@@ -1,0 +1,1385 @@
+{
+  "source": "https://erp.jerryfulfillment.com/LogisticFee/Index",
+  "exportedAt": "2026-08-06",
+  "rules": [
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 16:52:13 | 2026/6/27 10:44:21",
+      "englishName": "shunsubaoppuhuo",
+      "id": 77,
+      "name": "顺速宝普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "挂号",
+      "users": "吕永慷 | admin",
+      "relations": [
+        {
+          "carrier": "顺友",
+          "channel": "顺速宝(普货)",
+          "channelCode": "SYERP",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 16:51:51",
+      "englishName": "",
+      "id": 76,
+      "name": "顺速宝特货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "挂号",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺友",
+          "channel": "顺速宝挂号(特货)",
+          "channelCode": "SSBRAM",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 16:50:50",
+      "englishName": "",
+      "id": 75,
+      "name": "顺邮宝挂号",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "挂号",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺友",
+          "channel": "顺邮宝挂号",
+          "channelCode": "SYBRAM",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 16:40:38",
+      "englishName": "",
+      "id": 74,
+      "name": "顺速宝plus",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "挂号",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺友",
+          "channel": "顺速宝Plus",
+          "channelCode": "SYEPL",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 10:52:50",
+      "englishName": "",
+      "id": 73,
+      "name": "捷易通达以色列特敏到门",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "捷易通达",
+          "channel": "以色列特敏-到门",
+          "channelCode": "3281",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 10:52:35",
+      "englishName": "",
+      "id": 72,
+      "name": "捷易通达以色列特敏",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "捷易通达",
+          "channel": "以色列特敏",
+          "channelCode": "2581",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 10:52:18",
+      "englishName": "",
+      "id": 71,
+      "name": "捷易通达以色列敏感到门",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "捷易通达",
+          "channel": "以色列敏感(到门)",
+          "channelCode": "2001",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 10:52:06",
+      "englishName": "",
+      "id": 70,
+      "name": "捷易通达以色列敏感",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "捷易通达",
+          "channel": "以色列敏感",
+          "channelCode": "1961",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 10:51:54",
+      "englishName": "",
+      "id": 69,
+      "name": "捷易通达以色列普货到门",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "捷易通达",
+          "channel": "以色列普货(到门)",
+          "channelCode": "1981",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 10:51:31",
+      "englishName": "",
+      "id": 68,
+      "name": "捷易通达以色列普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "捷易通达",
+          "channel": "以色列普货",
+          "channelCode": "1921",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 10:13:26",
+      "englishName": "",
+      "id": 67,
+      "name": "百洲欧美服装专线-lt",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "义乌百洲国际货运代理有限公司",
+          "channel": "欧美服装专线-lt",
+          "channelCode": "BZ175",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 9:49:54",
+      "englishName": "",
+      "id": 66,
+      "name": "容鼎美国纯商派化妆品专线PK00270",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "容鼎供应链",
+          "channel": "美国化妆品专线A(SP)",
+          "channelCode": "PK00270",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 9:49:30",
+      "englishName": "",
+      "id": 65,
+      "name": "容鼎美国纯商派DDP专线-特敏专线PK00251",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "容鼎供应链",
+          "channel": "美国标准DDP专线-特敏货A(SP)",
+          "channelCode": "PK00251",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/22 9:49:03",
+      "englishName": "",
+      "id": 64,
+      "name": "容鼎美国纯商派DDP专线-敏货PK00187",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "容鼎供应链",
+          "channel": "美国标准DDP专线-敏货A(SP)",
+          "channelCode": "PK00187",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:40:38",
+      "englishName": "",
+      "id": 63,
+      "name": "闪电猴敏感偏远",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "浙江闪电猴",
+          "channel": "美猴敏感专线(偏远)",
+          "channelCode": "18821",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:40:21",
+      "englishName": "",
+      "id": 62,
+      "name": "闪电猴敏感",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "浙江闪电猴",
+          "channel": "美猴敏感专线",
+          "channelCode": "14021",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:40:08",
+      "englishName": "",
+      "id": 61,
+      "name": "闪电猴带电偏远",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "浙江闪电猴",
+          "channel": "美猴带电专线(偏远)",
+          "channelCode": "19241",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:39:55",
+      "englishName": "",
+      "id": 60,
+      "name": "闪电猴带电",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "浙江闪电猴",
+          "channel": "美猴带电专线",
+          "channelCode": "13601",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:39:37",
+      "englishName": "",
+      "id": 59,
+      "name": "闪电猴普货偏远",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "浙江闪电猴",
+          "channel": "美猴专线普货(偏远)",
+          "channelCode": "14421",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:39:20",
+      "englishName": "",
+      "id": 58,
+      "name": "闪电猴普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "浙江闪电猴",
+          "channel": "美猴专线普货",
+          "channelCode": "19221",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:07:15",
+      "englishName": "",
+      "id": 57,
+      "name": "万邦化妆品专线",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "万邦速达-专线",
+          "channel": "MUSLR: 万邦化妆品专线挂号",
+          "channelCode": "MUSLR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:06:59",
+      "englishName": "",
+      "id": 56,
+      "name": "万邦特敏专线B",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "万邦速达-专线",
+          "channel": "WBSLHC: 特敏专线B",
+          "channelCode": "WBSLHC",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:06:35",
+      "englishName": "",
+      "id": 55,
+      "name": "万邦服装专线普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "万邦速达-专线",
+          "channel": "WBPHFZ: 万邦服装专线普货",
+          "channelCode": "WBPHFZ",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:06:21",
+      "englishName": "",
+      "id": 54,
+      "name": "万邦专线挂号普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "万邦速达-专线",
+          "channel": "EUSLPHR: 万邦专线挂号普货",
+          "channelCode": "EUSLPHR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:06:07",
+      "englishName": "",
+      "id": 53,
+      "name": "万邦专线挂号含电",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "万邦速达-专线",
+          "channel": "EUSLR: 万邦专线挂号含电",
+          "channelCode": "EUSLR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:05:28",
+      "englishName": "",
+      "id": 52,
+      "name": "云速递化妆品",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "义乌市思方云递物流有限公司简称：云速递",
+          "channel": "全球专线化妆品",
+          "channelCode": "SFYD-HZP",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:05:08",
+      "englishName": "",
+      "id": 51,
+      "name": "云速递服装",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "义乌市思方云递物流有限公司简称：云速递",
+          "channel": "全球专线服装",
+          "channelCode": "SFYD-FZ",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:04:55",
+      "englishName": "",
+      "id": 50,
+      "name": "云速递带电",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "义乌市思方云递物流有限公司简称：云速递",
+          "channel": "全球专线带电",
+          "channelCode": "SFYD-DD",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:04:38",
+      "englishName": "",
+      "id": 49,
+      "name": "云速递普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "义乌市思方云递物流有限公司简称：云速递",
+          "channel": "全球专线普货",
+          "channelCode": "SFYD-PH",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:04:28",
+      "englishName": "",
+      "id": 48,
+      "name": "云速递敏感",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "义乌市思方云递物流有限公司简称：云速递",
+          "channel": "全球专线敏感",
+          "channelCode": "SFYD-FP",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/21 19:03:11",
+      "englishName": "",
+      "id": 47,
+      "name": "花海美国标准商派专线-敏感货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "杭州花海供应链",
+          "channel": "美国标准商派专线-敏感货",
+          "channelCode": "13421",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 19:18:09",
+      "englishName": "",
+      "id": 46,
+      "name": "联邮通婚纱",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "4PX（新版）",
+          "channel": "联邮通婚纱专线",
+          "channelCode": "S5290",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 19:17:52",
+      "englishName": "",
+      "id": 45,
+      "name": "联邮通商派普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "4PX（新版）",
+          "channel": "联邮通标准商派专线-普货",
+          "channelCode": "S5246",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 19:17:40",
+      "englishName": "",
+      "id": 44,
+      "name": "联邮通服装",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "4PX（新版）",
+          "channel": "联邮通服装专线",
+          "channelCode": "S1427",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 19:17:29",
+      "englishName": "",
+      "id": 43,
+      "name": "联邮通标准挂号普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "4PX（新版）",
+          "channel": "联邮通标准挂号-普货",
+          "channelCode": "QC",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 19:16:51 | 2026/6/20 19:19:45",
+      "englishName": "",
+      "id": 42,
+      "name": "联邮通经济挂号普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | 吕永慷",
+      "relations": [
+        {
+          "carrier": "4PX（新版）",
+          "channel": "联邮通经济挂号-普货",
+          "channelCode": "O5",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 19:16:44 | 2026/6/20 19:20:15",
+      "englishName": "",
+      "id": 41,
+      "name": "联邮通标准挂号带电",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | 吕永慷",
+      "relations": [
+        {
+          "carrier": "4PX（新版）",
+          "channel": "联邮通标准挂号-带电",
+          "channelCode": "OH",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 19:16:37",
+      "englishName": "",
+      "id": 40,
+      "name": "联邮通经济挂号带电",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "4PX（新版）",
+          "channel": "联邮通经济挂号-带电",
+          "channelCode": "JW",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 18:33:13",
+      "englishName": "",
+      "id": 39,
+      "name": "顺丰商派普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺丰国际出口电商",
+          "channel": "国际电商专递-商派专线",
+          "channelCode": "INT0720",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 18:33:01",
+      "englishName": "",
+      "id": 38,
+      "name": "顺丰商派服装",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺丰国际出口电商",
+          "channel": "商派服装专线",
+          "channelCode": "INT0792",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 18:32:50",
+      "englishName": "",
+      "id": 37,
+      "name": "顺丰敏货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺丰国际出口电商",
+          "channel": "敏货电商专递",
+          "channelCode": "INT0627",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 18:32:36",
+      "englishName": "",
+      "id": 36,
+      "name": "顺丰CD",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺丰国际出口电商",
+          "channel": "国际电商专递-CD",
+          "channelCode": "INT0263",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 18:32:24",
+      "englishName": "",
+      "id": 35,
+      "name": "顺丰服装",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "顺丰国际出口电商",
+          "channel": "服装专线",
+          "channelCode": "INT0655",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:27:51",
+      "englishName": "",
+      "id": 34,
+      "name": "云途服装",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途全球服装专线挂号",
+          "channelCode": "FZZXR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:27:25",
+      "englishName": "",
+      "id": 33,
+      "name": "云途中包普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途中包专线挂号（特惠普货）",
+          "channelCode": "ZBZXRPH",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:27:04",
+      "englishName": "",
+      "id": 32,
+      "name": "云途挂号标快普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途全球专线挂号（标快普货）",
+          "channelCode": "BKPHR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:26:53",
+      "englishName": "",
+      "id": 31,
+      "name": "云途挂号标快带电",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途全球专线挂号（标快带电）",
+          "channelCode": "BKZXR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:26:30",
+      "englishName": "",
+      "id": 30,
+      "name": "云途商派标快普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途全球商派专线（标快普货）",
+          "channelCode": "YTSPPH",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:26:15",
+      "englishName": "",
+      "id": 29,
+      "name": "云途商派特惠普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途商派专线（特惠普货）",
+          "channelCode": "YTSPTHPH",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:25:58",
+      "englishName": "",
+      "id": 28,
+      "name": "云途化妆品",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途全球化妆品类专线挂号",
+          "channelCode": "MUZXR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:25:43 | 2026/6/20 17:33:35",
+      "englishName": "",
+      "id": 27,
+      "name": "云途挂号普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | 吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途全球专线挂号（特惠普货）",
+          "channelCode": "THPHR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/20 17:25:29 | 2026/6/20 17:33:44",
+      "englishName": "",
+      "id": 26,
+      "name": "云途挂号带电",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | 吕永慷",
+      "relations": [
+        {
+          "carrier": "云途物流",
+          "channel": "云途全球专线挂号（特惠带电）",
+          "channelCode": "THZXR",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 17:05:05 | 2026/6/29 14:20:27",
+      "englishName": "Yanwen Express",
+      "id": 24,
+      "name": "燕文精品服装",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | admin",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文精品服装专线-普货",
+          "channelCode": "1667",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:23:38 | 2026/6/29 14:19:00",
+      "englishName": "Yanwen Express",
+      "id": 23,
+      "name": "燕文化妆品",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | admin",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文化妆品专线",
+          "channelCode": "1046",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:23:19",
+      "englishName": "Yanwen Express",
+      "id": 22,
+      "name": "燕文服装",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文服装专线-普货",
+          "channelCode": "1500",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:22:35",
+      "englishName": "Yanwen Express",
+      "id": 21,
+      "name": "燕文专线惠选",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文专线惠选-普货",
+          "channelCode": "995",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:22:08",
+      "englishName": "Chinapost",
+      "id": 20,
+      "name": "燕文中邮郑州E邮宝",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "挂号",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "中邮郑州线下E邮宝",
+          "channelCode": "556",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:21:31",
+      "englishName": "Yanwen Express",
+      "id": 19,
+      "name": "燕文快递特货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线 / 快递",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文专线快递-特货",
+          "channelCode": "557",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:21:03",
+      "englishName": "Yanwen Express",
+      "id": 18,
+      "name": "燕文快递普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线 / 快递",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文专线快递-普货",
+          "channelCode": "440",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:20:37",
+      "englishName": "Yanwen Express",
+      "id": 17,
+      "name": "燕文航空挂号特货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "挂号",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文航空挂号-特货",
+          "channelCode": "456",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:20:21",
+      "englishName": "Yanwen Express",
+      "id": 16,
+      "name": "燕文航空挂号普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "挂号",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文航空挂号-普货",
+          "channelCode": "437",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:20:03",
+      "englishName": "Yanwen Express",
+      "id": 15,
+      "name": "燕文精品特货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文精品追踪-特货",
+          "channelCode": "1666",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:19:45",
+      "englishName": "Yanwen Express",
+      "id": 14,
+      "name": "燕文精品普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文精品追踪-普货",
+          "channelCode": "1665",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/16 16:17:01 | 2026/6/16 16:17:20",
+      "englishName": "Yanwen Express",
+      "id": 13,
+      "name": "燕文专线追踪特货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | 吕永慷",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文专线追踪-特货",
+          "channelCode": "484",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/12 17:21:17 | 2026/6/15 15:45:49",
+      "englishName": "Yanwen Express",
+      "id": 12,
+      "name": "燕文专线追踪普货",
+      "published": "未发布",
+      "relationCount": "1",
+      "status": "启用",
+      "type": "专线",
+      "users": "吕永慷 | sumool",
+      "relations": [
+        {
+          "carrier": "燕文物流",
+          "channel": "燕文专线追踪-普货",
+          "channelCode": "481",
+          "discounts": "-\n-"
+        }
+      ],
+      "phoneRequired": false
+    },
+    {
+      "currency": "USD",
+      "dates": "2026/6/12 11:09:32 | 2026/6/25 13:58:03",
+      "englishName": "shopifytest",
+      "id": 11,
+      "name": "shopify申请用",
+      "published": "发布",
+      "relationCount": "-",
+      "status": "启用",
+      "type": "free",
+      "users": "admin | admin",
+      "relations": [],
+      "phoneRequired": false
+    }
+  ]
+}
