@@ -1,0 +1,4 @@
+package com.milano.quotation.imports;
+import jakarta.persistence.*;import java.time.Instant;import java.util.UUID;
+@Entity @Table(name="migration_manifest_entry")public class MigrationManifestEntry{@Id public UUID id;@Column(name="job_id",nullable=false)public UUID jobId;@Column(nullable=false,length=96)public String sku;@Column(name="image_type",nullable=false,length=24)public String imageType;@Column(name="file_name",nullable=false,length=512)public String fileName;@Column(name="expected_sha256",length=64)public String expectedSha256;@Column(nullable=false,length=24)public String status;@Column(name="error_message",length=1000)public String errorMessage;@Column(name="asset_id")public UUID assetId;@Column(name="updated_at",nullable=false)public Instant updatedAt;protected MigrationManifestEntry(){}
+}

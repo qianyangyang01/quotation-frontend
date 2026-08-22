@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { deletePurchaseProduct, loadPurchaseProducts, normalizePurchaseRecord, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
-import { parsePurchaseWorkbook, type PurchaseImportPreview } from '@/data/purchaseWorkbook'
+import { confirmPurchaseImport, previewPurchaseWorkbook, type ServerPurchaseImportPreview } from '@/services/purchaseImports'
+import ImageMigrationPanel from './ImageMigrationPanel.vue'
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
 const records = ref<PurchaseProductRecord[]>([])
 const loading = ref(true)
 const search = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
-const importPreview = ref<PurchaseImportPreview | null>(null)
-const lastImport = ref<PurchaseImportPreview | null>(null)
+const importPreview = ref<ServerPurchaseImportPreview | null>(null)
+const lastImport = ref<ServerPurchaseImportPreview | null>(null)
 const parsing = ref(false)
 const savingImport = ref(false)
 const detail = ref<PurchaseProductRecord | null>(null)
@@ -17,6 +18,7 @@ const editor = ref<PurchaseProductRecord | null>(null)
 const editingOriginalSku = ref('')
 const notice = ref('')
 const previewImage = ref<{ src: string; title: string } | null>(null)
+const showImageMigration = ref(false)
 
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -48,7 +50,7 @@ async function chooseWorkbook(event: Event) {
   const file = input.files?.[0]
   if (!file) return
   parsing.value = true
-  try { importPreview.value = await parsePurchaseWorkbook(file, records.value) }
+  try { importPreview.value = await previewPurchaseWorkbook(file) }
   catch (error) { toast(error instanceof Error ? error.message : 'Excel 解析失败') }
   finally { parsing.value = false; input.value = '' }
 }
@@ -57,7 +59,7 @@ async function confirmImport() {
   if (!importPreview.value) return
   savingImport.value = true
   try {
-    await upsertPurchaseProducts(importPreview.value.records)
+    await confirmPurchaseImport(importPreview.value.jobId)
     lastImport.value = importPreview.value
     importPreview.value = null
     await reload()
@@ -124,13 +126,14 @@ const detailFields = computed(() => detail.value ? [
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
       <button class="outline" :disabled="parsing" @click="fileInput?.click()">{{ parsing ? '解析中…' : 'Excel 导入' }}</button>
+      <button class="outline" @click="showImageMigration=true">图片迁移</button>
       <button class="primary" @click="openEditor()">＋ 新增采购资料</button>
       <input ref="fileInput" hidden type="file" accept=".xlsx" @change="chooseWorkbook">
     </div>
   </section>
 
   <section class="stats">
-    <article><small>采购资料</small><b>{{ records.length }}</b><span>浏览器本地数据库</span></article>
+    <article><small>采购资料</small><b>{{ records.length }}</b><span>报价服务器数据库</span></article>
     <article><small>可参与报价</small><b>{{ readyCount }}</b><span>关键成本资料完整</span></article>
     <article><small>待补充资料</small><b class="orange">{{ pendingCount }}</b><span>空值显示“暂无数据”</span></article>
     <article><small>系统生成 SKU</small><b class="orange">{{ generatedCount }}</b><span>修改后才可参与报价</span></article>
@@ -199,6 +202,7 @@ const detailFields = computed(() => detail.value ? [
   </section></div>
 
   <div v-if="previewImage" class="image-preview" @click.self="previewImage=null"><button @click="previewImage=null">×</button><figure><img :src="previewImage.src"><figcaption>{{ previewImage.title }}</figcaption></figure></div>
+  <div v-if="showImageMigration" class="mask" @click.self="showImageMigration=false"><ImageMigrationPanel @close="showImageMigration=false" /></div>
   <Transition name="toast"><div v-if="notice" class="toast">{{ notice }}</div></Transition>
 </template>
 

@@ -1,0 +1,4 @@
+package com.milano.quotation.imports;
+import com.fasterxml.jackson.databind.JsonNode;import jakarta.persistence.*;import org.hibernate.annotations.JdbcTypeCode;import org.hibernate.type.SqlTypes;import java.time.Instant;import java.util.UUID;
+@Entity @Table(name="purchase_import_row")public class PurchaseImportRow{@Id public UUID id;@Column(name="job_id",nullable=false)public UUID jobId;@Column(name="source_row",nullable=false)public int sourceRow;@Column(nullable=false,length=96)public String sku;@JdbcTypeCode(SqlTypes.JSON)@Column(nullable=false,columnDefinition="jsonb")public JsonNode payload;@Column(name="product_asset_id")public UUID productAssetId;@Column(name="physical_asset_id")public UUID physicalAssetId;@Column(name="created_at",nullable=false)public Instant createdAt;protected PurchaseImportRow(){}
+}

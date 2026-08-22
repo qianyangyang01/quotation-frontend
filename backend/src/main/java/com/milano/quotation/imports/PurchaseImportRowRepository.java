@@ -1,0 +1,1 @@
+package com.milano.quotation.imports;import org.springframework.data.jpa.repository.JpaRepository;import java.util.List;import java.util.UUID;public interface PurchaseImportRowRepository extends JpaRepository<PurchaseImportRow,UUID>{List<PurchaseImportRow>findByJobIdOrderBySourceRow(UUID jobId);long countByJobId(UUID jobId);}
