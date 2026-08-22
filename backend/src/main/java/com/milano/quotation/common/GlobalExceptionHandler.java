@@ -13,11 +13,14 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import com.milano.quotation.audit.AuditService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private final AuditService audit;
     public GlobalExceptionHandler(AuditService audit) { this.audit = audit; }
     @ExceptionHandler(AppException.class)
@@ -60,6 +63,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiResponse<Void>> unexpected(Exception exception) {
+        log.error("Unhandled quotation API failure", exception);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.error("INTERNAL_ERROR", "服务器处理失败，请凭请求编号联系管理员", List.of()));
     }
 }

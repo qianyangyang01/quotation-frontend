@@ -7,6 +7,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.context.WebApplicationContext;
+import org.springframework.test.annotation.DirtiesContext;
 import jakarta.servlet.http.Cookie;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
@@ -54,5 +55,28 @@ class AuthenticationIntegrationTest {
                         .content("{\"account\":\"ADMIN\",\"password\":\"WrongPass123\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+    }
+
+    @Test
+    @DirtiesContext
+    void initialPasswordChangeRefreshesSessionAndAllowsBusinessAccess() throws Exception {
+        var login = mvc.perform(post("/api/v1/auth/login").with(csrf())
+                        .contentType("application/json")
+                        .content("{\"account\":\"ADMIN\",\"password\":\"TestAdmin123\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        var session = (org.springframework.mock.web.MockHttpSession) login.getRequest().getSession(false);
+
+        mvc.perform(post("/api/v1/auth/change-password").session(session).with(csrf())
+                .contentType("application/json")
+                        .content("{\"currentPassword\":\"TestAdmin123\",\"newPassword\":\"ChangedPass456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("SUCCESS"));
+
+        mvc.perform(get("/api/v1/auth/me").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mustChangePassword").value(false));
+        mvc.perform(get("/api/v1/purchase-products").session(session))
+                .andExpect(status().isOk());
     }
 }

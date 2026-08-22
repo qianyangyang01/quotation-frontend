@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -76,7 +78,9 @@ public class UserAccountService implements UserDetailsService {
     private void recordPasswordChange(UUID userId, String changedBy, String type) {
         jdbc.sql("insert into password_change_history(id,user_id,changed_by,change_type,created_at) values(:id,:user,:actor,:type,:time)")
                 .param("id", UUID.randomUUID()).param("user", userId).param("actor", normalizeAccount(changedBy))
-                .param("type", type).param("time", Instant.now()).update();
+                // PostgreSQL's JDBC driver does not infer a SQL type for java.time.Instant.
+                // OffsetDateTime maps explicitly to TIMESTAMPTZ and keeps the audit time in UTC.
+                .param("type", type).param("time", OffsetDateTime.now(ZoneOffset.UTC)).update();
     }
 
     public static String normalizeAccount(String account) { return account == null ? "" : account.trim().toUpperCase(Locale.ROOT); }
