@@ -23,7 +23,14 @@ bash "$deploy_dir/scripts/preflight.sh"
 existing_containers="$(docker ps -aq --filter label=com.docker.compose.project=quotation-prod)"
 current_before="$(readlink -f "$root/current" 2>/dev/null || true)"
 if [[ "$current_before" == "$root/releases/"* && -f "$current_before/deploy/scripts/backup.sh" ]]; then
-  backup_path="$(bash "$current_before/deploy/scripts/backup.sh")"
+  # Older backup scripts may emit MinIO progress before the final path. Keep
+  # that output visible, but persist only the final verified directory.
+  backup_output="$(bash "$current_before/deploy/scripts/backup.sh")"
+  backup_path="$(tail -n 1 <<< "$backup_output")"
+  if [[ "$backup_output" == *$'\n'* ]]; then sed '$d' <<< "$backup_output" >&2; fi
+  [[ "$backup_path" != *$'\n'* ]] || { echo "ERROR: backup path must be a single line" >&2; exit 1; }
+  case "$backup_path" in "$root/backups/"*-full) ;; *) echo "ERROR: invalid quotation backup path" >&2; exit 1;; esac
+  test -d "$backup_path" -a -f "$backup_path/SHA256SUMS" || { echo "ERROR: verified quotation backup is incomplete" >&2; exit 1; }
 elif [[ -n "$existing_containers" ]]; then
   echo "ERROR: quotation containers exist without a valid current release; refusing an untracked upgrade" >&2
   exit 1

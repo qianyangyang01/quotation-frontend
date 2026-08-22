@@ -21,7 +21,7 @@ docker run --rm --network quotation-internal \
   -e HOME=/tmp \
   -e "MC_HOST_quotation=http://${QUOTATION_MINIO_ACCESS_KEY}:${QUOTATION_MINIO_SECRET_KEY}@quotation-minio:9000" \
   -v "$temporary/objects:/backup" minio/mc:RELEASE.2025-07-21T05-28-08Z \
-  mirror --overwrite quotation/quotation-assets /backup/quotation-assets
+  mirror --overwrite quotation/quotation-assets /backup/quotation-assets >&2
 (
   cd "$temporary/objects"
   find quotation-assets -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum > ../quotation-assets.sha256
