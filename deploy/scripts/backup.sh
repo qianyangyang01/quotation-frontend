@@ -18,6 +18,7 @@ test -s "$temporary/quotation_prod.dump" || { echo "ERROR: PostgreSQL backup is 
 mkdir -p "$temporary/objects"
 docker run --rm --network quotation-internal \
   --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp \
   -e "MC_HOST_quotation=http://${QUOTATION_MINIO_ACCESS_KEY}:${QUOTATION_MINIO_SECRET_KEY}@quotation-minio:9000" \
   -v "$temporary/objects:/backup" minio/mc:RELEASE.2025-07-21T05-28-08Z \
   mirror --overwrite quotation/quotation-assets /backup/quotation-assets
