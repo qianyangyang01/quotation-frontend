@@ -1,0 +1,1 @@
+package com.milano.quotation.purchase;import org.springframework.data.jpa.repository.JpaRepository;import java.util.UUID;public interface PurchaseProductImageRepository extends JpaRepository<PurchaseProductImage,UUID>{void deleteByProductIdAndImageType(UUID productId,String imageType);}

@@ -1,0 +1,24 @@
+package com.milano.quotation.logistics;
+
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.milano.quotation.audit.AuditService;
+import com.milano.quotation.common.ApiResponse;
+import com.milano.quotation.idempotency.IdempotencyService;
+import com.milano.quotation.security.QuotationPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.Map;import java.util.UUID;
+
+@RestController @RequestMapping("/api/v1/logistics") @PreAuthorize("hasAuthority('PERM_logistics')") @Transactional
+public class LogisticsController{
+    private final LogisticsService logistics;private final AuditService audit;private final IdempotencyService idempotency;public LogisticsController(LogisticsService logistics,AuditService audit,IdempotencyService idempotency){this.logistics=logistics;this.audit=audit;this.idempotency=idempotency;}
+    @GetMapping("/workspace")ApiResponse<LogisticsService.Workspace>workspace(){return ApiResponse.ok(logistics.workspace());}
+    @PostMapping("/providers")ApiResponse<?>provider(@RequestBody ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){var existing=idempotency.existing(account(auth),"logistics-provider-create",key,body);if(existing.isPresent())return ApiResponse.ok(existing.get());var result=logistics.addProvider(body);idempotency.save(account(auth),"logistics-provider-create",key,body,result);audit.record("logistics.provider-create","logistics-provider",result.path("id").asText(),"success",Map.of());return ApiResponse.ok(result);}
+    @PostMapping("/channels")ApiResponse<?>channel(@RequestBody ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){var existing=idempotency.existing(account(auth),"logistics-channel-create",key,body);if(existing.isPresent())return ApiResponse.ok(existing.get());var result=logistics.addChannel(body);idempotency.save(account(auth),"logistics-channel-create",key,body,result);audit.record("logistics.channel-create","logistics-channel",result.path("id").asText(),"success",Map.of());return ApiResponse.ok(result);}
+    @PostMapping("/channels/{channelId}/versions")ApiResponse<?>draft(@PathVariable UUID channelId,@RequestBody ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){body.put("channelId",channelId.toString());var existing=idempotency.existing(account(auth),"logistics-version-create",key,body);if(existing.isPresent())return ApiResponse.ok(existing.get());var result=logistics.createDraft(channelId,body);idempotency.save(account(auth),"logistics-version-create",key,body,result);audit.record("logistics.import","logistics-version",result.path("id").asText(),"success",Map.of());return ApiResponse.ok(result);}
+    @PostMapping("/channels/{channelId}/versions/{versionId}/publish")ApiResponse<?>publish(@PathVariable UUID channelId,@PathVariable UUID versionId,@RequestBody(required=false)ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){var request=body==null?com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode():body;request.put("channelId",channelId.toString()).put("versionId",versionId.toString());var existing=idempotency.existing(account(auth),"logistics-publish",key,request);if(existing.isPresent())return ApiResponse.ok(existing.get());var note=request.path("note").asText("");var result=logistics.publish(channelId,versionId,note,account(auth));idempotency.save(account(auth),"logistics-publish",key,request,result);audit.record("logistics.publish","logistics-version",versionId.toString(),"success",Map.of("channelId",channelId));return ApiResponse.ok(result);}
+    @PostMapping("/channels/{channelId}/versions/{versionId}/rollback")ApiResponse<?>rollback(@PathVariable UUID channelId,@PathVariable UUID versionId,@RequestBody(required=false)ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){var request=body==null?com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode():body;request.put("channelId",channelId.toString()).put("versionId",versionId.toString());var existing=idempotency.existing(account(auth),"logistics-rollback",key,request);if(existing.isPresent())return ApiResponse.ok(existing.get());var note=request.path("note").asText("");var result=logistics.rollback(channelId,versionId,note,account(auth));idempotency.save(account(auth),"logistics-rollback",key,request,result);audit.record("logistics.rollback","logistics-version",result.path("id").asText(),"success",Map.of("channelId",channelId,"targetVersionId",versionId));return ApiResponse.ok(result);}
+    private static String account(Authentication auth){return ((QuotationPrincipal)auth.getPrincipal()).account();}
+}
