@@ -2,15 +2,13 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
-import { loadQuotationUser } from '@/utils/quotationSession'
 import { loadQuotationRecords, updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
 import { loadPurchaseProducts } from '@/data/purchaseStore'
 import { quotationProductCategories } from '@/components/quotation/types'
 
 const props = defineProps<{ scope: 'mine' | 'company' }>()
 const route = useRoute()
-const user = loadQuotationUser()
-const records = ref(loadQuotationRecords())
+const records = ref<QuotationRecord[]>([])
 const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
 const search = ref('')
 const filterStatus = ref<'' | QuotationRecordStatus>('')
@@ -25,7 +23,7 @@ interface DealLineForm { id: string; optionId: string; unitPriceUsd: string; qua
 const form = reactive({ status: 'won' as 'won' | 'lost', dealLines: [] as DealLineForm[], date: new Date().toISOString().slice(0, 10), note: '' })
 const isMine = computed(() => props.scope === 'mine')
 const title = computed(() => isMine.value ? '我的报价记录' : '报价记录')
-const scoped = computed(() => isMine.value ? records.value.filter(item => item.salespersonName === user.name && item.salespersonAccount === user.account) : records.value)
+const scoped = computed(() => records.value)
 function recordOptions(row: QuotationRecord) { return row.quoteOptions || [] }
 function optionLabel(option: QuotationRecordQuoteOption) { return `${option.country}${option.quoteRegion ? `（${option.quoteRegion}）` : ''} · ${option.channel}${option.carrier && option.carrier !== option.channel ? ` · ${option.carrier}` : ''}` }
 function recordCountries(row: QuotationRecord) { return [...new Set(recordOptions(row).map(option => option.country).filter(country => country && country !== '—'))] }
@@ -85,7 +83,14 @@ function recordProductImage(row: QuotationRecord) {
   const primarySku = row.primarySku.split(/[、,+\s]/).find(Boolean) || row.primarySku
   return purchaseProducts.value.find(item => item.sku === primarySku)?.productImage || ''
 }
-onMounted(async () => { try { purchaseProducts.value = await loadPurchaseProducts() } catch { purchaseProducts.value = [] } })
+onMounted(async () => {
+  const [recordResult, purchaseResult] = await Promise.allSettled([
+    loadQuotationRecords(props.scope),
+    loadPurchaseProducts(),
+  ])
+  records.value = recordResult.status === 'fulfilled' ? recordResult.value : []
+  purchaseProducts.value = purchaseResult.status === 'fulfilled' ? purchaseResult.value : []
+})
 function fillForm(row: QuotationRecord) {
   form.status = row.status === 'lost' ? 'lost' : 'won'
   form.dealLines = (row.dealLines || []).map(line => ({ id: line.id, optionId: line.optionId, unitPriceUsd: line.unitPriceUsd.toFixed(2), quantity: String(line.quantity) }))
@@ -125,7 +130,7 @@ function cancelEdit() {
   fillForm(selected.value)
   editing.value = false
 }
-function submit() {
+async function submit() {
   if (!selected.value) return
   const options = recordOptions(selected.value)
   if (form.status === 'won' && !form.dealLines.length) { toast('请至少添加一条成交方案'); return }
@@ -145,9 +150,9 @@ function submit() {
   const totalUsd = savedLines.reduce((sum, line) => sum + line.amountUsd, 0)
   const totalQuantity = savedLines.reduce((sum, line) => sum + line.quantity, 0)
   const singleLine = savedLines.length === 1 ? savedLines[0] : undefined
-  const updated = updateQuotationRecord(selected.value.id, { status: form.status, dealLines: savedLines, dealOptionId: singleLine?.optionId, dealOptionLabel: singleLine?.optionLabel || (savedLines.length ? `${savedLines.length}条成交方案` : undefined), actualQuoteUsd: savedLines.length ? totalUsd : undefined, actualQuoteCny: savedLines.length ? totalUsd * selected.value.exchangeRate : undefined, dealQuantity: savedLines.length ? totalQuantity : undefined, closedAt: form.date, note: form.note.trim() || undefined }, { name: user.name, account: user.account })
+  const updated = await updateQuotationRecord(selected.value.id, { status: form.status, dealLines: savedLines, dealOptionId: singleLine?.optionId, dealOptionLabel: singleLine?.optionLabel || (savedLines.length ? `${savedLines.length}条成交方案` : undefined), actualQuoteUsd: savedLines.length ? totalUsd : undefined, actualQuoteCny: savedLines.length ? totalUsd * selected.value.exchangeRate : undefined, dealQuantity: savedLines.length ? totalQuantity : undefined, closedAt: form.date, note: form.note.trim() || undefined }, selected.value._version)
   if (!updated) { toast('保存失败，请刷新页面后重试'); return }
-  records.value = loadQuotationRecords(); selected.value = records.value.find(item => item.id === selected.value?.id) || null
+  records.value = await loadQuotationRecords(props.scope); selected.value = records.value.find(item => item.id === selected.value?.id) || null
   editing.value = false
   toast(updated.updatedAt === previousUpdatedAt ? '没有检测到内容变化' : '报价结果已保存，并记录本次修改时间')
 }

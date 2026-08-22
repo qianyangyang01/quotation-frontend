@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { DEFAULT_LOCAL_PASSWORD, defaultHomeForRole, login } from '@/data/authStore'
+import { defaultHomeForRole, login } from '@/data/authStore'
 
 const router = useRouter()
 const account = ref('QYY001')
@@ -14,9 +14,9 @@ async function submit() {
   error.value = ''
   if (!account.value.trim() || !password.value) { error.value = '请输入账号和密码'; return }
   loading.value = true
-  const result = login(account.value, password.value)
+  const result = await login(account.value, password.value)
   if (!result.ok) { error.value = result.message; loading.value = false; return }
-  await router.replace(defaultHomeForRole(result.user.role))
+  await router.replace(result.user.mustChangePassword ? '/change-password' : defaultHomeForRole(result.user.role))
 }
 </script>
 
@@ -59,8 +59,8 @@ async function submit() {
         <label><span>登录密码</span><div><i aria-hidden="true">◆</i><input v-model="password" :type="passwordVisible?'text':'password'" autocomplete="current-password" placeholder="请输入密码" @input="error=''" /><button type="button" @click="passwordVisible=!passwordVisible">{{ passwordVisible?'隐藏':'显示' }}</button></div></label>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <button class="submit" type="submit" :disabled="loading"><span>{{ loading?'正在登录…':'登录系统' }}</span><i aria-hidden="true">→</i></button>
-        <aside><i aria-hidden="true">i</i><span><b>首次登录账号</b><small>账号：QYY001</small><small>初始密码：{{ DEFAULT_LOCAL_PASSWORD }}</small></span></aside>
-        <footer>当前为浏览器本地测试版本 · 正式上线后接入服务器认证</footer>
+        <aside><i aria-hidden="true">i</i><span><b>企业账号安全</b><small>请使用管理员分配的独立报价系统账号</small><small>首次登录后请立即修改临时密码</small></span></aside>
+        <footer>报价系统独立服务器认证 · 会话与培训系统完全隔离</footer>
       </form>
     </section>
   </main>

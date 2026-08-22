@@ -1,3 +1,5 @@
+import { api, idempotencyKey } from '@/services/http'
+
 export type QuotationRecordStatus = 'pending' | 'won' | 'lost'
 
 export interface QuotationRecordSpecifiedQuote {
@@ -79,7 +81,7 @@ export interface QuotationRecordEditor {
 }
 
 export interface QuotationRecord {
-  id: string; no: string; salespersonName: string; salespersonAccount: string; customerName: string
+  id: string; no: string; _version?: number; salespersonName: string; salespersonAccount: string; customerName: string
   quoteMode: 'single' | 'bundle'; productSummary: string; productImage?: string; primarySku: string; productCategory?: string; logisticsAttribute: string
   volumetricEnabled?: boolean; packageLengthCm?: number; packageWidthCm?: number; packageHeightCm?: number; defaultVolumeDivisor?: number
   country: string; carrier: string; channel: string; rule: string; customerGrade: string; taxCustomerType?: 'A' | 'B'; monthlySalesEstimate?: string
@@ -93,7 +95,6 @@ export interface QuotationRecord {
 
 export type QuotationRecordUpdate = Partial<Pick<QuotationRecord, QuotationRecordEditableField | 'dealOptionId'>>
 
-const KEY = 'milano.quotation.records.v1'
 const n = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0
 const optionalN = (value: unknown) => value == null || value === '' ? null : n(value)
 const editableFields: QuotationRecordEditableField[] = ['status', 'actualQuoteUsd', 'actualQuoteCny', 'dealQuantity', 'closedAt', 'note', 'dealOptionLabel']
@@ -107,23 +108,8 @@ const fieldLabels: Record<QuotationRecordEditableField, string> = {
   dealOptionLabel: '成交渠道',
   dealLines: '成交方案明细',
 }
-const statusLabels: Record<QuotationRecordStatus, string> = { pending: '待处理', won: '已成交', lost: '未成交' }
-
 function isEditableField(value: unknown): value is QuotationRecordEditableField {
   return typeof value === 'string' && editableFields.includes(value as QuotationRecordEditableField)
-}
-
-function revisionValue(field: QuotationRecordEditableField, value: unknown) {
-  if (value == null || value === '') return '—'
-  if (field === 'status' && (value === 'pending' || value === 'won' || value === 'lost')) return statusLabels[value]
-  if (field === 'actualQuoteUsd') return `$${n(value).toFixed(2)}`
-  if (field === 'actualQuoteCny') return `¥${n(value).toFixed(2)}`
-  if (field === 'dealLines') {
-    const lines = Array.isArray(value) ? value as QuotationRecordDealLine[] : []
-    if (!lines.length) return '—'
-    return lines.map(line => `${line.optionLabel} $${n(line.unitPriceUsd).toFixed(2)} × ${n(line.quantity)}`).join('；')
-  }
-  return String(value)
 }
 
 function normalizeRevisions(value: unknown): QuotationRecordRevision[] {
@@ -284,50 +270,18 @@ function normalize(raw: Partial<QuotationRecord>): QuotationRecord | null {
       : [legacyPrimaryOption(raw, recordId)]
   const specifiedQuotes = Array.isArray(raw.quoteOptions) ? specifiedQuotesFromOptions(quoteOptions) : legacyQuotes
   const dealLines = normalizeDealLines(raw.dealLines, quoteOptions, raw)
-  return { id: recordId, no: String(raw.no), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
+  return { id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
 }
-export function loadQuotationRecords() { try { const rows = JSON.parse(localStorage.getItem(KEY) || '[]'); return Array.isArray(rows) ? rows.map(normalize).filter((row): row is QuotationRecord => !!row).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [] } catch { return [] } }
-export function saveQuotationRecords(rows: QuotationRecord[]) { localStorage.setItem(KEY, JSON.stringify(rows)) }
-export function createQuotationRecord(input: Omit<QuotationRecord, 'id' | 'no' | 'status' | 'createdAt' | 'updatedAt' | 'revisions'>) { const now = new Date().toISOString(); const raw: QuotationRecord = { ...input, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, no: `QT${now.slice(0, 10).replace(/-/g, '')}${String(Date.now()).slice(-5)}`, status: 'pending', createdAt: now, updatedAt: now, revisions: [] }; const record = normalize(raw)!; const rows = loadQuotationRecords(); rows.unshift(record); saveQuotationRecords(rows); return record }
-export function updateQuotationRecord(id: string, patch: QuotationRecordUpdate, editor?: QuotationRecordEditor) {
-  const rows = loadQuotationRecords()
-  const i = rows.findIndex(row => row.id === id)
-  if (i < 0) return null
-
-  const current = rows[i]
-  const editablePatch: QuotationRecordUpdate = {}
-  if (Object.prototype.hasOwnProperty.call(patch, 'status') && (patch.status === 'pending' || patch.status === 'won' || patch.status === 'lost')) editablePatch.status = patch.status
-  if (Object.prototype.hasOwnProperty.call(patch, 'actualQuoteUsd')) editablePatch.actualQuoteUsd = patch.actualQuoteUsd
-  if (Object.prototype.hasOwnProperty.call(patch, 'actualQuoteCny')) editablePatch.actualQuoteCny = patch.actualQuoteCny
-  if (Object.prototype.hasOwnProperty.call(patch, 'dealQuantity')) editablePatch.dealQuantity = patch.dealQuantity
-  if (Object.prototype.hasOwnProperty.call(patch, 'closedAt')) editablePatch.closedAt = patch.closedAt
-  if (Object.prototype.hasOwnProperty.call(patch, 'note')) editablePatch.note = patch.note
-  if (Object.prototype.hasOwnProperty.call(patch, 'dealOptionId')) editablePatch.dealOptionId = optionalText(patch.dealOptionId)
-  if (Object.prototype.hasOwnProperty.call(patch, 'dealOptionLabel')) editablePatch.dealOptionLabel = optionalText(patch.dealOptionLabel)
-  if (Object.prototype.hasOwnProperty.call(patch, 'dealLines')) editablePatch.dealLines = Array.isArray(patch.dealLines) ? patch.dealLines : []
-
-  const candidate = normalize({ ...current, ...editablePatch, id, updatedAt: current.updatedAt, revisions: current.revisions })!
-  const changedFields = editableFields.filter(field => field === 'dealLines'
-    ? JSON.stringify(current.dealLines || []) !== JSON.stringify(candidate.dealLines || [])
-    : !Object.is(current[field], candidate[field]))
-  const dealOptionIdChanged = !Object.is(current.dealOptionId, candidate.dealOptionId)
-  if (!changedFields.length && !dealOptionIdChanged) return current
-
-  const changedAt = new Date().toISOString()
-  const editorName = editor?.name?.trim() || current.salespersonName || '—'
-  const editorAccount = editor?.account?.trim() || current.salespersonAccount || '—'
-  const revisions = changedFields.map((field, index): QuotationRecordRevision => ({
-    id: `${changedAt}-${field}-${index}`,
-    changedAt,
-    editorName,
-    editorAccount,
-    field,
-    fieldLabel: fieldLabels[field],
-    before: revisionValue(field, current[field]),
-    after: revisionValue(field, candidate[field]),
-  }))
-
-  rows[i] = { ...candidate, updatedAt: changedAt, revisions: [...current.revisions, ...revisions] }
-  saveQuotationRecords(rows)
-  return rows[i]
+export async function loadQuotationRecords(scope: 'mine' | 'company' = 'company') {
+  const rows = await api.get<QuotationRecord[]>(`/quotations?scope=${scope}`)
+  return rows.map(normalize).filter((row): row is QuotationRecord => !!row).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+export async function saveQuotationRecords(_rows: QuotationRecord[]) { throw new Error('报价记录必须通过独立报价 API 创建或修改') }
+export async function createQuotationRecord(input: Omit<QuotationRecord, 'id' | 'no' | 'status' | 'createdAt' | 'updatedAt' | 'revisions'>) {
+  const raw = await api.post<QuotationRecord>('/quotations', input, idempotencyKey('quotation-create'))
+  return normalize(raw)!
+}
+export async function updateQuotationRecord(id: string, patch: QuotationRecordUpdate, expectedVersion?: number) {
+  const raw = await api.patch<QuotationRecord>(`/quotations/${id}`, { ...patch, _version: expectedVersion })
+  return normalize(raw)
 }

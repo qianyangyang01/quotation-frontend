@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { loadQuotationUser } from '@/utils/quotationSession'
+import { currentAuthUser } from '@/data/authStore'
+import { api } from '@/services/http'
 import AppTopbar from '@/components/AppTopbar.vue'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
 import QuotationCondition from '@/components/quotation/QuotationCondition.vue'
@@ -51,9 +52,8 @@ function rulesForShipment(logisticsAttribute: string, carrier: string, country: 
       && rule.relations.some(relation => relation.carrier === carrier && financeAllowsLogisticsChannel(financePolicies, logisticsAttribute, country, rule.id, relation)))
     .map(rule => rule.name)
 }
-const quotationUser = loadQuotationUser()
-const currentSalespersonName = computed(() => quotationUser.name)
-const currentSalespersonAccount = computed(() => quotationUser.account)
+const currentSalespersonName = computed(() => currentAuthUser.value.name)
+const currentSalespersonAccount = computed(() => currentAuthUser.value.account || '—')
 const selectedSalesperson = computed(() => currentSalespersonAccount.value === '—'
   ? currentSalespersonName.value
   : `${currentSalespersonName.value}（${currentSalespersonAccount.value}）`)
@@ -331,13 +331,13 @@ function refreshFinanceTaxSettings(event?: Event) {
   financeTaxSettings.value = loadFinanceTaxSettings()
   products.value.forEach(product => normalizeRule(product, true))
 }
-function reorderCommonCountries(countries: string[]) {
+async function reorderCommonCountries(countries: string[]) {
   const order = new Map(countries.map((country, index) => [country, (index + 1) * 10]))
   financeCountrySettings.value.forEach(setting => {
     const sortOrder = order.get(setting.country)
     if (sortOrder != null && setting.enabled && setting.stage === 'common') setting.sortOrder = sortOrder
   })
-  financeCountrySettings.value = saveFinanceCountrySettings(financeCountrySettings.value)
+  financeCountrySettings.value = await saveFinanceCountrySettings(financeCountrySettings.value)
   toast('常用国家顺序已保存')
 }
 onMounted(async () => {
@@ -550,7 +550,6 @@ const activeMatrixRows = computed(() => quoteMatrixMode.value === 'specified'
     ? templateQuoteRows.value
     : [])
 /* Legacy single-route snapshot retained for reference only; common quotations now use commonQuoteRows. */
-/* eslint-disable-next-line @typescript-eslint/no-unused-vars */
 function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
   if (!p.country || !p.rule || !p.channel) return null
   const exact = excelQuoteRows(p, p.country).find(row => row.rule === p.rule && row.carrier === p.channel)
@@ -701,7 +700,7 @@ function useLogistics(p: Product, option: { country: string; quoteRegion?: strin
   p.status = '已试算'
   toast(`已采用“${option.rule}”，运费 ¥${option.freight.toFixed(2)}`)
 }
-function save() {
+async function save() {
   const p = products.value[0]
   const customer = customerName.value.trim()
   const selectedMatrixRows = savedQuoteRows.value
@@ -750,11 +749,11 @@ function save() {
       taxCustomUsd: row.taxCustomUsd,
     }
   })
-  localStorage.setItem('milano-quotation-draft', JSON.stringify({ quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, selectedTaxCustomerType: selectedTaxCustomerType.value, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value }))
+  await api.put('/quotation-drafts/mine', { quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, selectedTaxCustomerType: selectedTaxCustomerType.value, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value })
   const productSummary = quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
-  const record = createQuotationRecord({
+  const record = await createQuotationRecord({
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
     customerName: customer, quoteMode: quoteMode.value, productSummary,
     productImage: quoteMode.value === 'bundle' ? (bundleItems.value.find(item => item.image)?.image || '') : p.image,

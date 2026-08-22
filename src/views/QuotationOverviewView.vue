@@ -16,7 +16,7 @@ import {
 import { loadPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { loadQuotationRecords, type QuotationRecord } from '@/data/quotationRecords'
 
-const records = ref<QuotationRecord[]>(loadQuotationRecords())
+const records = ref<QuotationRecord[]>([])
 const purchases = ref<PurchaseProductRecord[]>([])
 const purchaseLoadFailed = ref(false)
 const globalSearch = ref('')
@@ -138,8 +138,13 @@ watch(categoryPageCount, count => { if (categoryPage.value > count) categoryPage
 watch(detailPageCount, count => { if (detailPage.value > count) detailPage.value = count })
 
 onMounted(async () => {
-  try { purchases.value = await loadPurchaseProducts() }
-  catch { purchaseLoadFailed.value = true; purchases.value = [] }
+  const [recordResult, purchaseResult] = await Promise.allSettled([
+    loadQuotationRecords('company'),
+    loadPurchaseProducts(),
+  ])
+  records.value = recordResult.status === 'fulfilled' ? recordResult.value : []
+  if (purchaseResult.status === 'fulfilled') purchases.value = purchaseResult.value
+  else { purchaseLoadFailed.value = true; purchases.value = [] }
 })
 </script>
 

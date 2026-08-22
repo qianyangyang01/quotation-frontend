@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { defaultHomeForRole, hasPermission, isAuthenticated, type PermissionKey } from '@/data/authStore'
+import { currentAuthUser, defaultHomeForRole, hasPermission, initializeAuth, isAuthenticated, type PermissionKey } from '@/data/authStore'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -7,6 +7,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: () => isAuthenticated.value ? defaultHomeForRole() : '/login' },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { title: '登录' } },
+    { path: '/change-password', name: 'change-password', component: () => import('@/views/ChangePasswordView.vue'), meta: { title: '修改临时密码' } },
     { path: '/quotation/overview', name: 'quotation-overview', component: () => import('@/views/QuotationOverviewView.vue'), meta: { title: '报价情况预览', permission: 'allRecords' } },
     { path: '/quotation', name: 'quotation', component: () => import('@/views/QuotationSystemView.vue'), meta: { title: '我的报价', permission: 'quote' } },
     { path: '/quotation/products', name: 'quotation-products', component: () => import('@/views/JerryModuleView.vue'), props: { mode: 'products' }, meta: { title: '采购', permission: 'purchase' } },
@@ -21,9 +22,12 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
+  await initializeAuth()
   if (to.path === '/login') return isAuthenticated.value ? defaultHomeForRole() : true
   if (!isAuthenticated.value) return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
+  if (currentAuthUser.value.mustChangePassword && to.path !== '/change-password') return '/change-password'
+  if (!currentAuthUser.value.mustChangePassword && to.path === '/change-password') return defaultHomeForRole()
   const permission = to.meta.permission as PermissionKey | undefined
   if (permission && !hasPermission(permission)) return defaultHomeForRole()
 })

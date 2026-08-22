@@ -1,9 +1,11 @@
+import { api } from '@/services/http'
+
 export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPriceCny: number; source: string }
 export type PurchaseStockStatus = '有货' | '无货' | '待确认' | ''
 export type PurchaseSkuOrigin = 'imported' | 'manual' | 'system'
 
 export type PurchaseProductRecord = {
-  sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string
+  sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
   size: string; color: string; weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null
   minOrderQty: number | null; purchasePriceCny: number | null
@@ -16,41 +18,6 @@ export type PurchaseProductRecord = {
   name: string; image: string; weightKg: number | null; colorSku: string; material: string; marks: string; shippingMarks: string[]
   rawTierPrice: string; l6Price: string; freightTrial: string; invoiceInfo: string; taxIncludedPrice: string; taxPoint: string
   taxDifference: string; packagingInfo: string; sourceLinks: string[]; otherNotes: string; more: string; weightDescription: string
-}
-
-const DB_NAME = 'milano-quotation'
-const DB_VERSION = 1
-const STORE_NAME = 'purchase-products'
-const LEGACY_STORAGE_KEY = 'milano.purchase-products.v1'
-let databasePromise: Promise<IDBDatabase> | null = null
-
-function openDatabase() {
-  if (typeof indexedDB === 'undefined') return Promise.reject(new Error('当前浏览器不支持 IndexedDB'))
-  if (databasePromise) return databasePromise
-  databasePromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: 'sku' })
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error || new Error('采购数据库打开失败'))
-  })
-  return databasePromise
-}
-
-function requestResult<T>(request: IDBRequest<T>) {
-  return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error || new Error('采购数据库操作失败'))
-  })
-}
-
-function transactionDone(transaction: IDBTransaction) {
-  return new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(transaction.error || new Error('采购数据库保存失败'))
-    transaction.onabort = () => reject(transaction.error || new Error('采购数据库保存已取消'))
-  })
 }
 
 function numberOrNull(value: unknown) {
@@ -85,7 +52,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const color = String(input.color || input.colorSku || '').trim()
   const sourceLinks = input.sourceLinks || []
   const base = {
-    sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage,
+    sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
     size: String(input.size || '').trim(), color, weightG, lengthCm: numberOrNull(input.lengthCm), widthCm: numberOrNull(input.widthCm), heightCm: numberOrNull(input.heightCm),
     minOrderQty, purchasePriceCny, tier2MinQty: numberOrNull(input.tier2MinQty), tier2PriceCny: numberOrNull(input.tier2PriceCny),
@@ -114,42 +81,25 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
 }
 
 export async function loadPurchaseProducts(): Promise<PurchaseProductRecord[]> {
-  if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_STORAGE_KEY)
-  const database = await openDatabase()
-  const rows = await requestResult(database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll())
-  return (rows as PurchaseProductRecord[]).map(normalizePurchaseRecord).sort((a, b) => b.sourceRow - a.sourceRow)
+  return (await api.get<PurchaseProductRecord[]>('/purchase-products')).map(normalizePurchaseRecord).sort((a, b) => b.sourceRow - a.sourceRow)
 }
 
 export async function savePurchaseProducts(records: PurchaseProductRecord[]) {
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  const store = transaction.objectStore(STORE_NAME)
-  store.clear()
-  records.map(normalizePurchaseRecord).forEach(record => store.put(record))
-  await transactionDone(transaction)
+  await upsertPurchaseProducts(records)
 }
 
 export async function upsertPurchaseProducts(records: PurchaseProductRecord[]) {
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  const store = transaction.objectStore(STORE_NAME)
-  records.map(normalizePurchaseRecord).forEach(record => store.put(record))
-  await transactionDone(transaction)
+  if (!records.length) return
+  await api.put('/purchase-products/batch', records.map(normalizePurchaseRecord))
 }
 
 export async function deletePurchaseProduct(sku: string) {
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  transaction.objectStore(STORE_NAME).delete(sku)
-  await transactionDone(transaction)
+  await api.delete(`/purchase-products/${encodeURIComponent(sku)}`)
 }
 
 export async function resetPurchaseProducts() {
-  if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_STORAGE_KEY)
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  transaction.objectStore(STORE_NAME).clear()
-  await transactionDone(transaction)
+  const rows = await loadPurchaseProducts()
+  await Promise.all(rows.map(row => deletePurchaseProduct(row.sku)))
 }
 
 export function findPurchaseProduct(records: PurchaseProductRecord[], sku: string) {

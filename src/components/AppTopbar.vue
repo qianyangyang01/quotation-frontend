@@ -21,7 +21,7 @@ const initials = computed(() => currentAuthUser.value.name.slice(0, 2).toUpperCa
 
 async function signOut() {
   accountMenuOpen.value = false
-  logout()
+  await logout()
   await router.replace('/login')
 }
 </script>

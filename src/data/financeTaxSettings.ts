@@ -1,4 +1,5 @@
 import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
+import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
 export type TaxCustomerType = 'A' | 'B'
 export type LogisticsTaxMode = 'exempt' | 'taxable'
@@ -45,7 +46,6 @@ export type FinanceQuoteTaxResult = {
   label: string
 }
 
-const STORAGE_KEY = 'milano.finance-tax-settings.v1'
 export const FINANCE_TAX_SETTINGS_UPDATED_EVENT = 'milano:finance-tax-settings-updated'
 
 function normalizeProviderName(value: string) {
@@ -119,22 +119,13 @@ function normalizeSettings(raw?: Partial<FinanceTaxSettings> | null): FinanceTax
 }
 
 export function loadFinanceTaxSettings(): FinanceTaxSettings {
-  if (typeof window === 'undefined') return normalizeSettings()
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    if (stored) return normalizeSettings(JSON.parse(stored) as FinanceTaxSettings)
-  } catch {
-    // Invalid local data falls back to logistics provider and country defaults.
-  }
-  return normalizeSettings()
+  return normalizeSettings(readFinanceSetting<FinanceTaxSettings>('tax-settings'))
 }
 
-export function saveFinanceTaxSettings(settings: FinanceTaxSettings): FinanceTaxSettings {
+export async function saveFinanceTaxSettings(settings: FinanceTaxSettings): Promise<FinanceTaxSettings> {
   const normalized = normalizeSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
-    window.dispatchEvent(new CustomEvent(FINANCE_TAX_SETTINGS_UPDATED_EVENT))
-  }
+  await writeFinanceSetting('tax-settings', normalized)
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_TAX_SETTINGS_UPDATED_EVENT))
   return normalized
 }
 

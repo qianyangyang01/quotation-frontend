@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import AppTopbar from '@/components/AppTopbar.vue'
 import {
   authState,
   currentAuthUser,
+  loadAuthUsers,
   resetAuthUserPassword,
   roleDefinitions,
   saveAuthUser,
@@ -34,21 +35,21 @@ function permissionLabel(permission: string, short = false) {
   return labels[permission]?.[short ? 1 : 0] || permission
 }
 function toast(message: string) { notice.value = message; window.setTimeout(() => notice.value === message && (notice.value = ''), 2400) }
-function changeRole(id: string, role: RoleKey) {
+async function changeRole(id: string, role: RoleKey) {
   const user = authState.users.find(item => item.id === id)
   if (!user) return
   if (user.account === currentAuthUser.value.account) { toast('当前登录账号不能在本页修改自身角色'); return }
-  updateAuthUserRole(id, role)
-  toast(`已将${user.name}调整为${roleName(role)}`)
+  try { await updateAuthUserRole(id, role); toast(`已将${user.name}调整为${roleName(role)}`) }
+  catch (error) { toast(error instanceof Error ? error.message : '角色修改失败') }
 }
-function changeStatus(id: string, status: AccountStatus) {
-  try { updateAuthUserStatus(id, status); toast(status === 'enabled' ? '账号已启用' : '账号已停用') }
+async function changeStatus(id: string, status: AccountStatus) {
+  try { await updateAuthUserStatus(id, status); toast(status === 'enabled' ? '账号已启用' : '账号已停用') }
   catch (error) { toast(error instanceof Error ? error.message : '操作失败') }
 }
-function addUser() {
+async function addUser() {
   try {
     if (form.password !== form.confirmPassword) throw new Error('两次输入的密码不一致')
-    saveAuthUser({ name: form.name, account: form.account, password: form.password, role: form.role, status: 'enabled' })
+    await saveAuthUser({ name: form.name, account: form.account, password: form.password, role: form.role, status: 'enabled' })
     form.name = ''; form.account = ''; form.password = ''; form.confirmPassword = ''; form.role = 'employee'; showAdd.value = false
     toast('账号已添加')
   } catch (error) { toast(error instanceof Error ? error.message : '添加失败') }
@@ -63,14 +64,15 @@ function closeResetPassword() {
   resetForm.password = ''
   resetForm.confirmPassword = ''
 }
-function submitResetPassword() {
+async function submitResetPassword() {
   try {
     if (resetForm.password !== resetForm.confirmPassword) throw new Error('两次输入的密码不一致')
-    resetAuthUserPassword(resetUserId.value, resetForm.password)
+    await resetAuthUserPassword(resetUserId.value, resetForm.password)
     closeResetPassword()
     toast('密码已重置，原密码立即失效')
   } catch (error) { toast(error instanceof Error ? error.message : '密码重置失败') }
 }
+onMounted(async () => { try { await loadAuthUsers() } catch (error) { toast(error instanceof Error ? error.message : '账号列表加载失败') } })
 </script>
 
 <template>
@@ -78,15 +80,15 @@ function submitResetPassword() {
     <AppTopbar />
     <main>
       <header class="page-head"><div><p>ACCESS CONTROL</p><h1>权限管理</h1><span>按岗位分配可见模块；页面入口和直接地址访问使用同一套权限规则。</span></div><button @click="showAdd=!showAdd">＋ 新增账号</button></header>
-      <section class="summary"><article><small>角色数量</small><b>5</b><span>按岗位预设权限</span></article><article><small>账号数量</small><b>{{ authState.users.length }}</b><span>浏览器本地账号</span></article><article><small>启用账号</small><b>{{ enabledCount }}</b><span>可进入系统</span></article><article><small>当前角色</small><b>{{ roleName(currentAuthUser.role) }}</b><span>{{ currentAuthUser.account }}</span></article></section>
+      <section class="summary"><article><small>角色数量</small><b>5</b><span>按岗位预设权限</span></article><article><small>账号数量</small><b>{{ authState.users.length }}</b><span>报价服务器账号</span></article><article><small>启用账号</small><b>{{ enabledCount }}</b><span>可进入系统</span></article><article><small>当前角色</small><b>{{ roleName(currentAuthUser.role) }}</b><span>{{ currentAuthUser.account }}</span></article></section>
 
       <section class="roles-card"><header><div><h2>角色权限</h2><span>财务现阶段与超级管理员使用相同业务权限</span></div></header><div class="role-grid"><article v-for="role in roleDefinitions" :key="role.key"><header><i>{{ role.shortName.slice(0,1) }}</i><span><b>{{ role.name }}</b><small>{{ authState.users.filter(user=>user.role===role.key).length }} 个账号</small></span></header><p>{{ role.description }}</p><div><em v-for="permission in role.permissions" :key="permission">{{ permissionLabel(permission) }}</em></div></article></div></section>
 
-      <section v-if="showAdd" class="add-card"><header><div><h2>新增账号</h2><span>创建后员工可使用账号和初始密码直接登录</span></div><button aria-label="关闭" @click="showAdd=false">×</button></header><div><label>姓名<input v-model.trim="form.name" autocomplete="off" placeholder="输入员工姓名"></label><label>登录账号<input v-model.trim="form.account" autocomplete="off" placeholder="例如 YW002"></label><label>初始密码<input v-model="form.password" type="password" autocomplete="new-password" placeholder="至少8位，包含字母和数字"></label><label>确认密码<input v-model="form.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入初始密码"></label><label>角色<select v-model="form.role"><option v-for="role in roleDefinitions" :key="role.key" :value="role.key">{{ role.name }}</option></select></label><button @click="addUser">确认添加</button></div></section>
+      <section v-if="showAdd" class="add-card"><header><div><h2>新增账号</h2><span>创建后员工可使用账号和临时密码直接登录</span></div><button aria-label="关闭" @click="showAdd=false">×</button></header><div><label>姓名<input v-model.trim="form.name" autocomplete="off" placeholder="输入员工姓名"></label><label>登录账号<input v-model.trim="form.account" autocomplete="off" placeholder="例如 YW002"></label><label>初始密码<input v-model="form.password" type="password" autocomplete="new-password" placeholder="至少10位，包含字母和数字"></label><label>确认密码<input v-model="form.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入初始密码"></label><label>角色<select v-model="form.role"><option v-for="role in roleDefinitions" :key="role.key" :value="role.key">{{ role.name }}</option></select></label><button @click="addUser">确认添加</button></div></section>
 
       <section class="accounts-card"><header><div><h2>账号与角色</h2><span>修改后立即影响该账号的菜单和路由访问</span></div><div><label>⌕<input v-model="keyword" placeholder="搜索姓名或账号"></label><select v-model="roleFilter"><option value="">全部角色</option><option v-for="role in roleDefinitions" :key="role.key" :value="role.key">{{ role.name }}</option></select></div></header><div class="table-scroll"><table><thead><tr><th>账号</th><th>当前角色</th><th>可见范围</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="user in filteredUsers" :key="user.id"><td><span class="person"><i>{{ user.name.slice(0,2) }}</i><span><b>{{ user.name }}</b><small>{{ user.account }}</small></span></span></td><td><select :value="user.role" :disabled="user.account===currentAuthUser.account" @change="changeRole(user.id,($event.target as HTMLSelectElement).value as RoleKey)"><option v-for="role in roleDefinitions" :key="role.key" :value="role.key">{{ role.name }}</option></select></td><td><span class="scope-tags"><em v-for="permission in roleDefinitions.find(role=>role.key===user.role)?.permissions" :key="permission">{{ permissionLabel(permission,true) }}</em></span></td><td><span :class="['status',user.status]">{{ user.status==='enabled'?'已启用':'已停用' }}</span></td><td><span class="row-actions"><button class="reset" @click="openResetPassword(user.id)">重置密码</button><button v-if="user.status==='enabled'" :disabled="user.account===currentAuthUser.account" class="disable" @click="changeStatus(user.id,'disabled')">停用</button><button v-else class="enable" @click="changeStatus(user.id,'enabled')">启用</button></span></td></tr><tr v-if="!filteredUsers.length"><td colspan="5" class="empty">没有找到匹配账号</td></tr></tbody></table></div></section>
     </main>
-    <div v-if="resetUserId" class="modal-mask" @click.self="closeResetPassword"><section class="password-modal" role="dialog" aria-modal="true" aria-label="重置密码"><header><div><small>ACCOUNT SECURITY</small><h2>重置登录密码</h2><span>{{ authState.users.find(user=>user.id===resetUserId)?.name }} · {{ authState.users.find(user=>user.id===resetUserId)?.account }}</span></div><button aria-label="关闭" @click="closeResetPassword">×</button></header><label>新密码<input v-model="resetForm.password" type="password" autocomplete="new-password" placeholder="至少8位，包含字母和数字"></label><label>确认新密码<input v-model="resetForm.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入新密码"></label><p>保存后，该账号原密码将立即失效。</p><footer><button @click="closeResetPassword">取消</button><button class="primary" @click="submitResetPassword">确认重置</button></footer></section></div>
+    <div v-if="resetUserId" class="modal-mask" @click.self="closeResetPassword"><section class="password-modal" role="dialog" aria-modal="true" aria-label="重置密码"><header><div><small>ACCOUNT SECURITY</small><h2>重置登录密码</h2><span>{{ authState.users.find(user=>user.id===resetUserId)?.name }} · {{ authState.users.find(user=>user.id===resetUserId)?.account }}</span></div><button aria-label="关闭" @click="closeResetPassword">×</button></header><label>新密码<input v-model="resetForm.password" type="password" autocomplete="new-password" placeholder="至少10位，包含字母和数字"></label><label>确认新密码<input v-model="resetForm.confirmPassword" type="password" autocomplete="new-password" placeholder="再次输入新密码"></label><p>保存后，该账号原密码将立即失效，并要求首次登录修改。</p><footer><button @click="closeResetPassword">取消</button><button class="primary" @click="submitResetPassword">确认重置</button></footer></section></div>
     <div v-if="notice" class="toast">{{ notice }}</div>
   </div>
 </template>

@@ -121,7 +121,7 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
     })
   } else price = findPriceRow(rule, country, actualWeightKg, productMarks, quoteRegion)
   if (!price) return null
-  let base = 0
+  let base: number
   if (price.intervalPrice > 0) base = price.intervalPrice
   else if (price.firstWeightKg > 0 && price.firstWeightPrice > 0) {
     const extraWeight = Math.max(0, chargeWeightKg - price.firstWeightKg)

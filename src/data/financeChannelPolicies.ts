@@ -6,6 +6,7 @@ import {
   type CountryContinent,
   type CountryStage,
 } from './countryClassification'
+import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
 export const financeLogisticsAttributeOptions = ['普货', '带电', '纯电池', '液体', '粉末', '非液体化妆品', '带磁', '微敏感'] as const
 export type FinanceLogisticsAttribute = string
@@ -48,11 +49,7 @@ export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E'
 export type CustomerGradeSetting = { grade: CustomerGrade; coefficient: number; enabled: boolean }
 export type FinanceExchangeRateSetting = { usdCny: number; updatedAt: string }
 
-const STORAGE_KEY = 'milano.finance-logistics-attribute-policies.v5'
-const COUNTRY_CLASSIFICATION_STORAGE_KEY = 'milano.finance-country-classification.v1'
 export const FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT = 'milano:finance-country-settings-updated'
-const CUSTOMER_GRADE_STORAGE_KEY = 'milano.finance-customer-grade-coefficients.v1'
-const EXCHANGE_RATE_STORAGE_KEY = 'milano.finance-exchange-rate.v1'
 const DEFAULT_USD_CNY_RATE = 6.75
 export const COMMON_COUNTRY_LIMIT = 20
 
@@ -111,22 +108,13 @@ function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting
 }
 
 export function loadFinanceCountrySettings(): FinanceCountrySetting[] {
-  if (typeof window === 'undefined') return normalizeFinanceCountrySettings([])
-  try {
-    const stored = window.localStorage.getItem(COUNTRY_CLASSIFICATION_STORAGE_KEY)
-    if (stored) return normalizeFinanceCountrySettings(JSON.parse(stored) as FinanceCountrySetting[])
-  } catch {
-    // Invalid local test data falls back to the built-in country classification.
-  }
-  return normalizeFinanceCountrySettings([])
+  return normalizeFinanceCountrySettings(readFinanceSetting<FinanceCountrySetting[]>('country-classification') || [])
 }
 
-export function saveFinanceCountrySettings(settings: FinanceCountrySetting[]) {
+export async function saveFinanceCountrySettings(settings: FinanceCountrySetting[]) {
   const normalized = normalizeFinanceCountrySettings(settings)
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(COUNTRY_CLASSIFICATION_STORAGE_KEY, JSON.stringify(normalized))
-    window.dispatchEvent(new CustomEvent(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT))
-  }
+  await writeFinanceSetting('country-classification', normalized)
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT))
   return normalized
 }
 
@@ -198,56 +186,34 @@ function normalizePolicies(policies: FinanceChannelPolicy[]) {
 }
 
 export function loadFinanceChannelPolicies(): FinanceChannelPolicy[] {
-  if (typeof window === 'undefined') return normalizePolicies(defaultPolicies)
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    if (stored) return normalizePolicies(JSON.parse(stored) as FinanceChannelPolicy[])
-  } catch {
-    // Invalid local test data falls back to the built-in policies.
-  }
-  return normalizePolicies(defaultPolicies)
+  return normalizePolicies(readFinanceSetting<FinanceChannelPolicy[]>('channel-policies') || defaultPolicies)
 }
 
-export function saveFinanceChannelPolicies(policies: FinanceChannelPolicy[]) {
-  if (typeof window !== 'undefined') window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizePolicies(policies)))
+export async function saveFinanceChannelPolicies(policies: FinanceChannelPolicy[]) {
+  await writeFinanceSetting('channel-policies', normalizePolicies(policies))
 }
 
 export function loadCustomerGradeSettings(): CustomerGradeSetting[] {
-  if (typeof window === 'undefined') return defaultGradeSettings.map(setting => ({ ...setting }))
-  try {
-    const stored = window.localStorage.getItem(CUSTOMER_GRADE_STORAGE_KEY)
-    if (stored) return (JSON.parse(stored) as CustomerGradeSetting[]).map(setting => ({ ...setting }))
-  } catch {
-    // Invalid local test data falls back to the built-in coefficients.
-  }
-  return defaultGradeSettings.map(setting => ({ ...setting }))
+  return (readFinanceSetting<CustomerGradeSetting[]>('customer-grades') || defaultGradeSettings).map(setting => ({ ...setting }))
 }
 
-export function saveCustomerGradeSettings(settings: CustomerGradeSetting[]) {
-  if (typeof window !== 'undefined') window.localStorage.setItem(CUSTOMER_GRADE_STORAGE_KEY, JSON.stringify(settings))
+export async function saveCustomerGradeSettings(settings: CustomerGradeSetting[]) {
+  await writeFinanceSetting('customer-grades', settings)
 }
 
 export function loadFinanceExchangeRate(): FinanceExchangeRateSetting {
-  if (typeof window === 'undefined') return { usdCny: DEFAULT_USD_CNY_RATE, updatedAt: '系统默认' }
-  try {
-    const stored = window.localStorage.getItem(EXCHANGE_RATE_STORAGE_KEY)
-    if (stored) {
-      const parsed = JSON.parse(stored) as Partial<FinanceExchangeRateSetting>
-      const usdCny = Number(parsed.usdCny)
-      if (Number.isFinite(usdCny) && usdCny > 0) return { usdCny, updatedAt: parsed.updatedAt || '财务维护' }
-    }
-  } catch {
-    // Invalid local test data falls back to the company default rate.
-  }
+  const parsed = readFinanceSetting<Partial<FinanceExchangeRateSetting>>('exchange-rate')
+  const usdCny = Number(parsed?.usdCny)
+  if (Number.isFinite(usdCny) && usdCny > 0) return { usdCny, updatedAt: parsed?.updatedAt || '财务维护' }
   return { usdCny: DEFAULT_USD_CNY_RATE, updatedAt: '系统默认' }
 }
 
-export function saveFinanceExchangeRate(usdCny: number): FinanceExchangeRateSetting {
+export async function saveFinanceExchangeRate(usdCny: number): Promise<FinanceExchangeRateSetting> {
   const setting = {
     usdCny: Math.max(0.0001, Number(usdCny) || DEFAULT_USD_CNY_RATE),
     updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
   }
-  if (typeof window !== 'undefined') window.localStorage.setItem(EXCHANGE_RATE_STORAGE_KEY, JSON.stringify(setting))
+  await writeFinanceSetting('exchange-rate', setting)
   return setting
 }
 

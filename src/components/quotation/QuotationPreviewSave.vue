@@ -69,7 +69,8 @@ watch(groups, value => {
 
 function toggleCountry(country: string) {
   const next = new Set(expandedCountries.value)
-  next.has(country) ? next.delete(country) : next.add(country)
+  if (next.has(country)) next.delete(country)
+  else next.add(country)
   expandedCountries.value = next
 }
 function toggleAll() {

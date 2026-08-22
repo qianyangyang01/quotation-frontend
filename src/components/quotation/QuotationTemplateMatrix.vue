@@ -69,8 +69,8 @@ function notify(message: string) {
   feedbackTimer = window.setTimeout(() => { feedback.value = '' }, 3600)
 }
 
-function refreshTemplates(preferredId = '') {
-  templates.value = loadQuotationTemplates(owner.value)
+async function refreshTemplates(preferredId = '') {
+  templates.value = await loadQuotationTemplates(owner.value)
   const preferred = preferredId || selectedTemplateId.value
   selectedTemplateId.value = templates.value.some(item => item.id === preferred)
     ? preferred
@@ -126,7 +126,7 @@ function handlePresetApplied(valid: number, missing: number) {
   appliedMissingCount.value = missing
 }
 
-function createFromCurrent() {
+async function createFromCurrent() {
   const name = createName.value.trim()
   if (!currentRows.value.length) {
     notify('当前还没有选择渠道，请先在下方添加国家和渠道，再新建模板')
@@ -137,20 +137,20 @@ function createFromCurrent() {
     notify('已生成模板名称，可修改后再次点击“新建模板”')
     return
   }
-  const created = createQuotationTemplate(owner.value, {
+  const created = await createQuotationTemplate(owner.value, {
     name,
     description: createDescription.value.trim(),
     items: templateItems(currentRows.value),
   })
   createName.value = ''
   createDescription.value = ''
-  refreshTemplates(created.id)
+  await refreshTemplates(created.id)
   applyTemplate(created)
   showManager.value = true
   notify(`模板“${created.name}”已新建`)
 }
 
-function updateActiveFromCurrent() {
+async function updateActiveFromCurrent() {
   const template = activeTemplate.value
   if (!template) {
     notify('请先应用需要更新的模板')
@@ -160,13 +160,13 @@ function updateActiveFromCurrent() {
     notify('模板至少需要保留一条渠道，当前选择为空，未执行更新')
     return
   }
-  const updated = updateQuotationTemplate(owner.value, template.id, { items: templateItems(currentRows.value) })
+  const updated = await updateQuotationTemplate(owner.value, template.id, { items: templateItems(currentRows.value) }, template._version)
   if (!updated) {
     notify('模板已不存在，请刷新后重试')
-    refreshTemplates()
+    await refreshTemplates()
     return
   }
-  refreshTemplates(updated.id)
+  await refreshTemplates(updated.id)
   emit('templateChange', { id: updated.id, name: updated.name })
   notify(`模板“${updated.name}”已按当前临时清单更新`)
 }
@@ -177,40 +177,40 @@ function startRename(template: QuotationPersonalTemplate) {
   pendingDeleteId.value = ''
 }
 
-function saveRename(template: QuotationPersonalTemplate) {
+async function saveRename(template: QuotationPersonalTemplate) {
   const name = editingName.value.trim()
   if (!name) {
     notify('模板名称不能为空')
     return
   }
-  const updated = updateQuotationTemplate(owner.value, template.id, { name })
+  const updated = await updateQuotationTemplate(owner.value, template.id, { name }, template._version)
   editingId.value = ''
   editingName.value = ''
-  refreshTemplates(updated?.id || template.id)
+  await refreshTemplates(updated?.id || template.id)
   if (activeTemplateId.value === template.id && updated) emit('templateChange', { id: updated.id, name: updated.name })
   notify(`模板已重命名为“${name}”`)
 }
 
-function copyTemplate(template: QuotationPersonalTemplate) {
-  const copied = copyQuotationTemplate(owner.value, template.id)
+async function copyTemplate(template: QuotationPersonalTemplate) {
+  const copied = await copyQuotationTemplate(owner.value, template.id)
   if (!copied) {
     notify('模板复制失败，请刷新后重试')
     return
   }
-  refreshTemplates(copied.id)
+  await refreshTemplates(copied.id)
   notify(`已复制为“${copied.name}”`)
 }
 
-function removeTemplate(template: QuotationPersonalTemplate) {
+async function removeTemplate(template: QuotationPersonalTemplate) {
   if (pendingDeleteId.value !== template.id) {
     pendingDeleteId.value = template.id
     notify(`再次点击“确认删除”将删除模板“${template.name}”`)
     return
   }
   const wasActive = activeTemplateId.value === template.id
-  deleteQuotationTemplate(owner.value, template.id)
+  await deleteQuotationTemplate(owner.value, template.id)
   pendingDeleteId.value = ''
-  refreshTemplates()
+  await refreshTemplates()
   if (wasActive) {
     activeTemplateId.value = ''
     emit('templateChange', null)
@@ -219,7 +219,7 @@ function removeTemplate(template: QuotationPersonalTemplate) {
 }
 
 function onTemplatesUpdated() {
-  refreshTemplates()
+  void refreshTemplates()
 }
 
 watch(() => [props.ownerName, props.ownerAccount], () => {
@@ -227,7 +227,7 @@ watch(() => [props.ownerName, props.ownerAccount], () => {
   presetSelection.value = []
   currentRows.value = []
   emit('templateChange', null)
-  refreshTemplates()
+  void refreshTemplates()
 }, { immediate: true })
 
 onMounted(() => window.addEventListener(QUOTATION_TEMPLATES_UPDATED_EVENT, onTemplatesUpdated))

@@ -297,19 +297,19 @@ function primaryAction() {
   else if (props.mode === 'members') openFinancePolicyEditor()
   else showEditor.value = true
 }
-function saveGradeSettings() {
+async function saveGradeSettings() {
   customerGradeSettings.value.forEach(setting => {
     setting.coefficient = Math.max(0, Number(setting.coefficient) || 1)
   })
-  saveCustomerGradeSettings(customerGradeSettings.value)
+  await saveCustomerGradeSettings(customerGradeSettings.value)
   toast('S–E 客户等级计算系数已保存')
 }
-function saveExchangeRateSetting() {
+async function saveExchangeRateSetting() {
   if (!Number.isFinite(financeExchangeRate.value.usdCny) || financeExchangeRate.value.usdCny <= 0) {
     toast('美元汇率必须大于 0')
     return
   }
-  financeExchangeRate.value = saveFinanceExchangeRate(financeExchangeRate.value.usdCny)
+  financeExchangeRate.value = await saveFinanceExchangeRate(financeExchangeRate.value.usdCny)
   toast(`美元汇率已保存：1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY`)
 }
 function fixedFeeCny(fixedFeeUsd: number) {
@@ -349,13 +349,13 @@ function removeTaxProvider(setting: FinanceProviderTaxSetting) {
   setting.selected = false
   toast(`${setting.provider} 已移出税务设置，保存后将视为未配置`)
 }
-function saveTaxSettings() {
+async function saveTaxSettings() {
   financeTaxSettings.value.countries.forEach(setting => {
     setting.aFixedFeeUsd = Math.max(0, Number(setting.aFixedFeeUsd) || 0)
     setting.bPerItemFeeUsd = Math.max(0, Number(setting.bPerItemFeeUsd) || 0)
     setting.enabled = setting.aFixedFeeUsd > 0 || setting.bPerItemFeeUsd > 0
   })
-  financeTaxSettings.value = saveFinanceTaxSettings(financeTaxSettings.value)
+  financeTaxSettings.value = await saveFinanceTaxSettings(financeTaxSettings.value)
   toast('国家客户税费与物流商全局税务属性已保存')
 }
 function startFinanceTabDrag(tab: FinanceSettingsTab, event: DragEvent) {
@@ -452,7 +452,7 @@ function endFinanceCountryDrag() {
   draggedFinanceCountry.value = ''
   dragOverFinanceCountry.value = ''
 }
-function saveFinanceCountryClassification() {
+async function saveFinanceCountryClassification() {
   if (financeCountrySettings.value.filter(setting => setting.enabled && setting.stage === 'common').length > COMMON_COUNTRY_LIMIT) {
     toast(`常用国家最多只能设置 ${COMMON_COUNTRY_LIMIT} 个`)
     return
@@ -461,7 +461,7 @@ function saveFinanceCountryClassification() {
     setting.continent = inferCountryContinent(setting.code)
     setting.sortOrder = Math.max(1, Number(setting.sortOrder) || 1)
   })
-  financeCountrySettings.value = saveFinanceCountrySettings(financeCountrySettings.value)
+  financeCountrySettings.value = await saveFinanceCountrySettings(financeCountrySettings.value)
   toast('常用国家设置已保存，业务报价国家列表将同步更新')
 }
 function openFinancePolicyEditor(policy?: FinanceChannelPolicy) {
@@ -605,7 +605,7 @@ function handleFinanceCategoryChange() {
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
 }
-function saveFinancePolicy() {
+async function saveFinancePolicy() {
   const form = financePolicyForm.value
   const category = form.category.trim()
   form.countryRules.forEach(rule => { rule.country = rule.country.trim() })
@@ -631,13 +631,13 @@ function saveFinancePolicy() {
   const index = financePolicies.value.findIndex(item => item.id === editingFinancePolicyId.value)
   if (index >= 0) financePolicies.value.splice(index, 1, policy)
   else financePolicies.value.unshift(policy)
-  saveFinanceChannelPolicies(financePolicies.value)
+  await saveFinanceChannelPolicies(financePolicies.value)
   showEditor.value = false
   toast(`${category} 的 ${form.countryRules.length} 个国家渠道策略已保存`)
 }
-function removeFinancePolicy(policy: FinanceChannelPolicy) {
+async function removeFinancePolicy(policy: FinanceChannelPolicy) {
   financePolicies.value = financePolicies.value.filter(item => item.id !== policy.id)
-  saveFinanceChannelPolicies(financePolicies.value)
+  await saveFinanceChannelPolicies(financePolicies.value)
   toast(`${policy.category} 品类策略已删除`)
 }
 function openProductEditor(product?: ProductRow) {
