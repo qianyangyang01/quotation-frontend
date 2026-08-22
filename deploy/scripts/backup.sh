@@ -15,7 +15,7 @@ trap cleanup EXIT
 docker compose --project-name quotation-prod --env-file "$deploy_dir/.env" -f "$deploy_dir/docker-compose.yml" exec -T quotation-postgres \
   pg_dump --format=custom --no-owner --dbname=quotation_prod --username=quotation_app > "$temporary/quotation_prod.dump"
 test -s "$temporary/quotation_prod.dump" || { echo "ERROR: PostgreSQL backup is empty" >&2; exit 1; }
-mkdir -p "$temporary/objects"
+mkdir -p "$temporary/objects/quotation-assets"
 docker run --rm --network quotation-internal \
   --user "$(id -u):$(id -g)" \
   -e HOME=/tmp \
