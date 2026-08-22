@@ -32,9 +32,27 @@ export const logisticsRules: LogisticsRule[] = masterData.rules.map(rule => {
   const area = areaByRule.get(rule.id)
   return { ...rule, relations: rule.relations as LogisticsRelation[], areaCount: area?.areaCount ?? 0, priceRowCount: area?.priceRowCount ?? 0, prices: area?.prices ?? [] }
 })
-export const logisticsCarriers = [...new Set(logisticsRules.flatMap(rule => rule.relations.map(item => item.carrier)).filter(Boolean))].sort()
-export const logisticsChannels = logisticsRules.flatMap(rule => rule.relations.map(item => ({ ...item, ruleId: rule.id, ruleName: rule.name })))
-export const logisticsCountries = [...new Map(logisticsRules.flatMap(rule => rule.prices.map(price => [price.countryCode || price.areaName, { code: price.countryCode, name: price.areaName }]))).values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+export const legacyLogisticsProviderNames = [...new Set(logisticsRules.flatMap(rule => rule.relations.map(item => item.carrier)).filter(Boolean))]
+export const logisticsCarriers: string[] = []
+export const logisticsChannels: Array<LogisticsRelation & { ruleId: number; ruleName: string }> = []
+export const logisticsCountries: Array<{ code: string; name: string }> = []
+
+function rebuildLogisticsIndexes() {
+  const carriers = [...new Set(logisticsRules.flatMap(rule => rule.relations.map(item => item.carrier)).filter(Boolean))].sort()
+  const channels = logisticsRules.flatMap(rule => rule.relations.map(item => ({ ...item, ruleId: rule.id, ruleName: rule.name })))
+  const countries = [...new Map(logisticsRules.flatMap(rule => rule.prices.map(price => [price.countryCode || price.areaName, { code: price.countryCode, name: price.areaName }]))).values()]
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  logisticsCarriers.splice(0, logisticsCarriers.length, ...carriers)
+  logisticsChannels.splice(0, logisticsChannels.length, ...channels)
+  logisticsCountries.splice(0, logisticsCountries.length, ...countries)
+}
+
+export function replaceLogisticsRules(rules: LogisticsRule[]) {
+  logisticsRules.splice(0, logisticsRules.length, ...rules)
+  rebuildLogisticsIndexes()
+}
+
+rebuildLogisticsIndexes()
 export const australiaQuoteRegions = ['澳大利亚1区', '澳大利亚2区', '澳大利亚3区', '澳大利亚4区'] as const
 export function normalizeAustraliaQuoteRegion(value: string) {
   const normalized = String(value || '').replace(/[（）()\s]/g, '')

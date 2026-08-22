@@ -5,6 +5,7 @@ export type QuotationProduct = {
   sku: string
   supplier: string
   image: string
+  physicalImage: string
   stockStatus: '有货' | '无货' | '待确认'
   /** 本次报价由业务员统一选择，不从采购资料继承。 */
   logisticsAttribute: string
@@ -79,6 +80,9 @@ export type QuotationMatrixRow = {
   taxConfigured: boolean
   taxRatePercent: number | null
   countryFixedTaxUsd: number
+  taxCustomerType: 'A' | 'B'
+  taxFeeMode: 'exempt' | 'fixed-order' | 'per-item' | 'missing'
+  taxPerItemFeeUsd: number
   taxLabel: string
   tax1Usd: number | null
   tax2Usd: number | null

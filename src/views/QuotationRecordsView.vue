@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { loadQuotationUser } from '@/utils/quotationSession'
 import { loadQuotationRecords, updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
 import { loadPurchaseProducts } from '@/data/purchaseStore'
@@ -8,7 +8,7 @@ import { quotationProductCategories } from '@/components/quotation/types'
 const props = defineProps<{ scope: 'mine' | 'company' }>()
 const user = loadQuotationUser()
 const records = ref(loadQuotationRecords())
-const purchaseProducts = loadPurchaseProducts()
+const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
 const search = ref('')
 const filterStatus = ref<'' | QuotationRecordStatus>('')
 const filterCountry = ref('')
@@ -80,8 +80,9 @@ const dateTime = (value?: string) => {
 function recordProductImage(row: QuotationRecord) {
   if (row.productImage) return row.productImage
   const primarySku = row.primarySku.split(/[、,+\s]/).find(Boolean) || row.primarySku
-  return purchaseProducts.find(item => item.sku === primarySku)?.image || ''
+  return purchaseProducts.value.find(item => item.sku === primarySku)?.productImage || ''
 }
+onMounted(async () => { try { purchaseProducts.value = await loadPurchaseProducts() } catch { purchaseProducts.value = [] } })
 function fillForm(row: QuotationRecord) {
   form.status = row.status === 'lost' ? 'lost' : 'won'
   form.dealLines = (row.dealLines || []).map(line => ({ id: line.id, optionId: line.optionId, unitPriceUsd: line.unitPriceUsd.toFixed(2), quantity: String(line.quantity) }))
@@ -155,7 +156,7 @@ watch(list, rows => {
 
 <template>
   <div class="app">
-    <header class="topbar"><RouterLink class="brand" to="/quotation"><i>M</i><span><b>米莱诺报价</b><small>MILANO PRICING ERP</small></span></RouterLink><nav><RouterLink to="/quotation">业务报价</RouterLink><RouterLink to="/quotation/products">采购资料</RouterLink><RouterLink to="/quotation/logistics">物流规则</RouterLink><RouterLink to="/quotation/members">财务设置</RouterLink><RouterLink :class="{active:isMine}" to="/quotation/my-records">我的报价记录</RouterLink><RouterLink :class="{active:!isMine}" to="/quotation/records">公司报价记录</RouterLink></nav><div class="user"><i>{{ user.name.slice(0,2) }}</i><span><b>{{ user.name }}</b><small>{{ user.account }}</small></span></div></header>
+    <header class="topbar"><RouterLink class="brand" to="/quotation"><i>M</i><span><b>米莱诺报价</b><small>MILANO PRICING ERP</small></span></RouterLink><nav><RouterLink to="/quotation">我的报价</RouterLink><RouterLink to="/quotation/products">采购</RouterLink><RouterLink to="/quotation/logistics">物流</RouterLink><RouterLink to="/quotation/members">财务</RouterLink><RouterLink :class="{active:isMine}" to="/quotation/my-records">我的报价记录</RouterLink><RouterLink :class="{active:!isMine}" to="/quotation/records">公司报价记录</RouterLink></nav><div class="user"><i>{{ user.name.slice(0,2) }}</i><span><b>{{ user.name }}</b><small>{{ user.account }}</small></span></div></header>
     <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '跟进本人系统报价与客户实际成交结果' : '查看全体业务员的报价与成交回填记录' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>需要回填成交结果</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>已完成真实报价回填</em></span></article><article><i>×</i><span><small>未成交</small><b>{{ lost }}</b><em>已确认但没有成交</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ scoped.length }}</b><em>保留系统报价快照</em></span></article></section>
       <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="won">已成交</option><option value="lost">未成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="search='';filterStatus='';filterCategory='';filterCountry=''">重置</button><b>共 {{ list.length }} 条记录</b></section>
@@ -179,7 +180,7 @@ watch(list, rows => {
           <section v-if="detailTab==='overview'" class="overview-panel">
             <div class="overview-metrics"><article><small>报价国家</small><b>{{ recordCountries(selected).length || 1 }}</b><span>个国家</span></article><article><small>报价渠道</small><b>{{ recordOptions(selected).length || 1 }}</b><span>条渠道</span></article><article><small>1件报价区间</small><b>{{ hasMultipleOptions(selected) ? quote1UsdRange(selected) : usd(selected.systemQuoteUsd) }}</b><span>{{ hasMultipleOptions(selected) ? quote1CnyRange(selected) : cny(selected.systemQuoteCny) }}</span></article></div>
             <article class="primary-plan"><header><b>首选方案</b><span>报价单优先展示</span></header><div><span><strong>{{ primaryOption(selected)?.country || selected.country }} · {{ primaryOption(selected)?.channel || selected.channel }}</strong><small>{{ primaryOption(selected)?.carrier || selected.carrier }} · {{ primaryOption(selected)?.eta || selected.rule }}</small></span><b>{{ optionPrice(primaryOption(selected)?.quote1Usd ?? selected.systemQuoteUsd) }}</b></div></article>
-            <section class="overview-info"><header>报价基本信息</header><div><span>客户</span><b>{{ selected.customerName }}</b><span>商品</span><b>{{ selected.productSummary }}</b><span>SKU</span><b>{{ selected.primarySku }}</b><span>报价模式</span><b>{{ selected.matrixMode === 'template' ? `模板 · ${selected.quotationTemplateName || '个人报价'}` : hasMultipleOptions(selected) ? '多国家多渠道报价' : '常用国家快速报价' }}</b><span>客户等级</span><b>{{ selected.customerGrade }}</b><span>自定义数量</span><b>{{ selected.customQuoteQuantity || '—' }}{{ selected.quoteMode==='bundle'?'套':'件' }}</b><span>创建时间</span><b>{{ dateTime(selected.createdAt) }}</b><span>最后修改</span><b>{{ dateTime(selected.updatedAt) }}</b></div></section>
+            <section class="overview-info"><header>报价基本信息</header><div><span>客户</span><b>{{ selected.customerName }}</b><span>商品</span><b>{{ selected.productSummary }}</b><span>SKU</span><b>{{ selected.primarySku }}</b><span>报价模式</span><b>{{ selected.matrixMode === 'template' ? `模板 · ${selected.quotationTemplateName || '个人报价'}` : hasMultipleOptions(selected) ? '多国家多渠道报价' : '常用国家快速报价' }}</b><span>客户等级</span><b>{{ selected.customerGrade }}</b><span>税费客户类型</span><b>{{ selected.taxCustomerType ? `${selected.taxCustomerType}类客户` : '旧记录未保存' }}</b><span>自定义数量</span><b>{{ selected.customQuoteQuantity || '—' }}{{ selected.quoteMode==='bundle'?'套':'件' }}</b><span>创建时间</span><b>{{ dateTime(selected.createdAt) }}</b><span>最后修改</span><b>{{ dateTime(selected.updatedAt) }}</b></div></section>
             <section class="outcome-card"><header><b>客户成交结果</b></header><div><em :class="selected.status">{{ statusText(selected.status) }}</em><span v-if="selected.dealLines?.length">成交渠道 <b>{{ selected.dealLines.length }}条</b></span><span v-if="selected.dealQuantity">成交总数量 <b>{{ selected.dealQuantity }}{{ selected.quoteMode==='bundle'?'套':'件' }}</b></span><span v-if="selected.actualQuoteUsd">成交总金额 <b>{{ usd(selected.actualQuoteUsd) }}</b></span><span v-if="selected.status==='pending'">等待业务员回填客户成交结果</span></div><div v-if="selected.dealLines?.length" class="saved-deal-lines"><article v-for="line in selected.dealLines" :key="line.id"><span><b>{{ line.optionLabel }}</b><small>{{ usd(line.unitPriceUsd) }} × {{ line.quantity }}{{ selected.quoteMode==='bundle'?'套':'件' }}</small></span><strong>{{ usd(line.amountUsd) }}</strong></article></div></section>
             <button class="view-options" @click="detailTab='options'">查看全部国家与渠道报价 →</button>
           </section>

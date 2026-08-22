@@ -22,11 +22,9 @@ const taxable = computed(() => !props.row.taxIncluded && props.row.taxConfigured
 const missing = computed(() => !props.row.taxIncluded && !props.row.taxConfigured)
 const badgeText = computed(() => {
   if (props.row.taxIncluded) return '免税'
-  if (missing.value) return '税率待设置'
-  const fixed = Number(props.row.countryFixedTaxUsd || 0)
-  const rate = Number(props.row.taxRatePercent || 0)
-  if (fixed > 0 && rate <= 0) return `含税 $${fixed.toFixed(fixed % 1 ? 2 : 0)}`
-  if (rate > 0 && fixed <= 0) return `含税 ${rate.toFixed(rate % 1 ? 1 : 0)}%`
+  if (missing.value) return '税费待设置'
+  if (props.row.taxFeeMode === 'fixed-order') return `A类 $${Number(props.row.countryFixedTaxUsd || 0).toFixed(2)}/单`
+  if (props.row.taxFeeMode === 'per-item') return `B类 $${Number(props.row.taxPerItemFeeUsd || 0).toFixed(2)}/件`
   return '含税'
 })
 const untaxedPrice = computed(() => finalPrice.value == null || taxAmount.value == null ? null : Math.max(0, finalPrice.value - taxAmount.value))
@@ -43,7 +41,7 @@ const untaxedPrice = computed(() => finalPrice.value == null || taxAmount.value 
     </span>
   </span>
   <span v-else-if="mode==='price' && row.taxIncluded" class="tax-price-meta exempt"><em>免税</em></span>
-  <span v-else-if="mode==='price' && missing" class="tax-price-meta missing" tabindex="0"><em>暂未计税</em><span class="tax-tooltip warning">请先在财务设置中维护该物流商税率</span></span>
+  <span v-else-if="mode==='price' && missing" class="tax-price-meta missing" tabindex="0"><em>暂未计税</em><span class="tax-tooltip warning">请先在财务设置中维护该国家客户税费或物流商属性</span></span>
 </template>
 
 <style scoped>

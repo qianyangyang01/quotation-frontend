@@ -15,7 +15,7 @@ import { quotationProductCategories, type BundleQuoteItem, type QuotationCountry
 import { australiaQuoteRegions, calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProducts, purchaseDisplayName, purchaseFreightChoices, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
-import { calculateFinanceQuoteTax, FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings } from '@/data/financeTaxSettings'
+import { calculateFinanceQuoteTax, FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings, type TaxCustomerType } from '@/data/financeTaxSettings'
 import { inferCountryContinent } from '@/data/countryClassification'
 import {
   customerGradeCoefficient,
@@ -59,6 +59,7 @@ const selectedSalesperson = computed(() => currentSalespersonAccount.value === '
 const currentUserAvatar = computed(() => currentSalespersonName.value.slice(0, 2).toUpperCase())
 const customerGradeSettings = loadCustomerGradeSettings()
 const selectedCustomerGrade = ref<CustomerGrade>('S')
+const selectedTaxCustomerType = ref<TaxCustomerType>('A')
 const financeExchangeRate = loadFinanceExchangeRate()
 const exchange = ref({ usd: financeExchangeRate.usdCny, eur: 7.86, updatedAt: financeExchangeRate.updatedAt })
 const notice = ref('')
@@ -73,16 +74,14 @@ const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
 const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('common')
 const quoteMode = ref<QuotationMode>('single')
 const route = useRoute()
-const purchaseRecords = loadPurchaseProducts()
+const purchaseRecords = ref<PurchaseProductRecord[]>([])
 const financePolicies = loadFinanceChannelPolicies()
 const financeCountrySettings = ref(loadFinanceCountrySettings())
 const financeTaxSettings = ref(loadFinanceTaxSettings())
 const quotationAttributeOptions = [...new Set([...financeLogisticsAttributeOptions, ...financePolicies.map(policy => policy.category)])]
-const initialPurchaseRecord = findPurchaseProduct(purchaseRecords, String(route.query.sku || '')) || purchaseRecords[0]
-const initialFreightChoice = initialPurchaseRecord ? purchaseFreightChoices(initialPurchaseRecord).find(item => item.quantity === 10) : undefined
-const skuSearch = ref(initialPurchaseRecord?.sku || '')
+const skuSearch = ref('')
 const customerName = ref('')
-const productCategory = ref(quotationProductCategories.find(category => category === initialPurchaseRecord?.category) || '')
+const productCategory = ref('')
 const monthlySalesEstimate = ref('10')
 function monthlySalesPurchaseQuantity(value = monthlySalesEstimate.value) {
   return value === '100+' ? 100 : value === '100' ? 10 : 1
@@ -95,7 +94,7 @@ function purchasePriceForMonthlySales(record: PurchaseProductRecord) {
 }
 const initialLogisticsAttribute = quotationAttributeOptions[0] || '普货'
 const initialCountry = financeCountryOptionsForCategory(financePolicies, initialLogisticsAttribute, financeCountrySettings.value)[0]?.name || ''
-const initialWeight = initialPurchaseRecord?.weightKg || 0.001
+const initialWeight = 0.001
 const initialChannel = channelsForShipment(initialLogisticsAttribute, initialCountry, initialWeight)[0] || ''
 const initialRule = rulesForShipment(initialLogisticsAttribute, initialChannel, initialCountry, initialWeight)[0] || ''
 
@@ -113,15 +112,15 @@ function changeQuoteRegion(p: Product, payload: { country: string; region: strin
 
 const products = ref<Product[]>([
   {
-    id: 1, selected: true, name: initialPurchaseRecord ? purchaseDisplayName(initialPurchaseRecord) : '待查询采购商品', sku: initialPurchaseRecord?.sku || '', logisticsAttribute: initialLogisticsAttribute,
-    supplier: initialPurchaseRecord?.quotationOwner || '待补充', image: initialPurchaseRecord?.image || '', stockStatus: initialPurchaseRecord?.stockStatus || '待确认', quantity: 1, purchase: initialPurchaseRecord ? purchasePriceForMonthlySales(initialPurchaseRecord) : 0,
-    purchaseFreightPerUnit: initialFreightChoice?.unitFreightCny || 0,
-    netWeight: initialPurchaseRecord?.weightKg || 0,
+    id: 1, selected: true, name: '待查询采购商品', sku: '', logisticsAttribute: initialLogisticsAttribute,
+    supplier: '待补充', image: '', physicalImage: '', stockStatus: '待确认', quantity: 1, purchase: 0,
+    purchaseFreightPerUnit: 0,
+    netWeight: 0,
     country: initialCountry, channel: initialChannel, rule: initialRule,
     manualFreight: false, freight: 30.16, margin: 21, memberMargin: 17, profitType: 'rate', fixedProfit: 0,
-    weightSource: 'purchase', manualWeight: initialPurchaseRecord?.weightKg || 0,
+    weightSource: 'purchase', manualWeight: 0,
     volumetricEnabled: false, packageLengthCm: 0, packageWidthCm: 0, packageHeightCm: 0,
-    discountEnabled: false, discountRate: 0, status: initialPurchaseRecord?.status === '资料完整' ? '采购资料已加载' : (initialPurchaseRecord?.status || '待查询'),
+    discountEnabled: false, discountRate: 0, status: '待查询',
   },
 ])
 let bundleItemId = 1
@@ -142,12 +141,12 @@ function bundleItemFromRecord(record?: PurchaseProductRecord): BundleQuoteItem {
     status: record ? (record.status === '资料完整' ? '采购资料已加载' : record.status) : '待查询',
   }
 }
-const bundleItems = ref<BundleQuoteItem[]>([bundleItemFromRecord(initialPurchaseRecord)])
+const bundleItems = ref<BundleQuoteItem[]>([bundleItemFromRecord()])
 function normalizedBundleSets(value: number) { return Math.max(1, Math.floor(Number(value) || 1)) }
 function bundlePurchaseCost(sets = 1) {
   const setCount = normalizedBundleSets(sets)
   return bundleItems.value.reduce((sum, item) => {
-    const record = findPurchaseProduct(purchaseRecords, item.sku)
+    const record = findPurchaseProduct(purchaseRecords.value, item.sku)
     const purchasePrice = record ? purchasePriceForMonthlySales(record) : item.purchaseUnitPrice
     return sum + purchasePrice * normalizedBundleSets(item.quantityPerSet) * setCount
   }, 0)
@@ -194,17 +193,18 @@ function totalCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePur
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
 function salePrice(p: Product) { return totalCost(p) * selectedGradeCoefficient() }
 function usdPriceFromCny(cny: number) { return Math.round(cny * 100) / 100 / exchange.value.usd }
-function taxResult(country: string, provider: string, baseQuoteCny: number) {
-  return calculateFinanceQuoteTax(financeTaxSettings.value, country, provider, usdPriceFromCny(baseQuoteCny))
+function taxResult(country: string, provider: string, baseQuoteCny: number, quantity = 1) {
+  return calculateFinanceQuoteTax(financeTaxSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), selectedTaxCustomerType.value, quantity)
 }
-function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p)).totalUsd * exchange.value.usd }
+function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd * exchange.value.usd }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyPurchaseRecord(p: Product, record: PurchaseProductRecord) {
   p.sku = record.sku
   p.name = purchaseDisplayName(record)
   p.supplier = record.quotationOwner || '待补充'
   p.image = record.image
-  p.stockStatus = record.stockStatus
+  p.physicalImage = record.physicalImage
+  p.stockStatus = record.stockStatus || '待确认'
   p.purchase = purchasePriceForMonthlySales(record)
   p.purchaseFreightPerUnit = purchaseFreightChoices(record).find(item => item.quantity === 10)?.unitFreightCny || 0
   p.netWeight = record.weightKg || 0
@@ -216,7 +216,7 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord) {
   p.status = record.status === '资料完整' ? '采购资料已加载' : record.status
 }
 function queryProduct() {
-  const matches = purchaseRecords.filter(item => item.sku === skuSearch.value.trim().toUpperCase().replace(/\s+/g, ''))
+  const matches = purchaseRecords.value.filter(item => item.sku === skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') && item.quoteReady)
   if (!matches.length) { toast(`未在采购资料中找到 SKU：${skuSearch.value}`); return }
   const p = products.value[0]
   applyPurchaseRecord(p, matches[0])
@@ -230,8 +230,9 @@ function queryProduct() {
 }
 function queryBundleItem(item: BundleQuoteItem) {
   const normalizedSku = item.sku.trim().toUpperCase().replace(/\s+/g, '')
-  const record = findPurchaseProduct(purchaseRecords, normalizedSku)
+  const record = findPurchaseProduct(purchaseRecords.value, normalizedSku)
   if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return }
+  if (!record.quoteReady) { toast(`${record.sku} 的重量、起订量或采购价尚未补齐，暂不能参与报价`); return }
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
   if (duplicate) {
     duplicate.quantityPerSet += normalizedBundleSets(item.quantityPerSet)
@@ -244,7 +245,7 @@ function queryBundleItem(item: BundleQuoteItem) {
   item.name = purchaseDisplayName(record)
   item.supplier = record.quotationOwner || '待补充'
   item.image = record.image
-  item.stockStatus = record.stockStatus
+  item.stockStatus = record.stockStatus || '待确认'
   item.customWeightKg = null
   item.weightKg = record.weightKg || 0
   item.purchaseFreightPerUnit = purchaseFreightChoices(record).find(choice => choice.quantity === 10)?.unitFreightCny || 0
@@ -262,7 +263,7 @@ function removeBundleItem(id: number) {
 }
 function updateBundleItemQuantity(item: BundleQuoteItem, showToast = false) {
   item.quantityPerSet = normalizedBundleSets(item.quantityPerSet)
-  const record = findPurchaseProduct(purchaseRecords, item.sku)
+  const record = findPurchaseProduct(purchaseRecords.value, item.sku)
   if (record) item.purchaseUnitPrice = purchasePriceForMonthlySales(record)
   normalizeRule(products.value[0], true)
   if (showToast) toast(`已更新 ${item.sku} 的单套数量`)
@@ -282,10 +283,10 @@ function changeQuoteMode(mode: QuotationMode) {
 }
 function changeMonthlySalesEstimate(p: Product, value: string) {
   monthlySalesEstimate.value = value
-  const record = findPurchaseProduct(purchaseRecords, p.sku)
+  const record = findPurchaseProduct(purchaseRecords.value, p.sku)
   if (record) p.purchase = purchasePriceForMonthlySales(record)
   bundleItems.value.forEach(item => {
-    const itemRecord = findPurchaseProduct(purchaseRecords, item.sku)
+    const itemRecord = findPurchaseProduct(purchaseRecords.value, item.sku)
     if (itemRecord) item.purchaseUnitPrice = purchasePriceForMonthlySales(itemRecord)
   })
   normalizeRule(p, true)
@@ -319,23 +320,6 @@ function normalizeRule(p: Product, silent = false) {
   p.status = '已自动采用最低报价渠道'
   if (!silent) toast(`已自动采用最低报价渠道“${best.rule}”，报价 ¥${best.finalQuoteCny.toFixed(2)}`)
 }
-function calculateFreight(p: Product, silent = false) {
-  if (p.manualFreight) return
-  if (!p.rule) { p.freight = 0; p.status = '当前条件无可用物流规则'; return }
-  const rule = logisticsRules.find(item => item.name === p.rule)
-  const result = rule ? calculateLogisticsFee(
-    rule,
-    p.country,
-    quoteMode.value === 'bundle' ? chargeWeight(p) : singleActualWeight(p),
-    [p.logisticsAttribute],
-    quoteMode.value === 'single' ? singleDimensions(p) : undefined,
-    quoteRegionForCountry(p.country),
-  ) : null
-  if (!result) { p.status = '无匹配物流价'; return }
-  p.freight = Number(result.total.toFixed(2))
-  p.status = '已试算'
-  if (!silent) toast(`${p.sku} 已按“${p.rule}”完成试算`)
-}
 normalizeRule(products.value[0], true)
 function refreshFinanceCountrySettings(event?: Event) {
   if (event instanceof StorageEvent && event.key && event.key !== 'milano.finance-country-classification.v1') return
@@ -356,11 +340,16 @@ function reorderCommonCountries(countries: string[]) {
   financeCountrySettings.value = saveFinanceCountrySettings(financeCountrySettings.value)
   toast('常用国家顺序已保存')
 }
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.addEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.addEventListener('storage', refreshFinanceCountrySettings)
   window.addEventListener('storage', refreshFinanceTaxSettings)
+  try {
+    purchaseRecords.value = await loadPurchaseProducts()
+    const requestedSku = String(route.query.sku || '').trim()
+    if (requestedSku) { skuSearch.value = requestedSku; queryProduct() }
+  } catch { toast('采购数据读取失败，请刷新页面后重试') }
 })
 onBeforeUnmount(() => {
   window.removeEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
@@ -410,12 +399,12 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
   if (quoteMode.value === 'bundle') {
     cost = bundlePurchaseCost(normalizedQuantity) + bundleDomesticFreight(normalizedQuantity) + freight
   } else {
-    const record = findPurchaseProduct(purchaseRecords, p.sku)
+    const record = findPurchaseProduct(purchaseRecords.value, p.sku)
     const purchasePrice = record ? purchasePriceForMonthlySales(record) : p.purchase
     cost = (purchasePrice + p.purchaseFreightPerUnit) * normalizedQuantity + freight
   }
   const baseQuoteCny = cost * selectedGradeCoefficient()
-  const tax = taxResult(country, provider, baseQuoteCny)
+  const tax = taxResult(country, provider, baseQuoteCny, normalizedQuantity)
   const quoteCny = tax.totalUsd * exchange.value.usd
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }
@@ -445,7 +434,7 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
           : currentQuantity === quantity
             ? custom
             : quantityCostBreakdown(p, option.rule, currentQuantity, country, option.carrier)
-    const tax = custom?.tax || taxResult(country, option.carrier, 0)
+    const tax = custom?.tax || taxResult(country, option.carrier, 0, quantity)
     const row: QuotationMatrixRow = {
         ...option,
         country,
@@ -464,6 +453,9 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
         taxConfigured: tax.configured,
         taxRatePercent: tax.ratePercent,
         countryFixedTaxUsd: tax.fixedFeeUsd,
+        taxCustomerType: tax.customerType,
+        taxFeeMode: tax.feeMode,
+        taxPerItemFeeUsd: tax.perItemFeeUsd,
         taxLabel: tax.label,
         tax1Usd: quote1?.tax.taxUsd ?? null,
         tax2Usd: quote2?.tax.taxUsd ?? null,
@@ -501,7 +493,7 @@ function quoteMatrixContextKey(p: Product) {
   const bundleKey = quoteMode.value === 'bundle'
     ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
-  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${selectedQuoteRegions.value.澳大利亚}|${financeTaxSettings.value.updatedAt}`
+  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${selectedTaxCustomerType.value}|${selectedQuoteRegions.value.澳大利亚}|${financeTaxSettings.value.updatedAt}`
 }
 // 报价国家和渠道矩阵计算量很大。通过稳定的 computed/函数引用传给三个矩阵，
 // 避免客户名称等无关表单字段每输入一个字符就重算全部国家、渠道和四档报价。
@@ -573,7 +565,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
   const quote2 = quantityCostBreakdown(p, p.rule, 2, p.country, p.channel)
   const quote3 = quantityCostBreakdown(p, p.rule, 3, p.country, p.channel)
   const custom = quantityCostBreakdown(p, p.rule, quantity, p.country, p.channel)
-  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p))
+  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p), quantity)
   return {
     country: p.country,
     channelKey: rule && relation ? financeChannelKey(rule.id, relation) : `${p.rule}::${p.channel}`,
@@ -595,6 +587,9 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     taxConfigured: tax.configured,
     taxRatePercent: tax.ratePercent,
     countryFixedTaxUsd: tax.fixedFeeUsd,
+    taxCustomerType: tax.customerType,
+    taxFeeMode: tax.feeMode,
+    taxPerItemFeeUsd: tax.perItemFeeUsd,
     taxLabel: tax.label,
     tax1Usd: quote1?.tax.taxUsd ?? null,
     tax2Usd: quote2?.tax.taxUsd ?? null,
@@ -626,7 +621,7 @@ const saveValidationIssues = computed(() => {
   if (!p?.sku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入一个有效 SKU' : '请输入 SKU 并查询商品' })
   if (p?.sku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
-  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'存在不包税物流商尚未填写税率，请到财务设置补齐' })
+  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'存在不免税物流商对应国家尚未设置客户税费，请到财务设置补齐' })
   return issues
 })
 const displayedSaveValidationIssues = computed(() => showSaveValidation.value ? saveValidationIssues.value : [])
@@ -657,16 +652,17 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   }
   const unit = quoteMode.value === 'bundle' ? '套' : '件'
   const values = [
-    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '税务方式', '税率', '国家固定税费（USD）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（USD）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（CNY）`],
+    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '税费客户类型', '计费方式', '税费金额（USD）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（USD）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（CNY）`],
     ...rows.map(row => [
       row.country,
       row.quoteRegion || '全国统一',
       row.carrier,
       row.transport,
       row.eta,
-      row.taxIncluded ? '包税' : row.taxConfigured ? '不包税' : '不包税（税率待设置）',
-      row.taxRatePercent == null ? '' : `${row.taxRatePercent}%`,
-      row.countryFixedTaxUsd ? row.countryFixedTaxUsd.toFixed(2) : '',
+      row.taxIncluded ? '免税' : row.taxConfigured ? '不免税' : '不免税（税费待设置）',
+      `${row.taxCustomerType}类客户`,
+      row.taxFeeMode === 'fixed-order' ? '固定/单' : row.taxFeeMode === 'per-item' ? '按件' : '—',
+      row.taxFeeMode === 'fixed-order' ? row.countryFixedTaxUsd.toFixed(2) : row.taxFeeMode === 'per-item' ? row.taxPerItemFeeUsd.toFixed(2) : '',
       row.quote1 == null ? '' : row.quote1.toFixed(2),
       row.quote1 == null ? '' : (row.quote1 * exchange.value.usd).toFixed(2),
       row.quote2 == null ? '' : row.quote2.toFixed(2),
@@ -713,7 +709,7 @@ function save() {
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
   if (!p?.sku || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
-  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('存在不包税物流商尚未填写税率，请先到财务设置补齐'); return }
+  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('存在不免税物流商对应国家尚未设置客户税费，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const quoteOptions = selectedMatrixRows.map((row) => {
     const countryCode = quotationCountries(p).find(country => country.name === row.country)?.code
@@ -744,6 +740,9 @@ function save() {
       taxConfigured: row.taxConfigured,
       taxRatePercent: row.taxRatePercent,
       countryFixedTaxUsd: row.countryFixedTaxUsd,
+      taxCustomerType: row.taxCustomerType,
+      taxFeeMode: row.taxFeeMode,
+      taxPerItemFeeUsd: row.taxPerItemFeeUsd,
       taxLabel: row.taxLabel,
       tax1Usd: row.tax1Usd,
       tax2Usd: row.tax2Usd,
@@ -751,7 +750,7 @@ function save() {
       taxCustomUsd: row.taxCustomUsd,
     }
   })
-  localStorage.setItem('milano-quotation-draft', JSON.stringify({ quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value }))
+  localStorage.setItem('milano-quotation-draft', JSON.stringify({ quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, selectedTaxCustomerType: selectedTaxCustomerType.value, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value }))
   const productSummary = quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
@@ -768,7 +767,7 @@ function save() {
     defaultVolumeDivisor: quoteMode.value === 'single' && p.volumetricEnabled ? 8000 : undefined,
     logisticsAttribute: p.logisticsAttribute, country: p.country, carrier: p.channel,
     channel: logisticsRules.find(rule => rule.name === p.rule)?.relations.find(relation => relation.carrier === p.channel)?.channel || p.rule,
-    rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: usdPriceFromCny(finalSalePrice(p)), totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
+    rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, taxCustomerType: selectedTaxCustomerType.value, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: usdPriceFromCny(finalSalePrice(p)), totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
     matrixMode: quoteMatrixMode.value,
     quotationTemplateId: templateSnapshot?.id,
     quotationTemplateName: templateSnapshot?.name,
@@ -782,14 +781,13 @@ function toast(message: string) {
   notice.value = message
   window.setTimeout(() => { if (notice.value === message) notice.value = '' }, 2400)
 }
-if (initialPurchaseRecord?.status === '资料完整' && products.value[0].rule) calculateFreight(products.value[0], true)
 </script>
 
 <template>
   <div class="jerry-app">
     <header class="topbar">
       <RouterLink class="brand" to="/quotation"><span>M</span><div><strong>米莱诺报价</strong><small>MILANO PRICING ERP</small></div></RouterLink>
-      <nav><RouterLink class="active" to="/quotation">业务报价</RouterLink><RouterLink to="/quotation/products">采购资料</RouterLink><RouterLink to="/quotation/logistics">物流规则</RouterLink><RouterLink to="/quotation/members">财务设置</RouterLink><RouterLink to="/quotation/my-records">我的报价记录</RouterLink><RouterLink to="/quotation/records">公司报价记录</RouterLink></nav>
+      <nav><RouterLink class="active" to="/quotation">我的报价</RouterLink><RouterLink to="/quotation/products">采购</RouterLink><RouterLink to="/quotation/logistics">物流</RouterLink><RouterLink to="/quotation/members">财务</RouterLink><RouterLink to="/quotation/my-records">我的报价记录</RouterLink><RouterLink to="/quotation/records">公司报价记录</RouterLink></nav>
       <div class="top-actions"><button class="icon-btn" aria-label="通知">●</button><span class="avatar">{{ currentUserAvatar }}</span><div><b>{{ currentSalespersonName }}</b><small>{{ currentSalespersonAccount }}</small></div></div>
     </header>
 
@@ -802,9 +800,9 @@ if (initialPurchaseRecord?.status === '资料完整' && products.value[0].rule) 
         <QuotationCondition
           :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :product-category="productCategory" :product-categories="quotationProductCategories" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
-          :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
+          :coefficient="selectedGradeCoefficient()" :tax-customer-type="selectedTaxCustomerType" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode"
-          @update:sku-search="skuSearch=$event" @update:customer-name="customerName=$event" @update:product-category="productCategory=$event" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade"
+          @update:sku-search="skuSearch=$event" @update:customer-name="customerName=$event" @update:product-category="productCategory=$event" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade" @update:tax-customer-type="selectedTaxCustomerType=$event as TaxCustomerType"
           @query="queryProduct" @update:logistics-attribute="p.logisticsAttribute=$event;normalizeRule(p)"
         />
 
@@ -869,7 +867,7 @@ if (initialPurchaseRecord?.status === '资料完整' && products.value[0].rule) 
           :rows="savedQuoteRows" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
           :sku="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
-          :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
+          :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()" :tax-customer-type="selectedTaxCustomerType"
           :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
           :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
           :primary-cny-price="finalSalePrice(p)" :primary-usd-price="usdPriceFromCny(finalSalePrice(p))"

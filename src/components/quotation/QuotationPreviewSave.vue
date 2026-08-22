@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   productName: string
   sku: string
   customerGrade: string
+  taxCustomerType: 'A' | 'B'
   coefficient: number
   customQuantity: number
   unitLabel: string
@@ -103,6 +104,7 @@ function isPrimary(row: QuotationMatrixRow) { return row.country === props.prima
           <div><dt>SKU</dt><dd>{{ sku || '—' }}</dd></div>
           <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
           <div><dt>客户等级</dt><dd>{{ customerGrade }}级客户 × {{ coefficient.toFixed(2) }}</dd></div>
+          <div><dt>税费客户类型</dt><dd>{{ taxCustomerType === 'A' ? 'A类 · 固定/单' : 'B类 · 按件' }}</dd></div>
           <div><dt>自定义数量</dt><dd>{{ Math.max(1, customQuantity || 1) }}{{ unitLabel }}</dd></div>
         </dl>
       </section>

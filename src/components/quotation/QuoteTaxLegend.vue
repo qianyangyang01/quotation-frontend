@@ -1,5 +1,5 @@
 <template>
-  <div class="tax-legend" aria-label="税费说明"><span><b>含税</b>报价已包含税费</span><span><b>免税</b>不增加税费</span></div>
+  <div class="tax-legend" aria-label="税费说明"><span><b>A / B 税费</b>A类固定按单，B类按件累计</span><span><b>免税</b>不增加税费</span></div>
 </template>
 
 <style scoped>

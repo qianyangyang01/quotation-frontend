@@ -1,10 +1,13 @@
-import { logisticsChannels, logisticsCountries } from './logistics'
+import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
 
-export type LogisticsTaxMode = 'included' | 'not-included'
+export type TaxCustomerType = 'A' | 'B'
+export type LogisticsTaxMode = 'exempt' | 'taxable'
 
 export type FinanceCountryTaxSetting = {
   country: string
-  fixedFeeUsd: number
+  aFixedFeeUsd: number
+  bPerItemFeeUsd: number
+  selected: boolean
   enabled: boolean
   sortOrder: number
 }
@@ -13,13 +16,12 @@ export type FinanceProviderChannelTax = {
   key: string
   channel: string
   ruleName: string
-  ratePercent: number | null
 }
 
 export type FinanceProviderTaxSetting = {
   provider: string
   mode: LogisticsTaxMode
-  fixedRatePercent: number | null
+  selected: boolean
   channels: FinanceProviderChannelTax[]
 }
 
@@ -32,8 +34,12 @@ export type FinanceTaxSettings = {
 export type FinanceQuoteTaxResult = {
   included: boolean
   configured: boolean
-  ratePercent: number | null
+  ratePercent: null
   fixedFeeUsd: number
+  perItemFeeUsd: number
+  customerType: TaxCustomerType
+  quantity: number
+  feeMode: 'exempt' | 'fixed-order' | 'per-item' | 'missing'
   taxUsd: number
   totalUsd: number
   label: string
@@ -47,12 +53,7 @@ function normalizeProviderName(value: string) {
 }
 
 function defaultMode(provider: string): LogisticsTaxMode {
-  if (/燕文|顺丰|递四方|4PX/i.test(provider)) return 'not-included'
-  return 'included'
-}
-
-function defaultProviderRate(provider: string) {
-  return /顺丰|递四方|4PX/i.test(provider) ? 27.5 : null
+  return /燕文|顺丰|递四方|4PX/i.test(provider) ? 'taxable' : 'exempt'
 }
 
 function providerDefaults(): FinanceProviderTaxSetting[] {
@@ -62,29 +63,21 @@ function providerDefaults(): FinanceProviderTaxSetting[] {
     if (!provider || !item.channel) return
     const rows = groups.get(provider) || []
     const key = `${item.ruleId}::${provider}::${item.channelCode || item.channel}`
-    if (!rows.some(row => row.key === key)) rows.push({
-      key,
-      channel: item.channel,
-      ruleName: item.ruleName,
-      ratePercent: null,
-    })
+    if (!rows.some(row => row.key === key)) rows.push({ key, channel: item.channel, ruleName: item.ruleName })
     groups.set(provider, rows)
   })
-  return [...groups.entries()].map(([provider, channels]) => {
-    const mode = defaultMode(provider)
-    return {
-      provider,
-      mode,
-      fixedRatePercent: mode === 'not-included' ? defaultProviderRate(provider) : null,
-      channels: channels.sort((a, b) => a.channel.localeCompare(b.channel, 'zh-CN')),
-    }
-  }).sort((a, b) => a.provider.localeCompare(b.provider, 'zh-CN'))
+  return [...groups.entries()].map(([provider, channels]) => ({
+    provider,
+    mode: defaultMode(provider),
+    selected: legacyLogisticsProviderNames.includes(provider),
+    channels: channels.sort((a, b) => a.channel.localeCompare(b.channel, 'zh-CN')),
+  })).sort((a, b) => a.provider.localeCompare(b.provider, 'zh-CN'))
 }
 
 function countryDefaults(): FinanceCountryTaxSetting[] {
   return logisticsCountries
     .filter(item => item.name && item.name !== '全球')
-    .map((item, index) => ({ country: item.name, fixedFeeUsd: 0, enabled: false, sortOrder: (index + 1) * 10 }))
+    .map((item, index) => ({ country: item.name, aFixedFeeUsd: 0, bPerItemFeeUsd: 0, selected: false, enabled: false, sortOrder: (index + 1) * 10 }))
     .sort((a, b) => a.country.localeCompare(b.country, 'zh-CN'))
 }
 
@@ -93,51 +86,33 @@ function finiteNonNegative(value: unknown) {
   return Number.isFinite(number) && number >= 0 ? number : 0
 }
 
-function optionalNonNegative(value: unknown) {
-  if (value == null || value === '') return null
-  const number = Number(value)
-  return Number.isFinite(number) && number >= 0 ? number : null
-}
-
 function normalizeSettings(raw?: Partial<FinanceTaxSettings> | null): FinanceTaxSettings {
   const countryMap = new Map((raw?.countries || []).map(item => [item.country, item]))
   const providerMap = new Map((raw?.providers || []).map(item => [item.provider, item]))
   return {
     countries: countryDefaults().map(fallback => {
       const stored = countryMap.get(fallback.country)
+      const legacy = stored as (typeof stored & { fixedFeeUsd?: unknown })
+      const aFixedFeeUsd = finiteNonNegative(stored?.aFixedFeeUsd ?? legacy?.fixedFeeUsd)
+      const bPerItemFeeUsd = finiteNonNegative(stored?.bPerItemFeeUsd)
       return {
         country: fallback.country,
-        fixedFeeUsd: finiteNonNegative(stored?.fixedFeeUsd),
-        enabled: stored?.enabled === true,
+        aFixedFeeUsd,
+        bPerItemFeeUsd,
+        selected: typeof stored?.selected === 'boolean' ? stored.selected : Boolean(stored && (stored.enabled === true || aFixedFeeUsd > 0 || bPerItemFeeUsd > 0)),
+        enabled: stored?.enabled === true || aFixedFeeUsd > 0 || bPerItemFeeUsd > 0,
         sortOrder: Number.isFinite(Number(stored?.sortOrder)) ? Math.max(1, Number(stored?.sortOrder)) : fallback.sortOrder,
       }
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
     providers: providerDefaults().map(fallback => {
       const stored = providerMap.get(fallback.provider)
       const storedMode = String(stored?.mode || '')
-      const mode: LogisticsTaxMode = storedMode === 'included'
-        ? 'included'
-        : storedMode === 'not-included' || storedMode === 'fixed-rate' || storedMode === 'channel-rate'
-          ? 'not-included'
+      const mode: LogisticsTaxMode = storedMode === 'exempt' || storedMode === 'included'
+        ? 'exempt'
+        : storedMode === 'taxable' || storedMode === 'not-included' || storedMode === 'fixed-rate' || storedMode === 'channel-rate'
+          ? 'taxable'
           : fallback.mode
-      const channelMap = new Map((stored?.channels || []).map(item => [item.key, item]))
-      const legacyChannelRates = (stored?.channels || [])
-        .map(item => optionalNonNegative(item.ratePercent))
-        .filter((rate): rate is number => rate != null)
-      const sameLegacyChannelRate = legacyChannelRates.length > 0 && legacyChannelRates.every(rate => rate === legacyChannelRates[0])
-      const migratedRate = optionalNonNegative(stored?.fixedRatePercent)
-        ?? (sameLegacyChannelRate ? legacyChannelRates[0] : null)
-        ?? fallback.fixedRatePercent
-      return {
-        provider: fallback.provider,
-        mode,
-        fixedRatePercent: mode === 'not-included' ? migratedRate : null,
-        channels: fallback.channels.map(channel => {
-          const storedChannel = channelMap.get(channel.key)
-          const rate = storedChannel?.ratePercent
-          return { ...channel, ratePercent: rate == null ? null : finiteNonNegative(rate) }
-        }),
-      }
+      return { ...fallback, mode, selected: typeof stored?.selected === 'boolean' ? stored.selected : fallback.selected }
     }),
     updatedAt: String(raw?.updatedAt || '尚未保存'),
   }
@@ -149,7 +124,7 @@ export function loadFinanceTaxSettings(): FinanceTaxSettings {
     const stored = window.localStorage.getItem(STORAGE_KEY)
     if (stored) return normalizeSettings(JSON.parse(stored) as FinanceTaxSettings)
   } catch {
-    // Invalid local test data falls back to live logistics provider/channel defaults.
+    // Invalid local data falls back to logistics provider and country defaults.
   }
   return normalizeSettings()
 }
@@ -163,49 +138,46 @@ export function saveFinanceTaxSettings(settings: FinanceTaxSettings): FinanceTax
   return normalized
 }
 
-export function financeTaxProviderIsComplete(setting: FinanceProviderTaxSetting) {
-  if (setting.mode === 'included') return true
-  return setting.fixedRatePercent != null && setting.fixedRatePercent >= 0
-}
-
 export function calculateFinanceQuoteTax(
   settings: FinanceTaxSettings,
   country: string,
   provider: string,
   baseQuoteUsd: number,
+  customerType: TaxCustomerType = 'A',
+  quantity = 1,
 ): FinanceQuoteTaxResult {
   const normalizedBase = Number.isFinite(Number(baseQuoteUsd)) ? Math.max(0, Number(baseQuoteUsd)) : 0
-  const providerSetting = settings.providers.find(item => item.provider.trim() === provider.trim())
-  if (!providerSetting || providerSetting.mode === 'included') {
-    return { included: true, configured: true, ratePercent: null, fixedFeeUsd: 0, taxUsd: 0, totalUsd: normalizedBase, label: '包税' }
+  const normalizedQuantity = Math.max(1, Math.floor(Number(quantity) || 1))
+  const providerSetting = settings.providers.find(item => item.selected && item.provider.trim() === provider.trim())
+  if (!providerSetting) {
+    return { included: false, configured: false, ratePercent: null, fixedFeeUsd: 0, perItemFeeUsd: 0, customerType, quantity: normalizedQuantity, feeMode: 'missing', taxUsd: 0, totalUsd: normalizedBase, label: '物流商税务属性待设置' }
+  }
+  if (providerSetting.mode === 'exempt') {
+    return { included: true, configured: true, ratePercent: null, fixedFeeUsd: 0, perItemFeeUsd: 0, customerType, quantity: normalizedQuantity, feeMode: 'exempt', taxUsd: 0, totalUsd: normalizedBase, label: '免税' }
   }
 
-  const countrySetting = settings.countries.find(item => item.country === country)
-  const fixedFeeUsd = countrySetting?.enabled ? finiteNonNegative(countrySetting.fixedFeeUsd) : 0
-  const ratePercent = optionalNonNegative(providerSetting.fixedRatePercent)
-  if (ratePercent == null) {
-    return {
-      included: false,
-      configured: false,
-      ratePercent: null,
-      fixedFeeUsd,
-      taxUsd: 0,
-      totalUsd: normalizedBase,
-      label: fixedFeeUsd > 0 ? `不包税 · 税率待设置 · 固定税 $${fixedFeeUsd.toFixed(2)}` : '不包税 · 税率待设置',
-    }
+  const countrySetting = settings.countries.find(item => item.selected && item.country === country)
+  if (!countrySetting?.enabled) {
+    return { included: false, configured: false, ratePercent: null, fixedFeeUsd: 0, perItemFeeUsd: 0, customerType, quantity: normalizedQuantity, feeMode: 'missing', taxUsd: 0, totalUsd: normalizedBase, label: `${country || '当前国家'}客户税费待设置` }
   }
 
-  const taxUsd = Math.round((normalizedBase * ratePercent / 100 + fixedFeeUsd) * 100) / 100
-  const totalUsd = Math.round((normalizedBase + taxUsd) * 100) / 100
+  const fixedFeeUsd = finiteNonNegative(countrySetting.aFixedFeeUsd)
+  const perItemFeeUsd = finiteNonNegative(countrySetting.bPerItemFeeUsd)
+  const taxUsd = Number((customerType === 'A' ? fixedFeeUsd : perItemFeeUsd * normalizedQuantity).toFixed(2))
+  const totalUsd = Number((normalizedBase + taxUsd).toFixed(2))
   return {
     included: false,
     configured: true,
-    ratePercent,
+    ratePercent: null,
     fixedFeeUsd,
+    perItemFeeUsd,
+    customerType,
+    quantity: normalizedQuantity,
+    feeMode: customerType === 'A' ? 'fixed-order' : 'per-item',
     taxUsd,
     totalUsd,
-    label: fixedFeeUsd > 0
-      ? `不包税 · 税率 ${ratePercent}% · 固定税 $${fixedFeeUsd.toFixed(2)}`
-      : `不包税 · 税率 ${ratePercent}%`,
+    label: customerType === 'A'
+      ? `不免税 · A类固定 $${fixedFeeUsd.toFixed(2)}/单`
+      : `不免税 · B类 $${perItemFeeUsd.toFixed(2)}/件 × ${normalizedQuantity}`,
   }
 }
