@@ -1,4 +1,10 @@
+.git
+.github
+.idea
+.vscode
 node_modules
 dist
-.git
+backend
+deploy/.env
+outputs
 *.log

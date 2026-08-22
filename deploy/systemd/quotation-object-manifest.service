@@ -1,0 +1,8 @@
+[Unit]
+Description=Quotation object manifest backup
+After=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+ExecStart=/bin/bash /srv/ahmln-data/quotation-app/current/deploy/scripts/backup-object-manifest.sh

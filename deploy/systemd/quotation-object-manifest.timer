@@ -1,0 +1,10 @@
+[Unit]
+Description=Run quotation object manifest backup daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target
