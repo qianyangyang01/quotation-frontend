@@ -16,7 +16,7 @@ class FlywayPostgresIntegrationTest {
     @Test void appliesQuotationSchemaWithoutExternalDependencies() throws Exception {
         var flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load();
-        assertEquals(4, flyway.migrate().migrationsExecuted);
+        assertEquals(5, flyway.migrate().migrationsExecuted);
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name in ('app_user','purchase_product','quotation_record','audit_log')");
              var result = statement.executeQuery()) {
@@ -32,12 +32,13 @@ class FlywayPostgresIntegrationTest {
                        and (table_name, column_name) in (
                            ('asset_object', 'sha256'),
                            ('import_part', 'sha256'),
-                           ('migration_manifest_entry', 'expected_sha256')
+                           ('migration_manifest_entry', 'expected_sha256'),
+                           ('idempotency_record', 'request_hash')
                        )
                      """);
              var result = statement.executeQuery()) {
             result.next();
-            assertEquals(3, result.getInt(1));
+            assertEquals(4, result.getInt(1));
         }
     }
 }
