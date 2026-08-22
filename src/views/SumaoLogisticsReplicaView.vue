@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import AppTopbar from '@/components/AppTopbar.vue'
 import { logisticsRules as sourceRules, type LogisticsPriceRow, type LogisticsRule } from '@/data/logistics'
 import { parseLogisticsWorkbook, type LogisticsDiffField, type LogisticsDiffRow, type LogisticsImportPreview } from '@/data/logisticsWorkbook'
 import {
@@ -361,11 +362,7 @@ function areaAction(message: string) { notify(`${message}已在当前页面状�
 
 <template>
   <div class="erp">
-    <header class="milano-topbar">
-      <RouterLink class="milano-brand" to="/quotation"><span>M</span><div><strong>米莱诺报价</strong><small>MILANO PRICING ERP</small></div></RouterLink>
-      <nav><RouterLink to="/quotation">我的报价</RouterLink><RouterLink to="/quotation/products">采购</RouterLink><RouterLink class="active" to="/quotation/logistics">物流</RouterLink><RouterLink to="/quotation/members">财务</RouterLink><RouterLink to="/quotation/my-records">我的报价记录</RouterLink><RouterLink to="/quotation/records">公司报价记录</RouterLink></nav>
-      <div class="milano-user"><span>AD</span><div><b>管理员</b><small>报价中心</small></div></div>
-    </header>
+    <AppTopbar />
     <section class="workspace">
       <template v-if="view === 'list'">
         <div class="milano-heading"><div><p>LOGISTICS CONFIGURATION</p><h1>物流规则</h1><span>维护物流渠道、国家区域、重量限制与分段运费，供米莱诺报价计算直接调用。</span></div></div>

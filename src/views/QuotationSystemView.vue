@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { loadQuotationUser } from '@/utils/quotationSession'
+import AppTopbar from '@/components/AppTopbar.vue'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
 import QuotationCondition from '@/components/quotation/QuotationCondition.vue'
 import ProductInfoCard from '@/components/quotation/ProductInfoCard.vue'
@@ -56,7 +57,6 @@ const currentSalespersonAccount = computed(() => quotationUser.account)
 const selectedSalesperson = computed(() => currentSalespersonAccount.value === '—'
   ? currentSalespersonName.value
   : `${currentSalespersonName.value}（${currentSalespersonAccount.value}）`)
-const currentUserAvatar = computed(() => currentSalespersonName.value.slice(0, 2).toUpperCase())
 const customerGradeSettings = loadCustomerGradeSettings()
 const selectedCustomerGrade = ref<CustomerGrade>('S')
 const selectedTaxCustomerType = ref<TaxCustomerType>('A')
@@ -785,11 +785,7 @@ function toast(message: string) {
 
 <template>
   <div class="jerry-app">
-    <header class="topbar">
-      <RouterLink class="brand" to="/quotation"><span>M</span><div><strong>米莱诺报价</strong><small>MILANO PRICING ERP</small></div></RouterLink>
-      <nav><RouterLink class="active" to="/quotation">我的报价</RouterLink><RouterLink to="/quotation/products">采购</RouterLink><RouterLink to="/quotation/logistics">物流</RouterLink><RouterLink to="/quotation/members">财务</RouterLink><RouterLink to="/quotation/my-records">我的报价记录</RouterLink><RouterLink to="/quotation/records">公司报价记录</RouterLink></nav>
-      <div class="top-actions"><button class="icon-btn" aria-label="通知">●</button><span class="avatar">{{ currentUserAvatar }}</span><div><b>{{ currentSalespersonName }}</b><small>{{ currentSalespersonAccount }}</small></div></div>
-    </header>
+    <AppTopbar />
 
     <main class="quotation-page">
       <QuotationHeader :salesperson="selectedSalesperson" :rate="exchange.usd" :status="products[0]?.status || '待查询'" :mode-label="quoteMode === 'bundle' ? '组合 SKU 报价' : '单品 SKU 报价'" @show-rule="showRule=true" />

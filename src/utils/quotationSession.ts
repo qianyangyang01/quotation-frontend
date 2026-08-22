@@ -1,3 +1,5 @@
+import { currentAuthUser } from '@/data/authStore'
+
 export interface QuotationUser {
   name: string
   account: string
@@ -6,6 +8,7 @@ export interface QuotationUser {
 const QUOTATION_USER_KEY = 'milano.quotation.user.v1'
 
 export function loadQuotationUser(): QuotationUser {
+  if (currentAuthUser.value) return { name: currentAuthUser.value.name, account: currentAuthUser.value.account }
   try {
     const saved = JSON.parse(localStorage.getItem(QUOTATION_USER_KEY) || 'null') as Partial<QuotationUser> | null
     // 测试环境初始业务员改为钱洋洋；旧版默认占位名自动迁移，真实登录账号仍原样保留。

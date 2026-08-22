@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AppTopbar from '@/components/AppTopbar.vue'
 import FilterPanel from '@/components/finance/FilterPanel.vue'
 import LogisticsCard, { type ProviderGroup } from '@/components/finance/LogisticsCard.vue'
 import PurchaseDataWorkspace from '@/components/purchase/PurchaseDataWorkspace.vue'
@@ -758,11 +759,7 @@ function saveEditor() {
 
 <template>
   <div class="module-app">
-    <header class="topbar">
-      <RouterLink class="brand" to="/quotation"><span>M</span><div><strong>米莱诺报价</strong><small>MILANO PRICING ERP</small></div></RouterLink>
-      <nav><RouterLink to="/quotation">我的报价</RouterLink><RouterLink :class="{ active: mode === 'products' }" to="/quotation/products">采购</RouterLink><RouterLink :class="{ active: mode === 'logistics' }" to="/quotation/logistics">物流</RouterLink><RouterLink :class="{ active: mode === 'members' }" to="/quotation/members">财务</RouterLink><RouterLink to="/quotation/my-records">我的报价记录</RouterLink><RouterLink to="/quotation/records">公司报价记录</RouterLink></nav>
-      <div class="user"><span>AD</span><div><b>管理员</b><small>报价中心</small></div></div>
-    </header>
+    <AppTopbar />
 
     <main v-if="showPurchaseWorkspace" class="page"><PurchaseDataWorkspace /></main>
     <main v-else class="page">
