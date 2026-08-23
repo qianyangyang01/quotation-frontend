@@ -9,15 +9,15 @@ services:
     image: postgres:16.4-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: quotation_prod
-      POSTGRES_USER: quotation_app
+      POSTGRES_DB: ${QUOTATION_DB_NAME:-quotation_prod}
+      POSTGRES_USER: ${QUOTATION_DB_USER:-quotation_app}
       POSTGRES_PASSWORD: ${QUOTATION_POSTGRES_PASSWORD:?required}
       TZ: UTC
     volumes:
       - quotation-postgres-data:/var/lib/postgresql/data
     networks: [quotation-internal]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quotation_app -d quotation_prod"]
+      test: ["CMD-SHELL", "pg_isready -U ${QUOTATION_DB_USER:-quotation_app} -d ${QUOTATION_DB_NAME:-quotation_prod}"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -65,21 +65,21 @@ services:
       quotation-redis: { condition: service_healthy }
       quotation-minio: { condition: service_healthy }
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://quotation-postgres:5432/quotation_prod
-      SPRING_DATASOURCE_USERNAME: quotation_app
+      SPRING_DATASOURCE_URL: jdbc:postgresql://quotation-postgres:5432/${QUOTATION_DB_NAME:-quotation_prod}
+      SPRING_DATASOURCE_USERNAME: ${QUOTATION_DB_USER:-quotation_app}
       SPRING_DATASOURCE_PASSWORD: ${QUOTATION_POSTGRES_PASSWORD}
       SPRING_DATA_REDIS_HOST: quotation-redis
       SPRING_DATA_REDIS_PASSWORD: ${QUOTATION_REDIS_PASSWORD}
       APP_STORAGE_ENDPOINT: http://quotation-minio:9000
       APP_STORAGE_ACCESS_KEY: ${QUOTATION_MINIO_ACCESS_KEY}
       APP_STORAGE_SECRET_KEY: ${QUOTATION_MINIO_SECRET_KEY}
-      APP_STORAGE_BUCKET: quotation-assets
+      APP_STORAGE_BUCKET: ${QUOTATION_STORAGE_BUCKET:-quotation-assets}
       APP_BOOTSTRAP_ADMIN_ACCOUNT: ${QUOTATION_BOOTSTRAP_ADMIN_ACCOUNT}
       APP_BOOTSTRAP_ADMIN_NAME: ${QUOTATION_BOOTSTRAP_ADMIN_NAME}
       APP_BOOTSTRAP_ADMIN_PASSWORD: ${QUOTATION_BOOTSTRAP_ADMIN_PASSWORD}
       APP_PUBLIC_BASE_URL: ${QUOTATION_PUBLIC_BASE_URL}
       APP_CORS_ALLOWED_ORIGIN: ${QUOTATION_PUBLIC_BASE_URL}
-      APP_COOKIE_SECURE: "true"
+      APP_COOKIE_SECURE: ${QUOTATION_COOKIE_SECURE:-true}
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -Duser.timezone=UTC
     expose: ["8088"]
     networks: [quotation-internal, ahmln-edge]
@@ -108,13 +108,13 @@ services:
 
 networks:
   quotation-internal:
-    name: quotation-internal
+    name: ${QUOTATION_INTERNAL_NETWORK:-quotation-internal}
     internal: true
   ahmln-edge:
-    name: ahmln-edge
+    name: ${QUOTATION_EDGE_NETWORK:-ahmln-edge}
     external: true
 
 volumes:
-  quotation-postgres-data: { name: quotation-postgres-data }
-  quotation-redis-data: { name: quotation-redis-data }
-  quotation-minio-data: { name: quotation-minio-data }
+  quotation-postgres-data: { name: "${QUOTATION_POSTGRES_VOLUME:-quotation-postgres-data}" }
+  quotation-redis-data: { name: "${QUOTATION_REDIS_VOLUME:-quotation-redis-data}" }
+  quotation-minio-data: { name: "${QUOTATION_MINIO_VOLUME:-quotation-minio-data}" }

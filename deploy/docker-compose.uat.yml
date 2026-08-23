@@ -1,0 +1,18 @@
+services:
+  quotation-postgres:
+    mem_limit: 512m
+    cpus: 0.75
+  quotation-redis:
+    mem_limit: 160m
+    cpus: 0.25
+  quotation-minio:
+    mem_limit: 384m
+    cpus: 0.50
+  quotation-backend:
+    mem_limit: 1024m
+    cpus: 1.25
+  quotation-frontend:
+    mem_limit: 160m
+    cpus: 0.25
+    ports:
+      - "127.0.0.1:${QUOTATION_UAT_HTTP_PORT:-18088}:80"

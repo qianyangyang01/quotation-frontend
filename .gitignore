@@ -1,7 +1,9 @@
 node_modules/
 dist/
 .codex-runtime/
+.codex-remote-scripts/
 outputs/
+tmp/
 
 *.log
 .env

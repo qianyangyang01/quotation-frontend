@@ -6,7 +6,8 @@ COPY src ./src
 RUN mvn -B -DskipTests package
 
 FROM eclipse-temurin:21-jre-alpine
-RUN addgroup -S quotation && adduser -S quotation -G quotation
+RUN apk add --no-cache font-wqy-zenhei \
+    && addgroup -S quotation && adduser -S quotation -G quotation
 WORKDIR /app
 COPY --from=build /workspace/target/quotation-backend-0.1.0.jar app.jar
 USER quotation
