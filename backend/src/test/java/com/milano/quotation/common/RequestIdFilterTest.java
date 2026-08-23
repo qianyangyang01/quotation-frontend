@@ -6,6 +6,14 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RequestIdFilterTest {
+    @Test void apiResponseUsesRequestIdAndSafeFallback() {
+        org.slf4j.MDC.clear();
+        assertEquals("unknown", ApiResponse.ok("value").requestId());
+        org.slf4j.MDC.put("requestId", "request-42");
+        try { assertEquals("request-42", ApiResponse.ok("value").requestId()); }
+        finally { org.slf4j.MDC.clear(); }
+    }
+
     @Test void preservesSafeRequestIdAndRejectsUnsafeInput() throws Exception {
         var filter = new RequestIdFilter();
         var safeRequest = new MockHttpServletRequest();

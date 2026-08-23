@@ -26,6 +26,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21, cache: maven }
+      - name: Install Chinese PDF font
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-wqy-zenhei
       - run: bash deploy/scripts/verify-isolation.sh
       - working-directory: backend
         run: mvn -B verify
+      - name: Reject skipped Docker integration tests
+        run: |
+          if grep -R "disabledWithoutDocker" backend/target/surefire-reports/TEST-*.xml; then
+            echo "PostgreSQL/Testcontainers tests were skipped; the quality gate is not valid." >&2
+            exit 1
+          fi
