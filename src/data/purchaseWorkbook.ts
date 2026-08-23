@@ -9,10 +9,11 @@ export const PURCHASE_WORKBOOK_HEADERS = [
   '是否有货*', '备注', '工厂信息', '货源链接1', '货源链接2', '货源链接3', '相似货源', '审核备注',
 ] as const
 
-export type PurchaseImportIssue = { row: number; field: string; message: string; level: 'warning' | 'skipped' }
+export type PurchaseImportIssue = { row: number; field: string; message: string; level: 'error' | 'warning' | 'skipped' }
 export type PurchaseImportPreview = {
   fileName: string; records: PurchaseProductRecord[]; issues: PurchaseImportIssue[]
   totalRows: number; added: number; updated: number; generatedSku: number; productImages: number; physicalImages: number; skipped: number
+  errorCount: number; warningCount: number; canConfirm: boolean
 }
 
 const RELATIONSHIP_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -254,6 +255,8 @@ export async function parsePurchaseWorkbook(file: File, existing: PurchaseProduc
     record.importWarnings.push(...issues.slice(issueStart).map(issue => issue.message))
     records.push(record)
   }
+  const errorCount = issues.filter(issue => issue.level === 'error' || issue.level === 'skipped').length
+  const warningCount = issues.filter(issue => issue.level === 'warning').length
   return {
     fileName: file.name, records, issues, totalRows: records.length + skipped,
     added: records.filter(item => !existingSkus.has(item.sku)).length,
@@ -261,6 +264,6 @@ export async function parsePurchaseWorkbook(file: File, existing: PurchaseProduc
     generatedSku: records.filter(item => item.skuOrigin === 'system').length,
     productImages: records.filter(item => item.productImage).length,
     physicalImages: records.filter(item => item.physicalImage).length,
-    skipped,
+    skipped, errorCount, warningCount, canConfirm: errorCount === 0,
   }
 }

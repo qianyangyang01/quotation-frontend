@@ -1,11 +1,11 @@
-import { logisticsRules as runtimeRules, replaceLogisticsRules, type LogisticsPriceRow, type LogisticsRule } from './logistics'
+import { replaceLogisticsRules, type LogisticsPriceRow, type LogisticsRule } from './logistics'
 import type { LogisticsDiffRow, LogisticsDiffSummary, LogisticsImportIssue, LogisticsImportPreview, LogisticsRateRow } from './logisticsWorkbook'
 import { api, idempotencyKey } from '@/services/http'
 
 export type LogisticsProviderRecord = { id: string; name: string; code: string; enabled: boolean; createdAt: string; updatedAt: string }
 export type LogisticsChannelRecord = {
   id: string; ruleId: number; providerId: string; name: string; code: string; type: string; logisticsAttribute: string
-  enabled: boolean; currentVersionId: string; createdAt: string; updatedAt: string
+  enabled: boolean; currentVersionId: string; createdAt: string; updatedAt: string; _version: number
 }
 export type LogisticsVersionStatus = 'draft' | 'published' | 'superseded' | 'rejected'
 export type LogisticsChannelVersionRecord = {
@@ -19,15 +19,20 @@ export const LOGISTICS_PUBLISHED_EVENT = 'milano:logistics-published'
 
 type RemoteWorkspace = Omit<LogisticsWorkspaceState, 'audits'> & { audits?: LogisticsAuditRecord[] }
 
-function toPriceRow(row: LogisticsRateRow): LogisticsPriceRow {
+function numberOrZero(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+export function normalizeLogisticsPriceRow(row: Partial<LogisticsRateRow>): LogisticsPriceRow {
   return {
-    areaName: row.areaName, countryCode: row.countryCode, etaMinDays: row.etaMinDays, etaMaxDays: row.etaMaxDays,
-    prohibitedMarks: row.prohibitedMarks, allowedMarks: row.allowedMarks, maxPerimeterCm: row.maxPerimeterCm, maxSideCm: row.maxSideCm,
-    volumeDivisor: row.volumeDivisor, weightFromKg: row.weightFromKg, weightToKg: row.weightToKg, startWeightKg: row.startWeightKg,
-    pricePerKg: row.pricePerKg, minChargeWeightKg: row.minChargeWeightKg, firstWeightKg: row.firstWeightKg, firstWeightPrice: row.firstWeightPrice,
-    nextWeightKg: row.nextWeightKg, nextWeightPrice: row.nextWeightPrice, intervalPrice: row.intervalPrice, registrationFee: row.registrationFee,
-    surcharge: row.surcharge, fuelSurchargeRate: row.fuelSurchargeRate, prohibitGeneralCargo: row.prohibitGeneralCargo, volumetric: row.volumetric,
-    phoneRequired: row.phoneRequired, zoneName: row.zoneName, zoneExclude: row.zoneExclude,
+    areaName: String(row.areaName || ''), countryCode: String(row.countryCode || ''), etaMinDays: numberOrZero(row.etaMinDays), etaMaxDays: numberOrZero(row.etaMaxDays),
+    prohibitedMarks: String(row.prohibitedMarks || ''), allowedMarks: String(row.allowedMarks || ''), maxPerimeterCm: numberOrZero(row.maxPerimeterCm), maxSideCm: numberOrZero(row.maxSideCm),
+    volumeDivisor: numberOrZero(row.volumeDivisor), weightFromKg: numberOrZero(row.weightFromKg), weightToKg: numberOrZero(row.weightToKg), startWeightKg: numberOrZero(row.startWeightKg),
+    pricePerKg: numberOrZero(row.pricePerKg), minChargeWeightKg: numberOrZero(row.minChargeWeightKg), firstWeightKg: numberOrZero(row.firstWeightKg), firstWeightPrice: numberOrZero(row.firstWeightPrice),
+    nextWeightKg: numberOrZero(row.nextWeightKg), nextWeightPrice: numberOrZero(row.nextWeightPrice), intervalPrice: numberOrZero(row.intervalPrice), registrationFee: numberOrZero(row.registrationFee),
+    surcharge: numberOrZero(row.surcharge), fuelSurchargeRate: numberOrZero(row.fuelSurchargeRate), prohibitGeneralCargo: row.prohibitGeneralCargo === true, volumetric: row.volumetric === true,
+    phoneRequired: row.phoneRequired === true, zoneName: String(row.zoneName || ''), zoneExclude: row.zoneExclude === true,
   }
 }
 
@@ -42,22 +47,39 @@ export async function loadLogisticsWorkspace(): Promise<LogisticsWorkspaceState>
 }
 
 export async function addLogisticsProvider(name: string, code: string) {
-  return api.post<LogisticsProviderRecord>('/logistics/providers', { name: name.trim(), code: code.trim().toUpperCase(), enabled: true })
+  return api.post<LogisticsProviderRecord>('/logistics/providers', { name: name.trim(), code: code.trim().toUpperCase(), enabled: true }, idempotencyKey('logistics-provider'))
 }
 
 export async function addLogisticsChannel(input: { providerId: string; name: string; code: string; type: string; logisticsAttribute: string }) {
-  return api.post<LogisticsChannelRecord>('/logistics/channels', input)
+  return api.post<LogisticsChannelRecord>('/logistics/channels', input, idempotencyKey('logistics-channel'))
+}
+
+export async function updateLogisticsChannel(channel: LogisticsChannelRecord, input: { name: string; code: string; type: string; logisticsAttribute: string; enabled: boolean }) {
+  return api.put<LogisticsChannelRecord>(`/logistics/channels/${channel.id}`, input, { 'If-Match': String(channel._version) })
+}
+
+export async function setLogisticsChannelStatus(channel: LogisticsChannelRecord, enabled: boolean) {
+  return api.patch<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/status`, { enabled }, { 'If-Match': String(channel._version) })
+}
+
+export async function cloneLogisticsChannel(channel: LogisticsChannelRecord, name: string, code: string) {
+  return api.post<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/clone`, { name, code }, idempotencyKey('logistics-clone'))
+}
+
+export async function deleteLogisticsChannel(channelId: string) { return api.delete<void>(`/logistics/channels/${channelId}`) }
+
+export async function saveLogisticsManualDraft(channelId: string, rows: LogisticsPriceRow[], note: string) {
+  return api.put<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/manual-draft`, { fileName: '手工维护区域规则', rows, note }, { 'Idempotency-Key': idempotencyKey('logistics-manual-draft') })
 }
 
 export async function createLogisticsDraft(channelId: string, preview: LogisticsImportPreview, file: File, actor = '物流负责人') {
-  return api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/versions`, {
-    fileName: file.name, sourceHash: preview.sourceHash, rows: preview.rows, issues: preview.issues,
-    diffRows: preview.diffRows, summary: preview.summary, importedBy: actor, publishedBy: '', auditNote: '',
-  }, idempotencyKey('logistics-import'))
+  void preview; void actor
+  const form = new FormData(); form.append('file', file)
+  return api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/imports`, form, idempotencyKey('logistics-import'))
 }
 
-export async function publishLogisticsVersion(channelId: string, versionId: string, note: string) {
-  await api.post(`/logistics/channels/${channelId}/versions/${versionId}/publish`, { note }, idempotencyKey('logistics-publish'))
+export async function publishLogisticsVersion(channelId: string, versionId: string, note: string, removalConfirmed = false) {
+  await api.post(`/logistics/channels/${channelId}/versions/${versionId}/publish`, { note, removalConfirmed }, idempotencyKey('logistics-publish'))
   await refreshPublishedLogisticsRules(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT))
 }
 
@@ -73,13 +95,16 @@ export async function refreshPublishedLogisticsRules() {
   const rules: LogisticsRule[] = state.channels.filter(channel => channel.enabled && channel.currentVersionId).flatMap(channel => {
     const provider = providers.get(channel.providerId); const version = versions.get(channel.currentVersionId)
     if (!provider?.enabled || !version || version.status !== 'published') return []
-    const prices = version.rows.map(toPriceRow)
+    const prices = version.rows.map(normalizeLogisticsPriceRow)
     return [{ id: channel.ruleId, name: channel.name, englishName: channel.code.toLowerCase(), type: channel.type, currency: 'CNY', published: '发布', status: '启用', dates: `${channel.createdAt}|${channel.updatedAt}`, users: `${version.importedBy}|${version.publishedBy}`, relations: [{ carrier: provider.name, channel: channel.name, channelCode: channel.code, discounts: '-\n-' }], phoneRequired: prices.some(row => row.phoneRequired), areaCount: new Set(prices.map(row => row.countryCode || row.areaName)).size, priceRowCount: prices.length, prices }]
   })
-  if (rules.length) replaceLogisticsRules(rules)
-  return rules.length ? rules : runtimeRules
+  replaceLogisticsRules(rules)
+  return rules
 }
 
 export async function initializeLogisticsRepository() {
-  try { await refreshPublishedLogisticsRules() } catch (error) { console.warn('报价物流服务初始化失败，暂时保留内置只读规则', error) }
+  try { await refreshPublishedLogisticsRules() } catch (error) {
+    replaceLogisticsRules([])
+    console.warn('报价物流服务初始化失败，已停用本地规则并等待正式发布版本', error)
+  }
 }

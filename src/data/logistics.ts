@@ -74,8 +74,8 @@ function priceMatchesCountryAndRegion(price: LogisticsPriceRow, country: string,
   return true
 }
 
-function splitMarks(value: string) {
-  return value.split(/[,，、;；|]/).map(item => item.trim()).filter(Boolean)
+function splitMarks(value: unknown) {
+  return String(value || '').split(/[,，、;；|]/).map(item => item.trim()).filter(Boolean)
 }
 function normalizeShippingMarks(marks: string[]) {
   const normalized = marks.flatMap(mark => mark === '化妆品' ? ['非液体化妆品'] : [mark]).filter(Boolean)

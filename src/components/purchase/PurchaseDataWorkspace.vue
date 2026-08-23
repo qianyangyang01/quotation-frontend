@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { deletePurchaseProduct, loadPurchaseProducts, normalizePurchaseRecord, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { deletePurchaseProduct, loadPurchaseProduct, loadPurchaseProducts, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { confirmPurchaseImport, previewPurchaseWorkbook, type ServerPurchaseImportPreview } from '@/services/purchaseImports'
 import ImageMigrationPanel from './ImageMigrationPanel.vue'
 
@@ -13,6 +13,7 @@ const importPreview = ref<ServerPurchaseImportPreview | null>(null)
 const lastImport = ref<ServerPurchaseImportPreview | null>(null)
 const parsing = ref(false)
 const savingImport = ref(false)
+const importMode = ref<'formal' | 'pending_template'>('formal')
 const detail = ref<PurchaseProductRecord | null>(null)
 const editor = ref<PurchaseProductRecord | null>(null)
 const editingOriginalSku = ref('')
@@ -56,10 +57,10 @@ async function chooseWorkbook(event: Event) {
 }
 
 async function confirmImport() {
-  if (!importPreview.value) return
+  if (!importPreview.value || !importPreview.value.canConfirm) return
   savingImport.value = true
   try {
-    await confirmPurchaseImport(importPreview.value.jobId)
+    await confirmPurchaseImport(importPreview.value.jobId, importMode.value)
     lastImport.value = importPreview.value
     importPreview.value = null
     await reload()
@@ -69,7 +70,7 @@ async function confirmImport() {
 }
 
 function emptyRecord() {
-  return normalizePurchaseRecord({ sourceRow: Date.now(), sku: '', skuOrigin: 'manual', stockStatus: '待确认', quotationDate: new Date().toISOString().slice(0, 10), importWarnings: [] })
+  return normalizePurchaseRecord({ sourceRow: Date.now(), sku: '', skuOrigin: 'manual', catalogState: 'ready', stockStatus: '待确认', quotationDate: new Date().toISOString().slice(0, 10), importWarnings: [] })
 }
 function openEditor(record?: PurchaseProductRecord) {
   editingOriginalSku.value = record?.sku || ''
@@ -82,6 +83,8 @@ async function saveEditor() {
   if (!sku) { toast('请填写 SKU'); return }
   if (records.value.some(item => item.sku === sku && item.sku !== editingOriginalSku.value)) { toast(`SKU ${sku} 已存在`); return }
   const wasGenerated = editor.value.skuOrigin === 'system'
+  const pendingTemplate = editor.value.catalogState === 'pending_template' && Boolean(editingOriginalSku.value)
+  if (pendingTemplate && sku !== editingOriginalSku.value) { toast('模板SKU转正式请使用“确认转正式”按钮'); return }
   const record = normalizePurchaseRecord({ ...editor.value, sku, skuOrigin: wasGenerated && sku.startsWith('AUTO-') ? 'system' : 'manual' })
   try {
     if (editingOriginalSku.value && editingOriginalSku.value !== sku) await deletePurchaseProduct(editingOriginalSku.value)
@@ -90,6 +93,21 @@ async function saveEditor() {
     await reload()
     toast(`${sku} 已保存${record.skuOrigin === 'system' ? '，请尽快修改系统生成 SKU' : ''}`)
   } catch (error) { toast(error instanceof Error ? error.message : '采购资料保存失败') }
+}
+
+async function promoteEditor() {
+  if (!editor.value || editor.value.catalogState !== 'pending_template' || !editingOriginalSku.value) return
+  const targetSku = editor.value.sku.trim().toUpperCase().replace(/\s+/g, '')
+  if (!targetSku || /^(TESTP|TEST|DEMO|MOCK)/i.test(targetSku) || targetSku.startsWith('AUTO-')) { toast('请先把SKU修改为非 TEST/DEMO/AUTO 的真实业务SKU'); return }
+  try {
+    const pending = normalizePurchaseRecord({ ...editor.value, sku: editingOriginalSku.value, catalogState: 'pending_template' })
+    await upsertPurchaseProducts([pending])
+    const refreshed = await loadPurchaseProduct(editingOriginalSku.value)
+    await promotePurchaseProduct(editingOriginalSku.value, targetSku, refreshed._version ?? -1)
+    editor.value = null
+    await reload()
+    toast(`${targetSku} 已确认转为正式商品`)
+  } catch (error) { toast(error instanceof Error ? error.message : '模板商品转正式失败') }
 }
 
 function handleImage(event: Event, field: 'productImage' | 'physicalImage') {
@@ -166,8 +184,9 @@ const detailFields = computed(() => detail.value ? [
   <div v-if="importPreview" class="mask" @click.self="importPreview=null"><section class="modal import-modal">
     <button class="close" @click="importPreview=null">×</button><small>EXCEL IMPORT PREVIEW</small><h2>采购数据导入预览</h2><p>{{ importPreview.fileName }}</p>
     <div class="import-stats"><span><b>{{ importPreview.totalRows }}</b>读取行</span><span><b>{{ importPreview.added }}</b>新增</span><span><b>{{ importPreview.updated }}</b>覆盖</span><span><b>{{ importPreview.generatedSku }}</b>临时SKU</span><span><b>{{ importPreview.productImages }}</b>产品图</span><span><b>{{ importPreview.physicalImages }}</b>实物图</span></div>
-    <div class="issues"><b>导入提示（{{ importPreview.issues.length }}）</b><p v-if="!importPreview.issues.length">模板检查通过，没有发现异常。</p><article v-for="(issue,index) in importPreview.issues" :key="`${issue.row}-${index}`"><em>第 {{ issue.row }} 行 · {{ issue.field }}</em><span>{{ issue.message }}</span></article></div>
-    <footer><button @click="importPreview=null">取消</button><button class="primary" :disabled="savingImport || !importPreview.records.length" @click="confirmImport">{{ savingImport ? '正在导入…' : `确认导入 ${importPreview.records.length} 条` }}</button></footer>
+    <label class="import-mode">导入用途<select v-model="importMode"><option value="formal">正式采购数据</option><option value="pending_template">模板待补全目录（不可报价）</option></select><small v-if="importMode==='pending_template'">保留模板参考值，但所有SKU将被服务端锁定为不可报价。</small></label>
+    <div class="issues"><b>导入提示（阻断 {{ importPreview.errorCount }} · 警告 {{ importPreview.warningCount }}）</b><p v-if="!importPreview.issues.length">模板检查通过，没有发现异常。</p><p v-else-if="!importPreview.canConfirm" class="blocking">存在阻断错误，当前文件不能确认导入。请修正 Excel 后重新上传。</p><article v-for="(issue,index) in importPreview.issues" :key="`${issue.row}-${index}`" :class="issue.level"><em>第 {{ issue.row }} 行 · {{ issue.field }}</em><span>{{ issue.message }}</span></article></div>
+    <footer><button @click="importPreview=null">取消</button><button class="primary" :disabled="savingImport || !importPreview.records.length || !importPreview.canConfirm" @click="confirmImport">{{ savingImport ? '正在导入…' : importPreview.canConfirm ? `确认导入 ${importPreview.records.length} 条` : '存在阻断错误，无法导入' }}</button></footer>
   </section></div>
 
   <div v-if="detail" class="mask" @click.self="detail=null"><section class="modal detail-modal">
@@ -180,6 +199,7 @@ const detailFields = computed(() => detail.value ? [
   <div v-if="editor" class="mask" @click.self="editor=null"><section class="modal editor-modal">
     <button class="close" @click="editor=null">×</button><small>PURCHASE DATA EDITOR</small><h2>{{ editingOriginalSku ? '编辑采购资料' : '新增采购资料' }}</h2><p>字段顺序与标准 Excel 模板一致；空字段保存后显示“暂无数据”。</p>
     <div v-if="editor.skuOrigin==='system'" class="generated-warning">系统生成 SKU 必须修改成真实 SKU 后，才可以参与报价。</div>
+    <div v-else-if="editor.catalogState==='pending_template'" class="generated-warning">当前是模板待补全目录。保存不会解除锁定；改成真实业务SKU并点击“确认转正式”后才可参与报价。</div>
     <div class="form-grid">
       <label>1. SKU*<input v-model="editor.sku" :class="{ alert:editor.skuOrigin==='system' }"></label><label>2. 类别*<input v-model="editor.category"></label>
       <label class="wide">3. 产品图片（嵌入本格）<div class="upload"><img v-if="editor.productImage" :src="editor.productImage"><input type="file" accept="image/*" @change="handleImage($event,'productImage')"><button v-if="editor.productImage" @click.prevent="editor.productImage=''">移除</button></div></label>
@@ -198,7 +218,7 @@ const detailFields = computed(() => detail.value ? [
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>
     </div>
-    <footer><button @click="editor=null">取消</button><button class="primary" @click="saveEditor">保存资料</button></footer>
+    <footer><button @click="editor=null">取消</button><button @click="saveEditor">保存资料</button><button v-if="editor.catalogState==='pending_template'" class="primary" @click="promoteEditor">确认转正式</button></footer>
   </section></div>
 
   <div v-if="previewImage" class="image-preview" @click.self="previewImage=null"><button @click="previewImage=null">×</button><figure><img :src="previewImage.src"><figcaption>{{ previewImage.title }}</figcaption></figure></div>
@@ -209,4 +229,6 @@ const detailFields = computed(() => detail.value ? [
 <style scoped>
 .purchase-heading{display:flex;align-items:end;justify-content:space-between;margin-bottom:22px}.purchase-heading p,.modal>small{margin:0 0 7px;color:#d87600;font-size:10px;font-weight:900;letter-spacing:.18em}.purchase-heading h1{margin:0 0 8px;font-size:29px}.purchase-heading span,.modal>p{color:#74808a;font-size:13px}.heading-actions{display:flex;gap:10px}.heading-actions a,.heading-actions button,.primary{box-sizing:border-box;height:40px;padding:0 16px;border:1px solid #ff9900;border-radius:8px;background:#fff;color:#a96000;font-size:12px;font-weight:900;text-decoration:none;line-height:38px}.heading-actions .primary,.primary{border:0;background:#ff9900;color:#17212b}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}.stats article{display:grid;gap:5px;padding:16px 18px;border:1px solid #dfe5e9;border-radius:10px;background:#fff}.stats small,.stats span{color:#7c8790;font-size:11px}.stats b{font-size:25px}.orange{color:#d87600!important}.toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:12px 14px;border:1px solid #dfe5e9;border-radius:9px;background:#fff}.toolbar label{display:flex;align-items:center;width:360px;height:36px;gap:7px;border:1px solid #dce3e8;border-radius:6px;padding:0 10px;color:#77838d}.toolbar input{width:100%;border:0;outline:0}.toolbar button{height:36px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#596771}.toolbar .result-link{border-color:#ffb452;color:#a96000}.toolbar>span{margin-left:auto;color:#78858f;font-size:11px}.table-card{overflow:auto;border:1px solid #dfe5e9;border-radius:10px;background:#fff}.table-card table{width:100%;min-width:1180px;border-collapse:collapse}.table-card th{padding:12px 14px;background:#f7f9fa;color:#71808a;font-size:10px;text-align:left}.table-card td{padding:13px 14px;border-top:1px solid #e8ecef;font-size:11px;vertical-align:middle}.table-card td>small,.table-card td>span,.table-card td>b{display:block;margin-top:4px}.product{display:flex;align-items:center;min-width:220px;gap:10px}.product>button,.product>i{display:grid;place-items:center;width:48px;height:48px;flex:0 0 48px;border:0;border-radius:8px;overflow:hidden;background:#fff1da;color:#a96000;font-style:normal;font-weight:900}.product img{width:100%;height:100%;object-fit:cover}.product span{display:grid;gap:3px}.product span small{color:#87939c}.product span em{width:max-content;padding:3px 6px;border-radius:9px;background:#fff0d8;color:#b56600;font-size:8px;font-style:normal}.price{color:#c56d00;font-size:15px}.table-card td>em{display:inline-block;padding:5px 8px;border-radius:10px;font-size:9px;font-style:normal}.table-card td>em.ready{background:#e8f7ee;color:#16824e}.table-card td>em.warn{background:#fff1de;color:#b46800}.actions{white-space:nowrap}.actions button{border:0;background:none;color:#a96000;font-weight:800}.empty{display:grid;justify-items:center;gap:7px;padding:70px;color:#7f8b94}.mask{position:fixed;z-index:60;inset:0;overflow:auto;padding:35px;background:rgba(17,24,39,.45);backdrop-filter:blur(3px)}.modal{position:relative;box-sizing:border-box;width:min(980px,96vw);margin:auto;padding:25px;border-radius:12px;background:#fff;box-shadow:0 24px 70px rgba(17,24,39,.25)}.modal h2{margin:4px 0 6px}.close{position:absolute;top:15px;right:16px;border:0;background:none;font-size:24px}.modal footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid #e3e8eb}.modal footer button{height:40px;padding:0 18px;border:1px solid #dce3e8;border-radius:7px;background:#fff;font-weight:800}.modal footer .primary{border:0;background:#ff9900}.import-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:18px 0}.import-stats span{display:grid;gap:4px;padding:12px;border-radius:8px;background:#f6f8f9;color:#74808a;font-size:10px}.import-stats b{color:#17212b;font-size:20px}.issues{max-height:330px;overflow:auto;border:1px solid #e3e8eb;border-radius:8px}.issues>b,.issues>p,.issues article{display:block;padding:10px 13px}.issues article{display:grid;grid-template-columns:150px 1fr;border-top:1px solid #edf0f2;font-size:10px}.issues article em{color:#b56700;font-style:normal;font-weight:800}.detail-images{display:flex;gap:12px;margin:16px 0}.detail-images button{display:grid;gap:5px;border:1px solid #e1e6e9;border-radius:8px;background:#fff;padding:8px}.detail-images img{width:110px;height:110px;object-fit:cover}.detail-images span{font-size:10px}.detail-grid{display:grid;grid-template-columns:repeat(3,1fr);max-height:53vh;overflow:auto;border:1px solid #e2e7ea;border-radius:8px}.detail-grid>div{min-height:48px;padding:10px 12px;border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2}.detail-grid .wide{grid-column:span 3}.detail-grid small{color:#85919a}.detail-grid p{margin:6px 0 0;word-break:break-word}.detail-grid a{display:block;margin-top:6px;color:#a96000}.editor-modal{width:min(1040px,96vw)}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-height:62vh;overflow:auto;margin-top:17px;padding-right:7px}.form-grid label{display:grid;gap:6px;color:#4e5c66;font-size:11px}.form-grid .wide{grid-column:1/-1}.form-grid input,.form-grid select,.form-grid textarea{box-sizing:border-box;width:100%;min-height:38px;border:1px solid #dce3e8;border-radius:6px;padding:8px;font:inherit}.form-grid textarea{min-height:70px;resize:vertical}.form-grid input.alert{border-color:#f29a23;background:#fff9ef}.upload{display:flex;align-items:center;gap:10px;padding:8px;border:1px dashed #d9e0e5;border-radius:7px}.upload img{width:75px;height:75px;border-radius:6px;object-fit:cover}.upload button{border:0;background:none;color:#d24c43}.generated-warning{margin-top:14px;padding:10px 12px;border:1px solid #f6c779;border-radius:7px;background:#fff7e8;color:#a75c00;font-size:11px;font-weight:800}.image-preview{position:fixed;z-index:90;inset:0;display:grid;place-items:center;background:rgba(8,14,20,.82)}.image-preview>button{position:absolute;top:25px;right:30px;border:0;background:none;color:#fff;font-size:30px}.image-preview figure{margin:0;text-align:center}.image-preview img{max-width:82vw;max-height:78vh;border-radius:10px}.image-preview figcaption{margin-top:10px;color:#fff}.toast{position:fixed;right:25px;bottom:25px;z-index:100;padding:13px 18px;border-radius:8px;background:#17212b;color:#fff;font-size:12px}.toast-enter-active,.toast-leave-active{transition:.2s}.toast-enter-from,.toast-leave-to{opacity:0;transform:translateY(7px)}@media(max-width:850px){.purchase-heading{align-items:start;flex-direction:column;gap:15px}.heading-actions{flex-wrap:wrap}.stats{grid-template-columns:1fr 1fr}.toolbar{flex-wrap:wrap}.toolbar label{width:100%}.toolbar>span{margin-left:0}.import-stats{grid-template-columns:repeat(3,1fr)}.detail-grid{grid-template-columns:1fr 1fr}.detail-grid .wide{grid-column:span 2}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}}
 .purchase-tiers{display:grid;min-width:158px;gap:4px}.purchase-tiers span{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 7px;border-radius:6px;background:#f4f6f7}.purchase-tiers span.base{background:#fff1db}.purchase-tiers small{color:#687681;font-size:9px;white-space:nowrap}.purchase-tiers b{color:#bd6800;font-size:11px;white-space:nowrap}.no-data{color:#929da5}
+.issues .blocking{margin:0;border-top:1px solid #f3c7c3;background:#fff1ef;color:#b62f27;font-weight:800}.issues article.error{background:#fff8f7}.issues article.error em{color:#c4362d}.primary:disabled{cursor:not-allowed;opacity:.5}
+.import-mode{display:grid;gap:6px;margin:12px 0;padding:12px;border:1px solid #f1d19a;border-radius:8px;background:#fff8eb;color:#6c5b42;font-size:11px}.import-mode select{height:36px;border:1px solid #dfc392;border-radius:6px;background:#fff;padding:0 9px}.import-mode small{color:#a35f00}
 </style>

@@ -6,10 +6,16 @@ import { parseLogisticsWorkbook, type LogisticsDiffField, type LogisticsDiffRow,
 import {
   addLogisticsChannel,
   addLogisticsProvider,
+  cloneLogisticsChannel,
   createLogisticsDraft,
+  deleteLogisticsChannel,
   loadLogisticsWorkspace,
   publishLogisticsVersion,
+  refreshPublishedLogisticsRules,
   rollbackLogisticsVersion,
+  saveLogisticsManualDraft,
+  setLogisticsChannelStatus,
+  updateLogisticsChannel,
   versionRows,
   type LogisticsChannelRecord,
   type LogisticsChannelVersionRecord,
@@ -38,6 +44,7 @@ const form = reactive({ id: 0, name: '', englishName: '', type: '专线', publis
 const editingAreaIndex = ref<number | null>(null)
 const areaForm = reactive({ areaName: '', countryCode: '', etaMinDays: 0, etaMaxDays: 0, weightFromG: 0, weightToG: 0, pricePer1000G: 0, registrationFee: 0 })
 const areaKeyword = ref('')
+const selectedAreaIndexes = ref<number[]>([])
 type WorkspaceMode = 'rules' | 'base'
 const workspaceMode = ref<WorkspaceMode>('base')
 const templateInput = ref<HTMLInputElement | null>(null)
@@ -179,7 +186,7 @@ function matchExistingChannel(fileName: string) {
 }
 async function refreshWorkspace() {
   workspace.value = await loadLogisticsWorkspace()
-  rules.value = structuredClone(sourceRules)
+  rules.value = structuredClone(await refreshPublishedLogisticsRules())
   if (!workspace.value.providers.some(item => item.id === selectedProviderId.value)) selectedProviderId.value = workspace.value.providers[0]?.id || ''
 }
 async function importChannelFile(channel: LogisticsChannelRecord, file: File, openReview = true) {
@@ -254,7 +261,7 @@ async function publishReviewedVersion() {
   if (!allRequiredReviewed.value) return notify(`请先核对剩余 ${remainingRequiredReviewCount.value} 项异常变更`)
   if (!auditNote.value.trim()) return notify('请填写审核备注后再发布')
   if (reviewingVersion.value.summary.removed && !removalConfirmed.value) return notify('请先确认本次移除的国家或价格段')
-  try { await publishLogisticsVersion(reviewingChannel.value.id, reviewingVersion.value.id, auditNote.value); showImportReview.value = false; await refreshWorkspace(); notify('价格版本已发布，业务报价已切换到新版本') }
+  try { await publishLogisticsVersion(reviewingChannel.value.id, reviewingVersion.value.id, auditNote.value, removalConfirmed.value); showImportReview.value = false; await refreshWorkspace(); notify('价格版本已发布，业务报价已切换到新版本') }
   catch (error) { notify(error instanceof Error ? error.message : '发布失败，仍继续使用旧版本') }
 }
 function openHistory(channel: LogisticsChannelRecord) { historyChannel.value = channel; showVersionHistory.value = true }
@@ -307,15 +314,34 @@ function openRuleEditor(rule?: LogisticsRule) {
   Object.assign(form, { id: rule?.id ?? 0, name: rule?.name ?? '', englishName: rule?.englishName ?? '', type: rule?.type ?? '专线', published: rule?.published ?? '未发布', status: rule?.status ?? '启用', carrier: relation?.carrier ?? '', channel: relation?.channel ?? '', channelCode: relation?.channelCode ?? '' })
   showRuleEditor.value = true
 }
-function saveRule() {
-  const existing = rules.value.find(rule => rule.id === form.id)
-  if (existing) Object.assign(existing, { name: form.name, englishName: form.englishName, type: form.type, published: form.published, status: form.status, relations: form.carrier ? [{ carrier: form.carrier, channel: form.channel, channelCode: form.channelCode, discounts: '-\n-' }] : [] })
-  else rules.value.unshift({ id: Math.max(...rules.value.map(rule => rule.id)) + 1, name: form.name || '新运费规则', englishName: form.englishName, type: form.type, currency: 'USD', published: form.published, status: form.status, dates: new Date().toLocaleString(), users: 'admin', relations: form.carrier ? [{ carrier: form.carrier, channel: form.channel, channelCode: form.channelCode, discounts: '-\n-' }] : [], phoneRequired: false, areaCount: 0, priceRowCount: 0, prices: [] })
-  showRuleEditor.value = false; notify('保存成功')
+async function saveRule() {
+  try {
+    const channel = workspace.value.channels.find(item => item.ruleId === form.id)
+    if (channel) await updateLogisticsChannel(channel, { name: form.name, code: form.channelCode || form.englishName || channel.code, type: form.type, logisticsAttribute: channel.logisticsAttribute, enabled: form.status === '启用' })
+    else {
+      if (!selectedProvider.value) throw new Error('请先在物流基础数据中创建并选择物流商')
+      await addLogisticsChannel({ providerId: selectedProvider.value.id, name: form.name || '新运费规则', code: form.channelCode || form.englishName, type: form.type, logisticsAttribute: '普货' })
+    }
+    showRuleEditor.value = false; await refreshWorkspace(); notify('运费规则已保存到数据库')
+  } catch (error) { notify(error instanceof Error ? error.message : '运费规则保存失败') }
 }
-function cloneSelected() { const rule = rules.value.find(item => selectedIds.value.includes(item.id)); if (!rule) return notify('请选择一条规则'); rules.value.unshift({ ...structuredClone(rule), id: Math.max(...rules.value.map(item => item.id)) + 1, name: `${rule.name}-副本` }); notify('克隆成功') }
-function toggleRule(rule: LogisticsRule) { rule.status = rule.status === '启用' ? '禁用' : '启用'; openRuleMenuId.value = null; notify('状态设置成功') }
-function removeRule(rule: LogisticsRule) { rules.value = rules.value.filter(item => item.id !== rule.id); selectedIds.value = selectedIds.value.filter(id => id !== rule.id); openRuleMenuId.value = null; notify('已从当前本地数据中删除') }
+async function cloneSelected() {
+  const rule = rules.value.find(item => selectedIds.value.includes(item.id)); if (!rule) return notify('请选择一条规则')
+  const channel = workspace.value.channels.find(item => item.ruleId === rule.id); if (!channel) return notify('该规则尚未迁移到数据库，不能克隆')
+  try { await cloneLogisticsChannel(channel, `${rule.name}-副本`, `${channel.code}-COPY-${Date.now().toString(36).toUpperCase()}`); await refreshWorkspace(); notify('克隆成功，价格已进入待审核草稿') }
+  catch (error) { notify(error instanceof Error ? error.message : '克隆失败') }
+}
+async function toggleRule(rule: LogisticsRule) {
+  const channel = workspace.value.channels.find(item => item.ruleId === rule.id); if (!channel) return notify('该规则尚未迁移到数据库')
+  try { await setLogisticsChannelStatus(channel, rule.status !== '启用'); openRuleMenuId.value = null; await refreshWorkspace(); notify('状态已保存到数据库') }
+  catch (error) { notify(error instanceof Error ? error.message : '状态设置失败') }
+}
+async function removeRule(rule: LogisticsRule) {
+  const channel = workspace.value.channels.find(item => item.ruleId === rule.id); if (!channel) return notify('该规则尚未迁移到数据库')
+  if (!window.confirm(`确认删除“${rule.name}”吗？已有历史版本的渠道将拒绝删除并提示停用。`)) return
+  try { await deleteLogisticsChannel(channel.id); selectedIds.value = selectedIds.value.filter(id => id !== rule.id); openRuleMenuId.value = null; await refreshWorkspace(); notify('规则已删除') }
+  catch (error) { notify(error instanceof Error ? error.message : '删除失败') }
+}
 function openAreas(rule: LogisticsRule) { activeRule.value = rule; openRuleMenuId.value = null; view.value = 'areas' }
 function openCondition(rule: LogisticsRule) { activeRule.value = rule; showConditionEditor.value = true }
 function exportRules() { const data = rules.value.filter(rule => !selectedIds.value.length || selectedIds.value.includes(rule.id)); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); link.download = '运费规则.json'; link.click(); URL.revokeObjectURL(link.href); notify(`已导出 ${data.length} 条规则`) }
@@ -329,7 +355,7 @@ function openAreaEditor(index?: number) {
   })
   showAreaEditor.value = true
 }
-function saveArea() {
+async function saveArea() {
   if (!activeRule.value) return
   if (Number(areaForm.weightToG) < Number(areaForm.weightFromG)) {
     notify('截止重量不能小于起始重量')
@@ -341,6 +367,7 @@ function saveArea() {
     weightFromKg: kilogramsFromGrams(areaForm.weightFromG), weightToKg: kilogramsFromGrams(areaForm.weightToG),
     pricePerKg: Math.max(0, Number(areaForm.pricePer1000G) || 0), registrationFee: Math.max(0, Number(areaForm.registrationFee) || 0),
   }
+  const rows = structuredClone(activeRule.value.prices)
   if (editingAreaIndex.value == null) {
     const newRow: LogisticsPriceRow = {
       ...editable, prohibitedMarks: '', allowedMarks: '', maxPerimeterCm: 0, maxSideCm: 0, volumeDivisor: 0,
@@ -348,16 +375,21 @@ function saveArea() {
       nextWeightKg: 0, nextWeightPrice: 0, intervalPrice: 0, surcharge: 0, fuelSurchargeRate: 0,
       prohibitGeneralCargo: false, volumetric: false, phoneRequired: false, zoneName: '', zoneExclude: false,
     }
-    activeRule.value.prices.push(newRow)
+    rows.push(newRow)
   } else {
-    Object.assign(activeRule.value.prices[editingAreaIndex.value], editable)
+    Object.assign(rows[editingAreaIndex.value]!, editable)
   }
-  activeRule.value.areaCount = new Set(activeRule.value.prices.map(row => row.countryCode || row.areaName)).size
-  activeRule.value.priceRowCount = activeRule.value.prices.length
-  showAreaEditor.value = false
-  notify('区域计费重量已按 g 保存，报价计算会自动换算')
+  try {
+    const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id)
+    if (!channel) throw new Error('该规则尚未迁移到数据库')
+    await saveLogisticsManualDraft(channel.id, rows, '手工维护区域计费规则')
+    showAreaEditor.value = false; view.value = 'list'; await refreshWorkspace(); notify('区域规则已保存为数据库待审版本，发布后才参与报价')
+  } catch (error) { notify(error instanceof Error ? error.message : '区域规则保存失败') }
 }
-function areaAction(message: string) { notify(`${message}已在当前页面状态执行`) }
+function exportAreas() { if (!activeRule.value) return; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(activeRule.value.prices, null, 2)], { type: 'application/json' })); link.download = `${activeRule.value.englishName || activeRule.value.id}-areas.json`; link.click(); URL.revokeObjectURL(link.href); notify(`已导出 ${activeRule.value.prices.length} 条区域规则`) }
+async function copyArea(index: number) { if (!activeRule.value) return; const rows = structuredClone(activeRule.value.prices); rows.splice(index + 1, 0, { ...structuredClone(rows[index]!), areaName: `${rows[index]!.areaName}-副本` }); const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id); if (!channel) return notify('该规则尚未迁移到数据库'); try { await saveLogisticsManualDraft(channel.id, rows, '复制区域规则'); view.value = 'list'; await refreshWorkspace(); notify('复制项已保存为待审版本') } catch (error) { notify(error instanceof Error ? error.message : '复制失败') } }
+async function deleteSelectedAreas() { if (!activeRule.value || !selectedAreaIndexes.value.length) return notify('请先选择区域规则'); const rows = activeRule.value.prices.filter((_, index) => !selectedAreaIndexes.value.includes(index)); const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id); if (!channel) return notify('该规则尚未迁移到数据库'); try { await saveLogisticsManualDraft(channel.id, rows, '批量删除区域规则'); selectedAreaIndexes.value = []; view.value = 'list'; await refreshWorkspace(); notify('删除结果已保存为待审版本') } catch (error) { notify(error instanceof Error ? error.message : '批量删除失败') } }
+async function saveCondition() { if (!activeRule.value) return; const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id); if (!channel) return notify('该规则尚未迁移到数据库'); const rows = activeRule.value.prices.map(row => ({ ...row, phoneRequired: activeRule.value!.phoneRequired })); try { await saveLogisticsManualDraft(channel.id, rows, '维护条件限制'); showConditionEditor.value = false; await refreshWorkspace(); notify('条件限制已保存为待审版本') } catch (error) { notify(error instanceof Error ? error.message : '条件限制保存失败') } }
 </script>
 
 <template>
@@ -399,11 +431,11 @@ function areaAction(message: string) { notify(`${message}已在当前页面状�
           </div>
         </section>
       </template>
-      <template v-else-if="activeRule"><div class="area-page-head"><button class="back-button" @click="view='list'">‹ 返回运费规则</button><div><p>REGIONAL PRICING RULES</p><h1>{{ activeRule.name }}</h1><span>维护国家区域、时效、重量范围和人民币计费价格。</span></div><button class="primary-button" @click="openAreaEditor()">＋ 新增区域规则</button></div><section class="area-workspace-card"><div class="area-toolbar"><label><span>⌕</span><input v-model="areaKeyword" placeholder="搜索区域名称或国家代码"></label><div><button class="secondary-button" @click="notify('导入功能将在接数据库时启用')">导入</button><button class="secondary-button" @click="areaAction('导出区域规则')">导出</button><button class="secondary-button" @click="areaAction('操作日志')">操作日志</button><button class="danger-outline" @click="areaAction('批量删除')">批量删除</button></div><span>共 {{ visibleAreaRows.length }} 条区域规则</span></div><div class="modern-table-scroll"><table class="modern-area-table"><thead><tr><th></th><th>区域信息</th><th>预计时效</th><th>商品限制</th><th>状态</th><th>计费重量</th><th>计费价格</th><th>操作</th></tr></thead><tbody><tr v-for="entry in visibleAreaRows" :key="entry.index"><td><input type="checkbox"></td><td class="rule-name-cell"><b>{{ entry.area.areaName }}</b><small>{{ entry.area.countryCode || '暂无国家代码' }}</small></td><td>{{ entry.area.etaMinDays }}～{{ entry.area.etaMaxDays }} 天</td><td class="limit-cell"><span>{{ entry.area.prohibitGeneralCargo?'禁止普货':'允许普货' }}</span><small>禁运：{{ entry.area.prohibitedMarks || '无' }} · 允许：{{ entry.area.allowedMarks || '全部' }}</small></td><td><span class="status-pill success">启用</span></td><td><b>{{ gramsFromKg(entry.area.weightFromKg) }}～{{ gramsFromKg(entry.area.weightToKg) }} g</b></td><td class="price-cell"><b>¥{{ entry.area.pricePerKg }}/1000g</b><small>挂号费 ¥{{ entry.area.registrationFee }}</small></td><td class="modern-ops"><button class="edit-button" @click="openAreaEditor(entry.index)">编辑</button><button class="more-button" @click="areaAction('复制')">复制</button></td></tr><tr v-if="!visibleAreaRows.length"><td colspan="8" class="modern-empty">没有找到符合条件的区域规则</td></tr></tbody></table></div></section></template>
+      <template v-else-if="activeRule"><div class="area-page-head"><button class="back-button" @click="view='list'">‹ 返回运费规则</button><div><p>REGIONAL PRICING RULES</p><h1>{{ activeRule.name }}</h1><span>维护国家区域、时效、重量范围和人民币计费价格；保存后进入待审版本。</span></div><button class="primary-button" @click="openAreaEditor()">＋ 新增区域规则</button></div><section class="area-workspace-card"><div class="area-toolbar"><label><span>⌕</span><input v-model="areaKeyword" placeholder="搜索区域名称或国家代码"></label><div><button class="secondary-button" @click="triggerTemplateUpload(workspace.channels.find(item=>item.ruleId===activeRule?.id)?.id || '')">导入Excel</button><button class="secondary-button" @click="exportAreas">导出</button><button class="secondary-button" @click="view='list';workspaceMode='base'">版本日志</button><button class="danger-outline" :disabled="!selectedAreaIndexes.length" @click="deleteSelectedAreas">批量删除</button></div><span>共 {{ visibleAreaRows.length }} 条区域规则</span></div><div class="modern-table-scroll"><table class="modern-area-table"><thead><tr><th></th><th>区域信息</th><th>预计时效</th><th>商品限制</th><th>状态</th><th>计费重量</th><th>计费价格</th><th>操作</th></tr></thead><tbody><tr v-for="entry in visibleAreaRows" :key="entry.index"><td><input v-model="selectedAreaIndexes" type="checkbox" :value="entry.index"></td><td class="rule-name-cell"><b>{{ entry.area.areaName }}</b><small>{{ entry.area.countryCode || '暂无国家代码' }}</small></td><td>{{ entry.area.etaMinDays }}～{{ entry.area.etaMaxDays }} 天</td><td class="limit-cell"><span>{{ entry.area.prohibitGeneralCargo?'禁止普货':'允许普货' }}</span><small>禁运：{{ entry.area.prohibitedMarks || '无' }} · 允许：{{ entry.area.allowedMarks || '全部' }}</small></td><td><span class="status-pill success">启用</span></td><td><b>{{ gramsFromKg(entry.area.weightFromKg) }}～{{ gramsFromKg(entry.area.weightToKg) }} g</b></td><td class="price-cell"><b>¥{{ entry.area.pricePerKg }}/1000g</b><small>挂号费 ¥{{ entry.area.registrationFee }}</small></td><td class="modern-ops"><button class="edit-button" @click="openAreaEditor(entry.index)">编辑</button><button class="more-button" @click="copyArea(entry.index)">复制</button></td></tr><tr v-if="!visibleAreaRows.length"><td colspan="8" class="modern-empty">没有找到符合条件的区域规则</td></tr></tbody></table></div></section></template>
     </section>
 
     <div v-if="showRuleEditor" class="mask"><div class="modal rule-modal"><header><div><small>LOGISTICS RULE</small><b>{{ form.id ? '编辑运费规则' : '新增运费规则' }}</b></div><button aria-label="关闭" @click="showRuleEditor=false">×</button></header><div class="form"><label><span>规则名称</span><input v-model="form.name"></label><label><span>英文名称</span><input v-model="form.englishName"></label><label><span>模板类型</span><select v-model="form.type"><option>专线</option><option>挂号</option><option>free</option></select></label><label><span>会员运费报价系数</span><input value="0.00"></label><label><span>是否发布</span><select v-model="form.published"><option>未发布</option><option>发布</option></select></label><label><span>状态</span><select v-model="form.status"><option>启用</option><option>禁用</option></select></label><label><span>物流商</span><input v-model="form.carrier"></label><label><span>渠道</span><input v-model="form.channel"></label><label><span>渠道编码</span><input v-model="form.channelCode"></label></div><footer><button class="cancel-button" @click="showRuleEditor=false">取消</button><button class="primary-orange" @click="saveRule">保存规则</button></footer></div></div>
-    <div v-if="showConditionEditor" class="mask"><div class="modal small"><header><div><small>CONDITION SETTINGS</small><b>条件限制</b></div><button aria-label="关闭" @click="showConditionEditor=false">×</button></header><label class="check"><input v-model="activeRule!.phoneRequired" type="checkbox"><span><b>匹配时需要收件人电话</b><small>启用后，此规则仅用于具备电话信息的报价。</small></span></label><footer><button class="cancel-button" @click="showConditionEditor=false">取消</button><button class="primary-orange" @click="showConditionEditor=false;notify('保存成功')">保存设置</button></footer></div></div>
+    <div v-if="showConditionEditor" class="mask"><div class="modal small"><header><div><small>CONDITION SETTINGS</small><b>条件限制</b></div><button aria-label="关闭" @click="showConditionEditor=false">×</button></header><label class="check"><input v-model="activeRule!.phoneRequired" type="checkbox"><span><b>匹配时需要收件人电话</b><small>启用后，此规则仅用于具备电话信息的报价。</small></span></label><footer><button class="cancel-button" @click="showConditionEditor=false">取消</button><button class="primary-orange" @click="saveCondition">保存设置</button></footer></div></div>
     <div v-if="showAreaEditor" class="mask"><div class="modal area-modal"><header><div><small>REGIONAL PRICING</small><b>{{ editingAreaIndex == null ? '新增区域规则' : '编辑区域规则' }}</b></div><button aria-label="关闭" @click="showAreaEditor=false">×</button></header><div class="form"><label><span>区域名称</span><input v-model="areaForm.areaName"></label><label><span>国家简码</span><input v-model="areaForm.countryCode"></label><label><span>时效最早天数</span><input v-model.number="areaForm.etaMinDays" type="number"></label><label><span>时效最晚天数</span><input v-model.number="areaForm.etaMaxDays" type="number"></label><label><span>起始重量（g）</span><input v-model.number="areaForm.weightFromG" type="number" min="0" step="1"></label><label><span>截止重量（g）</span><input v-model.number="areaForm.weightToG" type="number" min="0" step="1"></label><label><span>每 1000g 运费（CNY）</span><input v-model.number="areaForm.pricePer1000G" type="number" min="0" step="0.01"></label><label><span>挂号费（CNY）</span><input v-model.number="areaForm.registrationFee" type="number"></label></div><footer><button class="cancel-button" @click="showAreaEditor=false">取消</button><button class="primary-orange" @click="saveArea">保存区域规则</button></footer></div></div>
     <div v-if="showProviderEditor" class="mask"><div class="modal small base-modal"><header>新增物流商<button @click="showProviderEditor=false">×</button></header><div class="simple-form"><label>物流商名称<input v-model="providerForm.name" placeholder="例如：燕文物流"></label><label>物流商编码<input v-model="providerForm.code" placeholder="例如：YANWEN" @input="providerForm.code=providerForm.code.toUpperCase()"></label></div><footer><button class="primary-orange" @click="saveProvider">保存物流商</button><button @click="showProviderEditor=false">取消</button></footer></div></div>
     <div v-if="showChannelEditor" class="mask"><div class="modal small base-modal"><header><div><small>LOGISTICS CHANNEL</small><b>新增物流渠道</b></div><button @click="showChannelEditor=false">×</button></header><div class="simple-form"><label>渠道名称<input v-model="channelForm.name" placeholder="例如：燕文普货专线"></label><label>渠道编码<input v-model="channelForm.code" placeholder="唯一编码，例如：YW-PH" @input="channelForm.code=channelForm.code.toUpperCase()"></label><label>规则类型<select v-model="channelForm.type"><option>专线</option><option>挂号</option><option>快递</option></select></label><label>物流属性<select v-model="channelForm.logisticsAttribute"><option>普货</option><option>带电</option><option>化妆品</option><option>敏感货</option></select></label></div><footer><button @click="showChannelEditor=false">取消</button><button class="primary-orange" @click="saveChannel">创建并上传</button></footer></div></div>

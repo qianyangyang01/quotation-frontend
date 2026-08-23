@@ -1,6 +1,6 @@
 package com.milano.quotation.imports;
 
-import com.fasterxml.jackson.databind.ObjectMapper;import com.fasterxml.jackson.databind.node.ObjectNode;import com.milano.quotation.common.AppException;import com.milano.quotation.storage.AssetStorageService;import org.apache.poi.ss.usermodel.DataFormatter;import org.apache.poi.xssf.usermodel.XSSFWorkbook;import org.springframework.scheduling.annotation.Async;import org.springframework.stereotype.Service;import org.springframework.transaction.annotation.Transactional;import org.springframework.web.multipart.MultipartFile;import java.io.*;import java.security.MessageDigest;import java.time.Instant;import java.util.*;import java.util.zip.ZipEntry;import java.util.zip.ZipInputStream;
+import tools.jackson.databind.ObjectMapper;import tools.jackson.databind.node.ObjectNode;import com.milano.quotation.common.AppException;import com.milano.quotation.storage.AssetStorageService;import org.apache.poi.ss.usermodel.DataFormatter;import org.apache.poi.xssf.usermodel.XSSFWorkbook;import org.springframework.scheduling.annotation.Async;import org.springframework.stereotype.Service;import org.springframework.transaction.annotation.Transactional;import org.springframework.web.multipart.MultipartFile;import java.io.*;import java.security.MessageDigest;import java.time.Instant;import java.util.*;import java.util.zip.ZipEntry;import java.util.zip.ZipInputStream;
 
 @Service
 public class ImageMigrationService{
@@ -15,6 +15,6 @@ public class ImageMigrationService{
     private static String normalizePath(String value){var path=value.replace('\\','/').replaceAll("^\\./","");if(path.startsWith("/")||path.matches("^[A-Za-z]:.*")||Arrays.asList(path.split("/")).contains("..")||path.length()>512)throw AppException.unprocessable("清单包含不安全的文件路径");return path;}
     private static String sha(MultipartFile file)throws Exception{try(var input=file.getInputStream()){var digest=MessageDigest.getInstance("SHA-256");input.transferTo(new java.security.DigestOutputStream(OutputStream.nullOutputStream(),digest));return HexFormat.of().formatHex(digest.digest());}}
     private static String safeName(String name){var value=name.replaceAll("[\\r\\n\\\\/]","_");return value.substring(0,Math.min(255,value.length()));}
-    public record JobView(UUID id,String status,String sourceName,com.fasterxml.jackson.databind.JsonNode summary,long completed,long failed,long pending,int uploadedParts,String error,Instant createdAt,Instant updatedAt){}
+    public record JobView(UUID id,String status,String sourceName,tools.jackson.databind.JsonNode summary,long completed,long failed,long pending,int uploadedParts,String error,Instant createdAt,Instant updatedAt){}
     public record ErrorView(String sku,String imageType,String fileName,String error){}
 }

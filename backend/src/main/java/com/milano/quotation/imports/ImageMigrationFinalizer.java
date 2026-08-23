@@ -1,6 +1,6 @@
 package com.milano.quotation.imports;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.ObjectNode;
 import com.milano.quotation.common.AppException;
 import com.milano.quotation.purchase.PurchaseProductService;
 import org.springframework.stereotype.Service;
