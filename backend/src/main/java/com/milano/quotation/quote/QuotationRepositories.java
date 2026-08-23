@@ -5,8 +5,14 @@ import java.util.List;
 import java.util.UUID;
 
 interface QuotationRecordRepository extends JpaRepository<QuotationRecordEntity,UUID>{
+    java.util.Optional<QuotationRecordEntity> findByQuoteNo(String quoteNo);
     List<QuotationRecordEntity> findAllByOrderByCreatedAtDesc();
     List<QuotationRecordEntity> findByOwnerAccountOrderByCreatedAtDesc(String ownerAccount);
+    org.springframework.data.domain.Page<QuotationRecordEntity> findByOwnerAccount(String ownerAccount, org.springframework.data.domain.Pageable pageable);
 }
 interface QuotationTemplateRepository extends JpaRepository<QuotationTemplateEntity,UUID>{List<QuotationTemplateEntity> findByOwnerAccountOrderByUpdatedAtDesc(String ownerAccount);}
 interface QuotationDraftRepository extends JpaRepository<QuotationDraftEntity,String>{}
+interface QuotationShareRepository extends JpaRepository<QuotationShareEntity,UUID>{
+    java.util.Optional<QuotationShareEntity> findByTokenHash(String tokenHash);
+    List<QuotationShareEntity> findByQuotationIdOrderByCreatedAtDesc(UUID quotationId);
+}

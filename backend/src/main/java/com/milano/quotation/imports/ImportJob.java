@@ -1,5 +1,5 @@
 package com.milano.quotation.imports;
 
-import com.fasterxml.jackson.databind.JsonNode;import jakarta.persistence.*;import org.hibernate.annotations.JdbcTypeCode;import org.hibernate.type.SqlTypes;import java.time.Instant;import java.util.UUID;
+import tools.jackson.databind.JsonNode;import jakarta.persistence.*;import org.hibernate.annotations.JdbcTypeCode;import org.hibernate.type.SqlTypes;import java.time.Instant;import java.util.UUID;
 @Entity @Table(name="import_job")public class ImportJob{@Id public UUID id;@Column(name="job_type",nullable=false,length=40)public String jobType;@Column(nullable=false,length=24)public String status;@Column(name="requested_by",nullable=false,length=24)public String requestedBy;@Column(name="source_name",nullable=false,length=255)public String sourceName;@Column(name="source_hash",length=64)public String sourceHash;@JdbcTypeCode(SqlTypes.JSON)@Column(nullable=false,columnDefinition="jsonb")public JsonNode payload;@Column(name="error_message",length=1000)public String errorMessage;@Column(name="created_at",nullable=false)public Instant createdAt;@Column(name="updated_at",nullable=false)public Instant updatedAt;@Column(name="completed_at")public Instant completedAt;protected ImportJob(){}
 }
