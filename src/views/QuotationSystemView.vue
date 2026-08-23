@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
 import { api } from '@/services/http'
+import { loadCustomers, type Customer } from '@/services/masterData'
+import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
 import AppTopbar from '@/components/AppTopbar.vue'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
 import QuotationCondition from '@/components/quotation/QuotationCondition.vue'
@@ -15,7 +17,7 @@ import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationProduct as Product } from '@/components/quotation/types'
 import { australiaQuoteRegions, calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
-import { findPurchaseProduct, loadPurchaseProducts, purchaseDisplayName, purchaseFreightChoices, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { findPurchaseProduct, loadPurchaseProduct, loadPurchaseProducts, purchaseDisplayName, purchaseFreightChoices, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { calculateFinanceQuoteTax, FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings, type TaxCustomerType } from '@/data/financeTaxSettings'
 import { inferCountryContinent } from '@/data/countryClassification'
@@ -63,6 +65,7 @@ const selectedTaxCustomerType = ref<TaxCustomerType>('A')
 const financeExchangeRate = loadFinanceExchangeRate()
 const exchange = ref({ usd: financeExchangeRate.usdCny, eur: 7.86, updatedAt: financeExchangeRate.updatedAt })
 const notice = ref('')
+const readiness = ref<QuotationReadiness | null>(null)
 const showRule = ref(false)
 const showHistory = ref(false)
 const customQuoteQuantity = ref(5)
@@ -81,6 +84,7 @@ const financeTaxSettings = ref(loadFinanceTaxSettings())
 const quotationAttributeOptions = [...new Set([...financeLogisticsAttributeOptions, ...financePolicies.map(policy => policy.category)])]
 const skuSearch = ref('')
 const customerName = ref('')
+const customers = ref<Customer[]>([])
 const productCategory = ref('')
 const monthlySalesEstimate = ref('10')
 function monthlySalesPurchaseQuantity(value = monthlySalesEstimate.value) {
@@ -215,9 +219,14 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord) {
   p.packageHeightCm = 0
   p.status = record.status === '资料完整' ? '采购资料已加载' : record.status
 }
-function queryProduct() {
-  const matches = purchaseRecords.value.filter(item => item.sku === skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') && item.quoteReady)
-  if (!matches.length) { toast(`未在采购资料中找到 SKU：${skuSearch.value}`); return }
+async function queryProduct() {
+  const normalizedSku = skuSearch.value.trim().toUpperCase().replace(/\s+/g, '')
+  let matches = purchaseRecords.value.filter(item => item.sku === normalizedSku && item.quoteReady)
+  if (!matches.length) {
+    try { const remote = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(remote); matches = remote.quoteReady ? [remote] : [] }
+    catch { /* the unified not-found message below is clearer to the user */ }
+  }
+  if (!matches.length) { toast(`未找到可报价 SKU：${skuSearch.value}，请确认采购资料已完整保存`); return }
   const p = products.value[0]
   applyPurchaseRecord(p, matches[0])
   if (!productCategory.value) productCategory.value = quotationProductCategories.find(category => category === matches[0].category) || ''
@@ -228,9 +237,10 @@ function queryProduct() {
   const duplicate = matches.length > 1 ? `；检测到${matches.length}条同SKU记录，当前采用第一条` : ''
   toast(`已加载 ${matches[0].sku}；是否有货：${matches[0].stockStatus}${warning}${duplicate}`)
 }
-function queryBundleItem(item: BundleQuoteItem) {
+async function queryBundleItem(item: BundleQuoteItem) {
   const normalizedSku = item.sku.trim().toUpperCase().replace(/\s+/g, '')
-  const record = findPurchaseProduct(purchaseRecords.value, normalizedSku)
+  let record = findPurchaseProduct(purchaseRecords.value, normalizedSku)
+  if (!record) { try { record = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(record) } catch { /* handled below */ } }
   if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return }
   if (!record.quoteReady) { toast(`${record.sku} 的重量、起订量或采购价尚未补齐，暂不能参与报价`); return }
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
@@ -346,7 +356,10 @@ onMounted(async () => {
   window.addEventListener('storage', refreshFinanceCountrySettings)
   window.addEventListener('storage', refreshFinanceTaxSettings)
   try {
-    purchaseRecords.value = await loadPurchaseProducts()
+    const [products, customerPage, readinessState] = await Promise.all([loadPurchaseProducts(), loadCustomers('', 0, 100, true), loadQuotationReadiness()])
+    purchaseRecords.value = products
+    customers.value = customerPage.items
+    readiness.value = readinessState
     const requestedSku = String(route.query.sku || '').trim()
     if (requestedSku) { skuSearch.value = requestedSku; queryProduct() }
   } catch { toast('采购数据读取失败，请刷新页面后重试') }
@@ -621,6 +634,7 @@ const saveValidationIssues = computed(() => {
   if (p?.sku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
   if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'存在不免税物流商对应国家尚未设置客户税费，请到财务设置补齐' })
+  if (readiness.value && !readiness.value.ready) issues.push({ key:'businessReadiness', label:'业务就绪条件', message:`报价业务尚未就绪：${readiness.value.missing.join('；')}` })
   return issues
 })
 const displayedSaveValidationIssues = computed(() => showSaveValidation.value ? saveValidationIssues.value : [])
@@ -637,7 +651,7 @@ function attemptSave() {
 function locateValidationIssue(key: string) {
   const selector = ['customerName','productCategory','sku'].includes(key)
     ? `[data-validation-field="${key}"]`
-    : key === 'taxPolicy'
+    : key === 'taxPolicy' || key === 'businessReadiness'
       ? '.quote-preview'
       : '.matrix-mode-panel'
   const target = document.querySelector<HTMLElement>(selector)
@@ -703,6 +717,7 @@ function useLogistics(p: Product, option: { country: string; quoteRegion?: strin
 async function save() {
   const p = products.value[0]
   const customer = customerName.value.trim()
+  const customerId = customers.value.find(item => item.name === customer)?.id
   const selectedMatrixRows = savedQuoteRows.value
   if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
@@ -749,13 +764,13 @@ async function save() {
       taxCustomUsd: row.taxCustomUsd,
     }
   })
-  await api.put('/quotation-drafts/mine', { quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, selectedTaxCustomerType: selectedTaxCustomerType.value, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value })
+  await api.put('/quotation-drafts/mine', { quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, selectedTaxCustomerType: selectedTaxCustomerType.value, customerId, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value })
   const productSummary = quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
   const record = await createQuotationRecord({
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
-    customerName: customer, quoteMode: quoteMode.value, productSummary,
+    customerId, customerName: customer, quoteMode: quoteMode.value, productSummary,
     productImage: quoteMode.value === 'bundle' ? (bundleItems.value.find(item => item.image)?.image || '') : p.image,
     primarySku: quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => item.sku).join('、') : p.sku,
     productCategory: productCategory.value,
@@ -793,7 +808,7 @@ function toast(message: string) {
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
-          :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :product-category="productCategory" :product-categories="quotationProductCategories" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
+          :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :customer-options="customers.map(item=>item.name)" :product-category="productCategory" :product-categories="quotationProductCategories" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :tax-customer-type="selectedTaxCustomerType" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode"

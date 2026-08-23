@@ -1,7 +1,7 @@
 package com.milano.quotation.finance;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 import com.milano.quotation.audit.AuditService;
 import com.milano.quotation.common.ApiResponse;
 import com.milano.quotation.common.AppException;
@@ -27,6 +27,6 @@ public class FinanceSettingController {
         var row=existing.orElseGet(()->FinanceSetting.create(key,body.deepCopy())); row.payload=body.deepCopy(); row.updatedAt=Instant.now(); settings.saveAndFlush(row);
         audit.record("finance.update","finance-setting",key,"success",Map.of()); return ApiResponse.ok(view(row));
     }
-    private JsonNode view(FinanceSetting row){var wrapper=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();wrapper.set("value",row.payload.deepCopy());wrapper.put("_version",row.version);wrapper.put("_updatedAt",row.updatedAt.toString());return wrapper;}
+    private JsonNode view(FinanceSetting row){var wrapper=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();wrapper.set("value",row.payload.deepCopy());wrapper.put("_version",row.version);wrapper.put("_updatedAt",row.updatedAt.toString());return wrapper;}
     private static void validateKey(String key){if(!KEYS.contains(key)) throw AppException.notFound("财务设置不存在");}
 }

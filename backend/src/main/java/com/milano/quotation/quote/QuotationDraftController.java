@@ -1,6 +1,6 @@
 package com.milano.quotation.quote;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import com.milano.quotation.common.ApiResponse;
 import com.milano.quotation.security.QuotationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;

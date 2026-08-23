@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
-import { loadQuotationRecords, updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
+import { loadQuotationRecords, quotationPdfUrl, restoreQuotationRecord, shareQuotationRecord, updateQuotationRecord, voidQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
 import { loadPurchaseProducts } from '@/data/purchaseStore'
 import { quotationProductCategories } from '@/components/quotation/types'
 
@@ -72,7 +72,7 @@ const won = computed(() => scoped.value.filter(item => item.status === 'won').le
 const lost = computed(() => scoped.value.filter(item => item.status === 'lost').length)
 const cny = (value: number) => `¥${value.toFixed(2)}`
 const usd = (value: number) => `$${value.toFixed(2)}`
-const statusText = (value: QuotationRecordStatus) => ({ pending: '待处理', won: '已成交', lost: '未成交' })[value]
+const statusText = (value: QuotationRecordStatus) => ({ pending: '待处理', won: '已成交', lost: '未成交', voided: '已作废' })[value]
 const dateTime = (value?: string) => {
   if (!value) return '—'
   const date = new Date(value)
@@ -125,6 +125,20 @@ function processRecord(row: QuotationRecord) {
   editing.value = isMine.value
 }
 function closeDrawer() { editing.value = false; selected.value = null }
+function downloadPdf() { if (selected.value) window.open(quotationPdfUrl(selected.value), '_blank', 'noopener') }
+async function shareSelected() {
+  if (!selected.value) return
+  try { const result = await shareQuotationRecord(selected.value); const url = `${window.location.origin}${result.path}`; await navigator.clipboard.writeText(url); toast(`分享链接已复制，有效期至 ${new Date(result.expiresAt).toLocaleDateString('zh-CN')}`) }
+  catch (error) { toast(error instanceof Error ? error.message : '创建分享失败') }
+}
+async function voidOrRestore() {
+  if (!selected.value) return
+  try {
+    if (selected.value.status === 'voided') await restoreQuotationRecord(selected.value)
+    else { const reason = window.prompt('请输入作废原因（至少2个字）')?.trim(); if (!reason) return; await voidQuotationRecord(selected.value, reason) }
+    records.value = await loadQuotationRecords(props.scope); selected.value = records.value.find(item => item.id === selected.value?.id) || null; toast('操作成功')
+  } catch (error) { toast(error instanceof Error ? error.message : '操作失败') }
+}
 function cancelEdit() {
   if (!selected.value) return
   fillForm(selected.value)
@@ -199,7 +213,7 @@ watch(() => route.query.record, recordId => {
           </section>
           <section v-else-if="detailTab==='options'" class="option-detail-panel"><header><div><b>国家与渠道报价明细</b><span>按国家分组查看本次保存的全部方案</span></div><em>{{ selectedOptionGroups.length }} 国 · {{ recordOptions(selected).length }} 渠道</em></header><div class="detail-country-groups"><details v-for="(group,index) in selectedOptionGroups" :key="group.country" :open="index===0 || group.options.some(option=>option.isPrimary || selectedDealOptionIds.has(option.id))"><summary><span><b>{{ group.countryCode || '' }} {{ group.country }}</b><small>{{ group.options.length }} 条渠道</small></span><i>展开⌄</i></summary><div class="detail-option-head"><span>渠道 / 服务商</span><span>时效</span><span>1件</span><span>2件</span><span>3件</span><span>{{ selected.customQuoteQuantity || '自定义' }}件</span></div><article v-for="option in group.options" :key="option.id" :class="{primary:option.isPrimary,deal:selectedDealOptionIds.has(option.id)}"><span><b>{{ option.channel }}</b><small>{{ option.carrier }} · {{ option.rule }}</small><em v-if="option.isPrimary">首选</em><em v-if="selectedDealOptionIds.has(option.id)" class="deal-badge">已成交</em></span><b>{{ option.eta }}</b><i>{{ optionPrice(option.quote1Usd) }}</i><i>{{ optionPrice(option.quote2Usd) }}</i><i>{{ optionPrice(option.quote3Usd) }}</i><i>{{ optionPrice(option.quoteCustomUsd) }}</i></article></details></div></section>
           <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><p v-for="revision in group.changes" :key="revision.id"><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
-          <footer class="drawer-view-footer"><button @click="closeDrawer">关闭</button><button v-if="isMine" class="primary" @click="processRecord(selected)">{{ selected.status==='pending' ? '去处理成交结果' : '编辑成交结果' }}</button></footer>
+          <footer class="drawer-view-footer"><button @click="closeDrawer">关闭</button><button @click="downloadPdf">客户版PDF</button><button @click="shareSelected">复制分享链接</button><button @click="voidOrRestore">{{ selected.status==='voided' ? '恢复报价' : '作废报价' }}</button><button v-if="isMine && selected.status!=='voided'" class="primary" @click="processRecord(selected)">{{ selected.status==='pending' ? '去处理成交结果' : '编辑成交结果' }}</button></footer>
         </template>
 
         <template v-else>

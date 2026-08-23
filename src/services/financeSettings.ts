@@ -7,11 +7,29 @@ const versions = new Map<FinanceSettingKey, number>()
 
 type VersionedSetting<T> = { value: T; _version: number }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function normalizeFinanceSettingValue(key: FinanceSettingKey, value: unknown): unknown {
+  if (!isRecord(value)) return value
+  if (key === 'country-classification' && Array.isArray(value.countries)) return value.countries
+  if (key === 'channel-policies' && Array.isArray(value.policies)) return value.policies
+  if (key === 'customer-grades' && Array.isArray(value.grades)) return value.grades
+  if (key === 'exchange-rate' && !('usdCny' in value) && 'usdToCny' in value) {
+    return { usdCny: value.usdToCny, updatedAt: String(value.effectiveAt || '财务维护') }
+  }
+  if (key === 'tax-settings' && Array.isArray(value.rules) && !('countries' in value) && !('providers' in value)) {
+    return { countries: [], providers: [], updatedAt: '尚未保存' }
+  }
+  return value
+}
+
 export async function hydrateFinanceSettings() {
   const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings')
   for (const [rawKey, wrapped] of Object.entries(values)) {
     const key = rawKey as FinanceSettingKey
-    cache.set(key, wrapped.value)
+    cache.set(key, normalizeFinanceSettingValue(key, wrapped.value))
     versions.set(key, wrapped._version)
   }
 }
