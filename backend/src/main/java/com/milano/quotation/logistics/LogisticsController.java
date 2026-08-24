@@ -3,6 +3,7 @@ package com.milano.quotation.logistics;
 import tools.jackson.databind.node.ObjectNode;
 import com.milano.quotation.audit.AuditService;
 import com.milano.quotation.common.ApiResponse;
+import com.milano.quotation.common.PageResponse;
 import com.milano.quotation.idempotency.IdempotencyService;
 import com.milano.quotation.security.QuotationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -10,12 +11,19 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 import java.util.Map;import java.util.UUID;
 
 @RestController @RequestMapping("/api/v1/logistics") @PreAuthorize("hasAuthority('PERM_logistics')") @Transactional
 public class LogisticsController{
-    private final LogisticsService logistics;private final LogisticsWorkbookService workbooks;private final AuditService audit;private final IdempotencyService idempotency;public LogisticsController(LogisticsService logistics,LogisticsWorkbookService workbooks,AuditService audit,IdempotencyService idempotency){this.logistics=logistics;this.workbooks=workbooks;this.audit=audit;this.idempotency=idempotency;}
+    private final LogisticsService logistics;private final LogisticsQueryService queries;private final LogisticsWorkbookService workbooks;private final AuditService audit;private final IdempotencyService idempotency;public LogisticsController(LogisticsService logistics,LogisticsQueryService queries,LogisticsWorkbookService workbooks,AuditService audit,IdempotencyService idempotency){this.logistics=logistics;this.queries=queries;this.workbooks=workbooks;this.audit=audit;this.idempotency=idempotency;}
     @GetMapping("/workspace")ApiResponse<LogisticsService.Workspace>workspace(){return ApiResponse.ok(logistics.workspace());}
+    @GetMapping("/providers")ApiResponse<PageResponse<JsonNode>>providers(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="50")int size,@RequestParam(defaultValue="")String query,@RequestParam(required=false)Boolean enabled){return ApiResponse.ok(queries.providers(page,size,query,enabled));}
+    @GetMapping("/channels")ApiResponse<PageResponse<JsonNode>>channels(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="50")int size,@RequestParam(defaultValue="")String query,@RequestParam(required=false)UUID providerId,@RequestParam(required=false)Boolean enabled){return ApiResponse.ok(queries.channels(page,size,query,providerId,enabled));}
+    @GetMapping("/versions")ApiResponse<PageResponse<JsonNode>>versions(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="50")int size,@RequestParam(required=false)UUID channelId,@RequestParam(defaultValue="")String status){return ApiResponse.ok(queries.versions(page,size,channelId,status));}
+    @GetMapping("/versions/{versionId}/rows")ApiResponse<PageResponse<JsonNode>>versionRows(@PathVariable UUID versionId,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="100")int size,@RequestParam(defaultValue="")String countryCode,@RequestParam(defaultValue="")String query){return ApiResponse.ok(queries.versionRows(versionId,page,size,countryCode,query));}
+    @GetMapping("/versions/{versionId}/issues")ApiResponse<PageResponse<JsonNode>>versionIssues(@PathVariable UUID versionId,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="100")int size){return ApiResponse.ok(queries.versionIssues(versionId,page,size));}
+    @GetMapping("/versions/{versionId}/diff")ApiResponse<PageResponse<JsonNode>>versionDiff(@PathVariable UUID versionId,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="100")int size){return ApiResponse.ok(queries.versionDiff(versionId,page,size));}
     @PostMapping("/providers")ApiResponse<?>provider(@RequestBody ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){var existing=idempotency.existing(account(auth),"logistics-provider-create",key,body);if(existing.isPresent())return ApiResponse.ok(existing.get());var result=logistics.addProvider(body);idempotency.save(account(auth),"logistics-provider-create",key,body,result);audit.record("logistics.provider-create","logistics-provider",result.path("id").asText(),"success",Map.of());return ApiResponse.ok(result);}
     @PostMapping("/channels")ApiResponse<?>channel(@RequestBody ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){var existing=idempotency.existing(account(auth),"logistics-channel-create",key,body);if(existing.isPresent())return ApiResponse.ok(existing.get());var result=logistics.addChannel(body);idempotency.save(account(auth),"logistics-channel-create",key,body,result);audit.record("logistics.channel-create","logistics-channel",result.path("id").asText(),"success",Map.of());return ApiResponse.ok(result);}
     @PutMapping("/channels/{channelId}")ApiResponse<?>updateChannel(@PathVariable UUID channelId,@RequestBody ObjectNode body,@RequestHeader("If-Match")long version,Authentication auth){var result=logistics.updateChannel(channelId,body,version);audit.record("logistics.channel-update","logistics-channel",channelId.toString(),"success",Map.of("actor",account(auth)));return ApiResponse.ok(result);}

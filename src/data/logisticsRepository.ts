@@ -1,6 +1,7 @@
-import { replaceLogisticsRules, type LogisticsPriceRow, type LogisticsRule } from './logistics'
+import { type LogisticsPriceRow, type LogisticsRule } from './logistics'
 import type { LogisticsDiffRow, LogisticsDiffSummary, LogisticsImportIssue, LogisticsImportPreview, LogisticsRateRow } from './logisticsWorkbook'
 import { api, idempotencyKey } from '@/services/http'
+import { invalidatePublishedLogisticsCache } from './publishedLogisticsRepository'
 
 export type LogisticsProviderRecord = { id: string; name: string; code: string; enabled: boolean; createdAt: string; updatedAt: string }
 export type LogisticsChannelRecord = {
@@ -12,12 +13,13 @@ export type LogisticsChannelVersionRecord = {
   id: string; channelId: string; versionNumber: number; status: LogisticsVersionStatus; fileName: string; sourceHash: string
   originalFile: Blob | null; rows: LogisticsRateRow[]; issues: LogisticsImportIssue[]; diffRows: LogisticsDiffRow[]; summary: LogisticsDiffSummary
   importedAt: string; importedBy: string; publishedAt: string; publishedBy: string; auditNote: string; rollbackFromVersionId?: string
+  rowCount: number; issueCount: number; diffCount: number; countryCount: number
 }
 export type LogisticsAuditRecord = { id: string; channelId: string; versionId: string; action: 'import' | 'publish' | 'rollback'; actor: string; note: string; createdAt: string }
 export type LogisticsWorkspaceState = { providers: LogisticsProviderRecord[]; channels: LogisticsChannelRecord[]; versions: LogisticsChannelVersionRecord[]; audits: LogisticsAuditRecord[] }
 export const LOGISTICS_PUBLISHED_EVENT = 'milano:logistics-published'
 
-type RemoteWorkspace = Omit<LogisticsWorkspaceState, 'audits'> & { audits?: LogisticsAuditRecord[] }
+type PageResult<T> = { items: T[]; page: number; size: number; total: number; totalPages: number }
 const WORKSPACE_CACHE_MS = 5_000
 let workspaceCache: { value: LogisticsWorkspaceState; expiresAt: number } | null = null
 let workspaceRequest: Promise<LogisticsWorkspaceState> | null = null
@@ -50,6 +52,10 @@ function normalizeLogisticsVersion(version: LogisticsChannelVersionRecord): Logi
     publishedAt: String(version.publishedAt || ''),
     publishedBy: String(version.publishedBy || ''),
     auditNote: String(version.auditNote || ''),
+    rowCount: numberOrZero(version.rowCount || version.rows?.length),
+    issueCount: numberOrZero(version.issueCount || version.issues?.length),
+    diffCount: numberOrZero(version.diffCount || version.diffRows?.length),
+    countryCount: numberOrZero(version.countryCount),
   }
 }
 
@@ -67,15 +73,33 @@ export function normalizeLogisticsPriceRow(row: Partial<LogisticsRateRow>): Logi
 
 export function invalidateLogisticsWorkspaceCache() { workspaceCache = null }
 
+async function loadAllPages<T>(path: string) {
+  const items: T[] = []
+  let page = 0
+  let totalPages = 1
+  while (page < totalPages) {
+    const separator = path.includes('?') ? '&' : '?'
+    const result = await api.get<PageResult<T>>(`${path}${separator}page=${page}&size=200`)
+    items.push(...result.items)
+    totalPages = result.totalPages
+    page += 1
+  }
+  return items
+}
+
 export async function loadLogisticsWorkspace(): Promise<LogisticsWorkspaceState> {
   if (workspaceCache && workspaceCache.expiresAt > Date.now()) return workspaceCache.value
   if (workspaceRequest) return workspaceRequest
-  workspaceRequest = api.get<RemoteWorkspace>('/logistics/workspace').then(state => {
+  workspaceRequest = Promise.all([
+    loadAllPages<LogisticsProviderRecord>('/logistics/providers'),
+    loadAllPages<LogisticsChannelRecord>('/logistics/channels'),
+    loadAllPages<LogisticsChannelVersionRecord>('/logistics/versions'),
+  ]).then(([providers, channels, versions]) => {
     const normalized = {
-      providers: [...state.providers].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
-      channels: [...state.channels].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
-      versions: [...state.versions].map(normalizeLogisticsVersion).sort((a, b) => b.versionNumber - a.versionNumber || b.importedAt.localeCompare(a.importedAt)),
-      audits: [...(state.audits || [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      providers: [...providers].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+      channels: [...channels].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+      versions: [...versions].map(normalizeLogisticsVersion).sort((a, b) => b.versionNumber - a.versionNumber || b.importedAt.localeCompare(a.importedAt)),
+      audits: [],
     }
     workspaceCache = { value: normalized, expiresAt: Date.now() + WORKSPACE_CACHE_MS }
     return normalized
@@ -94,11 +118,15 @@ export async function addLogisticsChannel(input: { providerId: string; name: str
 }
 
 export async function updateLogisticsChannel(channel: LogisticsChannelRecord, input: { name: string; code: string; type: string; logisticsAttribute: string; enabled: boolean }) {
-  return mutation(api.put<LogisticsChannelRecord>(`/logistics/channels/${channel.id}`, input, { 'If-Match': String(channel._version) }))
+  const result = await mutation(api.put<LogisticsChannelRecord>(`/logistics/channels/${channel.id}`, input, { 'If-Match': String(channel._version) }))
+  if (channel.currentVersionId) await invalidatePublishedLogisticsCache()
+  return result
 }
 
 export async function setLogisticsChannelStatus(channel: LogisticsChannelRecord, enabled: boolean) {
-  return mutation(api.patch<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/status`, { enabled }, { 'If-Match': String(channel._version) }))
+  const result = await mutation(api.patch<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/status`, { enabled }, { 'If-Match': String(channel._version) }))
+  if (channel.currentVersionId) await invalidatePublishedLogisticsCache()
+  return result
 }
 
 export async function cloneLogisticsChannel(channel: LogisticsChannelRecord, name: string, code: string) {
@@ -120,32 +148,52 @@ export async function createLogisticsDraft(channelId: string, preview: Logistics
 export async function publishLogisticsVersion(channelId: string, versionId: string, note: string, removalConfirmed = false) {
   await api.post(`/logistics/channels/${channelId}/versions/${versionId}/publish`, { note, removalConfirmed }, idempotencyKey('logistics-publish'))
   invalidateLogisticsWorkspaceCache()
-  await refreshPublishedLogisticsRules(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT))
+  await invalidatePublishedLogisticsCache(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT))
 }
 
 export async function rollbackLogisticsVersion(channelId: string, targetVersionId: string, note: string) {
   const result = await api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/versions/${targetVersionId}/rollback`, { note }, idempotencyKey('logistics-rollback'))
   invalidateLogisticsWorkspaceCache()
-  await refreshPublishedLogisticsRules(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT)); return result
+  await invalidatePublishedLogisticsCache(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT)); return result
 }
 
 export function versionRows(state: LogisticsWorkspaceState, channel: LogisticsChannelRecord) { return state.versions.find(version => version.id === channel.currentVersionId)?.rows || [] }
 
-export async function refreshPublishedLogisticsRules(existingState?: LogisticsWorkspaceState) {
-  const state = existingState || await loadLogisticsWorkspace(); const providers = new Map(state.providers.map(provider => [provider.id, provider])); const versions = new Map(state.versions.map(version => [version.id, version]))
-  const rules: LogisticsRule[] = state.channels.filter(channel => channel.enabled && channel.currentVersionId).flatMap(channel => {
-    const provider = providers.get(channel.providerId); const version = versions.get(channel.currentVersionId)
-    if (!provider?.enabled || !version || version.status !== 'published') return []
-    const prices = version.rows.map(normalizeLogisticsPriceRow)
-    return [{ id: channel.ruleId, name: channel.name, englishName: channel.code.toLowerCase(), type: channel.type, currency: 'CNY', published: '发布', status: '启用', dates: `${channel.createdAt}|${channel.updatedAt}`, users: `${version.importedBy}|${version.publishedBy}`, relations: [{ carrier: provider.name, channel: channel.name, channelCode: channel.code, discounts: '-\n-' }], phoneRequired: prices.some(row => row.phoneRequired), areaCount: new Set(prices.map(row => row.countryCode || row.areaName)).size, priceRowCount: prices.length, prices }]
-  })
-  replaceLogisticsRules(rules)
-  return rules
+async function loadVersionArray<T>(versionId: string, field: 'rows' | 'issues' | 'diff') {
+  return loadAllPages<T>(`/logistics/versions/${versionId}/${field}`)
 }
 
-export async function initializeLogisticsRepository() {
-  try { await refreshPublishedLogisticsRules() } catch (error) {
-    replaceLogisticsRules([])
-    console.warn('报价物流服务初始化失败，已停用本地规则并等待正式发布版本', error)
-  }
+export async function loadLogisticsVersionDetail(version: LogisticsChannelVersionRecord) {
+  const [rows, issues, diffRows] = await Promise.all([
+    loadVersionArray<LogisticsRateRow>(version.id, 'rows'),
+    loadVersionArray<LogisticsImportIssue>(version.id, 'issues'),
+    loadVersionArray<LogisticsDiffRow>(version.id, 'diff'),
+  ])
+  return normalizeLogisticsVersion({ ...version, rows, issues, diffRows })
+}
+
+export async function loadCurrentVersionRows(state: LogisticsWorkspaceState, channel: LogisticsChannelRecord) {
+  const version = state.versions.find(item => item.id === channel.currentVersionId)
+  if (!version) return []
+  if (version.rows.length || version.rowCount === 0) return version.rows
+  const rows = await loadVersionArray<LogisticsRateRow>(version.id, 'rows')
+  version.rows = rows
+  return rows
+}
+
+export function workspaceLogisticsRules(state: LogisticsWorkspaceState): LogisticsRule[] {
+  const providers = new Map(state.providers.map(provider => [provider.id, provider]))
+  return state.channels.map(channel => {
+    const provider = providers.get(channel.providerId)
+    const version = state.versions.find(item => item.id === channel.currentVersionId)
+      || state.versions.find(item => item.channelId === channel.id && item.status === 'draft')
+    return {
+      id: channel.ruleId, name: channel.name, englishName: channel.code.toLowerCase(), type: channel.type, currency: 'CNY',
+      published: channel.currentVersionId ? '发布' : '未发布', status: channel.enabled && provider?.enabled ? '启用' : '禁用',
+      dates: `${channel.createdAt}|${channel.updatedAt}`, users: `${version?.importedBy || ''}|${version?.publishedBy || ''}`,
+      relations: [{ carrier: provider?.name || '', channel: channel.name, channelCode: channel.code, discounts: '-\n-' }],
+      phoneRequired: false, areaCount: version?.countryCount || 0, priceRowCount: version?.rowCount || 0,
+      prices: version?.rows.map(normalizeLogisticsPriceRow) || [],
+    }
+  })
 }

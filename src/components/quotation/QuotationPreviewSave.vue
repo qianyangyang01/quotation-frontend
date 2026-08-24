@@ -22,8 +22,9 @@ const props = withDefaults(defineProps<{
   primaryCnyPrice: number
   primaryUsdPrice: number
   blockReason?: string
+  saving?: boolean
   validationIssues?: Array<{ key: string; label: string; message: string }>
-}>(), { blockReason: '', validationIssues: () => [] })
+}>(), { blockReason: '', saving: false, validationIssues: () => [] })
 
 const emit = defineEmits<{ save: []; copy: [rows: QuotationMatrixRow[]]; locateIssue: [key: string] }>()
 const expandedCountries = ref(new Set<string>())
@@ -136,7 +137,7 @@ function isPrimary(row: QuotationMatrixRow) { return row.country === props.prima
       </div>
     </section>
 
-    <footer><span :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button class="outline" :disabled="!rows.length" @click="emit('copy',rows)">复制报价数据</button><button class="dark" :disabled="!rows.length" @click="toggleAll">{{ allExpanded ? '收起报价单' : '查看完整报价单' }}</button><button class="save" :disabled="!!blockReason || !hasQuoteRows" @click="emit('save')">保存 1 张报价单 · {{ countryCount }}国{{ rows.length }}渠道</button></div></footer>
+    <footer><span :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button class="outline" :disabled="!rows.length || saving" @click="emit('copy',rows)">复制报价数据</button><button class="dark" :disabled="!rows.length || saving" @click="toggleAll">{{ allExpanded ? '收起报价单' : '查看完整报价单' }}</button><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving" @click="emit('save')">{{ saving ? '正在校验物流版本…' : `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
   </section>
 </template>
 

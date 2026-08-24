@@ -1,4 +1,4 @@
-import { australiaQuoteRegions, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation } from './logistics'
+import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation } from './logistics'
 import {
   defaultCountrySortOrder,
   defaultCountryStage,
@@ -67,11 +67,7 @@ const defaultGradeSettings: CustomerGradeSetting[] = [
 
 export function countriesAvailableForCategory(attribute: string) {
   if (!attribute.trim()) return []
-  const countries = logisticsRules
-    .filter(rule => rule.status === '启用')
-    .flatMap(rule => rule.prices)
-    .map(price => ({ code: price.countryCode, name: price.areaName }))
-    .filter(country => country.name !== '全球')
+  const countries = logisticsCountries.filter(country => country.name !== '全球')
   return [...new Map(countries.map(country => [country.code || country.name, country])).values()]
 }
 
@@ -90,6 +86,17 @@ function defaultFinanceCountrySettings(): FinanceCountrySetting[] {
 }
 
 function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting>[]) {
+  if (!logisticsCountries.length && settings.length) {
+    return settings.filter(setting => setting.country).map(setting => {
+      const stage = setting.stage === 'common' || setting.stage === 'standard' || setting.stage === 'rare' ? setting.stage : defaultCountryStage(String(setting.country))
+      return {
+        country: String(setting.country), code: String(setting.code || '').toUpperCase(), stage,
+        continent: setting.continent || inferCountryContinent(setting.code),
+        sortOrder: Number.isFinite(Number(setting.sortOrder)) ? Math.max(1, Number(setting.sortOrder)) : defaultCountrySortOrder(String(setting.country), stage),
+        enabled: setting.enabled !== false,
+      }
+    }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN'))
+  }
   const stored = new Map(settings.map(setting => [setting.country, setting]))
   const normalized = defaultFinanceCountrySettings().map(fallback => {
     const setting = stored.get(fallback.country)
@@ -169,7 +176,7 @@ function normalizePolicies(policies: FinanceChannelPolicy[]) {
     return {
       ...policy,
       countryRules: policy.countryRules.filter(rule => countryMeta.has(rule.country)).map(rule => {
-        const available = new Set(channelsAvailableForCountry(rule.country, policy.category).map(option => option.key))
+        const available = logisticsRules.length ? new Set(channelsAvailableForCountry(rule.country, policy.category).map(option => option.key)) : null
         const stage = rule.stage === 'common' || rule.stage === 'standard' || rule.stage === 'rare'
           ? rule.stage
           : defaultCountryStage(rule.country)
@@ -178,7 +185,7 @@ function normalizePolicies(policies: FinanceChannelPolicy[]) {
           stage,
           continent: inferCountryContinent(countryMeta.get(rule.country)?.code),
           sortOrder: Number.isFinite(Number(rule.sortOrder)) ? Number(rule.sortOrder) : defaultCountrySortOrder(rule.country, stage),
-          allowedChannels: rule.allowedChannels.filter(channel => available.has(channel)),
+          allowedChannels: available ? rule.allowedChannels.filter(channel => available.has(channel)) : [...rule.allowedChannels],
         }
       }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
     }
