@@ -1,23 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import AppTopbar from '@/components/AppTopbar.vue'
-import { type LogisticsPriceRow, type LogisticsRule } from '@/data/logistics'
+import { type LogisticsRule } from '@/data/logistics'
 import { parseLogisticsWorkbook, type LogisticsDiffField, type LogisticsDiffRow, type LogisticsImportPreview } from '@/data/logisticsWorkbook'
 import {
   addLogisticsChannel,
   addLogisticsProvider,
-  cloneLogisticsChannel,
   createLogisticsDraft,
-  deleteLogisticsChannel,
+  importLogisticsProviderFiles,
   loadCurrentVersionRows,
   loadLogisticsVersionDetail,
   loadLogisticsWorkspace,
+  previewLogisticsProviderImports,
+  publishLogisticsProviderVersions,
   publishLogisticsVersion,
+  rejectLogisticsVersion,
   rollbackLogisticsVersion,
-  saveLogisticsManualDraft,
   setLogisticsChannelStatus,
-  updateLogisticsChannel,
   workspaceLogisticsRules,
+  type LogisticsBatchPreview,
   type LogisticsChannelRecord,
   type LogisticsChannelVersionRecord,
   type LogisticsProviderRecord,
@@ -27,9 +28,7 @@ import {
 const rules = ref<LogisticsRule[]>([])
 const workspaceLoading = ref(true)
 const workspaceError = ref('')
-const selectedIds = ref<number[]>([])
 const typeFilter = ref('')
-const publishFilter = ref('')
 const statusFilter = ref('')
 const changeFilter = ref<'pending' | 'up' | 'down' | 'risk' | ''>('')
 const searchMode = ref<'name' | 'english'>('name')
@@ -39,15 +38,7 @@ const pageSize = ref(10)
 const toast = ref('')
 const view = ref<'list' | 'areas'>('list')
 const activeRule = ref<LogisticsRule | null>(null)
-const showRuleEditor = ref(false)
-const showConditionEditor = ref(false)
-const showAreaEditor = ref(false)
-const openRuleMenuId = ref<number | null>(null)
-const form = reactive({ id: 0, name: '', englishName: '', type: '专线', published: '未发布', status: '启用', carrier: '', channel: '', channelCode: '' })
-const editingAreaIndex = ref<number | null>(null)
-const areaForm = reactive({ areaName: '', countryCode: '', etaMinDays: 0, etaMaxDays: 0, weightFromG: 0, weightToG: 0, pricePer1000G: 0, registrationFee: 0 })
 const areaKeyword = ref('')
-const selectedAreaIndexes = ref<number[]>([])
 type WorkspaceMode = 'rules' | 'base'
 const workspaceMode = ref<WorkspaceMode>('base')
 const templateInput = ref<HTMLInputElement | null>(null)
@@ -73,6 +64,14 @@ const expandedReviewCountries = ref<string[]>([])
 const reviewedDiffKeys = ref<string[]>([])
 const historyChannel = ref<LogisticsChannelRecord | null>(null)
 const showVersionHistory = ref(false)
+const batchFiles = ref<File[]>([])
+const batchPreview = ref<LogisticsBatchPreview | null>(null)
+const showBatchPreview = ref(false)
+const replaceBatchDrafts = ref(false)
+const showBatchReview = ref(false)
+const batchSelectedVersionIds = ref<string[]>([])
+const batchReviewedVersionIds = ref<string[]>([])
+const batchAuditNote = ref('')
 const providerSettings = computed(() => workspace.value.providers)
 const filteredProviderSettings = computed(() => {
   const query = providerSearch.value.trim().toLowerCase()
@@ -82,6 +81,7 @@ const filteredProviderSettings = computed(() => {
 const selectedProvider = computed(() => providerSettings.value.find(item => item.id === selectedProviderId.value) ?? providerSettings.value[0])
 const selectedProviderChannels = computed(() => workspace.value.channels.filter(item => item.providerId === selectedProvider.value?.id))
 const historyVersions = computed(() => workspace.value.versions.filter(item => item.channelId === historyChannel.value?.id))
+const selectedProviderDrafts = computed(() => selectedProviderChannels.value.map(channel => ({ channel, version: draftVersion(channel) })).filter((item): item is { channel: LogisticsChannelRecord; version: LogisticsChannelVersionRecord } => Boolean(item.version)))
 const reviewChangedDiffs = computed(() => importPreview.value?.diffRows.filter(item => item.type !== 'unchanged') ?? [])
 const reviewVisibleDiffs = computed(() => reviewChangedDiffs.value.filter(item => {
   const query = reviewCountryKeyword.value.trim().toLowerCase()
@@ -178,16 +178,6 @@ function triggerTemplateUpload(channelId = '', mode: 'single' | 'batch-update' |
   uploadMode.value = mode
   templateInput.value?.click()
 }
-function matchExistingChannel(fileName: string) {
-  const baseName = fileName.replace(/\.xlsx$/i, '').toUpperCase()
-  const codeTokens = baseName.split(/[^A-Z0-9]+/).filter(Boolean)
-  const compact = baseName.replace(/[^A-Z0-9\u3400-\u9FFF]/g, '')
-  return selectedProviderChannels.value.find(channel => {
-    const code = channel.code.trim().toUpperCase()
-    const name = channel.name.toUpperCase().replace(/[^A-Z0-9\u3400-\u9FFF]/g, '')
-    return (code && codeTokens.includes(code)) || (name && compact.includes(name))
-  })
-}
 async function refreshWorkspace() {
   workspaceLoading.value = true
   workspaceError.value = ''
@@ -217,20 +207,10 @@ async function handleTemplateUpload(event: Event) {
   try {
     if (uploadMode.value !== 'single') {
       if (!selectedProvider.value) throw new Error('请先选择物流商')
-      let imported = 0
-      for (const file of files) {
-        const name = file.name.replace(/\.xlsx$/i, '').trim()
-        let channel = matchExistingChannel(file.name)
-        if (!channel && uploadMode.value === 'batch-update') throw new Error(`“${file.name}”未匹配到现有渠道，请在文件名中保留渠道编码`)
-        if (!channel) {
-          const preview = await parseLogisticsWorkbook(file, [])
-          channel = await addLogisticsChannel({ providerId: selectedProvider.value.id, name, code: `${selectedProvider.value.code}-${Date.now().toString(36)}-${imported + 1}`, type: '专线', logisticsAttribute: '普货' })
-          await createLogisticsDraft(channel.id, preview, file)
-          await refreshWorkspace()
-        } else await importChannelFile(channel, file, false)
-        imported += 1
-      }
-      notify(uploadMode.value === 'batch-update' ? `已生成 ${imported} 个渠道的待审核价格版本` : `已导入 ${imported} 个渠道草稿，请逐一审核发布`)
+      batchFiles.value = files
+      batchPreview.value = await previewLogisticsProviderImports(selectedProvider.value.id, files)
+      replaceBatchDrafts.value = false
+      showBatchPreview.value = true
     } else {
       const channel = workspace.value.channels.find(item => item.id === uploadChannelId.value)
       if (!channel) throw new Error('请先选择需要更新的渠道')
@@ -238,6 +218,34 @@ async function handleTemplateUpload(event: Event) {
     }
   } catch (error) { notify(error instanceof Error ? error.message : 'Excel 导入失败') }
   input.value = ''
+}
+function batchItemHasDraft(channelId: string) { return Boolean(channelId && workspace.value.versions.some(version => version.channelId === channelId && version.status === 'draft')) }
+async function commitBatchImport() {
+  if (!selectedProvider.value || !batchPreview.value) return
+  if (batchPreview.value.blocking) return notify('批次中存在阻断错误，不能提交')
+  if (batchPreview.value.items.some(item => batchItemHasDraft(item.channelId)) && !replaceBatchDrafts.value) return notify('存在已有待审稿，请勾选明确终止旧草稿后再提交')
+  try {
+    const result = await importLogisticsProviderFiles(selectedProvider.value.id, batchFiles.value, replaceBatchDrafts.value)
+    showBatchPreview.value = false; await refreshWorkspace(); notify(`已生成 ${result.count} 个待审核版本`); openBatchReview()
+  } catch (error) { notify(error instanceof Error ? error.message : '批量导入失败，未写入任何文件') }
+}
+function openBatchReview() {
+  if (!selectedProviderDrafts.value.length) return notify('当前物流商没有待审核版本')
+  batchSelectedVersionIds.value = selectedProviderDrafts.value.map(item => item.version.id)
+  batchReviewedVersionIds.value = []; batchAuditNote.value = ''; showBatchReview.value = true
+}
+function batchNeedsReview(version: LogisticsChannelVersionRecord) { return version.summary.highRisk > 0 || version.summary.removed > 0 }
+async function publishBatchVersions() {
+  if (!selectedProvider.value) return
+  const selected = selectedProviderDrafts.value.filter(item => batchSelectedVersionIds.value.includes(item.version.id))
+  if (!selected.length) return notify('请选择至少一个待审核版本')
+  if (!batchAuditNote.value.trim()) return notify('请填写批量审核备注')
+  const unreviewed = selected.filter(item => batchNeedsReview(item.version) && !batchReviewedVersionIds.value.includes(item.version.id))
+  if (unreviewed.length) return notify(`仍有 ${unreviewed.length} 个风险版本未确认`)
+  try {
+    await publishLogisticsProviderVersions(selectedProvider.value.id, selected.map(item => ({ channelId: item.channel.id, versionId: item.version.id, removalConfirmed: item.version.summary.removed > 0, reviewConfirmed: !batchNeedsReview(item.version) || batchReviewedVersionIds.value.includes(item.version.id) })), batchAuditNote.value)
+    showBatchReview.value = false; await refreshWorkspace(); notify(`已批量发布 ${selected.length} 个正式版本`)
+  } catch (error) { notify(error instanceof Error ? error.message : '批量发布失败，所有渠道仍保持原正式版本') }
 }
 function handleTemplateDrop(event: DragEvent) {
   if (!selectedProvider.value) return
@@ -288,9 +296,15 @@ async function rollbackVersion(version: LogisticsChannelVersionRecord) {
   try { await rollbackLogisticsVersion(historyChannel.value.id, version.id, `回滚至V${version.versionNumber}`); await refreshWorkspace(); notify('回滚成功，报价已恢复到目标版本') }
   catch (error) { notify(error instanceof Error ? error.message : '回滚失败') }
 }
+async function terminateDraft(version: LogisticsChannelVersionRecord) {
+  if (!historyChannel.value) return
+  const note = window.prompt(`请输入终止 V${version.versionNumber} 的原因`, '测试草稿终止，不参与正式报价')?.trim()
+  if (!note) return
+  try { await rejectLogisticsVersion(historyChannel.value.id, version.id, note); await refreshWorkspace(); notify('待审草稿已终止，历史记录已保留') }
+  catch (error) { notify(error instanceof Error ? error.message : '终止草稿失败') }
+}
 onMounted(() => { void refreshWorkspace() })
 function gramsFromKg(value: number) { return Math.ceil(Math.max(0, Number(value) || 0) * 1000) }
-function kilogramsFromGrams(value: number) { return Math.ceil(Math.max(0, Number(value) || 0)) / 1000 }
 
 function draftForRule(rule: LogisticsRule) {
   const channel = workspace.value.channels.find(item => item.ruleId === rule.id)
@@ -307,54 +321,24 @@ const filtered = computed(() => rules.value.filter(rule => {
     || (changeFilter.value === 'risk' && Boolean(draft?.summary.highRisk))
     || (changeFilter.value === 'up' && draftHasDirection(draft, 'up'))
     || (changeFilter.value === 'down' && draftHasDirection(draft, 'down'))
-  return changeMatches && (!typeFilter.value || rule.type.includes(typeFilter.value)) && (!publishFilter.value || rule.published === publishFilter.value) && (!statusFilter.value || rule.status === statusFilter.value) && (!keyword.value.trim() || searchValue.toLowerCase().includes(keyword.value.trim().toLowerCase()))
+  return changeMatches && (!typeFilter.value || rule.type.includes(typeFilter.value)) && (!statusFilter.value || rule.status === statusFilter.value) && (!keyword.value.trim() || searchValue.toLowerCase().includes(keyword.value.trim().toLowerCase()))
 }))
 const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
 const visibleRules = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
-const allVisibleSelected = computed(() => visibleRules.value.length > 0 && visibleRules.value.every(rule => selectedIds.value.includes(rule.id)))
 const areaRows = computed(() => activeRule.value?.prices ?? [])
 const visibleAreaRows = computed(() => areaRows.value.map((area, index) => ({ area, index })).filter(({ area }) => !areaKeyword.value.trim() || `${area.areaName} ${area.countryCode}`.toLowerCase().includes(areaKeyword.value.trim().toLowerCase())))
 const ruleStats = computed(() => ({
   total: rules.value.length,
   enabled: rules.value.filter(rule => rule.status === '启用').length,
-  published: rules.value.filter(rule => rule.published === '发布').length,
+  published: rules.value.length,
   areas: rules.value.reduce((sum, rule) => sum + rule.areaCount, 0),
 }))
 
 function notify(message: string) { toast.value = message; window.setTimeout(() => toast.value === message && (toast.value = ''), 2200) }
-function toggleVisible() { const ids = visibleRules.value.map(rule => rule.id); selectedIds.value = allVisibleSelected.value ? selectedIds.value.filter(id => !ids.includes(id)) : [...new Set([...selectedIds.value, ...ids])] }
-function openRuleEditor(rule?: LogisticsRule) {
-  const relation = rule?.relations[0]
-  Object.assign(form, { id: rule?.id ?? 0, name: rule?.name ?? '', englishName: rule?.englishName ?? '', type: rule?.type ?? '专线', published: rule?.published ?? '未发布', status: rule?.status ?? '启用', carrier: relation?.carrier ?? '', channel: relation?.channel ?? '', channelCode: relation?.channelCode ?? '' })
-  showRuleEditor.value = true
-}
-async function saveRule() {
-  try {
-    const channel = workspace.value.channels.find(item => item.ruleId === form.id)
-    if (channel) await updateLogisticsChannel(channel, { name: form.name, code: form.channelCode || form.englishName || channel.code, type: form.type, logisticsAttribute: channel.logisticsAttribute, enabled: form.status === '启用' })
-    else {
-      if (!selectedProvider.value) throw new Error('请先在物流基础数据中创建并选择物流商')
-      await addLogisticsChannel({ providerId: selectedProvider.value.id, name: form.name || '新运费规则', code: form.channelCode || form.englishName, type: form.type, logisticsAttribute: '普货' })
-    }
-    showRuleEditor.value = false; await refreshWorkspace(); notify('运费规则已保存到数据库')
-  } catch (error) { notify(error instanceof Error ? error.message : '运费规则保存失败') }
-}
-async function cloneSelected() {
-  const rule = rules.value.find(item => selectedIds.value.includes(item.id)); if (!rule) return notify('请选择一条规则')
-  const channel = workspace.value.channels.find(item => item.ruleId === rule.id); if (!channel) return notify('该规则尚未迁移到数据库，不能克隆')
-  try { await cloneLogisticsChannel(channel, `${rule.name}-副本`, `${channel.code}-COPY-${Date.now().toString(36).toUpperCase()}`); await refreshWorkspace(); notify('克隆成功，价格已进入待审核草稿') }
-  catch (error) { notify(error instanceof Error ? error.message : '克隆失败') }
-}
 async function toggleRule(rule: LogisticsRule) {
   const channel = workspace.value.channels.find(item => item.ruleId === rule.id); if (!channel) return notify('该规则尚未迁移到数据库')
-  try { await setLogisticsChannelStatus(channel, rule.status !== '启用'); openRuleMenuId.value = null; await refreshWorkspace(); notify('状态已保存到数据库') }
+  try { await setLogisticsChannelStatus(channel, rule.status !== '启用'); await refreshWorkspace(); notify('启用状态已保存；正式版本和历史保持不变') }
   catch (error) { notify(error instanceof Error ? error.message : '状态设置失败') }
-}
-async function removeRule(rule: LogisticsRule) {
-  const channel = workspace.value.channels.find(item => item.ruleId === rule.id); if (!channel) return notify('该规则尚未迁移到数据库')
-  if (!window.confirm(`确认删除“${rule.name}”吗？已有历史版本的渠道将拒绝删除并提示停用。`)) return
-  try { await deleteLogisticsChannel(channel.id); selectedIds.value = selectedIds.value.filter(id => id !== rule.id); openRuleMenuId.value = null; await refreshWorkspace(); notify('规则已删除') }
-  catch (error) { notify(error instanceof Error ? error.message : '删除失败') }
 }
 async function hydrateRulePrices(rule: LogisticsRule) {
   const channel = workspace.value.channels.find(item => item.ruleId === rule.id)
@@ -367,54 +351,9 @@ async function hydrateRulePrices(rule: LogisticsRule) {
   rule.areaCount = new Set(detail.rows.map(row => row.countryCode || row.areaName)).size
   rule.phoneRequired = detail.rows.some(row => row.phoneRequired)
 }
-async function openAreas(rule: LogisticsRule) { try { await hydrateRulePrices(rule); activeRule.value = rule; openRuleMenuId.value = null; view.value = 'areas' } catch (error) { notify(error instanceof Error ? error.message : '区域规则加载失败') } }
-async function openCondition(rule: LogisticsRule) { try { await hydrateRulePrices(rule); activeRule.value = rule; showConditionEditor.value = true } catch (error) { notify(error instanceof Error ? error.message : '条件规则加载失败') } }
-function exportRules() { const data = rules.value.filter(rule => !selectedIds.value.length || selectedIds.value.includes(rule.id)); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); link.download = '运费规则.json'; link.click(); URL.revokeObjectURL(link.href); notify(`已导出 ${data.length} 条规则`) }
-function openAreaEditor(index?: number) {
-  const row = index === undefined ? null : areaRows.value[index]
-  editingAreaIndex.value = index ?? null
-  Object.assign(areaForm, {
-    areaName: row?.areaName ?? '', countryCode: row?.countryCode ?? '', etaMinDays: row?.etaMinDays ?? 0, etaMaxDays: row?.etaMaxDays ?? 0,
-    weightFromG: gramsFromKg(row?.weightFromKg ?? 0), weightToG: gramsFromKg(row?.weightToKg ?? 0),
-    pricePer1000G: row?.pricePerKg ?? 0, registrationFee: row?.registrationFee ?? 0,
-  })
-  showAreaEditor.value = true
-}
-async function saveArea() {
-  if (!activeRule.value) return
-  if (Number(areaForm.weightToG) < Number(areaForm.weightFromG)) {
-    notify('截止重量不能小于起始重量')
-    return
-  }
-  const editable = {
-    areaName: areaForm.areaName.trim(), countryCode: areaForm.countryCode.trim().toUpperCase(),
-    etaMinDays: Math.max(0, Number(areaForm.etaMinDays) || 0), etaMaxDays: Math.max(0, Number(areaForm.etaMaxDays) || 0),
-    weightFromKg: kilogramsFromGrams(areaForm.weightFromG), weightToKg: kilogramsFromGrams(areaForm.weightToG),
-    pricePerKg: Math.max(0, Number(areaForm.pricePer1000G) || 0), registrationFee: Math.max(0, Number(areaForm.registrationFee) || 0),
-  }
-  const rows = structuredClone(activeRule.value.prices)
-  if (editingAreaIndex.value == null) {
-    const newRow: LogisticsPriceRow = {
-      ...editable, prohibitedMarks: '', allowedMarks: '', maxPerimeterCm: 0, maxSideCm: 0, volumeDivisor: 0,
-      startWeightKg: 0, minChargeWeightKg: 0, firstWeightKg: 0, firstWeightPrice: 0,
-      nextWeightKg: 0, nextWeightPrice: 0, intervalPrice: 0, surcharge: 0, fuelSurchargeRate: 0,
-      prohibitGeneralCargo: false, volumetric: false, phoneRequired: false, zoneName: '', zoneExclude: false,
-    }
-    rows.push(newRow)
-  } else {
-    Object.assign(rows[editingAreaIndex.value]!, editable)
-  }
-  try {
-    const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id)
-    if (!channel) throw new Error('该规则尚未迁移到数据库')
-    await saveLogisticsManualDraft(channel.id, rows, '手工维护区域计费规则')
-    showAreaEditor.value = false; view.value = 'list'; await refreshWorkspace(); notify('区域规则已保存为数据库待审版本，发布后才参与报价')
-  } catch (error) { notify(error instanceof Error ? error.message : '区域规则保存失败') }
-}
+async function openAreas(rule: LogisticsRule) { try { await hydrateRulePrices(rule); activeRule.value = rule; view.value = 'areas' } catch (error) { notify(error instanceof Error ? error.message : '区域规则加载失败') } }
+function exportRules() { const data = rules.value; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); link.download = '正式运费规则.json'; link.click(); URL.revokeObjectURL(link.href); notify(`已导出 ${data.length} 条正式规则`) }
 function exportAreas() { if (!activeRule.value) return; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(activeRule.value.prices, null, 2)], { type: 'application/json' })); link.download = `${activeRule.value.englishName || activeRule.value.id}-areas.json`; link.click(); URL.revokeObjectURL(link.href); notify(`已导出 ${activeRule.value.prices.length} 条区域规则`) }
-async function copyArea(index: number) { if (!activeRule.value) return; const rows = structuredClone(activeRule.value.prices); rows.splice(index + 1, 0, { ...structuredClone(rows[index]!), areaName: `${rows[index]!.areaName}-副本` }); const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id); if (!channel) return notify('该规则尚未迁移到数据库'); try { await saveLogisticsManualDraft(channel.id, rows, '复制区域规则'); view.value = 'list'; await refreshWorkspace(); notify('复制项已保存为待审版本') } catch (error) { notify(error instanceof Error ? error.message : '复制失败') } }
-async function deleteSelectedAreas() { if (!activeRule.value || !selectedAreaIndexes.value.length) return notify('请先选择区域规则'); const rows = activeRule.value.prices.filter((_, index) => !selectedAreaIndexes.value.includes(index)); const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id); if (!channel) return notify('该规则尚未迁移到数据库'); try { await saveLogisticsManualDraft(channel.id, rows, '批量删除区域规则'); selectedAreaIndexes.value = []; view.value = 'list'; await refreshWorkspace(); notify('删除结果已保存为待审版本') } catch (error) { notify(error instanceof Error ? error.message : '批量删除失败') } }
-async function saveCondition() { if (!activeRule.value) return; const channel = workspace.value.channels.find(item => item.ruleId === activeRule.value?.id); if (!channel) return notify('该规则尚未迁移到数据库'); const rows = activeRule.value.prices.map(row => ({ ...row, phoneRequired: activeRule.value!.phoneRequired })); try { await saveLogisticsManualDraft(channel.id, rows, '维护条件限制'); showConditionEditor.value = false; await refreshWorkspace(); notify('条件限制已保存为待审版本') } catch (error) { notify(error instanceof Error ? error.message : '条件限制保存失败') } }
 </script>
 
 <template>
@@ -430,23 +369,22 @@ async function saveCondition() { if (!activeRule.value) return; const channel = 
           <section class="rule-stat-grid">
             <article><span class="stat-icon orange">规</span><div><small>运费规则</small><b>{{ ruleStats.total }}</b><em>当前全部计费规则</em></div></article>
             <article><span class="stat-icon green">启</span><div><small>已启用</small><b>{{ ruleStats.enabled }}</b><em>可参与报价计算</em></div></article>
-            <article><span class="stat-icon blue">发</span><div><small>已发布</small><b>{{ ruleStats.published }}</b><em>已完成发布标记</em></div></article>
+            <article><span class="stat-icon blue">版</span><div><small>正式版本</small><b>{{ ruleStats.published }}</b><em>均由渠道审核发布生成</em></div></article>
             <article><span class="stat-icon amber">区</span><div><small>国家区域</small><b>{{ ruleStats.areas.toLocaleString() }}</b><em>规则关联区域总数</em></div></article>
           </section>
           <section class="rule-workspace-card">
-            <header class="rule-card-head"><div><h2>运费规则列表</h2><p>按物流属性、渠道和国家区域维护报价计算参数。</p></div><div class="header-actions"><button class="secondary-button" @click="exportRules">导出规则</button><button class="secondary-button" @click="cloneSelected">克隆所选</button><button class="primary-button" @click="openRuleEditor()">＋ 新增运费规则</button></div></header>
+            <header class="rule-card-head"><div><h2>运费规则列表</h2><p>只读展示渠道已审核发布的正式版本；价格和版本请到基础资料中的对应渠道维护。</p></div><div class="header-actions"><button class="secondary-button" @click="exportRules">导出正式规则</button></div></header>
             <div class="modern-filters">
               <label class="keyword-search"><span>⌕</span><input v-model="keyword" :placeholder="searchMode==='name'?'搜索规则名称':'搜索英文名称'" @keyup.enter="page=1"></label>
               <div class="search-mode"><button :class="{ active:searchMode==='name' }" @click="searchMode='name';page=1">规则名称</button><button :class="{ active:searchMode==='english' }" @click="searchMode='english';page=1">英文名称</button></div>
               <select v-model="typeFilter" @change="page=1"><option value="">全部类型</option><option>专线</option><option>挂号</option><option>free</option></select>
-              <select v-model="publishFilter" @change="page=1"><option value="">全部发布状态</option><option>发布</option><option>未发布</option></select>
               <select v-model="statusFilter" @change="page=1"><option value="">全部启用状态</option><option>启用</option><option>禁用</option></select>
               <div class="change-chips"><button :class="{ active:changeFilter==='pending' }" @click="changeFilter=changeFilter==='pending'?'':'pending';page=1">有新版本待审核</button><button :class="{ active:changeFilter==='up' }" @click="changeFilter=changeFilter==='up'?'':'up';page=1">价格上涨</button><button :class="{ active:changeFilter==='down' }" @click="changeFilter=changeFilter==='down'?'':'down';page=1">价格下降</button><button :class="{ active:changeFilter==='risk' }" @click="changeFilter=changeFilter==='risk'?'':'risk';page=1">大幅调价</button></div>
-              <button class="reset-button" @click="typeFilter='';publishFilter='';statusFilter='';changeFilter='';keyword='';page=1">重置</button>
+              <button class="reset-button" @click="typeFilter='';statusFilter='';changeFilter='';keyword='';page=1">重置</button>
               <span class="filter-result">共 {{ filtered.length }} 条</span>
             </div>
-            <div class="modern-table-scroll"><table class="modern-rule-table"><thead><tr><th><input type="checkbox" :checked="allVisibleSelected" @change="toggleVisible"></th><th>规则信息</th><th>类型 / 关联</th><th>发布状态</th><th>维护信息</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td><input v-model="selectedIds" type="checkbox" :value="rule.id"></td><td class="rule-name-cell"><b>{{ rule.name }}</b><small>{{ rule.englishName || '暂无英文名称' }}</small></td><td><span class="rule-type">{{ rule.type }}</span><small>{{ rule.relations.length }} 个关联渠道</small></td><td><span class="status-pill" :class="rule.published==='发布'?'success':'pending'">{{ rule.published }}</span></td><td class="maintenance-cell"><b>{{ rule.users.split('|')[0] || '—' }}</b><small>{{ rule.dates.split('|')[1] || rule.dates.split('|')[0] || '暂无时间' }}</small></td><td><span class="status-pill" :class="rule.status==='启用'?'success':'disabled'">{{ rule.status }}</span></td><td class="modern-ops"><button class="area-button" @click="openAreas(rule)">区域设置</button><button class="edit-button" @click="openRuleEditor(rule)">编辑</button><div class="more-wrap"><button class="more-button" aria-label="更多操作" @click.stop="openRuleMenuId=openRuleMenuId===rule.id?null:rule.id">•••</button><div v-if="openRuleMenuId===rule.id" class="more-popover"><button @click="toggleRule(rule)">{{ rule.status==='启用'?'禁用规则':'启用规则' }}</button><button @click="openCondition(rule);openRuleMenuId=null">条件限制</button><button class="danger" @click="removeRule(rule)">删除规则</button></div></div></td></tr><tr v-if="!visibleRules.length"><td colspan="7" class="modern-empty">没有找到符合条件的运费规则</td></tr></tbody></table></div>
-            <footer class="modern-pagination"><span>已选择 {{ selectedIds.length }} 条 · 共 {{ filtered.length }} 条</span><label>每页<select v-model.number="pageSize" @change="page=1"><option>10</option><option>20</option><option>50</option><option>100</option></select>条</label><button :disabled="page===1" @click="page=Math.max(1,page-1)">上一页</button><b>{{ page }} / {{ pages }}</b><button :disabled="page===pages" @click="page=Math.min(pages,page+1)">下一页</button></footer>
+            <div class="modern-table-scroll"><table class="modern-rule-table"><thead><tr><th>规则信息</th><th>类型 / 关联</th><th>正式版本</th><th>维护信息</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td class="rule-name-cell"><b>{{ rule.name }}</b><small>{{ rule.englishName || '暂无英文名称' }}</small></td><td><span class="rule-type">{{ rule.type }}</span><small>{{ rule.relations.length }} 个关联渠道</small></td><td><span class="status-pill success">{{ rule.published }} · 已发布</span></td><td class="maintenance-cell"><b>{{ rule.users.split('|')[1] || rule.users.split('|')[0] || '—' }}</b><small>{{ rule.dates.split('|')[1] || rule.dates.split('|')[0] || '暂无时间' }}</small></td><td><span class="status-pill" :class="rule.status==='启用'?'success':'disabled'">{{ rule.status }}</span></td><td class="modern-ops"><button class="area-button" @click="openAreas(rule)">查看区域</button><button class="edit-button" @click="toggleRule(rule)">{{ rule.status==='启用'?'禁用':'启用' }}</button></td></tr><tr v-if="!visibleRules.length"><td colspan="6" class="modern-empty">当前没有已审核发布的正式运费规则</td></tr></tbody></table></div>
+            <footer class="modern-pagination"><span>共 {{ filtered.length }} 条正式规则</span><label>每页<select v-model.number="pageSize" @change="page=1"><option>10</option><option>20</option><option>50</option><option>100</option></select>条</label><button :disabled="page===1" @click="page=Math.max(1,page-1)">上一页</button><b>{{ page }} / {{ pages }}</b><button :disabled="page===pages" @click="page=Math.min(pages,page+1)">下一页</button></footer>
           </section>
         </template>
         <section v-else class="base-settings">
@@ -454,18 +392,17 @@ async function saveCondition() { if (!activeRule.value) return; const channel = 
           <input ref="templateInput" class="hidden-file" type="file" multiple accept=".xlsx" @change="handleTemplateUpload">
           <div class="provider-manager">
             <aside class="provider-list"><div class="provider-sort-hint"><span>物流商列表</span><small>正式渠道数据仓库</small></div><div class="provider-list-scroll"><button v-for="provider in filteredProviderSettings" :key="provider.id" :class="{ active:selectedProvider?.id===provider.id }" @click="selectedProviderId=provider.id"><u>⋮⋮</u><i>{{ provider.name.slice(0,1) }}</i><span><b>{{ provider.name }}</b><small>{{ provider.code }}</small></span><em>{{ providerChannelCount(provider) }}个渠道</em><strong>›</strong></button><div v-if="!filteredProviderSettings.length" class="provider-empty">没有匹配的物流商</div></div><footer>共 {{ providerSettings.length }} 家物流商</footer></aside>
-            <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0,1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span></h3><small>物流商编码 {{ selectedProvider.code }} · 新物流商发布前需在财务设置税务属性</small></div><div class="provider-detail-actions"><button class="outline-orange" @click="showChannelEditor=true">＋ 新增渠道</button><button class="outline-orange" @click="triggerTemplateUpload('','batch-import')">批量导入渠道</button><button class="upload" @click="triggerTemplateUpload('','batch-update')">批量更新价格</button></div></header><div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute }}</small></b><div><strong>{{ currentVersion(channel) ? `V${currentVersion(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersion(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ countryCount(visibleVersion(channel)) }}国 / {{ visibleVersion(channel)?.rowCount || 0 }}价格段</div><span :class="{ pending:draftVersion(channel) }">{{ draftVersion(channel) ? `V${draftVersion(channel)!.versionNumber} 待审核` : '无待审版本' }}</span><time>{{ currentVersion(channel)?.publishedAt || '—' }}</time><div class="template-actions"><button @click="triggerTemplateUpload(channel.id)">{{ currentVersion(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersion(channel)" class="move-template" @click="openDraftReview(channel)">审核发布</button><button @click="openHistory(channel)">版本历史</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未创建渠道</div></div><button class="template-dropzone" @dragover.prevent @drop.prevent="handleTemplateDrop" @click="triggerTemplateUpload('','batch-update')"><i>⇧</i><span>拖拽多个含渠道编码的 38 列模板到这里，或<strong>批量更新现有渠道价格</strong></span></button></div></section>
+            <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0,1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span></h3><small>物流商编码 {{ selectedProvider.code }} · 渠道、价格和审核的唯一维护入口</small></div><div class="provider-detail-actions"><button class="outline-orange" @click="showChannelEditor=true">＋ 新增渠道</button><button class="outline-orange" @click="triggerTemplateUpload('','batch-import')">批量导入渠道</button><button class="upload" @click="triggerTemplateUpload('','batch-update')">批量更新价格</button><button v-if="selectedProviderDrafts.length" class="upload" @click="openBatchReview">批量审核 {{ selectedProviderDrafts.length }}</button></div></header><div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute }}</small></b><div><strong>{{ currentVersion(channel) ? `V${currentVersion(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersion(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ countryCount(visibleVersion(channel)) }}国 / {{ visibleVersion(channel)?.rowCount || 0 }}价格段</div><span :class="{ pending:draftVersion(channel) }">{{ draftVersion(channel) ? `V${draftVersion(channel)!.versionNumber} 待审核` : '无待审版本' }}</span><time>{{ currentVersion(channel)?.publishedAt || '—' }}</time><div class="template-actions"><button @click="triggerTemplateUpload(channel.id)">{{ currentVersion(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersion(channel)" class="move-template" @click="openDraftReview(channel)">审核发布</button><button @click="openHistory(channel)">版本历史</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未创建渠道</div></div><button class="template-dropzone" @dragover.prevent @drop.prevent="handleTemplateDrop" @click="triggerTemplateUpload('','batch-update')"><i>⇧</i><span>拖拽多个渠道 Excel 到这里，系统将按<strong>渠道编码或名称自动匹配并预检</strong></span></button></div></section>
           </div>
         </section>
       </template>
-      <template v-else-if="activeRule"><div class="area-page-head"><button class="back-button" @click="view='list'">‹ 返回运费规则</button><div><p>REGIONAL PRICING RULES</p><h1>{{ activeRule.name }}</h1><span>维护国家区域、时效、重量范围和人民币计费价格；保存后进入待审版本。</span></div><button class="primary-button" @click="openAreaEditor()">＋ 新增区域规则</button></div><section class="area-workspace-card"><div class="area-toolbar"><label><span>⌕</span><input v-model="areaKeyword" placeholder="搜索区域名称或国家代码"></label><div><button class="secondary-button" @click="triggerTemplateUpload(workspace.channels.find(item=>item.ruleId===activeRule?.id)?.id || '')">导入Excel</button><button class="secondary-button" @click="exportAreas">导出</button><button class="secondary-button" @click="view='list';workspaceMode='base'">版本日志</button><button class="danger-outline" :disabled="!selectedAreaIndexes.length" @click="deleteSelectedAreas">批量删除</button></div><span>共 {{ visibleAreaRows.length }} 条区域规则</span></div><div class="modern-table-scroll"><table class="modern-area-table"><thead><tr><th></th><th>区域信息</th><th>预计时效</th><th>商品限制</th><th>状态</th><th>计费重量</th><th>计费价格</th><th>操作</th></tr></thead><tbody><tr v-for="entry in visibleAreaRows" :key="entry.index"><td><input v-model="selectedAreaIndexes" type="checkbox" :value="entry.index"></td><td class="rule-name-cell"><b>{{ entry.area.areaName }}</b><small>{{ entry.area.countryCode || '暂无国家代码' }}</small></td><td>{{ entry.area.etaMinDays }}～{{ entry.area.etaMaxDays }} 天</td><td class="limit-cell"><span>{{ entry.area.prohibitGeneralCargo?'禁止普货':'允许普货' }}</span><small>禁运：{{ entry.area.prohibitedMarks || '无' }} · 允许：{{ entry.area.allowedMarks || '全部' }}</small></td><td><span class="status-pill success">启用</span></td><td><b>{{ gramsFromKg(entry.area.weightFromKg) }}～{{ gramsFromKg(entry.area.weightToKg) }} g</b></td><td class="price-cell"><b>¥{{ entry.area.pricePerKg }}/1000g</b><small>挂号费 ¥{{ entry.area.registrationFee }}</small></td><td class="modern-ops"><button class="edit-button" @click="openAreaEditor(entry.index)">编辑</button><button class="more-button" @click="copyArea(entry.index)">复制</button></td></tr><tr v-if="!visibleAreaRows.length"><td colspan="8" class="modern-empty">没有找到符合条件的区域规则</td></tr></tbody></table></div></section></template>
+      <template v-else-if="activeRule"><div class="area-page-head"><button class="back-button" @click="view='list'">‹ 返回运费规则</button><div><p>PUBLISHED REGIONAL PRICING</p><h1>{{ activeRule.name }}</h1><span>当前正式版本的只读区域价格；修改价格请返回基础资料中的对应渠道上传新版本。</span></div></div><section class="area-workspace-card"><div class="area-toolbar"><label><span>⌕</span><input v-model="areaKeyword" placeholder="搜索区域名称或国家代码"></label><div><button class="secondary-button" @click="exportAreas">导出正式版本</button><button class="secondary-button" @click="view='list';workspaceMode='base'">返回渠道版本</button></div><span>共 {{ visibleAreaRows.length }} 条区域规则</span></div><div class="modern-table-scroll"><table class="modern-area-table"><thead><tr><th>区域信息</th><th>预计时效</th><th>商品限制</th><th>状态</th><th>计费重量</th><th>计费价格</th></tr></thead><tbody><tr v-for="entry in visibleAreaRows" :key="entry.index"><td class="rule-name-cell"><b>{{ entry.area.areaName }}</b><small>{{ entry.area.countryCode || '暂无国家代码' }}</small></td><td>{{ entry.area.etaMinDays }}～{{ entry.area.etaMaxDays }} 天</td><td class="limit-cell"><span>{{ entry.area.prohibitGeneralCargo?'禁止普货':'允许普货' }}</span><small>禁运：{{ entry.area.prohibitedMarks || '无' }} · 允许：{{ entry.area.allowedMarks || '全部' }}</small></td><td><span class="status-pill success">正式</span></td><td><b>{{ gramsFromKg(entry.area.weightFromKg) }}～{{ gramsFromKg(entry.area.weightToKg) }} g</b></td><td class="price-cell"><b>¥{{ entry.area.pricePerKg }}/1000g</b><small>挂号费 ¥{{ entry.area.registrationFee }}</small></td></tr><tr v-if="!visibleAreaRows.length"><td colspan="6" class="modern-empty">没有找到符合条件的正式区域规则</td></tr></tbody></table></div></section></template>
     </section>
 
-    <div v-if="showRuleEditor" class="mask"><div class="modal rule-modal"><header><div><small>LOGISTICS RULE</small><b>{{ form.id ? '编辑运费规则' : '新增运费规则' }}</b></div><button aria-label="关闭" @click="showRuleEditor=false">×</button></header><div class="form"><label><span>规则名称</span><input v-model="form.name"></label><label><span>英文名称</span><input v-model="form.englishName"></label><label><span>模板类型</span><select v-model="form.type"><option>专线</option><option>挂号</option><option>free</option></select></label><label><span>会员运费报价系数</span><input value="0.00"></label><label><span>是否发布</span><select v-model="form.published"><option>未发布</option><option>发布</option></select></label><label><span>状态</span><select v-model="form.status"><option>启用</option><option>禁用</option></select></label><label><span>物流商</span><input v-model="form.carrier"></label><label><span>渠道</span><input v-model="form.channel"></label><label><span>渠道编码</span><input v-model="form.channelCode"></label></div><footer><button class="cancel-button" @click="showRuleEditor=false">取消</button><button class="primary-orange" @click="saveRule">保存规则</button></footer></div></div>
-    <div v-if="showConditionEditor" class="mask"><div class="modal small"><header><div><small>CONDITION SETTINGS</small><b>条件限制</b></div><button aria-label="关闭" @click="showConditionEditor=false">×</button></header><label class="check"><input v-model="activeRule!.phoneRequired" type="checkbox"><span><b>匹配时需要收件人电话</b><small>启用后，此规则仅用于具备电话信息的报价。</small></span></label><footer><button class="cancel-button" @click="showConditionEditor=false">取消</button><button class="primary-orange" @click="saveCondition">保存设置</button></footer></div></div>
-    <div v-if="showAreaEditor" class="mask"><div class="modal area-modal"><header><div><small>REGIONAL PRICING</small><b>{{ editingAreaIndex == null ? '新增区域规则' : '编辑区域规则' }}</b></div><button aria-label="关闭" @click="showAreaEditor=false">×</button></header><div class="form"><label><span>区域名称</span><input v-model="areaForm.areaName"></label><label><span>国家简码</span><input v-model="areaForm.countryCode"></label><label><span>时效最早天数</span><input v-model.number="areaForm.etaMinDays" type="number"></label><label><span>时效最晚天数</span><input v-model.number="areaForm.etaMaxDays" type="number"></label><label><span>起始重量（g）</span><input v-model.number="areaForm.weightFromG" type="number" min="0" step="1"></label><label><span>截止重量（g）</span><input v-model.number="areaForm.weightToG" type="number" min="0" step="1"></label><label><span>每 1000g 运费（CNY）</span><input v-model.number="areaForm.pricePer1000G" type="number" min="0" step="0.01"></label><label><span>挂号费（CNY）</span><input v-model.number="areaForm.registrationFee" type="number"></label></div><footer><button class="cancel-button" @click="showAreaEditor=false">取消</button><button class="primary-orange" @click="saveArea">保存区域规则</button></footer></div></div>
     <div v-if="showProviderEditor" class="mask"><div class="modal small base-modal"><header>新增物流商<button @click="showProviderEditor=false">×</button></header><div class="simple-form"><label>物流商名称<input v-model="providerForm.name" placeholder="例如：燕文物流"></label><label>物流商编码<input v-model="providerForm.code" placeholder="例如：YANWEN" @input="providerForm.code=providerForm.code.toUpperCase()"></label></div><footer><button class="primary-orange" @click="saveProvider">保存物流商</button><button @click="showProviderEditor=false">取消</button></footer></div></div>
     <div v-if="showChannelEditor" class="mask"><div class="modal small base-modal"><header><div><small>LOGISTICS CHANNEL</small><b>新增物流渠道</b></div><button @click="showChannelEditor=false">×</button></header><div class="simple-form"><label>渠道名称<input v-model="channelForm.name" placeholder="例如：燕文普货专线"></label><label>渠道编码<input v-model="channelForm.code" placeholder="唯一编码，例如：YW-PH" @input="channelForm.code=channelForm.code.toUpperCase()"></label><label>规则类型<select v-model="channelForm.type"><option>专线</option><option>挂号</option><option>快递</option></select></label><label>物流属性<select v-model="channelForm.logisticsAttribute"><option>普货</option><option>带电</option><option>化妆品</option><option>敏感货</option></select></label></div><footer><button @click="showChannelEditor=false">取消</button><button class="primary-orange" @click="saveChannel">创建并上传</button></footer></div></div>
+    <div v-if="showBatchPreview && batchPreview" class="mask"><div class="modal batch-modal"><header><div><small>BATCH IMPORT PREVIEW</small><b>{{ selectedProvider?.name }} · {{ batchPreview.count }} 个文件预检</b></div><button @click="showBatchPreview=false">×</button></header><div class="batch-body"><div class="batch-summary"><span>匹配渠道 {{ batchPreview.items.filter(item=>item.action==='match').length }}</span><span>新建渠道 {{ batchPreview.items.filter(item=>item.action==='create').length }}</span><span :class="{ danger:batchPreview.blocking }">阻断文件 {{ batchPreview.blocking }}</span></div><div class="batch-list"><article v-for="item in batchPreview.items" :key="item.sourceHash"><span :class="['batch-action',item.action]">{{ item.action==='match'?'匹配':'新建' }}</span><div><b>{{ item.fileName }}</b><small>{{ item.channelName }} · {{ item.channelCode }} · {{ item.validRows }} 行</small></div><div class="history-summary"><span>新增 {{ item.summary.added }}</span><span>调价 {{ item.summary.price }}</span><span>移除 {{ item.summary.removed }}</span><span>风险 {{ item.summary.highRisk }}</span></div><em v-if="batchItemHasDraft(item.channelId)" class="batch-warning">已有待审稿</em><em v-else-if="item.errors" class="batch-error">{{ item.errors }} 个错误</em><em v-else class="batch-ok">可提交</em></article></div><label v-if="batchPreview.items.some(item=>batchItemHasDraft(item.channelId))" class="removal-confirm"><input v-model="replaceBatchDrafts" type="checkbox">我确认终止上述渠道的旧待审稿，保留历史后生成下一版本</label></div><footer><button @click="showBatchPreview=false">取消</button><button class="primary-orange" :disabled="Boolean(batchPreview.blocking)" @click="commitBatchImport">确认导入为待审版本</button></footer></div></div>
+    <div v-if="showBatchReview && selectedProvider" class="mask"><div class="modal batch-modal"><header><div><small>PROVIDER REVIEW</small><b>{{ selectedProvider.name }} · 批量审核发布</b></div><button @click="showBatchReview=false">×</button></header><div class="batch-body"><p class="batch-help">仅勾选需要本次发布的渠道；任一所选版本校验失败，整批不会发布。</p><div class="batch-list"><article v-for="item in selectedProviderDrafts" :key="item.version.id"><input v-model="batchSelectedVersionIds" type="checkbox" :value="item.version.id"><div><b>{{ item.channel.name }} · V{{ item.version.versionNumber }}</b><small>{{ item.version.fileName }} · {{ item.version.rowCount }} 行</small></div><div class="history-summary"><span>新增 {{ item.version.summary.added }}</span><span>调价 {{ item.version.summary.price }}</span><span>移除 {{ item.version.summary.removed }}</span><span>风险 {{ item.version.summary.highRisk }}</span></div><label v-if="batchNeedsReview(item.version)" class="batch-review-check"><input v-model="batchReviewedVersionIds" type="checkbox" :value="item.version.id">已核对风险/移除项</label><em v-else class="batch-ok">校验通过</em></article></div><label class="audit-note">批量审核备注<textarea v-model="batchAuditNote" placeholder="填写本批价格来源、调整原因和审核结论"></textarea></label></div><footer><button @click="showBatchReview=false">暂不发布</button><button class="primary-orange" @click="publishBatchVersions">审核通过并批量发布</button></footer></div></div>
     <div v-if="showImportReview && importPreview && reviewingVersion" class="mask">
       <div class="modal import-review-modal">
         <header>
@@ -558,7 +495,7 @@ async function saveCondition() { if (!activeRule.value) return; const channel = 
         </footer>
       </div>
     </div>
-    <div v-if="showVersionHistory && historyChannel" class="mask"><div class="modal history-modal"><header><div><small>VERSION HISTORY</small><b>{{ historyChannel.name }} · 版本历史</b></div><button @click="showVersionHistory=false">×</button></header><div class="history-list"><article v-for="version in historyVersions" :key="version.id"><span :class="['version-status',version.status]">{{ version.status==='published'?'当前正式':version.status==='draft'?'待审核':version.status==='superseded'?'历史版本':'已驳回' }}</span><div><b>V{{ version.versionNumber }} · {{ version.fileName }}</b><small>导入 {{ version.importedAt }} / {{ version.importedBy }}<template v-if="version.publishedAt"> · 发布 {{ version.publishedAt }} / {{ version.publishedBy }}</template></small><p>{{ version.auditNote || '暂无审核备注' }}</p></div><div class="history-summary"><span>新增 {{ version.summary.added }}</span><span>调价 {{ version.summary.price }}</span><span>移除 {{ version.summary.removed }}</span><span>规则 {{ version.summary.rule }}</span></div><div class="history-actions"><button @click="downloadVersion(version)">下载原文件</button><button v-if="version.status!=='draft' && historyChannel.currentVersionId!==version.id" class="rollback" @click="rollbackVersion(version)">回滚到此版</button></div></article></div><footer><button @click="showVersionHistory=false">关闭</button></footer></div></div>
+    <div v-if="showVersionHistory && historyChannel" class="mask"><div class="modal history-modal"><header><div><small>VERSION HISTORY</small><b>{{ historyChannel.name }} · 版本历史</b></div><button @click="showVersionHistory=false">×</button></header><div class="history-list"><article v-for="version in historyVersions" :key="version.id"><span :class="['version-status',version.status]">{{ version.status==='published'?'当前正式':version.status==='draft'?'待审核':version.status==='superseded'?'历史版本':'已终止' }}</span><div><b>V{{ version.versionNumber }} · {{ version.fileName }}</b><small>导入 {{ version.importedAt }} / {{ version.importedBy }}<template v-if="version.publishedAt"> · 发布 {{ version.publishedAt }} / {{ version.publishedBy }}</template></small><p>{{ version.auditNote || '暂无审核备注' }}</p></div><div class="history-summary"><span>新增 {{ version.summary.added }}</span><span>调价 {{ version.summary.price }}</span><span>移除 {{ version.summary.removed }}</span><span>规则 {{ version.summary.rule }}</span></div><div class="history-actions"><button @click="downloadVersion(version)">下载原文件</button><button v-if="version.status==='draft'" class="danger" @click="terminateDraft(version)">终止草稿</button><button v-else-if="historyChannel.currentVersionId!==version.id" class="rollback" @click="rollbackVersion(version)">回滚到此版</button></div></article></div><footer><button @click="showVersionHistory=false">关闭</button></footer></div></div>
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
 </template>
@@ -610,6 +547,7 @@ async function saveCondition() { if (!activeRule.value) return; const channel = 
 .review-detail{min-width:0;display:flex;flex-direction:column;padding:18px;background:#fff;overflow:auto}.review-detail-head{display:flex;align-items:flex-start;gap:15px;margin-bottom:14px}.review-detail-head>div:first-child{min-width:210px;flex:1}.review-detail-head h3{margin:0;color:#1c2a34;font-size:19px}.review-detail-head small{display:block;margin-top:5px;color:#929ca3;font-size:9px}.review-detail-badges{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px}.review-detail-badges>span{padding:5px 8px;border:1px solid #dfe5e8;border-radius:12px;background:#f7f9fa;color:#65737d;font-size:8px;font-weight:800}.review-detail-badges>span.price{border-color:#f1d297;background:#fff2da;color:#ca7200}.review-detail-badges>span.added{border-color:#a9dfbf;background:#e9f8ef;color:#16834f}.review-detail-badges>span.removed,.review-detail-badges>span.high-risk{border-color:#f0aaa3;background:#fff0ee;color:#ce4438}.review-detail-badges>span.rule{border-color:#afd4e8;background:#eef8fd;color:#287aa6}.review-detail-badges>button{height:30px;padding:0 10px;border:1px solid #9bc7e5;border-radius:6px;background:#fff;color:#2b7fae;font-size:9px;font-weight:800}.review-detail-badges>button.reviewed{border-color:#9ad8b5;background:#eaf8ef;color:#188652}
 .price-change-cards{display:grid;gap:10px}.price-change-card{min-height:104px;display:grid;grid-template-columns:42px minmax(0,1fr) 110px;align-items:center;gap:13px;padding:14px 16px;border:1px solid #e1e7ea;border-radius:9px;background:#fff}.price-change-card.risk.up,.price-change-card.risk.added{border-color:#efb0aa;background:#fffafa}.change-icon{width:39px;height:39px;display:grid;place-items:center;border-radius:9px;background:#fff0d9;color:#d77900;font-size:18px;font-weight:900}.change-main>b{display:block;margin-bottom:10px;font-size:12px}.change-main>div{display:grid;grid-template-columns:minmax(90px,1fr) 26px minmax(90px,1fr);align-items:end}.change-main>div>i{color:#839099;font-size:19px;font-style:normal;text-align:center}.change-main span{display:grid;gap:3px}.change-main small{color:#929ca3;font-size:8px}.change-main strong{color:#293741;font-size:17px}.price-change-card.down .after strong,.price-change-card.down .change-result{color:#168d55}.price-change-card.up .after strong,.price-change-card.up .change-result,.price-change-card.added .after strong,.price-change-card.added .change-result{color:#d64a3d}.change-result{display:grid;justify-items:end;gap:5px;color:#c97a12}.change-result>b{font-size:13px}.change-result>span{padding:3px 7px;border-radius:10px;background:#f1f4f5;font-size:9px;font-weight:800}.price-change-card.down .change-result>span{background:#e8f7ee}.price-change-card.up .change-result>span,.price-change-card.added .change-result>span{background:#ffece9}
 .segment-change-card{display:flex;align-items:center;gap:12px;padding:17px;margin-top:10px;border:1px solid #b8e2ca;border-radius:9px;background:#f1fbf5}.segment-change-card.removed{border-color:#efb2ac;background:#fff3f1}.segment-change-card>i{width:32px;height:32px;display:grid;place-items:center;border-radius:50%;background:#1c9c61;color:#fff;font-size:20px;font-style:normal}.segment-change-card.removed>i{background:#d64a3d}.segment-change-card>span{display:grid;gap:4px}.segment-change-card b{font-size:12px}.segment-change-card small{color:#73818b}.rule-change-panel{margin-top:10px;overflow:hidden;border:1px solid #e1e7ea;border-radius:9px}.rule-change-panel>header{min-height:42px!important;padding:0 14px!important;border:0!important;background:#f8fafb!important}.rule-change-panel>header b{font-size:11px!important}.rule-change-panel>div{display:grid;grid-template-columns:minmax(130px,1fr) minmax(100px,1fr) 30px minmax(100px,1fr);align-items:center;gap:8px;padding:10px 14px;border-top:1px solid #edf1f3}.rule-change-panel>div>b{font-size:10px}.rule-change-panel>div>span{color:#687680}.rule-change-panel>div>i{color:#8a969e;font-style:normal;text-align:center}.rule-change-panel>div>strong{color:#cf7500}.review-detail>.review-detail-empty{flex:1;display:grid;place-items:center;color:#909ba3}.review-detail-progress{min-height:42px;margin-top:auto!important;justify-content:flex-start!important;gap:12px!important;padding:12px 0 0!important;border:0!important;background:#fff!important}.review-detail-progress>span{margin:0;color:#79858e;font-size:10px}.review-detail-progress>span b{color:#168d55;font-size:13px}.review-detail-progress>em{margin-left:auto;color:#cf493d;font-size:9px;font-style:normal;font-weight:800}.review-detail-progress>em.complete{color:#168d55}.review-no-change{display:grid;place-items:center;min-height:220px;border:1px dashed #d8e1e6;border-radius:9px;color:#8b969e}.review-body>.issue-list{margin-top:14px;margin-bottom:0}.review-modal-footer{flex:0 0 auto}.review-modal-footer>span{margin:0 auto 0 0;color:#c7473c;font-size:9px;font-weight:800}.review-modal-footer>span.ready{color:#168852}.review-modal-footer .primary-orange:disabled{cursor:not-allowed;opacity:.45}
-@media(max-width:960px){.import-review-modal{width:96vw}.review-workspace{height:auto;grid-template-columns:1fr}.review-navigator{max-height:320px;border-right:0;border-bottom:1px solid #e3e9ec}.review-detail{min-height:420px}.review-detail-head{flex-direction:column}.review-detail-badges{justify-content:flex-start}.review-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.batch-modal{width:min(1120px,94vw);max-height:90vh;display:flex;flex-direction:column}.batch-body{min-height:0;overflow:auto;padding:18px}.batch-summary{display:flex;gap:10px;margin-bottom:14px}.batch-summary span{padding:8px 12px;border-radius:7px;background:#f1f5f7;color:#50616d}.batch-summary .danger{background:#fff0ee;color:#c7473c}.batch-list{display:grid;gap:8px}.batch-list article{display:grid;grid-template-columns:auto minmax(260px,1fr) minmax(250px,auto) minmax(100px,auto);align-items:center;gap:12px;padding:12px;border:1px solid #e1e7ea;border-radius:8px}.batch-list article>div>b,.batch-list article>div>small{display:block}.batch-list article>div>small{margin-top:4px;color:#87939b}.batch-action{padding:5px 8px;border-radius:12px;background:#e9f7ef;color:#178651;font-size:9px;font-weight:850}.batch-action.create{background:#fff0d9;color:#c87200}.batch-warning,.batch-error{color:#c7463b;font-size:9px;font-style:normal;font-weight:800}.batch-ok{color:#168852;font-size:9px;font-style:normal;font-weight:800}.batch-review-check{display:flex;align-items:center;gap:6px;color:#bd4a3f;font-size:9px;font-weight:800}.batch-help{margin:0 0 14px;color:#65747e}.batch-modal .audit-note{margin-top:16px}
+@media(max-width:960px){.import-review-modal{width:96vw}.review-workspace{height:auto;grid-template-columns:1fr}.review-navigator{max-height:320px;border-right:0;border-bottom:1px solid #e3e9ec}.review-detail{min-height:420px}.review-detail-head{flex-direction:column}.review-detail-badges{justify-content:flex-start}.review-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.batch-list article{grid-template-columns:auto 1fr}.batch-list article>.history-summary,.batch-list article>em,.batch-list article>label{grid-column:2}}
 @media(max-width:620px){.import-review-modal>.review-body{padding:12px}.review-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.review-risk-banner{align-items:flex-start;flex-direction:column}.review-risk-banner>button{margin-left:0}.price-change-card{grid-template-columns:35px minmax(0,1fr)}.change-result{grid-column:2;justify-items:start}.review-modal-footer{flex-wrap:wrap}.review-modal-footer>span{width:100%}.review-modal-footer button{flex:1}}
 </style>

@@ -30,6 +30,22 @@ public class LogisticsWorkbookService {
             "zoneCity", "zoneState", "zoneExclude"};
     private static final Set<Integer> TEXT = Set.of(0, 1, 4, 5, 28, 32, 33, 34, 35, 36);
     private static final Set<Integer> BOOLEAN = Set.of(29, 30, 31, 37);
+    private static final Map<String, String> PRICE_FIELDS = Map.of(
+            "pricePerKg", "运费单价", "firstWeightPrice", "首重价", "nextWeightPrice", "续重单价",
+            "intervalPrice", "区间运费", "registrationFee", "挂号费", "surcharge", "附加费",
+            "fuelSurchargeRate", "燃油附加费率");
+    private static final Map<String, String> RULE_FIELDS = Map.ofEntries(
+            Map.entry("etaMinDays", "时效最早天数"), Map.entry("etaMaxDays", "时效最晚天数"),
+            Map.entry("prohibitedMarks", "禁运商品"), Map.entry("allowedMarks", "允许商品标记"),
+            Map.entry("maxPerimeterCm", "三边之和"), Map.entry("maxSideCm", "三边最大长度"),
+            Map.entry("volumeDivisor", "计泡系数"), Map.entry("minLengthCm", "最小长度"),
+            Map.entry("maxLengthCm", "最大长度"), Map.entry("minWidthCm", "最小宽度"),
+            Map.entry("maxWidthCm", "最大宽度"), Map.entry("minSideAreaCm2", "最小侧面积"),
+            Map.entry("maxSideAreaCm2", "最大侧面积"), Map.entry("startWeightKg", "起重"),
+            Map.entry("minChargeWeightKg", "最小计重"), Map.entry("firstWeightKg", "首重"),
+            Map.entry("nextWeightKg", "续重"), Map.entry("specialGoodsContent", "特殊品含量"),
+            Map.entry("volumetric", "是否计抛"), Map.entry("prohibitGeneralCargo", "是否禁止普货"),
+            Map.entry("phoneRequired", "电话是否必需"), Map.entry("zoneExclude", "排除"));
     private final ObjectMapper mapper;
 
     public LogisticsWorkbookService(ObjectMapper mapper) { this.mapper = mapper; }
@@ -62,14 +78,10 @@ public class LogisticsWorkbookService {
             }
             if (rows.isEmpty()) throw AppException.unprocessable("物流模板中没有可导入的数据");
             var errors = count(issues, "error");
-            var previous = new HashMap<String, tools.jackson.databind.JsonNode>(); previousRows.forEach(row -> previous.put(row.path("rowKey").asText(identity(row)), row));
-            var diffRows = mapper.createArrayNode(); int added = 0, unchanged = 0;
-            for (var row : rows) { var key = row.path("rowKey").asText(); var diff = diffRows.addObject(); diff.put("key", key); diff.set("row", row); diff.putArray("changes"); diff.put("risk", false); diff.putNull("maxPercentChange"); if (previous.remove(key) == null) { diff.put("type", "added"); added++; } else { diff.put("type", "unchanged"); unchanged++; } }
-            int removed = previous.size(); previous.forEach((key, row) -> { var diff = diffRows.addObject(); diff.put("key", key); diff.put("type", "removed"); diff.set("row", row); diff.putArray("changes"); diff.put("risk", false); diff.putNull("maxPercentChange"); });
-            var summary = mapper.createObjectNode().put("added", added).put("price", 0).put("rule", 0).put("removed", removed).put("unchanged", unchanged).put("highRisk", 0);
+            var comparison = compare(rows, previousRows);
             var result = mapper.createObjectNode(); result.put("fileName", safeName(fileName)); result.put("sourceHash", AssetHash.sha(bytes));
             result.set("rows", rows); result.set("issues", issues); result.put("validRows", rows.size()); result.put("errors", errors);
-            result.put("warnings", count(issues, "warning")); result.set("diffRows", diffRows); result.set("summary", summary); return result;
+            result.put("warnings", count(issues, "warning")); result.set("diffRows", comparison.path("diffRows")); result.set("summary", comparison.path("summary")); return result;
         } catch (AppException exception) { throw exception; }
         catch (Exception exception) { throw AppException.unprocessable("物流Excel解析失败：" + safe(exception.getMessage())); }
     }
@@ -87,6 +99,47 @@ public class LogisticsWorkbookService {
     private static void validateRow(ObjectNode row, int source, ArrayNode issues) { if (row.path("areaName").asText().isBlank()) issue(issues, source, "区域名称", "区域名称不能为空", "error"); if (row.path("countryCode").asText().isBlank()) issue(issues, source, "国家简码", "国家简码不能为空", "error"); if (row.path("etaMinDays").asDouble() > row.path("etaMaxDays").asDouble()) issue(issues, source, "预计时效", "最早天数不能大于最晚天数", "error"); if (row.path("weightToKg").asDouble() <= row.path("weightFromKg").asDouble()) issue(issues, source, "重量区间", "截止重量必须大于起始重量", "error"); if (!(row.path("pricePerKg").asDouble() > 0 || row.path("intervalPrice").asDouble() > 0 || row.path("firstWeightPrice").asDouble() > 0)) issue(issues, source, "计费价格", "未填写有效计费价格", "error"); }
     private static BigDecimal number(Row row, int column, int source, String field, FormulaEvaluator evaluator, ArrayNode issues) { var cell = row == null ? null : row.getCell(column); if (cell == null || cell.getCellType() == CellType.BLANK) return BigDecimal.ZERO; try { if (cell.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); if (cell.getCellType() == CellType.FORMULA) { try { var value = evaluator.evaluate(cell); if (value != null && value.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(value.getNumberValue()); } catch (RuntimeException ignored) { if (cell.getCachedFormulaResultType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); } } var raw = text(row, column, evaluator).replace(",", "").replace("¥", "").replace("￥", "").replace("\u00A0", "").replace("\u202F", "").replaceAll("(?i)CNY|RMB", "").replaceAll("\\s+", ""); return raw.isBlank() ? BigDecimal.ZERO : new BigDecimal(raw); } catch (Exception exception) { issue(issues, source, field, "不是有效数字", "error"); return BigDecimal.ZERO; } }
     private static void putNumber(ObjectNode row, String key, BigDecimal value) { row.put(key, value.stripTrailingZeros()); }
+    ObjectNode compare(ArrayNode rows, ArrayNode previousRows) {
+        var previous = new LinkedHashMap<String, tools.jackson.databind.JsonNode>();
+        previousRows.forEach(row -> previous.put(row.path("rowKey").asText(identity(row)), row));
+        var diffRows = mapper.createArrayNode();
+        var summary = mapper.createObjectNode().put("added", 0).put("price", 0).put("rule", 0).put("removed", 0).put("unchanged", 0).put("highRisk", 0);
+        for (var row : rows) {
+            var key = row.path("rowKey").asText(identity(row));
+            var before = previous.remove(key);
+            var diff = diffRows.addObject().put("key", key); diff.set("row", row); var changes = diff.putArray("changes");
+            if (before == null) {
+                diff.put("type", "added").put("risk", false).putNull("maxPercentChange"); increment(summary, "added"); continue;
+            }
+            diff.set("previous", before); double maxPercent = 0; boolean hasPercent = false; int priceChanges = 0;
+            for (var field : PRICE_FIELDS.entrySet()) if (!same(before.path(field.getKey()), row.path(field.getKey()))) {
+                var change = changes.addObject().put("field", field.getValue()).put("price", true);
+                copyValue(change, "before", before.path(field.getKey())); copyValue(change, "after", row.path(field.getKey()));
+                var oldValue = before.path(field.getKey()).asDouble(); var nextValue = row.path(field.getKey()).asDouble();
+                var percent = oldValue == 0 ? (nextValue == 0 ? 0 : 100) : Math.abs((nextValue - oldValue) / oldValue * 100);
+                maxPercent = Math.max(maxPercent, percent); hasPercent = true; priceChanges++;
+            }
+            var ruleChanges = 0;
+            for (var field : RULE_FIELDS.entrySet()) if (!same(before.path(field.getKey()), row.path(field.getKey()))) {
+                var change = changes.addObject().put("field", field.getValue()).put("price", false);
+                copyValue(change, "before", before.path(field.getKey())); copyValue(change, "after", row.path(field.getKey())); ruleChanges++;
+            }
+            var type = priceChanges > 0 ? "price" : ruleChanges > 0 ? "rule" : "unchanged";
+            var risk = hasPercent && maxPercent > 10;
+            diff.put("type", type).put("risk", risk); if (hasPercent) diff.put("maxPercentChange", maxPercent); else diff.putNull("maxPercentChange");
+            increment(summary, type); if (risk) increment(summary, "highRisk");
+        }
+        previous.forEach((key, row) -> { var diff = diffRows.addObject().put("key", key).put("type", "removed").put("risk", false); diff.set("row", row); diff.set("previous", row); diff.putArray("changes"); diff.putNull("maxPercentChange"); increment(summary, "removed"); });
+        return mapper.createObjectNode().set("diffRows", diffRows).set("summary", summary);
+    }
+    private static void increment(ObjectNode summary, String field) { summary.put(field, summary.path(field).asInt() + 1); }
+    private static boolean same(tools.jackson.databind.JsonNode left, tools.jackson.databind.JsonNode right) {
+        if (left.isNumber() || right.isNumber()) return Math.abs(left.asDouble() - right.asDouble()) < 0.000000001;
+        return Objects.equals(left.asText(), right.asText());
+    }
+    private static void copyValue(ObjectNode target, String field, tools.jackson.databind.JsonNode value) {
+        if (value.isBoolean()) target.put(field, value.asBoolean()); else if (value.isNumber()) target.put(field, value.decimalValue()); else target.put(field, value.asText());
+    }
     private static String identity(tools.jackson.databind.JsonNode row) { return String.join("|", row.path("countryCode").asText(), row.path("areaName").asText(), row.path("zoneName").asText(), row.path("zonePostalPrefix").asText(), row.path("zonePostalCode").asText(), row.path("zoneCity").asText(), row.path("zoneState").asText(), row.path("weightFromKg").asText(), row.path("weightToKg").asText()).toLowerCase(Locale.ROOT); }
     private static boolean flag(String value) { return value.matches("(?i)^(是|1|true|yes)$"); }
     private static String text(Row row, int column, FormulaEvaluator evaluator) {

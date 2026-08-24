@@ -17,6 +17,9 @@ export type LogisticsChannelVersionRecord = {
 }
 export type LogisticsAuditRecord = { id: string; channelId: string; versionId: string; action: 'import' | 'publish' | 'rollback'; actor: string; note: string; createdAt: string }
 export type LogisticsWorkspaceState = { providers: LogisticsProviderRecord[]; channels: LogisticsChannelRecord[]; versions: LogisticsChannelVersionRecord[]; audits: LogisticsAuditRecord[] }
+export type LogisticsBatchPreviewItem = LogisticsImportPreview & { action: 'match' | 'create'; matchType: 'code' | 'name' | 'new'; channelId: string; channelName: string; channelCode: string }
+export type LogisticsBatchPreview = { providerId: string; count: number; blocking: number; items: LogisticsBatchPreviewItem[] }
+export type LogisticsBatchImportResult = { providerId: string; count: number; items: Array<{ fileName: string; channelId: string; channelName: string; versionId: string; versionNumber: number; action: 'created' | 'updated' | 'duplicate' }> }
 export const LOGISTICS_PUBLISHED_EVENT = 'milano:logistics-published'
 
 type PageResult<T> = { items: T[]; page: number; size: number; total: number; totalPages: number }
@@ -139,10 +142,29 @@ export async function saveLogisticsManualDraft(channelId: string, rows: Logistic
   return mutation(api.put<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/manual-draft`, { fileName: '手工维护区域规则', rows, note }, { 'Idempotency-Key': idempotencyKey('logistics-manual-draft') }))
 }
 
-export async function createLogisticsDraft(channelId: string, preview: LogisticsImportPreview, file: File, actor = '物流负责人') {
+export async function createLogisticsDraft(channelId: string, preview: LogisticsImportPreview, file: File, actor = '物流负责人', replaceDraft = false) {
   void preview; void actor
   const form = new FormData(); form.append('file', file)
-  return mutation(api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/imports`, form, idempotencyKey('logistics-import')))
+  return mutation(api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/imports?replaceDraft=${replaceDraft}`, form, idempotencyKey('logistics-import')))
+}
+
+function providerFilesForm(files: File[]) { const form = new FormData(); files.forEach(file => form.append('files', file)); return form }
+
+export async function previewLogisticsProviderImports(providerId: string, files: File[]) {
+  return api.post<LogisticsBatchPreview>(`/logistics/providers/${providerId}/imports/preview`, providerFilesForm(files))
+}
+
+export async function importLogisticsProviderFiles(providerId: string, files: File[], replaceDrafts = false) {
+  return mutation(api.post<LogisticsBatchImportResult>(`/logistics/providers/${providerId}/imports?replaceDrafts=${replaceDrafts}`, providerFilesForm(files), idempotencyKey('logistics-provider-import')))
+}
+
+export async function publishLogisticsProviderVersions(providerId: string, selections: Array<{ channelId: string; versionId: string; removalConfirmed: boolean; reviewConfirmed: boolean }>, note: string) {
+  const result = await api.post<{ providerId: string; count: number; published: LogisticsChannelVersionRecord[] }>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, idempotencyKey('logistics-provider-publish'))
+  invalidateLogisticsWorkspaceCache(); await invalidatePublishedLogisticsCache(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT)); return result
+}
+
+export async function rejectLogisticsVersion(channelId: string, versionId: string, note: string) {
+  return mutation(api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/versions/${versionId}/reject`, { note }, idempotencyKey('logistics-reject')))
 }
 
 export async function publishLogisticsVersion(channelId: string, versionId: string, note: string, removalConfirmed = false) {
@@ -183,17 +205,17 @@ export async function loadCurrentVersionRows(state: LogisticsWorkspaceState, cha
 
 export function workspaceLogisticsRules(state: LogisticsWorkspaceState): LogisticsRule[] {
   const providers = new Map(state.providers.map(provider => [provider.id, provider]))
-  return state.channels.map(channel => {
+  return state.channels.filter(channel => Boolean(channel.currentVersionId)).map(channel => {
     const provider = providers.get(channel.providerId)
-    const version = state.versions.find(item => item.id === channel.currentVersionId)
-      || state.versions.find(item => item.channelId === channel.id && item.status === 'draft')
+    const version = state.versions.find(item => item.id === channel.currentVersionId && item.status === 'published')
+    if (!version) return null
     return {
       id: channel.ruleId, name: channel.name, englishName: channel.code.toLowerCase(), type: channel.type, currency: 'CNY',
-      published: channel.currentVersionId ? '发布' : '未发布', status: channel.enabled && provider?.enabled ? '启用' : '禁用',
+      published: `V${version.versionNumber}`, status: channel.enabled && provider?.enabled ? '启用' : '禁用',
       dates: `${channel.createdAt}|${channel.updatedAt}`, users: `${version?.importedBy || ''}|${version?.publishedBy || ''}`,
       relations: [{ carrier: provider?.name || '', channel: channel.name, channelCode: channel.code, discounts: '-\n-' }],
       phoneRequired: false, areaCount: version?.countryCount || 0, priceRowCount: version?.rowCount || 0,
       prices: version?.rows.map(normalizeLogisticsPriceRow) || [],
     }
-  })
+  }).filter((rule): rule is LogisticsRule => rule !== null)
 }

@@ -49,6 +49,25 @@ class LogisticsWorkbookServiceTest {
         assertEquals(4, result.path("rows").get(0).path("sourceRow").asInt());
     }
 
+    @Test
+    void detectsPriceRuleRemovalAndHighRiskInsteadOfReportingNoDifference() {
+        var mapper = JsonMapper.builder().build();
+        var previous = mapper.createArrayNode();
+        previous.addObject().put("rowKey", "us|美国||||||0|1").put("areaName", "美国").put("countryCode", "US").put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 50).put("etaMinDays", 7);
+        previous.addObject().put("rowKey", "gb|英国||||||0|1").put("areaName", "英国").put("countryCode", "GB").put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 40).put("etaMinDays", 7);
+        var next = mapper.createArrayNode();
+        next.addObject().put("rowKey", "us|美国||||||0|1").put("areaName", "美国").put("countryCode", "US").put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 60).put("etaMinDays", 8);
+
+        var result = service.compare(next, previous);
+
+        assertEquals(1, result.path("summary").path("price").asInt());
+        assertEquals(1, result.path("summary").path("removed").asInt());
+        assertEquals(1, result.path("summary").path("highRisk").asInt());
+        assertEquals("price", result.path("diffRows").get(0).path("type").asText());
+        assertEquals(2, result.path("diffRows").get(0).path("changes").size());
+        assertEquals(20.0, result.path("diffRows").get(0).path("maxPercentChange").asDouble());
+    }
+
     private MockMultipartFile workbook(boolean valid) throws Exception {
         try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("物流价格"); var header = sheet.createRow(0);
