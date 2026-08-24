@@ -1,5 +1,6 @@
 import { computed, reactive } from 'vue'
 import { api, resetCsrf } from '@/services/http'
+import { clearPublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
 
 export type RoleKey = 'super_admin' | 'finance' | 'logistics' | 'purchase' | 'employee'
 export type PermissionKey = 'quote' | 'purchase' | 'logistics' | 'finance' | 'myRecords' | 'allRecords' | 'permissions'
@@ -54,7 +55,7 @@ export async function login(account: string, password: string) {
   try { applySession(await api.post<SessionUser>('/auth/login', { account: account.trim().toUpperCase(), password })); authState.initialized = true; return { ok: true as const, user: currentAuthUser.value } }
   catch (error) { return { ok: false as const, message: error instanceof Error ? error.message : '登录失败' } }
 }
-export async function logout() { try { await api.post('/auth/logout') } finally { authState.current = null; authState.permissions = []; resetCsrf() } }
+export async function logout() { try { await api.post('/auth/logout') } finally { await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; resetCsrf() } }
 export function hasPermission(permission: PermissionKey) { return isAuthenticated.value && authState.permissions.includes(permission) }
 export function defaultHomeForRole(role = currentAuthUser.value.role) { if (role === 'logistics') return '/quotation/logistics'; if (role === 'purchase') return '/quotation/products'; if (role === 'employee') return '/quotation'; return '/quotation/overview' }
 

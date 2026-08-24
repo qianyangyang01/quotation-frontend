@@ -46,8 +46,18 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return (await parseEnvelope<T>(response)).data
 }
 
+export type ConditionalGetResult<T> = { status: 200; data: T; etag: string } | { status: 304; data: null; etag: string }
+
+export async function conditionalGet<T>(path: string, options: { etag?: string; signal?: AbortSignal } = {}): Promise<ConditionalGetResult<T>> {
+  const headers = new Headers({ Accept: 'application/json', 'X-Request-Id': crypto.randomUUID() })
+  if (options.etag) headers.set('If-None-Match', options.etag)
+  const response = await fetch(`${API_BASE}${path}`, { method: 'GET', headers, credentials: 'include', signal: options.signal })
+  if (response.status === 304) return { status: 304, data: null, etag: response.headers.get('ETag') || options.etag || '' }
+  return { status: 200, data: (await parseEnvelope<T>(response)).data, etag: response.headers.get('ETag') || '' }
+}
+
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
   post: <T>(path: string, body?: unknown, idempotencyKey?: string) => request<T>(path, { method: 'POST', body: body instanceof FormData ? body : body === undefined ? undefined : JSON.stringify(body), headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined }),
   put: <T>(path: string, body?: unknown, headers?: HeadersInit) => request<T>(path, { method: 'PUT', body: body instanceof FormData ? body : JSON.stringify(body), headers }),
   patch: <T>(path: string, body: unknown, headers?: HeadersInit) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body), headers }),

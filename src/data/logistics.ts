@@ -1,6 +1,3 @@
-import masterData from './sumaoLogisticsMaster.json'
-import areaData from './sumaoLogisticsAreas.json'
-
 export interface LogisticsPriceRow {
   areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number
   prohibitedMarks: string; allowedMarks: string; maxPerimeterCm: number; maxSideCm: number
@@ -10,7 +7,6 @@ export interface LogisticsPriceRow {
   surcharge: number; fuelSurchargeRate: number; prohibitGeneralCargo: boolean; volumetric: boolean
   phoneRequired: boolean; zoneName: string; zoneExclude: boolean
 }
-interface AreaRule { id: number; areaCount: number; priceRowCount: number; prices: LogisticsPriceRow[] }
 export interface LogisticsRelation { carrier: string; channel: string; channelCode: string; discounts: string }
 export interface LogisticsRule {
   id: number; name: string; englishName: string; type: string; currency: string; published: string
@@ -27,20 +23,21 @@ export interface ShipmentDimensions {
   defaultVolumeDivisor?: number
 }
 
-const areaByRule = new Map((areaData.rules as AreaRule[]).map(rule => [rule.id, rule]))
-export const logisticsRules: LogisticsRule[] = masterData.rules.map(rule => {
-  const area = areaByRule.get(rule.id)
-  return { ...rule, relations: rule.relations as LogisticsRelation[], areaCount: area?.areaCount ?? 0, priceRowCount: area?.priceRowCount ?? 0, prices: area?.prices ?? [] }
-})
-export const legacyLogisticsProviderNames = [...new Set(logisticsRules.flatMap(rule => rule.relations.map(item => item.carrier)).filter(Boolean))]
+// 生产运行时只接受后端已发布物流版本。旧速猫JSON仍作为迁移素材保留在仓库，
+// 不再打入业务页面首屏，也不会在接口加载前短暂参与报价。
+export const logisticsRules: LogisticsRule[] = []
+export const legacyLogisticsProviderNames: string[] = []
 export const logisticsCarriers: string[] = []
 export const logisticsChannels: Array<LogisticsRelation & { ruleId: number; ruleName: string }> = []
 export const logisticsCountries: Array<{ code: string; name: string }> = []
+let publishedCountryCatalog: Array<{ code: string; name: string }> = []
 
 function rebuildLogisticsIndexes() {
   const carriers = [...new Set(logisticsRules.flatMap(rule => rule.relations.map(item => item.carrier)).filter(Boolean))].sort()
   const channels = logisticsRules.flatMap(rule => rule.relations.map(item => ({ ...item, ruleId: rule.id, ruleName: rule.name })))
-  const countries = [...new Map(logisticsRules.flatMap(rule => rule.prices.map(price => [price.countryCode || price.areaName, { code: price.countryCode, name: price.areaName }]))).values()]
+  const countries = (publishedCountryCatalog.length
+    ? publishedCountryCatalog
+    : [...new Map(logisticsRules.flatMap(rule => rule.prices.map(price => [price.countryCode || price.areaName, { code: price.countryCode, name: price.areaName }]))).values()])
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   logisticsCarriers.splice(0, logisticsCarriers.length, ...carriers)
   logisticsChannels.splice(0, logisticsChannels.length, ...channels)
@@ -49,6 +46,13 @@ function rebuildLogisticsIndexes() {
 
 export function replaceLogisticsRules(rules: LogisticsRule[]) {
   logisticsRules.splice(0, logisticsRules.length, ...rules)
+  rebuildLogisticsIndexes()
+}
+
+export function replaceLogisticsCountryCatalog(countries: Array<{ code: string; name: string }>) {
+  publishedCountryCatalog = [...new Map(countries
+    .filter(country => country.name)
+    .map(country => [country.code || country.name, { code: String(country.code || '').toUpperCase(), name: country.name }])).values()]
   rebuildLogisticsIndexes()
 }
 
