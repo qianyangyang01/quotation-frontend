@@ -127,8 +127,11 @@ export async function loadPublishedLogisticsManifest(options: { signal?: AbortSi
 
 export async function loadPublishedLogisticsRules(query: RuleQuery, options: { signal?: AbortSignal } = {}) {
   const countries = normalized(query.countries)
-  if (!countries.length) throw new Error('没有可查询的报价国家')
   const { manifest, verified } = await loadPublishedLogisticsManifest({ signal: options.signal })
+  if (!countries.length) {
+    replaceLogisticsRules([])
+    return { revision: manifest.revision, rules: [], source: 'manifest' as const, verified }
+  }
   const key = queryKey(manifest.revision, query)
   let cached = rulesMemory.get(key)
   if (!cached) {
