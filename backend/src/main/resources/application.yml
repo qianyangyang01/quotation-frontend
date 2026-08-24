@@ -1,6 +1,10 @@
 server:
   port: 8088
   forward-headers-strategy: framework
+  compression:
+    enabled: true
+    min-response-size: 1KB
+    mime-types: application/json
   servlet:
     session:
       cookie:

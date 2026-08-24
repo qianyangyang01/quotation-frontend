@@ -60,8 +60,8 @@ public class SecurityConfig {
     CorsConfigurationSource cors(@Value("${app.cors-allowed-origin}") String origin) {
         var config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(origin)); config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Content-Type", "X-XSRF-TOKEN", "X-Request-Id", "Idempotency-Key", "If-Match"));
-        config.setExposedHeaders(List.of("X-Request-Id")); config.setAllowCredentials(true); config.setMaxAge(3600L);
+        config.setAllowedHeaders(List.of("Content-Type", "X-XSRF-TOKEN", "X-Request-Id", "Idempotency-Key", "If-Match", "If-None-Match"));
+        config.setExposedHeaders(List.of("X-Request-Id", "ETag")); config.setAllowCredentials(true); config.setMaxAge(3600L);
         var source = new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/api/**", config); return source;
     }
 
