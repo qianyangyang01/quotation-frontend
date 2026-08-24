@@ -37,10 +37,15 @@ class QuotationWorkflowIntegrationTest {
     @Test
     void createsVoidsRestoresAndSharesSanitizedQuotation() throws Exception {
         var session = authenticatedSession();
+        mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
+                        .header("Idempotency-Key", "quote-invalid-1").contentType("application/json").content("{}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'customerName')]").exists())
+                .andExpect(jsonPath("$.fieldErrors[?(@.field == 'monthlySalesEstimate')]").exists());
         var created = mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
                         .header("Idempotency-Key", "quote-test-1")
                         .contentType("application/json")
-                        .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"测试客户\",\"productSummary\":\"测试商品\",\"purchaseCost\":\"SECRET_COST\",\"profitRate\":\"SECRET_PROFIT\"}"))
+                        .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"测试客户\",\"quoteMode\":\"single\",\"primarySku\":\"SKU-1\",\"productCategory\":\"服装\",\"logisticsAttribute\":\"普货\",\"customerGrade\":\"A级客户\",\"taxCustomerType\":\"A\",\"monthlySalesEstimate\":\"10\",\"quoteOptions\":[{\"country\":\"美国\",\"channel\":\"测试渠道\"}],\"productSummary\":\"测试商品\",\"purchaseCost\":\"SECRET_COST\",\"profitRate\":\"SECRET_PROFIT\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("pending"))
                 .andExpect(jsonPath("$.data.customerId").doesNotExist()).andReturn();
         var createdData = mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
@@ -89,6 +94,20 @@ class QuotationWorkflowIntegrationTest {
                 .andExpect(jsonPath("$.data.customerName").value("草稿客户"))
                 .andExpect(jsonPath("$.data.selectedCustomerGrade").value("A"))
                 .andExpect(jsonPath("$.data.customerId").doesNotExist());
+        mvc.perform(delete("/api/v1/quotation-drafts/mine").session(session).with(csrf())).andExpect(status().isOk());
+        var draft = mvc.perform(put("/api/v1/quotation-drafts/mine/state").session(session).with(csrf())
+                        .header("If-Match", "-1").contentType("application/json")
+                        .content("{\"schemaVersion\":2,\"customerName\":\"未完成客户\",\"quoteMode\":\"single\",\"skuSearch\":\"SKU-1\",\"productCategory\":\"\",\"logisticsAttribute\":\"普货\",\"selectedCustomerGrade\":\"S\",\"selectedTaxCustomerType\":\"A\",\"monthlySalesEstimate\":\"10\",\"customQuoteQuantity\":5,\"quoteMatrixMode\":\"common\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.exists").value(true)).andReturn();
+        var draftVersion = mapper.readTree(draft.getResponse().getContentAsByteArray()).path("data").path("version").asLong();
+        mvc.perform(get("/api/v1/quotation-drafts/mine/state").session(session))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.payload.customerName").value("未完成客户"));
+        mvc.perform(put("/api/v1/quotation-drafts/mine/state").session(session).with(csrf())
+                        .header("If-Match", "-1").contentType("application/json")
+                        .content("{\"schemaVersion\":2,\"customerName\":\"冲突客户\",\"quoteMode\":\"single\"}"))
+                .andExpect(status().isConflict());
+        mvc.perform(delete("/api/v1/quotation-drafts/mine/state").session(session).with(csrf()).header("If-Match", String.valueOf(draftVersion)))
+                .andExpect(status().isOk());
 
         var supplier = mvc.perform(post("/api/v1/suppliers").session(session).with(csrf()).contentType("application/json")
                         .content("{\"code\":\"SUP-001\",\"name\":\"供应商主数据\",\"contactName\":\"李四\",\"phone\":\"13900000000\",\"platform\":\"1688\",\"category\":\"服装\",\"settlementTerms\":\"月结30天\",\"leadTimeDays\":3,\"rating\":4.8,\"enabled\":true}"))
