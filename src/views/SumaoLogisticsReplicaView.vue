@@ -7,6 +7,8 @@ import {
   addLogisticsChannel,
   addLogisticsProvider,
   createLogisticsDraft,
+  deleteLogisticsChannel,
+  deleteLogisticsProvider,
   importLogisticsProviderFiles,
   loadCurrentVersionRows,
   loadLogisticsVersionDetail,
@@ -17,6 +19,7 @@ import {
   rejectLogisticsVersion,
   rollbackLogisticsVersion,
   setLogisticsChannelStatus,
+  setLogisticsProviderStatus,
   workspaceLogisticsRules,
   type LogisticsBatchPreview,
   type LogisticsChannelRecord,
@@ -113,6 +116,7 @@ const remainingRequiredReviewCount = computed(() => mandatoryReviewDiffs.value.f
 const allRequiredReviewed = computed(() => remainingRequiredReviewCount.value === 0)
 
 function providerChannelCount(provider: LogisticsProviderRecord) { return workspace.value.channels.filter(item => item.providerId === provider.id).length }
+function channelVersionCount(channel: LogisticsChannelRecord) { return workspace.value.versions.filter(item => item.channelId === channel.id).length }
 function currentVersion(channel: LogisticsChannelRecord) { return workspace.value.versions.find(item => item.id === channel.currentVersionId) }
 function draftVersion(channel: LogisticsChannelRecord) { return workspace.value.versions.find(item => item.channelId === channel.id && item.status === 'draft') }
 function visibleVersion(channel: LogisticsChannelRecord) { return currentVersion(channel) || draftVersion(channel) }
@@ -261,6 +265,35 @@ async function saveProvider() {
     Object.assign(providerForm, { name: '', code: '' }); showProviderEditor.value = false; notify('物流商已添加，财务税务属性待设置')
   } catch (error) { notify(error instanceof Error ? error.message : '新增物流商失败') }
 }
+async function toggleProviderStatus() {
+  const provider = selectedProvider.value
+  if (!provider) return
+  const next = !provider.enabled
+  const message = next ? `确认重新启用物流商“${provider.name}”吗？` : `确认停用物流商“${provider.name}”吗？旗下渠道会保留，但立即退出业务报价。`
+  if (!window.confirm(message)) return
+  try { await setLogisticsProviderStatus(provider, next); await refreshWorkspace(); notify(next ? '物流商已重新启用' : '物流商已停用，历史数据仍保留') }
+  catch (error) { notify(error instanceof Error ? error.message : '物流商状态修改失败') }
+}
+async function removeProvider() {
+  const provider = selectedProvider.value
+  if (!provider || providerChannelCount(provider) > 0) return notify('物流商已有渠道，只能停用，不能删除')
+  if (!window.confirm(`确认永久删除空物流商“${provider.name}”吗？此操作不可撤销。`)) return
+  try { await deleteLogisticsProvider(provider.id); selectedProviderId.value = ''; await refreshWorkspace(); notify('空物流商已删除') }
+  catch (error) { notify(error instanceof Error ? error.message : '物流商删除失败') }
+}
+async function toggleChannelStatus(channel: LogisticsChannelRecord) {
+  const next = !channel.enabled
+  const message = next ? `确认重新启用渠道“${channel.name}”吗？` : `确认停用渠道“${channel.name}”吗？正式版本和历史会保留，但立即退出业务报价。`
+  if (!window.confirm(message)) return
+  try { await setLogisticsChannelStatus(channel, next); await refreshWorkspace(); notify(next ? '渠道已重新启用' : '渠道已停用，版本历史仍保留') }
+  catch (error) { notify(error instanceof Error ? error.message : '渠道状态修改失败') }
+}
+async function removeChannel(channel: LogisticsChannelRecord) {
+  if (channelVersionCount(channel) > 0) return notify('渠道已有版本记录，只能停用，不能删除')
+  if (!window.confirm(`确认永久删除空渠道“${channel.name}”吗？此操作不可撤销。`)) return
+  try { await deleteLogisticsChannel(channel.id); await refreshWorkspace(); notify('空渠道已删除') }
+  catch (error) { notify(error instanceof Error ? error.message : '渠道删除失败') }
+}
 async function saveChannel() {
   if (!selectedProvider.value) return
   try {
@@ -392,7 +425,7 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
           <input ref="templateInput" class="hidden-file" type="file" multiple accept=".xlsx" @change="handleTemplateUpload">
           <div class="provider-manager">
             <aside class="provider-list"><div class="provider-sort-hint"><span>物流商列表</span><small>正式渠道数据仓库</small></div><div class="provider-list-scroll"><button v-for="provider in filteredProviderSettings" :key="provider.id" :class="{ active:selectedProvider?.id===provider.id }" @click="selectedProviderId=provider.id"><u>⋮⋮</u><i>{{ provider.name.slice(0,1) }}</i><span><b>{{ provider.name }}</b><small>{{ provider.code }}</small></span><em>{{ providerChannelCount(provider) }}个渠道</em><strong>›</strong></button><div v-if="!filteredProviderSettings.length" class="provider-empty">没有匹配的物流商</div></div><footer>共 {{ providerSettings.length }} 家物流商</footer></aside>
-            <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0,1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span></h3><small>物流商编码 {{ selectedProvider.code }} · 渠道、价格和审核的唯一维护入口</small></div><div class="provider-detail-actions"><button class="outline-orange" @click="showChannelEditor=true">＋ 新增渠道</button><button class="outline-orange" @click="triggerTemplateUpload('','batch-import')">批量导入渠道</button><button class="upload" @click="triggerTemplateUpload('','batch-update')">批量更新价格</button><button v-if="selectedProviderDrafts.length" class="upload" @click="openBatchReview">批量审核 {{ selectedProviderDrafts.length }}</button></div></header><div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute }}</small></b><div><strong>{{ currentVersion(channel) ? `V${currentVersion(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersion(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ countryCount(visibleVersion(channel)) }}国 / {{ visibleVersion(channel)?.rowCount || 0 }}价格段</div><span :class="{ pending:draftVersion(channel) }">{{ draftVersion(channel) ? `V${draftVersion(channel)!.versionNumber} 待审核` : '无待审版本' }}</span><time>{{ currentVersion(channel)?.publishedAt || '—' }}</time><div class="template-actions"><button @click="triggerTemplateUpload(channel.id)">{{ currentVersion(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersion(channel)" class="move-template" @click="openDraftReview(channel)">审核发布</button><button @click="openHistory(channel)">版本历史</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未创建渠道</div></div><button class="template-dropzone" @dragover.prevent @drop.prevent="handleTemplateDrop" @click="triggerTemplateUpload('','batch-update')"><i>⇧</i><span>拖拽多个渠道 Excel 到这里，系统将按<strong>渠道编码或名称自动匹配并预检</strong></span></button></div></section>
+            <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0,1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span><em v-if="!selectedProvider.enabled">已停用</em></h3><small>物流商编码 {{ selectedProvider.code }} · 渠道、价格和审核的唯一维护入口</small></div><div class="provider-detail-actions"><button class="outline-orange" @click="showChannelEditor=true">＋ 新增渠道</button><button class="outline-orange" @click="triggerTemplateUpload('','batch-import')">批量导入渠道</button><button class="upload" @click="triggerTemplateUpload('','batch-update')">批量更新价格</button><button v-if="selectedProviderDrafts.length" class="upload" @click="openBatchReview">批量审核 {{ selectedProviderDrafts.length }}</button><button class="state-action" @click="toggleProviderStatus">{{ selectedProvider.enabled ? '停用物流商' : '重新启用' }}</button><button v-if="providerChannelCount(selectedProvider)===0" class="danger-action" @click="removeProvider">删除物流商</button></div></header><div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute }}<em v-if="!channel.enabled"> · 已停用</em></small></b><div><strong>{{ currentVersion(channel) ? `V${currentVersion(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersion(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ countryCount(visibleVersion(channel)) }}国 / {{ visibleVersion(channel)?.rowCount || 0 }}价格段</div><span :class="{ pending:draftVersion(channel) }">{{ draftVersion(channel) ? `V${draftVersion(channel)!.versionNumber} 待审核` : '无待审版本' }}</span><time>{{ currentVersion(channel)?.publishedAt || '—' }}</time><div class="template-actions"><button @click="triggerTemplateUpload(channel.id)">{{ currentVersion(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersion(channel)" class="move-template" @click="openDraftReview(channel)">审核发布</button><button @click="openHistory(channel)">版本历史</button><button class="state-action" @click="toggleChannelStatus(channel)">{{ channel.enabled ? '停用' : '启用' }}</button><button v-if="channelVersionCount(channel)===0" class="danger-action" @click="removeChannel(channel)">删除</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未创建渠道</div></div><button class="template-dropzone" @dragover.prevent @drop.prevent="handleTemplateDrop" @click="triggerTemplateUpload('','batch-update')"><i>⇧</i><span>拖拽多个渠道 Excel 到这里，系统将按<strong>渠道编码或名称自动匹配并预检</strong></span></button></div></section>
           </div>
         </section>
       </template>
@@ -550,4 +583,5 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
 .batch-modal{width:min(1120px,94vw);max-height:90vh;display:flex;flex-direction:column}.batch-body{min-height:0;overflow:auto;padding:18px}.batch-summary{display:flex;gap:10px;margin-bottom:14px}.batch-summary span{padding:8px 12px;border-radius:7px;background:#f1f5f7;color:#50616d}.batch-summary .danger{background:#fff0ee;color:#c7473c}.batch-list{display:grid;gap:8px}.batch-list article{display:grid;grid-template-columns:auto minmax(260px,1fr) minmax(250px,auto) minmax(100px,auto);align-items:center;gap:12px;padding:12px;border:1px solid #e1e7ea;border-radius:8px}.batch-list article>div>b,.batch-list article>div>small{display:block}.batch-list article>div>small{margin-top:4px;color:#87939b}.batch-action{padding:5px 8px;border-radius:12px;background:#e9f7ef;color:#178651;font-size:9px;font-weight:850}.batch-action.create{background:#fff0d9;color:#c87200}.batch-warning,.batch-error{color:#c7463b;font-size:9px;font-style:normal;font-weight:800}.batch-ok{color:#168852;font-size:9px;font-style:normal;font-weight:800}.batch-review-check{display:flex;align-items:center;gap:6px;color:#bd4a3f;font-size:9px;font-weight:800}.batch-help{margin:0 0 14px;color:#65747e}.batch-modal .audit-note{margin-top:16px}
 @media(max-width:960px){.import-review-modal{width:96vw}.review-workspace{height:auto;grid-template-columns:1fr}.review-navigator{max-height:320px;border-right:0;border-bottom:1px solid #e3e9ec}.review-detail{min-height:420px}.review-detail-head{flex-direction:column}.review-detail-badges{justify-content:flex-start}.review-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.batch-list article{grid-template-columns:auto 1fr}.batch-list article>.history-summary,.batch-list article>em,.batch-list article>label{grid-column:2}}
 @media(max-width:620px){.import-review-modal>.review-body{padding:12px}.review-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.review-risk-banner{align-items:flex-start;flex-direction:column}.review-risk-banner>button{margin-left:0}.price-change-card{grid-template-columns:35px minmax(0,1fr)}.change-result{grid-column:2;justify-items:start}.review-modal-footer{flex-wrap:wrap}.review-modal-footer>span{width:100%}.review-modal-footer button{flex:1}}
+.provider-detail-actions{flex-wrap:wrap;justify-content:flex-end}.provider-detail h3 em{display:inline-block;margin-left:6px;padding:3px 7px;border-radius:10px;background:#f0f2f4;color:#6f7a82;font-size:9px;font-style:normal}.provider-detail-actions .state-action,.provider-detail-actions .danger-action{height:36px;padding:0 12px;border-radius:6px;background:#fff;font-weight:750}.provider-detail-actions .state-action{border:1px solid #d6dde2;color:#596873}.provider-detail-actions .danger-action{border:1px solid #e7a59d;color:#c94f40}.template-table-head,.template-table-row{min-width:1000px;grid-template-columns:minmax(165px,1.35fr) minmax(150px,1.15fr) 90px 78px 126px 260px}.template-table-row>b small em{color:#c74d3d;font-style:normal}.template-actions .state-action{color:#6a737a}.template-actions .danger-action{color:#cf5142}
 </style>

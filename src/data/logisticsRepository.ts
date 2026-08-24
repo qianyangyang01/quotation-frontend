@@ -3,7 +3,7 @@ import type { LogisticsDiffRow, LogisticsDiffSummary, LogisticsImportIssue, Logi
 import { api, idempotencyKey } from '@/services/http'
 import { invalidatePublishedLogisticsCache } from './publishedLogisticsRepository'
 
-export type LogisticsProviderRecord = { id: string; name: string; code: string; enabled: boolean; createdAt: string; updatedAt: string }
+export type LogisticsProviderRecord = { id: string; name: string; code: string; enabled: boolean; createdAt: string; updatedAt: string; _version: number }
 export type LogisticsChannelRecord = {
   id: string; ruleId: number; providerId: string; name: string; code: string; type: string; logisticsAttribute: string
   enabled: boolean; currentVersionId: string; createdAt: string; updatedAt: string; _version: number
@@ -115,6 +115,14 @@ async function mutation<T>(request: Promise<T>) { const result = await request; 
 export async function addLogisticsProvider(name: string, code: string) {
   return mutation(api.post<LogisticsProviderRecord>('/logistics/providers', { name: name.trim(), code: code.trim().toUpperCase(), enabled: true }, idempotencyKey('logistics-provider')))
 }
+
+export async function setLogisticsProviderStatus(provider: LogisticsProviderRecord, enabled: boolean) {
+  const result = await mutation(api.patch<LogisticsProviderRecord>(`/logistics/providers/${provider.id}/status`, { enabled }, { 'If-Match': String(provider._version) }))
+  await invalidatePublishedLogisticsCache()
+  return result
+}
+
+export async function deleteLogisticsProvider(providerId: string) { return mutation(api.delete<void>(`/logistics/providers/${providerId}`)) }
 
 export async function addLogisticsChannel(input: { providerId: string; name: string; code: string; type: string; logisticsAttribute: string }) {
   return mutation(api.post<LogisticsChannelRecord>('/logistics/channels', input, idempotencyKey('logistics-channel')))
