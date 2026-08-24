@@ -132,7 +132,6 @@ public class QuotationController {
 
     @GetMapping(value = "/{id}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
     @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
-    @Transactional(readOnly = true)
     ResponseEntity<byte[]> pdf(@PathVariable UUID id, Authentication auth) {
         var row = owned(id, auth); var bytes = documents.pdf(row);
         audit.record("quotation.pdf", "quotation", id.toString(), "success", Map.of("bytes", bytes.length));

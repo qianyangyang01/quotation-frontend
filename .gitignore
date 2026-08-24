@@ -4,6 +4,7 @@ dist/
 .codex-remote-scripts/
 outputs/
 tmp/
+artifacts/performance/
 
 *.log
 .env

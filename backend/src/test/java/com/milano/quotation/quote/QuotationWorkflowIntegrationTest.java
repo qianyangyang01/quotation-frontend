@@ -1,5 +1,6 @@
 package com.milano.quotation.quote;
 
+import com.milano.quotation.audit.AuditLogRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,6 +14,7 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.http.MediaType.APPLICATION_PDF;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -26,6 +28,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 class QuotationWorkflowIntegrationTest {
     @Autowired WebApplicationContext context;
     @Autowired ObjectMapper mapper;
+    @Autowired AuditLogRepository auditLogs;
     @MockitoBean QuotationReadinessService readiness;
     MockMvc mvc;
 
@@ -42,6 +45,10 @@ class QuotationWorkflowIntegrationTest {
                 .andExpect(jsonPath("$.data.customerId").doesNotExist()).andReturn();
         var createdData = mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
         var id = createdData.path("id").asText(); var version = createdData.path("_version").asLong();
+
+        mvc.perform(get("/api/v1/quotations/{id}/pdf", id).session(session).accept(APPLICATION_PDF))
+                .andExpect(status().isOk()).andExpect(content().contentType(APPLICATION_PDF));
+        assertTrue(auditLogs.findAll().stream().anyMatch(log -> log.action.equals("quotation.pdf") && log.resourceId.equals(id)));
 
         var voided = mvc.perform(post("/api/v1/quotations/{id}/void", id).session(session).with(csrf())
                         .contentType("application/json").content("{\"reason\":\"客户取消\",\"version\":" + version + "}"))

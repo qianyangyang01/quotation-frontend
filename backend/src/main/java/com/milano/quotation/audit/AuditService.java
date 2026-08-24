@@ -4,7 +4,6 @@ import tools.jackson.databind.ObjectMapper;
 import org.slf4j.MDC;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -15,7 +14,7 @@ import java.util.UUID;
 public class AuditService {
     private final AuditLogRepository logs; private final ObjectMapper mapper;
     public AuditService(AuditLogRepository logs, ObjectMapper mapper) { this.logs = logs; this.mapper = mapper; }
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void record(String action, String resourceType, String resourceId, String outcome, Map<String, ?> detail) {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         var log = new AuditLog(); log.id = UUID.randomUUID(); log.requestId = value(MDC.get("requestId"), "system");
