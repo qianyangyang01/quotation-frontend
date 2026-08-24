@@ -84,6 +84,7 @@ class AssetStorageServiceTest {
         asset.expiresAt = Instant.now().minusSeconds(1);
         when(assets.findExpiredUnreferenced(any())).thenReturn(List.of(asset));
         doThrow(new RuntimeException("down")).when(minio).removeObject(any());
+        assertFalse(service.removeRaw("purchase-import/failed.zip"));
         assertDoesNotThrow(service::cleanupExpired);
         verify(assets, never()).delete(asset);
     }
@@ -102,6 +103,8 @@ class AssetStorageServiceTest {
         assertSame(stream, service.open(id).stream());
         assertSame(stream, service.openRaw("migration/a"));
         assertDoesNotThrow(() -> service.putRaw("migration/a", new java.io.ByteArrayInputStream(new byte[]{1}), 1, "application/octet-stream"));
+        assertTrue(service.removeRaw(""));
+        assertTrue(service.removeRaw("purchase-import/completed.zip"));
         when(assets.findExpiredUnreferenced(any())).thenReturn(List.of(asset));
         service.cleanupExpired();
         verify(assets).delete(asset);

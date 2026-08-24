@@ -48,7 +48,7 @@ class PurchaseProductServiceTest {
         assertEquals("AB12", created.path("sku").asText());
         assertEquals("真实商品", service.get("ab 12").path("name").asText());
         assertTrue(service.exists("AB12"));
-        when(products.findBySkuContainingIgnoreCase("AB", PageRequest.of(0, 10)))
+        when(products.search("AB", PageRequest.of(0, 10)))
                 .thenReturn(new PageImpl<>(List.of(rows.get("AB12"))));
         assertEquals(1, service.page(" AB ", PageRequest.of(0, 10)).getTotalElements());
         service.delete("AB12");

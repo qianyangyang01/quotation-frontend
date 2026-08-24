@@ -5,7 +5,6 @@ import com.milano.quotation.audit.AuditService;
 import com.milano.quotation.common.ApiResponse;
 import com.milano.quotation.common.PageResponse;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,7 +17,8 @@ import org.springframework.web.multipart.MultipartFile;
 public class PurchaseProductController {
     private final PurchaseProductService products; private final AuditService audit;
     public PurchaseProductController(PurchaseProductService products, AuditService audit) { this.products=products; this.audit=audit; }
-    @GetMapping @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<PageResponse<JsonNode>> list(@RequestParam(defaultValue="")String q,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="100")int size) { var safePage=Math.max(0,page);var safeSize=Math.max(1,Math.min(size,500));return ApiResponse.ok(PageResponse.from(products.page(q,PageRequest.of(safePage,safeSize,Sort.by(Sort.Direction.DESC,"updatedAt"))))); }
+    @GetMapping @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<PageResponse<JsonNode>> list(@RequestParam(defaultValue="")String q,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="100")int size) { var safePage=Math.max(0,page);var safeSize=Math.max(1,Math.min(size,500));return ApiResponse.ok(PageResponse.from(products.page(q,PageRequest.of(safePage,safeSize)))); }
+    @GetMapping("/stats") @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<PurchaseProductService.Stats> stats(){return ApiResponse.ok(products.stats());}
     @GetMapping("/{sku}") @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<JsonNode> get(@PathVariable String sku){return ApiResponse.ok(products.get(sku));}
     @PutMapping("/{sku}") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<JsonNode> upsert(@PathVariable String sku, @RequestBody JsonNode body) {
         ((tools.jackson.databind.node.ObjectNode) body).put("sku", sku); var result=products.upsert(body); audit.record("purchase.upsert","purchase-product",sku,"success", Map.of()); return ApiResponse.ok(result);

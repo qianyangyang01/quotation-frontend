@@ -7,9 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
+import java.util.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.milano.quotation.storage.AssetStorageService;
@@ -23,10 +21,11 @@ public class PurchaseProductService {
     private final PurchaseProductRepository products; private final PurchaseProductImageRepository images; private final AssetStorageService storage;
     public PurchaseProductService(PurchaseProductRepository products,PurchaseProductImageRepository images,AssetStorageService storage) { this.products = products; this.images=images; this.storage=storage; }
 
-    @Transactional(readOnly=true) public Page<JsonNode> page(String query,Pageable pageable) { return products.findBySkuContainingIgnoreCase(query==null?"":query.trim(),pageable).map(this::view); }
+    @Transactional(readOnly=true) public Page<JsonNode> page(String query,Pageable pageable) { return products.search(query==null?"":query.trim(),pageable).map(this::view); }
     @Transactional(readOnly=true) public JsonNode get(String sku) { return products.findBySku(normalizeSku(sku)).map(this::view).orElseThrow(()->AppException.notFound("商品不存在")); }
     @Transactional(readOnly=true) public boolean exists(String sku) { return products.findBySku(normalizeSku(sku)).isPresent(); }
     @Transactional(readOnly=true) public long readyCount() { return products.countByQuoteReadyTrue(); }
+    @Transactional(readOnly=true) public Stats stats() {var total=products.count();var ready=products.countByQuoteReadyTrue();return new Stats(total,ready,total-ready,products.countGeneratedSku());}
     @Transactional(readOnly=true) public boolean isQuoteReady(String sku) { return products.findBySku(normalizeSku(sku)).map(row -> row.quoteReady).orElse(false); }
 
     @Transactional
@@ -83,6 +82,7 @@ public class PurchaseProductService {
         var catalogState="pending_template".equals(importMode)?CATALOG_PENDING_TEMPLATE:CATALOG_READY;
         return upsert(payload,false,catalogState,sourceHash);
     }
+
     @Transactional public JsonNode promote(String sourceSku,String targetSku,long expectedVersion){
         var source=normalizeSku(sourceSku);var target=normalizeSku(targetSku);var row=products.findBySku(source).orElseThrow(()->AppException.notFound("商品不存在"));
         if(row.version!=expectedVersion)throw AppException.conflict("商品已被其他用户修改，请刷新后重试");
@@ -125,4 +125,5 @@ public class PurchaseProductService {
     private static String normalizeSourceHash(String value){if(value==null||value.isBlank())return null;var normalized=value.trim().toLowerCase(Locale.ROOT);if(!normalized.matches("[0-9a-f]{64}"))throw AppException.unprocessable("导入来源SHA-256不合法");return normalized;}
     private void externalizeImage(ObjectNode object,String field,String type){var value=object.path(field).asText("");if(!value.startsWith("data:"))return;var marker=value.indexOf(",");if(marker<0||!value.substring(0,marker).contains(";base64"))throw AppException.unprocessable("图片Base64格式错误");try{var bytes=java.util.Base64.getDecoder().decode(value.substring(marker+1));var asset=storage.storeImage(bytes,object.path("sku").asText("product")+"-"+type);object.put(field,"/api/v1/assets/"+asset.id);if(type.equals("product"))object.put("image","/api/v1/assets/"+asset.id);}catch(IllegalArgumentException e){throw AppException.unprocessable("图片Base64格式错误");}}
     private void linkFromUrl(UUID productId,String value,String type){var prefix="/api/v1/assets/";if(!value.startsWith(prefix))return;try{var assetId=UUID.fromString(value.substring(prefix.length()));link(productId,assetId,type);}catch(IllegalArgumentException ignored){}}
+    public record Stats(long total,long ready,long pending,long generatedSku){}
 }

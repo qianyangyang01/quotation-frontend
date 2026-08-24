@@ -84,10 +84,16 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   }
 }
 
-type PurchasePage = { items: PurchaseProductRecord[]; page: number; size: number; total: number; totalPages: number }
+export type PurchasePage = { items: PurchaseProductRecord[]; page: number; size: number; total: number; totalPages: number }
+export type PurchaseStats = { total:number;ready:number;pending:number;generatedSku:number }
+export async function loadPurchaseProductPage(query='',page=0,size=50):Promise<PurchasePage>{
+  const result=await api.get<PurchasePage>(`/purchase-products?q=${encodeURIComponent(query)}&page=${page}&size=${size}`)
+  return {...result,items:result.items.map(normalizePurchaseRecord)}
+}
+export const loadPurchaseStats=()=>api.get<PurchaseStats>('/purchase-products/stats')
 export async function loadPurchaseProducts(query = '', page = 0, size = 500): Promise<PurchaseProductRecord[]> {
-  const result = await api.get<PurchasePage>(`/purchase-products?q=${encodeURIComponent(query)}&page=${page}&size=${size}`)
-  return result.items.map(normalizePurchaseRecord).sort((a, b) => b.sourceRow - a.sourceRow)
+  const result = await loadPurchaseProductPage(query,page,size)
+  return result.items
 }
 
 export async function loadPurchaseProduct(sku: string): Promise<PurchaseProductRecord> {

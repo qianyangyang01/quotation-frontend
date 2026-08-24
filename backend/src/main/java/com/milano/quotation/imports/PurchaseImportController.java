@@ -12,11 +12,16 @@ import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.*;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -31,10 +36,13 @@ public class PurchaseImportController {
     private final IdempotencyService idempotency;
     private final AuditService audit;
     private final AssetStorageService storage;
+    private final AsyncPurchaseImportService asyncImports;
+    private final PurchaseImportImageService asyncImages;
 
     public PurchaseImportController(PurchaseWorkbookService parser, ImportJobRepository jobs,
                                     PurchaseImportRowRepository rows, PurchaseProductService products,
-                                    IdempotencyService idempotency, AuditService audit, AssetStorageService storage) {
+                                    IdempotencyService idempotency, AuditService audit, AssetStorageService storage,
+                                    AsyncPurchaseImportService asyncImports, PurchaseImportImageService asyncImages) {
         this.parser = parser;
         this.jobs = jobs;
         this.rows = rows;
@@ -42,7 +50,23 @@ public class PurchaseImportController {
         this.idempotency = idempotency;
         this.audit = audit;
         this.storage = storage;
+        this.asyncImports = asyncImports;
+        this.asyncImages = asyncImages;
     }
+
+    @PostMapping(value="/jobs",consumes="multipart/form-data")
+    ResponseEntity<ApiResponse<?>> createJob(@RequestPart("file")MultipartFile file,Authentication auth){var job=asyncImports.create(file,account(auth));audit.record("purchase.async-import-create","purchase-import",job.id.toString(),"success",Map.of("file",job.sourceName,"size",file.getSize()));return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(job.id)));}
+    @PostMapping(value="/jobs/{id}/image-parts",consumes="multipart/form-data")
+    ResponseEntity<ApiResponse<?>> imagePart(@PathVariable UUID id,@RequestParam int partNumber,@RequestPart("file")MultipartFile file){asyncImages.upload(id,partNumber,file);audit.record("purchase.async-import-image-part","purchase-import",id.toString(),"success",Map.of("part",partNumber,"size",file.getSize()));return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(id)));}
+    @GetMapping("/jobs") ApiResponse<?> jobs(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="20")int size){return ApiResponse.ok(asyncImports.list(PageRequest.of(Math.max(0,page),Math.min(100,Math.max(1,size)))));}
+    @GetMapping("/jobs/{id}") ApiResponse<?> jobView(@PathVariable UUID id){return ApiResponse.ok(asyncImports.view(id));}
+    @GetMapping("/jobs/{id}/rows") ApiResponse<?> jobRows(@PathVariable UUID id,@RequestParam(required=false)String status,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="50")int size){return ApiResponse.ok(asyncImports.rowPage(id,status,PageRequest.of(Math.max(0,page),Math.min(200,Math.max(1,size)))));}
+    @GetMapping("/jobs/{id}/image-errors") ApiResponse<?> imageErrors(@PathVariable UUID id,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="50")int size){return ApiResponse.ok(asyncImports.imageErrorPage(id,PageRequest.of(Math.max(0,page),Math.min(200,Math.max(1,size)))));}
+    @GetMapping("/jobs/{id}/errors.xlsx") ResponseEntity<StreamingResponseBody> errors(@PathVariable UUID id){asyncImports.view(id);StreamingResponseBody body=output->{try(var workbook=new SXSSFWorkbook(100)){var sheet=workbook.createSheet("数据错误");var header=sheet.createRow(0);String[] names={"Excel行号","SKU","状态","处理动作","错误原因"};for(int i=0;i<names.length;i++)header.createCell(i).setCellValue(names[i]);int index=1;for(var status:List.of("error","conflict")){int page=0;while(true){var result=asyncImports.rowPage(id,status,PageRequest.of(page++,1000));for(var item:result){var row=sheet.createRow(index++);row.createCell(0).setCellValue(item.sourceRow());row.createCell(1).setCellValue(item.sku());row.createCell(2).setCellValue(item.status());row.createCell(3).setCellValue(item.action()==null?"":item.action());row.createCell(4).setCellValue(item.error()==null?"":item.error());}if(result.isLast())break;}}var imageSheet=workbook.createSheet("图片错误");var imageHeader=imageSheet.createRow(0);String[] imageNames={"SKU","图片类型","文件名","错误原因"};for(int i=0;i<imageNames.length;i++)imageHeader.createCell(i).setCellValue(imageNames[i]);index=1;int page=0;while(true){var result=asyncImports.imageErrorPage(id,PageRequest.of(page++,1000));for(var item:result){var row=imageSheet.createRow(index++);row.createCell(0).setCellValue(item.sku());row.createCell(1).setCellValue(item.type());row.createCell(2).setCellValue(item.fileName());row.createCell(3).setCellValue(item.error()==null?"":item.error());}if(result.isLast())break;}workbook.write(output);workbook.dispose();}};return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=purchase-import-errors-"+id+".xlsx").body(body);}
+    @PostMapping("/jobs/{id}/confirm") ResponseEntity<ApiResponse<?>> confirmJob(@PathVariable UUID id,@RequestHeader("Idempotency-Key")String key,Authentication auth){var request=JsonNodeFactory.instance.objectNode().put("jobId",id.toString());var existing=idempotency.existing(account(auth),"purchase-async-confirm",key,request);if(existing.isPresent())return ResponseEntity.accepted().body(ApiResponse.ok(existing.get()));var job=asyncImports.confirm(id);var response=JsonNodeFactory.instance.objectNode().put("jobId",id.toString()).put("status",job.status);idempotency.save(account(auth),"purchase-async-confirm",key,request,response);audit.record("purchase.async-import-confirm","purchase-import",id.toString(),"success",Map.of("validRows",job.validRows));return ResponseEntity.accepted().body(ApiResponse.ok(response));}
+    @PostMapping("/jobs/{id}/retry") ResponseEntity<ApiResponse<?>> retry(@PathVariable UUID id){var job=asyncImports.retry(id);audit.record("purchase.async-import-retry","purchase-import",id.toString(),"success",Map.of());return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(job.id)));}
+    @PostMapping("/jobs/{id}/rollback") ResponseEntity<ApiResponse<?>> rollback(@PathVariable UUID id){var job=asyncImports.requestRollback(id);audit.record("purchase.async-import-rollback","purchase-import",id.toString(),"success",Map.of());return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(job.id)));}
+    @PostMapping("/jobs/{id}/cancel") ApiResponse<?> cancel(@PathVariable UUID id){var job=asyncImports.cancel(id);audit.record("purchase.async-import-cancel","purchase-import",id.toString(),"success",Map.of());return ApiResponse.ok(asyncImports.view(job.id));}
 
     @PostMapping(value = "/preview", consumes = "multipart/form-data")
     ApiResponse<?> preview(@RequestPart("file") MultipartFile file, Authentication auth) {

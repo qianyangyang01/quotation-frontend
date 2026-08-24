@@ -44,8 +44,9 @@ class FlywayPostgresIntegrationTest {
         var flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load();
         var migrationResult = flyway.migrate();
-        assertEquals(2, migrationResult.migrationsExecuted);
+        assertEquals(3, migrationResult.migrationsExecuted);
         assertEquals(true, migrationResult.migrations.stream().anyMatch(item -> "13".equals(item.version)));
+        assertEquals(true, migrationResult.migrations.stream().anyMatch(item -> "14".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name in ('app_user','purchase_product','quotation_record','audit_log','customer','supplier','quotation_share','business_migration_batch')");
              var result = statement.executeQuery()) {

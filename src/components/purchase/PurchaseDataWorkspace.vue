@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { deletePurchaseProduct, loadPurchaseProduct, loadPurchaseProducts, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { deletePurchaseProduct, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { confirmPurchaseImport, previewPurchaseWorkbook, type ServerPurchaseImportPreview } from '@/services/purchaseImports'
+import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImportJob, loadPurchaseImportJob, loadPurchaseImportJobs, loadPurchaseImportRows, purchaseImportErrorsUrl, retryPurchaseImportJob, rollbackPurchaseImportJob, uploadPurchaseImagePart, type PurchaseImportJob, type PurchaseImportRowView } from '@/services/purchaseAsyncImports'
 import ImageMigrationPanel from './ImageMigrationPanel.vue'
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
@@ -22,20 +23,31 @@ const previewImage = ref<{ src: string; title: string } | null>(null)
 const showImageMigration = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(10)
+const totalRecords = ref(0)
+const serverTotalPages = ref(1)
+const purchaseStats = ref({ total:0, ready:0, pending:0, generatedSku:0 })
+const asyncFileInput = ref<HTMLInputElement | null>(null)
+const imagePartInput = ref<HTMLInputElement | null>(null)
+const asyncUploading = ref(false)
+const imageUploading = ref(false)
+const showTaskCenter = ref(false)
+const importJobs = ref<PurchaseImportJob[]>([])
+const activeJob = ref<PurchaseImportJob | null>(null)
+const activeRows = ref<PurchaseImportRowView[]>([])
+const activeRowStatus = ref('error')
+const imagePartNumber = ref(1)
+const pendingJobAction = ref<'confirm'|'retry'|'cancel'|'rollback'|null>(null)
+let jobPollTimer = 0
 
-const filtered = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  if (!query) return records.value
-  return records.value.filter(item => [item.sku, item.category, item.quotationOwner, item.size, item.color, item.factoryInfo, item.notes].join(' ').toLowerCase().includes(query))
-})
-const readyCount = computed(() => records.value.filter(item => item.quoteReady).length)
-const pendingCount = computed(() => records.value.length - readyCount.value)
-const generatedCount = computed(() => records.value.filter(item => item.skuOrigin === 'system').length)
-const tieredCount = computed(() => filtered.value.filter(item => item.priceTiers.length > 1).length)
-const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
-const pageStart = computed(() => filtered.value.length ? (currentPage.value - 1) * pageSize.value : 0)
-const pageEnd = computed(() => Math.min(pageStart.value + pageSize.value, filtered.value.length))
-const pagedRecords = computed(() => filtered.value.slice(pageStart.value, pageEnd.value))
+const filtered = computed(() => records.value)
+const readyCount = computed(() => purchaseStats.value.ready)
+const pendingCount = computed(() => purchaseStats.value.pending)
+const generatedCount = computed(() => purchaseStats.value.generatedSku)
+const tieredCount = computed(() => records.value.filter(item => item.priceTiers.length > 1).length)
+const totalPages = computed(() => Math.max(1, serverTotalPages.value))
+const pageStart = computed(() => totalRecords.value ? (currentPage.value - 1) * pageSize.value : 0)
+const pageEnd = computed(() => Math.min(pageStart.value + records.value.length, totalRecords.value))
+const pagedRecords = computed(() => records.value)
 const visiblePages = computed<(number | 'ellipsis-start' | 'ellipsis-end')[]>(() => {
   const total = totalPages.value
   if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
@@ -49,14 +61,16 @@ const visiblePages = computed<(number | 'ellipsis-start' | 'ellipsis-end')[]>(()
   return pages
 })
 
-watch(search, () => { currentPage.value = 1 })
-watch(pageSize, () => { currentPage.value = 1 })
+let searchTimer=0
+watch(search, () => { currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(reload,250) })
+watch(pageSize, () => { currentPage.value = 1;reload() })
 watch(totalPages, total => {
   if (currentPage.value > total) currentPage.value = total
 })
 
 function goToPage(page: number) {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
+  reload()
 }
 function resetFilters() {
   search.value = ''
@@ -65,11 +79,20 @@ function resetFilters() {
 
 async function reload() {
   loading.value = true
-  try { records.value = await loadPurchaseProducts() }
+  try { const [page,stats]=await Promise.all([loadPurchaseProductPage(search.value.trim(),currentPage.value-1,pageSize.value),loadPurchaseStats()]);records.value=page.items;totalRecords.value=page.total;serverTotalPages.value=page.totalPages;purchaseStats.value=stats }
   catch (error) { toast(error instanceof Error ? error.message : '采购数据读取失败') }
   finally { loading.value = false }
 }
-onMounted(reload)
+onMounted(() => { reload(); refreshImportJobs(); jobPollTimer = window.setInterval(refreshImportJobs, 2000) })
+onUnmounted(() => { window.clearInterval(jobPollTimer);window.clearTimeout(searchTimer) })
+
+const jobStatusLabel:Record<string,string>={queued:'排队中',parsing:'解析校验中',ready:'待确认', 'import-queued':'等待入库',importing:'批量入库中',completed:'已完成','completed-with-errors':'部分完成',failed:'失败',cancelled:'已取消','rollback-queued':'等待回滚','rolling-back':'回滚中','rolled-back':'已回滚'}
+async function refreshImportJobs(){try{const page=await loadPurchaseImportJobs();importJobs.value=page.content;if(activeJob.value){const fresh=await loadPurchaseImportJob(activeJob.value.id);activeJob.value=fresh;if(['completed','completed-with-errors','rolled-back'].includes(fresh.status))await reload()}}catch{/* 页面主数据错误提示已独立处理，轮询失败等待下一次重试 */}}
+async function selectImportJob(job:PurchaseImportJob){activeJob.value=await loadPurchaseImportJob(job.id);await refreshJobRows()}
+async function refreshJobRows(){if(!activeJob.value)return;const page=await loadPurchaseImportRows(activeJob.value.id,activeRowStatus.value,0,50);activeRows.value=page.content}
+async function chooseAsyncWorkbook(event:Event){const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file)return;asyncUploading.value=true;try{activeJob.value=await createPurchaseImportJob(file);showTaskCenter.value=true;await refreshImportJobs();toast('大批量导入任务已创建，正在后台解析')}catch(error){toast(error instanceof Error?error.message:'导入任务创建失败')}finally{asyncUploading.value=false;input.value=''}}
+async function chooseImagePart(event:Event){const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file||!activeJob.value)return;imageUploading.value=true;try{activeJob.value=await uploadPurchaseImagePart(activeJob.value.id,imagePartNumber.value,file);imagePartNumber.value+=1;toast('图片分包上传成功')}catch(error){toast(error instanceof Error?error.message:'图片分包上传失败')}finally{imageUploading.value=false;input.value=''}}
+async function executeJobAction(){if(!activeJob.value||!pendingJobAction.value)return;const id=activeJob.value.id;try{if(pendingJobAction.value==='confirm')await confirmPurchaseImportJob(id);else if(pendingJobAction.value==='retry')await retryPurchaseImportJob(id);else if(pendingJobAction.value==='cancel')await cancelPurchaseImportJob(id);else await rollbackPurchaseImportJob(id);activeJob.value=await loadPurchaseImportJob(id);await refreshImportJobs();toast('任务操作已提交')}catch(error){toast(error instanceof Error?error.message:'任务操作失败')}finally{pendingJobAction.value=null}}
 
 let toastTimer = 0
 function toast(message: string) {
@@ -175,15 +198,18 @@ const detailFields = computed(() => detail.value ? [
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
-      <button class="outline" :disabled="parsing" @click="fileInput?.click()">{{ parsing ? '解析中…' : 'Excel 导入' }}</button>
+      <button class="outline" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading ? '上传中…' : '大批量导入' }}</button>
+      <button class="outline" @click="showTaskCenter=true;refreshImportJobs()">导入任务</button>
+      <button class="outline" :disabled="parsing" @click="fileInput?.click()">{{ parsing ? '解析中…' : '小文件导入' }}</button>
       <button class="outline" @click="showImageMigration=true">图片迁移</button>
       <button class="primary" @click="openEditor()">＋ 新增采购资料</button>
       <input ref="fileInput" hidden type="file" accept=".xlsx" @change="chooseWorkbook">
+      <input ref="asyncFileInput" hidden type="file" accept=".xlsx" @change="chooseAsyncWorkbook">
     </div>
   </section>
 
   <section class="stats">
-    <article><small>采购资料</small><b>{{ records.length }}</b><span>报价服务器数据库</span></article>
+    <article><small>采购资料</small><b>{{ purchaseStats.total }}</b><span>报价服务器数据库</span></article>
     <article><small>可参与报价</small><b>{{ readyCount }}</b><span>关键成本资料完整</span></article>
     <article><small>待补充资料</small><b class="orange">{{ pendingCount }}</b><span>空值显示“暂无数据”</span></article>
     <article><small>系统生成 SKU</small><b class="orange">{{ generatedCount }}</b><span>修改后才可参与报价</span></article>
@@ -193,7 +219,7 @@ const detailFields = computed(() => detail.value ? [
     <label>⌕ <input v-model="search" placeholder="搜索 SKU、类别、报价人、尺码、颜色或工厂"></label>
     <button @click="resetFilters">重置筛选</button>
     <button v-if="lastImport" class="result-link" @click="importPreview=lastImport">查看最近导入结果</button>
-    <span>共 {{ filtered.length }} 条 · {{ tieredCount }} 条含阶梯价<span v-if="filtered.length"> · 当前 {{ pageStart + 1 }}–{{ pageEnd }} 条</span></span>
+    <span>共 {{ totalRecords }} 条 · 当前页 {{ tieredCount }} 条含阶梯价<span v-if="totalRecords"> · 当前 {{ pageStart + 1 }}–{{ pageEnd }} 条</span></span>
   </section>
 
   <section class="table-card">
@@ -211,7 +237,7 @@ const detailFields = computed(() => detail.value ? [
         <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button></td>
       </tr></tbody>
     </table>
-    <footer v-if="filtered.length" class="pagination" aria-label="采购资料分页">
+    <footer v-if="totalRecords" class="pagination" aria-label="采购资料分页">
       <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
       <nav>
         <button :disabled="currentPage===1" @click="goToPage(currentPage-1)">上一页</button>
@@ -231,6 +257,26 @@ const detailFields = computed(() => detail.value ? [
     <label class="import-mode">导入用途<select v-model="importMode"><option value="formal">正式采购数据</option><option value="pending_template">模板待补全目录（不可报价）</option></select><small v-if="importMode==='pending_template'">保留模板参考值，但所有SKU将被服务端锁定为不可报价。</small></label>
     <div class="issues"><b>导入提示（阻断 {{ importPreview.errorCount }} · 警告 {{ importPreview.warningCount }}）</b><p v-if="!importPreview.issues.length">模板检查通过，没有发现异常。</p><p v-else-if="!importPreview.canConfirm" class="blocking">存在阻断错误，当前文件不能确认导入。请修正 Excel 后重新上传。</p><article v-for="(issue,index) in importPreview.issues" :key="`${issue.row}-${index}`" :class="issue.level"><em>第 {{ issue.row }} 行 · {{ issue.field }}</em><span>{{ issue.message }}</span></article></div>
     <footer><button @click="importPreview=null">取消</button><button class="primary" :disabled="savingImport || !importPreview.records.length || !importPreview.canConfirm" @click="confirmImport">{{ savingImport ? '正在导入…' : importPreview.canConfirm ? `确认导入 ${importPreview.records.length} 条` : '存在阻断错误，无法导入' }}</button></footer>
+  </section></div>
+
+  <div v-if="showTaskCenter" class="mask" @click.self="showTaskCenter=false"><section class="modal task-center-modal">
+    <button class="close" @click="showTaskCenter=false">×</button><small>ASYNC PURCHASE IMPORT</small><h2>大批量导入任务中心</h2><p>Excel 后台流式解析，合格数据一次确认后分批入库。</p>
+    <div class="task-center-grid">
+      <aside class="job-list"><button v-for="job in importJobs" :key="job.id" :class="{ active:activeJob?.id===job.id }" @click="selectImportJob(job)"><b>{{ job.sourceName }}</b><span>{{ jobStatusLabel[job.status] || job.status }} · {{ job.progressPercent }}%</span><small>{{ new Date(job.createdAt).toLocaleString() }}</small></button><p v-if="!importJobs.length">暂无大批量导入任务</p></aside>
+      <main v-if="activeJob" class="job-detail">
+        <header><div><b>{{ activeJob.sourceName }}</b><span :class="['job-status',activeJob.status]">{{ jobStatusLabel[activeJob.status] || activeJob.status }}</span></div><strong>{{ activeJob.progressPercent }}%</strong></header>
+        <div class="progress"><i :style="{ width:`${activeJob.progressPercent}%` }"></i></div>
+        <div class="job-stats"><span><b>{{ activeJob.totalRows }}</b>总行数</span><span><b>{{ activeJob.validRows }}</b>合格</span><span><b>{{ activeJob.errorRows }}</b>错误</span><span><b>{{ activeJob.addedRows }}</b>新增</span><span><b>{{ activeJob.updatedRows }}</b>覆盖</span><span><b>{{ activeJob.conflictRows }}</b>冲突</span></div>
+        <p v-if="activeJob.error" class="job-error">{{ activeJob.error }}</p>
+        <div v-if="['queued','parsing','ready','failed'].includes(activeJob.status)" class="image-part-upload"><label>图片ZIP分包编号 <input v-model.number="imagePartNumber" type="number" min="1"></label><button :disabled="imageUploading" @click="imagePartInput?.click()">{{ imageUploading?'上传中…':'上传图片分包' }}</button><small>命名：SKU-product.jpg / SKU-physical.jpg；已上传 {{ activeJob.imageParts }} 包</small><input ref="imagePartInput" hidden type="file" accept=".zip" @change="chooseImagePart"></div>
+        <div v-if="activeJob.imagePartDetails?.length" class="image-part-list"><button v-for="part in activeJob.imagePartDetails" :key="part.partNumber" :class="part.status" :title="part.error || part.fileName" @click="part.status==='failed' && (imagePartNumber=part.partNumber)"><b>分包 {{ part.partNumber }}</b><span>{{ part.status==='completed'?'已完成':part.status==='failed'?'失败，点击选择替换':'待处理' }}</span><small v-if="part.error">{{ part.error }}</small></button></div>
+        <div class="row-filter"><button :class="{active:activeRowStatus==='error'}" @click="activeRowStatus='error';refreshJobRows()">错误行</button><button :class="{active:activeRowStatus==='conflict'}" @click="activeRowStatus='conflict';refreshJobRows()">冲突行</button><a :href="purchaseImportErrorsUrl(activeJob.id)" download>下载错误清单</a></div>
+        <div class="job-rows"><p v-if="!activeRows.length">当前没有对应记录</p><article v-for="row in activeRows" :key="row.sourceRow"><b>第 {{ row.sourceRow }} 行 · {{ row.sku }}</b><span>{{ row.error || '暂无错误说明' }}</span></article></div>
+        <div v-if="pendingJobAction" class="action-confirm"><span>确认执行“{{ pendingJobAction==='confirm'?'批次入库':pendingJobAction==='rollback'?'整批回滚':pendingJobAction==='retry'?'重试任务':'取消任务' }}”吗？</span><button @click="pendingJobAction=null">返回</button><button class="primary" @click="executeJobAction">确认执行</button></div>
+        <footer v-else><button v-if="['queued','parsing','ready'].includes(activeJob.status)" @click="pendingJobAction='cancel'">取消任务</button><button v-if="activeJob.status==='failed'" @click="pendingJobAction='retry'">重试</button><button v-if="['completed','completed-with-errors'].includes(activeJob.status)" @click="pendingJobAction='rollback'">整批回滚</button><button v-if="activeJob.status==='ready'" class="primary" :disabled="!activeJob.validRows" @click="pendingJobAction='confirm'">确认入库 {{ activeJob.validRows }} 条</button></footer>
+      </main>
+      <main v-else class="job-detail empty">请选择一个导入任务</main>
+    </div>
   </section></div>
 
   <div v-if="detail" class="mask" @click.self="detail=null"><section class="modal detail-modal">
@@ -276,4 +322,5 @@ const detailFields = computed(() => detail.value ? [
 .issues .blocking{margin:0;border-top:1px solid #f3c7c3;background:#fff1ef;color:#b62f27;font-weight:800}.issues article.error{background:#fff8f7}.issues article.error em{color:#c4362d}.primary:disabled{cursor:not-allowed;opacity:.5}
 .import-mode{display:grid;gap:6px;margin:12px 0;padding:12px;border:1px solid #f1d19a;border-radius:8px;background:#fff8eb;color:#6c5b42;font-size:11px}.import-mode select{height:36px;border:1px solid #dfc392;border-radius:6px;background:#fff;padding:0 9px}.import-mode small{color:#a35f00}
 .pagination{display:flex;min-width:1180px;align-items:center;justify-content:space-between;gap:18px;padding:14px 16px;border-top:1px solid #e3e8eb;background:#fafbfc;color:#74808a;font-size:11px}.pagination nav{display:flex;align-items:center;gap:6px}.pagination button{min-width:32px;height:32px;padding:0 10px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#596771;font-size:11px;font-weight:800}.pagination button.active{border-color:#ff9900;background:#ff9900;color:#17212b}.pagination button:disabled{cursor:not-allowed;opacity:.42}.pagination nav i{display:grid;width:24px;place-items:center;color:#9aa4ac;font-style:normal}.pagination label{display:flex;align-items:center;gap:7px}.pagination select{height:32px;border:1px solid #dce3e8;border-radius:6px;background:#fff;padding:0 8px;color:#596771}
+.task-center-modal{width:min(1180px,97vw)}.task-center-grid{display:grid;grid-template-columns:280px 1fr;min-height:520px;margin-top:18px;border:1px solid #dfe5e9;border-radius:9px;overflow:hidden}.job-list{overflow:auto;border-right:1px solid #dfe5e9;background:#f7f9fa}.job-list>button{display:grid;width:100%;gap:5px;padding:14px;border:0;border-bottom:1px solid #e5eaed;background:transparent;text-align:left}.job-list>button.active{background:#fff3df;box-shadow:inset 3px 0 #ff9900}.job-list span,.job-list small{color:#74808a;font-size:10px}.job-detail{min-width:0;padding:20px}.job-detail>header{display:flex;align-items:center;justify-content:space-between}.job-detail>header>div{display:grid;gap:7px}.job-detail>header strong{font-size:28px}.job-status{width:max-content;padding:4px 8px;border-radius:10px;background:#edf1f3;color:#596771;font-size:10px}.job-status.ready,.job-status.completed{background:#e7f6ec;color:#16764a}.job-status.failed,.job-status.completed-with-errors{background:#fff0e7;color:#ad5700}.progress{height:8px;margin:15px 0;border-radius:8px;overflow:hidden;background:#edf1f3}.progress i{display:block;height:100%;background:#ff9900;transition:width .25s}.job-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}.job-stats span{display:grid;gap:4px;padding:10px;border-radius:7px;background:#f6f8f9;color:#74808a;font-size:9px}.job-stats b{color:#17212b;font-size:18px}.job-error{padding:10px;border-radius:6px;background:#fff0ee;color:#b3362e}.image-part-upload{display:flex;align-items:center;gap:10px;margin:14px 0;padding:12px;border:1px dashed #d8dfe4;border-radius:7px}.image-part-upload label{display:flex;align-items:center;gap:7px}.image-part-upload input{width:70px;height:30px;border:1px solid #d7dee3}.image-part-upload button,.row-filter button,.row-filter a{height:32px;padding:0 10px;border:1px solid #dce3e8;border-radius:5px;background:#fff;color:#596771;text-decoration:none;line-height:30px}.image-part-upload small{margin-left:auto;color:#7b8790}.image-part-list{display:flex;max-height:100px;gap:6px;overflow:auto}.image-part-list button{display:grid;min-width:115px;gap:3px;padding:7px;border:1px solid #dfe5e9;border-radius:6px;background:#f7f9fa;text-align:left}.image-part-list button.completed{border-color:#bfe4ce;background:#edf9f1}.image-part-list button.failed{border-color:#f0c5aa;background:#fff4ec;cursor:pointer}.image-part-list span,.image-part-list small{font-size:9px;color:#74808a}.image-part-list small{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row-filter{display:flex;gap:7px;margin:14px 0}.row-filter button.active{border-color:#ff9900;color:#a96000}.row-filter a{margin-left:auto}.job-rows{max-height:180px;overflow:auto;border:1px solid #e2e7ea;border-radius:7px}.job-rows article{display:grid;gap:4px;padding:9px 11px;border-top:1px solid #edf0f2;font-size:10px}.job-rows article:first-child{border-top:0}.job-rows span{color:#a34c00}.action-confirm{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:15px;padding:12px;border-radius:7px;background:#fff4df}.action-confirm span{margin-right:auto;font-weight:800}.action-confirm button{height:34px;padding:0 12px;border:1px solid #dce3e8;border-radius:5px;background:#fff}.action-confirm .primary{border:0;background:#ff9900}@media(max-width:900px){.task-center-grid{grid-template-columns:1fr}.job-list{max-height:180px;border-right:0;border-bottom:1px solid #dfe5e9}.job-stats{grid-template-columns:repeat(3,1fr)}}
 </style>
