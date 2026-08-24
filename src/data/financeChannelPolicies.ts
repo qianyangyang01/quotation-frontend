@@ -54,7 +54,7 @@ export const FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT = 'milano:finance-country-se
 const CUSTOMER_GRADE_STORAGE_KEY = 'milano.finance-customer-grade-coefficients.v1'
 const EXCHANGE_RATE_STORAGE_KEY = 'milano.finance-exchange-rate.v1'
 const DEFAULT_USD_CNY_RATE = 6.75
-export const COMMON_COUNTRY_LIMIT = 20
+export const COMMON_COUNTRY_LIMIT = 40
 
 // Kept for the purchase data category input. Finance logistics policies use the six attributes above.
 export const financeCategoryOptions = ['未分类', '保健品', '美妆', '化妆品', '服装', '日用品', '个护健康', '家居百货', '数码配件', '宠物用品', '袜子']
