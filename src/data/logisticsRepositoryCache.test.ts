@@ -6,7 +6,7 @@ vi.mock('@/services/http', () => ({
   idempotencyKey: () => 'test-key',
 }))
 
-import { invalidateLogisticsWorkspaceCache, loadLogisticsWorkspace, refreshPublishedLogisticsRules } from './logisticsRepository'
+import { invalidateLogisticsWorkspaceCache, loadLogisticsWorkspace, workspaceLogisticsRules } from './logisticsRepository'
 
 describe('logistics workspace request coalescing', () => {
   beforeEach(() => {
@@ -15,29 +15,30 @@ describe('logistics workspace request coalescing', () => {
   })
 
   it('shares concurrent workspace requests and reuses the result for published rule refresh', async () => {
-    get.mockResolvedValue({
-      providers: [{ id: 'provider-1', name: '云途', code: 'YT', enabled: true, createdAt: '', updatedAt: '' }],
-      channels: [{ id: 'channel-1', ruleId: 1, providerId: 'provider-1', name: '云途普货', code: 'YT-PH', type: '专线', logisticsAttribute: '普货', enabled: true, currentVersionId: '', createdAt: '', updatedAt: '', _version: 0 }],
-      versions: [],
-    })
+    get.mockImplementation((path: string) => Promise.resolve({
+      items: path.startsWith('/logistics/providers')
+        ? [{ id: 'provider-1', name: '云途', code: 'YT', enabled: true, createdAt: '', updatedAt: '' }]
+        : path.startsWith('/logistics/channels')
+          ? [{ id: 'channel-1', ruleId: 1, providerId: 'provider-1', name: '云途普货', code: 'YT-PH', type: '专线', logisticsAttribute: '普货', enabled: true, currentVersionId: '', createdAt: '', updatedAt: '', _version: 0 }]
+          : [],
+      page: 0, size: 200, total: 1, totalPages: 1,
+    }))
 
     const [first, second] = await Promise.all([loadLogisticsWorkspace(), loadLogisticsWorkspace()])
-    await refreshPublishedLogisticsRules(first)
+    expect(workspaceLogisticsRules(first)).toHaveLength(1)
 
     expect(first).toBe(second)
     expect(first.providers).toHaveLength(1)
-    expect(get).toHaveBeenCalledTimes(1)
+    expect(get).toHaveBeenCalledTimes(3)
   })
 
   it('normalizes optional review fields from migrated logistics drafts', async () => {
-    get.mockResolvedValue({
-      providers: [],
-      channels: [],
-      versions: [{
+    get.mockImplementation((path: string) => Promise.resolve({
+      items: path.startsWith('/logistics/versions') ? [{
         id: 'version-1', channelId: 'channel-1', versionNumber: 1, status: 'draft', fileName: 'legacy.xlsx', sourceHash: 'sha256',
         rows: [{ areaName: '美国', countryCode: 'US' }], importedAt: '', importedBy: '', publishedAt: '', publishedBy: '', auditNote: '',
-      }],
-    })
+      }] : [], page: 0, size: 200, total: 1, totalPages: 1,
+    }))
 
     const state = await loadLogisticsWorkspace()
 
