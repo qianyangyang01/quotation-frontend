@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
 import { api } from '@/services/http'
-import { loadCustomers, type Customer } from '@/services/masterData'
 import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
 import AppTopbar from '@/components/AppTopbar.vue'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
@@ -85,7 +84,6 @@ const financeTaxSettings = ref(loadFinanceTaxSettings())
 const quotationAttributeOptions = [...new Set([...financeLogisticsAttributeOptions, ...financePolicies.map(policy => policy.category)])]
 const skuSearch = ref('')
 const customerName = ref('')
-const customers = ref<Customer[]>([])
 const productCategory = ref('')
 const monthlySalesEstimate = ref('10')
 function monthlySalesPurchaseQuantity(value = monthlySalesEstimate.value) {
@@ -359,9 +357,8 @@ onMounted(async () => {
   window.addEventListener('storage', refreshFinanceCountrySettings)
   window.addEventListener('storage', refreshFinanceTaxSettings)
   try {
-    const [products, customerPage, readinessState] = await Promise.all([loadPurchaseProducts(), loadCustomers('', 0, 100, true), loadQuotationReadiness()])
+    const [products, readinessState] = await Promise.all([loadPurchaseProducts(), loadQuotationReadiness()])
     purchaseRecords.value = products
-    customers.value = customerPage.items
     readiness.value = readinessState
     const requestedSku = String(route.query.sku || '').trim()
     if (requestedSku) { skuSearch.value = requestedSku; queryProduct() }
@@ -720,7 +717,6 @@ function useLogistics(p: Product, option: { country: string; quoteRegion?: strin
 async function save() {
   const p = products.value[0]
   const customer = customerName.value.trim()
-  const customerId = customers.value.find(item => item.name === customer)?.id
   const selectedMatrixRows = savedQuoteRows.value
   if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
@@ -767,13 +763,13 @@ async function save() {
       taxCustomUsd: row.taxCustomUsd,
     }
   })
-  await api.put('/quotation-drafts/mine', { quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, selectedTaxCustomerType: selectedTaxCustomerType.value, customerId, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value })
+  await api.put('/quotation-drafts/mine', { quoteMode: quoteMode.value, quoteMatrixMode: quoteMatrixMode.value, quotationTemplate: templateSnapshot, products: products.value, bundleItems: bundleItems.value, quoteOptions, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), specifiedQuotes: selectedMatrixRows, exchange: exchange.value, selectedSalesperson: selectedSalesperson.value, selectedCustomerGrade: selectedCustomerGrade.value, selectedTaxCustomerType: selectedTaxCustomerType.value, customerName: customer, productCategory: productCategory.value, monthlySalesEstimate: monthlySalesEstimate.value })
   const productSummary = quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
   const record = await createQuotationRecord({
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
-    customerId, customerName: customer, quoteMode: quoteMode.value, productSummary,
+    customerName: customer, quoteMode: quoteMode.value, productSummary,
     productImage: quoteMode.value === 'bundle'
       ? (bundleItems.value.map(item => preferredQuotationImage(item.physicalImage, item.image)).find(Boolean) || '')
       : preferredQuotationImage(p.physicalImage, p.image),
@@ -813,7 +809,7 @@ function toast(message: string) {
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
-          :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :customer-options="customers.map(item=>item.name)" :product-category="productCategory" :product-categories="quotationProductCategories" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
+          :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :product-category="productCategory" :product-categories="quotationProductCategories" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :tax-customer-type="selectedTaxCustomerType" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode"

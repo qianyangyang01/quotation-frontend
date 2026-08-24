@@ -81,7 +81,7 @@ export interface QuotationRecordEditor {
 }
 
 export interface QuotationRecord {
-  id: string; no: string; _version?: number; salespersonName: string; salespersonAccount: string; customerId?: string; customerName: string
+  id: string; no: string; _version?: number; salespersonName: string; salespersonAccount: string; customerName: string
   quoteMode: 'single' | 'bundle'; productSummary: string; productImage?: string; primarySku: string; productCategory?: string; logisticsAttribute: string
   volumetricEnabled?: boolean; packageLengthCm?: number; packageWidthCm?: number; packageHeightCm?: number; defaultVolumeDivisor?: number
   country: string; carrier: string; channel: string; rule: string; customerGrade: string; taxCustomerType?: 'A' | 'B'; monthlySalesEstimate?: string

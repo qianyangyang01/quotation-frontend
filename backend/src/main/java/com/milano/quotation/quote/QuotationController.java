@@ -29,7 +29,7 @@ import java.util.*;
 @RequestMapping("/api/v1/quotations")
 public class QuotationController {
     private static final Set<String> PATCH_FIELDS = Set.of("status", "dealLines", "dealOptionId", "dealOptionLabel",
-            "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerId", "customerName");
+            "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerName");
     private final QuotationRecordRepository records;
     private final QuotationShareRepository shares;
     private final QuotationDocumentService documents;
@@ -67,12 +67,13 @@ public class QuotationController {
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());
         var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = input.deepCopy();
+        payload.remove("customerId");
         payload.put("id", id.toString()); payload.put("no", no); payload.put("salespersonName", principal.displayName());
         payload.put("salespersonAccount", principal.account()); payload.put("status", "pending");
         payload.put("createdAt", now.toString()); payload.put("updatedAt", now.toString());
         if (!payload.has("revisions")) payload.putArray("revisions");
         var row = new QuotationRecordEntity(); row.id = id; row.quoteNo = no; row.ownerAccount = principal.account();
-        row.status = "pending"; row.customerId = optionalUuid(payload.path("customerId").asText(""));
+        row.status = "pending";
         row.payload = payload; row.createdAt = now; row.updatedAt = now; records.saveAndFlush(row);
         var response = view(row); idempotency.save(principal.account(), "quotation-create", key, body, response);
         audit.record("quotation.create", "quotation", id.toString(), "success", Map.of("quoteNo", no));
@@ -85,7 +86,7 @@ public class QuotationController {
     ApiResponse<JsonNode> update(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
         var row = owned(id, auth); assertVersion(row, patch.path("_version").asLong(-1));
         if (row.voidedAt != null) throw AppException.conflict("已作废报价需先恢复后才能修改");
-        var current = (ObjectNode) row.payload.deepCopy(); var revisions = current.withArray("revisions"); var now = Instant.now();
+        var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
         patch.properties().forEach(entry -> {
             if (PATCH_FIELDS.contains(entry.getKey())) {
                 var old = current.get(entry.getKey());
@@ -96,7 +97,7 @@ public class QuotationController {
             }
         });
         current.put("updatedAt", now.toString()); row.status = current.path("status").asText(row.status);
-        row.customerId = optionalUuid(current.path("customerId").asText("")); row.payload = current; row.updatedAt = now;
+        row.payload = current; row.updatedAt = now;
         records.saveAndFlush(row); audit.record("quotation.update", "quotation", id.toString(), "success", Map.of("status", row.status));
         return ApiResponse.ok(view(row));
     }
@@ -171,7 +172,6 @@ public class QuotationController {
     private static void revision(ArrayNode revisions, QuotationPrincipal principal, String field, JsonNode before, JsonNode after, Instant now) { var revision = revisions.addObject(); revision.put("id", UUID.randomUUID().toString()); revision.put("changedAt", now.toString()); revision.put("editorName", principal.displayName()); revision.put("editorAccount", principal.account()); revision.put("field", field); revision.set("before", before == null ? NullNode.instance : before); revision.set("after", after); }
     private static boolean hasAll(Authentication auth) { return auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("PERM_allRecords")); }
     private static QuotationPrincipal principal(Authentication auth) { return (QuotationPrincipal) auth.getPrincipal(); }
-    private static UUID optionalUuid(String value) { try { return value == null || value.isBlank() ? null : UUID.fromString(value); } catch (Exception exception) { throw AppException.unprocessable("客户编号格式不正确"); } }
     private static String token() { var bytes = new byte[32]; new SecureRandom().nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
     static String sha256(String value) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); } }
     private static String quoteNo(Instant now, UUID id) { return "QT" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").withZone(ZoneOffset.UTC).format(now) + id.toString().substring(0, 6).toUpperCase(Locale.ROOT); }

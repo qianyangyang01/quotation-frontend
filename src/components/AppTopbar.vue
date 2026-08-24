@@ -10,7 +10,6 @@ const navItems = computed(() => [
   { label: '报价预览', path: '/quotation/overview', permission: 'allRecords' as const },
   { label: '我的报价', path: '/quotation', permission: 'quote' as const },
   { label: '采购', path: '/quotation/products', permission: 'purchase' as const },
-  { label: '客户', path: '/quotation/customers', permission: 'finance' as const },
   { label: '物流', path: '/quotation/logistics', permission: 'logistics' as const },
   { label: '财务', path: '/quotation/members', permission: 'finance' as const },
   { label: '我的报价记录', path: '/quotation/my-records', permission: 'myRecords' as const },

@@ -1,69 +1,56 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import AppTopbar from '@/components/AppTopbar.vue'
 import {
-  createCustomer, createSupplier, deleteSupplier, loadCustomers, loadSuppliers, setCustomerStatus,
-  updateCustomer, updateSupplier, type Customer, type Supplier,
+  createSupplier, deleteSupplier, loadSuppliers, updateSupplier, type Supplier,
 } from '@/services/masterData'
 
-const props = defineProps<{ mode: 'customers' | 'suppliers' }>()
-const rows = ref<Array<Customer | Supplier>>([])
+const rows = ref<Supplier[]>([])
 const query = ref('')
 const page = ref(0)
 const total = ref(0)
 const totalPages = ref(0)
 const loading = ref(false)
 const saving = ref(false)
-const editor = ref<Customer | Supplier | null | undefined>(undefined)
+const editor = ref<Supplier | null | undefined>(undefined)
 const notice = ref('')
-const form = reactive({ code: '', name: '', contactName: '', phone: '', email: '', countryCode: '', grade: '', notes: '', platform: '', category: '', settlementTerms: '', leadTimeDays: '', rating: '', enabled: true })
-const isCustomer = computed(() => props.mode === 'customers')
-const title = computed(() => isCustomer.value ? '客户管理' : '供应商管理')
+const form = reactive({ code: '', name: '', contactName: '', phone: '', platform: '', category: '', settlementTerms: '', leadTimeDays: '', rating: '', enabled: true })
 
 let searchTimer = 0
 watch(query, () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => { page.value = 0; void reload() }, 300) })
-watch(() => props.mode, () => { query.value = ''; page.value = 0; void reload() })
 onMounted(reload)
 
 async function reload() {
   loading.value = true
   try {
-    const result = isCustomer.value ? await loadCustomers(query.value, page.value) : await loadSuppliers(query.value, page.value)
+    const result = await loadSuppliers(query.value, page.value)
     rows.value = result.items; total.value = result.total; totalPages.value = result.totalPages
   } catch (error) { show(error instanceof Error ? error.message : '数据加载失败') }
   finally { loading.value = false }
 }
 function show(message: string) { notice.value = message; window.setTimeout(() => notice.value === message && (notice.value = ''), 3000) }
-function open(row?: Customer | Supplier) {
+function open(row?: Supplier) {
   editor.value = row || null
-  Object.assign(form, { code: row?.code || '', name: row?.name || '', contactName: row?.contactName || '', phone: row?.phone || '', email: 'email' in (row || {}) ? (row as Customer).email : '', countryCode: 'countryCode' in (row || {}) ? (row as Customer).countryCode : '', grade: 'grade' in (row || {}) ? (row as Customer).grade : '', notes: 'notes' in (row || {}) ? (row as Customer).notes : '', platform: 'platform' in (row || {}) ? (row as Supplier).platform : '', category: 'category' in (row || {}) ? (row as Supplier).category : '', settlementTerms: 'settlementTerms' in (row || {}) ? (row as Supplier).settlementTerms : '', leadTimeDays: 'leadTimeDays' in (row || {}) ? String((row as Supplier).leadTimeDays ?? '') : '', rating: 'rating' in (row || {}) ? String((row as Supplier).rating ?? '') : '', enabled: row?.enabled ?? true })
+  Object.assign(form, { code: row?.code || '', name: row?.name || '', contactName: row?.contactName || '', phone: row?.phone || '', platform: row?.platform || '', category: row?.category || '', settlementTerms: row?.settlementTerms || '', leadTimeDays: String(row?.leadTimeDays ?? ''), rating: String(row?.rating ?? ''), enabled: row?.enabled ?? true })
 }
 async function save() {
   if (!form.code.trim() || !form.name.trim()) return show('编码和名称不能为空')
   saving.value = true
   try {
-    if (isCustomer.value) {
-      const input = { code: form.code, name: form.name, contactName: form.contactName, phone: form.phone, email: form.email, countryCode: form.countryCode, grade: form.grade, notes: form.notes, enabled: form.enabled }
-      if (editor.value) await updateCustomer(editor.value as Customer, input)
-      else await createCustomer(input)
-    } else {
-      const input = { code: form.code, name: form.name, contactName: form.contactName, phone: form.phone, platform: form.platform, category: form.category, settlementTerms: form.settlementTerms, leadTimeDays: form.leadTimeDays === '' ? null : Number(form.leadTimeDays), rating: form.rating === '' ? null : Number(form.rating), enabled: form.enabled }
-      if (editor.value) await updateSupplier(editor.value as Supplier, input)
-      else await createSupplier(input)
-    }
+    const input = { code: form.code, name: form.name, contactName: form.contactName, phone: form.phone, platform: form.platform, category: form.category, settlementTerms: form.settlementTerms, leadTimeDays: form.leadTimeDays === '' ? null : Number(form.leadTimeDays), rating: form.rating === '' ? null : Number(form.rating), enabled: form.enabled }
+    if (editor.value) await updateSupplier(editor.value, input)
+    else await createSupplier(input)
     editor.value = undefined; await reload(); show('保存成功')
   } catch (error) { show(error instanceof Error ? error.message : '保存失败') }
   finally { saving.value = false }
 }
-async function toggle(row: Customer | Supplier) {
+async function toggle(row: Supplier) {
   try {
-    if (isCustomer.value) await setCustomerStatus(row as Customer, !row.enabled)
-    else await updateSupplier(row as Supplier, { ...(row as Supplier), enabled: !row.enabled })
+    await updateSupplier(row, { ...row, enabled: !row.enabled })
     await reload(); show(row.enabled ? '已停用' : '已启用')
   } catch (error) { show(error instanceof Error ? error.message : '状态修改失败') }
 }
-async function remove(row: Customer | Supplier) {
-  if (isCustomer.value) return toggle(row)
+async function remove(row: Supplier) {
   if (!window.confirm(`确认删除供应商“${row.name}”吗？有关联商品时系统会拒绝删除。`)) return
   try { await deleteSupplier(row.id); await reload(); show('供应商已删除') }
   catch (error) { show(error instanceof Error ? error.message : '删除失败') }
@@ -74,15 +61,15 @@ async function changePage(next: number) { page.value = next; await reload() }
 <template>
   <AppTopbar />
   <main class="workspace">
-    <header class="heading"><div><small>MASTER DATA</small><h1>{{ title }}</h1><p>{{ isCustomer ? '维护报价客户、等级、国家和联系方式。' : '维护真实采购供应商及合作状态，关联商品后不可直接删除。' }}</p></div><button @click="open()">＋ 新增{{ isCustomer ? '客户' : '供应商' }}</button></header>
-    <section class="summary"><article><small>{{ title }}总数</small><b>{{ total }}</b></article><article><small>当前页启用</small><b>{{ rows.filter(row=>row.enabled).length }}</b></article></section>
-    <section class="card"><div class="toolbar"><input v-model.trim="query" :placeholder="`搜索${isCustomer?'客户':'供应商'}名称或编码`"><span>共 {{ total }} 条</span></div>
+    <header class="heading"><div><small>MASTER DATA</small><h1>供应商管理</h1><p>维护真实采购供应商及合作状态，关联商品后不可直接删除。</p></div><button @click="open()">＋ 新增供应商</button></header>
+    <section class="summary"><article><small>供应商管理总数</small><b>{{ total }}</b></article><article><small>当前页启用</small><b>{{ rows.filter(row=>row.enabled).length }}</b></article></section>
+    <section class="card"><div class="toolbar"><input v-model.trim="query" placeholder="搜索供应商名称或编码"><span>共 {{ total }} 条</span></div>
       <div v-if="loading" class="empty">正在加载…</div><div v-else-if="!rows.length" class="empty">暂无数据，请点击右上角新增。</div>
-      <table v-else><thead><tr><th>名称 / 编码</th><th>联系人</th><th v-if="isCustomer">国家 / 等级</th><th v-else>平台 / 品类</th><th v-if="!isCustomer">结算 / 交期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td><b>{{ row.name }}</b><small>{{ row.code }}</small></td><td><b>{{ row.contactName || '暂无' }}</b><small>{{ row.phone || '暂无' }}</small></td><td v-if="isCustomer">{{ (row as Customer).countryCode || '暂无' }} / {{ (row as Customer).grade || '暂无' }}</td><td v-else>{{ (row as Supplier).platform || '暂无' }} / {{ (row as Supplier).category || '暂无' }}</td><td v-if="!isCustomer">{{ (row as Supplier).settlementTerms || '暂无' }} / {{ (row as Supplier).leadTimeDays ?? '暂无' }} 天</td><td><em :class="{ enabled:row.enabled }">{{ row.enabled ? '启用' : '停用' }}</em></td><td class="actions"><button @click="open(row)">编辑</button><button @click="toggle(row)">{{ row.enabled ? '停用' : '启用' }}</button><button v-if="!isCustomer" class="danger" @click="remove(row)">删除</button></td></tr></tbody></table>
+      <table v-else><thead><tr><th>名称 / 编码</th><th>联系人</th><th>平台 / 品类</th><th>结算 / 交期</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="row in rows" :key="row.id"><td><b>{{ row.name }}</b><small>{{ row.code }}</small></td><td><b>{{ row.contactName || '暂无' }}</b><small>{{ row.phone || '暂无' }}</small></td><td>{{ row.platform || '暂无' }} / {{ row.category || '暂无' }}</td><td>{{ row.settlementTerms || '暂无' }} / {{ row.leadTimeDays ?? '暂无' }} 天</td><td><em :class="{ enabled:row.enabled }">{{ row.enabled ? '启用' : '停用' }}</em></td><td class="actions"><button @click="open(row)">编辑</button><button @click="toggle(row)">{{ row.enabled ? '停用' : '启用' }}</button><button class="danger" @click="remove(row)">删除</button></td></tr></tbody></table>
       <footer><button :disabled="page<=0" @click="changePage(page-1)">上一页</button><span>{{ page+1 }} / {{ Math.max(1,totalPages) }}</span><button :disabled="page+1>=totalPages" @click="changePage(page+1)">下一页</button></footer>
     </section>
   </main>
-  <div v-if="editor !== undefined" class="mask" @click.self="editor=undefined"><section class="modal"><header><div><small>MASTER DATA EDITOR</small><h2>{{ editor ? '编辑' : '新增' }}{{ title.replace('管理','') }}</h2></div><button @click="editor=undefined">×</button></header><div class="form"><label>编码*<input v-model.trim="form.code" maxlength="64"></label><label>名称*<input v-model.trim="form.name" maxlength="160"></label><label>联系人<input v-model.trim="form.contactName"></label><label>电话<input v-model.trim="form.phone"></label><template v-if="isCustomer"><label>邮箱<input v-model.trim="form.email" type="email"></label><label>国家简码<input v-model.trim="form.countryCode"></label><label>客户等级<input v-model.trim="form.grade"></label><label class="wide">备注<textarea v-model.trim="form.notes"></textarea></label></template><template v-else><label>采购平台<input v-model.trim="form.platform"></label><label>主营品类<input v-model.trim="form.category"></label><label>结算方式<input v-model.trim="form.settlementTerms"></label><label>平均交期（天）<input v-model="form.leadTimeDays" type="number" min="0"></label><label>评分（0-5）<input v-model="form.rating" type="number" min="0" max="5" step="0.1"></label></template><label><input v-model="form.enabled" type="checkbox"> 启用</label></div><footer><button @click="editor=undefined">取消</button><button class="primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button></footer></section></div>
+  <div v-if="editor !== undefined" class="mask" @click.self="editor=undefined"><section class="modal"><header><div><small>MASTER DATA EDITOR</small><h2>{{ editor ? '编辑' : '新增' }}供应商</h2></div><button @click="editor=undefined">×</button></header><div class="form"><label>编码*<input v-model.trim="form.code" maxlength="64"></label><label>名称*<input v-model.trim="form.name" maxlength="160"></label><label>联系人<input v-model.trim="form.contactName"></label><label>电话<input v-model.trim="form.phone"></label><label>采购平台<input v-model.trim="form.platform"></label><label>主营品类<input v-model.trim="form.category"></label><label>结算方式<input v-model.trim="form.settlementTerms"></label><label>平均交期（天）<input v-model="form.leadTimeDays" type="number" min="0"></label><label>评分（0-5）<input v-model="form.rating" type="number" min="0" max="5" step="0.1"></label><label><input v-model="form.enabled" type="checkbox"> 启用</label></div><footer><button @click="editor=undefined">取消</button><button class="primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button></footer></section></div>
   <div v-if="notice" class="toast">{{ notice }}</div>
 </template>
 

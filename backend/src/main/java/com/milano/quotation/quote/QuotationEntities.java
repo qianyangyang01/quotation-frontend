@@ -12,7 +12,7 @@ class QuotationRecordEntity {
     @Id UUID id; @Column(name="quote_no",nullable=false,unique=true,length=40) String quoteNo;
     @Column(name="owner_account",nullable=false,length=24) String ownerAccount; @Column(nullable=false,length=16) String status;
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable=false,columnDefinition="jsonb") JsonNode payload; @Version long version;
-    @Column(name="customer_id") UUID customerId; @Column(name="voided_at") Instant voidedAt;
+    @Column(name="voided_at") Instant voidedAt;
     @Column(name="voided_by",length=24) String voidedBy; @Column(name="void_reason",length=500) String voidReason;
     @Column(name="created_at",nullable=false) Instant createdAt; @Column(name="updated_at",nullable=false) Instant updatedAt;
     protected QuotationRecordEntity() {}

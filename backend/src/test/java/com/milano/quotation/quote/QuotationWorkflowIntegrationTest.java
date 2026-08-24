@@ -37,8 +37,9 @@ class QuotationWorkflowIntegrationTest {
         var created = mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
                         .header("Idempotency-Key", "quote-test-1")
                         .contentType("application/json")
-                        .content("{\"customerName\":\"测试客户\",\"productSummary\":\"测试商品\",\"purchaseCost\":\"SECRET_COST\",\"profitRate\":\"SECRET_PROFIT\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("pending")).andReturn();
+                        .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"测试客户\",\"productSummary\":\"测试商品\",\"purchaseCost\":\"SECRET_COST\",\"profitRate\":\"SECRET_PROFIT\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("pending"))
+                .andExpect(jsonPath("$.data.customerId").doesNotExist()).andReturn();
         var createdData = mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
         var id = createdData.path("id").asText(); var version = createdData.path("_version").asLong();
 
@@ -72,13 +73,15 @@ class QuotationWorkflowIntegrationTest {
                         .content("{\"usdToCny\":7.12,\"effectiveAt\":\"2026-08-22\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.value.usdToCny").value(7.12));
 
-        var customer = mvc.perform(post("/api/v1/customers").session(session).with(csrf()).contentType("application/json")
-                        .content("{\"code\":\"CUST-001\",\"name\":\"客户主数据\",\"contactName\":\"张三\",\"phone\":\"13800000000\",\"email\":\"\",\"countryCode\":\"US\",\"grade\":\"A\",\"notes\":\"\",\"enabled\":true}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.code").value("CUST-001")).andReturn();
-        var customerId = mapper.readTree(customer.getResponse().getContentAsByteArray()).path("data").path("id").asText();
-        mvc.perform(patch("/api/v1/customers/{id}/status", customerId).session(session).with(csrf())
-                        .header("If-Match", "999").contentType("application/json").content("{\"enabled\":false}"))
-                .andExpect(status().isConflict());
+        mvc.perform(get("/api/v1/customers").session(session))
+                .andExpect(status().isNotFound());
+        mvc.perform(put("/api/v1/quotation-drafts/mine").session(session).with(csrf())
+                        .contentType("application/json")
+                        .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"草稿客户\",\"selectedCustomerGrade\":\"A\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.customerName").value("草稿客户"))
+                .andExpect(jsonPath("$.data.selectedCustomerGrade").value("A"))
+                .andExpect(jsonPath("$.data.customerId").doesNotExist());
 
         var supplier = mvc.perform(post("/api/v1/suppliers").session(session).with(csrf()).contentType("application/json")
                         .content("{\"code\":\"SUP-001\",\"name\":\"供应商主数据\",\"contactName\":\"李四\",\"phone\":\"13900000000\",\"platform\":\"1688\",\"category\":\"服装\",\"settlementTerms\":\"月结30天\",\"leadTimeDays\":3,\"rating\":4.8,\"enabled\":true}"))
