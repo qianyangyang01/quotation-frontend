@@ -5,8 +5,8 @@ import { currentAuthUser } from '@/data/authStore'
 import { ApiError } from '@/services/http'
 import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { validateQuotationConditions } from '@/services/quotationValidation'
-import { hydrateFinanceSettings } from '@/services/financeSettings'
 import { buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules, validatePublishedLogisticsRevision } from '@/data/publishedLogisticsRepository'
+import { loadQuotationWorkspaceConfiguration } from '@/services/quotationWorkspaceBootstrap'
 import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
 import AppTopbar from '@/components/AppTopbar.vue'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
@@ -87,7 +87,7 @@ const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('common')
 const quoteMode = ref<QuotationMode>('single')
 const route = useRoute()
 const purchaseRecords = ref<PurchaseProductRecord[]>([])
-const financePolicies = loadFinanceChannelPolicies()
+let financePolicies = loadFinanceChannelPolicies()
 const financeCountrySettings = ref(loadFinanceCountrySettings())
 const financeTaxSettings = ref(loadFinanceTaxSettings())
 const quotationAttributeOptions = [...new Set([...financeLogisticsAttributeOptions, ...financePolicies.map(policy => policy.category)])]
@@ -674,9 +674,10 @@ async function initializeQuotationWorkspace() {
   draftStatus.value = 'loading'
   draftError.value = ''
   try {
-    await hydrateFinanceSettings()
-    financeCountrySettings.value = loadFinanceCountrySettings()
-    financeTaxSettings.value = loadFinanceTaxSettings()
+    const configuration = await loadQuotationWorkspaceConfiguration()
+    financeCountrySettings.value = configuration.countrySettings
+    financeTaxSettings.value = configuration.taxSettings
+    financePolicies = configuration.channelPolicies
     const [products, readinessState] = await Promise.all([loadPurchaseProducts(), loadQuotationReadiness()])
     purchaseRecords.value = products
     readiness.value = readinessState
