@@ -13,6 +13,18 @@ type StoredManifest = { key: 'current'; etag: string; value: PublishedLogisticsM
 type StoredRules = { key: string; revision: string; rules: LogisticsRule[]; storedAt: number }
 type RuleQuery = { attribute: string; countries: string[]; channelCodes?: string[] }
 
+export function buildQuoteLogisticsCountryQuery(
+  settings: Array<{ country: string; enabled: boolean; stage: string }>,
+  currentCountry = '',
+  selectedCountries: string[] = [],
+) {
+  return normalized([
+    ...selectedCountries,
+    ...settings.filter(setting => setting.enabled && setting.stage === 'common').map(setting => setting.country),
+    currentCountry,
+  ])
+}
+
 const DB_NAME = 'milano-quotation-cache'
 const DB_VERSION = 1
 const CACHE_SCHEMA = 'published-logistics-v1'
