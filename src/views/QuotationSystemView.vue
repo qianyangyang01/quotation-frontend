@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
 import { api } from '@/services/http'
 import { hydrateFinanceSettings } from '@/services/financeSettings'
-import { loadPublishedLogisticsManifest, loadPublishedLogisticsRules, validatePublishedLogisticsRevision } from '@/data/publishedLogisticsRepository'
+import { buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules, validatePublishedLogisticsRevision } from '@/data/publishedLogisticsRepository'
 import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
 import AppTopbar from '@/components/AppTopbar.vue'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
@@ -322,11 +322,16 @@ async function ensureQuoteLogistics(p: Product) {
   logisticsLoadError.value = ''
   p.status = '正在加载当前商品所需物流规则'
   try {
-    let countries = financeCountrySettings.value.filter(setting => setting.enabled).map(setting => setting.country)
+    const selectedCountries = quoteMatrixMode.value === 'specified'
+      ? specifiedQuoteRows.value.map(row => row.country)
+      : quoteMatrixMode.value === 'template'
+        ? templateQuoteRows.value.map(row => row.country)
+        : []
+    let countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country, selectedCountries)
     if (!countries.length) {
       await loadPublishedLogisticsManifest({ signal: controller.signal })
       financeCountrySettings.value = loadFinanceCountrySettings()
-      countries = financeCountrySettings.value.filter(setting => setting.enabled).map(setting => setting.country)
+      countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country, selectedCountries)
     }
     const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal })
     if (controller.signal.aborted) return

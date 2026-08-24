@@ -32,6 +32,36 @@ describe('published logistics version cache', () => {
     expect(conditionalGet.mock.calls.filter(([path]) => String(path).includes('/rules'))).toHaveLength(1)
   })
 
+  it('treats a manifest without quote countries as an empty business result', async () => {
+    conditionalGet.mockResolvedValue({
+      status: 200,
+      data: { ...manifest('empty'), publishedChannels: 0, countries: [] },
+      etag: '"empty"',
+    })
+    const repository = await import('./publishedLogisticsRepository')
+
+    const result = await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: [] })
+
+    expect(result).toMatchObject({ revision: 'empty', rules: [], source: 'manifest', verified: true })
+    expect(conditionalGet).toHaveBeenCalledTimes(1)
+    expect(conditionalGet.mock.calls[0]?.[0]).toContain('/manifest')
+  })
+
+  it('queries only common and currently selected quote countries', async () => {
+    const repository = await import('./publishedLogisticsRepository')
+    const rareCountries = Array.from({ length: 140 }, (_, index) => ({ country: `国家${index}`, enabled: true, stage: 'rare' }))
+
+    const countries = repository.buildQuoteLogisticsCountryQuery([
+      ...rareCountries,
+      { country: '美国', enabled: true, stage: 'common' },
+      { country: '英国', enabled: true, stage: 'common' },
+      { country: '法国', enabled: false, stage: 'common' },
+    ], '澳大利亚', ['美国'])
+
+    expect(countries).toEqual(['澳大利亚', '美国', '英国'])
+    expect(countries).not.toContain('国家0')
+  })
+
   it('invalidates cached rules when the published revision changes', async () => {
     const manifests = [manifest('r1'), manifest('r2')]
     conditionalGet.mockImplementation((path: string) => {
