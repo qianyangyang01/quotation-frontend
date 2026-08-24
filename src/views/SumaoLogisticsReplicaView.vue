@@ -67,6 +67,8 @@ const expandedReviewCountries = ref<string[]>([])
 const reviewedDiffKeys = ref<string[]>([])
 const historyChannel = ref<LogisticsChannelRecord | null>(null)
 const showVersionHistory = ref(false)
+const pendingHistoryAction = ref<{ type: 'terminate' | 'rollback'; version: LogisticsChannelVersionRecord } | null>(null)
+const historyActionNote = ref('')
 const batchFiles = ref<File[]>([])
 const batchPreview = ref<LogisticsBatchPreview | null>(null)
 const showBatchPreview = ref(false)
@@ -324,17 +326,25 @@ function downloadVersion(version: LogisticsChannelVersionRecord) {
   if (!version.originalFile) return notify('系统内置 legacy-v1 没有原始 Excel 文件')
   const link = document.createElement('a'); link.href = URL.createObjectURL(version.originalFile); link.download = version.fileName; link.click(); URL.revokeObjectURL(link.href)
 }
-async function rollbackVersion(version: LogisticsChannelVersionRecord) {
-  if (!historyChannel.value || !window.confirm(`确认回滚到 V${version.versionNumber} 吗？回滚会生成新的正式审计版本。`)) return
-  try { await rollbackLogisticsVersion(historyChannel.value.id, version.id, `回滚至V${version.versionNumber}`); await refreshWorkspace(); notify('回滚成功，报价已恢复到目标版本') }
-  catch (error) { notify(error instanceof Error ? error.message : '回滚失败') }
+function rollbackVersion(version: LogisticsChannelVersionRecord) {
+  pendingHistoryAction.value = { type: 'rollback', version }
+  historyActionNote.value = `回滚至V${version.versionNumber}`
 }
-async function terminateDraft(version: LogisticsChannelVersionRecord) {
-  if (!historyChannel.value) return
-  const note = window.prompt(`请输入终止 V${version.versionNumber} 的原因`, '测试草稿终止，不参与正式报价')?.trim()
-  if (!note) return
-  try { await rejectLogisticsVersion(historyChannel.value.id, version.id, note); await refreshWorkspace(); notify('待审草稿已终止，历史记录已保留') }
-  catch (error) { notify(error instanceof Error ? error.message : '终止草稿失败') }
+function terminateDraft(version: LogisticsChannelVersionRecord) {
+  pendingHistoryAction.value = { type: 'terminate', version }
+  historyActionNote.value = '测试草稿终止，不参与正式报价'
+}
+async function confirmHistoryAction() {
+  if (!historyChannel.value || !pendingHistoryAction.value) return
+  const action = pendingHistoryAction.value
+  const note = historyActionNote.value.trim()
+  if (!note) return notify(action.type === 'terminate' ? '请填写终止原因' : '请填写回滚备注')
+  try {
+    if (action.type === 'terminate') await rejectLogisticsVersion(historyChannel.value.id, action.version.id, note)
+    else await rollbackLogisticsVersion(historyChannel.value.id, action.version.id, note)
+    pendingHistoryAction.value = null; await refreshWorkspace()
+    notify(action.type === 'terminate' ? '待审草稿已终止，历史记录已保留' : '回滚成功，报价已恢复到目标版本')
+  } catch (error) { notify(error instanceof Error ? error.message : action.type === 'terminate' ? '终止草稿失败' : '回滚失败') }
 }
 onMounted(() => { void refreshWorkspace() })
 function gramsFromKg(value: number) { return Math.ceil(Math.max(0, Number(value) || 0) * 1000) }
@@ -529,6 +539,7 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
       </div>
     </div>
     <div v-if="showVersionHistory && historyChannel" class="mask"><div class="modal history-modal"><header><div><small>VERSION HISTORY</small><b>{{ historyChannel.name }} · 版本历史</b></div><button @click="showVersionHistory=false">×</button></header><div class="history-list"><article v-for="version in historyVersions" :key="version.id"><span :class="['version-status',version.status]">{{ version.status==='published'?'当前正式':version.status==='draft'?'待审核':version.status==='superseded'?'历史版本':'已终止' }}</span><div><b>V{{ version.versionNumber }} · {{ version.fileName }}</b><small>导入 {{ version.importedAt }} / {{ version.importedBy }}<template v-if="version.publishedAt"> · 发布 {{ version.publishedAt }} / {{ version.publishedBy }}</template></small><p>{{ version.auditNote || '暂无审核备注' }}</p></div><div class="history-summary"><span>新增 {{ version.summary.added }}</span><span>调价 {{ version.summary.price }}</span><span>移除 {{ version.summary.removed }}</span><span>规则 {{ version.summary.rule }}</span></div><div class="history-actions"><button @click="downloadVersion(version)">下载原文件</button><button v-if="version.status==='draft'" class="danger" @click="terminateDraft(version)">终止草稿</button><button v-else-if="historyChannel.currentVersionId!==version.id" class="rollback" @click="rollbackVersion(version)">回滚到此版</button></div></article></div><footer><button @click="showVersionHistory=false">关闭</button></footer></div></div>
+    <div v-if="pendingHistoryAction && historyChannel" class="mask history-action-mask"><div class="modal small history-action-modal"><header><b>{{ pendingHistoryAction.type==='terminate' ? '终止待审草稿' : '回滚正式价格版本' }}</b><button @click="pendingHistoryAction=null">×</button></header><div><p v-if="pendingHistoryAction.type==='terminate'">确认终止 <strong>{{ historyChannel.name }} V{{ pendingHistoryAction.version.versionNumber }}</strong> 吗？草稿不会参与报价，文件和审计记录仍会保留。</p><p v-else>确认将 <strong>{{ historyChannel.name }}</strong> 回滚到 V{{ pendingHistoryAction.version.versionNumber }} 吗？系统会生成新的连续正式版本，不改写历史版本号。</p><label>{{ pendingHistoryAction.type==='terminate' ? '终止原因' : '回滚备注' }}<textarea v-model="historyActionNote" rows="3"></textarea></label></div><footer><button @click="pendingHistoryAction=null">取消</button><button :class="pendingHistoryAction.type==='terminate'?'danger-confirm':'primary-orange'" @click="confirmHistoryAction">{{ pendingHistoryAction.type==='terminate' ? '确认终止' : '确认回滚并发布' }}</button></footer></div></div>
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
 </template>
@@ -583,5 +594,5 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
 .batch-modal{width:min(1120px,94vw);max-height:90vh;display:flex;flex-direction:column}.batch-body{min-height:0;overflow:auto;padding:18px}.batch-summary{display:flex;gap:10px;margin-bottom:14px}.batch-summary span{padding:8px 12px;border-radius:7px;background:#f1f5f7;color:#50616d}.batch-summary .danger{background:#fff0ee;color:#c7473c}.batch-list{display:grid;gap:8px}.batch-list article{display:grid;grid-template-columns:auto minmax(260px,1fr) minmax(250px,auto) minmax(100px,auto);align-items:center;gap:12px;padding:12px;border:1px solid #e1e7ea;border-radius:8px}.batch-list article>div>b,.batch-list article>div>small{display:block}.batch-list article>div>small{margin-top:4px;color:#87939b}.batch-action{padding:5px 8px;border-radius:12px;background:#e9f7ef;color:#178651;font-size:9px;font-weight:850}.batch-action.create{background:#fff0d9;color:#c87200}.batch-warning,.batch-error{color:#c7463b;font-size:9px;font-style:normal;font-weight:800}.batch-ok{color:#168852;font-size:9px;font-style:normal;font-weight:800}.batch-review-check{display:flex;align-items:center;gap:6px;color:#bd4a3f;font-size:9px;font-weight:800}.batch-help{margin:0 0 14px;color:#65747e}.batch-modal .audit-note{margin-top:16px}
 @media(max-width:960px){.import-review-modal{width:96vw}.review-workspace{height:auto;grid-template-columns:1fr}.review-navigator{max-height:320px;border-right:0;border-bottom:1px solid #e3e9ec}.review-detail{min-height:420px}.review-detail-head{flex-direction:column}.review-detail-badges{justify-content:flex-start}.review-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.batch-list article{grid-template-columns:auto 1fr}.batch-list article>.history-summary,.batch-list article>em,.batch-list article>label{grid-column:2}}
 @media(max-width:620px){.import-review-modal>.review-body{padding:12px}.review-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.review-risk-banner{align-items:flex-start;flex-direction:column}.review-risk-banner>button{margin-left:0}.price-change-card{grid-template-columns:35px minmax(0,1fr)}.change-result{grid-column:2;justify-items:start}.review-modal-footer{flex-wrap:wrap}.review-modal-footer>span{width:100%}.review-modal-footer button{flex:1}}
-.provider-detail-actions{flex-wrap:wrap;justify-content:flex-end}.provider-detail h3 em{display:inline-block;margin-left:6px;padding:3px 7px;border-radius:10px;background:#f0f2f4;color:#6f7a82;font-size:9px;font-style:normal}.provider-detail-actions .state-action,.provider-detail-actions .danger-action{height:36px;padding:0 12px;border-radius:6px;background:#fff;font-weight:750}.provider-detail-actions .state-action{border:1px solid #d6dde2;color:#596873}.provider-detail-actions .danger-action{border:1px solid #e7a59d;color:#c94f40}.template-table-head,.template-table-row{min-width:1000px;grid-template-columns:minmax(165px,1.35fr) minmax(150px,1.15fr) 90px 78px 126px 260px}.template-table-row>b small em{color:#c74d3d;font-style:normal}.template-actions .state-action{color:#6a737a}.template-actions .danger-action{color:#cf5142}
+.provider-detail-actions{flex-wrap:wrap;justify-content:flex-end}.provider-detail h3 em{display:inline-block;margin-left:6px;padding:3px 7px;border-radius:10px;background:#f0f2f4;color:#6f7a82;font-size:9px;font-style:normal}.provider-detail-actions .state-action,.provider-detail-actions .danger-action{height:36px;padding:0 12px;border-radius:6px;background:#fff;font-weight:750}.provider-detail-actions .state-action{border:1px solid #d6dde2;color:#596873}.provider-detail-actions .danger-action{border:1px solid #e7a59d;color:#c94f40}.template-table-head,.template-table-row{min-width:1000px;grid-template-columns:minmax(165px,1.35fr) minmax(150px,1.15fr) 90px 78px 126px 260px}.template-table-row>b small em{color:#c74d3d;font-style:normal}.template-actions .state-action{color:#6a737a}.template-actions .danger-action{color:#cf5142}.history-action-mask{z-index:120}.history-action-modal>div{display:grid;gap:16px;padding:22px}.history-action-modal p{margin:0;color:#53616b;line-height:1.7}.history-action-modal label{display:grid;gap:7px;color:#5f6d78;font-weight:750}.history-action-modal textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #d7e0e6;border-radius:6px;resize:vertical;font:inherit;font-weight:400}.history-action-modal .danger-confirm{height:38px;padding:0 22px;border:0;border-radius:6px;background:#d94a3b;color:#fff;font-weight:850}
 </style>
