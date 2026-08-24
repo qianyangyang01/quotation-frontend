@@ -36,12 +36,15 @@ public class QuotationController {
     private final AuditService audit;
     private final IdempotencyService idempotency;
     private final QuotationReadinessService readiness;
+    private final QuotationSubmissionValidator submissionValidator;
 
     public QuotationController(QuotationRecordRepository records, QuotationShareRepository shares,
                                QuotationDocumentService documents, AuditService audit,
-                               IdempotencyService idempotency, QuotationReadinessService readiness) {
+                               IdempotencyService idempotency, QuotationReadinessService readiness,
+                               QuotationSubmissionValidator submissionValidator) {
         this.records = records; this.shares = shares; this.documents = documents;
         this.audit = audit; this.idempotency = idempotency; this.readiness = readiness;
+        this.submissionValidator = submissionValidator;
     }
 
     @GetMapping
@@ -63,6 +66,7 @@ public class QuotationController {
     ApiResponse<JsonNode> create(@RequestBody JsonNode body, @RequestHeader("Idempotency-Key") String key,
                                  Authentication auth) {
         if (!(body instanceof ObjectNode input) || body.toString().length() > 4_000_000) throw AppException.unprocessable("报价数据格式错误或过大");
+        submissionValidator.validate(input);
         readiness.assertCanCreate(input);
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());

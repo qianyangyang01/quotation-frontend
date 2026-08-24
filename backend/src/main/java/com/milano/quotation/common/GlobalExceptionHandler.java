@@ -37,6 +37,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.unprocessableEntity().body(ApiResponse.error("VALIDATION_ERROR", "输入数据不符合要求", errors));
     }
 
+    @ExceptionHandler(FieldValidationException.class)
+    ResponseEntity<ApiResponse<Void>> fieldValidation(FieldValidationException exception) {
+        return ResponseEntity.unprocessableEntity().body(ApiResponse.error("VALIDATION_ERROR", exception.getMessage(), exception.fieldErrors()));
+    }
+
     @ExceptionHandler({OptimisticLockException.class, DataIntegrityViolationException.class})
     ResponseEntity<ApiResponse<Void>> conflict(Exception ignored) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("CONFLICT", "数据已变化或存在重复，请刷新后重试", List.of()));

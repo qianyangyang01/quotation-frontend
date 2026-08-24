@@ -47,7 +47,8 @@ function rowKey(row: Pick<QuotationMatrixRow, 'channelKey' | 'rule' | 'carrier' 
   return row.channelKey?.trim() || fallbackRowKey(row)
 }
 function presetFallbackMatchesRow(preset: QuotationPresetSelection, row: QuotationMatrixRow) {
-  return !!preset.rule && !!preset.carrier && !!preset.transport
+  return (!preset.quoteRegion || preset.quoteRegion === row.quoteRegion)
+    && !!preset.rule && !!preset.carrier && !!preset.transport
     && preset.rule === row.rule
     && preset.carrier === row.carrier
     && preset.transport === row.transport
@@ -55,7 +56,7 @@ function presetFallbackMatchesRow(preset: QuotationPresetSelection, row: Quotati
 function findPresetRow(preset: QuotationPresetSelection, rows: QuotationMatrixRow[]) {
   const presetChannelKey = preset.channelKey?.trim()
   if (presetChannelKey) {
-    const stableMatch = rows.find(row => row.channelKey?.trim() === presetChannelKey)
+    const stableMatch = rows.find(row => row.channelKey?.trim() === presetChannelKey && (!preset.quoteRegion || preset.quoteRegion === row.quoteRegion))
     if (stableMatch) return stableMatch
   }
   return rows.find(row => presetFallbackMatchesRow(preset, row))

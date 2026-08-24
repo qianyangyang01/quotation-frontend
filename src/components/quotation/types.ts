@@ -97,6 +97,7 @@ export type QuotationMatrixRow = {
  */
 export type QuotationPresetSelection = {
   country: string
+  quoteRegion?: string
   channelKey?: string
   rule?: string
   carrier?: string

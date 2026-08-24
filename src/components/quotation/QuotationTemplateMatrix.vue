@@ -26,6 +26,9 @@ const props = defineProps<{
   ownerName: string
   ownerAccount: string
   unitLabel?: string
+  draftSelection?: QuotationPresetSelection[]
+  draftTemplate?: { id: string; name: string } | null
+  draftVersion?: number
 }>()
 
 const emit = defineEmits<{
@@ -57,6 +60,7 @@ const editingName = ref('')
 const pendingDeleteId = ref('')
 const feedback = ref('')
 let feedbackTimer = 0
+let appliedDraftVersion = 0
 
 const selectedTemplate = computed(() => templates.value.find(item => item.id === selectedTemplateId.value))
 const activeTemplate = computed(() => templates.value.find(item => item.id === activeTemplateId.value))
@@ -228,6 +232,17 @@ watch(() => [props.ownerName, props.ownerAccount], () => {
   currentRows.value = []
   emit('templateChange', null)
   void refreshTemplates()
+}, { immediate: true })
+
+watch(() => props.draftVersion || 0, version => {
+  if (!version || version === appliedDraftVersion) return
+  appliedDraftVersion = version
+  const draftTemplate = props.draftTemplate
+  selectedTemplateId.value = draftTemplate?.id || ''
+  activeTemplateId.value = draftTemplate?.id || ''
+  presetSelection.value = (props.draftSelection || []).map(item => ({ ...item }))
+  presetVersion.value += 1
+  emit('templateChange', draftTemplate ? { ...draftTemplate } : null)
 }, { immediate: true })
 
 onMounted(() => window.addEventListener(QUOTATION_TEMPLATES_UPDATED_EVENT, onTemplatesUpdated))
