@@ -12,6 +12,7 @@ const baseUrl = option('base-url', 'http://127.0.0.1:18088').replace(/\/$/, '')
 const usersCount = Number(option('users', '20'))
 const durationSeconds = Number(option('duration', '120'))
 const rampMilliseconds = Number(option('ramp-ms', '150'))
+const mode = option('mode', 'mixed')
 const outputPath = resolve(option('output', `artifacts/load-test-${Date.now()}.json`))
 const runId = option('run-id', new Date().toISOString().replace(/\D/g, '').slice(0, 14))
 const accountPrefix = option('account-prefix', `mx${runId.slice(-8)}`).slice(0, 16)
@@ -232,6 +233,7 @@ async function runUser(user, deadline, startDelay) {
   let sequence = 0
   await sleep(startDelay)
   await createQuotation(user, sequence++)
+  if (mode === 'burst') return
   while (performance.now() < deadline) {
     const dice = Math.random()
     try {
@@ -266,6 +268,7 @@ async function runUser(user, deadline, startDelay) {
 
 async function main() {
   if (!Number.isInteger(usersCount) || usersCount < 1 || usersCount > 100) throw new Error('users must be between 1 and 100')
+  if (!['burst', 'mixed'].includes(mode)) throw new Error('mode must be burst or mixed')
   if (!Number.isFinite(durationSeconds) || durationSeconds < 5) throw new Error('duration must be at least 5 seconds')
   if (!Number.isFinite(rampMilliseconds) || rampMilliseconds < 0 || rampMilliseconds > 10_000) throw new Error('ramp-ms must be between 0 and 10000')
 
@@ -286,7 +289,7 @@ async function main() {
     runId,
     startedAt,
     completedAt: new Date().toISOString(),
-    target: { baseUrl, users: usersCount, durationSeconds, rampMilliseconds, mix: { query: 0.65, create: 0.20, update: 0.10, pdf: 0.05 } },
+    target: { baseUrl, users: usersCount, durationSeconds, rampMilliseconds, mode, mix: mode === 'mixed' ? { query: 0.65, create: 0.20, update: 0.10, pdf: 0.05 } : { create: 1 } },
     actual: {
       elapsedSeconds: Number(elapsedSeconds.toFixed(2)),
       attempts,
@@ -296,13 +299,18 @@ async function main() {
       requestsPerSecond: Number((attempts / elapsedSeconds).toFixed(2)),
     },
     operations,
-    thresholds: {
-      zeroErrors: errorCount === 0,
-      queryP95Below1000Ms: (operations.query?.p95Ms ?? Infinity) < 1000,
-      createP95Below2000Ms: (operations.create?.p95Ms ?? Infinity) < 2000,
-      updateP95Below2000Ms: (operations.update?.p95Ms ?? Infinity) < 2000,
-      pdfP95Below5000Ms: (operations.pdf?.p95Ms ?? Infinity) < 5000,
-    },
+    thresholds: mode === 'burst'
+      ? {
+          zeroErrors: errorCount === 0,
+          createP95Below2000Ms: (operations.create?.p95Ms ?? Infinity) < 2000,
+        }
+      : {
+          zeroErrors: errorCount === 0,
+          queryP95Below1000Ms: (operations.query?.p95Ms ?? Infinity) < 1000,
+          createP95Below2000Ms: (operations.create?.p95Ms ?? Infinity) < 2000,
+          updateP95Below2000Ms: (operations.update?.p95Ms ?? Infinity) < 2000,
+          pdfP95Below5000Ms: (operations.pdf?.p95Ms ?? Infinity) < 5000,
+        },
     failures,
   }
   await mkdir(dirname(outputPath), { recursive: true })
