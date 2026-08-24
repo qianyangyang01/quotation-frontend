@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { BundleQuoteItem } from './types'
+import QuotationProductImage from './QuotationProductImage.vue'
 
 const grams = (weightKg: number) => Math.ceil((Number.isFinite(Number(weightKg)) ? Number(weightKg) : 0) * 1000)
 const effectiveWeightKg = (item: BundleQuoteItem) => item.customWeightKg == null ? item.weightKg : item.customWeightKg
@@ -31,7 +32,7 @@ defineEmits<{
     <div class="bundle-rows">
       <article v-for="(item,index) in items" :key="item.id">
         <div class="product-cell">
-          <div class="thumb"><img v-if="item.image" :src="item.image" :alt="item.name"><span v-else>{{ index + 1 }}</span></div>
+          <QuotationProductImage class="thumb" :physical-image="item.physicalImage" :product-image="item.image" :alt="`${item.name || item.sku}商品图`" :fallback-text="String(index + 1)" />
           <div><label><input v-model.trim="item.sku" placeholder="输入 SKU" @keyup.enter="$emit('query',item)"><button type="button" @click="$emit('query',item)">查询</button></label><b>{{ item.name || '等待查询采购资料' }}</b><small>{{ item.supplier || '—' }} · {{ item.status || '待查询' }} · 库存：<em :class="{ out:item.stockStatus==='无货', pending:item.stockStatus==='待确认' }">{{ item.stockStatus }}</em></small></div>
         </div>
         <label class="qty"><input v-model.number="item.quantityPerSet" type="number" min="1" step="1" @change="$emit('quantityChange',item)"><span>件/套</span></label>

@@ -44,6 +44,7 @@ export type BundleQuoteItem = {
   name: string
   supplier: string
   image: string
+  physicalImage: string
   stockStatus: '有货' | '无货' | '待确认'
   quantityPerSet: number
   purchaseUnitPrice: number

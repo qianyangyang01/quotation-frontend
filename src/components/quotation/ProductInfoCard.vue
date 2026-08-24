@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { QuotationProduct } from './types'
+import QuotationProductImage from './QuotationProductImage.vue'
 defineProps<{ product: QuotationProduct }>()
 </script>
 
 <template>
   <section class="product-card">
-    <div class="physical-image" :class="{ empty:!product.physicalImage }"><template v-if="product.physicalImage"><img :src="product.physicalImage" :alt="`${product.name}实物图`"><small>采购实物图</small></template><span v-else>采购暂未上传实物图</span></div>
+    <QuotationProductImage class="physical-image" :physical-image="product.physicalImage" :product-image="product.image" :alt="`${product.name}商品图`" fallback-text="采购暂未上传图片" show-label />
     <div class="info"><small>当前报价商品</small><h2>{{ product.name }}</h2><p><code>{{ product.sku }}</code><span>采购：{{ product.supplier }}</span><span class="stock" :class="{ out:product.stockStatus==='无货', pending:product.stockStatus==='待确认' }">是否有货：{{ product.stockStatus }}</span></p></div>
     <div class="state"><i></i><span>{{ product.status }}</span><small>采购资料与物流数据已关联</small></div>
   </section>

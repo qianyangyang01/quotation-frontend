@@ -19,6 +19,7 @@ import { quotationProductCategories, type BundleQuoteItem, type QuotationCountry
 import { australiaQuoteRegions, calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, loadPurchaseProducts, purchaseDisplayName, purchaseFreightChoices, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
+import { preferredQuotationImage } from '@/data/quotationImages'
 import { calculateFinanceQuoteTax, FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings, type TaxCustomerType } from '@/data/financeTaxSettings'
 import { inferCountryContinent } from '@/data/countryClassification'
 import {
@@ -136,6 +137,7 @@ function bundleItemFromRecord(record?: PurchaseProductRecord): BundleQuoteItem {
     name: record ? purchaseDisplayName(record) : '',
     supplier: record?.quotationOwner || '',
     image: record?.image || '',
+    physicalImage: record?.physicalImage || '',
     stockStatus: record?.stockStatus || '待确认',
     quantityPerSet,
     purchaseUnitPrice: record ? purchasePriceForMonthlySales(record) : 0,
@@ -255,6 +257,7 @@ async function queryBundleItem(item: BundleQuoteItem) {
   item.name = purchaseDisplayName(record)
   item.supplier = record.quotationOwner || '待补充'
   item.image = record.image
+  item.physicalImage = record.physicalImage
   item.stockStatus = record.stockStatus || '待确认'
   item.customWeightKg = null
   item.weightKg = record.weightKg || 0
@@ -771,7 +774,9 @@ async function save() {
   const record = await createQuotationRecord({
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
     customerId, customerName: customer, quoteMode: quoteMode.value, productSummary,
-    productImage: quoteMode.value === 'bundle' ? (bundleItems.value.find(item => item.image)?.image || '') : p.image,
+    productImage: quoteMode.value === 'bundle'
+      ? (bundleItems.value.map(item => preferredQuotationImage(item.physicalImage, item.image)).find(Boolean) || '')
+      : preferredQuotationImage(p.physicalImage, p.image),
     primarySku: quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => item.sku).join('、') : p.sku,
     productCategory: productCategory.value,
     volumetricEnabled: quoteMode.value === 'single' && p.volumetricEnabled,
