@@ -28,4 +28,21 @@ describe('logistics workspace request coalescing', () => {
     expect(first.providers).toHaveLength(1)
     expect(get).toHaveBeenCalledTimes(1)
   })
+
+  it('normalizes optional review fields from migrated logistics drafts', async () => {
+    get.mockResolvedValue({
+      providers: [],
+      channels: [],
+      versions: [{
+        id: 'version-1', channelId: 'channel-1', versionNumber: 1, status: 'draft', fileName: 'legacy.xlsx', sourceHash: 'sha256',
+        rows: [{ areaName: '美国', countryCode: 'US' }], importedAt: '', importedBy: '', publishedAt: '', publishedBy: '', auditNote: '',
+      }],
+    })
+
+    const state = await loadLogisticsWorkspace()
+
+    expect(state.versions[0]?.issues).toEqual([])
+    expect(state.versions[0]?.diffRows).toEqual([])
+    expect(state.versions[0]?.summary).toEqual({ added: 0, price: 0, rule: 0, removed: 0, unchanged: 0, highRisk: 0 })
+  })
 })

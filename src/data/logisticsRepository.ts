@@ -27,6 +27,32 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function normalizeLogisticsVersion(version: LogisticsChannelVersionRecord): LogisticsChannelVersionRecord {
+  const summary = version.summary || {} as Partial<LogisticsDiffSummary>
+  return {
+    ...version,
+    fileName: String(version.fileName || ''),
+    sourceHash: String(version.sourceHash || ''),
+    originalFile: null,
+    rows: Array.isArray(version.rows) ? version.rows : [],
+    issues: Array.isArray(version.issues) ? version.issues : [],
+    diffRows: Array.isArray(version.diffRows) ? version.diffRows : [],
+    summary: {
+      added: numberOrZero(summary.added),
+      price: numberOrZero(summary.price),
+      rule: numberOrZero(summary.rule),
+      removed: numberOrZero(summary.removed),
+      unchanged: numberOrZero(summary.unchanged),
+      highRisk: numberOrZero(summary.highRisk),
+    },
+    importedAt: String(version.importedAt || ''),
+    importedBy: String(version.importedBy || ''),
+    publishedAt: String(version.publishedAt || ''),
+    publishedBy: String(version.publishedBy || ''),
+    auditNote: String(version.auditNote || ''),
+  }
+}
+
 export function normalizeLogisticsPriceRow(row: Partial<LogisticsRateRow>): LogisticsPriceRow {
   return {
     areaName: String(row.areaName || ''), countryCode: String(row.countryCode || ''), etaMinDays: numberOrZero(row.etaMinDays), etaMaxDays: numberOrZero(row.etaMaxDays),
@@ -48,7 +74,7 @@ export async function loadLogisticsWorkspace(): Promise<LogisticsWorkspaceState>
     const normalized = {
       providers: [...state.providers].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
       channels: [...state.channels].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
-      versions: [...state.versions].map(version => ({ ...version, originalFile: null })).sort((a, b) => b.versionNumber - a.versionNumber || b.importedAt.localeCompare(a.importedAt)),
+      versions: [...state.versions].map(normalizeLogisticsVersion).sort((a, b) => b.versionNumber - a.versionNumber || b.importedAt.localeCompare(a.importedAt)),
       audits: [...(state.audits || [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     }
     workspaceCache = { value: normalized, expiresAt: Date.now() + WORKSPACE_CACHE_MS }
