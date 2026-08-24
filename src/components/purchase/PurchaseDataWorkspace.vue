@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { deletePurchaseProduct, loadPurchaseProduct, loadPurchaseProducts, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { confirmPurchaseImport, previewPurchaseWorkbook, type ServerPurchaseImportPreview } from '@/services/purchaseImports'
 import ImageMigrationPanel from './ImageMigrationPanel.vue'
@@ -20,6 +20,8 @@ const editingOriginalSku = ref('')
 const notice = ref('')
 const previewImage = ref<{ src: string; title: string } | null>(null)
 const showImageMigration = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(10)
 
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -29,7 +31,37 @@ const filtered = computed(() => {
 const readyCount = computed(() => records.value.filter(item => item.quoteReady).length)
 const pendingCount = computed(() => records.value.length - readyCount.value)
 const generatedCount = computed(() => records.value.filter(item => item.skuOrigin === 'system').length)
-const tieredCount = computed(() => records.value.filter(item => item.priceTiers.length > 1).length)
+const tieredCount = computed(() => filtered.value.filter(item => item.priceTiers.length > 1).length)
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
+const pageStart = computed(() => filtered.value.length ? (currentPage.value - 1) * pageSize.value : 0)
+const pageEnd = computed(() => Math.min(pageStart.value + pageSize.value, filtered.value.length))
+const pagedRecords = computed(() => filtered.value.slice(pageStart.value, pageEnd.value))
+const visiblePages = computed<(number | 'ellipsis-start' | 'ellipsis-end')[]>(() => {
+  const total = totalPages.value
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
+  const start = Math.max(2, currentPage.value - 2)
+  const end = Math.min(total - 1, currentPage.value + 2)
+  const pages: (number | 'ellipsis-start' | 'ellipsis-end')[] = [1]
+  if (start > 2) pages.push('ellipsis-start')
+  for (let page = start; page <= end; page += 1) pages.push(page)
+  if (end < total - 1) pages.push('ellipsis-end')
+  pages.push(total)
+  return pages
+})
+
+watch(search, () => { currentPage.value = 1 })
+watch(pageSize, () => { currentPage.value = 1 })
+watch(totalPages, total => {
+  if (currentPage.value > total) currentPage.value = total
+})
+
+function goToPage(page: number) {
+  currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
+}
+function resetFilters() {
+  search.value = ''
+  currentPage.value = 1
+}
 
 async function reload() {
   loading.value = true
@@ -159,9 +191,9 @@ const detailFields = computed(() => detail.value ? [
 
   <section class="toolbar">
     <label>⌕ <input v-model="search" placeholder="搜索 SKU、类别、报价人、尺码、颜色或工厂"></label>
-    <button @click="search=''">重置筛选</button>
+    <button @click="resetFilters">重置筛选</button>
     <button v-if="lastImport" class="result-link" @click="importPreview=lastImport">查看最近导入结果</button>
-    <span>共 {{ filtered.length }} 条 · {{ tieredCount }} 条含阶梯价</span>
+    <span>共 {{ filtered.length }} 条 · {{ tieredCount }} 条含阶梯价<span v-if="filtered.length"> · 当前 {{ pageStart + 1 }}–{{ pageEnd }} 条</span></span>
   </section>
 
   <section class="table-card">
@@ -169,7 +201,7 @@ const detailFields = computed(() => detail.value ? [
     <div v-else-if="!filtered.length" class="empty"><b>暂无采购数据</b><span>请下载标准模板填写后，通过“Excel 导入”添加采购资料。</span></div>
     <table v-else>
       <thead><tr><th>类别 / SKU</th><th>采购阶梯价格</th><th>重量与尺寸</th><th>国内运费</th><th>尺码 / 颜色</th><th>资料状态</th><th>操作</th></tr></thead>
-      <tbody><tr v-for="record in filtered" :key="record.sku">
+      <tbody><tr v-for="record in pagedRecords" :key="record.sku">
         <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><i v-else>{{ record.category.slice(0,1) || '?' }}</i><span><b>{{ purchaseDisplayName(record) }}</b><small>{{ record.sku }}</small><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
         <td><div v-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
         <td><b>{{ value(record.weightG,' g') }}</b><small>{{ value(record.lengthCm) }} × {{ value(record.widthCm) }} × {{ value(record.heightCm) }} cm</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
@@ -179,6 +211,18 @@ const detailFields = computed(() => detail.value ? [
         <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button></td>
       </tr></tbody>
     </table>
+    <footer v-if="filtered.length" class="pagination" aria-label="采购资料分页">
+      <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+      <nav>
+        <button :disabled="currentPage===1" @click="goToPage(currentPage-1)">上一页</button>
+        <template v-for="page in visiblePages" :key="page">
+          <i v-if="typeof page !== 'number'">…</i>
+          <button v-else :class="{ active:page===currentPage }" :aria-current="page===currentPage ? 'page' : undefined" @click="goToPage(page)">{{ page }}</button>
+        </template>
+        <button :disabled="currentPage===totalPages" @click="goToPage(currentPage+1)">下一页</button>
+      </nav>
+      <label>每页<select v-model.number="pageSize"><option :value="10">10 条</option><option :value="20">20 条</option><option :value="50">50 条</option></select></label>
+    </footer>
   </section>
 
   <div v-if="importPreview" class="mask" @click.self="importPreview=null"><section class="modal import-modal">
@@ -231,4 +275,5 @@ const detailFields = computed(() => detail.value ? [
 .purchase-tiers{display:grid;min-width:158px;gap:4px}.purchase-tiers span{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 7px;border-radius:6px;background:#f4f6f7}.purchase-tiers span.base{background:#fff1db}.purchase-tiers small{color:#687681;font-size:9px;white-space:nowrap}.purchase-tiers b{color:#bd6800;font-size:11px;white-space:nowrap}.no-data{color:#929da5}
 .issues .blocking{margin:0;border-top:1px solid #f3c7c3;background:#fff1ef;color:#b62f27;font-weight:800}.issues article.error{background:#fff8f7}.issues article.error em{color:#c4362d}.primary:disabled{cursor:not-allowed;opacity:.5}
 .import-mode{display:grid;gap:6px;margin:12px 0;padding:12px;border:1px solid #f1d19a;border-radius:8px;background:#fff8eb;color:#6c5b42;font-size:11px}.import-mode select{height:36px;border:1px solid #dfc392;border-radius:6px;background:#fff;padding:0 9px}.import-mode small{color:#a35f00}
+.pagination{display:flex;min-width:1180px;align-items:center;justify-content:space-between;gap:18px;padding:14px 16px;border-top:1px solid #e3e8eb;background:#fafbfc;color:#74808a;font-size:11px}.pagination nav{display:flex;align-items:center;gap:6px}.pagination button{min-width:32px;height:32px;padding:0 10px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#596771;font-size:11px;font-weight:800}.pagination button.active{border-color:#ff9900;background:#ff9900;color:#17212b}.pagination button:disabled{cursor:not-allowed;opacity:.42}.pagination nav i{display:grid;width:24px;place-items:center;color:#9aa4ac;font-style:normal}.pagination label{display:flex;align-items:center;gap:7px}.pagination select{height:32px;border:1px solid #dce3e8;border-radius:6px;background:#fff;padding:0 8px;color:#596771}
 </style>
