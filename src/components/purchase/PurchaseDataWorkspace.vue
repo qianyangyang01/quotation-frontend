@@ -196,7 +196,7 @@ const detailFields = computed(() => detail.value ? [
     <footer><button @click="detail=null">关闭</button><button class="primary" @click="openEditor(detail)">编辑资料</button></footer>
   </section></div>
 
-  <div v-if="editor" class="mask" @click.self="editor=null"><section class="modal editor-modal">
+  <div v-if="editor" class="mask"><section class="modal editor-modal">
     <button class="close" @click="editor=null">×</button><small>PURCHASE DATA EDITOR</small><h2>{{ editingOriginalSku ? '编辑采购资料' : '新增采购资料' }}</h2><p>字段顺序与标准 Excel 模板一致；空字段保存后显示“暂无数据”。</p>
     <div v-if="editor.skuOrigin==='system'" class="generated-warning">系统生成 SKU 必须修改成真实 SKU 后，才可以参与报价。</div>
     <div v-else-if="editor.catalogState==='pending_template'" class="generated-warning">当前是模板待补全目录。保存不会解除锁定；改成真实业务SKU并点击“确认转正式”后才可参与报价。</div>
