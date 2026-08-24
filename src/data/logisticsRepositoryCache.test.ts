@@ -29,7 +29,7 @@ describe('logistics workspace request coalescing', () => {
 
     expect(first).toBe(second)
     expect(first.providers).toHaveLength(1)
-    expect(get).toHaveBeenCalledTimes(3)
+    expect(get).toHaveBeenCalledTimes(4)
   })
 
   it('normalizes optional review fields from migrated logistics drafts', async () => {

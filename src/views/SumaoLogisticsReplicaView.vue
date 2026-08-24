@@ -6,14 +6,18 @@ import { parseLogisticsWorkbook, type LogisticsDiffField, type LogisticsDiffRow,
 import {
   addLogisticsChannel,
   addLogisticsProvider,
+  archiveLogisticsChannel,
   createLogisticsDraft,
   deleteLogisticsChannel,
   deleteLogisticsProvider,
   importLogisticsProviderFiles,
+  importLogisticsGlobalFiles,
+  initialLogisticsBatchSelection,
   loadCurrentVersionRows,
   loadLogisticsVersionDetail,
   loadLogisticsWorkspace,
   previewLogisticsProviderImports,
+  previewLogisticsGlobalImports,
   publishLogisticsProviderVersions,
   publishLogisticsVersion,
   rejectLogisticsVersion,
@@ -46,7 +50,7 @@ type WorkspaceMode = 'rules' | 'base'
 const workspaceMode = ref<WorkspaceMode>('base')
 const templateInput = ref<HTMLInputElement | null>(null)
 const uploadChannelId = ref('')
-const uploadMode = ref<'single' | 'batch-update' | 'batch-import'>('single')
+const uploadMode = ref<'single' | 'batch-update' | 'batch-import' | 'global-import'>('single')
 const providerSearch = ref('')
 const showProviderEditor = ref(false)
 const providerForm = reactive({ name: '', code: '' })
@@ -73,6 +77,10 @@ const batchFiles = ref<File[]>([])
 const batchPreview = ref<LogisticsBatchPreview | null>(null)
 const showBatchPreview = ref(false)
 const replaceBatchDrafts = ref(false)
+const batchSelectedKeys = ref<string[]>([])
+const showArchivedChannels = ref(false)
+const archivingChannel = ref<LogisticsChannelRecord | null>(null)
+const archiveReason = ref('')
 const showBatchReview = ref(false)
 const batchSelectedVersionIds = ref<string[]>([])
 const batchReviewedVersionIds = ref<string[]>([])
@@ -84,9 +92,12 @@ const filteredProviderSettings = computed(() => {
   return providerSettings.value.filter(item => `${item.name} ${item.code}`.toLowerCase().includes(query))
 })
 const selectedProvider = computed(() => providerSettings.value.find(item => item.id === selectedProviderId.value) ?? providerSettings.value[0])
-const selectedProviderChannels = computed(() => workspace.value.channels.filter(item => item.providerId === selectedProvider.value?.id))
+const selectedProviderChannels = computed(() => workspace.value.channels.filter(item => item.providerId === selectedProvider.value?.id && Boolean(item.archived) === showArchivedChannels.value))
+const activeProviderChannels = computed(() => workspace.value.channels.filter(item => item.providerId === selectedProvider.value?.id && !item.archived))
 const historyVersions = computed(() => workspace.value.versions.filter(item => item.channelId === historyChannel.value?.id))
-const selectedProviderDrafts = computed(() => selectedProviderChannels.value.map(channel => ({ channel, version: draftVersion(channel) })).filter((item): item is { channel: LogisticsChannelRecord; version: LogisticsChannelVersionRecord } => Boolean(item.version)))
+const selectedProviderDrafts = computed(() => activeProviderChannels.value.map(channel => ({ channel, version: draftVersion(channel) })).filter((item): item is { channel: LogisticsChannelRecord; version: LogisticsChannelVersionRecord } => Boolean(item.version)))
+const selectedBatchItems = computed(() => batchPreview.value?.items.filter(item => batchSelectedKeys.value.includes(item.fileKey)) ?? [])
+const selectedBatchDraftCount = computed(() => selectedBatchItems.value.filter(item => item.hasDraft).length)
 const reviewChangedDiffs = computed(() => importPreview.value?.diffRows.filter(item => item.type !== 'unchanged') ?? [])
 const reviewVisibleDiffs = computed(() => reviewChangedDiffs.value.filter(item => {
   const query = reviewCountryKeyword.value.trim().toLowerCase()
@@ -179,7 +190,7 @@ function reviewPercent(change: LogisticsDiffField) {
   const percent = (after - before) / Math.abs(before) * 100
   return `${percent > 0 ? '+' : ''}${percent.toFixed(1)}%`
 }
-function triggerTemplateUpload(channelId = '', mode: 'single' | 'batch-update' | 'batch-import' = 'single') {
+function triggerTemplateUpload(channelId = '', mode: 'single' | 'batch-update' | 'batch-import' | 'global-import' = 'single') {
   uploadChannelId.value = channelId
   uploadMode.value = mode
   templateInput.value?.click()
@@ -212,9 +223,13 @@ async function handleTemplateUpload(event: Event) {
   const files = Array.from(input.files)
   try {
     if (uploadMode.value !== 'single') {
-      if (!selectedProvider.value) throw new Error('请先选择物流商')
       batchFiles.value = files
-      batchPreview.value = await previewLogisticsProviderImports(selectedProvider.value.id, files)
+      if (uploadMode.value === 'global-import') batchPreview.value = await previewLogisticsGlobalImports(files)
+      else {
+        if (!selectedProvider.value) throw new Error('请先选择物流商')
+        batchPreview.value = await previewLogisticsProviderImports(selectedProvider.value.id, files)
+      }
+      batchSelectedKeys.value = initialLogisticsBatchSelection(batchPreview.value)
       replaceBatchDrafts.value = false
       showBatchPreview.value = true
     } else {
@@ -225,14 +240,16 @@ async function handleTemplateUpload(event: Event) {
   } catch (error) { notify(error instanceof Error ? error.message : 'Excel 导入失败') }
   input.value = ''
 }
-function batchItemHasDraft(channelId: string) { return Boolean(channelId && workspace.value.versions.some(version => version.channelId === channelId && version.status === 'draft')) }
 async function commitBatchImport() {
-  if (!selectedProvider.value || !batchPreview.value) return
-  if (batchPreview.value.blocking) return notify('批次中存在阻断错误，不能提交')
-  if (batchPreview.value.items.some(item => batchItemHasDraft(item.channelId)) && !replaceBatchDrafts.value) return notify('存在已有待审稿，请勾选明确终止旧草稿后再提交')
+  if (!batchPreview.value || !selectedBatchItems.value.length) return notify('请至少选择一份可提交文件')
+  if (selectedBatchDraftCount.value && !replaceBatchDrafts.value) return notify('存在已有待审稿，请勾选明确终止旧草稿后再提交')
   try {
-    const result = await importLogisticsProviderFiles(selectedProvider.value.id, batchFiles.value, replaceBatchDrafts.value)
-    showBatchPreview.value = false; await refreshWorkspace(); notify(`已生成 ${result.count} 个待审核版本`); openBatchReview()
+    const indexes = new Set(selectedBatchItems.value.map(item => item.fileIndex)); const selectedFiles = batchFiles.value.filter((_, index) => indexes.has(index))
+    const result = uploadMode.value === 'global-import'
+      ? await importLogisticsGlobalFiles(selectedFiles, replaceBatchDrafts.value)
+      : await importLogisticsProviderFiles(selectedProvider.value!.id, selectedFiles, replaceBatchDrafts.value)
+    showBatchPreview.value = false; await refreshWorkspace(); notify(`已处理 ${result.count} 个渠道版本`)
+    if (uploadMode.value !== 'global-import') openBatchReview()
   } catch (error) { notify(error instanceof Error ? error.message : '批量导入失败，未写入任何文件') }
 }
 function openBatchReview() {
@@ -266,6 +283,12 @@ async function saveProvider() {
     await refreshWorkspace(); selectedProviderId.value = provider.id
     Object.assign(providerForm, { name: '', code: '' }); showProviderEditor.value = false; notify('物流商已添加，财务税务属性待设置')
   } catch (error) { notify(error instanceof Error ? error.message : '新增物流商失败') }
+}
+function openArchive(channel: LogisticsChannelRecord) { archivingChannel.value = channel; archiveReason.value = ''; }
+async function confirmArchive() {
+  if (!archivingChannel.value || !archiveReason.value.trim()) return notify('请填写归档原因')
+  try { await archiveLogisticsChannel(archivingChannel.value, archiveReason.value); archivingChannel.value = null; await refreshWorkspace(); notify('渠道已归档，正式规则和报价已立即移除') }
+  catch (error) { notify(error instanceof Error ? error.message : '渠道归档失败') }
 }
 async function toggleProviderStatus() {
   const provider = selectedProvider.value
@@ -431,11 +454,11 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
           </section>
         </template>
         <section v-else class="base-settings">
-          <div class="base-toolbar"><div><h2>物流商与渠道版本</h2><p>完整 Excel 快照先进入草稿审核；只有发布后的价格版本才参与业务报价。</p></div><div class="provider-toolbar"><label>⌕<input v-model="providerSearch" placeholder="搜索物流商或编码"></label><button class="outline-orange" @click="showProviderEditor=true">＋ 新增物流商</button></div></div>
+          <div class="base-toolbar"><div><h2>物流商与渠道版本</h2><p>完整 Excel 快照先进入草稿审核；只有发布后的价格版本才参与业务报价。</p></div><div class="provider-toolbar"><label>⌕<input v-model="providerSearch" placeholder="搜索物流商或编码"></label><button class="outline-orange" @click="triggerTemplateUpload('','global-import')">全局批量导入</button><button class="outline-orange" @click="showProviderEditor=true">＋ 新增物流商</button></div></div>
           <input ref="templateInput" class="hidden-file" type="file" multiple accept=".xlsx" @change="handleTemplateUpload">
           <div class="provider-manager">
             <aside class="provider-list"><div class="provider-sort-hint"><span>物流商列表</span><small>正式渠道数据仓库</small></div><div class="provider-list-scroll"><button v-for="provider in filteredProviderSettings" :key="provider.id" :class="{ active:selectedProvider?.id===provider.id }" @click="selectedProviderId=provider.id"><u>⋮⋮</u><i>{{ provider.name.slice(0,1) }}</i><span><b>{{ provider.name }}</b><small>{{ provider.code }}</small></span><em>{{ providerChannelCount(provider) }}个渠道</em><strong>›</strong></button><div v-if="!filteredProviderSettings.length" class="provider-empty">没有匹配的物流商</div></div><footer>共 {{ providerSettings.length }} 家物流商</footer></aside>
-            <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0,1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span><em v-if="!selectedProvider.enabled">已停用</em></h3><small>物流商编码 {{ selectedProvider.code }} · 渠道、价格和审核的唯一维护入口</small></div><div class="provider-detail-actions"><button class="outline-orange" @click="showChannelEditor=true">＋ 新增渠道</button><button class="outline-orange" @click="triggerTemplateUpload('','batch-import')">批量导入渠道</button><button class="upload" @click="triggerTemplateUpload('','batch-update')">批量更新价格</button><button v-if="selectedProviderDrafts.length" class="upload" @click="openBatchReview">批量审核 {{ selectedProviderDrafts.length }}</button><button class="state-action" @click="toggleProviderStatus">{{ selectedProvider.enabled ? '停用物流商' : '重新启用' }}</button><button v-if="providerChannelCount(selectedProvider)===0" class="danger-action" @click="removeProvider">删除物流商</button></div></header><div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute }}<em v-if="!channel.enabled"> · 已停用</em></small></b><div><strong>{{ currentVersion(channel) ? `V${currentVersion(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersion(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ countryCount(visibleVersion(channel)) }}国 / {{ visibleVersion(channel)?.rowCount || 0 }}价格段</div><span :class="{ pending:draftVersion(channel) }">{{ draftVersion(channel) ? `V${draftVersion(channel)!.versionNumber} 待审核` : '无待审版本' }}</span><time>{{ currentVersion(channel)?.publishedAt || '—' }}</time><div class="template-actions"><button @click="triggerTemplateUpload(channel.id)">{{ currentVersion(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersion(channel)" class="move-template" @click="openDraftReview(channel)">审核发布</button><button @click="openHistory(channel)">版本历史</button><button class="state-action" @click="toggleChannelStatus(channel)">{{ channel.enabled ? '停用' : '启用' }}</button><button v-if="channelVersionCount(channel)===0" class="danger-action" @click="removeChannel(channel)">删除</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未创建渠道</div></div><button class="template-dropzone" @dragover.prevent @drop.prevent="handleTemplateDrop" @click="triggerTemplateUpload('','batch-update')"><i>⇧</i><span>拖拽多个渠道 Excel 到这里，系统将按<strong>渠道编码或名称自动匹配并预检</strong></span></button></div></section>
+            <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0,1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ activeProviderChannels.length }}个渠道</span><em v-if="!selectedProvider.enabled">已停用</em></h3><small>物流商编码 {{ selectedProvider.code }} · 渠道、价格和审核的唯一维护入口</small></div><div class="provider-detail-actions"><button class="outline-orange" @click="showChannelEditor=true">＋ 新增渠道</button><button class="outline-orange" @click="triggerTemplateUpload('','batch-import')">批量导入渠道</button><button class="upload" @click="triggerTemplateUpload('','batch-update')">批量更新价格</button><button v-if="selectedProviderDrafts.length" class="upload" @click="openBatchReview">批量审核 {{ selectedProviderDrafts.length }}</button><button class="state-action" @click="showArchivedChannels=!showArchivedChannels">{{ showArchivedChannels?'返回日常渠道':'查看已归档' }}</button><button class="state-action" @click="toggleProviderStatus">{{ selectedProvider.enabled ? '停用物流商' : '重新启用' }}</button><button v-if="providerChannelCount(selectedProvider)===0" class="danger-action" @click="removeProvider">删除物流商</button></div></header><div class="provider-detail-body"><h4>{{ showArchivedChannels?'已归档渠道':'渠道价格与版本' }}</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>{{ showArchivedChannels?'归档信息':'调价状态' }}</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute }}<em v-if="!channel.enabled"> · 已停用</em></small></b><div><strong>{{ currentVersion(channel) ? `V${currentVersion(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersion(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ countryCount(visibleVersion(channel)) }}国 / {{ visibleVersion(channel)?.rowCount || 0 }}价格段</div><span v-if="channel.archived" class="pending">{{ channel.archiveReason }} · {{ channel.archivedBy }} · {{ channel.archivedAt }}</span><span v-else :class="{ pending:draftVersion(channel) }">{{ draftVersion(channel) ? `V${draftVersion(channel)!.versionNumber} 待审核` : '无待审版本' }}</span><time>{{ currentVersion(channel)?.publishedAt || '—' }}</time><div class="template-actions"><button v-if="!channel.archived" @click="triggerTemplateUpload(channel.id)">{{ currentVersion(channel) ? '更新价格' : '上传价格' }}</button><button v-if="!channel.archived&&draftVersion(channel)" class="move-template" @click="openDraftReview(channel)">审核发布</button><button @click="openHistory(channel)">版本历史</button><button v-if="!channel.archived" class="state-action" @click="toggleChannelStatus(channel)">{{ channel.enabled ? '停用' : '启用' }}</button><button v-if="!channel.archived&&channelVersionCount(channel)===0" class="danger-action" @click="removeChannel(channel)">删除</button><button v-else-if="!channel.archived" class="danger-action" @click="openArchive(channel)">归档</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">{{ showArchivedChannels?'当前物流商没有已归档渠道':'当前物流商尚未创建渠道' }}</div></div><button v-if="!showArchivedChannels" class="template-dropzone" @dragover.prevent @drop.prevent="handleTemplateDrop" @click="triggerTemplateUpload('','batch-update')"><i>⇧</i><span>拖拽多个渠道 Excel 到这里，系统将按<strong>渠道编码或名称自动匹配并预检</strong></span></button></div></section>
           </div>
         </section>
       </template>
@@ -444,7 +467,8 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
 
     <div v-if="showProviderEditor" class="mask"><div class="modal small base-modal"><header>新增物流商<button @click="showProviderEditor=false">×</button></header><div class="simple-form"><label>物流商名称<input v-model="providerForm.name" placeholder="例如：燕文物流"></label><label>物流商编码<input v-model="providerForm.code" placeholder="例如：YANWEN" @input="providerForm.code=providerForm.code.toUpperCase()"></label></div><footer><button class="primary-orange" @click="saveProvider">保存物流商</button><button @click="showProviderEditor=false">取消</button></footer></div></div>
     <div v-if="showChannelEditor" class="mask"><div class="modal small base-modal"><header><div><small>LOGISTICS CHANNEL</small><b>新增物流渠道</b></div><button @click="showChannelEditor=false">×</button></header><div class="simple-form"><label>渠道名称<input v-model="channelForm.name" placeholder="例如：燕文普货专线"></label><label>渠道编码<input v-model="channelForm.code" placeholder="唯一编码，例如：YW-PH" @input="channelForm.code=channelForm.code.toUpperCase()"></label><label>规则类型<select v-model="channelForm.type"><option>专线</option><option>挂号</option><option>快递</option></select></label><label>物流属性<select v-model="channelForm.logisticsAttribute"><option>普货</option><option>带电</option><option>化妆品</option><option>敏感货</option></select></label></div><footer><button @click="showChannelEditor=false">取消</button><button class="primary-orange" @click="saveChannel">创建并上传</button></footer></div></div>
-    <div v-if="showBatchPreview && batchPreview" class="mask"><div class="modal batch-modal"><header><div><small>BATCH IMPORT PREVIEW</small><b>{{ selectedProvider?.name }} · {{ batchPreview.count }} 个文件预检</b></div><button @click="showBatchPreview=false">×</button></header><div class="batch-body"><div class="batch-summary"><span>匹配渠道 {{ batchPreview.items.filter(item=>item.action==='match').length }}</span><span>新建渠道 {{ batchPreview.items.filter(item=>item.action==='create').length }}</span><span :class="{ danger:batchPreview.blocking }">阻断文件 {{ batchPreview.blocking }}</span></div><div class="batch-list"><article v-for="item in batchPreview.items" :key="item.sourceHash"><span :class="['batch-action',item.action]">{{ item.action==='match'?'匹配':'新建' }}</span><div><b>{{ item.fileName }}</b><small>{{ item.channelName }} · {{ item.channelCode }} · {{ item.validRows }} 行</small></div><div class="history-summary"><span>新增 {{ item.summary.added }}</span><span>调价 {{ item.summary.price }}</span><span>移除 {{ item.summary.removed }}</span><span>风险 {{ item.summary.highRisk }}</span></div><em v-if="batchItemHasDraft(item.channelId)" class="batch-warning">已有待审稿</em><em v-else-if="item.errors" class="batch-error">{{ item.errors }} 个错误</em><em v-else class="batch-ok">可提交</em></article></div><label v-if="batchPreview.items.some(item=>batchItemHasDraft(item.channelId))" class="removal-confirm"><input v-model="replaceBatchDrafts" type="checkbox">我确认终止上述渠道的旧待审稿，保留历史后生成下一版本</label></div><footer><button @click="showBatchPreview=false">取消</button><button class="primary-orange" :disabled="Boolean(batchPreview.blocking)" @click="commitBatchImport">确认导入为待审版本</button></footer></div></div>
+    <div v-if="showBatchPreview && batchPreview" class="mask"><div class="modal batch-modal"><header><div><small>BATCH IMPORT PREVIEW</small><b>{{ uploadMode==='global-import'?'全局批量导入':selectedProvider?.name }} · {{ batchPreview.count }} 个文件预检</b></div><button @click="showBatchPreview=false">×</button></header><div class="batch-body"><div class="batch-summary"><span>可提交 {{ selectedBatchItems.length }} 份</span><span :class="{ danger:batchPreview.blocking }">阻断 {{ batchPreview.blocking }} 份</span><span>将终止旧草稿 {{ selectedBatchDraftCount }} 份</span></div><div class="batch-list"><article v-for="item in batchPreview.items" :key="item.fileKey" :class="{ blocked:item.errors }"><input v-model="batchSelectedKeys" type="checkbox" :value="item.fileKey" :disabled="Boolean(item.errors)"><span :class="['batch-action',item.action]">{{ item.action==='match'?'匹配':item.action==='create'?'新建':item.action==='restore'?'恢复':'阻断' }}</span><div><b>{{ item.fileName }}</b><small>{{ item.providerName||selectedProvider?.name||item.providerMatchMessage }} · {{ item.channelName||'未匹配渠道' }} · {{ item.validRows }} 行</small><em v-if="item.hasDraft" class="batch-warning">已有待审稿</em><em v-if="item.errors" class="batch-error">解析错误 {{ item.errors }} 个</em></div><div class="history-summary"><span>新增 {{ item.summary.added }}</span><span>调价 {{ item.summary.price }}</span><span>移除 {{ item.summary.removed }}</span><span>风险 {{ item.summary.highRisk }}</span></div><details v-if="item.errors" open class="batch-issues"><summary>阻断原因</summary><p v-for="(issue,index) in item.issues" :key="index">Excel 第 {{ issue.row||'—' }} 行 · {{ issue.field }}：{{ issue.message }}</p></details><em v-else class="batch-ok">可提交</em></article></div><label v-if="selectedBatchDraftCount" class="removal-confirm"><input v-model="replaceBatchDrafts" type="checkbox">我确认终止所选渠道的旧待审稿，保留历史后生成下一版本</label></div><footer><span>可提交 {{ selectedBatchItems.length }} 份、阻断 {{ batchPreview.blocking }} 份、将终止旧草稿 {{ selectedBatchDraftCount }} 份</span><button @click="showBatchPreview=false">取消</button><button class="primary-orange" :disabled="!selectedBatchItems.length || Boolean(selectedBatchDraftCount&&!replaceBatchDrafts)" @click="commitBatchImport">确认导入所选文件</button></footer></div></div>
+    <div v-if="archivingChannel" class="mask"><div class="modal small base-modal"><header><div><small>CHANNEL ARCHIVE</small><b>归档 {{ archivingChannel.name }}</b></div><button @click="archivingChannel=null">×</button></header><div class="simple-form"><p>归档后渠道会退出日常列表、正式规则和报价；版本、文件、审核及历史关联全部保留。再次导入同渠道时可恢复并继续版本号。</p><label>归档原因<textarea v-model="archiveReason" maxlength="500" placeholder="请填写停用或替换该渠道的业务原因"></textarea></label></div><footer><button @click="archivingChannel=null">取消</button><button class="danger-action" :disabled="!archiveReason.trim()" @click="confirmArchive">确认归档</button></footer></div></div>
     <div v-if="showBatchReview && selectedProvider" class="mask"><div class="modal batch-modal"><header><div><small>PROVIDER REVIEW</small><b>{{ selectedProvider.name }} · 批量审核发布</b></div><button @click="showBatchReview=false">×</button></header><div class="batch-body"><p class="batch-help">仅勾选需要本次发布的渠道；任一所选版本校验失败，整批不会发布。</p><div class="batch-list"><article v-for="item in selectedProviderDrafts" :key="item.version.id"><input v-model="batchSelectedVersionIds" type="checkbox" :value="item.version.id"><div><b>{{ item.channel.name }} · V{{ item.version.versionNumber }}</b><small>{{ item.version.fileName }} · {{ item.version.rowCount }} 行</small></div><div class="history-summary"><span>新增 {{ item.version.summary.added }}</span><span>调价 {{ item.version.summary.price }}</span><span>移除 {{ item.version.summary.removed }}</span><span>风险 {{ item.version.summary.highRisk }}</span></div><label v-if="batchNeedsReview(item.version)" class="batch-review-check"><input v-model="batchReviewedVersionIds" type="checkbox" :value="item.version.id">已核对风险/移除项</label><em v-else class="batch-ok">校验通过</em></article></div><label class="audit-note">批量审核备注<textarea v-model="batchAuditNote" placeholder="填写本批价格来源、调整原因和审核结论"></textarea></label></div><footer><button @click="showBatchReview=false">暂不发布</button><button class="primary-orange" @click="publishBatchVersions">审核通过并批量发布</button></footer></div></div>
     <div v-if="showImportReview && importPreview && reviewingVersion" class="mask">
       <div class="modal import-review-modal">

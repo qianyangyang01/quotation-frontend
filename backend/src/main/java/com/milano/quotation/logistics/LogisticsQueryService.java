@@ -53,7 +53,7 @@ public class LogisticsQueryService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<JsonNode> channels(int page, int size, String query, UUID providerId, Boolean enabled) {
+    public PageResponse<JsonNode> channels(int page, int size, String query, UUID providerId, Boolean enabled, Boolean archived) {
         var params = new LinkedHashMap<String, Object>();
         var where = new StringBuilder(" where 1=1");
         if (query != null && !query.isBlank()) {
@@ -68,7 +68,9 @@ public class LogisticsQueryService {
             where.append(" and coalesce((payload->>'enabled')::boolean, true) = :enabled");
             params.put("enabled", enabled);
         }
-        return jsonPage("logistics_channel" + where, "payload::text as payload, version", "updated_at desc", page, size, params, true);
+        if (archived != null) where.append(archived ? " and archived_at is not null" : " and archived_at is null");
+        var select = "(payload || jsonb_build_object('archived', archived_at is not null, 'archivedAt', coalesce(archived_at::text,''), 'archivedBy', coalesce(archived_by,''), 'archiveReason', coalesce(archive_reason,'')))::text as payload, version";
+        return jsonPage("logistics_channel" + where, select, "updated_at desc", page, size, params, true);
     }
 
     @Transactional(readOnly = true)
@@ -120,6 +122,7 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
+                  and c.archived_at is null
                 order by c.id
                 """).query(String.class).list();
         var revision = sha256(String.join("\n", revisionParts));
@@ -131,6 +134,7 @@ public class LogisticsQueryService {
                 cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
+                  and c.archived_at is null
                   and coalesce(item->>'areaName','')<>''
                 order by name, code
                 """).query((rs, rowNum) -> new PublishedCountry(rs.getString("code"), rs.getString("name"))).list();
@@ -141,6 +145,7 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
+                  and c.archived_at is null
                 order by attribute
                 """).query(String.class).list();
         return new PublishedManifest(revision, Instant.now(), revisionParts.size(), countries, attributes);
@@ -171,6 +176,7 @@ public class LogisticsQueryService {
                 cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
+                  and c.archived_at is null
                   and (
                 """).append(String.join(" or ", countryConditions)).append(")");
         if (!normalizedChannels.isEmpty()) {

@@ -68,6 +68,7 @@ class LogisticsQueryPostgresIntegrationTest {
 
     @Test
     void filtersPublishedRulesAndChangesRevisionOnlyForPublishedMetadata() {
+        jdbc.sql("update logistics_channel set archived_at=null, archived_by=null, archive_reason=null, payload=jsonb_set(payload,'{enabled}','true'::jsonb), version=version+1 where id=:id").param("id", channelId).update();
         var first = service.manifest();
         var rules = service.publishedRules(first.revision(), "普货", List.of("美国"), List.of("YT-PH"));
         assertEquals(1, rules.rules().size());
@@ -82,5 +83,19 @@ class LogisticsQueryPostgresIntegrationTest {
         jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false'::jsonb), version=version+1, updated_at=now() where id=:id").param("id", channelId).update();
         assertNotEquals(first.revision(), service.manifest().revision());
         assertThrows(AppException.class, () -> service.publishedRules(first.revision(), "普货", List.of("美国"), List.of()));
+    }
+
+    @Test
+    void archivedChannelLeavesDailyListManifestAndPublishedQuoteProjection() {
+        jdbc.sql("update logistics_channel set archived_at=null, archived_by=null, archive_reason=null, payload=jsonb_set(payload,'{enabled}','true'::jsonb), version=version+1 where id=:id").param("id", channelId).update();
+        assertEquals(1, service.channels(0, 50, "", providerId, null, false).total());
+        jdbc.sql("update logistics_channel set archived_at=now(), archived_by='ADMIN', archive_reason='下线测试', version=version+1 where id=:id").param("id", channelId).update();
+        assertEquals(0, service.channels(0, 50, "", providerId, null, false).total());
+        var archived = service.channels(0, 50, "", providerId, null, true);
+        assertEquals(1, archived.total());
+        assertTrue(archived.items().getFirst().path("archived").asBoolean());
+        assertEquals("下线测试", archived.items().getFirst().path("archiveReason").asText());
+        assertEquals(0, service.manifest().publishedChannels());
+        assertTrue(service.manifest().countries().isEmpty());
     }
 }

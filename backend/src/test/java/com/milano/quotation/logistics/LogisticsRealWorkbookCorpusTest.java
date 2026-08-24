@@ -20,11 +20,16 @@ class LogisticsRealWorkbookCorpusTest {
         Assumptions.assumeTrue(Files.isDirectory(root), "物流模板语料目录不存在");
         var service = new LogisticsWorkbookService(JsonMapper.builder().build());
         var files = Files.walk(root).filter(path -> path.getFileName().toString().toLowerCase().endsWith(".xlsx")).sorted().toList();
+        var providerNames = Files.list(root).filter(Files::isDirectory).map(folder -> folder.getFileName().toString()).toList();
 
         assertEquals(66, files.size(), "权威模板数量必须保持为66份");
         var blockedFiles = 0;
+        var providerMatched = 0;
         var unexpected = new java.util.ArrayList<String>();
         for (var path : files) {
+            var filePrefix = LogisticsService.providerMatchPrefix(path.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ""));
+            var providerMatches = providerNames.stream().filter(name -> LogisticsService.providerMatchPrefix(name).equals(filePrefix)).count();
+            if (providerMatches == 1) providerMatched++;
             var upload = new MockMultipartFile("file", path.getFileName().toString(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Files.readAllBytes(path));
             var result = service.parse(upload, JsonMapper.builder().build().createArrayNode());
             assertTrue(result.path("validRows").asInt() > 0, () -> path + " 没有有效价格行");
@@ -57,5 +62,7 @@ class LogisticsRealWorkbookCorpusTest {
         }
         assertTrue(unexpected.isEmpty(), () -> "存在非预期阻断错误：\n" + String.join("\n", unexpected));
         assertEquals(5, blockedFiles, "66份基准中只允许已确认的5份源文件被预检拦截");
+        assertEquals(62, providerMatched, "前两个有效字符必须唯一匹配62份文件");
+        assertEquals(57, providerMatched - blockedFiles, "全局预检最终应有57份可选、9份阻断");
     }
 }

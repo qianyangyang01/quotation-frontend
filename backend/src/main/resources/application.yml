@@ -1,5 +1,10 @@
 server:
   port: 8088
+  tomcat:
+    # Global logistics import accepts up to 100 files plus form fields. Tomcat
+    # 11 defaults to 50 multipart parts, so keep the connector aligned with the
+    # business-level batch limit while retaining a finite DoS guard.
+    max-part-count: ${APP_MAX_PART_COUNT:110}
   forward-headers-strategy: framework
   compression:
     enabled: true
