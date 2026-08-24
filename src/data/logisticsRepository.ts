@@ -18,6 +18,9 @@ export type LogisticsWorkspaceState = { providers: LogisticsProviderRecord[]; ch
 export const LOGISTICS_PUBLISHED_EVENT = 'milano:logistics-published'
 
 type RemoteWorkspace = Omit<LogisticsWorkspaceState, 'audits'> & { audits?: LogisticsAuditRecord[] }
+const WORKSPACE_CACHE_MS = 5_000
+let workspaceCache: { value: LogisticsWorkspaceState; expiresAt: number } | null = null
+let workspaceRequest: Promise<LogisticsWorkspaceState> | null = null
 
 function numberOrZero(value: unknown) {
   const parsed = Number(value)
@@ -36,62 +39,74 @@ export function normalizeLogisticsPriceRow(row: Partial<LogisticsRateRow>): Logi
   }
 }
 
+export function invalidateLogisticsWorkspaceCache() { workspaceCache = null }
+
 export async function loadLogisticsWorkspace(): Promise<LogisticsWorkspaceState> {
-  const state = await api.get<RemoteWorkspace>('/logistics/workspace')
-  return {
-    providers: [...state.providers].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
-    channels: [...state.channels].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
-    versions: [...state.versions].map(version => ({ ...version, originalFile: null })).sort((a, b) => b.versionNumber - a.versionNumber || b.importedAt.localeCompare(a.importedAt)),
-    audits: [...(state.audits || [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-  }
+  if (workspaceCache && workspaceCache.expiresAt > Date.now()) return workspaceCache.value
+  if (workspaceRequest) return workspaceRequest
+  workspaceRequest = api.get<RemoteWorkspace>('/logistics/workspace').then(state => {
+    const normalized = {
+      providers: [...state.providers].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+      channels: [...state.channels].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+      versions: [...state.versions].map(version => ({ ...version, originalFile: null })).sort((a, b) => b.versionNumber - a.versionNumber || b.importedAt.localeCompare(a.importedAt)),
+      audits: [...(state.audits || [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    }
+    workspaceCache = { value: normalized, expiresAt: Date.now() + WORKSPACE_CACHE_MS }
+    return normalized
+  }).finally(() => { workspaceRequest = null })
+  return workspaceRequest
 }
 
+async function mutation<T>(request: Promise<T>) { const result = await request; invalidateLogisticsWorkspaceCache(); return result }
+
 export async function addLogisticsProvider(name: string, code: string) {
-  return api.post<LogisticsProviderRecord>('/logistics/providers', { name: name.trim(), code: code.trim().toUpperCase(), enabled: true }, idempotencyKey('logistics-provider'))
+  return mutation(api.post<LogisticsProviderRecord>('/logistics/providers', { name: name.trim(), code: code.trim().toUpperCase(), enabled: true }, idempotencyKey('logistics-provider')))
 }
 
 export async function addLogisticsChannel(input: { providerId: string; name: string; code: string; type: string; logisticsAttribute: string }) {
-  return api.post<LogisticsChannelRecord>('/logistics/channels', input, idempotencyKey('logistics-channel'))
+  return mutation(api.post<LogisticsChannelRecord>('/logistics/channels', input, idempotencyKey('logistics-channel')))
 }
 
 export async function updateLogisticsChannel(channel: LogisticsChannelRecord, input: { name: string; code: string; type: string; logisticsAttribute: string; enabled: boolean }) {
-  return api.put<LogisticsChannelRecord>(`/logistics/channels/${channel.id}`, input, { 'If-Match': String(channel._version) })
+  return mutation(api.put<LogisticsChannelRecord>(`/logistics/channels/${channel.id}`, input, { 'If-Match': String(channel._version) }))
 }
 
 export async function setLogisticsChannelStatus(channel: LogisticsChannelRecord, enabled: boolean) {
-  return api.patch<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/status`, { enabled }, { 'If-Match': String(channel._version) })
+  return mutation(api.patch<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/status`, { enabled }, { 'If-Match': String(channel._version) }))
 }
 
 export async function cloneLogisticsChannel(channel: LogisticsChannelRecord, name: string, code: string) {
-  return api.post<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/clone`, { name, code }, idempotencyKey('logistics-clone'))
+  return mutation(api.post<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/clone`, { name, code }, idempotencyKey('logistics-clone')))
 }
 
-export async function deleteLogisticsChannel(channelId: string) { return api.delete<void>(`/logistics/channels/${channelId}`) }
+export async function deleteLogisticsChannel(channelId: string) { return mutation(api.delete<void>(`/logistics/channels/${channelId}`)) }
 
 export async function saveLogisticsManualDraft(channelId: string, rows: LogisticsPriceRow[], note: string) {
-  return api.put<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/manual-draft`, { fileName: '手工维护区域规则', rows, note }, { 'Idempotency-Key': idempotencyKey('logistics-manual-draft') })
+  return mutation(api.put<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/manual-draft`, { fileName: '手工维护区域规则', rows, note }, { 'Idempotency-Key': idempotencyKey('logistics-manual-draft') }))
 }
 
 export async function createLogisticsDraft(channelId: string, preview: LogisticsImportPreview, file: File, actor = '物流负责人') {
   void preview; void actor
   const form = new FormData(); form.append('file', file)
-  return api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/imports`, form, idempotencyKey('logistics-import'))
+  return mutation(api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/imports`, form, idempotencyKey('logistics-import')))
 }
 
 export async function publishLogisticsVersion(channelId: string, versionId: string, note: string, removalConfirmed = false) {
   await api.post(`/logistics/channels/${channelId}/versions/${versionId}/publish`, { note, removalConfirmed }, idempotencyKey('logistics-publish'))
+  invalidateLogisticsWorkspaceCache()
   await refreshPublishedLogisticsRules(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT))
 }
 
 export async function rollbackLogisticsVersion(channelId: string, targetVersionId: string, note: string) {
   const result = await api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/versions/${targetVersionId}/rollback`, { note }, idempotencyKey('logistics-rollback'))
+  invalidateLogisticsWorkspaceCache()
   await refreshPublishedLogisticsRules(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT)); return result
 }
 
 export function versionRows(state: LogisticsWorkspaceState, channel: LogisticsChannelRecord) { return state.versions.find(version => version.id === channel.currentVersionId)?.rows || [] }
 
-export async function refreshPublishedLogisticsRules() {
-  const state = await loadLogisticsWorkspace(); const providers = new Map(state.providers.map(provider => [provider.id, provider])); const versions = new Map(state.versions.map(version => [version.id, version]))
+export async function refreshPublishedLogisticsRules(existingState?: LogisticsWorkspaceState) {
+  const state = existingState || await loadLogisticsWorkspace(); const providers = new Map(state.providers.map(provider => [provider.id, provider])); const versions = new Map(state.versions.map(version => [version.id, version]))
   const rules: LogisticsRule[] = state.channels.filter(channel => channel.enabled && channel.currentVersionId).flatMap(channel => {
     const provider = providers.get(channel.providerId); const version = versions.get(channel.currentVersionId)
     if (!provider?.enabled || !version || version.status !== 'published') return []

@@ -186,7 +186,7 @@ function matchExistingChannel(fileName: string) {
 }
 async function refreshWorkspace() {
   workspace.value = await loadLogisticsWorkspace()
-  rules.value = structuredClone(await refreshPublishedLogisticsRules())
+  rules.value = structuredClone(await refreshPublishedLogisticsRules(workspace.value))
   if (!workspace.value.providers.some(item => item.id === selectedProviderId.value)) selectedProviderId.value = workspace.value.providers[0]?.id || ''
 }
 async function importChannelFile(channel: LogisticsChannelRecord, file: File, openReview = true) {

@@ -105,6 +105,27 @@ class PurchaseProductServiceTest {
     }
 
     @Test
+    void reusesTheSameImageLinkAndFlushesBeforeReplacingIt() {
+        var product = PurchaseProduct.create("SKU-IMG", JsonNodeFactory.instance.objectNode().put("sku", "SKU-IMG"), "ready", false, null);
+        rows.put(product.sku, product);
+        var firstAsset = UUID.randomUUID();
+        var existing = new PurchaseProductImage();
+        existing.id = UUID.randomUUID(); existing.productId = product.id; existing.assetId = firstAsset; existing.imageType = "product";
+        when(images.findFirstByProductIdAndImageTypeOrderBySortOrderAsc(product.id, "product")).thenReturn(Optional.of(existing));
+
+        service.linkAsset(product.sku, firstAsset, "product");
+        verify(images, never()).deleteByProductIdAndImageType(product.id, "product");
+        verify(images, never()).save(any(PurchaseProductImage.class));
+
+        var replacement = UUID.randomUUID();
+        service.linkAsset(product.sku, replacement, "product");
+        var order = inOrder(images);
+        order.verify(images).deleteByProductIdAndImageType(product.id, "product");
+        order.verify(images).flush();
+        order.verify(images).save(argThat(link -> link.assetId.equals(replacement) && link.imageType.equals("product")));
+    }
+
+    @Test
     void locksTemplateSkuAndOnlyPromotesCompleteBusinessSku() {
         var template = JsonNodeFactory.instance.objectNode().put("sku", "TESTP260001")
                 .put("weightG", 100).put("lengthCm", 10).put("widthCm", 8).put("heightCm", 4)

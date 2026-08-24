@@ -68,7 +68,7 @@ public class PurchaseProductService {
 
     @Transactional public JsonNode uploadImage(String sku,String type,MultipartFile file){
         if(!List.of("product","physical").contains(type))throw AppException.unprocessable("图片类型不合法");var product=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
-        try{var asset=storage.storeImage(file.getBytes(),file.getOriginalFilename());images.deleteByProductIdAndImageType(product.id,type);var link=new PurchaseProductImage();link.id=UUID.randomUUID();link.productId=product.id;link.assetId=asset.id;link.imageType=type;link.sortOrder=0;images.save(link);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+asset.id);if(type.equals("product"))payload.put("image","/api/v1/assets/"+asset.id);product.updatedAt=Instant.now();return view(product);}catch(java.io.IOException e){throw AppException.unprocessable("图片读取失败");}
+        try{var asset=storage.storeImage(file.getBytes(),file.getOriginalFilename());link(product.id,asset.id,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+asset.id);if(type.equals("product"))payload.put("image","/api/v1/assets/"+asset.id);product.updatedAt=Instant.now();return view(product);}catch(java.io.IOException e){throw AppException.unprocessable("图片读取失败");}
     }
 
     @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId){
@@ -95,7 +95,12 @@ public class PurchaseProductService {
         products.saveAndFlush(row);return view(row);
     }
     @Transactional public void linkAsset(String sku,UUID assetId,String type){if(!List.of("product","physical").contains(type))throw AppException.unprocessable("图片类型不合法");var product=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("SKU "+sku+" 不存在"));link(product.id,assetId,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+assetId);if(type.equals("product"))payload.put("image","/api/v1/assets/"+assetId);product.updatedAt=Instant.now();}
-    private void link(UUID productId,UUID assetId,String type){images.deleteByProductIdAndImageType(productId,type);var link=new PurchaseProductImage();link.id=UUID.randomUUID();link.productId=productId;link.assetId=assetId;link.imageType=type;link.sortOrder=0;images.save(link);}
+    private void link(UUID productId,UUID assetId,String type){
+        var current=images.findFirstByProductIdAndImageTypeOrderBySortOrderAsc(productId,type);
+        if(current.isPresent()&&current.get().assetId.equals(assetId))return;
+        if(current.isPresent()){images.deleteByProductIdAndImageType(productId,type);images.flush();}
+        var link=new PurchaseProductImage();link.id=UUID.randomUUID();link.productId=productId;link.assetId=assetId;link.imageType=type;link.sortOrder=0;images.save(link);
+    }
 
     private JsonNode view(PurchaseProduct row) {
         var object = (ObjectNode) row.payload.deepCopy(); object.put("sku", row.sku); object.put("_version", row.version);
