@@ -65,6 +65,24 @@ const defaultGradeSettings: CustomerGradeSetting[] = [
   { grade: 'E', coefficient: 1.30, enabled: true },
 ]
 
+export function normalizeCustomerGradeSettings(settings: Partial<CustomerGradeSetting>[] | undefined): CustomerGradeSetting[] {
+  const configured = new Map<CustomerGrade, Partial<CustomerGradeSetting>>()
+  if (Array.isArray(settings)) {
+    settings.forEach(setting => {
+      if (defaultGradeSettings.some(item => item.grade === setting.grade)) configured.set(setting.grade as CustomerGrade, setting)
+    })
+  }
+  return defaultGradeSettings.map(fallback => {
+    const setting = configured.get(fallback.grade)
+    const coefficient = Number(setting?.coefficient)
+    return {
+      grade: fallback.grade,
+      coefficient: Number.isFinite(coefficient) && coefficient >= 0 ? coefficient : fallback.coefficient,
+      enabled: typeof setting?.enabled === 'boolean' ? setting.enabled : fallback.enabled,
+    }
+  })
+}
+
 export function countriesAvailableForCategory(attribute: string) {
   if (!attribute.trim()) return []
   const countries = logisticsCountries.filter(country => country.name !== '全球')
@@ -201,7 +219,7 @@ export async function saveFinanceChannelPolicies(policies: FinanceChannelPolicy[
 }
 
 export function loadCustomerGradeSettings(): CustomerGradeSetting[] {
-  return (readFinanceSetting<CustomerGradeSetting[]>('customer-grades') || defaultGradeSettings).map(setting => ({ ...setting }))
+  return normalizeCustomerGradeSettings(readFinanceSetting<Partial<CustomerGradeSetting>[]>('customer-grades'))
 }
 
 export async function saveCustomerGradeSettings(settings: CustomerGradeSetting[]) {
