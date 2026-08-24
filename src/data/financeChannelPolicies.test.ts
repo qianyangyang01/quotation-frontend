@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeCustomerGradeSettings } from './financeChannelPolicies'
+import { COMMON_COUNTRY_LIMIT, normalizeCustomerGradeSettings } from './financeChannelPolicies'
+
+describe('common country settings', () => {
+  it('allows finance to configure up to 40 common countries', () => {
+    expect(COMMON_COUNTRY_LIMIT).toBe(40)
+  })
+})
 
 describe('customer grade settings', () => {
   it('restores all S-E rows when the persisted setting is empty', () => {
