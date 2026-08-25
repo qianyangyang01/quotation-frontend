@@ -28,6 +28,7 @@ export type QuotationProduct = {
   packageLengthCm: number
   packageWidthCm: number
   packageHeightCm: number
+  volumeDivisor: number
   discountEnabled: boolean
   discountRate: number
   status: string

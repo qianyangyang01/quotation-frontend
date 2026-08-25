@@ -149,7 +149,7 @@ function emptyQuotationProduct(): Product {
     country: initialCountry, channel: initialChannel, rule: initialRule,
     manualFreight: false, freight: 30.16, margin: 21, memberMargin: 17, profitType: 'rate', fixedProfit: 0,
     weightSource: 'purchase', manualWeight: 0,
-    volumetricEnabled: false, packageLengthCm: 0, packageWidthCm: 0, packageHeightCm: 0,
+    volumetricEnabled: false, packageLengthCm: 0, packageWidthCm: 0, packageHeightCm: 0, volumeDivisor: 8000,
     discountEnabled: false, discountRate: 0, status: '待查询',
   }
 }
@@ -201,7 +201,7 @@ function singleActualWeight(p: Product, quantity = Math.max(1, p.quantity)) {
   const unitWeight = p.weightSource === 'manual' ? p.manualWeight : p.netWeight
   return Math.max(0, unitWeight) * Math.max(1, quantity)
 }
-function singleVolumeWeight(p: Product, quantity = Math.max(1, p.quantity), divisor = 8000) {
+function singleVolumeWeight(p: Product, quantity = Math.max(1, p.quantity), divisor = p.volumeDivisor) {
   if (!p.volumetricEnabled || p.packageLengthCm <= 0 || p.packageWidthCm <= 0 || p.packageHeightCm <= 0) return 0
   return p.packageLengthCm * p.packageWidthCm * p.packageHeightCm * Math.max(1, quantity) / Math.max(1, divisor)
 }
@@ -216,6 +216,7 @@ function singleDimensions(p: Product, quantity = Math.max(1, p.quantity)) {
     widthCm: Math.max(0, p.packageWidthCm),
     heightCm: Math.max(0, p.packageHeightCm),
     volumeMultiplier: Math.max(1, quantity),
+    volumeDivisor: Math.max(1, Number(p.volumeDivisor) || 8000),
     defaultVolumeDivisor: 8000,
   }
 }
@@ -241,10 +242,11 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord) {
   p.purchaseFreightPerUnit = purchaseFreightChoices(record).find(item => item.quantity === 10)?.unitFreightCny || 0
   p.netWeight = record.weightKg || 0
   p.manualWeight = record.weightKg || 0
-  p.volumetricEnabled = false
-  p.packageLengthCm = 0
-  p.packageWidthCm = 0
-  p.packageHeightCm = 0
+  p.packageLengthCm = Math.max(0, Number(record.lengthCm) || 0)
+  p.packageWidthCm = Math.max(0, Number(record.widthCm) || 0)
+  p.packageHeightCm = Math.max(0, Number(record.heightCm) || 0)
+  p.volumetricEnabled = p.packageLengthCm > 0 && p.packageWidthCm > 0 && p.packageHeightCm > 0
+  p.volumeDivisor = 8000
   p.status = record.status === '资料完整' ? '采购资料已加载' : record.status
 }
 const queryValidationFields = ref<string[]>([])
@@ -498,6 +500,7 @@ function draftPayload(): QuotationDraftPayload {
       packageLengthCm: Math.max(0, Number(p.packageLengthCm) || 0),
       packageWidthCm: Math.max(0, Number(p.packageWidthCm) || 0),
       packageHeightCm: Math.max(0, Number(p.packageHeightCm) || 0),
+      volumeDivisor: Math.max(1, Number(p.volumeDivisor) || 8000),
       primaryCountry: p.country,
       primaryChannelKey: primary?.channelKey || '',
       primaryRule: p.rule,
@@ -575,10 +578,12 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
   p.logisticsAttribute = quotationAttributeOptions.includes(payload.logisticsAttribute) ? payload.logisticsAttribute : initialLogisticsAttribute
   products.value = [p]
   const singleSku = payload.product?.sku || payload.skuSearch
+  let restoredFromPurchase = false
   if (quoteMode.value === 'single' && singleSku) {
     const record = await recordForDraftSku(singleSku)
     if (record) {
       applyPurchaseRecord(p, record)
+      restoredFromPurchase = true
       skuSearch.value = record.sku
     } else skuSearch.value = singleSku
   }
@@ -587,10 +592,14 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
     p.quantity = Math.max(1, Math.floor(Number(productState.quantity) || 1))
     p.weightSource = productState.weightSource === 'manual' ? 'manual' : 'purchase'
     p.manualWeight = Math.max(0, Number(productState.manualWeight) || 0)
-    p.volumetricEnabled = productState.volumetricEnabled === true
-    p.packageLengthCm = Math.max(0, Number(productState.packageLengthCm) || 0)
-    p.packageWidthCm = Math.max(0, Number(productState.packageWidthCm) || 0)
-    p.packageHeightCm = Math.max(0, Number(productState.packageHeightCm) || 0)
+    p.volumeDivisor = Math.max(1, Number(productState.volumeDivisor) || 8000)
+    if (!restoredFromPurchase) {
+      p.packageLengthCm = Math.max(0, Number(productState.packageLengthCm) || 0)
+      p.packageWidthCm = Math.max(0, Number(productState.packageWidthCm) || 0)
+      p.packageHeightCm = Math.max(0, Number(productState.packageHeightCm) || 0)
+      p.volumetricEnabled = productState.volumetricEnabled === true
+        && p.packageLengthCm > 0 && p.packageWidthCm > 0 && p.packageHeightCm > 0
+    }
   }
   if (quoteMode.value === 'bundle') {
     const restoredItems: BundleQuoteItem[] = []
@@ -1221,7 +1230,7 @@ async function save() {
     packageLengthCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageLengthCm : undefined,
     packageWidthCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageWidthCm : undefined,
     packageHeightCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageHeightCm : undefined,
-    defaultVolumeDivisor: quoteMode.value === 'single' && p.volumetricEnabled ? 8000 : undefined,
+    defaultVolumeDivisor: quoteMode.value === 'single' && p.volumetricEnabled ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
     logisticsAttribute: p.logisticsAttribute, country: p.country, carrier: p.channel,
     channel: logisticsRules.find(rule => rule.name === p.rule)?.relations.find(relation => relation.carrier === p.channel)?.channel || p.rule,
     rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, taxCustomerType: selectedTaxCustomerType.value, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: usdPriceFromCny(finalSalePrice(p)), totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,

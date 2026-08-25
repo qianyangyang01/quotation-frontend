@@ -146,6 +146,16 @@ class PurchaseProductServiceTest {
     }
 
     @Test
+    void promotesQuoteReadyProductsWithoutOptionalDimensions() {
+        var template = JsonNodeFactory.instance.objectNode().put("sku", "TESTP260002")
+                .put("weightG", 180).put("minOrderQty", 1).put("purchasePriceCny", 36.8);
+        var saved = service.upsertImported(template, null, null, "pending_template", "b".repeat(64));
+        var promoted = service.promote("TESTP260002", "BIZ-260002", saved.path("_version").asLong());
+        assertTrue(promoted.path("quoteReady").asBoolean());
+        assertFalse(promoted.hasNonNull("lengthCm"));
+    }
+
+    @Test
     void disablesEnablesAndRejectsStaleCatalogChanges() {
         var payload=JsonNodeFactory.instance.objectNode().put("sku","SAFE-1").put("weightG",100).put("lengthCm",10).put("widthCm",8).put("heightCm",4).put("minOrderQty",1).put("purchasePriceCny",12.5);
         var product=PurchaseProduct.create("SAFE-1",payload,"ready",true,null);product.version=4;rows.put(product.sku,product);

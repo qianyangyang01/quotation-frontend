@@ -40,13 +40,20 @@ class FlywayPostgresIntegrationTest {
                     values ('33333333-3333-3333-3333-333333333333', 'ADMIN', 'quotation-create', 'legacy-key', 'legacy-hash', 200,
                             '{"customerId":"11111111-1111-1111-1111-111111111111","customerName":"历史客户"}'::jsonb, now())
                     """);
+            statement.executeUpdate("""
+                    insert into purchase_product (id, sku, payload, catalog_state, quote_ready, version, created_at, updated_at)
+                    values ('44444444-4444-4444-4444-444444444444', 'BIZ-NO-DIMENSIONS',
+                            '{"weightG":180,"minOrderQty":1,"purchasePriceCny":36.8,"quoteReady":false,"status":"待补充资料"}'::jsonb,
+                            'ready', false, 0, now(), now())
+                    """);
         }
         var flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load();
         var migrationResult = flyway.migrate();
-        assertEquals(3, migrationResult.migrationsExecuted);
+        assertEquals(4, migrationResult.migrationsExecuted);
         assertEquals(true, migrationResult.migrations.stream().anyMatch(item -> "13".equals(item.version)));
         assertEquals(true, migrationResult.migrations.stream().anyMatch(item -> "14".equals(item.version)));
+        assertEquals(true, migrationResult.migrations.stream().anyMatch(item -> "15".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("select count(*) from information_schema.tables where table_schema='public' and table_name in ('app_user','purchase_product','quotation_record','audit_log','customer','supplier','quotation_share','business_migration_batch')");
              var result = statement.executeQuery()) {
@@ -80,6 +87,14 @@ class FlywayPostgresIntegrationTest {
              var result = statement.executeQuery()) {
             result.next();
             assertEquals(3, result.getInt(1));
+        }
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.prepareStatement("select quote_ready, payload ->> 'quoteReady', payload ->> 'status' from purchase_product where sku='BIZ-NO-DIMENSIONS'");
+             var result = statement.executeQuery()) {
+            result.next();
+            assertEquals(true, result.getBoolean(1));
+            assertEquals("true", result.getString(2));
+            assertEquals("资料完整", result.getString(3));
         }
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
               var statement = connection.prepareStatement("select data_type from information_schema.columns where table_schema='public' and table_name='purchase_product' and column_name='source_hash'");

@@ -20,6 +20,15 @@ describe('purchase catalog state', () => {
     expect(findPurchaseProduct([product], product.sku)?.sku).toBe('BIZ-260001')
   })
 
+  it('keeps products without dimensions quote-ready and leaves volumetric display disabled', () => {
+    const product = normalizePurchaseRecord({
+      sku: 'BIZ-260003', catalogState: 'ready', weightG: 180, minOrderQty: 1, purchasePriceCny: 36.8,
+    })
+    expect(product.quoteReady).toBe(true)
+    expect(product.lengthCm).toBeNull()
+    expect(findPurchaseProduct([product], product.sku)?.sku).toBe('BIZ-260003')
+  })
+
   it('keeps disabled products visible but excludes them from new quotations', () => {
     const product = normalizePurchaseRecord({ sku: 'BIZ-260002', catalogState: 'disabled', ...complete })
     expect(product.status).toBe('已停用')

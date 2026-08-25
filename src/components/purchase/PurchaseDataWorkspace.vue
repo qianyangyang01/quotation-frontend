@@ -223,7 +223,7 @@ function unitFreight(record: PurchaseProductRecord, quantity: number) {
 const detailFields = computed(() => detail.value ? [
   ['SKU*', detail.value.sku], ['类别*', detail.value.category], ['产品图片（嵌入本格）', detail.value.productImage ? '已上传' : '暂无数据'], ['实物图（嵌入本格）', detail.value.physicalImage ? '已上传' : '暂无数据'],
   ['报价人*', detail.value.quotationOwner], ['报价日期*', detail.value.quotationDate], ['尺码', detail.value.size], ['颜色', detail.value.color],
-  ['克重(g)*', value(detail.value.weightG, ' g')], ['长(cm)*', value(detail.value.lengthCm, ' cm')], ['宽(cm)*', value(detail.value.widthCm, ' cm')], ['高(cm)*', value(detail.value.heightCm, ' cm')],
+  ['克重(g)*', value(detail.value.weightG, ' g')], ['长(cm)', value(detail.value.lengthCm, ' cm')], ['宽(cm)', value(detail.value.widthCm, ' cm')], ['高(cm)', value(detail.value.heightCm, ' cm')],
   ['起订量(件)*', value(detail.value.minOrderQty, ' 件')], ['基准采购单价(CNY/件)*', money(detail.value.purchasePriceCny)], ['阶梯价2起订量', value(detail.value.tier2MinQty, ' 件')], ['阶梯价2(CNY/件)', money(detail.value.tier2PriceCny)],
   ['阶梯价3起订量', value(detail.value.tier3MinQty, ' 件')], ['阶梯价3(CNY/件)', money(detail.value.tier3PriceCny)], ['1件总运费(CNY)', money(detail.value.singleFreightCny)], ['10件总运费(CNY)', money(detail.value.freight10Cny)],
   ['100件总运费(CNY)', money(detail.value.freight100Cny)], ['是否包邮', detail.value.freeShipping], ['含票价(CNY/件)', money(detail.value.taxIncludedPriceCny)], ['票类型', detail.value.invoiceType],
@@ -356,8 +356,8 @@ const detailFields = computed(() => detail.value ? [
       <label class="wide">4. 实物图（嵌入本格）<div class="upload"><img v-if="editor.physicalImage" :src="editor.physicalImage"><input type="file" accept="image/*" @change="handleImage($event,'physicalImage')"><button v-if="editor.physicalImage" @click.prevent="editor.physicalImage=''">移除</button></div></label>
       <label>5. 报价人*<input v-model="editor.quotationOwner"></label><label>6. 报价日期*<input v-model="editor.quotationDate" type="date"></label>
       <label>7. 尺码<input v-model="editor.size"></label><label>8. 颜色<input v-model="editor.color"></label>
-      <label>9. 克重(g)*<input v-model.number="editor.weightG" type="number" min="0" step="0.01"></label><label>10. 长(cm)*<input v-model.number="editor.lengthCm" type="number" min="0" step="0.01"></label>
-      <label>11. 宽(cm)*<input v-model.number="editor.widthCm" type="number" min="0" step="0.01"></label><label>12. 高(cm)*<input v-model.number="editor.heightCm" type="number" min="0" step="0.01"></label>
+      <label>9. 克重(g)*<input v-model.number="editor.weightG" type="number" min="0" step="0.01"></label><label>10. 长(cm)<input v-model.number="editor.lengthCm" type="number" min="0" step="0.01"></label>
+      <label>11. 宽(cm)<input v-model.number="editor.widthCm" type="number" min="0" step="0.01"></label><label>12. 高(cm)<input v-model.number="editor.heightCm" type="number" min="0" step="0.01"></label>
       <label>13. 起订量(件)*<input v-model.number="editor.minOrderQty" type="number" min="1" step="1"></label><label>14. 基准采购单价(CNY/件)*<input v-model.number="editor.purchasePriceCny" type="number" min="0" step="0.01"></label>
       <label>15. 阶梯价2起订量<input v-model.number="editor.tier2MinQty" type="number" min="1" step="1"></label><label>16. 阶梯价2(CNY/件)<input v-model.number="editor.tier2PriceCny" type="number" min="0" step="0.01"></label>
       <label>17. 阶梯价3起订量<input v-model.number="editor.tier3MinQty" type="number" min="1" step="1"></label><label>18. 阶梯价3(CNY/件)<input v-model.number="editor.tier3PriceCny" type="number" min="0" step="0.01"></label>

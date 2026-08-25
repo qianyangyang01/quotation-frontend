@@ -28,7 +28,7 @@ public class PurchaseWorkbookService {
             "阶梯价2(CNY/件)", "阶梯价3起订量", "阶梯价3(CNY/件)", "1件总运费(CNY)", "10件总运费(CNY)",
             "100件总运费(CNY)", "是否包邮", "含票价(CNY/件)", "票类型", "是否有货*", "备注", "工厂信息", "货源链接1",
             "货源链接2", "货源链接3", "相似货源", "审核备注");
-    private static final Set<String> REQUIRED_NUMBERS = Set.of("克重(g)*", "长(cm)*", "宽(cm)*", "高(cm)*", "起订量(件)*", "基准采购单价(CNY/件)*");
+    private static final Set<String> REQUIRED_NUMBERS = Set.of("克重(g)*", "起订量(件)*", "基准采购单价(CNY/件)*");
     private static final Pattern CURRENCY = Pattern.compile("(?i)(CNY|RMB)");
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
 

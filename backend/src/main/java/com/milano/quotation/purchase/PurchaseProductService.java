@@ -130,7 +130,7 @@ public class PurchaseProductService {
         if(isReservedSku(target))throw AppException.unprocessable("正式商品必须改为非 TEST/DEMO/AUTO 的业务SKU");
         if(!source.equals(target)&&products.findBySku(target).isPresent())throw AppException.conflict("目标SKU已存在："+target);
         var payload=(ObjectNode)row.payload.deepCopy();payload.put("sku",target);validatePayload(payload);
-        if(!completeForQuotation(payload))throw AppException.unprocessable("重量、长宽高、起订量或采购价尚未补齐，不能转正式");
+        if(!completeForQuotation(payload))throw AppException.unprocessable("重量、起订量或采购价尚未补齐，不能转正式");
         row.sku=target;row.catalogState=CATALOG_READY;row.quoteReady=true;row.updatedAt=Instant.now();applyDerivedState(payload,CATALOG_READY,true);row.payload=payload;
         products.saveAndFlush(row);return view(row);
     }
@@ -161,7 +161,7 @@ public class PurchaseProductService {
         }
         if (object.toString().length() > 1_000_000) throw AppException.unprocessable("单条商品数据过大");
     }
-    private static boolean completeForQuotation(ObjectNode object){return positive(object,"weightG")&&positive(object,"lengthCm")&&positive(object,"widthCm")&&positive(object,"heightCm")&&positive(object,"minOrderQty")&&nonNegative(object,"purchasePriceCny");}
+    private static boolean completeForQuotation(ObjectNode object){return positive(object,"weightG")&&positive(object,"minOrderQty")&&nonNegative(object,"purchasePriceCny");}
     private static boolean positive(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>0;}
     private static boolean nonNegative(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>=0;}
     private static boolean isReservedSku(String sku){return sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK)[A-Z0-9._/-]*$")||sku.startsWith("AUTO-");}

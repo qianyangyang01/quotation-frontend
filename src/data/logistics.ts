@@ -20,6 +20,8 @@ export interface ShipmentDimensions {
   heightCm: number
   /** 同规格商品合并为一个包裹时，体积按件数累计。 */
   volumeMultiplier?: number
+  /** 报价人员本次指定的体积重除数；存在时优先于渠道默认值。 */
+  volumeDivisor?: number
   defaultVolumeDivisor?: number
 }
 
@@ -112,7 +114,11 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   if (hasDimensions && dimensions) {
     const volume = dimensions.lengthCm * dimensions.widthCm * dimensions.heightCm * Math.max(1, dimensions.volumeMultiplier || 1)
     price = candidates.find(candidate => {
-      const divisor = candidate.volumeDivisor > 0 ? candidate.volumeDivisor : Math.max(1, dimensions.defaultVolumeDivisor || 8000)
+      const divisor = dimensions.volumeDivisor && dimensions.volumeDivisor > 0
+        ? dimensions.volumeDivisor
+        : candidate.volumeDivisor > 0
+          ? candidate.volumeDivisor
+          : Math.max(1, dimensions.defaultVolumeDivisor || 8000)
       const volumetric = volume / divisor
       const chargeable = Math.max(actualWeightKg, volumetric)
       if (chargeable > candidate.weightFromKg && chargeable <= candidate.weightToKg) {

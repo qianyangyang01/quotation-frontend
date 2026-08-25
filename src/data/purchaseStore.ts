@@ -69,10 +69,9 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     sourceLink3: String(input.sourceLink3 || sourceLinks[2] || '').trim(), similarSource: String(input.similarSource || sourceLinks[3] || '').trim(),
     auditNotes: String(input.auditNotes || '').trim(), importWarnings: Array.isArray(input.importWarnings) ? [...input.importWarnings] : [],
   }
-  const dimensionsReady = [base.lengthCm, base.widthCm, base.heightCm].every(value => value != null && value > 0)
   const reservedSku = /^(TESTP|TEST|DEMO|MOCK)/i.test(sku) || sku.startsWith('AUTO-')
-  const quoteReady = catalogState === 'ready' && !reservedSku && skuOrigin !== 'system' && weightG != null && weightG > 0 && dimensionsReady && minOrderQty != null && minOrderQty > 0 && purchasePriceCny != null && purchasePriceCny >= 0
-  const missing = [weightG == null || weightG <= 0 ? '重量' : '', !dimensionsReady ? '长宽高' : '', minOrderQty == null || minOrderQty <= 0 ? '起订量' : '', purchasePriceCny == null ? '采购价' : ''].filter(Boolean)
+  const quoteReady = catalogState === 'ready' && !reservedSku && skuOrigin !== 'system' && weightG != null && weightG > 0 && minOrderQty != null && minOrderQty > 0 && purchasePriceCny != null && purchasePriceCny >= 0
+  const missing = [weightG == null || weightG <= 0 ? '重量' : '', minOrderQty == null || minOrderQty <= 0 ? '起订量' : '', purchasePriceCny == null ? '采购价' : ''].filter(Boolean)
   const status = catalogState === 'pending_template' ? '模板待补全（不可报价）' : catalogState === 'disabled' ? '已停用' : skuOrigin === 'system' ? '系统生成SKU，待修改' : quoteReady ? '资料完整' : `待补充${missing.length ? `：${missing.join('、')}` : ''}`
   const priceTiers = buildPriceTiers(base)
   return {

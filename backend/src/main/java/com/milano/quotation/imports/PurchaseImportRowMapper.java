@@ -10,7 +10,7 @@ import java.util.*;
 
 @Component
 public class PurchaseImportRowMapper {
-    private static final Set<String> REQUIRED_NUMBERS=Set.of("weightG","lengthCm","widthCm","heightCm","minOrderQty","purchasePriceCny");
+    private static final Set<String> REQUIRED_NUMBERS=Set.of("weightG","minOrderQty","purchasePriceCny");
     private final ObjectMapper mapper;
     public PurchaseImportRowMapper(ObjectMapper mapper){this.mapper=mapper;}
 

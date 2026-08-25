@@ -34,6 +34,7 @@ export interface QuotationDraftPayload {
     packageLengthCm: number
     packageWidthCm: number
     packageHeightCm: number
+    volumeDivisor?: number
     primaryCountry: string
     primaryChannelKey: string
     primaryRule: string

@@ -30,4 +30,23 @@ describe('logistics fee calculation', () => {
   it('keeps the quotation fee engine available after removing the management-page calculator', () => {
     expect(calculateLogisticsFee(publishedRule, '美国', 0.5)?.total).toBe(59)
   })
+
+  it('uses the quotation divisor and the larger volumetric weight throughout fee matching', () => {
+    const result = calculateLogisticsFee(publishedRule, '美国', 0.18, ['普货'], {
+      lengthCm: 32, widthCm: 24, heightCm: 8, volumeDivisor: 8000,
+    })
+    expect(result?.actualWeightKg).toBe(0.18)
+    expect(result?.volumeWeightKg).toBeCloseTo(0.768)
+    expect(result?.chargeWeightKg).toBeCloseTo(0.768)
+    expect(result?.volumeDivisor).toBe(8000)
+    expect(result?.total).toBeCloseTo(79.904)
+  })
+
+  it('lets an adjusted quotation divisor override the channel default', () => {
+    const result = calculateLogisticsFee(publishedRule, '美国', 0.18, ['普货'], {
+      lengthCm: 10, widthCm: 10, heightCm: 10, volumeDivisor: 4000,
+    })
+    expect(result?.volumeDivisor).toBe(4000)
+    expect(result?.chargeWeightKg).toBe(0.25)
+  })
 })
