@@ -51,7 +51,7 @@ public class QuotationReadinessService {
         return root;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public void assertCanCreate(ObjectNode quotation) {
         var state = snapshot();
         var reasons = new ArrayList<String>();
@@ -59,11 +59,8 @@ public class QuotationReadinessService {
         var skuText = quotation.path("primarySku").asText("").trim();
         if (skuText.isEmpty()) {
             reasons.add("报价必须选择正式采购商品");
-        } else {
-            for (var sku : skuText.split("[,，、\\s]+")) {
-                if (!sku.isBlank() && !products.isQuoteReady(sku)) reasons.add("商品 " + sku + " 尚未确认转正式");
-            }
-        }
+        } else products.notQuoteReadyLocked(List.of(skuText.split("[,，、+\\s]+")))
+                .forEach(sku -> reasons.add("商品 " + sku + " 尚未确认转正式"));
         if (!reasons.isEmpty()) throw AppException.unprocessable("报价业务尚未就绪：" + String.join("；", reasons.stream().distinct().toList()));
     }
 

@@ -4,6 +4,7 @@ import com.milano.quotation.audit.AuditService;
 import com.milano.quotation.common.AppException;
 import com.milano.quotation.idempotency.IdempotencyService;
 import com.milano.quotation.security.QuotationPrincipal;
+import com.milano.quotation.purchase.PurchaseProductService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.access.AccessDeniedException;
@@ -22,7 +23,7 @@ import static org.mockito.Mockito.*;
 class QuotationTemplateControllerTest {
     private QuotationTemplateRepository templates;private AuditService audit;private IdempotencyService idempotency;private QuotationTemplateController controller;
     private UsernamePasswordAuthenticationToken auth;
-    @BeforeEach void setup(){templates=mock(QuotationTemplateRepository.class);audit=mock(AuditService.class);idempotency=mock(IdempotencyService.class);controller=new QuotationTemplateController(templates,audit,idempotency);var principal=new QuotationPrincipal(UUID.randomUUID(),"ADMIN","管理员","hash","superadmin",true,false,List.of("quote"));auth=new UsernamePasswordAuthenticationToken(principal,"",principal.getAuthorities());}
+    @BeforeEach void setup(){templates=mock(QuotationTemplateRepository.class);audit=mock(AuditService.class);idempotency=mock(IdempotencyService.class);controller=new QuotationTemplateController(templates,audit,idempotency,mock(PurchaseProductService.class));var principal=new QuotationPrincipal(UUID.randomUUID(),"ADMIN","管理员","hash","superadmin",true,false,List.of("quote"));auth=new UsernamePasswordAuthenticationToken(principal,"",principal.getAuthorities());}
 
     @Test void listsAndCreatesValidatedTemplatesWithIdempotency(){var existing=JsonNodeFactory.instance.objectNode().put("id","cached");when(idempotency.existing(eq("ADMIN"),eq("quotation-template-create"),eq("key-0001"),any())).thenReturn(Optional.of(existing));assertSame(existing,controller.create(JsonNodeFactory.instance.objectNode().put("name","模板"),"key-0001",auth).data());verify(templates,never()).save(any());when(idempotency.existing(anyString(),anyString(),eq("key-0002"),any())).thenReturn(Optional.empty());assertThrows(AppException.class,()->controller.create(JsonNodeFactory.instance.objectNode().put("name",""),"key-0002",auth));assertThrows(AppException.class,()->controller.create(JsonNodeFactory.instance.objectNode().put("name","x".repeat(121)),"key-0002",auth));when(templates.save(any())).thenAnswer(c->c.getArgument(0));var created=controller.create(JsonNodeFactory.instance.objectNode().put("name"," 正式模板 "),"key-0002",auth).data();assertEquals("正式模板",created.path("name").asText());verify(idempotency).save(eq("ADMIN"),eq("quotation-template-create"),eq("key-0002"),any(),any());var row=row("ADMIN","列表模板");when(templates.findByOwnerAccountOrderByUpdatedAtDesc("ADMIN")).thenReturn(List.of(row));assertEquals(1,controller.list(auth).data().size());}
 

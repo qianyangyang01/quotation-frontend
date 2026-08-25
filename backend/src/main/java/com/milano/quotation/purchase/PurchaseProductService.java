@@ -18,8 +18,8 @@ public class PurchaseProductService {
     public static final String CATALOG_PENDING_TEMPLATE = "pending_template";
     public static final String CATALOG_READY = "ready";
     public static final String CATALOG_DISABLED = "disabled";
-    private final PurchaseProductRepository products; private final PurchaseProductImageRepository images; private final AssetStorageService storage;
-    public PurchaseProductService(PurchaseProductRepository products,PurchaseProductImageRepository images,AssetStorageService storage) { this.products = products; this.images=images; this.storage=storage; }
+    private final PurchaseProductRepository products; private final PurchaseProductImageRepository images; private final AssetStorageService storage; private final PurchaseProductDeletionGuard deletionGuard;
+    public PurchaseProductService(PurchaseProductRepository products,PurchaseProductImageRepository images,AssetStorageService storage,PurchaseProductDeletionGuard deletionGuard) { this.products = products; this.images=images; this.storage=storage;this.deletionGuard=deletionGuard; }
 
     @Transactional(readOnly=true) public Page<JsonNode> page(String query,Pageable pageable) { return products.search(query==null?"":query.trim(),pageable).map(this::view); }
     @Transactional(readOnly=true) public JsonNode get(String sku) { return products.findBySku(normalizeSku(sku)).map(this::view).orElseThrow(()->AppException.notFound("商品不存在")); }
@@ -27,6 +27,23 @@ public class PurchaseProductService {
     @Transactional(readOnly=true) public long readyCount() { return products.countByQuoteReadyTrue(); }
     @Transactional(readOnly=true) public Stats stats() {var total=products.count();var ready=products.countByQuoteReadyTrue();return new Stats(total,ready,total-ready,products.countGeneratedSku());}
     @Transactional(readOnly=true) public boolean isQuoteReady(String sku) { return products.findBySku(normalizeSku(sku)).map(row -> row.quoteReady).orElse(false); }
+
+    @Transactional
+    public List<String> notQuoteReadyLocked(Collection<String> skus) {
+        var normalized=skus.stream().map(PurchaseProductService::referencedSku).flatMap(Optional::stream).distinct().sorted().toList();
+        if(normalized.isEmpty())return List.of();
+        var ready=products.findAllLockedBySkuIn(normalized).stream().filter(row->row.quoteReady).map(row->row.sku).collect(java.util.stream.Collectors.toSet());
+        return normalized.stream().filter(sku->!ready.contains(sku)).toList();
+    }
+
+    @Transactional
+    public void lockStructuredReferences(JsonNode payload) {
+        var skus=new TreeSet<String>();
+        addReferencedSku(skus,payload.path("skuSearch").asText(""));addReferencedSku(skus,payload.path("product").path("sku").asText(""));
+        for(var sku:payload.path("primarySku").asText("").split("[,，、+\\s]+"))addReferencedSku(skus,sku);
+        var bundles=payload.path("bundleItems");if(bundles.isArray())bundles.forEach(item->addReferencedSku(skus,item.path("sku").asText("")));
+        if(!skus.isEmpty())products.findAllLockedBySkuIn(skus);
+    }
 
     @Transactional
     public JsonNode upsert(JsonNode input) {
@@ -61,8 +78,31 @@ public class PurchaseProductService {
         return rows.stream().map(this::upsert).toList();
     }
 
-    @Transactional public void delete(String sku) {
-        var normalized = normalizeSku(sku); if (products.findBySku(normalized).isEmpty()) throw AppException.notFound("商品不存在"); products.deleteBySku(normalized);
+    @Transactional(readOnly=true) public PurchaseProductDeletionGuard.DeletionCheck deletionCheck(String sku) {
+        var row=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
+        return deletionGuard.inspect(row.id,row.sku,row.version);
+    }
+
+    @Transactional public JsonNode changeCatalogState(String sku,String state,long expectedVersion) {
+        if(!List.of(CATALOG_READY,CATALOG_DISABLED).contains(state))throw AppException.unprocessable("目录状态只允许 ready 或 disabled");
+        var row=locked(sku);assertVersion(row,expectedVersion);
+        if(CATALOG_READY.equals(state)&&isReservedSku(row.sku))throw AppException.unprocessable("测试或系统生成SKU不能启用为正式商品");
+        row.catalogState=state;row.quoteReady=CATALOG_READY.equals(state)&&completeForQuotation((ObjectNode)row.payload);
+        var payload=(ObjectNode)row.payload;applyDerivedState(payload,state,row.quoteReady);row.updatedAt=Instant.now();
+        return view(products.saveAndFlush(row));
+    }
+
+    @Transactional public DeleteResult delete(String sku,long expectedVersion) {
+        var row=locked(sku);assertVersion(row,expectedVersion);var check=deletionGuard.inspect(row.id,row.sku,row.version);
+        if(!check.canDelete())throw new DeletionBlocked(check,"商品存在业务引用，不能彻底删除："+check.blockingMessage());
+        var assetIds=images.findByProductId(row.id).stream().map(image->image.assetId).distinct().toList();
+        products.delete(row);products.flush();var retired=storage.retireUnreferenced(assetIds);
+        return new DeleteResult(check,retired);
+    }
+
+    @Transactional public DeleteResult delete(String sku) {
+        var row=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
+        return delete(sku,row.version);
     }
 
     @Transactional public JsonNode uploadImage(String sku,String type,MultipartFile file){
@@ -110,6 +150,10 @@ public class PurchaseProductService {
         var value = sku == null ? "" : sku.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", "");
         if (value.isEmpty() || value.length() > 96 || !value.matches("[A-Z0-9._/-]+")) throw AppException.unprocessable("SKU格式不合法"); return value;
     }
+    private PurchaseProduct locked(String sku){return products.findLockedBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));}
+    private static void assertVersion(PurchaseProduct row,long expectedVersion){if(row.version!=expectedVersion)throw AppException.conflict("商品已被其他用户修改，请刷新后重试");}
+    private static Optional<String> referencedSku(String value){if(value==null)return Optional.empty();var sku=value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+","");return sku.isEmpty()||sku.length()>96||!sku.matches("[A-Z0-9._/-]+")?Optional.empty():Optional.of(sku);}
+    private static void addReferencedSku(Collection<String> skus,String value){referencedSku(value).ifPresent(skus::add);}
     private static void validatePayload(ObjectNode object) {
         for (String field : List.of("productImage", "physicalImage", "image")) {
             var value = object.path(field).asText("");
@@ -126,4 +170,10 @@ public class PurchaseProductService {
     private void externalizeImage(ObjectNode object,String field,String type){var value=object.path(field).asText("");if(!value.startsWith("data:"))return;var marker=value.indexOf(",");if(marker<0||!value.substring(0,marker).contains(";base64"))throw AppException.unprocessable("图片Base64格式错误");try{var bytes=java.util.Base64.getDecoder().decode(value.substring(marker+1));var asset=storage.storeImage(bytes,object.path("sku").asText("product")+"-"+type);object.put(field,"/api/v1/assets/"+asset.id);if(type.equals("product"))object.put("image","/api/v1/assets/"+asset.id);}catch(IllegalArgumentException e){throw AppException.unprocessable("图片Base64格式错误");}}
     private void linkFromUrl(UUID productId,String value,String type){var prefix="/api/v1/assets/";if(!value.startsWith(prefix))return;try{var assetId=UUID.fromString(value.substring(prefix.length()));link(productId,assetId,type);}catch(IllegalArgumentException ignored){}}
     public record Stats(long total,long ready,long pending,long generatedSku){}
+    public record DeleteResult(PurchaseProductDeletionGuard.DeletionCheck check,int retiredImages){}
+    public static final class DeletionBlocked extends AppException{
+        private final PurchaseProductDeletionGuard.DeletionCheck check;
+        public DeletionBlocked(PurchaseProductDeletionGuard.DeletionCheck check,String message){super(org.springframework.http.HttpStatus.CONFLICT,"PURCHASE_DELETE_BLOCKED",message);this.check=check;}
+        public PurchaseProductDeletionGuard.DeletionCheck check(){return check;}
+    }
 }

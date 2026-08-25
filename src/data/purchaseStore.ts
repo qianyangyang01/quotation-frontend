@@ -4,6 +4,7 @@ export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPri
 export type PurchaseStockStatus = '有货' | '无货' | '待确认' | ''
 export type PurchaseSkuOrigin = 'imported' | 'manual' | 'system'
 export type PurchaseCatalogState = 'pending_template' | 'ready' | 'disabled'
+export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageCount:number;supplierLinks:number;quotationRecords:number;drafts:number;templates:number;importBatches:number }
 
 export type PurchaseProductRecord = {
   sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number
@@ -109,8 +110,16 @@ export async function upsertPurchaseProducts(records: PurchaseProductRecord[]) {
   await api.put('/purchase-products/batch', records.map(normalizePurchaseRecord))
 }
 
-export async function deletePurchaseProduct(sku: string) {
-  await api.delete(`/purchase-products/${encodeURIComponent(sku)}`)
+export async function loadPurchaseDeletionCheck(sku: string) {
+  return api.get<PurchaseDeletionCheck>(`/purchase-products/${encodeURIComponent(sku)}/deletion-check`)
+}
+
+export async function setPurchaseProductCatalogState(sku: string, state: 'ready' | 'disabled', expectedVersion: number) {
+  return normalizePurchaseRecord(await api.post<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sku)}/catalog-state`, { state, expectedVersion }))
+}
+
+export async function deletePurchaseProduct(sku: string, expectedVersion: number) {
+  await api.delete(`/purchase-products/${encodeURIComponent(sku)}?expectedVersion=${expectedVersion}`)
 }
 
 export async function promotePurchaseProduct(sourceSku: string, targetSku: string, expectedVersion: number) {
@@ -119,7 +128,7 @@ export async function promotePurchaseProduct(sourceSku: string, targetSku: strin
 
 export async function resetPurchaseProducts() {
   const rows = await loadPurchaseProducts()
-  await Promise.all(rows.map(row => deletePurchaseProduct(row.sku)))
+  await Promise.all(rows.map(row => deletePurchaseProduct(row.sku, row._version ?? -1)))
 }
 
 export function findPurchaseProduct(records: PurchaseProductRecord[], sku: string) {

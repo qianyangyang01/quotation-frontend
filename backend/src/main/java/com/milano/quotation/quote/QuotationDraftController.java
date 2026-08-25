@@ -7,6 +7,7 @@ import tools.jackson.databind.node.ObjectNode;
 import com.milano.quotation.common.ApiResponse;
 import com.milano.quotation.common.AppException;
 import com.milano.quotation.security.QuotationPrincipal;
+import com.milano.quotation.purchase.PurchaseProductService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,9 +25,9 @@ public class QuotationDraftController {
             "monthlySalesEstimate", "customQuoteQuantity", "quoteMatrixMode",
             "selectedQuoteRegions", "product", "bundleItems", "commonSelections",
             "specifiedSelections", "templateSelections", "activeTemplate");
-    private final QuotationDraftRepository drafts; public QuotationDraftController(QuotationDraftRepository drafts){this.drafts=drafts;}
+    private final QuotationDraftRepository drafts;private final PurchaseProductService products; public QuotationDraftController(QuotationDraftRepository drafts,PurchaseProductService products){this.drafts=drafts;this.products=products;}
     @GetMapping("/mine") @Transactional(readOnly=true) ApiResponse<JsonNode> get(Authentication auth){return ApiResponse.ok(drafts.findById(account(auth)).map(row->row.payload).orElse(null));}
-    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
+    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){products.lockStructuredReferences(body);var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
     @DeleteMapping("/mine") @Transactional ApiResponse<Void> delete(Authentication auth){drafts.deleteById(account(auth));return ApiResponse.ok(null);}
 
     @GetMapping("/mine/state") @Transactional(readOnly=true)
@@ -36,7 +37,7 @@ public class QuotationDraftController {
 
     @PutMapping("/mine/state") @Transactional
     ApiResponse<JsonNode> saveState(@RequestBody JsonNode body,@RequestHeader("If-Match") long expectedVersion,Authentication auth){
-        var payload=validated(body);var owner=account(auth);var existing=drafts.findById(owner);
+        var payload=validated(body);products.lockStructuredReferences(payload);var owner=account(auth);var existing=drafts.findById(owner);
         if(existing.isEmpty()){
             if(expectedVersion!=-1)throw AppException.conflict("草稿已经变化，请重新加载后继续");
             var row=new QuotationDraftEntity();row.ownerAccount=owner;row.payload=payload;row.updatedAt=Instant.now();

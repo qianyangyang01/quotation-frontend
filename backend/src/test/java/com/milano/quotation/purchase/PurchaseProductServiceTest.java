@@ -23,6 +23,7 @@ class PurchaseProductServiceTest {
     private PurchaseProductRepository products;
     private PurchaseProductImageRepository images;
     private AssetStorageService storage;
+    private PurchaseProductDeletionGuard deletionGuard;
     private PurchaseProductService service;
     private final LinkedHashMap<String, PurchaseProduct> rows = new LinkedHashMap<>();
 
@@ -31,14 +32,18 @@ class PurchaseProductServiceTest {
         products = mock(PurchaseProductRepository.class);
         images = mock(PurchaseProductImageRepository.class);
         storage = mock(AssetStorageService.class);
-        service = new PurchaseProductService(products, images, storage);
+        deletionGuard = mock(PurchaseProductDeletionGuard.class);
+        service = new PurchaseProductService(products, images, storage, deletionGuard);
         when(products.findBySku(anyString())).thenAnswer(call -> Optional.ofNullable(rows.get(call.getArgument(0))));
+        when(products.findLockedBySku(anyString())).thenAnswer(call -> Optional.ofNullable(rows.get(call.getArgument(0))));
         when(products.saveAndFlush(any())).thenAnswer(call -> {
             var row = (PurchaseProduct) call.getArgument(0);
             rows.put(row.sku, row);
             return row;
         });
-        doAnswer(call -> { rows.remove((String) call.getArgument(0)); return null; }).when(products).deleteBySku(anyString());
+        doAnswer(call -> { rows.remove(((PurchaseProduct)call.getArgument(0)).sku); return null; }).when(products).delete(any(PurchaseProduct.class));
+        when(images.findByProductId(any())).thenReturn(List.of());
+        when(deletionGuard.inspect(any(),anyString(),anyLong())).thenAnswer(call -> new PurchaseProductDeletionGuard.DeletionCheck(true,(Long)call.getArgument(2),0,0,0,0,0,0));
     }
 
     @Test
@@ -138,5 +143,45 @@ class PurchaseProductServiceTest {
         assertEquals("BIZ-260001", promoted.path("sku").asText());
         assertEquals("ready", promoted.path("catalogState").asText());
         assertTrue(promoted.path("quoteReady").asBoolean());
+    }
+
+    @Test
+    void disablesEnablesAndRejectsStaleCatalogChanges() {
+        var payload=JsonNodeFactory.instance.objectNode().put("sku","SAFE-1").put("weightG",100).put("lengthCm",10).put("widthCm",8).put("heightCm",4).put("minOrderQty",1).put("purchasePriceCny",12.5);
+        var product=PurchaseProduct.create("SAFE-1",payload,"ready",true,null);product.version=4;rows.put(product.sku,product);
+        var disabled=service.changeCatalogState("SAFE-1","disabled",4);
+        assertEquals("disabled",disabled.path("catalogState").asText());assertFalse(disabled.path("quoteReady").asBoolean());
+        assertThrows(AppException.class,()->service.changeCatalogState("SAFE-1","ready",3));
+        var enabled=service.changeCatalogState("SAFE-1","ready",4);
+        assertEquals("ready",enabled.path("catalogState").asText());assertTrue(enabled.path("quoteReady").asBoolean());
+        assertThrows(AppException.class,()->service.changeCatalogState("SAFE-1","pending_template",4));
+    }
+
+    @Test
+    void blocksReferencedDeleteAndRetiresOnlyCollectedImages() {
+        var product=PurchaseProduct.create("SAFE-2",JsonNodeFactory.instance.objectNode().put("sku","SAFE-2"),"ready",false,null);product.version=2;rows.put(product.sku,product);
+        var blocked=new PurchaseProductDeletionGuard.DeletionCheck(false,2,1,0,1,0,0,0);
+        when(deletionGuard.inspect(product.id,product.sku,2)).thenReturn(blocked);
+        assertThrows(PurchaseProductService.DeletionBlocked.class,()->service.delete(product.sku,2));
+        verify(products,never()).delete(product);
+
+        var assetId=UUID.randomUUID();var image=new PurchaseProductImage();image.id=UUID.randomUUID();image.productId=product.id;image.assetId=assetId;image.imageType="product";
+        when(deletionGuard.inspect(product.id,product.sku,2)).thenReturn(new PurchaseProductDeletionGuard.DeletionCheck(true,2,1,0,0,0,0,0));
+        when(images.findByProductId(product.id)).thenReturn(List.of(image));when(storage.retireUnreferenced(List.of(assetId))).thenReturn(1);
+        var result=service.delete(product.sku,2);assertEquals(1,result.retiredImages());assertFalse(rows.containsKey(product.sku));
+        verify(storage).retireUnreferenced(List.of(assetId));
+    }
+
+    @Test
+    void locksStructuredJsonReferencesAndChecksQuoteReadinessInSkuOrder() {
+        var ready=PurchaseProduct.create("BIZ-1",JsonNodeFactory.instance.objectNode().put("sku","BIZ-1"),"ready",true,null);
+        when(products.findAllLockedBySkuIn(List.of("BIZ-1","BIZ-2"))).thenReturn(List.of(ready));
+        assertEquals(List.of("BIZ-2"),service.notQuoteReadyLocked(List.of(" biz-2 ","BIZ-1","BIZ-2")));
+
+        var payload=JsonNodeFactory.instance.objectNode().put("skuSearch","BIZ-2");
+        payload.putObject("product").put("sku","BIZ-1");payload.putArray("bundleItems").addObject().put("sku","BIZ-2");
+        service.lockStructuredReferences(payload);
+        verify(products,atLeastOnce()).findAllLockedBySkuIn(argThat(skus->skus.size()==2&&skus.containsAll(List.of("BIZ-1","BIZ-2"))));
+        assertDoesNotThrow(()->service.lockStructuredReferences(JsonNodeFactory.instance.objectNode()));
     }
 }

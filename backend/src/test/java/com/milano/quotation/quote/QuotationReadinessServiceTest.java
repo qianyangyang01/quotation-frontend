@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -26,6 +27,7 @@ class QuotationReadinessServiceTest {
         logistics = mock(LogisticsService.class);
         finance = mock(FinanceSettingRepository.class);
         service = new QuotationReadinessService(products, logistics, finance);
+        when(products.notQuoteReadyLocked(anyCollection())).thenReturn(List.of("TESTP260001"));
     }
 
     @Test
@@ -42,7 +44,7 @@ class QuotationReadinessServiceTest {
     @Test
     void acceptsCompletePurchaseLogisticsAndFinanceState() {
         when(products.readyCount()).thenReturn(1L);
-        when(products.isQuoteReady("BIZ-1")).thenReturn(true);
+        when(products.notQuoteReadyLocked(anyCollection())).thenReturn(List.of());
         when(logistics.publishedChannelCount()).thenReturn(1L);
         var countries = JsonNodeFactory.instance.arrayNode(); countries.addObject().put("country", "美国");
         var policies = JsonNodeFactory.instance.arrayNode(); policies.addObject().put("channel", "云途");

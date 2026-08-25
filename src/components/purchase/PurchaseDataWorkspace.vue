@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { deletePurchaseProduct, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { deletePurchaseProduct, loadPurchaseDeletionCheck, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, setPurchaseProductCatalogState, upsertPurchaseProducts, type PurchaseDeletionCheck, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { confirmPurchaseImport, previewPurchaseWorkbook, type ServerPurchaseImportPreview } from '@/services/purchaseImports'
 import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImportJob, loadPurchaseImportJob, loadPurchaseImportJobs, loadPurchaseImportRows, purchaseImportErrorsUrl, retryPurchaseImportJob, rollbackPurchaseImportJob, uploadPurchaseImagePart, type PurchaseImportJob, type PurchaseImportRowView } from '@/services/purchaseAsyncImports'
 import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs } from '@/services/purchaseImportPolling'
@@ -38,6 +38,11 @@ const activeRows = ref<PurchaseImportRowView[]>([])
 const activeRowStatus = ref('error')
 const imagePartNumber = ref(1)
 const pendingJobAction = ref<'confirm'|'retry'|'cancel'|'rollback'|null>(null)
+const deleteTarget = ref<PurchaseProductRecord | null>(null)
+const deleteCheck = ref<PurchaseDeletionCheck | null>(null)
+const deleteConfirmation = ref('')
+const catalogAction = ref<{ record:PurchaseProductRecord;state:'ready'|'disabled' } | null>(null)
+const productActionBusy = ref(false)
 let jobPollTimer = 0
 
 const filtered = computed(() => records.value)
@@ -49,6 +54,7 @@ const totalPages = computed(() => Math.max(1, serverTotalPages.value))
 const pageStart = computed(() => totalRecords.value ? (currentPage.value - 1) * pageSize.value : 0)
 const pageEnd = computed(() => Math.min(pageStart.value + records.value.length, totalRecords.value))
 const pagedRecords = computed(() => records.value)
+const deleteConfirmationMatches = computed(() => deleteTarget.value != null && deleteConfirmation.value.trim().toUpperCase() === deleteTarget.value.sku)
 const visiblePages = computed<(number | 'ellipsis-start' | 'ellipsis-end')[]>(() => {
   const total = totalPages.value
   if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
@@ -143,6 +149,28 @@ function openEditor(record?: PurchaseProductRecord) {
   editor.value = record ? normalizePurchaseRecord(JSON.parse(JSON.stringify(record)) as PurchaseProductRecord) : emptyRecord()
   detail.value = null
 }
+function requestCatalogState(record:PurchaseProductRecord,state:'ready'|'disabled'){detail.value=null;catalogAction.value={record,state}}
+async function executeCatalogState(){
+  if(!catalogAction.value||productActionBusy.value)return
+  const {record,state}=catalogAction.value;productActionBusy.value=true
+  try{await setPurchaseProductCatalogState(record.sku,state,record._version??-1);catalogAction.value=null;await reload();toast(state==='disabled'?`${record.sku} 已停用`:`${record.sku} 已重新启用`)}
+  catch(error){toast(error instanceof Error?error.message:'采购资料状态修改失败')}
+  finally{productActionBusy.value=false}
+}
+async function requestDelete(record:PurchaseProductRecord){
+  detail.value=null;deleteTarget.value=record;deleteCheck.value=null;deleteConfirmation.value='';productActionBusy.value=true
+  try{deleteCheck.value=await loadPurchaseDeletionCheck(record.sku)}catch(error){deleteTarget.value=null;toast(error instanceof Error?error.message:'删除检查失败')}
+  finally{productActionBusy.value=false}
+}
+function closeDelete(force=false){if(productActionBusy.value&&!force)return;deleteTarget.value=null;deleteCheck.value=null;deleteConfirmation.value=''}
+async function executeDelete(){
+  if(!deleteTarget.value||!deleteCheck.value?.canDelete||!deleteConfirmationMatches.value||productActionBusy.value)return
+  const target=deleteTarget.value;productActionBusy.value=true
+  try{await deletePurchaseProduct(target.sku,deleteCheck.value.version);if(records.value.length===1&&currentPage.value>1)currentPage.value-=1;closeDelete(true);await reload();toast(`${target.sku} 已彻底删除`)}
+  catch(error){toast(error instanceof Error?error.message:'采购资料删除失败')}
+  finally{productActionBusy.value=false}
+}
+async function disableBlockedDelete(){if(!deleteTarget.value||deleteTarget.value.catalogState==='disabled')return;const target=deleteTarget.value;closeDelete();requestCatalogState(target,'disabled')}
 async function saveEditor() {
   if (!editor.value) return
   const sku = editor.value.sku.trim().toUpperCase().replace(/\s+/g, '')
@@ -153,7 +181,7 @@ async function saveEditor() {
   if (pendingTemplate && sku !== editingOriginalSku.value) { toast('模板SKU转正式请使用“确认转正式”按钮'); return }
   const record = normalizePurchaseRecord({ ...editor.value, sku, skuOrigin: wasGenerated && sku.startsWith('AUTO-') ? 'system' : 'manual' })
   try {
-    if (editingOriginalSku.value && editingOriginalSku.value !== sku) await deletePurchaseProduct(editingOriginalSku.value)
+    if (editingOriginalSku.value && editingOriginalSku.value !== sku) await deletePurchaseProduct(editingOriginalSku.value, editor.value._version ?? -1)
     await upsertPurchaseProducts([record])
     editor.value = null
     await reload()
@@ -245,7 +273,7 @@ const detailFields = computed(() => detail.value ? [
         <td><small>1件 {{ unitFreight(record,1) }}</small><small>10件 {{ unitFreight(record,10) }}</small><small>100件 {{ unitFreight(record,100) }}</small></td>
         <td><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small><small>实物图：{{ record.physicalImage ? '已上传' : '暂无数据' }}</small></td>
         <td><em :class="{ ready:record.quoteReady, warn:!record.quoteReady }">{{ record.status }}</em><small>库存：{{ record.stockStatus || '暂无数据' }}</small></td>
-        <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button></td>
+        <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button><button v-if="record.catalogState!=='disabled'" @click="requestCatalogState(record,'disabled')">停用</button><button v-else @click="requestCatalogState(record,'ready')">启用</button><button class="danger-link" @click="requestDelete(record)">删除</button></td>
       </tr></tbody>
     </table>
     <footer v-if="totalRecords" class="pagination" aria-label="采购资料分页">
@@ -294,7 +322,28 @@ const detailFields = computed(() => detail.value ? [
     <button class="close" @click="detail=null">×</button><small>PURCHASE SOURCE DETAIL</small><h2>采购资料详情</h2><p>按标准模板 32 列顺序展示</p>
     <div class="detail-images"><button v-if="detail.productImage" @click="showImage(detail.productImage,`${detail.sku} 产品图片`)"><img :src="detail.productImage"><span>产品图片</span></button><button v-if="detail.physicalImage" @click="showImage(detail.physicalImage,`${detail.sku} 实物图`)"><img :src="detail.physicalImage"><span>实物图</span></button><i v-if="!detail.productImage && !detail.physicalImage">暂无图片</i></div>
     <div class="detail-grid"><div v-for="field in detailFields" :key="field[0]" :class="{ wide:['备注','工厂信息','审核备注'].includes(String(field[0])) }"><small>{{ field[0] }}</small><a v-if="String(field[0]).includes('货源') && validUrl(String(field[1]))" :href="String(field[1])" target="_blank" rel="noopener">打开链接</a><p v-else>{{ field[1] || '暂无数据' }}</p></div></div>
-    <footer><button @click="detail=null">关闭</button><button class="primary" @click="openEditor(detail)">编辑资料</button></footer>
+    <footer><button @click="detail=null">关闭</button><button class="danger-link" @click="requestDelete(detail)">删除</button><button v-if="detail.catalogState!=='disabled'" @click="requestCatalogState(detail,'disabled')">停用</button><button v-else @click="requestCatalogState(detail,'ready')">启用</button><button class="primary" @click="openEditor(detail)">编辑资料</button></footer>
+  </section></div>
+
+  <div v-if="catalogAction" class="mask" @click.self="!productActionBusy && (catalogAction=null)"><section class="modal product-action-modal">
+    <button class="close" :disabled="productActionBusy" @click="catalogAction=null">×</button><small>PURCHASE CATALOG STATE</small><h2>{{ catalogAction.state==='disabled'?'停用采购资料':'重新启用采购资料' }}</h2>
+    <p><b>{{ catalogAction.record.sku }}</b></p><div class="action-warning">{{ catalogAction.state==='disabled'?'停用后保留历史资料和图片，但不能参与新报价。':'启用后将重新按资料完整度决定是否可参与报价。' }}</div>
+    <footer><button :disabled="productActionBusy" @click="catalogAction=null">取消</button><button class="primary" :disabled="productActionBusy" @click="executeCatalogState">{{ productActionBusy?'处理中…':catalogAction.state==='disabled'?'确认停用':'确认启用' }}</button></footer>
+  </section></div>
+
+  <div v-if="deleteTarget" class="mask" @click.self="closeDelete()"><section class="modal product-action-modal">
+    <button class="close" :disabled="productActionBusy" @click="closeDelete()">×</button><small>PURCHASE SAFE DELETE</small><h2>删除采购资料</h2><p><b>{{ deleteTarget.sku }}</b></p>
+    <div v-if="!deleteCheck" class="delete-loading">正在检查供应商、报价、草稿、模板和导入批次引用…</div>
+    <template v-else-if="!deleteCheck.canDelete">
+      <div class="action-warning danger">该商品存在业务引用，不能彻底删除，只能停用。</div>
+      <div class="reference-grid"><span><b>{{ deleteCheck.supplierLinks }}</b>供应商关联</span><span><b>{{ deleteCheck.quotationRecords }}</b>报价记录</span><span><b>{{ deleteCheck.drafts }}</b>报价草稿</span><span><b>{{ deleteCheck.templates }}</b>报价模板</span><span><b>{{ deleteCheck.importBatches }}</b>未回滚导入批次</span><span><b>{{ deleteCheck.imageCount }}</b>图片关系</span></div>
+      <p v-if="deleteCheck.importBatches" class="rollback-hint">该商品来自仍可回滚的导入批次，请从“导入任务”执行整批回滚。</p>
+    </template>
+    <template v-else>
+      <div class="action-warning danger">此操作不可恢复，将删除商品及 {{ deleteCheck.imageCount }} 个图片关系；无其他引用的图片会进入清理队列。</div>
+      <label class="delete-confirmation">请输入完整 SKU <b>{{ deleteTarget.sku }}</b> 以确认<input v-model="deleteConfirmation" autocomplete="off" :placeholder="deleteTarget.sku"></label>
+    </template>
+    <footer><button :disabled="productActionBusy" @click="closeDelete()">取消</button><button v-if="deleteCheck&&!deleteCheck.canDelete&&deleteTarget.catalogState!=='disabled'" :disabled="productActionBusy" @click="disableBlockedDelete">停用该商品</button><button v-if="deleteCheck?.canDelete" class="danger-button" :disabled="productActionBusy||!deleteConfirmationMatches" @click="executeDelete">{{ productActionBusy?'删除中…':'确认彻底删除' }}</button></footer>
   </section></div>
 
   <div v-if="editor" class="mask"><section class="modal editor-modal">
@@ -334,4 +383,5 @@ const detailFields = computed(() => detail.value ? [
 .import-mode{display:grid;gap:6px;margin:12px 0;padding:12px;border:1px solid #f1d19a;border-radius:8px;background:#fff8eb;color:#6c5b42;font-size:11px}.import-mode select{height:36px;border:1px solid #dfc392;border-radius:6px;background:#fff;padding:0 9px}.import-mode small{color:#a35f00}
 .pagination{display:flex;min-width:1180px;align-items:center;justify-content:space-between;gap:18px;padding:14px 16px;border-top:1px solid #e3e8eb;background:#fafbfc;color:#74808a;font-size:11px}.pagination nav{display:flex;align-items:center;gap:6px}.pagination button{min-width:32px;height:32px;padding:0 10px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#596771;font-size:11px;font-weight:800}.pagination button.active{border-color:#ff9900;background:#ff9900;color:#17212b}.pagination button:disabled{cursor:not-allowed;opacity:.42}.pagination nav i{display:grid;width:24px;place-items:center;color:#9aa4ac;font-style:normal}.pagination label{display:flex;align-items:center;gap:7px}.pagination select{height:32px;border:1px solid #dce3e8;border-radius:6px;background:#fff;padding:0 8px;color:#596771}
 .task-center-modal{width:min(1180px,97vw)}.task-center-grid{display:grid;grid-template-columns:280px 1fr;min-height:520px;margin-top:18px;border:1px solid #dfe5e9;border-radius:9px;overflow:hidden}.job-list{overflow:auto;border-right:1px solid #dfe5e9;background:#f7f9fa}.job-list>button{display:grid;width:100%;gap:5px;padding:14px;border:0;border-bottom:1px solid #e5eaed;background:transparent;text-align:left}.job-list>button.active{background:#fff3df;box-shadow:inset 3px 0 #ff9900}.job-list span,.job-list small{color:#74808a;font-size:10px}.job-detail{min-width:0;padding:20px}.job-detail>header{display:flex;align-items:center;justify-content:space-between}.job-detail>header>div{display:grid;gap:7px}.job-detail>header strong{font-size:28px}.job-status{width:max-content;padding:4px 8px;border-radius:10px;background:#edf1f3;color:#596771;font-size:10px}.job-status.ready,.job-status.completed{background:#e7f6ec;color:#16764a}.job-status.failed,.job-status.completed-with-errors{background:#fff0e7;color:#ad5700}.progress{height:8px;margin:15px 0;border-radius:8px;overflow:hidden;background:#edf1f3}.progress i{display:block;height:100%;background:#ff9900;transition:width .25s}.job-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}.job-stats span{display:grid;gap:4px;padding:10px;border-radius:7px;background:#f6f8f9;color:#74808a;font-size:9px}.job-stats b{color:#17212b;font-size:18px}.job-error{padding:10px;border-radius:6px;background:#fff0ee;color:#b3362e}.image-part-upload{display:flex;align-items:center;gap:10px;margin:14px 0;padding:12px;border:1px dashed #d8dfe4;border-radius:7px}.image-part-upload label{display:flex;align-items:center;gap:7px}.image-part-upload input{width:70px;height:30px;border:1px solid #d7dee3}.image-part-upload button,.row-filter button,.row-filter a{height:32px;padding:0 10px;border:1px solid #dce3e8;border-radius:5px;background:#fff;color:#596771;text-decoration:none;line-height:30px}.image-part-upload small{margin-left:auto;color:#7b8790}.image-part-list{display:flex;max-height:100px;gap:6px;overflow:auto}.image-part-list button{display:grid;min-width:115px;gap:3px;padding:7px;border:1px solid #dfe5e9;border-radius:6px;background:#f7f9fa;text-align:left}.image-part-list button.completed{border-color:#bfe4ce;background:#edf9f1}.image-part-list button.failed{border-color:#f0c5aa;background:#fff4ec;cursor:pointer}.image-part-list span,.image-part-list small{font-size:9px;color:#74808a}.image-part-list small{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row-filter{display:flex;gap:7px;margin:14px 0}.row-filter button.active{border-color:#ff9900;color:#a96000}.row-filter a{margin-left:auto}.job-rows{max-height:180px;overflow:auto;border:1px solid #e2e7ea;border-radius:7px}.job-rows article{display:grid;gap:4px;padding:9px 11px;border-top:1px solid #edf0f2;font-size:10px}.job-rows article:first-child{border-top:0}.job-rows span{color:#a34c00}.action-confirm{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:15px;padding:12px;border-radius:7px;background:#fff4df}.action-confirm span{margin-right:auto;font-weight:800}.action-confirm button{height:34px;padding:0 12px;border:1px solid #dce3e8;border-radius:5px;background:#fff}.action-confirm .primary{border:0;background:#ff9900}@media(max-width:900px){.task-center-grid{grid-template-columns:1fr}.job-list{max-height:180px;border-right:0;border-bottom:1px solid #dfe5e9}.job-stats{grid-template-columns:repeat(3,1fr)}}
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.actions button:disabled{cursor:not-allowed;opacity:.45}.danger-link{color:#c43f36!important}.product-action-modal{width:min(580px,96vw)}.action-warning{margin:16px 0;padding:13px 14px;border:1px solid #f1d19a;border-radius:8px;background:#fff8eb;color:#775628;line-height:1.6}.action-warning.danger{border-color:#edc0bc;background:#fff3f1;color:#a6322a}.reference-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.reference-grid span{display:grid;gap:5px;padding:11px;border-radius:7px;background:#f5f7f8;color:#74808a;font-size:10px}.reference-grid b{color:#17212b;font-size:20px}.rollback-hint{padding:10px 12px;border-left:3px solid #ff9900;background:#fff8ea;color:#8a570d;font-size:11px}.delete-confirmation{display:grid;gap:7px;margin-top:16px;color:#45535e;font-size:11px;font-weight:800}.delete-confirmation input{box-sizing:border-box;width:100%;height:40px;border:1px solid #d9e0e5;border-radius:7px;padding:0 10px;font:inherit;text-transform:uppercase}.delete-confirmation input:focus{border-color:#dc4b41;outline:2px solid rgba(220,75,65,.12)}.delete-loading{display:grid;place-items:center;min-height:120px;color:#74808a}.modal footer .danger-button{border-color:#c43f36;background:#c43f36;color:#fff}.modal footer button:disabled{cursor:not-allowed;opacity:.45}@media(max-width:600px){.reference-grid{grid-template-columns:repeat(2,1fr)}}
 </style>

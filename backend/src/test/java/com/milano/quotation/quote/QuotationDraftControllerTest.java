@@ -2,6 +2,7 @@ package com.milano.quotation.quote;
 
 import com.milano.quotation.common.AppException;
 import com.milano.quotation.security.QuotationPrincipal;
+import com.milano.quotation.purchase.PurchaseProductService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -23,7 +24,7 @@ class QuotationDraftControllerTest {
 
     @BeforeEach void setup() {
         drafts = mock(QuotationDraftRepository.class);
-        controller = new QuotationDraftController(drafts);
+        controller = new QuotationDraftController(drafts, mock(PurchaseProductService.class));
         var principal = new QuotationPrincipal(UUID.randomUUID(), "ADMIN", "管理员", "hash", "superadmin", true, false, List.of("quote"));
         auth = new UsernamePasswordAuthenticationToken(principal, "", principal.getAuthorities());
     }

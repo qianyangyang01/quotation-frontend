@@ -109,4 +109,16 @@ class AssetStorageServiceTest {
         service.cleanupExpired();
         verify(assets).delete(asset);
     }
+
+    @Test void retiresOnlyRepositoryConfirmedUnreferencedAssets() {
+        var minio = mock(MinioClient.class); var assets = mock(AssetObjectRepository.class);
+        var service = new AssetStorageService(minio, assets, "quotation-assets", false);
+        var first = UUID.randomUUID(); var second = UUID.randomUUID();
+        when(assets.retireUnreferenced(any(), any())).thenReturn(1);
+
+        assertEquals(1, service.retireUnreferenced(java.util.Arrays.asList(first, first, null, second)));
+        verify(assets).retireUnreferenced(argThat(ids -> ids.size() == 2 && ids.containsAll(List.of(first, second))), any());
+        assertEquals(0, service.retireUnreferenced(List.of()));
+        verifyNoMoreInteractions(assets);
+    }
 }

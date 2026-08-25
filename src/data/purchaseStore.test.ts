@@ -19,4 +19,11 @@ describe('purchase catalog state', () => {
     expect(product.quoteReady).toBe(true)
     expect(findPurchaseProduct([product], product.sku)?.sku).toBe('BIZ-260001')
   })
+
+  it('keeps disabled products visible but excludes them from new quotations', () => {
+    const product = normalizePurchaseRecord({ sku: 'BIZ-260002', catalogState: 'disabled', ...complete })
+    expect(product.status).toBe('已停用')
+    expect(product.quoteReady).toBe(false)
+    expect(findPurchaseProduct([product], product.sku)).toBeUndefined()
+  })
 })
