@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { deletePurchaseProduct, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, upsertPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { confirmPurchaseImport, previewPurchaseWorkbook, type ServerPurchaseImportPreview } from '@/services/purchaseImports'
 import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImportJob, loadPurchaseImportJob, loadPurchaseImportJobs, loadPurchaseImportRows, purchaseImportErrorsUrl, retryPurchaseImportJob, rollbackPurchaseImportJob, uploadPurchaseImagePart, type PurchaseImportJob, type PurchaseImportRowView } from '@/services/purchaseAsyncImports'
+import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs } from '@/services/purchaseImportPolling'
 import ImageMigrationPanel from './ImageMigrationPanel.vue'
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
@@ -83,16 +84,26 @@ async function reload() {
   catch (error) { toast(error instanceof Error ? error.message : '采购数据读取失败') }
   finally { loading.value = false }
 }
-onMounted(() => { reload(); refreshImportJobs(); jobPollTimer = window.setInterval(refreshImportJobs, 2000) })
-onUnmounted(() => { window.clearInterval(jobPollTimer);window.clearTimeout(searchTimer) })
+onMounted(() => { reload() })
+onUnmounted(() => { stopJobPolling();window.clearTimeout(searchTimer) })
+
+watch(showTaskCenter, open => {
+  if (open) {
+    void refreshImportJobs()
+    startJobPolling()
+  } else stopJobPolling()
+})
 
 const jobStatusLabel:Record<string,string>={queued:'排队中',parsing:'解析校验中',ready:'待确认', 'import-queued':'等待入库',importing:'批量入库中',completed:'已完成','completed-with-errors':'部分完成',failed:'失败',cancelled:'已取消','rollback-queued':'等待回滚','rolling-back':'回滚中','rolled-back':'已回滚'}
-async function refreshImportJobs(){try{const page=await loadPurchaseImportJobs();importJobs.value=page.content;if(activeJob.value){const fresh=await loadPurchaseImportJob(activeJob.value.id);activeJob.value=fresh;if(['completed','completed-with-errors','rolled-back'].includes(fresh.status))await reload()}}catch{/* 页面主数据错误提示已独立处理，轮询失败等待下一次重试 */}}
+function importJobStatuses(){return [activeJob.value?.status,...importJobs.value.map(job=>job.status)]}
+function startJobPolling(){stopJobPolling();jobPollTimer=window.setInterval(()=>{if(shouldPollPurchaseImportJobs(showTaskCenter.value,importJobStatuses()))void refreshImportJobs()},2000)}
+function stopJobPolling(){window.clearInterval(jobPollTimer);jobPollTimer=0}
+async function refreshImportJobs(){try{const previousStatus=activeJob.value?.status;const page=await loadPurchaseImportJobs();importJobs.value=page.content;if(activeJob.value){const fresh=await loadPurchaseImportJob(activeJob.value.id);activeJob.value=fresh;if(didPurchaseImportDataChange(previousStatus,fresh.status))await reload()}}catch{/* 页面主数据错误提示已独立处理，轮询失败等待下一次重试 */}}
 async function selectImportJob(job:PurchaseImportJob){activeJob.value=await loadPurchaseImportJob(job.id);await refreshJobRows()}
 async function refreshJobRows(){if(!activeJob.value)return;const page=await loadPurchaseImportRows(activeJob.value.id,activeRowStatus.value,0,50);activeRows.value=page.content}
 async function chooseAsyncWorkbook(event:Event){const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file)return;asyncUploading.value=true;try{activeJob.value=await createPurchaseImportJob(file);showTaskCenter.value=true;await refreshImportJobs();toast('大批量导入任务已创建，正在后台解析')}catch(error){toast(error instanceof Error?error.message:'导入任务创建失败')}finally{asyncUploading.value=false;input.value=''}}
 async function chooseImagePart(event:Event){const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file||!activeJob.value)return;imageUploading.value=true;try{activeJob.value=await uploadPurchaseImagePart(activeJob.value.id,imagePartNumber.value,file);imagePartNumber.value+=1;toast('图片分包上传成功')}catch(error){toast(error instanceof Error?error.message:'图片分包上传失败')}finally{imageUploading.value=false;input.value=''}}
-async function executeJobAction(){if(!activeJob.value||!pendingJobAction.value)return;const id=activeJob.value.id;try{if(pendingJobAction.value==='confirm')await confirmPurchaseImportJob(id);else if(pendingJobAction.value==='retry')await retryPurchaseImportJob(id);else if(pendingJobAction.value==='cancel')await cancelPurchaseImportJob(id);else await rollbackPurchaseImportJob(id);activeJob.value=await loadPurchaseImportJob(id);await refreshImportJobs();toast('任务操作已提交')}catch(error){toast(error instanceof Error?error.message:'任务操作失败')}finally{pendingJobAction.value=null}}
+async function executeJobAction(){if(!activeJob.value||!pendingJobAction.value)return;const id=activeJob.value.id;try{if(pendingJobAction.value==='confirm')await confirmPurchaseImportJob(id);else if(pendingJobAction.value==='retry')await retryPurchaseImportJob(id);else if(pendingJobAction.value==='cancel')await cancelPurchaseImportJob(id);else await rollbackPurchaseImportJob(id);await refreshImportJobs();toast('任务操作已提交')}catch(error){toast(error instanceof Error?error.message:'任务操作失败')}finally{pendingJobAction.value=null}}
 
 let toastTimer = 0
 function toast(message: string) {
@@ -199,7 +210,7 @@ const detailFields = computed(() => detail.value ? [
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
       <button class="outline" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading ? '上传中…' : '大批量导入' }}</button>
-      <button class="outline" @click="showTaskCenter=true;refreshImportJobs()">导入任务</button>
+      <button class="outline" @click="showTaskCenter=true">导入任务</button>
       <button class="outline" :disabled="parsing" @click="fileInput?.click()">{{ parsing ? '解析中…' : '小文件导入' }}</button>
       <button class="outline" @click="showImageMigration=true">图片迁移</button>
       <button class="primary" @click="openEditor()">＋ 新增采购资料</button>
