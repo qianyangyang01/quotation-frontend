@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LogisticsChannelRecord, LogisticsChannelVersionRecord, LogisticsWorkspaceState } from './logisticsRepository'
-import { logisticsChannelRows, logisticsProviderRows, logisticsWorkspaceSummary } from './logisticsWorkspaceView'
+import { logisticsChannelRows, logisticsProviderRows, logisticsRuleDetailColumns, logisticsRuleTabs, logisticsWorkspaceSummary } from './logisticsWorkspaceView'
 
 function channel(id: string, providerId: string, currentVersionId = ''): LogisticsChannelRecord {
   return { id, providerId, currentVersionId, ruleId: Number(id), name: `渠道${id}`, code: `CODE-${id}`, type: '专线', logisticsAttribute: '普货', enabled: true, createdAt: '', updatedAt: '', _version: 1, archived: false, archivedAt: '', archivedBy: '', archiveReason: '' }
@@ -23,6 +23,13 @@ function workspace(): LogisticsWorkspaceState {
 }
 
 describe('logistics workspace published views', () => {
+  it('keeps weight restrictions inside rule detail and omits the freight calculator tab', () => {
+    expect(logisticsRuleTabs).toEqual(['物流商', '物流渠道', '运费规则', '国家区域'])
+    expect(logisticsRuleTabs).not.toContain('重量限制')
+    expect(logisticsRuleTabs).not.toContain('运费试算')
+    expect(logisticsRuleDetailColumns).toEqual(['国家区域', '重量范围', '计泡系数', '最长边', '最大周长', '商品限制', '每1000g运费', '挂号费', '预计时效', '状态'])
+  })
+
   it('derives channel, published and blocked draft counts without archived channels', () => {
     expect(logisticsWorkspaceSummary(workspace())).toEqual({ channels: 2, published: 1, blockedDrafts: 1 })
   })

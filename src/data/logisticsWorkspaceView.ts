@@ -4,8 +4,9 @@ import type {
   LogisticsWorkspaceState,
 } from './logisticsRepository'
 
-export const logisticsRuleTabs = ['物流商', '物流渠道', '运费规则', '国家区域', '重量限制', '运费试算'] as const
+export const logisticsRuleTabs = ['物流商', '物流渠道', '运费规则', '国家区域'] as const
 export type LogisticsRuleTab = typeof logisticsRuleTabs[number]
+export const logisticsRuleDetailColumns = ['国家区域', '重量范围', '计泡系数', '最长边', '最大周长', '商品限制', '每1000g运费', '挂号费', '预计时效', '状态'] as const
 
 export function currentPublishedVersion(state: LogisticsWorkspaceState, channel: LogisticsChannelRecord) {
   return state.versions.find(version => version.id === channel.currentVersionId && version.status === 'published')
