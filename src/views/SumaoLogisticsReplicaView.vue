@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import AppTopbar from '@/components/AppTopbar.vue'
-import { type LogisticsRule } from '@/data/logistics'
+import { calculateLogisticsFee, type LogisticsRule } from '@/data/logistics'
+import { loadPublishedLogisticsManifest } from '@/data/publishedLogisticsRepository'
+import {
+  logisticsChannelRows,
+  logisticsProviderRows,
+  logisticsRuleTabs,
+  logisticsWorkspaceSummary,
+  type LogisticsRuleTab,
+} from '@/data/logisticsWorkspaceView'
 import { parseLogisticsWorkbook, type LogisticsDiffField, type LogisticsDiffRow, type LogisticsImportPreview } from '@/data/logisticsWorkbook'
 import {
   addLogisticsChannel,
@@ -18,6 +26,7 @@ import {
   loadCurrentVersionRows,
   loadLogisticsVersionDetail,
   loadLogisticsWorkspace,
+  normalizeLogisticsPriceRow,
   previewLogisticsProviderImports,
   previewLogisticsGlobalImports,
   publishLogisticsProviderVersions,
@@ -42,7 +51,7 @@ const workspaceError = ref('')
 const typeFilter = ref('')
 const statusFilter = ref('')
 const changeFilter = ref<'pending' | 'up' | 'down' | 'risk' | ''>('')
-const searchMode = ref<'name' | 'english'>('name')
+const searchMode = ref<'name' | 'code'>('name')
 const keyword = ref('')
 const page = ref(1)
 const pageSize = ref(10)
@@ -52,6 +61,14 @@ const activeRule = ref<LogisticsRule | null>(null)
 const areaKeyword = ref('')
 type WorkspaceMode = 'rules' | 'base'
 const workspaceMode = ref<WorkspaceMode>('base')
+const activeRulesTab = ref<LogisticsRuleTab>('运费规则')
+const publishedCountries = ref<Array<{ code: string; name: string }>>([])
+const showBlockedOnly = ref(false)
+const detailRuleId = ref(0)
+const detailLoading = ref(false)
+const detailError = ref('')
+const calcCountry = ref('')
+const calcWeightG = ref(500)
 const templateInput = ref<HTMLInputElement | null>(null)
 const uploadChannelId = ref('')
 const uploadMode = ref<'single' | 'batch-update' | 'batch-import' | 'global-import'>('single')
@@ -90,13 +107,13 @@ const batchSelectedVersionIds = ref<string[]>([])
 const batchReviewedVersionIds = ref<string[]>([])
 const batchAuditNote = ref('')
 const providerSettings = computed(() => workspace.value.providers)
+const blockedProviderIds = computed(() => new Set(logisticsChannelRows(workspace.value).filter(item => item.blockedErrors > 0).map(item => item.channel.providerId)))
 const filteredProviderSettings = computed(() => {
   const query = providerSearch.value.trim().toLowerCase()
-  if (!query) return providerSettings.value
-  return providerSettings.value.filter(item => `${item.name} ${item.code}`.toLowerCase().includes(query))
+  return providerSettings.value.filter(item => (!showBlockedOnly.value || blockedProviderIds.value.has(item.id)) && (!query || `${item.name} ${item.code}`.toLowerCase().includes(query)))
 })
 const selectedProvider = computed(() => providerSettings.value.find(item => item.id === selectedProviderId.value) ?? providerSettings.value[0])
-const selectedProviderChannels = computed(() => workspace.value.channels.filter(item => item.providerId === selectedProvider.value?.id && Boolean(item.archived) === showArchivedChannels.value))
+const selectedProviderChannels = computed(() => workspace.value.channels.filter(item => item.providerId === selectedProvider.value?.id && Boolean(item.archived) === showArchivedChannels.value && (!showBlockedOnly.value || Boolean(draftVersion(item)?.errors))))
 const activeProviderChannels = computed(() => workspace.value.channels.filter(item => item.providerId === selectedProvider.value?.id && !item.archived))
 const historyVersions = computed(() => workspace.value.versions.filter(item => item.channelId === historyChannel.value?.id))
 const selectedProviderDrafts = computed(() => activeProviderChannels.value.map(channel => ({ channel, version: draftVersion(channel) })).filter((item): item is { channel: LogisticsChannelRecord; version: LogisticsChannelVersionRecord } => Boolean(item.version)))
@@ -105,6 +122,15 @@ const blockedProviderDrafts = computed(() => selectedProviderDrafts.value.filter
 const selectedPublishableVersionIds = computed(() => filterPublishableLogisticsVersionIds(selectedProviderDrafts.value.map(item => item.version), batchSelectedVersionIds.value))
 const selectedBatchItems = computed(() => batchPreview.value?.items.filter(item => batchSelectedKeys.value.includes(item.fileKey)) ?? [])
 const selectedBatchDraftCount = computed(() => selectedBatchItems.value.filter(item => item.hasDraft).length)
+const workspaceSummary = computed(() => logisticsWorkspaceSummary(workspace.value))
+const providerRows = computed(() => logisticsProviderRows(workspace.value))
+const channelRows = computed(() => logisticsChannelRows(workspace.value))
+const detailRule = computed(() => rules.value.find(rule => rule.id === detailRuleId.value) || rules.value[0] || null)
+const detailCountries = computed(() => [...new Set((detailRule.value?.prices || []).map(row => row.areaName || row.countryCode).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
+const detailWeightRows = computed(() => [...(detailRule.value?.prices || [])].sort((a, b) => a.weightFromKg - b.weightFromKg || a.weightToKg - b.weightToKg))
+const calcResult = computed(() => detailRule.value && calcCountry.value
+  ? calculateLogisticsFee(detailRule.value, calcCountry.value, Math.max(0, Number(calcWeightG.value) || 0) / 1000)
+  : null)
 const reviewChangedDiffs = computed(() => importPreview.value?.diffRows.filter(item => item.type !== 'unchanged') ?? [])
 const reviewVisibleDiffs = computed(() => reviewChangedDiffs.value.filter(item => {
   const query = reviewCountryKeyword.value.trim().toLowerCase()
@@ -206,8 +232,14 @@ async function refreshWorkspace() {
   workspaceLoading.value = true
   workspaceError.value = ''
   try {
-    workspace.value = await loadLogisticsWorkspace()
+    const [nextWorkspace, manifestResult] = await Promise.all([
+      loadLogisticsWorkspace(),
+      loadPublishedLogisticsManifest().catch(() => null),
+    ])
+    workspace.value = nextWorkspace
+    publishedCountries.value = manifestResult?.manifest.countries || []
     rules.value = structuredClone(workspaceLogisticsRules(workspace.value))
+    if (!rules.value.some(rule => rule.id === detailRuleId.value)) detailRuleId.value = rules.value[0]?.id || 0
     if (!workspace.value.providers.some(item => item.id === selectedProviderId.value)) selectedProviderId.value = workspace.value.providers[0]?.id || ''
   } catch (error) {
     workspaceError.value = error instanceof Error ? error.message : '物流工作区加载失败'
@@ -389,7 +421,9 @@ function draftHasDirection(version: LogisticsChannelVersionRecord | undefined, d
   return Boolean(version?.diffRows.some(diff => diff.changes.some(change => change.price && Number(change.after) !== Number(change.before) && (direction === 'up' ? Number(change.after) > Number(change.before) : Number(change.after) < Number(change.before)))))
 }
 const filtered = computed(() => rules.value.filter(rule => {
-  const searchValue = searchMode.value === 'name' ? rule.name : rule.englishName
+  const searchValue = searchMode.value === 'name'
+    ? `${rule.name} ${rule.relations[0]?.carrier || ''} ${rule.relations[0]?.channel || ''}`
+    : rule.relations[0]?.channelCode || ''
   const draft = draftForRule(rule)
   const changeMatches = !changeFilter.value
     || (changeFilter.value === 'pending' && Boolean(draft))
@@ -402,29 +436,50 @@ const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageS
 const visibleRules = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const areaRows = computed(() => activeRule.value?.prices ?? [])
 const visibleAreaRows = computed(() => areaRows.value.map((area, index) => ({ area, index })).filter(({ area }) => !areaKeyword.value.trim() || `${area.areaName} ${area.countryCode}`.toLowerCase().includes(areaKeyword.value.trim().toLowerCase())))
-const ruleStats = computed(() => ({
-  total: rules.value.length,
-  enabled: rules.value.filter(rule => rule.status === '启用').length,
-  published: rules.value.length,
-  areas: rules.value.reduce((sum, rule) => sum + rule.areaCount, 0),
-}))
+async function selectRulesTab(tab: LogisticsRuleTab) {
+  activeRulesTab.value = tab
+  if (tab === '重量限制' || tab === '运费试算') await hydrateDetailRule()
+}
+
+async function hydrateDetailRule(resetCountry = false) {
+  const rule = detailRule.value
+  if (!rule || detailLoading.value) return
+  detailLoading.value = true
+  detailError.value = ''
+  try {
+    await hydrateRulePrices(rule)
+    if (resetCountry || !detailCountries.value.includes(calcCountry.value)) calcCountry.value = detailCountries.value[0] || ''
+  } catch (error) {
+    detailError.value = error instanceof Error ? error.message : '正式价格段加载失败'
+  } finally { detailLoading.value = false }
+}
+
+async function changeDetailRule() { await hydrateDetailRule(true) }
+
+function openBlockedDrafts(providerId = '') {
+  const first = channelRows.value.find(item => item.blockedErrors > 0 && (!providerId || item.channel.providerId === providerId))
+  showBlockedOnly.value = true
+  showArchivedChannels.value = false
+  if (first) selectedProviderId.value = first.channel.providerId
+  workspaceMode.value = 'base'
+}
+
+function clearBlockedFilter() {
+  showBlockedOnly.value = false
+  if (!workspace.value.providers.some(item => item.id === selectedProviderId.value)) selectedProviderId.value = workspace.value.providers[0]?.id || ''
+}
 
 function notify(message: string) { toast.value = message; window.setTimeout(() => toast.value === message && (toast.value = ''), 2200) }
-async function toggleRule(rule: LogisticsRule) {
-  const channel = workspace.value.channels.find(item => item.ruleId === rule.id); if (!channel) return notify('该规则尚未迁移到数据库')
-  try { await setLogisticsChannelStatus(channel, rule.status !== '启用'); await refreshWorkspace(); notify('启用状态已保存；正式版本和历史保持不变') }
-  catch (error) { notify(error instanceof Error ? error.message : '状态设置失败') }
-}
 async function hydrateRulePrices(rule: LogisticsRule) {
   const channel = workspace.value.channels.find(item => item.ruleId === rule.id)
-  const version = channel ? visibleVersion(channel) : undefined
-  if (!version) return
-  const detail = await loadLogisticsVersionDetail(version)
-  Object.assign(version, detail)
-  rule.prices = detail.rows.map(row => ({ ...row }))
-  rule.priceRowCount = detail.rows.length
-  rule.areaCount = new Set(detail.rows.map(row => row.countryCode || row.areaName)).size
-  rule.phoneRequired = detail.rows.some(row => row.phoneRequired)
+  const version = channel ? currentVersion(channel) : undefined
+  if (!channel || !version) return
+  if (rule.prices.length && rule.prices.length === rule.priceRowCount) return
+  const rows = await loadCurrentVersionRows(workspace.value, channel)
+  rule.prices = rows.map(normalizeLogisticsPriceRow)
+  rule.priceRowCount = rows.length
+  rule.areaCount = new Set(rows.map(row => row.countryCode || row.areaName)).size
+  rule.phoneRequired = rows.some(row => row.phoneRequired)
 }
 async function openAreas(rule: LogisticsRule) { try { await hydrateRulePrices(rule); activeRule.value = rule; view.value = 'areas' } catch (error) { notify(error instanceof Error ? error.message : '区域规则加载失败') } }
 function exportRules() { const data = rules.value; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); link.download = '正式运费规则.json'; link.click(); URL.revokeObjectURL(link.href); notify(`已导出 ${data.length} 条正式规则`) }
@@ -441,29 +496,55 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
         <div class="milano-heading"><div><p>LOGISTICS CONFIGURATION</p><h1>物流规则</h1><span>维护物流渠道、国家区域、重量限制与分段运费，供米莱诺报价计算直接调用。</span></div></div>
         <section class="workspace-switch"><button :class="{ active: workspaceMode === 'base' }" @click="workspaceMode='base'">基础资料设置</button><button :class="{ active: workspaceMode === 'rules' }" @click="workspaceMode='rules'">运费规则列表</button></section>
         <template v-if="workspaceMode === 'rules'">
-          <section class="rule-stat-grid">
-            <article><span class="stat-icon orange">规</span><div><small>运费规则</small><b>{{ ruleStats.total }}</b><em>当前全部计费规则</em></div></article>
-            <article><span class="stat-icon green">启</span><div><small>已启用</small><b>{{ ruleStats.enabled }}</b><em>可参与报价计算</em></div></article>
-            <article><span class="stat-icon blue">版</span><div><small>正式版本</small><b>{{ ruleStats.published }}</b><em>均由渠道审核发布生成</em></div></article>
-            <article><span class="stat-icon amber">区</span><div><small>国家区域</small><b>{{ ruleStats.areas.toLocaleString() }}</b><em>规则关联区域总数</em></div></article>
+          <section class="published-summary" aria-label="物流渠道版本统计">
+            <span><b>{{ workspaceSummary.channels }}</b> 个渠道</span><i>/</i>
+            <span><b>{{ workspaceSummary.published }}</b> 个已发布</span><i>/</i>
+            <button type="button" @click="openBlockedDrafts()"><b>{{ workspaceSummary.blockedDrafts }}</b> 个阻断草稿</button>
           </section>
-          <section class="rule-workspace-card">
+          <nav class="published-tabs" aria-label="物流正式数据分类"><button v-for="tab in logisticsRuleTabs" :key="tab" :class="{ active:activeRulesTab===tab }" @click="selectRulesTab(tab)">{{ tab }}</button></nav>
+
+          <section v-if="activeRulesTab==='物流商'" class="published-panel provider-summary-grid">
+            <article v-for="provider in providerRows" :key="provider.id"><i>{{ provider.name.slice(0,1) }}</i><div><b>{{ provider.name }}</b><small>{{ provider.code }}</small></div><span>{{ provider.channels }} 个渠道<br>{{ provider.published }} 个已发布<em v-if="provider.blockedDrafts"> · {{ provider.blockedDrafts }} 个阻断</em></span></article>
+            <div v-if="!providerRows.length" class="modern-empty">暂无物流商数据</div>
+          </section>
+
+          <section v-else-if="activeRulesTab==='物流渠道'" class="published-panel">
+            <div class="modern-table-scroll"><table class="published-data-table channel-table"><thead><tr><th>物流商</th><th>渠道</th><th>渠道编码</th><th>物流属性</th><th>正式版本</th><th>草稿状态</th><th>状态</th></tr></thead><tbody><tr v-for="item in channelRows" :key="item.channel.id"><td>{{ item.providerName }}</td><td><b>{{ item.channel.name }}</b></td><td><code class="channel-code" :title="item.channel.code">{{ item.channel.code }}</code></td><td>{{ item.channel.logisticsAttribute }}</td><td><span v-if="item.published" class="status-pill success">V{{ item.published.versionNumber }} · 已发布</span><span v-else>尚未发布</span></td><td><button v-if="item.blockedErrors" class="blocked-link" @click="openBlockedDrafts(item.channel.providerId)">{{ item.blockedErrors }} 个阻断错误</button><span v-else-if="item.draft">V{{ item.draft.versionNumber }} 待审核</span><span v-else>无草稿</span></td><td><span class="status-pill" :class="item.channel.enabled&&item.providerEnabled?'success':'disabled'">{{ item.channel.enabled&&item.providerEnabled?'启用':'禁用' }}</span></td></tr></tbody></table></div>
+          </section>
+
+          <section v-else-if="activeRulesTab==='运费规则'" class="rule-workspace-card">
             <header class="rule-card-head"><div><h2>运费规则列表</h2><p>只读展示渠道已审核发布的正式版本；价格和版本请到基础资料中的对应渠道维护。</p></div><div class="header-actions"><button class="secondary-button" @click="exportRules">导出正式规则</button></div></header>
             <div class="modern-filters">
-              <label class="keyword-search"><span>⌕</span><input v-model="keyword" :placeholder="searchMode==='name'?'搜索规则名称':'搜索英文名称'" @keyup.enter="page=1"></label>
-              <div class="search-mode"><button :class="{ active:searchMode==='name' }" @click="searchMode='name';page=1">规则名称</button><button :class="{ active:searchMode==='english' }" @click="searchMode='english';page=1">英文名称</button></div>
+              <label class="keyword-search"><span>⌕</span><input v-model="keyword" :placeholder="searchMode==='name'?'搜索规则、物流商或渠道':'搜索渠道编码'" @keyup.enter="page=1"></label>
+              <div class="search-mode"><button :class="{ active:searchMode==='name' }" @click="searchMode='name';page=1">名称</button><button :class="{ active:searchMode==='code' }" @click="searchMode='code';page=1">渠道编码</button></div>
               <select v-model="typeFilter" @change="page=1"><option value="">全部类型</option><option>专线</option><option>挂号</option><option>free</option></select>
               <select v-model="statusFilter" @change="page=1"><option value="">全部启用状态</option><option>启用</option><option>禁用</option></select>
               <div class="change-chips"><button :class="{ active:changeFilter==='pending' }" @click="changeFilter=changeFilter==='pending'?'':'pending';page=1">有新版本待审核</button><button :class="{ active:changeFilter==='up' }" @click="changeFilter=changeFilter==='up'?'':'up';page=1">价格上涨</button><button :class="{ active:changeFilter==='down' }" @click="changeFilter=changeFilter==='down'?'':'down';page=1">价格下降</button><button :class="{ active:changeFilter==='risk' }" @click="changeFilter=changeFilter==='risk'?'':'risk';page=1">大幅调价</button></div>
               <button class="reset-button" @click="typeFilter='';statusFilter='';changeFilter='';keyword='';page=1">重置</button>
               <span class="filter-result">共 {{ filtered.length }} 条</span>
             </div>
-            <div class="modern-table-scroll"><table class="modern-rule-table"><thead><tr><th>规则信息</th><th>类型 / 关联</th><th>正式版本</th><th>维护信息</th><th>启用状态</th><th>操作</th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td class="rule-name-cell"><b>{{ rule.name }}</b><small>{{ rule.englishName || '暂无英文名称' }}</small></td><td><span class="rule-type">{{ rule.type }}</span><small>{{ rule.relations.length }} 个关联渠道</small></td><td><span class="status-pill success">{{ rule.published }} · 已发布</span></td><td class="maintenance-cell"><b>{{ rule.users.split('|')[1] || rule.users.split('|')[0] || '—' }}</b><small>{{ rule.dates.split('|')[1] || rule.dates.split('|')[0] || '暂无时间' }}</small></td><td><span class="status-pill" :class="rule.status==='启用'?'success':'disabled'">{{ rule.status }}</span></td><td class="modern-ops"><button class="area-button" @click="openAreas(rule)">查看区域</button><button class="edit-button" @click="toggleRule(rule)">{{ rule.status==='启用'?'禁用':'启用' }}</button></td></tr><tr v-if="!visibleRules.length"><td colspan="6" class="modern-empty">当前没有已审核发布的正式运费规则</td></tr></tbody></table></div>
+            <div class="modern-table-scroll"><table class="modern-rule-table"><colgroup><col class="col-rule"><col class="col-provider"><col class="col-channel"><col class="col-code"><col class="col-count"><col class="col-count"><col class="col-version"><col class="col-status"><col class="col-action"></colgroup><thead><tr><th>规则名称</th><th>物流商</th><th>渠道</th><th>渠道编码</th><th>区域数</th><th>价格段</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="rule in visibleRules" :key="rule.id"><td class="rule-name-cell"><b>{{ rule.name }}</b><small>{{ rule.type }}</small></td><td>{{ rule.relations[0]?.carrier || '—' }}</td><td>{{ rule.relations[0]?.channel || '—' }}</td><td><code class="channel-code" :title="rule.relations[0]?.channelCode || '—'">{{ rule.relations[0]?.channelCode || '—' }}</code></td><td>{{ rule.areaCount }}</td><td>{{ rule.priceRowCount }}</td><td><span class="status-pill success">{{ rule.published }}</span></td><td><span class="status-pill" :class="rule.status==='启用'?'success':'disabled'">{{ rule.status }}</span></td><td class="modern-ops"><button class="area-button" @click="openAreas(rule)">查看区域</button></td></tr><tr v-if="!visibleRules.length"><td colspan="9" class="modern-empty">当前没有已审核发布的正式运费规则</td></tr></tbody></table></div>
             <footer class="modern-pagination"><span>共 {{ filtered.length }} 条正式规则</span><label>每页<select v-model.number="pageSize" @change="page=1"><option>10</option><option>20</option><option>50</option><option>100</option></select>条</label><button :disabled="page===1" @click="page=Math.max(1,page-1)">上一页</button><b>{{ page }} / {{ pages }}</b><button :disabled="page===pages" @click="page=Math.min(pages,page+1)">下一页</button></footer>
+          </section>
+
+          <section v-else-if="activeRulesTab==='国家区域'" class="published-panel country-summary-grid">
+            <article v-for="country in publishedCountries" :key="country.code||country.name"><b>{{ country.name }}</b><code>{{ country.code || '—' }}</code><small>正式版本可用区域</small></article>
+            <div v-if="!publishedCountries.length" class="modern-empty">正式版本暂无国家区域</div>
+          </section>
+
+          <section v-else-if="activeRulesTab==='重量限制'" class="published-panel detail-panel">
+            <header><div><h2>重量限制</h2><p>选择正式渠道后按需加载重量段，不在首屏下载全部价格数据。</p></div><label>正式规则<select v-model.number="detailRuleId" @change="changeDetailRule"><option v-for="rule in rules" :key="rule.id" :value="rule.id">{{ rule.name }} · {{ rule.relations[0]?.channelCode }}</option></select></label></header>
+            <div v-if="detailLoading" class="modern-empty">正在加载正式价格段…</div><div v-else-if="detailError" class="modern-empty error-text">{{ detailError }}</div>
+            <div v-else class="modern-table-scroll"><table class="published-data-table weight-table"><thead><tr><th>国家区域</th><th>重量范围</th><th>计泡系数</th><th>最长边</th><th>最大周长</th><th>商品限制</th></tr></thead><tbody><tr v-for="(row,index) in detailWeightRows" :key="`${row.countryCode}-${row.weightFromKg}-${index}`"><td><b>{{ row.areaName }}</b><small>{{ row.countryCode || '—' }}</small></td><td>{{ gramsFromKg(row.weightFromKg) }}～{{ gramsFromKg(row.weightToKg) }} g</td><td>{{ row.volumeDivisor || '—' }}</td><td>{{ row.maxSideCm ? `${row.maxSideCm} cm` : '—' }}</td><td>{{ row.maxPerimeterCm ? `${row.maxPerimeterCm} cm` : '—' }}</td><td>{{ row.prohibitedMarks || (row.prohibitGeneralCargo?'禁止普货':'无限制') }}</td></tr><tr v-if="!detailWeightRows.length"><td colspan="6" class="modern-empty">该正式版本暂无重量段</td></tr></tbody></table></div>
+          </section>
+
+          <section v-else class="published-panel freight-calculator">
+            <div class="calculator-form"><p>FREIGHT CALCULATOR</p><h2>正式规则运费试算</h2><label>正式规则<select v-model.number="detailRuleId" @change="changeDetailRule"><option v-for="rule in rules" :key="rule.id" :value="rule.id">{{ rule.name }} · {{ rule.relations[0]?.channelCode }}</option></select></label><label>目的国家 / 区域<select v-model="calcCountry" :disabled="detailLoading"><option v-for="country in detailCountries" :key="country">{{ country }}</option></select></label><label>计费重量（g）<input v-model.number="calcWeightG" type="number" min="1" step="1"></label><small v-if="detailLoading">正在加载正式价格段…</small><small v-else-if="detailError" class="error-text">{{ detailError }}</small></div>
+            <div class="calculator-result"><small>试算结果 CNY</small><strong v-if="calcResult">¥ {{ calcResult.total.toFixed(2) }}</strong><strong v-else>暂无匹配价格</strong><template v-if="calcResult"><p><span>计费区间</span><b>{{ gramsFromKg(calcResult.price.weightFromKg) }}～{{ gramsFromKg(calcResult.price.weightToKg) }} g</b></p><p><span>每 1000g 运费</span><b>¥ {{ calcResult.price.pricePerKg }}</b></p><p><span>挂号费</span><b>¥ {{ calcResult.price.registrationFee }}</b></p><p v-if="calcResult.surcharge"><span>附加费</span><b>¥ {{ calcResult.surcharge.toFixed(2) }}</b></p><p><span>预计时效</span><b>{{ calcResult.price.etaMinDays }}～{{ calcResult.price.etaMaxDays }} 天</b></p></template></div>
           </section>
         </template>
         <section v-else class="base-settings">
-          <div class="base-toolbar"><div><h2>物流商与渠道版本</h2><p>完整 Excel 快照先进入草稿审核；只有发布后的价格版本才参与业务报价。</p></div><div class="provider-toolbar"><label>⌕<input v-model="providerSearch" placeholder="搜索物流商或编码"></label><button class="outline-orange" @click="triggerTemplateUpload('','global-import')">全局批量导入</button><button class="outline-orange" @click="showProviderEditor=true">＋ 新增物流商</button></div></div>
+          <div class="base-toolbar"><div><h2>物流商与渠道版本</h2><p>完整 Excel 快照先进入草稿审核；只有发布后的价格版本才参与业务报价。</p></div><div class="provider-toolbar"><label>⌕<input v-model="providerSearch" placeholder="搜索物流商或编码"></label><button v-if="showBlockedOnly" class="blocked-filter-button" @click="clearBlockedFilter">正在查看阻断草稿 ×</button><button class="outline-orange" @click="triggerTemplateUpload('','global-import')">全局批量导入</button><button class="outline-orange" @click="showProviderEditor=true">＋ 新增物流商</button></div></div>
           <input ref="templateInput" class="hidden-file" type="file" multiple accept=".xlsx" @change="handleTemplateUpload">
           <div class="provider-manager">
             <aside class="provider-list"><div class="provider-sort-hint"><span>物流商列表</span><small>正式渠道数据仓库</small></div><div class="provider-list-scroll"><button v-for="provider in filteredProviderSettings" :key="provider.id" :class="{ active:selectedProvider?.id===provider.id }" @click="selectedProviderId=provider.id"><u>⋮⋮</u><i>{{ provider.name.slice(0,1) }}</i><span><b>{{ provider.name }}</b><small>{{ provider.code }}</small></span><em>{{ providerChannelCount(provider) }}个渠道</em><strong>›</strong></button><div v-if="!filteredProviderSettings.length" class="provider-empty">没有匹配的物流商</div></div><footer>共 {{ providerSettings.length }} 家物流商</footer></aside>
@@ -609,12 +690,13 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
 .rule-stat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}.rule-stat-grid article{min-width:0;display:flex;align-items:center;gap:14px;padding:18px 20px;border:1px solid #e0e6ea;border-radius:11px;background:#fff;box-shadow:0 7px 22px rgba(29,42,53,.045)}.stat-icon{flex:0 0 42px;width:42px;height:42px;display:grid;place-items:center;border-radius:50%;font-size:15px;font-weight:900}.stat-icon.orange{background:#fff0d7;color:#d87700}.stat-icon.green{background:#e5f6ec;color:#178955}.stat-icon.blue{background:#e9f3f9;color:#347eaa}.stat-icon.amber{background:#fff5df;color:#b57a11}.rule-stat-grid article div{min-width:0;display:grid;grid-template-columns:1fr auto;align-items:end;gap:2px 10px}.rule-stat-grid small{color:#75818b;font-size:10px}.rule-stat-grid b{grid-row:1/3;grid-column:2;font-size:25px;line-height:1;color:#18252f}.rule-stat-grid em{color:#9aa3aa;font-size:9px;font-style:normal;white-space:nowrap}
 .rule-workspace-card,.area-workspace-card{overflow:visible;border:1px solid #dfe5e9;border-radius:12px;background:#fff;box-shadow:0 8px 28px rgba(30,44,56,.05)}.rule-card-head{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 22px;border-bottom:1px solid #e6ebee}.rule-card-head h2{margin:0 0 5px;font-size:18px}.rule-card-head p{margin:0;color:#7a8790;font-size:11px}.header-actions{display:flex;align-items:center;gap:9px}.primary-button,.primary-orange{height:38px;padding:0 18px;border:0;border-radius:7px;background:#ff9411!important;color:#fff!important;font-weight:850;box-shadow:0 5px 13px rgba(223,119,0,.16)}.primary-button:hover,.primary-orange:hover{background:#ed8500!important}.secondary-button,.reset-button,.cancel-button,.back-button{height:36px;padding:0 14px;border:1px solid #d7e0e5;border-radius:7px;background:#fff;color:#50606c;font-weight:750}.secondary-button:hover,.reset-button:hover,.cancel-button:hover,.back-button:hover{border-color:#f0b15b;background:#fffaf2;color:#c86e00}
 .modern-filters{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 22px;background:#f8fafb;border-bottom:1px solid #e6ebee}.modern-filters select{box-sizing:border-box;height:37px;min-width:130px;padding:0 31px 0 11px;border:1px solid #d8e1e6;border-radius:7px;background:#fff;color:#53616c}.keyword-search{width:min(290px,100%);height:37px;box-sizing:border-box;display:flex;align-items:center;gap:7px;padding:0 11px;border:1px solid #d8e1e6;border-radius:7px;background:#fff;color:#7a8791}.keyword-search:focus-within{border-color:#f3a33a;box-shadow:0 0 0 3px rgba(255,148,17,.1)}.keyword-search input{min-width:0;width:100%;border:0;outline:0;background:transparent;color:#26343e}.search-mode{display:flex;height:37px;padding:3px;border-radius:7px;background:#e9eef1}.search-mode button{padding:0 11px;border:0;border-radius:5px;background:transparent;color:#73808a;font-size:10px;font-weight:750}.search-mode button.active{background:#fff;color:#d87800;box-shadow:0 2px 7px rgba(38,51,61,.1)}.reset-button{height:37px}.filter-result{margin-left:auto;color:#78848e;font-size:11px}
-.modern-table-scroll{max-width:100%;overflow-x:auto;overflow-y:visible}.modern-rule-table,.modern-area-table{width:100%;min-width:1050px;border-collapse:separate;border-spacing:0;table-layout:auto}.modern-rule-table th,.modern-area-table th{height:39px;padding:0 14px;border:0;border-bottom:1px solid #e1e7eb;background:#f4f7f8;color:#66747e;text-align:left;font-size:10px;font-weight:800}.modern-rule-table td,.modern-area-table td{height:58px;padding:10px 14px;border:0;border-bottom:1px solid #edf1f3;color:#26343e;text-align:left;line-height:1.45;vertical-align:middle}.modern-rule-table tbody tr:hover,.modern-area-table tbody tr:hover{background:#fffaf3}.modern-rule-table th:first-child,.modern-rule-table td:first-child,.modern-area-table th:first-child,.modern-area-table td:first-child{width:28px;text-align:center}.modern-rule-table th:last-child,.modern-rule-table td:last-child{width:235px}.modern-area-table th:last-child,.modern-area-table td:last-child{width:126px}.modern-rule-table input[type=checkbox],.modern-area-table input[type=checkbox]{accent-color:#ff9411}.rule-name-cell b,.maintenance-cell b,.price-cell b{display:block;color:#17242e;font-size:12px}.rule-name-cell small,.maintenance-cell small,.price-cell small,.limit-cell small,.modern-rule-table td>small{display:block;margin-top:4px;color:#909aa2;font-size:9px}.rule-type{display:inline-block;margin-bottom:3px;padding:3px 8px;border-radius:10px;background:#fff0da;color:#ce7200;font-size:9px;font-weight:850}.status-pill{display:inline-block;padding:4px 9px;border:1px solid transparent;border-radius:11px;font-size:9px;font-weight:850}.status-pill.success{border-color:#a9dfbf;background:#e9f8ef;color:#16834f}.status-pill.pending{border-color:#f1d49d;background:#fff6e6;color:#a66a05}.status-pill.disabled{border-color:#d6dde1;background:#f1f4f5;color:#68757e}.modern-ops{position:relative;display:flex;align-items:center;gap:7px;white-space:nowrap}.modern-ops>button,.more-wrap>button{height:30px;padding:0 10px;border-radius:6px;background:#fff;font-size:10px;font-weight:800}.area-button{border:1px solid #ff9411;color:#cf7200}.edit-button{border:1px solid #d5dee3;color:#435662}.more-button{min-width:32px;border:1px solid #d5dee3!important;color:#62717c;letter-spacing:1px}.more-wrap{position:relative}.more-popover{position:absolute;z-index:25;right:0;top:36px;width:125px;padding:6px;border:1px solid #dfe5e9;border-radius:8px;background:#fff;box-shadow:0 10px 28px rgba(27,40,50,.18)}.more-popover button{width:100%;height:32px;padding:0 9px;border:0;border-radius:5px;background:#fff;color:#43535e;text-align:left;font-size:10px}.more-popover button:hover{background:#f5f7f8}.more-popover button.danger{color:#cf4e41}.modern-empty{height:120px!important;color:#939da4!important;text-align:center!important}
+.modern-table-scroll{max-width:100%;overflow-x:auto;overflow-y:visible}.modern-rule-table,.modern-area-table{width:100%;min-width:1050px;border-collapse:separate;border-spacing:0;table-layout:auto}.modern-rule-table th,.modern-area-table th{height:39px;padding:0 14px;border:0;border-bottom:1px solid #e1e7eb;background:#f4f7f8;color:#66747e;text-align:left;font-size:10px;font-weight:800}.modern-rule-table td,.modern-area-table td{height:58px;padding:10px 14px;border:0;border-bottom:1px solid #edf1f3;color:#26343e;text-align:left;line-height:1.45;vertical-align:middle}.modern-rule-table tbody tr:hover,.modern-area-table tbody tr:hover{background:#fffaf3}.modern-rule-table th:first-child,.modern-rule-table td:first-child{width:auto;text-align:left}.modern-area-table th:first-child,.modern-area-table td:first-child{width:190px;text-align:left}.modern-rule-table th:last-child,.modern-rule-table td:last-child{width:auto}.modern-area-table th:last-child,.modern-area-table td:last-child{width:126px}.modern-rule-table .col-rule{width:16%}.modern-rule-table .col-provider{width:11%}.modern-rule-table .col-channel{width:15%}.modern-rule-table .col-code{width:15%}.modern-rule-table .col-count{width:7%}.modern-rule-table .col-version{width:9%}.modern-rule-table .col-status{width:8%}.modern-rule-table .col-action{width:9%}.modern-rule-table input[type=checkbox],.modern-area-table input[type=checkbox]{accent-color:#ff9411}.rule-name-cell b,.maintenance-cell b,.price-cell b{display:block;color:#17242e;font-size:12px}.rule-name-cell small,.maintenance-cell small,.price-cell small,.limit-cell small,.modern-rule-table td>small{display:block;margin-top:4px;color:#909aa2;font-size:9px}.rule-type{display:inline-block;margin-bottom:3px;padding:3px 8px;border-radius:10px;background:#fff0da;color:#ce7200;font-size:9px;font-weight:850}.status-pill{display:inline-block;padding:4px 9px;border:1px solid transparent;border-radius:11px;font-size:9px;font-weight:850}.status-pill.success{border-color:#a9dfbf;background:#e9f8ef;color:#16834f}.status-pill.pending{border-color:#f1d49d;background:#fff6e6;color:#a66a05}.status-pill.disabled{border-color:#d6dde1;background:#f1f4f5;color:#68757e}.modern-ops{position:relative;display:flex;align-items:center;gap:7px;white-space:nowrap}.modern-ops>button,.more-wrap>button{height:30px;padding:0 10px;border-radius:6px;background:#fff;font-size:10px;font-weight:800}.area-button{border:1px solid #ff9411;color:#cf7200}.edit-button{border:1px solid #d5dee3;color:#435662}.more-button{min-width:32px;border:1px solid #d5dee3!important;color:#62717c;letter-spacing:1px}.more-wrap{position:relative}.more-popover{position:absolute;z-index:25;right:0;top:36px;width:125px;padding:6px;border:1px solid #dfe5e9;border-radius:8px;background:#fff;box-shadow:0 10px 28px rgba(27,40,50,.18)}.more-popover button{width:100%;height:32px;padding:0 9px;border:0;border-radius:5px;background:#fff;color:#43535e;text-align:left;font-size:10px}.more-popover button:hover{background:#f5f7f8}.more-popover button.danger{color:#cf4e41}.modern-empty{height:120px!important;color:#939da4!important;text-align:center!important}
 .modern-pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-height:52px;box-sizing:border-box;padding:8px 18px;border-radius:0 0 12px 12px;border-top:0;background:#fafbfc;color:#75818a;font-size:10px}.modern-pagination>span{margin-right:auto}.modern-pagination label{display:flex;align-items:center;gap:5px}.modern-pagination select{height:30px;border:1px solid #d8e0e5;border-radius:5px;background:#fff}.modern-pagination button{height:30px;padding:0 11px;border:1px solid #d8e0e5;border-radius:5px;background:#fff;color:#52626d}.modern-pagination button:disabled{opacity:.42;cursor:not-allowed}.modern-pagination b{color:#34434d}
 .area-page-head{display:flex;align-items:flex-end;gap:18px;margin-bottom:20px}.area-page-head>div{flex:1}.area-page-head p{margin:0 0 7px;color:#d97700;font-size:10px;font-weight:900;letter-spacing:.18em}.area-page-head h1{margin:0 0 6px;font-size:28px}.area-page-head span{color:#78848e;font-size:11px}.back-button{align-self:center}.area-page-head>.primary-button{align-self:center}.area-workspace-card{overflow:hidden}.area-toolbar{display:flex;align-items:center;gap:12px;padding:15px 18px;border-bottom:1px solid #e4eaed;background:#fff}.area-toolbar>label{width:290px;height:37px;box-sizing:border-box;display:flex;align-items:center;gap:7px;padding:0 11px;border:1px solid #d8e1e6;border-radius:7px;color:#7b8790}.area-toolbar input{min-width:0;width:100%;border:0;outline:0}.area-toolbar>div{display:flex;gap:7px}.area-toolbar>span{margin-left:auto;color:#78848d;font-size:10px}.limit-cell span{display:block;color:#42535e}.danger-outline{border-color:#edb5ae!important;color:#bd4b40!important;background:#fff!important}
 .mask{backdrop-filter:blur(3px);background:rgba(17,27,35,.48)}.modal,.modal.small,.modal.area-modal{overflow:hidden;border:1px solid #e0e6ea;border-radius:12px;background:#fff;box-shadow:0 22px 60px rgba(18,29,38,.24)}.modal header{min-height:66px;height:auto;box-sizing:border-box;display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #e5eaed;background:#fff;color:#192730}.modal header>div{display:grid;gap:4px}.modal header small{color:#d87800;font-size:8px;font-weight:900;letter-spacing:.16em}.modal header b{font-size:17px}.modal header>button{width:32px;height:32px;display:grid;place-items:center;margin-left:auto;border:0;border-radius:50%;background:#f3f5f6;color:#71808a;font-size:20px}.form{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:22px}.form label{display:grid;grid-template-columns:1fr;align-items:initial;gap:7px;color:#62707b;font-size:10px}.form input,.form select,.simple-form input,.simple-form select{box-sizing:border-box;width:100%;height:38px;border:1px solid #d7e0e5;border-radius:7px;padding:0 10px;background:#fff;color:#273640}.form input:focus,.form select:focus,.simple-form input:focus,.simple-form select:focus{outline:0;border-color:#f2a23a;box-shadow:0 0 0 3px rgba(255,148,17,.1)}.modal footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid #e4e9ec;background:#fafbfc}.modal footer button{height:38px;padding:0 18px;border-radius:7px}.check{display:flex;align-items:flex-start;gap:11px;margin:24px;padding:18px;border:1px solid #e1e7ea;border-radius:8px;background:#fafbfc}.check input{margin-top:3px;accent-color:#ff9411}.check span{display:grid;gap:4px}.check small{color:#87929a}.toast{right:28px;bottom:28px;border-radius:8px;background:#1e2b34;box-shadow:0 10px 30px rgba(16,25,32,.25)}
 .base-settings,.provider-list,.provider-detail,.codes-card,.country-region-panel,.country-directory-table{box-shadow:0 5px 18px rgba(30,44,56,.035)}.provider-list-scroll{background:#f7f9fa}.template-dropzone{transition:border-color .15s,background .15s}.save-settings{border-radius:0 0 12px 12px}.base-settings button,.rule-workspace-card button,.area-workspace-card button,.modal button{cursor:pointer}
-@media(max-width:1180px){.rule-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.rule-card-head{align-items:flex-start}.header-actions{flex-wrap:wrap;justify-content:flex-end}.modern-table-scroll{overflow-x:auto}.modern-rule-table,.modern-area-table{min-width:980px}.more-popover{position:fixed;right:5vw;top:auto}}
+.published-summary{display:flex;align-items:center;gap:13px;margin-bottom:13px;padding:15px 20px;border:1px solid #e0e6ea;border-radius:11px;background:#fff;color:#6d7982;box-shadow:0 7px 22px rgba(29,42,53,.045)}.published-summary span,.published-summary button{display:flex;align-items:baseline;gap:5px}.published-summary b{color:#17242e;font-size:22px}.published-summary i{color:#c4cbd0;font-style:normal}.published-summary button{padding:0;border:0;background:transparent;color:#c7473c;font:inherit}.published-summary button b{color:#c7473c}.published-tabs{display:flex;gap:4px;margin-bottom:14px;padding:5px;border-radius:9px;background:#e9edf0}.published-tabs button{flex:1;height:39px;border:0;border-radius:6px;background:transparent;color:#65717b}.published-tabs button.active{background:#fff;color:#171f26;font-weight:850;box-shadow:0 2px 10px #21303e12}.published-panel{overflow:hidden;border:1px solid #dfe5e9;border-radius:12px;background:#fff;box-shadow:0 8px 28px rgba(30,44,56,.05)}.provider-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:16px}.provider-summary-grid article{display:flex;align-items:center;gap:12px;min-width:0;padding:16px;border:1px solid #e2e7ea;border-radius:9px}.provider-summary-grid article>i{flex:0 0 38px;width:38px;height:38px;display:grid;place-items:center;border-radius:9px;background:#fff0d9;color:#c97000;font-style:normal;font-weight:900}.provider-summary-grid article>div{min-width:0;display:grid;gap:4px}.provider-summary-grid article>div b,.provider-summary-grid article>div small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-summary-grid article>div small{color:#8b969e}.provider-summary-grid article>span{margin-left:auto;color:#72808a;font-size:9px;line-height:1.7;text-align:right}.provider-summary-grid article>span em{color:#c7473c;font-style:normal}.published-data-table{width:100%;min-width:900px;border-collapse:separate;border-spacing:0;table-layout:auto}.published-data-table th,.published-data-table td{height:44px;padding:8px 14px;border:0;border-bottom:1px solid #edf1f3;text-align:left}.published-data-table th{background:#f4f7f8;color:#66747e;font-size:10px}.published-data-table th:first-child,.published-data-table td:first-child{width:auto;text-align:left}.published-data-table td small{display:block;margin-top:4px;color:#909aa2}.channel-code{display:block;max-width:220px;overflow:hidden;color:#2c647f;text-overflow:ellipsis;white-space:nowrap}.blocked-link{padding:0;border:0;background:transparent;color:#c7473c;font-weight:800}.country-summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;padding:16px}.country-summary-grid article{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px;padding:13px;border:1px solid #e2e7ea;border-radius:8px}.country-summary-grid article b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.country-summary-grid article code{color:#c97000}.country-summary-grid article small{grid-column:1/-1;color:#8b969e}.detail-panel>header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 20px;border-bottom:1px solid #e6ebee}.detail-panel>header h2{margin:0 0 5px}.detail-panel>header p{margin:0;color:#7a8790}.detail-panel>header label{display:grid;gap:5px;color:#71808a;font-size:9px}.detail-panel select,.calculator-form select,.calculator-form input{min-width:300px;height:38px;box-sizing:border-box;border:1px solid #d7e0e5;border-radius:6px;padding:0 10px;background:#fff}.weight-table{min-width:1050px}.error-text{color:#c7473c!important}.freight-calculator{display:grid;grid-template-columns:minmax(0,1fr) 360px}.calculator-form{display:grid;gap:13px;padding:28px}.calculator-form>p{margin:0;color:#d77b00;font-size:10px;font-weight:900;letter-spacing:.16em}.calculator-form h2{margin:0 0 8px}.calculator-form label{display:grid;gap:6px;color:#71808a;font-size:10px}.calculator-result{padding:30px;background:#1b2630;color:#fff}.calculator-result>small{color:#aeb7bf}.calculator-result>strong{display:block;margin:10px 0 25px;color:#ffad38;font-size:28px}.calculator-result p{display:flex;justify-content:space-between;gap:15px;margin:0;padding:9px 0;border-top:1px solid #34414c;font-size:11px}.calculator-result p span{color:#aab4bd}.blocked-filter-button{height:38px;padding:0 12px;border:1px solid #e9a9a2;border-radius:7px;background:#fff3f1;color:#be4237;font-weight:800}
+@media(max-width:1180px){.rule-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.rule-card-head{align-items:flex-start}.header-actions{flex-wrap:wrap;justify-content:flex-end}.modern-table-scroll{overflow-x:auto}.modern-rule-table,.modern-area-table{min-width:980px}.provider-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.country-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.more-popover{position:fixed;right:5vw;top:auto}}
 @media(max-width:900px){.workspace{width:94vw;min-width:0}.rule-card-head,.area-page-head{align-items:flex-start;flex-direction:column}.header-actions{width:100%;justify-content:flex-start}.area-page-head>.primary-button{align-self:flex-start}.modern-filters{align-items:stretch}.keyword-search{width:100%}.filter-result{width:100%;margin-left:0}.area-toolbar{align-items:flex-start;flex-wrap:wrap}.area-toolbar>label{width:100%}.area-toolbar>span{width:100%;margin-left:0}.form{grid-template-columns:1fr}.modal,.modal.area-modal{width:min(680px,92vw);max-height:90vh;overflow:auto}}
 @media(max-width:620px){.rule-stat-grid{grid-template-columns:1fr}.rule-stat-grid article{padding:14px 16px}.header-actions{display:grid;grid-template-columns:1fr 1fr}.header-actions .primary-button{grid-column:1/-1}.header-actions button{width:100%}.modern-filters select{flex:1}.search-mode{width:100%}.search-mode button{flex:1}.modern-pagination{flex-wrap:wrap}.modern-pagination>span{width:100%;margin:0}.area-toolbar>div{width:100%;overflow-x:auto}.milano-heading h1,.area-page-head h1{font-size:24px}.provider-toolbar{flex-direction:column;align-items:stretch}.provider-toolbar label{width:100%}.provider-detail-actions{align-items:stretch;flex-direction:column}.provider-detail-actions .upload{width:100%;margin:0}.modal footer{position:sticky;bottom:0}}
 .version-table .template-table-head,.version-table .template-table-row{min-width:1060px;grid-template-columns:minmax(180px,1.3fr) minmax(180px,1.2fr) 120px 105px 150px 220px}.version-table .template-table-row>div>strong,.version-table .template-table-row>div>small{display:block}.version-table .template-table-row>div>small{color:#8c979f;font-size:9px}.import-review-modal{width:min(1180px,94vw);max-height:92vh}.review-body{padding:20px;overflow:auto;max-height:72vh}.review-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:16px}.review-stats article{display:grid;gap:7px;padding:14px;border:1px solid #e1e7ea;border-radius:8px;background:#f8fafb}.review-stats small{color:#7d8992}.review-stats b{font-size:23px}.review-stats .added b{color:#168951}.review-stats .changed b{color:#d47900}.review-stats .removed b,.review-stats .risk b{color:#cf493d}.issue-list{display:grid;gap:5px;margin-bottom:16px;padding:14px;border:1px solid #efd5ad;border-radius:8px;background:#fff9ef}.issue-list span{font-size:10px}.issue-list span.error{color:#c83f35}.issue-list span.warning{color:#a46a0b}.diff-table{border:1px solid #e0e6ea;border-radius:8px;overflow:auto}.diff-head,.diff-row{min-width:900px;display:grid;grid-template-columns:90px 230px minmax(350px,1fr) 120px;align-items:center;gap:12px;padding:10px 14px}.diff-head{background:#f3f6f8;color:#6a7781;font-size:10px;font-weight:800}.diff-row{border-top:1px solid #edf0f2}.diff-row strong{width:max-content;padding:4px 8px;border-radius:10px;font-size:9px}.diff-row strong.added{background:#e4f6eb;color:#16894f}.diff-row strong.price{background:#fff0d7;color:#c97100}.diff-row strong.removed{background:#ffe9e7;color:#c7463b}.diff-row strong.rule{background:#e8f2fb;color:#307ba7}.diff-row small{color:#65727c}.diff-row em{color:#77909d;font-style:normal}.diff-row em.danger{color:#cc3f35;font-weight:800}.audit-note{display:grid;gap:7px;margin-top:16px;font-weight:800}.audit-note textarea{min-height:70px;resize:vertical;border:1px solid #d7e0e5;border-radius:7px;padding:10px;font:inherit}.removal-confirm{display:flex;align-items:center;gap:8px;margin-top:12px;padding:12px;border:1px solid #efc1bc;border-radius:7px;background:#fff3f1;color:#b83d33;font-weight:750}.history-modal{width:min(1040px,94vw);max-height:90vh}.history-list{display:grid;gap:10px;max-height:70vh;overflow:auto;padding:18px}.history-list article{display:grid;grid-template-columns:88px minmax(240px,1fr) 270px 160px;align-items:center;gap:15px;padding:15px;border:1px solid #e1e7ea;border-radius:9px}.version-status{width:max-content;padding:5px 9px;border-radius:12px;background:#eef2f4;color:#687681;font-size:9px;font-weight:800}.version-status.published{background:#e4f6eb;color:#16894f}.version-status.draft{background:#fff0d7;color:#c97100}.history-list article>div>b,.history-list article>div>small{display:block}.history-list article>div>small{margin-top:4px;color:#85919a;font-size:9px}.history-list p{margin:7px 0 0;color:#5d6b76;font-size:10px}.history-summary{display:flex;flex-wrap:wrap;gap:6px}.history-summary span{padding:4px 7px;border-radius:10px;background:#f2f5f7;color:#64727d;font-size:9px}.history-actions{display:flex;justify-content:flex-end;gap:8px}.history-actions button{border:0;background:none;color:#247cb0}.history-actions .rollback{color:#d67700;font-weight:800}.primary-orange:disabled{cursor:not-allowed;opacity:.45}@media(max-width:900px){.review-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.history-list article{grid-template-columns:80px 1fr}.history-summary,.history-actions{grid-column:2}}

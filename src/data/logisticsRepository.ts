@@ -250,7 +250,7 @@ export function workspaceLogisticsRules(state: LogisticsWorkspaceState): Logisti
     const version = state.versions.find(item => item.id === channel.currentVersionId && item.status === 'published')
     if (!version) return null
     return {
-      id: channel.ruleId, name: channel.name, englishName: channel.code.toLowerCase(), type: channel.type, currency: 'CNY',
+      id: channel.ruleId, name: channel.name, englishName: '', type: channel.type, currency: 'CNY',
       published: `V${version.versionNumber}`, status: channel.enabled && provider?.enabled ? '启用' : '禁用',
       dates: `${channel.createdAt}|${channel.updatedAt}`, users: `${version?.importedBy || ''}|${version?.publishedBy || ''}`,
       relations: [{ carrier: provider?.name || '', channel: channel.name, channelCode: channel.code, discounts: '-\n-' }],
