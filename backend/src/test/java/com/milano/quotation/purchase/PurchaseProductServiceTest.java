@@ -53,6 +53,8 @@ class PurchaseProductServiceTest {
         assertEquals("AB12", created.path("sku").asText());
         assertEquals("真实商品", service.get("ab 12").path("name").asText());
         assertTrue(service.exists("AB12"));
+        assertEquals("AB12", service.page(" ab 12 ", PageRequest.of(0, 10)).getContent().getFirst().path("sku").asText());
+        verify(products, never()).search(eq("ab 12"), any());
         when(products.search("AB", PageRequest.of(0, 10)))
                 .thenReturn(new PageImpl<>(List.of(rows.get("AB12"))));
         assertEquals(1, service.page(" AB ", PageRequest.of(0, 10)).getTotalElements());

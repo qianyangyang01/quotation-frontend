@@ -20,7 +20,7 @@ import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
 import { australiaQuoteRegions, calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
-import { findPurchaseProduct, loadPurchaseProduct, loadPurchaseProducts, purchaseDisplayName, purchaseFreightChoices, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseFreightChoices, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
 import { calculateFinanceQuoteTax, FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings, type TaxCustomerType } from '@/data/financeTaxSettings'
@@ -40,6 +40,19 @@ import {
   saveFinanceCountrySettings,
   type CustomerGrade,
 } from '@/data/financeChannelPolicies'
+import {
+  bundleDomesticFreight as calculateBundleDomesticFreight,
+  bundleGoodsWeight as calculateBundleGoodsWeight,
+  bundlePurchaseCost as calculateBundlePurchaseCost,
+  hasQuotationProduct,
+  monthlySalesTierLabel as calculateMonthlySalesTierLabel,
+  normalizedQuoteQuantity,
+  purchasePriceForMonthlySales as calculatePurchasePriceForMonthlySales,
+  singleActualWeight as calculateSingleActualWeight,
+  singleChargeWeight,
+  singleShipmentDimensions,
+  usdPriceFromCny as convertCnyToUsd,
+} from '@/services/quotationCalculator'
 
 const displayGrams = (weightKg: number) => Math.ceil((Number.isFinite(weightKg) ? weightKg : 0) * 1000)
 function ruleSupportsShipment(rule: (typeof logisticsRules)[number], country: string, weightKg: number, logisticsAttribute: string) {
@@ -113,14 +126,11 @@ let draftTimer = 0
 let draftSavePromise: Promise<void> | null = null
 let lastSavedDraftSignature = ''
 let leaveDecision: ((allowed: boolean) => void) | null = null
-function monthlySalesPurchaseQuantity(value = monthlySalesEstimate.value) {
-  return value === '100+' ? 100 : value === '100' ? 10 : 1
-}
 function monthlySalesTierLabel(value = monthlySalesEstimate.value) {
-  return value === '100+' ? '100件采购价' : value === '100' ? '10件采购价' : '1件参考价'
+  return calculateMonthlySalesTierLabel(value)
 }
 function purchasePriceForMonthlySales(record: PurchaseProductRecord) {
-  return purchaseUnitPrice(record, monthlySalesPurchaseQuantity())
+  return calculatePurchasePriceForMonthlySales(record, monthlySalesEstimate.value)
 }
 const initialLogisticsAttribute = quotationAttributeOptions[0] || '普货'
 const initialCountry = financeCountryOptionsForCategory(financePolicies, initialLogisticsAttribute, financeCountrySettings.value)[0]?.name || ''
@@ -174,58 +184,33 @@ function bundleItemFromRecord(record?: PurchaseProductRecord): BundleQuoteItem {
   }
 }
 const bundleItems = ref<BundleQuoteItem[]>([bundleItemFromRecord()])
-function normalizedBundleSets(value: number) { return Math.max(1, Math.floor(Number(value) || 1)) }
+function normalizedBundleSets(value: number) { return normalizedQuoteQuantity(value) }
 function bundlePurchaseCost(sets = 1) {
-  const setCount = normalizedBundleSets(sets)
-  return bundleItems.value.reduce((sum, item) => {
-    const record = findPurchaseProduct(purchaseRecords.value, item.sku)
-    const purchasePrice = record ? purchasePriceForMonthlySales(record) : item.purchaseUnitPrice
-    return sum + purchasePrice * normalizedBundleSets(item.quantityPerSet) * setCount
-  }, 0)
+  return calculateBundlePurchaseCost(bundleItems.value, purchaseRecords.value, monthlySalesEstimate.value, sets)
 }
 function bundleDomesticFreight(sets = 1) {
-  const setCount = normalizedBundleSets(sets)
-  return bundleItems.value.reduce((sum, item) => sum + item.purchaseFreightPerUnit * normalizedBundleSets(item.quantityPerSet) * setCount, 0)
+  return calculateBundleDomesticFreight(bundleItems.value, sets)
 }
 function bundleGoodsWeight(sets = 1) {
-  const setCount = normalizedBundleSets(sets)
-  return bundleItems.value.reduce((sum, item) => {
-    const weightKg = item.customWeightKg != null && Number.isFinite(Number(item.customWeightKg))
-      ? Math.max(0, Number(item.customWeightKg))
-      : item.weightKg
-    return sum + weightKg * normalizedBundleSets(item.quantityPerSet) * setCount
-  }, 0)
+  return calculateBundleGoodsWeight(bundleItems.value, sets)
 }
 function purchaseWeight(p: Product) { return quoteMode.value === 'bundle' ? bundleGoodsWeight(1) : p.netWeight * p.quantity }
 function singleActualWeight(p: Product, quantity = Math.max(1, p.quantity)) {
-  const unitWeight = p.weightSource === 'manual' ? p.manualWeight : p.netWeight
-  return Math.max(0, unitWeight) * Math.max(1, quantity)
-}
-function singleVolumeWeight(p: Product, quantity = Math.max(1, p.quantity), divisor = p.volumeDivisor) {
-  if (!p.volumetricEnabled || p.packageLengthCm <= 0 || p.packageWidthCm <= 0 || p.packageHeightCm <= 0) return 0
-  return p.packageLengthCm * p.packageWidthCm * p.packageHeightCm * Math.max(1, quantity) / Math.max(1, divisor)
+  return calculateSingleActualWeight(p, quantity)
 }
 function chargeWeight(p: Product) {
   if (quoteMode.value === 'bundle') return purchaseWeight(p)
-  return Math.max(singleActualWeight(p), singleVolumeWeight(p))
+  return singleChargeWeight(p)
 }
 function singleDimensions(p: Product, quantity = Math.max(1, p.quantity)) {
-  if (!p.volumetricEnabled) return undefined
-  return {
-    lengthCm: Math.max(0, p.packageLengthCm),
-    widthCm: Math.max(0, p.packageWidthCm),
-    heightCm: Math.max(0, p.packageHeightCm),
-    volumeMultiplier: Math.max(1, quantity),
-    volumeDivisor: Math.max(1, Number(p.volumeDivisor) || 8000),
-    defaultVolumeDivisor: 8000,
-  }
+  return singleShipmentDimensions(p, quantity)
 }
 function productCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePurchaseCost(1) : p.purchase * p.quantity }
 function domesticFreight(p: Product) { return quoteMode.value === 'bundle' ? bundleDomesticFreight(1) : p.purchaseFreightPerUnit * p.quantity }
 function totalCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePurchaseCost(1) + bundleDomesticFreight(1) + p.freight : p.purchase + p.purchaseFreightPerUnit + p.freight }
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
 function salePrice(p: Product) { return totalCost(p) * selectedGradeCoefficient() }
-function usdPriceFromCny(cny: number) { return Math.round(cny * 100) / 100 / exchange.value.usd }
+function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
 function taxResult(country: string, provider: string, baseQuoteCny: number, quantity = 1) {
   return calculateFinanceQuoteTax(financeTaxSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), selectedTaxCustomerType.value, quantity)
 }
@@ -393,6 +378,8 @@ async function ensureQuoteLogistics(p: Product) {
     }
     const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal })
     if (controller.signal.aborted) return
+    financePolicies = loadFinanceChannelPolicies()
+    financeTaxSettings.value = loadFinanceTaxSettings()
     logisticsRevision.value = result.revision
     logisticsLoadState.value = result.rules.length ? (result.verified ? 'ready' : 'stale') : 'empty'
     if (!result.rules.length) {
@@ -690,9 +677,7 @@ async function initializeQuotationWorkspace() {
     financeCountrySettings.value = configuration.countrySettings
     financeTaxSettings.value = configuration.taxSettings
     financePolicies = configuration.channelPolicies
-    const [products, readinessState] = await Promise.all([loadPurchaseProducts(), loadQuotationReadiness()])
-    purchaseRecords.value = products
-    readiness.value = readinessState
+    readiness.value = await loadQuotationReadiness()
     const restored = await loadAndRestoreDraft()
     const requestedSku = String(route.query.sku || '').trim()
     if (requestedSku && !restored.exists) { skuSearch.value = requestedSku; markDraftDirty() }
@@ -1058,7 +1043,7 @@ const saveValidationIssues = computed(() => {
   const issues: Array<{ key: string; label: string; message: string }> = []
   const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', taxCustomerType:'税费客户类型', monthlySalesEstimate:'预估月销量' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
-  const hasSku = quoteMode.value === 'bundle' ? bundleItems.value.some(item => !!item.sku) : !!p?.sku
+  const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入一个有效 SKU' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
@@ -1072,7 +1057,7 @@ const saveValidationIssues = computed(() => {
   return issues
 })
 const displayedSaveValidationIssues = computed(() => showSaveValidation.value ? saveValidationIssues.value : [])
-const hasQueriedQuotationProduct = computed(() => quoteMode.value === 'bundle' ? bundleItems.value.some(item => !!item.sku) : !!products.value[0]?.sku)
+const hasQueriedQuotationProduct = computed(() => hasQuotationProduct(quoteMode.value, products.value[0]?.sku || '', bundleItems.value.map(item => item.sku)))
 const logisticsSaveBlockReason = computed(() => logisticsLoadState.value === 'loading' ? '物流规则正在加载，请稍候'
   : hasQueriedQuotationProduct.value && logisticsLoadState.value === 'idle' ? '请先加载当前商品的物流规则'
   : logisticsLoadState.value === 'stale' ? '无法确认物流正式版本，暂不能保存'
@@ -1175,7 +1160,7 @@ async function save() {
   const selectedMatrixRows = savedQuoteRows.value
   if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
-  if (!p?.sku || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
+  if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
   if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('存在不免税物流商对应国家尚未设置客户税费，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null

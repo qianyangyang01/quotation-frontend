@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import com.milano.quotation.storage.AssetStorageService;
 import org.springframework.web.multipart.MultipartFile;
@@ -21,7 +22,15 @@ public class PurchaseProductService {
     private final PurchaseProductRepository products; private final PurchaseProductImageRepository images; private final AssetStorageService storage; private final PurchaseProductDeletionGuard deletionGuard;
     public PurchaseProductService(PurchaseProductRepository products,PurchaseProductImageRepository images,AssetStorageService storage,PurchaseProductDeletionGuard deletionGuard) { this.products = products; this.images=images; this.storage=storage;this.deletionGuard=deletionGuard; }
 
-    @Transactional(readOnly=true) public Page<JsonNode> page(String query,Pageable pageable) { return products.search(query==null?"":query.trim(),pageable).map(this::view); }
+    @Transactional(readOnly=true) public Page<JsonNode> page(String query,Pageable pageable) {
+        var cleaned=query==null?"":query.trim();
+        var exact=referencedSku(cleaned).flatMap(products::findBySku);
+        if(exact.isPresent()) {
+            var content=pageable.getPageNumber()==0?List.of(view(exact.get())):List.<JsonNode>of();
+            return new PageImpl<>(content,pageable,1);
+        }
+        return products.search(cleaned,pageable).map(this::view);
+    }
     @Transactional(readOnly=true) public JsonNode get(String sku) { return products.findBySku(normalizeSku(sku)).map(this::view).orElseThrow(()->AppException.notFound("商品不存在")); }
     @Transactional(readOnly=true) public boolean exists(String sku) { return products.findBySku(normalizeSku(sku)).isPresent(); }
     @Transactional(readOnly=true) public long readyCount() { return products.countByQuoteReadyTrue(); }

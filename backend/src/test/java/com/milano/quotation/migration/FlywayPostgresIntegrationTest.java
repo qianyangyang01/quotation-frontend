@@ -140,12 +140,27 @@ class FlywayPostgresIntegrationTest {
 
         seedQuotationRemovalMigration();
         var quotationRemovalMigration = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
-                .locations("classpath:db/migration").load().migrate();
+                .locations("classpath:db/migration").target(MigrationVersion.fromVersion("17")).load().migrate();
         assertEquals(1, quotationRemovalMigration.migrationsExecuted);
         assertEquals(true, quotationRemovalMigration.migrations.stream().anyMatch(item -> "17".equals(item.version)));
         assertQuotationRemovalMigration();
         restoreQuotationVoidState();
         assertQuotationVoidStateRestored();
+
+        var searchMigration = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").load().migrate();
+        assertEquals(1, searchMigration.migrationsExecuted);
+        assertEquals(true, searchMigration.migrations.stream().anyMatch(item -> "18".equals(item.version)));
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.prepareStatement("""
+                     select count(*) from pg_indexes
+                     where schemaname = 'public'
+                       and indexname in ('idx_purchase_product_sku_trgm', 'idx_purchase_product_payload_trgm')
+                     """);
+             var result = statement.executeQuery()) {
+            result.next();
+            assertEquals(2, result.getInt(1));
+        }
     }
 
     private void seedPurchaseProductsForCategoryMigration() throws Exception {

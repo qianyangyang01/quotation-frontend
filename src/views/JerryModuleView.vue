@@ -44,6 +44,8 @@ import {
   type FinanceProviderTaxSetting,
   type LogisticsTaxMode,
 } from '@/data/financeTaxSettings'
+import { replaceLogisticsRules } from '@/data/logistics'
+import { loadPublishedLogisticsManifest, loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 
 const props = defineProps<{ mode: 'products' | 'suppliers' | 'logistics' | 'members' | 'history' }>()
 const showPurchaseWorkspace = computed(() => props.mode === 'products')
@@ -678,7 +680,26 @@ function closeImagePreview() {
 function handlePreviewKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && previewImage.value) closeImagePreview()
 }
-onMounted(() => window.addEventListener('keydown', handlePreviewKeydown))
+async function hydrateFinanceLogisticsContext() {
+  if (props.mode !== 'members') return
+  try {
+    const { manifest } = await loadPublishedLogisticsManifest()
+    const countries = manifest.countries.map(country => country.code || country.name)
+    const rules = await Promise.all(manifest.attributes.map(attribute =>
+      loadPublishedLogisticsRules({ attribute, countries }).then(result => result.rules)))
+    replaceLogisticsRules(rules.flat())
+    financePolicies.value = loadFinanceChannelPolicies()
+    financeCountrySettings.value = loadFinanceCountrySettings()
+    financeTaxSettings.value = loadFinanceTaxSettings()
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '物流正式数据加载失败'
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handlePreviewKeydown)
+  void hydrateFinanceLogisticsContext()
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', handlePreviewKeydown))
 function buildPriceTiers(raw: string, basePrice: number | null, minQty: number) {
   const normalized = raw.replace(/[，；—～~]/g, match => ({ '，': ',', '；': ';', '—': '-', '～': '-', '~': '-' }[match] || match))
