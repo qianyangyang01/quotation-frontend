@@ -36,8 +36,7 @@ export type QuotationProduct = {
 
 export type QuotationMode = 'single' | 'bundle'
 
-export const quotationProductCategories = ['文胸', '内裤', '袜子', '服装', '保健品', '化妆品'] as const
-export type QuotationProductCategory = (typeof quotationProductCategories)[number]
+export { quotationProductCategories, type QuotationProductCategory } from '@/data/productCategories'
 
 export type BundleQuoteItem = {
   id: number
