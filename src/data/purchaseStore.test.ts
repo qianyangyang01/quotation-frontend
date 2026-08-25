@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findPurchaseProduct, normalizePurchaseRecord } from './purchaseStore'
+import { findPurchaseProduct, normalizePurchaseRecord, purchaseUnitPrice } from './purchaseStore'
 
 describe('purchase catalog state', () => {
   const complete = {
@@ -34,5 +34,26 @@ describe('purchase catalog state', () => {
     expect(product.status).toBe('已停用')
     expect(product.quoteReady).toBe(false)
     expect(findPurchaseProduct([product], product.sku)).toBeUndefined()
+  })
+
+  it('keeps identical dimensions and identical tier prices valid', () => {
+    const product = normalizePurchaseRecord({
+      sku: 'BIZ-260004', catalogState: 'ready', weightG: 180,
+      lengthCm: 12, widthCm: 12, heightCm: 12,
+      minOrderQty: 1, purchasePriceCny: 9.9,
+      tier2MinQty: 20, tier2PriceCny: 9.9,
+      tier3MinQty: 500, tier3PriceCny: 9.9,
+    })
+    expect(product.quoteReady).toBe(true)
+    expect([product.lengthCm, product.widthCm, product.heightCm]).toEqual([12, 12, 12])
+    expect([1, 19, 20, 499, 500].map(quantity => purchaseUnitPrice(product, quantity))).toEqual([9.9, 9.9, 9.9, 9.9, 9.9])
+  })
+
+  it('marks genuinely missing required cells incomplete without rejecting optional blanks', () => {
+    const product = normalizePurchaseRecord({ sku: 'BIZ-260005', catalogState: 'ready', weightG: '', minOrderQty: 1, purchasePriceCny: 8 } as never)
+    expect(product.quoteReady).toBe(false)
+    expect(product.status).toContain('重量')
+    expect(product.lengthCm).toBeNull()
+    expect(product.tier2PriceCny).toBeNull()
   })
 })

@@ -51,6 +51,12 @@ class QuotationWorkflowIntegrationTest {
         var createdData = mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
         var id = createdData.path("id").asText(); var version = createdData.path("_version").asLong();
 
+        mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
+                        .header("Idempotency-Key", "quote-test-1")
+                        .contentType("application/json")
+                        .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"测试客户\",\"quoteMode\":\"single\",\"primarySku\":\"SKU-1\",\"productCategory\":\"服装\",\"logisticsAttribute\":\"普货\",\"customerGrade\":\"A级客户\",\"taxCustomerType\":\"A\",\"monthlySalesEstimate\":\"10\",\"quoteOptions\":[{\"id\":\"option-us\",\"country\":\"美国\",\"carrier\":\"承运商A\",\"channel\":\"渠道A\"},{\"id\":\"option-ca\",\"country\":\"加拿大\",\"carrier\":\"承运商B\",\"channel\":\"渠道B\"}],\"productSummary\":\"测试商品\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(id));
+
         var other = new QuotationRecordEntity();
         other.id = UUID.randomUUID(); other.quoteNo = "Q-OTHER-1"; other.ownerAccount = "EMP001"; other.status = "pending";
         var otherPayload = JsonNodeFactory.instance.objectNode().put("id", other.id.toString()).put("no", other.quoteNo)

@@ -37,6 +37,13 @@ class QuotationSubmissionValidatorTest {
         assertTrue(error.fieldErrors().stream().anyMatch(item -> item.field().equals("quoteOptions")));
     }
 
+    @Test void acceptsBundleQuotationWithMultipleStructuredSkus() {
+        var input = valid().put("quoteMode", "bundle").put("primarySku", "SKU-1、SKU-2");
+        input.putArray("bundleItems").addObject().put("sku", "SKU-1").put("quantityPerSet", 2);
+        input.withArray("bundleItems").addObject().put("sku", "SKU-2").put("quantityPerSet", 1);
+        assertDoesNotThrow(() -> validator.validate(input));
+    }
+
     private tools.jackson.databind.node.ObjectNode valid() {
         var body = JsonNodeFactory.instance.objectNode();
         body.put("customerName", "客户A").put("quoteMode", "single").put("primarySku", "SKU-1")

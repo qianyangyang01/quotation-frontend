@@ -1,0 +1,105 @@
+import type { ShipmentDimensions } from '@/data/logistics'
+import { findPurchaseProduct, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
+
+export type MonthlySalesEstimate = '10' | '100' | '100+'
+
+export type BundleCalculationItem = {
+  sku: string
+  quantityPerSet: number
+  purchaseUnitPrice: number
+  purchaseFreightPerUnit: number
+  weightKg: number
+  customWeightKg: number | null
+}
+
+export type SingleWeightInput = {
+  quantity: number
+  netWeight: number
+  weightSource: 'purchase' | 'manual'
+  manualWeight: number
+  volumetricEnabled: boolean
+  packageLengthCm: number
+  packageWidthCm: number
+  packageHeightCm: number
+  volumeDivisor: number
+}
+
+export function normalizedQuoteQuantity(value: number) {
+  return Math.max(1, Math.floor(Number(value) || 1))
+}
+
+export function purchaseQuantityForMonthlySales(value: string): number {
+  return value === '100+' ? 100 : value === '100' ? 10 : 1
+}
+
+export function monthlySalesTierLabel(value: string) {
+  return value === '100+' ? '100件采购价' : value === '100' ? '10件采购价' : '1件参考价'
+}
+
+export function purchasePriceForMonthlySales(record: PurchaseProductRecord, estimate: string) {
+  return purchaseUnitPrice(record, purchaseQuantityForMonthlySales(estimate))
+}
+
+export function bundlePurchaseCost(
+  items: BundleCalculationItem[],
+  records: PurchaseProductRecord[],
+  estimate: string,
+  sets = 1,
+) {
+  const setCount = normalizedQuoteQuantity(sets)
+  return items.reduce((sum, item) => {
+    const record = findPurchaseProduct(records, item.sku)
+    const purchasePrice = record ? purchasePriceForMonthlySales(record, estimate) : item.purchaseUnitPrice
+    return sum + purchasePrice * normalizedQuoteQuantity(item.quantityPerSet) * setCount
+  }, 0)
+}
+
+export function bundleDomesticFreight(items: BundleCalculationItem[], sets = 1) {
+  const setCount = normalizedQuoteQuantity(sets)
+  return items.reduce((sum, item) => sum + item.purchaseFreightPerUnit * normalizedQuoteQuantity(item.quantityPerSet) * setCount, 0)
+}
+
+export function bundleGoodsWeight(items: BundleCalculationItem[], sets = 1) {
+  const setCount = normalizedQuoteQuantity(sets)
+  return items.reduce((sum, item) => {
+    const weightKg = item.customWeightKg != null && Number.isFinite(Number(item.customWeightKg))
+      ? Math.max(0, Number(item.customWeightKg))
+      : Math.max(0, Number(item.weightKg) || 0)
+    return sum + weightKg * normalizedQuoteQuantity(item.quantityPerSet) * setCount
+  }, 0)
+}
+
+export function singleActualWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
+  const unitWeight = input.weightSource === 'manual' ? input.manualWeight : input.netWeight
+  return Math.max(0, Number(unitWeight) || 0) * normalizedQuoteQuantity(quantity)
+}
+
+export function singleVolumeWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity), divisor = input.volumeDivisor) {
+  if (!input.volumetricEnabled || input.packageLengthCm <= 0 || input.packageWidthCm <= 0 || input.packageHeightCm <= 0) return 0
+  return input.packageLengthCm * input.packageWidthCm * input.packageHeightCm * normalizedQuoteQuantity(quantity) / Math.max(1, Number(divisor) || 8000)
+}
+
+export function singleChargeWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
+  return Math.max(singleActualWeight(input, quantity), singleVolumeWeight(input, quantity))
+}
+
+export function singleShipmentDimensions(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)): ShipmentDimensions | undefined {
+  if (!input.volumetricEnabled) return undefined
+  return {
+    lengthCm: Math.max(0, Number(input.packageLengthCm) || 0),
+    widthCm: Math.max(0, Number(input.packageWidthCm) || 0),
+    heightCm: Math.max(0, Number(input.packageHeightCm) || 0),
+    volumeMultiplier: normalizedQuoteQuantity(quantity),
+    volumeDivisor: Math.max(1, Number(input.volumeDivisor) || 8000),
+    defaultVolumeDivisor: 8000,
+  }
+}
+
+export function usdPriceFromCny(cny: number, usdCny: number) {
+  const rate = Math.max(0.0001, Number(usdCny) || 0)
+  return Math.round(Math.max(0, Number(cny) || 0) * 100) / 100 / rate
+}
+
+export function hasQuotationProduct(mode: 'single' | 'bundle', primarySku: string, bundleSkus: string[]) {
+  return mode === 'bundle' ? bundleSkus.some(sku => sku.trim()) : Boolean(primarySku.trim())
+}
