@@ -76,7 +76,9 @@ describe('bundle SKU calculation', () => {
 
   it('recognizes loaded single and bundle products consistently before save', () => {
     expect(hasQuotationProduct('single', 'SKU-1', [])).toBe(true)
-    expect(hasQuotationProduct('bundle', '', ['', 'SKU-2'])).toBe(true)
+    expect(hasQuotationProduct('bundle', '', ['SKU-1', 'SKU-2'])).toBe(true)
+    expect(hasQuotationProduct('bundle', '', ['', 'SKU-2'])).toBe(false)
+    expect(hasQuotationProduct('bundle', '', ['sku-2', 'SKU-2'])).toBe(false)
     expect(hasQuotationProduct('bundle', '', ['', '  '])).toBe(false)
   })
 })

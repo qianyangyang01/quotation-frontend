@@ -62,6 +62,15 @@ export interface QuotationRecordDealLine {
   amountUsd: number
 }
 
+export interface QuotationRecordBundleItem {
+  sku: string
+  name: string
+  quantityPerSet: number
+  effectiveWeightKg: number
+  purchaseUnitPriceCny: number
+  domesticFreightPerUnitCny: number
+}
+
 export type QuotationRecordEditableField = 'status' | 'actualQuoteUsd' | 'actualQuoteCny' | 'dealQuantity' | 'closedAt' | 'note' | 'dealOptionLabel' | 'dealLines'
 
 export interface QuotationRecordRevision {
@@ -82,7 +91,7 @@ export interface QuotationRecordEditor {
 
 export interface QuotationRecord {
   id: string; no: string; _version?: number; salespersonName: string; salespersonAccount: string; customerName: string
-  quoteMode: 'single' | 'bundle'; productSummary: string; productImage?: string; primarySku: string; productCategory?: string; logisticsAttribute: string
+  quoteMode: 'single' | 'bundle'; productSummary: string; productImage?: string; primarySku: string; bundleItems?: QuotationRecordBundleItem[]; productCategory?: string; logisticsAttribute: string
   volumetricEnabled?: boolean; packageLengthCm?: number; packageWidthCm?: number; packageHeightCm?: number; defaultVolumeDivisor?: number
   country: string; carrier: string; channel: string; rule: string; customerGrade: string; taxCustomerType?: 'A' | 'B'; monthlySalesEstimate?: string
   systemQuoteCny: number; systemQuoteUsd: number; totalCostCny: number; exchangeRate: number
@@ -259,7 +268,18 @@ function normalizeDealLines(value: unknown, options: QuotationRecordQuoteOption[
     amountUsd: Number((legacyPrice * Math.max(1, Math.floor(legacyQuantity))).toFixed(2)),
   }]
 }
-function normalize(raw: Partial<QuotationRecord>): QuotationRecord | null {
+function normalizeBundleItems(value: unknown): QuotationRecordBundleItem[] {
+  if (!Array.isArray(value)) return []
+  return value.map(raw => ({
+    sku: String(raw?.sku || '').trim().toUpperCase(),
+    name: String(raw?.name || '').trim(),
+    quantityPerSet: Math.max(1, Math.floor(n(raw?.quantityPerSet))),
+    effectiveWeightKg: Math.max(0, n(raw?.effectiveWeightKg)),
+    purchaseUnitPriceCny: Math.max(0, n(raw?.purchaseUnitPriceCny)),
+    domesticFreightPerUnitCny: Math.max(0, n(raw?.domesticFreightPerUnitCny)),
+  })).filter(item => item.sku)
+}
+export function normalizeQuotationRecord(raw: Partial<QuotationRecord>): QuotationRecord | null {
   if (!raw.id || !raw.no) return null
   const recordId = String(raw.id)
   const legacyQuotes = normalizeSpecifiedQuotes(raw.specifiedQuotes)
@@ -270,18 +290,19 @@ function normalize(raw: Partial<QuotationRecord>): QuotationRecord | null {
       : [legacyPrimaryOption(raw, recordId)]
   const specifiedQuotes = Array.isArray(raw.quoteOptions) ? specifiedQuotesFromOptions(quoteOptions) : legacyQuotes
   const dealLines = normalizeDealLines(raw.dealLines, quoteOptions, raw)
-  return { id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
+  const bundleItems = normalizeBundleItems(raw.bundleItems)
+  return { id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), bundleItems: bundleItems.length ? bundleItems : undefined, productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
 }
 export async function loadQuotationRecords(scope: 'mine' | 'company' = 'company') {
   const result = await api.get<{ items: QuotationRecord[] }>(`/quotations?scope=${scope}&size=100`)
-  return result.items.map(normalize).filter((row): row is QuotationRecord => !!row).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  return result.items.map(normalizeQuotationRecord).filter((row): row is QuotationRecord => !!row).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 export async function saveQuotationRecords(_rows: QuotationRecord[]) { throw new Error('报价记录必须通过独立报价 API 创建或修改') }
 export async function createQuotationRecord(input: Omit<QuotationRecord, 'id' | 'no' | 'status' | 'createdAt' | 'updatedAt' | 'revisions'>) {
   const raw = await api.post<QuotationRecord>('/quotations', input, idempotencyKey('quotation-create'))
-  return normalize(raw)!
+  return normalizeQuotationRecord(raw)!
 }
 export async function updateQuotationRecord(id: string, patch: QuotationRecordUpdate, expectedVersion?: number) {
   const raw = await api.patch<QuotationRecord>(`/quotations/${id}`, { ...patch, _version: expectedVersion })
-  return normalize(raw)
+  return normalizeQuotationRecord(raw)
 }

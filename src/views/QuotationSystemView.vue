@@ -1044,7 +1044,7 @@ const saveValidationIssues = computed(() => {
   const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', taxCustomerType:'税费客户类型', monthlySalesEstimate:'预估月销量' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
   const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
-  if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入一个有效 SKU' : '请输入 SKU 并查询商品' })
+  if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
   if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'存在不免税物流商对应国家尚未设置客户税费，请到财务设置补齐' })
@@ -1206,13 +1206,25 @@ async function save() {
   const productSummary = quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
+  const recordBundleItems = quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => {
+    const record = findPurchaseProduct(purchaseRecords.value, item.sku)
+    return {
+      sku: item.sku.trim().toUpperCase(),
+      name: item.name,
+      quantityPerSet: normalizedBundleSets(item.quantityPerSet),
+      effectiveWeightKg: item.customWeightKg == null ? Math.max(0, item.weightKg) : Math.max(0, Number(item.customWeightKg) || 0),
+      purchaseUnitPriceCny: record ? purchasePriceForMonthlySales(record) : Math.max(0, item.purchaseUnitPrice),
+      domesticFreightPerUnitCny: Math.max(0, item.purchaseFreightPerUnit),
+    }
+  }) : undefined
   const record = await createQuotationRecord({
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
     customerName: customer, quoteMode: quoteMode.value, productSummary,
     productImage: quoteMode.value === 'bundle'
       ? (bundleItems.value.map(item => preferredQuotationImage(item.physicalImage, item.image)).find(Boolean) || '')
       : preferredQuotationImage(p.physicalImage, p.image),
-    primarySku: quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => item.sku).join('、') : p.sku,
+    primarySku: quoteMode.value === 'bundle' ? recordBundleItems!.map(item => item.sku).join('、') : p.sku,
+    bundleItems: recordBundleItems,
     productCategory: productCategory.value,
     volumetricEnabled: quoteMode.value === 'single' && p.volumetricEnabled,
     packageLengthCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageLengthCm : undefined,

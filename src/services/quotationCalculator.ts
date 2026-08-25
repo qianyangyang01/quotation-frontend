@@ -101,5 +101,6 @@ export function usdPriceFromCny(cny: number, usdCny: number) {
 }
 
 export function hasQuotationProduct(mode: 'single' | 'bundle', primarySku: string, bundleSkus: string[]) {
-  return mode === 'bundle' ? bundleSkus.some(sku => sku.trim()) : Boolean(primarySku.trim())
+  if (mode === 'single') return Boolean(primarySku.trim())
+  return new Set(bundleSkus.map(sku => sku.trim().toUpperCase()).filter(Boolean)).size >= 2
 }

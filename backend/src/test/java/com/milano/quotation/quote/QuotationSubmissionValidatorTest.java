@@ -39,9 +39,31 @@ class QuotationSubmissionValidatorTest {
 
     @Test void acceptsBundleQuotationWithMultipleStructuredSkus() {
         var input = valid().put("quoteMode", "bundle").put("primarySku", "SKU-1、SKU-2");
-        input.putArray("bundleItems").addObject().put("sku", "SKU-1").put("quantityPerSet", 2);
-        input.withArray("bundleItems").addObject().put("sku", "SKU-2").put("quantityPerSet", 1);
+        addBundleItem(input, "SKU-1", 2, 0.2, 12, 1.5);
+        addBundleItem(input, "SKU-2", 1, 0.35, 20, 0);
         assertDoesNotThrow(() -> validator.validate(input));
+    }
+
+    @Test void rejectsIncompleteDuplicateAndMismatchedBundles() {
+        var input = valid().put("quoteMode", "bundle").put("primarySku", "SKU-2、SKU-1");
+        addBundleItem(input, "SKU-1", 0, 0, -1, -2);
+        addBundleItem(input, "sku-1", 1, 0.2, 10, 0);
+        var error = assertThrows(FieldValidationException.class, () -> validator.validate(input));
+        assertTrue(error.fieldErrors().stream().anyMatch(item -> item.field().equals("bundleItems")));
+        assertTrue(error.fieldErrors().stream().anyMatch(item -> item.field().equals("primarySku")));
+    }
+
+    @Test void rejectsBundleDetailsOnSingleQuotation() {
+        var input = valid();
+        addBundleItem(input, "SKU-1", 1, 0.2, 12, 0);
+        var error = assertThrows(FieldValidationException.class, () -> validator.validate(input));
+        assertTrue(error.fieldErrors().stream().anyMatch(item -> item.field().equals("bundleItems")));
+    }
+
+    private void addBundleItem(tools.jackson.databind.node.ObjectNode input, String sku, int quantity, double weight, double price, double freight) {
+        input.withArray("bundleItems").addObject().put("sku", sku).put("name", "商品" + sku)
+                .put("quantityPerSet", quantity).put("effectiveWeightKg", weight)
+                .put("purchaseUnitPriceCny", price).put("domesticFreightPerUnitCny", freight);
     }
 
     private tools.jackson.databind.node.ObjectNode valid() {

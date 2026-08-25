@@ -57,6 +57,16 @@ class QuotationWorkflowIntegrationTest {
                         .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"测试客户\",\"quoteMode\":\"single\",\"primarySku\":\"SKU-1\",\"productCategory\":\"服装\",\"logisticsAttribute\":\"普货\",\"customerGrade\":\"A级客户\",\"taxCustomerType\":\"A\",\"monthlySalesEstimate\":\"10\",\"quoteOptions\":[{\"id\":\"option-us\",\"country\":\"美国\",\"carrier\":\"承运商A\",\"channel\":\"渠道A\"},{\"id\":\"option-ca\",\"country\":\"加拿大\",\"carrier\":\"承运商B\",\"channel\":\"渠道B\"}],\"productSummary\":\"测试商品\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(id));
 
+        var bundleBody = "{\"customerName\":\"组合测试客户\",\"quoteMode\":\"bundle\",\"primarySku\":\"SKU-1、SKU-2\",\"bundleItems\":[{\"sku\":\"SKU-1\",\"name\":\"商品一\",\"quantityPerSet\":2,\"effectiveWeightKg\":0.2,\"purchaseUnitPriceCny\":12,\"domesticFreightPerUnitCny\":1.5},{\"sku\":\"SKU-2\",\"name\":\"商品二\",\"quantityPerSet\":1,\"effectiveWeightKg\":0.35,\"purchaseUnitPriceCny\":20,\"domesticFreightPerUnitCny\":0}],\"productCategory\":\"保健品\",\"logisticsAttribute\":\"普货\",\"customerGrade\":\"S级客户\",\"taxCustomerType\":\"A\",\"monthlySalesEstimate\":\"10\",\"quoteOptions\":[{\"id\":\"bundle-us\",\"country\":\"美国\",\"carrier\":\"承运商A\",\"channel\":\"渠道A\"}],\"productSummary\":\"SKU-1 × 2 + SKU-2 × 1\"}";
+        var bundleCreated = mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
+                        .header("Idempotency-Key", "quote-bundle-1").contentType("application/json").content(bundleBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.bundleItems.length()").value(2))
+                .andExpect(jsonPath("$.data.bundleItems[0].effectiveWeightKg").value(0.2)).andReturn();
+        var bundleId = mapper.readTree(bundleCreated.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+        mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
+                        .header("Idempotency-Key", "quote-bundle-1").contentType("application/json").content(bundleBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(bundleId));
+
         var other = new QuotationRecordEntity();
         other.id = UUID.randomUUID(); other.quoteNo = "Q-OTHER-1"; other.ownerAccount = "EMP001"; other.status = "pending";
         var otherPayload = JsonNodeFactory.instance.objectNode().put("id", other.id.toString()).put("no", other.quoteNo)
@@ -68,12 +78,14 @@ class QuotationWorkflowIntegrationTest {
 
         mvc.perform(get("/api/v1/quotations").session(session).param("scope", "mine"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.items[0].id").value(id));
-        mvc.perform(get("/api/v1/quotations").session(session).param("scope", "company"))
-                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(2))
                 .andExpect(jsonPath("$.data.items[?(@.id == '" + id + "')]").exists())
+                .andExpect(jsonPath("$.data.items[?(@.id == '" + bundleId + "')]").exists());
+        mvc.perform(get("/api/v1/quotations").session(session).param("scope", "company"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(3))
+                .andExpect(jsonPath("$.data.items[?(@.id == '" + id + "')]").exists())
+                .andExpect(jsonPath("$.data.items[?(@.id == '" + bundleId + "')].bundleItems.length()").value(2))
                 .andExpect(jsonPath("$.data.items[?(@.id == '" + other.id + "')]").exists());
 
         var updated = mvc.perform(patch("/api/v1/quotations/{id}", id).session(session).with(csrf())
