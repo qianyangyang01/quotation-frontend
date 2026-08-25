@@ -14,7 +14,7 @@ export type LogisticsChannelVersionRecord = {
   id: string; channelId: string; versionNumber: number; status: LogisticsVersionStatus; fileName: string; sourceHash: string
   originalFile: Blob | null; rows: LogisticsRateRow[]; issues: LogisticsImportIssue[]; diffRows: LogisticsDiffRow[]; summary: LogisticsDiffSummary
   importedAt: string; importedBy: string; publishedAt: string; publishedBy: string; auditNote: string; rollbackFromVersionId?: string
-  rowCount: number; issueCount: number; diffCount: number; countryCount: number
+  rowCount: number; issueCount: number; diffCount: number; countryCount: number; errors: number; warnings: number
 }
 export type LogisticsAuditRecord = { id: string; channelId: string; versionId: string; action: 'import' | 'publish' | 'rollback'; actor: string; note: string; createdAt: string }
 export type LogisticsWorkspaceState = { providers: LogisticsProviderRecord[]; channels: LogisticsChannelRecord[]; versions: LogisticsChannelVersionRecord[]; audits: LogisticsAuditRecord[] }
@@ -33,15 +33,21 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function countOrFallback(value: unknown, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback
+}
+
 function normalizeLogisticsVersion(version: LogisticsChannelVersionRecord): LogisticsChannelVersionRecord {
   const summary = version.summary || {} as Partial<LogisticsDiffSummary>
+  const issues = Array.isArray(version.issues) ? version.issues : []
   return {
     ...version,
     fileName: String(version.fileName || ''),
     sourceHash: String(version.sourceHash || ''),
     originalFile: null,
     rows: Array.isArray(version.rows) ? version.rows : [],
-    issues: Array.isArray(version.issues) ? version.issues : [],
+    issues,
     diffRows: Array.isArray(version.diffRows) ? version.diffRows : [],
     summary: {
       added: numberOrZero(summary.added),
@@ -60,6 +66,8 @@ function normalizeLogisticsVersion(version: LogisticsChannelVersionRecord): Logi
     issueCount: numberOrZero(version.issueCount || version.issues?.length),
     diffCount: numberOrZero(version.diffCount || version.diffRows?.length),
     countryCount: numberOrZero(version.countryCount),
+    errors: countOrFallback(version.errors, issues.filter(issue => issue.level === 'error').length),
+    warnings: countOrFallback(version.warnings, issues.filter(issue => issue.level === 'warning').length),
   }
 }
 
@@ -122,6 +130,14 @@ export function initialLogisticsBatchSelection(preview: LogisticsBatchPreview) {
 export function logisticsBatchSelectionSummary(preview: LogisticsBatchPreview, selectedKeys: string[]) {
   const selected = new Set(selectedKeys); const items = preview.items.filter(item => selected.has(item.fileKey) && item.errors === 0)
   return { selectable: items.length, blocked: preview.items.filter(item => item.errors > 0).length, replaceDrafts: items.filter(item => item.hasDraft).length }
+}
+
+export function logisticsVersionHasBlockingErrors(version: LogisticsChannelVersionRecord) { return version.errors > 0 }
+export function logisticsVersionNeedsRiskReview(version: LogisticsChannelVersionRecord) { return version.summary.highRisk > 0 || version.summary.removed > 0 }
+export function initialLogisticsVersionPublishSelection(versions: LogisticsChannelVersionRecord[]) { return versions.filter(version => !logisticsVersionHasBlockingErrors(version)).map(version => version.id) }
+export function filterPublishableLogisticsVersionIds(versions: LogisticsChannelVersionRecord[], selectedIds: string[]) {
+  const selected = new Set(selectedIds)
+  return versions.filter(version => selected.has(version.id) && !logisticsVersionHasBlockingErrors(version)).map(version => version.id)
 }
 
 export async function setLogisticsProviderStatus(provider: LogisticsProviderRecord, enabled: boolean) {

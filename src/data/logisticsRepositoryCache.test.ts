@@ -36,13 +36,20 @@ describe('logistics workspace request coalescing', () => {
     get.mockImplementation((path: string) => Promise.resolve({
       items: path.startsWith('/logistics/versions') ? [{
         id: 'version-1', channelId: 'channel-1', versionNumber: 1, status: 'draft', fileName: 'legacy.xlsx', sourceHash: 'sha256',
-        rows: [{ areaName: '美国', countryCode: 'US' }], importedAt: '', importedBy: '', publishedAt: '', publishedBy: '', auditNote: '',
+        rows: [{ areaName: '美国', countryCode: 'US' }],
+        issues: [
+          { row: 4, field: '重量区间', message: '起始重量不能大于结束重量', level: 'error' },
+          { row: 5, field: '时效', message: '建议补充', level: 'warning' },
+        ],
+        importedAt: '', importedBy: '', publishedAt: '', publishedBy: '', auditNote: '',
       }] : [], page: 0, size: 200, total: 1, totalPages: 1,
     }))
 
     const state = await loadLogisticsWorkspace()
 
-    expect(state.versions[0]?.issues).toEqual([])
+    expect(state.versions[0]?.issues).toHaveLength(2)
+    expect(state.versions[0]?.errors).toBe(1)
+    expect(state.versions[0]?.warnings).toBe(1)
     expect(state.versions[0]?.diffRows).toEqual([])
     expect(state.versions[0]?.summary).toEqual({ added: 0, price: 0, rule: 0, removed: 0, unchanged: 0, highRisk: 0 })
   })
