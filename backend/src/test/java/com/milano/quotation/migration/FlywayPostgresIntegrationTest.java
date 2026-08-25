@@ -6,9 +6,12 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.DriverManager;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayPostgresIntegrationTest {
@@ -48,7 +51,7 @@ class FlywayPostgresIntegrationTest {
                     """);
         }
         var flyway = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
-                .locations("classpath:db/migration").load();
+                .locations("classpath:db/migration").target(MigrationVersion.fromVersion("15")).load();
         var migrationResult = flyway.migrate();
         assertEquals(4, migrationResult.migrationsExecuted);
         assertEquals(true, migrationResult.migrations.stream().anyMatch(item -> "13".equals(item.version)));
@@ -124,6 +127,123 @@ class FlywayPostgresIntegrationTest {
              var result = statement.executeQuery()) {
             result.next();
             assertEquals(4, result.getInt(1));
+        }
+
+        seedPurchaseProductsForCategoryMigration();
+        var categoryMigration = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").load().migrate();
+        assertEquals(1, categoryMigration.migrationsExecuted);
+        assertEquals(true, categoryMigration.migrations.stream().anyMatch(item -> "16".equals(item.version)));
+        assertPurchaseCategoryMigration();
+        restorePurchaseCategories();
+        assertPurchaseCategoriesRestored();
+    }
+
+    private void seedPurchaseProductsForCategoryMigration() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.prepareStatement("""
+                     insert into purchase_product(
+                         id, sku, payload, version, created_at, updated_at,
+                         catalog_state, quote_ready
+                     ) values (?, ?, ?::jsonb, ?, now(), now(), ?, ?)
+                     """)) {
+            // Together with BIZ-NO-DIMENSIONS seeded above this yields exactly
+            // 54 rows, allowing two deterministic assignments per category.
+            for (var index = 0; index < 53; index++) {
+                var sku = "CATEGORY-%03d".formatted(index);
+                var payload = index == 0
+                        ? "{\"sku\":\"%s\",\"marker\":\"unchanged\"}".formatted(sku)
+                        : "{\"sku\":\"%s\",\"category\":\"旧品类-%d\",\"marker\":\"unchanged\"}".formatted(sku, index);
+                statement.setObject(1, java.util.UUID.nameUUIDFromBytes(sku.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                statement.setString(2, sku);
+                statement.setString(3, payload);
+                statement.setLong(4, index);
+                statement.setString(5, switch (index % 3) {
+                    case 0 -> "ready";
+                    case 1 -> "disabled";
+                    default -> "pending_template";
+                });
+                statement.setBoolean(6, index % 3 == 0);
+                statement.addBatch();
+            }
+            statement.executeBatch();
+        }
+    }
+
+    private void assertPurchaseCategoryMigration() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("select count(*) from purchase_product_category_backup_v16")) {
+                result.next(); assertEquals(54, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*), min(category_count), max(category_count)
+                    from (
+                        select payload->>'category' as category, count(*) as category_count
+                        from purchase_product
+                        group by payload->>'category'
+                    ) categories
+                    """)) {
+                result.next(); assertEquals(27, result.getInt(1)); assertEquals(2, result.getInt(2)); assertEquals(2, result.getInt(3));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*)
+                    from purchase_product
+                    where payload->>'category' not in (
+                        '文胸','袜子','内裤','服装','化妆品','保健品','日用品','庭院工具','家用电器',
+                        '健身器材','厨房用具','家纺','配饰','鞋','文具','灯具','数码','辅料','玩具','书籍',
+                        '宠物用品','医疗','汽车用品','清洁用品','箱包','护肤品','其他'
+                    )
+                       or payload->>'marker' <> 'unchanged'
+                    """)) {
+                result.next(); assertEquals(0, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*)
+                    from purchase_product product
+                    join purchase_product_category_backup_v16 backup on backup.product_id = product.id
+                    where product.version <> backup.previous_version + 1
+                    """)) {
+                result.next(); assertEquals(0, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("select count(*) from purchase_product_category_backup_v16 where not had_category and previous_category is null")) {
+                result.next(); assertEquals(2, result.getInt(1));
+            }
+        }
+    }
+
+    private void restorePurchaseCategories() throws Exception {
+        var workingDirectory = Path.of("").toAbsolutePath();
+        var script = workingDirectory.resolve("deploy/scripts/rollback-purchase-categories-v16.sql");
+        if (!Files.exists(script)) script = workingDirectory.resolve("../deploy/scripts/rollback-purchase-categories-v16.sql").normalize();
+        var rollbackSql = Files.readString(script);
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.execute(rollbackSql);
+            assertThrows(java.sql.SQLException.class, () -> statement.execute(rollbackSql));
+        }
+    }
+
+    private void assertPurchaseCategoriesRestored() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("select count(*) from purchase_product_category_backup_v16 where restored_at is not null")) {
+                result.next(); assertEquals(54, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("select count(*) from purchase_product where not (payload ? 'category')")) {
+                result.next(); assertEquals(2, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("select count(*) from purchase_product where payload->>'category' like '旧品类-%' and payload->>'marker' = 'unchanged'")) {
+                result.next(); assertEquals(52, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*)
+                    from purchase_product product
+                    join purchase_product_category_backup_v16 backup on backup.product_id = product.id
+                    where product.version <> backup.previous_version + 2
+                    """)) {
+                result.next(); assertEquals(0, result.getInt(1));
+            }
         }
     }
 }
