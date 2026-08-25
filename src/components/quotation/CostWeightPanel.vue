@@ -42,7 +42,7 @@ function updateDivisor(event: Event) {
         <label>长（cm）<input :value="product.packageLengthCm" disabled></label>
         <label>宽（cm）<input :value="product.packageWidthCm" disabled></label>
         <label>高（cm）<input :value="product.packageHeightCm" disabled></label>
-        <label>计抛除数<input :value="product.volumeDivisor" type="number" min="1" step="100" inputmode="numeric" @change="updateDivisor"></label>
+        <label>计抛除数<input :value="product.volumeDivisor" type="number" min="1" step="100" inputmode="numeric" @input="updateDivisor"></label>
       </div>
       <div class="weight-comparison">
         <p><span>实际重量</span><b>{{ grams(actualWeight()) }} g</b><small>商品重量 × 数量</small></p>

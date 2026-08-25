@@ -79,4 +79,19 @@ describe('published logistics version cache', () => {
     expect(refreshed.revision).toBe('r2')
     expect(refreshed.rules[0]?.id).toBe(2)
   })
+
+  it('falls back to the network when IndexedDB opening stalls', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('indexedDB', { open: vi.fn(() => ({})) })
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('r-timeout'), etag: 'manifest-timeout' }
+      : { status: 200, data: { revision: 'r-timeout', rules: [rule] }, etag: 'rules-timeout' }))
+    const repository = await import('./publishedLogisticsRepository')
+
+    const loading = repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] })
+    await vi.advanceTimersByTimeAsync(1600)
+
+    await expect(loading).resolves.toMatchObject({ revision: 'r-timeout', rules: [rule], source: 'network' })
+    vi.useRealTimers()
+  })
 })

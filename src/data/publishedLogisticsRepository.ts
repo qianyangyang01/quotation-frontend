@@ -31,6 +31,7 @@ const CACHE_SCHEMA = 'published-logistics-v1'
 const MANIFEST_STORE = 'logisticsManifest'
 const RULE_STORE = 'publishedRuleQueries'
 const CACHE_EVENT = 'milano:published-logistics-cache'
+const INDEXED_DB_TIMEOUT_MS = 1500
 let manifestMemory: StoredManifest | null = null
 const rulesMemory = new Map<string, StoredRules>()
 let manifestRequest: Promise<{ manifest: PublishedLogisticsManifest; changed: boolean; verified: boolean }> | null = null
@@ -42,47 +43,75 @@ function openDatabase() {
   if (databasePromise) return databasePromise
   databasePromise = new Promise(resolve => {
     if (typeof indexedDB === 'undefined') return resolve(null)
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
+    let settled = false
+    const finish = (database: IDBDatabase | null) => {
+      if (settled) {
+        database?.close()
+        return
+      }
+      settled = true
+      globalThis.clearTimeout(timeout)
+      resolve(database)
+    }
+    const timeout = globalThis.setTimeout(() => finish(null), INDEXED_DB_TIMEOUT_MS)
+    let request: IDBOpenDBRequest
+    try { request = indexedDB.open(DB_NAME, DB_VERSION) }
+    catch { finish(null); return }
     request.onupgradeneeded = () => {
       const database = request.result
       if (!database.objectStoreNames.contains(MANIFEST_STORE)) database.createObjectStore(MANIFEST_STORE, { keyPath: 'key' })
       if (!database.objectStoreNames.contains(RULE_STORE)) database.createObjectStore(RULE_STORE, { keyPath: 'key' })
     }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => resolve(null)
-    request.onblocked = () => resolve(null)
+    request.onsuccess = () => finish(request.result)
+    request.onerror = () => finish(null)
+    request.onblocked = () => finish(null)
   })
   return databasePromise
+}
+
+function settleIndexedDb<T>(setup: (finish: (value: T) => void) => void, fallback: T) {
+  return new Promise<T>(resolve => {
+    let settled = false
+    const finish = (value: T) => {
+      if (settled) return
+      settled = true
+      globalThis.clearTimeout(timeout)
+      resolve(value)
+    }
+    const timeout = globalThis.setTimeout(() => finish(fallback), INDEXED_DB_TIMEOUT_MS)
+    try { setup(finish) }
+    catch { finish(fallback) }
+  })
 }
 
 async function readStore<T>(storeName: string, key: IDBValidKey): Promise<T | null> {
   const database = await openDatabase()
   if (!database) return null
-  return new Promise(resolve => {
+  return settleIndexedDb<T | null>(resolve => {
     const request = database.transaction(storeName, 'readonly').objectStore(storeName).get(key)
     request.onsuccess = () => resolve((request.result as T | undefined) || null)
     request.onerror = () => resolve(null)
-  })
+  }, null)
 }
 
 async function writeStore(storeName: string, value: unknown) {
   const database = await openDatabase()
   if (!database) return
-  await new Promise<void>(resolve => {
+  await settleIndexedDb<void>(resolve => {
     const request = database.transaction(storeName, 'readwrite').objectStore(storeName).put(value)
     request.onsuccess = () => resolve()
     request.onerror = () => resolve()
-  })
+  }, undefined)
 }
 
 async function clearStore(storeName: string) {
   const database = await openDatabase()
   if (!database) return
-  await new Promise<void>(resolve => {
+  await settleIndexedDb<void>(resolve => {
     const request = database.transaction(storeName, 'readwrite').objectStore(storeName).clear()
     request.onsuccess = () => resolve()
     request.onerror = () => resolve()
-  })
+  }, undefined)
 }
 
 function normalized(values: string[] | undefined) {
