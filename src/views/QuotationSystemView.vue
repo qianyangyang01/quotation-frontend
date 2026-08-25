@@ -617,7 +617,10 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
   restoredSpecifiedSelections.value = draftSelection(payload.specifiedSelections || [])
   restoredTemplateSelections.value = draftSelection(payload.templateSelections || [])
   activeTemplateSnapshot.value = payload.activeTemplate?.id ? { id: String(payload.activeTemplate.id), name: String(payload.activeTemplate.name || '个人报价模板') } : null
-  if (hasQueriedQuotationProduct.value && productCategory.value) {
+  const hasRestoredProduct = quoteMode.value === 'bundle'
+    ? bundleItems.value.some(item => Boolean(item.sku))
+    : Boolean(p.sku)
+  if (hasRestoredProduct && productCategory.value) {
     await ensureQuoteLogistics(p)
     const primaryRows = productState?.primaryCountry ? excelQuoteRows(p, productState.primaryCountry) : []
     const primary = primaryRows.find(row => productState.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
