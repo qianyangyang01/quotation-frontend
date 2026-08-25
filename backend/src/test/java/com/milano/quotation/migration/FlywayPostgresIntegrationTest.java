@@ -131,12 +131,21 @@ class FlywayPostgresIntegrationTest {
 
         seedPurchaseProductsForCategoryMigration();
         var categoryMigration = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
-                .locations("classpath:db/migration").load().migrate();
+                .locations("classpath:db/migration").target(MigrationVersion.fromVersion("16")).load().migrate();
         assertEquals(1, categoryMigration.migrationsExecuted);
         assertEquals(true, categoryMigration.migrations.stream().anyMatch(item -> "16".equals(item.version)));
         assertPurchaseCategoryMigration();
         restorePurchaseCategories();
         assertPurchaseCategoriesRestored();
+
+        seedQuotationRemovalMigration();
+        var quotationRemovalMigration = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").load().migrate();
+        assertEquals(1, quotationRemovalMigration.migrationsExecuted);
+        assertEquals(true, quotationRemovalMigration.migrations.stream().anyMatch(item -> "17".equals(item.version)));
+        assertQuotationRemovalMigration();
+        restoreQuotationVoidState();
+        assertQuotationVoidStateRestored();
     }
 
     private void seedPurchaseProductsForCategoryMigration() throws Exception {
@@ -243,6 +252,152 @@ class FlywayPostgresIntegrationTest {
                     where product.version <> backup.previous_version + 2
                     """)) {
                 result.next(); assertEquals(0, result.getInt(1));
+            }
+        }
+    }
+
+    @Test void refusesToGuessMissingPreVoidStatus() throws Exception {
+        var schema = "invalid_void_mapping";
+        var baseline = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .schemas(schema).defaultSchema(schema).locations("classpath:db/migration")
+                .target(MigrationVersion.fromVersion("16")).load();
+        baseline.migrate();
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.execute("set search_path to " + schema);
+            statement.executeUpdate("""
+                    insert into quotation_record(id, quote_no, owner_account, status, payload, version, voided_at, created_at, updated_at)
+                    values ('66666666-6666-6666-6666-666666666666', 'Q-INVALID-VOID', 'ADMIN', 'voided',
+                            '{"status":"voided","customerName":"缺失映射"}'::jsonb, 0, now(), now(), now())
+                    """);
+        }
+        var migration = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .schemas(schema).defaultSchema(schema).locations("classpath:db/migration").load();
+        assertThrows(org.flywaydb.core.api.FlywayException.class, migration::migrate);
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.execute("set search_path to " + schema);
+            try (var result = statement.executeQuery("select status, payload ? '_statusBeforeVoid', voided_at is not null from quotation_record where quote_no='Q-INVALID-VOID'")) {
+                result.next(); assertEquals("voided", result.getString(1)); assertEquals(false, result.getBoolean(2)); assertEquals(true, result.getBoolean(3));
+            }
+        }
+    }
+
+    private void seedQuotationRemovalMigration() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    insert into quotation_record(
+                        id, quote_no, owner_account, status, payload, version,
+                        voided_at, voided_by, void_reason, created_at, updated_at
+                    ) values (
+                        '55555555-5555-5555-5555-555555555555', 'Q-VOIDED-1', 'ADMIN', 'voided',
+                        '{"status":"voided","_statusBeforeVoid":"won","customerName":"保留客户","revisions":[{"id":"revision-kept"}]}'::jsonb,
+                        7, '2026-08-24T01:02:03Z', 'ADMIN', '历史作废原因',
+                        '2026-08-20T01:00:00Z', '2026-08-24T01:02:03Z'
+                    )
+                    """);
+            for (var index = 0; index < 3; index++) {
+                statement.executeUpdate("""
+                        insert into quotation_share(id, quotation_id, token_hash, created_by, expires_at, created_at)
+                        values (
+                            gen_random_uuid(),
+                            '55555555-5555-5555-5555-555555555555',
+                            md5(random()::text) || md5(random()::text),
+                            'ADMIN', now() + interval '7 days', now()
+                        )
+                        """);
+            }
+            statement.executeUpdate("""
+                    insert into audit_log(id, request_id, actor_account, action, resource_type, resource_id, outcome, detail, created_at)
+                    values ('77777777-7777-7777-7777-777777777777', 'request-v17', 'ADMIN', 'quotation.void',
+                            'quotation', '55555555-5555-5555-5555-555555555555', 'success', '{"marker":"audit-kept"}'::jsonb, now())
+                    """);
+        }
+    }
+
+    private void assertQuotationRemovalMigration() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("select to_regclass('public.quotation_share') is null")) {
+                result.next(); assertEquals(true, result.getBoolean(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*)
+                    from information_schema.columns
+                    where table_schema='public' and table_name='quotation_record'
+                      and column_name in ('voided_at','voided_by','void_reason')
+                    """)) {
+                result.next(); assertEquals(0, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select status, payload->>'status', payload ? '_statusBeforeVoid',
+                           payload->>'customerName', payload->'revisions'->0->>'id', version,
+                           updated_at = '2026-08-24T01:02:03Z'::timestamptz
+                    from quotation_record where quote_no='Q-VOIDED-1'
+                    """)) {
+                result.next();
+                assertEquals("won", result.getString(1));
+                assertEquals("won", result.getString(2));
+                assertEquals(false, result.getBoolean(3));
+                assertEquals("保留客户", result.getString(4));
+                assertEquals("revision-kept", result.getString(5));
+                assertEquals(7, result.getLong(6));
+                assertEquals(true, result.getBoolean(7));
+            }
+            try (var result = statement.executeQuery("""
+                    select previous_status, previous_status_before_void #>> '{}', normalized_status,
+                           previous_voided_by, previous_void_reason, previous_version
+                    from quotation_void_state_backup_v17
+                    """)) {
+                result.next();
+                assertEquals("voided", result.getString(1));
+                assertEquals("won", result.getString(2));
+                assertEquals("won", result.getString(3));
+                assertEquals("ADMIN", result.getString(4));
+                assertEquals("历史作废原因", result.getString(5));
+                assertEquals(7, result.getLong(6));
+                assertEquals(false, result.next());
+            }
+            try (var result = statement.executeQuery("select count(*) from quotation_record")) {
+                result.next(); assertEquals(2, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("select count(*), min(detail->>'marker') from audit_log where id='77777777-7777-7777-7777-777777777777'")) {
+                result.next(); assertEquals(1, result.getInt(1)); assertEquals("audit-kept", result.getString(2));
+            }
+        }
+    }
+
+    private void restoreQuotationVoidState() throws Exception {
+        var workingDirectory = Path.of("").toAbsolutePath();
+        var script = workingDirectory.resolve("deploy/scripts/restore-quotation-void-state-v17.sql");
+        if (!Files.exists(script)) script = workingDirectory.resolve("../deploy/scripts/restore-quotation-void-state-v17.sql").normalize();
+        var restoreSql = Files.readString(script);
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.execute(restoreSql);
+            assertThrows(java.sql.SQLException.class, () -> statement.execute(restoreSql));
+        }
+    }
+
+    private void assertQuotationVoidStateRestored() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("""
+                    select status, payload->>'status', payload->>'_statusBeforeVoid',
+                           voided_at = '2026-08-24T01:02:03Z'::timestamptz,
+                           voided_by, void_reason, version, payload->'revisions'->0->>'id'
+                    from quotation_record where quote_no='Q-VOIDED-1'
+                    """)) {
+                result.next();
+                assertEquals("voided", result.getString(1));
+                assertEquals("voided", result.getString(2));
+                assertEquals("won", result.getString(3));
+                assertEquals(true, result.getBoolean(4));
+                assertEquals("ADMIN", result.getString(5));
+                assertEquals("历史作废原因", result.getString(6));
+                assertEquals(7, result.getLong(7));
+                assertEquals("revision-kept", result.getString(8));
             }
         }
     }

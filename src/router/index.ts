@@ -7,7 +7,6 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: () => isAuthenticated.value ? defaultHomeForRole() : '/login' },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { title: '登录' } },
-    { path: '/share/:token', name: 'quotation-share', component: () => import('@/views/PublicQuotationShareView.vue'), meta: { title: '客户报价单', public: true } },
     { path: '/migration/export', name: 'migration-export', component: () => import('@/views/LegacyMigrationExportView.vue'), meta: { title: '本地数据迁移盘点', public: true } },
     { path: '/change-password', name: 'change-password', component: () => import('@/views/ChangePasswordView.vue'), meta: { title: '修改临时密码' } },
     { path: '/quotation/overview', name: 'quotation-overview', component: () => import('@/views/QuotationOverviewView.vue'), meta: { title: '报价情况预览', permission: 'allRecords' } },
@@ -16,7 +15,7 @@ const router = createRouter({
     { path: '/quotation/suppliers', name: 'quotation-suppliers', component: () => import('@/views/MasterDataView.vue'), meta: { title: '供应商管理', permission: 'purchase' } },
     { path: '/quotation/logistics', name: 'quotation-logistics', component: () => import('@/views/SumaoLogisticsReplicaView.vue'), meta: { title: '物流', permission: 'logistics' } },
     { path: '/quotation/members', name: 'quotation-members', component: () => import('@/views/JerryModuleView.vue'), props: { mode: 'members' }, meta: { title: '财务', permission: 'finance' } },
-    { path: '/quotation/my-records', name: 'quotation-my-records', component: () => import('@/views/QuotationRecordsView.vue'), props: { scope: 'mine' }, meta: { title: '我的报价记录', permission: 'myRecords' } },
+    { path: '/quotation/my-records', name: 'quotation-my-records', component: () => import('@/views/QuotationRecordsView.vue'), props: { scope: 'mine' }, meta: { title: '我的报价记录', permissions: ['myRecords', 'allRecords'] } },
     { path: '/quotation/records', name: 'quotation-records', component: () => import('@/views/QuotationRecordsView.vue'), props: { scope: 'company' }, meta: { title: '报价记录', permission: 'allRecords' } },
     { path: '/quotation/permissions', name: 'quotation-permissions', component: () => import('@/views/PermissionManagementView.vue'), meta: { title: '权限管理', permission: 'permissions' } },
     { path: '/quotation/migrations', name: 'quotation-migrations', component: () => import('@/views/MigrationManagementView.vue'), meta: { title: '数据迁移', permission: 'permissions' } },
@@ -34,6 +33,8 @@ router.beforeEach(async (to) => {
   if (!currentAuthUser.value.mustChangePassword && to.path === '/change-password') return defaultHomeForRole()
   const permission = to.meta.permission as PermissionKey | undefined
   if (permission && !hasPermission(permission)) return defaultHomeForRole()
+  const permissions = to.meta.permissions as PermissionKey[] | undefined
+  if (permissions && !permissions.some(item => hasPermission(item))) return defaultHomeForRole()
 })
 
 router.afterEach((to) => {

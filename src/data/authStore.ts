@@ -57,6 +57,8 @@ export async function login(account: string, password: string) {
 }
 export async function logout() { try { await api.post('/auth/logout') } finally { await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; resetCsrf() } }
 export function hasPermission(permission: PermissionKey) { return isAuthenticated.value && authState.permissions.includes(permission) }
+export function hasAnyPermission(...permissions: PermissionKey[]) { return permissions.some(permission => hasPermission(permission)) }
+export function canAccessMyRecords(permissions: readonly PermissionKey[]) { return permissions.includes('myRecords') || permissions.includes('allRecords') }
 export function defaultHomeForRole(role = currentAuthUser.value.role) { if (role === 'logistics') return '/quotation/logistics'; if (role === 'purchase') return '/quotation/products'; if (role === 'employee') return '/quotation'; return '/quotation/overview' }
 
 export async function loadAuthUsers() { authState.users = await api.get<AuthUser[]>('/users'); return authState.users }

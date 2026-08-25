@@ -1,6 +1,6 @@
 import { api, idempotencyKey } from '@/services/http'
 
-export type QuotationRecordStatus = 'pending' | 'won' | 'lost' | 'voided'
+export type QuotationRecordStatus = 'pending' | 'won' | 'lost'
 
 export interface QuotationRecordSpecifiedQuote {
   country: string
@@ -90,7 +90,6 @@ export interface QuotationRecord {
   specifiedQuotes?: QuotationRecordSpecifiedQuote[]
   quoteOptions?: QuotationRecordQuoteOption[]; customQuoteQuantity?: number; dealOptionId?: string; dealOptionLabel?: string; dealLines?: QuotationRecordDealLine[]
   status: QuotationRecordStatus; actualQuoteUsd?: number; actualQuoteCny?: number; dealQuantity?: number
-  voidedAt?: string; voidedBy?: string; voidReason?: string
   closedAt?: string; note?: string; createdAt: string; updatedAt: string; revisions: QuotationRecordRevision[]
 }
 
@@ -271,7 +270,7 @@ function normalize(raw: Partial<QuotationRecord>): QuotationRecord | null {
       : [legacyPrimaryOption(raw, recordId)]
   const specifiedQuotes = Array.isArray(raw.quoteOptions) ? specifiedQuotesFromOptions(quoteOptions) : legacyQuotes
   const dealLines = normalizeDealLines(raw.dealLines, quoteOptions, raw)
-  return { id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' || raw.status === 'voided' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, voidedAt: optionalText(raw.voidedAt), voidedBy: optionalText(raw.voidedBy), voidReason: optionalText(raw.voidReason), createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
+  return { id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
 }
 export async function loadQuotationRecords(scope: 'mine' | 'company' = 'company') {
   const result = await api.get<{ items: QuotationRecord[] }>(`/quotations?scope=${scope}&size=100`)
@@ -286,13 +285,3 @@ export async function updateQuotationRecord(id: string, patch: QuotationRecordUp
   const raw = await api.patch<QuotationRecord>(`/quotations/${id}`, { ...patch, _version: expectedVersion })
   return normalize(raw)
 }
-export async function voidQuotationRecord(row: QuotationRecord, reason: string) {
-  return normalize(await api.post<QuotationRecord>(`/quotations/${row.id}/void`, { reason, version: row._version }))
-}
-export async function restoreQuotationRecord(row: QuotationRecord) {
-  return normalize(await api.post<QuotationRecord>(`/quotations/${row.id}/restore`, { version: row._version }))
-}
-export async function shareQuotationRecord(row: QuotationRecord, days = 7) {
-  return api.post<{ id: string; token: string; path: string; expiresAt: string }>(`/quotations/${row.id}/shares`, { days })
-}
-export function quotationPdfUrl(row: QuotationRecord) { return `/api/v1/quotations/${row.id}/pdf` }

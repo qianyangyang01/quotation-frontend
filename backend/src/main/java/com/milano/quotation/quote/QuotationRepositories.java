@@ -12,7 +12,3 @@ interface QuotationRecordRepository extends JpaRepository<QuotationRecordEntity,
 }
 interface QuotationTemplateRepository extends JpaRepository<QuotationTemplateEntity,UUID>{List<QuotationTemplateEntity> findByOwnerAccountOrderByUpdatedAtDesc(String ownerAccount);}
 interface QuotationDraftRepository extends JpaRepository<QuotationDraftEntity,String>{}
-interface QuotationShareRepository extends JpaRepository<QuotationShareEntity,UUID>{
-    java.util.Optional<QuotationShareEntity> findByTokenHash(String tokenHash);
-    List<QuotationShareEntity> findByQuotationIdOrderByCreatedAtDesc(UUID quotationId);
-}

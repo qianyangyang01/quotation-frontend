@@ -1,6 +1,5 @@
 package com.milano.quotation.quote;
 
-import com.milano.quotation.audit.AuditLogRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,9 +11,10 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.springframework.http.MediaType.APPLICATION_PDF;
+import java.time.Instant;
+import java.util.UUID;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -28,14 +28,14 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 class QuotationWorkflowIntegrationTest {
     @Autowired WebApplicationContext context;
     @Autowired ObjectMapper mapper;
-    @Autowired AuditLogRepository auditLogs;
+    @Autowired QuotationRecordRepository records;
     @MockitoBean QuotationReadinessService readiness;
     MockMvc mvc;
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
     @Test
-    void createsVoidsRestoresAndSharesSanitizedQuotation() throws Exception {
+    void keepsPersonalOutcomeEditingAndMakesCompanyRecordsReadOnly() throws Exception {
         var session = authenticatedSession();
         mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
                         .header("Idempotency-Key", "quote-invalid-1").contentType("application/json").content("{}"))
@@ -45,40 +45,63 @@ class QuotationWorkflowIntegrationTest {
         var created = mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
                         .header("Idempotency-Key", "quote-test-1")
                         .contentType("application/json")
-                        .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"测试客户\",\"quoteMode\":\"single\",\"primarySku\":\"SKU-1\",\"productCategory\":\"服装\",\"logisticsAttribute\":\"普货\",\"customerGrade\":\"A级客户\",\"taxCustomerType\":\"A\",\"monthlySalesEstimate\":\"10\",\"quoteOptions\":[{\"country\":\"美国\",\"channel\":\"测试渠道\"}],\"productSummary\":\"测试商品\",\"purchaseCost\":\"SECRET_COST\",\"profitRate\":\"SECRET_PROFIT\"}"))
+                        .content("{\"customerId\":\"11111111-1111-1111-1111-111111111111\",\"customerName\":\"测试客户\",\"quoteMode\":\"single\",\"primarySku\":\"SKU-1\",\"productCategory\":\"服装\",\"logisticsAttribute\":\"普货\",\"customerGrade\":\"A级客户\",\"taxCustomerType\":\"A\",\"monthlySalesEstimate\":\"10\",\"quoteOptions\":[{\"id\":\"option-us\",\"country\":\"美国\",\"carrier\":\"承运商A\",\"channel\":\"渠道A\"},{\"id\":\"option-ca\",\"country\":\"加拿大\",\"carrier\":\"承运商B\",\"channel\":\"渠道B\"}],\"productSummary\":\"测试商品\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("pending"))
                 .andExpect(jsonPath("$.data.customerId").doesNotExist()).andReturn();
         var createdData = mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
         var id = createdData.path("id").asText(); var version = createdData.path("_version").asLong();
 
-        mvc.perform(get("/api/v1/quotations/{id}/pdf", id).session(session).accept(APPLICATION_PDF))
-                .andExpect(status().isOk()).andExpect(content().contentType(APPLICATION_PDF));
-        assertTrue(auditLogs.findAll().stream().anyMatch(log -> log.action.equals("quotation.pdf") && log.resourceId.equals(id)));
+        var other = new QuotationRecordEntity();
+        other.id = UUID.randomUUID(); other.quoteNo = "Q-OTHER-1"; other.ownerAccount = "EMP001"; other.status = "pending";
+        var otherPayload = JsonNodeFactory.instance.objectNode().put("id", other.id.toString()).put("no", other.quoteNo)
+                .put("salespersonAccount", "EMP001").put("salespersonName", "其他员工").put("customerName", "其他客户")
+                .put("status", "pending");
+        otherPayload.putArray("revisions"); other.payload = otherPayload;
+        other.createdAt = Instant.parse("2026-08-20T00:00:00Z"); other.updatedAt = other.createdAt;
+        records.saveAndFlush(other);
 
-        var voided = mvc.perform(post("/api/v1/quotations/{id}/void", id).session(session).with(csrf())
-                        .contentType("application/json").content("{\"reason\":\"客户取消\",\"version\":" + version + "}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("voided")).andReturn();
-        var voidVersion = mapper.readTree(voided.getResponse().getContentAsByteArray()).path("data").path("_version").asLong();
-
-        var restored = mvc.perform(post("/api/v1/quotations/{id}/restore", id).session(session).with(csrf())
-                        .contentType("application/json").content("{\"version\":" + voidVersion + "}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("pending")).andReturn();
-        var restoredVersion = mapper.readTree(restored.getResponse().getContentAsByteArray()).path("data").path("_version").asLong();
-        assertTrue(restoredVersion > voidVersion);
-
-        var shared = mvc.perform(post("/api/v1/quotations/{id}/shares", id).session(session).with(csrf())
-                        .contentType("application/json").content("{\"days\":7}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.token").isNotEmpty()).andReturn();
-        var token = mapper.readTree(shared.getResponse().getContentAsByteArray()).path("data").path("token").asText();
-
-        mvc.perform(get("/api/public/v1/quotation-shares/{token}", token))
+        mvc.perform(get("/api/v1/quotations").session(session).param("scope", "mine"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.customerName").value("测试客户"))
-                .andExpect(jsonPath("$.data.purchaseCost").doesNotExist())
-                .andExpect(jsonPath("$.data.profitRate").doesNotExist());
-
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(id));
         mvc.perform(get("/api/v1/quotations").session(session).param("scope", "company"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").value(id));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(2))
+                .andExpect(jsonPath("$.data.items[?(@.id == '" + id + "')]").exists())
+                .andExpect(jsonPath("$.data.items[?(@.id == '" + other.id + "')]").exists());
+
+        var updated = mvc.perform(patch("/api/v1/quotations/{id}", id).session(session).with(csrf())
+                        .contentType("application/json")
+                        .content("{\"_version\":" + version + ",\"status\":\"won\",\"dealLines\":[{\"id\":\"deal-us\",\"optionId\":\"option-us\",\"optionLabel\":\"美国 · 渠道A\",\"country\":\"美国\",\"carrier\":\"承运商A\",\"channel\":\"渠道A\",\"unitPriceUsd\":12.5,\"quantity\":2,\"amountUsd\":25},{\"id\":\"deal-ca\",\"optionId\":\"option-ca\",\"optionLabel\":\"加拿大 · 渠道B\",\"country\":\"加拿大\",\"carrier\":\"承运商B\",\"channel\":\"渠道B\",\"unitPriceUsd\":15,\"quantity\":3,\"amountUsd\":45}],\"actualQuoteUsd\":70,\"dealQuantity\":5,\"closedAt\":\"2026-08-25\",\"note\":\"多渠道成交\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("won"))
+                .andExpect(jsonPath("$.data.dealLines.length()").value(2))
+                .andExpect(jsonPath("$.data.actualQuoteUsd").value(70))
+                .andReturn();
+        var updatedVersion = mapper.readTree(updated.getResponse().getContentAsByteArray()).path("data").path("_version").asLong();
+        mvc.perform(patch("/api/v1/quotations/{id}", id).session(session).with(csrf())
+                        .contentType("application/json").content("{\"_version\":" + updatedVersion + ",\"status\":\"won\",\"note\":\"多渠道成交\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(patch("/api/v1/quotations/{id}", id).session(session).with(csrf())
+                        .contentType("application/json").content("{\"_version\":" + version + ",\"status\":\"lost\",\"note\":\"过期覆盖\"}"))
+                .andExpect(status().isConflict());
+        mvc.perform(patch("/api/v1/quotations/{id}", other.id).session(session).with(csrf())
+                        .contentType("application/json").content("{\"_version\":0,\"status\":\"won\"}"))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(get("/api/v1/quotations/{id}/pdf", id).session(session)).andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/quotations/{id}/void", id).session(session).with(csrf()).contentType("application/json").content("{}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/quotations/{id}/restore", id).session(session).with(csrf()).contentType("application/json").content("{}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/v1/quotations/{id}/shares", id).session(session).with(csrf()).contentType("application/json").content("{}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(delete("/api/v1/quotations/{id}/shares/{shareId}", id, UUID.randomUUID()).session(session).with(csrf()))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/public/v1/quotation-shares/{token}", "a".repeat(40)))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/public/v1/quotation-shares/{token}", "a".repeat(40)).session(session))
+                .andExpect(status().isNotFound());
 
         mvc.perform(put("/api/v1/finance-settings/exchange-rate").session(session).with(csrf())
                         .header("If-Match", "-1").contentType("application/json")
