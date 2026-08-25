@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { currentAuthUser, currentRole, defaultHomeForRole, hasPermission, logout } from '@/data/authStore'
+import { currentAuthUser, currentRole, defaultHomeForRole, hasPermission, logout, type PermissionKey } from '@/data/authStore'
 
 const route = useRoute()
 const router = useRouter()
 const accountMenuOpen = ref(false)
 const navItems = computed(() => [
-  { label: '报价预览', path: '/quotation/overview', permission: 'allRecords' as const },
-  { label: '我的报价', path: '/quotation', permission: 'quote' as const },
-  { label: '采购', path: '/quotation/products', permission: 'purchase' as const },
-  { label: '物流', path: '/quotation/logistics', permission: 'logistics' as const },
-  { label: '财务', path: '/quotation/members', permission: 'finance' as const },
-  { label: '我的报价记录', path: '/quotation/my-records', permission: 'myRecords' as const },
-  { label: '报价记录', path: '/quotation/records', permission: 'allRecords' as const },
-  { label: '权限管理', path: '/quotation/permissions', permission: 'permissions' as const },
-].filter(item => hasPermission(item.permission)))
+  { label: '报价预览', path: '/quotation/overview', permissions: ['allRecords'] },
+  { label: '我的报价', path: '/quotation', permissions: ['quote'] },
+  { label: '采购', path: '/quotation/products', permissions: ['purchase'] },
+  { label: '物流', path: '/quotation/logistics', permissions: ['logistics'] },
+  { label: '财务', path: '/quotation/members', permissions: ['finance'] },
+  { label: '我的报价记录', path: '/quotation/my-records', permissions: ['myRecords', 'allRecords'] },
+  { label: '报价记录', path: '/quotation/records', permissions: ['allRecords'] },
+  { label: '权限管理', path: '/quotation/permissions', permissions: ['permissions'] },
+].filter(item => item.permissions.some(permission => hasPermission(permission as PermissionKey))))
 const home = computed(() => defaultHomeForRole())
 const initials = computed(() => currentAuthUser.value.name.slice(0, 2).toUpperCase())
 

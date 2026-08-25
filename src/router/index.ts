@@ -13,7 +13,7 @@ const router = createRouter({
     { path: '/quotation/suppliers', name: 'quotation-suppliers', component: () => import('@/views/JerryModuleView.vue'), props: { mode: 'suppliers' }, meta: { title: '供应商管理', permission: 'purchase' } },
     { path: '/quotation/logistics', name: 'quotation-logistics', component: () => import('@/views/SumaoLogisticsReplicaView.vue'), meta: { title: '物流', permission: 'logistics' } },
     { path: '/quotation/members', name: 'quotation-members', component: () => import('@/views/JerryModuleView.vue'), props: { mode: 'members' }, meta: { title: '财务', permission: 'finance' } },
-    { path: '/quotation/my-records', name: 'quotation-my-records', component: () => import('@/views/QuotationRecordsView.vue'), props: { scope: 'mine' }, meta: { title: '我的报价记录', permission: 'myRecords' } },
+    { path: '/quotation/my-records', name: 'quotation-my-records', component: () => import('@/views/QuotationRecordsView.vue'), props: { scope: 'mine' }, meta: { title: '我的报价记录', permissions: ['myRecords', 'allRecords'] } },
     { path: '/quotation/records', name: 'quotation-records', component: () => import('@/views/QuotationRecordsView.vue'), props: { scope: 'company' }, meta: { title: '报价记录', permission: 'allRecords' } },
     { path: '/quotation/permissions', name: 'quotation-permissions', component: () => import('@/views/PermissionManagementView.vue'), meta: { title: '权限管理', permission: 'permissions' } },
     { path: '/quotation/history', redirect: '/quotation/records' },
@@ -26,6 +26,8 @@ router.beforeEach((to) => {
   if (!isAuthenticated.value) return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
   const permission = to.meta.permission as PermissionKey | undefined
   if (permission && !hasPermission(permission)) return defaultHomeForRole()
+  const permissions = to.meta.permissions as PermissionKey[] | undefined
+  if (permissions && !permissions.some(item => hasPermission(item))) return defaultHomeForRole()
 })
 
 router.afterEach((to) => {
