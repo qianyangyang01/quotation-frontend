@@ -1,3 +1,5 @@
+import { quotationProductCategories } from './productCategories'
+
 export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPriceCny: number; source: string }
 export type PurchaseStockStatus = '有货' | '无货' | '待确认' | ''
 export type PurchaseSkuOrigin = 'imported' | 'manual' | 'system'
@@ -22,6 +24,7 @@ const DB_NAME = 'milano-quotation'
 const DB_VERSION = 1
 const STORE_NAME = 'purchase-products'
 const LEGACY_STORAGE_KEY = 'milano.purchase-products.v1'
+const CATEGORY_MIGRATION_KEY = 'milano.purchase-category-migration.v1'
 let databasePromise: Promise<IDBDatabase> | null = null
 
 function openDatabase() {
@@ -51,6 +54,25 @@ function transactionDone(transaction: IDBTransaction) {
     transaction.onerror = () => reject(transaction.error || new Error('采购数据库保存失败'))
     transaction.onabort = () => reject(transaction.error || new Error('采购数据库保存已取消'))
   })
+}
+
+function stableCategory(sku: string, sourceRow: number) {
+  const seed = `${sku}:${sourceRow}`
+  let hash = 2166136261
+  for (let index = 0; index < seed.length; index += 1) hash = Math.imul(hash ^ seed.charCodeAt(index), 16777619)
+  return quotationProductCategories[(hash >>> 0) % quotationProductCategories.length]
+}
+
+async function migrateExistingPurchaseCategories(database: IDBDatabase) {
+  if (typeof window === 'undefined' || window.localStorage.getItem(CATEGORY_MIGRATION_KEY) === '1') return
+  const rows = await requestResult(database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll()) as PurchaseProductRecord[]
+  if (rows.length) {
+    const transaction = database.transaction(STORE_NAME, 'readwrite')
+    const store = transaction.objectStore(STORE_NAME)
+    rows.forEach(record => store.put({ ...record, category: stableCategory(record.sku, record.sourceRow) }))
+    await transactionDone(transaction)
+  }
+  window.localStorage.setItem(CATEGORY_MIGRATION_KEY, '1')
 }
 
 function numberOrNull(value: unknown) {
@@ -116,6 +138,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
 export async function loadPurchaseProducts(): Promise<PurchaseProductRecord[]> {
   if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_STORAGE_KEY)
   const database = await openDatabase()
+  await migrateExistingPurchaseCategories(database)
   const rows = await requestResult(database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll())
   return (rows as PurchaseProductRecord[]).map(normalizePurchaseRecord).sort((a, b) => b.sourceRow - a.sourceRow)
 }
