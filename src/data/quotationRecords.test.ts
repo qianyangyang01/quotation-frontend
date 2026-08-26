@@ -14,11 +14,11 @@ function baseRecord() {
 describe('quotation record bundle snapshots', () => {
   it('normalizes a structured immutable bundle snapshot', () => {
     const record = normalizeQuotationRecord({ ...baseRecord(), bundleItems: [
-      { sku: ' sku-1 ', name: '商品一', quantityPerSet: 2, effectiveWeightKg: 0.2, purchaseUnitPriceCny: 12, domesticFreightPerUnitCny: 1.5 },
+      { sku: ' sku-1 ', name: '商品一', quantityPerSet: 2, effectiveWeightKg: 0.2, purchaseBaseUnitPriceCny: 11.32, purchaseInvoiceType: '普票6%', purchaseInvoiceRatePercent: 6, purchaseInvoiceTaxApplied: true, purchaseUnitPriceCny: 12, domesticFreightPerUnitCny: 1.5 },
       { sku: 'SKU-2', name: '商品二', quantityPerSet: 1, effectiveWeightKg: 0.35, purchaseUnitPriceCny: 20, domesticFreightPerUnitCny: 0 },
     ] })
     expect(record?.bundleItems).toEqual([
-      { sku: 'SKU-1', name: '商品一', quantityPerSet: 2, effectiveWeightKg: 0.2, purchaseUnitPriceCny: 12, domesticFreightPerUnitCny: 1.5 },
+      { sku: 'SKU-1', name: '商品一', quantityPerSet: 2, effectiveWeightKg: 0.2, purchaseBaseUnitPriceCny: 11.32, purchaseInvoiceType: '普票6%', purchaseInvoiceRatePercent: 6, purchaseInvoiceTaxApplied: true, purchaseUnitPriceCny: 12, domesticFreightPerUnitCny: 1.5 },
       { sku: 'SKU-2', name: '商品二', quantityPerSet: 1, effectiveWeightKg: 0.35, purchaseUnitPriceCny: 20, domesticFreightPerUnitCny: 0 },
     ])
   })

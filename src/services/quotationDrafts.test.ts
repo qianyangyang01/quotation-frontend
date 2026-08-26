@@ -8,7 +8,7 @@ const mockedApi = vi.mocked(api)
 const payload: QuotationDraftPayload = {
   schemaVersion: 2, customerName: '客户A', quoteMode: 'single', skuSearch: 'SKU-1', productCategory: '服装', logisticsAttribute: '普货',
   selectedCustomerGrade: 'S', selectedTaxCustomerType: 'A', monthlySalesEstimate: '10', customQuoteQuantity: 5, quoteMatrixMode: 'common',
-  selectedQuoteRegions: { 澳大利亚: '1区' }, product: { sku: 'SKU-1', quantity: 1, weightSource: 'purchase', manualWeight: 0, volumetricEnabled: false, packageLengthCm: 0, packageWidthCm: 0, packageHeightCm: 0, primaryCountry: '美国', primaryChannelKey: 'channel-1', primaryRule: '规则A', primaryCarrier: '物流商A' },
+  selectedQuoteRegions: { 澳大利亚: '1区' }, product: { sku: 'SKU-1', purchaseInvoiceTaxApplied: true, quantity: 1, weightSource: 'purchase', manualWeight: 0, volumetricEnabled: false, packageLengthCm: 0, packageWidthCm: 0, packageHeightCm: 0, primaryCountry: '美国', primaryChannelKey: 'channel-1', primaryRule: '规则A', primaryCarrier: '物流商A' },
   bundleItems: [], commonSelections: [], specifiedSelections: [], templateSelections: [], activeTemplate: null,
 }
 
@@ -28,6 +28,11 @@ describe('quotation draft repository', () => {
     expect(mockedApi.put).toHaveBeenCalledWith('/quotation-drafts/mine/state', payload, { 'If-Match': '3' })
     await deleteQuotationDraft(4)
     expect(mockedApi.delete).toHaveBeenCalledWith('/quotation-drafts/mine/state', { 'If-Match': '4' })
+  })
+
+  it('keeps the invoice-pricing marker optional for legacy schema-version-2 drafts', () => {
+    const legacy = { ...payload, product: { ...payload.product, purchaseInvoiceTaxApplied: undefined } }
+    expect(normalizeDraftState({ exists: true, payload: legacy, version: 2 }).payload?.product.purchaseInvoiceTaxApplied).toBeUndefined()
   })
 
   it('keeps only stable unique channel selections', () => {

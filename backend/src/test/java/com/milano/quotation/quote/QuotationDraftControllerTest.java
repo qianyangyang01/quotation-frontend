@@ -35,9 +35,11 @@ class QuotationDraftControllerTest {
         assertFalse(empty.path("exists").asBoolean());
         assertEquals(-1, empty.path("version").asInt());
         when(drafts.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
-        var saved = controller.saveState(validDraft(), -1, auth).data();
+        var draft = validDraft(); draft.putObject("product").put("sku", "SKU-1").put("purchaseInvoiceTaxApplied", true);
+        var saved = controller.saveState(draft, -1, auth).data();
         assertTrue(saved.path("exists").asBoolean());
         assertEquals("客户A", saved.path("payload").path("customerName").asText());
+        assertTrue(saved.path("payload").path("product").path("purchaseInvoiceTaxApplied").asBoolean());
     }
 
     @Test void rejectsStaleVersionAndProtectsNewerDraftFromDelete() {

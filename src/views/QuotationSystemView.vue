@@ -47,6 +47,7 @@ import {
   hasQuotationProduct,
   monthlySalesTierLabel as calculateMonthlySalesTierLabel,
   normalizedQuoteQuantity,
+  purchasePriceBreakdown as calculatePurchasePriceBreakdown,
   purchasePriceForMonthlySales as calculatePurchasePriceForMonthlySales,
   resolveBundleProductCategory,
   singleActualWeight as calculateSingleActualWeight,
@@ -130,8 +131,11 @@ let leaveDecision: ((allowed: boolean) => void) | null = null
 function monthlySalesTierLabel(value = monthlySalesEstimate.value) {
   return calculateMonthlySalesTierLabel(value)
 }
-function purchasePriceForMonthlySales(record: PurchaseProductRecord) {
-  return calculatePurchasePriceForMonthlySales(record, monthlySalesEstimate.value)
+function purchasePricingForMonthlySales(record: PurchaseProductRecord, invoiceTaxApplied = true) {
+  return calculatePurchasePriceBreakdown(record, monthlySalesEstimate.value, invoiceTaxApplied)
+}
+function purchasePriceForMonthlySales(record: PurchaseProductRecord, invoiceTaxApplied = true) {
+  return calculatePurchasePriceForMonthlySales(record, monthlySalesEstimate.value, invoiceTaxApplied)
 }
 const initialLogisticsAttribute = quotationAttributeOptions[0] || '普货'
 const initialCountry = financeCountryOptionsForCategory(financePolicies, initialLogisticsAttribute, financeCountrySettings.value)[0]?.name || ''
@@ -155,6 +159,7 @@ function emptyQuotationProduct(): Product {
   return {
     id: 1, selected: true, name: '待查询采购商品', sku: '', logisticsAttribute: initialLogisticsAttribute,
     supplier: '待补充', image: '', physicalImage: '', stockStatus: '待确认', quantity: 1, purchase: 0,
+    purchaseBaseUnitPrice: 0, purchaseInvoiceType: '', purchaseInvoiceRatePercent: 0, purchaseInvoiceTaxApplied: true,
     purchaseFreightPerUnit: 0,
     netWeight: 0,
     country: initialCountry, channel: initialChannel, rule: initialRule,
@@ -166,8 +171,9 @@ function emptyQuotationProduct(): Product {
 }
 const products = ref<Product[]>([emptyQuotationProduct()])
 let bundleItemId = 1
-function bundleItemFromRecord(record?: PurchaseProductRecord): BundleQuoteItem {
+function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied = true): BundleQuoteItem {
   const quantityPerSet = 1
+  const pricing = record ? purchasePricingForMonthlySales(record, invoiceTaxApplied) : null
   return {
     id: bundleItemId++,
     sku: record?.sku || '',
@@ -177,7 +183,11 @@ function bundleItemFromRecord(record?: PurchaseProductRecord): BundleQuoteItem {
     physicalImage: record?.physicalImage || '',
     stockStatus: record?.stockStatus || '待确认',
     quantityPerSet,
-    purchaseUnitPrice: record ? purchasePriceForMonthlySales(record) : 0,
+    purchaseUnitPrice: pricing?.effectiveUnitPriceCny || 0,
+    purchaseBaseUnitPrice: pricing?.baseUnitPriceCny || 0,
+    purchaseInvoiceType: pricing?.invoiceType || '',
+    purchaseInvoiceRatePercent: pricing?.invoiceRatePercent || 0,
+    purchaseInvoiceTaxApplied: invoiceTaxApplied,
     customWeightKg: null,
     purchaseFreightPerUnit: record ? purchaseFreightChoices(record).find(item => item.quantity === 10)?.unitFreightCny || 0 : 0,
     weightKg: record?.weightKg || 0,
@@ -217,14 +227,30 @@ function taxResult(country: string, provider: string, baseQuoteCny: number, quan
 }
 function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd * exchange.value.usd }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
-function applyPurchaseRecord(p: Product, record: PurchaseProductRecord) {
+function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
+  const pricing = purchasePricingForMonthlySales(record, invoiceTaxApplied)
+  p.purchase = pricing.effectiveUnitPriceCny
+  p.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
+  p.purchaseInvoiceType = pricing.invoiceType
+  p.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
+  p.purchaseInvoiceTaxApplied = invoiceTaxApplied
+}
+function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProductRecord, invoiceTaxApplied = item.purchaseInvoiceTaxApplied) {
+  const pricing = purchasePricingForMonthlySales(record, invoiceTaxApplied)
+  item.purchaseUnitPrice = pricing.effectiveUnitPriceCny
+  item.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
+  item.purchaseInvoiceType = pricing.invoiceType
+  item.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
+  item.purchaseInvoiceTaxApplied = invoiceTaxApplied
+}
+function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = true) {
   p.sku = record.sku
   p.name = purchaseDisplayName(record)
   p.supplier = record.quotationOwner || '待补充'
   p.image = record.image
   p.physicalImage = record.physicalImage
   p.stockStatus = record.stockStatus || '待确认'
-  p.purchase = purchasePriceForMonthlySales(record)
+  applyProductPurchasePricing(p, record, invoiceTaxApplied)
   p.purchaseFreightPerUnit = purchaseFreightChoices(record).find(item => item.quantity === 10)?.unitFreightCny || 0
   p.netWeight = record.weightKg || 0
   p.manualWeight = record.weightKg || 0
@@ -295,6 +321,7 @@ async function queryBundleItem(item: BundleQuoteItem) {
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
   if (duplicate) {
     duplicate.quantityPerSet += normalizedBundleSets(item.quantityPerSet)
+    applyBundlePurchasePricing(duplicate, record, true)
     removeBundleItem(item.id)
     updateBundleItemQuantity(duplicate)
     toast(`${record.sku} 已存在，已合并到同一行并累加单套数量`)
@@ -308,6 +335,7 @@ async function queryBundleItem(item: BundleQuoteItem) {
   item.stockStatus = record.stockStatus || '待确认'
   item.customWeightKg = null
   item.weightKg = record.weightKg || 0
+  applyBundlePurchasePricing(item, record, true)
   item.purchaseFreightPerUnit = purchaseFreightChoices(record).find(choice => choice.quantity === 10)?.unitFreightCny || 0
   item.status = record.status === '资料完整' ? '采购资料已加载' : record.status
   const recordCategory = quotationProductCategories.find(category => category === record?.category) || ''
@@ -343,7 +371,7 @@ function removeBundleItem(id: number) {
 function updateBundleItemQuantity(item: BundleQuoteItem, showToast = false) {
   item.quantityPerSet = normalizedBundleSets(item.quantityPerSet)
   const record = findPurchaseProduct(purchaseRecords.value, item.sku)
-  if (record) item.purchaseUnitPrice = purchasePriceForMonthlySales(record)
+  if (record) applyBundlePurchasePricing(item, record)
   normalizeRule(products.value[0], true)
   if (showToast) toast(`已更新 ${item.sku} 的单套数量`)
 }
@@ -363,10 +391,10 @@ function changeQuoteMode(mode: QuotationMode) {
 function changeMonthlySalesEstimate(p: Product, value: string) {
   monthlySalesEstimate.value = value
   const record = findPurchaseProduct(purchaseRecords.value, p.sku)
-  if (record) p.purchase = purchasePriceForMonthlySales(record)
+  if (record) applyProductPurchasePricing(p, record)
   bundleItems.value.forEach(item => {
     const itemRecord = findPurchaseProduct(purchaseRecords.value, item.sku)
-    if (itemRecord) item.purchaseUnitPrice = purchasePriceForMonthlySales(itemRecord)
+    if (itemRecord) applyBundlePurchasePricing(item, itemRecord)
   })
   normalizeRule(p, true)
   toast(`已匹配${monthlySalesTierLabel()}，采购单价与报价已更新`)
@@ -497,6 +525,7 @@ function draftPayload(): QuotationDraftPayload {
     selectedQuoteRegions: { ...selectedQuoteRegions.value },
     product: {
       sku: p.sku,
+      purchaseInvoiceTaxApplied: p.purchaseInvoiceTaxApplied,
       quantity: Math.max(1, Math.floor(p.quantity || 1)),
       weightSource: p.weightSource,
       manualWeight: Math.max(0, Number(p.manualWeight) || 0),
@@ -510,7 +539,7 @@ function draftPayload(): QuotationDraftPayload {
       primaryRule: p.rule,
       primaryCarrier: p.channel,
     },
-    bundleItems: bundleItems.value.map(item => ({ sku: item.sku, quantityPerSet: normalizedBundleSets(item.quantityPerSet), customWeightKg: item.customWeightKg == null ? null : Math.max(0, Number(item.customWeightKg) || 0) })),
+    bundleItems: bundleItems.value.map(item => ({ sku: item.sku, quantityPerSet: normalizedBundleSets(item.quantityPerSet), customWeightKg: item.customWeightKg == null ? null : Math.max(0, Number(item.customWeightKg) || 0), purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied })),
     commonSelections: selectionFromRows(commonQuoteRows.value),
     specifiedSelections: selectionFromRows(specifiedQuoteRows.value),
     templateSelections: selectionFromRows(templateQuoteRows.value),
@@ -586,7 +615,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
   if (quoteMode.value === 'single' && singleSku) {
     const record = await recordForDraftSku(singleSku)
     if (record) {
-      applyPurchaseRecord(p, record)
+      applyPurchaseRecord(p, record, payload.product?.purchaseInvoiceTaxApplied === true)
       restoredFromPurchase = true
       skuSearch.value = record.sku
     } else skuSearch.value = singleSku
@@ -609,7 +638,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
     const restoredItems: BundleQuoteItem[] = []
     for (const savedItem of payload.bundleItems || []) {
       const record = await recordForDraftSku(savedItem.sku)
-      const item = bundleItemFromRecord(record)
+      const item = bundleItemFromRecord(record, savedItem.purchaseInvoiceTaxApplied === true)
       item.sku = record?.sku || String(savedItem.sku || '').trim().toUpperCase()
       item.quantityPerSet = normalizedBundleSets(savedItem.quantityPerSet)
       item.customWeightKg = savedItem.customWeightKg == null ? null : Math.max(0, Number(savedItem.customWeightKg) || 0)
@@ -843,7 +872,7 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
     cost = bundlePurchaseCost(normalizedQuantity) + bundleDomesticFreight(normalizedQuantity) + freight
   } else {
     const record = findPurchaseProduct(purchaseRecords.value, p.sku)
-    const purchasePrice = record ? purchasePriceForMonthlySales(record) : p.purchase
+    const purchasePrice = record ? purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied) : p.purchase
     cost = (purchasePrice + p.purchaseFreightPerUnit) * normalizedQuantity + freight
   }
   const baseQuoteCny = cost * selectedGradeCoefficient()
@@ -1224,13 +1253,16 @@ async function save() {
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
   const recordBundleItems = quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => {
-    const record = findPurchaseProduct(purchaseRecords.value, item.sku)
     return {
       sku: item.sku.trim().toUpperCase(),
       name: item.name,
       quantityPerSet: normalizedBundleSets(item.quantityPerSet),
       effectiveWeightKg: item.customWeightKg == null ? Math.max(0, item.weightKg) : Math.max(0, Number(item.customWeightKg) || 0),
-      purchaseUnitPriceCny: record ? purchasePriceForMonthlySales(record) : Math.max(0, item.purchaseUnitPrice),
+      purchaseBaseUnitPriceCny: Math.max(0, item.purchaseBaseUnitPrice),
+      purchaseInvoiceType: item.purchaseInvoiceType || undefined,
+      purchaseInvoiceRatePercent: Math.max(0, item.purchaseInvoiceRatePercent),
+      purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied,
+      purchaseUnitPriceCny: Math.max(0, item.purchaseUnitPrice),
       domesticFreightPerUnitCny: Math.max(0, item.purchaseFreightPerUnit),
     }
   }) : undefined
@@ -1243,6 +1275,11 @@ async function save() {
     primarySku: quoteMode.value === 'bundle' ? recordBundleItems!.map(item => item.sku).join('、') : p.sku,
     bundleItems: recordBundleItems,
     productCategory: productCategory.value,
+    purchaseBaseUnitPriceCny: quoteMode.value === 'single' ? Math.max(0, p.purchaseBaseUnitPrice) : undefined,
+    purchaseInvoiceType: quoteMode.value === 'single' ? (p.purchaseInvoiceType || undefined) : undefined,
+    purchaseInvoiceRatePercent: quoteMode.value === 'single' ? Math.max(0, p.purchaseInvoiceRatePercent) : undefined,
+    purchaseInvoiceTaxApplied: quoteMode.value === 'single' ? p.purchaseInvoiceTaxApplied : undefined,
+    purchaseUnitPriceCny: quoteMode.value === 'single' ? Math.max(0, p.purchase) : undefined,
     volumetricEnabled: quoteMode.value === 'single' && p.volumetricEnabled,
     packageLengthCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageLengthCm : undefined,
     packageWidthCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageWidthCm : undefined,

@@ -7,6 +7,7 @@ export type BundleCalculationItem = {
   sku: string
   quantityPerSet: number
   purchaseUnitPrice: number
+  purchaseInvoiceTaxApplied?: boolean
   purchaseFreightPerUnit: number
   weightKg: number
   customWeightKg: number | null
@@ -36,8 +37,42 @@ export function monthlySalesTierLabel(value: string) {
   return value === '100+' ? '100件采购价' : value === '100' ? '10件采购价' : '1件参考价'
 }
 
-export function purchasePriceForMonthlySales(record: PurchaseProductRecord, estimate: string) {
-  return purchaseUnitPrice(record, purchaseQuantityForMonthlySales(estimate))
+export type PurchasePriceBreakdown = {
+  baseUnitPriceCny: number
+  invoiceType: string
+  invoiceRatePercent: number
+  invoiceMultiplier: number
+  invoiceTaxApplied: boolean
+  effectiveUnitPriceCny: number
+}
+
+export function roundCny(value: number) {
+  return Math.round((Math.max(0, Number(value) || 0) + Number.EPSILON) * 100) / 100
+}
+
+export function purchaseInvoiceRatePercent(invoiceType: string) {
+  const matched = String(invoiceType || '').match(/(\d+(?:\.\d+)?)\s*%/)
+  if (!matched) return 0
+  const rate = Number(matched[1])
+  return Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : 0
+}
+
+export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true): PurchasePriceBreakdown {
+  const baseUnitPriceCny = roundCny(purchaseUnitPrice(record, purchaseQuantityForMonthlySales(estimate)))
+  const invoiceRatePercent = purchaseInvoiceRatePercent(record.invoiceType)
+  const appliedRatePercent = invoiceTaxApplied ? invoiceRatePercent : 0
+  return {
+    baseUnitPriceCny,
+    invoiceType: record.invoiceType,
+    invoiceRatePercent,
+    invoiceMultiplier: 1 + appliedRatePercent / 100,
+    invoiceTaxApplied,
+    effectiveUnitPriceCny: roundCny(baseUnitPriceCny * (1 + appliedRatePercent / 100)),
+  }
+}
+
+export function purchasePriceForMonthlySales(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true) {
+  return purchasePriceBreakdown(record, estimate, invoiceTaxApplied).effectiveUnitPriceCny
 }
 
 export function bundlePurchaseCost(
@@ -49,7 +84,7 @@ export function bundlePurchaseCost(
   const setCount = normalizedQuoteQuantity(sets)
   return items.reduce((sum, item) => {
     const record = findPurchaseProduct(records, item.sku)
-    const purchasePrice = record ? purchasePriceForMonthlySales(record, estimate) : item.purchaseUnitPrice
+    const purchasePrice = record ? purchasePriceForMonthlySales(record, estimate, item.purchaseInvoiceTaxApplied !== false) : item.purchaseUnitPrice
     return sum + purchasePrice * normalizedQuoteQuantity(item.quantityPerSet) * setCount
   }, 0)
 }

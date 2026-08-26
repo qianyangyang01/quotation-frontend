@@ -27,6 +27,7 @@ export interface QuotationDraftPayload {
   selectedQuoteRegions: Record<string, string>
   product: {
     sku: string
+    purchaseInvoiceTaxApplied?: boolean
     quantity: number
     weightSource: 'purchase' | 'manual'
     manualWeight: number
@@ -40,7 +41,7 @@ export interface QuotationDraftPayload {
     primaryRule: string
     primaryCarrier: string
   }
-  bundleItems: Array<{ sku: string; quantityPerSet: number; customWeightKg: number | null }>
+  bundleItems: Array<{ sku: string; quantityPerSet: number; customWeightKg: number | null; purchaseInvoiceTaxApplied?: boolean }>
   commonSelections: DraftChannelSelection[]
   specifiedSelections: DraftChannelSelection[]
   templateSelections: DraftChannelSelection[]

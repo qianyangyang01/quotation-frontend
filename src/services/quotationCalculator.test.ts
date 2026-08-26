@@ -6,6 +6,8 @@ import {
   bundlePurchaseCost,
   hasQuotationProduct,
   monthlySalesTierLabel,
+  purchaseInvoiceRatePercent,
+  purchasePriceBreakdown,
   purchasePriceForMonthlySales,
   purchaseQuantityForMonthlySales,
   resolveBundleProductCategory,
@@ -24,6 +26,10 @@ const second = normalizePurchaseRecord({
   sku: 'BIZ-002', catalogState: 'ready', weightG: 350, minOrderQty: 1, purchasePriceCny: 12,
   tier2MinQty: 10, tier2PriceCny: 12, tier3MinQty: 100, tier3PriceCny: 12,
 })
+const taxed = normalizePurchaseRecord({
+  sku: 'BIZ-TAXED', catalogState: 'ready', weightG: 100, minOrderQty: 1, purchasePriceCny: 1,
+  tier2MinQty: 10, tier2PriceCny: 17.98, invoiceType: '普票6%', taxIncludedPriceCny: 999,
+})
 
 describe('quotation purchase tiers', () => {
   it('maps monthly sales bands to their documented purchase quantities', () => {
@@ -36,6 +42,40 @@ describe('quotation purchase tiers', () => {
     expect(purchasePriceForMonthlySales(first, '100')).toBe(18)
     expect(purchasePriceForMonthlySales(first, '100+')).toBe(16)
     expect(purchasePriceForMonthlySales(second, '100+')).toBe(12)
+  })
+
+  it('applies the purchase invoice percentage after tier matching and rounds each unit to cents', () => {
+    expect(purchasePriceForMonthlySales(taxed, '10')).toBe(1.06)
+    expect(purchasePriceForMonthlySales(taxed, '100')).toBe(19.06)
+    expect(purchasePriceBreakdown(taxed, '100')).toEqual({
+      baseUnitPriceCny: 17.98,
+      invoiceType: '普票6%',
+      invoiceRatePercent: 6,
+      invoiceMultiplier: 1.06,
+      invoiceTaxApplied: true,
+      effectiveUnitPriceCny: 19.06,
+    })
+  })
+
+  it('ignores the recorded tax-included price and treats missing or nonnumeric invoice types as zero percent', () => {
+    expect(purchasePriceForMonthlySales(taxed, '10')).toBe(1.06)
+    expect(purchaseInvoiceRatePercent('增值税普通发票')).toBe(0)
+    expect(purchaseInvoiceRatePercent('不开票')).toBe(0)
+    expect(purchaseInvoiceRatePercent('')).toBe(0)
+  })
+
+  it.each([
+    ['普票1%', 1],
+    ['普票3%', 3],
+    ['普票6%', 6],
+    ['专票13%', 13],
+  ])('maps %s to a %d percent purchase invoice rate', (invoiceType, expected) => {
+    expect(purchaseInvoiceRatePercent(invoiceType)).toBe(expected)
+  })
+
+  it('keeps legacy draft pricing unadjusted when the compatibility flag is false', () => {
+    expect(purchasePriceForMonthlySales(taxed, '100', false)).toBe(17.98)
+    expect(purchasePriceBreakdown(taxed, '100', false).invoiceRatePercent).toBe(6)
   })
 })
 
@@ -68,6 +108,16 @@ describe('bundle SKU calculation', () => {
     expect(bundlePurchaseCost(items, [first, second], '100', 3)).toBe((18 * 2 + 12) * 3)
     expect(bundleDomesticFreight(items, 3)).toBe((1.5 * 2 + 2) * 3)
     expect(bundleGoodsWeight(items, 3)).toBe((0.2 * 2 + 0.5) * 3)
+  })
+
+  it('applies each bundle SKU invoice rate independently without changing domestic freight', () => {
+    const taxedItems = [
+      { sku: taxed.sku, quantityPerSet: 2, purchaseUnitPrice: 0, purchaseInvoiceTaxApplied: true, purchaseFreightPerUnit: 1.5, weightKg: 0.1, customWeightKg: null },
+      { sku: second.sku, quantityPerSet: 1, purchaseUnitPrice: 0, purchaseInvoiceTaxApplied: true, purchaseFreightPerUnit: 2, weightKg: 0.35, customWeightKg: null },
+    ]
+    expect(bundlePurchaseCost(taxedItems, [taxed, second], '10')).toBe(1.06 * 2 + 12)
+    expect(bundleDomesticFreight(taxedItems)).toBe(1.5 * 2 + 2)
+    expect(bundlePurchaseCost([{ ...taxedItems[0], purchaseInvoiceTaxApplied: false }], [taxed], '10')).toBe(2)
   })
 
   it('rounds CNY before converting to USD and guards invalid rates', () => {

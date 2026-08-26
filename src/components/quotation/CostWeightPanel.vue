@@ -20,13 +20,19 @@ function updateDivisor(event: Event) {
   props.product.volumeDivisor = Number.isFinite(value) ? Math.max(1, Math.round(value)) : 8000
   emit('weightChange')
 }
+function purchasePricingLabel() {
+  const product = props.product
+  if (!product.purchaseInvoiceTaxApplied) return `${props.purchaseTierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} · 旧草稿沿用原规则`
+  if (product.purchaseInvoiceRatePercent <= 0) return `${props.purchaseTierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} · 未配置采购票率`
+  return `${props.purchaseTierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} × ${(1 + product.purchaseInvoiceRatePercent / 100).toFixed(2)}（${product.purchaseInvoiceType}）= 计入成本 ¥${product.purchase.toFixed(2)}`
+}
 </script>
 
 <template>
   <section class="module-card">
     <header><div><i>02</i><span><b>成本与重量</b><small>采购数据与计费重量</small></span></div><em>采购资料</em></header>
     <div class="fields">
-      <label>采购单价（CNY）<input v-model.number="product.purchase" disabled><small class="tier-match">已匹配：{{ purchaseTierLabel }}</small></label>
+      <label>计入成本单价（CNY）<input v-model.number="product.purchase" disabled><small class="tier-match">{{ purchasePricingLabel() }}</small></label>
       <label>商品重量（g）<input :value="grams(product.netWeight)" disabled></label>
       <label>重量来源<select v-model="product.weightSource" @change="$emit('weightChange')"><option value="purchase">使用采购表重量</option><option value="manual">业务员指定重量</option></select></label>
       <label v-if="product.weightSource==='manual'">指定重量（g）<input :value="grams(product.manualWeight)" type="number" min="0" step="1" inputmode="numeric" @input="updateManualWeight"></label>
@@ -52,7 +58,7 @@ function updateDivisor(event: Event) {
         <p class="charge-result"><span>最终计费重量</span><b>{{ grams(chargeWeight) }} g</b><small>实重与体积重取最大值</small></p>
       </div>
     </div>
-    <div class="highlights"><p><span>商品采购成本</span><b>¥{{ productCost.toFixed(2) }}</b><small>{{ purchaseTierLabel }}计算</small></p><p><span>计费重量</span><b>{{ grams(chargeWeight) }} g</b><small v-if="product.volumetricEnabled">实际 {{ grams(actualWeight()) }} g / 体积 {{ grams(volumeWeight()) }} g，取较大值</small><small v-else>{{ product.weightSource==='manual' ? '业务指定' : '采购重量自动计算' }}</small></p><p><span>国内运费成本</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>10件运费平摊</small></p></div>
+    <div class="highlights"><p><span>商品采购成本</span><b>¥{{ productCost.toFixed(2) }}</b><small>阶梯价与采购票点计算</small></p><p><span>计费重量</span><b>{{ grams(chargeWeight) }} g</b><small v-if="product.volumetricEnabled">实际 {{ grams(actualWeight()) }} g / 体积 {{ grams(volumeWeight()) }} g，取较大值</small><small v-else>{{ product.weightSource==='manual' ? '业务指定' : '采购重量自动计算' }}</small></p><p><span>国内运费成本</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>10件运费平摊，不计采购票点</small></p></div>
   </section>
 </template>
 

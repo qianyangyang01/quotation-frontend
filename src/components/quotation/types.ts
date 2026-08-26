@@ -11,6 +11,10 @@ export type QuotationProduct = {
   logisticsAttribute: string
   quantity: number
   purchase: number
+  purchaseBaseUnitPrice: number
+  purchaseInvoiceType: string
+  purchaseInvoiceRatePercent: number
+  purchaseInvoiceTaxApplied: boolean
   purchaseFreightPerUnit: number
   netWeight: number
   country: string
@@ -48,6 +52,10 @@ export type BundleQuoteItem = {
   stockStatus: '有货' | '无货' | '待确认'
   quantityPerSet: number
   purchaseUnitPrice: number
+  purchaseBaseUnitPrice: number
+  purchaseInvoiceType: string
+  purchaseInvoiceRatePercent: number
+  purchaseInvoiceTaxApplied: boolean
   customWeightKg: number | null
   purchaseFreightPerUnit: number
   weightKg: number
