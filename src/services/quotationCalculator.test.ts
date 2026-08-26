@@ -8,6 +8,7 @@ import {
   monthlySalesTierLabel,
   purchasePriceForMonthlySales,
   purchaseQuantityForMonthlySales,
+  resolveBundleProductCategory,
   singleActualWeight,
   singleChargeWeight,
   singleShipmentDimensions,
@@ -80,5 +81,11 @@ describe('bundle SKU calculation', () => {
     expect(hasQuotationProduct('bundle', '', ['', 'SKU-2'])).toBe(false)
     expect(hasQuotationProduct('bundle', '', ['sku-2', 'SKU-2'])).toBe(false)
     expect(hasQuotationProduct('bundle', '', ['', '  '])).toBe(false)
+  })
+
+  it('preserves a manually selected bundle category across mixed SKU categories', () => {
+    expect(resolveBundleProductCategory('内裤', '服装', ['护肤品'])).toBe('内裤')
+    expect(resolveBundleProductCategory('', '服装', ['服装'])).toBe('服装')
+    expect(resolveBundleProductCategory('', '服装', ['护肤品'])).toBe('')
   })
 })

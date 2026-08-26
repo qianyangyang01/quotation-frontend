@@ -69,6 +69,11 @@ export function bundleGoodsWeight(items: BundleCalculationItem[], sets = 1) {
   }, 0)
 }
 
+export function resolveBundleProductCategory(selectedCategory: string, recordCategory: string, existingCategories: string[]) {
+  if (selectedCategory) return selectedCategory
+  return recordCategory && existingCategories.every(category => category === recordCategory) ? recordCategory : ''
+}
+
 export function singleActualWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
   const unitWeight = input.weightSource === 'manual' ? input.manualWeight : input.netWeight
   return Math.max(0, Number(unitWeight) || 0) * normalizedQuoteQuantity(quantity)

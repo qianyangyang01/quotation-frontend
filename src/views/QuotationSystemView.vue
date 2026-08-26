@@ -48,6 +48,7 @@ import {
   monthlySalesTierLabel as calculateMonthlySalesTierLabel,
   normalizedQuoteQuantity,
   purchasePriceForMonthlySales as calculatePurchasePriceForMonthlySales,
+  resolveBundleProductCategory,
   singleActualWeight as calculateSingleActualWeight,
   singleChargeWeight,
   singleShipmentDimensions,
@@ -251,6 +252,13 @@ function blockConditionProgress(issues: Array<{ key: string; message: string }>)
   locateValidationIssue(issues[0].key)
   return true
 }
+function clearQueryValidationField(key: string) {
+  queryValidationFields.value = queryValidationFields.value.filter(field => field !== key)
+}
+function changeProductCategory(value: string) {
+  productCategory.value = value
+  clearQueryValidationField('productCategory')
+}
 async function queryProduct() {
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: false }))) return
   const normalizedSku = skuSearch.value.trim().toUpperCase().replace(/\s+/g, '')
@@ -304,8 +312,7 @@ async function queryBundleItem(item: BundleQuoteItem) {
   item.status = record.status === '资料完整' ? '采购资料已加载' : record.status
   const recordCategory = quotationProductCategories.find(category => category === record?.category) || ''
   const existingCategories = bundleItems.value.filter(other => other.id !== item.id && other.sku).map(other => findPurchaseProduct(purchaseRecords.value, other.sku)?.category).filter(Boolean)
-  if (!productCategory.value && recordCategory && existingCategories.every(category => category === recordCategory)) productCategory.value = recordCategory
-  else if (productCategory.value && recordCategory && existingCategories.some(category => category !== recordCategory)) productCategory.value = ''
+  productCategory.value = resolveBundleProductCategory(productCategory.value, recordCategory, existingCategories as string[])
   if (blockConditionProgress(conditionIssues({ includeSku: false, includeCategory: true }))) {
     item.status = '产品品类待补充'
     return
@@ -314,6 +321,16 @@ async function queryBundleItem(item: BundleQuoteItem) {
   updateBundleItemQuantity(item, false)
   await ensureQuoteLogistics(products.value[0])
   toast(`已加入组合 SKU：${record.sku}；是否有货：${record.stockStatus}`)
+}
+async function queryBundleItems() {
+  const items = bundleItems.value.filter(item => item.sku.trim())
+  if (!items.length) {
+    const issues = conditionIssues({ includeSku: false, includeCategory: false })
+    issues.push({ key: 'sku', message: '请至少输入一个组合商品 SKU' })
+    blockConditionProgress(issues)
+    return
+  }
+  for (const item of [...items]) await queryBundleItem(item)
 }
 function addBundleItem() {
   bundleItems.value.push(bundleItemFromRecord())
@@ -1308,8 +1325,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :tax-customer-type="selectedTaxCustomerType" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode"
-          @update:sku-search="skuSearch=$event" @update:customer-name="customerName=$event" @update:product-category="productCategory=$event" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade" @update:tax-customer-type="selectedTaxCustomerType=$event as TaxCustomerType"
-          @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
+          @update:sku-search="skuSearch=$event" @update:customer-name="customerName=$event" @update:product-category="changeProductCategory" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade" @update:tax-customer-type="selectedTaxCustomerType=$event as TaxCustomerType"
+          @query="queryProduct" @query-bundle="queryBundleItems" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
         <section v-if="p.sku && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">

@@ -2,7 +2,7 @@
 import type { QuotationMode } from './types'
 
 withDefaults(defineProps<{ mode: QuotationMode; skuSearch: string; customerName: string; productCategory: string; productCategories: readonly string[]; monthlySalesEstimate: string; attributes: string[]; logisticsAttribute: string; grades: Array<{ grade: string }>; grade: string; coefficient: number; taxCustomerType: 'A' | 'B'; salesperson: string; invalidFields?: string[] }>(), { invalidFields: () => [] })
-defineEmits<{ 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value: string]; 'update:customerName': [value: string]; 'update:productCategory': [value: string]; 'update:monthlySalesEstimate': [value: string]; query: []; 'update:logisticsAttribute': [value: string]; 'update:grade': [value: string]; 'update:taxCustomerType': [value: 'A' | 'B'] }>()
+defineEmits<{ 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value: string]; 'update:customerName': [value: string]; 'update:productCategory': [value: string]; 'update:monthlySalesEstimate': [value: string]; query: []; queryBundle: []; 'update:logisticsAttribute': [value: string]; 'update:grade': [value: string]; 'update:taxCustomerType': [value: 'A' | 'B'] }>()
 </script>
 
 <template>
@@ -18,7 +18,7 @@ defineEmits<{ 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value:
       <label class="category-field" data-validation-field="productCategory" :class="{ invalid:invalidFields.includes('productCategory') }"><span>产品品类 <em>必填</em></span><select required :value="productCategory" @change="$emit('update:productCategory', ($event.target as HTMLSelectElement).value)"><option value="" disabled>请选择产品品类</option><option v-for="category in productCategories" :key="category" :value="category">{{ category }}</option></select><small v-if="invalidFields.includes('productCategory')" class="field-error">请选择产品品类</small></label>
       <label class="sales-field" data-validation-field="monthlySalesEstimate" :class="{ invalid:invalidFields.includes('monthlySalesEstimate') }"><span>预估月销量 <em>必填</em></span><select required :value="monthlySalesEstimate" @change="$emit('update:monthlySalesEstimate', ($event.target as HTMLSelectElement).value)"><option value="10">预估月销量 10</option><option value="100">预估月销量 100</option><option value="100+">预估月销量 100+</option></select><small v-if="invalidFields.includes('monthlySalesEstimate')" class="field-error">请选择预估月销量</small></label>
     </div>
-    <footer><span>{{ mode === 'bundle' ? '在组合明细中逐个查询 SKU，物流属性由本次组合统一选择。' : '查询后将刷新商品成本、重量及下方渠道报价矩阵。' }}</span><button v-if="mode === 'single'" @click="$emit('query')">查询商品</button></footer>
+    <footer><span>{{ mode === 'bundle' ? '可一次查询全部组合 SKU，也可在组合明细中逐行查询。' : '查询后将刷新商品成本、重量及下方渠道报价矩阵。' }}</span><button v-if="mode === 'single'" type="button" @click="$emit('query')">查询商品</button><button v-else type="button" @click="$emit('queryBundle')">查询全部 SKU</button></footer>
   </section>
 </template>
 
