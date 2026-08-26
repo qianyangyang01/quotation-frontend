@@ -237,6 +237,7 @@ const detailFields = computed(() => detail.value ? [
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
+      <RouterLink class="outline" to="/quotation/suppliers">供应商管理</RouterLink>
       <button class="outline" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading ? '上传中…' : '大批量导入' }}</button>
       <button class="outline" @click="showTaskCenter=true">导入任务</button>
       <button class="outline" :disabled="parsing" @click="fileInput?.click()">{{ parsing ? '解析中…' : '小文件导入' }}</button>

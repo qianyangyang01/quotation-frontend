@@ -5,6 +5,7 @@ import org.slf4j.MDC;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.time.Instant;
 import java.util.Map;
@@ -16,6 +17,13 @@ public class AuditService {
     public AuditService(AuditLogRepository logs, ObjectMapper mapper) { this.logs = logs; this.mapper = mapper; }
     @Transactional
     public void record(String action, String resourceType, String resourceId, String outcome, Map<String, ?> detail) {
+        save(action, resourceType, resourceId, outcome, detail);
+    }
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordIndependent(String action, String resourceType, String resourceId, String outcome, Map<String, ?> detail) {
+        save(action, resourceType, resourceId, outcome, detail);
+    }
+    private void save(String action, String resourceType, String resourceId, String outcome, Map<String, ?> detail) {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         var log = new AuditLog(); log.id = UUID.randomUUID(); log.requestId = value(MDC.get("requestId"), "system");
         log.actorAccount = authentication == null ? "anonymous" : value(authentication.getName(), "anonymous");

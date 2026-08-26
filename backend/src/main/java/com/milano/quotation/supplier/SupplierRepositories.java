@@ -15,5 +15,6 @@ interface SupplierRepository extends JpaRepository<Supplier, UUID> {
 interface SupplierProductRepository extends JpaRepository<SupplierProduct, UUID> {
     boolean existsBySupplierId(UUID supplierId);
     boolean existsBySupplierIdAndProductId(UUID supplierId, UUID productId);
+    java.util.Optional<SupplierProduct> findBySupplierIdAndId(UUID supplierId, UUID id);
     List<SupplierProduct> findBySupplierIdOrderByUpdatedAtDesc(UUID supplierId);
 }

@@ -1,5 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
+import { buildQuotationPayload, performanceProductNumber, performanceSku } from './quotation-payload.mjs'
 
 const baseUrl = String(process.env.PERF_BASE_URL || 'http://127.0.0.1:18088').replace(/\/$/, '')
 const users = Math.max(1, Number(process.env.PERF_USERS || 30))
@@ -57,8 +58,8 @@ function record(operation, elapsed, error) {
 }
 
 async function operation(session, sequence) {
-  const value = (sequence % 10000) + 1
-  const sku = `PERF-SKU-${String(value).padStart(5, '0')}`
+  const value = performanceProductNumber(sequence)
+  const sku = performanceSku(value)
   const roll = sequence % 100
   if (roll < 40) return ['sku-query', () => session.request(`/purchase-products/${sku}`)]
   if (roll < 58) return ['purchase-list', () => session.request(`/purchase-products?q=${encodeURIComponent(sku)}&page=0&size=20`)]
@@ -68,16 +69,9 @@ async function operation(session, sequence) {
   }]
   if (roll < 90) return ['quotation-list', () => session.request('/quotations?scope=mine&page=0&size=50')]
   const bundle = roll % 2 === 0
-  const secondSku = `PERF-SKU-${String((value % 10000) + 1).padStart(5, '0')}`
-  return ['quotation-save', () => session.request('/quotations', {
+  return [bundle ? 'quotation-save-bundle' : 'quotation-save-single', () => session.request('/quotations', {
     method: 'POST', headers: { 'Idempotency-Key': `perf:${session.account}:${sequence}:${crypto.randomUUID()}` },
-    body: {
-      customerName: `性能客户-${session.account}-${sequence}`, quoteMode: bundle ? 'bundle' : 'single',
-      primarySku: bundle ? `${sku}、${secondSku}` : sku, productCategory: '服装', logisticsAttribute: '普货',
-      customerGrade: 'A级客户', taxCustomerType: 'A', monthlySalesEstimate: '100',
-      productSummary: bundle ? `${sku} + ${secondSku}` : sku,
-      quoteOptions: [{ country: '美国', carrier: '燕文', channel: '性能普货专线', quoteCustomUsd: 12.34 }],
-    },
+    body: buildQuotationPayload(session.account, sequence, bundle),
   })]
 }
 
@@ -86,6 +80,19 @@ for (let index = 0; index < users; index += 1) {
   const session = new Session(`PERF${String(index + 1).padStart(2, '0')}`)
   await session.login()
   sessions.push(session)
+}
+
+try {
+  await sessions[0].request('/quotations', {
+    method: 'POST', headers: { 'Idempotency-Key': `perf:preflight:single:${crypto.randomUUID()}` },
+    body: buildQuotationPayload(sessions[0].account, 0, false),
+  })
+  await sessions[0].request('/quotations', {
+    method: 'POST', headers: { 'Idempotency-Key': `perf:preflight:bundle:${crypto.randomUUID()}` },
+    body: buildQuotationPayload(sessions[0].account, 1, true),
+  })
+} catch (error) {
+  throw new Error(`性能夹具契约失败：${String(error?.message || error)}`, { cause: error })
 }
 
 const startedAt = new Date().toISOString()
@@ -117,7 +124,9 @@ const operations = Object.fromEntries([...samples].map(([name, values]) => {
 const failureRate = total ? failures.length / total : 1
 const queryNames = ['sku-query', 'purchase-list', 'logistics-query', 'quotation-list']
 const thresholdFailures = queryNames.filter(name => (operations[name]?.p95Ms ?? Number.POSITIVE_INFINITY) > 1000)
-if ((operations['quotation-save']?.p95Ms ?? Number.POSITIVE_INFINITY) > 1500) thresholdFailures.push('quotation-save')
+for (const name of ['quotation-save-single', 'quotation-save-bundle']) {
+  if ((operations[name]?.p95Ms ?? Number.POSITIVE_INFINITY) > 1500) thresholdFailures.push(name)
+}
 if (failureRate >= 0.01) thresholdFailures.push('error-rate')
 const report = {
   baseUrl, startedAt, finishedAt: new Date().toISOString(), users, warmupSeconds, durationSeconds, total,

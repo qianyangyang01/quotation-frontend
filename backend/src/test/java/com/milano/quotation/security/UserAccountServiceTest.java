@@ -50,4 +50,31 @@ class UserAccountServiceTest {
         assertEquals("new-hash", account.passwordHash);
         assertFalse(account.mustChangePassword);
     }
+
+    @Test void protectsCurrentAccountRoleAndStatusButAllowsIdempotentUpdate() {
+        var current = UserAccount.create("ADMIN", "管理员", "hash", "super_admin", false);
+        when(users.findById(current.id)).thenReturn(Optional.of(current));
+
+        var disable = assertThrows(AppException.class,
+                () -> service.update(current.id, "super_admin", "disabled", "admin"));
+        assertEquals("CURRENT_ACCOUNT_PROTECTED", disable.code());
+
+        var demote = assertThrows(AppException.class,
+                () -> service.update(current.id, "finance", "enabled", "ADMIN"));
+        assertEquals("CURRENT_ACCOUNT_PROTECTED", demote.code());
+
+        var unchanged = service.update(current.id, "super_admin", "enabled", "ADMIN");
+        assertEquals("super_admin", unchanged.role());
+        assertEquals("enabled", unchanged.status());
+    }
+
+    @Test void allowsAuthorizedActorToUpdateAnotherAccount() {
+        var employee = UserAccount.create("EMP001", "员工", "hash", "employee", false);
+        when(users.findById(employee.id)).thenReturn(Optional.of(employee));
+
+        var updated = service.update(employee.id, "purchase", "disabled", "ADMIN");
+
+        assertEquals("purchase", updated.role());
+        assertEquals("disabled", updated.status());
+    }
 }

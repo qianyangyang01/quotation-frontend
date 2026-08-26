@@ -25,8 +25,16 @@ public class UserController {
         var result = users.create(body.account(), body.name(), body.password(), body.role());
         audit.record("user.create", "user", result.id().toString(), "success", Map.of("account", result.account(), "role", result.role())); return ApiResponse.ok(result);
     }
-    @PatchMapping("/{id}") ApiResponse<UserAccountService.UserView> update(@PathVariable UUID id, @Valid @RequestBody UpdateUser body) {
-        var result = users.update(id, body.role(), body.status()); audit.record("user.update", "user", id.toString(), "success", Map.of("role", body.role(), "status", body.status())); return ApiResponse.ok(result);
+    @PatchMapping("/{id}") ApiResponse<UserAccountService.UserView> update(@PathVariable UUID id, @Valid @RequestBody UpdateUser body, Authentication authentication) {
+        var actor = UserAccountService.normalizeAccount(authentication.getName());
+        try {
+            var result = users.update(id, body.role(), body.status(), actor);
+            audit.record("user.update", "user", id.toString(), "success", Map.of("actor", actor, "targetAccount", result.account(), "role", body.role(), "status", body.status()));
+            return ApiResponse.ok(result);
+        } catch (com.milano.quotation.common.AppException error) {
+            audit.recordIndependent("user.update", "user", id.toString(), "failure", Map.of("actor", actor, "role", body.role(), "status", body.status(), "reason", error.getMessage()));
+            throw error;
+        }
     }
     @PostMapping("/{id}/reset-password") ApiResponse<Void> reset(@PathVariable UUID id, @Valid @RequestBody ResetPassword body, Authentication authentication) {
         users.resetPassword(id, body.password(), authentication.getName()); audit.record("user.reset-password", "user", id.toString(), "success", Map.of()); return ApiResponse.ok(null);

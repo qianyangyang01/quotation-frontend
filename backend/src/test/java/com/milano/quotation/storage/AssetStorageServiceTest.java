@@ -111,6 +111,26 @@ class AssetStorageServiceTest {
         verify(assets).delete(asset);
     }
 
+    @Test void promotesDeduplicatedTemporaryAssetOnlyForFormalStorage() throws Exception {
+        var minio = mock(MinioClient.class); var assets = mock(AssetObjectRepository.class);
+        var service = new AssetStorageService(minio, assets, "quotation-assets", false);
+        var png = new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+        var stagingJob = UUID.randomUUID();
+        var temporary = new AssetObject(); temporary.id = UUID.randomUUID(); temporary.storageState = "temporary";
+        temporary.stagingJobId = stagingJob; temporary.expiresAt = Instant.now().plusSeconds(3600);
+        when(assets.findBySha256(AssetStorageService.sha256(png))).thenReturn(Optional.of(temporary));
+
+        assertSame(temporary, service.storeTemporaryImageIndependent(png, "same.png", UUID.randomUUID()));
+        assertEquals("temporary", temporary.storageState);
+        assertEquals(stagingJob, temporary.stagingJobId);
+
+        assertSame(temporary, service.storeImage(png, "same.png"));
+        assertEquals("published", temporary.storageState);
+        assertNull(temporary.stagingJobId);
+        assertNull(temporary.expiresAt);
+        verify(minio, never()).putObject(any());
+    }
+
     @Test void retiresOnlyRepositoryConfirmedUnreferencedAssets() {
         var minio = mock(MinioClient.class); var assets = mock(AssetObjectRepository.class);
         var service = new AssetStorageService(minio, assets, "quotation-assets", false);

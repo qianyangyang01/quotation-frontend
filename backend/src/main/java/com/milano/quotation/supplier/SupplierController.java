@@ -77,20 +77,72 @@ public class SupplierController {
     @Transactional(readOnly = true)
     ApiResponse<List<ProductLinkView>> productLinks(@PathVariable UUID id) {
         if (!suppliers.existsById(id)) throw AppException.notFound("供应商不存在");
-        return ApiResponse.ok(links.findBySupplierIdOrderByUpdatedAtDesc(id).stream().map(ProductLinkView::of).toList());
+        var rows = links.findBySupplierIdOrderByUpdatedAtDesc(id);
+        var productMap = products.findAllById(rows.stream().map(row -> row.productId).distinct().toList()).stream()
+                .collect(java.util.stream.Collectors.toMap(product -> product.id, product -> product));
+        return ApiResponse.ok(rows.stream().map(row -> ProductLinkView.of(row, productMap.get(row.productId))).toList());
     }
 
     @PostMapping("/{id}/products")
     @Transactional
     ApiResponse<ProductLinkView> linkProduct(@PathVariable UUID id, @Valid @RequestBody ProductLinkInput input) {
-        if (!suppliers.existsById(id)) throw AppException.notFound("供应商不存在");
-        if (!products.existsById(input.productId())) throw AppException.notFound("采购商品不存在");
-        if (links.existsBySupplierIdAndProductId(id, input.productId())) throw AppException.conflict("该商品已经关联此供应商");
-        var now = Instant.now(); var link = new SupplierProduct(); link.id = UUID.randomUUID(); link.supplierId = id;
-        link.productId = input.productId(); link.supplierSku = trim(input.supplierSku()); link.enabled = true;
-        link.createdAt = now; link.updatedAt = now; links.save(link);
-        audit.record("supplier.product-link", "supplier", id.toString(), "success", Map.of("productId", input.productId()));
-        return ApiResponse.ok(ProductLinkView.of(link));
+        try {
+            if (!suppliers.existsById(id)) throw AppException.notFound("供应商不存在");
+            var product = resolveProduct(input);
+            if (links.existsBySupplierIdAndProductId(id, product.id)) throw AppException.conflict("该商品已经关联此供应商，请编辑或重新启用现有关联");
+            var now = Instant.now(); var link = new SupplierProduct(); link.id = UUID.randomUUID(); link.supplierId = id;
+            link.productId = product.id; link.supplierSku = trim(input.supplierSku()); link.enabled = true;
+            link.createdAt = now; link.updatedAt = now; links.saveAndFlush(link);
+            audit.record("supplier.product-link", "supplier", id.toString(), "success", Map.of("linkId", link.id, "productId", product.id, "sku", product.sku));
+            return ApiResponse.ok(ProductLinkView.of(link, product));
+        } catch (AppException error) {
+            audit.recordIndependent("supplier.product-link", "supplier", id.toString(), "failure", Map.of("sku", trim(input.sku()), "reason", error.getMessage()));
+            throw error;
+        }
+    }
+
+    @PatchMapping("/{id}/products/{linkId}")
+    @Transactional
+    ApiResponse<ProductLinkView> updateProductLink(@PathVariable UUID id, @PathVariable UUID linkId,
+                                                    @Valid @RequestBody ProductLinkUpdate input) {
+        try {
+            if (!suppliers.existsById(id)) throw AppException.notFound("供应商不存在");
+            var link = links.findBySupplierIdAndId(id, linkId).orElseThrow(() -> AppException.notFound("供应商商品关联不存在"));
+            link.supplierSku = trim(input.supplierSku()); link.enabled = input.enabled(); link.updatedAt = Instant.now();
+            links.saveAndFlush(link);
+            var product = products.findById(link.productId).orElseThrow(() -> AppException.notFound("采购商品不存在"));
+            audit.record("supplier.product-link-update", "supplier", id.toString(), "success", Map.of("linkId", link.id, "productId", link.productId, "enabled", link.enabled));
+            return ApiResponse.ok(ProductLinkView.of(link, product));
+        } catch (AppException error) {
+            audit.recordIndependent("supplier.product-link-update", "supplier", id.toString(), "failure", Map.of("linkId", linkId, "enabled", input.enabled(), "reason", error.getMessage()));
+            throw error;
+        }
+    }
+
+    @DeleteMapping("/{id}/products/{linkId}")
+    @Transactional
+    ApiResponse<Void> unlinkProduct(@PathVariable UUID id, @PathVariable UUID linkId) {
+        try {
+            if (!suppliers.existsById(id)) throw AppException.notFound("供应商不存在");
+            var link = links.findBySupplierIdAndId(id, linkId).orElseThrow(() -> AppException.notFound("供应商商品关联不存在"));
+            links.delete(link); links.flush();
+            audit.record("supplier.product-unlink", "supplier", id.toString(), "success", Map.of("linkId", linkId, "productId", link.productId));
+            return ApiResponse.ok(null);
+        } catch (AppException error) {
+            audit.recordIndependent("supplier.product-unlink", "supplier", id.toString(), "failure", Map.of("linkId", linkId, "reason", error.getMessage()));
+            throw error;
+        }
+    }
+
+    private com.milano.quotation.purchase.PurchaseProduct resolveProduct(ProductLinkInput input) {
+        var byId = input.productId() == null ? Optional.<com.milano.quotation.purchase.PurchaseProduct>empty() : products.findById(input.productId());
+        var normalizedSku = normalizeSku(input.sku());
+        var bySku = normalizedSku.isEmpty() ? Optional.<com.milano.quotation.purchase.PurchaseProduct>empty() : products.findBySku(normalizedSku);
+        if (input.productId() == null && normalizedSku.isEmpty()) throw AppException.unprocessable("请选择需要关联的采购商品");
+        if (input.productId() != null && byId.isEmpty()) throw AppException.notFound("采购商品不存在");
+        if (!normalizedSku.isEmpty() && bySku.isEmpty()) throw AppException.notFound("采购商品不存在");
+        if (byId.isPresent() && bySku.isPresent() && !byId.get().id.equals(bySku.get().id)) throw AppException.unprocessable("productId 与 SKU 指向的商品不一致");
+        return byId.or(() -> bySku).orElseThrow(() -> AppException.notFound("采购商品不存在"));
     }
 
     private static void apply(Supplier row, Input input) {
@@ -99,6 +151,7 @@ public class SupplierController {
         row.leadTimeDays = input.leadTimeDays(); row.rating = input.rating(); row.enabled = input.enabled();
     }
     private static String normalize(String value) { return value.trim().toUpperCase(Locale.ROOT); }
+    private static String normalizeSku(String value) { return value == null ? "" : value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }
     private static String trim(String value) { return value == null ? "" : value.trim(); }
 
     record Input(@NotBlank @Size(max = 64) String code, @NotBlank @Size(max = 160) String name,
@@ -106,7 +159,8 @@ public class SupplierController {
                  @Size(max = 120) String platform, @Size(max = 160) String category,
                  @Size(max = 160) String settlementTerms, @Min(0) Integer leadTimeDays,
                  @DecimalMin("0") @DecimalMax("5") BigDecimal rating, boolean enabled) {}
-    record ProductLinkInput(@NotNull UUID productId, @Size(max = 96) String supplierSku) {}
+    record ProductLinkInput(UUID productId, @Size(max = 96) String sku, @Size(max = 96) String supplierSku) {}
+    record ProductLinkUpdate(@Size(max = 96) String supplierSku, @NotNull Boolean enabled) {}
     record View(UUID id, String code, String name, String contactName, String phone, String platform,
                 String category, String settlementTerms, Integer leadTimeDays, BigDecimal rating,
                 boolean enabled, long version, Instant createdAt, Instant updatedAt) {
@@ -114,9 +168,15 @@ public class SupplierController {
                 row.platform, row.category, row.settlementTerms, row.leadTimeDays, row.rating,
                 row.enabled, row.version, row.createdAt, row.updatedAt); }
     }
-    record ProductLinkView(UUID id, UUID supplierId, UUID productId, String supplierSku, boolean enabled,
+    record ProductLinkView(UUID id, UUID supplierId, UUID productId, String productSku, String productCategory,
+                           String catalogState, String supplierSku, boolean enabled,
                            Instant createdAt, Instant updatedAt) {
-        static ProductLinkView of(SupplierProduct row) { return new ProductLinkView(row.id, row.supplierId,
-                row.productId, row.supplierSku, row.enabled, row.createdAt, row.updatedAt); }
+        static ProductLinkView of(SupplierProduct row, com.milano.quotation.purchase.PurchaseProduct product) {
+            var sku = product == null ? "" : product.sku;
+            var category = product == null ? "" : product.payload.path("category").asText("");
+            var state = product == null ? "" : product.catalogState;
+            return new ProductLinkView(row.id, row.supplierId, row.productId, sku, category, state,
+                    row.supplierSku, row.enabled, row.createdAt, row.updatedAt);
+        }
     }
 }
