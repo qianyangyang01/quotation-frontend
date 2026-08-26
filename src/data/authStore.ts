@@ -1,6 +1,7 @@
 import { computed, reactive } from 'vue'
 import { api, resetCsrf } from '@/services/http'
 import { clearPublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
+import { clearFinanceSettingsCache, hydrateFinanceSettings } from '@/services/financeSettings'
 
 export type RoleKey = 'super_admin' | 'finance' | 'logistics' | 'purchase' | 'employee'
 export type PermissionKey = 'quote' | 'purchase' | 'logistics' | 'finance' | 'myRecords' | 'allRecords' | 'permissions'
@@ -51,11 +52,34 @@ export function validatePassword(password: string) {
   return ''
 }
 
+const FINANCE_LOGIN_HYDRATION_TIMEOUT_MS = 8_000
+
+async function hydrateFinanceSettingsAfterLogin() {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), FINANCE_LOGIN_HYDRATION_TIMEOUT_MS)
+  try {
+    await hydrateFinanceSettings({ force: true, signal: controller.signal })
+    return { ready: true as const, message: '' }
+  } catch (error) {
+    return {
+      ready: false as const,
+      message: controller.signal.aborted ? '财务设置加载超时，请进入财务页面重试' : error instanceof Error ? error.message : '财务设置加载失败，请进入财务页面重试',
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export async function login(account: string, password: string) {
-  try { applySession(await api.post<SessionUser>('/auth/login', { account: account.trim().toUpperCase(), password })); authState.initialized = true; return { ok: true as const, user: currentAuthUser.value } }
+  try {
+    applySession(await api.post<SessionUser>('/auth/login', { account: account.trim().toUpperCase(), password }))
+    authState.initialized = true
+    const financeSettings = await hydrateFinanceSettingsAfterLogin()
+    return { ok: true as const, user: currentAuthUser.value, financeSettingsReady: financeSettings.ready, financeSettingsMessage: financeSettings.message }
+  }
   catch (error) { return { ok: false as const, message: error instanceof Error ? error.message : '登录失败' } }
 }
-export async function logout() { try { await api.post('/auth/logout') } finally { await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; resetCsrf() } }
+export async function logout() { try { await api.post('/auth/logout') } finally { clearFinanceSettingsCache(); await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; resetCsrf() } }
 export function hasPermission(permission: PermissionKey) { return isAuthenticated.value && authState.permissions.includes(permission) }
 export function hasAnyPermission(...permissions: PermissionKey[]) { return permissions.some(permission => hasPermission(permission)) }
 export function canAccessMyRecords(permissions: readonly PermissionKey[]) { return permissions.includes('myRecords') || permissions.includes('allRecords') }

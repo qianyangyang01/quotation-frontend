@@ -2,8 +2,12 @@ import { api } from '@/services/http'
 
 export type FinanceSettingKey = 'country-classification' | 'channel-policies' | 'customer-grades' | 'exchange-rate' | 'tax-settings'
 
+const financeSettingKeys: FinanceSettingKey[] = ['country-classification', 'channel-policies', 'customer-grades', 'exchange-rate', 'tax-settings']
 const cache = new Map<FinanceSettingKey, unknown>()
 const versions = new Map<FinanceSettingKey, number>()
+let hydrationRequest: Promise<void> | null = null
+let hydrationGeneration = 0
+let hydrated = false
 
 type VersionedSetting<T> = { value: T; _version: number }
 
@@ -25,13 +29,54 @@ export function normalizeFinanceSettingValue(key: FinanceSettingKey, value: unkn
   return value
 }
 
-export async function hydrateFinanceSettings() {
-  const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings')
-  for (const [rawKey, wrapped] of Object.entries(values)) {
-    const key = rawKey as FinanceSettingKey
-    cache.set(key, normalizeFinanceSettingValue(key, wrapped.value))
-    versions.set(key, wrapped._version)
-  }
+export function financeSettingsAreHydrated() {
+  return hydrated
+}
+
+export function clearFinanceSettingsCache() {
+  hydrationGeneration += 1
+  hydrationRequest = null
+  hydrated = false
+  cache.clear()
+  versions.clear()
+}
+
+export function hydrateFinanceSettings(options: { force?: boolean; signal?: AbortSignal } = {}) {
+  if (hydrated && !options.force) return Promise.resolve()
+  if (hydrationRequest) return hydrationRequest
+  if (options.force) hydrated = false
+
+  const generation = hydrationGeneration
+  const request = (async () => {
+    const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings', { signal: options.signal })
+    const nextCache = new Map<FinanceSettingKey, unknown>()
+    const nextVersions = new Map<FinanceSettingKey, number>()
+    const missing = financeSettingKeys.filter(key => !values[key])
+    if (missing.length) throw new Error(`财务设置返回不完整：${missing.join('、')}`)
+
+    financeSettingKeys.forEach(key => {
+      const wrapped = values[key]!
+      if (!Object.prototype.hasOwnProperty.call(wrapped, 'value')) throw new Error(`财务设置内容无效：${key}`)
+      if (!Number.isFinite(Number(wrapped._version))) throw new Error(`财务设置版本无效：${key}`)
+      const normalized = normalizeFinanceSettingValue(key, wrapped.value)
+      const expectsArray = key === 'country-classification' || key === 'channel-policies' || key === 'customer-grades'
+      if (expectsArray ? !Array.isArray(normalized) : !isRecord(normalized)) throw new Error(`财务设置内容无效：${key}`)
+      nextCache.set(key, normalized)
+      nextVersions.set(key, Number(wrapped._version))
+    })
+
+    if (generation !== hydrationGeneration) return
+    cache.clear()
+    versions.clear()
+    nextCache.forEach((value, key) => cache.set(key, value))
+    nextVersions.forEach((value, key) => versions.set(key, value))
+    hydrated = true
+  })()
+
+  hydrationRequest = request
+  return request.finally(() => {
+    if (hydrationRequest === request) hydrationRequest = null
+  })
 }
 
 export function readFinanceSetting<T>(key: FinanceSettingKey): T | undefined {
@@ -44,3 +89,5 @@ export async function writeFinanceSetting<T>(key: FinanceSettingKey, value: T) {
   versions.set(key, saved._version)
   return saved.value
 }
+
+if (typeof window !== 'undefined') window.addEventListener('quotation:session-expired', clearFinanceSettingsCache)
