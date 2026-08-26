@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { COMMON_COUNTRY_LIMIT, normalizeCustomerGradeSettings } from './financeChannelPolicies'
+import { COMMON_COUNTRY_LIMIT, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings } from './financeChannelPolicies'
 
 describe('common country settings', () => {
   it('allows finance to configure up to 40 common countries', () => {
     expect(COMMON_COUNTRY_LIMIT).toBe(40)
+  })
+
+  it('keeps saved country master data when no active channel currently publishes it', () => {
+    const settings = normalizeFinanceCountrySettings([{ country: '历史国家', code: 'HX', stage: 'standard', continent: '亚洲', sortOrder: 700, enabled: false }])
+
+    expect(settings.find(setting => setting.country === '历史国家')).toEqual({ country: '历史国家', code: 'HX', stage: 'standard', continent: '亚洲', sortOrder: 700, enabled: false })
   })
 })
 

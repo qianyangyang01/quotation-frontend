@@ -103,7 +103,7 @@ function defaultFinanceCountrySettings(): FinanceCountrySetting[] {
   })
 }
 
-function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting>[]) {
+export function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting>[]) {
   if (!logisticsCountries.length && settings.length) {
     return settings.filter(setting => setting.country).map(setting => {
       const stage = setting.stage === 'common' || setting.stage === 'standard' || setting.stage === 'rare' ? setting.stage : defaultCountryStage(String(setting.country))
@@ -116,7 +116,8 @@ function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN'))
   }
   const stored = new Map(settings.map(setting => [setting.country, setting]))
-  const normalized = defaultFinanceCountrySettings().map(fallback => {
+  const defaults = defaultFinanceCountrySettings()
+  const normalized = defaults.map(fallback => {
     const setting = stored.get(fallback.country)
     const stage = setting?.stage === 'common' || setting?.stage === 'standard' || setting?.stage === 'rare' ? setting.stage : fallback.stage
     return {
@@ -126,6 +127,19 @@ function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting
       sortOrder: Number.isFinite(Number(setting?.sortOrder)) ? Math.max(1, Number(setting?.sortOrder)) : defaultCountrySortOrder(fallback.country, stage),
       enabled: setting?.enabled !== false,
     }
+  })
+  const currentCountries = new Set(defaults.map(setting => setting.country))
+  settings.filter(setting => setting.country && !currentCountries.has(String(setting.country))).forEach(setting => {
+    const country = String(setting.country)
+    const stage = setting.stage === 'common' || setting.stage === 'standard' || setting.stage === 'rare' ? setting.stage : defaultCountryStage(country)
+    normalized.push({
+      country,
+      code: String(setting.code || '').toUpperCase(),
+      stage,
+      continent: setting.continent || inferCountryContinent(setting.code),
+      sortOrder: Number.isFinite(Number(setting.sortOrder)) ? Math.max(1, Number(setting.sortOrder)) : defaultCountrySortOrder(country, stage),
+      enabled: setting.enabled !== false,
+    })
   })
   const common = normalized.filter(setting => setting.enabled && setting.stage === 'common').sort((a, b) => a.sortOrder - b.sortOrder)
   common.slice(COMMON_COUNTRY_LIMIT).forEach(setting => { setting.stage = 'standard'; setting.sortOrder = defaultCountrySortOrder(setting.country, 'standard') })

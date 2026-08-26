@@ -74,6 +74,7 @@ class AssetStorageServiceTest {
         when(assets.findBySha256(any())).thenReturn(Optional.empty());
         when(minio.putObject(any())).thenThrow(new RuntimeException("down"));
         assertEquals("STORAGE_UNAVAILABLE", assertThrows(AppException.class, () -> service.storeImage(png, "a.png")).code());
+        verify(assets, never()).save(any());
         assertThrows(AppException.class, () -> service.putRaw("migration/a", new java.io.ByteArrayInputStream(png), png.length, "image/png"));
         when(minio.getObject(any())).thenThrow(new RuntimeException("down"));
         var asset = new AssetObject(); asset.id = UUID.randomUUID(); asset.objectKey = "objects/x";

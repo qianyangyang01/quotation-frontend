@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import AppTopbar from '@/components/AppTopbar.vue'
+import DateFilter from '@/components/DateFilter.vue'
 import {
   buildCategoryPerformance,
   buildDashboardSummary,
@@ -159,8 +160,8 @@ onMounted(async () => {
 
       <section class="global-filters">
         <label class="global-search">⌕<input v-model="globalSearch" placeholder="搜索报价、客户、SKU、业务员"></label>
-        <label>开始日期<input v-model="startDate" type="date" :max="endDate || undefined"></label>
-        <label>结束日期<input v-model="endDate" type="date" :min="startDate || undefined"></label>
+        <DateFilter v-model="startDate" label="开始日期" :max="endDate || undefined" />
+        <DateFilter v-model="endDate" label="结束日期" :min="startDate || undefined" />
         <label>国家<select v-model="countryFilter"><option value="">全部</option><option v-for="country in allCountries" :key="country">{{ country }}</option></select></label>
         <label>业务员<select v-model="salespersonFilter"><option value="">全部</option><option v-for="name in allSalespeople" :key="name">{{ name }}</option></select></label>
         <label>品类<select v-model="categoryFilter"><option value="">全部</option><option v-for="category in allCategories" :key="category">{{ category }}</option></select></label>
