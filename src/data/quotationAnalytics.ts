@@ -15,27 +15,16 @@ export interface DashboardSummary {
   quotedSkuCount: number
   quoteUsd: number
   quoteCny: number
-  expectedProfitCny: number
-  weightedMarginPercent: number | null
-}
-
-export interface TrendPoint {
-  key: string
-  label: string
-  quoteUsd: number
-  quoteCny: number
-  quotationCount: number
 }
 
 export interface SalespersonRankingRow {
   key: string
   name: string
   account: string
-  quotationCount: number
   customerCount: number
-  quoteUsd: number
-  quoteCny: number
-  marginPercent: number | null
+  quotedProductCount: number
+  wonProductCount: number
+  conversionRate: number | null
   latestQuoteAt: string
 }
 
@@ -47,14 +36,16 @@ export interface CategoryPerformanceRow {
   quotationCount: number
   quoteUsd: number
   quoteCny: number
-  marginPercent: number | null
   skus: string[]
 }
 
 const round = (value: number) => Number(value.toFixed(2))
+const invalidSkuValues = new Set(['—', '-', '--', '暂无数据', '无', 'N/A', 'NA'])
 
 export function quotationSkus(record: QuotationRecord) {
-  return [...new Set(record.primarySku.split(/[、,+\s]+/).map(value => value.trim().toUpperCase()).filter(Boolean))]
+  return [...new Set(record.primarySku.split(/[、,+\s]+/)
+    .map(value => value.trim().toUpperCase())
+    .filter(value => Boolean(value) && !invalidSkuValues.has(value)))]
 }
 
 export function recordCountries(record: QuotationRecord) {
@@ -88,21 +79,12 @@ export function filterQuotationRecords(records: QuotationRecord[], filters: Dash
   })
 }
 
-export function weightedMarginPercent(records: QuotationRecord[]) {
-  const quoteCny = records.reduce((sum, record) => sum + record.systemQuoteCny, 0)
-  if (!(quoteCny > 0)) return null
-  const profit = records.reduce((sum, record) => sum + record.systemQuoteCny - record.totalCostCny, 0)
-  return round(profit / quoteCny * 100)
-}
-
 export function buildDashboardSummary(records: QuotationRecord[]): DashboardSummary {
   return {
     quotationCount: records.length,
     quotedSkuCount: new Set(records.flatMap(quotationSkus)).size,
     quoteUsd: round(records.reduce((sum, record) => sum + record.systemQuoteUsd, 0)),
     quoteCny: round(records.reduce((sum, record) => sum + record.systemQuoteCny, 0)),
-    expectedProfitCny: round(records.reduce((sum, record) => sum + record.systemQuoteCny - record.totalCostCny, 0)),
-    weightedMarginPercent: weightedMarginPercent(records),
   }
 }
 
@@ -114,38 +96,28 @@ export function buildSalespersonRanking(records: QuotationRecord[]): Salesperson
     if (rows) rows.push(record)
     else groups.set(key, [record])
   }
-  return [...groups.entries()].map(([key, rows]) => ({
-    key,
-    name: rows[0]?.salespersonName || '未指定业务员',
-    account: rows[0]?.salespersonAccount || '—',
-    quotationCount: rows.length,
-    customerCount: new Set(rows.map(row => row.customerName.trim()).filter(Boolean)).size,
-    quoteUsd: round(rows.reduce((sum, row) => sum + row.systemQuoteUsd, 0)),
-    quoteCny: round(rows.reduce((sum, row) => sum + row.systemQuoteCny, 0)),
-    marginPercent: weightedMarginPercent(rows),
-    latestQuoteAt: rows.reduce((latest, row) => row.createdAt > latest ? row.createdAt : latest, ''),
-  })).sort((a, b) => b.quoteCny - a.quoteCny || b.quotationCount - a.quotationCount || a.name.localeCompare(b.name, 'zh-CN'))
-}
-
-export function buildTrend(records: QuotationRecord[]): TrendPoint[] {
-  if (!records.length) return []
-  const timestamps = records.map(record => new Date(record.createdAt).getTime()).filter(Number.isFinite)
-  const spanDays = timestamps.length ? (Math.max(...timestamps) - Math.min(...timestamps)) / 86_400_000 : 0
-  const groupByDay = spanDays <= 45
-  const groups = new Map<string, QuotationRecord[]>()
-  for (const record of records) {
-    const key = groupByDay ? record.createdAt.slice(0, 10) : record.createdAt.slice(0, 7)
-    const rows = groups.get(key)
-    if (rows) rows.push(record)
-    else groups.set(key, [record])
-  }
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, rows]) => ({
-    key,
-    label: groupByDay ? key.slice(5) : key,
-    quoteUsd: round(rows.reduce((sum, row) => sum + row.systemQuoteUsd, 0)),
-    quoteCny: round(rows.reduce((sum, row) => sum + row.systemQuoteCny, 0)),
-    quotationCount: rows.length,
-  }))
+  return [...groups.entries()].map(([key, rows]) => {
+    const quotedProductCount = rows.reduce((sum, row) => sum + quotationSkus(row).length, 0)
+    const wonProductCount = rows.reduce((sum, row) => sum + (row.status === 'won' ? quotationSkus(row).length : 0), 0)
+    return {
+      key,
+      name: rows[0]?.salespersonName || '未指定业务员',
+      account: rows[0]?.salespersonAccount || '—',
+      customerCount: new Set(rows.map(row => row.customerName.trim()).filter(Boolean)).size,
+      quotedProductCount,
+      wonProductCount,
+      conversionRate: quotedProductCount > 0 ? round(wonProductCount / quotedProductCount * 100) : null,
+      latestQuoteAt: rows.reduce((latest, row) => row.createdAt > latest ? row.createdAt : latest, ''),
+    }
+  }).sort((a, b) => {
+    if (a.conversionRate == null && b.conversionRate != null) return 1
+    if (a.conversionRate != null && b.conversionRate == null) return -1
+    return (b.conversionRate ?? 0) - (a.conversionRate ?? 0)
+      || b.wonProductCount - a.wonProductCount
+      || b.quotedProductCount - a.quotedProductCount
+      || b.customerCount - a.customerCount
+      || a.name.localeCompare(b.name, 'zh-CN')
+  })
 }
 
 export function buildCategoryPerformance(records: QuotationRecord[], purchases: PurchaseProductRecord[]): CategoryPerformanceRow[] {
@@ -178,7 +150,6 @@ export function buildCategoryPerformance(records: QuotationRecord[], purchases: 
       quotationCount: rows.length,
       quoteUsd: round(rows.reduce((sum, row) => sum + row.systemQuoteUsd, 0)),
       quoteCny: round(rows.reduce((sum, row) => sum + row.systemQuoteCny, 0)),
-      marginPercent: weightedMarginPercent(rows),
       skus: [...new Set(products.map(item => item.sku.toUpperCase()))],
     }
   }).sort((a, b) => b.quoteCny - a.quoteCny || b.quotationCount - a.quotationCount || a.category.localeCompare(b.category, 'zh-CN'))
@@ -191,10 +162,7 @@ function csvCell(value: string | number) {
 
 export function quotationDetailsCsv(records: QuotationRecord[], purchases: PurchaseProductRecord[]) {
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
-  const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '成本(RMB)', '报价(USD)', '报价(RMB)', '预计毛利(RMB)', '毛利率']
-  const rows = records.map(record => {
-    const margin = record.systemQuoteCny > 0 ? (record.systemQuoteCny - record.totalCostCny) / record.systemQuoteCny * 100 : null
-    return [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2), (record.systemQuoteCny - record.totalCostCny).toFixed(2), margin == null ? '' : `${margin.toFixed(2)}%`]
-  })
+  const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '成本(RMB)', '报价(USD)', '报价(RMB)']
+  const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2)])
   return `\uFEFF${[header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')}`
 }
