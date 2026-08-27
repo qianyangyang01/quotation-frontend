@@ -77,7 +77,8 @@ public class PurchaseImportJdbcService {
         named.update("""
                 INSERT INTO purchase_product
                     (id, sku, payload, catalog_state, quote_ready, source_hash, version, created_at, updated_at)
-                SELECT r.id, r.sku, r.payload - '_version' - '_updatedAt', 'ready',
+                SELECT r.id, r.sku, r.payload - '_version' - '_updatedAt',
+                       CASE WHEN COALESCE((r.payload ->> 'quoteReady')::boolean, false) THEN 'ready' ELSE 'pending_template' END,
                        COALESCE((r.payload ->> 'quoteReady')::boolean, false), :sourceHash, 0, :now, :now
                   FROM purchase_import_row r
                  WHERE r.id IN (:ids)
@@ -89,7 +90,7 @@ public class PurchaseImportJdbcService {
         named.update("""
                 UPDATE purchase_product p
                    SET payload = r.payload - '_version' - '_updatedAt',
-                       catalog_state = 'ready',
+                       catalog_state = CASE WHEN COALESCE((r.payload ->> 'quoteReady')::boolean, false) THEN 'ready' ELSE 'pending_template' END,
                        quote_ready = COALESCE((r.payload ->> 'quoteReady')::boolean, false),
                        source_hash = :sourceHash,
                        version = p.version + 1,

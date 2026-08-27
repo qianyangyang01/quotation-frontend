@@ -40,9 +40,11 @@ export function monthlySalesTierLabel(value: string) {
 export type PurchasePriceBreakdown = {
   baseUnitPriceCny: number
   invoiceType: string
+  taxPoint: number | null
   invoiceRatePercent: number
   invoiceMultiplier: number
   invoiceTaxApplied: boolean
+  priceSource: 'tier-tax-point' | 'tax-included-price' | 'untaxed-tier' | 'legacy-invoice-type'
   effectiveUnitPriceCny: number
 }
 
@@ -59,15 +61,26 @@ export function purchaseInvoiceRatePercent(invoiceType: string) {
 
 export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true): PurchasePriceBreakdown {
   const baseUnitPriceCny = roundCny(purchaseUnitPrice(record, purchaseQuantityForMonthlySales(estimate)))
-  const invoiceRatePercent = purchaseInvoiceRatePercent(record.invoiceType)
+  const explicitTaxPoint = record.taxPointExplicit
+  const taxPoint = record.taxPoint
+  const legacyRatePercent = explicitTaxPoint ? 0 : purchaseInvoiceRatePercent(record.invoiceType)
+  const invoiceRatePercent = taxPoint == null ? legacyRatePercent : taxPoint * 100
   const appliedRatePercent = invoiceTaxApplied ? invoiceRatePercent : 0
+  const useTaxIncludedPrice = invoiceTaxApplied && explicitTaxPoint && taxPoint == null && record.taxIncludedPriceCny != null
+  const priceSource: PurchasePriceBreakdown['priceSource'] = !invoiceTaxApplied
+    ? 'untaxed-tier'
+    : taxPoint != null ? 'tier-tax-point'
+      : useTaxIncludedPrice ? 'tax-included-price'
+        : legacyRatePercent > 0 ? 'legacy-invoice-type' : 'untaxed-tier'
   return {
     baseUnitPriceCny,
     invoiceType: record.invoiceType,
+    taxPoint,
     invoiceRatePercent,
     invoiceMultiplier: 1 + appliedRatePercent / 100,
     invoiceTaxApplied,
-    effectiveUnitPriceCny: roundCny(baseUnitPriceCny * (1 + appliedRatePercent / 100)),
+    priceSource,
+    effectiveUnitPriceCny: useTaxIncludedPrice ? roundCny(record.taxIncludedPriceCny ?? 0) : roundCny(baseUnitPriceCny * (1 + appliedRatePercent / 100)),
   }
 }
 

@@ -2,7 +2,9 @@ package com.milano.quotation.imports;
 import tools.jackson.databind.JsonNode;import jakarta.persistence.*;import org.hibernate.annotations.JdbcTypeCode;import org.hibernate.type.SqlTypes;import java.time.Instant;import java.util.UUID;
 @Entity @Table(name="purchase_import_row") public class PurchaseImportRow {
     @Id public UUID id; @Column(name="job_id",nullable=false) public UUID jobId;
-    @Column(name="source_row",nullable=false) public int sourceRow; @Column(nullable=false,length=96) public String sku;
+    @Column(name="source_row",nullable=false) public int sourceRow;
+    @Column(name="source_sheet",nullable=false,length=128) public String sourceSheet="采购产品导入";
+    @Column(nullable=false,length=96) public String sku;
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable=false,columnDefinition="jsonb") public JsonNode payload;
     @Column(name="validation_status",nullable=false,length=24) public String validationStatus="valid";
     @Column(name="import_action",length=16) public String importAction;

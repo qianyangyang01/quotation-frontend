@@ -46,12 +46,33 @@ class PurchaseWorkbookServiceTest {
     }
 
     @Test
-    void marksMissingRequiredAmountAsBlockingError() throws Exception {
+    void importsMissingRequiredAmountAsPendingTemplate() throws Exception {
         var preview = service.preview(workbook(false), "BUYER01");
 
-        assertFalse(preview.summary().path("canConfirm").asBoolean());
-        assertEquals(1, preview.summary().path("errorCount").asInt());
-        assertEquals("error", preview.issues().get(0).path("level").asText());
+        assertTrue(preview.summary().path("canConfirm").asBoolean());
+        assertEquals(0, preview.summary().path("errorCount").asInt());
+        assertEquals(1, preview.summary().path("pending").asInt());
+        assertEquals("pending_template", preview.records().getFirst().path("catalogState").asText());
+    }
+
+    @Test
+    void mergesInternationalSheetsAndIgnoresDefaultOnlyRows() throws Exception {
+        try(var workbook=new XSSFWorkbook();var output=new ByteArrayOutputStream()){
+            var first=workbook.createSheet("张汝玉");var second=workbook.createSheet("陈晨BK");
+            for(var sheet:java.util.List.of(first,second)){var header=sheet.createRow(0);for(int i=0;i<PurchaseWorkbookService.INTERNATIONAL_HEADERS.size();i++)header.createCell(i).setCellValue(PurchaseWorkbookService.INTERNATIONAL_HEADERS.get(i));}
+            var row=first.createRow(1);row.createCell(1).setCellValue("2026-08-27");row.createCell(2).setCellValue("张汝玉");row.createCell(4).setCellValue("SKU-INT-1");row.createCell(6).setCellValue("200g左右");row.createCell(13).setCellValue(1);row.createCell(14).setCellValue(10);row.createCell(24).setCellValue(0.08);row.createCell(25).setCellValue("普票");row.createCell(27).setCellValue("有");
+            second.createRow(1).createCell(23).setCellValue(0);workbook.write(output);
+            var file=new MockMultipartFile("file","international.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",output.toByteArray());var preview=service.preview(file,"BUYER01");
+            assertEquals(1,preview.records().size());assertEquals(2,preview.summary().path("sheetCount").asInt());assertEquals(1,preview.summary().path("ignoredRows").asInt());assertEquals("张汝玉",preview.records().getFirst().path("sourceSheet").asText());assertEquals(0.08,preview.records().getFirst().path("taxPoint").asDouble(),0.0001);
+        }
+    }
+
+    @Test void groupsDuplicateSkuChoicesBySheetAndRow() throws Exception {
+        try(var workbook=new XSSFWorkbook();var output=new ByteArrayOutputStream()){
+            for(var name:java.util.List.of("采购一组","采购二组")){var sheet=workbook.createSheet(name);var header=sheet.createRow(0);for(int index=0;index<PurchaseWorkbookService.HEADERS.size();index++)header.createCell(index).setCellValue(PurchaseWorkbookService.HEADERS.get(index));var row=sheet.createRow(1);row.createCell(0).setCellValue("SKU-DUP");row.createCell(8).setCellValue(100);row.createCell(12).setCellValue(1);row.createCell(13).setCellValue(8.5);}
+            workbook.write(output);var preview=service.preview(new MockMultipartFile("file","duplicate.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",output.toByteArray()),"BUYER01");
+            assertFalse(preview.summary().path("canConfirm").asBoolean());assertEquals(0,preview.summary().path("blockingErrorCount").asInt());assertEquals(1,preview.summary().path("duplicateGroups").size());assertEquals(2,preview.summary().path("duplicateGroups").get(0).path("choices").size());
+        }
     }
 
     private MockMultipartFile workbook(boolean includePrice) throws Exception {

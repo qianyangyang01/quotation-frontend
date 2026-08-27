@@ -9,11 +9,13 @@ export const PURCHASE_WORKBOOK_HEADERS = [
   '是否有货*', '备注', '工厂信息', '货源链接1', '货源链接2', '货源链接3', '相似货源', '审核备注',
 ] as const
 
-export type PurchaseImportIssue = { row: number; field: string; message: string; level: 'error' | 'warning' | 'skipped' }
+export type PurchaseImportIssue = { sourceSheet?: string; row: number; field: string; message: string; level: 'error' | 'warning' | 'skipped' }
+export type PurchaseDuplicateChoice = { sourceSheet: string; sourceRow: number }
+export type PurchaseDuplicateGroup = { sku: string; choices: PurchaseDuplicateChoice[] }
 export type PurchaseImportPreview = {
   fileName: string; records: PurchaseProductRecord[]; issues: PurchaseImportIssue[]
-  totalRows: number; added: number; updated: number; generatedSku: number; productImages: number; physicalImages: number; skipped: number
-  errorCount: number; warningCount: number; canConfirm: boolean
+  totalRows: number; added: number; updated: number; pending: number; ignoredRows: number; sheetCount: number; generatedSku: number; productImages: number; physicalImages: number; skipped: number
+  errorCount: number; blockingErrorCount: number; warningCount: number; canConfirm: boolean; duplicateGroups: PurchaseDuplicateGroup[]
 }
 
 const RELATIONSHIP_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -261,9 +263,10 @@ export async function parsePurchaseWorkbook(file: File, existing: PurchaseProduc
     fileName: file.name, records, issues, totalRows: records.length + skipped,
     added: records.filter(item => !existingSkus.has(item.sku)).length,
     updated: records.filter(item => existingSkus.has(item.sku)).length,
+    pending: records.filter(item => !item.quoteReady).length, ignoredRows: 0, sheetCount: 1,
     generatedSku: records.filter(item => item.skuOrigin === 'system').length,
     productImages: records.filter(item => item.productImage).length,
     physicalImages: records.filter(item => item.physicalImage).length,
-    skipped, errorCount, warningCount, canConfirm: errorCount === 0,
+    skipped, errorCount, blockingErrorCount: errorCount, warningCount, canConfirm: errorCount === 0, duplicateGroups: [],
   }
 }

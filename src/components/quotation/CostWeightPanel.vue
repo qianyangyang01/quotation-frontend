@@ -23,6 +23,7 @@ function updateDivisor(event: Event) {
 function purchasePricingLabel() {
   const product = props.product
   if (!product.purchaseInvoiceTaxApplied) return `${props.purchaseTierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} · 旧草稿沿用原规则`
+  if (product.purchaseInvoiceRatePercent <= 0 && Math.abs(product.purchase - product.purchaseBaseUnitPrice) > 0.001) return `票点暂无数据 · 使用含票价 ¥${product.purchase.toFixed(2)}`
   if (product.purchaseInvoiceRatePercent <= 0) return `${props.purchaseTierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} · 未配置采购票率`
   return `${props.purchaseTierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} × ${(1 + product.purchaseInvoiceRatePercent / 100).toFixed(2)}（${product.purchaseInvoiceType}）= 计入成本 ¥${product.purchase.toFixed(2)}`
 }

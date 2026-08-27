@@ -150,9 +150,10 @@ class FlywayPostgresIntegrationTest {
         seedSupplierRemovalMigration();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(2, finalMigrations.migrationsExecuted);
+        assertEquals(3, finalMigrations.migrationsExecuted);
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "18".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "19".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "20".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("""
                      select count(*) from pg_indexes

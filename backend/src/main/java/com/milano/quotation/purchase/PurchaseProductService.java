@@ -128,7 +128,8 @@ public class PurchaseProductService {
         return upsert(payload,false,null,null);
     }
     @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId,String importMode,String sourceHash){
-        var catalogState="pending_template".equals(importMode)?CATALOG_PENDING_TEMPLATE:CATALOG_READY;
+        var complete=payload instanceof ObjectNode object&&completeForQuotation(object);
+        var catalogState="pending_template".equals(importMode)||!complete?CATALOG_PENDING_TEMPLATE:CATALOG_READY;
         return upsert(payload,false,catalogState,sourceHash);
     }
 
@@ -170,7 +171,7 @@ public class PurchaseProductService {
         }
         if (object.toString().length() > 1_000_000) throw AppException.unprocessable("单条商品数据过大");
     }
-    private static boolean completeForQuotation(ObjectNode object){return positive(object,"weightG")&&positive(object,"minOrderQty")&&nonNegative(object,"purchasePriceCny");}
+    private static boolean completeForQuotation(ObjectNode object){return positive(object,"weightG")&&positive(object,"minOrderQty")&&(nonNegative(object,"purchasePriceCny")||nonNegative(object,"tier2PriceCny")||nonNegative(object,"tier3PriceCny")||nonNegative(object,"taxIncludedPriceCny"));}
     private static boolean positive(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>0;}
     private static boolean nonNegative(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>=0;}
     private static boolean isReservedSku(String sku){return sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK)[A-Z0-9._/-]*$")||sku.startsWith("AUTO-");}

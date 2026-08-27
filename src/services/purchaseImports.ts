@@ -10,6 +10,6 @@ export async function previewPurchaseWorkbook(file: File): Promise<ServerPurchas
   return { jobId: response.jobId, fileName: response.fileName, records: response.records, issues: response.issues, ...response.summary }
 }
 
-export async function confirmPurchaseImport(jobId: string, importMode: 'formal' | 'pending_template' = 'formal') {
-  return api.post<{ jobId: string; imported: number; importMode: string; status: string }>(`/purchase-imports/${jobId}/confirm`, { importMode }, idempotencyKey(`purchase-import-${importMode}`))
+export async function confirmPurchaseImport(jobId: string, importMode: 'formal' | 'pending_template' = 'formal', duplicateSelections: Record<string, {sourceSheet:string;sourceRow:number}> = {}) {
+  return api.post<{ jobId: string; imported: number; importMode: string; status: string }>(`/purchase-imports/${jobId}/confirm`, { importMode, duplicateSelections }, idempotencyKey(`purchase-import-${importMode}`))
 }

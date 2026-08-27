@@ -50,9 +50,11 @@ describe('quotation purchase tiers', () => {
     expect(purchasePriceBreakdown(taxed, '100')).toEqual({
       baseUnitPriceCny: 17.98,
       invoiceType: '普票6%',
+      taxPoint: null,
       invoiceRatePercent: 6,
       invoiceMultiplier: 1.06,
       invoiceTaxApplied: true,
+      priceSource: 'legacy-invoice-type',
       effectiveUnitPriceCny: 19.06,
     })
   })
@@ -76,6 +78,22 @@ describe('quotation purchase tiers', () => {
   it('keeps legacy draft pricing unadjusted when the compatibility flag is false', () => {
     expect(purchasePriceForMonthlySales(taxed, '100', false)).toBe(17.98)
     expect(purchasePriceBreakdown(taxed, '100', false).invoiceRatePercent).toBe(6)
+  })
+
+  it('uses the independent tax point after tier selection', () => {
+    const current = normalizePurchaseRecord({ ...taxed, invoiceType: '专票', taxPoint: 0.08, taxIncludedPriceCny: 999 })
+    const result = purchasePriceBreakdown(current, '100')
+    expect(result.baseUnitPriceCny).toBe(17.98)
+    expect(result.effectiveUnitPriceCny).toBe(19.42)
+    expect(result.priceSource).toBe('tier-tax-point')
+    expect(result.invoiceRatePercent).toBe(8)
+  })
+
+  it('falls back to tax-included price only when the explicit tax point is blank', () => {
+    const current = normalizePurchaseRecord({ ...taxed, invoiceType: '专票', taxPoint: null, taxIncludedPriceCny: 22 })
+    const result = purchasePriceBreakdown(current, '100')
+    expect(result.effectiveUnitPriceCny).toBe(22)
+    expect(result.priceSource).toBe('tax-included-price')
   })
 })
 

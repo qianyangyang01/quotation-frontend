@@ -52,10 +52,22 @@ class AsyncPurchaseImportServiceTest {
     }
 
     @Test void confirmsOnlyReadyNonEmptyJob() {
-        var job=job("ready"); job.validRows=3; when(jobs.findById(job.id)).thenReturn(Optional.of(job));
-        assertEquals("import-queued",service.confirm(job.id).status); assertNotNull(job.confirmedAt);
-        job.status="ready"; job.validRows=0; assertThrows(AppException.class,()->service.confirm(job.id));
-        job.status="queued"; assertThrows(AppException.class,()->service.confirm(job.id));
+        var job=job("ready"); job.validRows=3; when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(rows.countByJobIdAndValidationStatus(job.id,"valid")).thenReturn(3L,0L);when(rows.findConflictSkus(job.id)).thenReturn(List.of());
+        assertEquals("import-queued",service.confirm(job.id,java.util.Map.of()).status); assertNotNull(job.confirmedAt);
+        job.status="ready"; job.validRows=0; assertThrows(AppException.class,()->service.confirm(job.id,java.util.Map.of()));
+        job.status="queued"; assertThrows(AppException.class,()->service.confirm(job.id,java.util.Map.of()));
+    }
+
+    @Test void requiresAndAppliesDuplicateSelectionBeforeConfirming() {
+        var job=job("ready");when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var first=importRow(job.id,"SKU-DUP","第一页",2);var second=importRow(job.id,"SKU-DUP","第二页",8);
+        when(rows.findConflictSkus(job.id)).thenReturn(List.of("SKU-DUP"),List.of("SKU-DUP"),List.of());
+        when(rows.findByJobIdAndSkuAndValidationStatusOrderBySourceRow(job.id,"SKU-DUP","conflict")).thenReturn(List.of(first,second));
+        when(rows.countByJobIdAndValidationStatus(job.id,"valid")).thenReturn(1L);when(rows.countByJobIdAndValidationStatus(job.id,"conflict")).thenReturn(0L);
+        assertThrows(AppException.class,()->service.confirm(job.id,Map.of()));
+        job.status="ready";
+        assertEquals("import-queued",service.confirm(job.id,Map.of("SKU-DUP",new AsyncPurchaseImportService.DuplicateSelection("第二页",8))).status);
+        assertEquals("duplicate-skipped",first.validationStatus);assertEquals("valid",second.validationStatus);
     }
 
     @ParameterizedTest @ValueSource(strings={"queued","ready","failed"})
@@ -63,6 +75,8 @@ class AsyncPurchaseImportServiceTest {
         var job=job(status); when(jobs.findById(job.id)).thenReturn(Optional.of(job));
         assertEquals("cancelled",service.cancel(job.id).status); assertTrue(job.cancelRequested); assertNotNull(job.completedAt);
     }
+
+    private static PurchaseImportRow importRow(UUID jobId,String sku,String sheet,int sourceRow){var row=new PurchaseImportRow();row.id=UUID.randomUUID();row.jobId=jobId;row.sku=sku;row.sourceSheet=sheet;row.sourceRow=sourceRow;row.validationStatus="conflict";row.importAction="insert";return row;}
 
     @Test void parsingCancellationIsRequestedAndImportingCannotCancel() {
         var job=job("parsing"); when(jobs.findById(job.id)).thenReturn(Optional.of(job));
