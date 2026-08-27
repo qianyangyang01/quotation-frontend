@@ -50,7 +50,7 @@ import {
   type FinanceSettingsWorkspace,
 } from '@/services/financeSettingsWorkspace'
 
-const props = defineProps<{ mode: 'products' | 'suppliers' | 'logistics' | 'members' | 'history' }>()
+const props = defineProps<{ mode: 'products' | 'logistics' | 'members' | 'history' }>()
 const showPurchaseWorkspace = computed(() => props.mode === 'products')
 const search = ref('')
 const notice = ref('')
@@ -157,7 +157,6 @@ const productForm = ref(emptyProductForm())
 
 const config = computed(() => ({
   products: ['PURCHASE DATA CENTER', '采购资料维护', '采购统一上传和维护 SKU、图片、重量及数量阶梯成本。', '新增采购资料'],
-  suppliers: ['SUPPLIER MASTER DATA', '供应商管理', '记录采购供应商、联系人、采购平台、结算方式、交期与合作状态。', '新增供应商'],
   logistics: ['LOGISTICS CONFIGURATION', '物流规则', '配置物流商、渠道、国家区域、重量限制与分段运费规则。', '新增运费规则'],
   members: ['FINANCE PRICING POLICY', '财务报价设置', '维护常用国家、客户等级、汇率和物流渠道授权。', '新增物流属性策略'],
   history: ['QUOTATION AUDIT', '报价记录', '保留每次报价的成本、汇率、物流规则、操作人和版本快照。', '导出记录'],
@@ -165,11 +164,6 @@ const config = computed(() => ({
 
 type ProductRow = any
 const products = ref<ProductRow[]>([])
-const suppliers = ref([
-  { code: 'SP00001', name: '义乌优选供应链', contact: '陈经理', phone: '138****6251', platform: '1688', category: '个护健康', payment: '月结30天', leadTime: '3–5天', products: 18, score: 4.8, status: '合作中' },
-  { code: 'SP00002', name: '杭州佳品贸易', contact: '林女士', phone: '136****9038', platform: '线下合同', category: '家居百货', payment: '款到发货', leadTime: '2–4天', products: 12, score: 4.6, status: '合作中' },
-  { code: 'SP00003', name: '深圳宏达科技', contact: '王先生', phone: '135****1186', platform: '1688', category: '数码配件', payment: '预付30%', leadTime: '5–7天', products: 9, score: 4.2, status: '待审核' },
-])
 const logistics = ref([
   { name: '云途全球专线', carrier: '云途物流', type: '专线', countries: '美国、加拿大、欧洲六国', weight: '10–30,000 g', price: '基础费 ¥16 + ¥68/1000g', status: '启用' },
   { name: '燕文航空挂号', carrier: '燕文物流', type: '挂号', countries: '全球常用国家', weight: '10–2,000 g', price: '基础费 ¥12 + ¥73/1000g + 挂号费 ¥8', status: '启用' },
@@ -181,7 +175,7 @@ const history = ref([
   { no: 'QT202607300064', sku: 'SKU00023107', country: '德国', member: '普通报价', rule: '燕文航空挂号', cost: 153.68, quote: 202.21, rate: 'USD 7.24 / EUR 7.86', operator: '管理员', time: '2026-07-30 16:20', status: '已保存' },
   { no: 'QT202607290031', sku: 'SKU00022968', country: '法国', member: '核心会员 A', rule: '顺邮宝挂号', cost: 48.40, quote: 59.02, rate: 'USD 7.23 / EUR 7.85', operator: '范国华', time: '2026-07-29 11:05', status: '已同步' },
 ])
-const rows = computed<any[]>(() => ({ products: products.value, suppliers: suppliers.value, logistics: logistics.value, members: financePolicies.value, history: history.value }[props.mode]))
+const rows = computed<any[]>(() => ({ products: products.value, logistics: logistics.value, members: financePolicies.value, history: history.value }[props.mode]))
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   return q ? rows.value.filter(row => Object.values(row).some(v => String(v).toLowerCase().includes(q))) : rows.value
@@ -823,7 +817,6 @@ function saveEditor() {
 
       <section v-if="mode !== 'logistics' && (mode !== 'members' || financeSettingsLoadState==='ready')" class="stats" :class="{ 'finance-stats':mode==='members' }">
         <template v-if="mode === 'products'"><div><small>已导入商品</small><b>{{ products.length }}</b><span>{{ purchaseImportMeta.sourceFile }} · {{ purchaseImportMeta.sourceSheet }}</span></div><div><small>资料完整</small><b>{{ completeProductCount }}</b><span>可直接参与SKU报价</span></div><div><small>待补充资料</small><b class="orange">{{ missingProductCount }}</b><span>缺少重量或采购价</span></div><div><small>含阶梯价格</small><b>{{ tieredProductCount }}</b><span>按业务数量自动匹配</span></div></template>
-        <template v-else-if="mode === 'suppliers'"><div><small>供应商总数</small><b>3</b><span>2 家稳定合作</span></div><div><small>关联商品</small><b>39</b><span>覆盖 3 个品类</span></div><div><small>平均交期</small><b>4.3天</b><span>近30天采购统计</span></div><div><small>待审核</small><b class="orange">1</b><span>资质信息待确认</span></div></template>
         <template v-else-if="mode === 'members'"><div v-for="card in financeSummaryCards" :key="card.id" role="button" tabindex="0" draggable="true" :class="{ active:financeSettingsTab===card.id, dragging:draggedFinanceTab===card.id, 'drag-over':dragOverFinanceTab===card.id }" title="点击切换模块；按住卡片拖动排序" @click="financeSettingsTab=card.id" @keydown.enter="financeSettingsTab=card.id" @keydown.space.prevent="financeSettingsTab=card.id" @dragstart="startFinanceTabDrag(card.id,$event)" @dragover="moveFinanceTabOver(card.id,$event)" @drop="dropFinanceTab(card.id,$event)" @dragend="endFinanceTabDrag"><em class="finance-card-drag" aria-hidden="true">⠿</em><i>{{ card.icon }}</i><section><small>{{ card.label }}</small><b>{{ card.value }}</b><span>{{ card.description }}</span></section></div></template>
         <template v-else><div><small>今日报价</small><b>18</b><span>涉及 11 个 SKU</span></div><div><small>会员报价</small><b>9</b><span>已同步 7 条</span></div><div><small>平均利润率</small><b>19.6%</b><span>处于安全区间</span></div><div><small>异常记录</small><b class="orange">1</b><span>物流规则已失效</span></div></template>
       </section>
@@ -925,7 +918,6 @@ function saveEditor() {
             </tr>
           </tbody>
         </table>
-        <table v-else-if="mode === 'suppliers'"><thead><tr><th>供应商 / 编号</th><th>联系人</th><th>采购平台</th><th>主营品类</th><th>结算方式</th><th>平均交期</th><th>关联商品</th><th>评分</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="s in filteredRows" :key="s.code"><td><div class="item"><i>{{ s.name.slice(0,1) }}</i><span><b>{{ s.name }}</b><small>{{ s.code }}</small></span></div></td><td><b>{{ s.contact }}</b><small>{{ s.phone }}</small></td><td><span class="tag">{{ s.platform }}</span></td><td>{{ s.category }}</td><td>{{ s.payment }}</td><td>{{ s.leadTime }}</td><td>{{ s.products }} 个 SKU</td><td><b class="orange">★ {{ s.score }}</b></td><td><em :class="{ warn:s.status !== '合作中' }">{{ s.status }}</em></td><td><button class="link" @click="showEditor=true">编辑</button><RouterLink class="link" to="/quotation/products">查看商品</RouterLink></td></tr></tbody></table>
         <table v-else-if="mode === 'logistics'"><thead><tr><th>规则名称</th><th>物流商</th><th>类型</th><th>适用国家 / 区域</th><th>重量限制</th><th>计费方式</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="r in filteredRows" :key="r.name"><td><b>{{ r.name }}</b></td><td>{{ r.carrier }}</td><td><span class="tag">{{ r.type }}</span></td><td>{{ r.countries }}</td><td>{{ r.weight }}</td><td>{{ r.price }}</td><td><em :class="{ warn:r.status !== '启用' }">{{ r.status }}</em></td><td><button class="link" @click="showEditor=true">编辑</button><button class="link" @click="toast('已打开区域及条件限制')">区域/限制</button></td></tr></tbody></table>
         <table v-else-if="mode === 'members' && financeSettingsTab==='logistics'"><thead><tr><th>物流属性</th><th>支持国家及具体物流渠道</th><th>国家数量</th><th>渠道配置数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="policy in filteredRows" :key="policy.id"><td><span class="finance-tag">{{ policy.category }}</span></td><td><div class="country-policy-list"><div v-for="rule in policy.countryRules" :key="rule.country"><b>{{ rule.country }}</b><div class="carrier-list"><span v-for="channelKey in rule.allowedChannels" :key="channelKey"><template v-if="financeChannelForKey(rule.country,channelKey,policy.category)">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.carrier }}｜{{ financeChannelForKey(rule.country,channelKey,policy.category)?.channel }}<em v-if="rule.country==='澳大利亚'" :class="{ warn:financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length }">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length ? `缺${financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.join('、')}` : '覆盖1～4区' }}</em></template></span></div></div></div></td><td>{{ policy.countryRules.length }} 个</td><td>{{ financePolicyCarrierCount(policy) }} 个</td><td><em :class="{ warn:!policy.enabled }">{{ policy.enabled ? '启用' : '停用' }}</em></td><td>{{ policy.updatedAt }}</td><td><button class="link" @click="openFinancePolicyEditor(policy)">统一维护</button><button class="link danger" @click="removeFinancePolicy(policy)">删除</button></td></tr></tbody></table>
         <div v-else-if="mode === 'members' && financeSettingsTab==='grades'" class="grade-settings"><header><div><b>S–E 客户等级计算系数</b><small>最终报价 = 综合成本 × 客户等级系数；美元报价按财务维护的汇率换算。</small></div><button class="primary" @click="saveGradeSettings">保存等级系数</button></header><div class="grade-grid"><label v-for="setting in customerGradeSettings" :key="setting.grade"><strong>{{ setting.grade }}级客户</strong><span>计算系数</span><input v-model.number="setting.coefficient" type="number" min="0" step="0.01"><small>成本 ¥100 → 报价 ¥{{ (100 * setting.coefficient).toFixed(2) }}</small><em><input v-model="setting.enabled" type="checkbox"> 启用</em></label></div></div>
@@ -1027,7 +1019,6 @@ function saveEditor() {
         <h3 class="section-title">系统辅助字段</h3>
         <label>商品名称<input v-model="productForm.name" placeholder="原表无商品名称，可在系统补充"></label>
       </div>
-      <div v-else-if="mode==='suppliers'" class="form"><label>供应商编号<input value="SP00004"></label><label>供应商名称<input placeholder="请输入公司或店铺名称"></label><label>联系人<input placeholder="请输入联系人"></label><label>联系电话<input placeholder="手机号或座机"></label><label>采购平台<select><option>1688</option><option>淘宝</option><option>线下合同</option><option>其他</option></select></label><label>主营品类<input placeholder="例如：家居百货"></label><label>结算方式<select><option>款到发货</option><option>月结30天</option><option>预付30%</option></select></label><label>平均交期（天）<input type="number" value="3"></label><label>采购链接<input placeholder="https://"></label><label>合作状态<select><option>合作中</option><option>待审核</option><option>已停用</option></select></label></div>
       <div v-else-if="mode==='logistics'" class="form"><label>规则名称<input value="新运费规则"></label><label>物流商<select><option>云途物流</option><option>燕文物流</option></select></label><label>规则类型<select><option>专线</option><option>挂号</option></select></label><label>适用国家<select><option>常用欧洲国家</option><option>北美国家</option></select></label><label>基础费<input type="number" value="0"></label><label>每 1000g 单价<input type="number" value="0"></label><label>挂号费<input type="number" value="0"></label><label>最大重量（g）<input type="number" value="2000" min="0" step="1"></label></div>
       <div v-else-if="mode==='members'" class="form finance-policy-form">
         <label>物流属性<div class="finance-attribute-combobox"><input ref="financeAttributeInput" :value="financePolicyForm.category" autocomplete="off" placeholder="选择或输入物流属性" role="combobox" :aria-expanded="financeAttributePickerOpen" @focus="openFinanceAttributePicker" @click="openFinanceAttributePicker" @input="updateFinanceAttribute" @blur="closeFinanceAttributePicker" @keydown.esc="financeAttributePickerOpen=false"><button type="button" aria-label="展开物流属性" @mousedown.prevent="toggleFinanceAttributePicker">⌄</button><div v-if="financeAttributePickerOpen" class="finance-attribute-menu" role="listbox"><button v-for="attribute in filteredFinanceAttributeOptions" :key="attribute" type="button" :class="{ active:attribute===financePolicyForm.category }" @mousedown.prevent="selectFinanceAttribute(attribute)">{{ attribute }}</button><p v-if="!filteredFinanceAttributeOptions.length && financePolicyForm.category.trim()">按当前输入创建“{{ financePolicyForm.category.trim() }}”</p></div></div><small>点击显示已有属性，也可以直接输入新的物流属性</small></label>

@@ -29,7 +29,8 @@ class BusinessMigrationExecutor {
             case"finance"->{var financeKey=financeKey(entry.path("key").asText());var replace="replace".equals(resolutions.path(key).asText());financeChanges.add(finance.apply(financeKey,normalizeFinance(financeKey,value),replace));}
             case"quotation-template"->merge(quoteResult,quotations.applyTemplates(value,mappings,actor,batch.sourceHash));
             case"quotation-record"->merge(quoteResult,quotations.applyRecords(value,mappings,actor,batch.sourceHash));
-            case"customer","supplier"->throw AppException.unprocessable("当前迁移报告包含尚未完成字段映射的主数据："+category);
+            case"customer"->throw AppException.unprocessable("当前迁移报告包含尚未完成字段映射的主数据："+category);
+            case"supplier"->throw AppException.unprocessable("供应商主数据功能已下线，禁止迁移该类别");
             default->throw AppException.unprocessable("无法识别的迁移数据类别："+category);}}
         if(!logisticsEntries.isEmpty())execution.set("logistics",logistics.importMigrationDrafts(logisticsEntries,actor));else execution.set("logistics",JsonNodeFactory.instance.objectNode());execution.set("quotations",quoteResult);var assetIds=uuidList(assets);storage.publish(assetIds);execution.put("productsCreated",createdSkus.size()).put("assetsPublished",assetIds.size()).put("financeChanged",countChanged(financeChanges));return execution;}
 

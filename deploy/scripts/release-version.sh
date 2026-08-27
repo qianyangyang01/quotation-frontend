@@ -23,6 +23,12 @@ bash "$deploy_dir/scripts/preflight.sh"
 existing_containers="$(docker ps -aq --filter label=com.docker.compose.project=quotation-prod)"
 current_before="$(readlink -f "$root/current" 2>/dev/null || true)"
 if [[ "$current_before" == "$root/releases/"* && -f "$current_before/deploy/scripts/backup.sh" ]]; then
+  supplier_export_output="$(bash "$deploy_dir/scripts/export-supplier-master-data.sh")"
+  supplier_export_path="$(tail -n 1 <<< "$supplier_export_output")"
+  if [[ "$supplier_export_path" != "not-applicable-already-removed" ]]; then
+    case "$supplier_export_path" in "$root/backups/supplier-removal/"*) ;; *) echo "ERROR: invalid supplier export path" >&2; exit 1;; esac
+    test -d "$supplier_export_path" -a -f "$supplier_export_path/SHA256SUMS" || { echo "ERROR: verified supplier export is incomplete" >&2; exit 1; }
+  fi
   # Older backup scripts may emit MinIO progress before the final path. Keep
   # that output visible, but persist only the final verified directory.
   backup_output="$(bash "$current_before/deploy/scripts/backup.sh")"
@@ -36,6 +42,7 @@ elif [[ -n "$existing_containers" ]]; then
   exit 1
 else
   backup_path="not-applicable-initial-release"
+  supplier_export_path="not-applicable-initial-release"
 fi
 docker build --pull --label "com.milano.quotation.release=$release" \
   -t "quotation-backend:$release" "$repository_dir/backend"
@@ -60,6 +67,7 @@ ln -sfn "$release_dir" "$root/current"
 printf '%s\n' \
   "release=$release" \
   "git_sha=$(git -C "$repository_dir" rev-parse HEAD)" \
+  "supplier_export=$supplier_export_path" \
   "backup=$backup_path" \
   "deployed_at=$(date -u +%FT%TZ)" > "$release_dir/manifest.txt"
 echo "Released $release"

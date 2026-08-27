@@ -43,7 +43,7 @@ class PurchaseProductServiceTest {
         });
         doAnswer(call -> { rows.remove(((PurchaseProduct)call.getArgument(0)).sku); return null; }).when(products).delete(any(PurchaseProduct.class));
         when(images.findByProductId(any())).thenReturn(List.of());
-        when(deletionGuard.inspect(any(),anyString(),anyLong())).thenAnswer(call -> new PurchaseProductDeletionGuard.DeletionCheck(true,(Long)call.getArgument(2),0,0,0,0,0,0));
+        when(deletionGuard.inspect(any(),anyString(),anyLong())).thenAnswer(call -> new PurchaseProductDeletionGuard.DeletionCheck(true,(Long)call.getArgument(2),0,0,0,0,0));
     }
 
     @Test
@@ -172,13 +172,13 @@ class PurchaseProductServiceTest {
     @Test
     void blocksReferencedDeleteAndRetiresOnlyCollectedImages() {
         var product=PurchaseProduct.create("SAFE-2",JsonNodeFactory.instance.objectNode().put("sku","SAFE-2"),"ready",false,null);product.version=2;rows.put(product.sku,product);
-        var blocked=new PurchaseProductDeletionGuard.DeletionCheck(false,2,1,0,1,0,0,0);
+        var blocked=new PurchaseProductDeletionGuard.DeletionCheck(false,2,1,1,0,0,0);
         when(deletionGuard.inspect(product.id,product.sku,2)).thenReturn(blocked);
         assertThrows(PurchaseProductService.DeletionBlocked.class,()->service.delete(product.sku,2));
         verify(products,never()).delete(product);
 
         var assetId=UUID.randomUUID();var image=new PurchaseProductImage();image.id=UUID.randomUUID();image.productId=product.id;image.assetId=assetId;image.imageType="product";
-        when(deletionGuard.inspect(product.id,product.sku,2)).thenReturn(new PurchaseProductDeletionGuard.DeletionCheck(true,2,1,0,0,0,0,0));
+        when(deletionGuard.inspect(product.id,product.sku,2)).thenReturn(new PurchaseProductDeletionGuard.DeletionCheck(true,2,1,0,0,0,0));
         when(images.findByProductId(product.id)).thenReturn(List.of(image));when(storage.retireUnreferenced(List.of(assetId))).thenReturn(1);
         var result=service.delete(product.sku,2);assertEquals(1,result.retiredImages());assertFalse(rows.containsKey(product.sku));
         verify(storage).retireUnreferenced(List.of(assetId));

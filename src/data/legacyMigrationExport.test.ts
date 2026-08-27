@@ -11,6 +11,13 @@ describe('legacy migration whitelist', () => {
     expect(legacyEntryDecision('milano-quotation/purchase-products', [{ sku: 'MLN-2026-001', category: '服装' }]).decision).toBe('migrate')
   })
 
+  it('excludes retired supplier master data', () => {
+    expect(legacyEntryDecision('milano-quotation/suppliers', [{ code: 'SUP-001' }])).toEqual({
+      decision: 'exclude',
+      reason: '供应商主数据功能已下线',
+    })
+  })
+
   it('always excludes training-system containers even when their names resemble quotation records', () => {
     expect(legacyEntryDecision('milano.training.feedback-records', [{ id: 'feedback-1' }])).toEqual({
       decision: 'exclude',

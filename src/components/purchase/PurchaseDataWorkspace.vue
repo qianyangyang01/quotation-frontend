@@ -237,7 +237,6 @@ const detailFields = computed(() => detail.value ? [
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
-      <RouterLink class="outline" to="/quotation/suppliers">供应商管理</RouterLink>
       <button class="outline" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading ? '上传中…' : '大批量导入' }}</button>
       <button class="outline" @click="showTaskCenter=true">导入任务</button>
       <button class="outline" :disabled="parsing" @click="fileInput?.click()">{{ parsing ? '解析中…' : '小文件导入' }}</button>
@@ -334,10 +333,10 @@ const detailFields = computed(() => detail.value ? [
 
   <div v-if="deleteTarget" class="mask" @click.self="closeDelete()"><section class="modal product-action-modal">
     <button class="close" :disabled="productActionBusy" @click="closeDelete()">×</button><small>PURCHASE SAFE DELETE</small><h2>删除采购资料</h2><p><b>{{ deleteTarget.sku }}</b></p>
-    <div v-if="!deleteCheck" class="delete-loading">正在检查供应商、报价、草稿、模板和导入批次引用…</div>
+    <div v-if="!deleteCheck" class="delete-loading">正在检查报价、草稿、模板和导入批次引用…</div>
     <template v-else-if="!deleteCheck.canDelete">
       <div class="action-warning danger">该商品存在业务引用，不能彻底删除，只能停用。</div>
-      <div class="reference-grid"><span><b>{{ deleteCheck.supplierLinks }}</b>供应商关联</span><span><b>{{ deleteCheck.quotationRecords }}</b>报价记录</span><span><b>{{ deleteCheck.drafts }}</b>报价草稿</span><span><b>{{ deleteCheck.templates }}</b>报价模板</span><span><b>{{ deleteCheck.importBatches }}</b>未回滚导入批次</span><span><b>{{ deleteCheck.imageCount }}</b>图片关系</span></div>
+      <div class="reference-grid"><span><b>{{ deleteCheck.quotationRecords }}</b>报价记录</span><span><b>{{ deleteCheck.drafts }}</b>报价草稿</span><span><b>{{ deleteCheck.templates }}</b>报价模板</span><span><b>{{ deleteCheck.importBatches }}</b>未回滚导入批次</span><span><b>{{ deleteCheck.imageCount }}</b>图片关系</span></div>
       <p v-if="deleteCheck.importBatches" class="rollback-hint">该商品来自仍可回滚的导入批次，请从“导入任务”执行整批回滚。</p>
     </template>
     <template v-else>

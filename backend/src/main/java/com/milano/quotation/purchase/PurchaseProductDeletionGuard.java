@@ -33,7 +33,6 @@ public class PurchaseProductDeletionGuard {
         var parameters = new MapSqlParameterSource().addValue("productId", productId).addValue("sku", sku);
         var sql = """
             SELECT
-              (SELECT count(*) FROM supplier_product WHERE product_id = :productId) supplier_links,
               (SELECT count(*) FROM quotation_record q
                 WHERE EXISTS (
                   SELECT 1 FROM regexp_split_to_table(
@@ -47,30 +46,28 @@ public class PurchaseProductDeletionGuard {
               (SELECT count(*) FROM purchase_product_image WHERE product_id = :productId) image_count
             """.formatted(STRUCTURED_REFERENCE.formatted("d.payload"), STRUCTURED_REFERENCE.formatted("t.payload"));
         return jdbc.queryForObject(sql, parameters, (row, index) -> {
-            int supplierLinks = row.getInt("supplier_links");
             int quotationRecords = row.getInt("quotation_records");
             int drafts = row.getInt("drafts");
             int templates = row.getInt("templates");
             int importBatches = row.getInt("import_batches");
             int imageCount = row.getInt("image_count");
-            boolean canDelete = supplierLinks + quotationRecords + drafts + templates + importBatches == 0;
-            return new DeletionCheck(canDelete, version, imageCount, supplierLinks, quotationRecords, drafts, templates, importBatches);
+            boolean canDelete = quotationRecords + drafts + templates + importBatches == 0;
+            return new DeletionCheck(canDelete, version, imageCount, quotationRecords, drafts, templates, importBatches);
         });
     }
 
-    public record DeletionCheck(boolean canDelete, long version, int imageCount, int supplierLinks,
-                                int quotationRecords, int drafts, int templates, int importBatches) {
+    public record DeletionCheck(boolean canDelete, long version, int imageCount, int quotationRecords,
+                                int drafts, int templates, int importBatches) {
         public Map<String, Object> auditDetail() {
             var detail = new LinkedHashMap<String, Object>();
             detail.put("version", version); detail.put("imageCount", imageCount);
-            detail.put("supplierLinks", supplierLinks); detail.put("quotationRecords", quotationRecords);
+            detail.put("quotationRecords", quotationRecords);
             detail.put("drafts", drafts); detail.put("templates", templates); detail.put("importBatches", importBatches);
             return detail;
         }
 
         public String blockingMessage() {
             var reasons = new java.util.ArrayList<String>();
-            if (supplierLinks > 0) reasons.add("供应商关联 " + supplierLinks + " 条");
             if (quotationRecords > 0) reasons.add("报价记录 " + quotationRecords + " 条");
             if (drafts > 0) reasons.add("报价草稿 " + drafts + " 条");
             if (templates > 0) reasons.add("报价模板 " + templates + " 条");

@@ -32,7 +32,7 @@ selectCalcRule()
   <div class="logistics-app">
     <header class="topbar">
       <RouterLink class="brand" to="/quotation"><b>M</b><span><strong>米莱诺报价</strong><small>MILANO PRICING ERP</small></span></RouterLink>
-      <nav><RouterLink to="/quotation">我的报价</RouterLink><RouterLink to="/quotation/products">采购</RouterLink><RouterLink to="/quotation/suppliers">供应商</RouterLink><RouterLink class="active" to="/quotation/logistics">物流</RouterLink><RouterLink to="/quotation/members">财务</RouterLink><RouterLink to="/quotation/my-records">我的报价记录</RouterLink><RouterLink to="/quotation/records">公司报价记录</RouterLink></nav>
+      <nav><RouterLink to="/quotation">我的报价</RouterLink><RouterLink to="/quotation/products">采购</RouterLink><RouterLink class="active" to="/quotation/logistics">物流</RouterLink><RouterLink to="/quotation/members">财务</RouterLink><RouterLink to="/quotation/my-records">我的报价记录</RouterLink><RouterLink to="/quotation/records">公司报价记录</RouterLink></nav>
       <div class="source">数据源：速猫 ERP<small>同步快照 2026-08-06</small></div>
     </header>
     <main>

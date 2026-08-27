@@ -4,7 +4,7 @@ export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPri
 export type PurchaseStockStatus = '有货' | '无货' | '待确认' | ''
 export type PurchaseSkuOrigin = 'imported' | 'manual' | 'system'
 export type PurchaseCatalogState = 'pending_template' | 'ready' | 'disabled'
-export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageCount:number;supplierLinks:number;quotationRecords:number;drafts:number;templates:number;importBatches:number }
+export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageCount:number;quotationRecords:number;drafts:number;templates:number;importBatches:number }
 
 export type PurchaseProductRecord = {
   sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number

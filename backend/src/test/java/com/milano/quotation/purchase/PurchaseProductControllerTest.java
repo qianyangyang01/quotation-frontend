@@ -26,7 +26,7 @@ class PurchaseProductControllerTest {
     }
 
     @Test void auditsBlockedDeleteWithReferenceCounts(){
-        var check=new PurchaseProductDeletionGuard.DeletionCheck(false,9,2,1,3,4,5,1);
+        var check=new PurchaseProductDeletionGuard.DeletionCheck(false,9,2,3,4,5,1);
         when(products.delete("SAFE-2",9)).thenThrow(new PurchaseProductService.DeletionBlocked(check,"存在引用"));
         assertThrows(PurchaseProductService.DeletionBlocked.class,()->controller.delete("SAFE-2",9));
         verify(audit).record(eq("purchase.delete"),eq("purchase-product"),eq("SAFE-2"),eq("failure"),argThat(detail->detail.get("quotationRecords").equals(3)));

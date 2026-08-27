@@ -12,7 +12,7 @@ const router = createRouter({
     { path: '/quotation/overview', name: 'quotation-overview', component: () => import('@/views/QuotationOverviewView.vue'), meta: { title: '报价情况预览', permission: 'allRecords' } },
     { path: '/quotation', name: 'quotation', component: () => import('@/views/QuotationSystemView.vue'), meta: { title: '我的报价', permission: 'quote' } },
     { path: '/quotation/products', name: 'quotation-products', component: () => import('@/views/JerryModuleView.vue'), props: { mode: 'products' }, meta: { title: '采购', permission: 'purchase' } },
-    { path: '/quotation/suppliers', name: 'quotation-suppliers', component: () => import('@/views/MasterDataView.vue'), meta: { title: '供应商管理', permission: 'purchase' } },
+    { path: '/quotation/suppliers', redirect: '/quotation/products' },
     { path: '/quotation/logistics', name: 'quotation-logistics', component: () => import('@/views/SumaoLogisticsReplicaView.vue'), meta: { title: '物流', permission: 'logistics' } },
     { path: '/quotation/members', name: 'quotation-members', component: () => import('@/views/JerryModuleView.vue'), props: { mode: 'members' }, meta: { title: '财务', permission: 'finance' } },
     { path: '/quotation/my-records', name: 'quotation-my-records', component: () => import('@/views/QuotationRecordsView.vue'), props: { scope: 'mine' }, meta: { title: '我的报价记录', permissions: ['myRecords', 'allRecords'] } },

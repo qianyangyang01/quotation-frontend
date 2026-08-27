@@ -15,7 +15,7 @@ describe('purchase product safety actions', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('loads structured references using an encoded SKU', async () => {
-    const result = { canDelete: false, version: 7, imageCount: 2, supplierLinks: 1, quotationRecords: 3, drafts: 0, templates: 0, importBatches: 1 }
+    const result = { canDelete: false, version: 7, imageCount: 2, quotationRecords: 3, drafts: 0, templates: 0, importBatches: 1 }
     api.get.mockResolvedValue(result)
 
     await expect(loadPurchaseDeletionCheck('SKU / 01')).resolves.toEqual(result)

@@ -153,12 +153,8 @@ class QuotationWorkflowIntegrationTest {
         mvc.perform(delete("/api/v1/quotation-drafts/mine/state").session(session).with(csrf()).header("If-Match", String.valueOf(draftVersion)))
                 .andExpect(status().isOk());
 
-        var supplier = mvc.perform(post("/api/v1/suppliers").session(session).with(csrf()).contentType("application/json")
-                        .content("{\"code\":\"SUP-001\",\"name\":\"供应商主数据\",\"contactName\":\"李四\",\"phone\":\"13900000000\",\"platform\":\"1688\",\"category\":\"服装\",\"settlementTerms\":\"月结30天\",\"leadTimeDays\":3,\"rating\":4.8,\"enabled\":true}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.code").value("SUP-001")).andReturn();
-        var supplierId = mapper.readTree(supplier.getResponse().getContentAsByteArray()).path("data").path("id").asText();
-        mvc.perform(delete("/api/v1/suppliers/{id}", supplierId).session(session).with(csrf()))
-                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/suppliers").session(session))
+                .andExpect(status().isNotFound());
 
         var migration = mvc.perform(post("/api/v1/migration-jobs/business/preview").session(session).with(csrf())
                         .contentType("application/json")

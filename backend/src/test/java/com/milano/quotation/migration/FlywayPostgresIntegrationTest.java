@@ -147,10 +147,12 @@ class FlywayPostgresIntegrationTest {
         restoreQuotationVoidState();
         assertQuotationVoidStateRestored();
 
-        var searchMigration = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+        seedSupplierRemovalMigration();
+        var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(1, searchMigration.migrationsExecuted);
-        assertEquals(true, searchMigration.migrations.stream().anyMatch(item -> "18".equals(item.version)));
+        assertEquals(2, finalMigrations.migrationsExecuted);
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "18".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "19".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("""
                      select count(*) from pg_indexes
@@ -160,6 +162,43 @@ class FlywayPostgresIntegrationTest {
              var result = statement.executeQuery()) {
             result.next();
             assertEquals(2, result.getInt(1));
+        }
+        assertSupplierRemovalMigration();
+    }
+
+    private void seedSupplierRemovalMigration() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    insert into supplier(id, code, name, enabled, version, created_at, updated_at)
+                    values ('88888888-8888-8888-8888-888888888888', 'SUP-REMOVE-1', '待移除供应商', true, 0, now(), now())
+                    """);
+            statement.executeUpdate("""
+                    insert into supplier_product(id, supplier_id, product_id, supplier_sku, enabled, created_at, updated_at)
+                    values ('99999999-9999-9999-9999-999999999999',
+                            '88888888-8888-8888-8888-888888888888',
+                            '44444444-4444-4444-4444-444444444444', 'LEGACY-SKU', true, now(), now())
+                    """);
+            statement.executeUpdate("""
+                    insert into audit_log(id, request_id, actor_account, action, resource_type, resource_id, outcome, detail, created_at)
+                    values ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'request-v19', 'ADMIN', 'supplier.update',
+                            'supplier', '88888888-8888-8888-8888-888888888888', 'success', '{"marker":"supplier-audit-kept"}'::jsonb, now())
+                    """);
+        }
+    }
+
+    private void assertSupplierRemovalMigration() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("select to_regclass('public.supplier') is null, to_regclass('public.supplier_product') is null")) {
+                result.next(); assertEquals(true, result.getBoolean(1)); assertEquals(true, result.getBoolean(2));
+            }
+            try (var result = statement.executeQuery("select count(*) from purchase_product where id='44444444-4444-4444-4444-444444444444'")) {
+                result.next(); assertEquals(1, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("select count(*), min(detail->>'marker') from audit_log where id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'")) {
+                result.next(); assertEquals(1, result.getInt(1)); assertEquals("supplier-audit-kept", result.getString(2));
+            }
         }
     }
 
