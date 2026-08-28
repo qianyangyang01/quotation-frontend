@@ -9,6 +9,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -150,10 +151,11 @@ class FlywayPostgresIntegrationTest {
         seedSupplierRemovalMigration();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(3, finalMigrations.migrationsExecuted);
+        assertEquals(4, finalMigrations.migrationsExecuted);
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "18".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "19".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "20".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "21".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("""
                      select count(*) from pg_indexes
@@ -164,7 +166,41 @@ class FlywayPostgresIntegrationTest {
             result.next();
             assertEquals(2, result.getInt(1));
         }
+        assertPurchaseImportRowsAreUniqueWithinSheet();
         assertSupplierRemovalMigration();
+    }
+
+    private void assertPurchaseImportRowsAreUniqueWithinSheet() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    insert into import_job(id, job_type, status, requested_by, source_name, payload, created_at, updated_at)
+                    values ('21111111-1111-1111-1111-111111111111', 'purchase-xlsx-async', 'ready', 'ADMIN',
+                            'multi-sheet.xlsx', '{}', now(), now())
+                    """);
+            statement.executeUpdate("""
+                    insert into purchase_import_row(id, job_id, source_sheet, source_row, sku, payload, created_at, validation_status)
+                    values ('21222222-2222-2222-2222-222222222222', '21111111-1111-1111-1111-111111111111',
+                            '工作表一', 2, 'SKU-SHEET-1', '{}', now(), 'valid')
+                    """);
+            statement.executeUpdate("""
+                    insert into purchase_import_row(id, job_id, source_sheet, source_row, sku, payload, created_at, validation_status)
+                    values ('21333333-3333-3333-3333-333333333333', '21111111-1111-1111-1111-111111111111',
+                            '工作表二', 2, 'SKU-SHEET-2', '{}', now(), 'valid')
+                    """);
+            try (var result = statement.executeQuery("""
+                    select count(*) from purchase_import_row
+                    where job_id = '21111111-1111-1111-1111-111111111111' and source_row = 2
+                    """)) {
+                result.next();
+                assertEquals(2, result.getInt(1));
+            }
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                    insert into purchase_import_row(id, job_id, source_sheet, source_row, sku, payload, created_at, validation_status)
+                    values ('21444444-4444-4444-4444-444444444444', '21111111-1111-1111-1111-111111111111',
+                            '工作表一', 2, 'SKU-SHEET-DUPLICATE', '{}', now(), 'valid')
+                    """));
+        }
     }
 
     private void seedSupplierRemovalMigration() throws Exception {
