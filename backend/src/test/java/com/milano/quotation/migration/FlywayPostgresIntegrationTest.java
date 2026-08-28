@@ -151,11 +151,12 @@ class FlywayPostgresIntegrationTest {
         seedSupplierRemovalMigration();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(4, finalMigrations.migrationsExecuted);
+        assertEquals(5, finalMigrations.migrationsExecuted);
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "18".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "19".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "20".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "21".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "22".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("""
                      select count(*) from pg_indexes
@@ -229,6 +230,17 @@ class FlywayPostgresIntegrationTest {
              var statement = connection.createStatement()) {
             try (var result = statement.executeQuery("select to_regclass('public.supplier') is null, to_regclass('public.supplier_product') is null")) {
                 result.next(); assertEquals(true, result.getBoolean(1)); assertEquals(true, result.getBoolean(2));
+            }
+            try (var result = statement.executeQuery("select to_regclass('public.supplier_record') is not null")) {
+                result.next(); assertEquals(true, result.getBoolean(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*)
+                    from information_schema.table_constraints
+                    where table_schema='public' and table_name='supplier_record'
+                      and constraint_type='FOREIGN KEY'
+                    """)) {
+                result.next(); assertEquals(0, result.getInt(1));
             }
             try (var result = statement.executeQuery("select count(*) from purchase_product where id='44444444-4444-4444-4444-444444444444'")) {
                 result.next(); assertEquals(1, result.getInt(1));
