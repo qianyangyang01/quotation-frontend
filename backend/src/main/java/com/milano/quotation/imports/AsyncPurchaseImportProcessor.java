@@ -15,16 +15,16 @@ public class AsyncPurchaseImportProcessor {
     private void process(ImportJob job){var queuedStatus=job.status;var activeStatus="queued".equals(queuedStatus)?"parsing":"import-queued".equals(queuedStatus)?"importing":"rollback-queued".equals(queuedStatus)?"rolling-back":null;if(activeStatus==null||jobs.claim(job.id,AsyncPurchaseImportService.JOB_TYPE,queuedStatus,activeStatus,java.time.Instant.now())!=1)return;if("queued".equals(queuedStatus))parse(job);else if("import-queued".equals(queuedStatus))apply(job);else rollback(job);}
     private void parse(ImportJob job){
         try{
-            service.prepareParsing(job.id);var chunk=new ArrayList<PurchaseImportRowMapper.MappedRow>(PurchaseImportBatchService.BATCH_SIZE);
+            service.prepareParsing(job.id);var chunk=new ArrayList<PurchaseImportRowMapper.MappedRow>(PurchaseImportBatchService.BATCH_SIZE);var generated=new int[]{0};var warnings=new int[]{0};var started=System.nanoTime();var taskShort=job.id.toString().substring(0,8).toUpperCase(Locale.ROOT);
             try(var input=storage.openRaw(job.sourceObjectKey)){
-                reader.read(input,raw->{var mapped=mapper.map(raw.sourceSheet(),raw.sourceRow(),raw.values(),raw.schema());chunk.add(mapped);if(chunk.size()>=PurchaseImportBatchService.BATCH_SIZE){batches.stage(job.id,List.copyOf(chunk));chunk.clear();var state=jobs.findById(job.id).orElseThrow();if(state.cancelRequested)throw new Cancelled();}});
+                var result=reader.read(input,raw->{var mapped=mapper.map(taskShort,raw.sourceSheetIndex(),raw.sourceSheet(),raw.sourceRow(),raw.values(),raw.schema());if("system".equals(mapped.payload().path("skuOrigin").asText()))generated[0]++;warnings[0]+=mapped.warnings().size();chunk.add(mapped);if(chunk.size()>=PurchaseImportBatchService.BATCH_SIZE){batches.stage(job.id,List.copyOf(chunk));chunk.clear();var state=jobs.findById(job.id).orElseThrow();if(state.cancelRequested)throw new Cancelled();}});
                 if(!chunk.isEmpty())batches.stage(job.id,List.copyOf(chunk));
+                service.recordParseSummary(job.id,result,(System.nanoTime()-started)/1_000_000,generated[0],warnings[0]);
             }
-            if(job.payload.path("sourceBytes").asLong(0)<=30L*1024*1024)try(var imageInput=storage.openRaw(job.sourceObjectKey)){embeddedImages.process(job.id,imageInput);}
             if(jobs.findById(job.id).orElseThrow().cancelRequested)batches.cancelled(job.id);else batches.ready(job.id);
         }catch(Cancelled e){batches.cancelled(job.id);cleanup(job.id);}catch(Exception e){service.markFailed(job.id,"parsing",e);}
     }
-    private void apply(ImportJob job){try{service.markImporting(job.id);images.processAll(job.id);var current=jobs.findById(job.id).orElseThrow();current.phase="importing";jobs.save(current);batches.apply(job.id);cleanup(job.id);}catch(Exception e){service.markFailed(job.id,"importing",e);}}
+    private void apply(ImportJob job){try{service.markImporting(job.id);try(var imageInput=storage.openRaw(job.sourceObjectKey)){var result=embeddedImages.processDetailed(job.id,imageInput);service.recordEmbeddedImageFailures(job.id,result.failed());}catch(Exception imageError){service.recordEmbeddedImageFailure(job.id,imageError);}images.processAll(job.id);var current=jobs.findById(job.id).orElseThrow();current.phase="importing";jobs.save(current);batches.apply(job.id);cleanup(job.id);}catch(Exception e){service.markFailed(job.id,"importing",e);}}
     private void rollback(ImportJob job){try{service.markRollingBack(job.id);batches.rollback(job.id);}catch(Exception e){service.markFailed(job.id,"rolling-back",e);}}
     private void cleanup(UUID jobId){try{service.cleanupRaw(jobId);}catch(Exception ignored){/* 定时清理任务会继续重试。 */}}
     private static final class Cancelled extends RuntimeException{}

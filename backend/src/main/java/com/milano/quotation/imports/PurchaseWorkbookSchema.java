@@ -1,74 +1,37 @@
 package com.milano.quotation.imports;
 
-import com.milano.quotation.common.AppException;
-import java.util.List;
+import java.util.*;
 
+/** Position-independent header mapping shared by text and embedded-image imports. */
 final class PurchaseWorkbookSchema {
-    static final List<String> LEGACY_HEADERS = List.of(
-            "SKU*", "类别*", "产品图片（嵌入本格）", "实物图（嵌入本格）", "报价人*", "报价日期*", "尺码", "颜色",
-            "克重(g)*", "长(cm)*", "宽(cm)*", "高(cm)*", "起订量(件)*", "基准采购单价(CNY/件)*", "阶梯价2起订量", "阶梯价2(CNY/件)",
-            "阶梯价3起订量", "阶梯价3(CNY/件)", "1件总运费(CNY)", "10件总运费(CNY)", "100件总运费(CNY)", "是否包邮",
-            "含票价(CNY/件)", "票类型", "是否有货*", "备注", "工厂信息", "货源链接1", "货源链接2", "货源链接3", "相似货源", "审核备注");
-    static final List<String> INTERNATIONAL_HEADERS = List.of(
-            "实物图（嵌入本格）", "报价日期*", "报价人*", "备注", "SKU*", "产品图片（嵌入本格）", "克重(g)*", "尺码", "颜色", "材质",
-            "长(cm)*", "宽(cm)*", "高(cm)*", "起订量(件)*", "基准采购单价(CNY/件)*", "阶梯价2起订量", "阶梯价2(CNY/件)",
-            "阶梯价3起订量", "阶梯价3(CNY/件)", "1件总运费(CNY)", "10件总运费(CNY)", "100件总运费(CNY)", "是否包邮",
-            "含票价(CNY/件)", "票点", "票类型", "类别", "是否有货*", "工厂信息", "审核备注", "货源链接1", "货源链接2", "货源链接3", "相似货源");
+    static final List<String> LEGACY_HEADERS=List.of("SKU*","类别*","产品图片（嵌入本格）","实物图（嵌入本格）","报价人*","报价日期*","尺码","颜色","克重(g)*","长(cm)*","宽(cm)*","高(cm)*","起订量(件)*","基准采购单价(CNY/件)*","阶梯价2起订量","阶梯价2(CNY/件)","阶梯价3起订量","阶梯价3(CNY/件)","1件总运费(CNY)","10件总运费(CNY)","100件总运费(CNY)","是否包邮","含票价(CNY/件)","票类型","是否有货*","备注","工厂信息","货源链接1","货源链接2","货源链接3","相似货源","审核备注");
+    static final List<String> INTERNATIONAL_HEADERS=List.of("实物图（嵌入本格）","报价日期*","报价人*","备注","SKU*","产品图片（嵌入本格）","克重(g)*","尺码","颜色","材质","长(cm)*","宽(cm)*","高(cm)*","起订量(件)*","基准采购单价(CNY/件)*","阶梯价2起订量","阶梯价2(CNY/件)","阶梯价3起订量","阶梯价3(CNY/件)","1件总运费(CNY)","10件总运费(CNY)","100件总运费(CNY)","是否包邮","含票价(CNY/件)","票点","票类型","类别","是否有货*","工厂信息","审核备注","货源链接1","货源链接2","货源链接3","相似货源");
+    enum Version{LEGACY,INTERNATIONAL}
+    enum Field { SKU,PRODUCT_IMAGE,PHYSICAL_IMAGE,CATEGORY,OWNER,DATE,SIZE,COLOR,MATERIAL,WEIGHT,LENGTH,WIDTH,HEIGHT,MOQ,BASE_PRICE,TIER2_QTY,TIER2_PRICE,TIER3_QTY,TIER3_PRICE,FREIGHT1,FREIGHT10,FREIGHT100,FREE_SHIPPING,TAX_INCLUDED_PRICE,TAX_POINT,INVOICE_TYPE,STOCK,NOTES,FACTORY,AUDIT_NOTES,LINK1,LINK2,LINK3,SIMILAR }
+    private static final Map<Field,List<String>> ALIASES=aliases();
+    private final EnumMap<Field,List<Integer>> columns=new EnumMap<>(Field.class);
+    private final List<String> recognizedColumns,unknownColumns,missingColumns;
+    private final int headerRow,maxColumn;
 
-    enum Version { LEGACY, INTERNATIONAL }
-    private final Version version;
-    PurchaseWorkbookSchema(Version version) { this.version = version; }
-
-    static PurchaseWorkbookSchema identify(String[] headers, String sheetName) {
-        if (matches(headers, INTERNATIONAL_HEADERS)) return new PurchaseWorkbookSchema(Version.INTERNATIONAL);
-        if (matches(headers, LEGACY_HEADERS)) return new PurchaseWorkbookSchema(Version.LEGACY);
-        for (int i = 0; i < INTERNATIONAL_HEADERS.size(); i++) {
-            var actual = i < headers.length && headers[i] != null ? headers[i].trim() : "";
-            if (!INTERNATIONAL_HEADERS.get(i).equals(actual))
-                throw AppException.unprocessable("工作表“" + sheetName + "”列头不匹配，" + column(i) + "列应为“" + INTERNATIONAL_HEADERS.get(i) + "”");
-        }
-        throw AppException.unprocessable("工作表“" + sheetName + "”模板列头不匹配");
+    private PurchaseWorkbookSchema(String[] headers,int headerRow){
+        this.headerRow=headerRow;this.maxColumn=headers.length;var recognized=new ArrayList<String>();var unknown=new ArrayList<String>();
+        for(int i=0;i<headers.length;i++){var raw=headers[i]==null?"":headers[i].trim();if(raw.isBlank())continue;var field=find(normalize(raw));if(field==null)unknown.add(column(i)+" "+raw);else{columns.computeIfAbsent(field,k->new ArrayList<>()).add(i);recognized.add(column(i)+" "+raw);}}
+        recognizedColumns=List.copyOf(recognized);unknownColumns=List.copyOf(unknown);var missing=new ArrayList<String>();for(var field:Field.values())if(!columns.containsKey(field))missing.add(label(field));missingColumns=List.copyOf(missing);
     }
-    private static boolean matches(String[] actual, List<String> expected) {
-        if (actual.length < expected.size()) return false;
-        for (int i = 0; i < expected.size(); i++) if (!expected.get(i).equals(actual[i] == null ? "" : actual[i].trim())) return false;
-        return true;
-    }
-    int width() { return version == Version.INTERNATIONAL ? 34 : 32; }
-    int sku() { return version == Version.INTERNATIONAL ? 4 : 0; }
-    int productImage() { return version == Version.INTERNATIONAL ? 5 : 2; }
-    int physicalImage() { return version == Version.INTERNATIONAL ? 0 : 3; }
-    int category() { return version == Version.INTERNATIONAL ? 26 : 1; }
-    int owner() { return version == Version.INTERNATIONAL ? 2 : 4; }
-    int date() { return version == Version.INTERNATIONAL ? 1 : 5; }
-    int size() { return version == Version.INTERNATIONAL ? 7 : 6; }
-    int color() { return version == Version.INTERNATIONAL ? 8 : 7; }
-    int material() { return version == Version.INTERNATIONAL ? 9 : -1; }
-    int weight() { return version == Version.INTERNATIONAL ? 6 : 8; }
-    int length() { return version == Version.INTERNATIONAL ? 10 : 9; }
-    int widthCm() { return version == Version.INTERNATIONAL ? 11 : 10; }
-    int height() { return version == Version.INTERNATIONAL ? 12 : 11; }
-    int moq() { return version == Version.INTERNATIONAL ? 13 : 12; }
-    int basePrice() { return version == Version.INTERNATIONAL ? 14 : 13; }
-    int tier2Qty() { return version == Version.INTERNATIONAL ? 15 : 14; }
-    int tier2Price() { return version == Version.INTERNATIONAL ? 16 : 15; }
-    int tier3Qty() { return version == Version.INTERNATIONAL ? 17 : 16; }
-    int tier3Price() { return version == Version.INTERNATIONAL ? 18 : 17; }
-    int freight1() { return version == Version.INTERNATIONAL ? 19 : 18; }
-    int freight10() { return version == Version.INTERNATIONAL ? 20 : 19; }
-    int freight100() { return version == Version.INTERNATIONAL ? 21 : 20; }
-    int freeShipping() { return version == Version.INTERNATIONAL ? 22 : 21; }
-    int taxIncludedPrice() { return version == Version.INTERNATIONAL ? 23 : 22; }
-    int taxPoint() { return version == Version.INTERNATIONAL ? 24 : -1; }
-    int invoiceType() { return version == Version.INTERNATIONAL ? 25 : 23; }
-    int stock() { return version == Version.INTERNATIONAL ? 27 : 24; }
-    int notes() { return version == Version.INTERNATIONAL ? 3 : 25; }
-    int factory() { return version == Version.INTERNATIONAL ? 28 : 26; }
-    int auditNotes() { return version == Version.INTERNATIONAL ? 29 : 31; }
-    int link1() { return version == Version.INTERNATIONAL ? 30 : 27; }
-    int link2() { return version == Version.INTERNATIONAL ? 31 : 28; }
-    int link3() { return version == Version.INTERNATIONAL ? 32 : 29; }
-    int similar() { return version == Version.INTERNATIONAL ? 33 : 30; }
-    boolean international() { return version == Version.INTERNATIONAL; }
-    static String column(int index) { var out=new StringBuilder();for(int value=index+1;value>0;value=(value-1)/26)out.insert(0,(char)('A'+(value-1)%26));return out.toString(); }
+    PurchaseWorkbookSchema(Version version){this((version==Version.INTERNATIONAL?INTERNATIONAL_HEADERS:LEGACY_HEADERS).toArray(String[]::new),1);}
+    static PurchaseWorkbookSchema identify(String[] headers,String sheetName){var schema=identifyOrNull(headers,1);if(schema==null)throw com.milano.quotation.common.AppException.unprocessable("整个工作簿未找到SKU列，无法识别采购数据表");return schema;}
+    static PurchaseWorkbookSchema identifyOrNull(String[] headers,int headerRow){var schema=new PurchaseWorkbookSchema(headers,headerRow);return schema.columns.containsKey(Field.SKU)?schema:null;}
+    static boolean hasSkuHeader(String[] values){for(var value:values)if(find(normalize(value))==Field.SKU)return true;return false;}
+    String value(String[] values,Field field,List<String>warnings){var indexes=columns.getOrDefault(field,List.of());String selected="";int selectedIndex=-1;for(var index:indexes){var value=clean(values,index);if(value.isBlank())continue;if(selected.isBlank()){selected=value;selectedIndex=index;}else if(!selected.equals(value)&&warnings!=null)warnings.add(label(field)+"存在多个不同值，已采用"+column(selectedIndex)+"列，忽略"+column(index)+"列");}return selected;}
+    String[] coalesce(String[] values,List<String>warnings){if(values==null)values=new String[0];var merged=Arrays.copyOf(values,Math.max(values.length,maxColumn));for(var field:Field.values()){var primary=primary(field);if(primary>=0){merged[primary]=value(values,field,warnings);for(var duplicate:columns(field))if(duplicate!=primary)merged[duplicate]="";}}return merged;}
+    int primary(Field field){var indexes=columns.get(field);return indexes==null||indexes.isEmpty()?-1:indexes.get(0);} List<Integer> columns(Field field){return columns.getOrDefault(field,List.of());}
+    int headerRow(){return headerRow;} int maxColumn(){return maxColumn;} List<String> recognizedColumns(){return recognizedColumns;} List<String> unknownColumns(){return unknownColumns;} List<String> missingColumns(){return missingColumns;} int width(){return maxColumn;}
+    int sku(){return primary(Field.SKU);}int productImage(){return primary(Field.PRODUCT_IMAGE);}int physicalImage(){return primary(Field.PHYSICAL_IMAGE);}int category(){return primary(Field.CATEGORY);}int owner(){return primary(Field.OWNER);}int date(){return primary(Field.DATE);}int size(){return primary(Field.SIZE);}int color(){return primary(Field.COLOR);}int material(){return primary(Field.MATERIAL);}int weight(){return primary(Field.WEIGHT);}int length(){return primary(Field.LENGTH);}int widthCm(){return primary(Field.WIDTH);}int height(){return primary(Field.HEIGHT);}int moq(){return primary(Field.MOQ);}int basePrice(){return primary(Field.BASE_PRICE);}int tier2Qty(){return primary(Field.TIER2_QTY);}int tier2Price(){return primary(Field.TIER2_PRICE);}int tier3Qty(){return primary(Field.TIER3_QTY);}int tier3Price(){return primary(Field.TIER3_PRICE);}int freight1(){return primary(Field.FREIGHT1);}int freight10(){return primary(Field.FREIGHT10);}int freight100(){return primary(Field.FREIGHT100);}int freeShipping(){return primary(Field.FREE_SHIPPING);}int taxIncludedPrice(){return primary(Field.TAX_INCLUDED_PRICE);}int taxPoint(){return primary(Field.TAX_POINT);}int invoiceType(){return primary(Field.INVOICE_TYPE);}int stock(){return primary(Field.STOCK);}int notes(){return primary(Field.NOTES);}int factory(){return primary(Field.FACTORY);}int auditNotes(){return primary(Field.AUDIT_NOTES);}int link1(){return primary(Field.LINK1);}int link2(){return primary(Field.LINK2);}int link3(){return primary(Field.LINK3);}int similar(){return primary(Field.SIMILAR);}boolean international(){return columns.containsKey(Field.TAX_POINT)||columns.containsKey(Field.MATERIAL);}
+    static String normalize(String raw){if(raw==null)return "";return raw.trim().replace('\u3000',' ').replace('（','(').replace('）',')').replaceAll("[\\s\\r\\n]+","").replaceAll("[＊*]+$","").toUpperCase(Locale.ROOT);}
+    private static Field find(String value){if(value==null||value.isBlank())return null;for(var entry:ALIASES.entrySet())if(entry.getValue().contains(value))return entry.getKey();return null;}
+    private static Map<Field,List<String>> aliases(){var m=new EnumMap<Field,List<String>>(Field.class);put(m,Field.SKU,"SKU","SKU编码","商品SKU","产品SKU");put(m,Field.PRODUCT_IMAGE,"产品图片(嵌入本格)","产品图片","产品图","商品图片");put(m,Field.PHYSICAL_IMAGE,"实物图(嵌入本格)","实物图","实拍图");put(m,Field.CATEGORY,"类别","品类","产品类别");put(m,Field.OWNER,"报价人","采购报价人","询价人");put(m,Field.DATE,"报价日期","询价日期","日期");put(m,Field.SIZE,"尺码","规格","尺寸规格");put(m,Field.COLOR,"颜色");put(m,Field.MATERIAL,"材质","材料");put(m,Field.WEIGHT,"克重(G)","克重","重量(G)","重量");put(m,Field.LENGTH,"长(CM)","长度(CM)","长");put(m,Field.WIDTH,"宽(CM)","宽度(CM)","宽");put(m,Field.HEIGHT,"高(CM)","高度(CM)","高");put(m,Field.MOQ,"起订量(件)","起订量","MOQ");put(m,Field.BASE_PRICE,"基准采购单价(CNY/件)","基准采购单价","采购单价","采购价","单价");put(m,Field.TIER2_QTY,"阶梯价2起订量","二阶起订量");put(m,Field.TIER2_PRICE,"阶梯价2(CNY/件)","阶梯价2","二阶价格");put(m,Field.TIER3_QTY,"阶梯价3起订量","三阶起订量");put(m,Field.TIER3_PRICE,"阶梯价3(CNY/件)","阶梯价3","三阶价格");put(m,Field.FREIGHT1,"1件总运费(CNY)","1件总运费","1件运费");put(m,Field.FREIGHT10,"10件总运费(CNY)","10件总运费","10件运费");put(m,Field.FREIGHT100,"100件总运费(CNY)","100件总运费","100件运费");put(m,Field.FREE_SHIPPING,"是否包邮","包邮");put(m,Field.TAX_INCLUDED_PRICE,"含票价(CNY/件)","含票价","含税价");put(m,Field.TAX_POINT,"票点","税点","税率");put(m,Field.INVOICE_TYPE,"票类型","发票类型");put(m,Field.STOCK,"是否有货","库存状态","有货");put(m,Field.NOTES,"备注","采购备注");put(m,Field.FACTORY,"工厂信息","工厂");put(m,Field.AUDIT_NOTES,"审核备注");put(m,Field.LINK1,"货源链接1","货源链接","采购链接1");put(m,Field.LINK2,"货源链接2","采购链接2");put(m,Field.LINK3,"货源链接3","采购链接3");put(m,Field.SIMILAR,"相似货源","相似链接");return m;}
+    private static void put(Map<Field,List<String>> map,Field field,String... values){map.put(field,Arrays.stream(values).map(PurchaseWorkbookSchema::normalize).distinct().toList());}
+    private static String clean(String[] values,int index){return index<0||values==null||index>=values.length||values[index]==null?"":values[index].trim();}
+    private static String label(Field f){return switch(f){case SKU->"SKU";case PRODUCT_IMAGE->"产品图片";case PHYSICAL_IMAGE->"实物图";case CATEGORY->"类别";case OWNER->"报价人";case DATE->"报价日期";case SIZE->"尺码";case COLOR->"颜色";case MATERIAL->"材质";case WEIGHT->"克重";case LENGTH->"长";case WIDTH->"宽";case HEIGHT->"高";case MOQ->"起订量";case BASE_PRICE->"采购单价";case TIER2_QTY->"阶梯价2起订量";case TIER2_PRICE->"阶梯价2";case TIER3_QTY->"阶梯价3起订量";case TIER3_PRICE->"阶梯价3";case FREIGHT1->"1件运费";case FREIGHT10->"10件运费";case FREIGHT100->"100件运费";case FREE_SHIPPING->"是否包邮";case TAX_INCLUDED_PRICE->"含票价";case TAX_POINT->"票点";case INVOICE_TYPE->"票类型";case STOCK->"库存状态";case NOTES->"备注";case FACTORY->"工厂信息";case AUDIT_NOTES->"审核备注";case LINK1->"货源链接1";case LINK2->"货源链接2";case LINK3->"货源链接3";case SIMILAR->"相似货源";};}
+    static String column(int index){var out=new StringBuilder();for(int value=index+1;value>0;value=(value-1)/26)out.insert(0,(char)('A'+(value-1)%26));return out.toString();}
 }

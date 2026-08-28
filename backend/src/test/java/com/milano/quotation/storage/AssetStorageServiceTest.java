@@ -29,6 +29,11 @@ class AssetStorageServiceTest {
         assertEquals(AssetStorageService.sha256("same".getBytes()), AssetStorageService.sha256("same".getBytes()));
         assertNotEquals(AssetStorageService.sha256("same".getBytes()), AssetStorageService.sha256("different".getBytes()));
     }
+    @Test void streamsRawObjectAndComputesShaInTheSameRead()throws Exception{
+        var minio=mock(MinioClient.class);var service=new AssetStorageService(minio,mock(AssetObjectRepository.class),"quotation-assets",false);var bytes="single-pass".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        when(minio.putObject(any())).thenAnswer(call->{io.minio.PutObjectArgs args=call.getArgument(0);args.stream().transferTo(java.io.OutputStream.nullOutputStream());return null;});
+        assertEquals(AssetStorageService.sha256(bytes),service.putRawWithSha256("purchase-import/test/source.xlsx",new java.io.ByteArrayInputStream(bytes),bytes.length,"application/octet-stream"));verify(minio,times(1)).putObject(any());
+    }
 
     @Test void initializesOnlyItsOwnBucketAndSurfacesFailures() throws Exception {
         var minio = mock(MinioClient.class); var assets = mock(AssetObjectRepository.class);

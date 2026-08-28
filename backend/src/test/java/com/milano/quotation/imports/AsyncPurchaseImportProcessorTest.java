@@ -24,13 +24,13 @@ class AsyncPurchaseImportProcessorTest {
 
     @Test void parsesQueuedWorkbookAndDelegatesDuplicateGroupingToBatchReady(){
         var job=job("queued");queue(job,"queued");when(storage.openRaw("source")).thenReturn(new ByteArrayInputStream(new byte[]{1}));
-        doAnswer(call->{@SuppressWarnings("unchecked") Consumer<StreamingPurchaseWorkbookReader.RawRow> consumer=call.getArgument(1);consumer.accept(new StreamingPurchaseWorkbookReader.RawRow(2,new String[]{"a"}));consumer.accept(new StreamingPurchaseWorkbookReader.RawRow(3,new String[]{"b"}));return null;}).when(reader).read(any(),any());
-        var payload=JsonMapper.builder().build().createObjectNode();when(mapper.map(anyString(),anyInt(),any(),any())).thenAnswer(i->new PurchaseImportRowMapper.MappedRow(i.getArgument(0),i.getArgument(1),"SKU-1",payload,List.of(),List.of()));when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        doAnswer(call->{@SuppressWarnings("unchecked") Consumer<StreamingPurchaseWorkbookReader.RawRow> consumer=call.getArgument(1);consumer.accept(new StreamingPurchaseWorkbookReader.RawRow(2,new String[]{"a"}));consumer.accept(new StreamingPurchaseWorkbookReader.RawRow(3,new String[]{"b"}));return new StreamingPurchaseWorkbookReader.ReadResult(List.of(),2);}).when(reader).read(any(),any());
+        var payload=JsonMapper.builder().build().createObjectNode();when(mapper.map(anyString(),anyInt(),anyString(),anyInt(),any(),any())).thenAnswer(i->new PurchaseImportRowMapper.MappedRow(i.getArgument(2),i.getArgument(3),"SKU-1",payload,List.of(),List.of()));when(jobs.findById(job.id)).thenReturn(Optional.of(job));
         processor.poll();verify(async).prepareParsing(job.id);verify(batches).stage(eq(job.id),argThat(list->list.size()==2&&list.stream().allMatch(item->item.errors().isEmpty())));verify(batches).ready(job.id);
     }
 
     @Test void parsingRespectsCancelAndReportsFailures(){
-        var cancelled=job("queued");cancelled.cancelRequested=true;queue(cancelled,"queued");when(storage.openRaw("source")).thenReturn(new ByteArrayInputStream(new byte[]{1}));doNothing().when(reader).read(any(),any());when(jobs.findById(cancelled.id)).thenReturn(Optional.of(cancelled));processor.poll();verify(batches).cancelled(cancelled.id);
+        var cancelled=job("queued");cancelled.cancelRequested=true;queue(cancelled,"queued");when(storage.openRaw("source")).thenReturn(new ByteArrayInputStream(new byte[]{1}));when(reader.read(any(),any())).thenReturn(new StreamingPurchaseWorkbookReader.ReadResult(List.of(),0));when(jobs.findById(cancelled.id)).thenReturn(Optional.of(cancelled));processor.poll();verify(batches).cancelled(cancelled.id);
         reset(jobs,reader);var failed=job("queued");queue(failed,"queued");when(storage.openRaw("source")).thenThrow(new IllegalStateException("down"));processor.poll();verify(async).markFailed(eq(failed.id),eq("parsing"),any());
     }
 

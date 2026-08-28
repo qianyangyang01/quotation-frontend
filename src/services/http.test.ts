@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, conditionalGet, idempotencyKey, resetCsrf } from './http'
+import { ApiError, api, conditionalGet, idempotencyKey, resetCsrf, uploadForm } from './http'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -38,5 +38,17 @@ describe('quotation API client', () => {
     const second = idempotencyKey('quote')
     expect(first).toMatch(/^quote:/)
     expect(second).not.toBe(first)
+  })
+
+  it('reports real upload progress and returns the response envelope', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code:'SUCCESS',data:{headerName:'X-CSRF-TOKEN',token:'token'} }),{status:200,headers:{'Content-Type':'application/json'}})))
+    class FakeXhr {
+      upload:{onprogress:((event:{loaded:number;total:number;lengthComputable:boolean})=>void)|null}={onprogress:null};status=200;responseText=JSON.stringify({code:'SUCCESS',data:{id:'job-1'}});withCredentials=false;onerror:(()=>void)|null=null;onabort:(()=>void)|null=null;onload:(()=>void)|null=null
+      open(){} setRequestHeader(){} getResponseHeader(){return 'request-1'} abort(){this.onabort?.()}
+      send(){this.upload.onprogress?.({loaded:5,total:10,lengthComputable:true});this.upload.onprogress?.({loaded:10,total:10,lengthComputable:true});this.onload?.()}
+    }
+    vi.stubGlobal('XMLHttpRequest',FakeXhr)
+    const progress:number[]=[];const upload=uploadForm<{id:string}>('/purchase-imports/jobs',new FormData(),event=>progress.push(event.percent))
+    await expect(upload.promise).resolves.toEqual({id:'job-1'});expect(progress).toEqual([50,100])
   })
 })

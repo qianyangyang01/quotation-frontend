@@ -18,21 +18,23 @@ public class PurchaseImportRowMapper {
 
     MappedRow map(int sourceRow,String[] values){return map("采购产品导入",sourceRow,values,new PurchaseWorkbookSchema(PurchaseWorkbookSchema.Version.LEGACY));}
 
-    MappedRow map(String sourceSheet,int sourceRow,String[] values,PurchaseWorkbookSchema schema){
+    MappedRow map(String sourceSheet,int sourceRow,String[] values,PurchaseWorkbookSchema schema){return map("LOCAL",1,sourceSheet,sourceRow,values,schema);}
+    MappedRow map(String taskShort,int sourceSheetIndex,String sourceSheet,int sourceRow,String[] values,PurchaseWorkbookSchema schema){
         var errors=new ArrayList<String>();var warnings=new ArrayList<String>();
-        var rawSku=clean(values,schema.sku()).toUpperCase(Locale.ROOT);var sku=rawSku.replaceAll("\\s+","");
-        if(sku.isBlank())errors.add("SKU不能为空");
+        values=schema.coalesce(values,warnings);
+        var rawSku=value(values,schema,PurchaseWorkbookSchema.Field.SKU,warnings).toUpperCase(Locale.ROOT);var sku=rawSku.replaceAll("\\s+","");boolean generated=sku.isBlank();
+        if(generated){sku="AUTO-"+taskShort+"-"+sourceSheetIndex+"-"+sourceRow;warnings.add("SKU为空，已生成临时SKU；补充正式SKU前禁止报价");}
         else if(rawSku.matches(".*\\s+.*"))errors.add("SKU中不能包含空格");
         else if(sku.length()>96||!sku.matches("[A-Z0-9._/-]+"))errors.add("SKU格式不合法");
         else if(reserved(sku))errors.add("TESTP/TEST/DEMO/MOCK/AUTO 前缀为测试SKU，不能作为正式数据");
-        var out=mapper.createObjectNode();out.put("sourceSheet",sourceSheet);out.put("sourceRow",sourceRow);out.put("sku",sku);out.put("skuOrigin","imported");
-        optionalText(out,"category",clean(values,schema.category()),"类别",warnings);
+        var out=mapper.createObjectNode();out.put("sourceSheet",sourceSheet);out.put("sourceRow",sourceRow);out.put("sku",sku);out.put("skuOrigin",generated?"system":"imported");
+        optionalText(out,"category",value(values,schema,PurchaseWorkbookSchema.Field.CATEGORY,warnings),"类别",warnings);
         out.put("productImage","");out.put("physicalImage","");out.put("image","");
-        optionalText(out,"quotationOwner",clean(values,schema.owner()),"报价人",warnings);
-        var date=clean(values,schema.date()).replace('/','-').replace('.','-');
+        optionalText(out,"quotationOwner",value(values,schema,PurchaseWorkbookSchema.Field.OWNER,warnings),"报价人",warnings);
+        var date=value(values,schema,PurchaseWorkbookSchema.Field.DATE,warnings).replace('/','-').replace('.','-');
         if(date.isBlank()){out.put("quotationDate","");warnings.add("报价日期暂无数据");}
         else try{out.put("quotationDate",LocalDate.parse(date,DateTimeFormatter.ofPattern("yyyy-M-d")).toString());}catch(Exception e){out.put("quotationDate",date);warnings.add("报价日期无法识别，已按原文保存");}
-        out.put("size",clean(values,schema.size()));out.put("color",clean(values,schema.color()));out.put("material",clean(values,schema.material()));
+        out.put("size",value(values,schema,PurchaseWorkbookSchema.Field.SIZE,warnings));out.put("color",value(values,schema,PurchaseWorkbookSchema.Field.COLOR,warnings));out.put("material",value(values,schema,PurchaseWorkbookSchema.Field.MATERIAL,warnings));
         fuzzyNumber(out,"weightG",values,schema.weight(),"克重(g)",warnings,false,true);
         number(out,"lengthCm",values,schema.length(),"长(cm)",warnings,false);
         number(out,"widthCm",values,schema.widthCm(),"宽(cm)",warnings,false);
@@ -46,19 +48,19 @@ public class PurchaseImportRowMapper {
         number(out,"singleFreightCny",values,schema.freight1(),"1件总运费",warnings,false);
         number(out,"freight10Cny",values,schema.freight10(),"10件总运费",warnings,false);
         number(out,"freight100Cny",values,schema.freight100(),"100件总运费",warnings,false);
-        choice(out,"freeShipping",clean(values,schema.freeShipping()),Set.of("是","否"),"是否包邮",warnings);
+        choice(out,"freeShipping",value(values,schema,PurchaseWorkbookSchema.Field.FREE_SHIPPING,warnings),Set.of("是","否"),"是否包邮",warnings);
         number(out,"taxIncludedPriceCny",values,schema.taxIncludedPrice(),"含票价",warnings,false);
-        taxPoint(out,clean(values,schema.taxPoint()),warnings,schema.international());
-        out.put("invoiceType",normalizeInvoiceType(clean(values,schema.invoiceType()),warnings,schema.international()));
-        stock(out,clean(values,schema.stock()),warnings);
-        out.put("notes",clean(values,schema.notes()));out.put("factoryInfo",clean(values,schema.factory()));out.put("auditNotes",clean(values,schema.auditNotes()));
-        out.put("sourceLink1",clean(values,schema.link1()));out.put("sourceLink2",clean(values,schema.link2()));out.put("sourceLink3",clean(values,schema.link3()));out.put("similarSource",clean(values,schema.similar()));
+        taxPoint(out,value(values,schema,PurchaseWorkbookSchema.Field.TAX_POINT,warnings),warnings,schema.international());
+        out.put("invoiceType",normalizeInvoiceType(value(values,schema,PurchaseWorkbookSchema.Field.INVOICE_TYPE,warnings),warnings,schema.international()));
+        stock(out,value(values,schema,PurchaseWorkbookSchema.Field.STOCK,warnings),warnings);
+        out.put("notes",value(values,schema,PurchaseWorkbookSchema.Field.NOTES,warnings));out.put("factoryInfo",value(values,schema,PurchaseWorkbookSchema.Field.FACTORY,warnings));out.put("auditNotes",value(values,schema,PurchaseWorkbookSchema.Field.AUDIT_NOTES,warnings));
+        out.put("sourceLink1",value(values,schema,PurchaseWorkbookSchema.Field.LINK1,warnings));out.put("sourceLink2",value(values,schema,PurchaseWorkbookSchema.Field.LINK2,warnings));out.put("sourceLink3",value(values,schema,PurchaseWorkbookSchema.Field.LINK3,warnings));out.put("similarSource",value(values,schema,PurchaseWorkbookSchema.Field.SIMILAR,warnings));
         derive(out,errors,warnings);return new MappedRow(sourceSheet,sourceRow,sku,out,List.copyOf(errors),List.copyOf(warnings));
     }
 
     private static void derive(ObjectNode o,List<String> errors,List<String> warnings){
         boolean usablePrice=nonNegative(o.get("purchasePriceCny"))||nonNegative(o.get("tier2PriceCny"))||nonNegative(o.get("tier3PriceCny"))||nonNegative(o.get("taxIncludedPriceCny"));
-        boolean ready=errors.isEmpty()&&positive(o.get("weightG"))&&positive(o.get("minOrderQty"))&&usablePrice;
+        boolean ready=errors.isEmpty()&&!"system".equals(o.path("skuOrigin").asText())&&positive(o.get("weightG"))&&positive(o.get("minOrderQty"))&&usablePrice;
         o.put("catalogState",ready?"ready":"pending_template");o.put("quoteReady",ready);o.put("status",ready?"资料完整":"模板待补全（不可报价）");
         o.put("name",o.path("category").asText().isBlank()?"商品 "+o.path("sku").asText():o.path("category").asText());
         var weight=o.get("weightG");if(weight==null||weight.isNull()){o.putNull("weightKg");o.put("weightDescription","");}else{o.put("weightKg",weight.asDouble()/1000);o.put("weightDescription",weight.asText());}
@@ -81,6 +83,7 @@ public class PurchaseImportRowMapper {
     private static boolean positive(tools.jackson.databind.JsonNode node){return node!=null&&!node.isNull()&&node.asDouble()>0;}
     private static boolean nonNegative(tools.jackson.databind.JsonNode node){return node!=null&&!node.isNull()&&node.isNumber()&&node.asDouble()>=0;}
     private static String clean(String[] values,int index){return index<0||values==null||index>=values.length||values[index]==null?"":values[index].trim();}
+    private static String value(String[] values,PurchaseWorkbookSchema schema,PurchaseWorkbookSchema.Field field,List<String>warnings){return schema.value(values,field,warnings);}
     static boolean reserved(String sku){return sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK)[A-Z0-9._/-]*$")||sku.startsWith("AUTO-");}
     record MappedRow(String sourceSheet,int sourceRow,String sku,ObjectNode payload,List<String>errors,List<String>warnings){MappedRow(int sourceRow,String sku,ObjectNode payload,List<String>errors,List<String>warnings){this("采购产品导入",sourceRow,sku,payload,errors,warnings);}}
 }

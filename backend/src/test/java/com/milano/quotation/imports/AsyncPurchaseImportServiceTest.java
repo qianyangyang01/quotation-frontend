@@ -32,6 +32,7 @@ class AsyncPurchaseImportServiceTest {
         storage=mock(AssetStorageService.class);
         service=new AsyncPurchaseImportService(jobs,rows,parts,images,storage,JsonMapper.builder().build());
         when(jobs.save(any())).thenAnswer(i->i.getArgument(0));
+        when(storage.putRawWithSha256(anyString(),any(),anyLong(),anyString())).thenReturn("a".repeat(64));
     }
 
     @Test void createsQueuedJobAndSanitizesSourceName() {
@@ -39,7 +40,11 @@ class AsyncPurchaseImportServiceTest {
         var job=service.create(file,"ADMIN");
         assertEquals("queued",job.status); assertEquals("folder_purchase_.xlsx",job.sourceName);
         assertEquals(64,job.sourceHash.length()); assertEquals(0,job.payload.path("totalRows").asInt());
-        verify(storage).putRaw(startsWith("purchase-import/"),any(),eq(3L),contains("spreadsheet"));
+        verify(storage).putRawWithSha256(startsWith("purchase-import/"),any(),eq(3L),contains("spreadsheet"));
+    }
+    @Test void readsUploadStreamOnceAndRemovesObjectWhenJobSaveFails()throws Exception{
+        var file=mock(org.springframework.web.multipart.MultipartFile.class);var opens=new java.util.concurrent.atomic.AtomicInteger();when(file.isEmpty()).thenReturn(false);when(file.getOriginalFilename()).thenReturn("purchase.xlsx");when(file.getSize()).thenReturn(3L);when(file.getInputStream()).thenAnswer(call->{opens.incrementAndGet();return new java.io.ByteArrayInputStream(new byte[]{1,2,3});});when(jobs.save(any())).thenThrow(new IllegalStateException("db down"));when(storage.removeRaw(anyString())).thenReturn(true);
+        assertThrows(AppException.class,()->service.create(file,"ADMIN"));assertEquals(1,opens.get());verify(storage).removeRaw(startsWith("purchase-import/"));
     }
 
     @Test void rejectsMissingWrongAndOversizeFiles() {

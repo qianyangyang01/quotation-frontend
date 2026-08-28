@@ -46,6 +46,20 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return (await parseEnvelope<T>(response)).data
 }
 
+export interface UploadProgress { loaded:number;total:number;percent:number;bytesPerSecond:number }
+export function uploadForm<T>(path:string,form:FormData,onProgress?:(progress:UploadProgress)=>void){
+  const xhr=new XMLHttpRequest();let cancelled=false;let startedAt=performance.now()
+  const promise=(async()=>{const token=await ensureCsrf();if(cancelled)throw new DOMException('上传已取消','AbortError');return await new Promise<T>((resolve,reject)=>{
+    xhr.open('POST',`${API_BASE}${path}`);xhr.withCredentials=true;xhr.setRequestHeader('Accept','application/json');xhr.setRequestHeader('X-Request-Id',crypto.randomUUID());xhr.setRequestHeader(token.headerName,token.token);startedAt=performance.now()
+    xhr.upload.onprogress=event=>{const elapsed=Math.max((performance.now()-startedAt)/1000,0.001);const total=event.lengthComputable?event.total:0;onProgress?.({loaded:event.loaded,total,percent:total?Math.min(100,Math.round(event.loaded*100/total)):0,bytesPerSecond:event.loaded/elapsed})}
+    xhr.onerror=()=>reject(new ApiError('网络连接中断，文件未上传完成',xhr.status||0,'UPLOAD_NETWORK_ERROR',xhr.getResponseHeader('X-Request-Id')||'unknown'))
+    xhr.onabort=()=>reject(new DOMException('上传已取消','AbortError'))
+    xhr.onload=()=>{let body:ApiEnvelope<T>;try{body=JSON.parse(xhr.responseText) as ApiEnvelope<T>}catch{reject(new ApiError('服务器返回了无法识别的响应',xhr.status,'INVALID_RESPONSE',xhr.getResponseHeader('X-Request-Id')||'unknown'));return}if(xhr.status<200||xhr.status>=300){if(xhr.status===401&&typeof window!=='undefined')window.dispatchEvent(new CustomEvent('quotation:session-expired'));reject(new ApiError(body.message||'请求失败',xhr.status,body.code||'REQUEST_FAILED',body.requestId,body.fieldErrors||[]));return}resolve(body.data)}
+    xhr.send(form)
+  })})()
+  return {promise,cancel:()=>{cancelled=true;xhr.abort()}}
+}
+
 export type ConditionalGetResult<T> = { status: 200; data: T; etag: string } | { status: 304; data: null; etag: string }
 
 export async function conditionalGet<T>(path: string, options: { etag?: string; signal?: AbortSignal } = {}): Promise<ConditionalGetResult<T>> {

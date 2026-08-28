@@ -29,7 +29,7 @@ class PurchaseEmbeddedImageImportServiceTest {
             var bytes=Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n8sAAAAASUVORK5CYII=");var drawing=sheet.createDrawingPatriarch();
             addPicture(source,drawing,bytes,schema.physicalImage());addPicture(source,drawing,bytes,schema.productImage());source.write(output);workbook=output.toByteArray();
         }
-        assertEquals(2,service.process(jobId,new ByteArrayInputStream(workbook)));
+        assertEquals(2,service.process(jobId,new ByteArrayInputStream(workbook)),staged.payload::toString);
         assertEquals(physical.id,staged.physicalAssetId);assertEquals(product.id,staged.productAssetId);assertEquals("/api/v1/assets/"+product.id,staged.payload.path("image").asText());
     }
 

@@ -13,7 +13,7 @@ class PurchaseImportRowMapperTest {
     @Test void reportsRequiredInvalidAndOptionalWarnings(){
         var v=values("");v[1]="";v[4]="";v[5]="not-date";v[8]="-1";v[9]="";v[10]="bad";v[12]="1.5";v[14]="bad";v[18]="bad";v[21]="未知";v[24]="未知";
         var row=mapper.map(3,v);
-        assertFalse(row.errors().isEmpty());assertTrue(row.warnings().size()>=6);assertEquals("模板待补全（不可报价）",row.payload().path("status").asText());assertTrue(row.payload().path("weightKg").isNull());
+        assertTrue(row.errors().isEmpty());assertEquals("system",row.payload().path("skuOrigin").asText());assertTrue(row.sku().startsWith("AUTO-"));assertTrue(row.warnings().size()>=6);assertEquals("模板待补全（不可报价）",row.payload().path("status").asText());assertTrue(row.payload().path("weightKg").isNull());
     }
     @Test void normalizesCurrencyBuildsTiersAndChoices(){
         var v=values(" abc-1 ");v[8]="1,000";v[13]="¥ 10.50";v[14]="100";v[15]="RMB 9";v[16]="200";v[17]="CNY 8";v[21]="是";v[22]="￥11";v[24]="待确认";
@@ -22,7 +22,7 @@ class PurchaseImportRowMapperTest {
     }
     @Test void rejectsIllegalAndAllReservedPrefixesAndHandlesShortInput(){
         assertFalse(mapper.map(2,new String[]{"bad sku"}).errors().isEmpty());
-        assertFalse(mapper.map(2,null).errors().isEmpty());
+        assertTrue(mapper.map(2,null).errors().isEmpty());assertEquals("system",mapper.map(2,null).payload().path("skuOrigin").asText());
         for(var sku:java.util.List.of("TEST1","DEMO_1","MOCK/1","AUTO-1"))assertTrue(PurchaseImportRowMapper.reserved(sku));
         assertFalse(PurchaseImportRowMapper.reserved("AUTOMATIC-1"));
     }
