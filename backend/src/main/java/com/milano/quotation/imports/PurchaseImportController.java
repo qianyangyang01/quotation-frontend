@@ -55,7 +55,11 @@ public class PurchaseImportController {
     }
 
     @PostMapping(value="/jobs",consumes="multipart/form-data")
-    ResponseEntity<ApiResponse<?>> createJob(@RequestPart("file")MultipartFile file,Authentication auth){var job=asyncImports.create(file,account(auth));audit.record("purchase.async-import-create","purchase-import",job.id.toString(),"success",Map.of("file",job.sourceName,"size",file.getSize()));return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(job.id)));}
+    ResponseEntity<ApiResponse<?>> createJob(@RequestPart("file")MultipartFile file,
+                                              @RequestParam(defaultValue="text-only")String importMode,
+                                              @RequestParam(required=false)Long originalSizeBytes,
+                                              @RequestParam(defaultValue="0")Integer removedMediaCount,
+                                              Authentication auth){var job=asyncImports.create(file,account(auth),importMode,originalSizeBytes,removedMediaCount);audit.record("purchase.async-import-create","purchase-import",job.id.toString(),"success",Map.of("file",job.sourceName,"uploadedSize",file.getSize(),"originalSize",job.payload.path("originalSizeBytes").asLong(),"removedMediaCount",job.payload.path("removedMediaCount").asInt(),"importMode","text-only"));return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(job.id)));}
     @PostMapping(value="/jobs/{id}/image-parts",consumes="multipart/form-data")
     ResponseEntity<ApiResponse<?>> imagePart(@PathVariable UUID id,@RequestParam int partNumber,@RequestPart("file")MultipartFile file){asyncImages.upload(id,partNumber,file);audit.record("purchase.async-import-image-part","purchase-import",id.toString(),"success",Map.of("part",partNumber,"size",file.getSize()));return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(id)));}
     @GetMapping("/jobs") ApiResponse<?> jobs(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="20")int size){return ApiResponse.ok(asyncImports.list(PageRequest.of(Math.max(0,page),Math.min(100,Math.max(1,size)))));}

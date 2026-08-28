@@ -37,9 +37,10 @@ class AsyncPurchaseImportServiceTest {
 
     @Test void createsQueuedJobAndSanitizesSourceName() {
         var file=new MockMultipartFile("file","folder\\purchase\n.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",new byte[]{1,2,3});
-        var job=service.create(file,"ADMIN");
+        var job=service.create(file,"ADMIN","text-only",90_000_000L,165);
         assertEquals("queued",job.status); assertEquals("folder_purchase_.xlsx",job.sourceName);
         assertEquals(64,job.sourceHash.length()); assertEquals(0,job.payload.path("totalRows").asInt());
+        assertEquals("text-only",job.payload.path("importMode").asText());assertEquals(90_000_000L,job.payload.path("originalSizeBytes").asLong());assertEquals(3L,job.payload.path("uploadedBytes").asLong());assertEquals(165,job.payload.path("removedMediaCount").asInt());
         verify(storage).putRawWithSha256(startsWith("purchase-import/"),any(),eq(3L),contains("spreadsheet"));
     }
     @Test void readsUploadStreamOnceAndRemovesObjectWhenJobSaveFails()throws Exception{
@@ -54,6 +55,11 @@ class AsyncPurchaseImportServiceTest {
         when(huge.isEmpty()).thenReturn(false); when(huge.getOriginalFilename()).thenReturn("a.xlsx");
         when(huge.getSize()).thenReturn(101L*1024*1024);
         assertThrows(AppException.class,()->service.create(huge,"A"));
+        var small=new MockMultipartFile("f","a.xlsx","",new byte[]{1});
+        assertThrows(AppException.class,()->service.create(small,"A","with-images",1L,0));
+        assertThrows(AppException.class,()->service.create(small,"A","text-only",101L*1024*1024,0));
+        assertThrows(AppException.class,()->service.create(small,"A","text-only",0L,0));
+        assertThrows(AppException.class,()->service.create(small,"A","text-only",1L,-1));
     }
 
     @Test void confirmsOnlyReadyNonEmptyJob() {

@@ -15,8 +15,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class AsyncPurchaseImportProcessorTest {
-    private ImportJobRepository jobs;private AsyncPurchaseImportService async;private StreamingPurchaseWorkbookReader reader;private PurchaseImportRowMapper mapper;private PurchaseImportBatchService batches;private PurchaseImportImageService images;private AssetStorageService storage;private PurchaseEmbeddedImageImportService embeddedImages;private AsyncPurchaseImportProcessor processor;
-    @BeforeEach void setup(){jobs=mock(ImportJobRepository.class);async=mock(AsyncPurchaseImportService.class);reader=mock(StreamingPurchaseWorkbookReader.class);mapper=mock(PurchaseImportRowMapper.class);batches=mock(PurchaseImportBatchService.class);images=mock(PurchaseImportImageService.class);storage=mock(AssetStorageService.class);embeddedImages=mock(PurchaseEmbeddedImageImportService.class);processor=new AsyncPurchaseImportProcessor(jobs,async,reader,mapper,batches,images,storage,embeddedImages);}
+    private ImportJobRepository jobs;private AsyncPurchaseImportService async;private StreamingPurchaseWorkbookReader reader;private PurchaseImportRowMapper mapper;private PurchaseImportBatchService batches;private PurchaseImportImageService images;private AssetStorageService storage;private AsyncPurchaseImportProcessor processor;
+    @BeforeEach void setup(){jobs=mock(ImportJobRepository.class);async=mock(AsyncPurchaseImportService.class);reader=mock(StreamingPurchaseWorkbookReader.class);mapper=mock(PurchaseImportRowMapper.class);batches=mock(PurchaseImportBatchService.class);images=mock(PurchaseImportImageService.class);storage=mock(AssetStorageService.class);processor=new AsyncPurchaseImportProcessor(jobs,async,reader,mapper,batches,images,storage);}
 
     @Test void skipsPollingWhileAnotherLargeJobRuns(){when(jobs.existsByJobTypeAndStatusIn(anyString(),any())).thenReturn(true);processor.poll();verify(jobs,never()).findFirstByJobTypeAndStatusOrderByCreatedAt(anyString(),anyString());}
 
@@ -35,7 +35,7 @@ class AsyncPurchaseImportProcessorTest {
     }
 
     @Test void importsQueuedJobAndReportsImportFailure(){
-        var job=job("import-queued");queue(job,"import-queued");when(jobs.findById(job.id)).thenReturn(Optional.of(job));processor.poll();verify(async).markImporting(job.id);verify(images).processAll(job.id);verify(batches).apply(job.id);
+        var job=job("import-queued");queue(job,"import-queued");when(jobs.findById(job.id)).thenReturn(Optional.of(job));processor.poll();verify(async).markImporting(job.id);verify(images).processAll(job.id);verify(storage,never()).openRaw(anyString());verify(batches).apply(job.id);
         reset(jobs,async,images,batches);var failed=job("import-queued");queue(failed,"import-queued");doThrow(new IllegalStateException("bad zip")).when(images).processAll(failed.id);processor.poll();verify(async).markFailed(eq(failed.id),eq("importing"),any());
     }
 
