@@ -90,4 +90,29 @@ describe('supplier record score preview', () => {
     expect(result.breakdown.afterSales).toBeNull()
     expect(result.breakdown.invoice).toBeNull()
   })
+
+  it('treats a complete zero score as complete rather than missing', () => {
+    const result = calculateSupplierScore({
+      qualityGrade: '不良', deliveryTerms: '8', afterSalesAvailable: false,
+      hotProductRecommendation: false, freeSample: false, priceLevel: '偏高',
+      invoiceType: '没票', taxPointPercent: null,
+    })
+
+    expect(result.complete).toBe(true)
+    expect(result.total).toBe(0)
+    expect(result.missingItems).toEqual([])
+    expect(result.breakdown).toEqual({ quality: 0, delivery: 0, afterSales: 0, hotProduct: 0, freeSample: 0, priceLevel: 0, invoice: 0 })
+  })
+
+  it.each([
+    ['优', 30], ['良', 20], ['不良', 0],
+  ])('scores quality %s as %d points', (qualityGrade, expected) => {
+    expect(calculateSupplierScore({ ...completeInput, qualityGrade }).breakdown.quality).toBe(expected)
+  })
+
+  it.each([
+    ['市场最低', 10], ['居中', 5], ['偏高', 0],
+  ])('scores price level %s as %d points', (priceLevel, expected) => {
+    expect(calculateSupplierScore({ ...completeInput, priceLevel }).breakdown.priceLevel).toBe(expected)
+  })
 })

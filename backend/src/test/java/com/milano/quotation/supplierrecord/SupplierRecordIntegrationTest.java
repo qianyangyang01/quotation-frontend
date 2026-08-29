@@ -11,6 +11,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.util.UUID;
+
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -40,6 +42,8 @@ class SupplierRecordIntegrationTest {
     @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
     void createsSearchesUpdatesAndDeletesIndependentRecordWithOptimisticLocking() throws Exception {
         var purchaseCountBefore = jdbc.queryForObject("select count(*) from purchase_product", Long.class);
+        var quotationCountBefore = jdbc.queryForObject("select count(*) from quotation_record", Long.class);
+        var importCountBefore = jdbc.queryForObject("select count(*) from import_job", Long.class);
         var createAuditCountBefore = jdbc.queryForObject(
                 "select count(*) from audit_log where action='supplier-record.create'", Long.class);
         var deleteAuditCountBefore = jdbc.queryForObject(
@@ -97,10 +101,16 @@ class SupplierRecordIntegrationTest {
 
         var purchaseCountAfter = jdbc.queryForObject("select count(*) from purchase_product", Long.class);
         org.junit.jupiter.api.Assertions.assertEquals(purchaseCountBefore, purchaseCountAfter);
+        org.junit.jupiter.api.Assertions.assertEquals(quotationCountBefore, jdbc.queryForObject("select count(*) from quotation_record", Long.class));
+        org.junit.jupiter.api.Assertions.assertEquals(importCountBefore, jdbc.queryForObject("select count(*) from import_job", Long.class));
         org.junit.jupiter.api.Assertions.assertEquals(createAuditCountBefore + 1, jdbc.queryForObject(
                 "select count(*) from audit_log where action='supplier-record.create'", Long.class));
         org.junit.jupiter.api.Assertions.assertEquals(deleteAuditCountBefore + 1, jdbc.queryForObject(
                 "select count(*) from audit_log where action='supplier-record.delete'", Long.class));
+        var createAuditDetail = jdbc.queryForObject(
+                "select cast(detail as varchar) from audit_log where action='supplier-record.create' order by created_at desc limit 1", String.class);
+        org.junit.jupiter.api.Assertions.assertFalse(createAuditDetail.contains("13800000000"));
+        org.junit.jupiter.api.Assertions.assertFalse(createAuditDetail.contains("响应快"));
     }
 
     @Test
@@ -111,6 +121,37 @@ class SupplierRecordIntegrationTest {
                         .content(input(" ", "", "待评价", 101, "1.1", "-1")))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
+    void rejectsMissingCsrfMissingVersionAndInvalidStructuredValues() throws Exception {
+        mvc.perform(post("/api/v1/supplier-records")
+                        .contentType("application/json")
+                        .content(input("无CSRF", "", "待评价", null, "0.01", "1000")))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(put("/api/v1/supplier-records/{id}", UUID.randomUUID()).with(csrf())
+                        .contentType("application/json")
+                        .content(input("缺版本", "", "待评价", null, "0.01", "1000")))
+                .andExpect(status().isUnprocessableEntity());
+
+        mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("非法开票", "", "待评价", null, "0.01", "1000")
+                                .replace("\"invoiceType\": \"普票\"", "\"invoiceType\": \"收据\"")))
+                .andExpect(status().isUnprocessableEntity());
+
+        mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("非法价格", "", "待评价", null, "0.01", "1000")
+                                .replace("\"priceLevel\": \"市场最低\"", "\"priceLevel\": \"随意填写\"")))
+                .andExpect(status().isUnprocessableEntity());
+
+        mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("超出票点", "", "待评价", null, "1.01", "1000")))
+                .andExpect(status().isUnprocessableEntity());
     }
 
     @Test

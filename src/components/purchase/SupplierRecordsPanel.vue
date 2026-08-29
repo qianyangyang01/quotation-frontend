@@ -4,6 +4,7 @@ import { ApiError } from '@/services/http'
 import { createSupplierRecord, deleteSupplierRecord, loadSupplierRecords, removeSupplierBusinessLicense, updateSupplierRecord, uploadSupplierBusinessLicense, type NumericDraft, type SupplierRecord, type SupplierRecordDraft, type SupplierRecordInput } from '@/services/supplierRecords'
 import SupplierRecordEditor from './SupplierRecordEditor.vue'
 import { deliveryLabel, deliveryValueForRequest, invoiceNeedsTaxPoint, legacyDeliveryText, normalizeInvoiceType, normalizeQualityGrade, qualityLabel, SCORE_ITEM_LABELS, taxPointDecimalForInvoice, validDeliveryOption, type ScoreBreakdown } from './supplierRecordOptions'
+import { createLatestRequestGuard, shouldPersistSupplierBase, shouldWarnSupplierUnload } from './supplierRecordWorkflow'
 
 const emit = defineEmits<{ close: []; notice: [message: string] }>()
 
@@ -29,6 +30,7 @@ const deleteTarget = ref<SupplierRecord | null>(null)
 const deleting = ref(false)
 const pendingDiscardAction = ref<(() => void) | null>(null)
 let searchTimer = 0
+const loadGuard = createLatestRequestGuard()
 
 const hasUnsavedChanges = computed(() => Boolean(editor.value) && (JSON.stringify(editor.value) !== savedSnapshot.value || Boolean(pendingLicenseFile.value) || removeLicenseRequested.value))
 const canGoPrevious = computed(() => currentPage.value > 1 && !editor.value)
@@ -36,8 +38,15 @@ const canGoNext = computed(() => currentPage.value < totalPages.value && !editor
 const pageStart = computed(() => total.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
 const pageEnd = computed(() => Math.min(currentPage.value * pageSize.value, total.value))
 
-onMounted(load)
-onUnmounted(() => window.clearTimeout(searchTimer))
+onMounted(() => {
+  window.addEventListener('beforeunload', beforeWindowUnload)
+  void load()
+})
+onUnmounted(() => {
+  window.clearTimeout(searchTimer)
+  window.removeEventListener('beforeunload', beforeWindowUnload)
+  loadGuard.invalidate()
+})
 
 watch(query, scheduleFilterReload)
 watch(industryBelt, scheduleFilterReload)
@@ -56,6 +65,7 @@ function scheduleFilterReload() {
 }
 
 async function load() {
+  const request = loadGuard.begin()
   loading.value = true
   loadError.value = ''
   try {
@@ -66,6 +76,7 @@ async function load() {
       page: currentPage.value - 1,
       size: pageSize.value,
     })
+    if (!loadGuard.isLatest(request)) return
     records.value = page.items
     total.value = page.total
     totalPages.value = Math.max(1, page.totalPages)
@@ -74,10 +85,17 @@ async function load() {
       await load()
     }
   } catch (error) {
+    if (!loadGuard.isLatest(request)) return
     loadError.value = message(error, '供应商记录读取失败')
   } finally {
-    loading.value = false
+    if (loadGuard.isLatest(request)) loading.value = false
   }
+}
+
+function beforeWindowUnload(event: BeforeUnloadEvent) {
+  if (!shouldWarnSupplierUnload(hasUnsavedChanges.value, saving.value, deleting.value)) return
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 function emptyDraft(): SupplierRecordDraft {
@@ -150,6 +168,14 @@ function normalizeNumber(value: NumericDraft) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function keepSavedEditor(saved: SupplierRecord) {
+  const draft = draftOf(saved)
+  editor.value = draft
+  editingRecord.value = saved
+  expandedId.value = saved.id
+  savedSnapshot.value = JSON.stringify(draft)
+}
+
 function missingScoreLabels(items: string[]) {
   return items.map((item) => SCORE_ITEM_LABELS[item as keyof ScoreBreakdown] || item)
 }
@@ -189,18 +215,30 @@ async function save() {
   if (validation) { formError.value = validation; return }
   saving.value = true
   formError.value = ''
+  let mediaOperation: 'upload' | 'remove' | '' = ''
   try {
     const input = inputOf(editor.value)
+    const persistBase = shouldPersistSupplierBase(Boolean(editingRecord.value), editor.value, savedSnapshot.value)
     let saved = editingRecord.value
+    if (persistBase) saved = editingRecord.value
       ? await updateSupplierRecord(editingRecord.value, input)
       : await createSupplierRecord(input)
-    if (pendingLicenseFile.value) saved = await uploadSupplierBusinessLicense(saved, pendingLicenseFile.value)
-    else if (removeLicenseRequested.value && saved.businessLicenseAssetId) saved = await removeSupplierBusinessLicense(saved)
+    if (!saved) return
+    if (pendingLicenseFile.value || (removeLicenseRequested.value && saved.businessLicenseAssetId)) keepSavedEditor(saved)
+    if (pendingLicenseFile.value) {
+      mediaOperation = 'upload'
+      saved = await uploadSupplierBusinessLicense(saved, pendingLicenseFile.value)
+    } else if (removeLicenseRequested.value && saved.businessLicenseAssetId) {
+      mediaOperation = 'remove'
+      saved = await removeSupplierBusinessLicense(saved)
+    }
     clearEditor()
     await load()
     emit('notice', `${saved.name} 已保存`)
   } catch (error) {
-    formError.value = error instanceof ApiError && error.status === 409
+    formError.value = mediaOperation
+      ? `供应商基本信息已保存，营业执照${mediaOperation === 'upload' ? '上传' : '移除'}失败，可直接再次点击保存重试。${message(error, '')}`
+      : error instanceof ApiError && error.status === 409
       ? '记录已被其他用户修改，请取消编辑并刷新后重试'
       : message(error, '供应商记录保存失败')
   } finally {
@@ -257,7 +295,7 @@ function message(error: unknown, fallback: string) { return error instanceof Err
 
 <template>
   <section class="supplier-tabs" aria-label="采购资料视图切换">
-    <button @click="emit('close')">采购资料</button>
+    <button @click="requestTransition(() => emit('close'))">采购资料</button>
     <button class="active">供应商记录</button>
   </section>
 

@@ -43,6 +43,44 @@ class SupplierRecordScoringTest {
     }
 
     @Test
+    void treatsACompleteZeroScoreAsCompleteRatherThanMissing() {
+        var row = complete();
+        row.qualityGrade = "不良";
+        row.deliveryTerms = "8";
+        row.afterSalesAvailable = false;
+        row.hotProductRecommendation = false;
+        row.freeSample = false;
+        row.priceLevel = "偏高";
+        row.invoiceType = "没票";
+        row.taxPoint = null;
+
+        var result = SupplierRecordScoring.evaluate(row);
+
+        assertEquals("COMPLETE", result.status());
+        assertEquals(0, result.total());
+        assertEquals(java.util.List.of(), result.missingItems());
+        assertEquals(0, result.breakdown().quality());
+        assertEquals(0, result.breakdown().delivery());
+        assertEquals(0, result.breakdown().invoice());
+    }
+
+    @Test
+    void appliesQualityAndPriceLevelScores() {
+        var row = complete();
+        row.qualityGrade = "良";
+        row.priceLevel = "居中";
+        var result = SupplierRecordScoring.evaluate(row);
+        assertEquals(20, result.breakdown().quality());
+        assertEquals(5, result.breakdown().priceLevel());
+
+        row.qualityGrade = "不良";
+        row.priceLevel = "偏高";
+        result = SupplierRecordScoring.evaluate(row);
+        assertEquals(0, result.breakdown().quality());
+        assertEquals(0, result.breakdown().priceLevel());
+    }
+
+    @Test
     void acceptsDeliveryValuesBeyondIntegerRangeAsCompleteZeroPointValues() {
         var row = complete();
         row.deliveryTerms = "2147483648";

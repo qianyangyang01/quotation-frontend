@@ -70,7 +70,7 @@ function chooseInvoiceType(value: string) {
       <label>对公账户<input v-model="model.corporateAccount" maxlength="500" placeholder="请输入对公账户信息"></label>
       <label>开户银行<input v-model="model.corporateBank" maxlength="160" placeholder="请输入开户银行"></label>
       <label>预估每月采购额（元）<input v-model.number="model.monthlyPurchaseAmount" type="number" min="0" step="0.01" placeholder="0.00"></label>
-      <label>价格水平<select v-model="model.priceLevel"><option value="">未填写</option><option v-for="option in PRICE_LEVEL_OPTIONS" :key="option">{{ option }}</option></select></label>
+      <label>价格水平<select v-model="model.priceLevel"><option value="">请选择</option><option v-for="option in PRICE_LEVEL_OPTIONS" :key="option">{{ option }}</option></select></label>
       <label class="license-field">营业执照
         <span v-if="pendingLicenseFile" class="license-file">待上传：{{ pendingLicenseFile.name }}</span>
         <span v-else-if="removeLicense" class="license-file removed">保存后移除当前图片</span>
@@ -86,22 +86,22 @@ function chooseInvoiceType(value: string) {
     </fieldset>
 
     <fieldset><legend>履约能力</legend>
-      <label>质量<select v-model="model.qualityGrade"><option value="">未填写</option><option v-for="option in QUALITY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+      <label>质量<select v-model="model.qualityGrade"><option value="">请选择</option><option v-for="option in QUALITY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
       <label>交期
         <select v-model="model.deliveryTerms">
-          <option value="">未填写</option>
+          <option value="">请选择</option>
           <option v-for="option in DELIVERY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}（{{ option.score }}分）</option>
         </select>
         <small v-if="model.legacyDeliveryTerms" class="history-note">历史交期记录：“{{ model.legacyDeliveryTerms }}”（只读保留）。留空不会丢失，选择新交期并保存后才会替换。</small>
       </label>
       <label>产能 / 我司可分配量<input v-model="model.capacityOrder" maxlength="120" placeholder="如：5000件/天，我司可分配2000件"></label>
-      <label>备货<select v-model="model.stockingStrategy"><option value="">未填写</option><option v-if="legacyStockingStrategy" :value="legacyStockingStrategy">历史记录（保留）</option><option v-for="option in STOCKING_OPTIONS" :key="option">{{ option }}</option></select><small v-if="legacyStockingStrategy" class="history-note">历史备货记录：{{ legacyStockingStrategy }}</small></label>
-      <label>免费样品<select v-model="model.freeSample"><option :value="null">未填写</option><option :value="true">有</option><option :value="false">没有</option></select></label>
-      <label>售后<select v-model="model.afterSalesAvailable"><option :value="null">未填写</option><option :value="true">有</option><option :value="false">没有</option></select><small v-if="model.afterSales.trim()" class="history-note">历史售后记录：{{ model.afterSales }}</small></label>
+      <label>备货<select v-model="model.stockingStrategy"><option value="">请选择</option><option v-if="legacyStockingStrategy" :value="legacyStockingStrategy">历史记录（保留）</option><option v-for="option in STOCKING_OPTIONS" :key="option">{{ option }}</option></select><small v-if="legacyStockingStrategy" class="history-note">历史备货记录：{{ legacyStockingStrategy }}</small></label>
+      <label>免费样品<select v-model="model.freeSample"><option :value="null">请选择</option><option :value="true">有</option><option :value="false">没有</option></select></label>
+      <label>售后<select v-model="model.afterSalesAvailable"><option :value="null">请选择</option><option :value="true">有</option><option :value="false">没有</option></select><small v-if="model.afterSales.trim()" class="history-note">历史售后记录：{{ model.afterSales }}</small></label>
     </fieldset>
 
     <fieldset class="cooperation-fieldset"><legend>合作评价</legend>
-      <label>爆品推荐<select v-model="model.hotProductRecommendation"><option :value="null">未填写</option><option :value="true">每月 1–5 个</option><option :value="false">没有</option></select></label>
+      <label>爆品推荐<select v-model="model.hotProductRecommendation"><option :value="null">请选择</option><option :value="true">每月 1–5 个</option><option :value="false">没有</option></select></label>
       <label>评级<select v-model="model.rating"><option>待评价</option><option>A级</option><option>B级</option><option>C级</option></select></label>
       <section class="wide score-card" :class="{ complete: scorePreview.complete }">
         <header><div><small>系统自动计算</small><b>综合评分</b></div><strong>{{ scorePreview.total ?? '待评分' }}<small v-if="scorePreview.complete"> / 100</small></strong></header>
