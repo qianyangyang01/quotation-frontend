@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { SupplierRecordDraft } from '@/services/supplierRecords'
+import { QUALITY_OPTIONS } from './supplierRecordOptions'
 
 defineProps<{ saving: boolean; error: string; licenseUrl?: string; pendingLicenseFile?: File | null; removeLicense?: boolean }>()
 const model = defineModel<SupplierRecordDraft>({ required: true })
@@ -10,6 +11,13 @@ function selectLicense(event: Event) {
   const file = input.files?.[0] || null
   if (file && file.size > 20 * 1024 * 1024) { input.value = ''; return }
   emit('licenseSelect', file)
+}
+
+function sanitizeDelivery(event: Event) {
+  const input = event.target as HTMLInputElement
+  const digits = input.value.replace(/\D/g, '')
+  input.value = digits
+  model.value.deliveryTerms = digits
 }
 </script>
 
@@ -40,8 +48,8 @@ function selectLicense(event: Event) {
       <label class="wide">询价记录<input v-model="model.alternativeInquiry" maxlength="500" placeholder="可填写文字、日期或链接"></label>
     </fieldset>
     <fieldset><legend>履约能力</legend>
-      <label>质量<input v-model="model.qualityGrade" maxlength="40" placeholder="如：A（优）"></label>
-      <label>交期<input v-model="model.deliveryTerms" maxlength="80" placeholder="如：3-7天"></label>
+      <label>质量<select v-model="model.qualityGrade"><option value="">未填写</option><option v-for="option in QUALITY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
+      <label>交期（具体到一天）<input v-model="model.deliveryTerms" inputmode="numeric" maxlength="10" placeholder="请输入天数，如：7" @input="sanitizeDelivery"></label>
       <label>产能/货单<input v-model="model.capacityOrder" maxlength="120" placeholder="如：5000件/天"></label>
       <label>备货策略<input v-model="model.stockingStrategy" maxlength="160" placeholder="如：安全库存备货"></label>
       <label>免费样品<select v-model="model.freeSample"><option :value="null">未填写</option><option :value="true">是</option><option :value="false">否</option></select></label>

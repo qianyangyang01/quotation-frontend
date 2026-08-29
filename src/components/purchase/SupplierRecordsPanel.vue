@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ApiError } from '@/services/http'
 import { createSupplierRecord, deleteSupplierRecord, loadSupplierRecords, removeSupplierBusinessLicense, updateSupplierRecord, uploadSupplierBusinessLicense, type NumericDraft, type SupplierRecord, type SupplierRecordDraft, type SupplierRecordInput } from '@/services/supplierRecords'
 import SupplierRecordEditor from './SupplierRecordEditor.vue'
+import { deliveryLabel, normalizeQualityGrade, qualityLabel, validDeliveryDays } from './supplierRecordOptions'
 
 const emit = defineEmits<{ close: []; notice: [message: string] }>()
 
@@ -93,7 +94,7 @@ function draftOf(record: SupplierRecord): SupplierRecordDraft {
     name: record.name, industryBelt: record.industryBelt, bossName: record.bossName,
     contactDetails: record.contactDetails, invoiceType: record.invoiceType,
     taxPointPercent: record.taxPoint == null ? '' : Number((record.taxPoint * 100).toFixed(4)),
-    qualityGrade: record.qualityGrade, deliveryTerms: record.deliveryTerms, capacityOrder: record.capacityOrder,
+    qualityGrade: normalizeQualityGrade(record.qualityGrade), deliveryTerms: record.deliveryTerms, capacityOrder: record.capacityOrder,
     stockingStrategy: record.stockingStrategy, alternativeInquiry: record.alternativeInquiry, corporateAccount: record.corporateAccount, corporateBank: record.corporateBank,
     hotProductRecommendation: record.hotProductRecommendation, freeSample: record.freeSample, afterSales: record.afterSales,
     cooperationScore: record.cooperationScore ?? '', rating: record.rating || '待评价',
@@ -169,6 +170,7 @@ function validateDraft(draft: SupplierRecordDraft) {
   if (score != null && (!Number.isInteger(score) || score < 0 || score > 100)) return '配合度必须是 0 到 100 的整数'
   const amount = normalizeNumber(draft.monthlyPurchaseAmount)
   if (amount != null && amount < 0) return '本月采购额不能为负数'
+  if (!validDeliveryDays(draft.deliveryTerms.trim())) return '交期必须填写明确的整数天数，例如：7'
   return ''
 }
 
@@ -270,7 +272,7 @@ function message(error: unknown, fallback: string) { return error instanceof Err
     <div v-else-if="loading" class="supplier-load-state"><b>正在读取供应商记录…</b></div>
     <div v-else class="supplier-table-wrap">
       <table class="supplier-table">
-        <thead><tr><th>展开</th><th>供应商名称</th><th>产业带</th><th>老板姓名</th><th>开票 / 票点</th><th>质量</th><th>交期</th><th>评级</th><th>总分</th><th>本月采购额</th><th>更新时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>展开</th><th>供应商名称</th><th>产业带</th><th>老板姓名</th><th>开票 / 票点</th><th>质量</th><th>交期（天）</th><th>评级</th><th>总分</th><th>本月采购额</th><th>更新时间</th><th>操作</th></tr></thead>
         <tbody>
           <template v-if="expandedId === 'new' && editor">
             <tr class="supplier-summary new"><td>⌄</td><td colspan="10"><b>新增供应商记录</b><small>仅供应商名称必填</small></td><td></td></tr>
@@ -282,7 +284,7 @@ function message(error: unknown, fallback: string) { return error instanceof Err
               <td><b>{{ record.name }}</b><small>{{ display(record.contactDetails) }}</small></td>
               <td>{{ display(record.industryBelt) }}</td><td>{{ display(record.bossName) }}</td>
               <td><b>{{ display(record.invoiceType) }}</b><small>{{ taxLabel(record.taxPoint) }}</small></td>
-              <td>{{ display(record.qualityGrade) }}</td><td>{{ display(record.deliveryTerms) }}</td>
+              <td>{{ qualityLabel(record.qualityGrade) }}</td><td>{{ deliveryLabel(record.deliveryTerms) }}</td>
               <td><em :class="record.rating === 'A级' ? 'rating-a' : ''">{{ display(record.rating) }}</em></td>
               <td><strong class="score">{{ record.cooperationScore ?? '—' }}</strong></td>
               <td>{{ money(record.monthlyPurchaseAmount) }}</td><td>{{ dateTime(record.updatedAt) }}</td>

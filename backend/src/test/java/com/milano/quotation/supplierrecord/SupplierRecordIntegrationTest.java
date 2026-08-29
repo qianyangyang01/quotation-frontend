@@ -105,6 +105,18 @@ class SupplierRecordIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
+    void rejectsFreeTextQualityAndDeliveryRanges() throws Exception {
+        mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("测试供应商", "", "待评价", 80, null, null)
+                                .replace("\"qualityGrade\": \"优\"", "\"qualityGrade\": \"A（优）\"")
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"3-7天\"")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
     @WithMockUser(username = "EMPLOYEE1", authorities = "PERM_quote")
     void quoteOnlyUsersCannotReadSupplierRecords() throws Exception {
         mvc.perform(get("/api/v1/supplier-records"))
@@ -129,8 +141,8 @@ class SupplierRecordIntegrationTest {
                   "contactDetails": "13800000000 / wx-huasheng",
                   "invoiceType": "普票",
                   "taxPoint": %s,
-                  "qualityGrade": "A",
-                  "deliveryTerms": "3-7天",
+                  "qualityGrade": "优",
+                  "deliveryTerms": "7",
                   "capacityOrder": "5000件/天",
                   "stockingStrategy": "安全库存备货",
                   "alternativeInquiry": "已询价3家",
