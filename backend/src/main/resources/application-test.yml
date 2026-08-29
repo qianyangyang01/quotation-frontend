@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:quotation;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    url: jdbc:h2:mem:quotation-${random.uuid};MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
     username: sa
     password:
   flyway:

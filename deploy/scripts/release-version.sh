@@ -29,9 +29,13 @@ if [[ "$current_before" == "$root/releases/"* && -f "$current_before/deploy/scri
     case "$supplier_export_path" in "$root/backups/supplier-removal/"*) ;; *) echo "ERROR: invalid supplier export path" >&2; exit 1;; esac
     test -d "$supplier_export_path" -a -f "$supplier_export_path/SHA256SUMS" || { echo "ERROR: verified supplier export is incomplete" >&2; exit 1; }
   fi
-  # Older backup scripts may emit MinIO progress before the final path. Keep
-  # that output visible, but persist only the final verified directory.
-  backup_output="$(bash "$current_before/deploy/scripts/backup.sh")"
+  supplier_record_export_output="$(bash "$deploy_dir/scripts/export-supplier-records.sh")"
+  supplier_record_export_path="$(tail -n 1 <<< "$supplier_record_export_output")"
+  case "$supplier_record_export_path" in "$root/backups/supplier-records/"*) ;; *) echo "ERROR: invalid supplier record export path" >&2; exit 1;; esac
+  test -d "$supplier_record_export_path" -a -f "$supplier_record_export_path/SHA256SUMS" || { echo "ERROR: verified supplier record export is incomplete" >&2; exit 1; }
+  # MinIO may emit progress before the final path. Keep that output visible,
+  # but persist only the final verified directory produced by this candidate.
+  backup_output="$(bash "$deploy_dir/scripts/backup.sh")"
   backup_path="$(tail -n 1 <<< "$backup_output")"
   if [[ "$backup_output" == *$'\n'* ]]; then sed '$d' <<< "$backup_output" >&2; fi
   [[ "$backup_path" != *$'\n'* ]] || { echo "ERROR: backup path must be a single line" >&2; exit 1; }
@@ -43,6 +47,7 @@ elif [[ -n "$existing_containers" ]]; then
 else
   backup_path="not-applicable-initial-release"
   supplier_export_path="not-applicable-initial-release"
+  supplier_record_export_path="not-applicable-initial-release"
 fi
 docker build --pull --label "com.milano.quotation.release=$release" \
   -t "quotation-backend:$release" "$repository_dir/backend"
@@ -68,6 +73,7 @@ printf '%s\n' \
   "release=$release" \
   "git_sha=$(git -C "$repository_dir" rev-parse HEAD)" \
   "supplier_export=$supplier_export_path" \
+  "supplier_record_export=$supplier_record_export_path" \
   "backup=$backup_path" \
   "deployed_at=$(date -u +%FT%TZ)" > "$release_dir/manifest.txt"
 echo "Released $release"

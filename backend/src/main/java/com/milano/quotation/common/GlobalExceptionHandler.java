@@ -2,6 +2,7 @@ package com.milano.quotation.common;
 
 import jakarta.persistence.OptimisticLockException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -42,7 +43,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.unprocessableEntity().body(ApiResponse.error("VALIDATION_ERROR", exception.getMessage(), exception.fieldErrors()));
     }
 
-    @ExceptionHandler({OptimisticLockException.class, DataIntegrityViolationException.class})
+    @ExceptionHandler({OptimisticLockException.class, ObjectOptimisticLockingFailureException.class,
+            DataIntegrityViolationException.class})
     ResponseEntity<ApiResponse<Void>> conflict(Exception ignored) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error("CONFLICT", "数据已变化或存在重复，请刷新后重试", List.of()));
     }

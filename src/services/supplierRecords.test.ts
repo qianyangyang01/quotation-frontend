@@ -9,8 +9,8 @@ import { createSupplierRecord, deleteSupplierRecord, loadSupplierRecords, remove
 const input: SupplierRecordInput = {
   name: '广州华盛服饰有限公司', industryBelt: '广州·十三行', bossName: '张老板', contactDetails: '13800000000 / wx-huasheng',
   invoiceType: '普票', taxPoint: 0.03, qualityGrade: 'A', deliveryTerms: '3-7天', capacityOrder: '5000件/天',
-  stockingStrategy: '安全库存备货', alternativeInquiry: '已询价3家', corporateAccount: '6222 ****', corporateBank: '中国银行广州分行', hotProductRecommendation: true,
-  freeSample: true, afterSales: '支持7天内退换', cooperationScore: 92, rating: 'A级', monthlyPurchaseAmount: 256800,
+  stockingStrategy: '成品备货', alternativeInquiry: '已询价3家', corporateAccount: '6222 ****', corporateBank: '中国银行广州分行', hotProductRecommendation: true,
+  freeSample: true, afterSales: '支持7天内退换', afterSalesAvailable: true, priceLevel: '市场最低', cooperationScore: 92, rating: 'A级', monthlyPurchaseAmount: 256800,
   notes: '响应快', suggestion: '保持合作',
 }
 

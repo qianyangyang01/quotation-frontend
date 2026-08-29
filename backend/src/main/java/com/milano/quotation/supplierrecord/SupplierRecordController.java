@@ -4,8 +4,10 @@ import com.milano.quotation.audit.AuditService;
 import com.milano.quotation.common.ApiResponse;
 import com.milano.quotation.common.AppException;
 import com.milano.quotation.common.PageResponse;
+import jakarta.persistence.OptimisticLockException;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -47,10 +49,16 @@ public class SupplierRecordController {
 
     @PostMapping
     ApiResponse<SupplierRecordView> create(@Valid @RequestBody SupplierRecordInput input, Authentication authentication) {
-        var result = records.create(input, authentication.getName());
-        audit.record("supplier-record.create", "supplier-record", result.id().toString(), "success",
-                Map.of("name", result.name()));
-        return ApiResponse.ok(result);
+        try {
+            var result = records.create(input, authentication.getName());
+            audit.record("supplier-record.create", "supplier-record", result.id().toString(), "success",
+                    Map.of("name", result.name()));
+            return ApiResponse.ok(result);
+        } catch (AppException error) {
+            audit.recordIndependent("supplier-record.create", "supplier-record", null, "failure",
+                    Map.of("reason", String.valueOf(error.getMessage())));
+            throw error;
+        }
     }
 
     @PutMapping("/{id}")
@@ -63,10 +71,10 @@ public class SupplierRecordController {
             audit.record("supplier-record.update", "supplier-record", id.toString(), "success",
                     Map.of("name", result.name(), "expectedVersion", expectedVersion));
             return ApiResponse.ok(result);
-        } catch (AppException error) {
+        } catch (AppException | OptimisticLockException | ObjectOptimisticLockingFailureException error) {
             audit.recordIndependent("supplier-record.update", "supplier-record", id.toString(), "failure",
-                    Map.of("expectedVersion", expectedVersion, "reason", error.getMessage()));
-            throw error;
+                    Map.of("expectedVersion", expectedVersion, "reason", String.valueOf(error.getMessage())));
+            throw writeFailure(error);
         }
     }
 
@@ -77,10 +85,10 @@ public class SupplierRecordController {
             audit.record("supplier-record.delete", "supplier-record", id.toString(), "success",
                     Map.of("name", deleted.name(), "expectedVersion", expectedVersion));
             return ApiResponse.ok(null);
-        } catch (AppException error) {
+        } catch (AppException | OptimisticLockException | ObjectOptimisticLockingFailureException error) {
             audit.recordIndependent("supplier-record.delete", "supplier-record", id.toString(), "failure",
-                    Map.of("expectedVersion", expectedVersion, "reason", error.getMessage()));
-            throw error;
+                    Map.of("expectedVersion", expectedVersion, "reason", String.valueOf(error.getMessage())));
+            throw writeFailure(error);
         }
     }
 
@@ -95,10 +103,10 @@ public class SupplierRecordController {
             audit.record("supplier-record.license-upload", "supplier-record", id.toString(), "success",
                     Map.of("expectedVersion", expectedVersion));
             return ApiResponse.ok(result);
-        } catch (AppException error) {
+        } catch (AppException | OptimisticLockException | ObjectOptimisticLockingFailureException error) {
             audit.recordIndependent("supplier-record.license-upload", "supplier-record", id.toString(), "failure",
-                    Map.of("expectedVersion", expectedVersion, "reason", error.getMessage()));
-            throw error;
+                    Map.of("expectedVersion", expectedVersion, "reason", String.valueOf(error.getMessage())));
+            throw writeFailure(error);
         }
     }
 
@@ -111,10 +119,15 @@ public class SupplierRecordController {
             audit.record("supplier-record.license-delete", "supplier-record", id.toString(), "success",
                     Map.of("expectedVersion", expectedVersion));
             return ApiResponse.ok(result);
-        } catch (AppException error) {
+        } catch (AppException | OptimisticLockException | ObjectOptimisticLockingFailureException error) {
             audit.recordIndependent("supplier-record.license-delete", "supplier-record", id.toString(), "failure",
-                    Map.of("expectedVersion", expectedVersion, "reason", error.getMessage()));
-            throw error;
+                    Map.of("expectedVersion", expectedVersion, "reason", String.valueOf(error.getMessage())));
+            throw writeFailure(error);
         }
+    }
+
+    private static RuntimeException writeFailure(RuntimeException error) {
+        if (error instanceof AppException) return error;
+        return AppException.conflict("供应商记录已被其他用户修改，请刷新后重试");
     }
 }

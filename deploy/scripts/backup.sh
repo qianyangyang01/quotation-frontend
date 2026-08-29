@@ -15,6 +15,9 @@ trap cleanup EXIT
 docker compose --project-name quotation-prod --env-file "$deploy_dir/.env" -f "$deploy_dir/docker-compose.yml" exec -T quotation-postgres \
   pg_dump --format=custom --no-owner --dbname=quotation_prod --username=quotation_app > "$temporary/quotation_prod.dump"
 test -s "$temporary/quotation_prod.dump" || { echo "ERROR: PostgreSQL backup is empty" >&2; exit 1; }
+docker compose --project-name quotation-prod --env-file "$deploy_dir/.env" -f "$deploy_dir/docker-compose.yml" exec -T quotation-postgres \
+  pg_restore --list < "$temporary/quotation_prod.dump" > "$temporary/quotation_prod.restore.list"
+test -s "$temporary/quotation_prod.restore.list" || { echo "ERROR: PostgreSQL backup restore listing is empty" >&2; exit 1; }
 mkdir -p "$temporary/objects/quotation-assets"
 docker run --rm --network quotation-internal \
   --user "$(id -u):$(id -g)" \
@@ -29,7 +32,7 @@ docker run --rm --network quotation-internal \
 docker compose --project-name quotation-prod --env-file "$deploy_dir/.env" -f "$deploy_dir/docker-compose.yml" config --images > "$temporary/images.txt"
 (
   cd "$temporary"
-  sha256sum quotation_prod.dump quotation-assets.sha256 images.txt > SHA256SUMS
+  sha256sum quotation_prod.dump quotation_prod.restore.list quotation-assets.sha256 images.txt > SHA256SUMS
   sha256sum -c SHA256SUMS >/dev/null
 )
 mv -- "$temporary" "$target"

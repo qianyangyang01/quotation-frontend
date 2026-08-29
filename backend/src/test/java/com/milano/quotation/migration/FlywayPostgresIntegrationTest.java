@@ -149,15 +149,20 @@ class FlywayPostgresIntegrationTest {
         assertQuotationVoidStateRestored();
 
         seedSupplierRemovalMigration();
+        var supplierRecordMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").target(MigrationVersion.fromVersion("23")).load().migrate();
+        assertEquals(6, supplierRecordMigrations.migrationsExecuted);
+        assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "18".equals(item.version)));
+        assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "19".equals(item.version)));
+        assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "20".equals(item.version)));
+        assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "21".equals(item.version)));
+        assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "22".equals(item.version)));
+        assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "23".equals(item.version)));
+        seedSupplierRecordBeforeStructuredScoring();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(6, finalMigrations.migrationsExecuted);
-        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "18".equals(item.version)));
-        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "19".equals(item.version)));
-        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "20".equals(item.version)));
-        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "21".equals(item.version)));
-        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "22".equals(item.version)));
-        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "23".equals(item.version)));
+        assertEquals(1, finalMigrations.migrationsExecuted);
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "24".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("""
                      select count(*) from pg_indexes
@@ -170,6 +175,7 @@ class FlywayPostgresIntegrationTest {
         }
         assertPurchaseImportRowsAreUniqueWithinSheet();
         assertSupplierRemovalMigration();
+        assertSupplierRecordStructuredScoringMigration();
     }
 
     private void assertPurchaseImportRowsAreUniqueWithinSheet() throws Exception {
@@ -262,6 +268,49 @@ class FlywayPostgresIntegrationTest {
             }
             try (var result = statement.executeQuery("select count(*), min(detail->>'marker') from audit_log where id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'")) {
                 result.next(); assertEquals(1, result.getInt(1)); assertEquals("supplier-audit-kept", result.getString(2));
+            }
+        }
+    }
+
+    private void seedSupplierRecordBeforeStructuredScoring() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    insert into supplier_record(
+                        id, name, invoice_type, tax_point, after_sales, cooperation_score, rating,
+                        created_by, updated_by, version, created_at, updated_at
+                    ) values (
+                        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'V23历史供应商', '不开票', 0.03,
+                        '历史售后自由文本', 88, 'B级', 'ADMIN', 'ADMIN', 0, now(), now()
+                    )
+                    """);
+        }
+    }
+
+    private void assertSupplierRecordStructuredScoringMigration() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("""
+                    select count(*) from information_schema.columns
+                    where table_schema='public' and table_name='supplier_record'
+                      and column_name in ('price_level','after_sales_available','calculated_score','score_policy_version')
+                    """)) {
+                result.next(); assertEquals(4, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select invoice_type, tax_point, after_sales, cooperation_score,
+                           price_level, after_sales_available, calculated_score, score_policy_version
+                    from supplier_record where id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+                    """)) {
+                result.next();
+                assertEquals("不开票", result.getString(1));
+                assertEquals(0, new java.math.BigDecimal("0.030000").compareTo(result.getBigDecimal(2)));
+                assertEquals("历史售后自由文本", result.getString(3));
+                assertEquals(88, result.getInt(4));
+                assertEquals(null, result.getString(5));
+                assertEquals(null, result.getObject(6));
+                assertEquals(null, result.getObject(7));
+                assertEquals(null, result.getString(8));
             }
         }
     }

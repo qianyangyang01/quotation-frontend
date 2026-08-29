@@ -32,6 +32,10 @@ class SupplierRecord {
     @Column(name = "free_sample") Boolean freeSample;
     @Column(name = "after_sales", length = 160) String afterSales;
     @Column(name = "cooperation_score") Integer cooperationScore;
+    @Column(name = "price_level", length = 20) String priceLevel;
+    @Column(name = "after_sales_available") Boolean afterSalesAvailable;
+    @Column(name = "calculated_score") Integer calculatedScore;
+    @Column(name = "score_policy_version", length = 40) String scorePolicyVersion;
     @Column(length = 20) String rating;
     @Column(name = "monthly_purchase_amount", precision = 18, scale = 2) BigDecimal monthlyPurchaseAmount;
     @Column(length = 2000) String notes;

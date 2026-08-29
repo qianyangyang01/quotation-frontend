@@ -98,8 +98,9 @@ public class SupplierRecordService {
         row.industryBelt = clean(input.industryBelt());
         row.bossName = clean(input.bossName());
         row.contactDetails = clean(input.contactDetails());
-        row.invoiceType = clean(input.invoiceType());
-        row.taxPoint = input.taxPoint();
+        row.invoiceType = normalizeInvoiceType(input.invoiceType());
+        validateInvoice(row.invoiceType, input.taxPoint());
+        row.taxPoint = "没票".equals(row.invoiceType) ? null : input.taxPoint();
         row.qualityGrade = clean(input.qualityGrade());
         row.deliveryTerms = clean(input.deliveryTerms());
         row.capacityOrder = clean(input.capacityOrder());
@@ -109,12 +110,33 @@ public class SupplierRecordService {
         row.corporateBank = clean(input.corporateBank());
         row.hotProductRecommendation = input.hotProductRecommendation();
         row.freeSample = input.freeSample();
-        row.afterSales = clean(input.afterSales());
-        row.cooperationScore = input.cooperationScore();
+        // afterSales and cooperationScore are legacy free-text/manual-score fields.
+        // Keep accepting them in the request for compatibility, but never overwrite history.
+        row.priceLevel = clean(input.priceLevel());
+        row.afterSalesAvailable = input.afterSalesAvailable();
         row.rating = clean(input.rating());
         row.monthlyPurchaseAmount = input.monthlyPurchaseAmount();
         row.notes = clean(input.notes());
         row.suggestion = clean(input.suggestion());
+        var score = SupplierRecordScoring.evaluate(row);
+        row.calculatedScore = score.total();
+        row.scorePolicyVersion = score.policyVersion();
+    }
+
+    private static String normalizeInvoiceType(String value) {
+        var cleaned = clean(value);
+        if (cleaned == null) return null;
+        var normalized = SupplierRecordScoring.normalizeInvoiceType(cleaned);
+        if (!List.of("专票", "普票", "没票").contains(normalized)) {
+            throw AppException.unprocessable("开票类型只能选择专票、普票或没票");
+        }
+        return normalized;
+    }
+
+    private static void validateInvoice(String invoiceType, java.math.BigDecimal taxPoint) {
+        if (("专票".equals(invoiceType) || "普票".equals(invoiceType)) && taxPoint == null) {
+            throw AppException.unprocessable("选择专票或普票后必须填写票点百分比");
+        }
     }
 
     private static void assertVersion(SupplierRecord row, long expectedVersion) {

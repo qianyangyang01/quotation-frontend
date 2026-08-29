@@ -2,6 +2,17 @@ import { api, request } from './http'
 
 export type PageResult<T> = { items: T[]; page: number; size: number; total: number; totalPages: number }
 
+export type SupplierScoreStatus = 'COMPLETE' | 'PENDING'
+export type SupplierScoreBreakdown = {
+  quality: number | null
+  delivery: number | null
+  afterSales: number | null
+  hotProduct: number | null
+  freeSample: number | null
+  priceLevel: number | null
+  invoice: number | null
+}
+
 export type SupplierRecord = {
   id: string
   name: string
@@ -22,7 +33,14 @@ export type SupplierRecord = {
   hotProductRecommendation: boolean | null
   freeSample: boolean | null
   afterSales: string
+  afterSalesAvailable: boolean | null
+  priceLevel: string
   cooperationScore: number | null
+  calculatedScore: number | null
+  scoreStatus: SupplierScoreStatus
+  missingScoreItems: string[]
+  scoreBreakdown: SupplierScoreBreakdown
+  scorePolicyVersion: string | null
   rating: string
   monthlyPurchaseAmount: number | null
   notes: string
@@ -34,7 +52,9 @@ export type SupplierRecord = {
   updatedAt: string
 }
 
-export type SupplierRecordInput = Omit<SupplierRecord, 'id' | 'businessLicenseAssetId' | 'businessLicenseUrl' | 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>
+export type SupplierRecordInput = Omit<SupplierRecord,
+  'id' | 'businessLicenseAssetId' | 'businessLicenseUrl' | 'calculatedScore' | 'scoreStatus' | 'missingScoreItems' |
+  'scoreBreakdown' | 'scorePolicyVersion' | 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>
 
 export type NumericDraft = number | '' | null
 export type SupplierRecordDraft = Omit<SupplierRecordInput, 'taxPoint' | 'cooperationScore' | 'monthlyPurchaseAmount'> & {

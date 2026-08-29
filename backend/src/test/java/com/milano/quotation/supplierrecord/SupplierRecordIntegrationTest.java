@@ -40,12 +40,20 @@ class SupplierRecordIntegrationTest {
     @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
     void createsSearchesUpdatesAndDeletesIndependentRecordWithOptimisticLocking() throws Exception {
         var purchaseCountBefore = jdbc.queryForObject("select count(*) from purchase_product", Long.class);
+        var createAuditCountBefore = jdbc.queryForObject(
+                "select count(*) from audit_log where action='supplier-record.create'", Long.class);
+        var deleteAuditCountBefore = jdbc.queryForObject(
+                "select count(*) from audit_log where action='supplier-record.delete'", Long.class);
         var createdResponse = mvc.perform(post("/api/v1/supplier-records").with(csrf())
                         .contentType("application/json")
                         .content(input("广州华盛服饰有限公司", "广州·十三行", "A级", 92, "0.03", "256800.00")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("广州华盛服饰有限公司"))
                 .andExpect(jsonPath("$.data.taxPoint").value(0.03))
+                .andExpect(jsonPath("$.data.cooperationScore").doesNotExist())
+                .andExpect(jsonPath("$.data.calculatedScore").value(75))
+                .andExpect(jsonPath("$.data.scoreStatus").value("COMPLETE"))
+                .andExpect(jsonPath("$.data.scorePolicyVersion").value("SUPPLIER_SCORE_V1"))
                 .andExpect(jsonPath("$.data.createdBy").value("PURCHASE1"))
                 .andReturn().getResponse().getContentAsString();
 
@@ -59,14 +67,15 @@ class SupplierRecordIntegrationTest {
                         .param("rating", "A级"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
-                .andExpect(jsonPath("$.data.items[0].cooperationScore").value(92));
+                .andExpect(jsonPath("$.data.items[0].calculatedScore").value(75));
 
         var updatedResponse = mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
                         .header("If-Match", version)
                         .contentType("application/json")
                         .content(input("广州华盛服饰有限公司", "广州·十三行", "A级", 95, "0.05", "300000.00")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.cooperationScore").value(95))
+                .andExpect(jsonPath("$.data.cooperationScore").doesNotExist())
+                .andExpect(jsonPath("$.data.calculatedScore").value(75))
                 .andExpect(jsonPath("$.data.updatedBy").value("PURCHASE1"))
                 .andReturn().getResponse().getContentAsString();
         var updatedVersion = mapper.readTree(updatedResponse).path("data").path("version").asLong();
@@ -88,9 +97,9 @@ class SupplierRecordIntegrationTest {
 
         var purchaseCountAfter = jdbc.queryForObject("select count(*) from purchase_product", Long.class);
         org.junit.jupiter.api.Assertions.assertEquals(purchaseCountBefore, purchaseCountAfter);
-        org.junit.jupiter.api.Assertions.assertEquals(1L, jdbc.queryForObject(
+        org.junit.jupiter.api.Assertions.assertEquals(createAuditCountBefore + 1, jdbc.queryForObject(
                 "select count(*) from audit_log where action='supplier-record.create'", Long.class));
-        org.junit.jupiter.api.Assertions.assertEquals(1L, jdbc.queryForObject(
+        org.junit.jupiter.api.Assertions.assertEquals(deleteAuditCountBefore + 1, jdbc.queryForObject(
                 "select count(*) from audit_log where action='supplier-record.delete'", Long.class));
     }
 
@@ -114,6 +123,50 @@ class SupplierRecordIntegrationTest {
                                 .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"3-7天\"")))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
+    void requiresTaxForInvoicesNormalizesNoInvoiceAndClearsTaxPoint() throws Exception {
+        mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("缺票点", "", "待评价", 88, null, null)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("不开票供应商", "", "待评价", 88, "0.09", null)
+                                .replace("\"invoiceType\": \"普票\"", "\"invoiceType\": \"不开票\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.invoiceType").value("没票"))
+                .andExpect(jsonPath("$.data.taxPoint").doesNotExist())
+                .andExpect(jsonPath("$.data.scoreBreakdown.invoice").value(0))
+                .andExpect(jsonPath("$.data.calculatedScore").value(75));
+    }
+
+    @Test
+    @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
+    void keepsLegacyManualFieldsAndIgnoresForgedScoreOnUpdate() throws Exception {
+        var createdResponse = mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("历史字段供应商", "", "B级", 99, "0.01", "1000")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        var created = mapper.readTree(createdResponse).path("data");
+        var id = created.path("id").asText();
+        var version = created.path("version").asLong();
+        jdbc.update("update supplier_record set cooperation_score=88, after_sales='历史售后说明' where id=?::uuid", id);
+
+        mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
+                        .header("If-Match", version)
+                        .contentType("application/json")
+                        .content(input("历史字段供应商", "", "B级", 1, "0.01", "2000")
+                                .replace("支持7天内退换", "伪造的新售后说明")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.cooperationScore").value(88))
+                .andExpect(jsonPath("$.data.afterSales").value("历史售后说明"))
+                .andExpect(jsonPath("$.data.calculatedScore").value(85));
     }
 
     @Test
@@ -152,6 +205,8 @@ class SupplierRecordIntegrationTest {
                   "freeSample": true,
                   "afterSales": "支持7天内退换",
                   "cooperationScore": %s,
+                  "priceLevel": "市场最低",
+                  "afterSalesAvailable": true,
                   "rating": %s,
                   "monthlyPurchaseAmount": %s,
                   "notes": "响应快，配合度高",
