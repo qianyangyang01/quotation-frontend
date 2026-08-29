@@ -61,6 +61,7 @@ export type SupplierRecordDraft = Omit<SupplierRecordInput, 'taxPoint' | 'cooper
   taxPointPercent: NumericDraft
   cooperationScore: NumericDraft
   monthlyPurchaseAmount: NumericDraft
+  legacyDeliveryTerms: string
 }
 
 export type SupplierRecordFilters = {

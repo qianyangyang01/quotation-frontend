@@ -7,6 +7,12 @@ export const QUALITY_OPTIONS = [
 export const INVOICE_TYPE_OPTIONS = ['专票', '普票', '没票'] as const
 export const PRICE_LEVEL_OPTIONS = ['市场最低', '居中', '偏高'] as const
 export const STOCKING_OPTIONS = ['成品备货', '半成品备货', '包材备货', '辅材备货'] as const
+export const DELIVERY_OPTIONS = [
+  { value: '0', label: '0天（随时到货）', score: 20 },
+  { value: '1', label: '1天到货', score: 15 },
+  { value: '7', label: '7天内到货', score: 10 },
+  { value: '8', label: '7天以上到货', score: 0 },
+] as const
 
 export type ScoreBreakdown = {
   quality: number | null
@@ -74,14 +80,23 @@ export function qualityLabel(value: string | null | undefined) {
   return QUALITY_OPTIONS.find((option) => option.value === normalized)?.label || normalized || '暂无数据'
 }
 
-export function validDeliveryDays(value: string) {
-  return value === '' || /^(?:0|[1-9]\d*)$/.test(value)
+export function validDeliveryOption(value: string) {
+  return value === '' || DELIVERY_OPTIONS.some((option) => option.value === value)
+}
+
+export function legacyDeliveryText(value: string | null | undefined) {
+  const normalized = value?.trim() || ''
+  return normalized && !validDeliveryOption(normalized) ? normalized : ''
+}
+
+export function deliveryValueForRequest(value: string, legacyValue: string) {
+  return value.trim() || legacyValue.trim()
 }
 
 export function deliveryLabel(value: string | null | undefined) {
   const normalized = value?.trim() || ''
   if (!normalized) return '暂无数据'
-  return /^\d+$/.test(normalized) ? `${normalized} 天` : normalized
+  return DELIVERY_OPTIONS.find((option) => option.value === normalized)?.label || normalized
 }
 
 function numberDraft(value: number | '' | null) {
@@ -94,13 +109,13 @@ export function calculateSupplierScore(input: SupplierScoreInput): SupplierScore
   const invoiceType = normalizeInvoiceType(input.invoiceType)
   const taxPointPercent = numberDraft(input.taxPointPercent)
 
-  const validDelivery = delivery !== '' && validDeliveryDays(delivery)
+  const legacyCompatibleDelivery = /^(?:0|[1-9]\d*)$/.test(delivery) ? Number(delivery) : null
   const validTaxPoint = taxPointPercent != null && taxPointPercent >= 0 && taxPointPercent <= 100
   const breakdown: ScoreBreakdown = {
     quality: quality === '优' ? 30 : quality === '良' ? 20 : quality === '不良' ? 0 : null,
-    delivery: validDelivery
-      ? Number(delivery) === 0 ? 20 : Number(delivery) === 1 ? 15 : Number(delivery) <= 7 ? 10 : 0
-      : null,
+    delivery: legacyCompatibleDelivery == null
+      ? null
+      : legacyCompatibleDelivery === 0 ? 20 : legacyCompatibleDelivery === 1 ? 15 : legacyCompatibleDelivery <= 7 ? 10 : 0,
     afterSales: input.afterSalesAvailable == null ? null : input.afterSalesAvailable ? 10 : 0,
     hotProduct: input.hotProductRecommendation == null ? null : input.hotProductRecommendation ? 10 : 0,
     freeSample: input.freeSample == null ? null : input.freeSample ? 5 : 0,

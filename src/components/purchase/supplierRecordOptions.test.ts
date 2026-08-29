@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateSupplierScore, deliveryLabel, invoiceNeedsTaxPoint, normalizeInvoiceType, normalizeQualityGrade, qualityLabel, taxPointDecimalForInvoice, validDeliveryDays } from './supplierRecordOptions'
+import { calculateSupplierScore, DELIVERY_OPTIONS, deliveryLabel, deliveryValueForRequest, invoiceNeedsTaxPoint, legacyDeliveryText, normalizeInvoiceType, normalizeQualityGrade, qualityLabel, taxPointDecimalForInvoice, validDeliveryOption } from './supplierRecordOptions'
 
 describe('supplier record fixed quality and delivery rules', () => {
   it('maps historical quality values to the new fixed grades', () => {
@@ -9,14 +9,30 @@ describe('supplier record fixed quality and delivery rules', () => {
     expect(qualityLabel('良')).toBe('良：有次品但可退换')
   })
 
-  it('accepts only a non-negative integer delivery day and formats new values', () => {
-    expect(validDeliveryDays('')).toBe(true)
-    expect(validDeliveryDays('7')).toBe(true)
-    expect(validDeliveryDays('5-7天')).toBe(false)
-    expect(validDeliveryDays('0')).toBe(true)
-    expect(validDeliveryDays('01')).toBe(false)
-    expect(deliveryLabel('7')).toBe('7 天')
+  it('exposes only the four delivery options and preserves historical values', () => {
+    expect(DELIVERY_OPTIONS).toEqual([
+      { value: '0', label: '0天（随时到货）', score: 20 },
+      { value: '1', label: '1天到货', score: 15 },
+      { value: '7', label: '7天内到货', score: 10 },
+      { value: '8', label: '7天以上到货', score: 0 },
+    ])
+    expect(validDeliveryOption('')).toBe(true)
+    expect(validDeliveryOption('0')).toBe(true)
+    expect(validDeliveryOption('1')).toBe(true)
+    expect(validDeliveryOption('7')).toBe(true)
+    expect(validDeliveryOption('8')).toBe(true)
+    expect(validDeliveryOption('2')).toBe(false)
+    expect(validDeliveryOption('5-7天')).toBe(false)
+    expect(deliveryLabel('0')).toBe('0天（随时到货）')
+    expect(deliveryLabel('7')).toBe('7天内到货')
+    expect(deliveryLabel('8')).toBe('7天以上到货')
     expect(deliveryLabel('5-7天')).toBe('5-7天')
+    expect(legacyDeliveryText(' 5-7天 ')).toBe('5-7天')
+    expect(legacyDeliveryText('2')).toBe('2')
+    expect(legacyDeliveryText('7')).toBe('')
+    expect(legacyDeliveryText('')).toBe('')
+    expect(deliveryValueForRequest('', '5-7天')).toBe('5-7天')
+    expect(deliveryValueForRequest(' 7 ', '5-7天')).toBe('7')
   })
 
   it('normalizes historical no-invoice values and identifies tax point requirements', () => {
@@ -46,9 +62,15 @@ describe('supplier record score preview', () => {
   })
 
   it.each([
-    [0, 20], [1, 15], [2, 10], [7, 10], [8, 0],
-  ])('scores %d delivery days as %d points', (days, expected) => {
+    [0, 20], [1, 15], [7, 10], [8, 0],
+  ])('scores delivery option %d as %d points', (days, expected) => {
     expect(calculateSupplierScore({ ...completeInput, deliveryTerms: String(days) }).breakdown.delivery).toBe(expected)
+  })
+
+  it('keeps historical exact delivery days compatible with the previous scoring rule', () => {
+    expect(calculateSupplierScore({ ...completeInput, deliveryTerms: '3' }).breakdown.delivery).toBe(10)
+    expect(calculateSupplierScore({ ...completeInput, deliveryTerms: '9' }).breakdown.delivery).toBe(0)
+    expect(calculateSupplierScore({ ...completeInput, deliveryTerms: '3-5天' }).breakdown.delivery).toBeNull()
   })
 
   it('scores invoice thresholds and no-invoice records', () => {

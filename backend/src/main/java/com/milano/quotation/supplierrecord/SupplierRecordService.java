@@ -35,6 +35,7 @@ public class SupplierRecordService {
         row.id = UUID.randomUUID();
         row.createdAt = now;
         row.createdBy = actor(actor);
+        validateDeliveryTransition(input.deliveryTerms(), null);
         apply(row, input);
         row.updatedAt = now;
         row.updatedBy = actor(actor);
@@ -45,6 +46,7 @@ public class SupplierRecordService {
     public SupplierRecordView update(UUID id, long expectedVersion, SupplierRecordInput input, String actor) {
         var row = records.findById(id).orElseThrow(() -> AppException.notFound("供应商记录不存在"));
         assertVersion(row, expectedVersion);
+        validateDeliveryTransition(input.deliveryTerms(), row.deliveryTerms);
         apply(row, input);
         row.updatedAt = Instant.now();
         row.updatedBy = actor(actor);
@@ -137,6 +139,25 @@ public class SupplierRecordService {
         if (("专票".equals(invoiceType) || "普票".equals(invoiceType)) && taxPoint == null) {
             throw AppException.unprocessable("选择专票或普票后必须填写票点百分比");
         }
+    }
+
+    private static void validateDeliveryTransition(String requestedValue, String persistedValue) {
+        var requested = clean(requestedValue);
+        var persisted = clean(persistedValue);
+        var persistedIsLegacy = persisted != null && !isDeliveryOption(persisted);
+        if (requested == null) {
+            if (persistedIsLegacy) {
+                throw AppException.unprocessable("历史交期记录不能直接清空，请选择新的交期选项");
+            }
+            return;
+        }
+        if (isDeliveryOption(requested)) return;
+        if (persisted != null && persisted.equals(requested)) return;
+        throw AppException.unprocessable("交期只能选择0天、1天、7天内或7天以上；历史交期记录只能原样保留或替换为新选项");
+    }
+
+    private static boolean isDeliveryOption(String value) {
+        return "0".equals(value) || "1".equals(value) || "7".equals(value) || "8".equals(value);
     }
 
     private static void assertVersion(SupplierRecord row, long expectedVersion) {

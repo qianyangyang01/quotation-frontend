@@ -18,7 +18,7 @@ public record SupplierRecordInput(
         @Size(max = 40) String invoiceType,
         @DecimalMin("0") @DecimalMax("1") BigDecimal taxPoint,
         @Size(max = 40) @Pattern(regexp = "^(?:优|良|不良)?$", message = "质量只能选择优、良或不良") String qualityGrade,
-        @Size(max = 80) @Pattern(regexp = "^(?:0|[1-9]\\d*)?$", message = "交期必须填写非负整数天数") String deliveryTerms,
+        @Size(max = 80) String deliveryTerms,
         @Size(max = 120) String capacityOrder,
         @Size(max = 160) String stockingStrategy,
         @Size(max = 500) String alternativeInquiry,

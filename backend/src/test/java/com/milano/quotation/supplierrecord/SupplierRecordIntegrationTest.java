@@ -123,6 +123,104 @@ class SupplierRecordIntegrationTest {
                                 .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"3-7天\"")))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+
+        mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("测试供应商", "", "待评价", 80, null, null)
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"2\"")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
+    void preservesLegacyDeliveryTextUntilAnExplicitStandardOptionReplacement() throws Exception {
+        var createdResponse = mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("历史交期供应商", "", "待评价", 80, "0.01", "1000")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        var created = mapper.readTree(createdResponse).path("data");
+        var id = created.path("id").asText();
+        var version = created.path("version").asLong();
+        jdbc.update("update supplier_record set delivery_terms='3-5天', calculated_score=null, score_policy_version=null where id=?::uuid", id);
+
+        mvc.perform(get("/api/v1/supplier-records"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items[0].deliveryTerms").value("3-5天"))
+                .andExpect(jsonPath("$.data.items[0].scoreStatus").value("PENDING"))
+                .andExpect(jsonPath("$.data.items[0].missingScoreItems[0]").value("delivery"));
+
+        var preservedResponse = mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
+                        .header("If-Match", version)
+                        .contentType("application/json")
+                        .content(input("历史交期供应商", "", "A级", 1, "0.01", "2000")
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"3-5天\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deliveryTerms").value("3-5天"))
+                .andExpect(jsonPath("$.data.scoreStatus").value("PENDING"))
+                .andExpect(jsonPath("$.data.calculatedScore").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+        var preservedVersion = mapper.readTree(preservedResponse).path("data").path("version").asLong();
+
+        mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
+                        .header("If-Match", preservedVersion)
+                        .contentType("application/json")
+                        .content(input("历史交期供应商", "", "A级", 1, "0.01", "2000")
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"\"")))
+                .andExpect(status().isUnprocessableEntity());
+
+        mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
+                        .header("If-Match", preservedVersion)
+                        .contentType("application/json")
+                        .content(input("历史交期供应商", "", "A级", 1, "0.01", "2000")
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"5-7天\"")))
+                .andExpect(status().isUnprocessableEntity());
+
+        mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
+                        .header("If-Match", preservedVersion)
+                        .contentType("application/json")
+                        .content(input("历史交期供应商", "", "A级", 1, "0.01", "2000")
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"0\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deliveryTerms").value("0"))
+                .andExpect(jsonPath("$.data.calculatedScore").value(95))
+                .andExpect(jsonPath("$.data.scoreStatus").value("COMPLETE"));
+    }
+
+    @Test
+    @WithMockUser(username = "PURCHASE1", authorities = "PERM_purchase")
+    void preservesHistoricalExactDaysUntilAStandardDeliveryOptionIsSelected() throws Exception {
+        var createdResponse = mvc.perform(post("/api/v1/supplier-records").with(csrf())
+                        .contentType("application/json")
+                        .content(input("历史整数交期供应商", "", "待评价", 80, "0.01", "1000")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        var created = mapper.readTree(createdResponse).path("data");
+        var id = created.path("id").asText();
+        var version = created.path("version").asLong();
+        jdbc.update("update supplier_record set delivery_terms='3' where id=?::uuid", id);
+
+        var preservedResponse = mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
+                        .header("If-Match", version)
+                        .contentType("application/json")
+                        .content(input("历史整数交期供应商", "", "A级", 1, "0.01", "2000")
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"3\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deliveryTerms").value("3"))
+                .andExpect(jsonPath("$.data.scoreBreakdown.delivery").value(10))
+                .andExpect(jsonPath("$.data.scoreStatus").value("COMPLETE"))
+                .andReturn().getResponse().getContentAsString();
+        var preservedVersion = mapper.readTree(preservedResponse).path("data").path("version").asLong();
+
+        mvc.perform(put("/api/v1/supplier-records/{id}", id).with(csrf())
+                        .header("If-Match", preservedVersion)
+                        .contentType("application/json")
+                        .content(input("历史整数交期供应商", "", "A级", 1, "0.01", "2000")
+                                .replace("\"deliveryTerms\": \"7\"", "\"deliveryTerms\": \"8\"")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deliveryTerms").value("8"))
+                .andExpect(jsonPath("$.data.scoreBreakdown.delivery").value(0));
     }
 
     @Test

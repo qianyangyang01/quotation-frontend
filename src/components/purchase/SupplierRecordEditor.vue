@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import type { SupplierRecordDraft } from '@/services/supplierRecords'
 import {
   calculateSupplierScore,
+  DELIVERY_OPTIONS,
+  deliveryValueForRequest,
   INVOICE_TYPE_OPTIONS,
   invoiceNeedsTaxPoint,
   PRICE_LEVEL_OPTIONS,
@@ -21,7 +23,10 @@ const legacyStockingStrategy = computed(() => {
   const value = model.value.stockingStrategy.trim()
   return value && !(STOCKING_OPTIONS as readonly string[]).includes(value) ? value : ''
 })
-const scorePreview = computed(() => calculateSupplierScore(model.value))
+const scorePreview = computed(() => calculateSupplierScore({
+  ...model.value,
+  deliveryTerms: deliveryValueForRequest(model.value.deliveryTerms, model.value.legacyDeliveryTerms),
+}))
 const scoreRows = computed(() => (Object.keys(scorePreview.value.breakdown) as Array<keyof ScoreBreakdown>).map((key) => ({
   key,
   label: SCORE_ITEM_LABELS[key],
@@ -33,13 +38,6 @@ function selectLicense(event: Event) {
   const file = input.files?.[0] || null
   if (file && file.size > 20 * 1024 * 1024) { input.value = ''; return }
   emit('licenseSelect', file)
-}
-
-function sanitizeDelivery(event: Event) {
-  const input = event.target as HTMLInputElement
-  const digits = input.value.replace(/\D/g, '')
-  input.value = digits
-  model.value.deliveryTerms = digits
 }
 
 function chooseInvoiceType(value: string) {
@@ -89,7 +87,13 @@ function chooseInvoiceType(value: string) {
 
     <fieldset><legend>履约能力</legend>
       <label>质量<select v-model="model.qualityGrade"><option value="">未填写</option><option v-for="option in QUALITY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-      <label>交期（具体到一天）<input v-model="model.deliveryTerms" inputmode="numeric" maxlength="10" placeholder="请输入非负整数，如：7" @input="sanitizeDelivery"></label>
+      <label>交期
+        <select v-model="model.deliveryTerms">
+          <option value="">未填写</option>
+          <option v-for="option in DELIVERY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}（{{ option.score }}分）</option>
+        </select>
+        <small v-if="model.legacyDeliveryTerms" class="history-note">历史交期记录：“{{ model.legacyDeliveryTerms }}”（只读保留）。留空不会丢失，选择新交期并保存后才会替换。</small>
+      </label>
       <label>产能 / 我司可分配量<input v-model="model.capacityOrder" maxlength="120" placeholder="如：5000件/天，我司可分配2000件"></label>
       <label>备货<select v-model="model.stockingStrategy"><option value="">未填写</option><option v-if="legacyStockingStrategy" :value="legacyStockingStrategy">历史记录（保留）</option><option v-for="option in STOCKING_OPTIONS" :key="option">{{ option }}</option></select><small v-if="legacyStockingStrategy" class="history-note">历史备货记录：{{ legacyStockingStrategy }}</small></label>
       <label>免费样品<select v-model="model.freeSample"><option :value="null">未填写</option><option :value="true">有</option><option :value="false">没有</option></select></label>

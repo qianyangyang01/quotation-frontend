@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ApiError } from '@/services/http'
 import { createSupplierRecord, deleteSupplierRecord, loadSupplierRecords, removeSupplierBusinessLicense, updateSupplierRecord, uploadSupplierBusinessLicense, type NumericDraft, type SupplierRecord, type SupplierRecordDraft, type SupplierRecordInput } from '@/services/supplierRecords'
 import SupplierRecordEditor from './SupplierRecordEditor.vue'
-import { deliveryLabel, invoiceNeedsTaxPoint, normalizeInvoiceType, normalizeQualityGrade, qualityLabel, SCORE_ITEM_LABELS, taxPointDecimalForInvoice, validDeliveryDays, type ScoreBreakdown } from './supplierRecordOptions'
+import { deliveryLabel, deliveryValueForRequest, invoiceNeedsTaxPoint, legacyDeliveryText, normalizeInvoiceType, normalizeQualityGrade, qualityLabel, SCORE_ITEM_LABELS, taxPointDecimalForInvoice, validDeliveryOption, type ScoreBreakdown } from './supplierRecordOptions'
 
 const emit = defineEmits<{ close: []; notice: [message: string] }>()
 
@@ -85,21 +85,24 @@ function emptyDraft(): SupplierRecordDraft {
     name: '', industryBelt: '', bossName: '', contactDetails: '', invoiceType: '', taxPointPercent: '',
     qualityGrade: '', deliveryTerms: '', capacityOrder: '', stockingStrategy: '', alternativeInquiry: '', corporateAccount: '', corporateBank: '',
     hotProductRecommendation: null, freeSample: null, afterSales: '', afterSalesAvailable: null, priceLevel: '', cooperationScore: '', rating: '待评价',
-    monthlyPurchaseAmount: '', notes: '', suggestion: '',
+    monthlyPurchaseAmount: '', notes: '', suggestion: '', legacyDeliveryTerms: '',
   }
 }
 
 function draftOf(record: SupplierRecord): SupplierRecordDraft {
+  const deliveryTerms = record.deliveryTerms.trim()
+  const legacyDeliveryTerms = legacyDeliveryText(deliveryTerms)
   return {
     name: record.name, industryBelt: record.industryBelt, bossName: record.bossName,
     contactDetails: record.contactDetails, invoiceType: normalizeInvoiceType(record.invoiceType),
     taxPointPercent: record.taxPoint == null ? '' : Number((record.taxPoint * 100).toFixed(4)),
-    qualityGrade: normalizeQualityGrade(record.qualityGrade), deliveryTerms: record.deliveryTerms, capacityOrder: record.capacityOrder,
+    qualityGrade: normalizeQualityGrade(record.qualityGrade), deliveryTerms: legacyDeliveryTerms ? '' : deliveryTerms, capacityOrder: record.capacityOrder,
     stockingStrategy: record.stockingStrategy, alternativeInquiry: record.alternativeInquiry, corporateAccount: record.corporateAccount, corporateBank: record.corporateBank,
     hotProductRecommendation: record.hotProductRecommendation, freeSample: record.freeSample, afterSales: record.afterSales,
     afterSalesAvailable: record.afterSalesAvailable, priceLevel: record.priceLevel,
     cooperationScore: record.cooperationScore ?? '', rating: record.rating || '待评价',
     monthlyPurchaseAmount: record.monthlyPurchaseAmount ?? '', notes: record.notes, suggestion: record.suggestion,
+    legacyDeliveryTerms,
   }
 }
 
@@ -158,7 +161,7 @@ function inputOf(draft: SupplierRecordDraft): SupplierRecordInput {
     name: draft.name.trim(), industryBelt: draft.industryBelt.trim(), bossName: draft.bossName.trim(),
     contactDetails: draft.contactDetails.trim(), invoiceType,
     taxPoint: taxPointDecimalForInvoice(invoiceType, taxPointPercent),
-    qualityGrade: draft.qualityGrade.trim(), deliveryTerms: draft.deliveryTerms.trim(),
+    qualityGrade: draft.qualityGrade.trim(), deliveryTerms: deliveryValueForRequest(draft.deliveryTerms, draft.legacyDeliveryTerms),
     capacityOrder: draft.capacityOrder.trim(), stockingStrategy: draft.stockingStrategy.trim(),
     alternativeInquiry: draft.alternativeInquiry.trim(), corporateAccount: draft.corporateAccount.trim(), corporateBank: draft.corporateBank.trim(),
     hotProductRecommendation: draft.hotProductRecommendation, freeSample: draft.freeSample,
@@ -176,7 +179,7 @@ function validateDraft(draft: SupplierRecordDraft) {
   if (taxPoint != null && (taxPoint < 0 || taxPoint > 100)) return '票点必须在 0% 到 100% 之间'
   const amount = normalizeNumber(draft.monthlyPurchaseAmount)
   if (amount != null && amount < 0) return '预估每月采购额不能为负数'
-  if (!validDeliveryDays(draft.deliveryTerms.trim())) return '交期必须填写明确的非负整数天数，例如：0 或 7'
+  if (!validDeliveryOption(draft.deliveryTerms.trim())) return '请选择固定的交期选项'
   return ''
 }
 
