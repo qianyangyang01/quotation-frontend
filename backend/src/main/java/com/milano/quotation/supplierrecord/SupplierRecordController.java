@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 import java.util.UUID;
@@ -78,6 +79,40 @@ public class SupplierRecordController {
             return ApiResponse.ok(null);
         } catch (AppException error) {
             audit.recordIndependent("supplier-record.delete", "supplier-record", id.toString(), "failure",
+                    Map.of("expectedVersion", expectedVersion, "reason", error.getMessage()));
+            throw error;
+        }
+    }
+
+    @PostMapping("/{id}/business-license")
+    ApiResponse<SupplierRecordView> uploadBusinessLicense(@PathVariable UUID id,
+                                                           @RequestHeader("If-Match") long expectedVersion,
+                                                           @RequestParam("file") MultipartFile file,
+                                                           Authentication authentication) throws java.io.IOException {
+        try {
+            var result = records.uploadBusinessLicense(id, expectedVersion, file.getBytes(),
+                    file.getOriginalFilename(), authentication.getName());
+            audit.record("supplier-record.license-upload", "supplier-record", id.toString(), "success",
+                    Map.of("expectedVersion", expectedVersion));
+            return ApiResponse.ok(result);
+        } catch (AppException error) {
+            audit.recordIndependent("supplier-record.license-upload", "supplier-record", id.toString(), "failure",
+                    Map.of("expectedVersion", expectedVersion, "reason", error.getMessage()));
+            throw error;
+        }
+    }
+
+    @DeleteMapping("/{id}/business-license")
+    ApiResponse<SupplierRecordView> removeBusinessLicense(@PathVariable UUID id,
+                                                           @RequestHeader("If-Match") long expectedVersion,
+                                                           Authentication authentication) {
+        try {
+            var result = records.removeBusinessLicense(id, expectedVersion, authentication.getName());
+            audit.record("supplier-record.license-delete", "supplier-record", id.toString(), "success",
+                    Map.of("expectedVersion", expectedVersion));
+            return ApiResponse.ok(result);
+        } catch (AppException error) {
+            audit.recordIndependent("supplier-record.license-delete", "supplier-record", id.toString(), "failure",
                     Map.of("expectedVersion", expectedVersion, "reason", error.getMessage()));
             throw error;
         }

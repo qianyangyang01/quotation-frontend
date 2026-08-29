@@ -13,8 +13,8 @@ interface SupplierRecordRepository extends JpaRepository<SupplierRecord, UUID> {
             select record from SupplierRecord record
             where (:query = ''
                 or lower(record.name) like lower(concat('%', :query, '%'))
-                or lower(coalesce(record.contactRole, '')) like lower(concat('%', :query, '%'))
-                or lower(coalesce(record.relationshipNotes, '')) like lower(concat('%', :query, '%')))
+                or lower(coalesce(record.bossName, '')) like lower(concat('%', :query, '%'))
+                or lower(coalesce(record.contactDetails, '')) like lower(concat('%', :query, '%')))
               and (:industryBelt = '' or record.industryBelt = :industryBelt)
               and (:rating = '' or record.rating = :rating)
             order by record.updatedAt desc

@@ -1,4 +1,4 @@
-import { api } from './http'
+import { api, request } from './http'
 
 export type PageResult<T> = { items: T[]; page: number; size: number; total: number; totalPages: number }
 
@@ -6,8 +6,8 @@ export type SupplierRecord = {
   id: string
   name: string
   industryBelt: string
-  contactRole: string
-  relationshipNotes: string
+  bossName: string
+  contactDetails: string
   invoiceType: string
   taxPoint: number | null
   qualityGrade: string
@@ -15,7 +15,10 @@ export type SupplierRecord = {
   capacityOrder: string
   stockingStrategy: string
   alternativeInquiry: string
-  costSheet: string
+  corporateAccount: string
+  corporateBank: string
+  businessLicenseAssetId: string | null
+  businessLicenseUrl: string
   hotProductRecommendation: boolean | null
   freeSample: boolean | null
   afterSales: string
@@ -31,7 +34,7 @@ export type SupplierRecord = {
   updatedAt: string
 }
 
-export type SupplierRecordInput = Omit<SupplierRecord, 'id' | 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>
+export type SupplierRecordInput = Omit<SupplierRecord, 'id' | 'businessLicenseAssetId' | 'businessLicenseUrl' | 'createdBy' | 'updatedBy' | 'version' | 'createdAt' | 'updatedAt'>
 
 export type NumericDraft = number | '' | null
 export type SupplierRecordDraft = Omit<SupplierRecordInput, 'taxPoint' | 'cooperationScore' | 'monthlyPurchaseAmount'> & {
@@ -69,4 +72,18 @@ export function updateSupplierRecord(record: Pick<SupplierRecord, 'id' | 'versio
 
 export function deleteSupplierRecord(record: Pick<SupplierRecord, 'id' | 'version'>) {
   return api.delete<void>(`/supplier-records/${record.id}`, { 'If-Match': String(record.version) })
+}
+
+export function uploadSupplierBusinessLicense(record: Pick<SupplierRecord, 'id' | 'version'>, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return request<SupplierRecord>(`/supplier-records/${record.id}/business-license`, {
+    method: 'POST', body: form, headers: { 'If-Match': String(record.version) },
+  })
+}
+
+export function removeSupplierBusinessLicense(record: Pick<SupplierRecord, 'id' | 'version'>) {
+  return request<SupplierRecord>(`/supplier-records/${record.id}/business-license`, {
+    method: 'DELETE', headers: { 'If-Match': String(record.version) },
+  })
 }

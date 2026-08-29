@@ -151,12 +151,13 @@ class FlywayPostgresIntegrationTest {
         seedSupplierRemovalMigration();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(5, finalMigrations.migrationsExecuted);
+        assertEquals(6, finalMigrations.migrationsExecuted);
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "18".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "19".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "20".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "21".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "22".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "23".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("""
                      select count(*) from pg_indexes
@@ -239,6 +240,20 @@ class FlywayPostgresIntegrationTest {
                     from information_schema.table_constraints
                     where table_schema='public' and table_name='supplier_record'
                       and constraint_type='FOREIGN KEY'
+                    """)) {
+                result.next(); assertEquals(1, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*) from information_schema.columns
+                    where table_schema='public' and table_name='supplier_record'
+                      and column_name in ('boss_name','contact_details','corporate_account','corporate_bank','business_license_asset_id')
+                    """)) {
+                result.next(); assertEquals(5, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*) from information_schema.columns
+                    where table_schema='public' and table_name='supplier_record'
+                      and column_name in ('contact_role','relationship_notes','cost_sheet')
                     """)) {
                 result.next(); assertEquals(0, result.getInt(1));
             }

@@ -1,6 +1,7 @@
 package com.milano.quotation.supplierrecord;
 
 import com.milano.quotation.common.AppException;
+import com.milano.quotation.storage.AssetStorageService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -9,12 +10,17 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.List;
 
 @Service
 public class SupplierRecordService {
     private final SupplierRecordRepository records;
+    private final AssetStorageService storage;
 
-    public SupplierRecordService(SupplierRecordRepository records) { this.records = records; }
+    public SupplierRecordService(SupplierRecordRepository records, AssetStorageService storage) {
+        this.records = records;
+        this.storage = storage;
+    }
 
     @Transactional(readOnly = true)
     public Page<SupplierRecordView> page(String query, String industryBelt, String rating, Pageable pageable) {
@@ -50,16 +56,48 @@ public class SupplierRecordService {
         var row = records.findById(id).orElseThrow(() -> AppException.notFound("供应商记录不存在"));
         assertVersion(row, expectedVersion);
         var view = SupplierRecordView.from(row);
+        var licenseAssetId = row.businessLicenseAssetId;
         records.delete(row);
         records.flush();
+        if (licenseAssetId != null) storage.retireUnreferenced(List.of(licenseAssetId));
         return view;
+    }
+
+    @Transactional
+    public SupplierRecordView uploadBusinessLicense(UUID id, long expectedVersion, byte[] bytes, String filename,
+                                                    String actor) {
+        var row = records.findById(id).orElseThrow(() -> AppException.notFound("供应商记录不存在"));
+        assertVersion(row, expectedVersion);
+        var previousAssetId = row.businessLicenseAssetId;
+        var asset = storage.storeImage(bytes, filename);
+        row.businessLicenseAssetId = asset.id;
+        row.updatedAt = Instant.now();
+        row.updatedBy = actor(actor);
+        var saved = SupplierRecordView.from(records.saveAndFlush(row));
+        if (previousAssetId != null && !previousAssetId.equals(asset.id)) {
+            storage.retireUnreferenced(List.of(previousAssetId));
+        }
+        return saved;
+    }
+
+    @Transactional
+    public SupplierRecordView removeBusinessLicense(UUID id, long expectedVersion, String actor) {
+        var row = records.findById(id).orElseThrow(() -> AppException.notFound("供应商记录不存在"));
+        assertVersion(row, expectedVersion);
+        var previousAssetId = row.businessLicenseAssetId;
+        row.businessLicenseAssetId = null;
+        row.updatedAt = Instant.now();
+        row.updatedBy = actor(actor);
+        var saved = SupplierRecordView.from(records.saveAndFlush(row));
+        if (previousAssetId != null) storage.retireUnreferenced(List.of(previousAssetId));
+        return saved;
     }
 
     private static void apply(SupplierRecord row, SupplierRecordInput input) {
         row.name = input.name().trim();
         row.industryBelt = clean(input.industryBelt());
-        row.contactRole = clean(input.contactRole());
-        row.relationshipNotes = clean(input.relationshipNotes());
+        row.bossName = clean(input.bossName());
+        row.contactDetails = clean(input.contactDetails());
         row.invoiceType = clean(input.invoiceType());
         row.taxPoint = input.taxPoint();
         row.qualityGrade = clean(input.qualityGrade());
@@ -67,7 +105,8 @@ public class SupplierRecordService {
         row.capacityOrder = clean(input.capacityOrder());
         row.stockingStrategy = clean(input.stockingStrategy());
         row.alternativeInquiry = clean(input.alternativeInquiry());
-        row.costSheet = clean(input.costSheet());
+        row.corporateAccount = clean(input.corporateAccount());
+        row.corporateBank = clean(input.corporateBank());
         row.hotProductRecommendation = input.hotProductRecommendation();
         row.freeSample = input.freeSample();
         row.afterSales = clean(input.afterSales());

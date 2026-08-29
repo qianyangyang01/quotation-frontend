@@ -16,8 +16,8 @@ class SupplierRecord {
     @Id UUID id;
     @Column(nullable = false, length = 160) String name;
     @Column(name = "industry_belt", length = 160) String industryBelt;
-    @Column(name = "contact_role", length = 80) String contactRole;
-    @Column(name = "relationship_notes", length = 160) String relationshipNotes;
+    @Column(name = "boss_name", length = 80) String bossName;
+    @Column(name = "contact_details", length = 160) String contactDetails;
     @Column(name = "invoice_type", length = 40) String invoiceType;
     @Column(name = "tax_point", precision = 7, scale = 6) BigDecimal taxPoint;
     @Column(name = "quality_grade", length = 40) String qualityGrade;
@@ -25,7 +25,9 @@ class SupplierRecord {
     @Column(name = "capacity_order", length = 120) String capacityOrder;
     @Column(name = "stocking_strategy", length = 160) String stockingStrategy;
     @Column(name = "alternative_inquiry", length = 500) String alternativeInquiry;
-    @Column(name = "cost_sheet", length = 500) String costSheet;
+    @Column(name = "corporate_account", length = 500) String corporateAccount;
+    @Column(name = "corporate_bank", length = 160) String corporateBank;
+    @Column(name = "business_license_asset_id") UUID businessLicenseAssetId;
     @Column(name = "hot_product_recommendation") Boolean hotProductRecommendation;
     @Column(name = "free_sample") Boolean freeSample;
     @Column(name = "after_sales", length = 160) String afterSales;

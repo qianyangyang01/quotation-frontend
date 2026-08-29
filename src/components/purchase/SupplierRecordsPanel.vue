@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ApiError } from '@/services/http'
-import { createSupplierRecord, deleteSupplierRecord, loadSupplierRecords, updateSupplierRecord, type NumericDraft, type SupplierRecord, type SupplierRecordDraft, type SupplierRecordInput } from '@/services/supplierRecords'
+import { createSupplierRecord, deleteSupplierRecord, loadSupplierRecords, removeSupplierBusinessLicense, updateSupplierRecord, uploadSupplierBusinessLicense, type NumericDraft, type SupplierRecord, type SupplierRecordDraft, type SupplierRecordInput } from '@/services/supplierRecords'
 import SupplierRecordEditor from './SupplierRecordEditor.vue'
 
 const emit = defineEmits<{ close: []; notice: [message: string] }>()
@@ -22,12 +22,14 @@ const expandedId = ref<string | null>(null)
 const savedSnapshot = ref('')
 const saving = ref(false)
 const formError = ref('')
+const pendingLicenseFile = ref<File | null>(null)
+const removeLicenseRequested = ref(false)
 const deleteTarget = ref<SupplierRecord | null>(null)
 const deleting = ref(false)
 const pendingDiscardAction = ref<(() => void) | null>(null)
 let searchTimer = 0
 
-const hasUnsavedChanges = computed(() => Boolean(editor.value) && JSON.stringify(editor.value) !== savedSnapshot.value)
+const hasUnsavedChanges = computed(() => Boolean(editor.value) && (JSON.stringify(editor.value) !== savedSnapshot.value || Boolean(pendingLicenseFile.value) || removeLicenseRequested.value))
 const canGoPrevious = computed(() => currentPage.value > 1 && !editor.value)
 const canGoNext = computed(() => currentPage.value < totalPages.value && !editor.value)
 const pageStart = computed(() => total.value ? (currentPage.value - 1) * pageSize.value + 1 : 0)
@@ -79,8 +81,8 @@ async function load() {
 
 function emptyDraft(): SupplierRecordDraft {
   return {
-    name: '', industryBelt: '', contactRole: '', relationshipNotes: '', invoiceType: '', taxPointPercent: '',
-    qualityGrade: '', deliveryTerms: '', capacityOrder: '', stockingStrategy: '', alternativeInquiry: '', costSheet: '',
+    name: '', industryBelt: '', bossName: '', contactDetails: '', invoiceType: '', taxPointPercent: '',
+    qualityGrade: '', deliveryTerms: '', capacityOrder: '', stockingStrategy: '', alternativeInquiry: '', corporateAccount: '', corporateBank: '',
     hotProductRecommendation: null, freeSample: null, afterSales: '', cooperationScore: '', rating: '待评价',
     monthlyPurchaseAmount: '', notes: '', suggestion: '',
   }
@@ -88,11 +90,11 @@ function emptyDraft(): SupplierRecordDraft {
 
 function draftOf(record: SupplierRecord): SupplierRecordDraft {
   return {
-    name: record.name, industryBelt: record.industryBelt, contactRole: record.contactRole,
-    relationshipNotes: record.relationshipNotes, invoiceType: record.invoiceType,
+    name: record.name, industryBelt: record.industryBelt, bossName: record.bossName,
+    contactDetails: record.contactDetails, invoiceType: record.invoiceType,
     taxPointPercent: record.taxPoint == null ? '' : Number((record.taxPoint * 100).toFixed(4)),
     qualityGrade: record.qualityGrade, deliveryTerms: record.deliveryTerms, capacityOrder: record.capacityOrder,
-    stockingStrategy: record.stockingStrategy, alternativeInquiry: record.alternativeInquiry, costSheet: record.costSheet,
+    stockingStrategy: record.stockingStrategy, alternativeInquiry: record.alternativeInquiry, corporateAccount: record.corporateAccount, corporateBank: record.corporateBank,
     hotProductRecommendation: record.hotProductRecommendation, freeSample: record.freeSample, afterSales: record.afterSales,
     cooperationScore: record.cooperationScore ?? '', rating: record.rating || '待评价',
     monthlyPurchaseAmount: record.monthlyPurchaseAmount ?? '', notes: record.notes, suggestion: record.suggestion,
@@ -105,6 +107,8 @@ function setEditor(draft: SupplierRecordDraft, record: SupplierRecord | null, id
   expandedId.value = id
   savedSnapshot.value = JSON.stringify(draft)
   formError.value = ''
+  pendingLicenseFile.value = null
+  removeLicenseRequested.value = false
 }
 
 function startCreate() { setEditor(emptyDraft(), null, 'new') }
@@ -115,6 +119,8 @@ function clearEditor() {
   expandedId.value = null
   savedSnapshot.value = ''
   formError.value = ''
+  pendingLicenseFile.value = null
+  removeLicenseRequested.value = false
 }
 
 function requestTransition(action: () => void) {
@@ -142,12 +148,12 @@ function normalizeNumber(value: NumericDraft) {
 function inputOf(draft: SupplierRecordDraft): SupplierRecordInput {
   const taxPointPercent = normalizeNumber(draft.taxPointPercent)
   return {
-    name: draft.name.trim(), industryBelt: draft.industryBelt.trim(), contactRole: draft.contactRole.trim(),
-    relationshipNotes: draft.relationshipNotes.trim(), invoiceType: draft.invoiceType.trim(),
+    name: draft.name.trim(), industryBelt: draft.industryBelt.trim(), bossName: draft.bossName.trim(),
+    contactDetails: draft.contactDetails.trim(), invoiceType: draft.invoiceType.trim(),
     taxPoint: taxPointPercent == null ? null : taxPointPercent / 100,
     qualityGrade: draft.qualityGrade.trim(), deliveryTerms: draft.deliveryTerms.trim(),
     capacityOrder: draft.capacityOrder.trim(), stockingStrategy: draft.stockingStrategy.trim(),
-    alternativeInquiry: draft.alternativeInquiry.trim(), costSheet: draft.costSheet.trim(),
+    alternativeInquiry: draft.alternativeInquiry.trim(), corporateAccount: draft.corporateAccount.trim(), corporateBank: draft.corporateBank.trim(),
     hotProductRecommendation: draft.hotProductRecommendation, freeSample: draft.freeSample,
     afterSales: draft.afterSales.trim(), cooperationScore: normalizeNumber(draft.cooperationScore),
     rating: draft.rating.trim(), monthlyPurchaseAmount: normalizeNumber(draft.monthlyPurchaseAmount),
@@ -174,9 +180,11 @@ async function save() {
   formError.value = ''
   try {
     const input = inputOf(editor.value)
-    const saved = editingRecord.value
+    let saved = editingRecord.value
       ? await updateSupplierRecord(editingRecord.value, input)
       : await createSupplierRecord(input)
+    if (pendingLicenseFile.value) saved = await uploadSupplierBusinessLicense(saved, pendingLicenseFile.value)
+    else if (removeLicenseRequested.value && saved.businessLicenseAssetId) saved = await removeSupplierBusinessLicense(saved)
     clearEditor()
     await load()
     emit('notice', `${saved.name} 已保存`)
@@ -187,6 +195,18 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+function selectLicense(file: File | null) {
+  if (file && file.size > 20 * 1024 * 1024) { formError.value = '营业执照图片不能超过 20MB'; return }
+  pendingLicenseFile.value = file
+  removeLicenseRequested.value = false
+  formError.value = ''
+}
+
+function requestRemoveLicense() {
+  pendingLicenseFile.value = null
+  removeLicenseRequested.value = Boolean(editingRecord.value?.businessLicenseAssetId)
 }
 
 function requestDelete(record: SupplierRecord) {
@@ -234,7 +254,7 @@ function message(error: unknown, fallback: string) { return error instanceof Err
   </section>
 
   <section class="supplier-toolbar">
-    <label class="supplier-search">⌕<input v-model="query" :disabled="Boolean(editor)" placeholder="搜索供应商名称、对接人"></label>
+    <label class="supplier-search">⌕<input v-model="query" :disabled="Boolean(editor)" placeholder="搜索供应商名称、老板姓名或联系方式"></label>
     <label><span>产业带</span><input v-model="industryBelt" :disabled="Boolean(editor)" placeholder="全部"></label>
     <label><span>评级</span><select v-model="rating" :disabled="Boolean(editor)"><option value="">全部</option><option>待评价</option><option>A级</option><option>B级</option><option>C级</option></select></label>
     <button class="supplier-add" :disabled="Boolean(editor)" @click="requestTransition(startCreate)">＋ 新增一项</button>
@@ -242,7 +262,7 @@ function message(error: unknown, fallback: string) { return error instanceof Err
 
   <section class="supplier-card">
     <header>
-      <div><b>供应商记录</b><span>点击行可展开完整信息，每次只展开一项</span></div>
+      <div><b>核心供应商</b><span>月采购金额 1 万元以上</span></div>
       <span v-if="editor">请先保存或取消当前编辑，再使用筛选与分页</span>
     </header>
 
@@ -250,17 +270,17 @@ function message(error: unknown, fallback: string) { return error instanceof Err
     <div v-else-if="loading" class="supplier-load-state"><b>正在读取供应商记录…</b></div>
     <div v-else class="supplier-table-wrap">
       <table class="supplier-table">
-        <thead><tr><th>展开</th><th>供应商名称</th><th>产业带</th><th>对接人身份</th><th>开票 / 票点</th><th>质量</th><th>交期</th><th>评级</th><th>总分</th><th>本月采购额</th><th>更新时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>展开</th><th>供应商名称</th><th>产业带</th><th>老板姓名</th><th>开票 / 票点</th><th>质量</th><th>交期</th><th>评级</th><th>总分</th><th>本月采购额</th><th>更新时间</th><th>操作</th></tr></thead>
         <tbody>
           <template v-if="expandedId === 'new' && editor">
             <tr class="supplier-summary new"><td>⌄</td><td colspan="10"><b>新增供应商记录</b><small>仅供应商名称必填</small></td><td></td></tr>
-            <tr class="supplier-detail-row"><td colspan="12"><SupplierRecordEditor v-model="editor" :saving="saving" :error="formError" @save="save" @cancel="requestTransition(clearEditor)" /></td></tr>
+            <tr class="supplier-detail-row"><td colspan="12"><SupplierRecordEditor v-model="editor" :saving="saving" :error="formError" :pending-license-file="pendingLicenseFile" :remove-license="removeLicenseRequested" @license-select="selectLicense" @remove-license="requestRemoveLicense" @save="save" @cancel="requestTransition(clearEditor)" /></td></tr>
           </template>
           <template v-for="record in records" :key="record.id">
             <tr class="supplier-summary" :class="{ expanded: expandedId === record.id }" @click="requestToggle(record)">
               <td><button class="expand-button" :aria-label="expandedId === record.id ? '收起' : '展开'">{{ expandedId === record.id ? '⌄' : '›' }}</button></td>
-              <td><b>{{ record.name }}</b><small>{{ display(record.relationshipNotes) }}</small></td>
-              <td>{{ display(record.industryBelt) }}</td><td>{{ display(record.contactRole) }}</td>
+              <td><b>{{ record.name }}</b><small>{{ display(record.contactDetails) }}</small></td>
+              <td>{{ display(record.industryBelt) }}</td><td>{{ display(record.bossName) }}</td>
               <td><b>{{ display(record.invoiceType) }}</b><small>{{ taxLabel(record.taxPoint) }}</small></td>
               <td>{{ display(record.qualityGrade) }}</td><td>{{ display(record.deliveryTerms) }}</td>
               <td><em :class="record.rating === 'A级' ? 'rating-a' : ''">{{ display(record.rating) }}</em></td>
@@ -268,7 +288,7 @@ function message(error: unknown, fallback: string) { return error instanceof Err
               <td>{{ money(record.monthlyPurchaseAmount) }}</td><td>{{ dateTime(record.updatedAt) }}</td>
               <td class="supplier-actions"><button @click.stop="requestToggle(record)">编辑</button><button class="danger" @click.stop="requestDelete(record)">删除</button></td>
             </tr>
-            <tr v-if="expandedId === record.id && editor" class="supplier-detail-row"><td colspan="12"><SupplierRecordEditor v-model="editor" :saving="saving" :error="formError" @save="save" @cancel="requestTransition(clearEditor)" /></td></tr>
+            <tr v-if="expandedId === record.id && editor" class="supplier-detail-row"><td colspan="12"><SupplierRecordEditor v-model="editor" :saving="saving" :error="formError" :license-url="removeLicenseRequested ? '' : editingRecord?.businessLicenseUrl" :pending-license-file="pendingLicenseFile" :remove-license="removeLicenseRequested" @license-select="selectLicense" @remove-license="requestRemoveLicense" @save="save" @cancel="requestTransition(clearEditor)" /></td></tr>
           </template>
         </tbody>
       </table>
