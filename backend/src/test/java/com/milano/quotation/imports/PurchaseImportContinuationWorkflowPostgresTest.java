@@ -57,6 +57,8 @@ class PurchaseImportContinuationWorkflowPostgresTest {
     @Autowired PurchaseImportBatchService batches;
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper mapper;
+    @Autowired com.milano.quotation.purchase.PurchaseProductService products;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
     @MockitoBean AsyncPurchaseImportProcessor processor;
     @MockitoBean AssetStorageService storage;
 
@@ -259,6 +261,119 @@ class PurchaseImportContinuationWorkflowPostgresTest {
         assertEquals(beforePayload, payload(originalId));
         assertEquals(beforeVersion, version(originalId));
         assertEquals(beforeCount, productCount());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"single", "bundle", "structured-quote", "draft-product", "draft-search", "draft-bundle", "template", "version"})
+    void rollbackPreservesEntireBatchWhenAnyProductIsReferencedOrModified(String kind) {
+        var source=source();var sku=sku(source,"B");
+        var job=prepare(source,values(sku(source,"A"),"可清理商品"),values(sku,"被保护商品"));
+        confirmAndApply(job);
+        var first=row(job,2).appliedProductId;var second=row(job,3).appliedProductId;
+        if(kind.equals("version"))jdbc.update("UPDATE purchase_product SET version=version+1 WHERE id=?",second);
+        else seedReference(kind,sku);
+        var beforeFirst=payload(first);var beforeSecond=payload(second);
+        var beforeCount=productCount();
+        var error=assertThrows(AppException.class,()->batches.rollback(job.id));
+        assertTrue(error.getMessage().contains("已阻止整批回滚"));
+        assertEquals(beforeCount,productCount());assertEquals(beforeFirst,payload(first));assertEquals(beforeSecond,payload(second));
+        assertNull(row(job,2).rolledBackAt);assertNull(row(job,3).rolledBackAt);
+        assertEquals("completed",reload(job).status);
+    }
+
+    @Test void rollbackUnreferencedBatchRetainsImportHistory() {
+        var source=source();var first=sku(source,"A");var second=sku(source,"B");
+        var job=prepare(source,values(first,"商品A"),values(second,"商品B"));confirmAndApply(job);
+        batches.rollback(job.id);
+        assertEquals(0,countSku(first));assertEquals(0,countSku(second));
+        assertNotNull(row(job,2).rolledBackAt);assertNotNull(row(job,3).rolledBackAt);
+        assertEquals("rolled-back",reload(job).status);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"single", "bundle", "draft-product", "template"})
+    @org.junit.jupiter.api.Timeout(90)
+    void rollbackWaitsForConcurrentReferenceAndThenPreservesWholeBatch(String kind) throws Exception {
+        var source=source();var sku=sku(source,"B");
+        var job=prepare(source,values(sku(source,"A"),"商品A"),values(sku,"商品B"));confirmAndApply(job);
+        var tx=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        var writerReady=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        var cleanerReady=new java.util.concurrent.CountDownLatch(1);
+        var writerPid=new java.util.concurrent.atomic.AtomicInteger();var cleanerPid=new java.util.concurrent.atomic.AtomicInteger();
+        var executor=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var writer=executor.submit(()->tx.executeWithoutResult(ignored->{
+                writerPid.set(jdbc.queryForObject("SELECT pg_backend_pid()",Integer.class));
+                if(kind.equals("single")||kind.equals("bundle"))assertTrue(products.notQuoteReadyLocked(List.of(sku)).isEmpty());
+                else products.lockStructuredReferences(mapper.createObjectNode().put("skuSearch",sku));
+                seedReference(kind,sku);writerReady.countDown();
+                try{assertTrue(release.await(40,java.util.concurrent.TimeUnit.SECONDS));}
+                catch(InterruptedException ex){Thread.currentThread().interrupt();throw new RuntimeException(ex);}
+            }));
+            assertTrue(writerReady.await(20,java.util.concurrent.TimeUnit.SECONDS));
+            var cleaner=executor.submit(()->tx.executeWithoutResult(ignored->{
+                cleanerPid.set(jdbc.queryForObject("SELECT pg_backend_pid()",Integer.class));cleanerReady.countDown();
+                batches.rollback(job.id);
+            }));
+            assertTrue(cleanerReady.await(20,java.util.concurrent.TimeUnit.SECONDS));
+            awaitBlockedBy(cleanerPid.get(),writerPid.get());release.countDown();
+            writer.get(20,java.util.concurrent.TimeUnit.SECONDS);
+            var error=assertThrows(java.util.concurrent.ExecutionException.class,()->cleaner.get(20,java.util.concurrent.TimeUnit.SECONDS));
+            assertInstanceOf(AppException.class,error.getCause());
+            assertEquals(1,countSku(sku));assertEquals(1,countSku(sku(source,"A")));
+            assertNull(row(job,2).rolledBackAt);assertNull(row(job,3).rolledBackAt);
+        }finally{release.countDown();executor.shutdownNow();assertTrue(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS));}
+    }
+
+    @Test @org.junit.jupiter.api.Timeout(90)
+    void concurrentDraftCannotSaveAProductDeletedWhileWaitingForItsLock() throws Exception {
+        var source=source();var sku=sku(source,"A");
+        var job=prepare(source,values(sku,"商品A"));confirmAndApply(job);
+        var tx=new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        var deleting=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        var writerReady=new java.util.concurrent.CountDownLatch(1);
+        var cleanerPid=new java.util.concurrent.atomic.AtomicInteger();var writerPid=new java.util.concurrent.atomic.AtomicInteger();
+        var executor=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var cleaner=executor.submit(()->tx.executeWithoutResult(ignored->{
+                cleanerPid.set(jdbc.queryForObject("SELECT pg_backend_pid()",Integer.class));batches.rollback(job.id);deleting.countDown();
+                try{assertTrue(release.await(40,java.util.concurrent.TimeUnit.SECONDS));}
+                catch(InterruptedException ex){Thread.currentThread().interrupt();throw new RuntimeException(ex);}
+            }));
+            assertTrue(deleting.await(20,java.util.concurrent.TimeUnit.SECONDS));
+            var writer=executor.submit(()->tx.executeWithoutResult(ignored->{
+                writerPid.set(jdbc.queryForObject("SELECT pg_backend_pid()",Integer.class));writerReady.countDown();
+                products.lockStructuredReferences(mapper.createObjectNode().put("skuSearch",sku));seedReference("draft-search",sku);
+            }));
+            assertTrue(writerReady.await(20,java.util.concurrent.TimeUnit.SECONDS));
+            awaitBlockedBy(writerPid.get(),cleanerPid.get());release.countDown();cleaner.get(20,java.util.concurrent.TimeUnit.SECONDS);
+            var error=assertThrows(java.util.concurrent.ExecutionException.class,()->writer.get(20,java.util.concurrent.TimeUnit.SECONDS));
+            assertInstanceOf(AppException.class,error.getCause());assertEquals(0,countSku(sku));
+            assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM quotation_draft WHERE payload->>'skuSearch'=?",Integer.class,sku));
+        }finally{release.countDown();executor.shutdownNow();assertTrue(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS));}
+    }
+
+    private void awaitBlockedBy(int waitingPid,int blockingPid) throws InterruptedException {
+        var deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+        while(System.nanoTime()<deadline){
+            if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT ? = ANY(pg_blocking_pids(?))",Boolean.class,blockingPid,waitingPid)))return;
+            Thread.sleep(25);
+        }
+        fail("Expected a real PostgreSQL row-lock wait");
+    }
+
+    private void seedReference(String kind,String sku) {
+        var payload=mapper.createObjectNode();
+        switch(kind){
+            case "single" -> payload.put("primarySku",sku);
+            case "bundle" -> payload.put("primarySku","UNRELATED、"+sku);
+            case "draft-product" -> payload.putObject("product").put("sku",sku);
+            case "draft-search" -> payload.put("skuSearch",sku);
+            default -> payload.putArray("bundleItems").addObject().put("sku",sku);
+        }
+        if(kind.startsWith("draft"))jdbc.update("INSERT INTO quotation_draft(owner_account,payload,version,updated_at) VALUES (?,?::jsonb,0,now())","D-"+UUID.randomUUID(),payload.toString());
+        else if(kind.equals("template"))jdbc.update("INSERT INTO quotation_template(id,owner_account,name,payload,version,created_at,updated_at) VALUES (?,'ADMIN',?,?::jsonb,0,now(),now())",UUID.randomUUID(),sku,payload.toString());
+        else jdbc.update("INSERT INTO quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at) VALUES (?,?,'ADMIN','pending',?::jsonb,0,now(),now())",UUID.randomUUID(),"Q-"+UUID.randomUUID().toString().substring(0,16),payload.toString());
     }
 
     private ImportJob prepare(String source, String[]... sourceRows) {

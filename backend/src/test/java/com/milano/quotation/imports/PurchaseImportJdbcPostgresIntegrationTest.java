@@ -26,7 +26,7 @@ class PurchaseImportJdbcPostgresIntegrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword())
                 .locations("classpath:db/migration").target(MigrationVersion.fromVersion("25")).load().migrate();
         var dataSource=new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());
-        var jdbc=new JdbcTemplate(dataSource);var service=new PurchaseImportJdbcService(new NamedParameterJdbcTemplate(dataSource),jdbc);
+        var jdbc=new JdbcTemplate(dataSource);var service=new PurchaseImportJdbcService(new NamedParameterJdbcTemplate(dataSource),jdbc,new com.milano.quotation.purchase.PurchaseProductDeletionGuard(new NamedParameterJdbcTemplate(dataSource)));
         var job=UUID.randomUUID();var existingProduct=UUID.randomUUID();var existingRow=UUID.randomUUID();var insertedRow=UUID.randomUUID();
         var oldAsset=UUID.randomUUID();var updateAsset=UUID.randomUUID();var insertAsset=UUID.randomUUID();
         jdbc.update("insert into import_job(id,job_type,status,requested_by,source_name,source_hash,payload,created_at,updated_at) values (?,?,?,?,?,?,?::jsonb,now(),now())",job,AsyncPurchaseImportService.JOB_TYPE,"ready","ADMIN","fixture.xlsx","a".repeat(64),"{}");

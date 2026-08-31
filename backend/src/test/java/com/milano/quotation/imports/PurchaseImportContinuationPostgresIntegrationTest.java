@@ -69,7 +69,7 @@ class PurchaseImportContinuationPostgresIntegrationTest {
         jdbc = new JdbcTemplate(ds);
         var named = new NamedParameterJdbcTemplate(ds);
         continuation = new PurchaseImportContinuationService(jdbc, named);
-        imports = new PurchaseImportJdbcService(named, jdbc);
+        imports = new PurchaseImportJdbcService(named, jdbc, new com.milano.quotation.purchase.PurchaseProductDeletionGuard(named));
         tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
     }
 

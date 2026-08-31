@@ -51,7 +51,11 @@ public class PurchaseProductService {
         addReferencedSku(skus,payload.path("skuSearch").asText(""));addReferencedSku(skus,payload.path("product").path("sku").asText(""));
         for(var sku:payload.path("primarySku").asText("").split("[,，、+\\s]+"))addReferencedSku(skus,sku);
         var bundles=payload.path("bundleItems");if(bundles.isArray())bundles.forEach(item->addReferencedSku(skus,item.path("sku").asText("")));
-        if(!skus.isEmpty())products.findAllLockedBySkuIn(skus);
+        if(!skus.isEmpty()) {
+            var existingIds=products.findAllBySkuIn(skus).stream().map(row->row.id).collect(java.util.stream.Collectors.toSet());
+            var lockedIds=products.findAllLockedBySkuIn(skus).stream().map(row->row.id).collect(java.util.stream.Collectors.toSet());
+            if(!lockedIds.containsAll(existingIds))throw AppException.conflict("引用商品已被删除或回滚，请刷新后重试");
+        }
     }
 
     @Transactional

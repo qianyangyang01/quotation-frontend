@@ -1,26 +1,27 @@
 package com.milano.quotation.imports;
 
+import com.milano.quotation.purchase.PurchaseProductDeletionGuard;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.ResultSet;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class PurchaseImportJdbcService {
     private final NamedParameterJdbcTemplate named;
     private final JdbcTemplate jdbc;
+    private final PurchaseProductDeletionGuard deletionGuard;
 
-    public PurchaseImportJdbcService(NamedParameterJdbcTemplate named, JdbcTemplate jdbc) {
+    public PurchaseImportJdbcService(NamedParameterJdbcTemplate named, JdbcTemplate jdbc, PurchaseProductDeletionGuard deletionGuard) {
         this.named = named;
         this.jdbc = jdbc;
+        this.deletionGuard = deletionGuard;
     }
 
     @Transactional
@@ -223,30 +224,33 @@ public class PurchaseImportJdbcService {
                  WHERE r.job_id = ? AND r.applied_at IS NOT NULL AND r.rolled_back_at IS NULL
                    AND NOT EXISTS (SELECT 1 FROM purchase_product p WHERE p.id = r.applied_product_id)
                 """, Integer.class, jobId);
-        var conflicts = new AtomicInteger(missing == null ? 0 : missing);
+        int conflicts = missing == null ? 0 : missing;
         Integer occupied = jdbc.queryForObject("""
                 SELECT count(*) FROM purchase_import_row r
                  WHERE r.job_id=? AND r.applied_at IS NOT NULL AND r.rolled_back_at IS NULL
                    AND r.import_action='sku-backfill' AND EXISTS (
                        SELECT 1 FROM purchase_product p WHERE p.sku=r.before_sku AND p.id<>r.applied_product_id)
                 """,Integer.class,jobId);
-        conflicts.addAndGet(occupied==null?0:occupied);
-        jdbc.query(connection -> {
-            var statement = connection.prepareStatement("""
-                    SELECT r.sku, r.applied_version, p.version
+        conflicts += occupied == null ? 0 : occupied;
+        record LockedProduct(UUID id, String sku, long appliedVersion, long version) {}
+        var locked = jdbc.query("""
+                    SELECT p.id, p.sku, r.applied_version, p.version
                       FROM purchase_import_row r
                       JOIN purchase_product p ON p.id = r.applied_product_id
                      WHERE r.job_id = ? AND r.applied_at IS NOT NULL AND r.rolled_back_at IS NULL
-                     ORDER BY r.source_row
+                     ORDER BY p.sku
                      FOR UPDATE OF p
-                    """, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
-            statement.setObject(1, jobId);
-            statement.setFetchSize(PurchaseImportBatchService.BATCH_SIZE);
-            return statement;
-        }, rs -> {
-            if (rs.getLong(3) != rs.getLong(2)) conflicts.incrementAndGet();
-        });
-        return conflicts.get();
+                    """, (rs, index) -> new LockedProduct(rs.getObject(1, UUID.class), rs.getString(2),
+                        rs.getLong(3), rs.getLong(4)), jobId);
+        // Query references only after acquiring all product locks. A writer that
+        // held a lock first may have committed a reference while we were waiting.
+        // The batch's own import history is intentionally not a business reference.
+        for (var product : locked) {
+            if (product.version() != product.appliedVersion()
+                    || deletionGuard.inspect(product.id(), product.sku(), product.version()).hasBusinessReferences())
+                conflicts++;
+        }
+        return conflicts;
     }
 
     public List<UUID> nextRollbackIds(UUID jobId) {
