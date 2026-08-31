@@ -116,7 +116,8 @@ public class LogisticsQueryService {
         var revisionParts = jdbc.sql("""
                 select concat_ws('|', p.id::text, p.version::text, p.payload->>'enabled',
                   c.id::text, c.version::text, c.code, c.payload->>'enabled', c.payload->>'name', c.payload->>'type', c.payload->>'logisticsAttribute',
-                  v.id::text, v.source_hash, coalesce(v.published_at::text,'')) as part
+                  v.id::text, v.source_hash, coalesce(v.published_at::text,''),md5(coalesce(v.payload->'rows','[]'::jsonb)::text),
+                  (select max(a.reviewed_at)::text from logistics_billing_acceptance a where a.version_id=v.id)) as part
                 from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
@@ -124,7 +125,7 @@ public class LogisticsQueryService {
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
-                  and coalesce((v.payload->>'quoteReady')::boolean,true)
+                  and logistics_version_quote_ready(v.id)
                 order by c.id
                 """).query(String.class).list();
         var revision = sha256(String.join("\n", revisionParts));
@@ -138,7 +139,7 @@ public class LogisticsQueryService {
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
-                  and coalesce((v.payload->>'quoteReady')::boolean,true)
+                  and logistics_version_quote_ready(v.id)
                   and coalesce(item->>'areaName','')<>''
                 order by name, code
                 """).query((rs, rowNum) -> new PublishedCountry(rs.getString("code"), rs.getString("name"))).list();
@@ -151,7 +152,7 @@ public class LogisticsQueryService {
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
-                  and coalesce((v.payload->>'quoteReady')::boolean,true)
+                  and logistics_version_quote_ready(v.id)
                 order by attribute
                 """).query(String.class).list();
         return new PublishedManifest(revision, Instant.now(), revisionParts.size(), countries, attributes);
@@ -175,7 +176,9 @@ public class LogisticsQueryService {
         var sql = new StringBuilder("""
                 select c.id::text as channel_id, c.rule_id, c.code as channel_code,
                   c.payload::text as channel_payload, p.payload::text as provider_payload,
-                  (v.payload - 'rows' - 'issues' - 'diffRows')::text as version_payload, item::text as row_payload
+                  ((v.payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object('id',v.id,'legacyBillingCompatible',
+                    exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy'
+                    and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text))))::text as version_payload, item::text as row_payload
                 from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
@@ -184,7 +187,7 @@ public class LogisticsQueryService {
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
-                  and coalesce((v.payload->>'quoteReady')::boolean,true)
+                  and logistics_version_quote_ready(v.id)
                   and (
                 """).append(String.join(" or ", countryConditions)).append(")");
         if (!normalizedChannels.isEmpty()) {
@@ -201,6 +204,7 @@ public class LogisticsQueryService {
         var grouped = new LinkedHashMap<String, ObjectNode>();
         jdbc.sql(sql.toString()).params(params).query((rs, rowNum) -> {
             var row = json(rs.getString("row_payload"));
+            row.put("quoteReady",true);
             if (!eligible(row, attribute)) return null;
             var channelId = rs.getString("channel_id");
             var rule = grouped.computeIfAbsent(channelId, ignored -> {
@@ -209,6 +213,9 @@ public class LogisticsQueryService {
                 var version = json(rsString(rs, "version_payload"));
                 var value = mapper.createObjectNode();
                 value.put("id", rsInt(rs, "rule_id"));
+                value.put("logisticsChannelId",channelId);
+                value.put("logisticsVersionId",version.path("id").asText());
+                value.put("billingVerified",!version.path("legacyBillingCompatible").asBoolean());
                 value.put("name", channel.path("name").asText(rsString(rs, "channel_code")));
                 value.put("englishName", rsString(rs, "channel_code").toLowerCase(Locale.ROOT));
                 value.put("type", channel.path("type").asText("专线"));

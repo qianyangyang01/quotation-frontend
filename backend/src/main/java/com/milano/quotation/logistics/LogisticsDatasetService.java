@@ -42,13 +42,43 @@ public class LogisticsDatasetService {
                 .query((rs,n)->json(rs.getString(1))).optional().orElseThrow(()->AppException.notFound("物流库不存在"));
     }
     @Transactional(readOnly=true)
+    public ObjectNode requiredChannels(UUID id) {
+        dataset(id);
+        var result=jdbc.sql("select payload::text from logistics_required_revision where dataset_id=:id order by revision desc limit 1").param("id",id)
+                .query((rs,n)->json(rs.getString(1))).optional().orElseGet(()->mapper.createObjectNode().put("revision",0).put("confirmed",false));
+        if(!result.has("channelIds"))result.putArray("channelIds");
+        var rows=result.putArray("channels");
+        for(var c:channelViews(id)){
+            var entry=(ObjectNode)c.deepCopy();
+            var latest=jdbc.sql("select payload::text from logistics_version where channel_id=:id order by case when status='published' then 0 else 1 end,created_at desc limit 1")
+                    .param("id",UUID.fromString(c.path("id").asText())).query((rs,n)->json(rs.getString(1))).optional();
+            var countries=new TreeSet<String>();var zones=new TreeSet<String>();var reasons=new TreeSet<String>();int count=0;
+            if(latest.isPresent())for(var price:latest.get().path("rows")){count++;countries.add(price.path("areaName").asText());if(!price.path("zoneName").asText().isBlank())zones.add(price.path("countryCode").asText()+" / "+price.path("zoneName").asText());if(!price.path("pendingReason").asText().isBlank())reasons.add(price.path("pendingReason").asText());}
+            entry.put("priceRows",count);entry.set("countries",mapper.valueToTree(countries));entry.set("zones",mapper.valueToTree(zones));entry.set("pendingReasons",mapper.valueToTree(reasons));rows.add(entry);
+        }
+        return result;
+    }
+    @Transactional
+    public ObjectNode saveRequiredChannels(UUID id,ObjectNode input,String actor) {
+        jdbc.sql("select id from logistics_dataset where id=:id for update").param("id",id).query(UUID.class).optional().orElseThrow(()->AppException.notFound("物流库不存在"));
+        if(!dataset(id).path("status").asText().equals("preparing"))throw AppException.conflict("仅准备区可修改上线必用清单");
+        var current=requiredChannels(id);if(!input.path("revision").isIntegralNumber()||input.path("revision").asLong()!=current.path("revision").asLong())throw AppException.conflict("必用清单已变化，请重新加载");
+        if(!input.path("channelIds").isArray()||input.path("note").asText().isBlank())throw AppException.unprocessable("请选择渠道并填写核对备注");
+        var valid=new HashSet<String>();for(var c:current.path("channels"))if(!c.path("archived").asBoolean())valid.add(c.path("id").asText());
+        var chosen=new LinkedHashSet<String>();for(var c:input.path("channelIds"))if(!valid.contains(c.asText())||!chosen.add(c.asText()))throw AppException.unprocessable("必用清单含无效、已归档或重复渠道");
+        if(input.path("confirmed").asBoolean()&&chosen.isEmpty())throw AppException.unprocessable("确认的必用清单不能为空");
+        var result=mapper.createObjectNode().put("revision",current.path("revision").asLong()+1).put("confirmed",input.path("confirmed").asBoolean()).put("note",input.path("note").asText()).put("confirmedBy",actor).put("confirmedAt",Instant.now().toString());result.set("channelIds",mapper.valueToTree(chosen));
+        jdbc.sql("insert into logistics_required_revision(dataset_id,revision,payload,created_by) values(:id,:revision,cast(:payload as jsonb),:actor)").param("id",id).param("revision",result.path("revision").asLong()).param("payload",result.toString()).param("actor",actor).update();
+        return requiredChannels(id);
+    }
+    @Transactional(readOnly=true)
     public ObjectNode workspace(UUID id) {
         var out=mapper.createObjectNode(); out.set("dataset",dataset(id));
         out.set("providers",array(jdbc.sql("select (payload || jsonb_build_object('id',id,'datasetId',dataset_id,'_version',version))::text from logistics_provider where dataset_id=:id order by payload->>'name'").param("id",id).query(String.class).list()));
         out.set("channels",channelViews(id));
         out.set("versions",array(jdbc.sql("""
                 select ((v.payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object(
-                'id',v.id,'channelId',v.channel_id,'status',v.status,'versionNumber',v.version_number,
+                'id',v.id,'channelId',v.channel_id,'status',v.status,'versionNumber',v.version_number,'quoteReady',logistics_version_quote_ready(v.id),
                 'rowCount',jsonb_array_length(coalesce(v.payload->'rows','[]'::jsonb)),
                 'issueCount',jsonb_array_length(coalesce(v.payload->'issues','[]'::jsonb))))::text
                 from logistics_version v join logistics_channel c on c.id=v.channel_id
@@ -61,7 +91,7 @@ public class LogisticsDatasetService {
                 select (c.payload || jsonb_build_object('id',c.id,'datasetId',c.dataset_id,'ruleId',c.rule_id,
                 'providerId',p.id,'providerName',p.payload->>'name','code',c.code,'currentVersionId',c.current_version_id,
                 'archived',c.archived_at is not null,'_version',c.version,'updatedAt',c.updated_at,
-                'quoteReady',c.current_version_id is not null and c.archived_at is null and coalesce((select (v.payload->>'quoteReady')::boolean from logistics_version v where v.id=c.current_version_id),true)
+                'quoteReady',c.current_version_id is not null and c.archived_at is null and logistics_version_quote_ready(c.current_version_id)
                  and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true),
                 'channelKey',concat(c.rule_id,'::',p.payload->>'name','::',c.code)))::text
                 from logistics_channel c join logistics_provider p on p.id=c.provider_id
@@ -84,7 +114,7 @@ public class LogisticsDatasetService {
         var params=new HashMap<String,Object>();params.put("dataset",id);params.put("query",query);params.put("search","%"+query.toLowerCase(Locale.ROOT)+"%");params.put("country",country);params.put("attribute",attribute);
         long total=jdbc.sql("select count(*) from "+from).params(params).query(Long.class).single();
         params.put("limit",size);params.put("offset",(long)page*size);
-        var items=jdbc.sql("select (item || jsonb_build_object('providerName',p.payload->>'name','channelName',c.payload->>'name','channelId',c.id,'versionId',v.id,'versionNumber',v.version_number,'quoteReady',c.archived_at is null and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true) and coalesce((v.payload->>'quoteReady')::boolean,true),'logisticsAttribute',c.payload->>'logisticsAttribute'))::text from "+from+" order by p.payload->>'name',c.payload->>'name',item->>'countryCode',(item->>'weightFromKg')::numeric limit :limit offset :offset")
+        var items=jdbc.sql("select (item || jsonb_build_object('providerName',p.payload->>'name','channelName',c.payload->>'name','channelId',c.id,'versionId',v.id,'versionNumber',v.version_number,'quoteReady',c.archived_at is null and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true) and logistics_version_quote_ready(v.id),'logisticsAttribute',c.payload->>'logisticsAttribute'))::text from "+from+" order by p.payload->>'name',c.payload->>'name',item->>'countryCode',(item->>'weightFromKg')::numeric limit :limit offset :offset")
                 .params(params).query((rs,n)->(JsonNode)json(rs.getString(1))).list();
         return new com.milano.quotation.common.PageResponse<>(items,page,size,total,(int)Math.ceil(total/(double)size));
     }
@@ -119,6 +149,13 @@ public class LogisticsDatasetService {
         for(var c:fresh) { if(c.path("quoteReady").asBoolean()) ready++; else pending.add(c); }
         int unresolved=0; for(var m:mappings) if(!m.path("status").asText().equals("matched")) unresolved++;
         result.put("readyChannels",ready).put("unmappedChannels",unresolved);
+        var required=requiredChannels(target);var notReady=result.putArray("requiredNotReady");
+        for(var requiredId:required.path("channelIds")){
+            JsonNode found=null;for(var c:required.path("channels"))if(c.path("id").asText().equals(requiredId.asText()))found=c;
+            if(found==null||!found.path("quoteReady").asBoolean())notReady.add(found==null?mapper.createObjectNode().put("id",requiredId.asText()).put("name","渠道已不可用"):found);
+        }
+        result.put("requiredRevision",required.path("revision").asLong()).put("requiredConfirmed",required.path("confirmed").asBoolean()).put("requiredCount",required.path("channelIds").size());
+        result.put("requiredReady",required.path("confirmed").asBoolean()&&!required.path("channelIds").isEmpty()&&notReady.isEmpty());
         var changes=result.putArray("bindingChanges");var byKey=new HashMap<String,JsonNode>();
         for(var m:mappings)if(m.path("status").asText().equals("matched"))byKey.put(m.path("oldChannelKey").asText(),m.path("target"));
         var linked=bindings();
@@ -136,6 +173,8 @@ public class LogisticsDatasetService {
         // Lock writers while capturing a recoverable, coherent source snapshot.
         lockCutover(); var source=guard.activeId(); var before=fingerprint(source);
         var snapshot=workspace(source); snapshot.set("bindings",bindings());
+        snapshot.set("requiredRevisions",array(jdbc.sql("select to_jsonb(r)::text from logistics_required_revision r where dataset_id=:id order by revision").param("id",source).query(String.class).list()));
+        snapshot.set("billingAcceptances",array(jdbc.sql("select to_jsonb(a)::text from logistics_billing_acceptance a join logistics_version v on v.id=a.version_id join logistics_channel c on c.id=v.channel_id where c.dataset_id=:id order by a.id").param("id",source).query(String.class).list()));
         snapshot.set("fullVersions",array(jdbc.sql("select to_jsonb(v)::text from logistics_version v join logistics_channel c on c.id=v.channel_id where c.dataset_id=:id order by v.id").param("id",source).query(String.class).list()));
         snapshot.set("drafts",array(jdbc.sql("select to_jsonb(d)::text from quotation_draft d order by owner_account").query(String.class).list()));
         var bytes=snapshot.toString().getBytes(StandardCharsets.UTF_8);
@@ -155,7 +194,7 @@ public class LogisticsDatasetService {
         var mappings=input.path("mappings"); if(!mappings.isArray()) throw AppException.unprocessable("缺少核对后的映射清单");
         var preview=preview(target,(ArrayNode)mappings);
         if(!preview.path("previewToken").asText().equals(input.path("previewToken").asText())) throw AppException.conflict("数据或关联已变化，请重新预览并核对");
-        if(preview.path("readyChannels").asInt()<1) throw AppException.unprocessable("至少审核发布一个可报价的新渠道后才能切换");
+        if(!preview.path("requiredReady").asBoolean()) throw AppException.unprocessable("必须先确认必用清单，并使全部必用渠道通过计费验收后才能切换");
         if((preview.path("unmappedChannels").asInt()>0 || !preview.path("pendingChannels").isEmpty()) && !input.path("unavailableConfirmed").asBoolean()) throw AppException.unprocessable("请明确确认未映射和暂不可用渠道");
         var backup=dataset(target).path("payload").path("backup");
         if(!backup.path("sourceFingerprint").asText().equals(preview.path("sourceFingerprint").asText())) throw AppException.conflict("缺少当前旧库备份，或备份后数据已变化，请重新备份");

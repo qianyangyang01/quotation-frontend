@@ -98,7 +98,14 @@ public class LogisticsImportService {
                     byte[] bytes=input.readNBytes(100*1024*1024+1);
                     if(!AssetStorageService.sha256(bytes).equals(file.path("sha256").asText()))throw AppException.conflict("源文件校验失败");
                     var parsed=parser.parse(bytes,file.path("name").asText());
-                    var report=parsed.deepCopy();report.remove("channels");fileReports.add(report.put("status","parsed"));
+                    var report=parsed.deepCopy();report.remove("channels");report.put("status","parsed");
+                    // Persist cell-level evidence once. Rewriting it on every channel progress tick
+                    // makes multi-provider standard workbooks needlessly expensive to import/poll.
+                    var evidence=mapper.writeValueAsBytes(report);var evidenceKey="logistics/evidence/"+id+"/"+lease+"/"+index+".json";
+                    storage.putRaw(evidenceKey,new ByteArrayInputStream(evidence),evidence.length,"application/json");
+                    for(var sheet:report.path("sheets"))((ObjectNode)sheet).remove("sourceCells");
+                    report.putObject("sourceEvidence").put("objectKey",evidenceKey).put("sha256",AssetStorageService.sha256(evidence));
+                    fileReports.add(report);
                     for(var value:parsed.path("channels")) {
                         var channel=(ObjectNode)value;var identity=LogisticsSourceParser.identity(channel);
                         channel.put("fileName",file.path("name").asText()).put("sourceFileIndex",index).put("batchId",id.toString());
@@ -151,7 +158,7 @@ public class LogisticsImportService {
         }
         var current=jdbc.sql("select v.payload::text from logistics_channel c join logistics_version v on v.id=c.current_version_id where c.id=:id")
                 .param("id",channelId).query(String.class).optional();
-        var outcome=mapper.createObjectNode().put("channelId",channelId.toString()).put("providerName",providerName).put("channelName",input.path("channelName").asText()).put("errors",input.path("errors").asInt()).put("quoteReady",input.path("quoteReady").asBoolean());
+        var outcome=mapper.createObjectNode().put("channelId",channelId.toString()).put("providerName",providerName).put("channelName",input.path("channelName").asText()).put("errors",input.path("errors").asInt()).put("quoteReady",false);
         if(current.isPresent() && input.path("errors").asInt()==0) {
             var published=mapper.readTree(current.get());
             if(input.path("contentHash").asText().equals(published.path("contentHash").asText()))return outcome.put("status","unchanged").put("versionId",published.path("id").asText());

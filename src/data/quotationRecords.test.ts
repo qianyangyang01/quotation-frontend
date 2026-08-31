@@ -12,6 +12,15 @@ function baseRecord() {
 }
 
 describe('quotation record bundle snapshots', () => {
+  it('preserves logistics version and calculation inputs without rewriting saved freight', () => {
+    const logisticsInput = { country: '美国', weightKg: .5, marks: ['普货'], dimensions: { lengthCm: 10, widthCm: 10, heightCm: 10 } }
+    const record = normalizeQuotationRecord({ ...baseRecord(), quoteOptions: [{
+      id: 'q1', country: '美国', carrier: '物流商', channel: '渠道', rule: '规则', eta: '',
+      logisticsChannelId: 'channel-v2', logisticsVersionId: 'price-v2', logisticsInput, freightCny: 45,
+      quote1Usd: 14, quote2Usd: null, quote3Usd: null, quoteCustomUsd: null,
+    }] })
+    expect(record?.quoteOptions?.[0]).toMatchObject({ logisticsChannelId: 'channel-v2', logisticsVersionId: 'price-v2', logisticsInput, freightCny: 45 })
+  })
   it('normalizes a structured immutable bundle snapshot', () => {
     const record = normalizeQuotationRecord({ ...baseRecord(), bundleItems: [
       { sku: ' sku-1 ', name: '商品一', quantityPerSet: 2, effectiveWeightKg: 0.2, purchaseBaseUnitPriceCny: 11.32, purchaseInvoiceType: '普票6%', purchaseInvoiceRatePercent: 6, purchaseInvoiceTaxApplied: true, purchaseUnitPriceCny: 12, domesticFreightPerUnitCny: 1.5 },

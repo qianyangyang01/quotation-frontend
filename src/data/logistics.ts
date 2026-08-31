@@ -10,6 +10,7 @@ export interface LogisticsPriceRow {
 }
 export interface LogisticsRelation { carrier: string; channel: string; channelCode: string; discounts: string }
 export interface LogisticsRule {
+  logisticsChannelId?: string; logisticsVersionId?: string; billingVerified?: boolean
   id: number; name: string; englishName: string; type: string; currency: string; published: string
   status: string; dates: string; users: string; relations: LogisticsRelation[]; phoneRequired: boolean
   areaCount: number; priceRowCount: number; prices: LogisticsPriceRow[]
@@ -113,6 +114,7 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   const candidates = rule.prices.filter(price =>
     priceMatchesCountryAndRegion(price, country, quoteRegion)
     && isPriceRowEligible(price, productMarks))
+  if (rule.billingVerified && candidates.some(price => price.zoneName || price.volumetric && (!hasDimensions || price.volumeDivisor <= 0))) return null
   let chargeWeightKg = actualWeightKg
   let volumeWeightKg = 0
   let volumeDivisor = 0
@@ -120,7 +122,7 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   if (hasDimensions && dimensions) {
     const volume = dimensions.lengthCm * dimensions.widthCm * dimensions.heightCm * Math.max(1, dimensions.volumeMultiplier || 1)
     price = candidates.find(candidate => {
-      const divisor = dimensions.volumeDivisor && dimensions.volumeDivisor > 0
+      const divisor = rule.billingVerified ? candidate.volumeDivisor : dimensions.volumeDivisor && dimensions.volumeDivisor > 0
         ? dimensions.volumeDivisor
         : candidate.volumeDivisor > 0
           ? candidate.volumeDivisor

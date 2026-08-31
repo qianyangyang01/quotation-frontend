@@ -57,6 +57,11 @@ for (let n = 0; n < 300 && ['queued', 'processing'].includes(finished.status); n
 }
 assert.equal(finished.status, 'completed')
 assert.equal(finished.payload.fileReports.length, names.length)
+assert(finished.payload.fileReports.every(f => f.sourceEvidence?.sha256 && f.sheets.every(s => !s.sourceCells)))
+const cellEvidence = await request(`${root}/imports/${batch.id}/files/0/evidence`, { binary: true })
+assert.equal(createHash('sha256').update(cellEvidence).digest('hex'), finished.payload.fileReports[0].sourceEvidence.sha256)
+assert(JSON.parse(cellEvidence).sheets.some(s => s.sourceCells?.length))
+passed('source-cell-evidence-preserved-outside-progress-payload', { bytes: cellEvidence.length })
 assert(finished.payload.results.some(r => r.status === 'draft'), 'At least one parsed channel must stage successfully')
 assert(!finished.payload.results.some(r => /IllegalStateException|NullPointerException|BadSqlGrammar/.test(r.message || '')), 'Unexpected staging exception')
 passed('real-files-durable-import', { elapsedMs: finished.payload.elapsedMs, parsingMs: finished.payload.parsingMs, stagingMs: finished.payload.stagingMs, results: finished.payload.results.length, drafts: finished.payload.results.filter(r => r.status === 'draft').length, blocked: finished.payload.results.filter(r => r.status === 'blocked').length })
@@ -127,6 +132,7 @@ async function review(v, removalConfirmed = true) {
 const firstOld = await request(`/logistics/channels/${channel.id}/manual-draft`, { method: 'PUT', key: `qa-${randomUUID()}`, body: { rows: [synthetic, { ...synthetic, areaName: '德国', countryCode: 'DE' }] } })
 await review(firstOld)
 const originalSynthetic = await request(`${root}/datasets/${active.id}/prices.xlsx?versionId=${firstOld.id}`, { binary: true })
+await writeFile(resolve(output, 'synthetic-prices.xlsx'), originalSynthetic)
 const secondOld = await request(`/logistics/channels/${channel.id}/manual-draft`, { method: 'PUT', key: `qa-${randomUUID()}`, body: { rows: [{ ...synthetic, pricePerKg: 60 }] } })
 await review(secondOld)
 const updatedSynthetic = await request(`${root}/datasets/${active.id}/prices.xlsx?versionId=${secondOld.id}`, { binary: true })
@@ -134,11 +140,47 @@ const next = await request(`${root}/datasets`, { method: 'POST', key: `qa-${rand
 const initialized = await importOne('合成完整价格.xlsx', originalSynthetic, next.id)
 const initialResult = initialized.payload.results[0]
 assert.equal(initialResult.status, 'draft', JSON.stringify(initialResult))
-assert.equal(initialResult.quoteReady, true)
+assert.equal(initialResult.quoteReady, false, 'Parsed or price-approved content is not a billing acceptance')
 assert.notEqual(initialResult.channelId, channel.id)
 const firstNew = await request(`${root}/versions/${initialResult.versionId}`)
 assert.equal(firstNew.basePublishedVersionId, '')
 await review(firstNew)
+const billingPath = `${root}/versions/${firstNew.id}/billing-acceptance`
+const unaccepted = await request(billingPath)
+assert.equal(unaccepted.quoteReady, false)
+assert.deepEqual(unaccepted.unsupportedReasons, [])
+const billingBody = {
+  fingerprint: unaccepted.fingerprint, engineVersion: unaccepted.engineVersion,
+  note: 'QA合成规则人工核算：每公斤50元、挂号20元，不计泡，无附加条件',
+  sourceReference: '脚本合成固定样本，不授权任何真实渠道', reviewConfirmed: true,
+  samples: ['US', 'DE'].flatMap(country => [.2, .8].map(weightKg => ({
+    sourceReference: '50 × 重量 + 20，独立常量预期', input: { country, weightKg, marks: ['普货'] }, expectedTotal: weightKg === .2 ? 30 : 60,
+  }))).concat([{ sourceReference: '大于1kg不收寄', input: { country: 'US', weightKg: 2, marks: ['普货'] }, expectRejected: true }]),
+}
+await request(billingPath, { method: 'POST', body: { ...billingBody, fingerprint: 'stale' }, key: randomUUID(), expected: 409 })
+const billingKey = randomUUID()
+const accepted = await Promise.all([1, 2].map(() => request(billingPath, { method: 'POST', body: billingBody, key: billingKey })))
+assert.equal(accepted[0].records.length, 1)
+assert.deepEqual(accepted[0], accepted[1])
+assert.equal(accepted[0].quoteReady, true)
+passed('server-billing-acceptance-fingerprint-and-concurrent-idempotency')
+const requiredPath = `${root}/datasets/${next.id}/required-channels`
+const emptyList = await request(requiredPath)
+assert.equal(emptyList.confirmed, false)
+assert.equal(emptyList.channelIds.length, 0)
+await request(`${root}/datasets/${next.id}/backup`, { method: 'POST' })
+const beforeSelection = await request(`${root}/datasets/${next.id}/preview`, { method: 'POST', body: { mappings: [] } })
+assert.equal(beforeSelection.readyChannels, 1)
+assert.equal(beforeSelection.requiredReady, false)
+await request(`${root}/datasets/${next.id}/activate`, { method: 'POST', body: { ...beforeSelection, note: 'QA：一个可报价渠道不是切换门槛', reviewConfirmed: true, unavailableConfirmed: true }, key: randomUUID(), expected: 422 })
+const requiredBody = { revision: emptyList.revision, confirmed: true, channelIds: [firstNew.channelId], note: '仅选择QA合成测试渠道，不替用户确认真实必用清单' }
+const requiredKey = randomUUID()
+const selections = await Promise.all([1, 2].map(() => request(requiredPath, { method: 'PUT', body: requiredBody, key: requiredKey })))
+assert.equal(selections[0].revision, 1)
+assert.deepEqual(selections[0], selections[1])
+await request(requiredPath, { method: 'PUT', body: requiredBody, key: randomUUID(), expected: 409 })
+await request(`${root}/datasets/${next.id}/activate`, { method: 'POST', body: { ...beforeSelection, note: 'QA：旧预览不可切换', reviewConfirmed: true, unavailableConfirmed: true }, key: randomUUID(), expected: 409 })
+passed('required-selection-revision-idempotency-and-stale-cutover')
 await request(`${root}/datasets/${next.id}/backup`, { method: 'POST' })
 const cutover = await request(`${root}/datasets/${next.id}/preview`, { method: 'POST', body: { mappings: [] } })
 const activationKey = `qa-${randomUUID()}`
@@ -155,6 +197,8 @@ assert.equal(updateVersion.summary.removed, 1)
 assert(updateVersion.diffRows.some(d => d.changes.some(c => c.delta === 10)))
 await request(`${root}/channels/${updateVersion.channelId}/versions/${updateVersion.id}/review`, { method: 'POST', key: `qa-${randomUUID()}`, body: { note: 'QA验证移除必须确认', removalConfirmed: false, reviewConfirmed: true }, expected: 422 })
 await review(updateVersion)
+assert.equal((await request(`${root}/versions/${updateVersion.id}/billing-acceptance`)).quoteReady, false)
+passed('new-price-version-invalidates-previous-billing-acceptance')
 const rollback = await request(`/logistics/channels/${firstNew.channelId}/versions/${firstNew.id}/rollback`, { method: 'POST', key: `qa-${randomUUID()}`, body: { note: 'QA回滚验证' } })
 assert.equal(rollback.rows.length, 2)
 const afterRollback = await importOne('合成完整价格.xlsx', updatedSynthetic, next.id)

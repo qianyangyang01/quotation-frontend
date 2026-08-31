@@ -26,6 +26,11 @@ class LogisticsRebuildPermissionTest {
             mvc.perform(get(root+path)).andExpect(status().isForbidden());
         mvc.perform(post(root+"/datasets").with(csrf()).header("Idempotency-Key","qa-permission-1").contentType("application/json").content("{\"name\":\"QA\"}")).andExpect(status().isForbidden());
         mvc.perform(post(root+"/datasets/"+id+"/activate").with(csrf()).header("Idempotency-Key","qa-permission-2").contentType("application/json").content("{}")).andExpect(status().isForbidden());
+        mvc.perform(get(root+"/datasets/"+id+"/required-channels")).andExpect(status().isForbidden());
+        mvc.perform(put(root+"/datasets/"+id+"/required-channels").with(csrf()).header("Idempotency-Key","qa-required-permission").contentType("application/json").content("{}")).andExpect(status().isForbidden());
+        mvc.perform(get(root+"/versions/"+id+"/billing-acceptance")).andExpect(status().isForbidden());
+        mvc.perform(get(root+"/imports/"+id+"/files/0/evidence")).andExpect(status().isForbidden());
+        mvc.perform(post(root+"/versions/"+id+"/billing-acceptance").with(csrf()).header("Idempotency-Key","qa-billing-permission").contentType("application/json").content("{}")).andExpect(status().isForbidden());
     }
     @Test void rejectsAnonymousExports()throws Exception {mvc.perform(get(root+"/datasets/"+id+"/prices.xlsx")).andExpect(status().isUnauthorized());}
 }

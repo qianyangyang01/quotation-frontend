@@ -21,7 +21,7 @@ public class LogisticsExportService {
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public byte[] prices(UUID dataset,UUID versionId,String query,String country,String attribute) {
         var versions=jdbc.sql("""
-                select v.payload::text as payload,p.payload->>'name' as provider,c.payload->>'name' as channel,
+                select (v.payload || jsonb_build_object('quoteReady',logistics_version_quote_ready(v.id)))::text as payload,p.payload->>'name' as provider,c.payload->>'name' as channel,
                 c.payload->>'logisticsAttribute' as attribute,v.id::text as id,v.status
                 from logistics_channel c join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.channel_id=c.id

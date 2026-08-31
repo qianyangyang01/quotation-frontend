@@ -19,7 +19,7 @@ interface LogisticsChannelRepository extends JpaRepository<LogisticsChannelEntit
     @Query(value="select * from logistics_channel where dataset_id=logistics_active_dataset() and lower(code)=lower(:code)",nativeQuery=true)
     Optional<LogisticsChannelEntity> findByCodeIgnoreCase(String code);
     long countByProviderId(UUID providerId);
-    @Query(value="select count(*) from logistics_channel c join logistics_provider p on p.id=c.provider_id join logistics_version v on v.id=c.current_version_id and v.status='published' where coalesce((v.payload->>'quoteReady')::boolean,true) and c.dataset_id=logistics_active_dataset() and c.current_version_id is not null and c.archived_at is null and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)",nativeQuery=true)
+    @Query(value="select count(*) from logistics_channel c join logistics_provider p on p.id=c.provider_id join logistics_version v on v.id=c.current_version_id and v.status='published' where logistics_version_quote_ready(v.id) and c.dataset_id=logistics_active_dataset() and c.current_version_id is not null and c.archived_at is null and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)",nativeQuery=true)
     long countByCurrentVersionIdIsNotNullAndArchivedAtIsNull();
     @Query(value="select * from logistics_channel where dataset_id=logistics_active_dataset() order by updated_at desc",nativeQuery=true)
     List<LogisticsChannelEntity> findAllByOrderByUpdatedAtDesc();

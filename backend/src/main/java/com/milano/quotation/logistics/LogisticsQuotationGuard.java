@@ -23,19 +23,30 @@ public class LogisticsQuotationGuard {
         var policies=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies' for share").query(String.class).optional().orElse("[]"));
         var channels=jdbc.sql("""
             select jsonb_build_object('key',concat(c.rule_id,'::',p.payload->>'name','::',c.code),
-                'versionId',v.id,'channelId',c.id,'rows',v.payload->'rows')::text
+                'versionId',v.id,'channelId',c.id,'rows',v.payload->'rows',
+                'legacy',exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy' and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)))::text
             from logistics_channel c join logistics_provider p on p.id=c.provider_id
             join logistics_version v on v.id=c.current_version_id and v.status='published'
             where c.dataset_id=:id and c.archived_at is null
             and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)
-            and coalesce((v.payload->>'quoteReady')::boolean,true)
+            and logistics_version_quote_ready(v.id)
             """).param("id",dataset).query((rs,n)->mapper.readTree(rs.getString(1))).list();
         for(var option:quotation.path("quoteOptions")) {
             var key=option.path("channelKey").asText();var country=option.path("country").asText();
             var channel=channels.stream().filter(c->c.path("key").asText().equals(key)).findFirst().orElseThrow(()->AppException.conflict("报价渠道已归档、未适配或不存在，请重新选择"));
             boolean countryAvailable=false;
-            for(var row:channel.path("rows"))if((row.path("areaName").asText().equals(country)||row.path("countryCode").asText().equalsIgnoreCase(country))&&row.path("quoteReady").asBoolean(true))countryAvailable=true;
+            for(var row:channel.path("rows"))if(row.path("areaName").asText().equals(country)||row.path("countryCode").asText().equalsIgnoreCase(country))countryAvailable=true;
             if(!countryAvailable||!allowed(policies,quotation.path("logisticsAttribute").asText(),country,key))throw AppException.unprocessable("渠道不在该国家及货物属性的财务允许范围内");
+            if(!channel.path("legacy").asBoolean()){
+                if(!option.path("logisticsVersionId").asText().equals(channel.path("versionId").asText())||!option.path("logisticsChannelId").asText().equals(channel.path("channelId").asText()))throw AppException.conflict("缺少当前渠道版本，请重新计价确认");
+                var input=option.path("logisticsInput");
+                if(!input.isObject())throw AppException.unprocessable("缺少重新计价输入");
+                if(!input.path("country").asText().equals(country))throw AppException.unprocessable("计费输入国家与报价国家不一致");
+                var normalized=(ObjectNode)input.deepCopy();normalized.putArray("marks").add(quotation.path("logisticsAttribute").asText());
+                var result=new LogisticsBillingEngine(mapper).calculate(channel.path("rows"),normalized);
+                if(!option.path("freightCny").isNumber()||option.path("freightCny").decimalValue().compareTo(result.path("total").decimalValue())!=0)throw AppException.conflict("物流费用与服务器核算不一致，请重新计价");
+                ((ObjectNode)option).set("logisticsCalculation",result);
+            }
             ((ObjectNode)option).set("logisticsVersionId",channel.path("versionId"));
             ((ObjectNode)option).set("logisticsChannelId",channel.path("channelId"));
         }

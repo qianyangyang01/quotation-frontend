@@ -49,6 +49,8 @@ class LogisticsQueryPostgresIntegrationTest {
         jdbc.sql("insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at,published_at) values(:id,:channel,1,'published','hash-1',cast(:payload as jsonb),:now,:now)")
                 .param("id", versionId).param("channel", channelId).param("payload", versionPayload).param("now", now).update();
         jdbc.sql("update logistics_channel set current_version_id=:version where id=:id").param("version", versionId).param("id", channelId).update();
+        // This suite exercises pre-migration legacy query compatibility, not new-version approval.
+        jdbc.sql("insert into logistics_billing_acceptance select gen_random_uuid(),id,md5((payload->'rows')::text),'legacy','legacy','{}','QA',now() from logistics_version where id=:id").param("id",versionId).update();
     }
 
     @Test
