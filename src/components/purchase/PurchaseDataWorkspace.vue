@@ -5,7 +5,6 @@ import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImport
 import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs, shouldRefreshPurchaseImportDetails } from '@/services/purchaseImportPolling'
 import { purchaseImportConfirmationState } from '@/services/purchaseImportConfirmation'
 import { createPurchaseImportTaskRequests } from '@/services/purchaseImportTaskRequests'
-import { preparePurchaseWorkbookTextOnly } from '@/services/purchaseWorkbookTextOnlyClient'
 import ImageMigrationPanel from './ImageMigrationPanel.vue'
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 
@@ -28,7 +27,7 @@ const purchaseStats = ref({ total:0, ready:0, pending:0, generatedSku:0 })
 const asyncFileInput = ref<HTMLInputElement | null>(null)
 const imagePartInput = ref<HTMLInputElement | null>(null)
 const asyncUploading = ref(false)
-const uploadProgress = ref({fileName:'',originalSize:0,size:0,loaded:0,percent:0,bytesPerSecond:0,stage:'',removedMediaCount:0,reductionPercent:0})
+const uploadProgress = ref({fileName:'',size:0,loaded:0,percent:0,bytesPerSecond:0,stage:''})
 let cancelActiveUpload:(()=>void)|null=null
 const imageUploading = ref(false)
 const showTaskCenter = ref(false)
@@ -145,23 +144,18 @@ async function refreshDuplicateGroups(){
   await taskRequests.read('duplicates',id,()=>status==='ready'?loadPurchaseImportDuplicateGroups(id):Promise.resolve([]),groups=>{activeDuplicateGroups.value=groups})
 }
 async function chooseAsyncWorkbook(event:Event){
-  const input=event.target as HTMLInputElement;const original=input.files?.[0];if(!original)return
+  const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file)return
   asyncUploading.value=true
-  uploadProgress.value={fileName:original.name,originalSize:original.size,size:original.size,loaded:0,percent:0,bytesPerSecond:0,stage:'正在检查工作簿',removedMediaCount:0,reductionPercent:0}
+  uploadProgress.value={fileName:file.name,size:file.size,loaded:0,percent:0,bytesPerSecond:0,stage:'正在上传表格'}
   try{
-    const preparation=preparePurchaseWorkbookTextOnly(original,progress=>{uploadProgress.value={...uploadProgress.value,stage:progress.stage,percent:progress.percent}})
-    cancelActiveUpload=preparation.cancel
-    const prepared=await preparation.promise
-    uploadProgress.value={...uploadProgress.value,size:prepared.optimizedSizeBytes,loaded:0,percent:0,stage:'正在上传无图数据文件',removedMediaCount:prepared.removedMediaCount,reductionPercent:prepared.reductionPercent}
-    const file=new File([prepared.blob],original.name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',lastModified:original.lastModified})
-    const upload=createPurchaseImportJob(file,{originalSizeBytes:prepared.originalSizeBytes,removedMediaCount:prepared.removedMediaCount},progress=>{uploadProgress.value={...uploadProgress.value,...progress,stage:progress.percent>=100?'正在创建任务':'正在上传无图数据文件'}})
+    const upload=createPurchaseImportJob(file,progress=>{uploadProgress.value={...uploadProgress.value,...progress,stage:progress.percent>=100?'正在创建任务':'正在上传表格'}})
     cancelActiveUpload=upload.cancel
     const uploadedJob=await upload.promise
     taskRequests.select(uploadedJob.id);activeJob.value=uploadedJob;taskDetailLoading.value=false
     activeDuplicateGroups.value=[];asyncDuplicateSelections.value={};pendingJobAction.value=null;activeRows.value=[];activeRowStatus.value='error';activeRowPage.value=0;activeRowTotalPages.value=0;activeRowTotal.value=0
     uploadProgress.value={...uploadProgress.value,loaded:file.size,percent:100,stage:'排队'}
-    showTaskCenter.value=true;await refreshImportJobs();toast(`已过滤 ${prepared.removedMediaCount} 张图片，数据任务正在后台解析`)
-  }catch(error){if(error instanceof DOMException&&error.name==='AbortError')toast('处理已取消');else toast(error instanceof Error?error.message:'无图快速导入失败')}
+    showTaskCenter.value=true;await refreshImportJobs();toast('表格已上传，后台正在解析数据，不导入图片')
+  }catch(error){if(error instanceof DOMException&&error.name==='AbortError')toast('上传已取消');else toast(error instanceof Error?error.message:'表格导入失败')}
   finally{asyncUploading.value=false;cancelActiveUpload=null;input.value=''}
 }
 function cancelUpload(){cancelActiveUpload?.()}
@@ -284,8 +278,8 @@ const detailFields = computed(() => detail.value ? [
   </section>
   <SupplierRecordsPanel v-if="showSupplierRecords" @close="showSupplierRecords=false" @notice="toast" />
   <template v-else>
-  <p class="append-import-help"><b>固定表格接着导入</b> 无 SKU 的行也可先入库，以后在原行补 SKU，会补到原商品并保留图片和人工维护资料。保持文件名、工作表名和旧行位置不变，新数据放在末尾；旧行除补空白 SKU 外的内容变化会拦截。图片仍先在本地过滤，原文件不变。</p>
-  <section v-if="asyncUploading" class="upload-status"><div><b>{{ uploadProgress.fileName }}</b><span v-if="uploadProgress.removedMediaCount">原始 {{ formatBytes(uploadProgress.originalSize) }} → 无图数据 {{ formatBytes(uploadProgress.size) }} · 已过滤 {{ uploadProgress.removedMediaCount }} 张图片 · 减少 {{ uploadProgress.reductionPercent }}%</span><span v-else>{{ formatBytes(uploadProgress.loaded) }} / {{ formatBytes(uploadProgress.size) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatBytes(uploadProgress.bytesPerSecond) }}/s</template></span></div><strong>{{ uploadProgress.stage }} {{ uploadProgress.percent }}%</strong><div class="progress"><i :style="{width:`${uploadProgress.percent}%`}"></i></div><button @click="cancelUpload">取消</button></section>
+  <p class="append-import-help"><b>固定表格接着导入</b> 无 SKU 的行也可先入库，以后在原行补 SKU，会补到原商品并保留图片和人工维护资料。保持文件名、工作表名和旧行位置不变，新数据放在末尾；旧行除补空白 SKU 外的内容变化会拦截。直接上传原表，仅导入表格数据，不处理或导入图片；建议使用无图表格。</p>
+  <section v-if="asyncUploading" class="upload-status"><div><b>{{ uploadProgress.fileName }}</b><span>{{ formatBytes(uploadProgress.loaded) }} / {{ formatBytes(uploadProgress.size) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatBytes(uploadProgress.bytesPerSecond) }}/s</template></span></div><strong>{{ uploadProgress.stage }} {{ uploadProgress.percent }}%</strong><div class="progress"><i :style="{width:`${uploadProgress.percent}%`}"></i></div><button @click="cancelUpload">取消</button></section>
 
   <section class="stats">
     <article><small>采购资料</small><b>{{ purchaseStats.total }}</b><span>报价服务器数据库</span></article>
@@ -353,7 +347,7 @@ const detailFields = computed(() => detail.value ? [
           </article></div>
           <small>各工作表分别记录；行号包含表头和空行。补 SKU 或旧行补导的起点可能早于历史最末行。</small>
         </section>
-        <p v-if="activeJob.summary?.importMode==='text-only'" class="parse-summary">无图快速导入 · 原始 {{ formatBytes(activeJob.summary.originalSizeBytes || activeJob.summary.sourceBytes || 0) }} · 实际上传 {{ formatBytes(activeJob.summary.uploadedBytes || 0) }} · 已过滤 {{ activeJob.summary.removedMediaCount || 0 }} 张图片</p>
+        <p v-if="activeJob.summary?.importMode==='text-only'" class="parse-summary">仅导入表格数据 · 已上传 {{ formatBytes(activeJob.summary.uploadedBytes || activeJob.summary.sourceBytes || 0) }} · 不导入 Excel 图片</p>
         <p v-if="activeJob.summary?.textParseMillis!=null" class="parse-summary">文本解析 {{ activeJob.summary.textParseMillis }} ms · 临时 SKU {{ activeJob.summary.generatedSkuRows || 0 }} 条 · 提醒 {{ activeJob.summary.warningCount || 0 }} 条</p>
         <div v-if="activeJob.summary?.sheetSummaries?.length" class="sheet-summaries"><article v-for="sheet in activeJob.summary.sheetSummaries" :key="sheet.sheetName" :class="{skipped:!sheet.recognized}"><b>{{ sheet.sheetName }}</b><span>{{ sheet.recognized ? `识别成功，${sheet.dataRows} 条数据` : '未发现 SKU 表头，已跳过' }}</span><small v-if="sheet.recognized">表头第 {{ sheet.headerRow }} 行 · 未知列 {{ sheet.unknownColumns.length }} · 缺少字段 {{ sheet.missingColumns.length }} · 忽略空行 {{ sheet.ignoredRows }}</small><small v-if="sheet.unknownColumns.length">未知列：{{ sheet.unknownColumns.join('、') }}</small></article></div>
         <p v-if="activeJob.error" class="job-error">{{ activeJob.error }}</p>

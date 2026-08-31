@@ -7,6 +7,23 @@ import java.io.*;import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class StreamingPurchaseWorkbookReaderTest {
+    @Test void readsOriginalWorkbookWithEmbeddedImageButMapsOnlyCellData()throws Exception{
+        try(var workbook=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var output=new ByteArrayOutputStream()){
+            var sheet=workbook.createSheet("固定采购表");var header=sheet.createRow(0);
+            header.createCell(0).setCellValue("SKU");header.createCell(1).setCellValue("采购价");header.createCell(2).setCellValue("产品图片");
+            var data=sheet.createRow(1);data.createCell(0).setCellValue("REAL-123");data.createCell(1).setCellValue(12.5);data.createCell(2).setCellValue("https://example.com/image.png");
+            var png=java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6zQAAAABJRU5ErkJggg==");
+            int picture=workbook.addPicture(png,org.apache.poi.ss.usermodel.Workbook.PICTURE_TYPE_PNG);
+            var anchor=workbook.getCreationHelper().createClientAnchor();anchor.setCol1(2);anchor.setRow1(1);anchor.setCol2(3);anchor.setRow2(2);
+            sheet.createDrawingPatriarch().createPicture(anchor,picture);workbook.write(output);
+            var mapped=new java.util.ArrayList<PurchaseImportRowMapper.MappedRow>();
+            var mapper=new PurchaseImportRowMapper(tools.jackson.databind.json.JsonMapper.builder().build());
+            var result=new StreamingPurchaseWorkbookReader().read(new ByteArrayInputStream(output.toByteArray()),row->mapped.add(mapper.map(row.sourceSheet(),row.sourceRow(),row.values(),row.schema())));
+            assertEquals(1,result.totalRows());assertEquals("REAL-123",mapped.getFirst().sku());
+            assertEquals(12.5,mapped.getFirst().payload().path("purchasePriceCny").asDouble());
+            for(var field:java.util.List.of("image","productImage","physicalImage"))assertEquals("",mapped.getFirst().payload().path(field).asText());
+        }
+    }
     @Test void streamsRowsWithoutLoadingPreviewPayload()throws Exception{var file=workbook(1_000);var count=new AtomicInteger();var result=new StreamingPurchaseWorkbookReader().read(new ByteArrayInputStream(file),row->{assertTrue(row.values().length>=2);count.incrementAndGet();});assertEquals(1_000,count.get());assertEquals(1,result.sheets().size());assertTrue(result.sheets().getFirst().recognized());}
     @Test void declaresTwoHundredThousandRowSafetyLimit(){assertEquals(200_000,StreamingPurchaseWorkbookReader.MAX_ROWS);}
     @Test void findsMovedHeadersAcrossArbitrarySheetsAndKeepsEmptyRecognizedSheet()throws Exception{try(var workbook=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var output=new ByteArrayOutputStream()){workbook.createSheet("说明页").createRow(0).createCell(0).setCellValue("填写说明");var data=workbook.createSheet("任意名称");data.createRow(0).createCell(0).setCellValue("标题");var header=data.createRow(2);header.createCell(0).setCellValue("AI建议");header.createCell(3).setCellValue(" 克重（g）* ");header.createCell(7).setCellValue(" sku * ");header.createCell(10).setCellValue("采购价");var row=data.createRow(3);row.createCell(0).setCellValue("ignore me");row.createCell(3).setCellValue("1600g左右");row.createCell(7).setCellValue("SKU-MOVED");row.createCell(10).setCellValue(12.5);var empty=workbook.createSheet("空数据页");var emptyHeader=empty.createRow(0);emptyHeader.createCell(5).setCellValue("SKU编码");workbook.write(output);var rows=new java.util.ArrayList<StreamingPurchaseWorkbookReader.RawRow>();var result=new StreamingPurchaseWorkbookReader().read(new ByteArrayInputStream(output.toByteArray()),rows::add);assertEquals(1,rows.size());assertEquals("SKU-MOVED",rows.getFirst().schema().value(rows.getFirst().values(),PurchaseWorkbookSchema.Field.SKU,new java.util.ArrayList<>()));assertEquals(3,result.sheets().size());assertFalse(result.sheets().get(0).recognized());assertEquals(3,result.sheets().get(1).headerRow());assertEquals(1,result.sheets().get(1).unknownColumns().size());assertTrue(result.sheets().get(2).recognized());assertEquals(0,result.sheets().get(2).dataRows());}}

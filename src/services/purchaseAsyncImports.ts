@@ -14,7 +14,12 @@ export interface PurchaseImportRowView { sourceSheet:string;sourceRow:number;sku
 export interface PurchaseImportDuplicateGroup { sku:string;choices:{sourceSheet:string;sourceRow:number}[] }
 export interface PageResult<T>{content:T[];number:number;size:number;totalElements:number;totalPages:number;first:boolean;last:boolean}
 
-export function createPurchaseImportJob(file:File,metadata:{originalSizeBytes:number;removedMediaCount:number},onProgress?:(progress:UploadProgress)=>void){const form=new FormData();form.append('file',file);form.append('originalSizeBytes',String(metadata.originalSizeBytes));form.append('removedMediaCount',String(metadata.removedMediaCount));form.append('importMode','text-only');return uploadForm<PurchaseImportJob>('/purchase-imports/jobs',form,onProgress)}
+export function createPurchaseImportJob(file:File,onProgress?:(progress:UploadProgress)=>void){
+  if(!file.name.toLowerCase().endsWith('.xlsx'))throw new Error('请选择.xlsx格式的采购模板')
+  if(file.size<=0||file.size>100*1024*1024)throw new Error('采购 Excel 文件不能为空且不能超过100MB')
+  const form=new FormData();form.append('file',file);form.append('importMode','text-only')
+  return uploadForm<PurchaseImportJob>('/purchase-imports/jobs',form,onProgress)
+}
 export async function uploadPurchaseImagePart(jobId:string,partNumber:number,file:File){const form=new FormData();form.append('file',file);return api.post<PurchaseImportJob>(`/purchase-imports/jobs/${jobId}/image-parts?partNumber=${partNumber}`,form)}
 export const loadPurchaseImportJobs=(page=0,size=20)=>api.get<PageResult<PurchaseImportJob>>(`/purchase-imports/jobs?page=${page}&size=${size}`)
 export const loadPurchaseImportJob=(id:string)=>api.get<PurchaseImportJob>(`/purchase-imports/jobs/${id}`)
