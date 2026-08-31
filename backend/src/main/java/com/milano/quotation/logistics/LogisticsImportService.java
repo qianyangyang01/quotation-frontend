@@ -161,7 +161,10 @@ public class LogisticsImportService {
         var outcome=mapper.createObjectNode().put("channelId",channelId.toString()).put("providerName",providerName).put("channelName",input.path("channelName").asText()).put("errors",input.path("errors").asInt()).put("quoteReady",false);
         if(current.isPresent() && input.path("errors").asInt()==0) {
             var published=mapper.readTree(current.get());
-            if(input.path("contentHash").asText().equals(published.path("contentHash").asText()))return outcome.put("status","unchanged").put("versionId",published.path("id").asText());
+            if(input.path("contentHash").asText().equals(published.path("contentHash").asText())){
+                outcome.putObject("summary").put("added",0).put("price",0).put("rule",0).put("removed",0).put("unchanged",published.path("rows").size());
+                return outcome.put("status","unchanged").put("versionId",published.path("id").asText());
+            }
         }
         var body=input.deepCopy().put("sourceHash",input.path("contentHash").asText()).put("importedBy",actor);
         var version=replaceDrafts?logistics.createDraftReplacing(channelId,body,"用户确认由新导入终止旧待审稿"):logistics.createDraft(channelId,body);

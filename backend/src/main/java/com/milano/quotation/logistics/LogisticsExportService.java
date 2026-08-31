@@ -18,8 +18,22 @@ import java.util.*;
 public class LogisticsExportService {
     private final JdbcClient jdbc; private final ObjectMapper mapper;
     public LogisticsExportService(JdbcClient jdbc,ObjectMapper mapper){this.jdbc=jdbc;this.mapper=mapper;}
+    public String priceSnapshot(UUID dataset,UUID versionId,String query,String country,String attribute) {
+        var rows=jdbc.sql("""
+                select jsonb_build_array(v.id,v.status,md5(v.payload::text),p.payload,c.payload)::text
+                from logistics_channel c join logistics_provider p on p.id=c.provider_id join logistics_version v on v.channel_id=c.id
+                where c.dataset_id=:dataset and ((cast(:version as uuid) is null and v.id=c.current_version_id) or v.id=cast(:version as uuid)) order by v.id
+                """).param("dataset",dataset).param("version",versionId==null?null:versionId.toString()).query(String.class).list();
+        if(rows.isEmpty())throw AppException.unprocessable("没有可导出的价格版本，请先审核价格或选择具体版本");
+        return LogisticsDatasetService.hash(mapper.valueToTree(List.of(dataset.toString(),rows,query,country,attribute)).toString());
+    }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public byte[] prices(UUID dataset,UUID versionId,String query,String country,String attribute) {
+        return prices(dataset,versionId,query,country,attribute,null);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public byte[] prices(UUID dataset,UUID versionId,String query,String country,String attribute,String snapshot) {
+        if(snapshot!=null&&!snapshot.equals(priceSnapshot(dataset,versionId,query,country,attribute)))throw AppException.conflict("价格版本已变化，请重新生成下载链接");
         var versions=jdbc.sql("""
                 select (v.payload || jsonb_build_object('quoteReady',logistics_version_quote_ready(v.id)))::text as payload,p.payload->>'name' as provider,c.payload->>'name' as channel,
                 c.payload->>'logisticsAttribute' as attribute,v.id::text as id,v.status
@@ -75,7 +89,7 @@ public class LogisticsExportService {
         try(var book=new XSSFWorkbook();var bytes=new ByteArrayOutputStream()) {
             var summary=book.createSheet("批次汇总");textRow(summary,0,List.of("MILANO_LOGISTICS_DIFF_V1","仅供审阅，不作为价格导入模板",Instant.now().toString()));
             textRow(summary,1,List.of("物流商","渠道","版本","基线版本","新增","调价","规则","移除","未变","状态"));
-            var detail=book.createSheet("变化明细");header(book,detail,List.of("物流商","渠道","国家","起重KG","止重KG","类型","字段","原值","新值","差额","涨跌百分比","原文件","工作表","行号"));
+            var detail=book.createSheet("变化明细");header(book,detail,List.of("物流商","渠道","国家","起重KG","止重KG","类型","字段","原值","新值","差额","涨跌百分比","原文件","工作表","行号","分区"));
             var issues=book.createSheet("问题清单");header(book,issues,List.of("物流商","渠道","字段","原因","原表行","级别"));
             int sr=2,dr=1,ir=1;
             for(var file:batchPayload.path("fileReports"))if(file.path("status").asText().equals("failed"))textRow(issues,ir++,List.of("",file.path("fileName").asText(),"文件",file.path("message").asText(),"","error"));
@@ -83,7 +97,14 @@ public class LogisticsExportService {
             for(var id:ids) {
                 var v=jdbc.sql("select v.payload::text,p.payload->>'name' as provider,c.payload->>'name' as channel from logistics_version v join logistics_channel c on c.id=v.channel_id join logistics_provider p on p.id=c.provider_id where v.id=:id")
                         .param("id",id).query((rs,n)->mapper.createObjectNode().put("provider",rs.getString("provider")).put("channel",rs.getString("channel")).set("version",mapper.readTree(rs.getString(1)))).optional().orElseThrow(()->AppException.notFound("版本不存在"));
-                var version=v.path("version");var totals=version.path("summary");
+                var version=(ObjectNode)v.path("version");
+                for(var result:batchPayload.path("results"))if(result.path("versionId").asText().equals(id.toString())&&result.path("status").asText().equals("unchanged")){
+                    version=version.deepCopy().put("status","unchanged").put("basePublishedVersionId",id.toString());
+                    version.putObject("summary").put("added",0).put("price",0).put("rule",0).put("removed",0).put("unchanged",version.path("rows").size());
+                    var diffs=version.putArray("diffRows");for(var price:version.path("rows")){var diff=diffs.addObject().put("type","unchanged");diff.set("row",price);diff.set("previous",price);diff.putArray("changes");}
+                    v.set("version",version);break;
+                }
+                var totals=version.path("summary");
                 textRow(summary,sr++,List.of(v.path("provider").asText(),v.path("channel").asText(),version.path("versionNumber").asText(),version.path("basePublishedVersionId").asText(),totals.path("added").asText(),totals.path("price").asText(),totals.path("rule").asText(),totals.path("removed").asText(),totals.path("unchanged").asText(),version.path("status").asText()));
                 for(var diff:version.path("diffRows")) {
                     var changes=diff.path("changes");
@@ -101,7 +122,7 @@ public class LogisticsExportService {
         var source=diff.path("row");int c=0;cell(r,c++,v.path("provider"));cell(r,c++,v.path("channel"));cell(r,c++,source.path("areaName"));
         cell(r,c++,source.path("weightFromKg"));cell(r,c++,source.path("weightToKg"));cell(r,c++,diff.path("type"));cell(r,c++,change.path("field"));
         cell(r,c++,change.path("before"));cell(r,c++,change.path("after"));cell(r,c++,change.path("delta"));cell(r,c++,change.path("percentChange"));
-        cell(r,c++,v.path("version").path("fileName"));cell(r,c++,source.path("sourceSheet"));cell(r,c,source.path("sourceRow"));
+        cell(r,c++,v.path("version").path("fileName"));cell(r,c++,source.path("sourceSheet"));cell(r,c++,source.path("sourceRow"));cell(r,c,source.path("zoneName"));
     }
     private static void header(Workbook book,Sheet sheet,List<String> labels){
         var style=book.createCellStyle();style.setFillForegroundColor(IndexedColors.DARK_TEAL.getIndex());style.setFillPattern(FillPatternType.SOLID_FOREGROUND);style.setWrapText(true);

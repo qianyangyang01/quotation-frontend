@@ -4,9 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
 import LogisticsRequiredChannels from '@/components/quotation/LogisticsRequiredChannels.vue'
 import LogisticsBillingReview from '@/components/quotation/LogisticsBillingReview.vue'
-import { idempotencyKey } from '@/services/http'
+import { idempotencyKey, type PreparedDownload } from '@/services/http'
 import { invalidatePublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
-import { logisticsRebuild as service, money, shown, weightLabel, type Dataset, type Workspace, type Batch, type BatchSummary, type Version, type Cutover, type PricePage } from '@/data/logisticsRebuild'
+import { logisticsRebuild as service, money, shown, weightLabel, completedBatchStage, type Dataset, type Workspace, type Batch, type BatchSummary, type Version, type Cutover, type PricePage } from '@/data/logisticsRebuild'
 
 const route = useRoute(), router = useRouter()
 const tab = ref<'prices' | 'imports' | 'history'>(route.query.logisticsTab === 'imports' ? 'imports' : route.query.logisticsTab === 'history' ? 'history' : 'prices')
@@ -16,6 +16,10 @@ const prices = ref<PricePage>({ items: [], total: 0, page: 0, size: 50, totalPag
 const query = ref(''), country = ref(''), attribute = ref(''), page = ref(0)
 const name = ref('物流新库'), files = ref<File[]>([]), replaceDrafts = ref(false)
 const busy = ref(false), error = ref(''), message = ref(''), note = ref(''), removal = ref(false), risk = ref(false)
+const preparedDownload = ref<PreparedDownload | null>(null)
+function clearDownload() { preparedDownload.value = null }
+watch([query, country, attribute, tab], clearDownload)
+onUnmounted(clearDownload)
 const acceptanceRefresh = ref(0)
 async function acceptanceUpdated() { cutover.value = null; await invalidatePublishedLogisticsCache(); await refresh(); if (version.value) { const id = version.value.id; const latest = await service.version(id); if (version.value?.id === id) version.value = latest } }
 const diffType = ref('all'), detailTab = ref<'diff' | 'rows' | 'issues'>('diff'), detailPage = ref(0)
@@ -27,16 +31,16 @@ const filteredDiffs = computed(() => (version.value?.diffRows || []).filter(d =>
 const visibleDiffs = computed(() => filteredDiffs.value.slice(detailPage.value * 50, (detailPage.value + 1) * 50))
 const visibleRows = computed(() => (version.value?.rows || []).slice(detailPage.value * 50, (detailPage.value + 1) * 50))
 const detailTotal = computed(() => detailTab.value === 'diff' ? filteredDiffs.value.length : (version.value?.rows?.length || 0))
-const statusLabel: Record<string, string> = { active: '当前生效库', preparing: '新库准备区', archived: '归档旧库', queued: '等待处理', processing: '处理中', completed: '处理完成，待审核', failed: '处理失败', interrupted: '处理已中断', draft: '待审核', published: '已生效', superseded: '历史版本', rejected: '已终止', blocked: '存在阻断', unchanged: '价格未变', parsed: '已解析', empty: '空表', metadata: '说明页', review: '待审核', staging: '生成草稿', parsing: '解析表格' }
+const statusLabel: Record<string, string> = { active: '当前生效库', preparing: '新库准备区', archived: '归档旧库', queued: '等待处理', processing: '处理中', completed: '处理完成', failed: '处理失败', interrupted: '处理已中断', draft: '待审核', published: '已生效', superseded: '历史版本', rejected: '已终止', blocked: '存在阻断', unchanged: '价格未变', parsed: '已解析', empty: '空表', metadata: '说明页', review: '待审核', staging: '生成草稿', parsing: '解析表格' }
 const diffLabel: Record<string, string> = { added: '新增', price: '价格变化', rule: '规则变化', removed: '移除', unchanged: '无变化' }
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review'), activationKey = idempotencyKey('logistics-activation')
 let disposed = false, selectionEpoch = 0
 
-async function run(action: () => Promise<void>) {
+async function run(action: () => Promise<void | PreparedDownload>) {
   if (busy.value) return
   busy.value = true; error.value = ''; message.value = ''
-  try { await action() } catch (e) { error.value = e instanceof Error ? e.message : '操作失败，请重试' } finally { busy.value = false }
+  try { const result = await action(); if (result && !disposed) preparedDownload.value = result } catch (e) { error.value = e instanceof Error ? e.message : '操作失败，请重试' } finally { busy.value = false }
 }
 function filters() { return new URLSearchParams({ query: query.value.trim(), country: country.value.trim(), attribute: attribute.value.trim(), page: String(page.value), size: '50' }) }
 function versionFilters(id: string) { return new URLSearchParams({ versionId: id }) }
@@ -48,6 +52,7 @@ async function refresh() {
   workspace.value = w; batches.value = b; acceptanceRefresh.value++; await loadPrices()
 }
 async function changeDataset() {
+  clearDownload()
   selectionEpoch++; clearTimeout(pollTimer); batch.value = null; version.value = null; cutover.value = null; page.value = 0; files.value = []
   workspace.value = null; batches.value = []; prices.value = { items: [], total: 0, page: 0, size: 50, totalPages: 0 }
   await run(refresh)
@@ -99,6 +104,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer) })
     <main>
       <header class="page-heading"><div><p class="eyebrow">LOGISTICS / PRICE WORKSPACE</p><h1>物流价格管理</h1><p>原表导入 · 版本审核 · 更新对比 · Excel 导出</p></div><div class="dataset-picker"><label>正在查看的物流库<select v-model="datasetId" :disabled="busy" @change="changeDataset"><option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.name }} · {{ statusLabel[d.status] }}</option></select></label><span class="tag" :class="selected?.status">{{ statusLabel[selected?.status || ''] }}</span></div></header>
       <p v-if="error" role="alert" class="notice error">{{ error }}</p><p v-if="message" role="status" class="notice success">{{ message }}</p>
+      <p v-if="preparedDownload" role="status" class="notice success">下载已就绪，请点击保存：<a :href="preparedDownload.url" :download="preparedDownload.filename">下载 {{ preparedDownload.filename }}</a>。下载仍需登录和物流权限；价格版本若发生变化，请重新生成链接。</p>
       <p v-if="archived" class="notice">这里是归档旧库，只能查阅和导出；不参与当前报价，不会被新导入自动恢复。</p>
       <p v-if="selected?.status === 'preparing'" class="notice">新库准备期间不影响当前报价。确认整体切换后，当前物流商和渠道列表才会全部换新。</p>
       <section class="metrics"><div><small>物流商</small><strong>{{ workspace?.providers.length || 0 }}</strong></div><div><small>渠道</small><strong>{{ workspace?.channels.length || 0 }}</strong></div><div><small>可自动报价</small><strong>{{ readyTargets.length }}</strong></div><div><small>待审价格版本</small><strong>{{ workspace?.versions.filter(v => v.status === 'draft').length || 0 }}</strong></div></section>
@@ -115,8 +121,8 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer) })
         <div class="card toolbar"><label>新物流库名称<input v-model="name" maxlength="120"></label><button :disabled="busy || !name.trim()" @click="createDataset">创建独立新库</button><span class="muted">不会清空当前库，也不会自动切换。</span></div>
         <div v-if="!archived" class="card"><h2>导入物流商原始报价表</h2><p><a href="/templates/logistics-v2.xlsx" download="物流标准导入模板V2.xlsx">下载新版标准模板（含示例和填写说明）</a></p><p class="muted">支持 .xls / .xlsx、多工作表、多渠道；每批最多30个文件，总计100MB。未审核价格不影响报价。</p><div class="toolbar"><input aria-label="物流报价文件" type="file" accept=".xls,.xlsx" multiple :disabled="busy" @change="chooseFiles"><button class="primary" :disabled="busy || !files.length" @click="upload">{{ busy ? '处理中…' : `上传并解析 ${files.length} 份文件` }}</button></div><label class="check"><input v-model="replaceDrafts" type="checkbox">如果已有不同待审稿，确认终止旧稿并保留历史，再生成新稿</label></div>
         <div class="card"><h2>导入记录</h2><div class="scroll"><table><thead><tr><th>时间</th><th>原始文件</th><th>状态</th><th>进度</th><th>操作</th></tr></thead><tbody><tr v-for="b in batches" :key="b.id"><td>{{ b.created_at }}</td><td>{{ b.files.map(f => f.name).join('、') }}</td><td>{{ statusLabel[b.status] || b.status }}</td><td>{{ b.progress || 0 }}%</td><td><button :disabled="busy" @click="openBatch(b.id)">查看结果</button></td></tr><tr v-if="!batches.length"><td colspan="5" class="empty">暂无导入批次。</td></tr></tbody></table></div></div>
-        <div v-if="batch" class="card"><div class="section-head"><h2>本批处理结果</h2><button :disabled="busy || batch.status !== 'completed'" @click="run(() => service.exportBatchDiff(batch!.id))">导出批次差异</button></div><p>{{ statusLabel[batch.status] }} · {{ statusLabel[batch.phase] || batch.phase }} · {{ batch.payload.progress || 0 }}%<span v-if="batch.payload.elapsedMs"> · 处理 {{ (batch.payload.elapsedMs / 1000).toFixed(2) }} 秒</span></p><progress :value="batch.payload.progress || 0" max="100" /><p v-if="batch.payload.error" class="warning">{{ batch.payload.error }}</p><button v-if="['failed', 'interrupted', 'processing'].includes(batch.status) && !archived" :disabled="busy" @click="run(async () => { batch = await service.retry(batch!.id); schedulePoll() })">重试失败 / 超时批次</button>
-          <details v-for="(file, i) in batch.payload.files" :key="i"><summary>{{ file.name }} <button :disabled="busy" @click.stop="run(() => service.original(batch!.id, i, file.name))">下载原文件</button><button v-if="batch.payload.fileReports?.[i]?.sourceEvidence" :disabled="busy" @click.stop="run(() => service.evidence(batch!.id, i))">下载解析证据</button></summary><p v-if="batch.payload.fileReports?.[i]?.message" class="warning">{{ batch.payload.fileReports[i]?.message }}</p><ul><li v-for="s in batch.payload.fileReports?.[i]?.sheets || []" :key="s.name">{{ s.name }}：{{ statusLabel[s.status] || s.status }} · {{ s.priceRows || 0 }} 条价格 {{ s.message || '' }}</li></ul></details>
+        <div v-if="batch" class="card"><div class="section-head"><h2>本批处理结果</h2><button :disabled="busy || batch.status !== 'completed'" @click="run(() => service.exportBatchDiff(batch!.id))">导出批次差异</button></div><p>{{ statusLabel[batch.status] }} · {{ completedBatchStage(batch) || statusLabel[batch.phase] || batch.phase }} · {{ batch.payload.progress || 0 }}%<span v-if="batch.payload.elapsedMs"> · 处理 {{ (batch.payload.elapsedMs / 1000).toFixed(2) }} 秒</span></p><progress :value="batch.payload.progress || 0" max="100" /><p v-if="batch.payload.error" class="warning">{{ batch.payload.error }}</p><button v-if="['failed', 'interrupted', 'processing'].includes(batch.status) && !archived" :disabled="busy" @click="run(async () => { batch = await service.retry(batch!.id); schedulePoll() })">重试失败 / 超时批次</button>
+          <details v-for="(file, i) in batch.payload.files" :key="i"><summary>{{ file.name }} <button :disabled="busy" @click.stop="run(() => service.original(batch!.id, i))">下载原文件</button><button v-if="batch.payload.fileReports?.[i]?.sourceEvidence" :disabled="busy" @click.stop="run(() => service.evidence(batch!.id, i))">下载解析证据</button></summary><p v-if="batch.payload.fileReports?.[i]?.message" class="warning">{{ batch.payload.fileReports[i]?.message }}</p><ul><li v-for="s in batch.payload.fileReports?.[i]?.sheets || []" :key="s.name">{{ s.name }}：{{ statusLabel[s.status] || s.status }} · {{ s.priceRows || 0 }} 条价格 {{ s.message || '' }}</li></ul></details>
           <div class="scroll"><table><thead><tr><th>物流商 / 渠道</th><th>结果</th><th>更新摘要</th><th>操作</th></tr></thead><tbody><tr v-for="(r, i) in batch.payload.results" :key="i"><td>{{ r.providerName }}<small>{{ r.channelName }}</small></td><td>{{ statusLabel[r.status] || r.status }}<small class="warning">{{ r.message }}{{ r.quoteReady === false ? '计费规则待适配' : '' }}</small></td><td>新增 {{ r.summary?.added || 0 }} · 调价 {{ r.summary?.price || 0 }} · 移除 {{ r.summary?.removed || 0 }}<small>{{ r.errors || 0 }} 个阻断问题</small></td><td><button v-if="r.versionId" :disabled="busy" @click="openVersion(r.versionId)">核对版本</button><details v-else><summary>查看原因</summary><p>{{ r.message }}</p><p v-for="(issue, j) in r.issues || []" :key="j">{{ issue.message }}</p></details></td></tr></tbody></table></div>
         </div>
         <div v-if="selected?.status === 'preparing'" class="card cutover"><h2>新库整体切换</h2><p>准备完毕后，先备份旧库并核对渠道关联。切换不删除历史报价；无法匹配的财务渠道、模板和草稿需要后续人工处理。</p><button :disabled="busy" @click="prepareCutover">备份旧库并生成切换预览</button>
@@ -129,7 +135,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer) })
       <section v-if="version" class="card version-detail"><div class="section-head"><div><p class="eyebrow">VERSION REVIEW</p><h2>{{ workspace?.channels.find(c => c.id === version?.channelId)?.name }} · V{{ version.versionNumber }}</h2><p>{{ statusLabel[version.status] }} · {{ version.fileName }}</p></div><button @click="version = null">关闭详情</button></div>
         <p v-if="version.quoteReady === false" class="notice">该版本的价格可核对和管理，但计费条件尚未完全适配。即使审核价格，也不会开放自动报价。</p>
         <LogisticsBillingReview :key="`${version.id}-${version.status}`" :version-id="version.id" :readonly="archived" @updated="acceptanceUpdated" />
-        <div class="toolbar"><button :disabled="busy" @click="run(() => service.exportPrices(datasetId, versionFilters(version!.id)))">导出本版本价格</button><button :disabled="busy" @click="run(() => service.exportDiff(version!))">导出本版本差异</button><button v-if="version.batchId" :disabled="busy" @click="run(() => service.original(version!.batchId!, version!.sourceFileIndex || 0, version!.fileName))">下载原文件</button></div>
+        <div class="toolbar"><button :disabled="busy" @click="run(() => service.exportPrices(datasetId, versionFilters(version!.id)))">导出本版本价格</button><button :disabled="busy" @click="run(() => service.exportDiff(version!))">导出本版本差异</button><button v-if="version.batchId" :disabled="busy" @click="run(() => service.original(version!.batchId!, version!.sourceFileIndex || 0))">下载原文件</button></div>
         <p class="muted">对比基线：{{ version.basePublishedVersionId || '初始价格版本（不与旧库比较）' }}</p>
         <div class="toolbar"><button @click="detailTab = 'diff'; detailPage = 0">价格变化</button><button @click="detailTab = 'rows'; detailPage = 0">完整价格</button><button @click="detailTab = 'issues'; detailPage = 0">解析问题 {{ version.issues?.length || 0 }}</button><select v-if="detailTab === 'diff'" v-model="diffType" aria-label="差异类型" @change="detailPage = 0"><option value="all">全部差异类型</option><option v-for="(label, key) in diffLabel" :key="key" :value="key">{{ label }}</option></select></div>
         <div v-if="detailTab === 'diff'" class="scroll"><table><thead><tr><th>国家 / 档位</th><th>类型</th><th>原值 → 新值</th><th>变化</th></tr></thead><tbody><tr v-for="d in visibleDiffs" :key="d.key"><td>{{ d.row.areaName }} · {{ d.row.zoneName || '无分区' }}<small>{{ weightLabel(d.row) }}</small></td><td>{{ diffLabel[d.type] }}</td><td><div v-for="(c, i) in d.changes" :key="i">{{ c.field }}：{{ shown(c.before) }} → {{ shown(c.after) }}</div><span v-if="!d.changes.length">公斤价 ¥{{ money(d.previous?.pricePerKg) }} → {{ d.type === 'removed' ? '移除' : `¥${money(d.row.pricePerKg)}` }}<small>每票 ¥{{ money(d.previous?.registrationFee) }} → {{ d.type === 'removed' ? '移除' : `¥${money(d.row.registrationFee)}` }}</small></span></td><td><div v-for="(c, i) in d.changes" :key="i">{{ c.delta == null ? '规则变化' : `${c.delta > 0 ? '+' : ''}${money(c.delta)}` }}<small>{{ c.percentChange == null ? '—' : `${c.percentChange > 0 ? '+' : ''}${c.percentChange.toFixed(2)}%` }}</small></div></td></tr></tbody></table></div>

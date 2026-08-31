@@ -1,12 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, conditionalGet, idempotencyKey, resetCsrf, uploadForm } from './http'
+import { ApiError, api, conditionalGet, downloadFile, idempotencyKey, resetCsrf, uploadForm } from './http'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   resetCsrf()
 })
 
 describe('quotation API client', () => {
+  it('prepares an authenticated native link and preserves snapshot parameters', async () => {
+    const result = { url: '/api/v1/logistics/rebuild/datasets/one/prices.xlsx?snapshot=fixed', filename: '物流价格.xlsx' }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: result })))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(downloadFile(new URLSearchParams({ kind: 'prices', id: 'one' }))).resolves.toEqual(result)
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/logistics/rebuild/downloads/prepare?kind=prices&id=one', expect.objectContaining({ credentials: 'include' }))
+  })
+  it('rejects external download links and preserves session error handling', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { url: 'https://external.invalid/export', filename: 'price.xlsx' } }))).mockResolvedValueOnce(new Response(JSON.stringify({ code: 'UNAUTHORIZED', message: '请重新登录' }), { status: 401 })))
+    await expect(downloadFile(new URLSearchParams())).rejects.toThrow('下载地址不合法')
+    await expect(downloadFile(new URLSearchParams())).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' })
+  })
   it('returns the data envelope and forwards request id', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'SUCCESS', data: { ok: true } }), {
       status: 200,
