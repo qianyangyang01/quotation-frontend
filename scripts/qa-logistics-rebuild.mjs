@@ -36,7 +36,7 @@ const [dataset, duplicate] = await Promise.all([1, 2].map(() => request(`${root}
 assert.equal(dataset.id, duplicate.id)
 report.datasetId = dataset.id
 passed('concurrent-dataset-create-idempotent')
-const names = (await readdir(corpus)).filter(n => /\.xlsx?$/i.test(n)).sort()
+const names = (await readdir(corpus)).filter(n => /\.xlsx?$/i.test(n) && !n.startsWith('~$')).sort()
 assert.equal(names.length, 11)
 async function upload(key) {
   const form = new FormData()

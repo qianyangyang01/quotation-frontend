@@ -114,7 +114,7 @@ class LogisticsSourceParserTest {
     void auditsEveryRealWorkbookAndChecksHandCalculatedSamples()throws Exception {
         var root=Path.of(System.getProperty("logistics.corpusDir"));var report=mapper.createArrayNode();var books=new LinkedHashMap<String,JsonNode>();
         try(var paths=Files.list(root)) {
-            for(var path:paths.filter(p->p.toString().matches("(?i).*\\.xlsx?$")).sorted().toList()) {
+            for(var path:paths.filter(p->p.toString().matches("(?i).*\\.xlsx?$")&&!p.getFileName().toString().startsWith("~$")).sorted().toList()) {
                 long start=System.nanoTime();var parsed=parser.parse(Files.readAllBytes(path),path.getFileName().toString());books.put(path.getFileName().toString(),parsed);
                 try(var w=WorkbookFactory.create(path.toFile(),null,true)){assertEquals(w.getNumberOfSheets(),parsed.path("sheets").size());}
                 var summary=parsed.deepCopy();summary.remove("channels");var cs=summary.putArray("channels");
