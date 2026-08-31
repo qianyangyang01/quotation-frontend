@@ -3,6 +3,7 @@ import { api, idempotencyKey, uploadForm, type UploadProgress } from './http'
 export type PurchaseImportJobStatus = 'queued'|'parsing'|'ready'|'import-queued'|'importing'|'completed'|'completed-with-errors'|'failed'|'cancelled'|'rollback-queued'|'rolling-back'|'rolled-back'
 export interface PurchaseImportImagePart { partNumber:number;fileName:string;status:string;sizeBytes:number;processedBytes:number;error?:string;processedAt?:string }
 export interface PurchaseImportJob {
+  archivedAt?:string|null
   id:string;status:PurchaseImportJobStatus;phase:string;sourceName:string;totalRows:number;processedRows:number;validRows:number;errorRows:number;addedRows:number;updatedRows:number;conflictRows:number;progressPercent:number;imageParts:number;imagePartDetails:PurchaseImportImagePart[];imageErrors:number;error?:string;summary?:{sourceBytes?:number;uploadedBytes?:number;originalSizeBytes?:number;removedMediaCount?:number;importMode?:'text-only';textParseMillis?:number;generatedSkuRows?:number;warningCount?:number;sheetSummaries?:PurchaseImportSheetSummary[];continuation?:PurchaseImportContinuation};createdAt:string;updatedAt:string;completedAt?:string;rolledBackAt?:string
 }
 export interface PurchaseImportContinuation {
@@ -21,7 +22,12 @@ export function createPurchaseImportJob(file:File,onProgress?:(progress:UploadPr
   return uploadForm<PurchaseImportJob>('/purchase-imports/jobs',form,onProgress)
 }
 export async function uploadPurchaseImagePart(jobId:string,partNumber:number,file:File){const form=new FormData();form.append('file',file);return api.post<PurchaseImportJob>(`/purchase-imports/jobs/${jobId}/image-parts?partNumber=${partNumber}`,form)}
-export const loadPurchaseImportJobs=(page=0,size=20)=>api.get<PageResult<PurchaseImportJob>>(`/purchase-imports/jobs?page=${page}&size=${size}`)
+export const loadPurchaseImportJobs=(page=0,size=20,archived=false)=>api.get<PageResult<PurchaseImportJob>>(`/purchase-imports/jobs?page=${page}&size=${size}&archived=${archived}`)
+export interface PurchaseImportRemovalCheck { action:'delete'|'archive'|'blocked';appliedRows:number;reason:string }
+export const checkPurchaseImportRemoval=(id:string)=>api.get<PurchaseImportRemovalCheck>(`/purchase-imports/jobs/${id}/deletion-check`)
+export const deletePurchaseImportTask=(id:string)=>api.delete<PurchaseImportRemovalCheck>(`/purchase-imports/jobs/${id}`)
+export const archivePurchaseImportTask=(id:string)=>api.post<PurchaseImportRemovalCheck>(`/purchase-imports/jobs/${id}/archive`)
+export const restorePurchaseImportTask=(id:string)=>api.post<PurchaseImportJob>(`/purchase-imports/jobs/${id}/restore`)
 export const loadPurchaseImportJob=(id:string)=>api.get<PurchaseImportJob>(`/purchase-imports/jobs/${id}`)
 export const loadPurchaseImportRows=(id:string,status='',page=0,size=50)=>api.get<PageResult<PurchaseImportRowView>>(`/purchase-imports/jobs/${id}/rows?status=${encodeURIComponent(status)}&page=${page}&size=${size}`)
 export const loadPurchaseImportDuplicateGroups=(id:string)=>api.get<PurchaseImportDuplicateGroup[]>(`/purchase-imports/jobs/${id}/duplicate-groups`)

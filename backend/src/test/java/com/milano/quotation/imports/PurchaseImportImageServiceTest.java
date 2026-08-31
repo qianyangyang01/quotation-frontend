@@ -24,7 +24,7 @@ class PurchaseImportImageServiceTest {
     @BeforeEach void setup(){jobs=mock(ImportJobRepository.class);parts=mock(ImportPartRepository.class);rows=mock(PurchaseImportRowRepository.class);entries=mock(MigrationManifestEntryRepository.class);storage=mock(AssetStorageService.class);jdbc=mock(JdbcTemplate.class);var transactions=mock(org.springframework.transaction.PlatformTransactionManager.class);when(transactions.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());service=new PurchaseImportImageService(jobs,parts,rows,entries,storage,jdbc,transactions);when(parts.save(any())).thenAnswer(i->i.getArgument(0));}
 
     @Test void uploadsZipPartAndSanitizesName(){
-        var job=job("ready");when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var job=job("ready");when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         var file=new MockMultipartFile("file","folder\\images\n.zip","application/zip",new byte[]{1,2});
         var part=service.upload(job.id,7,file);assertEquals(7,part.partNumber);assertEquals("folder_images_.zip",part.originalName);assertEquals(64,part.sha256.length());
         verify(storage).putRaw(contains("00007.zip"),any(),eq(2L),eq("application/zip"));
@@ -32,7 +32,7 @@ class PurchaseImportImageServiceTest {
 
     @Test void rejectsInvalidUploadStatesAndInputs(){
         var id=UUID.randomUUID();when(jobs.findById(id)).thenReturn(Optional.empty());assertThrows(AppException.class,()->service.upload(id,1,zipFile(new byte[]{1})));
-        var job=job("completed");when(jobs.findById(job.id)).thenReturn(Optional.of(job));assertThrows(AppException.class,()->service.upload(job.id,1,zipFile(new byte[]{1})));
+        var job=job("completed");when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));assertThrows(AppException.class,()->service.upload(job.id,1,zipFile(new byte[]{1})));
         job.status="ready";assertThrows(AppException.class,()->service.upload(job.id,0,zipFile(new byte[]{1})));
         assertThrows(AppException.class,()->service.upload(job.id,1,new MockMultipartFile("file","a.txt","",new byte[]{1})));
         var huge=mock(org.springframework.web.multipart.MultipartFile.class);when(huge.isEmpty()).thenReturn(false);when(huge.getOriginalFilename()).thenReturn("a.zip");when(huge.getSize()).thenReturn(501L*1024*1024);
@@ -67,7 +67,7 @@ class PurchaseImportImageServiceTest {
     }
 
     @Test void failedPartCanBeReplacedAndOwnedAssetsAreRetired(){
-        var job=job("failed");when(jobs.findById(job.id)).thenReturn(Optional.of(job));var old=part(job.id,2,"key");old.status="failed";when(parts.findByJobIdAndPartNumber(job.id,2)).thenReturn(Optional.of(old));var entry=new MigrationManifestEntry();entry.assetId=UUID.randomUUID();entry.assetOwned=true;when(entries.findByImportPartId(old.id)).thenReturn(List.of(entry));
+        var job=job("failed");when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));var old=part(job.id,2,"key");old.status="failed";when(parts.findByJobIdAndPartNumber(job.id,2)).thenReturn(Optional.of(old));var entry=new MigrationManifestEntry();entry.assetId=UUID.randomUUID();entry.assetOwned=true;when(entries.findByImportPartId(old.id)).thenReturn(List.of(entry));
         assertSame(old,service.upload(job.id,2,zipFile(new byte[]{1,2})));verify(storage).retire(List.of(entry.assetId),job.id);verify(entries).deleteByImportPartId(old.id);assertEquals("uploaded",old.status);
     }
 

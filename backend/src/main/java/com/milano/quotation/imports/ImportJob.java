@@ -34,5 +34,6 @@ public class ImportJob {
     @Column(name="created_at",nullable=false) public Instant createdAt;
     @Column(name="updated_at",nullable=false) public Instant updatedAt;
     @Column(name="completed_at") public Instant completedAt;
+    @Column(name="archived_at") public Instant archivedAt;
     protected ImportJob() {}
 }

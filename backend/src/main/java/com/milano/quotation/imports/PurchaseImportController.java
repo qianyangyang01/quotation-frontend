@@ -38,11 +38,12 @@ public class PurchaseImportController {
     private final AssetStorageService storage;
     private final AsyncPurchaseImportService asyncImports;
     private final PurchaseImportImageService asyncImages;
+    private final PurchaseImportTaskService tasks;
 
     public PurchaseImportController(PurchaseWorkbookService parser, ImportJobRepository jobs,
                                     PurchaseImportRowRepository rows, PurchaseProductService products,
                                     IdempotencyService idempotency, AuditService audit, AssetStorageService storage,
-                                    AsyncPurchaseImportService asyncImports, PurchaseImportImageService asyncImages) {
+                                    AsyncPurchaseImportService asyncImports, PurchaseImportImageService asyncImages, PurchaseImportTaskService tasks) {
         this.parser = parser;
         this.jobs = jobs;
         this.rows = rows;
@@ -50,7 +51,7 @@ public class PurchaseImportController {
         this.idempotency = idempotency;
         this.audit = audit;
         this.storage = storage;
-        this.asyncImports = asyncImports;
+        this.asyncImports = asyncImports;this.tasks=tasks;
         this.asyncImages = asyncImages;
     }
 
@@ -62,7 +63,11 @@ public class PurchaseImportController {
                                               Authentication auth){var job=asyncImports.create(file,account(auth),importMode,originalSizeBytes,removedMediaCount);audit.record("purchase.async-import-create","purchase-import",job.id.toString(),"success",Map.of("file",job.sourceName,"uploadedSize",file.getSize(),"originalSize",job.payload.path("originalSizeBytes").asLong(),"removedMediaCount",job.payload.path("removedMediaCount").asInt(),"importMode","text-only"));return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(job.id)));}
     @PostMapping(value="/jobs/{id}/image-parts",consumes="multipart/form-data")
     ResponseEntity<ApiResponse<?>> imagePart(@PathVariable UUID id,@RequestParam int partNumber,@RequestPart("file")MultipartFile file){asyncImages.upload(id,partNumber,file);audit.record("purchase.async-import-image-part","purchase-import",id.toString(),"success",Map.of("part",partNumber,"size",file.getSize()));return ResponseEntity.accepted().body(ApiResponse.ok(asyncImports.view(id)));}
-    @GetMapping("/jobs") ApiResponse<?> jobs(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="20")int size){return ApiResponse.ok(asyncImports.list(PageRequest.of(Math.max(0,page),Math.min(100,Math.max(1,size)))));}
+    @GetMapping("/jobs") ApiResponse<?> jobs(@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="20")int size,@RequestParam(defaultValue="false")boolean archived){return ApiResponse.ok(asyncImports.list(PageRequest.of(Math.max(0,page),Math.min(100,Math.max(1,size))),archived));}
+    @GetMapping("/jobs/{id}/deletion-check") ApiResponse<?> deletionCheck(@PathVariable UUID id){return ApiResponse.ok(tasks.inspect(id));}
+    @DeleteMapping("/jobs/{id}") ApiResponse<?> deleteTask(@PathVariable UUID id){return ApiResponse.ok(tasks.delete(id));}
+    @PostMapping("/jobs/{id}/archive") ApiResponse<?> archiveTask(@PathVariable UUID id){return ApiResponse.ok(tasks.archive(id));}
+    @PostMapping("/jobs/{id}/restore") ApiResponse<?> restoreTask(@PathVariable UUID id){tasks.restore(id);return ApiResponse.ok(asyncImports.view(id));}
     @GetMapping("/jobs/{id}") ApiResponse<?> jobView(@PathVariable UUID id){return ApiResponse.ok(asyncImports.view(id));}
     @GetMapping("/jobs/{id}/rows") ApiResponse<?> jobRows(@PathVariable UUID id,@RequestParam(required=false)String status,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="50")int size){return ApiResponse.ok(asyncImports.rowPage(id,status,PageRequest.of(Math.max(0,page),Math.min(200,Math.max(1,size)))));}
     @GetMapping("/jobs/{id}/duplicate-groups") ApiResponse<?> duplicateGroups(@PathVariable UUID id){return ApiResponse.ok(asyncImports.duplicateGroups(id));}

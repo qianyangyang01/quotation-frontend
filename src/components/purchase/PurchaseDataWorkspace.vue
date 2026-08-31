@@ -5,7 +5,7 @@ import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImport
 import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs, shouldRefreshPurchaseImportDetails } from '@/services/purchaseImportPolling'
 import { purchaseImportConfirmationState } from '@/services/purchaseImportConfirmation'
 import { createPurchaseImportTaskRequests } from '@/services/purchaseImportTaskRequests'
-import ImageMigrationPanel from './ImageMigrationPanel.vue'
+import { checkPurchaseImportRemoval, deletePurchaseImportTask, archivePurchaseImportTask, restorePurchaseImportTask, type PurchaseImportRemovalCheck } from '@/services/purchaseAsyncImports'
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 
@@ -18,7 +18,6 @@ const editor = ref<PurchaseProductRecord | null>(null)
 const editingOriginalSku = ref('')
 const notice = ref('')
 const previewImage = ref<{ src: string; title: string } | null>(null)
-const showImageMigration = ref(false)
 const showSupplierRecords = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -33,6 +32,14 @@ let cancelActiveUpload:(()=>void)|null=null
 const imageUploading = ref(false)
 const showTaskCenter = ref(false)
 const importJobs = ref<PurchaseImportJob[]>([])
+const jobPage = ref(0)
+const jobTotalPages = ref(0)
+const jobTotal = ref(0)
+const archivedJobs = ref(false)
+const jobListLoading = ref(false)
+const taskMaintenanceBusy = ref(false)
+const removalTarget = ref<{job:PurchaseImportJob;check:PurchaseImportRemovalCheck}|null>(null)
+let jobListRequest = 0
 const activeJob = ref<PurchaseImportJob | null>(null)
 const taskDetailLoading = ref(false)
 const taskRequests = createPurchaseImportTaskRequests()
@@ -115,8 +122,13 @@ function importJobStatuses(){return [activeJob.value?.status,...importJobs.value
 function startJobPolling(){stopJobPolling();jobPollTimer=window.setInterval(()=>{if(shouldPollPurchaseImportJobs(showTaskCenter.value,importJobStatuses()))void refreshImportJobs()},2000)}
 function stopJobPolling(){window.clearInterval(jobPollTimer);jobPollTimer=0}
 async function refreshImportJobs(refreshDetails=false){
+  const request=++jobListRequest
+  jobListLoading.value=true
   try{
-    const page=await loadPurchaseImportJobs();importJobs.value=page.content
+    const page=await loadPurchaseImportJobs(jobPage.value,20,archivedJobs.value)
+    if(request!==jobListRequest)return
+    if(jobPage.value>0&&jobPage.value>=page.totalPages){jobPage.value=Math.max(0,page.totalPages-1);await refreshImportJobs(refreshDetails);return}
+    importJobs.value=page.content;jobTotal.value=page.totalElements;jobTotalPages.value=page.totalPages
     if(!activeJob.value)return
     const {id,status:previousStatus}=activeJob.value
     let nextStatus=previousStatus
@@ -124,7 +136,39 @@ async function refreshImportJobs(refreshDetails=false){
     if(!applied){if(refreshDetails&&activeJob.value?.id===id)await Promise.all([refreshDuplicateGroups(),refreshJobRows()]);return}
     if(shouldRefreshPurchaseImportDetails(previousStatus,nextStatus,refreshDetails))await Promise.all([refreshDuplicateGroups(),refreshJobRows()])
     if(didPurchaseImportDataChange(previousStatus,nextStatus))await reload()
-  }catch{/* 页面主数据错误提示已独立处理，轮询失败等待下一次重试 */}
+  }catch(error){if(request===jobListRequest)toast(error instanceof Error?error.message:'导入任务读取失败，请重试')}
+  finally{if(request===jobListRequest)jobListLoading.value=false}
+}
+function clearActiveJob(){taskRequests.select('');activeJob.value=null;activeRows.value=[];activeDuplicateGroups.value=[];pendingJobAction.value=null;taskDetailLoading.value=false}
+function changeJobList(archived:boolean,page=0){
+  if(taskMaintenanceBusy.value)return
+  archivedJobs.value=archived;jobPage.value=page;clearActiveJob();void refreshImportJobs()
+}
+async function requestTaskRemoval(job:PurchaseImportJob){
+  taskMaintenanceBusy.value=true
+  try{const check=await checkPurchaseImportRemoval(job.id);removalTarget.value={job,check}}
+  catch(error){toast(error instanceof Error?error.message:'任务删除检查失败')}
+  finally{taskMaintenanceBusy.value=false}
+}
+async function removeTask(){
+  const target=removalTarget.value
+  if(!target||taskMaintenanceBusy.value||target.check.action==='blocked')return
+  taskMaintenanceBusy.value=true
+  try{
+    if(target.check.action==='archive')await archivePurchaseImportTask(target.job.id)
+    else await deletePurchaseImportTask(target.job.id)
+    if(activeJob.value?.id===target.job.id)clearActiveJob()
+    removalTarget.value=null;await refreshImportJobs()
+    toast(target.check.action==='archive'?'任务已移入已归档，商品和续传记录保留':'未入库任务已删除，采购商品不变')
+  }catch(error){removalTarget.value=null;await refreshImportJobs(true);toast(error instanceof Error?error.message:'任务整理失败，请刷新后重试')}
+  finally{taskMaintenanceBusy.value=false}
+}
+async function restoreTask(job:PurchaseImportJob){
+  if(taskMaintenanceBusy.value)return
+  taskMaintenanceBusy.value=true
+  try{await restorePurchaseImportTask(job.id);if(activeJob.value?.id===job.id)clearActiveJob();await refreshImportJobs();toast('已恢复，可在当前任务中查看和继续操作')}
+  catch(error){toast(error instanceof Error?error.message:'任务恢复失败')}
+  finally{taskMaintenanceBusy.value=false}
 }
 async function selectImportJob(job:PurchaseImportJob){
   taskRequests.select(job.id);activeJob.value=null;taskDetailLoading.value=true;pendingJobAction.value=null
@@ -152,6 +196,7 @@ async function chooseAsyncWorkbook(event:Event){
     const upload=createPurchaseImportJob(file,progress=>{uploadProgress.value={...uploadProgress.value,...progress,stage:progress.percent>=100?'正在创建任务':'正在上传表格'}})
     cancelActiveUpload=upload.cancel
     const uploadedJob=await upload.promise
+    archivedJobs.value=false;jobPage.value=0
     taskRequests.select(uploadedJob.id);activeJob.value=uploadedJob;taskDetailLoading.value=false
     activeDuplicateGroups.value=[];asyncDuplicateSelections.value={};pendingJobAction.value=null;activeRows.value=[];activeRowStatus.value='error';activeRowPage.value=0;activeRowTotalPages.value=0;activeRowTotal.value=0
     uploadProgress.value={...uploadProgress.value,loaded:file.size,percent:100,stage:'排队'}
@@ -272,7 +317,6 @@ const detailFields = computed(() => detail.value ? [
       <button class="outline" :class="{ active:showSupplierRecords }" @click="showSupplierRecords=true">供应商</button>
       <button class="outline" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading ? `${uploadProgress.percent}%` : 'Excel 导入' }}</button>
       <button class="outline" @click="showTaskCenter=true">导入任务</button>
-      <button class="outline" @click="showImageMigration=true">图片迁移</button>
       <button class="primary" @click="openEditor()">＋ 新增采购资料</button>
       <input ref="asyncFileInput" hidden type="file" accept=".xlsx" @change="chooseAsyncWorkbook">
     </div>
@@ -301,7 +345,7 @@ const detailFields = computed(() => detail.value ? [
     <table v-else>
       <thead><tr><th>类别 / SKU</th><th>采购阶梯价格</th><th>重量与尺寸</th><th>国内运费</th><th>尺码 / 颜色</th><th>资料状态</th><th>操作</th></tr></thead>
       <tbody><tr v-for="record in pagedRecords" :key="record.sku">
-        <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ purchaseDisplayName(record) }}</b><small>{{ record.sku }}</small><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
+        <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ record.category || purchaseDisplayName(record) }}</b><small class="product-sku">{{ record.sku }}</small><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
         <td><div v-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
         <td><b>{{ value(record.weightG,' g') }}</b><small>{{ value(record.lengthCm) }} × {{ value(record.widthCm) }} × {{ value(record.heightCm) }} cm</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
         <td><small>1件 {{ unitFreight(record,1) }}</small><small>10件 {{ unitFreight(record,10) }}</small><small>100件 {{ unitFreight(record,100) }}</small></td>
@@ -327,7 +371,19 @@ const detailFields = computed(() => detail.value ? [
   <div v-if="showTaskCenter" class="mask" @click.self="showTaskCenter=false"><section class="modal task-center-modal">
     <button class="close" @click="showTaskCenter=false">×</button><small>EXCEL IMPORT TASKS</small><h2>采购 Excel 导入任务</h2><p>按同名文件、工作表名和 Excel 实际行号接着导入。无 SKU 的行先入库；以后原行只补 SKU 时更新原商品，不重复新增。其余旧内容保持不变，新数据放在末尾。</p>
     <div class="task-center-grid">
-      <aside class="job-list"><button v-for="job in importJobs" :key="job.id" :class="{ active:activeJob?.id===job.id }" @click="selectImportJob(job)"><b>{{ job.sourceName }}</b><span>{{ jobPhaseLabel[job.phase] || jobStatusLabel[job.status] || job.status }} · {{ job.progressPercent }}%</span><small>{{ new Date(job.createdAt).toLocaleString() }}</small></button><p v-if="!importJobs.length">暂无导入任务</p></aside>
+      <aside class="job-list">
+        <div class="job-list-tabs"><button :class="{selected:!archivedJobs}" :disabled="taskMaintenanceBusy" @click="changeJobList(false)">当前任务</button><button :class="{selected:archivedJobs}" :disabled="taskMaintenanceBusy" @click="changeJobList(true)">已归档</button></div>
+        <div class="job-list-meta"><span>共 {{ jobTotal }} 条</span><button :disabled="jobListLoading||taskMaintenanceBusy" @click="refreshImportJobs()">刷新</button></div>
+        <div class="job-list-items">
+        <div v-for="job in importJobs" :key="job.id" class="job-list-item" :class="{active:activeJob?.id===job.id}">
+          <button class="job-select" :disabled="taskMaintenanceBusy" @click="selectImportJob(job)"><b>{{ job.sourceName }}</b><span>{{ jobPhaseLabel[job.phase] || jobStatusLabel[job.status] || job.status }} · {{ job.progressPercent }}%</span><small>{{ new Date(job.createdAt).toLocaleString() }}</small></button>
+          <button v-if="archivedJobs" class="job-maintenance" :disabled="taskMaintenanceBusy" :aria-label="`恢复任务 ${job.sourceName}`" @click="restoreTask(job)">恢复任务</button>
+          <button v-else class="job-maintenance" :disabled="taskMaintenanceBusy||!['ready','failed','cancelled','completed','completed-with-errors','rolled-back'].includes(job.status)" :title="['ready','failed','cancelled','completed','completed-with-errors','rolled-back'].includes(job.status)?'检查后删除未入库任务或归档历史任务':'任务执行或排队中，暂不能整理'" :aria-label="`删除任务 ${job.sourceName}`" @click="requestTaskRemoval(job)">删除任务</button>
+        </div>
+        <p v-if="!importJobs.length">{{ jobListLoading?'正在读取任务…':archivedJobs?'暂无归档任务':'暂无导入任务' }}</p>
+        </div>
+        <nav class="job-pagination" aria-label="导入任务分页"><button :disabled="jobPage===0||jobListLoading||taskMaintenanceBusy" @click="changeJobList(archivedJobs,jobPage-1)">上一页</button><span>{{ jobPage+1 }} / {{ Math.max(1,jobTotalPages) }}</span><button :disabled="jobPage+1>=jobTotalPages||jobListLoading||taskMaintenanceBusy" @click="changeJobList(archivedJobs,jobPage+1)">下一页</button></nav>
+      </aside>
       <main v-if="activeJob" class="job-detail">
         <header><div><b>{{ activeJob.sourceName }}</b><span :class="['job-status',activeJob.status]">{{ jobStatusLabel[activeJob.status] || activeJob.status }}</span></div><strong>{{ activeJob.progressPercent }}%</strong></header>
         <div class="progress"><i :style="{ width:`${activeJob.progressPercent}%` }"></i></div>
@@ -352,12 +408,12 @@ const detailFields = computed(() => detail.value ? [
         <p v-if="activeJob.summary?.textParseMillis!=null" class="parse-summary">文本解析 {{ activeJob.summary.textParseMillis }} ms · 临时 SKU {{ activeJob.summary.generatedSkuRows || 0 }} 条 · 提醒 {{ activeJob.summary.warningCount || 0 }} 条</p>
         <div v-if="activeJob.summary?.sheetSummaries?.length" class="sheet-summaries"><article v-for="sheet in activeJob.summary.sheetSummaries" :key="sheet.sheetName" :class="{skipped:!sheet.recognized}"><b>{{ sheet.sheetName }}</b><span>{{ sheet.recognized ? `识别成功，${sheet.dataRows} 条数据` : '未发现 SKU 表头，已跳过' }}</span><small v-if="sheet.recognized">表头第 {{ sheet.headerRow }} 行 · 未知列 {{ sheet.unknownColumns.length }} · 缺少字段 {{ sheet.missingColumns.length }} · 忽略空行 {{ sheet.ignoredRows }}</small><small v-if="sheet.unknownColumns.length">未知列：{{ sheet.unknownColumns.join('、') }}</small></article></div>
         <p v-if="activeJob.error" class="job-error">{{ activeJob.error }}</p>
-        <div v-if="['queued','parsing','ready','failed'].includes(activeJob.status)" class="image-part-upload"><label>图片ZIP分包编号 <input v-model.number="imagePartNumber" type="number" min="1"></label><button :disabled="imageUploading" @click="imagePartInput?.click()">{{ imageUploading?'上传中…':'上传图片分包' }}</button><small>命名：SKU-product.jpg / SKU-physical.jpg；已上传 {{ activeJob.imageParts }} 包</small><input ref="imagePartInput" hidden type="file" accept=".zip" @change="chooseImagePart"></div>
+        <div v-if="!activeJob.archivedAt&&['queued','parsing','ready','failed'].includes(activeJob.status)" class="image-part-upload"><label>图片ZIP分包编号 <input v-model.number="imagePartNumber" type="number" min="1"></label><button :disabled="imageUploading" @click="imagePartInput?.click()">{{ imageUploading?'上传中…':'上传图片分包' }}</button><small>命名：SKU-product.jpg / SKU-physical.jpg；已上传 {{ activeJob.imageParts }} 包</small><input ref="imagePartInput" hidden type="file" accept=".zip" @change="chooseImagePart"></div>
         <div v-if="activeJob.imagePartDetails?.length" class="image-part-list"><button v-for="part in activeJob.imagePartDetails" :key="part.partNumber" :class="part.status" :title="part.error || part.fileName" @click="part.status==='failed' && (imagePartNumber=part.partNumber)"><b>分包 {{ part.partNumber }}</b><span>{{ part.status==='completed'?'已完成':part.status==='failed'?'失败，点击选择替换':'待处理' }}</span><small v-if="part.error">{{ part.error }}</small></button></div>
         <div class="row-filter"><button :class="{active:activeRowStatus===''}" @click="activeRowStatus='';refreshJobRows()">全部行</button><button :class="{active:activeRowStatus==='valid'}" @click="activeRowStatus='valid';refreshJobRows()">合格/提醒</button><button :class="{active:activeRowStatus==='error'}" @click="activeRowStatus='error';refreshJobRows()">错误行</button><button :class="{active:activeRowStatus==='conflict'}" @click="activeRowStatus='conflict';refreshJobRows()">冲突行</button><button v-if="activeContinuation" :class="{active:activeRowStatus==='history-skipped'}" @click="activeRowStatus='history-skipped';refreshJobRows()">历史已跳过</button><a :href="purchaseImportErrorsUrl(activeJob.id)" download>下载错误清单</a></div>
         <div class="job-rows"><p v-if="!activeRows.length">当前没有对应记录</p><article v-for="row in activeRows" :key="`${row.sourceSheet}-${row.sourceRow}`"><b>{{ row.sourceSheet }} · 第 {{ row.sourceRow }} 行 · {{ row.sku }}</b><span>{{ rowMessage(row) }}</span></article></div>
         <div v-if="activeRowTotal" class="job-row-pages"><span>共 {{ activeRowTotal }} 行 · 第 {{ activeRowPage+1 }} / {{ activeRowTotalPages }} 页</span><button :disabled="activeRowPage===0" @click="refreshJobRows(activeRowPage-1)">上一页</button><button :disabled="activeRowPage+1>=activeRowTotalPages" @click="refreshJobRows(activeRowPage+1)">下一页</button></div>
-        <div v-if="pendingJobAction" class="action-confirm"><div v-if="pendingJobAction==='confirm'&&activeDuplicateGroups.length" class="async-duplicate-groups"><b>重复 SKU：每组选择一条后才能入库</b><fieldset v-for="group in activeDuplicateGroups" :key="group.sku"><legend>{{ group.sku }}</legend><label v-for="choice in group.choices" :key="`${choice.sourceSheet}-${choice.sourceRow}`"><input v-model="asyncDuplicateSelections[group.sku]" type="radio" :value="choice">{{ choice.sourceSheet }} · 第 {{ choice.sourceRow }} 行</label></fieldset></div><p v-if="pendingJobAction==='confirm'&&activeContinuation" class="confirm-counts">新增商品 {{ activeJob.addedRows }} 条 · 补 SKU {{ activeConfirmation.skuBackfillCount }} 条<template v-if="activeJob.updatedRows"> · 覆盖已有商品资料 {{ activeJob.updatedRows }} 条</template><template v-if="activeDuplicateGroups.length"> · 另有 {{ activeDuplicateGroups.length }} 组重复 SKU 按选择入库</template></p><span>确认执行“{{ pendingJobAction==='confirm'?`批次入库 ${activeConfirmation.count} 条`:pendingJobAction==='rollback'?'整批回滚':pendingJobAction==='retry'?'重试任务':'取消任务' }}”吗？</span><button @click="pendingJobAction=null">返回</button><button class="primary" :disabled="pendingJobAction==='confirm'&&!activeConfirmation.canConfirm" @click="executeJobAction">确认执行</button></div>
+        <p v-if="activeJob.archivedAt" class="archived-task-note">此任务已归档。商品与续传记录保留；恢复后才可继续操作。</p><div v-else-if="pendingJobAction" class="action-confirm"><div v-if="pendingJobAction==='confirm'&&activeDuplicateGroups.length" class="async-duplicate-groups"><b>重复 SKU：每组选择一条后才能入库</b><fieldset v-for="group in activeDuplicateGroups" :key="group.sku"><legend>{{ group.sku }}</legend><label v-for="choice in group.choices" :key="`${choice.sourceSheet}-${choice.sourceRow}`"><input v-model="asyncDuplicateSelections[group.sku]" type="radio" :value="choice">{{ choice.sourceSheet }} · 第 {{ choice.sourceRow }} 行</label></fieldset></div><p v-if="pendingJobAction==='confirm'&&activeContinuation" class="confirm-counts">新增商品 {{ activeJob.addedRows }} 条 · 补 SKU {{ activeConfirmation.skuBackfillCount }} 条<template v-if="activeJob.updatedRows"> · 覆盖已有商品资料 {{ activeJob.updatedRows }} 条</template><template v-if="activeDuplicateGroups.length"> · 另有 {{ activeDuplicateGroups.length }} 组重复 SKU 按选择入库</template></p><span>确认执行“{{ pendingJobAction==='confirm'?`批次入库 ${activeConfirmation.count} 条`:pendingJobAction==='rollback'?'整批回滚':pendingJobAction==='retry'?'重试任务':'取消任务' }}”吗？</span><button @click="pendingJobAction=null">返回</button><button class="primary" :disabled="pendingJobAction==='confirm'&&!activeConfirmation.canConfirm" @click="executeJobAction">确认执行</button></div>
         <footer v-else><button v-if="['queued','parsing','ready'].includes(activeJob.status)" @click="pendingJobAction='cancel'">取消任务</button><button v-if="activeJob.status==='failed'" @click="pendingJobAction='retry'">重试</button><button v-if="['completed','completed-with-errors'].includes(activeJob.status)" @click="pendingJobAction='rollback'">整批回滚</button><button v-if="activeConfirmation.canReview" class="primary" @click="pendingJobAction='confirm'">确认入库 {{ activeConfirmation.count }} 条</button></footer>
       </main>
       <main v-else class="job-detail empty">{{ taskDetailLoading ? '正在读取导入任务…' : '请选择一个导入任务' }}</main>
@@ -377,6 +433,12 @@ const detailFields = computed(() => detail.value ? [
     <footer><button :disabled="productActionBusy" @click="catalogAction=null">取消</button><button class="primary" :disabled="productActionBusy" @click="executeCatalogState">{{ productActionBusy?'处理中…':catalogAction.state==='disabled'?'确认停用':'确认启用' }}</button></footer>
   </section></div>
 
+    <div v-if="removalTarget" class="mask task-removal-mask"><section class="modal product-action-modal" role="dialog" aria-modal="true" aria-labelledby="task-removal-title">
+    <small>IMPORT TASK MAINTENANCE</small><h2 id="task-removal-title">{{ removalTarget.check.action==='archive'?'归档导入任务':removalTarget.check.action==='delete'?'彻底删除未入库任务':'暂不能删除任务' }}</h2>
+    <p class="task-source-name">{{ removalTarget.job.sourceName }}</p><div class="action-warning" :class="{danger:removalTarget.check.action==='delete'}">{{ removalTarget.check.reason }}</div>
+    <p>此操作不会删除采购商品、报价记录或现有图片。归档不等于整批回滚。</p>
+    <footer><button :disabled="taskMaintenanceBusy" @click="removalTarget=null">返回</button><button v-if="removalTarget.check.action!=='blocked'" :disabled="taskMaintenanceBusy" :class="removalTarget.check.action==='delete'?'danger-button':'primary'" @click="removeTask()">{{ taskMaintenanceBusy?'处理中…':removalTarget.check.action==='archive'?'确认归档':'确认彻底删除' }}</button></footer>
+  </section></div>
   <div v-if="deleteTarget" class="mask" @click.self="closeDelete()"><section class="modal product-action-modal">
     <button class="close" :disabled="productActionBusy" @click="closeDelete()">×</button><small>PURCHASE SAFE DELETE</small><h2>删除采购资料</h2><p><b>{{ deleteTarget.sku }}</b></p>
     <div v-if="!deleteCheck" class="delete-loading">正在检查报价、草稿、模板和导入批次引用…</div>
@@ -418,7 +480,6 @@ const detailFields = computed(() => detail.value ? [
   </section></div>
 
   <div v-if="previewImage" class="image-preview" @click.self="previewImage=null"><button @click="previewImage=null">×</button><figure><img :src="previewImage.src"><figcaption>{{ previewImage.title }}</figcaption></figure></div>
-  <div v-if="showImageMigration" class="mask" @click.self="showImageMigration=false"><ImageMigrationPanel @close="showImageMigration=false" /></div>
   </template>
   <Transition name="toast"><div v-if="notice" class="toast">{{ notice }}</div></Transition>
 </template>
@@ -435,4 +496,10 @@ const detailFields = computed(() => detail.value ? [
 .actions{white-space:nowrap}.actions button+button{margin-left:4px}.actions button:disabled{cursor:not-allowed;opacity:.45}.danger-link{color:#c43f36!important}.product-action-modal{width:min(580px,96vw)}.action-warning{margin:16px 0;padding:13px 14px;border:1px solid #f1d19a;border-radius:8px;background:#fff8eb;color:#775628;line-height:1.6}.action-warning.danger{border-color:#edc0bc;background:#fff3f1;color:#a6322a}.reference-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.reference-grid span{display:grid;gap:5px;padding:11px;border-radius:7px;background:#f5f7f8;color:#74808a;font-size:10px}.reference-grid b{color:#17212b;font-size:20px}.rollback-hint{padding:10px 12px;border-left:3px solid #ff9900;background:#fff8ea;color:#8a570d;font-size:11px}.delete-confirmation{display:grid;gap:7px;margin-top:16px;color:#45535e;font-size:11px;font-weight:800}.delete-confirmation input{box-sizing:border-box;width:100%;height:40px;border:1px solid #d9e0e5;border-radius:7px;padding:0 10px;font:inherit;text-transform:uppercase}.delete-confirmation input:focus{border-color:#dc4b41;outline:2px solid rgba(220,75,65,.12)}.delete-loading{display:grid;place-items:center;min-height:120px;color:#74808a}.modal footer .danger-button{border-color:#c43f36;background:#c43f36;color:#fff}.modal footer button:disabled{cursor:not-allowed;opacity:.45}@media(max-width:600px){.reference-grid{grid-template-columns:repeat(2,1fr)}}
 .append-import-help{margin:-6px 0 18px;padding:11px 14px;border:1px solid #dfe5e9;border-radius:8px;background:#f8fafb;color:#65727c;font-size:11px;line-height:1.7}.append-import-help>b{margin-right:10px;color:#35434e}.continuation-summary{margin:14px 0;padding:13px;border:1px solid #c9dfd2;border-radius:8px;background:#f5faf7;color:#486254;font-size:11px;line-height:1.6}.continuation-summary>header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px}.continuation-summary>header>span,.continuation-summary>small{color:#6b8073;font-size:10px}.continuation-summary p{margin:8px 0}.continuation-summary.blocked{border-color:#edc0bc;background:#fff7f5}.continuation-blocked{color:#a6322a}.continuation-empty{font-weight:700;color:#16764a}.continuation-sheets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:220px;overflow:auto;margin:10px 0}.continuation-sheets article{display:grid;gap:3px;padding:10px;border:1px solid #dbe7df;border-radius:7px;background:#fff}.continuation-sheets b{overflow-wrap:anywhere;color:#354a3e}.continuation-sheets span,.continuation-sheets small{font-size:10px}.row-filter{flex-wrap:wrap}.job-row-pages{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;color:#74808a;font-size:10px}.job-row-pages>span{margin-right:auto}.job-row-pages>button{padding:5px 8px;border:1px solid #dce3e8;border-radius:5px;background:#fff;color:#596771}.job-row-pages>button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:600px){.continuation-sheets{grid-template-columns:1fr}.job-row-pages{flex-wrap:wrap}.row-filter a{margin-left:0}}
 .job-stats.with-sku-backfill{grid-template-columns:repeat(7,minmax(0,1fr))}.confirm-counts{width:100%;margin:0 0 5px;color:#805819;font-size:11px;font-weight:700}@media(max-width:900px){.job-stats.with-sku-backfill{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.product{gap:12px}.product>span{min-width:0;max-width:260px;gap:4px}.product>span>b{font-size:13px;font-weight:650;line-height:1.35}.product>span .product-sku{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;color:#607185;overflow-wrap:anywhere}.product>span>small:last-child{font-size:10px;color:#7c8b9b}
+.job-list .job-list-tabs{display:flex;gap:4px;padding:10px;background:#fff;position:sticky;top:0;z-index:1}.job-list .job-list-tabs button{flex:1;padding:8px 6px;border:0;border-radius:6px;background:#f0f3f6;color:#617182;font-size:12px}.job-list .job-list-tabs button.selected{background:#fff0d8;color:#a96000;font-weight:700}
+.job-list-meta{display:flex;align-items:center;justify-content:space-between;padding:0 12px 8px;color:#7c8b9b;font-size:11px}.job-list-meta button{border:0;background:none;color:#617182}
+.job-list-item{padding:0 0 8px;border-top:1px solid #e1e7ed}.job-list-item.active{background:#fff5e6}.job-list .job-select{display:grid;gap:5px;width:100%;padding:14px 14px 8px;border:0;background:none;text-align:left}.job-select b,.task-source-name{overflow-wrap:anywhere}.job-select span,.job-select small{color:#738191;font-size:10px}.job-list .job-maintenance{margin-left:14px;padding:4px 7px;border:1px solid #dce3e8;border-radius:5px;background:white;color:#7b5a36;font-size:11px}.job-list button:disabled{opacity:.45;cursor:not-allowed}
+.job-pagination{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:12px 8px;background:white;font-size:11px}.job-pagination button{padding:5px;border:1px solid #dce3e8;border-radius:5px;background:white;color:#617182}.archived-task-note{padding:12px;border-radius:7px;background:#f0f4f8;color:#52667c;font-size:12px}.task-removal-mask{z-index:1300}
+.task-center-grid{height:min(650px,calc(100vh - 235px));min-height:350px}.job-list{display:flex;flex-direction:column;overflow:hidden}.job-list-items{flex:1;min-height:0;overflow:auto}.job-detail{min-width:0;overflow:auto}.job-list-tabs,.job-list-meta,.job-pagination{flex-shrink:0}.job-select:focus-visible,.job-maintenance:focus-visible{outline:2px solid #d78a23;outline-offset:-2px}@media(max-width:900px){.task-center-grid{height:auto}.job-list{height:260px;max-height:260px}.job-detail{max-height:60vh}}
 </style>

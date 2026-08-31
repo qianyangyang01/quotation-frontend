@@ -88,7 +88,7 @@ class AsyncPurchaseImportServiceTest {
     }
 
     @Test void confirmsOnlyReadyNonEmptyJob() {
-        var job=job("ready"); job.validRows=3; when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(rows.countByJobIdAndValidationStatus(job.id,"valid")).thenReturn(3L,0L);when(rows.findConflictSkus(job.id)).thenReturn(List.of());
+        var job=job("ready"); job.validRows=3; when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));when(rows.countByJobIdAndValidationStatus(job.id,"valid")).thenReturn(3L,0L);when(rows.findConflictSkus(job.id)).thenReturn(List.of());
         assertEquals("import-queued",service.confirm(job.id,java.util.Map.of()).status); assertNotNull(job.confirmedAt);
         job.status="ready"; job.validRows=0; assertThrows(AppException.class,()->service.confirm(job.id,java.util.Map.of()));
         job.status="queued"; assertThrows(AppException.class,()->service.confirm(job.id,java.util.Map.of()));
@@ -100,7 +100,7 @@ class AsyncPurchaseImportServiceTest {
         when(tx.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
         var guarded=new AsyncPurchaseImportService(jobs,rows,parts,images,storage,JsonMapper.builder().build(),tx,continuation);
         var job=job("ready");PurchaseImportContinuationService.initialize(job);
-        when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         doAnswer(ignored->{((tools.jackson.databind.node.ObjectNode)job.payload.path("continuation")).put("blocked",true).put("reason","旧行已改变");return null;}).when(continuation).refresh(job);
         assertThrows(AppException.class,()->guarded.confirm(job.id,Map.of()));
         assertTrue(job.payload.path("continuation").path("blocked").asBoolean());
@@ -115,7 +115,7 @@ class AsyncPurchaseImportServiceTest {
         when(tx.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
         var guarded=new AsyncPurchaseImportService(jobs,rows,parts,images,storage,JsonMapper.builder().build(),tx,continuation);
         var job=job("ready");job.validRows=3;PurchaseImportContinuationService.initialize(job);
-        when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         doAnswer(ignored->{((tools.jackson.databind.node.ObjectNode)job.payload.path("continuation")).put("pendingRows",0).put("skippedRows",3);return null;}).when(continuation).refresh(job);
         assertThrows(AppException.class,()->guarded.confirm(job.id,Map.of()));
         assertEquals(0,job.validRows);assertEquals("ready",job.status);
@@ -123,7 +123,7 @@ class AsyncPurchaseImportServiceTest {
     }
 
     @Test void requiresAndAppliesDuplicateSelectionBeforeConfirming() {
-        var job=job("ready");when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var job=job("ready");when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         var first=importRow(job.id,"SKU-DUP","第一页",2);var second=importRow(job.id,"SKU-DUP","第二页",8);
         when(rows.findConflictSkus(job.id)).thenReturn(List.of("SKU-DUP"),List.of("SKU-DUP"),List.of());
         when(rows.findByJobIdAndSkuAndValidationStatusOrderBySourceRow(job.id,"SKU-DUP","conflict")).thenReturn(List.of(first,second));
@@ -136,14 +136,14 @@ class AsyncPurchaseImportServiceTest {
 
     @ParameterizedTest @ValueSource(strings={"queued","ready","failed"})
     void cancelsJobsThatHaveNotStartedImport(String status) {
-        var job=job(status); when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var job=job(status); when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         assertEquals("cancelled",service.cancel(job.id).status); assertTrue(job.cancelRequested); assertNotNull(job.completedAt);
     }
 
     private static PurchaseImportRow importRow(UUID jobId,String sku,String sheet,int sourceRow){var row=new PurchaseImportRow();row.id=UUID.randomUUID();row.jobId=jobId;row.sku=sku;row.sourceSheet=sheet;row.sourceRow=sourceRow;row.validationStatus="conflict";row.importAction="insert";return row;}
 
     @Test void parsingCancellationIsRequestedAndImportingCannotCancel() {
-        var job=job("parsing"); when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var job=job("parsing"); when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         assertEquals("parsing",service.cancel(job.id).status); assertTrue(job.cancelRequested);
         job.status="importing"; assertThrows(AppException.class,()->service.cancel(job.id));
     }
@@ -151,20 +151,20 @@ class AsyncPurchaseImportServiceTest {
     @ParameterizedTest @ValueSource(strings={"parsing","importing","rolling-back"})
     void retriesFailedPhaseAtCorrectQueue(String failedPhase) {
         var job=job("failed"); ((tools.jackson.databind.node.ObjectNode)job.payload).put("failedPhase",failedPhase);
-        when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         var expected=failedPhase.equals("parsing")?"queued":failedPhase.equals("importing")?"import-queued":"rollback-queued";
         assertEquals(expected,service.retry(job.id).status);
         job.status="ready"; assertThrows(AppException.class,()->service.retry(job.id));
     }
 
     @Test void queuesRollbackOnlyForCompletedResults() {
-        var job=job("completed-with-errors"); when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var job=job("completed-with-errors"); when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         assertEquals("rollback-queued",service.requestRollback(job.id).status);
         job.status="ready"; assertThrows(AppException.class,()->service.requestRollback(job.id));
     }
 
     @Test void transitionsAndFailureArePersistedInPayload() {
-        var job=job("queued"); job.totalRows=9; job.validRows=8; when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var job=job("queued"); job.totalRows=9; job.validRows=8; when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         service.prepareParsing(job.id); verify(rows).deleteByJobId(job.id); assertEquals("parsing",job.status); assertEquals(0,job.totalRows);
         service.markImporting(job.id); assertEquals("images",job.phase);
         service.markRollingBack(job.id); assertEquals("rolling-back",job.status);
@@ -180,7 +180,7 @@ class AsyncPurchaseImportServiceTest {
     }
 
     @Test void exposesPagedRowsImagesAndJobViews() {
-        var job=job("ready"); when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var job=job("ready"); when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(jobs.findLockedById(job.id)).thenReturn(Optional.of(job));
         var row=new PurchaseImportRow(); row.sourceRow=2; row.sku="SKU-1"; row.validationStatus="error"; row.importAction="skip"; row.errorMessage="bad"; row.payload=JsonMapper.builder().build().createObjectNode();
         var page=PageRequest.of(0,20);
         when(rows.findByJobIdOrderBySourceRow(job.id,page)).thenReturn(new PageImpl<>(List.of(row),page,1));
@@ -190,13 +190,13 @@ class AsyncPurchaseImportServiceTest {
         when(images.countByJobIdAndStatus(job.id,"failed")).thenReturn(1L);
         assertEquals(1,service.rowPage(job.id,"",page).getTotalElements()); assertEquals(1,service.rowPage(job.id,"error",page).getTotalElements());
         assertEquals(1,service.imageErrors(job.id).size()); assertEquals(1,service.view(job.id).imageParts());
-        when(jobs.findByJobTypeOrderByCreatedAtDesc(AsyncPurchaseImportService.JOB_TYPE,page)).thenReturn(new PageImpl<>(List.of(job),page,1));
+        when(jobs.findVisibleJobs(AsyncPurchaseImportService.JOB_TYPE,false,page)).thenReturn(new PageImpl<>(List.of(job),page,1));
         assertEquals(1,service.list(page).getTotalElements());
     }
 
     @Test void hidesMissingAndForeignJobs() {
         var id=UUID.randomUUID(); when(jobs.findById(id)).thenReturn(Optional.empty()); assertThrows(AppException.class,()->service.view(id));
-        var foreign=job("ready"); foreign.jobType="other"; when(jobs.findById(foreign.id)).thenReturn(Optional.of(foreign)); assertThrows(AppException.class,()->service.view(foreign.id));
+        var foreign=job("ready"); foreign.jobType="other"; when(jobs.findById(foreign.id)).thenReturn(Optional.of(foreign));when(jobs.findLockedById(foreign.id)).thenReturn(Optional.of(foreign)); assertThrows(AppException.class,()->service.view(foreign.id));
     }
 
     private static ImportJob job(String status) {

@@ -29,7 +29,9 @@ public class PurchaseImportImageService {
 
     @Transactional
     public ImportPart upload(UUID jobId,int partNumber,MultipartFile file){
-        var job=jobs.findById(jobId).orElseThrow(()->AppException.notFound("采购导入任务不存在"));
+        var job=jobs.findLockedById(jobId).orElseThrow(()->AppException.notFound("采购导入任务不存在"));
+        if(!AsyncPurchaseImportService.JOB_TYPE.equals(job.jobType))throw AppException.notFound("采购导入任务不存在");
+        if(job.archivedAt!=null)throw AppException.conflict("任务已归档，请先恢复");
         if(!List.of("queued","parsing","ready","failed").contains(job.status))throw AppException.conflict("当前任务不能上传图片分包");
         if(partNumber<1||partNumber>10_000)throw AppException.unprocessable("图片分包编号不合法");
         if(file.isEmpty()||file.getOriginalFilename()==null||!file.getOriginalFilename().toLowerCase(Locale.ROOT).endsWith(".zip"))throw AppException.unprocessable("图片分包必须是ZIP文件");
