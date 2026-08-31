@@ -26,6 +26,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class QuotationWorkflowIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean com.milano.quotation.logistics.LogisticsQuotationGuard logisticsGuard;
     @Autowired WebApplicationContext context;
     @Autowired ObjectMapper mapper;
     @Autowired QuotationRecordRepository records;

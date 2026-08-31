@@ -657,8 +657,9 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
     await ensureQuoteLogistics(p)
     const primaryRows = productState?.primaryCountry ? excelQuoteRows(p, productState.primaryCountry) : []
     const primary = primaryRows.find(row => productState.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
-      || primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier)
+      || (!productState.primaryChannelKey ? primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier) : undefined)
     if (primary) { p.country = primary.country; p.rule = primary.rule; p.channel = primary.carrier; p.freight = primary.freight; p.status = '已恢复草稿并按当前规则重新计算' }
+    else if (productState?.primaryChannelKey) { p.rule = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已失效，请重新选择物流并确认价格'; toast('草稿引用的渠道不在当前物流库，请重新选择，不会按同名渠道自动套价') }
   }
   restoredSelectionVersion.value += 1
   draftRestored.value = true
@@ -1267,6 +1268,7 @@ async function save() {
     }
   }) : undefined
   const record = await createQuotationRecord({
+    logisticsRevision: logisticsRevision.value,
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
     customerName: customer, quoteMode: quoteMode.value, productSummary,
     productImage: quoteMode.value === 'bundle'

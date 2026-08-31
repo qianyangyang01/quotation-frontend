@@ -80,3 +80,14 @@ export const api = {
 
 export function idempotencyKey(prefix = 'web') { return `${prefix}:${crypto.randomUUID()}` }
 export function resetCsrf() { csrf = null }
+
+/** Authenticated binary downloads share JSON error/session handling with normal API calls. */
+export async function downloadFile(path: string, filename: string) {
+  const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers: { 'X-Request-Id': crypto.randomUUID() } })
+  if (!response.ok) { await parseEnvelope(response); return }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url; anchor.download = filename; anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}

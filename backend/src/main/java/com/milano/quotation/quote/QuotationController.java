@@ -27,12 +27,13 @@ public class QuotationController {
     private final IdempotencyService idempotency;
     private final QuotationReadinessService readiness;
     private final QuotationSubmissionValidator submissionValidator;
+    private final com.milano.quotation.logistics.LogisticsQuotationGuard logisticsGuard;
 
     public QuotationController(QuotationRecordRepository records, AuditService audit,
                                IdempotencyService idempotency, QuotationReadinessService readiness,
-                               QuotationSubmissionValidator submissionValidator) {
+                               QuotationSubmissionValidator submissionValidator, com.milano.quotation.logistics.LogisticsQuotationGuard logisticsGuard) {
         this.records = records; this.audit = audit; this.idempotency = idempotency; this.readiness = readiness;
-        this.submissionValidator = submissionValidator;
+        this.submissionValidator = submissionValidator; this.logisticsGuard=logisticsGuard;
     }
 
     @GetMapping
@@ -55,10 +56,11 @@ public class QuotationController {
                                  Authentication auth) {
         if (!(body instanceof ObjectNode input) || body.toString().length() > 4_000_000) throw AppException.unprocessable("报价数据格式错误或过大");
         submissionValidator.validate(input);
-        readiness.assertCanCreate(input);
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());
+        readiness.assertCanCreate(input);
         var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = input.deepCopy();
+        logisticsGuard.validate(payload);
         payload.remove("customerId");
         payload.put("id", id.toString()); payload.put("no", no); payload.put("salespersonName", principal.displayName());
         payload.put("salespersonAccount", principal.account()); payload.put("status", "pending");

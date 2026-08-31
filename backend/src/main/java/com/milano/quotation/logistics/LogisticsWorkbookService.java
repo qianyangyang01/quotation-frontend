@@ -22,7 +22,7 @@ public class LogisticsWorkbookService {
             "起始重量", "截止重量", "起重", "运费单价", "最小计重", "首重", "首重价", "续重", "续重单价", "区间运费",
             "挂号费", "附加费", "燃油附加费率", "特殊品含量", "是否计抛", "是否禁止普货", "电话是否必需", "分区名称",
             "分区邮编前缀", "分区邮编", "分区城市", "分区省州", "排除");
-    private static final String[] KEYS = {"areaName", "countryCode", "etaMinDays", "etaMaxDays", "prohibitedMarks", "allowedMarks",
+    static final String[] KEYS = {"areaName", "countryCode", "etaMinDays", "etaMaxDays", "prohibitedMarks", "allowedMarks",
             "maxPerimeterCm", "maxSideCm", "volumeDivisor", "minLengthCm", "maxLengthCm", "minWidthCm", "maxWidthCm", "minSideAreaCm2",
             "maxSideAreaCm2", "weightFromKg", "weightToKg", "startWeightKg", "pricePerKg", "minChargeWeightKg", "firstWeightKg",
             "firstWeightPrice", "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee", "surcharge", "fuelSurchargeRate",
@@ -33,7 +33,7 @@ public class LogisticsWorkbookService {
     private static final Map<String, String> PRICE_FIELDS = Map.of(
             "pricePerKg", "运费单价", "firstWeightPrice", "首重价", "nextWeightPrice", "续重单价",
             "intervalPrice", "区间运费", "registrationFee", "挂号费", "surcharge", "附加费",
-            "fuelSurchargeRate", "燃油附加费率");
+            "fuelSurchargeRate", "燃油附加费率", "linehaulPerKg", "干线费每KG");
     private static final Map<String, String> RULE_FIELDS = Map.ofEntries(
             Map.entry("etaMinDays", "时效最早天数"), Map.entry("etaMaxDays", "时效最晚天数"),
             Map.entry("prohibitedMarks", "禁运商品"), Map.entry("allowedMarks", "允许商品标记"),
@@ -44,8 +44,10 @@ public class LogisticsWorkbookService {
             Map.entry("maxSideAreaCm2", "最大侧面积"), Map.entry("startWeightKg", "起重"),
             Map.entry("minChargeWeightKg", "最小计重"), Map.entry("firstWeightKg", "首重"),
             Map.entry("nextWeightKg", "续重"), Map.entry("specialGoodsContent", "特殊品含量"),
-            Map.entry("volumetric", "是否计抛"), Map.entry("prohibitGeneralCargo", "是否禁止普货"),
-            Map.entry("phoneRequired", "电话是否必需"), Map.entry("zoneExclude", "排除"));
+            Map.entry("volumetric", "是否计抛"), Map.entry("weightFromInclusive", "下界包含"), Map.entry("weightToInclusive", "上界包含"), Map.entry("currency", "币种"), Map.entry("pricingModel", "计费方式"), Map.entry("prohibitGeneralCargo", "是否禁止普货"),
+            Map.entry("phoneRequired", "电话是否必需"), Map.entry("zoneExclude", "排除"),
+            Map.entry("billingStepKg", "计费进位KG"), Map.entry("originRegion", "发货区域"),
+            Map.entry("notes", "规则备注"), Map.entry("pendingReason", "待适配原因"), Map.entry("quoteReady", "自动报价可用性"));
     private final ObjectMapper mapper;
 
     public LogisticsWorkbookService(ObjectMapper mapper) { this.mapper = mapper; }
@@ -99,7 +101,7 @@ public class LogisticsWorkbookService {
     private static void validateRow(ObjectNode row, int source, ArrayNode issues) { if (row.path("areaName").asText().isBlank()) issue(issues, source, "区域名称", "区域名称不能为空", "error"); if (row.path("countryCode").asText().isBlank()) issue(issues, source, "国家简码", "国家简码不能为空", "error"); if (row.path("etaMinDays").asDouble() > row.path("etaMaxDays").asDouble()) issue(issues, source, "预计时效", "最早天数不能大于最晚天数", "error"); if (row.path("weightToKg").asDouble() <= row.path("weightFromKg").asDouble()) issue(issues, source, "重量区间", "截止重量必须大于起始重量", "error"); if (!(row.path("pricePerKg").asDouble() > 0 || row.path("intervalPrice").asDouble() > 0 || row.path("firstWeightPrice").asDouble() > 0)) issue(issues, source, "计费价格", "未填写有效计费价格", "error"); }
     private static BigDecimal number(Row row, int column, int source, String field, FormulaEvaluator evaluator, ArrayNode issues) { var cell = row == null ? null : row.getCell(column); if (cell == null || cell.getCellType() == CellType.BLANK) return BigDecimal.ZERO; try { if (cell.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); if (cell.getCellType() == CellType.FORMULA) { try { var value = evaluator.evaluate(cell); if (value != null && value.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(value.getNumberValue()); } catch (RuntimeException ignored) { if (cell.getCachedFormulaResultType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); } } var raw = text(row, column, evaluator).replace(",", "").replace("¥", "").replace("￥", "").replace("\u00A0", "").replace("\u202F", "").replaceAll("(?i)CNY|RMB", "").replaceAll("\\s+", ""); return raw.isBlank() ? BigDecimal.ZERO : new BigDecimal(raw); } catch (Exception exception) { issue(issues, source, field, "不是有效数字", "error"); return BigDecimal.ZERO; } }
     private static void putNumber(ObjectNode row, String key, BigDecimal value) { row.put(key, value.stripTrailingZeros()); }
-    ObjectNode compare(ArrayNode rows, ArrayNode previousRows) {
+    public ObjectNode compare(ArrayNode rows, ArrayNode previousRows) {
         var previous = new LinkedHashMap<String, tools.jackson.databind.JsonNode>();
         previousRows.forEach(row -> previous.put(row.path("rowKey").asText(identity(row)), row));
         var diffRows = mapper.createArrayNode();
@@ -116,8 +118,12 @@ public class LogisticsWorkbookService {
                 var change = changes.addObject().put("field", field.getValue()).put("price", true);
                 copyValue(change, "before", before.path(field.getKey())); copyValue(change, "after", row.path(field.getKey()));
                 var oldValue = before.path(field.getKey()).asDouble(); var nextValue = row.path(field.getKey()).asDouble();
-                var percent = oldValue == 0 ? (nextValue == 0 ? 0 : 100) : Math.abs((nextValue - oldValue) / oldValue * 100);
-                maxPercent = Math.max(maxPercent, percent); hasPercent = true; priceChanges++;
+                change.put("delta",row.path(field.getKey()).decimalValue().subtract(before.path(field.getKey()).decimalValue()));
+                if(oldValue!=0) {
+                    var percent=(nextValue-oldValue)/oldValue*100;
+                    change.put("percentChange",percent);maxPercent=Math.max(maxPercent,Math.abs(percent));hasPercent=true;
+                } else change.putNull("percentChange");
+                priceChanges++;
             }
             var ruleChanges = 0;
             for (var field : RULE_FIELDS.entrySet()) if (!same(before.path(field.getKey()), row.path(field.getKey()))) {

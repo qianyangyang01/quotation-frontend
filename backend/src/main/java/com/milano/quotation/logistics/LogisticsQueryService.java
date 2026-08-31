@@ -40,7 +40,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> providers(int page, int size, String query, Boolean enabled) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where 1=1");
+        var where = new StringBuilder(" where dataset_id=logistics_active_dataset()");
         if (query != null && !query.isBlank()) {
             where.append(" and (lower(payload->>'name') like :query or lower(code) like :query)");
             params.put("query", "%" + query.trim().toLowerCase(Locale.ROOT) + "%");
@@ -55,7 +55,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> channels(int page, int size, String query, UUID providerId, Boolean enabled, Boolean archived) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where 1=1");
+        var where = new StringBuilder(" where dataset_id=logistics_active_dataset()");
         if (query != null && !query.isBlank()) {
             where.append(" and (lower(payload->>'name') like :query or lower(code) like :query)");
             params.put("query", "%" + query.trim().toLowerCase(Locale.ROOT) + "%");
@@ -76,7 +76,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> versions(int page, int size, UUID channelId, String status) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where 1=1");
+        var where = new StringBuilder(" where channel_id in (select id from logistics_channel where dataset_id=logistics_active_dataset())");
         if (channelId != null) {
             where.append(" and channel_id = :channelId");
             params.put("channelId", channelId);
@@ -123,6 +123,8 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
+                  and c.dataset_id=logistics_active_dataset()
+                  and coalesce((v.payload->>'quoteReady')::boolean,true)
                 order by c.id
                 """).query(String.class).list();
         var revision = sha256(String.join("\n", revisionParts));
@@ -135,6 +137,8 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
+                  and c.dataset_id=logistics_active_dataset()
+                  and coalesce((v.payload->>'quoteReady')::boolean,true)
                   and coalesce(item->>'areaName','')<>''
                 order by name, code
                 """).query((rs, rowNum) -> new PublishedCountry(rs.getString("code"), rs.getString("name"))).list();
@@ -146,6 +150,8 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
+                  and c.dataset_id=logistics_active_dataset()
+                  and coalesce((v.payload->>'quoteReady')::boolean,true)
                 order by attribute
                 """).query(String.class).list();
         return new PublishedManifest(revision, Instant.now(), revisionParts.size(), countries, attributes);
@@ -177,6 +183,8 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
+                  and c.dataset_id=logistics_active_dataset()
+                  and coalesce((v.payload->>'quoteReady')::boolean,true)
                   and (
                 """).append(String.join(" or ", countryConditions)).append(")");
         if (!normalizedChannels.isEmpty()) {
