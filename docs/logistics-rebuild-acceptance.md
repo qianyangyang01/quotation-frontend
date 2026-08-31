@@ -1,5 +1,7 @@
 # 物流重建实施与验收记录
 
+> 后续解析器 v2 的重量修正、合并分区、动态档位与模板验收见 [v2 验收记录](logistics-parser-v2-acceptance.md)。以下保留原阶段记录，不代表 v2 已发布生产；原来的 79/10 渠道统计已经过时。
+
 ## 基线与边界
 
 - 独立工作树：`quotation-logistics-rebuild`；分支：`codex/logistics-dataset-rebuild`。
