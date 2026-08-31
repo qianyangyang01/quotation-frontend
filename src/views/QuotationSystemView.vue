@@ -216,7 +216,7 @@ function chargeWeight(p: Product) {
 function singleDimensions(p: Product, quantity = Math.max(1, p.quantity)) {
   return singleShipmentDimensions(p, quantity)
 }
-function productCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePurchaseCost(1) : p.purchase * p.quantity }
+
 function domesticFreight(p: Product) { return quoteMode.value === 'bundle' ? bundleDomesticFreight(1) : p.purchaseFreightPerUnit * p.quantity }
 function totalCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePurchaseCost(1) + bundleDomesticFreight(1) + p.freight : p.purchase + p.purchaseFreightPerUnit + p.freight }
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
@@ -1372,7 +1372,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <section v-if="quoteMode === 'single'" class="cost-workbench">
           <ProductInfoCard :product="p" />
-          <CostWeightPanel :product="p" :charge-weight="chargeWeight(p)" :product-cost="productCost(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" @weight-change="normalizeRule(p)" />
+          <CostWeightPanel :product="p" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" @weight-change="normalizeRule(p)" />
         </section>
         <section v-else class="cost-workbench">
           <BundleProductCard
