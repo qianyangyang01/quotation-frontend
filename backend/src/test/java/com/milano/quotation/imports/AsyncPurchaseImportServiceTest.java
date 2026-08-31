@@ -63,6 +63,30 @@ class AsyncPurchaseImportServiceTest {
         assertThrows(AppException.class,()->service.create(small,"A","text-only",1L,-1));
     }
 
+    @ParameterizedTest @ValueSource(ints={0,1})
+    void acceptsRepackedWorkbookLargerThanOriginalWithoutFalsifyingStatistics(int removedMediaCount) {
+        var file=new MockMultipartFile("file","purchase.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",new byte[]{1,2,3});
+        var job=service.create(file,"ADMIN","text-only",2L,removedMediaCount);
+        assertEquals("queued",job.status);
+        assertEquals(2L,job.payload.path("originalSizeBytes").asLong());
+        assertEquals(3L,job.payload.path("uploadedBytes").asLong());
+        assertEquals(removedMediaCount,job.payload.path("removedMediaCount").asInt());
+        verify(storage).putRawWithSha256(startsWith("purchase-import/"),any(),eq(3L),contains("spreadsheet"));
+    }
+
+    @Test void rejectsInvalidStatisticsAndOversizeUploadsBeforeStorage() {
+        var small=new MockMultipartFile("file","purchase.xlsx","",new byte[]{1});
+        for(long originalSize:new long[]{-1,0,100L*1024*1024+1})
+            assertThrows(AppException.class,()->service.create(small,"A","text-only",originalSize,0));
+        for(int removedCount:new int[]{-1,200_001})
+            assertThrows(AppException.class,()->service.create(small,"A","text-only",1L,removedCount));
+        var oversized=mock(org.springframework.web.multipart.MultipartFile.class);
+        when(oversized.isEmpty()).thenReturn(false);when(oversized.getOriginalFilename()).thenReturn("purchase.xlsx");
+        when(oversized.getSize()).thenReturn(100L*1024*1024+1);
+        assertThrows(AppException.class,()->service.create(oversized,"A","text-only",1L,0));
+        verifyNoInteractions(storage,jobs);
+    }
+
     @Test void confirmsOnlyReadyNonEmptyJob() {
         var job=job("ready"); job.validRows=3; when(jobs.findById(job.id)).thenReturn(Optional.of(job));when(rows.countByJobIdAndValidationStatus(job.id,"valid")).thenReturn(3L,0L);when(rows.findConflictSkus(job.id)).thenReturn(List.of());
         assertEquals("import-queued",service.confirm(job.id,java.util.Map.of()).status); assertNotNull(job.confirmedAt);

@@ -49,6 +49,22 @@ describe('purchase workbook text-only preparation', () => {
     expect(await zip.file('xl/worksheets/sheet1.xml')!.async('string')).toContain('<v>42</v>')
   })
 
+  it('keeps truthful size metadata when repackaging a compressed workbook increases its size', async () => {
+    const fixture = await workbookFixture({ image: false })
+    const originalZip = await JSZip.loadAsync(await fixture.arrayBuffer())
+    const source = new Blob([await originalZip.generateAsync({
+      type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 9 }, streamFiles: false,
+    })])
+    const result = await stripPurchaseWorkbookImages(source)
+    expect(result.blob.size).toBeGreaterThan(source.size)
+    expect(result.originalSizeBytes).toBe(source.size)
+    expect(result.optimizedSizeBytes).toBe(result.blob.size)
+    expect(result.removedMediaCount).toBe(0)
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer(), { checkCRC32: true })
+    expect(await zip.file('xl/worksheets/sheet1.xml')!.async('string'))
+      .toBe(await originalZip.file('xl/worksheets/sheet1.xml')!.async('string'))
+  })
+
   it('blocks unsupported image relations instead of uploading the original workbook', async () => {
     await expect(stripPurchaseWorkbookImages(await workbookFixture({ unsupportedImageRelation: true }))).rejects.toThrow('暂不支持的图片关系')
   })
