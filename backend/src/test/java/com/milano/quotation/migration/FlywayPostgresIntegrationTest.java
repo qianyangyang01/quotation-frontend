@@ -161,9 +161,29 @@ class FlywayPostgresIntegrationTest {
         seedSupplierRecordBeforeStructuredScoring();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(2, finalMigrations.migrationsExecuted);
+        assertEquals(3, finalMigrations.migrationsExecuted);
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "24".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "25".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "26".equals(item.version)));
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("""
+                    select count(*) from information_schema.columns
+                    where table_schema = 'public' and table_name = 'import_job'
+                      and column_name = 'archived_at' and is_nullable = 'YES'
+                      and data_type = 'timestamp with time zone'
+                    """)) {
+                result.next();
+                assertEquals(1, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("""
+                    select count(*) from pg_indexes where schemaname = 'public'
+                      and indexname in ('idx_purchase_import_job_visible', 'idx_purchase_import_job_archived')
+                    """)) {
+                result.next();
+                assertEquals(2, result.getInt(1));
+            }
+        }
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.prepareStatement("""
                      select count(*) from pg_indexes
