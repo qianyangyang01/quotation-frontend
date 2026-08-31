@@ -30,7 +30,7 @@ function handleError() {
   <div class="quotation-product-image" :class="{ empty:!current }">
     <img v-if="current" :src="current.url" :alt="alt" @error="handleError">
     <small v-if="current && showLabel">{{ current.label }}</small>
-    <span v-if="!current">{{ fallbackText }}</span>
+    <slot v-if="!current" name="fallback"><span>{{ fallbackText }}</span></slot>
   </div>
 </template>
 

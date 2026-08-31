@@ -1371,7 +1371,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <section v-if="quoteMode === 'single'" class="cost-workbench">
-          <ProductInfoCard :product="p" />
+          <ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" />
           <CostWeightPanel :product="p" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" @weight-change="normalizeRule(p)" />
         </section>
         <section v-else class="cost-workbench">
