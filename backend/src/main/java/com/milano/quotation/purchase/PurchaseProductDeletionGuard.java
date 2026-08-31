@@ -38,13 +38,13 @@ public class PurchaseProductDeletionGuard {
                   SELECT 1 FROM regexp_split_to_table(
                     upper(coalesce(q.payload ->> 'primarySku', '')), '[、,+，[:space:]]+'
                   ) token WHERE token = :sku
-                )) quotation_records,
+                ) OR (%s)) quotation_records,
               (SELECT count(*) FROM quotation_draft d WHERE %s) drafts,
               (SELECT count(*) FROM quotation_template t WHERE %s) templates,
               (SELECT count(DISTINCT job_id) FROM purchase_import_row
                 WHERE applied_product_id = :productId AND applied_at IS NOT NULL AND rolled_back_at IS NULL) import_batches,
               (SELECT count(*) FROM purchase_product_image WHERE product_id = :productId) image_count
-            """.formatted(STRUCTURED_REFERENCE.formatted("d.payload"), STRUCTURED_REFERENCE.formatted("t.payload"));
+            """.formatted(STRUCTURED_REFERENCE.formatted("q.payload"), STRUCTURED_REFERENCE.formatted("d.payload"), STRUCTURED_REFERENCE.formatted("t.payload"));
         return jdbc.queryForObject(sql, parameters, (row, index) -> {
             int quotationRecords = row.getInt("quotation_records");
             int drafts = row.getInt("drafts");
@@ -58,6 +58,10 @@ public class PurchaseProductDeletionGuard {
 
     public record DeletionCheck(boolean canDelete, long version, int imageCount, int quotationRecords,
                                 int drafts, int templates, int importBatches) {
+        public boolean hasBusinessReferences() {
+            return quotationRecords > 0 || drafts > 0 || templates > 0;
+        }
+
         public Map<String, Object> auditDetail() {
             var detail = new LinkedHashMap<String, Object>();
             detail.put("version", version); detail.put("imageCount", imageCount);
