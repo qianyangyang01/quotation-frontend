@@ -33,12 +33,30 @@ public class LogisticsRebuildController {
     private final IdempotencyService idempotency;
     private final AuditService audit;
     private final LogisticsDatasetGuard guard;
+    private final LogisticsBillingAcceptanceService billing;
     public LogisticsRebuildController(LogisticsDatasetService datasets,LogisticsImportService imports,LogisticsExportService exports,
-            LogisticsService logistics,LogisticsVersionRepository versions,AssetStorageService storage,IdempotencyService idempotency,AuditService audit,LogisticsDatasetGuard guard){
+            LogisticsService logistics,LogisticsVersionRepository versions,AssetStorageService storage,IdempotencyService idempotency,AuditService audit,LogisticsDatasetGuard guard,LogisticsBillingAcceptanceService billing){
+        this.billing=billing;
         this.guard=guard;
         this.datasets=datasets;this.imports=imports;this.exports=exports;this.logistics=logistics;this.versions=versions;this.storage=storage;this.idempotency=idempotency;this.audit=audit;
     }
     @GetMapping("/datasets") public ApiResponse<?> datasets(){return ApiResponse.ok(datasets.list());}
+    @GetMapping("/datasets/{id}/required-channels") public ApiResponse<?> required(@PathVariable UUID id){return ApiResponse.ok(datasets.requiredChannels(id));}
+    @PutMapping("/datasets/{id}/required-channels") @Transactional
+    public ApiResponse<?> required(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
+        var actor=actor(auth);input.put("datasetId",id.toString());guard.request(actor,"logistics-required",key);
+        var prior=idempotency.existing(actor,"logistics-required",key,input);if(prior.isPresent())return ApiResponse.ok(prior.get());
+        var result=datasets.saveRequiredChannels(id,input,actor);idempotency.save(actor,"logistics-required",key,input,result);
+        audit.record("logistics.required-confirm","logistics-dataset",id.toString(),"success",Map.of("revision",result.path("revision").asLong()));return ApiResponse.ok(result);
+    }
+    @GetMapping("/versions/{id}/billing-acceptance") public ApiResponse<?> billing(@PathVariable UUID id){return ApiResponse.ok(billing.status(id));}
+    @PostMapping("/versions/{id}/billing-acceptance") @Transactional
+    public ApiResponse<?> billing(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
+        var actor=actor(auth);input.put("versionId",id.toString());guard.request(actor,"logistics-billing-accept",key);
+        var prior=idempotency.existing(actor,"logistics-billing-accept",key,input);if(prior.isPresent())return ApiResponse.ok(prior.get());
+        var result=billing.approve(id,input,actor);idempotency.save(actor,"logistics-billing-accept",key,input,result);
+        audit.record("logistics.billing-accept","logistics-version",id.toString(),"success",Map.of("engineVersion",LogisticsBillingEngine.VERSION));return ApiResponse.ok(result);
+    }
     @PostMapping("/datasets") @Transactional
     public ApiResponse<?> create(@RequestBody ObjectNode body,@RequestHeader("Idempotency-Key")String key,Authentication auth){
         var actor=actor(auth);guard.request(actor,"logistics-dataset-create",key);var existing=idempotency.existing(actor,"logistics-dataset-create",key,body);if(existing.isPresent())return ApiResponse.ok(existing.get());
@@ -73,7 +91,15 @@ public class LogisticsRebuildController {
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).header(HttpHeaders.CONTENT_DISPOSITION,attachment(file.path("name").asText()))
                 .body(new InputStreamResource(storage.openRaw(file.path("objectKey").asText())));
     }
-    @GetMapping("/versions/{id}") public ApiResponse<?> version(@PathVariable UUID id){var v=versions.findById(id).orElseThrow(()->AppException.notFound("物流版本不存在"));return ApiResponse.ok(v.payload);}
+    @GetMapping("/imports/{id}/files/{index}/evidence")
+    public ResponseEntity<InputStreamResource> evidence(@PathVariable UUID id,@PathVariable int index){
+        var reports=imports.get(id).path("payload").path("fileReports");if(index<0||index>=reports.size())throw AppException.notFound("解析证据不存在");
+        var source=reports.get(index).path("sourceEvidence");if(source.path("objectKey").asText().isBlank())throw AppException.notFound("该批次没有独立证据文件，请查阅原文件");
+        audit.record("logistics.evidence-download","logistics-import",id.toString(),"success",Map.of("fileIndex",index));
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.CONTENT_DISPOSITION,attachment("原表解析证据.json"))
+                .body(new InputStreamResource(storage.openRaw(source.path("objectKey").asText())));
+    }
+    @GetMapping("/versions/{id}") public ApiResponse<?> version(@PathVariable UUID id){var v=versions.findById(id).orElseThrow(()->AppException.notFound("物流版本不存在"));return ApiResponse.ok(((ObjectNode)v.payload.deepCopy()).put("quoteReady",guard.quoteReady(id)));}
     @PostMapping("/channels/{channel}/versions/{version}/review") @Transactional
     public ApiResponse<?> review(@PathVariable UUID channel,@PathVariable UUID version,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
         input.put("channelId",channel.toString()).put("versionId",version.toString());var actor=actor(auth);

@@ -27,6 +27,19 @@ const publishedRule: LogisticsRule = {
 }
 
 describe('logistics fee calculation', () => {
+  it('requires dimensions and uses the accepted channel divisor for verified billing', () => {
+    const rule = { ...publishedRule, billingVerified: true }
+    expect(calculateLogisticsFee(rule, '美国', 0.1)).toBeNull()
+    const result = calculateLogisticsFee(rule, '美国', 0.1, ['普货'], {
+      lengthCm: 20, widthCm: 20, heightCm: 10, volumeDivisor: 999999,
+    })
+    expect(result?.volumeDivisor).toBe(8000)
+    expect(result?.total).toBe(59)
+    expect(calculateLogisticsFee({ ...rule, prices: [{ ...rule.prices[0]!, volumeDivisor: 0 }] }, '美国', .1, ['普货'], {
+      lengthCm: 20, widthCm: 20, heightCm: 10,
+    })).toBeNull()
+  })
+
   it('keeps the quotation fee engine available after removing the management-page calculator', () => {
     expect(calculateLogisticsFee(publishedRule, '美国', 0.5)?.total).toBe(59)
   })

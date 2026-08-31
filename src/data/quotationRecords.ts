@@ -28,6 +28,9 @@ export interface QuotationRecordQuoteOption {
   ruleId?: string
   channelCode?: string
   freightCny?: number
+  logisticsChannelId?: string
+  logisticsVersionId?: string
+  logisticsInput?: { country: string; weightKg: number; marks: string[]; dimensions?: { lengthCm: number; widthCm: number; heightCm: number; volumeMultiplier?: number } }
   totalCostCny?: number
   profitCny?: number
   quoteCny?: number
@@ -186,6 +189,9 @@ function normalizeQuoteOptions(value: unknown, recordId: string, rawRecord: Part
     option.ruleId = optionalText(raw?.ruleId)
     option.channelCode = optionalText(raw?.channelCode)
     option.freightCny = optionalNumber(raw?.freightCny)
+    option.logisticsChannelId = optionalText(raw?.logisticsChannelId)
+    option.logisticsVersionId = optionalText(raw?.logisticsVersionId)
+    option.logisticsInput = raw?.logisticsInput
     option.totalCostCny = optionalNumber(raw?.totalCostCny)
     option.profitCny = optionalNumber(raw?.profitCny)
     option.quoteCny = optionalNumber(raw?.quoteCny)

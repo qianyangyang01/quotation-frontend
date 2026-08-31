@@ -31,6 +31,7 @@ public class LogisticsDatasetGuard {
         if (!dataset.equals(activeId())) throw AppException.conflict("请从新库准备区操作该物流商");
     }
     public int nextRuleId() { return jdbc.sql("select nextval('logistics_rule_identity')").query(Integer.class).single(); }
+    public boolean quoteReady(UUID versionId) { return jdbc.sql("select logistics_version_quote_ready(:id)").param("id",versionId).query(Boolean.class).single(); }
     /** The caller must keep this transaction open through the idempotency response write. */
     public void request(String actor,String operation,String key) {
         if(key==null||!key.matches("[A-Za-z0-9._:-]{8,120}"))throw AppException.unprocessable("缺少或无效的 Idempotency-Key");
