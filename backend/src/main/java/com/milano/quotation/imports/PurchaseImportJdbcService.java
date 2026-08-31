@@ -40,17 +40,23 @@ public class PurchaseImportJdbcService {
                  WHERE r.id IN (:ids)
                    AND r.job_id = :jobId
                    AND r.validation_status = 'valid'
+                   AND r.applied_at IS NULL
                    AND ((r.import_action = 'update' AND NOT EXISTS (
                           SELECT 1 FROM purchase_product p
                            WHERE p.sku = r.sku AND p.version = r.expected_version
                         )) OR (r.import_action = 'insert' AND EXISTS (
                           SELECT 1 FROM purchase_product p WHERE p.sku = r.sku
+                        )) OR (r.import_action = 'sku-backfill' AND (
+                          NOT EXISTS (SELECT 1 FROM purchase_product p WHERE p.id=r.target_product_id
+                                      AND p.version=r.expected_version AND p.sku LIKE 'AUTO-%')
+                          OR EXISTS (SELECT 1 FROM purchase_product p WHERE p.sku=r.sku AND p.id<>r.target_product_id)
                         )))
                 """, parameters);
 
         named.update("""
                 UPDATE purchase_import_row r
                    SET before_payload = p.payload,
+                       before_sku = p.sku,
                        before_catalog_state = p.catalog_state,
                        before_quote_ready = p.quote_ready,
                        before_source_hash = p.source_hash,
@@ -69,8 +75,9 @@ public class PurchaseImportJdbcService {
                  WHERE r.id IN (:ids)
                    AND r.job_id = :jobId
                    AND r.validation_status = 'valid'
-                   AND r.import_action = 'update'
-                   AND p.sku = r.sku
+                   AND r.applied_at IS NULL
+                   AND ((r.import_action = 'update' AND p.sku = r.sku)
+                     OR (r.import_action = 'sku-backfill' AND p.id = r.target_product_id))
                    AND p.version = r.expected_version
                 """, parameters);
 
@@ -84,6 +91,7 @@ public class PurchaseImportJdbcService {
                  WHERE r.id IN (:ids)
                    AND r.job_id = :jobId
                    AND r.validation_status = 'valid'
+                   AND r.applied_at IS NULL
                    AND r.import_action = 'insert'
                 """, parameters);
 
@@ -99,10 +107,45 @@ public class PurchaseImportJdbcService {
                  WHERE r.id IN (:ids)
                    AND r.job_id = :jobId
                    AND r.validation_status = 'valid'
+                   AND r.applied_at IS NULL
                    AND r.import_action = 'update'
                    AND p.sku = r.sku
                    AND p.version = r.expected_version
                 """, parameters);
+
+        // Backfill uses the live product payload, not the newly uploaded row: it
+        // must preserve manual edits, image URLs, image links and disabled state.
+        named.update("""
+                WITH candidates AS (
+                    SELECT r.id AS row_id, r.sku, r.expected_version, p.id AS product_id, p.payload,
+                           CASE WHEN p.catalog_state='disabled' THEN 'disabled'
+                                WHEN jsonb_path_exists(p.payload,'$.weightG ? (@ > 0)')
+                                 AND jsonb_path_exists(p.payload,'$.minOrderQty ? (@ > 0)')
+                                 AND (jsonb_path_exists(p.payload,'$.purchasePriceCny ? (@ >= 0)')
+                                   OR jsonb_path_exists(p.payload,'$.tier2PriceCny ? (@ >= 0)')
+                                   OR jsonb_path_exists(p.payload,'$.tier3PriceCny ? (@ >= 0)')
+                                   OR jsonb_path_exists(p.payload,'$.taxIncludedPriceCny ? (@ >= 0)'))
+                                  THEN 'ready' ELSE 'pending_template' END AS next_state
+                      FROM purchase_import_row r JOIN purchase_product p ON p.id=r.target_product_id
+                     WHERE r.id IN (:ids) AND r.job_id=:jobId AND r.validation_status='valid'
+                       AND r.import_action='sku-backfill' AND r.applied_at IS NULL
+                       AND p.version=r.expected_version AND p.sku LIKE 'AUTO-%'
+                )
+                UPDATE purchase_product p SET
+                       sku=c.sku,
+                       payload=c.payload || jsonb_build_object(
+                           'sku',c.sku,'skuOrigin','imported','catalogState',c.next_state,
+                           'quoteReady',c.next_state='ready',
+                           'status',CASE WHEN c.next_state='disabled' THEN '已停用'
+                                         WHEN c.next_state='ready' THEN '资料完整' ELSE '模板待补全（不可报价）' END,
+                           'importWarnings',(SELECT COALESCE(jsonb_agg(w.value),'[]'::jsonb)
+                              FROM jsonb_array_elements(CASE WHEN jsonb_typeof(c.payload->'importWarnings')='array'
+                                  THEN c.payload->'importWarnings' ELSE '[]'::jsonb END) w
+                             WHERE (w.value #>> '{}') NOT LIKE 'SKU为空%临时SKU%')),
+                       catalog_state=c.next_state,quote_ready=c.next_state='ready',
+                       version=p.version+1,updated_at=:now
+                  FROM candidates c WHERE p.id=c.product_id AND p.version=c.expected_version AND p.sku LIKE 'AUTO-%'
+                """,parameters);
 
         named.update("""
                 UPDATE purchase_import_row r
@@ -113,9 +156,12 @@ public class PurchaseImportJdbcService {
                  WHERE r.id IN (:ids)
                    AND r.job_id = :jobId
                    AND r.validation_status = 'valid'
+                   AND r.applied_at IS NULL
                    AND p.sku = r.sku
                    AND ((r.import_action = 'insert' AND p.id = r.id)
-                     OR (r.import_action = 'update' AND p.updated_at = :now AND p.source_hash = :sourceHash))
+                     OR (r.import_action = 'update' AND p.updated_at = :now AND p.source_hash = :sourceHash)
+                     OR (r.import_action = 'sku-backfill' AND p.id = r.target_product_id
+                         AND p.version = r.expected_version + 1 AND p.updated_at = :now))
                 """, parameters);
 
         conflicts += named.update("""
@@ -133,10 +179,10 @@ public class PurchaseImportJdbcService {
                    SET storage_state='published', staging_job_id=NULL, expires_at=NULL
                  WHERE a.staging_job_id=:jobId AND a.id IN (
                     SELECT product_asset_id FROM purchase_import_row
-                     WHERE id IN (:ids) AND applied_at IS NOT NULL AND product_asset_id IS NOT NULL
+                     WHERE id IN (:ids) AND applied_at IS NOT NULL AND product_asset_id IS NOT NULL AND import_action<>'sku-backfill'
                     UNION
                     SELECT physical_asset_id FROM purchase_import_row
-                     WHERE id IN (:ids) AND applied_at IS NOT NULL AND physical_asset_id IS NOT NULL
+                     WHERE id IN (:ids) AND applied_at IS NOT NULL AND physical_asset_id IS NOT NULL AND import_action<>'sku-backfill'
                  )
                 """,parameters);
         Integer applied = named.queryForObject("SELECT count(*) FROM purchase_import_row WHERE id IN (:ids) AND applied_at IS NOT NULL", parameters, Integer.class);
@@ -150,6 +196,7 @@ public class PurchaseImportJdbcService {
                  USING purchase_import_row r
                  WHERE r.id IN (:ids)
                    AND r.applied_at IS NOT NULL
+                   AND r.import_action <> 'sku-backfill'
                    AND i.product_id = r.applied_product_id
                    AND i.image_type = :imageType
                    AND CASE WHEN :imageType = 'product' THEN r.product_asset_id IS NOT NULL ELSE r.physical_asset_id IS NOT NULL END
@@ -163,6 +210,7 @@ public class PurchaseImportJdbcService {
                   FROM purchase_import_row r
                  WHERE r.id IN (:ids)
                    AND r.applied_at IS NOT NULL
+                   AND r.import_action <> 'sku-backfill'
                    AND CASE WHEN :imageType = 'product' THEN r.product_asset_id IS NOT NULL ELSE r.physical_asset_id IS NOT NULL END
                 ON CONFLICT (product_id, asset_id, image_type) DO NOTHING
                 """, parameters);
@@ -176,6 +224,13 @@ public class PurchaseImportJdbcService {
                    AND NOT EXISTS (SELECT 1 FROM purchase_product p WHERE p.id = r.applied_product_id)
                 """, Integer.class, jobId);
         var conflicts = new AtomicInteger(missing == null ? 0 : missing);
+        Integer occupied = jdbc.queryForObject("""
+                SELECT count(*) FROM purchase_import_row r
+                 WHERE r.job_id=? AND r.applied_at IS NOT NULL AND r.rolled_back_at IS NULL
+                   AND r.import_action='sku-backfill' AND EXISTS (
+                       SELECT 1 FROM purchase_product p WHERE p.sku=r.before_sku AND p.id<>r.applied_product_id)
+                """,Integer.class,jobId);
+        conflicts.addAndGet(occupied==null?0:occupied);
         jdbc.query(connection -> {
             var statement = connection.prepareStatement("""
                     SELECT r.sku, r.applied_version, p.version
@@ -206,6 +261,16 @@ public class PurchaseImportJdbcService {
     public int rollback(UUID jobId, Collection<UUID> rowIds) {
         if (rowIds.isEmpty()) return 0;
         var parameters = new MapSqlParameterSource().addValue("ids", rowIds).addValue("jobId", jobId).addValue("now", OffsetDateTime.now(ZoneOffset.UTC));
+        // SKU backfill never changes image relations and must not use the full
+        // product-update rollback's delete/recreate image path.
+        named.update("""
+                UPDATE purchase_product p SET sku=r.before_sku,payload=r.before_payload,
+                       catalog_state=r.before_catalog_state,quote_ready=r.before_quote_ready,
+                       source_hash=r.before_source_hash,version=p.version+1,updated_at=:now
+                  FROM purchase_import_row r
+                 WHERE r.id IN (:ids) AND r.job_id=:jobId AND r.import_action='sku-backfill'
+                   AND p.id=r.applied_product_id AND p.version=r.applied_version
+                """,parameters);
         named.update("""
                 DELETE FROM purchase_product_image i
                  USING purchase_import_row r

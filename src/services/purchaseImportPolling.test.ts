@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs } from './purchaseImportPolling'
+import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs, shouldRefreshPurchaseImportDetails } from './purchaseImportPolling'
 
 describe('purchase import polling', () => {
   it('polls only while the task center is visible and a task is running', () => {
@@ -15,5 +15,12 @@ describe('purchase import polling', () => {
     expect(didPurchaseImportDataChange('completed', 'completed')).toBe(false)
     expect(didPurchaseImportDataChange('rolled-back', 'rolled-back')).toBe(false)
     expect(didPurchaseImportDataChange('ready', 'failed')).toBe(false)
+  })
+
+  it('reloads rows and duplicate choices after a declined confirmation leaves a task ready', () => {
+    expect(shouldRefreshPurchaseImportDetails('ready', 'ready', true)).toBe(true)
+    expect(shouldRefreshPurchaseImportDetails('ready', 'import-queued', true)).toBe(true)
+    expect(shouldRefreshPurchaseImportDetails('ready', 'ready')).toBe(false)
+    expect(shouldRefreshPurchaseImportDetails('importing', 'completed-with-errors')).toBe(true)
   })
 })

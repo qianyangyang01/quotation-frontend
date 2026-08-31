@@ -41,6 +41,7 @@ class AsyncPurchaseImportServiceTest {
         assertEquals("queued",job.status); assertEquals("folder_purchase_.xlsx",job.sourceName);
         assertEquals(64,job.sourceHash.length()); assertEquals(0,job.payload.path("totalRows").asInt());
         assertEquals("text-only",job.payload.path("importMode").asText());assertEquals(90_000_000L,job.payload.path("originalSizeBytes").asLong());assertEquals(3L,job.payload.path("uploadedBytes").asLong());assertEquals(165,job.payload.path("removedMediaCount").asInt());
+        assertEquals("append",job.payload.path("continuation").path("mode").asText());
         verify(storage).putRawWithSha256(startsWith("purchase-import/"),any(),eq(3L),contains("spreadsheet"));
     }
     @Test void readsUploadStreamOnceAndRemovesObjectWhenJobSaveFails()throws Exception{
@@ -67,6 +68,34 @@ class AsyncPurchaseImportServiceTest {
         assertEquals("import-queued",service.confirm(job.id,java.util.Map.of()).status); assertNotNull(job.confirmedAt);
         job.status="ready"; job.validRows=0; assertThrows(AppException.class,()->service.confirm(job.id,java.util.Map.of()));
         job.status="queued"; assertThrows(AppException.class,()->service.confirm(job.id,java.util.Map.of()));
+    }
+
+    @Test void confirmationCommitsRefreshedBlockedSummaryWithoutQueuingOrResolvingDuplicates(){
+        var continuation=mock(PurchaseImportContinuationService.class);
+        var tx=mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(tx.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+        var guarded=new AsyncPurchaseImportService(jobs,rows,parts,images,storage,JsonMapper.builder().build(),tx,continuation);
+        var job=job("ready");PurchaseImportContinuationService.initialize(job);
+        when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        doAnswer(ignored->{((tools.jackson.databind.node.ObjectNode)job.payload.path("continuation")).put("blocked",true).put("reason","旧行已改变");return null;}).when(continuation).refresh(job);
+        assertThrows(AppException.class,()->guarded.confirm(job.id,Map.of()));
+        assertTrue(job.payload.path("continuation").path("blocked").asBoolean());
+        assertEquals("ready",job.status);
+        verify(tx).commit(any());verify(tx,never()).rollback(any());
+        verify(rows,never()).findConflictSkus(any());
+    }
+
+    @Test void confirmationOfConcurrentlyConsumedRowsPersistsZeroPendingAndDoesNotImport(){
+        var continuation=mock(PurchaseImportContinuationService.class);
+        var tx=mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(tx.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+        var guarded=new AsyncPurchaseImportService(jobs,rows,parts,images,storage,JsonMapper.builder().build(),tx,continuation);
+        var job=job("ready");job.validRows=3;PurchaseImportContinuationService.initialize(job);
+        when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        doAnswer(ignored->{((tools.jackson.databind.node.ObjectNode)job.payload.path("continuation")).put("pendingRows",0).put("skippedRows",3);return null;}).when(continuation).refresh(job);
+        assertThrows(AppException.class,()->guarded.confirm(job.id,Map.of()));
+        assertEquals(0,job.validRows);assertEquals("ready",job.status);
+        verify(tx).commit(any());verify(rows,never()).findConflictSkus(any());
     }
 
     @Test void requiresAndAppliesDuplicateSelectionBeforeConfirming() {

@@ -10,6 +10,13 @@ import tools.jackson.databind.JsonNode;import jakarta.persistence.*;import org.h
     @Column(name="import_action",length=16) public String importAction;
     @Column(name="error_message",length=1000) public String errorMessage;
     @Column(name="expected_version") public Long expectedVersion;
+    @Column(name="source_content_hash",length=64) public String sourceContentHash;
+    @Column(name="source_content_hash_without_sku",length=64) public String sourceContentHashWithoutSku;
+    @Column(name="target_product_id") public UUID targetProductId;
+    @Column(name="before_sku",length=96) public String beforeSku;
+    @Column(name="continuation_validation_status",length=24) public String continuationValidationStatus;
+    @Column(name="continuation_import_action",length=16) public String continuationImportAction;
+    @Column(name="continuation_error_message",length=1000) public String continuationErrorMessage;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name="before_payload",columnDefinition="jsonb") public JsonNode beforePayload;
     @Column(name="before_catalog_state",length=24) public String beforeCatalogState;
     @Column(name="before_quote_ready") public Boolean beforeQuoteReady;

@@ -2,7 +2,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { deletePurchaseProduct, loadPurchaseDeletionCheck, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseDisplayName, purchaseFreightChoices, setPurchaseProductCatalogState, upsertPurchaseProducts, type PurchaseDeletionCheck, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImportJob, loadPurchaseImportDuplicateGroups, loadPurchaseImportJob, loadPurchaseImportJobs, loadPurchaseImportRows, purchaseImportErrorsUrl, retryPurchaseImportJob, rollbackPurchaseImportJob, uploadPurchaseImagePart, type PurchaseImportDuplicateGroup, type PurchaseImportJob, type PurchaseImportRowView } from '@/services/purchaseAsyncImports'
-import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs } from '@/services/purchaseImportPolling'
+import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs, shouldRefreshPurchaseImportDetails } from '@/services/purchaseImportPolling'
+import { purchaseImportConfirmationState } from '@/services/purchaseImportConfirmation'
+import { createPurchaseImportTaskRequests } from '@/services/purchaseImportTaskRequests'
 import { preparePurchaseWorkbookTextOnly } from '@/services/purchaseWorkbookTextOnlyClient'
 import ImageMigrationPanel from './ImageMigrationPanel.vue'
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
@@ -32,10 +34,15 @@ const imageUploading = ref(false)
 const showTaskCenter = ref(false)
 const importJobs = ref<PurchaseImportJob[]>([])
 const activeJob = ref<PurchaseImportJob | null>(null)
+const taskDetailLoading = ref(false)
+const taskRequests = createPurchaseImportTaskRequests()
 const activeRows = ref<PurchaseImportRowView[]>([])
 const activeDuplicateGroups = ref<PurchaseImportDuplicateGroup[]>([])
 const asyncDuplicateSelections = ref<Record<string,{sourceSheet:string;sourceRow:number}>>({})
 const activeRowStatus = ref('error')
+const activeRowPage = ref(0)
+const activeRowTotalPages = ref(0)
+const activeRowTotal = ref(0)
 const imagePartNumber = ref(1)
 const pendingJobAction = ref<'confirm'|'retry'|'cancel'|'rollback'|null>(null)
 const deleteTarget = ref<PurchaseProductRecord | null>(null)
@@ -55,7 +62,8 @@ const pageStart = computed(() => totalRecords.value ? (currentPage.value - 1) * 
 const pageEnd = computed(() => Math.min(pageStart.value + records.value.length, totalRecords.value))
 const pagedRecords = computed(() => records.value)
 const deleteConfirmationMatches = computed(() => deleteTarget.value != null && deleteConfirmation.value.trim().toUpperCase() === deleteTarget.value.sku)
-const asyncDuplicatesResolved = computed(() => activeDuplicateGroups.value.every(group => !!asyncDuplicateSelections.value[group.sku]))
+const activeConfirmation = computed(() => purchaseImportConfirmationState(activeJob.value, activeDuplicateGroups.value, asyncDuplicateSelections.value))
+const activeContinuation = computed(() => activeConfirmation.value.continuation)
 const visiblePages = computed<(number | 'ellipsis-start' | 'ellipsis-end')[]>(() => {
   const total = totalPages.value
   if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
@@ -106,10 +114,36 @@ const jobPhaseLabel:Record<string,string>={queued:'排队',parsing:'文本解析
 function importJobStatuses(){return [activeJob.value?.status,...importJobs.value.map(job=>job.status)]}
 function startJobPolling(){stopJobPolling();jobPollTimer=window.setInterval(()=>{if(shouldPollPurchaseImportJobs(showTaskCenter.value,importJobStatuses()))void refreshImportJobs()},2000)}
 function stopJobPolling(){window.clearInterval(jobPollTimer);jobPollTimer=0}
-async function refreshImportJobs(){try{const previousStatus=activeJob.value?.status;const page=await loadPurchaseImportJobs();importJobs.value=page.content;if(activeJob.value){const fresh=await loadPurchaseImportJob(activeJob.value.id);activeJob.value=fresh;if(previousStatus!==fresh.status&&fresh.status==='ready')await refreshDuplicateGroups();if(didPurchaseImportDataChange(previousStatus,fresh.status))await reload()}}catch{/* 页面主数据错误提示已独立处理，轮询失败等待下一次重试 */}}
-async function selectImportJob(job:PurchaseImportJob){activeJob.value=await loadPurchaseImportJob(job.id);asyncDuplicateSelections.value={};await Promise.all([refreshJobRows(),refreshDuplicateGroups()])}
-async function refreshJobRows(){if(!activeJob.value)return;const page=await loadPurchaseImportRows(activeJob.value.id,activeRowStatus.value,0,50);activeRows.value=page.content}
-async function refreshDuplicateGroups(){if(!activeJob.value||activeJob.value.status!=='ready'){activeDuplicateGroups.value=[];return}activeDuplicateGroups.value=await loadPurchaseImportDuplicateGroups(activeJob.value.id)}
+async function refreshImportJobs(refreshDetails=false){
+  try{
+    const page=await loadPurchaseImportJobs();importJobs.value=page.content
+    if(!activeJob.value)return
+    const {id,status:previousStatus}=activeJob.value
+    let nextStatus=previousStatus
+    const applied=await taskRequests.read('detail',id,()=>loadPurchaseImportJob(id),fresh=>{activeJob.value=fresh;nextStatus=fresh.status;if(previousStatus!==fresh.status&&fresh.status!=='ready')pendingJobAction.value=null})
+    if(!applied){if(refreshDetails&&activeJob.value?.id===id)await Promise.all([refreshDuplicateGroups(),refreshJobRows()]);return}
+    if(shouldRefreshPurchaseImportDetails(previousStatus,nextStatus,refreshDetails))await Promise.all([refreshDuplicateGroups(),refreshJobRows()])
+    if(didPurchaseImportDataChange(previousStatus,nextStatus))await reload()
+  }catch{/* 页面主数据错误提示已独立处理，轮询失败等待下一次重试 */}
+}
+async function selectImportJob(job:PurchaseImportJob){
+  taskRequests.select(job.id);activeJob.value=null;taskDetailLoading.value=true;pendingJobAction.value=null
+  activeDuplicateGroups.value=[];activeRows.value=[];asyncDuplicateSelections.value={};activeRowStatus.value='error';activeRowPage.value=0;activeRowTotalPages.value=0;activeRowTotal.value=0
+  try{
+    const applied=await taskRequests.read('detail',job.id,()=>loadPurchaseImportJob(job.id),fresh=>{activeJob.value=fresh;taskDetailLoading.value=false})
+    if(applied)await Promise.all([refreshJobRows(),refreshDuplicateGroups()])
+  }catch(error){taskDetailLoading.value=false;toast(error instanceof Error?error.message:'任务读取失败')}
+}
+async function refreshJobRows(pageNumber=0){
+  if(!activeJob.value)return
+  const id=activeJob.value.id;const status=activeRowStatus.value
+  await taskRequests.read('rows',id,()=>loadPurchaseImportRows(id,status,pageNumber,50),page=>{activeRows.value=page.content;activeRowPage.value=page.number;activeRowTotalPages.value=page.totalPages;activeRowTotal.value=page.totalElements})
+}
+async function refreshDuplicateGroups(){
+  if(!activeJob.value){activeDuplicateGroups.value=[];return}
+  const {id,status}=activeJob.value
+  await taskRequests.read('duplicates',id,()=>status==='ready'?loadPurchaseImportDuplicateGroups(id):Promise.resolve([]),groups=>{activeDuplicateGroups.value=groups})
+}
 async function chooseAsyncWorkbook(event:Event){
   const input=event.target as HTMLInputElement;const original=input.files?.[0];if(!original)return
   asyncUploading.value=true
@@ -122,7 +156,9 @@ async function chooseAsyncWorkbook(event:Event){
     const file=new File([prepared.blob],original.name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',lastModified:original.lastModified})
     const upload=createPurchaseImportJob(file,{originalSizeBytes:prepared.originalSizeBytes,removedMediaCount:prepared.removedMediaCount},progress=>{uploadProgress.value={...uploadProgress.value,...progress,stage:progress.percent>=100?'正在创建任务':'正在上传无图数据文件'}})
     cancelActiveUpload=upload.cancel
-    activeJob.value=await upload.promise
+    const uploadedJob=await upload.promise
+    taskRequests.select(uploadedJob.id);activeJob.value=uploadedJob;taskDetailLoading.value=false
+    activeDuplicateGroups.value=[];asyncDuplicateSelections.value={};pendingJobAction.value=null;activeRows.value=[];activeRowStatus.value='error';activeRowPage.value=0;activeRowTotalPages.value=0;activeRowTotal.value=0
     uploadProgress.value={...uploadProgress.value,loaded:file.size,percent:100,stage:'排队'}
     showTaskCenter.value=true;await refreshImportJobs();toast(`已过滤 ${prepared.removedMediaCount} 张图片，数据任务正在后台解析`)
   }catch(error){if(error instanceof DOMException&&error.name==='AbortError')toast('处理已取消');else toast(error instanceof Error?error.message:'无图快速导入失败')}
@@ -130,9 +166,9 @@ async function chooseAsyncWorkbook(event:Event){
 }
 function cancelUpload(){cancelActiveUpload?.()}
 function formatBytes(value:number){if(value<1024)return `${value} B`;if(value<1024*1024)return `${(value/1024).toFixed(1)} KB`;return `${(value/1024/1024).toFixed(1)} MB`}
-function rowMessage(row:PurchaseImportRowView){const warnings=Array.isArray(row.payload.importWarnings)?row.payload.importWarnings.filter(item=>typeof item==='string') as string[]:[];return row.error||warnings.join('；')||'没有提醒'}
+function rowMessage(row:PurchaseImportRowView){if(row.status==='history-skipped')return row.error||'该工作表的这一行已在历史批次处理，本次跳过，系统已有数据保持不变';if(row.action==='sku-backfill')return row.error||'补 SKU：关联到此前该行导入的原商品，不新增一份，保留图片和人工维护资料';const warnings=Array.isArray(row.payload.importWarnings)?row.payload.importWarnings.filter(item=>typeof item==='string') as string[]:[];return row.error||warnings.join('；')||'没有提醒'}
 async function chooseImagePart(event:Event){const input=event.target as HTMLInputElement;const file=input.files?.[0];if(!file||!activeJob.value)return;imageUploading.value=true;try{activeJob.value=await uploadPurchaseImagePart(activeJob.value.id,imagePartNumber.value,file);imagePartNumber.value+=1;toast('图片分包上传成功')}catch(error){toast(error instanceof Error?error.message:'图片分包上传失败')}finally{imageUploading.value=false;input.value=''}}
-async function executeJobAction(){if(!activeJob.value||!pendingJobAction.value)return;const id=activeJob.value.id;if(pendingJobAction.value==='confirm'&&!asyncDuplicatesResolved.value){toast('请先为每组重复SKU选择保留记录');return}try{if(pendingJobAction.value==='confirm')await confirmPurchaseImportJob(id,asyncDuplicateSelections.value);else if(pendingJobAction.value==='retry')await retryPurchaseImportJob(id);else if(pendingJobAction.value==='cancel')await cancelPurchaseImportJob(id);else await rollbackPurchaseImportJob(id);await refreshImportJobs();toast('任务操作已提交')}catch(error){toast(error instanceof Error?error.message:'任务操作失败')}finally{pendingJobAction.value=null}}
+async function executeJobAction(){if(!activeJob.value||!pendingJobAction.value)return;const id=activeJob.value.id;if(pendingJobAction.value==='confirm'&&!activeConfirmation.value.canConfirm){toast(activeContinuation.value?.blocked?'历史数据检查未通过，不能入库':!activeConfirmation.value.duplicatesResolved?'请先为每组重复SKU选择保留记录':'当前没有可确认入库的数据');return}try{if(pendingJobAction.value==='confirm')await confirmPurchaseImportJob(id,asyncDuplicateSelections.value);else if(pendingJobAction.value==='retry')await retryPurchaseImportJob(id);else if(pendingJobAction.value==='cancel')await cancelPurchaseImportJob(id);else await rollbackPurchaseImportJob(id);await refreshImportJobs(true);toast('任务操作已提交')}catch(error){await refreshImportJobs(true);toast(error instanceof Error?error.message:'任务操作失败')}finally{pendingJobAction.value=null}}
 
 let toastTimer = 0
 function toast(message: string) {
@@ -248,6 +284,7 @@ const detailFields = computed(() => detail.value ? [
   </section>
   <SupplierRecordsPanel v-if="showSupplierRecords" @close="showSupplierRecords=false" @notice="toast" />
   <template v-else>
+  <p class="append-import-help"><b>固定表格接着导入</b> 无 SKU 的行也可先入库，以后在原行补 SKU，会补到原商品并保留图片和人工维护资料。保持文件名、工作表名和旧行位置不变，新数据放在末尾；旧行除补空白 SKU 外的内容变化会拦截。图片仍先在本地过滤，原文件不变。</p>
   <section v-if="asyncUploading" class="upload-status"><div><b>{{ uploadProgress.fileName }}</b><span v-if="uploadProgress.removedMediaCount">原始 {{ formatBytes(uploadProgress.originalSize) }} → 无图数据 {{ formatBytes(uploadProgress.size) }} · 已过滤 {{ uploadProgress.removedMediaCount }} 张图片 · 减少 {{ uploadProgress.reductionPercent }}%</span><span v-else>{{ formatBytes(uploadProgress.loaded) }} / {{ formatBytes(uploadProgress.size) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatBytes(uploadProgress.bytesPerSecond) }}/s</template></span></div><strong>{{ uploadProgress.stage }} {{ uploadProgress.percent }}%</strong><div class="progress"><i :style="{width:`${uploadProgress.percent}%`}"></i></div><button @click="cancelUpload">取消</button></section>
 
   <section class="stats">
@@ -293,25 +330,42 @@ const detailFields = computed(() => detail.value ? [
   </section>
 
   <div v-if="showTaskCenter" class="mask" @click.self="showTaskCenter=false"><section class="modal task-center-modal">
-    <button class="close" @click="showTaskCenter=false">×</button><small>EXCEL IMPORT TASKS</small><h2>采购 Excel 导入任务</h2><p>Excel 内嵌图片会在本地过滤，仅上传采购数据；商品图片可后续单独维护。</p>
+    <button class="close" @click="showTaskCenter=false">×</button><small>EXCEL IMPORT TASKS</small><h2>采购 Excel 导入任务</h2><p>按同名文件、工作表名和 Excel 实际行号接着导入。无 SKU 的行先入库；以后原行只补 SKU 时更新原商品，不重复新增。其余旧内容保持不变，新数据放在末尾。</p>
     <div class="task-center-grid">
       <aside class="job-list"><button v-for="job in importJobs" :key="job.id" :class="{ active:activeJob?.id===job.id }" @click="selectImportJob(job)"><b>{{ job.sourceName }}</b><span>{{ jobPhaseLabel[job.phase] || jobStatusLabel[job.status] || job.status }} · {{ job.progressPercent }}%</span><small>{{ new Date(job.createdAt).toLocaleString() }}</small></button><p v-if="!importJobs.length">暂无导入任务</p></aside>
       <main v-if="activeJob" class="job-detail">
         <header><div><b>{{ activeJob.sourceName }}</b><span :class="['job-status',activeJob.status]">{{ jobStatusLabel[activeJob.status] || activeJob.status }}</span></div><strong>{{ activeJob.progressPercent }}%</strong></header>
         <div class="progress"><i :style="{ width:`${activeJob.progressPercent}%` }"></i></div>
-        <div class="job-stats"><span><b>{{ activeJob.totalRows }}</b>总行数</span><span><b>{{ activeJob.validRows }}</b>合格</span><span><b>{{ activeJob.errorRows }}</b>错误</span><span><b>{{ activeJob.addedRows }}</b>新增</span><span><b>{{ activeJob.updatedRows }}</b>覆盖</span><span><b>{{ activeJob.conflictRows }}</b>冲突</span></div>
+        <div class="job-stats" :class="{'with-sku-backfill':activeContinuation}"><span><b>{{ activeJob.totalRows }}</b>总行数</span><span><b>{{ activeJob.validRows }}</b>合格</span><span><b>{{ activeJob.errorRows }}</b>错误</span><span><b>{{ activeJob.addedRows }}</b>新增商品</span><span v-if="activeContinuation"><b>{{ activeConfirmation.skuBackfillCount }}</b>计划补 SKU</span><span><b>{{ activeJob.updatedRows }}</b>{{ activeContinuation ? '覆盖资料' : '覆盖' }}</span><span><b>{{ activeJob.conflictRows }}</b>冲突</span></div>
+        <section v-if="activeContinuation && (activeContinuation.sheets.length || activeContinuation.blocked)" class="continuation-summary" :class="{blocked:activeContinuation.blocked}">
+          <header><b>固定表格续传</b><span>{{ activeContinuation.baselineFound ? '已匹配历史记录' : '首次记录此表格' }}</span></header>
+          <p>历史已处理、本次跳过 <b>{{ activeContinuation.skippedRows }}</b> 行 · 本次待处理 <b>{{ activeContinuation.pendingRows }}</b> 行（含错误、冲突）</p>
+          <p v-if="activeConfirmation.skuBackfillCount">计划为 <b>{{ activeConfirmation.skuBackfillCount }}</b> 行的原商品补 SKU，保留其图片和人工维护资料，不新增重复商品。此处为校验计划数，成功情况请查看任务状态及冲突行。</p>
+          <p v-if="!activeContinuation.baselineFound">未找到相同文件名的历史记录，本次按新来源校验。请先确认文件名，避免无 SKU 的旧数据重复新增。</p>
+          <p v-if="activeContinuation.blocked" class="continuation-blocked" role="alert"><b>续传已停止：</b>{{ activeContinuation.reason || '历史数据检查未通过，请检查文件名、工作表名和旧行是否改变。' }} 请按提示修正表格后重新上传，本次不会入库。</p>
+          <p v-else-if="activeContinuation.pendingRows===0" class="continuation-empty">本次没有需要入库的数据，历史已处理行均已跳过，系统已有商品不变。</p>
+          <p v-else-if="activeJob.status==='ready'">确认后仅处理本次可入库行；错误行需修正后补导。历史未变化的行会跳过，补 SKU 只关联原商品；目标 SKU 被占用或原商品已有不同正式 SKU 时会阻止入库。</p>
+          <div v-if="activeContinuation.sheets.length" class="continuation-sheets"><article v-for="sheet in activeContinuation.sheets" :key="sheet.sheetName">
+            <b>{{ sheet.sheetName }}</b>
+            <span>历史已处理最末行：{{ sheet.lastImportedRow > (activeJob.summary?.sheetSummaries?.find(item=>item.sheetName===sheet.sheetName)?.headerRow ?? 1) ? `第 ${sheet.lastImportedRow} 行` : '尚无成功数据记录' }}</span>
+            <span>{{ sheet.newRows+sheet.retryRows+(sheet.skuBackfillRows || 0)>0 ? (['completed','completed-with-errors','rolled-back'].includes(activeJob.status) ? '本次处理起始行' : '本次待处理起始行') : '下次追加起始行' }}：第 {{ sheet.nextRow }} 行</span>
+            <small>跳过 {{ sheet.skippedRows }} 行 · 追加 {{ sheet.newRows }} 行 · 旧行补导 {{ sheet.retryRows }} 行 · 计划补 SKU {{ sheet.skuBackfillRows || 0 }} 行</small>
+          </article></div>
+          <small>各工作表分别记录；行号包含表头和空行。补 SKU 或旧行补导的起点可能早于历史最末行。</small>
+        </section>
         <p v-if="activeJob.summary?.importMode==='text-only'" class="parse-summary">无图快速导入 · 原始 {{ formatBytes(activeJob.summary.originalSizeBytes || activeJob.summary.sourceBytes || 0) }} · 实际上传 {{ formatBytes(activeJob.summary.uploadedBytes || 0) }} · 已过滤 {{ activeJob.summary.removedMediaCount || 0 }} 张图片</p>
         <p v-if="activeJob.summary?.textParseMillis!=null" class="parse-summary">文本解析 {{ activeJob.summary.textParseMillis }} ms · 临时 SKU {{ activeJob.summary.generatedSkuRows || 0 }} 条 · 提醒 {{ activeJob.summary.warningCount || 0 }} 条</p>
         <div v-if="activeJob.summary?.sheetSummaries?.length" class="sheet-summaries"><article v-for="sheet in activeJob.summary.sheetSummaries" :key="sheet.sheetName" :class="{skipped:!sheet.recognized}"><b>{{ sheet.sheetName }}</b><span>{{ sheet.recognized ? `识别成功，${sheet.dataRows} 条数据` : '未发现 SKU 表头，已跳过' }}</span><small v-if="sheet.recognized">表头第 {{ sheet.headerRow }} 行 · 未知列 {{ sheet.unknownColumns.length }} · 缺少字段 {{ sheet.missingColumns.length }} · 忽略空行 {{ sheet.ignoredRows }}</small><small v-if="sheet.unknownColumns.length">未知列：{{ sheet.unknownColumns.join('、') }}</small></article></div>
         <p v-if="activeJob.error" class="job-error">{{ activeJob.error }}</p>
         <div v-if="['queued','parsing','ready','failed'].includes(activeJob.status)" class="image-part-upload"><label>图片ZIP分包编号 <input v-model.number="imagePartNumber" type="number" min="1"></label><button :disabled="imageUploading" @click="imagePartInput?.click()">{{ imageUploading?'上传中…':'上传图片分包' }}</button><small>命名：SKU-product.jpg / SKU-physical.jpg；已上传 {{ activeJob.imageParts }} 包</small><input ref="imagePartInput" hidden type="file" accept=".zip" @change="chooseImagePart"></div>
         <div v-if="activeJob.imagePartDetails?.length" class="image-part-list"><button v-for="part in activeJob.imagePartDetails" :key="part.partNumber" :class="part.status" :title="part.error || part.fileName" @click="part.status==='failed' && (imagePartNumber=part.partNumber)"><b>分包 {{ part.partNumber }}</b><span>{{ part.status==='completed'?'已完成':part.status==='failed'?'失败，点击选择替换':'待处理' }}</span><small v-if="part.error">{{ part.error }}</small></button></div>
-        <div class="row-filter"><button :class="{active:activeRowStatus==='valid'}" @click="activeRowStatus='valid';refreshJobRows()">提醒/待补全</button><button :class="{active:activeRowStatus==='error'}" @click="activeRowStatus='error';refreshJobRows()">错误行</button><button :class="{active:activeRowStatus==='conflict'}" @click="activeRowStatus='conflict';refreshJobRows()">冲突行</button><a :href="purchaseImportErrorsUrl(activeJob.id)" download>下载错误清单</a></div>
+        <div class="row-filter"><button :class="{active:activeRowStatus===''}" @click="activeRowStatus='';refreshJobRows()">全部行</button><button :class="{active:activeRowStatus==='valid'}" @click="activeRowStatus='valid';refreshJobRows()">合格/提醒</button><button :class="{active:activeRowStatus==='error'}" @click="activeRowStatus='error';refreshJobRows()">错误行</button><button :class="{active:activeRowStatus==='conflict'}" @click="activeRowStatus='conflict';refreshJobRows()">冲突行</button><button v-if="activeContinuation" :class="{active:activeRowStatus==='history-skipped'}" @click="activeRowStatus='history-skipped';refreshJobRows()">历史已跳过</button><a :href="purchaseImportErrorsUrl(activeJob.id)" download>下载错误清单</a></div>
         <div class="job-rows"><p v-if="!activeRows.length">当前没有对应记录</p><article v-for="row in activeRows" :key="`${row.sourceSheet}-${row.sourceRow}`"><b>{{ row.sourceSheet }} · 第 {{ row.sourceRow }} 行 · {{ row.sku }}</b><span>{{ rowMessage(row) }}</span></article></div>
-        <div v-if="pendingJobAction" class="action-confirm"><div v-if="pendingJobAction==='confirm'&&activeDuplicateGroups.length" class="async-duplicate-groups"><b>重复 SKU：每组选择一条后才能入库</b><fieldset v-for="group in activeDuplicateGroups" :key="group.sku"><legend>{{ group.sku }}</legend><label v-for="choice in group.choices" :key="`${choice.sourceSheet}-${choice.sourceRow}`"><input v-model="asyncDuplicateSelections[group.sku]" type="radio" :value="choice">{{ choice.sourceSheet }} · 第 {{ choice.sourceRow }} 行</label></fieldset></div><span>确认执行“{{ pendingJobAction==='confirm'?'批次入库':pendingJobAction==='rollback'?'整批回滚':pendingJobAction==='retry'?'重试任务':'取消任务' }}”吗？</span><button @click="pendingJobAction=null">返回</button><button class="primary" :disabled="pendingJobAction==='confirm'&&!asyncDuplicatesResolved" @click="executeJobAction">确认执行</button></div>
-        <footer v-else><button v-if="['queued','parsing','ready'].includes(activeJob.status)" @click="pendingJobAction='cancel'">取消任务</button><button v-if="activeJob.status==='failed'" @click="pendingJobAction='retry'">重试</button><button v-if="['completed','completed-with-errors'].includes(activeJob.status)" @click="pendingJobAction='rollback'">整批回滚</button><button v-if="activeJob.status==='ready'" class="primary" :disabled="!activeJob.validRows&&!activeJob.conflictRows" @click="pendingJobAction='confirm'">确认入库 {{ activeJob.validRows+activeDuplicateGroups.length }} 条</button></footer>
+        <div v-if="activeRowTotal" class="job-row-pages"><span>共 {{ activeRowTotal }} 行 · 第 {{ activeRowPage+1 }} / {{ activeRowTotalPages }} 页</span><button :disabled="activeRowPage===0" @click="refreshJobRows(activeRowPage-1)">上一页</button><button :disabled="activeRowPage+1>=activeRowTotalPages" @click="refreshJobRows(activeRowPage+1)">下一页</button></div>
+        <div v-if="pendingJobAction" class="action-confirm"><div v-if="pendingJobAction==='confirm'&&activeDuplicateGroups.length" class="async-duplicate-groups"><b>重复 SKU：每组选择一条后才能入库</b><fieldset v-for="group in activeDuplicateGroups" :key="group.sku"><legend>{{ group.sku }}</legend><label v-for="choice in group.choices" :key="`${choice.sourceSheet}-${choice.sourceRow}`"><input v-model="asyncDuplicateSelections[group.sku]" type="radio" :value="choice">{{ choice.sourceSheet }} · 第 {{ choice.sourceRow }} 行</label></fieldset></div><p v-if="pendingJobAction==='confirm'&&activeContinuation" class="confirm-counts">新增商品 {{ activeJob.addedRows }} 条 · 补 SKU {{ activeConfirmation.skuBackfillCount }} 条<template v-if="activeJob.updatedRows"> · 覆盖已有商品资料 {{ activeJob.updatedRows }} 条</template><template v-if="activeDuplicateGroups.length"> · 另有 {{ activeDuplicateGroups.length }} 组重复 SKU 按选择入库</template></p><span>确认执行“{{ pendingJobAction==='confirm'?`批次入库 ${activeConfirmation.count} 条`:pendingJobAction==='rollback'?'整批回滚':pendingJobAction==='retry'?'重试任务':'取消任务' }}”吗？</span><button @click="pendingJobAction=null">返回</button><button class="primary" :disabled="pendingJobAction==='confirm'&&!activeConfirmation.canConfirm" @click="executeJobAction">确认执行</button></div>
+        <footer v-else><button v-if="['queued','parsing','ready'].includes(activeJob.status)" @click="pendingJobAction='cancel'">取消任务</button><button v-if="activeJob.status==='failed'" @click="pendingJobAction='retry'">重试</button><button v-if="['completed','completed-with-errors'].includes(activeJob.status)" @click="pendingJobAction='rollback'">整批回滚</button><button v-if="activeConfirmation.canReview" class="primary" @click="pendingJobAction='confirm'">确认入库 {{ activeConfirmation.count }} 条</button></footer>
       </main>
-      <main v-else class="job-detail empty">请选择一个导入任务</main>
+      <main v-else class="job-detail empty">{{ taskDetailLoading ? '正在读取导入任务…' : '请选择一个导入任务' }}</main>
     </div>
   </section></div>
 
@@ -384,4 +438,6 @@ const detailFields = computed(() => detail.value ? [
 .task-center-modal{width:min(1180px,97vw)}.task-center-grid{display:grid;grid-template-columns:280px 1fr;min-height:520px;margin-top:18px;border:1px solid #dfe5e9;border-radius:9px;overflow:hidden}.job-list{overflow:auto;border-right:1px solid #dfe5e9;background:#f7f9fa}.job-list>button{display:grid;width:100%;gap:5px;padding:14px;border:0;border-bottom:1px solid #e5eaed;background:transparent;text-align:left}.job-list>button.active{background:#fff3df;box-shadow:inset 3px 0 #ff9900}.job-list span,.job-list small{color:#74808a;font-size:10px}.job-detail{min-width:0;padding:20px}.job-detail>header{display:flex;align-items:center;justify-content:space-between}.job-detail>header>div{display:grid;gap:7px}.job-detail>header strong{font-size:28px}.job-status{width:max-content;padding:4px 8px;border-radius:10px;background:#edf1f3;color:#596771;font-size:10px}.job-status.ready,.job-status.completed{background:#e7f6ec;color:#16764a}.job-status.failed,.job-status.completed-with-errors{background:#fff0e7;color:#ad5700}.progress{height:8px;margin:15px 0;border-radius:8px;overflow:hidden;background:#edf1f3}.progress i{display:block;height:100%;background:#ff9900;transition:width .25s}.job-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}.job-stats span{display:grid;gap:4px;padding:10px;border-radius:7px;background:#f6f8f9;color:#74808a;font-size:9px}.job-stats b{color:#17212b;font-size:18px}.job-error{padding:10px;border-radius:6px;background:#fff0ee;color:#b3362e}.image-part-upload{display:flex;align-items:center;gap:10px;margin:14px 0;padding:12px;border:1px dashed #d8dfe4;border-radius:7px}.image-part-upload label{display:flex;align-items:center;gap:7px}.image-part-upload input{width:70px;height:30px;border:1px solid #d7dee3}.image-part-upload button,.row-filter button,.row-filter a{height:32px;padding:0 10px;border:1px solid #dce3e8;border-radius:5px;background:#fff;color:#596771;text-decoration:none;line-height:30px}.image-part-upload small{margin-left:auto;color:#7b8790}.image-part-list{display:flex;max-height:100px;gap:6px;overflow:auto}.image-part-list button{display:grid;min-width:115px;gap:3px;padding:7px;border:1px solid #dfe5e9;border-radius:6px;background:#f7f9fa;text-align:left}.image-part-list button.completed{border-color:#bfe4ce;background:#edf9f1}.image-part-list button.failed{border-color:#f0c5aa;background:#fff4ec;cursor:pointer}.image-part-list span,.image-part-list small{font-size:9px;color:#74808a}.image-part-list small{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row-filter{display:flex;gap:7px;margin:14px 0}.row-filter button.active{border-color:#ff9900;color:#a96000}.row-filter a{margin-left:auto}.job-rows{max-height:180px;overflow:auto;border:1px solid #e2e7ea;border-radius:7px}.job-rows article{display:grid;gap:4px;padding:9px 11px;border-top:1px solid #edf0f2;font-size:10px}.job-rows article:first-child{border-top:0}.job-rows span{color:#a34c00}.action-confirm{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;margin-top:15px;padding:12px;border-radius:7px;background:#fff4df}.action-confirm span{margin-right:auto;font-weight:800}.action-confirm button{height:34px;padding:0 12px;border:1px solid #dce3e8;border-radius:5px;background:#fff}.action-confirm .primary{border:0;background:#ff9900}.async-duplicate-groups{display:grid;width:100%;gap:7px;padding-bottom:10px;border-bottom:1px solid #efd9af}.async-duplicate-groups fieldset{display:flex;gap:14px;margin:0;padding:7px;border:1px solid #eadfc9;border-radius:6px;background:#fff}.async-duplicate-groups legend{font-size:10px;font-weight:900}.async-duplicate-groups label{font-size:10px}@media(max-width:900px){.task-center-grid{grid-template-columns:1fr}.job-list{max-height:180px;border-right:0;border-bottom:1px solid #dfe5e9}.job-stats{grid-template-columns:repeat(3,1fr)}}
 .upload-status{position:relative;display:grid;grid-template-columns:1fr auto;gap:7px;margin:-8px 0 16px;padding:13px 15px;border:1px solid #efc477;border-radius:9px;background:#fff9ed}.upload-status div:first-child{display:grid;gap:3px}.upload-status span,.upload-status strong{font-size:10px;color:#6f7b84}.upload-status .progress{grid-column:1/-1;margin:0}.upload-status button{position:absolute;right:12px;bottom:10px;border:0;background:none;color:#a96000;font-weight:800}.parse-summary{padding:8px 10px;border-radius:6px;background:#f7f9fa;color:#62707a;font-size:10px}.sheet-summaries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:150px;overflow:auto;margin:10px 0}.sheet-summaries article{display:grid;gap:3px;padding:9px;border:1px solid #dfe5e9;border-radius:7px}.sheet-summaries article.skipped{background:#f6f8f9;color:#78848d}.sheet-summaries span,.sheet-summaries small{overflow:hidden;text-overflow:ellipsis;color:#74808a;font-size:9px}
 .actions{white-space:nowrap}.actions button+button{margin-left:4px}.actions button:disabled{cursor:not-allowed;opacity:.45}.danger-link{color:#c43f36!important}.product-action-modal{width:min(580px,96vw)}.action-warning{margin:16px 0;padding:13px 14px;border:1px solid #f1d19a;border-radius:8px;background:#fff8eb;color:#775628;line-height:1.6}.action-warning.danger{border-color:#edc0bc;background:#fff3f1;color:#a6322a}.reference-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}.reference-grid span{display:grid;gap:5px;padding:11px;border-radius:7px;background:#f5f7f8;color:#74808a;font-size:10px}.reference-grid b{color:#17212b;font-size:20px}.rollback-hint{padding:10px 12px;border-left:3px solid #ff9900;background:#fff8ea;color:#8a570d;font-size:11px}.delete-confirmation{display:grid;gap:7px;margin-top:16px;color:#45535e;font-size:11px;font-weight:800}.delete-confirmation input{box-sizing:border-box;width:100%;height:40px;border:1px solid #d9e0e5;border-radius:7px;padding:0 10px;font:inherit;text-transform:uppercase}.delete-confirmation input:focus{border-color:#dc4b41;outline:2px solid rgba(220,75,65,.12)}.delete-loading{display:grid;place-items:center;min-height:120px;color:#74808a}.modal footer .danger-button{border-color:#c43f36;background:#c43f36;color:#fff}.modal footer button:disabled{cursor:not-allowed;opacity:.45}@media(max-width:600px){.reference-grid{grid-template-columns:repeat(2,1fr)}}
+.append-import-help{margin:-6px 0 18px;padding:11px 14px;border:1px solid #dfe5e9;border-radius:8px;background:#f8fafb;color:#65727c;font-size:11px;line-height:1.7}.append-import-help>b{margin-right:10px;color:#35434e}.continuation-summary{margin:14px 0;padding:13px;border:1px solid #c9dfd2;border-radius:8px;background:#f5faf7;color:#486254;font-size:11px;line-height:1.6}.continuation-summary>header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px}.continuation-summary>header>span,.continuation-summary>small{color:#6b8073;font-size:10px}.continuation-summary p{margin:8px 0}.continuation-summary.blocked{border-color:#edc0bc;background:#fff7f5}.continuation-blocked{color:#a6322a}.continuation-empty{font-weight:700;color:#16764a}.continuation-sheets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:220px;overflow:auto;margin:10px 0}.continuation-sheets article{display:grid;gap:3px;padding:10px;border:1px solid #dbe7df;border-radius:7px;background:#fff}.continuation-sheets b{overflow-wrap:anywhere;color:#354a3e}.continuation-sheets span,.continuation-sheets small{font-size:10px}.row-filter{flex-wrap:wrap}.job-row-pages{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;color:#74808a;font-size:10px}.job-row-pages>span{margin-right:auto}.job-row-pages>button{padding:5px 8px;border:1px solid #dce3e8;border-radius:5px;background:#fff;color:#596771}.job-row-pages>button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:600px){.continuation-sheets{grid-template-columns:1fr}.job-row-pages{flex-wrap:wrap}.row-filter a{margin-left:0}}
+.job-stats.with-sku-backfill{grid-template-columns:repeat(7,minmax(0,1fr))}.confirm-counts{width:100%;margin:0 0 5px;color:#805819;font-size:11px;font-weight:700}@media(max-width:900px){.job-stats.with-sku-backfill{grid-template-columns:repeat(3,minmax(0,1fr))}}
 </style>

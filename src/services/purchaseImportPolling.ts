@@ -16,3 +16,8 @@ export function shouldPollPurchaseImportJobs(taskCenterOpen: boolean, statuses: 
 export function didPurchaseImportDataChange(previousStatus: string | null | undefined, nextStatus: string) {
   return !DATA_CHANGED_STATUSES.has(previousStatus ?? '') && DATA_CHANGED_STATUSES.has(nextStatus)
 }
+
+export function shouldRefreshPurchaseImportDetails(previousStatus: string, nextStatus: string, afterAction = false) {
+  // Confirmation may refresh skips/conflicts without moving a ready task to another status.
+  return afterAction || previousStatus !== nextStatus
+}

@@ -51,6 +51,19 @@ class PurchaseImportBatchServiceTest {
         job.errorMessage="服务重启后任务已自动恢复排队";service.finishRollback(job.id);assertEquals("rolled-back",job.status);assertNotNull(job.rolledBackAt);assertNull(job.errorMessage);
     }
 
+    @Test void stagesOversizedSkuAsAnErrorWithoutTruncatingItsOriginalValue(){
+        var job=job("parsing");when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var oversized="X".repeat(97);var invalid=mapped(2,oversized,List.of("SKU格式不合法"));
+        service.stage(job.id,List.of(invalid));
+        @SuppressWarnings("unchecked") var captured=(List<PurchaseImportRow>)mockingDetails(rows).getInvocations().stream()
+                .filter(i->i.getMethod().getName().equals("saveAll")).findFirst().orElseThrow().getArgument(0);
+        var row=captured.getFirst();
+        assertTrue(row.sku.startsWith("INVALID-"));assertTrue(row.sku.length()<=96);
+        assertEquals(oversized,row.payload.path("sku").asText());
+        assertEquals("error",row.validationStatus);assertEquals("skip",row.importAction);
+        assertEquals(1,job.errorRows);assertEquals(0,job.validRows);assertEquals(0,job.addedRows);
+    }
+
     @Test void appliesSuccessAndConflictRows(){
         var job=job("importing");job.validRows=2;job.totalRows=2;when(jobs.findById(job.id)).thenReturn(Optional.of(job));
         var good=row(job.id,"SKU-1");good.productAssetId=UUID.randomUUID();good.physicalAssetId=UUID.randomUUID();var conflict=row(job.id,"SKU-2");

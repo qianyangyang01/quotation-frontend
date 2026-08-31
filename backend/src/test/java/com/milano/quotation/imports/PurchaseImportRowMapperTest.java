@@ -34,5 +34,16 @@ class PurchaseImportRowMapperTest {
         assertTrue(row.errors().isEmpty());assertEquals(1600,row.payload().path("weightG").asInt());assertEquals("1600g左右",row.payload().path("weightOriginal").asText());
         assertEquals(0.08,row.payload().path("taxPoint").asDouble(),0.0001);assertEquals("专票",row.payload().path("invoiceType").asText());assertEquals("棉",row.payload().path("material").asText());assertEquals("定制款",row.payload().path("stockStatus").asText());assertTrue(row.payload().path("quoteReady").asBoolean());
     }
+    @Test void sourceFingerprintIsStableForNoSkuRowsAcrossTasksAndImageChanges(){
+        var values=values("");
+        var schema=new PurchaseWorkbookSchema(PurchaseWorkbookSchema.Version.LEGACY);
+        var first=mapper.map("FIRST",1,"采购",31,values,schema);
+        values[2]="图片内容已过滤";
+        var next=mapper.map("SECOND",1,"采购",31,values,schema);
+        assertNotEquals(first.sku(),next.sku());
+        assertEquals(first.sourceContentHash(),next.sourceContentHash());
+        values[0]="MLN-REAL-31";
+        assertNotEquals(first.sourceContentHash(),mapper.map("SECOND",1,"采购",31,values,schema).sourceContentHash());
+    }
     private static String[] values(String sku){var v=new String[32];java.util.Arrays.fill(v,"");v[0]=sku;v[1]="运动内衣";v[4]="采购员";v[5]="2026-08-24";v[8]="350";v[9]="23.1";v[10]="23.1";v[11]="5.6";v[12]="1";v[13]="65.61";v[24]="有货";return v;}
 }

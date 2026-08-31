@@ -5,6 +5,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -55,7 +57,22 @@ public class PurchaseImportRowMapper {
         stock(out,value(values,schema,PurchaseWorkbookSchema.Field.STOCK,warnings),warnings);
         out.put("notes",value(values,schema,PurchaseWorkbookSchema.Field.NOTES,warnings));out.put("factoryInfo",value(values,schema,PurchaseWorkbookSchema.Field.FACTORY,warnings));out.put("auditNotes",value(values,schema,PurchaseWorkbookSchema.Field.AUDIT_NOTES,warnings));
         out.put("sourceLink1",value(values,schema,PurchaseWorkbookSchema.Field.LINK1,warnings));out.put("sourceLink2",value(values,schema,PurchaseWorkbookSchema.Field.LINK2,warnings));out.put("sourceLink3",value(values,schema,PurchaseWorkbookSchema.Field.LINK3,warnings));out.put("similarSource",value(values,schema,PurchaseWorkbookSchema.Field.SIMILAR,warnings));
-        derive(out,errors,warnings);return new MappedRow(sourceSheet,sourceRow,sku,out,List.copyOf(errors),List.copyOf(warnings));
+        derive(out,errors,warnings);return new MappedRow(sourceSheet,sourceRow,sku,out,List.copyOf(errors),List.copyOf(warnings),sourceContentHash(values,schema,false),sourceContentHash(values,schema,true));
+    }
+
+    private static String sourceContentHash(String[] values,PurchaseWorkbookSchema schema,boolean ignoreSku){
+        try{
+            var digest=MessageDigest.getInstance("SHA-256");
+            for(var field:PurchaseWorkbookSchema.Field.values()){
+                if(field==PurchaseWorkbookSchema.Field.PRODUCT_IMAGE||field==PurchaseWorkbookSchema.Field.PHYSICAL_IMAGE)continue;
+                if(ignoreSku&&field==PurchaseWorkbookSchema.Field.SKU)continue;
+                var text=schema.value(values,field,null);
+                var bytes=text.getBytes(StandardCharsets.UTF_8);
+                digest.update((field.name()+":"+bytes.length+":").getBytes(StandardCharsets.UTF_8));
+                digest.update(bytes);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        }catch(java.security.NoSuchAlgorithmException error){throw new IllegalStateException(error);}
     }
 
     private static void derive(ObjectNode o,List<String> errors,List<String> warnings){
@@ -85,5 +102,8 @@ public class PurchaseImportRowMapper {
     private static String clean(String[] values,int index){return index<0||values==null||index>=values.length||values[index]==null?"":values[index].trim();}
     private static String value(String[] values,PurchaseWorkbookSchema schema,PurchaseWorkbookSchema.Field field,List<String>warnings){return schema.value(values,field,warnings);}
     static boolean reserved(String sku){return sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK)[A-Z0-9._/-]*$")||sku.startsWith("AUTO-");}
-    record MappedRow(String sourceSheet,int sourceRow,String sku,ObjectNode payload,List<String>errors,List<String>warnings){MappedRow(int sourceRow,String sku,ObjectNode payload,List<String>errors,List<String>warnings){this("采购产品导入",sourceRow,sku,payload,errors,warnings);}}
+    record MappedRow(String sourceSheet,int sourceRow,String sku,ObjectNode payload,List<String>errors,List<String>warnings,String sourceContentHash,String sourceContentHashWithoutSku){
+        MappedRow(String sourceSheet,int sourceRow,String sku,ObjectNode payload,List<String>errors,List<String>warnings){this(sourceSheet,sourceRow,sku,payload,errors,warnings,null,null);}
+        MappedRow(int sourceRow,String sku,ObjectNode payload,List<String>errors,List<String>warnings){this("采购产品导入",sourceRow,sku,payload,errors,warnings,null,null);}
+    }
 }

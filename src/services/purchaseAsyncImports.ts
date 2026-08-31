@@ -3,8 +3,12 @@ import { api, idempotencyKey, uploadForm, type UploadProgress } from './http'
 export type PurchaseImportJobStatus = 'queued'|'parsing'|'ready'|'import-queued'|'importing'|'completed'|'completed-with-errors'|'failed'|'cancelled'|'rollback-queued'|'rolling-back'|'rolled-back'
 export interface PurchaseImportImagePart { partNumber:number;fileName:string;status:string;sizeBytes:number;processedBytes:number;error?:string;processedAt?:string }
 export interface PurchaseImportJob {
-  id:string;status:PurchaseImportJobStatus;phase:string;sourceName:string;totalRows:number;processedRows:number;validRows:number;errorRows:number;addedRows:number;updatedRows:number;conflictRows:number;progressPercent:number;imageParts:number;imagePartDetails:PurchaseImportImagePart[];imageErrors:number;error?:string;summary?:{sourceBytes?:number;uploadedBytes?:number;originalSizeBytes?:number;removedMediaCount?:number;importMode?:'text-only';textParseMillis?:number;generatedSkuRows?:number;warningCount?:number;sheetSummaries?:PurchaseImportSheetSummary[]};createdAt:string;updatedAt:string;completedAt?:string;rolledBackAt?:string
+  id:string;status:PurchaseImportJobStatus;phase:string;sourceName:string;totalRows:number;processedRows:number;validRows:number;errorRows:number;addedRows:number;updatedRows:number;conflictRows:number;progressPercent:number;imageParts:number;imagePartDetails:PurchaseImportImagePart[];imageErrors:number;error?:string;summary?:{sourceBytes?:number;uploadedBytes?:number;originalSizeBytes?:number;removedMediaCount?:number;importMode?:'text-only';textParseMillis?:number;generatedSkuRows?:number;warningCount?:number;sheetSummaries?:PurchaseImportSheetSummary[];continuation?:PurchaseImportContinuation};createdAt:string;updatedAt:string;completedAt?:string;rolledBackAt?:string
 }
+export interface PurchaseImportContinuation {
+  mode:'append';sourceName:string;baselineFound:boolean;skippedRows:number;pendingRows:number;skuBackfillRows?:number;blocked:boolean;reason?:string; sheets:PurchaseImportContinuationSheet[]
+}
+export interface PurchaseImportContinuationSheet {sheetName:string;lastImportedRow:number;nextRow:number;skippedRows:number;newRows:number;retryRows:number;skuBackfillRows?:number}
 export interface PurchaseImportSheetSummary {sheetName:string;recognized:boolean;headerRow:number;recognizedColumns:string[];unknownColumns:string[];missingColumns:string[];dataRows:number;ignoredRows:number}
 export interface PurchaseImportRowView { sourceSheet:string;sourceRow:number;sku:string;status:string;action:string;error?:string;payload:Record<string,unknown> }
 export interface PurchaseImportDuplicateGroup { sku:string;choices:{sourceSheet:string;sourceRow:number}[] }
