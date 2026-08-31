@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { calculateLogisticsFee, findPriceRow, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
-import { weightLabel } from './logisticsRebuild'
+import { completedBatchStage, weightLabel, type Batch } from './logisticsRebuild'
 
 const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): LogisticsRule => ({
   id: 9, name: '边界测试', englishName: '', type: '专线', currency: 'CNY', published: '', status: '启用', dates: '', users: '',
@@ -9,6 +9,15 @@ const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): Log
 })
 const row = { areaName: '法国', countryCode: 'FR', registrationFee: 2 }
 describe('rebuild pricing safety', () => {
+  it('does not label unchanged imports as awaiting review', () => {
+    const batch = (statuses: string[]) => ({ status: 'completed', payload: { results: statuses.map(status => ({ status })) } }) as Batch
+    expect(completedBatchStage(batch(['unchanged']))).toBe('无需审核')
+    expect(completedBatchStage(batch(['draft', 'unchanged']))).toBe('待审核')
+    expect(completedBatchStage(batch(['blocked']))).toBe('存在阻断，请核对')
+    expect(completedBatchStage(batch(['draft', 'blocked']))).toBe('存在阻断，请核对')
+    const failedFile = batch(['unchanged']); failedFile.payload.fileReports = [{ fileName: '损坏.xlsx', status: 'failed' }]
+    expect(completedBatchStage(failedFile)).toBe('存在文件解析失败，请核对')
+  })
   it('preserves the confirmed 200g/201g boundary through API normalization', () => {
     const rule = makeRule([{ ...row, weightFromKg: 0, weightToKg: 0.2, pricePerKg: 10 }, { ...row, weightFromKg: 0.201, weightToKg: 0.5, weightFromInclusive: true, pricePerKg: 20 }])
     expect(findPriceRow(rule, 'FR', 0.2)?.pricePerKg).toBe(10)

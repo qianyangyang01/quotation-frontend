@@ -81,13 +81,11 @@ export const api = {
 export function idempotencyKey(prefix = 'web') { return `${prefix}:${crypto.randomUUID()}` }
 export function resetCsrf() { csrf = null }
 
-/** Authenticated binary downloads share JSON error/session handling with normal API calls. */
-export async function downloadFile(path: string, filename: string) {
-  const response = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers: { 'X-Request-Id': crypto.randomUUID() } })
-  if (!response.ok) { await parseEnvelope(response); return }
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url; anchor.download = filename; anchor.click()
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+export interface PreparedDownload { url: string; filename: string }
+
+/** Prepare an authenticated native HTTP download instead of an unsupported Blob URL. */
+export async function downloadFile(parameters: URLSearchParams): Promise<PreparedDownload> {
+  const result = await api.get<PreparedDownload>(`/logistics/rebuild/downloads/prepare?${parameters}`)
+  if (!result.url.startsWith('/api/v1/logistics/rebuild/') || result.url.includes('\\') || !result.filename) throw new Error('服务器返回的下载地址不合法')
+  return result
 }

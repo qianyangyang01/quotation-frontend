@@ -46,15 +46,22 @@ export const logisticsRebuild = {
   backup: (id: string) => api.post<{ sha256: string }>(`${root}/datasets/${id}/backup`),
   preview: (id: string, mappings: Mapping[] = []) => api.post<Cutover>(`${root}/datasets/${id}/preview`, { mappings: mappings.map(({ oldChannelId, newChannelId }) => ({ oldChannelId, newChannelId })) }),
   activate: (id: string, preview: Cutover, note: string, unavailableConfirmed: boolean, key: string) => api.post<Cutover>(`${root}/datasets/${id}/activate`, { previewToken: preview.previewToken, mappings: preview.mappings.map(({ oldChannelId, newChannelId }) => ({ oldChannelId, newChannelId })), note, reviewConfirmed: true, unavailableConfirmed }, key),
-  exportPrices: (id: string, filters: URLSearchParams) => downloadFile(`${root}/datasets/${id}/prices.xlsx?${filters}`, '物流价格.xlsx'),
-  exportDiff: (v: Version) => downloadFile(`${root}/versions/${v.id}/changes.xlsx`, '价格变化.xlsx'),
-  exportBatchDiff: (id: string) => downloadFile(`${root}/imports/${id}/changes.xlsx`, '批次价格变化.xlsx'),
-  original: (id: string, index: number, filename: string) => downloadFile(`${root}/imports/${id}/files/${index}`, filename),
-  evidence: (id: string, index: number) => downloadFile(`${root}/imports/${id}/files/${index}/evidence`, '原表解析证据.json'),
+  exportPrices: (id: string, filters: URLSearchParams) => downloadFile(new URLSearchParams({ ...Object.fromEntries(filters), kind: 'prices', id })),
+  exportDiff: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-diff', id: v.id })),
+  exportBatchDiff: (id: string) => downloadFile(new URLSearchParams({ kind: 'batch-diff', id })),
+  original: (id: string, index: number) => downloadFile(new URLSearchParams({ kind: 'source', id, index: String(index) })),
+  evidence: (id: string, index: number) => downloadFile(new URLSearchParams({ kind: 'evidence', id, index: String(index) })),
 }
 
 export function weightLabel(price: Price) {
   return `${price.weightFromInclusive ? '[' : '('}${Number((price.weightFromKg * 1000).toFixed(3))}, ${Number((price.weightToKg * 1000).toFixed(3))}${price.weightToInclusive === false ? ')' : ']'} g`
+}
+export function completedBatchStage(batch: Pick<Batch, 'status' | 'payload'>) {
+  if (batch.status !== 'completed') return ''
+  if (batch.payload.fileReports?.some(f => f.status === 'failed')) return '存在文件解析失败，请核对'
+  if (batch.payload.results.some(r => r.status === 'blocked')) return '存在阻断，请核对'
+  if (batch.payload.results.some(r => r.status === 'draft')) return '待审核'
+  return '无需审核'
 }
 export function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—' }
 export function shown(value: unknown) { return value == null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value) }

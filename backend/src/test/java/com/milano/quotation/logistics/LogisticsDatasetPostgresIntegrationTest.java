@@ -78,6 +78,32 @@ class LogisticsDatasetPostgresIntegrationTest {
         var original=mapper.readTree(jdbc.sql("select payload::text from logistics_version").query(String.class).single());
         assertEquals(parser.businessHash((ArrayNode)original.path("rows")),parsed.path("channels").get(0).path("contentHash").asText());
     }finally{s.setRollbackOnly();}});}
+    @Test void nativeDownloadSnapshotRejectsChangedPricesOrFilters(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();var c=seed(dataset,"固定下载",true);
+        var token=exports.priceSnapshot(dataset,null,"固定","US","普货");
+        assertTrue(exports.prices(dataset,null,"固定","US","普货",token).length>0);
+        assertThrows(AppException.class,()->exports.prices(dataset,null,"固定","GB","普货",token));
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,pricePerKg}','99'::jsonb) where channel_id=:c").param("c",c).update();
+        assertThrows(AppException.class,()->exports.prices(dataset,null,"固定","US","普货",token));
+        var empty=UUID.fromString(datasets.create("空测试库","QA").path("id").asText());
+        assertThrows(AppException.class,()->exports.priceSnapshot(empty,null,"","",""));
+        assertThrows(AppException.class,()->exports.priceSnapshot(empty,jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",c).query(UUID.class).single(),"","",""));
+    }finally{s.setRollbackOnly();}});}
+    @Test void unchangedBatchDiffDoesNotReuseHistoricalVersionAdditions(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();var c=seed(dataset,"批次报表",false);
+        var v=jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",c).query(UUID.class).single();
+        var payload=(ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:v").param("v",v).query(String.class).single());
+        ((ObjectNode)payload.path("rows").get(0)).put("zoneName","2区");payload.putObject("summary").put("added",1).put("unchanged",0);
+        payload.putArray("diffRows").addObject().put("type","added").set("row",payload.path("rows").get(0));
+        jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where id=:v").param("p",payload.toString()).param("v",v).update();
+        var b=UUID.randomUUID();var batch=mapper.createObjectNode();batch.putArray("results").addObject().put("versionId",v.toString()).put("status","unchanged");
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:d,'QA',:key,'completed','review',cast(:p as jsonb))").param("id",b).param("d",dataset).param("key",b.toString()).param("p",batch.toString()).update();
+        try(var report=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new ByteArrayInputStream(exports.changes(b,null)))){
+            var row=report.getSheet("批次汇总").getRow(2);assertEquals("0",row.getCell(4).getStringCellValue());assertEquals("1",row.getCell(8).getStringCellValue());assertEquals(v.toString(),row.getCell(3).getStringCellValue());assertEquals("unchanged",row.getCell(9).getStringCellValue());
+            var detail=report.getSheet("变化明细").getRow(1);assertEquals("unchanged",detail.getCell(5).getStringCellValue());assertEquals(detail.getCell(7).getStringCellValue(),detail.getCell(8).getStringCellValue());assertEquals("2区",detail.getCell(14).getStringCellValue());
+        }
+        try(var original=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new ByteArrayInputStream(exports.changes(null,v)))){assertEquals("1",original.getSheet("批次汇总").getRow(2).getCell(4).getStringCellValue());assertEquals("added",original.getSheet("变化明细").getRow(1).getCell(5).getStringCellValue());}
+    }catch(IOException e){throw new AssertionError(e);}finally{s.setRollbackOnly();}});}
     @Test void durableWorkerStagesAChannelInsideTheDatabaseTransaction(){tx.executeWithoutResult(s->{try{
         var active=guard.activeId();seed(active,"验收源",true);var bytes=exports.prices(active,null,"验收源","","");
         var dataset=UUID.fromString(datasets.create("导入准备区","QA").path("id").asText());

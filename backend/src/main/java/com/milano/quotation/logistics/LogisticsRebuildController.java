@@ -41,6 +41,25 @@ public class LogisticsRebuildController {
         this.datasets=datasets;this.imports=imports;this.exports=exports;this.logistics=logistics;this.versions=versions;this.storage=storage;this.idempotency=idempotency;this.audit=audit;
     }
     @GetMapping("/datasets") public ApiResponse<?> datasets(){return ApiResponse.ok(datasets.list());}
+    @GetMapping("/downloads/prepare")
+    public ApiResponse<?> prepareDownload(@RequestParam String kind,@RequestParam UUID id,@RequestParam(required=false)UUID versionId,
+            @RequestParam(defaultValue="0")int index,@RequestParam(defaultValue="")String query,@RequestParam(defaultValue="")String country,@RequestParam(defaultValue="")String attribute){
+        String path,name;var params=new LinkedHashMap<String,String>();
+        switch(kind){
+            case "prices" -> {datasets.dataset(id);path="/datasets/"+id+"/prices.xlsx";name="物流价格.xlsx";
+                params.put("query",query);params.put("country",country);params.put("attribute",attribute);if(versionId!=null)params.put("versionId",versionId.toString());
+                params.put("snapshot",exports.priceSnapshot(id,versionId,query,country,attribute));}
+            case "version-diff" -> {if(!versions.existsById(id))throw AppException.notFound("物流版本不存在");path="/versions/"+id+"/changes.xlsx";name="版本变化.xlsx";}
+            case "batch-diff" -> {imports.get(id);path="/imports/"+id+"/changes.xlsx";name="批次价格变化.xlsx";}
+            case "source", "evidence" -> {var payload=imports.get(id).path("payload");var files=payload.path("files");if(index<0||index>=files.size())throw AppException.notFound("原文件不存在");
+                path="/imports/"+id+"/files/"+index;name=files.get(index).path("name").asText();
+                if(kind.equals("evidence")){if(payload.path("fileReports").path(index).path("sourceEvidence").path("objectKey").asText().isBlank())throw AppException.notFound("该批次没有独立解析证据");path+="/evidence";name="原表解析证据.json";}}
+            default -> throw AppException.unprocessable("不支持的下载类型");
+        }
+        var uri=org.springframework.web.util.UriComponentsBuilder.fromPath("/api/v1/logistics/rebuild"+path);params.forEach(uri::queryParam);
+        audit.record("logistics.download-prepare","logistics-download",id.toString(),"success",Map.of("kind",kind));
+        return ApiResponse.ok(Map.of("url",uri.build().encode().toUriString(),"filename",name));
+    }
     @GetMapping("/datasets/{id}/required-channels") public ApiResponse<?> required(@PathVariable UUID id){return ApiResponse.ok(datasets.requiredChannels(id));}
     @PutMapping("/datasets/{id}/required-channels") @Transactional
     public ApiResponse<?> required(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
@@ -113,10 +132,10 @@ public class LogisticsRebuildController {
         var result=logistics.recompare(channel,version);audit.record("logistics.recompare","logistics-version",version.toString(),"success",Map.of());return ApiResponse.ok(result);
     }
     @GetMapping("/datasets/{id}/prices.xlsx") public ResponseEntity<byte[]> prices(@PathVariable UUID id,@RequestParam(required=false)UUID versionId,
-            @RequestParam(defaultValue="")String query,@RequestParam(defaultValue="")String country,@RequestParam(defaultValue="")String attribute){
-        var bytes=exports.prices(id,versionId,query,country,attribute);audit.record("logistics.price-export","logistics-dataset",id.toString(),"success",Map.of("rowsScope","all-filtered"));return excel(bytes,"物流价格.xlsx");
+            @RequestParam(defaultValue="")String query,@RequestParam(defaultValue="")String country,@RequestParam(defaultValue="")String attribute,@RequestParam(required=false)String snapshot){
+        var bytes=exports.prices(id,versionId,query,country,attribute,snapshot);audit.record("logistics.price-export","logistics-dataset",id.toString(),"success",Map.of("rowsScope","all-filtered"));return excel(bytes,"物流价格.xlsx");
     }
-    @GetMapping("/imports/{id}/changes.xlsx") public ResponseEntity<byte[]> changes(@PathVariable UUID id){var bytes=exports.changes(id,null);audit.record("logistics.diff-export","logistics-import",id.toString(),"success",Map.of());return excel(bytes,"价格变化.xlsx");}
+    @GetMapping("/imports/{id}/changes.xlsx") public ResponseEntity<byte[]> changes(@PathVariable UUID id){var bytes=exports.changes(id,null);audit.record("logistics.diff-export","logistics-import",id.toString(),"success",Map.of());return excel(bytes,"批次价格变化.xlsx");}
     @GetMapping("/versions/{id}/changes.xlsx") public ResponseEntity<byte[]> versionChanges(@PathVariable UUID id){var bytes=exports.changes(null,id);audit.record("logistics.diff-export","logistics-version",id.toString(),"success",Map.of());return excel(bytes,"版本变化.xlsx");}
     static ResponseEntity<byte[]> excel(byte[] bytes,String name){return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).header(HttpHeaders.CONTENT_DISPOSITION,attachment(name)).body(bytes);}
     static String attachment(String name){return ContentDisposition.attachment().filename(name,StandardCharsets.UTF_8).build().toString();}
