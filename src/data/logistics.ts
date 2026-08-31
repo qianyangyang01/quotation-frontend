@@ -6,6 +6,7 @@ export interface LogisticsPriceRow {
   nextWeightKg: number; nextWeightPrice: number; intervalPrice: number; registrationFee: number
   surcharge: number; fuelSurchargeRate: number; prohibitGeneralCargo: boolean; volumetric: boolean
   phoneRequired: boolean; zoneName: string; zoneExclude: boolean
+  weightFromInclusive?: boolean; weightToInclusive?: boolean; quoteReady?: boolean
 }
 export interface LogisticsRelation { carrier: string; channel: string; channelCode: string; discounts: string }
 export interface LogisticsRule {
@@ -88,6 +89,7 @@ function normalizeShippingMarks(marks: string[]) {
   return [...new Set(normalized.length ? normalized : ['普货'])]
 }
 export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: string[] = ['普货']) {
+  if (price.quoteReady === false) return false
   const marks = normalizeShippingMarks(productMarks)
   const prohibited = new Set(splitMarks(price.prohibitedMarks))
   if (marks.some(mark => prohibited.has(mark))) return false
@@ -96,7 +98,11 @@ export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: strin
   return !allowed.size || marks.every(mark => mark === '普货' || allowed.has(mark))
 }
 export function findPriceRow(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], quoteRegion = '') {
-  return rule.prices.find(price => priceMatchesCountryAndRegion(price, country, quoteRegion) && weightKg > price.weightFromKg && weightKg <= price.weightToKg && isPriceRowEligible(price, productMarks))
+  return rule.prices.find(price => priceMatchesCountryAndRegion(price, country, quoteRegion) && weightMatchesPrice(price, weightKg) && isPriceRowEligible(price, productMarks))
+}
+export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive'>, weightKg: number) {
+  return (price.weightFromInclusive ? weightKg >= price.weightFromKg : weightKg > price.weightFromKg)
+    && (price.weightToInclusive === false ? weightKg < price.weightToKg : weightKg <= price.weightToKg)
 }
 export function calculateLogisticsFee(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], dimensions?: ShipmentDimensions, quoteRegion = '') {
   const actualWeightKg = Math.max(0, Number(weightKg) || 0)
@@ -119,9 +125,9 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
         : candidate.volumeDivisor > 0
           ? candidate.volumeDivisor
           : Math.max(1, dimensions.defaultVolumeDivisor || 8000)
-      const volumetric = volume / divisor
+      const volumetric = candidate.volumetric === false ? 0 : volume / divisor
       const chargeable = Math.max(actualWeightKg, volumetric)
-      if (chargeable > candidate.weightFromKg && chargeable <= candidate.weightToKg) {
+      if (weightMatchesPrice(candidate, chargeable)) {
         chargeWeightKg = chargeable
         volumeWeightKg = volumetric
         volumeDivisor = divisor
@@ -135,11 +141,11 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   if (price.intervalPrice > 0) base = price.intervalPrice
   else if (price.firstWeightKg > 0 && price.firstWeightPrice > 0) {
     const extraWeight = Math.max(0, chargeWeightKg - price.firstWeightKg)
-    const extraUnits = price.nextWeightKg > 0 ? Math.ceil(extraWeight / price.nextWeightKg) : 0
+    const extraUnits = price.nextWeightKg > 0 ? Math.ceil(extraWeight / price.nextWeightKg - 1e-9) : 0
     base = price.firstWeightPrice + extraUnits * price.nextWeightPrice
-  } else base = Math.max(chargeWeightKg, price.startWeightKg, price.minChargeWeightKg) * price.pricePerKg
+  } else base = Math.max(chargeWeightKg, price.startWeightKg || 0, price.minChargeWeightKg || 0) * price.pricePerKg
   // 速猫规则中的附加费属于渠道固定成本；燃油费按当前业务口径不参与报价。
   const surcharge = Math.max(0, price.surcharge || 0)
-  const total = base + price.registrationFee + surcharge
+  const total = base + (price.registrationFee || 0) + surcharge
   return { total: Number(total.toFixed(2)), base, surcharge, price, actualWeightKg, volumeWeightKg, chargeWeightKg, volumeDivisor }
 }

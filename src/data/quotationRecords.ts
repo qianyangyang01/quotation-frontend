@@ -102,7 +102,7 @@ export interface QuotationRecord {
   systemQuoteCny: number; systemQuoteUsd: number; totalCostCny: number; exchangeRate: number
   matrixMode?: 'common' | 'specified' | 'template'; quotationTemplateId?: string; quotationTemplateName?: string
   specifiedQuotes?: QuotationRecordSpecifiedQuote[]
-  quoteOptions?: QuotationRecordQuoteOption[]; customQuoteQuantity?: number; dealOptionId?: string; dealOptionLabel?: string; dealLines?: QuotationRecordDealLine[]
+  logisticsRevision?: string; quoteOptions?: QuotationRecordQuoteOption[]; customQuoteQuantity?: number; dealOptionId?: string; dealOptionLabel?: string; dealLines?: QuotationRecordDealLine[]
   status: QuotationRecordStatus; actualQuoteUsd?: number; actualQuoteCny?: number; dealQuantity?: number
   closedAt?: string; note?: string; createdAt: string; updatedAt: string; revisions: QuotationRecordRevision[]
 }

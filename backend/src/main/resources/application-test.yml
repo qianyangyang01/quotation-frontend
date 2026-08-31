@@ -16,6 +16,8 @@ spring:
   session:
     store-type: none
 app:
+  logistics:
+    resume-on-start: false
   bootstrap-admin:
     password: TestAdmin123
   storage:
