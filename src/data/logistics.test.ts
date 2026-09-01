@@ -27,39 +27,40 @@ const publishedRule: LogisticsRule = {
 }
 
 describe('logistics fee calculation', () => {
-  it('requires dimensions and uses the accepted channel divisor for verified billing', () => {
+  it('uses actual weight and ignores retained volumetric fields for verified billing', () => {
     const rule = { ...publishedRule, billingVerified: true }
-    expect(calculateLogisticsFee(rule, '美国', 0.1)).toBeNull()
+    expect(calculateLogisticsFee(rule, '美国', 0.1)?.total).toBe(27.8)
     const result = calculateLogisticsFee(rule, '美国', 0.1, ['普货'], {
       lengthCm: 20, widthCm: 20, heightCm: 10, volumeDivisor: 999999,
     })
-    expect(result?.volumeDivisor).toBe(8000)
-    expect(result?.total).toBe(59)
+    expect(result?.volumeDivisor).toBe(0)
+    expect(result?.chargeWeightKg).toBe(.1)
+    expect(result?.total).toBe(27.8)
     expect(calculateLogisticsFee({ ...rule, prices: [{ ...rule.prices[0]!, volumeDivisor: 0 }] }, '美国', .1, ['普货'], {
       lengthCm: 20, widthCm: 20, heightCm: 10,
-    })).toBeNull()
+    })?.total).toBe(27.8)
   })
 
   it('keeps the quotation fee engine available after removing the management-page calculator', () => {
     expect(calculateLogisticsFee(publishedRule, '美国', 0.5)?.total).toBe(59)
   })
 
-  it('uses the quotation divisor and the larger volumetric weight throughout fee matching', () => {
+  it('retains supplied dimensions without letting them change the chargeable weight', () => {
     const result = calculateLogisticsFee(publishedRule, '美国', 0.18, ['普货'], {
       lengthCm: 32, widthCm: 24, heightCm: 8, volumeDivisor: 8000,
     })
     expect(result?.actualWeightKg).toBe(0.18)
-    expect(result?.volumeWeightKg).toBeCloseTo(0.768)
-    expect(result?.chargeWeightKg).toBeCloseTo(0.768)
-    expect(result?.volumeDivisor).toBe(8000)
-    expect(result?.total).toBeCloseTo(79.904)
+    expect(result?.volumeWeightKg).toBe(0)
+    expect(result?.chargeWeightKg).toBe(0.18)
+    expect(result?.volumeDivisor).toBe(0)
+    expect(result?.total).toBe(34.04)
   })
 
-  it('lets an adjusted quotation divisor override the channel default', () => {
+  it('does not let an adjusted quotation divisor change the current calculation', () => {
     const result = calculateLogisticsFee(publishedRule, '美国', 0.18, ['普货'], {
       lengthCm: 10, widthCm: 10, heightCm: 10, volumeDivisor: 4000,
     })
-    expect(result?.volumeDivisor).toBe(4000)
-    expect(result?.chargeWeightKg).toBe(0.25)
+    expect(result?.volumeDivisor).toBe(0)
+    expect(result?.chargeWeightKg).toBe(0.18)
   })
 })

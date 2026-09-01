@@ -133,19 +133,13 @@ export function singleVolumeWeight(input: SingleWeightInput, quantity = normaliz
 }
 
 export function singleChargeWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
-  return Math.max(singleActualWeight(input, quantity), singleVolumeWeight(input, quantity))
+  return singleActualWeight(input, quantity)
 }
 
 export function singleShipmentDimensions(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)): ShipmentDimensions | undefined {
-  if (!input.volumetricEnabled) return undefined
-  return {
-    lengthCm: Math.max(0, Number(input.packageLengthCm) || 0),
-    widthCm: Math.max(0, Number(input.packageWidthCm) || 0),
-    heightCm: Math.max(0, Number(input.packageHeightCm) || 0),
-    volumeMultiplier: normalizedQuoteQuantity(quantity),
-    volumeDivisor: Math.max(1, Number(input.volumeDivisor) || 8000),
-    defaultVolumeDivisor: 8000,
-  }
+  void input
+  void quantity
+  return undefined
 }
 
 export function usdPriceFromCny(cny: number, usdCny: number) {

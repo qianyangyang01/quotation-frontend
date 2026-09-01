@@ -21,6 +21,14 @@ csrf = await request('/auth/csrf')
 const me = await request('/auth/login', { method: 'POST', body: { account: 'ADMIN', password: process.env.LOGISTICS_QA_PASSWORD } })
 assert.equal(me.name, '本地QA管理员', 'Refusing to write to an unverified environment')
 csrf = await request('/auth/csrf')
+if (me.mustChangePassword) {
+  assert(process.env.LOGISTICS_QA_NEW_PASSWORD, 'LOGISTICS_QA_NEW_PASSWORD is required for a fresh QA database')
+  await request('/auth/change-password', {
+    method: 'POST',
+    body: { currentPassword: process.env.LOGISTICS_QA_PASSWORD, newPassword: process.env.LOGISTICS_QA_NEW_PASSWORD },
+  })
+  csrf = await request('/auth/csrf')
+}
 const source = resolve(process.env.LOGISTICS_TEMPLATE_FILE), bytes = await readFile(source)
 const sha = b => createHash('sha256').update(b).digest('hex')
 const report = { startedAt: new Date().toISOString(), source, sha256: sha(bytes) }

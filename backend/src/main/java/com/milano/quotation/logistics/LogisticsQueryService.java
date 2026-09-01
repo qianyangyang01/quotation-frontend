@@ -205,6 +205,7 @@ public class LogisticsQueryService {
         jdbc.sql(sql.toString()).params(params).query((rs, rowNum) -> {
             var row = json(rs.getString("row_payload"));
             row.put("quoteReady",true);
+            if (!LogisticsBillingEngine.available(row)) return null;
             if (!eligible(row, attribute)) return null;
             var channelId = rs.getString("channel_id");
             var rule = grouped.computeIfAbsent(channelId, ignored -> {

@@ -132,6 +132,38 @@ class LogisticsSourceLayoutRegressionTest {
     }
 
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
+    void everyRealChannelFitsTheCurrentCoreBillingContract() throws Exception {
+        var engine=new LogisticsBillingEngine(mapper);var root=Path.of(System.getProperty("logistics.corpusDir"));int channels=0,rows=0;var blocked=new LinkedHashSet<String>();
+        try(var paths=Files.list(root)) {
+            for(var path:paths.filter(p->p.toString().matches("(?i).*\\.xlsx?$")&&!p.getFileName().toString().startsWith("~$")&&!p.getFileName().toString().equalsIgnoreCase("4px价格.xlsx")).sorted().toList())
+                for(var channel:parser.parse(Files.readAllBytes(path),path.getFileName().toString()).path("channels")) {
+                    assertEquals(0,channel.path("errors").asInt(),path.getFileName()+" / "+channel.path("channelName").asText()+" / "+channel.path("issues"));
+                    var reasons=engine.unsupported(channel.path("rows"));if(!reasons.isEmpty())blocked.add(channel.path("channelName").asText()+" / "+String.join("；",reasons));
+                    channels++;rows+=channel.path("rows").size();
+                }
+        }
+        assertEquals(88,channels);assertEquals(3094,rows);assertEquals(Set.of("联邮通标准挂号-带电（OH） / 同一国家、重量和分区存在多套价格，需要明确报价区域","联邮通经济挂号-带电（JW） / 同一国家、重量和分区存在多套价格，需要明确报价区域"),blocked);
+    }
+
+    @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
+    void everyAvailableRealPriceRowCanBeSelectedWithoutCrossZoneFallback() throws Exception {
+        var engine=new LogisticsBillingEngine(mapper);var root=Path.of(System.getProperty("logistics.corpusDir"));int checked=0;var failures=new LinkedHashSet<String>();
+        try(var paths=Files.list(root)) {
+            for(var path:paths.filter(p->p.toString().matches("(?i).*\\.xlsx?$")&&!p.getFileName().toString().startsWith("~$")&&!p.getFileName().toString().equalsIgnoreCase("4px价格.xlsx")).sorted().toList())
+                for(var channel:parser.parse(Files.readAllBytes(path),path.getFileName().toString()).path("channels"))for(var row:channel.path("rows")) {
+                    if(!engine.unsupported(channel.path("rows")).isEmpty())continue;
+                    if(!LogisticsBillingEngine.available(row))continue;
+                    var country=row.path("countryCode").asText();if(country.isBlank())country=row.path("areaName").asText();
+                    var countryRows=new ArrayList<JsonNode>();for(var candidate:channel.path("rows"))if(candidate.path("countryCode").asText().equalsIgnoreCase(country)||candidate.path("areaName").asText().equals(country))countryRows.add(candidate);
+                    var input=mapper.createObjectNode().put("country",country).put("weightKg",(row.path("weightFromKg").asDouble()+row.path("weightToKg").asDouble())/2);
+                    var zones=LogisticsBillingEngine.zoneOptions(countryRows);if(!zones.isEmpty())input.put("zoneName",row.path("zoneName").asText().isBlank()?"全国统一":LogisticsBillingEngine.splitZones(row.path("zoneName").asText()).iterator().next());
+                    try{engine.calculate(channel.path("rows"),input);}catch(RuntimeException error){var matching=new ArrayList<String>();for(var candidate:countryRows)if(LogisticsBillingEngine.includes(candidate,input.path("weightKg").decimalValue()))matching.add(candidate.path("sourceSheet").asText()+":"+candidate.path("sourceRow").asInt()+"="+candidate.path("pricePerKg").asText()+"+"+candidate.path("registrationFee").asText()+"["+candidate.path("zoneName").asText()+"]");failures.add(path.getFileName()+" / "+channel.path("channelName").asText()+" / "+country+" / "+row.path("sourceWeightRange").asText()+" / "+row.path("zoneName").asText()+" / "+error.getMessage()+" / "+matching);}checked++;
+                }
+        }
+        assertTrue(checked>3000);assertTrue(failures.isEmpty(),String.join("\n",failures));
+    }
+
+    @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void everyProviderAcceptsAnInsertedWeightTierInsideItsRealMergedTable() throws Exception {
         var root=Path.of(System.getProperty("logistics.corpusDir"));
         try(var paths=Files.list(root)) {

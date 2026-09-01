@@ -19,7 +19,7 @@ import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
-import { australiaQuoteRegions, calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
+import { calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseFreightChoices, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
@@ -51,8 +51,6 @@ import {
   purchasePriceForMonthlySales as calculatePurchasePriceForMonthlySales,
   resolveBundleProductCategory,
   singleActualWeight as calculateSingleActualWeight,
-  singleChargeWeight,
-  singleShipmentDimensions,
   usdPriceFromCny as convertCnyToUsd,
 } from '@/services/quotationCalculator'
 
@@ -93,7 +91,7 @@ let logisticsRequest: AbortController | null = null
 const showRule = ref(false)
 const showHistory = ref(false)
 const customQuoteQuantity = ref(5)
-const selectedQuoteRegions = ref<Record<string, string>>({ 澳大利亚: australiaQuoteRegions[0] })
+const selectedQuoteRegions = ref<Record<string, string>>({})
 const specifiedQuoteRows = ref<QuotationMatrixRow[]>([])
 const templateQuoteRows = ref<QuotationMatrixRow[]>([])
 const commonQuoteRows = ref<QuotationMatrixRow[]>([])
@@ -144,14 +142,13 @@ const initialChannel = channelsForShipment(initialLogisticsAttribute, initialCou
 const initialRule = rulesForShipment(initialLogisticsAttribute, initialChannel, initialCountry, initialWeight)[0] || ''
 
 function quoteRegionForCountry(country: string) {
-  return country === '澳大利亚' || country.toUpperCase() === 'AU'
-    ? (selectedQuoteRegions.value.澳大利亚 || australiaQuoteRegions[0])
-    : ''
+  const regions = logisticsQuoteRegions(country)
+  return regions.length ? (selectedQuoteRegions.value[country] || '') : ''
 }
 function changeQuoteRegion(p: Product, payload: { country: string; region: string }) {
-  if (payload.country !== '澳大利亚' || !australiaQuoteRegions.includes(payload.region as (typeof australiaQuoteRegions)[number])) return
-  selectedQuoteRegions.value = { ...selectedQuoteRegions.value, 澳大利亚: payload.region }
-  if (p.country === '澳大利亚') normalizeRule(p, true)
+  if (!logisticsQuoteRegions(payload.country).includes(payload.region)) return
+  selectedQuoteRegions.value = { ...selectedQuoteRegions.value, [payload.country]: payload.region }
+  if (p.country === payload.country) normalizeRule(p, true)
   toast(`已切换为${payload.region}，渠道与报价已按该区运费重新匹配`)
 }
 
@@ -211,10 +208,7 @@ function singleActualWeight(p: Product, quantity = Math.max(1, p.quantity)) {
 }
 function chargeWeight(p: Product) {
   if (quoteMode.value === 'bundle') return purchaseWeight(p)
-  return singleChargeWeight(p)
-}
-function singleDimensions(p: Product, quantity = Math.max(1, p.quantity)) {
-  return singleShipmentDimensions(p, quantity)
+  return singleActualWeight(p)
 }
 
 function domesticFreight(p: Product) { return quoteMode.value === 'bundle' ? bundleDomesticFreight(1) : p.purchaseFreightPerUnit * p.quantity }
@@ -257,7 +251,7 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceT
   p.packageLengthCm = Math.max(0, Number(record.lengthCm) || 0)
   p.packageWidthCm = Math.max(0, Number(record.widthCm) || 0)
   p.packageHeightCm = Math.max(0, Number(record.heightCm) || 0)
-  p.volumetricEnabled = p.packageLengthCm > 0 && p.packageWidthCm > 0 && p.packageHeightCm > 0
+  p.volumetricEnabled = false
   p.volumeDivisor = 8000
   p.status = record.status === '资料完整' ? '采购资料已加载' : record.status
 }
@@ -606,7 +600,8 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
   monthlySalesEstimate.value = ['10', '100', '100+'].includes(payload.monthlySalesEstimate) ? payload.monthlySalesEstimate : '10'
   customQuoteQuantity.value = Math.max(1, Math.floor(Number(payload.customQuoteQuantity) || 1))
   quoteMatrixMode.value = ['specified', 'template'].includes(payload.quoteMatrixMode) ? payload.quoteMatrixMode : 'common'
-  selectedQuoteRegions.value = { 澳大利亚: australiaQuoteRegions.includes(payload.selectedQuoteRegions?.澳大利亚 as (typeof australiaQuoteRegions)[number]) ? payload.selectedQuoteRegions.澳大利亚 : australiaQuoteRegions[0] }
+  selectedQuoteRegions.value = Object.fromEntries(Object.entries(payload.selectedQuoteRegions || {})
+    .filter(([country, region]) => logisticsQuoteRegions(country).includes(String(region)))) as Record<string, string>
   const p = emptyQuotationProduct()
   p.logisticsAttribute = quotationAttributeOptions.includes(payload.logisticsAttribute) ? payload.logisticsAttribute : initialLogisticsAttribute
   products.value = [p]
@@ -630,8 +625,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
       p.packageLengthCm = Math.max(0, Number(productState.packageLengthCm) || 0)
       p.packageWidthCm = Math.max(0, Number(productState.packageWidthCm) || 0)
       p.packageHeightCm = Math.max(0, Number(productState.packageHeightCm) || 0)
-      p.volumetricEnabled = productState.volumetricEnabled === true
-        && p.packageLengthCm > 0 && p.packageWidthCm > 0 && p.packageHeightCm > 0
+      p.volumetricEnabled = false
     }
   }
   if (quoteMode.value === 'bundle') {
@@ -699,7 +693,7 @@ async function resetLocalDraft() {
   quoteMode.value = 'single'
   quoteMatrixMode.value = 'common'
   customQuoteQuantity.value = 5
-  selectedQuoteRegions.value = { 澳大利亚: australiaQuoteRegions[0] }
+  selectedQuoteRegions.value = {}
   products.value = [emptyQuotationProduct()]
   bundleItems.value = [bundleItemFromRecord()]
   commonQuoteRows.value = []
@@ -839,7 +833,7 @@ function matchedLogistics(p: Product, country = p.country) {
       country,
       quoteMode.value === 'bundle' ? chargeWeight(p) : singleActualWeight(p),
       [p.logisticsAttribute],
-      quoteMode.value === 'single' ? singleDimensions(p) : undefined,
+      undefined,
       quoteRegionForCountry(country),
     )
     if (!result) return []
@@ -865,7 +859,7 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
   const weightKg = quoteMode.value === 'bundle'
     ? bundleGoodsWeight(normalizedQuantity)
     : singleActualWeight(p, normalizedQuantity)
-    const result = calculateLogisticsFee(rule, country, weightKg, [p.logisticsAttribute], quoteMode.value === 'single' ? singleDimensions(p, normalizedQuantity) : undefined, quoteRegionForCountry(country))
+    const result = calculateLogisticsFee(rule, country, weightKg, [p.logisticsAttribute], undefined, quoteRegionForCountry(country))
   if (!result) return null
   const freight = Number(result.total.toFixed(2))
   let cost: number
@@ -957,8 +951,8 @@ function quotationCountries(p: Product): QuotationCountrySummary[] {
       stage: common ? 'common' as const : 'rare' as const,
       continent: option?.continent || inferCountryContinent(country.code),
       sortOrder: common ? option.sortOrder : 1000,
-      quoteRegions: name === '澳大利亚' ? logisticsQuoteRegions(name) : undefined,
-      selectedQuoteRegion: name === '澳大利亚' ? quoteRegionForCountry(name) : undefined,
+      quoteRegions: logisticsQuoteRegions(name).length ? logisticsQuoteRegions(name) : undefined,
+      selectedQuoteRegion: logisticsQuoteRegions(name).length ? quoteRegionForCountry(name) : undefined,
     }
   }).sort((a, b) => Number(a.stage !== 'common') - Number(b.stage !== 'common') || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-CN'))
 }
@@ -966,7 +960,7 @@ function quoteMatrixContextKey(p: Product) {
   const bundleKey = quoteMode.value === 'bundle'
     ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
-  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${logisticsRevision.value}|${selectedTaxCustomerType.value}|${selectedQuoteRegions.value.澳大利亚}|${financeTaxSettings.value.updatedAt}`
+  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${logisticsRevision.value}|${selectedTaxCustomerType.value}|${JSON.stringify(selectedQuoteRegions.value)}|${financeTaxSettings.value.updatedAt}`
 }
 // 报价国家和渠道矩阵计算量很大。通过稳定的 computed/函数引用传给三个矩阵，
 // 避免客户名称等无关表单字段每输入一个字符就重算全部国家、渠道和四档报价。
@@ -1192,7 +1186,7 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   toast(`已复制 ${countryCount} 个国家、${rows.length} 条指定报价，打开 Excel 后按 Ctrl+V 粘贴`)
 }
 function useLogistics(p: Product, option: { country: string; quoteRegion?: string; rule: string; carrier: string; freight: number }) {
-  if (option.country === '澳大利亚' && option.quoteRegion) selectedQuoteRegions.value = { ...selectedQuoteRegions.value, 澳大利亚: option.quoteRegion }
+  if (option.quoteRegion) selectedQuoteRegions.value = { ...selectedQuoteRegions.value, [option.country]: option.quoteRegion }
   p.country = option.country
   p.channel = option.carrier
   p.rule = option.rule
@@ -1233,7 +1227,7 @@ async function save() {
       logisticsInput: {
         country: row.country,
         weightKg: quoteMode.value === 'bundle' ? chargeWeight(p) : singleActualWeight(p),
-        dimensions: quoteMode.value === 'single' ? singleDimensions(p) : undefined,
+        zoneName: row.quoteRegion,
         marks: [p.logisticsAttribute],
       },
       totalCostCny: row.totalCostCny,
@@ -1290,11 +1284,11 @@ async function save() {
     purchaseInvoiceRatePercent: quoteMode.value === 'single' ? Math.max(0, p.purchaseInvoiceRatePercent) : undefined,
     purchaseInvoiceTaxApplied: quoteMode.value === 'single' ? p.purchaseInvoiceTaxApplied : undefined,
     purchaseUnitPriceCny: quoteMode.value === 'single' ? Math.max(0, p.purchase) : undefined,
-    volumetricEnabled: quoteMode.value === 'single' && p.volumetricEnabled,
-    packageLengthCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageLengthCm : undefined,
-    packageWidthCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageWidthCm : undefined,
-    packageHeightCm: quoteMode.value === 'single' && p.volumetricEnabled ? p.packageHeightCm : undefined,
-    defaultVolumeDivisor: quoteMode.value === 'single' && p.volumetricEnabled ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
+    volumetricEnabled: false,
+    packageLengthCm: quoteMode.value === 'single' ? p.packageLengthCm : undefined,
+    packageWidthCm: quoteMode.value === 'single' ? p.packageWidthCm : undefined,
+    packageHeightCm: quoteMode.value === 'single' ? p.packageHeightCm : undefined,
+    defaultVolumeDivisor: quoteMode.value === 'single' ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
     logisticsAttribute: p.logisticsAttribute, country: p.country, carrier: p.channel,
     channel: logisticsRules.find(rule => rule.name === p.rule)?.relations.find(relation => relation.carrier === p.channel)?.channel || p.rule,
     rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, taxCustomerType: selectedTaxCustomerType.value, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: usdPriceFromCny(finalSalePrice(p)), totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
