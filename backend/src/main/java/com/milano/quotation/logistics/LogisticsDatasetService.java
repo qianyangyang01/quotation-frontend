@@ -29,6 +29,45 @@ public class LogisticsDatasetService {
         return jdbc.sql("select (to_jsonb(d))::text from logistics_dataset d order by created_at desc,id")
                 .query((rs,n)->json(rs.getString(1))).list();
     }
+    @Transactional(readOnly=true)
+    public List<ObjectNode> preparingRequiredPreviews() {
+        return jdbc.sql("""
+                select jsonb_build_object('id',d.id,'name',d.name,'status',d.status,'createdAt',d.created_at,
+                    'revision',coalesce((r.payload->>'revision')::bigint,0),
+                    'confirmed',coalesce((r.payload->>'confirmed')::boolean,false),
+                    'requiredCount',jsonb_array_length(coalesce(r.payload->'channelIds','[]'::jsonb)),
+                    'confirmedBy',coalesce(r.payload->>'confirmedBy',''),'confirmedAt',coalesce(r.payload->>'confirmedAt',''))::text
+                from logistics_dataset d
+                left join lateral (select payload from logistics_required_revision where dataset_id=d.id order by revision desc limit 1) r on true
+                where d.status='preparing'
+                order by coalesce((r.payload->>'confirmed')::boolean,false) desc,d.created_at desc,d.id
+                """).query((rs,n)->json(rs.getString(1))).list();
+    }
+    @Transactional(readOnly=true)
+    public ObjectNode requiredChannelPreview(UUID id) {
+        var dataset=dataset(id);
+        if(!dataset.path("status").asText().equals("preparing"))throw AppException.conflict("财务只预览新库准备区的必用渠道");
+        var required=jdbc.sql("select payload::text from logistics_required_revision where dataset_id=:id order by revision desc limit 1").param("id",id)
+                .query((rs,n)->json(rs.getString(1))).optional().orElseGet(()->mapper.createObjectNode().put("revision",0).put("confirmed",false));
+        if(!required.has("channelIds"))required.putArray("channelIds");
+        var selected=new LinkedHashSet<String>();for(var channel:required.path("channelIds"))selected.add(channel.asText());
+        var result=mapper.createObjectNode().put("datasetId",id.toString()).put("datasetName",dataset.path("name").asText())
+                .put("status",dataset.path("status").asText()).put("revision",required.path("revision").asLong())
+                .put("confirmed",required.path("confirmed").asBoolean()).put("note",required.path("note").asText())
+                .put("confirmedBy",required.path("confirmedBy").asText()).put("confirmedAt",required.path("confirmedAt").asText());
+        var channels=result.putArray("channels");int ready=0;
+        for(var c:channelViews(id))if(selected.contains(c.path("id").asText())){
+            var entry=(ObjectNode)c.deepCopy();
+            var latest=jdbc.sql("select payload::text from logistics_version where channel_id=:id order by case when status='published' then 0 else 1 end,created_at desc limit 1")
+                    .param("id",UUID.fromString(c.path("id").asText())).query((rs,n)->json(rs.getString(1))).optional();
+            var countries=new TreeSet<String>();var zones=new TreeSet<String>();var reasons=new TreeSet<String>();int count=0;
+            if(latest.isPresent())for(var price:latest.get().path("rows")){count++;countries.add(price.path("areaName").asText());if(!price.path("zoneName").asText().isBlank())zones.add(price.path("countryCode").asText()+" / "+price.path("zoneName").asText());if(!price.path("pendingReason").asText().isBlank())reasons.add(price.path("pendingReason").asText());}
+            entry.put("priceRows",count);entry.set("countries",mapper.valueToTree(countries));entry.set("zones",mapper.valueToTree(zones));entry.set("pendingReasons",mapper.valueToTree(reasons));channels.add(entry);
+            if(entry.path("quoteReady").asBoolean())ready++;
+        }
+        result.put("requiredCount",channels.size()).put("readyCount",ready);
+        return result;
+    }
     @Transactional
     public ObjectNode create(String name,String actor) {
         if(name==null || name.isBlank() || name.length()>120) throw AppException.unprocessable("请输入120字以内的新物流库名称");

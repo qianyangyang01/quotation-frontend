@@ -1114,9 +1114,11 @@ async function attemptSave() {
     return
   }
   savingQuotation.value = true
+  let logisticsRevisionConfirmed = false
   try {
     await flushDraft()
     const validation = await validatePublishedLogisticsRevision()
+    logisticsRevisionConfirmed = true
     if (validation.changed) {
       await ensureQuoteLogistics(products.value[0])
       toast('物流版本已更新，已重新计算，请确认后再保存')
@@ -1125,8 +1127,11 @@ async function attemptSave() {
     logisticsLoadState.value = 'ready'
     await save()
   } catch (error) {
-    if (logisticsRules.length) logisticsLoadState.value = 'stale'
-    toast(error instanceof Error ? error.message : '无法确认物流正式版本，请检查网络后重试')
+    if (!logisticsRevisionConfirmed && logisticsRules.length) logisticsLoadState.value = 'stale'
+    const details = error instanceof ApiError && error.fieldErrors.length
+      ? `：${error.fieldErrors.map(item => item.message).join('；')}`
+      : ''
+    toast(error instanceof Error ? `${error.message}${details}` : '报价保存失败，请重试')
   } finally { savingQuotation.value = false }
 }
 function locateValidationIssue(key: string) {

@@ -211,8 +211,8 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
     <template v-if="activeCountry">
       <div class="country-summary">
         <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>财务已授权 {{ rows.length }} 个可用渠道</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
-        <div class="metric lowest"><i>¥</i><span><small>最低价渠道</small><b>{{ formatUsd(lowest?.quote1 ?? null) }}</b><em>{{ lowest?.transport || '暂无可用渠道' }}</em></span></div>
-        <div class="metric fastest"><i>⚡</i><span><small>最快渠道</small><b>{{ fastest?.eta || '—' }}</b><em>{{ fastest?.transport || '暂无可用渠道' }}</em></span></div>
+        <div class="metric lowest"><i>¥</i><span><small>最低价渠道</small><b>{{ formatUsd(lowest?.quote1 ?? null) }}</b><em>{{ lowest ? `${lowest.carrier}｜${lowest.transport}` : '暂无可用渠道' }}</em></span></div>
+        <div class="metric fastest"><i>⚡</i><span><small>最快渠道</small><b>{{ fastest?.eta || '—' }}</b><em>{{ fastest ? `${fastest.carrier}｜${fastest.transport}` : '暂无可用渠道' }}</em></span></div>
         <button :disabled="!rows.length" @click="$emit('copy',sortedRows)">▦ 复制当前国家</button>
       </div>
       <div class="sort-toolbar" aria-label="渠道排序方式">
@@ -227,7 +227,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       <div class="table-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>2{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>3{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span class="custom-head">{{ customQuantity || 1 }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
       <div v-if="pagedRows.length" class="quote-rows">
         <article v-for="row in pagedRows" :key="`${row.rule}|${row.carrier}|${row.transport}`" :class="{ adopted:adoptedCountry===activeCountry && adoptedRule===row.rule && adoptedCarrier===row.carrier, selected:isSelected(row) }">
-          <div><span class="channel-name-line"><b>{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>{{ row.carrier }} · {{ row.rule }}</small></div><b>{{ row.eta }}</b>
+          <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></div><b>{{ row.eta }}</b>
           <span><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small><QuoteTaxMeta :row="row" mode="price" tier="1" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small><QuoteTaxMeta :row="row" mode="price" tier="2" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small><QuoteTaxMeta :row="row" mode="price" tier="3" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small><QuoteTaxMeta :row="row" mode="price" tier="custom" /></span>
           <div class="selection-actions"><button @click="toggleSelection(row)">{{ isSelected(row) ? '已加入' : '加入报价单' }}</button><button v-if="isSelected(row)" class="primary-action" @click="$emit('adopt',row)">{{ adoptedCountry===activeCountry && adoptedRule===row.rule && adoptedCarrier===row.carrier ? '首选' : '设为首选' }}</button></div>
         </article>

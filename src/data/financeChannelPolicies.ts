@@ -229,7 +229,9 @@ export function loadFinanceChannelPolicies(): FinanceChannelPolicy[] {
 }
 
 export async function saveFinanceChannelPolicies(policies: FinanceChannelPolicy[]) {
-  await writeFinanceSetting('channel-policies', normalizePolicies(policies))
+  const normalized = normalizePolicies(policies)
+  const saved = await writeFinanceSetting<FinanceChannelPolicy[]>('channel-policies', normalized)
+  return normalizePolicies(saved)
 }
 
 export function loadCustomerGradeSettings(): CustomerGradeSetting[] {

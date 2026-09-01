@@ -33,6 +33,13 @@ class LogisticsAcceptancePostgresTest {
         assertFalse(datasets.preview(d,mapper.createArrayNode()).path("requiredReady").asBoolean());billing.approve(v,approval(v),"QA");assertTrue(datasets.preview(d,mapper.createArrayNode()).path("requiredReady").asBoolean());
         assertEquals(1,jdbc.sql("select count(*) from logistics_required_revision where dataset_id=:id").param("id",d).query(Integer.class).single());
     }finally{s.setRollbackOnly();}});}
+    @Test void financePreviewReturnsOnlySelectedPreparingChannelsAndReadiness(){tx.executeWithoutResult(s->{try{
+        UUID d=create(),v=seed(d),c=channel(v);var selected=mapper.createObjectNode().put("revision",0).put("confirmed",true).put("note","财务预览必用渠道");selected.putArray("channelIds").add(c.toString());
+        datasets.saveRequiredChannels(d,selected,"QA");var summaries=datasets.preparingRequiredPreviews();var summary=summaries.stream().filter(item->item.path("id").asText().equals(d.toString())).findFirst().orElseThrow();
+        assertTrue(summary.path("confirmed").asBoolean());assertEquals(1,summary.path("requiredCount").asInt());var preview=datasets.requiredChannelPreview(d);
+        assertEquals(1,preview.path("channels").size());assertEquals(0,preview.path("readyCount").asInt());assertEquals(c.toString(),preview.path("channels").get(0).path("id").asText());
+        billing.approve(v,approval(v),"QA");assertEquals(1,datasets.requiredChannelPreview(d).path("readyCount").asInt());
+    }finally{s.setRollbackOnly();}});}
     @Test void acceptanceRequiresEveryRowSamplesAccurateCostsAndMatchingFingerprint(){tx.executeWithoutResult(s->{try{
         UUID d=create(),v=seed(d);var invalid=approval(v);((ObjectNode)invalid.path("samples").get(0)).put("expectedTotal",0);assertThrows(AppException.class,()->billing.approve(v,invalid,"QA"));
         var stale=approval(v).put("fingerprint","stale");assertThrows(AppException.class,()->billing.approve(v,stale,"QA"));
