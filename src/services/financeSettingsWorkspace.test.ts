@@ -7,6 +7,7 @@ const dependencies = vi.hoisted(() => ({
   loadCustomerGradeSettings: vi.fn(),
   loadFinanceExchangeRate: vi.fn(),
   loadFinanceTaxSettings: vi.fn(),
+  apiGet: vi.fn(),
 }))
 
 vi.mock('@/services/financeSettings', () => ({ hydrateFinanceSettings: dependencies.hydrateFinanceSettings }))
@@ -17,8 +18,9 @@ vi.mock('@/data/financeChannelPolicies', () => ({
   loadFinanceExchangeRate: dependencies.loadFinanceExchangeRate,
 }))
 vi.mock('@/data/financeTaxSettings', () => ({ loadFinanceTaxSettings: dependencies.loadFinanceTaxSettings }))
+vi.mock('@/services/http', () => ({ api: { get: dependencies.apiGet } }))
 
-import { loadFinanceSettingsWorkspace } from './financeSettingsWorkspace'
+import { loadFinanceRequiredPreview, loadFinanceRequiredPreviewDatasets, loadFinanceSettingsWorkspace } from './financeSettingsWorkspace'
 
 function configureReaders() {
   dependencies.loadFinanceChannelPolicies.mockReturnValue([{ id: '普货' }])
@@ -60,5 +62,15 @@ describe('finance settings workspace loading', () => {
     const workspace = await loadFinanceSettingsWorkspace({ force: true })
     expect(dependencies.hydrateFinanceSettings).toHaveBeenLastCalledWith({ force: true })
     expect(workspace.customerGrades).toHaveLength(1)
+  })
+
+  it('loads preparing-dataset summaries and one read-only required-channel preview', async () => {
+    dependencies.apiGet.mockResolvedValueOnce([{ id: 'dataset-1', confirmed: true, requiredCount: 6 }])
+      .mockResolvedValueOnce({ datasetId: 'dataset-1', requiredCount: 6, readyCount: 0, channels: [{ id: 'channel-1', quoteReady: false }] })
+
+    await expect(loadFinanceRequiredPreviewDatasets()).resolves.toEqual([{ id: 'dataset-1', confirmed: true, requiredCount: 6 }])
+    await expect(loadFinanceRequiredPreview('dataset-1')).resolves.toEqual(expect.objectContaining({ datasetId: 'dataset-1', readyCount: 0 }))
+    expect(dependencies.apiGet).toHaveBeenNthCalledWith(1, '/finance-settings/logistics-required-previews')
+    expect(dependencies.apiGet).toHaveBeenNthCalledWith(2, '/finance-settings/logistics-required-previews/dataset-1')
   })
 })

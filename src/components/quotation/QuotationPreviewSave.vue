@@ -120,7 +120,7 @@ function isPrimary(row: QuotationMatrixRow) { return row.country === props.prima
         <template v-if="expandedCountries.has(group.country)">
           <div class="quote-head"><span>物流渠道 / 服务商</span><span>预计时效</span><span>1{{ unitLabel }}</span><span>2{{ unitLabel }}</span><span>3{{ unitLabel }}</span><span>{{ Math.max(1, customQuantity || 1) }}{{ unitLabel }}</span></div>
           <article v-for="row in group.rows" :key="rowKey(row)" :class="{ primary:isPrimary(row) }">
-            <span><span class="channel-name-line"><b>{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>{{ row.carrier }} · {{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">整单首选</em></span><strong>{{ row.eta }}</strong>
+            <span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">整单首选</em></span><strong>{{ row.eta }}</strong>
             <span><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small><QuoteTaxMeta :row="row" mode="price" tier="1" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small><QuoteTaxMeta :row="row" mode="price" tier="2" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small><QuoteTaxMeta :row="row" mode="price" tier="3" /></span><span class="custom"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small><QuoteTaxMeta :row="row" mode="price" tier="custom" /></span>
           </article>
         </template>
