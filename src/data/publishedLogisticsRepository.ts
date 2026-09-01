@@ -1,5 +1,5 @@
 import { ApiError, conditionalGet } from '@/services/http'
-import { replaceLogisticsCountryCatalog, replaceLogisticsRules, type LogisticsRule } from './logistics'
+import { replaceLogisticsCountryCatalog, replaceLogisticsRules, type LogisticsPriceRow, type LogisticsRule } from './logistics'
 
 export interface PublishedLogisticsManifest {
   revision: string
@@ -32,6 +32,7 @@ const MANIFEST_STORE = 'logisticsManifest'
 const RULE_STORE = 'publishedRuleQueries'
 const CACHE_EVENT = 'milano:published-logistics-cache'
 const INDEXED_DB_TIMEOUT_MS = 1500
+const MAX_RULE_QUERY_COUNTRIES = 100
 let manifestMemory: StoredManifest | null = null
 const rulesMemory = new Map<string, StoredRules>()
 let manifestRequest: Promise<{ manifest: PublishedLogisticsManifest; changed: boolean; verified: boolean }> | null = null
@@ -200,6 +201,47 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: { s
     .finally(() => ruleRequests.delete(key))
   ruleRequests.set(key, request)
   return { revision: manifest.revision, rules: await request, source: 'network' as const, verified }
+}
+
+export async function loadPublishedLogisticsRuleCatalog(attributes: string[], countries: string[], options: { signal?: AbortSignal } = {}) {
+  const normalizedAttributes = normalized(attributes).length ? normalized(attributes) : ['普货']
+  const normalizedCountries = normalized(countries)
+  if (!normalizedCountries.length) {
+    replaceLogisticsRules([])
+    return { revision: (await loadPublishedLogisticsManifest({ signal: options.signal })).manifest.revision, rules: [] as LogisticsRule[], verified: true }
+  }
+  const countryBatches: string[][] = []
+  for (let index = 0; index < normalizedCountries.length; index += MAX_RULE_QUERY_COUNTRIES) {
+    countryBatches.push(normalizedCountries.slice(index, index + MAX_RULE_QUERY_COUNTRIES))
+  }
+  try {
+    const results = await Promise.all(normalizedAttributes.flatMap(attribute => countryBatches.map(batch =>
+      loadPublishedLogisticsRules({ attribute, countries: batch }, options))))
+    const rules = new Map<number, LogisticsRule>()
+    const priceKeys = new Map<number, Set<string>>()
+    results.flatMap(result => result.rules).forEach(rule => {
+      if (!rules.has(rule.id)) {
+        rules.set(rule.id, { ...rule, relations: rule.relations.map(relation => ({ ...relation })), prices: [] })
+        priceKeys.set(rule.id, new Set())
+      }
+      const merged = rules.get(rule.id)!
+      const seen = priceKeys.get(rule.id)!
+      rule.prices.forEach((price: LogisticsPriceRow) => {
+        const key = JSON.stringify(price)
+        if (!seen.has(key)) { seen.add(key); merged.prices.push(price) }
+      })
+    })
+    const merged = [...rules.values()].map(rule => ({
+      ...rule,
+      areaCount: new Set(rule.prices.map(price => price.countryCode || price.areaName)).size,
+      priceRowCount: rule.prices.length,
+    }))
+    replaceLogisticsRules(merged)
+    return { revision: results[0]?.revision || '', rules: merged, verified: results.every(result => result.verified) }
+  } catch (error) {
+    replaceLogisticsRules([])
+    throw error
+  }
 }
 
 export async function validatePublishedLogisticsRevision() {

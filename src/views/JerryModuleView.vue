@@ -41,8 +41,7 @@ import {
   type FinanceTaxSettings,
   type LogisticsTaxMode,
 } from '@/data/financeTaxSettings'
-import { replaceLogisticsRules } from '@/data/logistics'
-import { loadPublishedLogisticsManifest, loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
+import { loadPublishedLogisticsManifest, loadPublishedLogisticsRuleCatalog } from '@/data/publishedLogisticsRepository'
 import { ApiError } from '@/services/http'
 import {
   loadFinanceRequiredPreview,
@@ -764,9 +763,7 @@ async function hydrateFinanceLogisticsContext() {
   try {
     const { manifest } = await loadPublishedLogisticsManifest()
     const countries = manifest.countries.map(country => country.code || country.name)
-    const rules = await Promise.all(manifest.attributes.map(attribute =>
-      loadPublishedLogisticsRules({ attribute, countries }).then(result => result.rules)))
-    replaceLogisticsRules(rules.flat())
+    await loadPublishedLogisticsRuleCatalog(manifest.attributes, countries)
     applyFinanceSettingsWorkspace(readFinanceSettingsWorkspace())
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '物流正式数据加载失败'
