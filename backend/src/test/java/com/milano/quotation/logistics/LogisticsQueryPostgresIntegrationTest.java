@@ -12,7 +12,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers(disabledWithoutDocker = true)
@@ -85,6 +88,20 @@ class LogisticsQueryPostgresIntegrationTest {
         jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false'::jsonb), version=version+1, updated_at=now() where id=:id").param("id", channelId).update();
         assertNotEquals(first.revision(), service.manifest().revision());
         assertThrows(AppException.class, () -> service.publishedRules(first.revision(), "普货", List.of("美国"), List.of()));
+    }
+
+    @Test
+    void filtersTheMaximumCountryBatchAsASetInsteadOfExpandingOrConditions() {
+        jdbc.sql("update logistics_channel set archived_at=null, archived_by=null, archive_reason=null, payload=jsonb_set(payload,'{enabled}','true'::jsonb), version=version+1 where id=:id").param("id", channelId).update();
+        var revision = service.manifest().revision();
+        var countries = new ArrayList<String>();
+        countries.add("US");
+        for (int index = 1; index < 100; index++) countries.add("COUNTRY-" + index);
+
+        var rules = assertTimeout(Duration.ofSeconds(5), () -> service.publishedRules(revision, "普货", countries, List.of("YT-PH")));
+
+        assertEquals(1, rules.rules().size());
+        assertEquals("US", rules.rules().getFirst().path("prices").get(0).path("countryCode").asText());
     }
 
     @Test

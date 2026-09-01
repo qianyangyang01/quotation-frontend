@@ -167,12 +167,7 @@ public class LogisticsQueryService {
         var normalizedCountries = normalized(countries, MAX_COUNTRIES, "报价国家不能为空", "报价国家一次最多查询100个");
         var normalizedChannels = normalizedOptional(channelCodes, MAX_CHANNEL_CODES, "渠道一次最多查询100个");
         var params = new LinkedHashMap<String, Object>();
-        var countryConditions = new ArrayList<String>();
-        for (int index = 0; index < normalizedCountries.size(); index++) {
-            var key = "country" + index;
-            params.put(key, normalizedCountries.get(index).toLowerCase(Locale.ROOT));
-            countryConditions.add("lower(coalesce(item->>'countryCode','')) = :" + key + " or lower(coalesce(item->>'areaName','')) = :" + key);
-        }
+        params.put("countries", mapper.valueToTree(normalizedCountries.stream().map(value -> value.toLowerCase(Locale.ROOT)).toList()).toString());
         var sql = new StringBuilder("""
                 select c.id::text as channel_id, c.rule_id, c.code as channel_code,
                   c.payload::text as channel_payload, p.payload::text as provider_payload,
@@ -188,16 +183,14 @@ public class LogisticsQueryService {
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
                   and logistics_version_quote_ready(v.id)
-                  and (
-                """).append(String.join(" or ", countryConditions)).append(")");
+                  and (lower(coalesce(item->>'countryCode','')) in
+                         (select value from jsonb_array_elements_text(cast(:countries as jsonb)) requested(value))
+                    or lower(coalesce(item->>'areaName','')) in
+                         (select value from jsonb_array_elements_text(cast(:countries as jsonb)) requested(value)))
+                """);
         if (!normalizedChannels.isEmpty()) {
-            var channelConditions = new ArrayList<String>();
-            for (int index = 0; index < normalizedChannels.size(); index++) {
-                var key = "channel" + index;
-                params.put(key, normalizedChannels.get(index).toLowerCase(Locale.ROOT));
-                channelConditions.add("lower(c.code) = :" + key);
-            }
-            sql.append(" and (").append(String.join(" or ", channelConditions)).append(")");
+            params.put("channels", mapper.valueToTree(normalizedChannels.stream().map(value -> value.toLowerCase(Locale.ROOT)).toList()).toString());
+            sql.append(" and lower(c.code) in (select value from jsonb_array_elements_text(cast(:channels as jsonb)) requested(value))");
         }
         sql.append(" order by c.rule_id, coalesce(item->>'countryCode',''), coalesce((item->>'weightFromKg')::numeric,0)");
 
