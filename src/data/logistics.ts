@@ -70,16 +70,27 @@ export function normalizeAustraliaQuoteRegion(value: string) {
 }
 
 export function logisticsQuoteRegions(country: string) {
-  if (country !== '澳大利亚' && country.toUpperCase() !== 'AU') return []
-  return [...australiaQuoteRegions]
+  const regions = new Set<string>()
+  for (const rule of logisticsRules) meaningfulZoneOptions(rule.prices.filter(price => countryMatches(price, country))).forEach(region => regions.add(region))
+  return [...regions].map(region => (country === '澳大利亚' || country.toUpperCase() === 'AU') && normalizeZone(region) !== '全国统一' ? `澳大利亚${normalizeZone(region)}` : region)
 }
 
-function priceMatchesCountryAndRegion(price: LogisticsPriceRow, country: string, quoteRegion = '') {
-  const countryMatches = price.areaName === country || price.countryCode.toLowerCase() === country.toLowerCase()
-  if (!countryMatches) return false
-  if (quoteRegion) return normalizeAustraliaQuoteRegion(price.zoneName) === normalizeAustraliaQuoteRegion(quoteRegion) && !price.zoneExclude
-  // 未传报价区域的旧调用继续保持原有国家级匹配；业务报价会显式传入澳大利亚区域。
-  return true
+function countryMatches(price: LogisticsPriceRow, country: string) {
+  return price.areaName === country || price.countryCode.toLowerCase() === country.toLowerCase()
+}
+function splitZones(value: string) { return String(value || '').split(/[/／、,，;；|]/).map(item => item.trim()).filter(Boolean) }
+function normalizeZone(value: string) { return String(value || '').replace(/[（）()\s]/g, '').replace(/^澳大利亚/, '').replace('一区', '1区').replace('二区', '2区').replace('三区', '3区').replace('四区', '4区') }
+function meaningfulZoneOptions(rows: LogisticsPriceRow[]) {
+  const zones = new Set(rows.flatMap(row => splitZones(row.zoneName)))
+  const hasUnzoned = rows.some(row => !row.zoneName)
+  if (zones.size <= 1 && !hasUnzoned) return []
+  return [...(hasUnzoned && zones.size ? ['全国统一'] : []), ...zones]
+}
+function priceMatchesRegion(price: LogisticsPriceRow, quoteRegion: string, required: boolean) {
+  if (!required) return true
+  if (!quoteRegion) return false
+  if (normalizeZone(quoteRegion) === '全国统一') return !price.zoneName
+  return !price.zoneExclude && splitZones(price.zoneName).some(zone => normalizeZone(zone) === normalizeZone(quoteRegion))
 }
 
 function splitMarks(value: unknown) {
@@ -99,45 +110,27 @@ export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: strin
   return !allowed.size || marks.every(mark => mark === '普货' || allowed.has(mark))
 }
 export function findPriceRow(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], quoteRegion = '') {
-  return rule.prices.find(price => priceMatchesCountryAndRegion(price, country, quoteRegion) && weightMatchesPrice(price, weightKg) && isPriceRowEligible(price, productMarks))
+  const countryRows = rule.prices.filter(price => countryMatches(price, country)
+    && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks)))
+  const zoneRequired = meaningfulZoneOptions(countryRows).length > 0
+  return countryRows.find(price => priceMatchesRegion(price, quoteRegion, zoneRequired) && weightMatchesPrice(price, weightKg))
 }
 export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive'>, weightKg: number) {
   return (price.weightFromInclusive ? weightKg >= price.weightFromKg : weightKg > price.weightFromKg)
     && (price.weightToInclusive === false ? weightKg < price.weightToKg : weightKg <= price.weightToKg)
 }
 export function calculateLogisticsFee(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], dimensions?: ShipmentDimensions, quoteRegion = '') {
+  void dimensions
   const actualWeightKg = Math.max(0, Number(weightKg) || 0)
-  const hasDimensions = Boolean(dimensions
-    && dimensions.lengthCm > 0
-    && dimensions.widthCm > 0
-    && dimensions.heightCm > 0)
-  const candidates = rule.prices.filter(price =>
-    priceMatchesCountryAndRegion(price, country, quoteRegion)
-    && isPriceRowEligible(price, productMarks))
-  if (rule.billingVerified && candidates.some(price => price.zoneName || price.volumetric && (!hasDimensions || price.volumeDivisor <= 0))) return null
-  let chargeWeightKg = actualWeightKg
-  let volumeWeightKg = 0
-  let volumeDivisor = 0
-  let price: LogisticsPriceRow | undefined
-  if (hasDimensions && dimensions) {
-    const volume = dimensions.lengthCm * dimensions.widthCm * dimensions.heightCm * Math.max(1, dimensions.volumeMultiplier || 1)
-    price = candidates.find(candidate => {
-      const divisor = rule.billingVerified ? candidate.volumeDivisor : dimensions.volumeDivisor && dimensions.volumeDivisor > 0
-        ? dimensions.volumeDivisor
-        : candidate.volumeDivisor > 0
-          ? candidate.volumeDivisor
-          : Math.max(1, dimensions.defaultVolumeDivisor || 8000)
-      const volumetric = candidate.volumetric === false ? 0 : volume / divisor
-      const chargeable = Math.max(actualWeightKg, volumetric)
-      if (weightMatchesPrice(candidate, chargeable)) {
-        chargeWeightKg = chargeable
-        volumeWeightKg = volumetric
-        volumeDivisor = divisor
-        return true
-      }
-      return false
-    })
-  } else price = findPriceRow(rule, country, actualWeightKg, productMarks, quoteRegion)
+  const countryRows = rule.prices.filter(price => countryMatches(price, country)
+    && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks)))
+  const zoneRequired = meaningfulZoneOptions(countryRows).length > 0
+  const candidates = countryRows.filter(price => priceMatchesRegion(price, quoteRegion, zoneRequired))
+  if (zoneRequired && !quoteRegion) return null
+  const chargeWeightKg = actualWeightKg
+  const volumeWeightKg = 0
+  const volumeDivisor = 0
+  const price = candidates.find(candidate => weightMatchesPrice(candidate, chargeWeightKg))
   if (!price) return null
   let base: number
   if (price.intervalPrice > 0) base = price.intervalPrice
@@ -145,8 +138,8 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
     const extraWeight = Math.max(0, chargeWeightKg - price.firstWeightKg)
     const extraUnits = price.nextWeightKg > 0 ? Math.ceil(extraWeight / price.nextWeightKg - 1e-9) : 0
     base = price.firstWeightPrice + extraUnits * price.nextWeightPrice
-  } else base = Math.max(chargeWeightKg, price.startWeightKg || 0, price.minChargeWeightKg || 0) * price.pricePerKg
-  // 速猫规则中的附加费属于渠道固定成本；燃油费按当前业务口径不参与报价。
+  } else base = chargeWeightKg * price.pricePerKg
+  // 当前业务只使用价格和每票固定费用；其他导入字段保留用于追溯和后续扩展。
   const surcharge = Math.max(0, price.surcharge || 0)
   const total = base + (price.registrationFee || 0) + surcharge
   return { total: Number(total.toFixed(2)), base, surcharge, price, actualWeightKg, volumeWeightKg, chargeWeightKg, volumeDivisor }

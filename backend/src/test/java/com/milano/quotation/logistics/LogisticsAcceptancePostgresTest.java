@@ -42,8 +42,8 @@ class LogisticsAcceptancePostgresTest {
         jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,pricePerKg}','99') where id=:id").param("id",v).update();assertFalse(guard.quoteReady(v));
     }finally{s.setRollbackOnly();}});}
     @Test void unsupportedRulesCannotBeApprovedAndNewVersionsDoNotInheritAcceptance(){tx.executeWithoutResult(s->{try{
-        UUID d=create(),v=seed(d);jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,zoneName}','\"1区\"') where id=:id").param("id",v).update();assertThrows(AppException.class,()->billing.approve(v,approval(v),"QA"));
-        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,zoneName}','\"\"') where id=:id").param("id",v).update();billing.approve(v,approval(v),"QA");
+        UUID d=create(),v=seed(d);jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',(payload->'rows') || jsonb_build_array((payload->'rows'->0) || jsonb_build_object('pricePerKg',60,'originRegion','华东'))) where id=:id").param("id",v).update();assertThrows(AppException.class,()->billing.approve(v,approval(v),"QA"));
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',jsonb_build_array(payload->'rows'->0)) where id=:id").param("id",v).update();billing.approve(v,approval(v),"QA");
         UUID next=UUID.randomUUID();jdbc.sql("insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at) select :next,channel_id,2,'published','copy',payload,now() from logistics_version where id=:id").param("next",next).param("id",v).update();assertFalse(guard.quoteReady(next));
         jdbc.sql("update logistics_billing_acceptance set engine_version='outdated-engine' where version_id=:id").param("id",v).update();assertFalse(guard.quoteReady(v));
     }finally{s.setRollbackOnly();}});}

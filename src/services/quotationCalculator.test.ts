@@ -103,16 +103,17 @@ describe('single SKU weight calculation', () => {
     volumetricEnabled: true, packageLengthCm: 40, packageWidthCm: 30, packageHeightCm: 20, volumeDivisor: 8000,
   }
 
-  it('uses actual or manual weight and chooses the larger volumetric weight', () => {
+  it('uses actual or manual weight while retaining volume data for future use', () => {
     expect(singleActualWeight(input)).toBe(0.8)
     expect(singleVolumeWeight(input)).toBe(6)
-    expect(singleChargeWeight(input)).toBe(6)
+    expect(singleChargeWeight(input)).toBe(0.8)
     expect(singleActualWeight({ ...input, weightSource: 'manual' })).toBe(1.4)
   })
 
   it('disables volumetric calculation when dimensions are missing', () => {
     expect(singleVolumeWeight({ ...input, packageHeightCm: 0 })).toBe(0)
     expect(singleShipmentDimensions({ ...input, volumetricEnabled: false })).toBeUndefined()
+    expect(singleShipmentDimensions(input)).toBeUndefined()
   })
 })
 

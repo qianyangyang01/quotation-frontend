@@ -43,6 +43,7 @@ public class LogisticsQuotationGuard {
                 if(!input.isObject())throw AppException.unprocessable("缺少重新计价输入");
                 if(!input.path("country").asText().equals(country))throw AppException.unprocessable("计费输入国家与报价国家不一致");
                 var normalized=(ObjectNode)input.deepCopy();normalized.putArray("marks").add(quotation.path("logisticsAttribute").asText());
+                if(normalized.path("zoneName").asText().isBlank()&&!option.path("quoteRegion").asText().isBlank())normalized.put("zoneName",option.path("quoteRegion").asText());
                 var result=new LogisticsBillingEngine(mapper).calculate(channel.path("rows"),normalized);
                 if(!option.path("freightCny").isNumber()||option.path("freightCny").decimalValue().compareTo(result.path("total").decimalValue())!=0)throw AppException.conflict("物流费用与服务器核算不一致，请重新计价");
                 ((ObjectNode)option).set("logisticsCalculation",result);
