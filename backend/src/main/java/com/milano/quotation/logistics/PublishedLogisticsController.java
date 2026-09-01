@@ -45,6 +45,17 @@ public class PublishedLogisticsController {
         return ResponseEntity.ok().eTag(etagValue).cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(result));
     }
 
+    @GetMapping("/catalog")
+    ResponseEntity<ApiResponse<LogisticsQueryService.PublishedRules>> catalog(
+            @RequestParam(defaultValue = "") String revision,
+            @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+        var result = queries.publishedCatalog(revision);
+        var etagValue = sha256(result.revision() + "|catalog");
+        var etag = quote(etagValue);
+        if (etag.equals(ifNoneMatch)) return ResponseEntity.status(304).eTag(etagValue).build();
+        return ResponseEntity.ok().eTag(etagValue).cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(result));
+    }
+
     private static String quote(String value) { return "\"" + value + "\""; }
     private static String sha256(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }

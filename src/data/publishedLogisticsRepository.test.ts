@@ -62,7 +62,7 @@ describe('published logistics version cache', () => {
     expect(countries).not.toContain('国家0')
   })
 
-  it('loads a finance catalog in batches of at most 100 countries and merges repeated channels', async () => {
+  it('loads the finance channel catalog through one lightweight request', async () => {
     const countries = Array.from({ length: 140 }, (_, index) => ({ code: `C${index}`, name: `国家${index}` }))
     conditionalGet.mockImplementation((path: string) => {
       if (path.includes('/manifest')) return Promise.resolve({
@@ -70,27 +70,24 @@ describe('published logistics version cache', () => {
         data: { ...manifest('finance-r1'), countries },
         etag: 'finance-manifest',
       })
-      const requestUrl = new URL(`https://example.test${path}`)
-      const requestedCountries = requestUrl.searchParams.getAll('country')
       return Promise.resolve({
         status: 200,
         data: {
           revision: 'finance-r1',
-          rules: [{ ...rule, prices: [{ areaName: requestedCountries[0], countryCode: requestedCountries[0] }] }],
+          rules: [{ ...rule, prices: [{ areaName: '美国', countryCode: 'US' }] }],
         },
-        etag: `finance-rules-${requestedCountries.length}`,
+        etag: 'finance-catalog',
       })
     })
     const repository = await import('./publishedLogisticsRepository')
 
     const result = await repository.loadPublishedLogisticsRuleCatalog(['普货'], countries.map(country => country.code))
-    const ruleCalls = conditionalGet.mock.calls.filter(([path]) => String(path).includes('/rules'))
+    const catalogCalls = conditionalGet.mock.calls.filter(([path]) => String(path).includes('/catalog'))
 
-    expect(ruleCalls).toHaveLength(2)
-    expect(ruleCalls.map(([path]) => new URL(`https://example.test${path}`).searchParams.getAll('country').length).sort((a, b) => a - b)).toEqual([40, 100])
+    expect(catalogCalls).toHaveLength(1)
+    expect(new URL(`https://example.test${catalogCalls[0]?.[0]}`).searchParams.get('revision')).toBe('finance-r1')
     expect(result.rules).toHaveLength(1)
-    expect(result.rules[0]?.prices).toHaveLength(2)
-    expect(result.rules[0]?.priceRowCount).toBe(2)
+    expect(result.rules[0]?.prices).toHaveLength(1)
   })
 
   it('invalidates cached rules when the published revision changes', async () => {

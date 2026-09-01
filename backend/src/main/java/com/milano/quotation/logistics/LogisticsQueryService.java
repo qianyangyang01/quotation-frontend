@@ -159,6 +159,90 @@ public class LogisticsQueryService {
     }
 
     @Transactional(readOnly = true)
+    public PublishedRules publishedCatalog(String expectedRevision) {
+        var manifest = manifest();
+        if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(manifest.revision())) {
+            throw new AppException(HttpStatus.CONFLICT, "LOGISTICS_REVISION_CHANGED", "物流正式版本已更新，请重新加载规则");
+        }
+        var sql = """
+                with ready_ids as materialized (
+                  select c.id as channel_id, c.rule_id, c.code as channel_code,
+                    c.payload::text as channel_payload, p.payload::text as provider_payload, v.id as version_id
+                  from logistics_channel c
+                  join logistics_provider p on p.id=c.provider_id
+                  join logistics_version v on v.id=c.current_version_id and v.status='published'
+                  where coalesce((p.payload->>'enabled')::boolean,true)=true
+                    and coalesce((c.payload->>'enabled')::boolean,true)=true
+                    and c.archived_at is null
+                    and c.dataset_id=logistics_active_dataset()
+                    and exists(select 1 from logistics_billing_acceptance accepted
+                      where accepted.version_id=v.id
+                      and accepted.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)
+                      and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
+                        or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                )
+                select distinct ready.channel_id::text as channel_id, ready.rule_id, ready.channel_code,
+                  ready.channel_payload, ready.provider_payload,
+                  coalesce(item->>'countryCode','') as country_code, coalesce(item->>'areaName','') as area_name,
+                  coalesce(item->>'zoneName','') as zone_name, coalesce((item->>'zoneExclude')::boolean,false) as zone_exclude
+                from ready_ids ready
+                join logistics_version v on v.id=ready.version_id
+                cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
+                where coalesce(item->>'countryCode','')<>'' or coalesce(item->>'areaName','')<>''
+                order by ready.rule_id, country_code, area_name, zone_name, zone_exclude
+                """;
+        var grouped = new LinkedHashMap<String, ObjectNode>();
+        var coverageKeys = new LinkedHashMap<String, Set<String>>();
+        jdbc.sql(sql).query((rs, rowNum) -> {
+            var channelId = rs.getString("channel_id");
+            var rule = grouped.computeIfAbsent(channelId, ignored -> {
+                var channel = json(rsString(rs, "channel_payload"));
+                var provider = json(rsString(rs, "provider_payload"));
+                var value = mapper.createObjectNode();
+                value.put("id", rsInt(rs, "rule_id"));
+                value.put("logisticsChannelId", channelId);
+                value.put("billingVerified", true);
+                value.put("name", channel.path("name").asText(rsString(rs, "channel_code")));
+                value.put("englishName", rsString(rs, "channel_code").toLowerCase(Locale.ROOT));
+                value.put("type", channel.path("type").asText("专线"));
+                value.put("currency", "CNY");
+                value.put("published", "发布");
+                value.put("status", "启用");
+                value.putArray("relations").addObject()
+                        .put("carrier", provider.path("name").asText(""))
+                        .put("channel", channel.path("name").asText(""))
+                        .put("channelCode", rsString(rs, "channel_code"))
+                        .put("discounts", "-\n-");
+                value.put("phoneRequired", false);
+                value.put("areaCount", 0);
+                value.put("priceRowCount", 0);
+                value.putArray("prices");
+                coverageKeys.put(channelId, new java.util.HashSet<>());
+                return value;
+            });
+            var countryCode = rs.getString("country_code");
+            var areaName = rs.getString("area_name");
+            var zoneName = rs.getString("zone_name");
+            var zoneExclude = rs.getBoolean("zone_exclude");
+            var key = countryCode + "|" + areaName + "|" + zoneName + "|" + zoneExclude;
+            if (coverageKeys.get(channelId).add(key)) {
+                ((ArrayNode) rule.path("prices")).addObject()
+                        .put("countryCode", countryCode).put("areaName", areaName)
+                        .put("zoneName", zoneName).put("zoneExclude", zoneExclude).put("quoteReady", true);
+            }
+            return channelId;
+        }).list();
+        grouped.forEach((channelId, rule) -> {
+            var prices = (ArrayNode) rule.path("prices");
+            rule.put("priceRowCount", prices.size());
+            var countries = new java.util.HashSet<String>();
+            prices.forEach(price -> countries.add(price.path("countryCode").asText(price.path("areaName").asText(""))));
+            rule.put("areaCount", countries.size());
+        });
+        return new PublishedRules(manifest.revision(), new ArrayList<>(grouped.values()));
+    }
+
+    @Transactional(readOnly = true)
     public PublishedRules publishedRules(String expectedRevision, String attribute, List<String> countries, List<String> channelCodes) {
         var manifest = manifest();
         if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(manifest.revision())) {
@@ -171,10 +255,13 @@ public class LogisticsQueryService {
         var sql = new StringBuilder("""
                 with ready_versions as materialized (
                   select c.id as channel_id, c.rule_id, c.code as channel_code,
-                    c.payload as channel_payload, p.payload as provider_payload,
-                    v.id as version_id, v.payload as version_payload,
-                    exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy'
-                      and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)) as legacy_billing_compatible
+                    c.payload::text as channel_payload, p.payload::text as provider_payload,
+                    v.id as version_id,
+                    case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end as rows_payload,
+                    ((v.payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object('id',v.id,
+                      'legacyBillingCompatible',exists(select 1 from logistics_billing_acceptance legacy
+                        where legacy.version_id=v.id and legacy.kind='legacy'
+                        and legacy.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text))))::text as version_payload
                   from logistics_channel c
                   join logistics_provider p on p.id=c.provider_id
                   join logistics_version v on v.id=c.current_version_id and v.status='published'
@@ -182,14 +269,16 @@ public class LogisticsQueryService {
                     and coalesce((c.payload->>'enabled')::boolean,true)=true
                     and c.archived_at is null
                     and c.dataset_id=logistics_active_dataset()
-                    and logistics_version_quote_ready(v.id)
+                    and exists(select 1 from logistics_billing_acceptance accepted
+                      where accepted.version_id=v.id
+                      and accepted.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)
+                      and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
+                        or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
                 )
                 select rv.channel_id::text as channel_id, rv.rule_id, rv.channel_code,
-                  rv.channel_payload::text as channel_payload, rv.provider_payload::text as provider_payload,
-                  ((rv.version_payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object('id',rv.version_id,
-                    'legacyBillingCompatible',rv.legacy_billing_compatible))::text as version_payload, item::text as row_payload
+                  rv.channel_payload, rv.provider_payload, rv.version_payload, item::text as row_payload
                 from ready_versions rv
-                cross join lateral jsonb_array_elements(case when jsonb_typeof(rv.version_payload->'rows')='array' then rv.version_payload->'rows' else '[]'::jsonb end) item
+                cross join lateral jsonb_array_elements(rv.rows_payload) item
                 where (lower(coalesce(item->>'countryCode','')) in
                          (select value from jsonb_array_elements_text(cast(:countries as jsonb)) requested(value))
                     or lower(coalesce(item->>'areaName','')) in

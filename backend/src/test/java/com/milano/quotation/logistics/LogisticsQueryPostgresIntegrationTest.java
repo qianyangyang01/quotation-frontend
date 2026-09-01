@@ -105,6 +105,19 @@ class LogisticsQueryPostgresIntegrationTest {
     }
 
     @Test
+    void returnsOneLightweightFinanceCatalogWithCountryCoverage() {
+        var revision = service.manifest().revision();
+        var catalog = assertTimeout(Duration.ofSeconds(5), () -> service.publishedCatalog(revision));
+
+        assertEquals(1, catalog.rules().size());
+        assertEquals(2, catalog.rules().getFirst().path("prices").size());
+        assertTrue(catalog.rules().getFirst().path("prices").toString().contains("US"));
+        assertTrue(catalog.rules().getFirst().path("prices").toString().contains("DE"));
+        assertFalse(catalog.rules().getFirst().has("logisticsVersionId"));
+        assertFalse(catalog.rules().getFirst().path("prices").get(0).has("weightFromKg"));
+    }
+
+    @Test
     void archivedChannelLeavesDailyListManifestAndPublishedQuoteProjection() {
         jdbc.sql("update logistics_channel set archived_at=null, archived_by=null, archive_reason=null, payload=jsonb_set(payload,'{enabled}','true'::jsonb), version=version+1 where id=:id").param("id", channelId).update();
         assertEquals(1, service.channels(0, 50, "", providerId, null, false).total());

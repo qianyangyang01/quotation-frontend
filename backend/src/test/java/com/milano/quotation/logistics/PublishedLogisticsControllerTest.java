@@ -18,11 +18,13 @@ class PublishedLogisticsControllerTest {
         var rules = new LogisticsQueryService.PublishedRules("revision-1", List.of());
         when(service.manifest()).thenReturn(manifest);
         when(service.publishedRules("revision-1", "普货", List.of("美国"), null)).thenReturn(rules);
+        when(service.publishedCatalog("revision-1")).thenReturn(rules);
         var controller = new PublishedLogisticsController(service);
 
         var fresh = controller.manifest(null);
         var unchanged = controller.manifest("\"revision-1\"");
         var ruleResponse = controller.rules("revision-1", "普货", List.of("美国"), null, null);
+        var catalogResponse = controller.catalog("revision-1", null);
 
         assertEquals(200, fresh.getStatusCode().value());
         assertEquals("\"revision-1\"", fresh.getHeaders().getETag());
@@ -30,5 +32,7 @@ class PublishedLogisticsControllerTest {
         assertEquals(304, unchanged.getStatusCode().value());
         assertEquals(200, ruleResponse.getStatusCode().value());
         assertNotNull(ruleResponse.getHeaders().getETag());
+        assertEquals(200, catalogResponse.getStatusCode().value());
+        assertNotNull(catalogResponse.getHeaders().getETag());
     }
 }
