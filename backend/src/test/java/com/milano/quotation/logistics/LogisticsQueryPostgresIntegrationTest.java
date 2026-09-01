@@ -98,7 +98,7 @@ class LogisticsQueryPostgresIntegrationTest {
         countries.add("US");
         for (int index = 1; index < 100; index++) countries.add("COUNTRY-" + index);
 
-        var rules = assertTimeout(Duration.ofSeconds(5), () -> service.publishedRules(revision, "普货", countries, List.of("YT-PH")));
+        var rules = assertTimeout(Duration.ofSeconds(5), () -> service.publishedRules(revision, "普货", countries, List.of()));
 
         assertEquals(1, rules.rules().size());
         assertEquals("US", rules.rules().getFirst().path("prices").get(0).path("countryCode").asText());

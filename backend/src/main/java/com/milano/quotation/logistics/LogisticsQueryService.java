@@ -169,30 +169,37 @@ public class LogisticsQueryService {
         var params = new LinkedHashMap<String, Object>();
         params.put("countries", mapper.valueToTree(normalizedCountries.stream().map(value -> value.toLowerCase(Locale.ROOT)).toList()).toString());
         var sql = new StringBuilder("""
-                select c.id::text as channel_id, c.rule_id, c.code as channel_code,
-                  c.payload::text as channel_payload, p.payload::text as provider_payload,
-                  ((v.payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object('id',v.id,'legacyBillingCompatible',
+                with ready_versions as materialized (
+                  select c.id as channel_id, c.rule_id, c.code as channel_code,
+                    c.payload as channel_payload, p.payload as provider_payload,
+                    v.id as version_id, v.payload as version_payload,
                     exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy'
-                    and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text))))::text as version_payload, item::text as row_payload
-                from logistics_channel c
-                join logistics_provider p on p.id=c.provider_id
-                join logistics_version v on v.id=c.current_version_id and v.status='published'
-                cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
-                where coalesce((p.payload->>'enabled')::boolean,true)=true
-                  and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null
-                  and c.dataset_id=logistics_active_dataset()
-                  and logistics_version_quote_ready(v.id)
-                  and (lower(coalesce(item->>'countryCode','')) in
+                      and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)) as legacy_billing_compatible
+                  from logistics_channel c
+                  join logistics_provider p on p.id=c.provider_id
+                  join logistics_version v on v.id=c.current_version_id and v.status='published'
+                  where coalesce((p.payload->>'enabled')::boolean,true)=true
+                    and coalesce((c.payload->>'enabled')::boolean,true)=true
+                    and c.archived_at is null
+                    and c.dataset_id=logistics_active_dataset()
+                    and logistics_version_quote_ready(v.id)
+                )
+                select rv.channel_id::text as channel_id, rv.rule_id, rv.channel_code,
+                  rv.channel_payload::text as channel_payload, rv.provider_payload::text as provider_payload,
+                  ((rv.version_payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object('id',rv.version_id,
+                    'legacyBillingCompatible',rv.legacy_billing_compatible))::text as version_payload, item::text as row_payload
+                from ready_versions rv
+                cross join lateral jsonb_array_elements(case when jsonb_typeof(rv.version_payload->'rows')='array' then rv.version_payload->'rows' else '[]'::jsonb end) item
+                where (lower(coalesce(item->>'countryCode','')) in
                          (select value from jsonb_array_elements_text(cast(:countries as jsonb)) requested(value))
                     or lower(coalesce(item->>'areaName','')) in
                          (select value from jsonb_array_elements_text(cast(:countries as jsonb)) requested(value)))
                 """);
         if (!normalizedChannels.isEmpty()) {
             params.put("channels", mapper.valueToTree(normalizedChannels.stream().map(value -> value.toLowerCase(Locale.ROOT)).toList()).toString());
-            sql.append(" and lower(c.code) in (select value from jsonb_array_elements_text(cast(:channels as jsonb)) requested(value))");
+            sql.append(" and lower(rv.channel_code) in (select value from jsonb_array_elements_text(cast(:channels as jsonb)) requested(value))");
         }
-        sql.append(" order by c.rule_id, coalesce(item->>'countryCode',''), coalesce((item->>'weightFromKg')::numeric,0)");
+        sql.append(" order by rv.rule_id, coalesce(item->>'countryCode',''), coalesce((item->>'weightFromKg')::numeric,0)");
 
         var grouped = new LinkedHashMap<String, ObjectNode>();
         jdbc.sql(sql.toString()).params(params).query((rs, rowNum) -> {
