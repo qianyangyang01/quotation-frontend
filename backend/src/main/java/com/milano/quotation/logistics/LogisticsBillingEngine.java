@@ -12,7 +12,7 @@ import java.util.*;
 /** Fail-closed evaluator for explicitly supported, fully specified price rules. */
 @Component
 public class LogisticsBillingEngine {
-    public static final String VERSION="logistics-billing-v2";
+    public static final String VERSION="logistics-billing-v3";
     private final ObjectMapper mapper;
     public LogisticsBillingEngine(ObjectMapper mapper){this.mapper=mapper;}
 
@@ -29,8 +29,7 @@ public class LogisticsBillingEngine {
             if(model(row).equals("per-kg")&&n(row,"pricePerKg").signum()<=0)reasons.add("公斤价格无效");
             if(model(row).equals("interval")&&n(row,"intervalPrice").signum()<=0)reasons.add("区间价格无效");
             if(model(row).equals("first-next")&&(n(row,"firstWeightKg").signum()<=0||n(row,"firstWeightPrice").signum()<=0||n(row,"nextWeightKg").signum()<=0))reasons.add("首续重参数不完整");
-            var route=String.join("|",row.path("countryCode").asText(row.path("areaName").asText()).toUpperCase(Locale.ROOT),n(row,"weightFromKg").stripTrailingZeros().toPlainString(),n(row,"weightToKg").stripTrailingZeros().toPlainString(),String.valueOf(row.path("weightFromInclusive").asBoolean()),String.valueOf(row.path("weightToInclusive").asBoolean(true)),normalizeZone(row.path("zoneName").asText()));
-            var price=String.join("|",model(row),n(row,"pricePerKg").stripTrailingZeros().toPlainString(),n(row,"intervalPrice").stripTrailingZeros().toPlainString(),n(row,"firstWeightKg").stripTrailingZeros().toPlainString(),n(row,"firstWeightPrice").stripTrailingZeros().toPlainString(),n(row,"nextWeightKg").stripTrailingZeros().toPlainString(),n(row,"nextWeightPrice").stripTrailingZeros().toPlainString(),n(row,"registrationFee").stripTrailingZeros().toPlainString(),n(row,"surcharge").stripTrailingZeros().toPlainString());
+            var route=routeKey(row);var price=priceKey(row);
             routePrices.computeIfAbsent(route,ignored->new LinkedHashSet<>()).add(price);
         }
         if(routePrices.values().stream().anyMatch(prices->prices.size()>1))reasons.add("同一国家、重量和分区存在多套价格，需要明确报价区域");
@@ -72,6 +71,9 @@ public class LogisticsBillingEngine {
     static Set<String> splitZones(String value){var out=new LinkedHashSet<String>();for(var item:value.split("[/／、,，;；|]"))if(!item.isBlank())out.add(item.trim());return out;}
     static String normalizeZone(String value){return value.replaceAll("[（）()\\s]","").replaceFirst("^澳大利亚","").replace("一区","1区").replace("二区","2区").replace("三区","3区").replace("四区","4区");}
     static boolean available(JsonNode row){var reason=row.path("pendingReason").asText();return !reason.contains("暂停")&&!reason.contains("关停")&&!reason.contains("停收");}
+    static String acceptanceTierKey(JsonNode row){return routeKey(row)+"|"+priceKey(row)+"|"+available(row);}
+    private static String routeKey(JsonNode row){return String.join("|",row.path("countryCode").asText(row.path("areaName").asText()).toUpperCase(Locale.ROOT),n(row,"weightFromKg").stripTrailingZeros().toPlainString(),n(row,"weightToKg").stripTrailingZeros().toPlainString(),String.valueOf(row.path("weightFromInclusive").asBoolean()),String.valueOf(row.path("weightToInclusive").asBoolean(true)),normalizeZone(row.path("zoneName").asText()));}
+    private static String priceKey(JsonNode row){return String.join("|",model(row),n(row,"pricePerKg").stripTrailingZeros().toPlainString(),n(row,"intervalPrice").stripTrailingZeros().toPlainString(),n(row,"firstWeightKg").stripTrailingZeros().toPlainString(),n(row,"firstWeightPrice").stripTrailingZeros().toPlainString(),n(row,"nextWeightKg").stripTrailingZeros().toPlainString(),n(row,"nextWeightPrice").stripTrailingZeros().toPlainString(),n(row,"registrationFee").stripTrailingZeros().toPlainString(),n(row,"surcharge").stripTrailingZeros().toPlainString());}
     static String model(JsonNode r){return r.path("pricingModel").asText(n(r,"intervalPrice").signum()>0?"interval":n(r,"firstWeightPrice").signum()>0?"first-next":"per-kg");}
     static BigDecimal n(JsonNode r,String key){var v=r.path(key);if(v.isMissingNode()||v.isNull())return BigDecimal.ZERO;if(!v.isNumber()||!Double.isFinite(v.asDouble())||v.decimalValue().signum()<0)throw AppException.unprocessable("非有效非负数："+key);return v.decimalValue();}
     static BigDecimal positive(JsonNode r,String key){var v=n(r,key);if(v.signum()<=0)throw AppException.unprocessable("缺少有效参数："+key);return v;}

@@ -52,7 +52,7 @@ public class LogisticsRebuildController {
             case "version-diff" -> {if(!versions.existsById(id))throw AppException.notFound("物流版本不存在");path="/versions/"+id+"/changes.xlsx";name="版本变化.xlsx";}
             case "batch-diff" -> {imports.get(id);path="/imports/"+id+"/changes.xlsx";name="批次价格变化.xlsx";}
             case "source", "evidence" -> {var payload=imports.get(id).path("payload");var files=payload.path("files");if(index<0||index>=files.size())throw AppException.notFound("原文件不存在");
-                path="/imports/"+id+"/files/"+index;name=files.get(index).path("name").asText();
+                path="/imports/"+id+"/files/"+index;name=files.get(index).path("originalName").asText(files.get(index).path("name").asText());
                 if(kind.equals("evidence")){if(payload.path("fileReports").path(index).path("sourceEvidence").path("objectKey").asText().isBlank())throw AppException.notFound("该批次没有独立解析证据");path+="/evidence";name="原表解析证据.json";}}
             default -> throw AppException.unprocessable("不支持的下载类型");
         }
@@ -107,7 +107,7 @@ public class LogisticsRebuildController {
     public ResponseEntity<InputStreamResource> original(@PathVariable UUID id,@PathVariable int index){
         var files=imports.get(id).path("payload").path("files");if(index<0||index>=files.size())throw AppException.notFound("原文件不存在");var file=files.get(index);
         audit.record("logistics.source-download","logistics-import",id.toString(),"success",Map.of("fileIndex",index));
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).header(HttpHeaders.CONTENT_DISPOSITION,attachment(file.path("name").asText()))
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).header(HttpHeaders.CONTENT_DISPOSITION,attachment(file.path("originalName").asText(file.path("name").asText())))
                 .body(new InputStreamResource(storage.openRaw(file.path("objectKey").asText())));
     }
     @GetMapping("/imports/{id}/files/{index}/evidence")

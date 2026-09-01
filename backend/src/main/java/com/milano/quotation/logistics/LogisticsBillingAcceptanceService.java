@@ -28,16 +28,18 @@ public class LogisticsBillingAcceptanceService {
         if(!input.path("reviewConfirmed").asBoolean()||input.path("note").asText().isBlank()||input.path("sourceReference").asText().isBlank())throw AppException.unprocessable("请确认原表规则并填写核对依据和审核备注");
         var rows=v.path("payload").path("rows");var reasons=engine.unsupported(rows);if(!reasons.isEmpty())throw AppException.unprocessable("不能验收未适配规则："+String.join("；",reasons));
         var samples=input.path("samples");if(!samples.isArray()||samples.size()<2||samples.size()>20000)throw AppException.unprocessable("需提交独立核算的运费样本，最多20000条");
-        var covered=new HashMap<Integer,Set<String>>();var evidence=mapper.createArrayNode();int rejected=0;
+        var covered=new HashMap<String,Set<String>>();var evidence=mapper.createArrayNode();int rejected=0;
         for(var sample:samples){
             if(sample.path("sourceReference").asText().isBlank())throw AppException.unprocessable("每条样本需原表位置和人工核算依据");
             ObjectNode result=null;try{result=engine.calculate(rows,sample.path("input"));}catch(AppException e){if(!sample.path("expectRejected").asBoolean())throw e;rejected++;evidence.addObject().set("sample",sample);continue;}
             if(sample.path("expectRejected").asBoolean())throw AppException.unprocessable("应阻断的样本却可报价");
             var expected=LogisticsBillingEngine.n(sample,"expectedTotal");if(!sample.has("expectedTotal")||expected.compareTo(result.path("total").decimalValue())!=0)throw AppException.unprocessable("人工预期运费与系统结果不一致");
-            covered.computeIfAbsent(result.path("rowIndex").asInt(),k->new HashSet<>()).add(LogisticsBillingEngine.n(sample.path("input"),"weightKg").stripTrailingZeros().toPlainString());
+            var matchedRow=rows.get(result.path("rowIndex").asInt());
+            covered.computeIfAbsent(LogisticsBillingEngine.acceptanceTierKey(matchedRow),k->new HashSet<>()).add(LogisticsBillingEngine.n(sample.path("input"),"weightKg").stripTrailingZeros().toPlainString());
             evidence.addObject().set("sample",sample);((ObjectNode)evidence.get(evidence.size()-1)).set("result",result);
         }
-        for(int i=0;i<rows.size();i++)if(covered.getOrDefault(i,Set.of()).size()<2)throw AppException.unprocessable("每个价格档位至少需要两个不同重量的独立核算样本，第"+(i+1)+"档未覆盖");
+        var tiers=new LinkedHashMap<String,Integer>();for(int i=0;i<rows.size();i++)if(LogisticsBillingEngine.available(rows.get(i)))tiers.putIfAbsent(LogisticsBillingEngine.acceptanceTierKey(rows.get(i)),i);
+        for(var tier:tiers.entrySet())if(covered.getOrDefault(tier.getKey(),Set.of()).size()<2)throw AppException.unprocessable("每个等价价格档至少需要两个不同重量的独立核算样本，第"+(tier.getValue()+1)+"档未覆盖");
         if(rejected<1)throw AppException.unprocessable("至少需要一个越界或准入拒绝样本");
         var record=mapper.createObjectNode().put("note",input.path("note").asText()).put("sourceReference",input.path("sourceReference").asText());record.set("evidence",evidence);
         jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) values(:id,:version,:hash,:engine,'verified',cast(:payload as jsonb),:actor)")

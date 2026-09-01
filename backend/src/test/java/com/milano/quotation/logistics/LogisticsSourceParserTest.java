@@ -64,6 +64,13 @@ class LogisticsSourceParserTest {
         var b=a.deepCopy();((ObjectNode)b.get(0)).put("sourceFile","新表.xlsx").put("sourceCode","NEW").put("sourceRow",10);
         assertEquals(parser.businessHash(a),parser.businessHash(b));assertEquals("递四方",LogisticsSourceParser.provider("4px价格.xlsx"));
     }
+    @Test void removesOnlyLeadingUploadDateAndNeverRequiresOne(){
+        assertEquals("燕文价格.xlsx",LogisticsImportService.displayFileName("8.27燕文价格.xlsx"));
+        assertEquals("燕文价格.xlsx",LogisticsImportService.displayFileName("2026-08-27 燕文价格.xlsx"));
+        assertEquals("燕文价格.xlsx",LogisticsImportService.displayFileName("2026年8月27日燕文价格.xlsx"));
+        assertEquals("4px价格.xlsx",LogisticsImportService.displayFileName("4px价格.xlsx"));
+        assertEquals("顺丰价格.xlsx",LogisticsImportService.displayFileName("顺丰价格.xlsx"));
+    }
     @Test void blocksCrossSheetOverlappingChannelAndPreservesDuplicatesInFingerprint()throws Exception {
         try(var book=new XSSFWorkbook()) {
             for(var name:List.of("第一页","第二页")) {

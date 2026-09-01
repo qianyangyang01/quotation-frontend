@@ -17,10 +17,12 @@ import tools.jackson.databind.node.ObjectNode;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Pattern;
 
 @Service
 public class LogisticsImportService {
     private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(LogisticsImportService.class);
+    private static final Pattern LEADING_SOURCE_DATE=Pattern.compile("^(?:(?:19|20)\\d{2}\\s*(?:年|[./_-])\\s*)?\\d{1,2}\\s*(?:月\\s*\\d{1,2}\\s*日?|[./_-]\\s*\\d{1,2})[\\s._-]*");
     @org.springframework.beans.factory.annotation.Value("${app.logistics.resume-on-start:true}")
     private boolean resumeOnStart;
     private final JdbcClient jdbc;
@@ -65,8 +67,9 @@ public class LogisticsImportService {
         // Raw files remain durable evidence even if a later database write fails.
         for(int i=0;i<files.size();i++)try {
             var file=files.get(i);var bytes=file.getBytes();var objectKey="logistics/imports/"+id+"/"+i;
+            var originalName=safeFileName(file.getOriginalFilename());var displayName=displayFileName(originalName);
             storage.putRaw(objectKey,new ByteArrayInputStream(bytes),bytes.length,"application/octet-stream");
-            sources.addObject().put("name",file.getOriginalFilename().replaceAll("[\\r\\n\\\\/]","_")).put("objectKey",objectKey)
+            sources.addObject().put("name",displayName).put("originalName",originalName).put("objectKey",objectKey)
                     .put("sha256",AssetStorageService.sha256(bytes)).put("size",bytes.length);
         }catch(IOException e){throw AppException.unprocessable("文件持久化失败");}
         tx.executeWithoutResult(status->{guard.writable(dataset);jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:dataset,:actor,:key,'queued','queued',cast(:payload as jsonb))")
@@ -99,6 +102,7 @@ public class LogisticsImportService {
                     if(!AssetStorageService.sha256(bytes).equals(file.path("sha256").asText()))throw AppException.conflict("源文件校验失败");
                     var parsed=parser.parse(bytes,file.path("name").asText());
                     var report=parsed.deepCopy();report.remove("channels");report.put("status","parsed");
+                    report.put("originalFileName",file.path("originalName").asText(file.path("name").asText()));
                     // Persist cell-level evidence once. Rewriting it on every channel progress tick
                     // makes multi-provider standard workbooks needlessly expensive to import/poll.
                     var evidence=mapper.writeValueAsBytes(report);var evidenceKey="logistics/evidence/"+id+"/"+lease+"/"+index+".json";
@@ -108,7 +112,8 @@ public class LogisticsImportService {
                     fileReports.add(report);
                     for(var value:parsed.path("channels")) {
                         var channel=(ObjectNode)value;var identity=LogisticsSourceParser.identity(channel);
-                        channel.put("fileName",file.path("name").asText()).put("sourceFileIndex",index).put("batchId",id.toString());
+                        channel.put("fileName",file.path("name").asText()).put("originalFileName",file.path("originalName").asText(file.path("name").asText()))
+                                .put("sourceFileIndex",index).put("batchId",id.toString());
                         if(!grouped.containsKey(identity))grouped.put(identity,channel);
                         else {
                             var prior=grouped.get(identity);
@@ -118,7 +123,7 @@ public class LogisticsImportService {
                             } else prior.withArray("duplicateFiles").add(file.path("name").asText());
                         }
                     }
-                } catch(Exception e){fileReports.addObject().put("fileName",file.path("name").asText()).put("status","failed").put("message",safe(e));}
+                } catch(Exception e){fileReports.addObject().put("fileName",file.path("name").asText()).put("originalFileName",file.path("originalName").asText(file.path("name").asText())).put("status","failed").put("message",safe(e));}
                 index++;payload.put("progress",Math.round(index*60.0/payload.path("files").size()));save(id,lease,"processing","parsing",payload);
             }
             payload.put("parsingMs",(System.nanoTime()-start)/1_000_000);long stagingStart=System.nanoTime();
@@ -173,5 +178,10 @@ public class LogisticsImportService {
     }
     private void save(UUID id,UUID lease,String status,String phase,ObjectNode payload){jdbc.sql("update logistics_import_batch set status=:status,phase=:phase,payload=cast(:payload as jsonb),updated_at=now() where id=:id and lease_id=:lease")
             .param("lease",lease).param("id",id).param("status",status).param("phase",phase).param("payload",payload.toString()).update();}
+    static String displayFileName(String originalName){
+        var safe=safeFileName(originalName);var display=LEADING_SOURCE_DATE.matcher(safe).replaceFirst("").trim();
+        return display.isBlank()?safe:display;
+    }
+    static String safeFileName(String name){return name==null?"物流价格表.xlsx":name.replaceAll("[\\r\\n\\\\/]","_").trim();}
     private static String safe(Exception e){return e instanceof AppException?e.getMessage():"处理失败（"+e.getClass().getSimpleName()+"），正式价格未被替换";}
 }

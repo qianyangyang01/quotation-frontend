@@ -54,6 +54,11 @@ class LogisticsAcceptancePostgresTest {
         UUID next=UUID.randomUUID();jdbc.sql("insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at) select :next,channel_id,2,'published','copy',payload,now() from logistics_version where id=:id").param("next",next).param("id",v).update();assertFalse(guard.quoteReady(next));
         jdbc.sql("update logistics_billing_acceptance set engine_version='outdated-engine' where version_id=:id").param("id",v).update();assertFalse(guard.quoteReady(v));
     }finally{s.setRollbackOnly();}});}
+    @Test void identicalPhysicalRowsShareOneAcceptanceTier(){tx.executeWithoutResult(s->{try{
+        UUID d=create(),v=seed(d);
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',(payload->'rows') || jsonb_build_array(payload->'rows'->0)) where id=:id").param("id",v).update();
+        assertDoesNotThrow(()->billing.approve(v,approval(v),"QA"));assertTrue(guard.quoteReady(v));
+    }finally{s.setRollbackOnly();}});}
     @Test void requiredMissingAndStalePreviewPreventSwitchEvenWithReadyChannel(){tx.executeWithoutResult(s->{try{
         var old=guard.activeId();UUID d=create(),v=seed(d);billing.approve(v,approval(v),"QA");datasets.backup(d,"QA");
         var preview=datasets.preview(d,mapper.createArrayNode()).put("note","QA").put("reviewConfirmed",true).put("unavailableConfirmed",true);assertThrows(AppException.class,()->datasets.activate(d,preview,"QA"));
