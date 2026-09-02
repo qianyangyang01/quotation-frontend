@@ -495,7 +495,7 @@ class PurchaseImportContinuationWorkflowPostgresTest {
             case "draft-search" -> payload.put("skuSearch",sku);
             default -> payload.putArray("bundleItems").addObject().put("sku",sku);
         }
-        if(kind.startsWith("draft"))jdbc.update("INSERT INTO quotation_draft(owner_account,payload,version,updated_at) VALUES (?,?::jsonb,0,now())","D-"+UUID.randomUUID(),payload.toString());
+        if(kind.startsWith("draft"))jdbc.update("INSERT INTO quotation_draft(owner_account,payload,version,updated_at) VALUES (?,?::jsonb,0,now())","D-"+UUID.randomUUID().toString().substring(0,16),payload.toString());
         else if(kind.equals("template"))jdbc.update("INSERT INTO quotation_template(id,owner_account,name,payload,version,created_at,updated_at) VALUES (?,'ADMIN',?,?::jsonb,0,now(),now())",UUID.randomUUID(),sku,payload.toString());
         else jdbc.update("INSERT INTO quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at) VALUES (?,?,'ADMIN','pending',?::jsonb,0,now(),now())",UUID.randomUUID(),"Q-"+UUID.randomUUID().toString().substring(0,16),payload.toString());
     }
