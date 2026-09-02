@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COMMON_COUNTRY_LIMIT, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings } from './financeChannelPolicies'
+import { COMMON_COUNTRY_LIMIT, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings, normalizePolicies } from './financeChannelPolicies'
 
 describe('common country settings', () => {
   it('allows finance to configure up to 40 common countries', () => {
@@ -41,5 +41,15 @@ describe('customer grade settings', () => {
     })))
 
     expect(settings.every(setting => !setting.enabled)).toBe(true)
+  })
+})
+
+describe('unavailable logistics bindings', () => {
+  it('preserves and deduplicates disabled legacy channels without making them allowed', () => {
+    const legacy = { legacyKey: '1::旧物流::OLD', providerName: '旧物流', channelName: '旧渠道', status: 'unavailable' as const, reason: 'no-current-equivalent', backupSha256: 'abc' }
+    const [policy] = normalizePolicies([{ id: '普通', category: '普货', enabled: true, updatedAt: 'now', countryRules: [{ country: '美国', allowedChannels: [], unavailableChannels: [legacy, legacy], stage: 'common', continent: '北美洲', sortOrder: 1 }] }])
+
+    expect(policy.countryRules[0].allowedChannels).toEqual([])
+    expect(policy.countryRules[0].unavailableChannels).toEqual([legacy])
   })
 })

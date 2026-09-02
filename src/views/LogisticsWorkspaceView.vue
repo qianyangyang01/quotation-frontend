@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
+import LogisticsPager from '@/components/logistics/LogisticsPager.vue'
+import { logisticsPageFromQuery, logisticsPageQuery, logisticsPageSize } from '@/components/logistics/logisticsPagination'
 import LogisticsRequiredChannels from '@/components/quotation/LogisticsRequiredChannels.vue'
 import LogisticsBillingReview from '@/components/quotation/LogisticsBillingReview.vue'
 import { idempotencyKey, type PreparedDownload } from '@/services/http'
@@ -9,13 +11,17 @@ import { invalidatePublishedLogisticsCache } from '@/data/publishedLogisticsRepo
 import { logisticsRebuild as service, money, shown, weightLabel, completedBatchStage, type Dataset, type Workspace, type Batch, type BatchSummary, type Version, type Cutover, type PricePage } from '@/data/logisticsRebuild'
 
 const route = useRoute(), router = useRouter()
+const requestedPageSize = Number(Array.isArray(route.query.size) ? route.query.size[0] : route.query.size)
+const initialPageSize = logisticsPageSize(requestedPageSize)
+const requestedPage = Number(Array.isArray(route.query.page) ? route.query.page[0] : route.query.page)
 const tab = ref<'prices' | 'imports' | 'history'>(route.query.logisticsTab === 'imports' ? 'imports' : route.query.logisticsTab === 'history' ? 'history' : 'prices')
 const datasets = ref<Dataset[]>([]), datasetId = ref(''), workspace = ref<Workspace | null>(null)
 const batches = ref<BatchSummary[]>([]), batch = ref<Batch | null>(null), version = ref<Version | null>(null)
 const batchResultQuery = ref(''), batchResultProvider = ref('all'), batchResultStatus = ref('all'), batchResultPage = ref(0)
 const batchResultPageSize = 10
-const prices = ref<PricePage>({ items: [], total: 0, page: 0, size: 50, totalPages: 0 })
-const query = ref(''), country = ref(''), attribute = ref(''), page = ref(0)
+const prices = ref<PricePage>({ items: [], total: 0, page: 0, size: initialPageSize, totalPages: 0 })
+const query = ref(''), country = ref(''), attribute = ref(''), page = ref(logisticsPageFromQuery(requestedPage)), pageSize = ref(initialPageSize)
+const pricesLoading = ref(false), pricesLoaded = ref(false)
 const name = ref('物流新库'), files = ref<File[]>([]), replaceDrafts = ref(false)
 const busy = ref(false), error = ref(''), message = ref(''), note = ref(''), removal = ref(false), risk = ref(false)
 const preparedDownload = ref<PreparedDownload | null>(null)
@@ -64,20 +70,42 @@ async function run(action: () => Promise<void | PreparedDownload>) {
   busy.value = true; error.value = ''; message.value = ''
   try { const result = await action(); if (result && !disposed) preparedDownload.value = result } catch (e) { error.value = e instanceof Error ? e.message : '操作失败，请重试' } finally { busy.value = false }
 }
-function filters() { return new URLSearchParams({ query: query.value.trim(), country: country.value.trim(), attribute: attribute.value.trim(), page: String(page.value), size: '50' }) }
+function filters() { return new URLSearchParams({ query: query.value.trim(), country: country.value.trim(), attribute: attribute.value.trim(), page: String(page.value), size: String(pageSize.value) }) }
 function versionFilters(id: string) { return new URLSearchParams({ versionId: id }) }
 function currentBatchResultStatus(result: Batch['payload']['results'][number]) { return workspace.value?.versions.find(item => item.id === result.versionId)?.status || result.status }
-async function loadPrices() { const id = datasetId.value; const result = await service.prices(id, filters()); if (datasetId.value === id) prices.value = result }
+async function requestPrices(id: string) {
+  let result = await service.prices(id, filters())
+  if (result.totalPages > 0 && page.value >= result.totalPages) {
+    page.value = result.totalPages - 1
+    result = await service.prices(id, filters())
+  }
+  return result
+}
+async function loadPrices() {
+  const id = datasetId.value
+  pricesLoading.value = true
+  try {
+    const result = await requestPrices(id)
+    if (datasetId.value === id) { prices.value = result; pricesLoaded.value = true }
+  } finally {
+    if (datasetId.value === id) pricesLoading.value = false
+  }
+}
 async function refresh() {
   const id = datasetId.value, epoch = selectionEpoch
-  const [w, b] = await Promise.all([service.workspace(id), service.batches(id)])
-  if (disposed || id !== datasetId.value || epoch !== selectionEpoch) return
-  workspace.value = w; batches.value = b; acceptanceRefresh.value++; await loadPrices()
+  pricesLoading.value = true
+  try {
+    const [w, b, pricePage] = await Promise.all([service.workspace(id), service.batches(id), requestPrices(id)])
+    if (disposed || id !== datasetId.value || epoch !== selectionEpoch) return
+    workspace.value = w; batches.value = b; prices.value = pricePage; pricesLoaded.value = true; acceptanceRefresh.value++
+  } finally {
+    if (id === datasetId.value && epoch === selectionEpoch) pricesLoading.value = false
+  }
 }
 async function changeDataset() {
   clearDownload()
   selectionEpoch++; clearTimeout(pollTimer); batch.value = null; version.value = null; cutover.value = null; page.value = 0; files.value = []
-  workspace.value = null; batches.value = []; prices.value = { items: [], total: 0, page: 0, size: 50, totalPages: 0 }
+  workspace.value = null; batches.value = []; pricesLoaded.value = false; prices.value = { items: [], total: 0, page: 0, size: pageSize.value, totalPages: 0 }
   await run(refresh)
 }
 async function initialize() {
@@ -85,8 +113,11 @@ async function initialize() {
   datasetId.value ||= datasets.value.find(d => d.id === route.query.dataset)?.id || datasets.value.find(d => d.status === 'active')?.id || datasets.value[0]?.id || ''
   if (datasetId.value) await refresh()
 }
-watch([datasetId, tab], () => { if (datasetId.value) void router.replace({ query: { ...route.query, dataset: datasetId.value, logisticsTab: tab.value } }) })
+watch([datasetId, tab, page, pageSize], () => { if (datasetId.value) void router.replace({ query: { ...route.query, dataset: datasetId.value, logisticsTab: tab.value, ...logisticsPageQuery(page.value, pageSize.value) } }) })
 watch([batchResultQuery, batchResultProvider, batchResultStatus], () => { batchResultPage.value = 0 })
+async function submitPriceFilters() { page.value = 0; await loadPrices() }
+async function changePricePage(nextPage: number) { if (nextPage === page.value) return; page.value = nextPage; await run(loadPrices) }
+async function changePriceSize(size: number) { const nextSize = logisticsPageSize(size); if (nextSize === pageSize.value) return; pageSize.value = nextSize; page.value = 0; await run(loadPrices) }
 async function createDataset() { await run(async () => { const d = await service.create(name.value); datasetId.value = d.id; version.value = null; batch.value = null; cutover.value = null; selectionEpoch++; await initialize(); tab.value = 'imports'; message.value = '新库已创建，旧库仍正常生效。' }) }
 function chooseFiles(event: Event) { files.value = [...((event.target as HTMLInputElement).files || [])]; requestKey = idempotencyKey('logistics-import') }
 async function upload() {
@@ -136,9 +167,10 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer) })
       <nav class="tabs" aria-label="物流工作区"><button :class="{ active: tab === 'prices' }" @click="tab = 'prices'">当前物流价格</button><button :class="{ active: tab === 'imports' }" @click="tab = 'imports'">导入与更新</button><button :class="{ active: tab === 'history' }" @click="tab = 'history'">版本与历史</button></nav>
 
       <section v-if="tab === 'prices'" class="card">
-        <form class="toolbar" @submit.prevent="run(async () => { page = 0; await loadPrices() })"><label>物流商 / 渠道<input v-model="query" placeholder="搜索名称"></label><label>国家<input v-model="country" placeholder="例如 美国 / US"></label><label>货物属性<input v-model="attribute" placeholder="例如 普货"></label><button :disabled="busy">查询</button><button type="button" class="primary" :disabled="busy" @click="run(() => service.exportPrices(datasetId, filters()))">导出全部筛选价格</button></form>
-        <div class="scroll"><table><thead><tr><th>物流商 / 渠道</th><th>国家</th><th>重量段</th><th>计费价格</th><th>每票费用</th><th>版本 / 状态</th><th>操作</th></tr></thead><tbody><tr v-for="(r, i) in prices.items" :key="`${r.versionId}-${page}-${i}`"><td><b>{{ r.providerName }}</b><small>{{ r.channelName }}</small></td><td>{{ r.areaName }}<small>{{ r.countryCode }} · {{ r.zoneName || '无分区' }}</small></td><td>{{ weightLabel(r) }}</td><td v-if="r.pricingModel === 'first-next'">首 {{ r.firstWeightKg }}kg / {{ r.currency || 'CNY' }} {{ money(r.firstWeightPrice) }}<small>续 {{ r.nextWeightKg }}kg / {{ r.currency || 'CNY' }} {{ money(r.nextWeightPrice) }}</small></td><td v-else-if="r.intervalPrice">{{ r.currency || 'CNY' }} {{ money(r.intervalPrice) }} / 档</td><td v-else>{{ r.currency || 'CNY' }} {{ money(r.pricePerKg) }} / kg</td><td>{{ r.currency || 'CNY' }} {{ money(r.registrationFee) }}</td><td>V{{ r.versionNumber }}<small :class="{ warning: r.quoteReady === false }">{{ r.quoteReady === false ? '价格已记录 · 计费待适配' : '可自动报价' }}</small></td><td><button :disabled="busy" @click="openVersion(r.versionId!)">查看</button></td></tr><tr v-if="!prices.items.length"><td colspan="7" class="empty">当前条件没有正式价格；新库请先导入并审核价格版本。</td></tr></tbody></table></div>
-        <footer class="pager"><span>共 {{ prices.total }} 条 · 导出包含全部筛选结果</span><button :disabled="busy || page === 0" @click="run(async () => { page--; await loadPrices() })">上一页</button><span>{{ page + 1 }} / {{ Math.max(1, prices.totalPages) }}</span><button :disabled="busy || page + 1 >= prices.totalPages" @click="run(async () => { page++; await loadPrices() })">下一页</button></footer>
+        <form class="toolbar" @submit.prevent="run(submitPriceFilters)"><label>物流商 / 渠道<input v-model="query" placeholder="搜索名称"></label><label>国家<input v-model="country" placeholder="例如 美国 / US"></label><label>货物属性<input v-model="attribute" placeholder="例如 普货"></label><button :disabled="busy">查询</button><button type="button" class="primary" :disabled="busy" @click="run(() => service.exportPrices(datasetId, filters()))">导出全部筛选价格</button></form>
+        <LogisticsPager v-if="pricesLoaded" position="top" :page="page" :size="pageSize" :total="prices.total" :total-pages="prices.totalPages" :loading="busy || pricesLoading" @page-change="changePricePage" @size-change="changePriceSize" />
+        <div class="scroll" :aria-busy="pricesLoading"><table><thead><tr><th>物流商 / 渠道</th><th>国家</th><th>重量段</th><th>计费价格</th><th>每票费用</th><th>版本 / 状态</th><th>操作</th></tr></thead><tbody><template v-if="pricesLoading"><tr v-for="index in 6" :key="`skeleton-${index}`" class="price-skeleton" aria-hidden="true"><td v-for="column in 7" :key="column"><span /></td></tr></template><template v-else><tr v-for="(r, i) in prices.items" :key="`${r.versionId}-${page}-${i}`"><td><b>{{ r.providerName }}</b><small>{{ r.channelName }}</small></td><td>{{ r.areaName }}<small>{{ r.countryCode }} · {{ r.zoneName || '无分区' }}</small></td><td>{{ weightLabel(r) }}</td><td v-if="r.pricingModel === 'first-next'">首 {{ r.firstWeightKg }}kg / {{ r.currency || 'CNY' }} {{ money(r.firstWeightPrice) }}<small>续 {{ r.nextWeightKg }}kg / {{ r.currency || 'CNY' }} {{ money(r.nextWeightPrice) }}</small></td><td v-else-if="r.intervalPrice">{{ r.currency || 'CNY' }} {{ money(r.intervalPrice) }} / 档</td><td v-else>{{ r.currency || 'CNY' }} {{ money(r.pricePerKg) }} / kg</td><td>{{ r.currency || 'CNY' }} {{ money(r.registrationFee) }}</td><td>V{{ r.versionNumber }}<small :class="{ warning: r.quoteReady === false }">{{ r.quoteReady === false ? '价格已记录 · 计费待适配' : '可自动报价' }}</small></td><td><button :disabled="busy" @click="openVersion(r.versionId!)">查看</button></td></tr><tr v-if="!prices.items.length"><td colspan="7" class="empty">当前条件没有正式价格；新库请先导入并审核价格版本。</td></tr></template></tbody></table></div>
+        <LogisticsPager v-if="pricesLoaded" position="bottom" :page="page" :size="pageSize" :total="prices.total" :total-pages="prices.totalPages" :loading="busy || pricesLoading" @page-change="changePricePage" @size-change="changePriceSize" />
       </section>
 
       <section v-if="tab === 'imports'" class="stack">
@@ -178,4 +210,5 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer) })
 
 <style scoped>
 .logistics-page{min-height:100vh;background:#f3f5f7;color:#243542;font-size:14px}main{max-width:1500px;margin:0 auto;padding:28px 32px 64px}.page-heading,.section-head{display:flex;justify-content:space-between;align-items:center;gap:24px}.page-heading h1{font-size:28px;margin:5px 0 8px;letter-spacing:-.6px}.page-heading p{color:#71818d;margin:4px 0}.eyebrow{font-size:11px;font-weight:750;letter-spacing:1.5px;color:#a76b30!important}.dataset-picker{display:flex;align-items:flex-end;gap:12px}.dataset-picker select{min-width:260px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:24px 0}.metrics>div{background:#fff;border:1px solid #e2e8ed;border-radius:10px;padding:18px 22px}.metrics small{color:#7c8b96;display:block}.metrics strong{display:block;font-size:30px;line-height:1.3;margin-top:6px}.tabs{display:flex;gap:28px;border-bottom:1px solid #dbe3e8;margin-bottom:20px}.tabs button{border:0;border-radius:0;background:none;padding:13px 0;color:#6d7d88;font-size:15px}.tabs .active{color:#c8752d;border-bottom:3px solid #df8d41;font-weight:700}.card{border:1px solid #dfe6eb;background:white;border-radius:10px;padding:22px;box-shadow:0 2px 4px #152a3b03}.stack{display:grid;gap:18px}h2{font-size:18px;margin:0 0 14px}.toolbar{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:16px}.toolbar>label{flex:1;min-width:150px;max-width:260px}label{display:flex;flex-direction:column;gap:7px;font-size:12px;color:#667781}input,select,textarea,button{font:inherit}input:not([type=checkbox]),select,textarea{border:1px solid #cdd8e0;border-radius:6px;padding:10px 12px;background:#fff;color:#253d4c}textarea{width:100%;min-height:70px;box-sizing:border-box;resize:vertical}button{border:1px solid #ccd7df;border-radius:6px;background:white;color:#435e70;padding:9px 14px;cursor:pointer;white-space:nowrap}button:hover:not(:disabled){background:#f4f8fa}button.primary{background:#da853c;border-color:#da853c;color:white}button.primary:hover:not(:disabled){background:#c77730}button:disabled{opacity:.45;cursor:not-allowed}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left}th{background:#f4f7f9;font-size:12px;color:#74838e;padding:12px;font-weight:600;white-space:nowrap}td{border-bottom:1px solid #e9eef1;padding:13px 12px;vertical-align:top;line-height:1.65}td small{display:block;color:#81919c;font-size:12px;max-width:460px;white-space:normal}td b{font-weight:600}td button{font-size:12px;padding:5px 10px}.notice{padding:14px 18px;background:#fff4df;border:1px solid #f1d8ad;border-radius:8px;line-height:1.7}.notice.error{background:#fff0ee;border-color:#eebcb5;color:#ab3e32}.notice.success{background:#edf8f2;border-color:#badfc9;color:#24724a}.muted{color:#7d8d98;line-height:1.7}.warning{color:#bc762b!important}.tag{padding:8px 10px;border-radius:6px;background:#edf1f5;white-space:nowrap;font-size:12px}.tag.active{background:#e8f6ed;color:#348359}.tag.preparing{background:#fff0d8;color:#b77724}.empty{text-align:center;color:#82929c;padding:36px}.pager{display:flex;gap:12px;align-items:center;justify-content:flex-end;margin-top:18px;color:#83939d;font-size:12px}.pager>span:first-child{margin-right:auto}.check{display:flex;flex-direction:row;align-items:center;margin:14px 0;font-size:13px}.cutover{border-top:3px solid #dd9247}.cutover select{max-width:500px;width:100%}.review{margin-top:24px;padding-top:20px;border-top:1px solid #e2e8ed}.version-detail{margin-top:24px;border-top:3px solid #54788e}.section-head p{color:#7f8f9b}progress{width:100%;height:9px;accent-color:#db8b42;margin:8px 0 14px}details{margin:12px 0;color:#657986}summary{cursor:pointer}summary button{font-size:11px;margin-left:8px}li{line-height:1.9}input[type=checkbox]{accent-color:#d58842}.batch-result-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0 12px}.batch-result-summary span{padding:7px 11px;border:1px solid #e2e8ed;border-radius:999px;background:#f8fafb;color:#667984;font-size:12px}.batch-result-summary b{color:#294250}.batch-result-toolbar{display:grid;grid-template-columns:minmax(240px,1fr) minmax(150px,220px) minmax(150px,220px);gap:12px;align-items:end;margin-bottom:12px}.batch-results-table td{padding-top:10px;padding-bottom:10px}.batch-result-pager{margin-top:12px}@media(max-width:800px){main{padding:18px 12px}.page-heading{align-items:flex-start;flex-direction:column}.metrics{grid-template-columns:repeat(2,1fr)}.card{padding:16px}.dataset-picker{flex-wrap:wrap}td{min-width:100px}.toolbar>label{max-width:none}.tabs{gap:20px}.batch-result-toolbar{grid-template-columns:1fr}.batch-result-pager{flex-wrap:wrap}.batch-result-pager>span:first-child{width:100%}}
+.price-skeleton span{display:block;width:80%;height:14px;border-radius:5px;background:linear-gradient(90deg,#edf1f4 25%,#f7f9fa 50%,#edf1f4 75%);background-size:200% 100%;animation:price-skeleton 1.2s infinite}.price-skeleton td{height:40px}@keyframes price-skeleton{to{background-position:-200% 0}}
 </style>

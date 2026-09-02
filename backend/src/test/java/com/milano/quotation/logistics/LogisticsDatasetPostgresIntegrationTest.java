@@ -60,6 +60,17 @@ class LogisticsDatasetPostgresIntegrationTest {
         seed(next,"新增物流",true);assertThrows(AppException.class,()->datasets.activate(next,input,"QA"));assertEquals(old,guard.activeId());
         var latest=datasets.preview(next,mapper.createArrayNode()).put("note","QA").put("reviewConfirmed",true).put("unavailableConfirmed",true);datasets.activate(next,latest,"QA");assertEquals(2,queries.manifest().publishedChannels());assertEquals(3,datasets.prices(next,0,50,"","","").total());
     }finally{s.setRollbackOnly();}});}
+    @Test void pricesReturnFilteredTotalsAndStableEmptyPages(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();seed(dataset,"分页物流甲",true);seed(dataset,"分页物流乙",true);
+        var first=datasets.prices(dataset,0,1,"分页物流","US","普货");
+        assertEquals(2,first.total());assertEquals(2,first.totalPages());assertEquals(1,first.items().size());
+        var second=datasets.prices(dataset,1,1,"分页物流","美国","普货");
+        assertEquals(2,second.total());assertEquals(1,second.items().size());assertNotEquals(first.items().get(0).path("channelId"),second.items().get(0).path("channelId"));
+        var beyond=datasets.prices(dataset,9,1,"分页物流","US","普货");
+        assertEquals(2,beyond.total());assertEquals(0,beyond.items().size());
+        var empty=datasets.prices(dataset,0,20,"不存在的渠道","US","普货");
+        assertEquals(0,empty.total());assertEquals(0,empty.totalPages());assertEquals(0,empty.items().size());
+    }finally{s.setRollbackOnly();}});}
     @Test void quotationRejectsStaleVersionsTamperedFreightAndUnacceptedPrices(){tx.executeWithoutResult(s->{try{
         var c=seed(guard.activeId(),"服务端计费测试",true);var v=jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",c).query(UUID.class).single();
         var policies=mapper.createArrayNode();policies.addObject().put("enabled",true).put("category","普货").putArray("countryRules").addObject().put("country","美国").putArray("allowedChannels").add(key(c));
