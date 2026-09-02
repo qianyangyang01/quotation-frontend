@@ -49,17 +49,17 @@ assert(batch.payload.results.every(r => r.status === 'draft'))
 const queryStart = performance.now(), list = await request(`${root}/datasets/${dataset.id}/required-channels`)
 report.checklistQueryMs = Math.round(performance.now() - queryStart)
 assert.equal(list.channels.length, 88); assert.equal(list.channelIds.length, 0); assert.equal(list.confirmed, false)
-assert.equal(list.channels.reduce((n, c) => n + c.priceRows, 0), 3094)
+assert.equal(list.channels.reduce((n, c) => n + c.priceRows, 0), 3081)
 assert(list.channels.every(c => c.quoteReady === false))
 assert.equal(report.sha256, sha(await readFile(source)))
 const evidence = await request(`${root}/imports/${batch.id}/files/0/evidence`, { binary: true })
 assert.equal(sha(evidence), batch.payload.fileReports[0].sourceEvidence.sha256)
 assert(JSON.parse(evidence).sheets.some(s => s.sourceCells?.length))
-Object.assign(report, { elapsedMs: batch.payload.elapsedMs, parsingMs: batch.payload.parsingMs, stagingMs: batch.payload.stagingMs, progressPayloadBytes: Buffer.byteLength(JSON.stringify(batch)), evidenceBytes: evidence.length, channels: 88, rows: 3094, quoteReady: 0, finishedAt: new Date().toISOString() })
+Object.assign(report, { elapsedMs: batch.payload.elapsedMs, parsingMs: batch.payload.parsingMs, stagingMs: batch.payload.stagingMs, progressPayloadBytes: Buffer.byteLength(JSON.stringify(batch)), evidenceBytes: evidence.length, channels: 88, rows: 3081, quoteReady: 0, finishedAt: new Date().toISOString() })
 const output = resolve('backend/target/logistics-template-qa', dataset.id); await mkdir(output, { recursive: true })
 await writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2))
 await writeFile(resolve(output, 'required-channels.json'), JSON.stringify(list, null, 2))
-const md = ['# 日常必用渠道勾选清单', '', `核对范围：10家物流商、88个解析分组、3094条基础价格。极通多产品不等于仅两个实际下单产品。`, '', '以下均未预选，全部仍待完整计费验收；勾选只确定适配优先级，不授权生产切换。请优先在测试页面保存选择；本文件勾选不会自动同步数据库。', '', `[打开测试核对页面](${report.url})`, '']
+const md = ['# 日常必用渠道勾选清单', '', `核对范围：10家物流商、88个解析分组、3081条基础价格。递四方起运仓报价按已确认口径仅采用华东价；极通多产品不等于仅两个实际下单产品。`, '', '以下均未预选，全部仍待完整计费验收；勾选只确定适配优先级，不授权生产切换。请优先在测试页面保存选择；本文件勾选不会自动同步数据库。', '', `[打开测试核对页面](${report.url})`, '']
 for (const provider of [...new Set(list.channels.map(c => c.providerName))]) {
   md.push(`## ${provider}`, '')
   for (const c of list.channels.filter(c => c.providerName === provider)) {

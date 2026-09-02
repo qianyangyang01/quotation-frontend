@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.08.31-v2";
+    public static final String VERSION="providers-2026.09.02-v3";
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
@@ -126,7 +126,10 @@ public class LogisticsSourceParser {
         for(int r=header+1;r<=source.sheet.getLastRowNum();r++) {
             if(source.rowEmpty(r))continue;
             var name=value(source,r,headers,"渠道名称"); var prov=value(source,r,headers,"物流商");
-            var target=channel(prov.isBlank()?fallback:prov,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"货物属性"),"普货"),channels);
+            var effectiveProvider=prov.isBlank()?fallback:prov;
+            var sourceOrigin=value(source,r,headers,"发货区域");
+            if(excludeSouthChinaPrice(effectiveProvider,sourceOrigin)){source.parsedRows.add(r);continue;}
+            var target=channel(effectiveProvider,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"货物属性"),"普货"),channels);
             if(target.path("providerName").asText().isBlank())issue(target,r+1,"物流商","标准表需填写物流商","error");
             var row=mapper.createObjectNode();
             for(int c=0;c<LogisticsWorkbookService.KEYS.length;c++) {
@@ -139,7 +142,7 @@ public class LogisticsSourceParser {
             row.put("weightToInclusive",!headers.containsKey("终点包含")||flag(value(source,r,headers,"终点包含")));
             row.put("currency",defaultText(value(source,r,headers,"币种"),"CNY"));
             row.put("pricingModel",defaultText(value(source,r,headers,"计费方式"),row.path("intervalPrice").asDouble()>0?"interval":row.path("firstWeightPrice").asDouble()>0?"first-next":"per-kg"));
-            row.put("originRegion",value(source,r,headers,"发货区域")); row.put("notes",value(source,r,headers,"规则备注"));
+            applyOriginPolicy(row,effectiveProvider,sourceOrigin); row.put("notes",value(source,r,headers,"规则备注"));
             if(headers.containsKey("计费进位KG"))numeric(row,"billingStepKg",source,r,headers.get("计费进位KG"),target,true);
             row.put("pendingReason",value(source,r,headers,"待适配原因"));
             if(headers.containsKey("干线费每KG"))numeric(row,"linehaulPerKg",source,r,headers.get("干线费每KG"),target,true);
@@ -179,6 +182,8 @@ public class LogisticsSourceParser {
             var name=columns.channel>=0?source.text(r,columns.channel):section;
             if(provider.equals("云速递") && section.contains("美国商派"))name=section+"-"+countryRaw;
             if(name.isBlank())name=section;
+            var sourceOrigin=columns.origin>=0?source.text(r,columns.origin):"";
+            if(excludeSouthChinaPrice(provider,sourceOrigin)){source.parsedRows.add(r);continue;}
             var target=channel(provider,name,channels);
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",columns.firstPrice>=0?"first-next":"per-kg");
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
@@ -186,7 +191,7 @@ public class LogisticsSourceParser {
             if(!Arrays.asList(Locale.getISOCountries()).contains(normalizedCode))normalizedCode=countryCode(countryRaw);
             row.put("areaName",countryName(countryRaw)); row.put("countryCode",normalizedCode).put("sourceCountryCode",rawCode);
             row.put("sourceCountry",countryRaw).put("sourceCode",columns.code>=0?source.text(r,columns.code):"");
-            row.put("originRegion",columns.origin>=0?source.text(r,columns.origin):"");
+            applyOriginPolicy(row,provider,sourceOrigin);
             String zoneName=columns.zone>=0?defaultText(source.text(r,columns.zone),zone(countryRaw)):zone(countryRaw);
             if(rawCode.matches("[A-Z]{2}-[1-9][0-9]*"))zoneName=rawCode.substring(3)+"区";
             var embeddedZone=Pattern.compile("^([1-9一二三四五六七八九]区)[（(](.*)[)）]$").matcher(clean(weight));
@@ -330,7 +335,7 @@ public class LogisticsSourceParser {
             if(t.contains("首重")&&!t.contains("续重")){c.firstPrice=col;c.firstKg=firstNumber(t,0.5);}
             if(t.contains("续重")){c.nextPrice=col;c.nextKg=firstNumber(t,0.5);}
             if(t.contains("干线费"))c.linehaul=col;
-            if(t.equals("报价区域"))c.origin=col;
+            if(t.equals("报价区域")||t.equals("起运仓库"))c.origin=col;
             if(t.equals("分区"))c.zone=col;
             if(t.contains("时效"))c.eta=col;
             if(t.matches(".*(备注|说明|尺寸|附加费|服务费).*"))c.notes.add(col);
@@ -447,6 +452,14 @@ public class LogisticsSourceParser {
     }
     private void issue(ObjectNode channel,int row,String field,String message,String level){((ArrayNode)channel.path("issues")).addObject().put("row",row).put("field",field).put("message",message).put("level",level);}
     private static void pending(ObjectNode row,String reason){var prior=row.path("pendingReason").asText();if(!prior.contains(reason))row.put("pendingReason",prior.isBlank()?reason:prior+"；"+reason);}
+    private static boolean fourPx(String provider){return provider.equals("递四方")||provider.toLowerCase(Locale.ROOT).contains("4px");}
+    private static boolean excludeSouthChinaPrice(String provider,String origin){return fourPx(provider)&&origin.contains("华南")&&!origin.contains("华东");}
+    private static void applyOriginPolicy(ObjectNode row,String provider,String origin){
+        if(fourPx(provider)&&origin.contains("华东")){
+            row.put("sourceOriginRegion",origin).put("originRegion","");
+            row.put("normalizationNote","按用户确认：递四方统一采用华东起运仓报价");
+        } else row.put("originRegion",origin);
+    }
     private static String value(Source s,int r,Map<String,Integer> h,String key){return h.containsKey(key)?s.text(r,h.get(key)):"";}
     static String provider(String name){if(name.toLowerCase(Locale.ROOT).contains("4px"))return "递四方";for(var p:PROVIDERS)if(name.contains(p))return p;return "";}
     static String attribute(String name){if(name.matches(".*(化妆|彩妆).*"))return "非液体化妆品";if(name.contains("服装"))return "普货";if(name.matches(".*(电|特货).*"))return "带电";if(name.matches(".*(敏|特敏).*"))return "敏感货";return "普货";}
