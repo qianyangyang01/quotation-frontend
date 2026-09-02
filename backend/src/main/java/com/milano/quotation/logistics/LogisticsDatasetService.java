@@ -116,10 +116,9 @@ public class LogisticsDatasetService {
         out.set("providers",array(jdbc.sql("select (payload || jsonb_build_object('id',id,'datasetId',dataset_id,'_version',version))::text from logistics_provider where dataset_id=:id order by payload->>'name'").param("id",id).query(String.class).list()));
         out.set("channels",channelViews(id));
         out.set("versions",array(jdbc.sql("""
-                select ((v.payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object(
+                select (v.workspace_payload || jsonb_build_object(
                 'id',v.id,'channelId',v.channel_id,'status',v.status,'versionNumber',v.version_number,'quoteReady',logistics_version_quote_ready(v.id),
-                'rowCount',jsonb_array_length(coalesce(v.payload->'rows','[]'::jsonb)),
-                'issueCount',jsonb_array_length(coalesce(v.payload->'issues','[]'::jsonb))))::text
+                'rowCount',v.row_count,'issueCount',v.issue_count))::text
                 from logistics_version v join logistics_channel c on c.id=v.channel_id
                 where c.dataset_id=:id order by v.created_at desc,v.id
                 """).param("id",id).query(String.class).list()));
@@ -141,6 +140,9 @@ public class LogisticsDatasetService {
     public com.milano.quotation.common.PageResponse<JsonNode> prices(UUID id,int page,int size,String query,String country,String attribute) {
         if(page<0||size<1||size>200)throw AppException.unprocessable("分页参数不合法");
         dataset(id);
+        // The materialized page/count query briefly holds the expanded current rows twice. Keep this
+        // transaction-local so production-wide memory settings and unrelated requests are unaffected.
+        jdbc.sql("set local work_mem='96MB'").update();
         var result=jdbc.sql("""
                 with channel_base as materialized (
                   select c.id channel_id,c.payload channel_payload,c.archived_at,p.payload provider_payload,

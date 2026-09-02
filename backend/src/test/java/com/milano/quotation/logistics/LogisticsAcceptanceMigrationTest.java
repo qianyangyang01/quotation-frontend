@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers(disabledWithoutDocker=true)
 class LogisticsAcceptanceMigrationTest {
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
-    @Test void upgradesProductionV26DataToV31WithoutChangingBusinessPayloads(){
+    @Test void upgradesProductionV26DataToV32WithoutChangingBusinessPayloads(){
         resetDatabase();
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("26").load().migrate();
         var jdbc=JdbcClient.create(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
@@ -27,7 +27,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("31",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("32",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_provider where id=:id").param("id",provider).query(UUID.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
         assertEquals(version,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
@@ -36,6 +36,9 @@ class LogisticsAcceptanceMigrationTest {
         assertEquals(17.34,jdbc.sql("select (payload->>'logisticsFee')::numeric from quotation_record where id=:id").param("id",quotation).query(Double.class).single());
         assertTrue(ready(jdbc,version));
         assertEquals(1,jdbc.sql("select count(*) from logistics_billing_acceptance where version_id=:id and kind='legacy'").param("id",version).query(Integer.class).single());
+        assertEquals(1,jdbc.sql("select row_count from logistics_version where id=:id").param("id",version).query(Integer.class).single());
+        assertEquals(0,jdbc.sql("select issue_count from logistics_version where id=:id").param("id",version).query(Integer.class).single());
+        assertFalse(jdbc.sql("select jsonb_exists(workspace_payload,'rows') from logistics_version where id=:id").param("id",version).query(Boolean.class).single());
         var originalFingerprint=jdbc.sql("select rows_fingerprint from logistics_version where id=:id").param("id",version).query(String.class).single();
         jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,pricePerKg}','13.00'::jsonb) where id=:id").param("id",version).update();
         assertNotEquals(originalFingerprint,jdbc.sql("select rows_fingerprint from logistics_version where id=:id").param("id",version).query(String.class).single());
