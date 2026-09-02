@@ -1,0 +1,29 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:quotation-${random.uuid};MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    defer-datasource-initialization: true
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-test.sql
+  session:
+    store-type: none
+app:
+  logistics:
+    resume-on-start: false
+  bootstrap-admin:
+    password: TestAdmin123
+  storage:
+    initialize: false
+    endpoint: http://127.0.0.1:19000
+    access-key: test-access
+    secret-key: test-secret
+    bucket: quotation-assets-test
+  cors-allowed-origin: http://127.0.0.1:5173

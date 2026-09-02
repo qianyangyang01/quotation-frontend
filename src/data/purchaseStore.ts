@@ -1,84 +1,41 @@
-import { quotationProductCategories } from './productCategories'
+import { api } from '@/services/http'
 
 export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPriceCny: number; source: string }
-export type PurchaseStockStatus = '有货' | '无货' | '待确认' | ''
+export type PurchaseStockStatus = '有货' | '无货' | '待确认' | '定制款' | ''
 export type PurchaseSkuOrigin = 'imported' | 'manual' | 'system'
+export type PurchaseCatalogState = 'pending_template' | 'ready' | 'disabled'
+export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageCount:number;quotationRecords:number;drafts:number;templates:number;importBatches:number }
 
 export type PurchaseProductRecord = {
-  sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string
+  sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
   size: string; color: string; weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null
   minOrderQty: number | null; purchasePriceCny: number | null
   tier2MinQty: number | null; tier2PriceCny: number | null; tier3MinQty: number | null; tier3PriceCny: number | null
   priceTiers: PurchasePriceTier[]; singleFreightCny: number | null; freight10Cny: number | null; freight100Cny: number | null
-  freeShipping: '' | '是' | '否'; taxIncludedPriceCny: number | null; invoiceType: string; stockStatus: PurchaseStockStatus
+  freeShipping: '' | '是' | '否'; taxIncludedPriceCny: number | null; taxPoint: number | null; taxPointExplicit: boolean; invoiceType: string; stockStatus: PurchaseStockStatus
   notes: string; factoryInfo: string; sourceLink1: string; sourceLink2: string; sourceLink3: string; similarSource: string; auditNotes: string
-  quoteReady: boolean; status: string; importWarnings: string[]
+  catalogState: PurchaseCatalogState; quoteReady: boolean; status: string; importWarnings: string[]
   // Compatibility aliases consumed by the existing quotation calculator.
   name: string; image: string; weightKg: number | null; colorSku: string; material: string; marks: string; shippingMarks: string[]
-  rawTierPrice: string; l6Price: string; freightTrial: string; invoiceInfo: string; taxIncludedPrice: string; taxPoint: string
+  rawTierPrice: string; l6Price: string; freightTrial: string; invoiceInfo: string; taxIncludedPrice: string
   taxDifference: string; packagingInfo: string; sourceLinks: string[]; otherNotes: string; more: string; weightDescription: string
-}
-
-const DB_NAME = 'milano-quotation'
-const DB_VERSION = 1
-const STORE_NAME = 'purchase-products'
-const LEGACY_STORAGE_KEY = 'milano.purchase-products.v1'
-const CATEGORY_MIGRATION_KEY = 'milano.purchase-category-migration.v1'
-let databasePromise: Promise<IDBDatabase> | null = null
-
-function openDatabase() {
-  if (typeof indexedDB === 'undefined') return Promise.reject(new Error('当前浏览器不支持 IndexedDB'))
-  if (databasePromise) return databasePromise
-  databasePromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: 'sku' })
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error || new Error('采购数据库打开失败'))
-  })
-  return databasePromise
-}
-
-function requestResult<T>(request: IDBRequest<T>) {
-  return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error || new Error('采购数据库操作失败'))
-  })
-}
-
-function transactionDone(transaction: IDBTransaction) {
-  return new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(transaction.error || new Error('采购数据库保存失败'))
-    transaction.onabort = () => reject(transaction.error || new Error('采购数据库保存已取消'))
-  })
-}
-
-function stableCategory(sku: string, sourceRow: number) {
-  const seed = `${sku}:${sourceRow}`
-  let hash = 2166136261
-  for (let index = 0; index < seed.length; index += 1) hash = Math.imul(hash ^ seed.charCodeAt(index), 16777619)
-  return quotationProductCategories[(hash >>> 0) % quotationProductCategories.length]
-}
-
-async function migrateExistingPurchaseCategories(database: IDBDatabase) {
-  if (typeof window === 'undefined' || window.localStorage.getItem(CATEGORY_MIGRATION_KEY) === '1') return
-  const rows = await requestResult(database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll()) as PurchaseProductRecord[]
-  if (rows.length) {
-    const transaction = database.transaction(STORE_NAME, 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-    rows.forEach(record => store.put({ ...record, category: stableCategory(record.sku, record.sourceRow) }))
-    await transactionDone(transaction)
-  }
-  window.localStorage.setItem(CATEGORY_MIGRATION_KEY, '1')
 }
 
 function numberOrNull(value: unknown) {
   if (value === '' || value == null) return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function taxPointOrNull(value: unknown) {
+  if (value === '' || value == null) return null
+  const raw = String(value).trim().replace('％', '%')
+  const percent = raw.endsWith('%')
+  const numeric = Number(percent ? raw.slice(0, -1) : raw)
+  if (!Number.isFinite(numeric) || numeric < 0) return null
+  const normalized = percent || numeric > 1 ? numeric / 100 : numeric
+  return normalized <= 1 ? normalized : null
 }
 
 function buildPriceTiers(record: Pick<PurchaseProductRecord, 'minOrderQty' | 'purchasePriceCny' | 'tier2MinQty' | 'tier2PriceCny' | 'tier3MinQty' | 'tier3PriceCny'>) {
@@ -106,78 +63,89 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const productImage = String(input.productImage || input.image || '')
   const color = String(input.color || input.colorSku || '').trim()
   const sourceLinks = input.sourceLinks || []
+  const taxPointExplicit = Object.prototype.hasOwnProperty.call(input, 'taxPoint') || input.taxPointExplicit === true
+  const catalogState: PurchaseCatalogState = input.catalogState === 'pending_template' || input.catalogState === 'disabled' ? input.catalogState : 'ready'
   const base = {
-    sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage,
+    sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
     size: String(input.size || '').trim(), color, weightG, lengthCm: numberOrNull(input.lengthCm), widthCm: numberOrNull(input.widthCm), heightCm: numberOrNull(input.heightCm),
     minOrderQty, purchasePriceCny, tier2MinQty: numberOrNull(input.tier2MinQty), tier2PriceCny: numberOrNull(input.tier2PriceCny),
     tier3MinQty: numberOrNull(input.tier3MinQty), tier3PriceCny: numberOrNull(input.tier3PriceCny),
     singleFreightCny: numberOrNull(input.singleFreightCny), freight10Cny: numberOrNull(input.freight10Cny), freight100Cny: numberOrNull(input.freight100Cny),
     freeShipping: input.freeShipping === '是' || input.freeShipping === '否' ? input.freeShipping : '' as '' | '是' | '否',
-    taxIncludedPriceCny: numberOrNull(input.taxIncludedPriceCny ?? input.taxIncludedPrice), invoiceType: String(input.invoiceType || input.taxDifference || '').trim(),
-    stockStatus: input.stockStatus === '有货' || input.stockStatus === '无货' || input.stockStatus === '待确认' ? input.stockStatus : '' as PurchaseStockStatus,
+    taxIncludedPriceCny: numberOrNull(input.taxIncludedPriceCny ?? input.taxIncludedPrice), taxPoint: taxPointOrNull(input.taxPoint), taxPointExplicit,
+    invoiceType: String(input.invoiceType || input.taxDifference || '').trim(),
+    stockStatus: input.stockStatus === '有货' || input.stockStatus === '无货' || input.stockStatus === '待确认' || input.stockStatus === '定制款' ? input.stockStatus : '' as PurchaseStockStatus,
     notes: String(input.notes || '').trim(), factoryInfo: String(input.factoryInfo || input.packagingInfo || '').trim(),
     sourceLink1: String(input.sourceLink1 || sourceLinks[0] || '').trim(), sourceLink2: String(input.sourceLink2 || sourceLinks[1] || '').trim(),
     sourceLink3: String(input.sourceLink3 || sourceLinks[2] || '').trim(), similarSource: String(input.similarSource || sourceLinks[3] || '').trim(),
     auditNotes: String(input.auditNotes || '').trim(), importWarnings: Array.isArray(input.importWarnings) ? [...input.importWarnings] : [],
   }
-  const quoteReady = skuOrigin !== 'system' && weightG != null && weightG > 0 && minOrderQty != null && minOrderQty > 0 && purchasePriceCny != null && purchasePriceCny >= 0
-  const missing = [weightG == null || weightG <= 0 ? '重量' : '', minOrderQty == null || minOrderQty <= 0 ? '起订量' : '', purchasePriceCny == null ? '采购价' : ''].filter(Boolean)
-  const status = skuOrigin === 'system' ? '系统生成SKU，待修改' : quoteReady ? '资料完整' : `待补充${missing.length ? `：${missing.join('、')}` : ''}`
+  const reservedSku = /^(TESTP|TEST|DEMO|MOCK)/i.test(sku) || sku.startsWith('AUTO-')
+  const hasPrice = [purchasePriceCny, numberOrNull(input.tier2PriceCny), numberOrNull(input.tier3PriceCny), base.taxIncludedPriceCny].some(value => value != null && value >= 0)
+  const quoteReady = catalogState === 'ready' && !reservedSku && skuOrigin !== 'system' && weightG != null && weightG > 0 && minOrderQty != null && minOrderQty > 0 && hasPrice
+  const missing = [weightG == null || weightG <= 0 ? '重量' : '', minOrderQty == null || minOrderQty <= 0 ? '起订量' : '', !hasPrice ? '采购价' : ''].filter(Boolean)
+  const status = catalogState === 'pending_template' ? '模板待补全（不可报价）' : catalogState === 'disabled' ? '已停用' : skuOrigin === 'system' ? '系统生成SKU，待修改' : quoteReady ? '资料完整' : `待补充${missing.length ? `：${missing.join('、')}` : ''}`
   const priceTiers = buildPriceTiers(base)
   return {
-    ...base, quoteReady, status, priceTiers,
+    ...base, catalogState, quoteReady, status, priceTiers,
     name: category || `商品 ${sku}`, image: productImage, weightKg: weightG == null ? null : weightG / 1000, colorSku: color,
-    material: '', marks: '', shippingMarks: [], rawTierPrice: priceTiers.map(item => `${item.minQty}${item.maxQty == null ? '+' : `-${item.maxQty}`}件 ¥${item.unitPriceCny}`).join('；'),
+    material: String(input.material || '').trim(), marks: '', shippingMarks: [], rawTierPrice: priceTiers.map(item => `${item.minQty}${item.maxQty == null ? '+' : `-${item.maxQty}`}件 ¥${item.unitPriceCny}`).join('；'),
     l6Price: '', freightTrial: '', invoiceInfo: '', taxIncludedPrice: base.taxIncludedPriceCny == null ? '' : String(base.taxIncludedPriceCny),
-    taxPoint: '', taxDifference: base.invoiceType, packagingInfo: base.factoryInfo,
+    taxDifference: base.invoiceType, packagingInfo: base.factoryInfo,
     sourceLinks: [base.sourceLink1, base.sourceLink2, base.sourceLink3, base.similarSource], otherNotes: '', more: '', weightDescription: weightG == null ? '' : String(weightG),
   }
 }
 
-export async function loadPurchaseProducts(): Promise<PurchaseProductRecord[]> {
-  if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_STORAGE_KEY)
-  const database = await openDatabase()
-  await migrateExistingPurchaseCategories(database)
-  const rows = await requestResult(database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll())
-  return (rows as PurchaseProductRecord[]).map(normalizePurchaseRecord).sort((a, b) => b.sourceRow - a.sourceRow)
+export type PurchasePage = { items: PurchaseProductRecord[]; page: number; size: number; total: number; totalPages: number }
+export type PurchaseStats = { total:number;ready:number;pending:number;generatedSku:number }
+export async function loadPurchaseProductPage(query='',page=0,size=50):Promise<PurchasePage>{
+  const result=await api.get<PurchasePage>(`/purchase-products?q=${encodeURIComponent(query)}&page=${page}&size=${size}`)
+  return {...result,items:result.items.map(normalizePurchaseRecord)}
+}
+export const loadPurchaseStats=()=>api.get<PurchaseStats>('/purchase-products/stats')
+export async function loadPurchaseProducts(query = '', page = 0, size = 500): Promise<PurchaseProductRecord[]> {
+  const result = await loadPurchaseProductPage(query,page,size)
+  return result.items
+}
+
+export async function loadPurchaseProduct(sku: string): Promise<PurchaseProductRecord> {
+  return normalizePurchaseRecord(await api.get<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sku)}`))
 }
 
 export async function savePurchaseProducts(records: PurchaseProductRecord[]) {
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  const store = transaction.objectStore(STORE_NAME)
-  store.clear()
-  records.map(normalizePurchaseRecord).forEach(record => store.put(record))
-  await transactionDone(transaction)
+  await upsertPurchaseProducts(records)
 }
 
 export async function upsertPurchaseProducts(records: PurchaseProductRecord[]) {
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  const store = transaction.objectStore(STORE_NAME)
-  records.map(normalizePurchaseRecord).forEach(record => store.put(record))
-  await transactionDone(transaction)
+  if (!records.length) return
+  await api.put('/purchase-products/batch', records.map(normalizePurchaseRecord))
 }
 
-export async function deletePurchaseProduct(sku: string) {
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  transaction.objectStore(STORE_NAME).delete(sku)
-  await transactionDone(transaction)
+export async function loadPurchaseDeletionCheck(sku: string) {
+  return api.get<PurchaseDeletionCheck>(`/purchase-products/${encodeURIComponent(sku)}/deletion-check`)
+}
+
+export async function setPurchaseProductCatalogState(sku: string, state: 'ready' | 'disabled', expectedVersion: number) {
+  return normalizePurchaseRecord(await api.post<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sku)}/catalog-state`, { state, expectedVersion }))
+}
+
+export async function deletePurchaseProduct(sku: string, expectedVersion: number) {
+  await api.delete(`/purchase-products/${encodeURIComponent(sku)}?expectedVersion=${expectedVersion}`)
+}
+
+export async function promotePurchaseProduct(sourceSku: string, targetSku: string, expectedVersion: number) {
+  return normalizePurchaseRecord(await api.post<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sourceSku)}/promote`, { targetSku, expectedVersion }))
 }
 
 export async function resetPurchaseProducts() {
-  if (typeof window !== 'undefined') window.localStorage.removeItem(LEGACY_STORAGE_KEY)
-  const database = await openDatabase()
-  const transaction = database.transaction(STORE_NAME, 'readwrite')
-  transaction.objectStore(STORE_NAME).clear()
-  await transactionDone(transaction)
+  const rows = await loadPurchaseProducts()
+  await Promise.all(rows.map(row => deletePurchaseProduct(row.sku, row._version ?? -1)))
 }
 
 export function findPurchaseProduct(records: PurchaseProductRecord[], sku: string) {
   const normalized = sku.trim().toUpperCase().replace(/\s+/g, '')
-  return records.find(item => item.sku === normalized && item.skuOrigin !== 'system')
+  return records.find(item => item.sku === normalized && item.skuOrigin !== 'system' && item.quoteReady)
 }
 
 export function purchaseUnitPrice(record: PurchaseProductRecord, quantity: number) {

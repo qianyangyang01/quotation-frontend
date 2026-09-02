@@ -9,6 +9,7 @@ export const LOGISTICS_WORKBOOK_HEADERS = [
 ] as const
 
 export type LogisticsRateRow = {
+  weightFromInclusive?: boolean; weightToInclusive?: boolean; quoteReady?: boolean
   sourceRow: number
   areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number
   prohibitedMarks: string; allowedMarks: string; maxPerimeterCm: number; maxSideCm: number
@@ -95,7 +96,7 @@ async function readRows(zip: JSZip, sheetPath: string) {
     const raw = elements(cell, 'v')[0]?.textContent ?? ''
     const inline = elements(cell, 'is')[0]?.textContent ?? ''
     const formula = elements(cell, 'f')[0]?.textContent?.trim() || ''
-    let value: unknown = type === 's' ? shared[Number(raw)] ?? '' : type === 'inlineStr' ? inline : type === 'b' ? raw === '1' : raw === '' ? '' : Number.isFinite(Number(raw)) ? Number(raw) : raw
+    const value: unknown = type === 's' ? shared[Number(raw)] ?? '' : type === 'inlineStr' ? inline : type === 'b' ? raw === '1' : raw === '' ? '' : Number.isFinite(Number(raw)) ? Number(raw) : raw
     if ((value === '' || value == null) && formula) formulas.set(ref, formula.replace(/^=/, ''))
     const row = rows.get(rowNumber) || []
     row[col] = value

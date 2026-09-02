@@ -1,0 +1,39 @@
+name: quotation-quality
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.19.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: node scripts/validate-compose.mjs
+      - run: pnpm build
+
+  backend-and-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21, cache: maven }
+      - name: Install Chinese PDF font
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-wqy-zenhei
+      - run: bash deploy/scripts/verify-isolation.sh
+      - working-directory: backend
+        run: mvn -B verify
+      - name: Reject skipped Docker integration tests
+        run: |
+          if grep -R "disabledWithoutDocker" backend/target/surefire-reports/TEST-*.xml; then
+            echo "PostgreSQL/Testcontainers tests were skipped; the quality gate is not valid." >&2
+            exit 1
+          fi

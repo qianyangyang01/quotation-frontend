@@ -1,4 +1,5 @@
 import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
+import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
 export type TaxCustomerType = 'A' | 'B'
 export type LogisticsTaxMode = 'exempt' | 'taxable'
@@ -45,7 +46,6 @@ export type FinanceQuoteTaxResult = {
   label: string
 }
 
-const STORAGE_KEY = 'milano.finance-tax-settings.v1'
 export const FINANCE_TAX_SETTINGS_UPDATED_EVENT = 'milano:finance-tax-settings-updated'
 
 function normalizeProviderName(value: string) {
@@ -86,11 +86,17 @@ function finiteNonNegative(value: unknown) {
   return Number.isFinite(number) && number >= 0 ? number : 0
 }
 
-function normalizeSettings(raw?: Partial<FinanceTaxSettings> | null): FinanceTaxSettings {
+export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | null): FinanceTaxSettings {
   const countryMap = new Map((raw?.countries || []).map(item => [item.country, item]))
   const providerMap = new Map((raw?.providers || []).map(item => [item.provider, item]))
+  const countryFallbacks = countryDefaults()
+  const providerFallbacks = providerDefaults()
+  const countries = [...new Set([...countryFallbacks.map(item => item.country), ...countryMap.keys()])]
+  const providers = [...new Set([...providerFallbacks.map(item => item.provider), ...providerMap.keys()])]
   return {
-    countries: countryDefaults().map(fallback => {
+    countries: countries.map(country => {
+      const fallback = countryFallbacks.find(item => item.country === country)
+        || { country, aFixedFeeUsd: 0, bPerItemFeeUsd: 0, selected: false, enabled: false, sortOrder: 10_000 }
       const stored = countryMap.get(fallback.country)
       const legacy = stored as (typeof stored & { fixedFeeUsd?: unknown })
       const aFixedFeeUsd = finiteNonNegative(stored?.aFixedFeeUsd ?? legacy?.fixedFeeUsd)
@@ -104,37 +110,30 @@ function normalizeSettings(raw?: Partial<FinanceTaxSettings> | null): FinanceTax
         sortOrder: Number.isFinite(Number(stored?.sortOrder)) ? Math.max(1, Number(stored?.sortOrder)) : fallback.sortOrder,
       }
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
-    providers: providerDefaults().map(fallback => {
-      const stored = providerMap.get(fallback.provider)
+    providers: providers.map(provider => {
+      const stored = providerMap.get(provider)
+      const fallback = providerFallbacks.find(item => item.provider === provider)
+        || { provider, mode: defaultMode(provider), selected: false, channels: stored?.channels || [] }
       const storedMode = String(stored?.mode || '')
       const mode: LogisticsTaxMode = storedMode === 'exempt' || storedMode === 'included'
         ? 'exempt'
         : storedMode === 'taxable' || storedMode === 'not-included' || storedMode === 'fixed-rate' || storedMode === 'channel-rate'
           ? 'taxable'
           : fallback.mode
-      return { ...fallback, mode, selected: typeof stored?.selected === 'boolean' ? stored.selected : fallback.selected }
-    }),
+      return { ...fallback, channels: stored?.channels || fallback.channels, mode, selected: typeof stored?.selected === 'boolean' ? stored.selected : fallback.selected }
+    }).sort((a, b) => a.provider.localeCompare(b.provider, 'zh-CN')),
     updatedAt: String(raw?.updatedAt || '尚未保存'),
   }
 }
 
 export function loadFinanceTaxSettings(): FinanceTaxSettings {
-  if (typeof window === 'undefined') return normalizeSettings()
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    if (stored) return normalizeSettings(JSON.parse(stored) as FinanceTaxSettings)
-  } catch {
-    // Invalid local data falls back to logistics provider and country defaults.
-  }
-  return normalizeSettings()
+  return normalizeFinanceTaxSettings(readFinanceSetting<FinanceTaxSettings>('tax-settings'))
 }
 
-export function saveFinanceTaxSettings(settings: FinanceTaxSettings): FinanceTaxSettings {
-  const normalized = normalizeSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
-    window.dispatchEvent(new CustomEvent(FINANCE_TAX_SETTINGS_UPDATED_EVENT))
-  }
+export async function saveFinanceTaxSettings(settings: FinanceTaxSettings): Promise<FinanceTaxSettings> {
+  const normalized = normalizeFinanceTaxSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
+  await writeFinanceSetting('tax-settings', normalized)
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_TAX_SETTINGS_UPDATED_EVENT))
   return normalized
 }
 

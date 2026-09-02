@@ -98,8 +98,8 @@ function isPrimary(row: QuotationMatrixRow) {
     <section v-if="hasOptions" class="overview-grid">
       <article class="price-range"><span>1{{ unitLabel }}报价区间</span><b>{{ quote1UsdRange }}</b><small>{{ quote1CnyRange }}</small></article>
       <article class="custom-range"><span>{{ customQuantityLabel }}报价区间</span><b>{{ customUsdRange }}</b><small>按当前自定义数量</small></article>
-      <article><span>最低报价</span><b>{{ formatUsd(lowest?.quote1) }}</b><small>{{ lowest ? `${lowest.country} · ${lowest.transport}` : '暂无有效报价' }}</small></article>
-      <article><span>最快时效</span><b>{{ fastest?.eta || '—' }}</b><small>{{ fastest ? `${fastest.country} · ${fastest.transport}` : '暂无有效时效' }}</small></article>
+      <article><span>最低报价</span><b>{{ formatUsd(lowest?.quote1) }}</b><small>{{ lowest ? `${lowest.country} · ${lowest.carrier}｜${lowest.transport}` : '暂无有效报价' }}</small></article>
+      <article><span>最快时效</span><b>{{ fastest?.eta || '—' }}</b><small>{{ fastest ? `${fastest.country} · ${fastest.carrier}｜${fastest.transport}` : '暂无有效时效' }}</small></article>
     </section>
 
     <section class="primary-option">
@@ -131,7 +131,7 @@ function isPrimary(row: QuotationMatrixRow) {
           <details v-for="(group,index) in groupedOptions" :key="group.country" :open="index===0 || group.rows.some(isPrimary)">
             <summary><span><b>{{ group.country }}</b><small>{{ group.rows.length }} 条渠道</small></span><i>⌄</i></summary>
             <article v-for="row in group.rows" :key="rowKey(row)" :class="{ primary:isPrimary(row) }">
-              <span><span class="channel-name-line"><b>{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>{{ row.carrier }} · {{ row.rule }}</small><em v-if="isPrimary(row)">首选</em></span>
+              <span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">首选</em></span>
               <strong>{{ row.eta }}</strong>
               <span class="quote"><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small><QuoteTaxMeta :row="row" mode="price" tier="1" /></span>
               <span class="quote"><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small><QuoteTaxMeta :row="row" mode="price" tier="2" /></span>

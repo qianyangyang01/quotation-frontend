@@ -6,11 +6,15 @@ export type QuotationProduct = {
   supplier: string
   image: string
   physicalImage: string
-  stockStatus: '有货' | '无货' | '待确认'
+  stockStatus: '有货' | '无货' | '待确认' | '定制款'
   /** 本次报价由业务员统一选择，不从采购资料继承。 */
   logisticsAttribute: string
   quantity: number
   purchase: number
+  purchaseBaseUnitPrice: number
+  purchaseInvoiceType: string
+  purchaseInvoiceRatePercent: number
+  purchaseInvoiceTaxApplied: boolean
   purchaseFreightPerUnit: number
   netWeight: number
   country: string
@@ -28,6 +32,7 @@ export type QuotationProduct = {
   packageLengthCm: number
   packageWidthCm: number
   packageHeightCm: number
+  volumeDivisor: number
   discountEnabled: boolean
   discountRate: number
   status: string
@@ -43,9 +48,14 @@ export type BundleQuoteItem = {
   name: string
   supplier: string
   image: string
-  stockStatus: '有货' | '无货' | '待确认'
+  physicalImage: string
+  stockStatus: '有货' | '无货' | '待确认' | '定制款'
   quantityPerSet: number
   purchaseUnitPrice: number
+  purchaseBaseUnitPrice: number
+  purchaseInvoiceType: string
+  purchaseInvoiceRatePercent: number
+  purchaseInvoiceTaxApplied: boolean
   customWeightKg: number | null
   purchaseFreightPerUnit: number
   weightKg: number
@@ -95,6 +105,7 @@ export type QuotationMatrixRow = {
  */
 export type QuotationPresetSelection = {
   country: string
+  quoteRegion?: string
   channelKey?: string
   rule?: string
   carrier?: string

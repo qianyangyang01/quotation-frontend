@@ -17,10 +17,6 @@ import {
   channelsAvailableForCountry,
   countriesAvailableForCategory,
   financeLogisticsAttributeOptions,
-  loadFinanceExchangeRate,
-  loadCustomerGradeSettings,
-  loadFinanceChannelPolicies,
-  loadFinanceCountrySettings,
   saveCustomerGradeSettings,
   saveFinanceExchangeRate,
   saveFinanceChannelPolicies,
@@ -29,6 +25,7 @@ import {
   type FinanceCountryChannelRule,
   type FinanceChannelPolicy,
   type FinanceCountrySetting,
+  type FinanceExchangeRateSetting,
   type FinanceLogisticsAttribute,
 } from '@/data/financeChannelPolicies'
 import {
@@ -38,14 +35,26 @@ import {
   type CountryStage,
 } from '@/data/countryClassification'
 import {
-  loadFinanceTaxSettings,
   saveFinanceTaxSettings,
   type FinanceCountryTaxSetting,
   type FinanceProviderTaxSetting,
+  type FinanceTaxSettings,
   type LogisticsTaxMode,
 } from '@/data/financeTaxSettings'
+import { loadPublishedLogisticsManifest, loadPublishedLogisticsRuleCatalog } from '@/data/publishedLogisticsRepository'
+import { ApiError } from '@/services/http'
+import {
+  loadFinanceRequiredPreview,
+  loadFinanceRequiredPreviewDatasets,
+  loadFinanceSettingsWorkspace,
+  readFinanceSettingsWorkspace,
+  type FinanceRequiredPreview,
+  type FinanceRequiredPreviewChannel,
+  type FinanceRequiredPreviewDataset,
+  type FinanceSettingsWorkspace,
+} from '@/services/financeSettingsWorkspace'
 
-const props = defineProps<{ mode: 'products' | 'suppliers' | 'logistics' | 'members' | 'history' }>()
+const props = defineProps<{ mode: 'products' | 'logistics' | 'members' | 'history' }>()
 const showPurchaseWorkspace = computed(() => props.mode === 'products')
 const search = ref('')
 const notice = ref('')
@@ -58,11 +67,13 @@ const productPage = ref(1)
 const productPageSize = ref(20)
 const editingSourceRow = ref<number | null>(null)
 const editingFinancePolicyId = ref<string | null>(null)
-const financePolicies = ref<FinanceChannelPolicy[]>(loadFinanceChannelPolicies())
-const financeCountrySettings = ref<FinanceCountrySetting[]>(loadFinanceCountrySettings())
-const customerGradeSettings = ref<CustomerGradeSetting[]>(loadCustomerGradeSettings())
-const financeExchangeRate = ref(loadFinanceExchangeRate())
-const financeTaxSettings = ref(loadFinanceTaxSettings())
+const financePolicies = ref<FinanceChannelPolicy[]>([])
+const financeCountrySettings = ref<FinanceCountrySetting[]>([])
+const customerGradeSettings = ref<CustomerGradeSetting[]>([])
+const financeExchangeRate = ref<FinanceExchangeRateSetting>({ usdCny: 0, updatedAt: '' })
+const financeTaxSettings = ref<FinanceTaxSettings>({ countries: [], providers: [], updatedAt: '' })
+const financeSettingsLoadState = ref<'loading' | 'ready' | 'error'>(props.mode === 'members' ? 'loading' : 'ready')
+const financeSettingsLoadError = ref('')
 type FinanceSettingsTab = 'countries' | 'logistics' | 'grades' | 'exchange' | 'taxes'
 const FINANCE_TAB_ORDER_STORAGE_KEY = 'milano.finance-settings-card-order.v1'
 const defaultFinanceTabOrder: FinanceSettingsTab[] = ['countries', 'logistics', 'grades', 'exchange', 'taxes']
@@ -98,6 +109,12 @@ const financeFilterSearch = ref('')
 const financeFilterStatus = ref('')
 const financeFilterCountry = ref('')
 const financeFilterProvider = ref('')
+const financeRequiredDatasets = ref<FinanceRequiredPreviewDataset[]>([])
+const financeRequiredDatasetId = ref('')
+const financeRequiredPreview = ref<FinanceRequiredPreview | null>(null)
+const financeRequiredPreviewState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+const financeRequiredPreviewError = ref('')
+const financeRequiredSearch = ref('')
 const financeAttributeInput = ref<HTMLInputElement | null>(null)
 const financeAttributePickerOpen = ref(false)
 const financeAttributePickerTyping = ref(false)
@@ -150,7 +167,6 @@ const productForm = ref(emptyProductForm())
 
 const config = computed(() => ({
   products: ['PURCHASE DATA CENTER', '采购资料维护', '采购统一上传和维护 SKU、图片、重量及数量阶梯成本。', '新增采购资料'],
-  suppliers: ['SUPPLIER MASTER DATA', '供应商管理', '记录采购供应商、联系人、采购平台、结算方式、交期与合作状态。', '新增供应商'],
   logistics: ['LOGISTICS CONFIGURATION', '物流规则', '配置物流商、渠道、国家区域、重量限制与分段运费规则。', '新增运费规则'],
   members: ['FINANCE PRICING POLICY', '财务报价设置', '维护常用国家、客户等级、汇率和物流渠道授权。', '新增物流属性策略'],
   history: ['QUOTATION AUDIT', '报价记录', '保留每次报价的成本、汇率、物流规则、操作人和版本快照。', '导出记录'],
@@ -158,11 +174,6 @@ const config = computed(() => ({
 
 type ProductRow = any
 const products = ref<ProductRow[]>([])
-const suppliers = ref([
-  { code: 'SP00001', name: '义乌优选供应链', contact: '陈经理', phone: '138****6251', platform: '1688', category: '个护健康', payment: '月结30天', leadTime: '3–5天', products: 18, score: 4.8, status: '合作中' },
-  { code: 'SP00002', name: '杭州佳品贸易', contact: '林女士', phone: '136****9038', platform: '线下合同', category: '家居百货', payment: '款到发货', leadTime: '2–4天', products: 12, score: 4.6, status: '合作中' },
-  { code: 'SP00003', name: '深圳宏达科技', contact: '王先生', phone: '135****1186', platform: '1688', category: '数码配件', payment: '预付30%', leadTime: '5–7天', products: 9, score: 4.2, status: '待审核' },
-])
 const logistics = ref([
   { name: '云途全球专线', carrier: '云途物流', type: '专线', countries: '美国、加拿大、欧洲六国', weight: '10–30,000 g', price: '基础费 ¥16 + ¥68/1000g', status: '启用' },
   { name: '燕文航空挂号', carrier: '燕文物流', type: '挂号', countries: '全球常用国家', weight: '10–2,000 g', price: '基础费 ¥12 + ¥73/1000g + 挂号费 ¥8', status: '启用' },
@@ -174,7 +185,7 @@ const history = ref([
   { no: 'QT202607300064', sku: 'SKU00023107', country: '德国', member: '普通报价', rule: '燕文航空挂号', cost: 153.68, quote: 202.21, rate: 'USD 7.24 / EUR 7.86', operator: '管理员', time: '2026-07-30 16:20', status: '已保存' },
   { no: 'QT202607290031', sku: 'SKU00022968', country: '法国', member: '核心会员 A', rule: '顺邮宝挂号', cost: 48.40, quote: 59.02, rate: 'USD 7.23 / EUR 7.85', operator: '范国华', time: '2026-07-29 11:05', status: '已同步' },
 ])
-const rows = computed<any[]>(() => ({ products: products.value, suppliers: suppliers.value, logistics: logistics.value, members: financePolicies.value, history: history.value }[props.mode]))
+const rows = computed<any[]>(() => ({ products: products.value, logistics: logistics.value, members: financePolicies.value, history: history.value }[props.mode]))
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   return q ? rows.value.filter(row => Object.values(row).some(v => String(v).toLowerCase().includes(q))) : rows.value
@@ -271,6 +282,16 @@ const filteredFinancePolicyCards = computed(() => {
       && (!financeFilterProvider.value || card.countries.some(item => item.groups.some(group => group.provider === financeFilterProvider.value)))
   })
 })
+const filteredFinanceRequiredChannels = computed(() => {
+  const query = financeRequiredSearch.value.trim().toLowerCase()
+  return (financeRequiredPreview.value?.channels || []).filter(channel => !query
+    || `${channel.logisticsAttribute || '普货'} ${channel.providerName} ${channel.name} ${channel.code} ${channel.countries.join(' ')} ${channel.zones.join(' ')}`.toLowerCase().includes(query))
+})
+function financeRequiredBinding(channel: FinanceRequiredPreviewChannel) {
+  const policy = financePolicies.value.find(item => item.enabled && item.category === (channel.logisticsAttribute || '普货'))
+  const matched = channel.countries.filter(country => policy?.countryRules.some(rule => rule.country === country && rule.allowedChannels.includes(channel.channelKey))).length
+  return matched > 0 ? `${matched}/${channel.countries.length} 个国家已关联` : '待切换映射'
+}
 function resetFinanceFilters() {
   financeFilterSearch.value = ''
   financeFilterStatus.value = ''
@@ -297,19 +318,19 @@ function primaryAction() {
   else if (props.mode === 'members') openFinancePolicyEditor()
   else showEditor.value = true
 }
-function saveGradeSettings() {
+async function saveGradeSettings() {
   customerGradeSettings.value.forEach(setting => {
     setting.coefficient = Math.max(0, Number(setting.coefficient) || 1)
   })
-  saveCustomerGradeSettings(customerGradeSettings.value)
+  await saveCustomerGradeSettings(customerGradeSettings.value)
   toast('S–E 客户等级计算系数已保存')
 }
-function saveExchangeRateSetting() {
+async function saveExchangeRateSetting() {
   if (!Number.isFinite(financeExchangeRate.value.usdCny) || financeExchangeRate.value.usdCny <= 0) {
     toast('美元汇率必须大于 0')
     return
   }
-  financeExchangeRate.value = saveFinanceExchangeRate(financeExchangeRate.value.usdCny)
+  financeExchangeRate.value = await saveFinanceExchangeRate(financeExchangeRate.value.usdCny)
   toast(`美元汇率已保存：1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY`)
 }
 function fixedFeeCny(fixedFeeUsd: number) {
@@ -349,13 +370,13 @@ function removeTaxProvider(setting: FinanceProviderTaxSetting) {
   setting.selected = false
   toast(`${setting.provider} 已移出税务设置，保存后将视为未配置`)
 }
-function saveTaxSettings() {
+async function saveTaxSettings() {
   financeTaxSettings.value.countries.forEach(setting => {
     setting.aFixedFeeUsd = Math.max(0, Number(setting.aFixedFeeUsd) || 0)
     setting.bPerItemFeeUsd = Math.max(0, Number(setting.bPerItemFeeUsd) || 0)
     setting.enabled = setting.aFixedFeeUsd > 0 || setting.bPerItemFeeUsd > 0
   })
-  financeTaxSettings.value = saveFinanceTaxSettings(financeTaxSettings.value)
+  financeTaxSettings.value = await saveFinanceTaxSettings(financeTaxSettings.value)
   toast('国家客户税费与物流商全局税务属性已保存')
 }
 function startFinanceTabDrag(tab: FinanceSettingsTab, event: DragEvent) {
@@ -452,7 +473,7 @@ function endFinanceCountryDrag() {
   draggedFinanceCountry.value = ''
   dragOverFinanceCountry.value = ''
 }
-function saveFinanceCountryClassification() {
+async function saveFinanceCountryClassification() {
   if (financeCountrySettings.value.filter(setting => setting.enabled && setting.stage === 'common').length > COMMON_COUNTRY_LIMIT) {
     toast(`常用国家最多只能设置 ${COMMON_COUNTRY_LIMIT} 个`)
     return
@@ -461,7 +482,7 @@ function saveFinanceCountryClassification() {
     setting.continent = inferCountryContinent(setting.code)
     setting.sortOrder = Math.max(1, Number(setting.sortOrder) || 1)
   })
-  financeCountrySettings.value = saveFinanceCountrySettings(financeCountrySettings.value)
+  financeCountrySettings.value = await saveFinanceCountrySettings(financeCountrySettings.value)
   toast('常用国家设置已保存，业务报价国家列表将同步更新')
 }
 function openFinancePolicyEditor(policy?: FinanceChannelPolicy) {
@@ -605,7 +626,7 @@ function handleFinanceCategoryChange() {
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
 }
-function saveFinancePolicy() {
+async function saveFinancePolicy() {
   const form = financePolicyForm.value
   const category = form.category.trim()
   form.countryRules.forEach(rule => { rule.country = rule.country.trim() })
@@ -628,17 +649,24 @@ function saveFinancePolicy() {
     enabled: form.enabled,
     updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
   }
-  const index = financePolicies.value.findIndex(item => item.id === editingFinancePolicyId.value)
-  if (index >= 0) financePolicies.value.splice(index, 1, policy)
-  else financePolicies.value.unshift(policy)
-  saveFinanceChannelPolicies(financePolicies.value)
-  showEditor.value = false
-  toast(`${category} 的 ${form.countryRules.length} 个国家渠道策略已保存`)
+  const nextPolicies = financePolicies.value.map(item => item.id === editingFinancePolicyId.value ? policy : item)
+  if (!editingFinancePolicyId.value) nextPolicies.unshift(policy)
+  try {
+    financePolicies.value = await saveFinanceChannelPolicies(nextPolicies)
+    showEditor.value = false
+    toast(`${category} 的 ${form.countryRules.length} 个国家渠道策略已保存`)
+  } catch (error) {
+    toast(error instanceof Error ? `保存失败：${error.message}` : '保存失败，请刷新后重试')
+  }
 }
-function removeFinancePolicy(policy: FinanceChannelPolicy) {
-  financePolicies.value = financePolicies.value.filter(item => item.id !== policy.id)
-  saveFinanceChannelPolicies(financePolicies.value)
-  toast(`${policy.category} 品类策略已删除`)
+async function removeFinancePolicy(policy: FinanceChannelPolicy) {
+  const nextPolicies = financePolicies.value.filter(item => item.id !== policy.id)
+  try {
+    financePolicies.value = await saveFinanceChannelPolicies(nextPolicies)
+    toast(`${policy.category} 品类策略已删除`)
+  } catch (error) {
+    toast(error instanceof Error ? `删除失败：${error.message}` : '删除失败，请刷新后重试')
+  }
 }
 function openProductEditor(product?: ProductRow) {
   editingSourceRow.value = product?.sourceRow ?? null
@@ -678,7 +706,78 @@ function closeImagePreview() {
 function handlePreviewKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && previewImage.value) closeImagePreview()
 }
-onMounted(() => window.addEventListener('keydown', handlePreviewKeydown))
+function applyFinanceSettingsWorkspace(workspace: FinanceSettingsWorkspace) {
+  financePolicies.value = workspace.policies
+  financeCountrySettings.value = workspace.countries
+  customerGradeSettings.value = workspace.customerGrades
+  financeExchangeRate.value = workspace.exchangeRate
+  financeTaxSettings.value = workspace.taxSettings
+}
+function financeSettingsErrorMessage(error: unknown) {
+  if (error instanceof ApiError) return `${error.message}（请求编号：${error.requestId}）`
+  return error instanceof Error ? error.message : '财务设置加载失败，请稍后重试'
+}
+let financeRequiredPreviewGeneration = 0
+async function hydrateFinanceRequiredPreview() {
+  const datasetId = financeRequiredDatasetId.value, generation = ++financeRequiredPreviewGeneration
+  financeRequiredPreview.value = null; financeRequiredPreviewError.value = ''
+  if (!datasetId) { financeRequiredPreviewState.value = 'ready'; return }
+  financeRequiredPreviewState.value = 'loading'
+  try {
+    const preview = await loadFinanceRequiredPreview(datasetId)
+    if (generation !== financeRequiredPreviewGeneration || datasetId !== financeRequiredDatasetId.value) return
+    financeRequiredPreview.value = preview; financeRequiredPreviewState.value = 'ready'; financeRequiredSearch.value = ''
+  } catch (error) {
+    if (generation !== financeRequiredPreviewGeneration) return
+    financeRequiredPreviewError.value = financeSettingsErrorMessage(error); financeRequiredPreviewState.value = 'error'
+  }
+}
+async function hydrateFinanceRequiredDatasets() {
+  financeRequiredPreviewState.value = 'loading'; financeRequiredPreviewError.value = ''
+  try {
+    financeRequiredDatasets.value = await loadFinanceRequiredPreviewDatasets()
+    const retained = financeRequiredDatasets.value.some(dataset => dataset.id === financeRequiredDatasetId.value)
+    if (!retained) financeRequiredDatasetId.value = financeRequiredDatasets.value.find(dataset => dataset.confirmed && dataset.requiredCount > 0)?.id || financeRequiredDatasets.value[0]?.id || ''
+    await hydrateFinanceRequiredPreview()
+  } catch (error) {
+    financeRequiredPreviewError.value = financeSettingsErrorMessage(error); financeRequiredPreviewState.value = 'error'
+  }
+}
+async function hydrateFinanceSettingsWorkspace(force = false) {
+  if (props.mode !== 'members') return
+  financeSettingsLoadState.value = 'loading'
+  financeSettingsLoadError.value = ''
+  showEditor.value = false
+  try {
+    applyFinanceSettingsWorkspace(await loadFinanceSettingsWorkspace({ force }))
+    financeSettingsLoadState.value = 'ready'
+    void hydrateFinanceLogisticsContext()
+    void hydrateFinanceRequiredDatasets()
+  } catch (error) {
+    financeSettingsLoadError.value = financeSettingsErrorMessage(error)
+    financeSettingsLoadState.value = 'error'
+  }
+}
+async function hydrateFinanceLogisticsContext() {
+  if (props.mode !== 'members') return
+  try {
+    const { manifest } = await loadPublishedLogisticsManifest()
+    const countries = manifest.countries.map(country => country.code || country.name)
+    await loadPublishedLogisticsRuleCatalog(manifest.attributes, countries)
+    applyFinanceSettingsWorkspace(readFinanceSettingsWorkspace())
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '物流正式数据加载失败'
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handlePreviewKeydown)
+  void hydrateFinanceSettingsWorkspace()
+})
+watch(() => props.mode, mode => {
+  showEditor.value = false
+  if (mode === 'members') void hydrateFinanceSettingsWorkspace()
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', handlePreviewKeydown))
 function buildPriceTiers(raw: string, basePrice: number | null, minQty: number) {
   const normalized = raw.replace(/[，；—～~]/g, match => ({ '，': ',', '；': ';', '—': '-', '～': '-', '~': '-' }[match] || match))
@@ -763,17 +862,19 @@ function saveEditor() {
 
     <main v-if="showPurchaseWorkspace" class="page"><PurchaseDataWorkspace /></main>
     <main v-else class="page">
-      <section class="heading"><div><p>{{ config[0] }}</p><h1>{{ config[1] }}</h1><span>{{ config[2] }}</span></div><button v-if="mode!=='members' || financeSettingsTab==='logistics'" class="primary" @click="primaryAction">＋ {{ config[3] }}</button></section>
+      <section class="heading"><div><p>{{ config[0] }}</p><h1>{{ config[1] }}</h1><span>{{ config[2] }}</span></div><button v-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab==='logistics')" class="primary" @click="primaryAction">＋ {{ config[3] }}</button></section>
 
-      <section v-if="mode !== 'logistics'" class="stats" :class="{ 'finance-stats':mode==='members' }">
+      <section v-if="mode==='members' && financeSettingsLoadState==='loading'" class="finance-load-state" role="status" aria-live="polite"><i aria-hidden="true"></i><span><b>正在加载财务设置</b><small>正在从服务器读取已保存的国家、物流、等级、汇率和税率，请稍候。</small></span></section>
+      <section v-else-if="mode==='members' && financeSettingsLoadState==='error'" class="finance-load-state error" role="alert"><span><b>财务设置加载失败</b><small>{{ financeSettingsLoadError }}</small><em>为避免误用默认值，当前设置内容和保存操作已暂时隐藏。</em></span><button type="button" @click="hydrateFinanceSettingsWorkspace(true)">重新加载</button></section>
+
+      <section v-if="mode !== 'logistics' && (mode !== 'members' || financeSettingsLoadState==='ready')" class="stats" :class="{ 'finance-stats':mode==='members' }">
         <template v-if="mode === 'products'"><div><small>已导入商品</small><b>{{ products.length }}</b><span>{{ purchaseImportMeta.sourceFile }} · {{ purchaseImportMeta.sourceSheet }}</span></div><div><small>资料完整</small><b>{{ completeProductCount }}</b><span>可直接参与SKU报价</span></div><div><small>待补充资料</small><b class="orange">{{ missingProductCount }}</b><span>缺少重量或采购价</span></div><div><small>含阶梯价格</small><b>{{ tieredProductCount }}</b><span>按业务数量自动匹配</span></div></template>
-        <template v-else-if="mode === 'suppliers'"><div><small>供应商总数</small><b>3</b><span>2 家稳定合作</span></div><div><small>关联商品</small><b>39</b><span>覆盖 3 个品类</span></div><div><small>平均交期</small><b>4.3天</b><span>近30天采购统计</span></div><div><small>待审核</small><b class="orange">1</b><span>资质信息待确认</span></div></template>
         <template v-else-if="mode === 'members'"><div v-for="card in financeSummaryCards" :key="card.id" role="button" tabindex="0" draggable="true" :class="{ active:financeSettingsTab===card.id, dragging:draggedFinanceTab===card.id, 'drag-over':dragOverFinanceTab===card.id }" title="点击切换模块；按住卡片拖动排序" @click="financeSettingsTab=card.id" @keydown.enter="financeSettingsTab=card.id" @keydown.space.prevent="financeSettingsTab=card.id" @dragstart="startFinanceTabDrag(card.id,$event)" @dragover="moveFinanceTabOver(card.id,$event)" @drop="dropFinanceTab(card.id,$event)" @dragend="endFinanceTabDrag"><em class="finance-card-drag" aria-hidden="true">⠿</em><i>{{ card.icon }}</i><section><small>{{ card.label }}</small><b>{{ card.value }}</b><span>{{ card.description }}</span></section></div></template>
         <template v-else><div><small>今日报价</small><b>18</b><span>涉及 11 个 SKU</span></div><div><small>会员报价</small><b>9</b><span>已同步 7 条</span></div><div><small>平均利润率</small><b>19.6%</b><span>处于安全区间</span></div><div><small>异常记录</small><b class="orange">1</b><span>物流规则已失效</span></div></template>
       </section>
       <section v-if="mode==='logistics'" class="subtabs"><button v-for="tab in ['物流商','物流渠道','运费规则','国家区域','重量限制','运费试算']" :key="tab" :class="{ active: logisticsTab === tab }" @click="logisticsTab = tab; toast(`已切换至${tab}`)">{{ tab }}</button></section>
 
-      <section v-if="mode==='members' && financeSettingsTab==='countries'" class="common-country-manager">
+      <section v-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='countries'" class="common-country-manager">
         <header>
           <div><b>常用国家</b><span>最多{{ COMMON_COUNTRY_LIMIT }}个 · 拖动卡片调整业务报价展示顺序</span></div>
           <em>{{ financeStageCountryCount('common') }} / {{ COMMON_COUNTRY_LIMIT }}</em>
@@ -790,7 +891,7 @@ function saveEditor() {
         </div>
         <footer><span aria-hidden="true">⠿</span> 按住卡片拖动排序，保存后同步到业务报价</footer>
       </section>
-      <section v-else-if="mode==='members' && financeSettingsTab==='taxes'" class="finance-tax-workspace">
+      <section v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='taxes'" class="finance-tax-workspace">
         <header>
           <div><small>FINANCE TAX POLICY</small><b>税率设置</b><span>国家客户税费与物流商税务属性独立维护，确保报价计算清晰可追溯。</span></div>
           <aside><span>最近保存：{{ financeTaxSettings.updatedAt }}</span><button class="primary" type="button" @click="saveTaxSettings">保存并发布</button></aside>
@@ -829,16 +930,27 @@ function saveEditor() {
           </section>
         </div>
       </section>
-      <FilterPanel v-else-if="mode==='members' && financeSettingsTab==='logistics'" v-model:search="financeFilterSearch" v-model:status="financeFilterStatus" v-model:country="financeFilterCountry" v-model:provider="financeFilterProvider" :country-options="financeFilterCountryOptions" :provider-options="financeFilterProviderOptions" :total="filteredFinancePolicyCards.length" @reset="resetFinanceFilters" />
+      <FilterPanel v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='logistics'" v-model:search="financeFilterSearch" v-model:status="financeFilterStatus" v-model:country="financeFilterCountry" v-model:provider="financeFilterProvider" :country-options="financeFilterCountryOptions" :provider-options="financeFilterProviderOptions" :total="filteredFinancePolicyCards.length" @reset="resetFinanceFilters" />
       <section v-else-if="mode!=='members'" class="toolbar"><label><span>⌕</span><input v-model="search" placeholder="搜索当前模块数据"></label><select><option>全部状态</option><option>启用</option><option>草稿</option></select><button @click="search = ''">重置筛选</button><span>共 {{ filteredRows.length }} 条数据</span></section>
 
-      <section v-if="mode==='members' && financeSettingsTab==='logistics'" class="finance-card-list">
+      <section v-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='logistics'" class="finance-card-list">
+        <section class="finance-required-preview" aria-label="新库必用渠道预览">
+          <header><div><small>PREPARING LOGISTICS DATASET</small><b>新库必用渠道预览</b><span>只读核对，不会提前加入财务授权或当前报价。</span></div><aside><label>准备库<select v-model="financeRequiredDatasetId" aria-label="新库必用渠道预览" @change="hydrateFinanceRequiredPreview"><option v-if="!financeRequiredDatasets.length" value="">暂无准备库</option><option v-for="dataset in financeRequiredDatasets" :key="dataset.id" :value="dataset.id">{{ dataset.name }} · {{ dataset.confirmed ? '已确认' : '未确认' }} · {{ dataset.requiredCount }}个必用</option></select></label><button type="button" :disabled="financeRequiredPreviewState==='loading'" @click="hydrateFinanceRequiredDatasets">刷新预览</button></aside></header>
+          <p v-if="financeRequiredPreviewState==='loading'" class="finance-required-state">正在读取准备库必用渠道…</p>
+          <p v-else-if="financeRequiredPreviewState==='error'" role="alert" class="finance-required-state error">{{ financeRequiredPreviewError }}</p>
+          <template v-else-if="financeRequiredPreview">
+            <div class="finance-required-summary"><span>清单 V{{ financeRequiredPreview.revision }}</span><span :class="{ ready:financeRequiredPreview.confirmed }">{{ financeRequiredPreview.confirmed ? '已确认' : '未确认' }}</span><span>必用 {{ financeRequiredPreview.requiredCount }}</span><span :class="{ ready:financeRequiredPreview.readyCount===financeRequiredPreview.requiredCount && financeRequiredPreview.requiredCount>0 }">可报价 {{ financeRequiredPreview.readyCount }}</span><label>⌕<input v-model="financeRequiredSearch" aria-label="搜索新库必用渠道" placeholder="搜索物流商、渠道、国家"></label></div>
+            <div class="finance-required-table-wrap"><table><thead><tr><th>物流属性</th><th>物流商 / 渠道</th><th>国家 / 分区</th><th>价格行</th><th>价格状态</th><th>计费状态</th><th>财务关联</th></tr></thead><tbody><tr v-for="channel in filteredFinanceRequiredChannels" :key="channel.id"><td><span class="finance-tag">{{ channel.logisticsAttribute || '普货' }}</span></td><td><b>{{ channel.providerName }}</b><small>{{ channel.name }} · {{ channel.code }}</small></td><td>{{ channel.countries.length }} 个国家<small>{{ channel.countries.join('、') || '暂无国家' }}</small><small>{{ channel.zones.length ? `${channel.zones.length} 个分区标记` : '无分区标记' }}</small></td><td>{{ channel.priceRows }}</td><td><em :class="{ warn:!channel.currentVersionId }">{{ channel.currentVersionId ? '价格已发布' : '价格待审核' }}</em></td><td><em :class="{ ready:channel.quoteReady, warn:!channel.quoteReady }">{{ channel.quoteReady ? '可自动报价' : '计费待验收' }}</em></td><td>{{ financeRequiredBinding(channel) }}</td></tr><tr v-if="!filteredFinanceRequiredChannels.length"><td colspan="7" class="finance-required-empty">{{ financeRequiredPreview.requiredCount ? '没有匹配的必用渠道' : '该准备库尚未保存必用渠道' }}</td></tr></tbody></table></div>
+            <footer><span>确认人：{{ financeRequiredPreview.confirmedBy || '—' }} · {{ financeRequiredPreview.confirmedAt || '—' }}</span><span>备注：{{ financeRequiredPreview.note || '—' }}</span><b>准备库切换前，本表所有渠道均不参与正式报价。</b></footer>
+          </template>
+          <p v-else class="finance-required-state">当前没有新库准备区。</p>
+        </section>
         <header class="finance-list-head"><span>物流属性</span><span>国家</span><span>服务商</span><span>渠道</span><span>匹配</span><span>状态</span><span>更新时间</span><span>操作</span></header>
         <LogisticsCard v-for="card in filteredFinancePolicyCards" :key="card.key" :attribute="card.policy.category" :countries="card.countries" :preferred-country="financeFilterCountry || card.countries.find(item => !financeFilterProvider || item.groups.some(group => group.provider === financeFilterProvider))?.country" :status="card.policy.enabled ? '启用' : '停用'" :updated-at="card.policy.updatedAt" @maintain="openFinancePolicyEditor(card.policy)" @remove="removeFinancePolicy(card.policy)" />
         <div v-if="!filteredFinancePolicyCards.length" class="finance-empty"><b>没有找到匹配的物流策略</b><span>请调整关键词或筛选条件后重试</span></div>
       </section>
 
-      <section v-else-if="mode!=='members' || (financeSettingsTab!=='countries' && financeSettingsTab!=='taxes')" class="table-card">
+      <section v-else-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab!=='countries' && financeSettingsTab!=='taxes')" class="table-card">
         <table v-if="mode === 'products'" class="product-table">
           <colgroup><col class="product-main-col"><col class="product-price-col"><col class="product-weight-col"><col class="product-freight-col"><col class="product-spec-col"><col class="product-status-col"><col class="product-actions-col"></colgroup>
           <thead><tr><th>商品 / SKU</th><th>采购价格（CNY）</th><th>重量与起订量</th><th>国内运费档位（CNY）</th><th>规格信息</th><th>资料状态</th><th>操作</th></tr></thead>
@@ -869,7 +981,6 @@ function saveEditor() {
             </tr>
           </tbody>
         </table>
-        <table v-else-if="mode === 'suppliers'"><thead><tr><th>供应商 / 编号</th><th>联系人</th><th>采购平台</th><th>主营品类</th><th>结算方式</th><th>平均交期</th><th>关联商品</th><th>评分</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="s in filteredRows" :key="s.code"><td><div class="item"><i>{{ s.name.slice(0,1) }}</i><span><b>{{ s.name }}</b><small>{{ s.code }}</small></span></div></td><td><b>{{ s.contact }}</b><small>{{ s.phone }}</small></td><td><span class="tag">{{ s.platform }}</span></td><td>{{ s.category }}</td><td>{{ s.payment }}</td><td>{{ s.leadTime }}</td><td>{{ s.products }} 个 SKU</td><td><b class="orange">★ {{ s.score }}</b></td><td><em :class="{ warn:s.status !== '合作中' }">{{ s.status }}</em></td><td><button class="link" @click="showEditor=true">编辑</button><RouterLink class="link" to="/quotation/products">查看商品</RouterLink></td></tr></tbody></table>
         <table v-else-if="mode === 'logistics'"><thead><tr><th>规则名称</th><th>物流商</th><th>类型</th><th>适用国家 / 区域</th><th>重量限制</th><th>计费方式</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="r in filteredRows" :key="r.name"><td><b>{{ r.name }}</b></td><td>{{ r.carrier }}</td><td><span class="tag">{{ r.type }}</span></td><td>{{ r.countries }}</td><td>{{ r.weight }}</td><td>{{ r.price }}</td><td><em :class="{ warn:r.status !== '启用' }">{{ r.status }}</em></td><td><button class="link" @click="showEditor=true">编辑</button><button class="link" @click="toast('已打开区域及条件限制')">区域/限制</button></td></tr></tbody></table>
         <table v-else-if="mode === 'members' && financeSettingsTab==='logistics'"><thead><tr><th>物流属性</th><th>支持国家及具体物流渠道</th><th>国家数量</th><th>渠道配置数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="policy in filteredRows" :key="policy.id"><td><span class="finance-tag">{{ policy.category }}</span></td><td><div class="country-policy-list"><div v-for="rule in policy.countryRules" :key="rule.country"><b>{{ rule.country }}</b><div class="carrier-list"><span v-for="channelKey in rule.allowedChannels" :key="channelKey"><template v-if="financeChannelForKey(rule.country,channelKey,policy.category)">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.carrier }}｜{{ financeChannelForKey(rule.country,channelKey,policy.category)?.channel }}<em v-if="rule.country==='澳大利亚'" :class="{ warn:financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length }">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length ? `缺${financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.join('、')}` : '覆盖1～4区' }}</em></template></span></div></div></div></td><td>{{ policy.countryRules.length }} 个</td><td>{{ financePolicyCarrierCount(policy) }} 个</td><td><em :class="{ warn:!policy.enabled }">{{ policy.enabled ? '启用' : '停用' }}</em></td><td>{{ policy.updatedAt }}</td><td><button class="link" @click="openFinancePolicyEditor(policy)">统一维护</button><button class="link danger" @click="removeFinancePolicy(policy)">删除</button></td></tr></tbody></table>
         <div v-else-if="mode === 'members' && financeSettingsTab==='grades'" class="grade-settings"><header><div><b>S–E 客户等级计算系数</b><small>最终报价 = 综合成本 × 客户等级系数；美元报价按财务维护的汇率换算。</small></div><button class="primary" @click="saveGradeSettings">保存等级系数</button></header><div class="grade-grid"><label v-for="setting in customerGradeSettings" :key="setting.grade"><strong>{{ setting.grade }}级客户</strong><span>计算系数</span><input v-model.number="setting.coefficient" type="number" min="0" step="0.01"><small>成本 ¥100 → 报价 ¥{{ (100 * setting.coefficient).toFixed(2) }}</small><em><input v-model="setting.enabled" type="checkbox"> 启用</em></label></div></div>
@@ -971,7 +1082,6 @@ function saveEditor() {
         <h3 class="section-title">系统辅助字段</h3>
         <label>商品名称<input v-model="productForm.name" placeholder="原表无商品名称，可在系统补充"></label>
       </div>
-      <div v-else-if="mode==='suppliers'" class="form"><label>供应商编号<input value="SP00004"></label><label>供应商名称<input placeholder="请输入公司或店铺名称"></label><label>联系人<input placeholder="请输入联系人"></label><label>联系电话<input placeholder="手机号或座机"></label><label>采购平台<select><option>1688</option><option>淘宝</option><option>线下合同</option><option>其他</option></select></label><label>主营品类<input placeholder="例如：家居百货"></label><label>结算方式<select><option>款到发货</option><option>月结30天</option><option>预付30%</option></select></label><label>平均交期（天）<input type="number" value="3"></label><label>采购链接<input placeholder="https://"></label><label>合作状态<select><option>合作中</option><option>待审核</option><option>已停用</option></select></label></div>
       <div v-else-if="mode==='logistics'" class="form"><label>规则名称<input value="新运费规则"></label><label>物流商<select><option>云途物流</option><option>燕文物流</option></select></label><label>规则类型<select><option>专线</option><option>挂号</option></select></label><label>适用国家<select><option>常用欧洲国家</option><option>北美国家</option></select></label><label>基础费<input type="number" value="0"></label><label>每 1000g 单价<input type="number" value="0"></label><label>挂号费<input type="number" value="0"></label><label>最大重量（g）<input type="number" value="2000" min="0" step="1"></label></div>
       <div v-else-if="mode==='members'" class="form finance-policy-form">
         <label>物流属性<div class="finance-attribute-combobox"><input ref="financeAttributeInput" :value="financePolicyForm.category" autocomplete="off" placeholder="选择或输入物流属性" role="combobox" :aria-expanded="financeAttributePickerOpen" @focus="openFinanceAttributePicker" @click="openFinanceAttributePicker" @input="updateFinanceAttribute" @blur="closeFinanceAttributePicker" @keydown.esc="financeAttributePickerOpen=false"><button type="button" aria-label="展开物流属性" @mousedown.prevent="toggleFinanceAttributePicker">⌄</button><div v-if="financeAttributePickerOpen" class="finance-attribute-menu" role="listbox"><button v-for="attribute in filteredFinanceAttributeOptions" :key="attribute" type="button" :class="{ active:attribute===financePolicyForm.category }" @mousedown.prevent="selectFinanceAttribute(attribute)">{{ attribute }}</button><p v-if="!filteredFinanceAttributeOptions.length && financePolicyForm.category.trim()">按当前输入创建“{{ financePolicyForm.category.trim() }}”</p></div></div><small>点击显示已有属性，也可以直接输入新的物流属性</small></label>
@@ -981,7 +1091,7 @@ function saveEditor() {
           <section v-for="(rule,index) in financePolicyForm.countryRules" :key="index" class="country-rule-card">
             <div class="country-rule-head"><label class="country-search-label">支持国家（可输入搜索）<div class="country-picker"><span><b>⌕</b><input :value="financeCountrySearches[index] ?? rule.country" autocomplete="off" placeholder="输入国家名称搜索" role="combobox" :aria-expanded="openFinanceCountryPicker===index" @focus="openFinanceCountrySearch(index)" @input="updateFinanceCountrySearch(index,$event)" @blur="closeFinanceCountrySearch(index)" @keydown.esc="openFinanceCountryPicker=null"></span><div v-if="openFinanceCountryPicker===index" class="country-picker-menu" role="listbox"><button v-for="country in filteredFinanceCountries(index)" :key="country.code || country.name" type="button" :class="{ active:country.name===rule.country }" @mousedown.prevent="selectFinanceCountry(index,country.name)"><strong>{{ country.name }}</strong><small>{{ country.code }}</small></button><p v-if="!filteredFinanceCountries(index).length">没有匹配的国家</p></div></div></label><button type="button" @click="removeFinanceCountryRule(index)">移除国家</button></div>
             <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选 {{ rule.allowedChannels.length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道</span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
-            <div v-if="financeCountryRuleExpanded(index)" class="country-carrier-grid"><label v-for="option in financeChannelsForCountry(rule.country)" :key="option.key"><input v-model="rule.allowedChannels" type="checkbox" :value="option.key"><span><b>{{ option.channel }}</b><small>{{ option.carrier }} · {{ option.ruleName }}</small><em v-if="rule.country==='澳大利亚'" :class="{ warn:option.missingQuoteRegions.length }">{{ option.missingQuoteRegions.length ? `分区不完整：缺${option.missingQuoteRegions.join('、')}` : '澳大利亚1～4区完整' }}</em></span></label><p v-if="rule.country && !financeChannelsForCountry(rule.country).length">该国家在启用的物流规则中没有可配置渠道</p></div>
+            <div v-if="financeCountryRuleExpanded(index)" class="country-carrier-grid"><label v-for="option in financeChannelsForCountry(rule.country)" :key="option.key"><input v-model="rule.allowedChannels" type="checkbox" :value="option.key"><span><b>{{ option.carrier }}｜{{ option.channel }}</b><small>渠道编码：{{ option.channelCode || '—' }} · 计费规则：{{ option.ruleName }}</small><em v-if="rule.country==='澳大利亚'" :class="{ warn:option.missingQuoteRegions.length }">{{ option.missingQuoteRegions.length ? `分区不完整：缺${option.missingQuoteRegions.join('、')}` : `澳大利亚分区：${option.quoteRegions.join('、')}` }}</em><em v-else>适用国家：{{ rule.country }}</em></span></label><p v-if="rule.country && !financeChannelsForCountry(rule.country).length">该国家在启用的物流规则中没有可配置渠道</p></div>
             <small v-if="financeCountryRuleExpanded(index) && !financeChannelsForCountry(rule.country).length">当前国家在启用的物流规则中暂无可配置渠道。</small>
           </section>
           <div class="add-country-bottom"><span>物流规则匹配 {{ financeLogisticsCountries.length }} 个可发国家，已选择 {{ financePolicyForm.countryRules.length }} 个</span><button type="button" @click="addFinanceCountryRule">＋ 继续添加匹配国家</button></div>
@@ -1006,6 +1116,8 @@ function saveEditor() {
 .finance-tabs{gap:8px;margin-top:14px;padding:8px;background:#fffaf1;border-color:#f1d6ad}.finance-tabs button{min-width:190px;max-width:260px;border:1px solid #ffd39a;background:#fff1d8;color:#8d4d00;font-weight:800;transition:.18s ease}.finance-tabs button:hover{border-color:#ff9b18;background:#ffe3b6;color:#693800}.finance-tabs button.active{border-color:#eb8500;background:#ff9910;color:#17232e;box-shadow:0 4px 12px rgba(224,126,0,.25)}.grade-settings{padding:22px}.grade-settings>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.grade-settings>header div{display:grid;gap:5px}.grade-settings>header small{color:#7f8992}.grade-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.grade-grid>label{display:grid;grid-template-columns:1fr auto;gap:8px 12px;padding:16px;border:1px solid #dde4e8;border-radius:8px;background:#fafbfc}.grade-grid strong{font-size:17px}.grade-grid span,.grade-grid small{color:#7f8992}.grade-grid input[type=number]{grid-column:1/-1;height:38px;border:1px solid #d9e0e5;border-radius:6px;padding:0 10px;font-size:16px;font-weight:800}.grade-grid em{display:flex;align-items:center;gap:5px;background:none;padding:0;color:#4d5b65}.grade-grid em input{width:auto;height:auto}
 .finance-stats>div{height:100px;box-sizing:border-box;display:flex;align-items:center;gap:14px;padding:16px 18px;box-shadow:0 7px 22px rgba(23,35,46,.045)}.finance-stats>div>i{width:44px;height:44px;display:grid;place-items:center;flex:0 0 44px;border-radius:50%;background:#fff0d7;color:#be6900;font-size:14px;font-style:normal;font-weight:900}.finance-stats>div>section{min-width:0}.finance-stats small{color:#7d8790;font-size:10px;font-weight:700}.finance-stats b{margin:3px 0 2px;color:#17232e;font-size:26px;line-height:1.08}.finance-stats span{overflow:hidden;color:#929ba3;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.finance-tabs{box-shadow:0 7px 18px rgba(24,38,50,.05)}
 .finance-card-list{display:grid;gap:10px;min-width:0}.finance-list-head{display:grid;grid-template-columns:11% 12% 11% minmax(0,29%) 8% 7% 10% minmax(150px,12%);padding:0 16px;color:#77828b;font-size:10px;font-weight:800}.finance-list-head span{min-width:0;padding:0 12px}.finance-list-head span:last-child{text-align:right}.finance-empty{display:grid;justify-items:center;gap:7px;padding:68px 20px;border:1px dashed #d7dfe4;border-radius:8px;background:#fff;color:#35434e}.finance-empty:before{content:"⌕";width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:#fff0d7;color:#c66e00;font-size:22px}.finance-empty span{color:#8b959d;font-size:11px}
+.finance-required-preview{display:grid;gap:14px;margin-bottom:14px;padding:18px;border:1px solid #ead8bd;border-top:3px solid #e08a32;border-radius:10px;background:#fffaf3}.finance-required-preview>header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px}.finance-required-preview>header>div{display:grid;gap:4px}.finance-required-preview>header small{color:#a66a2d;font-size:10px;font-weight:800;letter-spacing:1.2px}.finance-required-preview>header b{color:#263d4b;font-size:17px}.finance-required-preview>header span{color:#778791;font-size:11px}.finance-required-preview>header aside{display:flex;align-items:flex-end;gap:10px}.finance-required-preview>header label{display:grid;gap:5px;color:#687983;font-size:11px}.finance-required-preview select{min-width:320px;padding:9px 11px;border:1px solid #d7c6ad;border-radius:6px;background:#fff}.finance-required-preview button{padding:9px 13px;border:1px solid #d7c6ad;border-radius:6px;background:#fff;color:#7d552b}.finance-required-preview button:disabled{opacity:.5}.finance-required-state{margin:0;padding:20px;text-align:center;color:#7b8b95}.finance-required-state.error{color:#b43d32}.finance-required-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.finance-required-summary>span{padding:6px 10px;border:1px solid #eadfce;border-radius:999px;background:#fff;color:#6d7d87;font-size:11px}.finance-required-summary .ready,.finance-required-table-wrap .ready{color:#287b4d}.finance-required-summary label{display:flex;align-items:center;gap:6px;margin-left:auto;color:#7b8992}.finance-required-summary input{width:240px;padding:8px 10px;border:1px solid #d9cbb8;border-radius:6px}.finance-required-table-wrap{overflow:auto;border:1px solid #eee2d2;border-radius:8px;background:#fff}.finance-required-table-wrap table{width:100%;border-collapse:collapse}.finance-required-table-wrap th,.finance-required-table-wrap td{padding:10px 12px;border-bottom:1px solid #f0e8de;text-align:left;vertical-align:top}.finance-required-table-wrap th{background:#f9f5ee;color:#73828b;font-size:10px;white-space:nowrap}.finance-required-table-wrap td{color:#344954;font-size:12px}.finance-required-table-wrap td small{display:block;max-width:420px;margin-top:3px;color:#82909a;line-height:1.5}.finance-required-table-wrap td em{font-style:normal}.finance-required-table-wrap td .warn{color:#ba6d28}.finance-required-empty{padding:30px!important;text-align:center!important;color:#85949c!important}.finance-required-preview>footer{display:flex;gap:14px;flex-wrap:wrap;color:#7a8992;font-size:11px}.finance-required-preview>footer b{margin-left:auto;color:#a25e24}
+@media(max-width:900px){.finance-required-preview>header{align-items:stretch;flex-direction:column}.finance-required-preview>header aside{align-items:stretch;flex-direction:column}.finance-required-preview select{min-width:0;width:100%}.finance-required-summary label{width:100%;margin-left:0}.finance-required-summary input{flex:1;width:auto}.finance-required-preview>footer b{width:100%;margin-left:0}}
 @media(max-width:1280px){.finance-list-head{grid-template-columns:10% 12% 11% minmax(0,28%) 8% 7% 10% minmax(150px,14%);padding-inline:10px}.finance-list-head span{padding-inline:8px}}
 @media(max-width:900px){.product-form,.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.freight-tier-editor,.freight-tier-view{grid-template-columns:1fr}.country-carrier-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:900px){.topbar nav{display:none}.stats{grid-template-columns:1fr 1fr}.subtabs{overflow-x:auto}.subtabs button{white-space:nowrap}.finance-list-head{display:none}}@media(max-width:620px){.brand{margin-right:0}.user div{display:none}.page{width:94vw;padding-top:22px}.heading{align-items:flex-start;gap:16px}.stats{grid-template-columns:1fr 1fr}.finance-stats>div{height:92px;padding:12px}.finance-stats>div>i{width:36px;height:36px;flex-basis:36px}.toolbar{flex-wrap:wrap}.toolbar label{width:100%}.toolbar>span{margin-left:0}.form{grid-template-columns:1fr}.country-carrier-grid{grid-template-columns:1fr}.country-rule-head{align-items:stretch;flex-direction:column}.country-rule-head label{max-width:none;width:100%}.detail-mask{padding:10px}.detail-card{padding:22px 16px}.detail-head{display:block;padding-right:28px}.detail-image{margin-top:14px}.detail-grid{grid-template-columns:1fr}.detail-grid .detail-wide{grid-column:auto}.image-preview{padding:18px}.preview-close{right:14px;top:14px}}
@@ -1029,4 +1141,5 @@ function saveEditor() {
 @media(max-width:1200px){.finance-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.tax-provider-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.finance-stats{grid-template-columns:1fr 1fr}.tax-country-matrix>header,.tax-provider-global>header{align-items:stretch;flex-direction:column}.tax-country-matrix>header>aside{align-items:stretch;flex-direction:column}.tax-country-matrix>header label,.tax-provider-global>header label{width:100%}.tax-country-matrix{overflow-x:auto}.tax-provider-cards{grid-template-columns:1fr}}
 .tax-country-matrix>header>aside,.tax-provider-global>header>aside{display:flex;align-items:center;gap:9px}.tax-country-matrix>header>aside label,.tax-provider-global>header>aside label{width:205px;height:35px;display:flex;align-items:center;gap:7px;box-sizing:border-box;padding:0 10px;border:1px solid #dbe3e8;border-radius:7px;color:#7b8892}.tax-country-matrix>header>aside input,.tax-provider-global>header>aside input{min-width:0;width:100%;border:0;outline:0;background:transparent}.tax-add-button{height:35px;padding:0 13px;border:1px solid #ef920a;border-radius:7px;background:#fff;color:#b66600;font-size:10px;font-weight:850;white-space:nowrap}.tax-add-button:hover{background:#fff7ea}.tax-add-button:disabled{cursor:not-allowed;border-color:#dfe5e9;background:#f6f8f9;color:#a6b0b7}.tax-add-row{display:flex;align-items:center;gap:9px;padding:10px 18px;border-bottom:1px solid #e7ebee;background:#fffaf2}.tax-add-search{width:260px;height:35px;display:flex;align-items:center;gap:7px;box-sizing:border-box;padding:0 10px;border:1px solid #e3ad5a;border-radius:7px;background:#fff;color:#9b650f}.tax-add-search:focus-within{border-color:#ee9209;box-shadow:0 0 0 3px rgba(238,146,9,.12)}.tax-add-search input{min-width:0;width:100%;border:0;outline:0;background:transparent;color:#27343e;font-size:10px}.tax-add-row select{min-width:260px;height:35px;border:1px solid #d8e0e5;border-radius:7px;background:#fff;padding:0 10px;color:#283641}.tax-add-row button{height:35px;padding:0 14px;border:1px solid #d8e0e5;border-radius:7px;background:#fff;color:#596772;font-size:10px;font-weight:800}.tax-add-row button.primary{border-color:#ef920a;background:#ff9910;color:#17232e}.tax-add-row button:disabled{cursor:not-allowed;border-color:#dfe5e9;background:#eef1f3;color:#9da7ae}.tax-country-head,.tax-country-rows>article{grid-template-columns:minmax(160px,1fr) minmax(190px,.95fr) minmax(210px,1fr) 70px 52px}.tax-country-rows>article>span{display:grid;gap:3px}.tax-country-matrix>footer{padding:9px 18px;border-top:1px dashed #e1e6e9;background:#fffaf1;color:#8b6d45;font-size:9px}.tax-remove-button{justify-self:start;border:0;background:transparent;color:#d55345;font-size:10px;font-weight:800}.tax-remove-button:hover{text-decoration:underline}.tax-provider-head,.tax-provider-list-compact>article{display:grid;grid-template-columns:minmax(210px,1.4fr) 100px 240px 52px;align-items:center;gap:14px}.tax-provider-head{padding:10px 18px;background:#fafbfc;color:#7d8992;font-size:10px;font-weight:800}.tax-provider-list-compact{max-height:360px;overflow:auto}.tax-provider-list-compact>article{padding:11px 18px;border-top:1px solid #edf0f2}.tax-provider-list-compact>article:first-child{border-top:0}.tax-provider-list-compact>article>span:first-child{display:grid;gap:3px}.tax-provider-list-compact b{font-size:11px}.tax-provider-list-compact small{overflow:hidden;color:#8a959d;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.tax-provider-list-compact>article>span:nth-child(2){color:#6f7c86;font-size:10px}.tax-provider-list-compact>article>div{display:grid;grid-template-columns:1fr 1fr;overflow:hidden;border:1px solid #dce3e7;border-radius:7px}.tax-provider-list-compact>article>div button{height:32px;border:0;background:#fff;color:#697681;font-size:10px;font-weight:800}.tax-provider-list-compact>article>div button+button{border-left:1px solid #dce3e7}.tax-provider-list-compact>article>div button.active{background:#fff0d8;color:#ad6200}.tax-provider-list-compact>article>div button:first-child.active{background:#e9f8ef;color:#16804e}
 @media(max-width:760px){.tax-country-matrix>header>aside,.tax-provider-global>header>aside{align-items:stretch;flex-direction:column}.tax-country-matrix>header>aside label,.tax-provider-global>header>aside label,.tax-add-button{width:100%}.tax-add-row{align-items:stretch;flex-direction:column}.tax-add-search,.tax-add-row select,.tax-add-row button{width:100%}.tax-country-head,.tax-country-rows>article{min-width:850px}.tax-provider-global{overflow-x:auto}.tax-provider-head,.tax-provider-list-compact>article{min-width:680px}}
+.finance-load-state{display:flex;align-items:center;gap:14px;min-height:78px;padding:18px 20px;border:1px solid #dfe6ea;border-left:4px solid var(--o);border-radius:10px;background:#fff;box-shadow:0 10px 28px rgba(24,38,50,.05)}.finance-load-state>i{width:24px;height:24px;flex:0 0 24px;border:3px solid #ffe2b8;border-top-color:var(--o);border-radius:50%;animation:finance-load-spin .8s linear infinite}.finance-load-state>span{display:grid;gap:5px}.finance-load-state b{font-size:14px}.finance-load-state small,.finance-load-state em{padding:0;background:transparent;color:#7e8a93;font-size:10px;font-style:normal}.finance-load-state.error{border-color:#efc9c4;border-left-color:#cc5143;background:#fff8f7}.finance-load-state.error>span{flex:1}.finance-load-state.error em{color:#a35b52}.finance-load-state>button{height:36px;margin-left:auto;padding:0 14px;border:1px solid #cf796f;border-radius:7px;background:#fff;color:#a13d31;font-size:10px;font-weight:850;cursor:pointer}@keyframes finance-load-spin{to{transform:rotate(360deg)}}
 </style>

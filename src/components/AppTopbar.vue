@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { currentAuthUser, currentRole, defaultHomeForRole, hasPermission, logout, type PermissionKey } from '@/data/authStore'
+import { currentAuthUser, currentRole, defaultHomeForRole, hasAnyPermission, hasPermission, logout, type PermissionKey } from '@/data/authStore'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,13 +15,14 @@ const navItems = computed(() => [
   { label: '我的报价记录', path: '/quotation/my-records', permissions: ['myRecords', 'allRecords'] },
   { label: '报价记录', path: '/quotation/records', permissions: ['allRecords'] },
   { label: '权限管理', path: '/quotation/permissions', permissions: ['permissions'] },
-].filter(item => item.permissions.some(permission => hasPermission(permission as PermissionKey))))
+  { label: '数据迁移', path: '/quotation/migrations', permissions: ['permissions'] },
+].filter(item => hasAnyPermission(...item.permissions as PermissionKey[])))
 const home = computed(() => defaultHomeForRole())
 const initials = computed(() => currentAuthUser.value.name.slice(0, 2).toUpperCase())
 
 async function signOut() {
   accountMenuOpen.value = false
-  logout()
+  await logout()
   await router.replace('/login')
 }
 </script>

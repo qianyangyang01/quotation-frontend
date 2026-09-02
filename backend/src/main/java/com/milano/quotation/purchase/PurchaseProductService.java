@@ -1,0 +1,193 @@
+package com.milano.quotation.purchase;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
+import com.milano.quotation.common.AppException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import com.milano.quotation.storage.AssetStorageService;
+import org.springframework.web.multipart.MultipartFile;
+
+@Service
+public class PurchaseProductService {
+    public static final String CATALOG_PENDING_TEMPLATE = "pending_template";
+    public static final String CATALOG_READY = "ready";
+    public static final String CATALOG_DISABLED = "disabled";
+    private final PurchaseProductRepository products; private final PurchaseProductImageRepository images; private final AssetStorageService storage; private final PurchaseProductDeletionGuard deletionGuard;
+    public PurchaseProductService(PurchaseProductRepository products,PurchaseProductImageRepository images,AssetStorageService storage,PurchaseProductDeletionGuard deletionGuard) { this.products = products; this.images=images; this.storage=storage;this.deletionGuard=deletionGuard; }
+
+    @Transactional(readOnly=true) public Page<JsonNode> page(String query,Pageable pageable) {
+        var cleaned=query==null?"":query.trim();
+        var exact=referencedSku(cleaned).flatMap(products::findBySku);
+        if(exact.isPresent()) {
+            var content=pageable.getPageNumber()==0?List.of(view(exact.get())):List.<JsonNode>of();
+            return new PageImpl<>(content,pageable,1);
+        }
+        return products.search(cleaned,pageable).map(this::view);
+    }
+    @Transactional(readOnly=true) public JsonNode get(String sku) { return products.findBySku(normalizeSku(sku)).map(this::view).orElseThrow(()->AppException.notFound("商品不存在")); }
+    @Transactional(readOnly=true) public boolean exists(String sku) { return products.findBySku(normalizeSku(sku)).isPresent(); }
+    @Transactional(readOnly=true) public long readyCount() { return products.countByQuoteReadyTrue(); }
+    @Transactional(readOnly=true) public Stats stats() {var total=products.count();var ready=products.countByQuoteReadyTrue();return new Stats(total,ready,total-ready,products.countGeneratedSku());}
+    @Transactional(readOnly=true) public boolean isQuoteReady(String sku) { return products.findBySku(normalizeSku(sku)).map(row -> row.quoteReady).orElse(false); }
+
+    @Transactional
+    public List<String> notQuoteReadyLocked(Collection<String> skus) {
+        var normalized=skus.stream().map(PurchaseProductService::referencedSku).flatMap(Optional::stream).distinct().sorted().toList();
+        if(normalized.isEmpty())return List.of();
+        var ready=products.findAllLockedBySkuIn(normalized).stream().filter(row->row.quoteReady).map(row->row.sku).collect(java.util.stream.Collectors.toSet());
+        return normalized.stream().filter(sku->!ready.contains(sku)).toList();
+    }
+
+    @Transactional
+    public void lockStructuredReferences(JsonNode payload) {
+        var skus=new TreeSet<String>();
+        addReferencedSku(skus,payload.path("skuSearch").asText(""));addReferencedSku(skus,payload.path("product").path("sku").asText(""));
+        for(var sku:payload.path("primarySku").asText("").split("[,，、+\\s]+"))addReferencedSku(skus,sku);
+        var bundles=payload.path("bundleItems");if(bundles.isArray())bundles.forEach(item->addReferencedSku(skus,item.path("sku").asText("")));
+        if(!skus.isEmpty()) {
+            var existingIds=products.findAllBySkuIn(skus).stream().map(row->row.id).collect(java.util.stream.Collectors.toSet());
+            var lockedIds=products.findAllLockedBySkuIn(skus).stream().map(row->row.id).collect(java.util.stream.Collectors.toSet());
+            if(!lockedIds.containsAll(existingIds))throw AppException.conflict("引用商品已被删除或回滚，请刷新后重试");
+        }
+    }
+
+    @Transactional
+    public JsonNode upsert(JsonNode input) {
+        return upsert(input, true, null, null);
+    }
+
+    private JsonNode upsert(JsonNode input, boolean requireVersionForExisting, String requestedCatalogState, String sourceHash) {
+        if (!(input instanceof ObjectNode object)) throw AppException.unprocessable("商品数据格式错误");
+        var sku = normalizeSku(object.path("sku").asText());
+        externalizeImage(object,"productImage","product"); externalizeImage(object,"physicalImage","physical");
+        if(object.path("productImage").asText("").isBlank()&&!object.path("image").asText("").isBlank())object.put("productImage",object.path("image").asText());
+        validatePayload(object);
+        object.put("sku", sku);
+        var existing=products.findBySku(sku);
+        if(existing.isPresent()&&requireVersionForExisting&&(!object.has("_version")||object.path("_version").asLong(-1)!=existing.get().version))throw AppException.conflict("商品 "+sku+" 已被其他用户修改，请刷新后重试");
+        var catalogState = requestedCatalogState != null ? requestedCatalogState
+                : existing.map(row -> row.catalogState).orElse(CATALOG_READY);
+        if (!List.of(CATALOG_PENDING_TEMPLATE, CATALOG_READY, CATALOG_DISABLED).contains(catalogState)) throw AppException.unprocessable("商品目录状态不合法");
+        if (isReservedSku(sku) && CATALOG_READY.equals(catalogState)) catalogState = CATALOG_PENDING_TEMPLATE;
+        var quoteReady = CATALOG_READY.equals(catalogState) && completeForQuotation(object) && !isReservedSku(sku);
+        applyDerivedState(object, catalogState, quoteReady);
+        object.remove(java.util.List.of("_version","_updatedAt"));
+        var finalCatalogState = catalogState; var finalQuoteReady = quoteReady;
+        var row = existing.orElseGet(() -> PurchaseProduct.create(sku, object.deepCopy(), finalCatalogState, finalQuoteReady, normalizeSourceHash(sourceHash)));
+        row.payload = object.deepCopy(); row.catalogState=catalogState; row.quoteReady=quoteReady;
+        if(sourceHash!=null)row.sourceHash=normalizeSourceHash(sourceHash);
+        row.updatedAt = Instant.now(); products.saveAndFlush(row); linkFromUrl(row.id,object.path("productImage").asText(""),"product");linkFromUrl(row.id,object.path("physicalImage").asText(""),"physical");return view(row);
+    }
+
+    @Transactional public List<JsonNode> upsertAll(List<JsonNode> rows) {
+        if (rows.size() > 5000) throw AppException.unprocessable("单次确认最多5000条商品，请分批导入");
+        return rows.stream().map(this::upsert).toList();
+    }
+
+    @Transactional(readOnly=true) public PurchaseProductDeletionGuard.DeletionCheck deletionCheck(String sku) {
+        var row=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
+        return deletionGuard.inspect(row.id,row.sku,row.version);
+    }
+
+    @Transactional public JsonNode changeCatalogState(String sku,String state,long expectedVersion) {
+        if(!List.of(CATALOG_READY,CATALOG_DISABLED).contains(state))throw AppException.unprocessable("目录状态只允许 ready 或 disabled");
+        var row=locked(sku);assertVersion(row,expectedVersion);
+        if(CATALOG_READY.equals(state)&&isReservedSku(row.sku))throw AppException.unprocessable("测试或系统生成SKU不能启用为正式商品");
+        row.catalogState=state;row.quoteReady=CATALOG_READY.equals(state)&&completeForQuotation((ObjectNode)row.payload);
+        var payload=(ObjectNode)row.payload;applyDerivedState(payload,state,row.quoteReady);row.updatedAt=Instant.now();
+        return view(products.saveAndFlush(row));
+    }
+
+    @Transactional public DeleteResult delete(String sku,long expectedVersion) {
+        var row=locked(sku);assertVersion(row,expectedVersion);var check=deletionGuard.inspect(row.id,row.sku,row.version);
+        if(!check.canDelete())throw new DeletionBlocked(check,"商品存在业务引用，不能彻底删除："+check.blockingMessage());
+        var assetIds=images.findByProductId(row.id).stream().map(image->image.assetId).distinct().toList();
+        products.delete(row);products.flush();var retired=storage.retireUnreferenced(assetIds);
+        return new DeleteResult(check,retired);
+    }
+
+    @Transactional public DeleteResult delete(String sku) {
+        var row=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
+        return delete(sku,row.version);
+    }
+
+    @Transactional public JsonNode uploadImage(String sku,String type,MultipartFile file){
+        if(!List.of("product","physical").contains(type))throw AppException.unprocessable("图片类型不合法");var product=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
+        try{var asset=storage.storeImage(file.getBytes(),file.getOriginalFilename());link(product.id,asset.id,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+asset.id);if(type.equals("product"))payload.put("image","/api/v1/assets/"+asset.id);product.updatedAt=Instant.now();return view(product);}catch(java.io.IOException e){throw AppException.unprocessable("图片读取失败");}
+    }
+
+    @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId){
+        // The parser already writes the staged asset URLs into the payload and
+        // upsert() materializes those links through linkFromUrl(). Linking the
+        // same assets again here leaves a delete/insert pair in one Hibernate
+        // batch and violates the unique product/asset/type constraint on real
+        // PostgreSQL.
+        return upsert(payload,false,null,null);
+    }
+    @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId,String importMode,String sourceHash){
+        var complete=payload instanceof ObjectNode object&&completeForQuotation(object);
+        var catalogState="pending_template".equals(importMode)||!complete?CATALOG_PENDING_TEMPLATE:CATALOG_READY;
+        return upsert(payload,false,catalogState,sourceHash);
+    }
+
+    @Transactional public JsonNode promote(String sourceSku,String targetSku,long expectedVersion){
+        var source=normalizeSku(sourceSku);var target=normalizeSku(targetSku);var row=products.findBySku(source).orElseThrow(()->AppException.notFound("商品不存在"));
+        if(row.version!=expectedVersion)throw AppException.conflict("商品已被其他用户修改，请刷新后重试");
+        if(!CATALOG_PENDING_TEMPLATE.equals(row.catalogState))throw AppException.conflict("只有模板待补全商品可以确认转正式");
+        if(isReservedSku(target))throw AppException.unprocessable("正式商品必须改为非 TEST/DEMO/AUTO 的业务SKU");
+        if(!source.equals(target)&&products.findBySku(target).isPresent())throw AppException.conflict("目标SKU已存在："+target);
+        var payload=(ObjectNode)row.payload.deepCopy();payload.put("sku",target);validatePayload(payload);
+        if(!completeForQuotation(payload))throw AppException.unprocessable("重量、起订量或采购价尚未补齐，不能转正式");
+        row.sku=target;row.catalogState=CATALOG_READY;row.quoteReady=true;row.updatedAt=Instant.now();applyDerivedState(payload,CATALOG_READY,true);row.payload=payload;
+        products.saveAndFlush(row);return view(row);
+    }
+    @Transactional public void linkAsset(String sku,UUID assetId,String type){if(!List.of("product","physical").contains(type))throw AppException.unprocessable("图片类型不合法");var product=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("SKU "+sku+" 不存在"));link(product.id,assetId,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+assetId);if(type.equals("product"))payload.put("image","/api/v1/assets/"+assetId);product.updatedAt=Instant.now();}
+    private void link(UUID productId,UUID assetId,String type){
+        var current=images.findFirstByProductIdAndImageTypeOrderBySortOrderAsc(productId,type);
+        if(current.isPresent()&&current.get().assetId.equals(assetId))return;
+        if(current.isPresent()){images.deleteByProductIdAndImageType(productId,type);images.flush();}
+        var link=new PurchaseProductImage();link.id=UUID.randomUUID();link.productId=productId;link.assetId=assetId;link.imageType=type;link.sortOrder=0;images.save(link);
+    }
+
+    private JsonNode view(PurchaseProduct row) {
+        var object = (ObjectNode) row.payload.deepCopy(); object.put("sku", row.sku); object.put("_version", row.version);
+        object.put("catalogState", row.catalogState);object.put("quoteReady",row.quoteReady);object.put("_updatedAt", row.updatedAt.toString()); return object;
+    }
+    private static String normalizeSku(String sku) {
+        var value = sku == null ? "" : sku.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", "");
+        if (value.isEmpty() || value.length() > 96 || !value.matches("[A-Z0-9._/-]+")) throw AppException.unprocessable("SKU格式不合法"); return value;
+    }
+    private PurchaseProduct locked(String sku){return products.findLockedBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));}
+    private static void assertVersion(PurchaseProduct row,long expectedVersion){if(row.version!=expectedVersion)throw AppException.conflict("商品已被其他用户修改，请刷新后重试");}
+    private static Optional<String> referencedSku(String value){if(value==null)return Optional.empty();var sku=value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+","");return sku.isEmpty()||sku.length()>96||!sku.matches("[A-Z0-9._/-]+")?Optional.empty():Optional.of(sku);}
+    private static void addReferencedSku(Collection<String> skus,String value){referencedSku(value).ifPresent(skus::add);}
+    private static void validatePayload(ObjectNode object) {
+        for (String field : List.of("productImage", "physicalImage", "image")) {
+            var value = object.path(field).asText("");
+            if (value.startsWith("data:")) throw AppException.unprocessable("图片不能以Base64保存到数据库，请使用图片上传接口");
+        }
+        if (object.toString().length() > 1_000_000) throw AppException.unprocessable("单条商品数据过大");
+    }
+    private static boolean completeForQuotation(ObjectNode object){return positive(object,"weightG")&&positive(object,"minOrderQty")&&(nonNegative(object,"purchasePriceCny")||nonNegative(object,"tier2PriceCny")||nonNegative(object,"tier3PriceCny")||nonNegative(object,"taxIncludedPriceCny"));}
+    private static boolean positive(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>0;}
+    private static boolean nonNegative(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>=0;}
+    private static boolean isReservedSku(String sku){return sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK)[A-Z0-9._/-]*$")||sku.startsWith("AUTO-");}
+    private static void applyDerivedState(ObjectNode object,String state,boolean quoteReady){object.put("catalogState",state);object.put("quoteReady",quoteReady);object.put("status",CATALOG_PENDING_TEMPLATE.equals(state)?"模板待补全（不可报价）":CATALOG_DISABLED.equals(state)?"已停用":quoteReady?"资料完整":"待补充资料");}
+    private static String normalizeSourceHash(String value){if(value==null||value.isBlank())return null;var normalized=value.trim().toLowerCase(Locale.ROOT);if(!normalized.matches("[0-9a-f]{64}"))throw AppException.unprocessable("导入来源SHA-256不合法");return normalized;}
+    private void externalizeImage(ObjectNode object,String field,String type){var value=object.path(field).asText("");if(!value.startsWith("data:"))return;var marker=value.indexOf(",");if(marker<0||!value.substring(0,marker).contains(";base64"))throw AppException.unprocessable("图片Base64格式错误");try{var bytes=java.util.Base64.getDecoder().decode(value.substring(marker+1));var asset=storage.storeImage(bytes,object.path("sku").asText("product")+"-"+type);object.put(field,"/api/v1/assets/"+asset.id);if(type.equals("product"))object.put("image","/api/v1/assets/"+asset.id);}catch(IllegalArgumentException e){throw AppException.unprocessable("图片Base64格式错误");}}
+    private void linkFromUrl(UUID productId,String value,String type){var prefix="/api/v1/assets/";if(!value.startsWith(prefix))return;try{var assetId=UUID.fromString(value.substring(prefix.length()));link(productId,assetId,type);}catch(IllegalArgumentException ignored){}}
+    public record Stats(long total,long ready,long pending,long generatedSku){}
+    public record DeleteResult(PurchaseProductDeletionGuard.DeletionCheck check,int retiredImages){}
+    public static final class DeletionBlocked extends AppException{
+        private final PurchaseProductDeletionGuard.DeletionCheck check;
+        public DeletionBlocked(PurchaseProductDeletionGuard.DeletionCheck check,String message){super(org.springframework.http.HttpStatus.CONFLICT,"PURCHASE_DELETE_BLOCKED",message);this.check=check;}
+        public PurchaseProductDeletionGuard.DeletionCheck check(){return check;}
+    }
+}

@@ -1,4 +1,4 @@
-import { australiaQuoteRegions, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation } from './logistics'
+import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation } from './logistics'
 import {
   defaultCountrySortOrder,
   defaultCountryStage,
@@ -6,6 +6,7 @@ import {
   type CountryContinent,
   type CountryStage,
 } from './countryClassification'
+import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
 export const financeLogisticsAttributeOptions = ['普货', '带电', '纯电池', '液体', '粉末', '非液体化妆品', '带磁', '微敏感'] as const
 export type FinanceLogisticsAttribute = string
@@ -48,11 +49,7 @@ export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E'
 export type CustomerGradeSetting = { grade: CustomerGrade; coefficient: number; enabled: boolean }
 export type FinanceExchangeRateSetting = { usdCny: number; updatedAt: string }
 
-const STORAGE_KEY = 'milano.finance-logistics-attribute-policies.v5'
-const COUNTRY_CLASSIFICATION_STORAGE_KEY = 'milano.finance-country-classification.v1'
 export const FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT = 'milano:finance-country-settings-updated'
-const CUSTOMER_GRADE_STORAGE_KEY = 'milano.finance-customer-grade-coefficients.v1'
-const EXCHANGE_RATE_STORAGE_KEY = 'milano.finance-exchange-rate.v1'
 const DEFAULT_USD_CNY_RATE = 6.75
 export const COMMON_COUNTRY_LIMIT = 40
 
@@ -68,13 +65,27 @@ const defaultGradeSettings: CustomerGradeSetting[] = [
   { grade: 'E', coefficient: 1.30, enabled: true },
 ]
 
+export function normalizeCustomerGradeSettings(settings: Partial<CustomerGradeSetting>[] | undefined): CustomerGradeSetting[] {
+  const configured = new Map<CustomerGrade, Partial<CustomerGradeSetting>>()
+  if (Array.isArray(settings)) {
+    settings.forEach(setting => {
+      if (defaultGradeSettings.some(item => item.grade === setting.grade)) configured.set(setting.grade as CustomerGrade, setting)
+    })
+  }
+  return defaultGradeSettings.map(fallback => {
+    const setting = configured.get(fallback.grade)
+    const coefficient = Number(setting?.coefficient)
+    return {
+      grade: fallback.grade,
+      coefficient: Number.isFinite(coefficient) && coefficient >= 0 ? coefficient : fallback.coefficient,
+      enabled: typeof setting?.enabled === 'boolean' ? setting.enabled : fallback.enabled,
+    }
+  })
+}
+
 export function countriesAvailableForCategory(attribute: string) {
   if (!attribute.trim()) return []
-  const countries = logisticsRules
-    .filter(rule => rule.status === '启用')
-    .flatMap(rule => rule.prices)
-    .map(price => ({ code: price.countryCode, name: price.areaName }))
-    .filter(country => country.name !== '全球')
+  const countries = logisticsCountries.filter(country => country.name !== '全球')
   return [...new Map(countries.map(country => [country.code || country.name, country])).values()]
 }
 
@@ -92,9 +103,21 @@ function defaultFinanceCountrySettings(): FinanceCountrySetting[] {
   })
 }
 
-function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting>[]) {
+export function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting>[]) {
+  if (!logisticsCountries.length && settings.length) {
+    return settings.filter(setting => setting.country).map(setting => {
+      const stage = setting.stage === 'common' || setting.stage === 'standard' || setting.stage === 'rare' ? setting.stage : defaultCountryStage(String(setting.country))
+      return {
+        country: String(setting.country), code: String(setting.code || '').toUpperCase(), stage,
+        continent: setting.continent || inferCountryContinent(setting.code),
+        sortOrder: Number.isFinite(Number(setting.sortOrder)) ? Math.max(1, Number(setting.sortOrder)) : defaultCountrySortOrder(String(setting.country), stage),
+        enabled: setting.enabled !== false,
+      }
+    }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN'))
+  }
   const stored = new Map(settings.map(setting => [setting.country, setting]))
-  const normalized = defaultFinanceCountrySettings().map(fallback => {
+  const defaults = defaultFinanceCountrySettings()
+  const normalized = defaults.map(fallback => {
     const setting = stored.get(fallback.country)
     const stage = setting?.stage === 'common' || setting?.stage === 'standard' || setting?.stage === 'rare' ? setting.stage : fallback.stage
     return {
@@ -105,28 +128,32 @@ function normalizeFinanceCountrySettings(settings: Partial<FinanceCountrySetting
       enabled: setting?.enabled !== false,
     }
   })
+  const currentCountries = new Set(defaults.map(setting => setting.country))
+  settings.filter(setting => setting.country && !currentCountries.has(String(setting.country))).forEach(setting => {
+    const country = String(setting.country)
+    const stage = setting.stage === 'common' || setting.stage === 'standard' || setting.stage === 'rare' ? setting.stage : defaultCountryStage(country)
+    normalized.push({
+      country,
+      code: String(setting.code || '').toUpperCase(),
+      stage,
+      continent: setting.continent || inferCountryContinent(setting.code),
+      sortOrder: Number.isFinite(Number(setting.sortOrder)) ? Math.max(1, Number(setting.sortOrder)) : defaultCountrySortOrder(country, stage),
+      enabled: setting.enabled !== false,
+    })
+  })
   const common = normalized.filter(setting => setting.enabled && setting.stage === 'common').sort((a, b) => a.sortOrder - b.sortOrder)
   common.slice(COMMON_COUNTRY_LIMIT).forEach(setting => { setting.stage = 'standard'; setting.sortOrder = defaultCountrySortOrder(setting.country, 'standard') })
   return normalized.sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN'))
 }
 
 export function loadFinanceCountrySettings(): FinanceCountrySetting[] {
-  if (typeof window === 'undefined') return normalizeFinanceCountrySettings([])
-  try {
-    const stored = window.localStorage.getItem(COUNTRY_CLASSIFICATION_STORAGE_KEY)
-    if (stored) return normalizeFinanceCountrySettings(JSON.parse(stored) as FinanceCountrySetting[])
-  } catch {
-    // Invalid local test data falls back to the built-in country classification.
-  }
-  return normalizeFinanceCountrySettings([])
+  return normalizeFinanceCountrySettings(readFinanceSetting<FinanceCountrySetting[]>('country-classification') || [])
 }
 
-export function saveFinanceCountrySettings(settings: FinanceCountrySetting[]) {
+export async function saveFinanceCountrySettings(settings: FinanceCountrySetting[]) {
   const normalized = normalizeFinanceCountrySettings(settings)
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(COUNTRY_CLASSIFICATION_STORAGE_KEY, JSON.stringify(normalized))
-    window.dispatchEvent(new CustomEvent(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT))
-  }
+  await writeFinanceSetting('country-classification', normalized)
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT))
   return normalized
 }
 
@@ -181,7 +208,7 @@ function normalizePolicies(policies: FinanceChannelPolicy[]) {
     return {
       ...policy,
       countryRules: policy.countryRules.filter(rule => countryMeta.has(rule.country)).map(rule => {
-        const available = new Set(channelsAvailableForCountry(rule.country, policy.category).map(option => option.key))
+        const available = logisticsRules.length ? new Set(channelsAvailableForCountry(rule.country, policy.category).map(option => option.key)) : null
         const stage = rule.stage === 'common' || rule.stage === 'standard' || rule.stage === 'rare'
           ? rule.stage
           : defaultCountryStage(rule.country)
@@ -190,7 +217,7 @@ function normalizePolicies(policies: FinanceChannelPolicy[]) {
           stage,
           continent: inferCountryContinent(countryMeta.get(rule.country)?.code),
           sortOrder: Number.isFinite(Number(rule.sortOrder)) ? Number(rule.sortOrder) : defaultCountrySortOrder(rule.country, stage),
-          allowedChannels: rule.allowedChannels.filter(channel => available.has(channel)),
+          allowedChannels: available ? rule.allowedChannels.filter(channel => available.has(channel)) : [...rule.allowedChannels],
         }
       }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
     }
@@ -198,56 +225,36 @@ function normalizePolicies(policies: FinanceChannelPolicy[]) {
 }
 
 export function loadFinanceChannelPolicies(): FinanceChannelPolicy[] {
-  if (typeof window === 'undefined') return normalizePolicies(defaultPolicies)
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY)
-    if (stored) return normalizePolicies(JSON.parse(stored) as FinanceChannelPolicy[])
-  } catch {
-    // Invalid local test data falls back to the built-in policies.
-  }
-  return normalizePolicies(defaultPolicies)
+  return normalizePolicies(readFinanceSetting<FinanceChannelPolicy[]>('channel-policies') || defaultPolicies)
 }
 
-export function saveFinanceChannelPolicies(policies: FinanceChannelPolicy[]) {
-  if (typeof window !== 'undefined') window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizePolicies(policies)))
+export async function saveFinanceChannelPolicies(policies: FinanceChannelPolicy[]) {
+  const normalized = normalizePolicies(policies)
+  const saved = await writeFinanceSetting<FinanceChannelPolicy[]>('channel-policies', normalized)
+  return normalizePolicies(saved)
 }
 
 export function loadCustomerGradeSettings(): CustomerGradeSetting[] {
-  if (typeof window === 'undefined') return defaultGradeSettings.map(setting => ({ ...setting }))
-  try {
-    const stored = window.localStorage.getItem(CUSTOMER_GRADE_STORAGE_KEY)
-    if (stored) return (JSON.parse(stored) as CustomerGradeSetting[]).map(setting => ({ ...setting }))
-  } catch {
-    // Invalid local test data falls back to the built-in coefficients.
-  }
-  return defaultGradeSettings.map(setting => ({ ...setting }))
+  return normalizeCustomerGradeSettings(readFinanceSetting<Partial<CustomerGradeSetting>[]>('customer-grades'))
 }
 
-export function saveCustomerGradeSettings(settings: CustomerGradeSetting[]) {
-  if (typeof window !== 'undefined') window.localStorage.setItem(CUSTOMER_GRADE_STORAGE_KEY, JSON.stringify(settings))
+export async function saveCustomerGradeSettings(settings: CustomerGradeSetting[]) {
+  await writeFinanceSetting('customer-grades', settings)
 }
 
 export function loadFinanceExchangeRate(): FinanceExchangeRateSetting {
-  if (typeof window === 'undefined') return { usdCny: DEFAULT_USD_CNY_RATE, updatedAt: '系统默认' }
-  try {
-    const stored = window.localStorage.getItem(EXCHANGE_RATE_STORAGE_KEY)
-    if (stored) {
-      const parsed = JSON.parse(stored) as Partial<FinanceExchangeRateSetting>
-      const usdCny = Number(parsed.usdCny)
-      if (Number.isFinite(usdCny) && usdCny > 0) return { usdCny, updatedAt: parsed.updatedAt || '财务维护' }
-    }
-  } catch {
-    // Invalid local test data falls back to the company default rate.
-  }
+  const parsed = readFinanceSetting<Partial<FinanceExchangeRateSetting>>('exchange-rate')
+  const usdCny = Number(parsed?.usdCny)
+  if (Number.isFinite(usdCny) && usdCny > 0) return { usdCny, updatedAt: parsed?.updatedAt || '财务维护' }
   return { usdCny: DEFAULT_USD_CNY_RATE, updatedAt: '系统默认' }
 }
 
-export function saveFinanceExchangeRate(usdCny: number): FinanceExchangeRateSetting {
+export async function saveFinanceExchangeRate(usdCny: number): Promise<FinanceExchangeRateSetting> {
   const setting = {
     usdCny: Math.max(0.0001, Number(usdCny) || DEFAULT_USD_CNY_RATE),
     updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
   }
-  if (typeof window !== 'undefined') window.localStorage.setItem(EXCHANGE_RATE_STORAGE_KEY, JSON.stringify(setting))
+  await writeFinanceSetting('exchange-rate', setting)
   return setting
 }
 

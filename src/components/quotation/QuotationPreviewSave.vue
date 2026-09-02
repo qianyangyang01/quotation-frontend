@@ -22,8 +22,9 @@ const props = withDefaults(defineProps<{
   primaryCnyPrice: number
   primaryUsdPrice: number
   blockReason?: string
+  saving?: boolean
   validationIssues?: Array<{ key: string; label: string; message: string }>
-}>(), { blockReason: '', validationIssues: () => [] })
+}>(), { blockReason: '', saving: false, validationIssues: () => [] })
 
 const emit = defineEmits<{ save: []; copy: [rows: QuotationMatrixRow[]]; locateIssue: [key: string] }>()
 const expandedCountries = ref(new Set<string>())
@@ -69,7 +70,8 @@ watch(groups, value => {
 
 function toggleCountry(country: string) {
   const next = new Set(expandedCountries.value)
-  next.has(country) ? next.delete(country) : next.add(country)
+  if (next.has(country)) next.delete(country)
+  else next.add(country)
   expandedCountries.value = next
 }
 function toggleAll() {
@@ -118,7 +120,7 @@ function isPrimary(row: QuotationMatrixRow) { return row.country === props.prima
         <template v-if="expandedCountries.has(group.country)">
           <div class="quote-head"><span>物流渠道 / 服务商</span><span>预计时效</span><span>1{{ unitLabel }}</span><span>2{{ unitLabel }}</span><span>3{{ unitLabel }}</span><span>{{ Math.max(1, customQuantity || 1) }}{{ unitLabel }}</span></div>
           <article v-for="row in group.rows" :key="rowKey(row)" :class="{ primary:isPrimary(row) }">
-            <span><span class="channel-name-line"><b>{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>{{ row.carrier }} · {{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">整单首选</em></span><strong>{{ row.eta }}</strong>
+            <span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">整单首选</em></span><strong>{{ row.eta }}</strong>
             <span><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small><QuoteTaxMeta :row="row" mode="price" tier="1" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small><QuoteTaxMeta :row="row" mode="price" tier="2" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small><QuoteTaxMeta :row="row" mode="price" tier="3" /></span><span class="custom"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small><QuoteTaxMeta :row="row" mode="price" tier="custom" /></span>
           </article>
         </template>
@@ -135,7 +137,7 @@ function isPrimary(row: QuotationMatrixRow) { return row.country === props.prima
       </div>
     </section>
 
-    <footer><span :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button class="outline" :disabled="!rows.length" @click="emit('copy',rows)">复制报价数据</button><button class="dark" :disabled="!rows.length" @click="toggleAll">{{ allExpanded ? '收起报价单' : '查看完整报价单' }}</button><button class="save" :disabled="!!blockReason || !hasQuoteRows" @click="emit('save')">保存 1 张报价单 · {{ countryCount }}国{{ rows.length }}渠道</button></div></footer>
+    <footer><span :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button class="outline" :disabled="!rows.length || saving" @click="emit('copy',rows)">复制报价数据</button><button class="dark" :disabled="!rows.length || saving" @click="toggleAll">{{ allExpanded ? '收起报价单' : '查看完整报价单' }}</button><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving" @click="emit('save')">{{ saving ? '正在校验物流版本…' : `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
   </section>
 </template>
 

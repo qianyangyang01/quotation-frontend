@@ -1,3 +1,5 @@
+import { api, idempotencyKey } from '@/services/http'
+
 export const QUOTATION_TEMPLATES_STORAGE_KEY = 'milano.quotation.personal-templates.v1'
 export const QUOTATION_TEMPLATES_UPDATED_EVENT = 'milano:quotation-personal-templates-updated'
 
@@ -19,6 +21,7 @@ export interface QuotationTemplateSelectionItem {
 
 export interface QuotationPersonalTemplate {
   id: string
+  _version?: number
   name: string
   description?: string
   ownerKey: string
@@ -170,34 +173,13 @@ function normalizeTemplate(value: unknown): QuotationPersonalTemplate | null {
   const description = cleanText(raw.description)
   return {
     id: templateId(raw.id),
+    _version: raw._version == null ? undefined : finiteRuleId(raw._version),
     name,
     ...(description ? { description } : {}),
     ...owner,
     items: normalizeSelectionItems(raw.items ?? raw.selections ?? raw.channels),
     createdAt,
     updatedAt,
-  }
-}
-
-function parseStoredTemplates(value: unknown) {
-  if (Array.isArray(value)) return value
-  const record = asRecord(value)
-  if (!record) return []
-  if (Array.isArray(record.templates)) return record.templates
-  if (Array.isArray(record.rows)) return record.rows
-  return []
-}
-
-function readAllTemplates(): QuotationPersonalTemplate[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const stored = window.localStorage.getItem(QUOTATION_TEMPLATES_STORAGE_KEY)
-    if (!stored) return []
-    return parseStoredTemplates(JSON.parse(stored))
-      .map(normalizeTemplate)
-      .filter((template): template is QuotationPersonalTemplate => template !== null)
-  } catch {
-    return []
   }
 }
 
@@ -211,81 +193,58 @@ function notifyTemplatesUpdated(ownerKey: string) {
   window.dispatchEvent(new CustomEvent(QUOTATION_TEMPLATES_UPDATED_EVENT, { detail: { ownerKey } }))
 }
 
-function writeAllTemplates(templates: QuotationPersonalTemplate[], ownerKey: string) {
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(QUOTATION_TEMPLATES_STORAGE_KEY, JSON.stringify(templates))
-    notifyTemplatesUpdated(ownerKey)
-  }
+function normalizeApiTemplate(value: unknown) {
+  const template = normalizeTemplate(value)
+  if (!template) throw new Error('服务端返回了无效的报价模板')
+  return template
 }
 
-function ownerTemplates(owner: QuotationTemplateOwner) {
-  const ownerKey = quotationTemplateOwnerKey(owner)
-  return readAllTemplates()
-    .filter(template => template.ownerKey === ownerKey)
+export async function loadQuotationTemplates(_owner: QuotationTemplateOwner) {
+  const rows = await api.get<unknown[]>('/quotation-templates')
+  return rows.map(normalizeApiTemplate)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name, 'zh-CN'))
 }
 
-export function loadQuotationTemplates(owner: QuotationTemplateOwner) {
-  return ownerTemplates(owner)
-}
-
-export function createQuotationTemplate(owner: QuotationTemplateOwner, input: QuotationTemplateCreateInput) {
+export async function createQuotationTemplate(owner: QuotationTemplateOwner, input: QuotationTemplateCreateInput) {
   const normalizedOwner = normalizeOwner(owner)
-  const now = new Date().toISOString()
   const name = cleanText(input.name) || '未命名报价模板'
   const description = cleanText(input.description)
-  const template: QuotationPersonalTemplate = {
-    id: createId(),
+  const template = normalizeApiTemplate(await api.post('/quotation-templates', {
     name,
     ...(description ? { description } : {}),
     ...normalizedOwner,
     items: normalizeSelectionItems(input.items),
-    createdAt: now,
-    updatedAt: now,
-  }
-  const all = readAllTemplates()
-  all.push(template)
-  writeAllTemplates(all, normalizedOwner.ownerKey)
+  }, idempotencyKey('quotation-template-create')))
+  notifyTemplatesUpdated(normalizedOwner.ownerKey)
   return template
 }
 
-export function updateQuotationTemplate(
+export async function updateQuotationTemplate(
   owner: QuotationTemplateOwner,
   id: string,
   patch: QuotationTemplateUpdateInput,
+  expectedVersion?: number,
 ) {
   const ownerKey = quotationTemplateOwnerKey(owner)
-  const all = readAllTemplates()
-  const index = all.findIndex(template => template.id === id && template.ownerKey === ownerKey)
-  if (index < 0) return null
-  const current = all[index]
-  const name = patch.name === undefined ? current.name : cleanText(patch.name) || current.name
-  const description = patch.description === undefined ? current.description : cleanText(patch.description)
-  const items = patch.items === undefined ? current.items : normalizeSelectionItems(patch.items)
-  const updated: QuotationPersonalTemplate = {
-    ...current,
-    name,
-    ...(description ? { description } : {}),
-    items,
-    updatedAt: new Date().toISOString(),
-  }
-  if (!description) delete updated.description
-  all[index] = updated
-  writeAllTemplates(all, ownerKey)
+  const updated = normalizeApiTemplate(await api.put(`/quotation-templates/${id}`, {
+    ...(patch.name !== undefined ? { name: cleanText(patch.name) } : {}),
+    ...(patch.description !== undefined ? { description: cleanText(patch.description) } : {}),
+    ...(patch.items !== undefined ? { items: normalizeSelectionItems(patch.items) } : {}),
+    _version: expectedVersion,
+  }))
+  notifyTemplatesUpdated(ownerKey)
   return updated
 }
 
-export function deleteQuotationTemplate(owner: QuotationTemplateOwner, id: string) {
+export async function deleteQuotationTemplate(owner: QuotationTemplateOwner, id: string) {
   const ownerKey = quotationTemplateOwnerKey(owner)
-  const all = readAllTemplates()
-  const remaining = all.filter(template => !(template.id === id && template.ownerKey === ownerKey))
-  if (remaining.length === all.length) return false
-  writeAllTemplates(remaining, ownerKey)
+  await api.delete(`/quotation-templates/${id}`)
+  notifyTemplatesUpdated(ownerKey)
   return true
 }
 
-export function copyQuotationTemplate(owner: QuotationTemplateOwner, id: string, name?: string) {
-  const source = ownerTemplates(owner).find(template => template.id === id)
+export async function copyQuotationTemplate(owner: QuotationTemplateOwner, id: string, name?: string) {
+  const source = (await loadQuotationTemplates(owner)).find(template => template.id === id)
   if (!source) return null
   return createQuotationTemplate(owner, {
     name: cleanText(name) || `${source.name}（副本）`,
