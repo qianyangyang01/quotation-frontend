@@ -22,9 +22,19 @@ export type FinanceLogisticsChannelOption = {
   missingQuoteRegions: string[]
 }
 
+export type FinanceUnavailableChannel = {
+  legacyKey: string
+  providerName: string
+  channelName: string
+  status: 'ambiguous' | 'unavailable'
+  reason: string
+  backupSha256: string
+}
+
 export type FinanceCountryChannelRule = {
   country: string
   allowedChannels: string[]
+  unavailableChannels?: FinanceUnavailableChannel[]
   stage: CountryStage
   continent: CountryContinent
   sortOrder: number
@@ -202,12 +212,12 @@ const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions
   updatedAt: '2026-08-08 10:00',
 }))
 
-function normalizePolicies(policies: FinanceChannelPolicy[]) {
+export function normalizePolicies(policies: FinanceChannelPolicy[]) {
   return policies.filter(policy => typeof policy.category === 'string' && policy.category.trim()).map(policy => {
     const countryMeta = new Map(countriesAvailableForCategory(policy.category).map(country => [country.name, country]))
     return {
       ...policy,
-      countryRules: policy.countryRules.filter(rule => countryMeta.has(rule.country)).map(rule => {
+      countryRules: policy.countryRules.filter(rule => countryMeta.has(rule.country) || (Array.isArray(rule.unavailableChannels) && rule.unavailableChannels.length > 0)).map(rule => {
         const available = logisticsRules.length ? new Set(channelsAvailableForCountry(rule.country, policy.category).map(option => option.key)) : null
         const stage = rule.stage === 'common' || rule.stage === 'standard' || rule.stage === 'rare'
           ? rule.stage
@@ -218,6 +228,16 @@ function normalizePolicies(policies: FinanceChannelPolicy[]) {
           continent: inferCountryContinent(countryMeta.get(rule.country)?.code),
           sortOrder: Number.isFinite(Number(rule.sortOrder)) ? Number(rule.sortOrder) : defaultCountrySortOrder(rule.country, stage),
           allowedChannels: available ? rule.allowedChannels.filter(channel => available.has(channel)) : [...rule.allowedChannels],
+          unavailableChannels: [...new Map((Array.isArray(rule.unavailableChannels) ? rule.unavailableChannels : [])
+            .filter(item => item && typeof item.legacyKey === 'string' && item.legacyKey.trim())
+            .map(item => [item.legacyKey, {
+              legacyKey: item.legacyKey.trim(),
+              providerName: String(item.providerName || ''),
+              channelName: String(item.channelName || ''),
+              status: item.status === 'ambiguous' ? 'ambiguous' as const : 'unavailable' as const,
+              reason: String(item.reason || ''),
+              backupSha256: String(item.backupSha256 || ''),
+            }])).values()],
         }
       }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
     }
