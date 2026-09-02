@@ -20,7 +20,7 @@ import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
 import { calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
-import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseFreightChoices, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
 import { calculateFinanceQuoteTax, FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings, type TaxCustomerType } from '@/data/financeTaxSettings'
@@ -156,7 +156,7 @@ function emptyQuotationProduct(): Product {
   return {
     id: 1, selected: true, name: '待查询采购商品', sku: '', logisticsAttribute: initialLogisticsAttribute,
     supplier: '待补充', image: '', physicalImage: '', stockStatus: '待确认', quantity: 1, purchase: 0,
-    purchaseBaseUnitPrice: 0, purchaseInvoiceType: '', purchaseInvoiceRatePercent: 0, purchaseInvoiceTaxApplied: true,
+    purchaseBaseUnitPrice: 0, purchaseInvoiceType: '', purchaseInvoiceRatePercent: 0, purchaseInvoiceTaxApplied: true, purchaseDataSource: 'standard', purchasePriceBasis: '',
     purchaseFreightPerUnit: 0,
     netWeight: 0,
     country: initialCountry, channel: initialChannel, rule: initialRule,
@@ -185,8 +185,10 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
     purchaseInvoiceType: pricing?.invoiceType || '',
     purchaseInvoiceRatePercent: pricing?.invoiceRatePercent || 0,
     purchaseInvoiceTaxApplied: invoiceTaxApplied,
+    purchaseDataSource: record?.dataSource || 'standard',
+    purchasePriceBasis: record?.purchasePriceBasis || '',
     customWeightKg: null,
-    purchaseFreightPerUnit: record ? purchaseFreightChoices(record).find(item => item.quantity === 10)?.unitFreightCny || 0 : 0,
+    purchaseFreightPerUnit: record ? purchaseQuoteFreightUnit(record) : 0,
     weightKg: record?.weightKg || 0,
     status: record ? (record.status === '资料完整' ? '采购资料已加载' : record.status) : '待查询',
   }
@@ -222,20 +224,26 @@ function taxResult(country: string, provider: string, baseQuoteCny: number, quan
 function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd * exchange.value.usd }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
-  const pricing = purchasePricingForMonthlySales(record, invoiceTaxApplied)
+  const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
+  const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
   p.purchase = pricing.effectiveUnitPriceCny
   p.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
   p.purchaseInvoiceType = pricing.invoiceType
   p.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
-  p.purchaseInvoiceTaxApplied = invoiceTaxApplied
+  p.purchaseInvoiceTaxApplied = effectiveInvoiceTaxApplied
+  p.purchaseDataSource = record.dataSource
+  p.purchasePriceBasis = record.purchasePriceBasis
 }
 function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProductRecord, invoiceTaxApplied = item.purchaseInvoiceTaxApplied) {
-  const pricing = purchasePricingForMonthlySales(record, invoiceTaxApplied)
+  const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
+  const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
   item.purchaseUnitPrice = pricing.effectiveUnitPriceCny
   item.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
   item.purchaseInvoiceType = pricing.invoiceType
   item.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
-  item.purchaseInvoiceTaxApplied = invoiceTaxApplied
+  item.purchaseInvoiceTaxApplied = effectiveInvoiceTaxApplied
+  item.purchaseDataSource = record.dataSource
+  item.purchasePriceBasis = record.purchasePriceBasis
 }
 function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = true) {
   p.sku = record.sku
@@ -245,7 +253,7 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceT
   p.physicalImage = record.physicalImage
   p.stockStatus = record.stockStatus || '待确认'
   applyProductPurchasePricing(p, record, invoiceTaxApplied)
-  p.purchaseFreightPerUnit = purchaseFreightChoices(record).find(item => item.quantity === 10)?.unitFreightCny || 0
+  p.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record)
   p.netWeight = record.weightKg || 0
   p.manualWeight = record.weightKg || 0
   p.packageLengthCm = Math.max(0, Number(record.lengthCm) || 0)
@@ -282,11 +290,13 @@ function changeProductCategory(value: string) {
 async function queryProduct() {
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: false }))) return
   const normalizedSku = skuSearch.value.trim().toUpperCase().replace(/\s+/g, '')
-  let matches = purchaseRecords.value.filter(item => item.sku === normalizedSku && item.quoteReady)
-  if (!matches.length) {
-    try { const remote = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(remote); matches = remote.quoteReady ? [remote] : [] }
+  let candidates = purchaseRecords.value.filter(item => item.sku === normalizedSku)
+  if (!candidates.length) {
+    try { const remote = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(remote); candidates = [remote] }
     catch { /* the unified not-found message below is clearer to the user */ }
   }
+  const matches = candidates.filter(item => item.quoteReady)
+  if (!matches.length && candidates.length) { toast(purchaseQuoteBlockingMessage(candidates[0])); return }
   if (!matches.length) { toast(`未找到可报价 SKU：${skuSearch.value}，请确认采购资料已完整保存`); return }
   const p = products.value[0]
   applyPurchaseRecord(p, matches[0])
@@ -308,10 +318,10 @@ async function queryBundleItem(item: BundleQuoteItem) {
   if (!item.sku.trim()) preIssues.push({ key: 'sku', message: '请输入组合商品SKU' })
   if (blockConditionProgress(preIssues)) return
   const normalizedSku = item.sku.trim().toUpperCase().replace(/\s+/g, '')
-  let record = findPurchaseProduct(purchaseRecords.value, normalizedSku)
+  let record = purchaseRecords.value.find(candidate => candidate.sku === normalizedSku)
   if (!record) { try { record = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(record) } catch { /* handled below */ } }
   if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return }
-  if (!record.quoteReady) { toast(`${record.sku} 的重量、起订量或采购价尚未补齐，暂不能参与报价`); return }
+  if (!record.quoteReady) { toast(purchaseQuoteBlockingMessage(record)); return }
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
   if (duplicate) {
     duplicate.quantityPerSet += normalizedBundleSets(item.quantityPerSet)
@@ -330,7 +340,7 @@ async function queryBundleItem(item: BundleQuoteItem) {
   item.customWeightKg = null
   item.weightKg = record.weightKg || 0
   applyBundlePurchasePricing(item, record, true)
-  item.purchaseFreightPerUnit = purchaseFreightChoices(record).find(choice => choice.quantity === 10)?.unitFreightCny || 0
+  item.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record)
   item.status = record.status === '资料完整' ? '采购资料已加载' : record.status
   const recordCategory = quotationProductCategories.find(category => category === record?.category) || ''
   const existingCategories = bundleItems.value.filter(other => other.id !== item.id && other.sku).map(other => findPurchaseProduct(purchaseRecords.value, other.sku)?.category).filter(Boolean)

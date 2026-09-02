@@ -22,5 +22,26 @@ public interface PurchaseImportRowRepository extends JpaRepository<PurchaseImpor
              )
             """,nativeQuery=true)
     int markFileDuplicates(UUID jobId);
+    @Modifying @Query(value="""
+            WITH ranked AS (
+                SELECT id,
+                       row_number() OVER (
+                           PARTITION BY sku
+                           ORDER BY COALESCE(NULLIF(payload->>'sourceSheetIndex','')::integer,1) DESC,
+                                    source_row DESC,
+                                    id DESC
+                       ) AS position,
+                       count(*) OVER (PARTITION BY sku) AS occurrences
+                  FROM purchase_import_row
+                 WHERE job_id=:jobId AND validation_status='valid'
+            )
+            UPDATE purchase_import_row r
+               SET validation_status='duplicate-skipped',
+                   import_action='skip',
+                   error_message='同一文件内SKU重复，已按2026旧数据规则保留后行'
+              FROM ranked d
+             WHERE r.id=d.id AND d.occurrences>1 AND d.position>1
+            """,nativeQuery=true)
+    int keepLastFileDuplicate(UUID jobId);
     void deleteByJobId(UUID jobId);
 }

@@ -74,6 +74,14 @@ class AsyncPurchaseImportServiceTest {
         verify(storage).putRawWithSha256(startsWith("purchase-import/"),any(),eq(3L),contains("spreadsheet"));
     }
 
+    @Test void acceptsLargeLegacyOriginalAfterTextOnlyRepackAndPersistsProfile() {
+        var file=new MockMultipartFile("file","陈晨.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",new byte[]{1,2,3});
+        var job=service.create(file,"ADMIN","text-only",724_658_909L,10_000,"legacy-2026");
+        assertEquals("legacy-2026",job.payload.path("importProfile").asText());
+        assertEquals(724_658_909L,job.payload.path("originalSizeBytes").asLong());
+        assertThrows(AppException.class,()->service.create(file,"ADMIN","text-only",724_658_909L,0,"unknown"));
+    }
+
     @Test void rejectsInvalidStatisticsAndOversizeUploadsBeforeStorage() {
         var small=new MockMultipartFile("file","purchase.xlsx","",new byte[]{1});
         for(long originalSize:new long[]{-1,0,100L*1024*1024+1})

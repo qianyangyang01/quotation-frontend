@@ -4,7 +4,7 @@ export type PurchaseImportJobStatus = 'queued'|'parsing'|'ready'|'import-queued'
 export interface PurchaseImportImagePart { partNumber:number;fileName:string;status:string;sizeBytes:number;processedBytes:number;error?:string;processedAt?:string }
 export interface PurchaseImportJob {
   archivedAt?:string|null
-  id:string;status:PurchaseImportJobStatus;phase:string;sourceName:string;totalRows:number;processedRows:number;validRows:number;errorRows:number;addedRows:number;updatedRows:number;conflictRows:number;progressPercent:number;imageParts:number;imagePartDetails:PurchaseImportImagePart[];imageErrors:number;error?:string;summary?:{sourceBytes?:number;uploadedBytes?:number;originalSizeBytes?:number;removedMediaCount?:number;importMode?:'text-only';textParseMillis?:number;generatedSkuRows?:number;warningCount?:number;sheetSummaries?:PurchaseImportSheetSummary[];continuation?:PurchaseImportContinuation};createdAt:string;updatedAt:string;completedAt?:string;rolledBackAt?:string
+  id:string;status:PurchaseImportJobStatus;phase:string;sourceName:string;totalRows:number;processedRows:number;validRows:number;errorRows:number;addedRows:number;updatedRows:number;conflictRows:number;progressPercent:number;imageParts:number;imagePartDetails:PurchaseImportImagePart[];imageErrors:number;error?:string;summary?:{sourceBytes?:number;uploadedBytes?:number;originalSizeBytes?:number;removedMediaCount?:number;importMode?:'text-only';importProfile?:PurchaseImportProfile;textParseMillis?:number;generatedSkuRows?:number;warningCount?:number;sheetSummaries?:PurchaseImportSheetSummary[];continuation?:PurchaseImportContinuation};createdAt:string;updatedAt:string;completedAt?:string;rolledBackAt?:string
 }
 export interface PurchaseImportContinuation {
   mode:'append';sourceName:string;baselineFound:boolean;skippedRows:number;pendingRows:number;skuBackfillRows?:number;blocked:boolean;reason?:string; sheets:PurchaseImportContinuationSheet[]
@@ -15,11 +15,19 @@ export interface PurchaseImportRowView { sourceSheet:string;sourceRow:number;sku
 export interface PurchaseImportDuplicateGroup { sku:string;choices:{sourceSheet:string;sourceRow:number}[] }
 export interface PageResult<T>{content:T[];number:number;size:number;totalElements:number;totalPages:number;first:boolean;last:boolean}
 
-export function createPurchaseImportJob(file:File,onProgress?:(progress:UploadProgress)=>void){
+export type PurchaseImportProfile = 'standard'|'legacy-2026'
+export interface PurchaseImportMetadata { importProfile?:PurchaseImportProfile;originalSizeBytes?:number;removedMediaCount?:number }
+
+export function createPurchaseImportJob(file:File,metadataOrProgress:PurchaseImportMetadata|((progress:UploadProgress)=>void)={},onProgress?:(progress:UploadProgress)=>void){
+  const metadata=typeof metadataOrProgress==='function'?{}:metadataOrProgress
+  const progress=typeof metadataOrProgress==='function'?metadataOrProgress:onProgress
   if(!file.name.toLowerCase().endsWith('.xlsx'))throw new Error('请选择.xlsx格式的采购模板')
   if(file.size<=0||file.size>100*1024*1024)throw new Error('采购 Excel 文件不能为空且不能超过100MB')
   const form=new FormData();form.append('file',file);form.append('importMode','text-only')
-  return uploadForm<PurchaseImportJob>('/purchase-imports/jobs',form,onProgress)
+  if(metadata.importProfile&&metadata.importProfile!=='standard')form.append('importProfile',metadata.importProfile)
+  if(metadata.originalSizeBytes!=null)form.append('originalSizeBytes',String(metadata.originalSizeBytes))
+  if(metadata.removedMediaCount!=null)form.append('removedMediaCount',String(metadata.removedMediaCount))
+  return uploadForm<PurchaseImportJob>('/purchase-imports/jobs',form,progress)
 }
 export async function uploadPurchaseImagePart(jobId:string,partNumber:number,file:File){const form=new FormData();form.append('file',file);return api.post<PurchaseImportJob>(`/purchase-imports/jobs/${jobId}/image-parts?partNumber=${partNumber}`,form)}
 export const loadPurchaseImportJobs=(page=0,size=20,archived=false)=>api.get<PageResult<PurchaseImportJob>>(`/purchase-imports/jobs?page=${page}&size=${size}&archived=${archived}`)

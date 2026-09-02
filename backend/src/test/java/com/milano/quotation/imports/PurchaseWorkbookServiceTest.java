@@ -14,6 +14,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -72,6 +73,15 @@ class PurchaseWorkbookServiceTest {
             for(var name:java.util.List.of("采购一组","采购二组")){var sheet=workbook.createSheet(name);var header=sheet.createRow(0);for(int index=0;index<PurchaseWorkbookService.HEADERS.size();index++)header.createCell(index).setCellValue(PurchaseWorkbookService.HEADERS.get(index));var row=sheet.createRow(1);row.createCell(0).setCellValue("SKU-DUP");row.createCell(8).setCellValue(100);row.createCell(12).setCellValue(1);row.createCell(13).setCellValue(8.5);}
             workbook.write(output);var preview=service.preview(new MockMultipartFile("file","duplicate.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",output.toByteArray()),"BUYER01");
             assertFalse(preview.summary().path("canConfirm").asBoolean());assertEquals(0,preview.summary().path("blockingErrorCount").asInt());assertEquals(1,preview.summary().path("duplicateGroups").size());assertEquals(2,preview.summary().path("duplicateGroups").get(0).path("choices").size());
+        }
+    }
+
+    @Test void standardPreviewDirectsClearlyLegacyHeadersToDedicatedEntry() throws Exception {
+        try(var workbook=new XSSFWorkbook();var output=new ByteArrayOutputStream()){
+            var sheet=workbook.createSheet("陈晨");var header=sheet.createRow(0);var headers=new String[]{"SKU","克重/g","1件运费","报价","含票价"};for(int i=0;i<headers.length;i++)header.createCell(i).setCellValue(headers[i]);
+            var row=sheet.createRow(1);row.createCell(0).setCellValue("OLD-1");row.createCell(1).setCellValue(70);row.createCell(2).setCellValue(1.7);row.createCell(3).setCellValue(6);row.createCell(4).setCellValue(6.18);workbook.write(output);
+            var file=new MockMultipartFile("file","陈晨.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",output.toByteArray());
+            assertTrue(assertThrows(com.milano.quotation.common.AppException.class,()->service.preview(file,"BUYER01")).getMessage().contains("旧数据导入"));
         }
     }
 

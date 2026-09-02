@@ -15,6 +15,8 @@ export type QuotationProduct = {
   purchaseInvoiceType: string
   purchaseInvoiceRatePercent: number
   purchaseInvoiceTaxApplied: boolean
+  purchaseDataSource?: 'standard' | 'legacy_2026'
+  purchasePriceBasis?: 'tax_included' | 'quoted' | ''
   purchaseFreightPerUnit: number
   netWeight: number
   country: string
@@ -56,6 +58,8 @@ export type BundleQuoteItem = {
   purchaseInvoiceType: string
   purchaseInvoiceRatePercent: number
   purchaseInvoiceTaxApplied: boolean
+  purchaseDataSource?: 'standard' | 'legacy_2026'
+  purchasePriceBasis?: 'tax_included' | 'quoted' | ''
   customWeightKg: number | null
   purchaseFreightPerUnit: number
   weightKg: number

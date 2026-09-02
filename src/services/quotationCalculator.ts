@@ -44,7 +44,7 @@ export type PurchasePriceBreakdown = {
   invoiceRatePercent: number
   invoiceMultiplier: number
   invoiceTaxApplied: boolean
-  priceSource: 'tier-tax-point' | 'tax-included-price' | 'untaxed-tier' | 'legacy-invoice-type'
+  priceSource: 'tier-tax-point' | 'tax-included-price' | 'untaxed-tier' | 'legacy-invoice-type' | 'legacy-final-price'
   effectiveUnitPriceCny: number
 }
 
@@ -61,6 +61,18 @@ export function purchaseInvoiceRatePercent(invoiceType: string) {
 
 export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true): PurchasePriceBreakdown {
   const baseUnitPriceCny = roundCny(purchaseUnitPrice(record, purchaseQuantityForMonthlySales(estimate)))
+  if (record.dataSource === 'legacy_2026') {
+    return {
+      baseUnitPriceCny,
+      invoiceType: record.invoiceType,
+      taxPoint: record.taxPoint,
+      invoiceRatePercent: 0,
+      invoiceMultiplier: 1,
+      invoiceTaxApplied: true,
+      priceSource: 'legacy-final-price',
+      effectiveUnitPriceCny: baseUnitPriceCny,
+    }
+  }
   const explicitTaxPoint = record.taxPointExplicit
   const taxPoint = record.taxPoint
   const legacyRatePercent = explicitTaxPoint ? 0 : purchaseInvoiceRatePercent(record.invoiceType)

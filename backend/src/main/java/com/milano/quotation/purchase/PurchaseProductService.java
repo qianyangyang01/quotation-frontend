@@ -70,6 +70,7 @@ public class PurchaseProductService {
         if(object.path("productImage").asText("").isBlank()&&!object.path("image").asText("").isBlank())object.put("productImage",object.path("image").asText());
         validatePayload(object);
         object.put("sku", sku);
+        normalizeLegacyPrice(object);
         var existing=products.findBySku(sku);
         if(existing.isPresent()&&requireVersionForExisting&&(!object.has("_version")||object.path("_version").asLong(-1)!=existing.get().version))throw AppException.conflict("商品 "+sku+" 已被其他用户修改，请刷新后重试");
         var catalogState = requestedCatalogState != null ? requestedCatalogState
@@ -144,7 +145,7 @@ public class PurchaseProductService {
         if(isReservedSku(target))throw AppException.unprocessable("正式商品必须改为非 TEST/DEMO/AUTO 的业务SKU");
         if(!source.equals(target)&&products.findBySku(target).isPresent())throw AppException.conflict("目标SKU已存在："+target);
         var payload=(ObjectNode)row.payload.deepCopy();payload.put("sku",target);validatePayload(payload);
-        if(!completeForQuotation(payload))throw AppException.unprocessable("重量、起订量或采购价尚未补齐，不能转正式");
+        if(!completeForQuotation(payload))throw AppException.unprocessable("legacy_2026".equals(payload.path("dataSource").asText())?"克重、有效价格或1件运费尚未补齐，请采购补全":"重量、起订量或采购价尚未补齐，不能转正式");
         row.sku=target;row.catalogState=CATALOG_READY;row.quoteReady=true;row.updatedAt=Instant.now();applyDerivedState(payload,CATALOG_READY,true);row.payload=payload;
         products.saveAndFlush(row);return view(row);
     }
@@ -175,11 +176,39 @@ public class PurchaseProductService {
         }
         if (object.toString().length() > 1_000_000) throw AppException.unprocessable("单条商品数据过大");
     }
-    private static boolean completeForQuotation(ObjectNode object){return positive(object,"weightG")&&positive(object,"minOrderQty")&&(nonNegative(object,"purchasePriceCny")||nonNegative(object,"tier2PriceCny")||nonNegative(object,"tier3PriceCny")||nonNegative(object,"taxIncludedPriceCny"));}
+    private static boolean completeForQuotation(ObjectNode object){
+        if("legacy_2026".equals(object.path("dataSource").asText()))return legacyBlockingReasons(object).isEmpty();
+        return positive(object,"weightG")&&positive(object,"minOrderQty")&&(nonNegative(object,"purchasePriceCny")||nonNegative(object,"tier2PriceCny")||nonNegative(object,"tier3PriceCny")||nonNegative(object,"taxIncludedPriceCny"));
+    }
     private static boolean positive(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>0;}
     private static boolean nonNegative(ObjectNode object,String field){var value=object.get(field);return value!=null&&value.isNumber()&&value.asDouble()>=0;}
     private static boolean isReservedSku(String sku){return sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK)[A-Z0-9._/-]*$")||sku.startsWith("AUTO-");}
-    private static void applyDerivedState(ObjectNode object,String state,boolean quoteReady){object.put("catalogState",state);object.put("quoteReady",quoteReady);object.put("status",CATALOG_PENDING_TEMPLATE.equals(state)?"模板待补全（不可报价）":CATALOG_DISABLED.equals(state)?"已停用":quoteReady?"资料完整":"待补充资料");}
+    private static void applyDerivedState(ObjectNode object,String state,boolean quoteReady){
+        object.put("catalogState",state);object.put("quoteReady",quoteReady);
+        if("legacy_2026".equals(object.path("dataSource").asText())){
+            var reasons=legacyBlockingReasons(object);var array=object.putArray("quotationBlockingReasons");reasons.forEach(array::add);
+            object.put("status",CATALOG_DISABLED.equals(state)?"已停用":quoteReady?"资料完整":"关键信息待补全（不可报价）");
+        }else object.put("status",CATALOG_PENDING_TEMPLATE.equals(state)?"模板待补全（不可报价）":CATALOG_DISABLED.equals(state)?"已停用":quoteReady?"资料完整":"待补充资料");
+    }
+    private static List<String> legacyBlockingReasons(ObjectNode object){
+        var reasons=new ArrayList<String>();var sku=object.path("sku").asText();
+        if(sku.isBlank()||isReservedSku(sku))reasons.add("正式SKU");
+        if(!positive(object,"weightG"))reasons.add("克重");
+        if(!positive(object,"minOrderQty"))reasons.add("起订量");
+        if(!positive(object,"purchasePriceCny"))reasons.add("采购价格");
+        if(!nonNegative(object,"singleFreightCny"))reasons.add("1件运费");
+        return reasons;
+    }
+    private static void normalizeLegacyPrice(ObjectNode object){
+        if(!"legacy_2026".equals(object.path("dataSource").asText()))return;
+        if(positive(object,"taxIncludedPriceCny")){
+            object.set("purchasePriceCny",object.get("taxIncludedPriceCny").deepCopy());object.put("purchasePriceBasis","tax_included");return;
+        }
+        if("tax_included".equals(object.path("purchasePriceBasis").asText())&&positive(object,"sourceQuotedPriceCny"))object.set("purchasePriceCny",object.get("sourceQuotedPriceCny").deepCopy());
+        if(positive(object,"purchasePriceCny")){
+            object.set("sourceQuotedPriceCny",object.get("purchasePriceCny").deepCopy());object.put("purchasePriceBasis","quoted");
+        }else object.put("purchasePriceBasis","");
+    }
     private static String normalizeSourceHash(String value){if(value==null||value.isBlank())return null;var normalized=value.trim().toLowerCase(Locale.ROOT);if(!normalized.matches("[0-9a-f]{64}"))throw AppException.unprocessable("导入来源SHA-256不合法");return normalized;}
     private void externalizeImage(ObjectNode object,String field,String type){var value=object.path(field).asText("");if(!value.startsWith("data:"))return;var marker=value.indexOf(",");if(marker<0||!value.substring(0,marker).contains(";base64"))throw AppException.unprocessable("图片Base64格式错误");try{var bytes=java.util.Base64.getDecoder().decode(value.substring(marker+1));var asset=storage.storeImage(bytes,object.path("sku").asText("product")+"-"+type);object.put(field,"/api/v1/assets/"+asset.id);if(type.equals("product"))object.put("image","/api/v1/assets/"+asset.id);}catch(IllegalArgumentException e){throw AppException.unprocessable("图片Base64格式错误");}}
     private void linkFromUrl(UUID productId,String value,String type){var prefix="/api/v1/assets/";if(!value.startsWith(prefix))return;try{var assetId=UUID.fromString(value.substring(prefix.length()));link(productId,assetId,type);}catch(IllegalArgumentException ignored){}}

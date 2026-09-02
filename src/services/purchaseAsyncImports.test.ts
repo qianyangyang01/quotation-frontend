@@ -31,4 +31,15 @@ describe('direct purchase workbook upload', () => {
     expect(() => createPurchaseImportJob(large)).toThrow('100MB')
     expect(uploadForm).not.toHaveBeenCalled()
   })
+
+  it('marks optimized uploads as 2026 legacy data and sends cleanup metadata', () => {
+    const file = new File(['optimized data'], '陈晨.xlsx')
+    const request = { promise: Promise.resolve({ id: 'legacy-job' }), cancel: vi.fn() }
+    vi.mocked(uploadForm).mockReturnValue(request)
+    createPurchaseImportJob(file, { importProfile: 'legacy-2026', originalSizeBytes: 724_000_000, removedMediaCount: 1436 })
+    const form = vi.mocked(uploadForm).mock.calls[0]![1]
+    expect(form.get('importProfile')).toBe('legacy-2026')
+    expect(form.get('originalSizeBytes')).toBe('724000000')
+    expect(form.get('removedMediaCount')).toBe('1436')
+  })
 })

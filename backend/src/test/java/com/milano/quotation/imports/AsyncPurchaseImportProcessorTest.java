@@ -29,6 +29,20 @@ class AsyncPurchaseImportProcessorTest {
         processor.poll();verify(async).prepareParsing(job.id);verify(batches).stage(eq(job.id),argThat(list->list.size()==2&&list.stream().allMatch(item->item.errors().isEmpty())));verify(batches).ready(job.id);
     }
 
+    @Test void usesLegacyMapperOnlyForLegacy2026Jobs(){
+        var job=job("queued");((tools.jackson.databind.node.ObjectNode)job.payload).put("importProfile","legacy-2026");queue(job,"queued");when(storage.openRaw("source")).thenReturn(new ByteArrayInputStream(new byte[]{1}));
+        doAnswer(call->{@SuppressWarnings("unchecked") Consumer<StreamingPurchaseWorkbookReader.RawRow> consumer=call.getArgument(1);consumer.accept(new StreamingPurchaseWorkbookReader.RawRow(2,new String[]{"a"}));return new StreamingPurchaseWorkbookReader.ReadResult(List.of(),1);}).when(reader).read(any(),any());
+        var payload=JsonMapper.builder().build().createObjectNode();when(mapper.mapLegacy2026(anyString(),anyInt(),anyString(),anyInt(),any(),any())).thenReturn(new PurchaseImportRowMapper.MappedRow(2,"OLD-1",payload,List.of(),List.of()));when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        processor.poll();verify(mapper).mapLegacy2026(anyString(),anyInt(),anyString(),eq(2),any(),any());verify(mapper,never()).map(anyString(),anyInt(),anyString(),anyInt(),any(),any());
+    }
+
+    @Test void standardProfileRejectsClearlyLegacyWorkbookHeaders(){
+        var job=job("queued");queue(job,"queued");when(storage.openRaw("source")).thenReturn(new ByteArrayInputStream(new byte[]{1}));
+        var headers=new String[]{"SKU","克重/g","1件运费","报价","含票价"};var schema=PurchaseWorkbookSchema.identifyOrNull(headers,1);assertNotNull(schema);assertTrue(schema.legacy2026Layout());
+        doAnswer(call->{@SuppressWarnings("unchecked") Consumer<StreamingPurchaseWorkbookReader.RawRow> consumer=call.getArgument(1);consumer.accept(new StreamingPurchaseWorkbookReader.RawRow("陈晨",1,2,new String[]{"OLD-1","70","1.7","6","6.18"},schema));return new StreamingPurchaseWorkbookReader.ReadResult(List.of(),1);}).when(reader).read(any(),any());
+        processor.poll();verify(async).markFailed(eq(job.id),eq("parsing"),argThat(error->error.getMessage().contains("旧数据导入")));verifyNoInteractions(mapper,batches);
+    }
+
     @Test void parsingRespectsCancelAndReportsFailures(){
         var cancelled=job("queued");cancelled.cancelRequested=true;queue(cancelled,"queued");when(storage.openRaw("source")).thenReturn(new ByteArrayInputStream(new byte[]{1}));when(reader.read(any(),any())).thenReturn(new StreamingPurchaseWorkbookReader.ReadResult(List.of(),0));when(jobs.findById(cancelled.id)).thenReturn(Optional.of(cancelled));processor.poll();verify(batches).cancelled(cancelled.id);
         reset(jobs,reader);var failed=job("queued");queue(failed,"queued");when(storage.openRaw("source")).thenThrow(new IllegalStateException("down"));processor.poll();verify(async).markFailed(eq(failed.id),eq("parsing"),any());

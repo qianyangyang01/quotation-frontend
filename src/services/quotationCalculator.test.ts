@@ -95,6 +95,20 @@ describe('quotation purchase tiers', () => {
     expect(result.effectiveUnitPriceCny).toBe(22)
     expect(result.priceSource).toBe('tax-included-price')
   })
+
+  it('uses the legacy final purchase price without applying the recorded ticket point twice', () => {
+    const legacy = normalizePurchaseRecord({
+      sku: 'OLD-260001', dataSource: 'legacy_2026', catalogState: 'ready', weightG: 70,
+      purchasePriceCny: 6.18, purchasePriceBasis: 'tax_included', sourceQuotedPriceCny: 6,
+      taxIncludedPriceCny: 6.18, taxPoint: 0.03, minOrderQty: 1, singleFreightCny: 1.7,
+    })
+    expect(purchasePriceBreakdown(legacy, '100+')).toMatchObject({
+      baseUnitPriceCny: 6.18,
+      effectiveUnitPriceCny: 6.18,
+      invoiceMultiplier: 1,
+      priceSource: 'legacy-final-price',
+    })
+  })
 })
 
 describe('single SKU weight calculation', () => {

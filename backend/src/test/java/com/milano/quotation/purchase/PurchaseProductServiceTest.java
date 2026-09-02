@@ -170,6 +170,29 @@ class PurchaseProductServiceTest {
     }
 
     @Test
+    void keepsLegacyProductPendingUntilWeightPriceAndSingleFreightAreComplete() {
+        var payload=JsonNodeFactory.instance.objectNode().put("sku","OLD-2026-1").put("dataSource","legacy_2026")
+                .put("sourceLabel","2026旧数据").put("minOrderQty",1).put("purchasePriceCny",12.5);
+        var saved=service.upsertImported(payload,null,null,"formal","c".repeat(64));
+        assertFalse(saved.path("quoteReady").asBoolean());
+        assertEquals("关键信息待补全（不可报价）",saved.path("status").asText());
+        assertEquals(List.of("克重","1件运费"),java.util.stream.StreamSupport.stream(saved.path("quotationBlockingReasons").spliterator(),false).map(node->node.asText()).toList());
+        assertTrue(assertThrows(AppException.class,()->service.promote("OLD-2026-1","OLD-2026-1",saved.path("_version").asLong())).getMessage().contains("1件运费"));
+
+        var edited=(tools.jackson.databind.node.ObjectNode)saved.deepCopy();edited.put("weightG",180).put("singleFreightCny",0);
+        var editedSaved=service.upsert(edited);assertFalse(editedSaved.path("quoteReady").asBoolean());
+        var completed=service.changeCatalogState("OLD-2026-1","ready",editedSaved.path("_version").asLong());
+        assertTrue(completed.path("quoteReady").asBoolean());
+        assertEquals("资料完整",completed.path("status").asText());
+        assertEquals(0,completed.path("quotationBlockingReasons").size());
+
+        var withTax=(tools.jackson.databind.node.ObjectNode)completed.deepCopy();withTax.put("taxIncludedPriceCny",13.8);
+        var repriced=service.upsert(withTax);assertEquals(13.8,repriced.path("purchasePriceCny").asDouble());assertEquals("tax_included",repriced.path("purchasePriceBasis").asText());
+        withTax=(tools.jackson.databind.node.ObjectNode)repriced.deepCopy();withTax.putNull("taxIncludedPriceCny");
+        var fallback=service.upsert(withTax);assertEquals(12.5,fallback.path("purchasePriceCny").asDouble());assertEquals("quoted",fallback.path("purchasePriceBasis").asText());
+    }
+
+    @Test
     void blocksReferencedDeleteAndRetiresOnlyCollectedImages() {
         var product=PurchaseProduct.create("SAFE-2",JsonNodeFactory.instance.objectNode().put("sku","SAFE-2"),"ready",false,null);product.version=2;rows.put(product.sku,product);
         var blocked=new PurchaseProductDeletionGuard.DeletionCheck(false,2,1,1,0,0,0);

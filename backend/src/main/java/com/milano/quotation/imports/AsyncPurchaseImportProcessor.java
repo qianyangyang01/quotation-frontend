@@ -17,7 +17,8 @@ public class AsyncPurchaseImportProcessor {
         try{
             service.prepareParsing(job.id);var chunk=new ArrayList<PurchaseImportRowMapper.MappedRow>(PurchaseImportBatchService.BATCH_SIZE);var generated=new int[]{0};var warnings=new int[]{0};var started=System.nanoTime();var taskShort=job.id.toString().substring(0,8).toUpperCase(Locale.ROOT);
             try(var input=storage.openRaw(job.sourceObjectKey)){
-                var result=reader.read(input,raw->{var mapped=mapper.map(taskShort,raw.sourceSheetIndex(),raw.sourceSheet(),raw.sourceRow(),raw.values(),raw.schema());if("system".equals(mapped.payload().path("skuOrigin").asText()))generated[0]++;warnings[0]+=mapped.warnings().size();chunk.add(mapped);if(chunk.size()>=PurchaseImportBatchService.BATCH_SIZE){batches.stage(job.id,List.copyOf(chunk));chunk.clear();var state=jobs.findById(job.id).orElseThrow();if(state.cancelRequested)throw new Cancelled();}});
+                var legacy=PurchaseImportProfile.isLegacy(job);
+                var result=reader.read(input,raw->{if(!legacy&&raw.schema().legacy2026Layout())throw com.milano.quotation.common.AppException.unprocessable("检测到旧版采购表头，请使用“旧数据导入”入口");var mapped=legacy?mapper.mapLegacy2026(taskShort,raw.sourceSheetIndex(),raw.sourceSheet(),raw.sourceRow(),raw.values(),raw.schema()):mapper.map(taskShort,raw.sourceSheetIndex(),raw.sourceSheet(),raw.sourceRow(),raw.values(),raw.schema());if("system".equals(mapped.payload().path("skuOrigin").asText()))generated[0]++;warnings[0]+=mapped.warnings().size();chunk.add(mapped);if(chunk.size()>=PurchaseImportBatchService.BATCH_SIZE){batches.stage(job.id,List.copyOf(chunk));chunk.clear();var state=jobs.findById(job.id).orElseThrow();if(state.cancelRequested)throw new Cancelled();}});
                 if(!chunk.isEmpty())batches.stage(job.id,List.copyOf(chunk));
                 service.recordParseSummary(job.id,result,(System.nanoTime()-started)/1_000_000,generated[0],warnings[0]);
             }

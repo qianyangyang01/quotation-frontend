@@ -36,7 +36,7 @@ public class PurchaseWorkbookService {
             int ignored=0,productImages=0,physicalImages=0,sheetCount=0;
             for(int sheetIndex=0;sheetIndex<workbook.getNumberOfSheets();sheetIndex++){
                 var sheet=workbook.getSheetAt(sheetIndex);var sheetName=safeSheetName(sheet.getSheetName());
-                PurchaseWorkbookSchema schema=null;for(int candidate=0;candidate<Math.min(StreamingPurchaseWorkbookReader.HEADER_SCAN_ROWS,sheet.getLastRowNum()+1);candidate++){var headers=values(sheet.getRow(candidate),formatter,evaluator);schema=PurchaseWorkbookSchema.identifyOrNull(headers,candidate+1);if(schema!=null)break;}if(schema==null)continue;sheetCount++;
+                PurchaseWorkbookSchema schema=null;for(int candidate=0;candidate<Math.min(StreamingPurchaseWorkbookReader.HEADER_SCAN_ROWS,sheet.getLastRowNum()+1);candidate++){var headers=values(sheet.getRow(candidate),formatter,evaluator);schema=PurchaseWorkbookSchema.identifyOrNull(headers,candidate+1);if(schema!=null)break;}if(schema==null)continue;if(schema.legacy2026Layout())throw AppException.unprocessable("检测到旧版采购表头，请使用“旧数据导入”入口");sheetCount++;
                 var pictures=pictures(sheet);
                 for(int rowIndex=schema.headerRow();rowIndex<=sheet.getLastRowNum();rowIndex++){
                     int excelRow=rowIndex+1;var values=values(sheet.getRow(rowIndex),formatter,evaluator);

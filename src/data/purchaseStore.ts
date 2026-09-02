@@ -4,10 +4,13 @@ export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPri
 export type PurchaseStockStatus = '有货' | '无货' | '待确认' | '定制款' | ''
 export type PurchaseSkuOrigin = 'imported' | 'manual' | 'system'
 export type PurchaseCatalogState = 'pending_template' | 'ready' | 'disabled'
+export type PurchaseDataSource = 'standard' | 'legacy_2026'
+export type PurchasePriceBasis = 'tax_included' | 'quoted' | ''
 export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageCount:number;quotationRecords:number;drafts:number;templates:number;importBatches:number }
 
 export type PurchaseProductRecord = {
   sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number
+  dataSource: PurchaseDataSource; purchasePriceBasis: PurchasePriceBasis; sourceQuotedPriceCny: number | null
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
   size: string; color: string; weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null
   minOrderQty: number | null; purchasePriceCny: number | null
@@ -15,7 +18,7 @@ export type PurchaseProductRecord = {
   priceTiers: PurchasePriceTier[]; singleFreightCny: number | null; freight10Cny: number | null; freight100Cny: number | null
   freeShipping: '' | '是' | '否'; taxIncludedPriceCny: number | null; taxPoint: number | null; taxPointExplicit: boolean; invoiceType: string; stockStatus: PurchaseStockStatus
   notes: string; factoryInfo: string; sourceLink1: string; sourceLink2: string; sourceLink3: string; similarSource: string; auditNotes: string
-  catalogState: PurchaseCatalogState; quoteReady: boolean; status: string; importWarnings: string[]
+  catalogState: PurchaseCatalogState; quoteReady: boolean; status: string; importWarnings: string[]; quotationBlockingReasons: string[]
   // Compatibility aliases consumed by the existing quotation calculator.
   name: string; image: string; weightKg: number | null; colorSku: string; material: string; marks: string; shippingMarks: string[]
   rawTierPrice: string; l6Price: string; freightTrial: string; invoiceInfo: string; taxIncludedPrice: string
@@ -56,10 +59,11 @@ function buildPriceTiers(record: Pick<PurchaseProductRecord, 'minOrderQty' | 'pu
 export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): PurchaseProductRecord {
   const sku = String(input.sku || '').trim().toUpperCase().replace(/\s+/g, '')
   const skuOrigin: PurchaseSkuOrigin = input.skuOrigin === 'system' || sku.startsWith('AUTO-') ? 'system' : input.skuOrigin === 'manual' ? 'manual' : 'imported'
+  const dataSource: PurchaseDataSource = input.dataSource === 'legacy_2026' ? 'legacy_2026' : 'standard'
   const weightG = numberOrNull(input.weightG)
-  const minOrderQty = numberOrNull(input.minOrderQty)
+  const minOrderQty = numberOrNull(input.minOrderQty) ?? (dataSource === 'legacy_2026' ? 1 : null)
   const purchasePriceCny = numberOrNull(input.purchasePriceCny)
-  const category = String(input.category || input.name || '').trim()
+  const category = String(input.category || (dataSource === 'legacy_2026' ? '' : input.name) || '').trim()
   const productImage = String(input.productImage || input.image || '')
   const color = String(input.color || input.colorSku || '').trim()
   const sourceLinks = input.sourceLinks || []
@@ -67,6 +71,8 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const catalogState: PurchaseCatalogState = input.catalogState === 'pending_template' || input.catalogState === 'disabled' ? input.catalogState : 'ready'
   const base = {
     sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version),
+    dataSource, purchasePriceBasis: input.purchasePriceBasis === 'tax_included' || input.purchasePriceBasis === 'quoted' ? input.purchasePriceBasis : '' as PurchasePriceBasis,
+    sourceQuotedPriceCny: numberOrNull(input.sourceQuotedPriceCny),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
     size: String(input.size || '').trim(), color, weightG, lengthCm: numberOrNull(input.lengthCm), widthCm: numberOrNull(input.widthCm), heightCm: numberOrNull(input.heightCm),
     minOrderQty, purchasePriceCny, tier2MinQty: numberOrNull(input.tier2MinQty), tier2PriceCny: numberOrNull(input.tier2PriceCny),
@@ -82,13 +88,18 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     auditNotes: String(input.auditNotes || '').trim(), importWarnings: Array.isArray(input.importWarnings) ? [...input.importWarnings] : [],
   }
   const reservedSku = /^(TESTP|TEST|DEMO|MOCK)/i.test(sku) || sku.startsWith('AUTO-')
-  const hasPrice = [purchasePriceCny, numberOrNull(input.tier2PriceCny), numberOrNull(input.tier3PriceCny), base.taxIncludedPriceCny].some(value => value != null && value >= 0)
-  const quoteReady = catalogState === 'ready' && !reservedSku && skuOrigin !== 'system' && weightG != null && weightG > 0 && minOrderQty != null && minOrderQty > 0 && hasPrice
-  const missing = [weightG == null || weightG <= 0 ? '重量' : '', minOrderQty == null || minOrderQty <= 0 ? '起订量' : '', !hasPrice ? '采购价' : ''].filter(Boolean)
-  const status = catalogState === 'pending_template' ? '模板待补全（不可报价）' : catalogState === 'disabled' ? '已停用' : skuOrigin === 'system' ? '系统生成SKU，待修改' : quoteReady ? '资料完整' : `待补充${missing.length ? `：${missing.join('、')}` : ''}`
+  const hasPrice = dataSource === 'legacy_2026'
+    ? purchasePriceCny != null && purchasePriceCny > 0
+    : [purchasePriceCny, numberOrNull(input.tier2PriceCny), numberOrNull(input.tier3PriceCny), base.taxIncludedPriceCny].some(value => value != null && value >= 0)
+  const derivedMissing = [reservedSku || skuOrigin === 'system' || !sku ? '正式SKU' : '', weightG == null || weightG <= 0 ? (dataSource === 'legacy_2026' ? '克重' : '重量') : '', !hasPrice ? '有效价格' : '', dataSource === 'legacy_2026' && (base.singleFreightCny == null || base.singleFreightCny < 0) ? '1件运费' : '', dataSource !== 'legacy_2026' && (minOrderQty == null || minOrderQty <= 0) ? '起订量' : ''].filter(Boolean)
+  const suppliedBlockingReasons = Array.isArray(input.quotationBlockingReasons) ? input.quotationBlockingReasons.map(item => String(item).trim()).filter(Boolean) : []
+  const quotationBlockingReasons = [...new Set(dataSource === 'legacy_2026' ? derivedMissing : [...derivedMissing, ...suppliedBlockingReasons])]
+  const quoteReady = catalogState === 'ready' && quotationBlockingReasons.length === 0
+  const missing = quotationBlockingReasons
+  const status = catalogState === 'pending_template' ? (dataSource === 'legacy_2026' ? `关键信息待补全（不可报价）${missing.length ? `：${missing.join('、')}` : ''}` : '模板待补全（不可报价）') : catalogState === 'disabled' ? '已停用' : skuOrigin === 'system' ? '系统生成SKU，待修改' : quoteReady ? '资料完整' : dataSource === 'legacy_2026' ? `关键信息待补全（不可报价）${missing.length ? `：${missing.join('、')}` : ''}` : `待补充${missing.length ? `：${missing.join('、')}` : ''}`
   const priceTiers = buildPriceTiers(base)
   return {
-    ...base, catalogState, quoteReady, status, priceTiers,
+    ...base, catalogState, quoteReady, status, priceTiers, quotationBlockingReasons,
     name: category || `商品 ${sku}`, image: productImage, weightKg: weightG == null ? null : weightG / 1000, colorSku: color,
     material: String(input.material || '').trim(), marks: '', shippingMarks: [], rawTierPrice: priceTiers.map(item => `${item.minQty}${item.maxQty == null ? '+' : `-${item.maxQty}`}件 ¥${item.unitPriceCny}`).join('；'),
     l6Price: '', freightTrial: '', invoiceInfo: '', taxIncludedPrice: base.taxIncludedPriceCny == null ? '' : String(base.taxIncludedPriceCny),
@@ -155,7 +166,7 @@ export function purchaseUnitPrice(record: PurchaseProductRecord, quantity: numbe
 }
 
 export function purchaseFreightChoices(record: PurchaseProductRecord) {
-  if (record.freeShipping === '是') return [1, 10, 100].map(quantity => ({ quantity, totalFreightCny: 0, unitFreightCny: 0 }))
+  if (record.freeShipping === '是') return (record.dataSource === 'legacy_2026' ? [1] : [1, 10, 100]).map(quantity => ({ quantity, totalFreightCny: 0, unitFreightCny: 0 }))
   return [{ quantity: 1, totalFreightCny: record.singleFreightCny }, { quantity: 10, totalFreightCny: record.freight10Cny }, { quantity: 100, totalFreightCny: record.freight100Cny }]
     .filter((item): item is { quantity: number; totalFreightCny: number } => item.totalFreightCny != null)
     .map(item => ({ ...item, unitFreightCny: item.totalFreightCny / item.quantity }))
@@ -163,6 +174,15 @@ export function purchaseFreightChoices(record: PurchaseProductRecord) {
 
 export function purchaseFreightUnit(record: PurchaseProductRecord, batchQuantity: number) {
   return purchaseFreightChoices(record).find(item => item.quantity === batchQuantity)?.unitFreightCny ?? 0
+}
+export function purchaseQuoteFreightUnit(record: PurchaseProductRecord) {
+  const choices = purchaseFreightChoices(record)
+  return (record.dataSource === 'legacy_2026' ? choices.find(item => item.quantity === 1) : choices.find(item => item.quantity === 10))?.unitFreightCny ?? 0
+}
+export function purchaseSourceLabel(record: Pick<PurchaseProductRecord, 'dataSource'>) { return record.dataSource === 'legacy_2026' ? '2026旧数据' : '新数据' }
+export function purchaseQuoteBlockingMessage(record: PurchaseProductRecord) {
+  const detail = record.quotationBlockingReasons.length ? `（缺少：${record.quotationBlockingReasons.join('、')}）` : ''
+  return `${record.sku || '该产品'}：该产品暂无克重信息或其他关键信息，请采购补全${detail}`
 }
 export function purchaseDisplayName(record: PurchaseProductRecord) { return record.category || `商品 ${record.sku}` }
 export function formatPurchaseTiers(record: PurchaseProductRecord) {

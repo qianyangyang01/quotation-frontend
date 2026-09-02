@@ -64,6 +64,24 @@ class PurchaseImportBatchServiceTest {
         assertEquals(1,job.errorRows);assertEquals(0,job.validRows);assertEquals(0,job.addedRows);
     }
 
+    @Test void legacyImportDoesNotOverwriteStandardProductsButCanRefreshLegacyProducts(){
+        var job=job("parsing");((tools.jackson.databind.node.ObjectNode)job.payload).put("importProfile","legacy-2026");when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        var standard=mock(PurchaseProduct.class);standard.sku="SKU-STANDARD";standard.version=2;standard.payload=mapperHolder.mapper.createObjectNode().put("dataSource","standard");
+        var legacy=mock(PurchaseProduct.class);legacy.sku="SKU-LEGACY";legacy.version=4;legacy.payload=mapperHolder.mapper.createObjectNode().put("dataSource","legacy_2026");
+        when(products.findAllBySkuIn(any())).thenReturn(List.of(standard,legacy));
+        service.stage(job.id,List.of(mapped(2,"SKU-STANDARD",List.of()),mapped(3,"SKU-LEGACY",List.of())));
+        @SuppressWarnings("unchecked") var captured=(List<PurchaseImportRow>)mockingDetails(rows).getInvocations().stream().filter(i->i.getMethod().getName().equals("saveAll")).findFirst().orElseThrow().getArgument(0);
+        assertEquals("error",captured.get(0).validationStatus);assertEquals("skip",captured.get(0).importAction);assertTrue(captured.get(0).errorMessage.contains("未覆盖"));
+        assertEquals("valid",captured.get(1).validationStatus);assertEquals("update",captured.get(1).importAction);assertEquals(4,captured.get(1).expectedVersion);
+        assertEquals(1,job.errorRows);assertEquals(1,job.validRows);
+    }
+
+    @Test void legacyReadyAutomaticallyKeepsLastDuplicateInsteadOfCreatingSelectionConflict(){
+        var job=job("parsing");((tools.jackson.databind.node.ObjectNode)job.payload).put("importProfile","legacy-2026");when(jobs.findById(job.id)).thenReturn(Optional.of(job));
+        service.ready(job.id);
+        verify(rows).keepLastFileDuplicate(job.id);verify(rows,never()).markFileDuplicates(job.id);
+    }
+
     @Test void appliesSuccessAndConflictRows(){
         var job=job("importing");job.validRows=2;job.totalRows=2;when(jobs.findById(job.id)).thenReturn(Optional.of(job));
         var good=row(job.id,"SKU-1");good.productAssetId=UUID.randomUUID();good.physicalAssetId=UUID.randomUUID();var conflict=row(job.id,"SKU-2");
