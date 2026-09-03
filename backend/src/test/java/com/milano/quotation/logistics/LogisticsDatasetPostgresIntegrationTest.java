@@ -110,10 +110,10 @@ class LogisticsDatasetPostgresIntegrationTest {
         var b=UUID.randomUUID();var batch=mapper.createObjectNode();batch.putArray("results").addObject().put("versionId",v.toString()).put("status","unchanged");
         jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:d,'QA',:key,'completed','review',cast(:p as jsonb))").param("id",b).param("d",dataset).param("key",b.toString()).param("p",batch.toString()).update();
         try(var report=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new ByteArrayInputStream(exports.changes(b,null)))){
-            var row=report.getSheet("批次汇总").getRow(2);assertEquals("0",row.getCell(4).getStringCellValue());assertEquals("1",row.getCell(8).getStringCellValue());assertEquals(v.toString(),row.getCell(3).getStringCellValue());assertEquals("unchanged",row.getCell(9).getStringCellValue());
-            var detail=report.getSheet("变化明细").getRow(1);assertEquals("unchanged",detail.getCell(5).getStringCellValue());assertEquals(detail.getCell(7).getStringCellValue(),detail.getCell(8).getStringCellValue());assertEquals("2区",detail.getCell(14).getStringCellValue());
+            var row=report.getSheet("批次汇总").getRow(2);assertEquals("0",row.getCell(4).getStringCellValue());assertEquals("1",row.getCell(10).getStringCellValue());assertEquals(v.toString(),row.getCell(3).getStringCellValue());assertEquals("unchanged",row.getCell(11).getStringCellValue());
+            var detail=report.getSheet("变化明细").getRow(1);assertEquals("无变化",detail.getCell(5).getStringCellValue());assertEquals(detail.getCell(7).getStringCellValue(),detail.getCell(8).getStringCellValue());assertEquals("2区",detail.getCell(15).getStringCellValue());
         }
-        try(var original=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new ByteArrayInputStream(exports.changes(null,v)))){assertEquals("1",original.getSheet("批次汇总").getRow(2).getCell(4).getStringCellValue());assertEquals("added",original.getSheet("变化明细").getRow(1).getCell(5).getStringCellValue());}
+        try(var original=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new ByteArrayInputStream(exports.changes(null,v)))){assertEquals("1",original.getSheet("批次汇总").getRow(2).getCell(4).getStringCellValue());assertEquals("新增",original.getSheet("变化明细").getRow(1).getCell(5).getStringCellValue());}
     }catch(IOException e){throw new AssertionError(e);}finally{s.setRollbackOnly();}});}
     @Test void durableWorkerStagesAChannelInsideTheDatabaseTransaction(){tx.executeWithoutResult(s->{try{
         var active=guard.activeId();seed(active,"验收源",true);var bytes=exports.prices(active,null,"验收源","","");

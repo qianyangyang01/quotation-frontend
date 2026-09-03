@@ -88,8 +88,8 @@ public class LogisticsExportService {
         if(ids.isEmpty()&&batchId==null)throw AppException.unprocessable("没有可导出的版本差异");
         try(var book=new XSSFWorkbook();var bytes=new ByteArrayOutputStream()) {
             var summary=book.createSheet("批次汇总");textRow(summary,0,List.of("MILANO_LOGISTICS_DIFF_V1","仅供审阅，不作为价格导入模板",Instant.now().toString()));
-            textRow(summary,1,List.of("物流商","渠道","版本","基线版本","新增","调价","规则","移除","未变","状态"));
-            var detail=book.createSheet("变化明细");header(book,detail,List.of("物流商","渠道","国家","起重KG","止重KG","类型","字段","原值","新值","差额","涨跌百分比","原文件","工作表","行号","分区"));
+            textRow(summary,1,List.of("物流商","渠道","版本","基线版本","新增","调价","规则变化","重量区间变化","移除","覆盖缩小","未变","状态"));
+            var detail=book.createSheet("变化明细");header(book,detail,List.of("物流商","渠道","国家","起重KG","止重KG","类型","字段","原值","新值","差额","涨跌百分比","影响","原文件","工作表","行号","分区"));
             var issues=book.createSheet("问题清单");header(book,issues,List.of("物流商","渠道","字段","原因","原表行","级别"));
             int sr=2,dr=1,ir=1;
             for(var file:batchPayload.path("fileReports"))if(file.path("status").asText().equals("failed"))textRow(issues,ir++,List.of("",file.path("fileName").asText(),"文件",file.path("message").asText(),"","error"));
@@ -100,12 +100,12 @@ public class LogisticsExportService {
                 var version=(ObjectNode)v.path("version");
                 for(var result:batchPayload.path("results"))if(result.path("versionId").asText().equals(id.toString())&&result.path("status").asText().equals("unchanged")){
                     version=version.deepCopy().put("status","unchanged").put("basePublishedVersionId",id.toString());
-                    version.putObject("summary").put("added",0).put("price",0).put("rule",0).put("removed",0).put("unchanged",version.path("rows").size());
-                    var diffs=version.putArray("diffRows");for(var price:version.path("rows")){var diff=diffs.addObject().put("type","unchanged");diff.set("row",price);diff.set("previous",price);diff.putArray("changes");}
+                    version.putObject("summary").put("added",0).put("price",0).put("rule",0).put("range",0).put("removed",0).put("coverageReduced",0).put("unchanged",version.path("rows").size());
+                    var diffs=version.putArray("diffRows");for(var price:version.path("rows")){var diff=diffs.addObject().put("type","unchanged");diff.set("row",price);diff.set("previous",price);diff.putArray("changes");diff.putArray("kinds").add("unchanged");}
                     v.set("version",version);break;
                 }
                 var totals=version.path("summary");
-                textRow(summary,sr++,List.of(v.path("provider").asText(),v.path("channel").asText(),version.path("versionNumber").asText(),version.path("basePublishedVersionId").asText(),totals.path("added").asText(),totals.path("price").asText(),totals.path("rule").asText(),totals.path("removed").asText(),totals.path("unchanged").asText(),version.path("status").asText()));
+                textRow(summary,sr++,List.of(v.path("provider").asText(),v.path("channel").asText(),version.path("versionNumber").asText(),version.path("basePublishedVersionId").asText(),totals.path("added").asText(),totals.path("price").asText(),totals.path("rule").asText(),totals.path("range").asText(),totals.path("removed").asText(),totals.path("coverageReduced").asText(),totals.path("unchanged").asText(),version.path("status").asText()));
                 for(var diff:version.path("diffRows")) {
                     var changes=diff.path("changes");
                     if(changes.isEmpty()) {
@@ -120,9 +120,29 @@ public class LogisticsExportService {
     }
     private void diffRow(Row r,JsonNode v,JsonNode diff,JsonNode change){
         var source=diff.path("row");int c=0;cell(r,c++,v.path("provider"));cell(r,c++,v.path("channel"));cell(r,c++,source.path("areaName"));
-        cell(r,c++,source.path("weightFromKg"));cell(r,c++,source.path("weightToKg"));cell(r,c++,diff.path("type"));cell(r,c++,change.path("field"));
+        cell(r,c++,source.path("weightFromKg"));cell(r,c++,source.path("weightToKg"));cell(r,c++,mapper.getNodeFactory().textNode(typeLabels(diff)));cell(r,c++,change.path("field"));
         cell(r,c++,change.path("before"));cell(r,c++,change.path("after"));cell(r,c++,change.path("delta"));cell(r,c++,change.path("percentChange"));
+        cell(r,c++,mapper.getNodeFactory().textNode(impact(diff,change)));
         cell(r,c++,v.path("version").path("fileName"));cell(r,c++,source.path("sourceSheet"));cell(r,c++,source.path("sourceRow"));cell(r,c,source.path("zoneName"));
+    }
+    private static String typeLabel(String type){return switch(type){case "added"->"新增";case "price"->"调价";case "rule"->"规则变化";case "range"->"重量区间变化";case "removed"->"移除";case "unchanged"->"无变化";default->type;};}
+    private static String typeLabels(JsonNode diff){if(!diff.path("kinds").isArray()||diff.path("kinds").isEmpty())return typeLabel(diff.path("type").asText());var labels=new ArrayList<String>();for(var kind:diff.path("kinds"))labels.add(typeLabel(kind.asText()));return String.join(" / ",labels);}
+    private static String impact(JsonNode diff,JsonNode change){
+        var type=diff.path("type").asText();if(type.equals("added"))return "新增覆盖范围";if(type.equals("removed"))return "停止覆盖";
+        var kind=change.path("kind").asText();if(kind.equals("range"))return rangeImpact(diff.path("previous"),diff.path("row"));
+        if(kind.equals("price")||change.path("price").asBoolean(false)){
+            var delta=change.path("delta");if(!delta.isNumber())return "价格已变化";
+            var amount=(delta.asDouble()>0?"+":"")+String.format(Locale.ROOT,"%.2f",delta.asDouble());var percent=change.path("percentChange");
+            return amount+(percent.isNumber()?" · "+(percent.asDouble()>0?"+":"")+String.format(Locale.ROOT,"%.2f%%",percent.asDouble()):"");
+        }
+        if(kind.equals("rule"))return "需复核计费规则";if(type.equals("range"))return rangeImpact(diff.path("previous"),diff.path("row"));
+        return type.equals("rule")?"需复核计费规则":"无变化";
+    }
+    private static String rangeImpact(JsonNode before,JsonNode after){
+        if(before.isMissingNode()||before.isNull())return "重量区间边界调整";
+        var from=after.path("weightFromKg").asDouble()-before.path("weightFromKg").asDouble();var to=after.path("weightToKg").asDouble()-before.path("weightToKg").asDouble();
+        if(from<=0&&to>=0&&(from<0||to>0))return "覆盖范围扩大";if(from>=0&&to<=0&&(from>0||to<0))return "覆盖范围缩小";
+        if(from>0&&to>0)return "重量区间整体上移";if(from<0&&to<0)return "重量区间整体下移";return "重量区间边界调整";
     }
     private static void header(Workbook book,Sheet sheet,List<String> labels){
         var style=book.createCellStyle();style.setFillForegroundColor(IndexedColors.DARK_TEAL.getIndex());style.setFillPattern(FillPatternType.SOLID_FOREGROUND);style.setWrapText(true);

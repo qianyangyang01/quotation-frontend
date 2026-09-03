@@ -68,6 +68,50 @@ class LogisticsWorkbookServiceTest {
         assertEquals(20.0, result.path("diffRows").get(0).path("maxPercentChange").asDouble());
     }
 
+    @Test
+    void pairsUnambiguousWeightRangeChangesAndKeepsOtherChangeKinds() {
+        var mapper = JsonMapper.builder().build();
+        var previous = mapper.createArrayNode();
+        previous.addObject().put("areaName", "美国").put("countryCode", "US").put("weightFromKg", 0).put("weightToKg", 1)
+                .put("pricePerKg", 50).put("startWeightKg", 0.05);
+        var next = mapper.createArrayNode();
+        next.addObject().put("areaName", "美国").put("countryCode", "US").put("weightFromKg", 0).put("weightToKg", 2)
+                .put("pricePerKg", 60).put("startWeightKg", 0.1);
+
+        var result = service.compare(next, previous); var diff = result.path("diffRows").get(0);
+
+        assertEquals("range", diff.path("type").asText());
+        assertTrue(diff.path("kinds").toString().contains("range"));
+        assertTrue(diff.path("kinds").toString().contains("price"));
+        assertTrue(diff.path("kinds").toString().contains("rule"));
+        assertEquals(1, result.path("summary").path("range").asInt());
+        assertEquals(1, result.path("summary").path("price").asInt());
+        assertEquals(1, result.path("summary").path("rule").asInt());
+        assertEquals(0, result.path("summary").path("added").asInt());
+        assertEquals(0, result.path("summary").path("removed").asInt());
+        assertEquals(0, result.path("summary").path("coverageReduced").asInt());
+    }
+
+    @Test
+    void marksCoverageReductionAndLeavesSplitRangesAsAdditionsAndRemoval() {
+        var mapper = JsonMapper.builder().build();
+        var previous = mapper.createArrayNode();
+        previous.addObject().put("areaName", "德国").put("countryCode", "DE").put("weightFromKg", 0).put("weightToKg", 2).put("pricePerKg", 50);
+        var reduced = mapper.createArrayNode();
+        reduced.addObject().put("areaName", "德国").put("countryCode", "DE").put("weightFromKg", 0.5).put("weightToKg", 1.5).put("pricePerKg", 50);
+        var reduction = service.compare(reduced, previous);
+        assertEquals("range", reduction.path("diffRows").get(0).path("type").asText());
+        assertEquals(1, reduction.path("summary").path("coverageReduced").asInt());
+
+        var split = mapper.createArrayNode();
+        split.addObject().put("areaName", "德国").put("countryCode", "DE").put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 50);
+        split.addObject().put("areaName", "德国").put("countryCode", "DE").put("weightFromKg", 1).put("weightToKg", 2).put("pricePerKg", 50);
+        var ambiguous = service.compare(split, previous);
+        assertEquals(0, ambiguous.path("summary").path("range").asInt());
+        assertEquals(2, ambiguous.path("summary").path("added").asInt());
+        assertEquals(1, ambiguous.path("summary").path("removed").asInt());
+    }
+
     private MockMultipartFile workbook(boolean valid) throws Exception {
         try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("物流价格"); var header = sheet.createRow(0);
