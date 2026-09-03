@@ -5,6 +5,7 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.*;
 
@@ -34,6 +35,9 @@ public class LogisticsWorkbookService {
             "pricePerKg", "运费单价", "firstWeightPrice", "首重价", "nextWeightPrice", "续重单价",
             "intervalPrice", "区间运费", "registrationFee", "挂号费", "surcharge", "附加费",
             "fuelSurchargeRate", "燃油附加费率", "linehaulPerKg", "干线费每KG");
+    private static final Map<String, String> RANGE_FIELDS = Map.of(
+            "weightFromKg", "起始重量", "weightToKg", "截止重量",
+            "weightFromInclusive", "下界包含", "weightToInclusive", "上界包含");
     private static final Map<String, String> RULE_FIELDS = Map.ofEntries(
             Map.entry("etaMinDays", "时效最早天数"), Map.entry("etaMaxDays", "时效最晚天数"),
             Map.entry("prohibitedMarks", "禁运商品"), Map.entry("allowedMarks", "允许商品标记"),
@@ -44,7 +48,7 @@ public class LogisticsWorkbookService {
             Map.entry("maxSideAreaCm2", "最大侧面积"), Map.entry("startWeightKg", "起重"),
             Map.entry("minChargeWeightKg", "最小计重"), Map.entry("firstWeightKg", "首重"),
             Map.entry("nextWeightKg", "续重"), Map.entry("specialGoodsContent", "特殊品含量"),
-            Map.entry("volumetric", "是否计抛"), Map.entry("weightFromInclusive", "下界包含"), Map.entry("weightToInclusive", "上界包含"), Map.entry("currency", "币种"), Map.entry("pricingModel", "计费方式"), Map.entry("prohibitGeneralCargo", "是否禁止普货"),
+            Map.entry("volumetric", "是否计抛"), Map.entry("currency", "币种"), Map.entry("pricingModel", "计费方式"), Map.entry("prohibitGeneralCargo", "是否禁止普货"),
             Map.entry("phoneRequired", "电话是否必需"), Map.entry("zoneExclude", "排除"),
             Map.entry("billingStepKg", "计费进位KG"), Map.entry("originRegion", "发货区域"),
             Map.entry("notes", "规则备注"), Map.entry("pendingReason", "待适配原因"), Map.entry("quoteReady", "自动报价可用性"));
@@ -102,41 +106,80 @@ public class LogisticsWorkbookService {
     private static BigDecimal number(Row row, int column, int source, String field, FormulaEvaluator evaluator, ArrayNode issues) { var cell = row == null ? null : row.getCell(column); if (cell == null || cell.getCellType() == CellType.BLANK) return BigDecimal.ZERO; try { if (cell.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); if (cell.getCellType() == CellType.FORMULA) { try { var value = evaluator.evaluate(cell); if (value != null && value.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(value.getNumberValue()); } catch (RuntimeException ignored) { if (cell.getCachedFormulaResultType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); } } var raw = text(row, column, evaluator).replace(",", "").replace("¥", "").replace("￥", "").replace("\u00A0", "").replace("\u202F", "").replaceAll("(?i)CNY|RMB", "").replaceAll("\\s+", ""); return raw.isBlank() ? BigDecimal.ZERO : new BigDecimal(raw); } catch (Exception exception) { issue(issues, source, field, "不是有效数字", "error"); return BigDecimal.ZERO; } }
     private static void putNumber(ObjectNode row, String key, BigDecimal value) { row.put(key, value.stripTrailingZeros()); }
     public ObjectNode compare(ArrayNode rows, ArrayNode previousRows) {
-        var previous = new LinkedHashMap<String, tools.jackson.databind.JsonNode>();
+        var previous = new LinkedHashMap<String, JsonNode>();
         previousRows.forEach(row -> previous.put(row.path("rowKey").asText(identity(row)), row));
         var diffRows = mapper.createArrayNode();
-        var summary = mapper.createObjectNode().put("added", 0).put("price", 0).put("rule", 0).put("removed", 0).put("unchanged", 0).put("highRisk", 0);
+        var summary = mapper.createObjectNode().put("added", 0).put("price", 0).put("rule", 0).put("range", 0)
+                .put("removed", 0).put("unchanged", 0).put("highRisk", 0).put("coverageReduced", 0);
+        var unmatchedNext = new LinkedHashMap<String, JsonNode>();
         for (var row : rows) {
             var key = row.path("rowKey").asText(identity(row));
             var before = previous.remove(key);
-            var diff = diffRows.addObject().put("key", key); diff.set("row", row); var changes = diff.putArray("changes");
-            if (before == null) {
-                diff.put("type", "added").put("risk", false).putNull("maxPercentChange"); increment(summary, "added"); continue;
-            }
-            diff.set("previous", before); double maxPercent = 0; boolean hasPercent = false; int priceChanges = 0;
-            for (var field : PRICE_FIELDS.entrySet()) if (!same(before.path(field.getKey()), row.path(field.getKey()))) {
-                var change = changes.addObject().put("field", field.getValue()).put("price", true);
-                copyValue(change, "before", before.path(field.getKey())); copyValue(change, "after", row.path(field.getKey()));
-                var oldValue = before.path(field.getKey()).asDouble(); var nextValue = row.path(field.getKey()).asDouble();
-                change.put("delta",row.path(field.getKey()).decimalValue().subtract(before.path(field.getKey()).decimalValue()));
-                if(oldValue!=0) {
-                    var percent=(nextValue-oldValue)/oldValue*100;
-                    change.put("percentChange",percent);maxPercent=Math.max(maxPercent,Math.abs(percent));hasPercent=true;
-                } else change.putNull("percentChange");
-                priceChanges++;
-            }
-            var ruleChanges = 0;
-            for (var field : RULE_FIELDS.entrySet()) if (!same(before.path(field.getKey()), row.path(field.getKey()))) {
-                var change = changes.addObject().put("field", field.getValue()).put("price", false);
-                copyValue(change, "before", before.path(field.getKey())); copyValue(change, "after", row.path(field.getKey())); ruleChanges++;
-            }
-            var type = priceChanges > 0 ? "price" : ruleChanges > 0 ? "rule" : "unchanged";
-            var risk = hasPercent && maxPercent > 10;
-            diff.put("type", type).put("risk", risk); if (hasPercent) diff.put("maxPercentChange", maxPercent); else diff.putNull("maxPercentChange");
-            increment(summary, type); if (risk) increment(summary, "highRisk");
+            if (before == null) unmatchedNext.put(key, row); else comparedDiff(diffRows, summary, key, row, before);
         }
-        previous.forEach((key, row) -> { var diff = diffRows.addObject().put("key", key).put("type", "removed").put("risk", false); diff.set("row", row); diff.set("previous", row); diff.putArray("changes"); diff.putNull("maxPercentChange"); increment(summary, "removed"); });
+        var pairedNext = new HashSet<String>(); var pairedPrevious = new HashSet<String>();
+        var nextGroups = rangeGroups(unmatchedNext.values()); var previousGroups = rangeGroups(previous.values());
+        for (var entry : nextGroups.entrySet()) {
+            var oldRows = previousGroups.get(entry.getKey()); var newRows = entry.getValue();
+            if (oldRows == null || oldRows.isEmpty() || oldRows.size() != newRows.size()) continue;
+            oldRows.sort(RANGE_ORDER); newRows.sort(RANGE_ORDER);
+            for (int index = 0; index < newRows.size(); index++) {
+                var row = newRows.get(index); var before = oldRows.get(index);
+                if (!rangeChanged(before, row)) continue;
+                var nextKey = row.path("rowKey").asText(identity(row)); var previousKey = before.path("rowKey").asText(identity(before));
+                comparedDiff(diffRows, summary, nextKey, row, before);
+                pairedNext.add(nextKey); pairedPrevious.add(previousKey);
+            }
+        }
+        unmatchedNext.forEach((key, row) -> { if (!pairedNext.contains(key)) simpleDiff(diffRows, summary, key, row, "added"); });
+        previous.forEach((key, row) -> { if (!pairedPrevious.contains(key)) simpleDiff(diffRows, summary, key, row, "removed"); });
         return mapper.createObjectNode().set("diffRows", diffRows).set("summary", summary);
+    }
+    private static final Comparator<JsonNode> RANGE_ORDER = Comparator.comparingDouble((JsonNode row)->row.path("weightFromKg").asDouble())
+            .thenComparingDouble(row->row.path("weightToKg").asDouble());
+    private static Map<String,List<JsonNode>> rangeGroups(Collection<JsonNode> rows) {
+        var groups=new LinkedHashMap<String,List<JsonNode>>();
+        for(var row:rows)groups.computeIfAbsent(rangeIdentity(row),ignored->new ArrayList<>()).add(row);
+        return groups;
+    }
+    private void simpleDiff(ArrayNode diffs,ObjectNode summary,String key,JsonNode row,String type) {
+        var diff=diffs.addObject().put("key",key).put("type",type).put("risk",false);diff.set("row",row);
+        if(type.equals("removed"))diff.set("previous",row);diff.putArray("changes");diff.putArray("kinds").add(type);diff.putNull("maxPercentChange");increment(summary,type);
+    }
+    private void comparedDiff(ArrayNode diffs,ObjectNode summary,String key,JsonNode row,JsonNode before) {
+        var diff=diffs.addObject().put("key",key);diff.set("row",row);diff.set("previous",before);var changes=diff.putArray("changes");
+        var kinds=new LinkedHashSet<String>();double maxPercent=0;boolean hasPercent=false;
+        for(var field:RANGE_FIELDS.entrySet())if(!same(before.path(field.getKey()),row.path(field.getKey()))){
+            var change=changes.addObject().put("field",field.getValue()).put("kind","range").put("price",false);
+            copyValue(change,"before",before.path(field.getKey()));copyValue(change,"after",row.path(field.getKey()));kinds.add("range");
+        }
+        for(var field:PRICE_FIELDS.entrySet())if(!same(before.path(field.getKey()),row.path(field.getKey()))){
+            var change=changes.addObject().put("field",field.getValue()).put("kind","price").put("price",true);
+            copyValue(change,"before",before.path(field.getKey()));copyValue(change,"after",row.path(field.getKey()));
+            var oldValue=before.path(field.getKey()).asDouble();var nextValue=row.path(field.getKey()).asDouble();
+            change.put("delta",BigDecimal.valueOf(nextValue).subtract(BigDecimal.valueOf(oldValue)));
+            if(oldValue!=0){var percent=(nextValue-oldValue)/oldValue*100;change.put("percentChange",percent);maxPercent=Math.max(maxPercent,Math.abs(percent));hasPercent=true;}else change.putNull("percentChange");
+            kinds.add("price");
+        }
+        for(var field:RULE_FIELDS.entrySet())if(!same(before.path(field.getKey()),row.path(field.getKey()))){
+            var change=changes.addObject().put("field",field.getValue()).put("kind","rule").put("price",false);
+            copyValue(change,"before",before.path(field.getKey()));copyValue(change,"after",row.path(field.getKey()));kinds.add("rule");
+        }
+        var kindArray=diff.putArray("kinds");kinds.forEach(kindArray::add);
+        var type=kinds.contains("range")?"range":kinds.contains("price")?"price":kinds.contains("rule")?"rule":"unchanged";
+        var reduced=kinds.contains("range")&&coverageReduced(before,row);var priceRisk=hasPercent&&maxPercent>10;
+        diff.put("type",type).put("risk",priceRisk||reduced);if(hasPercent)diff.put("maxPercentChange",maxPercent);else diff.putNull("maxPercentChange");
+        if(kinds.isEmpty()){kindArray.add("unchanged");increment(summary,"unchanged");}
+        else for(var kind:kinds)increment(summary,kind);
+        if(priceRisk)increment(summary,"highRisk");if(reduced)increment(summary,"coverageReduced");
+    }
+    private static boolean rangeChanged(JsonNode before,JsonNode row){for(var field:RANGE_FIELDS.keySet())if(!same(before.path(field),row.path(field)))return true;return false;}
+    private static boolean coverageReduced(JsonNode before,JsonNode row){
+        var oldFrom=before.path("weightFromKg").asDouble();var nextFrom=row.path("weightFromKg").asDouble();
+        var oldTo=before.path("weightToKg").asDouble();var nextTo=row.path("weightToKg").asDouble();
+        var lowerLost=nextFrom>oldFrom+0.000000001||(Math.abs(nextFrom-oldFrom)<0.000000001&&before.path("weightFromInclusive").asBoolean(false)&&!row.path("weightFromInclusive").asBoolean(false));
+        var upperLost=nextTo<oldTo-0.000000001||(Math.abs(nextTo-oldTo)<0.000000001&&before.path("weightToInclusive").asBoolean(true)&&!row.path("weightToInclusive").asBoolean(true));
+        return lowerLost||upperLost;
     }
     private static void increment(ObjectNode summary, String field) { summary.put(field, summary.path(field).asInt() + 1); }
     private static boolean same(tools.jackson.databind.JsonNode left, tools.jackson.databind.JsonNode right) {
@@ -146,7 +189,8 @@ public class LogisticsWorkbookService {
     private static void copyValue(ObjectNode target, String field, tools.jackson.databind.JsonNode value) {
         if (value.isBoolean()) target.put(field, value.asBoolean()); else if (value.isNumber()) target.put(field, value.decimalValue()); else target.put(field, value.asText());
     }
-    private static String identity(tools.jackson.databind.JsonNode row) { return String.join("|", row.path("countryCode").asText(), row.path("areaName").asText(), row.path("zoneName").asText(), row.path("zonePostalPrefix").asText(), row.path("zonePostalCode").asText(), row.path("zoneCity").asText(), row.path("zoneState").asText(), row.path("weightFromKg").asText(), row.path("weightToKg").asText()).toLowerCase(Locale.ROOT); }
+    private static String identity(JsonNode row) { return rangeIdentity(row)+"|"+row.path("weightFromKg").asText()+"|"+row.path("weightToKg").asText(); }
+    private static String rangeIdentity(JsonNode row) { return String.join("|", row.path("countryCode").asText(), row.path("areaName").asText(), row.path("zoneName").asText(), row.path("zonePostalPrefix").asText(), row.path("zonePostalCode").asText(), row.path("zoneCity").asText(), row.path("zoneState").asText()).toLowerCase(Locale.ROOT); }
     private static boolean flag(String value) { return value.matches("(?i)^(是|1|true|yes)$"); }
     private static String text(Row row, int column, FormulaEvaluator evaluator) {
         var cell = row == null ? null : row.getCell(column); if (cell == null) return "";

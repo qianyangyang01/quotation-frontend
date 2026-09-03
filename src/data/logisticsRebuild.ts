@@ -11,7 +11,9 @@ export type Price = {
   providerName?: string; channelName?: string; versionId?: string; versionNumber?: number; quoteReady?: boolean
 }
 export type Channel = { id: string; providerId: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean }
-export type Diff = { key: string; type: string; row: Price; previous?: Price; changes: Array<{ field: string; before: unknown; after: unknown; delta?: number; percentChange?: number | null }> }
+export type DiffKind = 'added' | 'price' | 'rule' | 'range' | 'removed' | 'unchanged'
+export type DiffChange = { field: string; kind?: 'price' | 'rule' | 'range'; price?: boolean; before: unknown; after: unknown; delta?: number; percentChange?: number | null }
+export type Diff = { key: string; type: DiffKind | string; kinds?: DiffKind[]; row: Price; previous?: Price; changes: DiffChange[] }
 export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; quoteReady?: boolean; errors: number; rowCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; publishedAt?: string }
 export type Workspace = { dataset: Dataset; providers: Array<{ id: string; name: string }>; channels: Channel[]; versions: Version[] }
 export type BatchResult = { channelId?: string; channelName: string; providerName: string; versionId?: string; status: string; message?: string; errors?: number; quoteReady?: boolean; summary?: Record<string, number>; issues?: SourceIssue[] }
@@ -65,6 +67,37 @@ export function completedBatchStage(batch: Pick<Batch, 'status' | 'payload'>) {
   if (batch.payload.results.some(r => r.status === 'blocked')) return '存在阻断，请核对'
   if (batch.payload.results.some(r => r.status === 'draft')) return '待审核'
   return '无需审核'
+}
+const diffKindOrder: DiffKind[] = ['range', 'price', 'rule', 'added', 'removed', 'unchanged']
+export function diffKinds(diff: Diff): DiffKind[] {
+  const supplied = Array.isArray(diff.kinds) ? diff.kinds.filter(kind => diffKindOrder.includes(kind)) : []
+  if (supplied.length) return diffKindOrder.filter(kind => supplied.includes(kind))
+  return diffKindOrder.includes(diff.type as DiffKind) ? [diff.type as DiffKind] : []
+}
+export function aggregateChangeSummary(items: Array<{ summary?: Record<string, number> }>) {
+  return items.reduce((total, item) => {
+    for (const key of ['added', 'price', 'rule', 'range', 'removed'] as const) total[key] += Number(item.summary?.[key] || 0)
+    total.coverageReduced += Number(item.summary?.coverageReduced || 0)
+    return total
+  }, { added: 0, price: 0, rule: 0, range: 0, removed: 0, coverageReduced: 0 })
+}
+export function rangeImpact(diff: Diff) {
+  const before = diff.previous, after = diff.row
+  if (!before) return '重量区间边界调整'
+  const fromDelta = Number(after.weightFromKg) - Number(before.weightFromKg)
+  const toDelta = Number(after.weightToKg) - Number(before.weightToKg)
+  if (fromDelta <= 0 && toDelta >= 0 && (fromDelta < 0 || toDelta > 0)) return '覆盖范围扩大'
+  if (fromDelta >= 0 && toDelta <= 0 && (fromDelta > 0 || toDelta < 0)) return '覆盖范围缩小'
+  if (fromDelta > 0 && toDelta > 0) return '重量区间整体上移'
+  if (fromDelta < 0 && toDelta < 0) return '重量区间整体下移'
+  return '重量区间边界调整'
+}
+export function changeImpact(change: DiffChange, currency = 'CNY') {
+  if (change.kind !== 'price' && !change.price) return change.kind === 'range' ? '重量边界变化' : '需复核计费规则'
+  if (typeof change.delta !== 'number' || !Number.isFinite(change.delta)) return '价格已变化'
+  const amount = `${change.delta > 0 ? '+' : ''}${change.delta.toFixed(2)}`
+  const percent = typeof change.percentChange === 'number' && Number.isFinite(change.percentChange) ? ` · ${change.percentChange > 0 ? '+' : ''}${change.percentChange.toFixed(2)}%` : ''
+  return `${currency} ${amount}${percent}`
 }
 export function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—' }
 export function shown(value: unknown) { return value == null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value) }
