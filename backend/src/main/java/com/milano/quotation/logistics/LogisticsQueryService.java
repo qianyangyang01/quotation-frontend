@@ -266,7 +266,7 @@ public class LogisticsQueryService {
                 .distinct()
                 .toList();
         params.put("countries", mapper.valueToTree(countryVariants).toString());
-        var sql = new StringBuilder("""
+        var metadataSql = new StringBuilder("""
                 select c.id::text as channel_id, c.rule_id, c.code as channel_code,
                   c.payload::text as channel_payload, p.payload::text as provider_payload,
                   jsonb_build_object(
@@ -275,7 +275,22 @@ public class LogisticsQueryService {
                     'publishedBy',coalesce(v.workspace_payload->>'publishedBy',v.payload->>'publishedBy'),
                     'legacyBillingCompatible',exists(select 1 from logistics_billing_acceptance legacy
                       where legacy.version_id=v.id and legacy.kind='legacy'
-                      and legacy.rows_fingerprint=v.rows_fingerprint))::text as version_payload,
+                      and legacy.rows_fingerprint=v.rows_fingerprint))::text as version_payload
+                from logistics_channel c
+                join logistics_provider p on p.id=c.provider_id
+                join logistics_version v on v.id=c.current_version_id and v.status='published'
+                where coalesce((p.payload->>'enabled')::boolean,true)=true
+                  and coalesce((c.payload->>'enabled')::boolean,true)=true
+                  and c.archived_at is null
+                  and c.dataset_id=logistics_active_dataset()
+                  and exists(select 1 from logistics_billing_acceptance accepted
+                    where accepted.version_id=v.id
+                    and accepted.rows_fingerprint=v.rows_fingerprint
+                    and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
+                      or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                """);
+        var rowSql = new StringBuilder("""
+                select c.id::text as channel_id,
                   (item - array['notes','rawValues','normalizationNote','sourceFile','sourceRow','sourceSheet',
                     'sourceCountry','sourceCountryCode','sourceWeightRange','sourceCode','sourceOriginRegion',
                     'originRegion','rowKey'])::text as row_payload
@@ -283,8 +298,8 @@ public class LogisticsQueryService {
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 cross join lateral jsonb_path_query(
-                  case when jsonb_typeof(v.payload->'rows')='array' then v.payload else '{"rows":[]}'::jsonb end,
-                  '$.rows[*] ? (@.countryCode == $countries[*] || @.areaName == $countries[*])',
+                  coalesce(v.payload->'rows','[]'::jsonb),
+                  '$[*] ? (@.countryCode == $countries[*] || @.areaName == $countries[*])',
                   jsonb_build_object('countries',cast(:countries as jsonb))) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
@@ -298,49 +313,59 @@ public class LogisticsQueryService {
                 """);
         if (!normalizedChannels.isEmpty()) {
             params.put("channels", mapper.valueToTree(normalizedChannels.stream().map(value -> value.toLowerCase(Locale.ROOT)).toList()).toString());
-            sql.append(" and lower(c.code) in (select value from jsonb_array_elements_text(cast(:channels as jsonb)) requested(value))");
+            var channelFilter = " and lower(c.code) in (select value from jsonb_array_elements_text(cast(:channels as jsonb)) requested(value))";
+            metadataSql.append(channelFilter);
+            rowSql.append(channelFilter);
         }
-        sql.append(" order by c.rule_id, coalesce(item->>'countryCode',''), coalesce((item->>'weightFromKg')::numeric,0)");
+        metadataSql.append(" order by c.rule_id");
+        rowSql.append(" order by c.rule_id, coalesce(item->>'countryCode',''), coalesce((item->>'weightFromKg')::numeric,0)");
 
         var grouped = new LinkedHashMap<String, ObjectNode>();
-        jdbc.sql(sql.toString()).params(params).query((rs, rowNum) -> {
+        var metadataParams = new LinkedHashMap<>(params);
+        metadataParams.remove("countries");
+        jdbc.sql(metadataSql.toString()).params(metadataParams).query((rs, rowNum) -> {
+            var channelId = rs.getString("channel_id");
+            var channel = json(rsString(rs, "channel_payload"));
+            var provider = json(rsString(rs, "provider_payload"));
+            var version = json(rsString(rs, "version_payload"));
+            var value = mapper.createObjectNode();
+            value.put("id", rsInt(rs, "rule_id"));
+            value.put("logisticsChannelId",channelId);
+            value.put("logisticsVersionId",version.path("id").asText());
+            value.put("billingVerified",!version.path("legacyBillingCompatible").asBoolean());
+            value.put("name", channel.path("name").asText(rsString(rs, "channel_code")));
+            value.put("englishName", rsString(rs, "channel_code").toLowerCase(Locale.ROOT));
+            value.put("type", channel.path("type").asText("专线"));
+            value.put("currency", "CNY");
+            value.put("published", "发布");
+            value.put("status", "启用");
+            value.put("dates", channel.path("createdAt").asText("") + "|" + channel.path("updatedAt").asText(""));
+            value.put("users", version.path("importedBy").asText("") + "|" + version.path("publishedBy").asText(""));
+            value.putArray("relations").addObject()
+                    .put("carrier", provider.path("name").asText(""))
+                    .put("channel", channel.path("name").asText(""))
+                    .put("channelCode", rsString(rs, "channel_code"))
+                    .put("discounts", "-\n-");
+            value.put("phoneRequired", false);
+            value.put("areaCount", 0);
+            value.put("priceRowCount", 0);
+            value.putArray("prices");
+            grouped.put(channelId, value);
+            return channelId;
+        }).list();
+        jdbc.sql(rowSql.toString()).params(params).query((rs, rowNum) -> {
             var row = json(rs.getString("row_payload"));
             if (!LogisticsBillingEngine.available(row)) return null;
             if (!eligible(row, attribute)) return null;
             row = quotePriceRow(row);
             var channelId = rs.getString("channel_id");
-            var rule = grouped.computeIfAbsent(channelId, ignored -> {
-                var channel = json(rsString(rs, "channel_payload"));
-                var provider = json(rsString(rs, "provider_payload"));
-                var version = json(rsString(rs, "version_payload"));
-                var value = mapper.createObjectNode();
-                value.put("id", rsInt(rs, "rule_id"));
-                value.put("logisticsChannelId",channelId);
-                value.put("logisticsVersionId",version.path("id").asText());
-                value.put("billingVerified",!version.path("legacyBillingCompatible").asBoolean());
-                value.put("name", channel.path("name").asText(rsString(rs, "channel_code")));
-                value.put("englishName", rsString(rs, "channel_code").toLowerCase(Locale.ROOT));
-                value.put("type", channel.path("type").asText("专线"));
-                value.put("currency", "CNY");
-                value.put("published", "发布");
-                value.put("status", "启用");
-                value.put("dates", channel.path("createdAt").asText("") + "|" + channel.path("updatedAt").asText(""));
-                value.put("users", version.path("importedBy").asText("") + "|" + version.path("publishedBy").asText(""));
-                value.putArray("relations").addObject()
-                        .put("carrier", provider.path("name").asText(""))
-                        .put("channel", channel.path("name").asText(""))
-                        .put("channelCode", rsString(rs, "channel_code"))
-                        .put("discounts", "-\n-");
-                value.put("phoneRequired", false);
-                value.put("areaCount", 0);
-                value.put("priceRowCount", 0);
-                value.putArray("prices");
-                return value;
-            });
+            var rule = grouped.get(channelId);
+            if (rule == null) return null;
             ((ArrayNode) rule.path("prices")).add(row);
             if (row.path("phoneRequired").asBoolean(false)) rule.put("phoneRequired", true);
             return channelId;
         }).list();
+        grouped.values().removeIf(rule -> rule.path("prices").isEmpty());
         grouped.values().forEach(rule -> {
             var prices = (ArrayNode) rule.path("prices");
             var areas = new java.util.HashSet<String>();
