@@ -161,7 +161,7 @@ class FlywayPostgresIntegrationTest {
         seedSupplierRecordBeforeStructuredScoring();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(9, finalMigrations.migrationsExecuted);
+        assertEquals(10, finalMigrations.migrationsExecuted);
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "24".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "25".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "26".equals(item.version)));

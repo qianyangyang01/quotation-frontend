@@ -47,10 +47,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 
 export interface UploadProgress { loaded:number;total:number;percent:number;bytesPerSecond:number }
-export function uploadForm<T>(path:string,form:FormData,onProgress?:(progress:UploadProgress)=>void){
+export function uploadForm<T>(path:string,form:FormData,onProgress?:(progress:UploadProgress)=>void,extraHeaders:HeadersInit={}){
   const xhr=new XMLHttpRequest();let cancelled=false;let startedAt=performance.now()
   const promise=(async()=>{const token=await ensureCsrf();if(cancelled)throw new DOMException('上传已取消','AbortError');return await new Promise<T>((resolve,reject)=>{
-    xhr.open('POST',`${API_BASE}${path}`);xhr.withCredentials=true;xhr.setRequestHeader('Accept','application/json');xhr.setRequestHeader('X-Request-Id',crypto.randomUUID());xhr.setRequestHeader(token.headerName,token.token);startedAt=performance.now()
+    xhr.open('POST',`${API_BASE}${path}`);xhr.withCredentials=true;const headers=new Headers(extraHeaders);headers.set('Accept','application/json');headers.set('X-Request-Id',crypto.randomUUID());headers.set(token.headerName,token.token);headers.forEach((value,name)=>xhr.setRequestHeader(name,value));startedAt=performance.now()
     xhr.upload.onprogress=event=>{const elapsed=Math.max((performance.now()-startedAt)/1000,0.001);const total=event.lengthComputable?event.total:0;onProgress?.({loaded:event.loaded,total,percent:total?Math.min(100,Math.round(event.loaded*100/total)):0,bytesPerSecond:event.loaded/elapsed})}
     xhr.onerror=()=>reject(new ApiError('网络连接中断，文件未上传完成',xhr.status||0,'UPLOAD_NETWORK_ERROR',xhr.getResponseHeader('X-Request-Id')||'unknown'))
     xhr.onabort=()=>reject(new DOMException('上传已取消','AbortError'))

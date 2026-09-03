@@ -34,9 +34,12 @@ public class LogisticsRebuildController {
     private final AuditService audit;
     private final LogisticsDatasetGuard guard;
     private final LogisticsBillingAcceptanceService billing;
+    private final LogisticsDraftReviewService draftReview;
+    private final LogisticsBatchPublishService batchPublish;
     public LogisticsRebuildController(LogisticsDatasetService datasets,LogisticsImportService imports,LogisticsExportService exports,
-            LogisticsService logistics,LogisticsVersionRepository versions,AssetStorageService storage,IdempotencyService idempotency,AuditService audit,LogisticsDatasetGuard guard,LogisticsBillingAcceptanceService billing){
+            LogisticsService logistics,LogisticsVersionRepository versions,AssetStorageService storage,IdempotencyService idempotency,AuditService audit,LogisticsDatasetGuard guard,LogisticsBillingAcceptanceService billing,LogisticsDraftReviewService draftReview,LogisticsBatchPublishService batchPublish){
         this.billing=billing;
+        this.draftReview=draftReview;this.batchPublish=batchPublish;
         this.guard=guard;
         this.datasets=datasets;this.imports=imports;this.exports=exports;this.logistics=logistics;this.versions=versions;this.storage=storage;this.idempotency=idempotency;this.audit=audit;
     }
@@ -106,6 +109,7 @@ public class LogisticsRebuildController {
     @GetMapping("/imports/{id}/files/{index}")
     public ResponseEntity<InputStreamResource> original(@PathVariable UUID id,@PathVariable int index){
         var files=imports.get(id).path("payload").path("files");if(index<0||index>=files.size())throw AppException.notFound("原文件不存在");var file=files.get(index);
+        if(!imports.sourceAvailable(id,index))throw AppException.notFound("原文件已按清理策略删除；仍可查看文件名、SHA-256、来源位置和解析证据");
         audit.record("logistics.source-download","logistics-import",id.toString(),"success",Map.of("fileIndex",index));
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).header(HttpHeaders.CONTENT_DISPOSITION,attachment(file.path("originalName").asText(file.path("name").asText())))
                 .body(new InputStreamResource(storage.openRaw(file.path("objectKey").asText())));
@@ -118,7 +122,17 @@ public class LogisticsRebuildController {
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.CONTENT_DISPOSITION,attachment("原表解析证据.json"))
                 .body(new InputStreamResource(storage.openRaw(source.path("objectKey").asText())));
     }
-    @GetMapping("/versions/{id}") public ApiResponse<?> version(@PathVariable UUID id){var v=versions.findById(id).orElseThrow(()->AppException.notFound("物流版本不存在"));return ApiResponse.ok(((ObjectNode)v.payload.deepCopy()).put("quoteReady",guard.quoteReady(id)));}
+    @GetMapping("/versions/{id}") public ApiResponse<?> version(@PathVariable UUID id){var result=draftReview.load(id,false);result.put("quoteReady",guard.quoteReady(id));return ApiResponse.ok(result);}
+    @PatchMapping("/versions/{id}/rows")
+    public ApiResponse<?> patchRows(@PathVariable UUID id,@RequestBody ObjectNode input,Authentication auth){
+        var result=draftReview.patch(id,input,actor(auth));audit.record("logistics.draft-correct","logistics-version",id.toString(),"success",Map.of("changeCount",input.path("changes").size()));return ApiResponse.ok(result);
+    }
+    @PostMapping("/imports/{id}/publish-ready")
+    public ApiResponse<?> publishReady(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
+        var actor=actor(auth);input.put("batchId",id.toString());var prior=idempotency.existing(actor,"logistics-batch-publish-ready",key,input);if(prior.isPresent())return ApiResponse.ok(prior.get());
+        var result=batchPublish.publishReady(id,input,actor);idempotency.save(actor,"logistics-batch-publish-ready",key,input,result);
+        audit.record("logistics.batch-publish-ready","logistics-import",id.toString(),"success",Map.of("published",result.path("publishedCount").asInt(),"skipped",result.path("skippedCount").asInt(),"failed",result.path("failedCount").asInt()));return ApiResponse.ok(result);
+    }
     @PostMapping("/channels/{channel}/versions/{version}/review") @Transactional
     public ApiResponse<?> review(@PathVariable UUID channel,@PathVariable UUID version,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
         input.put("channelId",channel.toString()).put("versionId",version.toString());var actor=actor(auth);

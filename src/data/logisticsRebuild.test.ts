@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { calculateLogisticsFee, findPriceRow, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
-import { aggregateChangeSummary, changeImpact, completedBatchStage, diffKinds, rangeImpact, weightLabel, type Batch, type Diff } from './logisticsRebuild'
+import { aggregateChangeSummary, batchComparisonSummary, changeImpact, completedBatchStage, diffKinds, formatTransferBytes, logisticsUploadError, rangeImpact, weightLabel, type Batch, type Diff } from './logisticsRebuild'
 
 const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): LogisticsRule => ({
   id: 9, name: '边界测试', englishName: '', type: '专线', currency: 'CNY', published: '', status: '启用', dates: '', users: '',
@@ -16,7 +16,7 @@ describe('rebuild pricing safety', () => {
     expect(completedBatchStage(batch(['blocked']))).toBe('存在阻断，请核对')
     expect(completedBatchStage(batch(['draft', 'blocked']))).toBe('存在阻断，请核对')
     const failedFile = batch(['unchanged']); failedFile.payload.fileReports = [{ fileName: '损坏.xlsx', status: 'failed' }]
-    expect(completedBatchStage(failedFile)).toBe('存在文件解析失败，请核对')
+    expect(completedBatchStage(failedFile)).toBe('存在文件解析失败或新模板待适配，请核对')
   })
   it('preserves the confirmed 200g/201g boundary through API normalization', () => {
     const rule = makeRule([{ ...row, weightFromKg: 0, weightToKg: 0.2, pricePerKg: 10 }, { ...row, weightFromKg: 0.201, weightToKg: 0.5, weightFromInclusive: true, pricePerKg: 20 }])
@@ -55,5 +55,21 @@ describe('rebuild pricing safety', () => {
     expect(rangeImpact(base)).toBe('覆盖范围扩大')
     expect(rangeImpact({ ...base, previous: { ...row, weightFromKg: 0, weightToKg: 0.2 }, row: { ...row, weightFromKg: 0.05, weightToKg: 0.15 } })).toBe('覆盖范围缩小')
     expect(changeImpact({ field: '运费单价', kind: 'price', before: 44, after: 49, delta: 5, percentChange: 11.3636 })).toBe('CNY +5.00 · +11.36%')
+  })
+  it('explains initial imports and suspicious full replacement summaries', () => {
+    expect(batchComparisonSummary({ providerName: '递四方', channelName: 'OH', status: 'draft', basePublishedVersionId: '', priceRows: 38, summary: { added: 38 } })).toContain('初次导入 38 条价格')
+    expect(batchComparisonSummary({ providerName: '递四方', channelName: 'QC', status: 'draft', basePublishedVersionId: 'old', priceRows: 70, summary: { added: 70, removed: 70, price: 0, rule: 0, range: 0 } })).toContain('没有匹配上')
+  })
+  it('accepts a larger multi-file batch while enforcing safe per-file and batch limits', () => {
+    const file = (name: string, size: number) => ({ name, size }) as File
+    expect(logisticsUploadError(Array.from({ length: 4 }, (_, index) => file(`物流商${index}.xlsx`, 90 * 1024 * 1024)))).toBe('')
+    expect(logisticsUploadError([file('过大.xlsx', 101 * 1024 * 1024)])).toBe('单个物流文件不能超过100MB')
+    expect(logisticsUploadError(Array.from({ length: 6 }, (_, index) => file(`物流商${index}.xlsx`, 90 * 1024 * 1024)))).toBe('同一批次文件总大小不能超过500MB')
+    expect(logisticsUploadError([file('错误.pdf', 1024)])).toContain('.xls')
+  })
+  it('formats upload sizes and speeds for progress display', () => {
+    expect(formatTransferBytes(512)).toBe('512 B')
+    expect(formatTransferBytes(1.5 * 1024 * 1024)).toBe('1.5 MB')
+    expect(formatTransferBytes(2 * 1024 * 1024 * 1024)).toBe('2.00 GB')
   })
 })

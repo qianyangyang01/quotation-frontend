@@ -106,19 +106,21 @@ public class LogisticsWorkbookService {
     private static BigDecimal number(Row row, int column, int source, String field, FormulaEvaluator evaluator, ArrayNode issues) { var cell = row == null ? null : row.getCell(column); if (cell == null || cell.getCellType() == CellType.BLANK) return BigDecimal.ZERO; try { if (cell.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); if (cell.getCellType() == CellType.FORMULA) { try { var value = evaluator.evaluate(cell); if (value != null && value.getCellType() == CellType.NUMERIC) return BigDecimal.valueOf(value.getNumberValue()); } catch (RuntimeException ignored) { if (cell.getCachedFormulaResultType() == CellType.NUMERIC) return BigDecimal.valueOf(cell.getNumericCellValue()); } } var raw = text(row, column, evaluator).replace(",", "").replace("¥", "").replace("￥", "").replace("\u00A0", "").replace("\u202F", "").replaceAll("(?i)CNY|RMB", "").replaceAll("\\s+", ""); return raw.isBlank() ? BigDecimal.ZERO : new BigDecimal(raw); } catch (Exception exception) { issue(issues, source, field, "不是有效数字", "error"); return BigDecimal.ZERO; } }
     private static void putNumber(ObjectNode row, String key, BigDecimal value) { row.put(key, value.stripTrailingZeros()); }
     public ObjectNode compare(ArrayNode rows, ArrayNode previousRows) {
-        var previous = new LinkedHashMap<String, JsonNode>();
-        previousRows.forEach(row -> previous.put(row.path("rowKey").asText(identity(row)), row));
+        var previous = new LinkedHashMap<String,Deque<JsonNode>>();
+        previousRows.forEach(row -> previous.computeIfAbsent(comparisonIdentity(row),ignored->new ArrayDeque<>()).add(row));
         var diffRows = mapper.createArrayNode();
         var summary = mapper.createObjectNode().put("added", 0).put("price", 0).put("rule", 0).put("range", 0)
                 .put("removed", 0).put("unchanged", 0).put("highRisk", 0).put("coverageReduced", 0);
-        var unmatchedNext = new LinkedHashMap<String, JsonNode>();
+        var unmatchedNext = new ArrayList<JsonNode>();var keyOccurrences=new LinkedHashMap<String,Integer>();
         for (var row : rows) {
-            var key = row.path("rowKey").asText(identity(row));
-            var before = previous.remove(key);
-            if (before == null) unmatchedNext.put(key, row); else comparedDiff(diffRows, summary, key, row, before);
+            var key = comparisonIdentity(row);
+            var matches=previous.get(key);var before=matches==null?null:matches.pollFirst();
+            if(matches!=null&&matches.isEmpty())previous.remove(key);
+            if (before == null) unmatchedNext.add(row); else comparedDiff(diffRows, summary, diffKey(key,keyOccurrences), row, before);
         }
-        var pairedNext = new HashSet<String>(); var pairedPrevious = new HashSet<String>();
-        var nextGroups = rangeGroups(unmatchedNext.values()); var previousGroups = rangeGroups(previous.values());
+        var unmatchedPrevious=previous.values().stream().flatMap(Collection::stream).toList();
+        var pairedNext = Collections.newSetFromMap(new IdentityHashMap<JsonNode,Boolean>());var pairedPrevious=Collections.newSetFromMap(new IdentityHashMap<JsonNode,Boolean>());
+        var nextGroups = rangeGroups(unmatchedNext); var previousGroups = rangeGroups(unmatchedPrevious);
         for (var entry : nextGroups.entrySet()) {
             var oldRows = previousGroups.get(entry.getKey()); var newRows = entry.getValue();
             if (oldRows == null || oldRows.isEmpty() || oldRows.size() != newRows.size()) continue;
@@ -126,15 +128,45 @@ public class LogisticsWorkbookService {
             for (int index = 0; index < newRows.size(); index++) {
                 var row = newRows.get(index); var before = oldRows.get(index);
                 if (!rangeChanged(before, row)) continue;
-                var nextKey = row.path("rowKey").asText(identity(row)); var previousKey = before.path("rowKey").asText(identity(before));
-                comparedDiff(diffRows, summary, nextKey, row, before);
-                pairedNext.add(nextKey); pairedPrevious.add(previousKey);
+                comparedDiff(diffRows, summary, diffKey(comparisonIdentity(row),keyOccurrences), row, before);
+                pairedNext.add(row); pairedPrevious.add(before);
             }
         }
-        unmatchedNext.forEach((key, row) -> { if (!pairedNext.contains(key)) simpleDiff(diffRows, summary, key, row, "added"); });
-        previous.forEach((key, row) -> { if (!pairedPrevious.contains(key)) simpleDiff(diffRows, summary, key, row, "removed"); });
+        unmatchedNext.forEach(row -> { if (!pairedNext.contains(row)) simpleDiff(diffRows, summary, diffKey(comparisonIdentity(row),keyOccurrences), row, "added"); });
+        unmatchedPrevious.forEach(row -> { if (!pairedPrevious.contains(row)) simpleDiff(diffRows, summary, diffKey(comparisonIdentity(row),keyOccurrences), row, "removed"); });
         return mapper.createObjectNode().set("diffRows", diffRows).set("summary", summary);
     }
+
+    /** Re-validates editable price rows without relying on parser row identifiers. */
+    public ArrayNode validateEditableRows(ArrayNode rows) {
+        var issues=mapper.createArrayNode();
+        var groups=new LinkedHashMap<String,List<JsonNode>>();
+        for(var value:rows){
+            var row=(ObjectNode)value;var source=row.path("sourceRow").asInt();
+            var beforeIssues=issues.size();validateRow(row,source,issues);row.put("rowKey",identity(row));
+            for(int i=beforeIssues;i<issues.size();i++)((ObjectNode)issues.get(i)).put("sourceSheet",row.path("sourceSheet").asText()).put("rowKey",row.path("rowKey").asText());
+            groups.computeIfAbsent(rangeIdentity(row),ignored->new ArrayList<>()).add(row);
+        }
+        for(var entry:groups.entrySet()){
+            var ordered=entry.getValue();ordered.sort(RANGE_ORDER);
+            for(int i=1;i<ordered.size();i++){
+                var before=ordered.get(i-1);var current=ordered.get(i);
+                var oldTo=before.path("weightToKg").asDouble();var nextFrom=current.path("weightFromKg").asDouble();
+                var overlap=nextFrom<oldTo-0.000000001 || (Math.abs(nextFrom-oldTo)<0.000000001&&before.path("weightToInclusive").asBoolean(true)&&current.path("weightFromInclusive").asBoolean(false)==true);
+                var gap=nextFrom>oldTo+0.000000001 || (Math.abs(nextFrom-oldTo)<0.000000001&&!before.path("weightToInclusive").asBoolean(true)&&!current.path("weightFromInclusive").asBoolean(false));
+                if(overlap||gap){
+                    var issue=issues.addObject().put("row",current.path("sourceRow").asInt()).put("field","重量连续性")
+                            .put("code",overlap?"WEIGHT_OVERLAP":"WEIGHT_GAP").put("level","error")
+                            .put("message",overlap?"与上一重量档重叠":"与上一重量档存在断档")
+                            .put("sourceSheet",current.path("sourceSheet").asText()).put("rowKey",current.path("rowKey").asText()).put("relatedRowKey",before.path("rowKey").asText());
+                    issue.putObject("suggestedFields").put("weightFromKg",oldTo).put("weightFromInclusive",!before.path("weightToInclusive").asBoolean(true));
+                }
+            }
+        }
+        return issues;
+    }
+
+    public String rowIdentity(JsonNode row){return identity(row);}
     private static final Comparator<JsonNode> RANGE_ORDER = Comparator.comparingDouble((JsonNode row)->row.path("weightFromKg").asDouble())
             .thenComparingDouble(row->row.path("weightToKg").asDouble());
     private static Map<String,List<JsonNode>> rangeGroups(Collection<JsonNode> rows) {
@@ -182,6 +214,7 @@ public class LogisticsWorkbookService {
         return lowerLost||upperLost;
     }
     private static void increment(ObjectNode summary, String field) { summary.put(field, summary.path(field).asInt() + 1); }
+    private static String diffKey(String businessKey,Map<String,Integer> occurrences){var index=occurrences.merge(businessKey,1,Integer::sum);return index==1?businessKey:businessKey+"#"+index;}
     private static boolean same(tools.jackson.databind.JsonNode left, tools.jackson.databind.JsonNode right) {
         if (left.isNumber() || right.isNumber()) return Math.abs(left.asDouble() - right.asDouble()) < 0.000000001;
         return Objects.equals(left.asText(), right.asText());
@@ -189,8 +222,17 @@ public class LogisticsWorkbookService {
     private static void copyValue(ObjectNode target, String field, tools.jackson.databind.JsonNode value) {
         if (value.isBoolean()) target.put(field, value.asBoolean()); else if (value.isNumber()) target.put(field, value.decimalValue()); else target.put(field, value.asText());
     }
+    private static String comparisonIdentity(JsonNode row) {
+        var hasBusinessIdentity=!row.path("countryCode").asText().isBlank()||!row.path("areaName").asText().isBlank();
+        if(!hasBusinessIdentity&&!row.path("rowKey").asText().isBlank())return row.path("rowKey").asText();
+        return identity(row);
+    }
     private static String identity(JsonNode row) { return rangeIdentity(row)+"|"+row.path("weightFromKg").asText()+"|"+row.path("weightToKg").asText(); }
-    private static String rangeIdentity(JsonNode row) { return String.join("|", row.path("countryCode").asText(), row.path("areaName").asText(), row.path("zoneName").asText(), row.path("zonePostalPrefix").asText(), row.path("zonePostalCode").asText(), row.path("zoneCity").asText(), row.path("zoneState").asText()).toLowerCase(Locale.ROOT); }
+    private static String rangeIdentity(JsonNode row) {
+        var effectiveOrigin=row.path("originRegion").asText();
+        if(effectiveOrigin.isBlank())effectiveOrigin=row.path("sourceOriginRegion").asText();
+        return String.join("|", row.path("countryCode").asText(), row.path("areaName").asText(), row.path("zoneName").asText(), row.path("zonePostalPrefix").asText(), row.path("zonePostalCode").asText(), row.path("zoneCity").asText(), row.path("zoneState").asText(), effectiveOrigin).toLowerCase(Locale.ROOT);
+    }
     private static boolean flag(String value) { return value.matches("(?i)^(是|1|true|yes)$"); }
     private static String text(Row row, int column, FormulaEvaluator evaluator) {
         var cell = row == null ? null : row.getCell(column); if (cell == null) return "";

@@ -55,13 +55,30 @@ describe('quotation API client', () => {
 
   it('reports real upload progress and returns the response envelope', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code:'SUCCESS',data:{headerName:'X-CSRF-TOKEN',token:'token'} }),{status:200,headers:{'Content-Type':'application/json'}})))
+    const sentHeaders:Record<string,string>={}
     class FakeXhr {
       upload:{onprogress:((event:{loaded:number;total:number;lengthComputable:boolean})=>void)|null}={onprogress:null};status=200;responseText=JSON.stringify({code:'SUCCESS',data:{id:'job-1'}});withCredentials=false;onerror:(()=>void)|null=null;onabort:(()=>void)|null=null;onload:(()=>void)|null=null
-      open(){} setRequestHeader(){} getResponseHeader(){return 'request-1'} abort(){this.onabort?.()}
+      open(){} setRequestHeader(name:string,value:string){sentHeaders[name.toLowerCase()]=value} getResponseHeader(){return 'request-1'} abort(){this.onabort?.()}
       send(){this.upload.onprogress?.({loaded:5,total:10,lengthComputable:true});this.upload.onprogress?.({loaded:10,total:10,lengthComputable:true});this.onload?.()}
     }
     vi.stubGlobal('XMLHttpRequest',FakeXhr)
-    const progress:number[]=[];const upload=uploadForm<{id:string}>('/purchase-imports/jobs',new FormData(),event=>progress.push(event.percent))
-    await expect(upload.promise).resolves.toEqual({id:'job-1'});expect(progress).toEqual([50,100])
+    const progress:number[]=[];const upload=uploadForm<{id:string}>('/purchase-imports/jobs',new FormData(),event=>progress.push(event.percent),{'Idempotency-Key':'upload-1'})
+    await expect(upload.promise).resolves.toEqual({id:'job-1'});expect(progress).toEqual([50,100]);expect(sentHeaders['idempotency-key']).toBe('upload-1')
+  })
+
+  it('cancels an upload that is already in flight', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code:'SUCCESS',data:{headerName:'X-CSRF-TOKEN',token:'token'} }),{status:200,headers:{'Content-Type':'application/json'}})))
+    let markSent:()=>void=()=>undefined
+    const sent=new Promise<void>(resolve=>{markSent=resolve})
+    class FakeXhr {
+      upload:{onprogress:((event:{loaded:number;total:number;lengthComputable:boolean})=>void)|null}={onprogress:null};status=0;responseText='';withCredentials=false;onerror:(()=>void)|null=null;onabort:(()=>void)|null=null;onload:(()=>void)|null=null
+      open(){} setRequestHeader(){} getResponseHeader(){return null} abort(){this.onabort?.()}
+      send(){markSent()}
+    }
+    vi.stubGlobal('XMLHttpRequest',FakeXhr)
+    const upload=uploadForm('/logistics/rebuild/datasets/one/imports',new FormData())
+    await sent
+    upload.cancel()
+    await expect(upload.promise).rejects.toMatchObject({name:'AbortError'})
   })
 })

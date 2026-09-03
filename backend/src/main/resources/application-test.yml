@@ -18,6 +18,7 @@ spring:
 app:
   logistics:
     resume-on-start: false
+    file-cleanup-enabled: false
   bootstrap-admin:
     password: TestAdmin123
   storage:

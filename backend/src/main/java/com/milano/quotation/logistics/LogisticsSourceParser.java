@@ -17,6 +17,7 @@ import java.util.regex.Pattern;
 @Service
 public class LogisticsSourceParser {
     public static final String VERSION="providers-2026.09.02-v4";
+    public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
@@ -28,8 +29,8 @@ public class LogisticsSourceParser {
     public LogisticsSourceParser(ObjectMapper mapper,LogisticsWorkbookService standard){this.mapper=mapper;this.standard=standard;}
 
     public ObjectNode parse(byte[] bytes,String filename) {
-        if(bytes.length==0 || bytes.length>100L*1024*1024 || filename==null || !filename.toLowerCase(Locale.ROOT).matches(".*\\.xlsx?$"))
-            throw AppException.unprocessable("物流文件必须是100MB以内的.xls或.xlsx");
+        if(bytes.length==0 || bytes.length>MAX_FILE_BYTES || filename==null || !filename.toLowerCase(Locale.ROOT).matches(".*\\.xlsx?$"))
+            throw AppException.unprocessable("单个物流文件必须是100MB以内的.xls或.xlsx");
         var result=mapper.createObjectNode().put("fileName",filename).put("parserVersion",VERSION);
         var sheets=result.putArray("sheets"); var channels=new LinkedHashMap<String,ObjectNode>();
         String provider=provider(filename);
@@ -52,7 +53,8 @@ public class LogisticsSourceParser {
                 }
                 if(!recognized || parsed.isEmpty()) {
                     var pending=channel(provider.isBlank()?"未识别物流商":provider,sheet.getSheetName().trim(),parsed);
-                    issue(pending,0,"工作表","非空表尚未识别价格结构，不能忽略该表或覆盖已有渠道","error");
+                    pending.put("templateStatus","adapter-required");
+                    issue(pending,0,"新模板待适配","非空表未匹配通用模板或已知物流商模板；原文件保留7天，新增解析器后可重试","error");
                     pending.set("sourceCells",source.raw());
                 }
                 report.set("sourceCells",source.raw());
@@ -443,6 +445,7 @@ public class LogisticsSourceParser {
         void report(ObjectNode channel,int row,String key,String message){if(reported.add(key))issue(channel,row,"参考时效",message,"error");}
     }
     private void finish(ObjectNode channel,String provider) {
+        if(!channel.has("templateStatus"))channel.put("templateStatus","known");
         var rows=(ArrayNode)channel.path("rows"); var previous=new HashMap<String,ObjectNode>(); var seen=new HashSet<String>();
         var sorted=new ArrayList<JsonNode>();rows.forEach(sorted::add);
         sorted.sort(Comparator.comparing(LogisticsSourceParser::scope).thenComparingDouble(r->r.path("weightFromKg").asDouble()).thenComparingDouble(r->r.path("weightToKg").asDouble()));

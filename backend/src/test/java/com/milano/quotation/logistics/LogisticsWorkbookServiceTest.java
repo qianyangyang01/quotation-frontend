@@ -93,6 +93,24 @@ class LogisticsWorkbookServiceTest {
     }
 
     @Test
+    void comparesBusinessRowsAcrossParserRowKeyChanges() {
+        var mapper = JsonMapper.builder().build();
+        var previous = mapper.createArrayNode();
+        previous.addObject().put("rowKey", "old-parser-key").put("areaName", "美国").put("countryCode", "US")
+                .put("originRegion", "华东").put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 50);
+        var next = mapper.createArrayNode();
+        next.addObject().put("rowKey", "new-parser-key").put("areaName", "美国").put("countryCode", "US")
+                .put("sourceOriginRegion", "华东").put("originRegion", "").put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 55);
+
+        var result = service.compare(next, previous);
+
+        assertEquals(1, result.path("summary").path("price").asInt());
+        assertEquals(1, result.path("summary").path("rule").asInt());
+        assertEquals(0, result.path("summary").path("added").asInt());
+        assertEquals(0, result.path("summary").path("removed").asInt());
+    }
+
+    @Test
     void marksCoverageReductionAndLeavesSplitRangesAsAdditionsAndRemoval() {
         var mapper = JsonMapper.builder().build();
         var previous = mapper.createArrayNode();
@@ -110,6 +128,44 @@ class LogisticsWorkbookServiceTest {
         assertEquals(0, ambiguous.path("summary").path("range").asInt());
         assertEquals(2, ambiguous.path("summary").path("added").asInt());
         assertEquals(1, ambiguous.path("summary").path("removed").asInt());
+    }
+
+    @Test
+    void preservesDuplicateBusinessRowsInInitialImportSummary() {
+        var mapper=JsonMapper.builder().build();var rows=mapper.createArrayNode();
+        rows.addObject().put("areaName","澳大利亚").put("countryCode","AU").put("weightFromKg",0).put("weightToKg",1).put("pricePerKg",50).put("sourceRow",4);
+        rows.addObject().put("areaName","澳大利亚").put("countryCode","AU").put("weightFromKg",0).put("weightToKg",1).put("pricePerKg",55).put("sourceRow",5);
+
+        var result=service.compare(rows,mapper.createArrayNode());
+
+        assertEquals(2,result.path("summary").path("added").asInt());
+        assertEquals(2,result.path("diffRows").size());
+        assertNotEquals(result.path("diffRows").get(0).path("key").asText(),result.path("diffRows").get(1).path("key").asText());
+    }
+
+    @Test
+    void locatesOverlapAndSuggestsExactBoundaryWithoutBlindOneGramShift() {
+        var mapper=JsonMapper.builder().build();var rows=mapper.createArrayNode();
+        rows.addObject().put("areaName","美国").put("countryCode","US").put("weightFromKg",0).put("weightToKg",1).put("weightFromInclusive",true).put("weightToInclusive",true).put("pricePerKg",50).put("sourceRow",8);
+        rows.addObject().put("areaName","美国").put("countryCode","US").put("weightFromKg",0.9).put("weightToKg",2).put("weightFromInclusive",true).put("weightToInclusive",true).put("pricePerKg",55).put("sourceRow",9);
+
+        var issues=service.validateEditableRows(rows);var overlap=issues.get(0);
+
+        assertEquals("WEIGHT_OVERLAP",overlap.path("code").asText());
+        assertEquals(1.0,overlap.path("suggestedFields").path("weightFromKg").asDouble());
+        assertFalse(overlap.path("suggestedFields").path("weightFromInclusive").asBoolean());
+    }
+
+    @Test
+    void detectsSinglePointGapFromTwoOpenBoundaries() {
+        var mapper=JsonMapper.builder().build();var rows=mapper.createArrayNode();
+        rows.addObject().put("areaName","德国").put("countryCode","DE").put("weightFromKg",0).put("weightToKg",1).put("weightFromInclusive",true).put("weightToInclusive",false).put("pricePerKg",40).put("sourceRow",3);
+        rows.addObject().put("areaName","德国").put("countryCode","DE").put("weightFromKg",1).put("weightToKg",2).put("weightFromInclusive",false).put("weightToInclusive",true).put("pricePerKg",42).put("sourceRow",4);
+
+        var issues=service.validateEditableRows(rows);
+
+        assertEquals("WEIGHT_GAP",issues.get(0).path("code").asText());
+        assertTrue(issues.get(0).path("suggestedFields").path("weightFromInclusive").asBoolean());
     }
 
     private MockMultipartFile workbook(boolean valid) throws Exception {

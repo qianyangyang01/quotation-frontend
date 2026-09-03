@@ -46,6 +46,21 @@ public class LogisticsBillingAcceptanceService {
                 .param("id",UUID.randomUUID()).param("version",version).param("hash",v.path("fingerprint").asText()).param("engine",LogisticsBillingEngine.VERSION).param("payload",record.toString()).param("actor",actor).update();
         return status(version);
     }
+    @Transactional public ObjectNode approveValidatedImport(UUID version,String actor,String note){
+        var v=version(version);guard.channel(UUID.fromString(v.path("channelId").asText()));
+        if(!v.path("status").asText().equals("published")||!v.path("currentVersionId").asText().equals(version.toString()))throw AppException.conflict("仅能校验当前已发布价格版本");
+        var payload=v.path("payload");
+        if(!LogisticsSourceParser.VERSION.equals(payload.path("parserVersion").asText()))throw AppException.unprocessable("解析器版本未知，不能自动开放财务使用");
+        if(!"known".equals(payload.path("templateStatus").asText()))throw AppException.unprocessable("新模板待适配，不能绕过模板校验发布");
+        if(payload.path("errors").asInt()>0||!payload.path("quoteReady").asBoolean())throw AppException.unprocessable("价格仍有阻断或待适配规则");
+        var reasons=engine.unsupported(payload.path("rows"));if(!reasons.isEmpty())throw AppException.unprocessable("计费模型未适配："+String.join("；",reasons));
+        var exists=jdbc.sql("select exists(select 1 from logistics_billing_acceptance where version_id=:id and rows_fingerprint=:hash and engine_version=:engine and kind='validated-import')")
+                .param("id",version).param("hash",v.path("fingerprint").asText()).param("engine",LogisticsBillingEngine.VERSION).query(Boolean.class).single();
+        if(!exists){var record=mapper.createObjectNode().put("note",note).put("parserVersion",LogisticsSourceParser.VERSION).put("validation","完整渠道重新校验");
+            jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) values(:id,:version,:hash,:engine,'validated-import',cast(:payload as jsonb),:actor)")
+                    .param("id",UUID.randomUUID()).param("version",version).param("hash",v.path("fingerprint").asText()).param("engine",LogisticsBillingEngine.VERSION).param("payload",record.toString()).param("actor",actor).update();}
+        return status(version);
+    }
     ObjectNode version(UUID id){return jdbc.sql("select jsonb_build_object('id',v.id,'channelId',c.id,'currentVersionId',c.current_version_id,'status',v.status,'payload',v.payload,'fingerprint',md5(coalesce(v.payload->'rows','[]'::jsonb)::text))::text from logistics_version v join logistics_channel c on c.id=v.channel_id where v.id=:id")
             .param("id",id).query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).optional().orElseThrow(()->AppException.notFound("物流版本不存在"));}
 }

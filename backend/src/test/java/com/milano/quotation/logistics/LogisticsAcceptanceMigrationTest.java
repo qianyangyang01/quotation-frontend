@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers(disabledWithoutDocker=true)
 class LogisticsAcceptanceMigrationTest {
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
-    @Test void upgradesProductionV26DataToV32WithoutChangingBusinessPayloads(){
+    @Test void upgradesProductionV26DataToV33WithoutChangingBusinessPayloads(){
         resetDatabase();
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("26").load().migrate();
         var jdbc=JdbcClient.create(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
@@ -27,7 +27,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("32",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("33",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_provider where id=:id").param("id",provider).query(UUID.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
         assertEquals(version,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
@@ -56,6 +56,11 @@ class LogisticsAcceptanceMigrationTest {
         assertTrue(ready(jdbc,old));assertFalse(ready(jdbc,draft));assertFalse(ready(jdbc,pending));assertFalse(ready(jdbc,fresh));
         assertEquals(original,jdbc.sql("select id from logistics_dataset where status='active'").query(UUID.class).single());
         assertFalse(ready(jdbc,seed(jdbc,original,"published",true,5)),"New old-library prices also need new acceptance");
+        var validated=seed(jdbc,original,"published",true,6);var fingerprint=jdbc.sql("select rows_fingerprint from logistics_version where id=:id").param("id",validated).query(String.class).single();
+        jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) values(:id,:version,:hash,'logistics-billing-v3','validated-import','{}','tester')")
+                .param("id",UUID.randomUUID()).param("version",validated).param("hash",fingerprint).update();
+        assertTrue(ready(jdbc,validated));
+        assertEquals(1,jdbc.sql("select count(*) from information_schema.tables where table_schema='public' and table_name='logistics_import_file'").query(Integer.class).single());
     }
     static void resetDatabase(){Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).cleanDisabled(false).load().clean();}
     static boolean ready(JdbcClient jdbc,UUID id){return jdbc.sql("select logistics_version_quote_ready(:id)").param("id",id).query(Boolean.class).single();}
