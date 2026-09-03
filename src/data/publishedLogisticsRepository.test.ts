@@ -122,4 +122,85 @@ describe('published logistics version cache', () => {
     await expect(loading).resolves.toMatchObject({ revision: 'r-timeout', rules: [rule], source: 'network' })
     vi.useRealTimers()
   })
+
+  it('upgrades the cache schema and removes legacy rule payloads', async () => {
+    const cleared = vi.fn()
+    const closed = vi.fn()
+    const completedRequest = (result?: unknown) => {
+      const request: Record<string, unknown> = { result }
+      queueMicrotask(() => (request.onsuccess as (() => void) | undefined)?.())
+      return request
+    }
+    const objectStore = {
+      clear: () => { cleared(); return completedRequest() },
+      get: () => completedRequest(undefined),
+      put: () => completedRequest(),
+    }
+    const database = {
+      objectStoreNames: { contains: () => true },
+      transaction: () => ({ objectStore: () => objectStore }),
+      createObjectStore: vi.fn(),
+      close: closed,
+      onversionchange: null as (() => void) | null,
+    }
+    const open = vi.fn(() => {
+      const request: Record<string, unknown> = {
+        result: database,
+        transaction: { objectStore: () => objectStore },
+      }
+      queueMicrotask(() => {
+        ;(request.onupgradeneeded as (() => void) | undefined)?.()
+        ;(request.onsuccess as (() => void) | undefined)?.()
+      })
+      return request
+    })
+    vi.stubGlobal('indexedDB', { open })
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('r2'), etag: 'manifest-r2' }
+      : { status: 200, data: { revision: 'r2', rules: [rule] }, etag: 'rules-r2' }))
+    const repository = await import('./publishedLogisticsRepository')
+
+    await expect(repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }))
+      .resolves.toMatchObject({ revision: 'r2', source: 'network' })
+
+    expect(open).toHaveBeenCalledWith('milano-quotation-cache', 2)
+    expect(cleared).toHaveBeenCalledTimes(1)
+    expect(database.onversionchange).toBeTypeOf('function')
+    database.onversionchange?.()
+    expect(closed).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to the network when another page blocks the cache upgrade', async () => {
+    const open = vi.fn(() => {
+      const request: Record<string, unknown> = {}
+      queueMicrotask(() => (request.onblocked as (() => void) | undefined)?.())
+      return request
+    })
+    vi.stubGlobal('indexedDB', { open })
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('blocked-r2'), etag: 'manifest-blocked-r2' }
+      : { status: 200, data: { revision: 'blocked-r2', rules: [rule] }, etag: 'rules-blocked-r2' }))
+    const repository = await import('./publishedLogisticsRepository')
+
+    await expect(repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }))
+      .resolves.toMatchObject({ revision: 'blocked-r2', rules: [rule], source: 'network' })
+  })
+
+  it('does not apply a superseded logistics response', async () => {
+    let resolveRules!: (value: unknown) => void
+    conditionalGet.mockImplementation((path: string) => path.includes('/manifest')
+      ? Promise.resolve({ status: 200, data: manifest('abort-r2'), etag: 'manifest-abort-r2' })
+      : new Promise(resolve => { resolveRules = resolve }))
+    const repository = await import('./publishedLogisticsRepository')
+    const { logisticsRules } = await import('./logistics')
+    const controller = new AbortController()
+    const loading = repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }, { signal: controller.signal })
+    while (!resolveRules) await Promise.resolve()
+
+    controller.abort()
+    resolveRules({ status: 200, data: { revision: 'abort-r2', rules: [rule] }, etag: 'rules-abort-r2' })
+
+    await expect(loading).rejects.toMatchObject({ name: 'AbortError' })
+    expect(logisticsRules).toEqual([])
+  })
 })

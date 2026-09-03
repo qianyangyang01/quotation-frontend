@@ -79,6 +79,11 @@ class LogisticsQueryPostgresIntegrationTest {
         assertEquals(1, rules.rules().size());
         assertEquals(1, rules.rules().getFirst().path("prices").size());
         assertTrue(first.countries().stream().anyMatch(country -> country.code().equals("US")));
+        assertEquals("US", service.publishedRules(first.revision(), "普货", List.of("us"), List.of("yt-ph"))
+                .rules().getFirst().path("prices").get(0).path("countryCode").asText());
+        assertEquals("US", service.publishedRules(first.revision(), "普货", List.of("uS"), List.of("YT-PH"))
+                .rules().getFirst().path("prices").get(0).path("countryCode").asText());
+        assertTrue(service.publishedRules(first.revision(), "普货", List.of("美国"), List.of("missing-channel")).rules().isEmpty());
 
         var price = rules.rules().getFirst().path("prices").get(0);
         assertEquals(55, price.path("pricePerKg").asInt());
@@ -115,6 +120,8 @@ class LogisticsQueryPostgresIntegrationTest {
 
         assertEquals(1, rules.rules().size());
         assertEquals("US", rules.rules().getFirst().path("prices").get(0).path("countryCode").asText());
+        countries.add("COUNTRY-100");
+        assertThrows(AppException.class, () -> service.publishedRules(revision, "普货", countries, List.of()));
     }
 
     @Test

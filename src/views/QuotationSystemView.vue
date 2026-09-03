@@ -19,7 +19,7 @@ import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
-import { calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules } from '@/data/logistics'
+import { calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
@@ -303,6 +303,7 @@ function changeProductCategory(value: string) {
 }
 async function queryProduct() {
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: false }))) return
+  cancelQuoteLogistics()
   const normalizedSku = skuSearch.value.trim().toUpperCase().replace(/\s+/g, '')
   let candidates = purchaseRecords.value.filter(item => item.sku === normalizedSku)
   if (!candidates.length) {
@@ -321,29 +322,37 @@ async function queryProduct() {
     return
   }
   queryValidationFields.value = []
-  if (matches[0].weightKg != null && matches[0].purchasePriceCny != null) await ensureQuoteLogistics(p)
-  else p.freight = 0
   const warning = matches[0].status === '资料完整' ? '' : `；${matches[0].status}`
   const duplicate = matches.length > 1 ? `；检测到${matches.length}条同SKU记录，当前采用第一条` : ''
-  toast(`已加载 ${matches[0].sku}；是否有货：${matches[0].stockStatus}${warning}${duplicate}`)
+  if (matches[0].weightKg != null && matches[0].purchasePriceCny != null) {
+    toast(`已加载 ${matches[0].sku}；物流规则正在后台加载；是否有货：${matches[0].stockStatus}${warning}${duplicate}`)
+    startQuoteLogisticsInBackground(p)
+  } else {
+    p.freight = 0
+    toast(`已加载 ${matches[0].sku}；是否有货：${matches[0].stockStatus}${warning}${duplicate}`)
+  }
 }
-async function queryBundleItem(item: BundleQuoteItem) {
+async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?: boolean; announce?: boolean } = {}) {
+  const loadLogistics = options.loadLogistics !== false
+  const announce = options.announce !== false
+  if (loadLogistics) cancelQuoteLogistics()
   const preIssues = conditionIssues({ includeSku: false, includeCategory: false })
   if (!item.sku.trim()) preIssues.push({ key: 'sku', message: '请输入组合商品SKU' })
-  if (blockConditionProgress(preIssues)) return
+  if (blockConditionProgress(preIssues)) return false
   const normalizedSku = item.sku.trim().toUpperCase().replace(/\s+/g, '')
   let record = purchaseRecords.value.find(candidate => candidate.sku === normalizedSku)
   if (!record) { try { record = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(record) } catch { /* handled below */ } }
-  if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return }
-  if (!record.quoteReady) { toast(purchaseQuoteBlockingMessage(record)); return }
+  if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return false }
+  if (!record.quoteReady) { toast(purchaseQuoteBlockingMessage(record)); return false }
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
   if (duplicate) {
     duplicate.quantityPerSet += normalizedBundleSets(item.quantityPerSet)
     applyBundlePurchasePricing(duplicate, record, true)
     removeBundleItem(item.id)
     updateBundleItemQuantity(duplicate)
-    toast(`${record.sku} 已存在，已合并到同一行并累加单套数量`)
-    return
+    if (announce) toast(`${record.sku} 已存在，已合并到同一行并累加单套数量`)
+    if (loadLogistics) startQuoteLogisticsInBackground(products.value[0])
+    return true
   }
   item.sku = record.sku
   item.name = purchaseDisplayName(record)
@@ -361,12 +370,13 @@ async function queryBundleItem(item: BundleQuoteItem) {
   productCategory.value = resolveBundleProductCategory(productCategory.value, recordCategory, existingCategories as string[])
   if (blockConditionProgress(conditionIssues({ includeSku: false, includeCategory: true }))) {
     item.status = '产品品类待补充'
-    return
+    return false
   }
   queryValidationFields.value = []
   updateBundleItemQuantity(item, false)
-  await ensureQuoteLogistics(products.value[0])
-  toast(`已加入组合 SKU：${record.sku}；是否有货：${record.stockStatus}`)
+  if (announce) toast(`已加入组合 SKU：${record.sku}；物流规则正在后台加载；是否有货：${record.stockStatus}`)
+  if (loadLogistics) startQuoteLogisticsInBackground(products.value[0])
+  return true
 }
 async function queryBundleItems() {
   const items = bundleItems.value.filter(item => item.sku.trim())
@@ -376,7 +386,15 @@ async function queryBundleItems() {
     blockConditionProgress(issues)
     return
   }
-  for (const item of [...items]) await queryBundleItem(item)
+  cancelQuoteLogistics()
+  let loaded = 0
+  for (const item of [...items]) {
+    if (await queryBundleItem(item, { loadLogistics: false, announce: false })) loaded += 1
+  }
+  if (loaded) {
+    toast(`已处理 ${loaded} 个组合 SKU；物流规则正在后台加载`)
+    startQuoteLogisticsInBackground(products.value[0])
+  }
 }
 function addBundleItem() {
   bundleItems.value.push(bundleItemFromRecord())
@@ -420,12 +438,26 @@ function changeMonthlySalesEstimate(p: Product, value: string) {
 function availableQuoteCountries(p: Product) {
   return countriesAvailableForCategory(p.logisticsAttribute).map(country => country.name)
 }
+function cancelQuoteLogistics() {
+  logisticsRequest?.abort()
+  logisticsRequest = null
+  replaceLogisticsRules([])
+  logisticsLoadState.value = 'idle'
+  logisticsLoadError.value = ''
+}
+function startQuoteLogisticsInBackground(p: Product) {
+  void ensureQuoteLogistics(p)
+}
 async function ensureQuoteLogistics(p: Product) {
   logisticsRequest?.abort()
   const controller = new AbortController()
   logisticsRequest = controller
+  replaceLogisticsRules([])
   logisticsLoadState.value = 'loading'
   logisticsLoadError.value = ''
+  p.channel = ''
+  p.rule = ''
+  p.freight = 0
   p.status = '正在加载当前商品所需物流规则'
   try {
     const selectedCountries = quoteMatrixMode.value === 'specified'
