@@ -122,7 +122,7 @@ public class LogisticsQueryService {
     }
 
     @Transactional(readOnly = true)
-    public PublishedManifest manifest() {
+    public ManifestRevision manifestRevision() {
         var revisionParts = jdbc.sql("""
                 select concat_ws('|', p.id::text, p.version::text, p.payload->>'enabled',
                   c.id::text, c.version::text, c.code, c.payload->>'enabled', c.payload->>'name', c.payload->>'type', c.payload->>'logisticsAttribute',
@@ -138,7 +138,16 @@ public class LogisticsQueryService {
                   and logistics_version_quote_ready(v.id)
                 order by c.id
                 """).query(String.class).list();
-        var revision = sha256(String.join("\n", revisionParts));
+        return new ManifestRevision(sha256(String.join("\n", revisionParts)), revisionParts.size());
+    }
+
+    @Transactional(readOnly = true)
+    public PublishedManifest manifest() {
+        return manifest(manifestRevision());
+    }
+
+    @Transactional(readOnly = true)
+    public PublishedManifest manifest(ManifestRevision revisionState) {
         var countries = jdbc.sql("""
                 select distinct coalesce(item->>'countryCode','') as code, coalesce(item->>'areaName','') as name
                 from logistics_channel c
@@ -165,13 +174,13 @@ public class LogisticsQueryService {
                   and logistics_version_quote_ready(v.id)
                 order by attribute
                 """).query(String.class).list();
-        return new PublishedManifest(revision, Instant.now(), revisionParts.size(), countries, attributes);
+        return new PublishedManifest(revisionState.revision(), Instant.now(), revisionState.publishedChannels(), countries, attributes);
     }
 
     @Transactional(readOnly = true)
     public PublishedRules publishedCatalog(String expectedRevision) {
-        var manifest = manifest();
-        if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(manifest.revision())) {
+        var revision = manifestRevision().revision();
+        if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(revision)) {
             throw new AppException(HttpStatus.CONFLICT, "LOGISTICS_REVISION_CHANGED", "物流正式版本已更新，请重新加载规则");
         }
         var sql = """
@@ -249,13 +258,13 @@ public class LogisticsQueryService {
             prices.forEach(price -> countries.add(price.path("countryCode").asText(price.path("areaName").asText(""))));
             rule.put("areaCount", countries.size());
         });
-        return new PublishedRules(manifest.revision(), new ArrayList<>(grouped.values()));
+        return new PublishedRules(revision, new ArrayList<>(grouped.values()));
     }
 
     @Transactional(readOnly = true)
     public PublishedRules publishedRules(String expectedRevision, String attribute, List<String> countries, List<String> channelCodes) {
-        var manifest = manifest();
-        if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(manifest.revision())) {
+        var revision = manifestRevision().revision();
+        if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(revision)) {
             throw new AppException(HttpStatus.CONFLICT, "LOGISTICS_REVISION_CHANGED", "物流正式版本已更新，请重新加载规则");
         }
         var normalizedCountries = normalized(countries, MAX_COUNTRIES, "报价国家不能为空", "报价国家一次最多查询100个");
@@ -373,7 +382,7 @@ public class LogisticsQueryService {
             rule.put("areaCount", areas.size());
             rule.put("priceRowCount", prices.size());
         });
-        return new PublishedRules(manifest.revision(), new ArrayList<>(grouped.values()));
+        return new PublishedRules(revision, new ArrayList<>(grouped.values()));
     }
 
     private PageResponse<JsonNode> versionArrayPage(UUID versionId, String field, int page, int size, String countryCode, String query) {
@@ -492,6 +501,7 @@ public class LogisticsQueryService {
     }
 
     public record PublishedCountry(String code, String name) {}
+    public record ManifestRevision(String revision, long publishedChannels) {}
     public record PublishedManifest(String revision, Instant generatedAt, long publishedChannels, List<PublishedCountry> countries, List<String> attributes) {}
     public record PublishedRules(String revision, List<ObjectNode> rules) {}
 }

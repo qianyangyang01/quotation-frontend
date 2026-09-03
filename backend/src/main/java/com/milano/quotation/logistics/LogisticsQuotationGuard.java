@@ -19,7 +19,7 @@ public class LogisticsQuotationGuard {
         var dataset=jdbc.sql("select id from logistics_dataset where status='active' for share").query(UUID.class).single();
         jdbc.sql("select id from logistics_channel where dataset_id=:id order by id for share").param("id",dataset).query(UUID.class).list();
         jdbc.sql("select id from logistics_provider where dataset_id=:id order by id for share").param("id",dataset).query(UUID.class).list();
-        if(!queries.manifest().revision().equals(quotation.path("logisticsRevision").asText()))throw AppException.conflict("物流版本已更新或缺少版本信息，请重新加载并计价后提交");
+        if(!queries.manifestRevision().revision().equals(quotation.path("logisticsRevision").asText()))throw AppException.conflict("物流版本已更新或缺少版本信息，请重新加载并计价后提交");
         var policies=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies' for share").query(String.class).optional().orElse("[]"));
         var channels=jdbc.sql("""
             select jsonb_build_object('key',concat(c.rule_id,'::',p.payload->>'name','::',c.code),
