@@ -190,6 +190,11 @@ function batchFileHint(index: number) {
   if (state === '未完成') return batch.value?.payload.error || '批次提前结束，请重试后查看具体原因。'
   return ''
 }
+function preferredReviewBatch(items: BatchSummary[]) {
+  return items.find(item => item.status === 'queued' || item.status === 'processing')
+    || items.find(item => item.status === 'completed')
+    || items[0]
+}
 async function requestPrices(id: string) {
   let result = await service.prices(id, filters())
   if (result.totalPages > 0 && page.value >= result.totalPages) {
@@ -216,7 +221,7 @@ async function refresh() {
     if (disposed || id !== datasetId.value || epoch !== selectionEpoch) return
     workspace.value = w; batches.value = b; prices.value = pricePage; pricesLoaded.value = true; acceptanceRefresh.value++
     if (tab.value === 'imports' && autoOpenLatestBatch && !batch.value && b.length) {
-      batch.value = await service.batch(b[0]!.id)
+      batch.value = await service.batch(preferredReviewBatch(b)!.id)
       resetBatchResultView()
       schedulePoll()
     }
@@ -238,7 +243,7 @@ async function initialize() {
 watch([datasetId, tab, page, pageSize], () => { if (datasetId.value) void router.replace({ query: { ...route.query, dataset: datasetId.value, logisticsTab: tab.value, ...logisticsPageQuery(page.value, pageSize.value) } }) })
 watch([batchResultQuery, batchResultProvider, batchResultStatus, batchResultFocus], () => { batchResultPage.value = 0 })
 watch(tab, value => {
-  if (value === 'imports' && autoOpenLatestBatch && !batch.value && batches.value.length) void openBatch(batches.value[0]!.id)
+  if (value === 'imports' && autoOpenLatestBatch && !batch.value && batches.value.length) void openBatch(preferredReviewBatch(batches.value)!.id)
 })
 async function submitPriceFilters() { page.value = 0; await loadPrices() }
 async function changePricePage(nextPage: number) { if (nextPage === page.value) return; page.value = nextPage; await run(loadPrices) }
