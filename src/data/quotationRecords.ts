@@ -30,7 +30,7 @@ export interface QuotationRecordQuoteOption {
   freightCny?: number
   logisticsChannelId?: string
   logisticsVersionId?: string
-  logisticsInput?: { country: string; weightKg: number; marks: string[]; dimensions?: { lengthCm: number; widthCm: number; heightCm: number; volumeMultiplier?: number } }
+  logisticsInput?: { country: string; baseWeightKg?: number; packagingWeightKg?: number; weightKg: number; marks: string[]; dimensions?: { lengthCm: number; widthCm: number; heightCm: number; volumeMultiplier?: number } }
   totalCostCny?: number
   profitCny?: number
   quoteCny?: number

@@ -1,18 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { normalizePurchaseRecord } from '@/data/purchaseStore'
 import {
+  bundleBaseWeight,
   bundleDomesticFreight,
   bundleGoodsWeight,
+  bundlePackagingWeight,
   bundlePurchaseCost,
   hasQuotationProduct,
   monthlySalesTierLabel,
+  packagingWeightKg,
   purchaseInvoiceRatePercent,
   purchasePriceBreakdown,
   purchasePriceForMonthlySales,
   purchaseQuantityForMonthlySales,
   resolveBundleProductCategory,
   singleActualWeight,
+  singleBaseWeight,
   singleChargeWeight,
+  singlePackagingWeight,
   singleShipmentDimensions,
   singleVolumeWeight,
   usdPriceFromCny,
@@ -117,11 +122,19 @@ describe('single SKU weight calculation', () => {
     volumetricEnabled: true, packageLengthCm: 40, packageWidthCm: 30, packageHeightCm: 20, volumeDivisor: 8000,
   }
 
-  it('uses actual or manual weight while retaining volume data for future use', () => {
-    expect(singleActualWeight(input)).toBe(0.8)
+  it('adds packaging to every physical item for purchase and manual weights', () => {
+    expect(singleBaseWeight(input)).toBe(0.8)
+    expect(singlePackagingWeight(input)).toBe(0.032)
+    expect(singleActualWeight(input)).toBeCloseTo(0.832)
     expect(singleVolumeWeight(input)).toBe(6)
-    expect(singleChargeWeight(input)).toBe(0.8)
-    expect(singleActualWeight({ ...input, weightSource: 'manual' })).toBe(1.4)
+    expect(singleChargeWeight(input)).toBeCloseTo(0.832)
+    expect(singleActualWeight({ ...input, weightSource: 'manual' })).toBeCloseTo(1.456)
+  })
+
+  it.each([
+    [0, 0], [1, 2], [49, 2], [50, 2], [51, 4], [100, 4], [270, 12],
+  ])('adds %sg base weight as %sg packaging', (baseGrams, packagingGrams) => {
+    expect(packagingWeightKg(baseGrams / 1000)).toBeCloseTo(packagingGrams / 1000)
   })
 
   it('disables volumetric calculation when dimensions are missing', () => {
@@ -137,10 +150,12 @@ describe('bundle SKU calculation', () => {
     { sku: second.sku, quantityPerSet: 1, purchaseUnitPrice: 99, purchaseFreightPerUnit: 2, weightKg: 0.35, customWeightKg: 0.5 },
   ]
 
-  it('aggregates each SKU quantity, freight and weight per set', () => {
+  it('aggregates each SKU quantity, freight, base weight and packaging per set', () => {
     expect(bundlePurchaseCost(items, [first, second], '100', 3)).toBe((18 * 2 + 12) * 3)
     expect(bundleDomesticFreight(items, 3)).toBe((1.5 * 2 + 2) * 3)
-    expect(bundleGoodsWeight(items, 3)).toBe((0.2 * 2 + 0.5) * 3)
+    expect(bundleBaseWeight(items, 3)).toBeCloseTo((0.2 * 2 + 0.5) * 3)
+    expect(bundlePackagingWeight(items, 3)).toBeCloseTo((0.008 * 2 + 0.02) * 3)
+    expect(bundleGoodsWeight(items, 3)).toBeCloseTo(((0.2 + 0.008) * 2 + 0.5 + 0.02) * 3)
   })
 
   it('applies each bundle SKU invoice rate independently without changing domestic freight', () => {

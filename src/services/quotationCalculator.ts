@@ -122,11 +122,36 @@ export function bundleDomesticFreight(items: BundleCalculationItem[], sets = 1) 
 export function bundleGoodsWeight(items: BundleCalculationItem[], sets = 1) {
   const setCount = normalizedQuoteQuantity(sets)
   return items.reduce((sum, item) => {
-    const weightKg = item.customWeightKg != null && Number.isFinite(Number(item.customWeightKg))
-      ? Math.max(0, Number(item.customWeightKg))
-      : Math.max(0, Number(item.weightKg) || 0)
-    return sum + weightKg * normalizedQuoteQuantity(item.quantityPerSet) * setCount
+    const baseWeightKg = bundleItemBaseWeight(item)
+    return sum + packagedUnitWeightKg(baseWeightKg) * normalizedQuoteQuantity(item.quantityPerSet) * setCount
   }, 0)
+}
+
+export function packagingWeightKg(baseWeightKg: number) {
+  const baseGrams = Math.max(0, Number(baseWeightKg) || 0) * 1000
+  if (baseGrams <= 0) return 0
+  return Math.ceil((baseGrams - 1e-9) / 50) * 2 / 1000
+}
+
+export function packagedUnitWeightKg(baseWeightKg: number) {
+  const normalizedBase = Math.max(0, Number(baseWeightKg) || 0)
+  return normalizedBase + packagingWeightKg(normalizedBase)
+}
+
+function bundleItemBaseWeight(item: BundleCalculationItem) {
+  return item.customWeightKg != null && Number.isFinite(Number(item.customWeightKg))
+    ? Math.max(0, Number(item.customWeightKg))
+    : Math.max(0, Number(item.weightKg) || 0)
+}
+
+export function bundleBaseWeight(items: BundleCalculationItem[], sets = 1) {
+  const setCount = normalizedQuoteQuantity(sets)
+  return items.reduce((sum, item) => sum + bundleItemBaseWeight(item) * normalizedQuoteQuantity(item.quantityPerSet) * setCount, 0)
+}
+
+export function bundlePackagingWeight(items: BundleCalculationItem[], sets = 1) {
+  const setCount = normalizedQuoteQuantity(sets)
+  return items.reduce((sum, item) => sum + packagingWeightKg(bundleItemBaseWeight(item)) * normalizedQuoteQuantity(item.quantityPerSet) * setCount, 0)
 }
 
 export function resolveBundleProductCategory(selectedCategory: string, recordCategory: string, existingCategories: string[]) {
@@ -134,9 +159,21 @@ export function resolveBundleProductCategory(selectedCategory: string, recordCat
   return recordCategory && existingCategories.every(category => category === recordCategory) ? recordCategory : ''
 }
 
-export function singleActualWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
+function singleUnitBaseWeight(input: SingleWeightInput) {
   const unitWeight = input.weightSource === 'manual' ? input.manualWeight : input.netWeight
-  return Math.max(0, Number(unitWeight) || 0) * normalizedQuoteQuantity(quantity)
+  return Math.max(0, Number(unitWeight) || 0)
+}
+
+export function singleBaseWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
+  return singleUnitBaseWeight(input) * normalizedQuoteQuantity(quantity)
+}
+
+export function singlePackagingWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
+  return packagingWeightKg(singleUnitBaseWeight(input)) * normalizedQuoteQuantity(quantity)
+}
+
+export function singleActualWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
+  return packagedUnitWeightKg(singleUnitBaseWeight(input)) * normalizedQuoteQuantity(quantity)
 }
 
 export function singleVolumeWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity), divisor = input.volumeDivisor) {

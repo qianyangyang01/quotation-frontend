@@ -3,7 +3,7 @@ import { validateQuotationConditions, type QuotationConditionInput } from './quo
 
 const valid: QuotationConditionInput = {
   customerName: '客户A', quoteMode: 'single', sku: 'SKU-1', productCategory: '服装', logisticsAttribute: '普货',
-  allowedLogisticsAttributes: ['普货', '带电'], customerGrade: 'S', enabledCustomerGrades: ['S', 'A'], taxCustomerType: 'A', monthlySalesEstimate: '10',
+  allowedLogisticsAttributes: ['普货', '带电'], customerGrade: 'S', enabledCustomerGrades: ['S', 'A'], monthlySalesEstimate: '10',
 }
 
 describe('quotation staged required validation', () => {
@@ -13,8 +13,8 @@ describe('quotation staged required validation', () => {
   })
 
   it('requires every pre-query condition and trims customer names', () => {
-    const issues = validateQuotationConditions({ ...valid, customerName: ' ', sku: '', logisticsAttribute: '', customerGrade: '', taxCustomerType: '', monthlySalesEstimate: '' }, { includeSku: true, includeCategory: false })
-    expect(issues.map(item => item.key)).toEqual(['customerName', 'sku', 'logisticsAttribute', 'customerGrade', 'taxCustomerType', 'monthlySalesEstimate'])
+    const issues = validateQuotationConditions({ ...valid, customerName: ' ', sku: '', logisticsAttribute: '', customerGrade: '', monthlySalesEstimate: '' }, { includeSku: true, includeCategory: false })
+    expect(issues.map(item => item.key)).toEqual(['customerName', 'sku', 'logisticsAttribute', 'customerGrade', 'monthlySalesEstimate'])
   })
 
   it('does not require a top-level SKU for bundle pre-validation', () => {

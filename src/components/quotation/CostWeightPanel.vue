@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { QuotationProduct } from './types'
-const props = defineProps<{ product: QuotationProduct; chargeWeight: number; domesticFreight: number; purchaseTierLabel: string }>()
+const props = defineProps<{ product: QuotationProduct; baseWeight: number; packagingWeight: number; chargeWeight: number; domesticFreight: number; purchaseTierLabel: string }>()
 const emit = defineEmits<{ weightChange: [] }>()
 
 const grams = (weightKg: number) => Math.ceil((Number.isFinite(weightKg) ? weightKg : 0) * 1000)
-const actualWeight = () => props.product.weightSource === 'manual' ? props.product.manualWeight : props.product.netWeight * Math.max(1, props.product.quantity)
+const actualWeight = () => props.baseWeight + props.packagingWeight
 const volumeWeight = () => props.product.volumetricEnabled
   ? props.product.packageLengthCm * props.product.packageWidthCm * props.product.packageHeightCm * Math.max(1, props.product.quantity) / Math.max(1, props.product.volumeDivisor || 8000)
   : 0
@@ -53,14 +53,14 @@ function purchasePricingLabel() {
         <label>计抛除数<input :value="product.volumeDivisor" type="number" min="1" step="100" inputmode="numeric" @input="updateDivisor"></label>
       </div>
       <div class="weight-comparison">
-        <p><span>实际重量</span><b>{{ grams(actualWeight()) }} g</b><small>商品重量 × 数量</small></p>
+        <p><span>实际重量</span><b>{{ grams(actualWeight()) }} g</b><small>基础 {{ grams(baseWeight) }}g + 包材 {{ grams(packagingWeight) }}g</small></p>
         <i>对比</i>
         <p><span>体积重公式</span><b>{{ product.packageLengthCm }} × {{ product.packageWidthCm }} × {{ product.packageHeightCm }} × {{ Math.max(1, product.quantity) }}</b><small>÷ {{ product.volumeDivisor || 8000 }}</small></p>
         <p><span>体积重量</span><b>{{ grams(volumeWeight()) }} g</b><small>采购尺寸自动计算</small></p>
         <p class="charge-result"><span>最终计费重量</span><b>{{ grams(chargeWeight) }} g</b><small>实重与体积重取最大值</small></p>
       </div>
     </div>
-    <div class="highlights"><p><span>计费重量</span><b>{{ grams(chargeWeight) }} g</b><small v-if="product.volumetricEnabled">实际 {{ grams(actualWeight()) }} g / 体积 {{ grams(volumeWeight()) }} g，取较大值</small><small v-else>{{ product.weightSource==='manual' ? '业务指定' : '采购重量自动计算' }}</small></p><p><span>国内运费成本</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>{{ product.purchaseDataSource==='legacy_2026' ? '采用旧数据唯一单档运费' : '10件运费平摊，不计采购票点' }}</small></p></div>
+    <div class="highlights"><p><span>计费重量</span><b>{{ grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 包材 {{ grams(packagingWeight) }}g</small></p><p><span>国内运费成本</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>{{ product.purchaseDataSource==='legacy_2026' ? '采用旧数据唯一单档运费' : '10件运费平摊，不计采购票点' }}</small></p></div>
   </section>
 </template>
 

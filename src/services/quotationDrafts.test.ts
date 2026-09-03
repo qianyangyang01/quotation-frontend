@@ -7,7 +7,7 @@ vi.mock('./http', () => ({ api: { get: vi.fn(), put: vi.fn(), delete: vi.fn() } 
 const mockedApi = vi.mocked(api)
 const payload: QuotationDraftPayload = {
   schemaVersion: 2, customerName: '客户A', quoteMode: 'single', skuSearch: 'SKU-1', productCategory: '服装', logisticsAttribute: '普货',
-  selectedCustomerGrade: 'S', selectedTaxCustomerType: 'A', monthlySalesEstimate: '10', customQuoteQuantity: 5, quoteMatrixMode: 'common',
+  selectedCustomerGrade: 'S', monthlySalesEstimate: '10', customQuoteQuantity: 5, quoteMatrixMode: 'common',
   selectedQuoteRegions: { 澳大利亚: '1区' }, product: { sku: 'SKU-1', purchaseInvoiceTaxApplied: true, quantity: 1, weightSource: 'purchase', manualWeight: 0, volumetricEnabled: false, packageLengthCm: 0, packageWidthCm: 0, packageHeightCm: 0, primaryCountry: '美国', primaryChannelKey: 'channel-1', primaryRule: '规则A', primaryCarrier: '物流商A' },
   bundleItems: [], commonSelections: [], specifiedSelections: [], templateSelections: [], activeTemplate: null,
 }
@@ -31,8 +31,9 @@ describe('quotation draft repository', () => {
   })
 
   it('keeps the invoice-pricing marker optional for legacy schema-version-2 drafts', () => {
-    const legacy = { ...payload, product: { ...payload.product, purchaseInvoiceTaxApplied: undefined } }
+    const legacy = { ...payload, selectedTaxCustomerType: 'B', product: { ...payload.product, purchaseInvoiceTaxApplied: undefined } }
     expect(normalizeDraftState({ exists: true, payload: legacy, version: 2 }).payload?.product.purchaseInvoiceTaxApplied).toBeUndefined()
+    expect(normalizeDraftState({ exists: true, payload: legacy, version: 2 }).payload).toHaveProperty('selectedTaxCustomerType', 'B')
   })
 
   it('keeps only stable unique channel selections', () => {

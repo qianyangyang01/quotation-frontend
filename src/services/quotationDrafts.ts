@@ -20,7 +20,6 @@ export interface QuotationDraftPayload {
   productCategory: string
   logisticsAttribute: string
   selectedCustomerGrade: string
-  selectedTaxCustomerType: 'A' | 'B'
   monthlySalesEstimate: string
   customQuoteQuantity: number
   quoteMatrixMode: DraftMatrixMode

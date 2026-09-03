@@ -9,7 +9,6 @@ export interface QuotationConditionInput {
   allowedLogisticsAttributes: readonly string[]
   customerGrade: string
   enabledCustomerGrades: readonly string[]
-  taxCustomerType: string
   monthlySalesEstimate: string
 }
 
@@ -21,7 +20,6 @@ export function validateQuotationConditions(input: QuotationConditionInput, opti
   if (options.includeCategory && !input.productCategory) issues.push({ key: 'productCategory', message: '请选择产品品类' })
   if (!input.logisticsAttribute || !input.allowedLogisticsAttributes.includes(input.logisticsAttribute)) issues.push({ key: 'logisticsAttribute', message: '请选择物流属性' })
   if (!input.enabledCustomerGrades.includes(input.customerGrade)) issues.push({ key: 'customerGrade', message: '请选择已启用的客户等级' })
-  if (!['A', 'B'].includes(input.taxCustomerType)) issues.push({ key: 'taxCustomerType', message: '请选择税费客户类型' })
   if (!['10', '100', '100+'].includes(input.monthlySalesEstimate)) issues.push({ key: 'monthlySalesEstimate', message: '请选择预估月销量' })
   return issues
 }

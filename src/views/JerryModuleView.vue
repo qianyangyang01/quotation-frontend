@@ -243,8 +243,8 @@ watch(financeTaxCountryAddSearch, () => { financeTaxCountryAdd.value = filteredA
 watch(financeTaxProviderAddSearch, () => { financeTaxProviderAdd.value = filteredAvailableTaxProviders.value[0]?.provider || '' })
 const financeTaxPreview = computed(() => {
   const setting = financeTaxCountries.value[0]
-  if (!setting) return '请选择常用国家并设置客户税费'
-  return `${setting.country} 10件：A类 $${setting.aFixedFeeUsd.toFixed(2)}；B类 $${(setting.bPerItemFeeUsd * 10).toFixed(2)}`
+  if (!setting) return '请选择常用国家并设置关税'
+  return `${setting.country}：关税 $${setting.fixedFeeUsd.toFixed(2)}/单`
 })
 function financeStageCountryCount(stage: CountryStage) {
   return financeCountrySettings.value.filter(setting => setting.enabled && setting.stage === stage).length
@@ -351,14 +351,13 @@ function addTaxCountry() {
   financeTaxCountryAdd.value = ''
   financeTaxCountryAddSearch.value = ''
   financeTaxCountryAddOpen.value = false
-  toast(`${setting.country} 已加入国家税费设置`)
+  toast(`${setting.country} 已加入国家关税设置`)
 }
 function removeTaxCountry(setting: FinanceCountryTaxSetting) {
   setting.selected = false
   setting.enabled = false
-  setting.aFixedFeeUsd = 0
-  setting.bPerItemFeeUsd = 0
-  toast(`${setting.country} 已移出税费设置，保存后生效`)
+  setting.fixedFeeUsd = 0
+  toast(`${setting.country} 已移出关税设置，保存后生效`)
 }
 function addTaxProvider() {
   const setting = financeTaxSettings.value.providers.find(item => item.provider === financeTaxProviderAdd.value)
@@ -375,12 +374,11 @@ function removeTaxProvider(setting: FinanceProviderTaxSetting) {
 }
 async function saveTaxSettings() {
   financeTaxSettings.value.countries.forEach(setting => {
-    setting.aFixedFeeUsd = Math.max(0, Number(setting.aFixedFeeUsd) || 0)
-    setting.bPerItemFeeUsd = Math.max(0, Number(setting.bPerItemFeeUsd) || 0)
-    setting.enabled = setting.aFixedFeeUsd > 0 || setting.bPerItemFeeUsd > 0
+    setting.fixedFeeUsd = Math.max(0, Number(setting.fixedFeeUsd) || 0)
+    setting.enabled = setting.fixedFeeUsd > 0
   })
   financeTaxSettings.value = await saveFinanceTaxSettings(financeTaxSettings.value)
-  toast('国家客户税费与物流商全局税务属性已保存')
+  toast('国家关税与物流商全局税务属性已保存')
 }
 function startFinanceTabDrag(tab: FinanceSettingsTab, event: DragEvent) {
   draggedFinanceTab.value = tab
@@ -897,23 +895,22 @@ function saveEditor() {
       </section>
       <section v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='taxes'" class="finance-tax-workspace">
         <header>
-          <div><small>FINANCE TAX POLICY</small><b>税率设置</b><span>国家客户税费与物流商税务属性独立维护，确保报价计算清晰可追溯。</span></div>
+          <div><small>FINANCE TAX POLICY</small><b>税率设置</b><span>国家关税与物流商税务属性独立维护，确保报价计算清晰可追溯。</span></div>
           <aside><span>最近保存：{{ financeTaxSettings.updatedAt }}</span><button class="primary" type="button" @click="saveTaxSettings">保存并发布</button></aside>
         </header>
         <div class="finance-tax-content">
           <section class="tax-country-matrix">
-            <header><div><b>国家客户税费</b><span>只维护实际报价国家；A类固定按单，B类按件累计。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableTaxCountries.length" @click="financeTaxCountryAddOpen=true;financeTaxCountryAddSearch='';financeTaxCountryAdd=availableTaxCountries[0]?.country || ''">＋ 添加国家</button><label>⌕<input v-model="financeTaxCountrySearch" placeholder="搜索已添加国家"></label></aside></header>
+            <header><div><b>国家关税</b><span>只维护实际报价国家；关税固定按整张报价单计入一次。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableTaxCountries.length" @click="financeTaxCountryAddOpen=true;financeTaxCountryAddSearch='';financeTaxCountryAdd=availableTaxCountries[0]?.country || ''">＋ 添加国家</button><label>⌕<input v-model="financeTaxCountrySearch" placeholder="搜索已添加国家"></label></aside></header>
             <div v-if="financeTaxCountryAddOpen" class="tax-add-row"><label class="tax-add-search">⌕<input v-model="financeTaxCountryAddSearch" autofocus placeholder="输入国家或代码搜索"></label><select v-model="financeTaxCountryAdd"><option v-if="!filteredAvailableTaxCountries.length" value="" disabled>没有匹配的国家</option><option v-for="setting in filteredAvailableTaxCountries" :key="setting.country" :value="setting.country">{{ setting.country }} · {{ financeCountrySettingMap.get(setting.country)?.code || '—' }}</option></select><button class="primary" type="button" :disabled="!financeTaxCountryAdd" @click="addTaxCountry">确认添加</button><button type="button" @click="financeTaxCountryAddOpen=false;financeTaxCountryAdd='';financeTaxCountryAddSearch=''">取消</button></div>
-            <div class="tax-country-head"><span>国家</span><span>A类客户 · 固定/单</span><span>B类客户 · 金额/件</span><span>状态</span><span>操作</span></div>
+            <div class="tax-country-head"><span>国家</span><span>关税（USD/单）</span><span>状态</span><span>操作</span></div>
             <div class="tax-country-rows">
               <article v-for="setting in financeTaxCountries" :key="setting.country">
                 <span><b>{{ setting.country }}</b><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }}</small></span>
-                <label><i>$</i><input v-model.number="setting.aFixedFeeUsd" :aria-label="`${setting.country}A类固定税费`" type="number" min="0" step="0.01"><strong>/ 单</strong><small>≈ ¥{{ fixedFeeCny(setting.aFixedFeeUsd) }}</small></label>
-                <label><i>$</i><input v-model.number="setting.bPerItemFeeUsd" :aria-label="`${setting.country}B类每件税费`" type="number" min="0" step="0.01"><strong>/ 件</strong><small>10件：${{ (Math.max(0,Number(setting.bPerItemFeeUsd)||0)*10).toFixed(2) }}</small></label>
-                <em :class="{ active:setting.aFixedFeeUsd>0 || setting.bPerItemFeeUsd>0 }">{{ setting.aFixedFeeUsd>0 || setting.bPerItemFeeUsd>0 ? '已启用' : '待设置' }}</em>
-                <button class="tax-remove-button" type="button" :aria-label="`删除${setting.country}税费设置`" @click="removeTaxCountry(setting)">删除</button>
+                <label><i>$</i><input v-model.number="setting.fixedFeeUsd" :aria-label="`${setting.country}关税`" type="number" min="0" step="0.01"><strong>/ 单</strong><small>≈ ¥{{ fixedFeeCny(setting.fixedFeeUsd) }}</small></label>
+                <em :class="{ active:setting.fixedFeeUsd>0 }">{{ setting.fixedFeeUsd>0 ? '已启用' : '待设置' }}</em>
+                <button class="tax-remove-button" type="button" :aria-label="`删除${setting.country}关税设置`" @click="removeTaxCountry(setting)">删除</button>
               </article>
-              <p v-if="!financeTaxCountries.length" class="tax-empty">还没有国家税费设置，点击“添加国家”开始配置</p>
+              <p v-if="!financeTaxCountries.length" class="tax-empty">还没有国家关税设置，点击“添加国家”开始配置</p>
             </div>
             <footer>{{ financeTaxPreview }}</footer>
           </section>
@@ -930,7 +927,7 @@ function saveEditor() {
               </article>
               <p v-if="!filteredTaxProviders.length" class="tax-empty">还没有物流商税务设置，点击“添加物流商”开始配置</p>
             </div>
-            <footer>ⓘ 免税物流商不叠加国家客户税费；不免税物流商按上方国家与客户类型计算。</footer>
+            <footer>ⓘ 免税物流商不叠加国家关税；不免税物流商按上方国家固定金额计入整张报价单一次。</footer>
           </section>
         </div>
       </section>
@@ -1145,7 +1142,8 @@ function saveEditor() {
 .finance-tax-content{display:grid;gap:14px;padding:16px;background:#f7f9fa}.tax-country-matrix,.tax-provider-global{overflow:hidden;border:1px solid #dfe6ea;border-radius:10px;background:#fff}.tax-country-matrix>header,.tax-provider-global>header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border-bottom:1px solid #e5eaed}.tax-country-matrix>header>div,.tax-provider-global>header>div{display:grid;gap:3px}.tax-country-matrix>header b,.tax-provider-global>header b{font-size:14px}.tax-country-matrix>header span,.tax-provider-global>header span{color:#84909a;font-size:10px}.tax-country-matrix>header>aside{display:flex;align-items:center;gap:10px}.tax-country-matrix>header>aside>span{padding:6px 10px;border-radius:14px;background:#fff5e6;color:#a45d00;font-weight:800}.tax-country-matrix>header label,.tax-provider-global>header label{width:190px;height:35px;display:flex;align-items:center;gap:7px;box-sizing:border-box;padding:0 10px;border:1px solid #dbe3e8;border-radius:7px;color:#7b8892}.tax-country-matrix>header input,.tax-provider-global>header input{min-width:0;width:100%;border:0;outline:0;background:transparent}.tax-country-head,.tax-country-rows>article{min-width:760px;display:grid;grid-template-columns:minmax(180px,1.1fr) minmax(220px,1fr) minmax(250px,1.1fr) 78px;align-items:center;gap:14px}.tax-country-head{padding:10px 18px;background:#fafbfc;color:#7d8992;font-size:10px;font-weight:800}.tax-country-rows{max-height:365px;overflow:auto}.tax-country-rows>article{padding:11px 18px;border-top:1px solid #edf0f2}.tax-country-rows>article:first-child{border-top:0}.tax-country-rows>article>div{display:grid;gap:3px}.tax-country-rows>article>div b{font-size:12px}.tax-country-rows>article>div small{color:#929ca4;font-size:9px}.tax-country-rows>article label{height:36px;display:grid;grid-template-columns:auto minmax(55px,90px) auto;align-items:center;gap:6px;padding:0 9px;border:1px solid #d8e0e5;border-radius:7px;background:#fff}.tax-country-rows>article label em{color:#bd6c00;font-size:11px;font-style:normal;font-weight:900}.tax-country-rows>article label input{min-width:0;width:100%;border:0;outline:0;font-size:13px;font-weight:850}.tax-country-rows>article label span{color:#7b8790;font-size:9px;white-space:nowrap}.tax-country-rows>article label small{grid-column:1/-1;margin-top:-3px;color:#a36b1e;font-size:8px}.tax-country-rows>article>em{justify-self:start;padding:5px 9px;border-radius:14px;background:#eef1f3;color:#7c8891;font-size:9px;font-style:normal;font-weight:800}.tax-country-rows>article>em.active{background:#e9f8ef;color:#16804e}.tax-provider-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-height:380px;overflow:auto;padding:14px}.tax-provider-cards>article{display:grid;gap:11px;padding:13px;border:1px solid #e2e8eb;border-radius:9px;background:#fff}.tax-provider-cards>article>header{display:grid;gap:3px}.tax-provider-cards>article b{font-size:11px}.tax-provider-cards>article span{color:#8a959d;font-size:9px}.tax-provider-cards>article>div{display:grid;grid-template-columns:1fr 1fr;overflow:hidden;border:1px solid #dce3e7;border-radius:7px}.tax-provider-cards button{height:33px;border:0;background:#fff;color:#697681;font-size:10px;font-weight:800}.tax-provider-cards button+button{border-left:1px solid #dce3e7}.tax-provider-cards button.active{background:#fff0d8;color:#ad6200}.tax-provider-cards>article.exempt button:first-child.active{background:#e9f8ef;color:#16804e}.tax-provider-global>footer{padding:11px 16px;border-top:1px dashed #e0e6e9;background:#fffaf1;color:#8a6e49;font-size:9px}.finance-tax-content>.tax-empty{border:1px dashed #dce3e7;border-radius:8px;background:#fff}
 @media(max-width:1200px){.finance-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.tax-provider-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.finance-stats{grid-template-columns:1fr 1fr}.tax-country-matrix>header,.tax-provider-global>header{align-items:stretch;flex-direction:column}.tax-country-matrix>header>aside{align-items:stretch;flex-direction:column}.tax-country-matrix>header label,.tax-provider-global>header label{width:100%}.tax-country-matrix{overflow-x:auto}.tax-provider-cards{grid-template-columns:1fr}}
 .tax-country-matrix>header>aside,.tax-provider-global>header>aside{display:flex;align-items:center;gap:9px}.tax-country-matrix>header>aside label,.tax-provider-global>header>aside label{width:205px;height:35px;display:flex;align-items:center;gap:7px;box-sizing:border-box;padding:0 10px;border:1px solid #dbe3e8;border-radius:7px;color:#7b8892}.tax-country-matrix>header>aside input,.tax-provider-global>header>aside input{min-width:0;width:100%;border:0;outline:0;background:transparent}.tax-add-button{height:35px;padding:0 13px;border:1px solid #ef920a;border-radius:7px;background:#fff;color:#b66600;font-size:10px;font-weight:850;white-space:nowrap}.tax-add-button:hover{background:#fff7ea}.tax-add-button:disabled{cursor:not-allowed;border-color:#dfe5e9;background:#f6f8f9;color:#a6b0b7}.tax-add-row{display:flex;align-items:center;gap:9px;padding:10px 18px;border-bottom:1px solid #e7ebee;background:#fffaf2}.tax-add-search{width:260px;height:35px;display:flex;align-items:center;gap:7px;box-sizing:border-box;padding:0 10px;border:1px solid #e3ad5a;border-radius:7px;background:#fff;color:#9b650f}.tax-add-search:focus-within{border-color:#ee9209;box-shadow:0 0 0 3px rgba(238,146,9,.12)}.tax-add-search input{min-width:0;width:100%;border:0;outline:0;background:transparent;color:#27343e;font-size:10px}.tax-add-row select{min-width:260px;height:35px;border:1px solid #d8e0e5;border-radius:7px;background:#fff;padding:0 10px;color:#283641}.tax-add-row button{height:35px;padding:0 14px;border:1px solid #d8e0e5;border-radius:7px;background:#fff;color:#596772;font-size:10px;font-weight:800}.tax-add-row button.primary{border-color:#ef920a;background:#ff9910;color:#17232e}.tax-add-row button:disabled{cursor:not-allowed;border-color:#dfe5e9;background:#eef1f3;color:#9da7ae}.tax-country-head,.tax-country-rows>article{grid-template-columns:minmax(160px,1fr) minmax(190px,.95fr) minmax(210px,1fr) 70px 52px}.tax-country-rows>article>span{display:grid;gap:3px}.tax-country-matrix>footer{padding:9px 18px;border-top:1px dashed #e1e6e9;background:#fffaf1;color:#8b6d45;font-size:9px}.tax-remove-button{justify-self:start;border:0;background:transparent;color:#d55345;font-size:10px;font-weight:800}.tax-remove-button:hover{text-decoration:underline}.tax-provider-head,.tax-provider-list-compact>article{display:grid;grid-template-columns:minmax(210px,1.4fr) 100px 240px 52px;align-items:center;gap:14px}.tax-provider-head{padding:10px 18px;background:#fafbfc;color:#7d8992;font-size:10px;font-weight:800}.tax-provider-list-compact{max-height:360px;overflow:auto}.tax-provider-list-compact>article{padding:11px 18px;border-top:1px solid #edf0f2}.tax-provider-list-compact>article:first-child{border-top:0}.tax-provider-list-compact>article>span:first-child{display:grid;gap:3px}.tax-provider-list-compact b{font-size:11px}.tax-provider-list-compact small{overflow:hidden;color:#8a959d;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.tax-provider-list-compact>article>span:nth-child(2){color:#6f7c86;font-size:10px}.tax-provider-list-compact>article>div{display:grid;grid-template-columns:1fr 1fr;overflow:hidden;border:1px solid #dce3e7;border-radius:7px}.tax-provider-list-compact>article>div button{height:32px;border:0;background:#fff;color:#697681;font-size:10px;font-weight:800}.tax-provider-list-compact>article>div button+button{border-left:1px solid #dce3e7}.tax-provider-list-compact>article>div button.active{background:#fff0d8;color:#ad6200}.tax-provider-list-compact>article>div button:first-child.active{background:#e9f8ef;color:#16804e}
-@media(max-width:760px){.tax-country-matrix>header>aside,.tax-provider-global>header>aside{align-items:stretch;flex-direction:column}.tax-country-matrix>header>aside label,.tax-provider-global>header>aside label,.tax-add-button{width:100%}.tax-add-row{align-items:stretch;flex-direction:column}.tax-add-search,.tax-add-row select,.tax-add-row button{width:100%}.tax-country-head,.tax-country-rows>article{min-width:850px}.tax-provider-global{overflow-x:auto}.tax-provider-head,.tax-provider-list-compact>article{min-width:680px}}
+@media(max-width:760px){.tax-country-matrix>header>aside,.tax-provider-global>header>aside{align-items:stretch;flex-direction:column}.tax-country-matrix>header>aside label,.tax-provider-global>header>aside label,.tax-add-button{width:100%}.tax-add-row{align-items:stretch;flex-direction:column}.tax-add-search,.tax-add-row select,.tax-add-row button{width:100%}.tax-country-head,.tax-country-rows>article{min-width:650px}.tax-provider-global{overflow-x:auto}.tax-provider-head,.tax-provider-list-compact>article{min-width:680px}}
+.tax-country-head,.tax-country-rows>article{grid-template-columns:minmax(180px,1fr) minmax(260px,1.2fr) 70px 52px}
 .finance-load-state{display:flex;align-items:center;gap:14px;min-height:78px;padding:18px 20px;border:1px solid #dfe6ea;border-left:4px solid var(--o);border-radius:10px;background:#fff;box-shadow:0 10px 28px rgba(24,38,50,.05)}.finance-load-state>i{width:24px;height:24px;flex:0 0 24px;border:3px solid #ffe2b8;border-top-color:var(--o);border-radius:50%;animation:finance-load-spin .8s linear infinite}.finance-load-state>span{display:grid;gap:5px}.finance-load-state b{font-size:14px}.finance-load-state small,.finance-load-state em{padding:0;background:transparent;color:#7e8a93;font-size:10px;font-style:normal}.finance-load-state.error{border-color:#efc9c4;border-left-color:#cc5143;background:#fff8f7}.finance-load-state.error>span{flex:1}.finance-load-state.error em{color:#a35b52}.finance-load-state>button{height:36px;margin-left:auto;padding:0 14px;border:1px solid #cf796f;border-radius:7px;background:#fff;color:#a13d31;font-size:10px;font-weight:850;cursor:pointer}@keyframes finance-load-spin{to{transform:rotate(360deg)}}
 .carrier-list .legacy-channel{background:#fff2dc;color:#9a5b08;border:1px dashed #dfa85c}.legacy-count{display:block;margin-top:4px;color:#a46617}.legacy-review-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px;padding:10px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef}.legacy-review-list>b{grid-column:1/-1;color:#91560b}.legacy-review-list>span{display:grid;gap:3px;padding:7px 9px;border-radius:5px;background:#fff;color:#684d2a}.legacy-review-list small{color:#9a7b53}
 </style>
