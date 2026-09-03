@@ -26,8 +26,8 @@ export function buildQuoteLogisticsCountryQuery(
 }
 
 const DB_NAME = 'milano-quotation-cache'
-const DB_VERSION = 1
-const CACHE_SCHEMA = 'published-logistics-v1'
+const DB_VERSION = 2
+const CACHE_SCHEMA = 'published-logistics-v2'
 const MANIFEST_STORE = 'logisticsManifest'
 const RULE_STORE = 'publishedRuleQueries'
 const CACHE_EVENT = 'milano:published-logistics-cache'
@@ -59,10 +59,15 @@ function openDatabase() {
     catch { finish(null); return }
     request.onupgradeneeded = () => {
       const database = request.result
+      const rulesExisted = database.objectStoreNames.contains(RULE_STORE)
       if (!database.objectStoreNames.contains(MANIFEST_STORE)) database.createObjectStore(MANIFEST_STORE, { keyPath: 'key' })
       if (!database.objectStoreNames.contains(RULE_STORE)) database.createObjectStore(RULE_STORE, { keyPath: 'key' })
+      if (rulesExisted) request.transaction?.objectStore(RULE_STORE).clear()
     }
-    request.onsuccess = () => finish(request.result)
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close()
+      finish(request.result)
+    }
     request.onerror = () => finish(null)
     request.onblocked = () => finish(null)
   })
@@ -169,6 +174,7 @@ export async function loadPublishedLogisticsManifest(options: { signal?: AbortSi
 export async function loadPublishedLogisticsRules(query: RuleQuery, options: { signal?: AbortSignal } = {}) {
   const countries = normalized(query.countries)
   const { manifest, verified } = await loadPublishedLogisticsManifest({ signal: options.signal })
+  options.signal?.throwIfAborted()
   if (!countries.length) {
     replaceLogisticsRules([])
     return { revision: manifest.revision, rules: [], source: 'manifest' as const, verified }
@@ -179,17 +185,19 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: { s
     cached = await readStore<StoredRules>(RULE_STORE, key) || undefined
     if (cached) rulesMemory.set(key, cached)
   }
+  options.signal?.throwIfAborted()
   if (cached?.revision === manifest.revision) {
     replaceLogisticsRules(cached.rules)
     return { revision: manifest.revision, rules: cached.rules, source: 'cache' as const, verified }
   }
-  const existing = ruleRequests.get(key)
+  const existing = options.signal ? undefined : ruleRequests.get(key)
   if (existing) return { revision: manifest.revision, rules: await existing, source: 'network' as const, verified }
   const parameters = new URLSearchParams({ revision: manifest.revision, attribute: query.attribute.trim() || '普货' })
   countries.forEach(country => parameters.append('country', country))
   normalized(query.channelCodes).forEach(channel => parameters.append('channelCode', channel))
   const request = conditionalGet<{ revision: string; rules: LogisticsRule[] }>(`/logistics/published/rules?${parameters}`, { signal: options.signal })
     .then(response => {
+      options.signal?.throwIfAborted()
       if (response.status === 304) throw new Error('物流规则缓存不存在，请重新加载')
       const value: StoredRules = { key, revision: response.data.revision, rules: response.data.rules, storedAt: Date.now() }
       rulesMemory.set(key, value)
@@ -197,8 +205,8 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: { s
       replaceLogisticsRules(value.rules)
       return value.rules
     })
-    .finally(() => ruleRequests.delete(key))
-  ruleRequests.set(key, request)
+    .finally(() => { if (ruleRequests.get(key) === request) ruleRequests.delete(key) })
+  if (!options.signal) ruleRequests.set(key, request)
   return { revision: manifest.revision, rules: await request, source: 'network' as const, verified }
 }
 
