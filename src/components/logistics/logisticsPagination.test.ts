@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampLogisticsPage, logisticsPageFromQuery, logisticsPageNumbers, logisticsPageQuery, logisticsPageSize } from './logisticsPagination'
+import { clampLogisticsPage, logisticsPageFromQuery, logisticsPageNumbers, logisticsPageQuery, logisticsPageRange, logisticsPageSize } from './logisticsPagination'
 
 describe('logistics pagination', () => {
   it('keeps a five-page window around the current page', () => {
@@ -25,5 +25,11 @@ describe('logistics pagination', () => {
     expect(logisticsPageFromQuery('7')).toBe(6)
     expect(logisticsPageFromQuery('0')).toBe(0)
     expect(logisticsPageQuery(6, 50)).toEqual({ page: '7', size: '50' })
+  })
+
+  it('shows the visible record range without overflowing the total', () => {
+    expect(logisticsPageRange(0, 20, 140)).toEqual({ from: 1, to: 20 })
+    expect(logisticsPageRange(6, 20, 140)).toEqual({ from: 121, to: 140 })
+    expect(logisticsPageRange(0, 20, 0)).toEqual({ from: 0, to: 0 })
   })
 })

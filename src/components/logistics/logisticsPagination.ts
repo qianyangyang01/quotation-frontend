@@ -26,3 +26,10 @@ export function logisticsPageNumbers(page: number, totalPages: number, windowSiz
 export function clampLogisticsPage(page: number, totalPages: number) {
   return Math.min(Math.max(0, Math.trunc(page)), Math.max(0, totalPages - 1))
 }
+
+export function logisticsPageRange(page: number, size: number, total: number) {
+  if (total <= 0) return { from: 0, to: 0 }
+  const safeSize = Math.max(1, Math.trunc(size))
+  const safePage = Math.max(0, Math.trunc(page))
+  return { from: safePage * safeSize + 1, to: Math.min(total, (safePage + 1) * safeSize) }
+}

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { clampLogisticsPage, logisticsPageNumbers } from './logisticsPagination'
+import { clampLogisticsPage, logisticsPageNumbers, logisticsPageRange } from './logisticsPagination'
 
-const props = defineProps<{ page: number; size: number; total: number; totalPages: number; loading?: boolean }>()
+const props = withDefaults(defineProps<{ page: number; size: number; total: number; totalPages: number; loading?: boolean; ariaLabel?: string; sizeOptions?: number[] }>(), {
+  ariaLabel: '物流价格分页',
+  sizeOptions: () => [20, 50, 100],
+})
 const emit = defineEmits<{ pageChange: [page: number]; sizeChange: [size: number] }>()
 const jumpPage = ref(props.page + 1)
 const lastPage = computed(() => Math.max(1, props.totalPages))
 const pages = computed(() => logisticsPageNumbers(props.page, props.totalPages))
+const range = computed(() => logisticsPageRange(props.page, props.size, props.total))
 watch(() => props.page, value => { jumpPage.value = value + 1 })
 watch(() => props.totalPages, () => { jumpPage.value = Math.min(lastPage.value, props.page + 1) })
 
@@ -16,11 +20,11 @@ function changeSize(event: Event) { emit('sizeChange', Number((event.target as H
 </script>
 
 <template>
-  <nav class="logistics-pager" aria-label="物流价格底部分页">
-    <span class="summary">共 {{ total }} 条</span>
+  <nav class="logistics-pager" :aria-label="ariaLabel">
+    <span class="summary">第 {{ range.from }}–{{ range.to }} 条 / 共 {{ total }} 条</span>
     <label>每页
       <select :value="size" :disabled="loading" aria-label="物流价格每页条数" @change="changeSize">
-        <option :value="20">20</option><option :value="50">50</option><option :value="100">100</option>
+        <option v-for="option in sizeOptions" :key="option" :value="option">{{ option }}</option>
       </select>
       条
     </label>
