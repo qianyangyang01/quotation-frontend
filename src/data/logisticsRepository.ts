@@ -200,7 +200,7 @@ export async function previewLogisticsGlobalImports(files: File[]) { return api.
 export async function importLogisticsGlobalFiles(files: File[], replaceDrafts = false) { return mutation(api.post<LogisticsBatchImportResult>(`/logistics/imports?replaceDrafts=${replaceDrafts}`, providerFilesForm(files), idempotencyKey('logistics-global-import'))) }
 
 export async function publishLogisticsProviderVersions(providerId: string, selections: Array<{ channelId: string; versionId: string; removalConfirmed: boolean; reviewConfirmed: boolean }>, note: string) {
-  const result = await api.post<{ providerId: string; count: number; published: LogisticsChannelVersionRecord[] }>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, idempotencyKey('logistics-provider-publish'))
+  const result = await api.post<{ providerId: string; count: number; published: Array<{ id: string; channelId: string; versionNumber: number; status: string; quoteReady: boolean }> }>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, idempotencyKey('logistics-provider-publish'))
   invalidateLogisticsWorkspaceCache(); await invalidatePublishedLogisticsCache(); window.dispatchEvent(new CustomEvent(LOGISTICS_PUBLISHED_EVENT)); return result
 }
 
