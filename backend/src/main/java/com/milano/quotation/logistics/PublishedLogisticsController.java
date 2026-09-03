@@ -25,9 +25,10 @@ public class PublishedLogisticsController {
     @GetMapping("/manifest")
     ResponseEntity<ApiResponse<LogisticsQueryService.PublishedManifest>> manifest(
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
-        var manifest = queries.manifest();
-        var etag = quote(manifest.revision());
-        if (etag.equals(ifNoneMatch)) return ResponseEntity.status(304).eTag(manifest.revision()).build();
+        var revision = queries.manifestRevision();
+        var etag = quote(revision.revision());
+        if (etag.equals(ifNoneMatch)) return ResponseEntity.status(304).eTag(revision.revision()).build();
+        var manifest = queries.manifest(revision);
         return ResponseEntity.ok().eTag(manifest.revision()).cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(manifest));
     }
 
