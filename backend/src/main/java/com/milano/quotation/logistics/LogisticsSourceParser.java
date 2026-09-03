@@ -16,11 +16,12 @@ import java.util.regex.Pattern;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.02-v3";
+    public static final String VERSION="providers-2026.09.02-v4";
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
     private static final Pattern RANGE=Pattern.compile("^([0-9.]+)(<=|<)(?:W|重量)(<=|<)([0-9.]+)$",Pattern.CASE_INSENSITIVE);
+    private static final Pattern ETA_RANGE=Pattern.compile("(?<![0-9])([0-9]{1,3})\\s*[-—–~～至]\\s*([0-9]{1,3})\\s*(?:个)?(?:工作日|天)(?![0-9])");
     private static final Map<String,String> COUNTRIES=countries();
     private final ObjectMapper mapper;
     private final LogisticsWorkbookService standard;
@@ -153,6 +154,7 @@ public class LogisticsSourceParser {
 
     private boolean parseTable(Source source,String provider,String file,Map<String,ObjectNode> channels) {
         Columns columns=null; boolean recognized=false; String section=source.sheet.getSheetName().trim();
+        var yanwenEta=provider.equals("燕文")?yanwenEtaExtractor(source):null;
         int auxiliary=-1;boolean example=false;
         var allNotes=new LinkedHashSet<String>();
         for(int r=0;r<=source.sheet.getLastRowNum();r++) {
@@ -187,6 +189,7 @@ public class LogisticsSourceParser {
             var target=channel(provider,name,channels);
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",columns.firstPrice>=0?"first-next":"per-kg");
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
+            String sourceContinent=columns.continent>=0?source.text(r,columns.continent):"";
             String normalizedCode=rawCode.replaceFirst("^([A-Z]{2})-[1-9][0-9]*$","$1");
             if(!Arrays.asList(Locale.getISOCountries()).contains(normalizedCode))normalizedCode=countryCode(countryRaw);
             row.put("areaName",countryName(countryRaw)); row.put("countryCode",normalizedCode).put("sourceCountryCode",rawCode);
@@ -233,9 +236,17 @@ public class LogisticsSourceParser {
                 if(row.path("linehaulPerKg").asDouble()>0)pending(row,"干线费需要明确计费叠加规则");
             }
             if(columns.eta>=0) {
-                var eta=numbers(source.text(r,columns.eta));
-                if(!eta.isEmpty())row.put("etaMinDays",eta.getFirst());if(eta.size()>1)row.put("etaMaxDays",eta.get(1));
+                var rawEta=source.text(r,columns.eta);
+                if(provider.equals("燕文")&&!rawEta.isBlank()) {
+                    var eta=parseEta(rawEta,source.address(r,columns.eta));
+                    if(eta==null)issue(target,r+1,"参考时效","燕文价格行时效必须是明确的起止天数："+rawEta,"error");
+                    else applyEta(row,eta,"row");
+                } else {
+                    var eta=numbers(rawEta);
+                    if(!eta.isEmpty())row.put("etaMinDays",eta.getFirst());if(eta.size()>1)row.put("etaMaxDays",eta.get(1));
+                }
             }
+            if(yanwenEta!=null)yanwenEta.apply(row,target,r+1,sourceContinent);
             var notes=new LinkedHashSet<String>();
             if(provider.equals("极通环球")){notes.add(columns.code>=0?source.text(r,columns.code):"");pending(row,"同表含多个下单产品及附加操作费，价格仅供管理，需人工确认适用产品");}
             for(int c:columns.notes) {var note=source.text(r,c);if(!note.isBlank()&&!note.equals("/"))notes.add(note);}
@@ -322,6 +333,7 @@ public class LogisticsSourceParser {
             String t=clean(source.text(r,col)); String lower=t.toLowerCase(Locale.ROOT);
             if(t.matches("国家|国家/地区|国家名称|通达国家|服务国家"))c.country=col;
             if(t.equals("CountryCode")||t.equals("Code"))c.countryCode=col;
+            if(t.equals("大洲"))c.continent=col;
             if(t.contains("产品名称")||t.equals("渠道名称"))c.channel=col;
             if(t.contains("产品代码")||t.equals("渠道代码"))c.code=col;
             if(t.contains("重量段始"))c.from=col;
@@ -352,6 +364,83 @@ public class LogisticsSourceParser {
         row.set("rawValues",source.rawRow(r));
         row.put("quoteReady",row.path("pendingReason").asText().isBlank());
         ((ArrayNode)target.path("rows")).add(row);
+    }
+    private YanwenEtaExtractor yanwenEtaExtractor(Source source) {
+        var index=new YanwenEtaExtractor();
+        for(int header=0;header<=source.sheet.getLastRowNum();header++) {
+            int code=-1,eta=-1;
+            for(int c=0;c<source.width(header);c++) {
+                var label=clean(source.text(header,c));
+                if(label.equalsIgnoreCase("CountryCode"))code=c;
+                if(label.contains("参考时效"))eta=c;
+            }
+            if(code<0||eta<0)continue;
+            for(int r=header+1;r<=source.sheet.getLastRowNum();r++) {
+                if(isPriceHeader(source,r))break;
+                var rawCode=clean(source.text(r,code)).toUpperCase(Locale.ROOT);
+                var rawEta=source.text(r,eta);
+                if(!rawCode.matches("[A-Z]{2}(?:-[0-9]+)?")||rawEta.isBlank())continue;
+                var parsed=parseEta(rawEta,source.address(r,eta));
+                if(parsed==null)index.invalidCountries.add(rawCode);else index.put(index.countries,index.conflictingCountries,rawCode,parsed);
+            }
+        }
+        if(source.sheet.getSheetName().trim().equals("中邮上海线下E邮宝"))for(int r=0;r<=source.sheet.getLastRowNum();r++)for(int c=0;c<source.width(r);c++) {
+            var text=source.text(r,c);
+            for(var continent:List.of("亚洲","欧洲","南美洲","北美洲","大洋洲","非洲"))if(clean(text).startsWith(continent+"：")||clean(text).startsWith(continent+":")) {
+                var parsed=parseEta(text,source.address(r,c));
+                if(parsed==null)index.invalidContinents.add(continent);else index.put(index.continents,index.conflictingContinents,continent,parsed);
+            }
+        }
+        return index;
+    }
+    private boolean isPriceHeader(Source source,int row) {
+        var labels=source.rowTexts(row).stream().map(LogisticsSourceParser::clean).filter(v->v.length()<40).toList();
+        boolean weight=labels.stream().anyMatch(v->v.contains("重量段")||v.contains("重量区间")||v.contains("计费重量限制"));
+        boolean price=labels.stream().anyMatch(v->(v.contains("运费")||v.contains("公斤重"))&&(v.toUpperCase(Locale.ROOT).contains("KG")||v.equals("运费单价")));
+        return weight&&price;
+    }
+    private EtaReference parseEta(String text,String cell) {
+        var matcher=ETA_RANGE.matcher(text);EtaReference found=null;
+        while(matcher.find()) {
+            int min=Integer.parseInt(matcher.group(1)),max=Integer.parseInt(matcher.group(2));
+            if(min<=0||max<min)return null;
+            var next=new EtaReference(min,max,text,cell);
+            if(found!=null&&(found.min!=next.min||found.max!=next.max))return null;
+            found=next;
+        }
+        return found;
+    }
+    private static void applyEta(ObjectNode row,EtaReference eta,String scope) {
+        row.put("etaMinDays",eta.min).put("etaMaxDays",eta.max).put("sourceEtaScope",scope).put("sourceEtaCell",eta.cell).put("sourceEtaText",eta.text);
+    }
+    private record EtaReference(int min,int max,String text,String cell){}
+    private final class YanwenEtaExtractor {
+        final Map<String,EtaReference> countries=new HashMap<>(),continents=new HashMap<>();
+        final Set<String> conflictingCountries=new HashSet<>(),conflictingContinents=new HashSet<>(),invalidCountries=new HashSet<>(),invalidContinents=new HashSet<>(),reported=new HashSet<>();
+        void put(Map<String,EtaReference> values,Set<String> conflicts,String key,EtaReference value) {
+            if(conflicts.contains(key))return;var previous=values.get(key);
+            if(previous==null)values.put(key,value);else if(previous.min!=value.min||previous.max!=value.max){values.remove(key);conflicts.add(key);}
+        }
+        void apply(ObjectNode row,ObjectNode channel,int sourceRow,String sourceContinent) {
+            int existingMin=row.path("etaMinDays").asInt(),existingMax=row.path("etaMaxDays").asInt();
+            if(existingMin>0&&existingMax>=existingMin)return;
+            if(existingMin>0||existingMax>0){issue(channel,sourceRow,"参考时效","燕文价格行时效不完整，禁止使用参考表覆盖","error");return;}
+            var raw=clean(row.path("sourceCountryCode").asText()).toUpperCase(Locale.ROOT);
+            var normalized=clean(row.path("countryCode").asText()).toUpperCase(Locale.ROOT);
+            var keys=new LinkedHashSet<String>();if(!raw.isBlank()){keys.add(raw);keys.add(raw.replaceFirst("-[0-9]+$",""));}if(!normalized.isBlank())keys.add(normalized);
+            for(var key:keys) {
+                if(conflictingCountries.contains(key)){report(channel,sourceRow,"country:"+key,"同一国家简码存在相互冲突的参考时效："+key);return;}
+                if(invalidCountries.contains(key)){report(channel,sourceRow,"country-invalid:"+key,"国家参考时效不是明确的起止天数："+key);return;}
+                var value=countries.get(key);if(value!=null){applyEta(row,value,"country");return;}
+            }
+            var continent=sourceContinent.trim();if(continent.equals("亚洲（中东）")||continent.equals("亚洲(中东)"))continent="亚洲";
+            if(!continent.isBlank()) {
+                if(conflictingContinents.contains(continent)){report(channel,sourceRow,"continent:"+continent,"同一大洲存在相互冲突的参考时效："+continent);return;}
+                if(invalidContinents.contains(continent)){report(channel,sourceRow,"continent-invalid:"+continent,"大洲参考时效不是明确的起止天数："+continent);return;}
+                var value=continents.get(continent);if(value!=null)applyEta(row,value,"continent");
+            }
+        }
+        void report(ObjectNode channel,int row,String key,String message){if(reported.add(key))issue(channel,row,"参考时效",message,"error");}
     }
     private void finish(ObjectNode channel,String provider) {
         var rows=(ArrayNode)channel.path("rows"); var previous=new HashMap<String,ObjectNode>(); var seen=new HashSet<String>();
@@ -496,7 +585,7 @@ public class LogisticsSourceParser {
     private static String scope(JsonNode row){return row.path("countryCode").asText()+"|"+row.path("areaName").asText()+"|"+row.path("zoneName").asText()+"|"+row.path("originRegion").asText();}
     private static Map<String,String> countries(){var m=new HashMap<String,String>();for(var code:Locale.getISOCountries())m.put(new Locale.Builder().setRegion(code).build().getDisplayCountry(Locale.SIMPLIFIED_CHINESE),code);m.put("英国","GB");m.put("韩国","KR");m.put("捷克","CZ");m.put("中国台湾","TW");m.put("台湾","TW");m.put("中国香港","HK");m.put("香港","HK");m.put("俄罗斯","RU");m.put("阿联酋","AE");m.put("土库曼","TM");return m;}
     private static class Columns {
-        int country=-1,countryCode=-1,channel=-1,code=-1,weight=-1,from=-1,to=-1,rate=-1,fee=-1,settlement=-1,minimum=-1,step=-1,origin=-1,zone=-1,eta=-1,linehaul=-1,firstPrice=-1,nextPrice=-1;
+        int country=-1,countryCode=-1,continent=-1,channel=-1,code=-1,weight=-1,from=-1,to=-1,rate=-1,fee=-1,settlement=-1,minimum=-1,step=-1,origin=-1,zone=-1,eta=-1,linehaul=-1,firstPrice=-1,nextPrice=-1;
         double firstKg=0.5,nextKg=0.5;List<Integer> notes=new ArrayList<>();
     }
     private class Source {

@@ -3,13 +3,16 @@ package com.milano.quotation.logistics;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.ss.util.CellRangeAddress;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.*;
+import java.security.MessageDigest;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -117,6 +120,40 @@ class LogisticsSourceParserTest {
             assertEquals(1,result.path("sheets").get(0).path("conditionalPriceRows").size());assertTrue(c.path("rows").get(0).path("notes").asText().contains("30"));
         }
     }
+    @Test void enrichesOnlyYanwenFromCountryReferenceBelowPricesAndPreservesInlineEta()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("燕文专线追踪-普货");
+            row(s,0,"大洲","国家","CountryCode","公斤运费(元/KG)","处理费(元/件)","重量段(KG)","参考时效");
+            row(s,1,"北美洲","美国","US",143,20,"0.001-0.1","");row(s,2,"","","",137,18,"0.101-0.2","");
+            s.addMergedRegion(new CellRangeAddress(1,2,0,0));s.addMergedRegion(new CellRangeAddress(1,2,1,1));s.addMergedRegion(new CellRangeAddress(1,2,2,2));
+            row(s,3,"欧洲","英国","GB",75,25,"0.001-1","3-4工作日");
+            row(s,6,"大洲","国家","Country Code","参考时效 (工作日)");row(s,7,"北美洲","美国","US","6-12工作日");row(s,8,"欧洲","英国","GB","5-10个工作日");
+            var channel=parser.parse(bytes(book),"8.27燕文价格.xlsx").path("channels").get(0);assertEquals(3,channel.path("rows").size());assertEquals(0,channel.path("errors").asInt(),channel.toString());
+            for(var value:channel.path("rows"))if(value.path("countryCode").asText().equals("US")){assertEquals(6,value.path("etaMinDays").asInt());assertEquals(12,value.path("etaMaxDays").asInt());assertEquals("country",value.path("sourceEtaScope").asText());}
+            var gb=findCountry(channel,"GB");assertEquals(3,gb.path("etaMinDays").asInt());assertEquals(4,gb.path("etaMaxDays").asInt());assertEquals("row",gb.path("sourceEtaScope").asText());
+        }
+    }
+    @Test void findsYanwenCountryReferencesAbovePricesAndSupportsPlainDays()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("燕文精品追踪-普货");row(s,0,"大洲","国家","Country Code","参考时效 (工作日)");
+            row(s,1,"欧洲","意大利","IT","12-14天");row(s,2,"欧洲","西班牙","ES","全段时效：9-14个工作日");
+            row(s,5,"大洲","国家","CountryCode","公斤运费(元/KG)","处理费(元/件)","重量段(KG)");row(s,6,"欧洲","意大利","IT",80,22,"0.001-1");row(s,7,"欧洲","西班牙","ES",82,22,"0.001-1");
+            var channel=parser.parse(bytes(book),"燕文价格.xlsx").path("channels").get(0);assertEquals(12,findCountry(channel,"IT").path("etaMinDays").asInt());assertEquals(14,findCountry(channel,"IT").path("etaMaxDays").asInt());assertEquals(9,findCountry(channel,"ES").path("etaMinDays").asInt());
+        }
+    }
+    @Test void mapsOnlyExplicitEpacketContinentsAndBlocksConflictingCountryReferences()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("中邮上海线下E邮宝");row(s,0,"大洲","国家","CountryCode","公斤运费(元/KG)","处理费(元/件)","重量段(KG)");
+            row(s,1,"北美洲","加拿大","CA",78,18,"0.001-2");row(s,2,"欧洲","英国","GB",75,25,"0.001-2");row(s,3,"非洲","南非","ZA",75,22,"0.001-2");
+            row(s,6,"参考时效","北美洲：揽收-到达目的国15-30个工作日");row(s,7,"", "欧洲：揽收-到达目的国15-25个工作日");
+            var channel=parser.parse(bytes(book),"燕文价格.xlsx").path("channels").get(0);assertEquals(15,findCountry(channel,"CA").path("etaMinDays").asInt());assertEquals(30,findCountry(channel,"CA").path("etaMaxDays").asInt());assertEquals(15,findCountry(channel,"GB").path("etaMinDays").asInt());assertEquals(0,findCountry(channel,"ZA").path("etaMinDays").asInt());
+        }
+        try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("燕文专线惠选-普货");row(s,0,"国家","CountryCode","公斤运费(元/KG)","处理费(元/件)","重量段(KG)");row(s,1,"美国","US",100,20,"0.001-1");
+            row(s,3,"国家","Country Code","参考时效 (工作日)");row(s,4,"美国","US","6-12工作日");row(s,5,"美国","US","8-15工作日");
+            var channel=parser.parse(bytes(book),"燕文价格.xlsx").path("channels").get(0);assertTrue(channel.path("errors").asInt()>0);assertEquals(0,findCountry(channel,"US").path("etaMinDays").asInt());
+        }
+    }
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void auditsEveryRealWorkbookAndChecksHandCalculatedSamples()throws Exception {
         var root=Path.of(System.getProperty("logistics.corpusDir"));var report=mapper.createArrayNode();var books=new LinkedHashMap<String,JsonNode>();
@@ -137,10 +174,54 @@ class LogisticsSourceParserTest {
         assertSample(books.get("8.1云速递价格.xlsx"),"全球专线普货","US",0.5,78,20);
         assertSample(books.get("8.7顺丰价格.xlsx"),"服装专线","DE",0.05,45.44,22);
     }
+    @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
+    void freezesRealWorkbookBusinessBaselines()throws Exception {
+        var root=Path.of(System.getProperty("logistics.corpusDir"));
+        var unrelated=new TreeMap<String,String>();var yanwenCore=new TreeMap<String,String>();
+        try(var paths=Files.list(root)) {
+            for(var path:paths.filter(p->p.toString().matches("(?i).*\\.xlsx?$")&&!p.getFileName().toString().startsWith("~$")).sorted().toList()) {
+                var file=path.getFileName().toString();var parsed=parser.parse(Files.readAllBytes(path),file);
+                for(var channel:parsed.path("channels")) {
+                    var key=file+"|"+LogisticsSourceParser.identity(channel);
+                    if(!file.equals("8.27燕文价格.xlsx"))unrelated.put(key,channel.path("contentHash").asText());
+                    else {
+                        var rows=mapper.createArrayNode();
+                        for(var value:channel.path("rows")) {
+                            var row=(ObjectNode)value.deepCopy();row.remove(List.of("etaMinDays","etaMaxDays","sourceEtaScope","sourceEtaCell","sourceEtaText"));rows.add(row);
+                        }
+                        yanwenCore.put(key,parser.businessHash(rows));
+                    }
+                }
+            }
+        }
+        var unrelatedHash=LogisticsDatasetService.hash(mapper.writeValueAsString(unrelated));
+        var yanwenCoreHash=LogisticsDatasetService.hash(mapper.writeValueAsString(yanwenCore));
+        assertEquals("97172f01a81ec6389773fa8a36864fbd1f356b5f5e1ac83463bee62ad0d3aa7b",unrelatedHash);
+        assertEquals("06461d6ecc61d5055d84d4cd794c242d9a146ce11591c8420655bcd6596a9ecb",yanwenCoreHash);
+    }
+    @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
+    void enrichesThePinnedRealYanwenWorkbookWithoutChangingRows()throws Exception {
+        var path=Path.of(System.getProperty("logistics.corpusDir")).resolve("8.27燕文价格.xlsx");var bytes=Files.readAllBytes(path);
+        assertEquals("67D6E7A198E1AB685F816195BF930731C47298E27A780AA77210569894B525E4",HexFormat.of().withUpperCase().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)));
+        var parsed=parser.parse(bytes,path.getFileName().toString());var channels=new LinkedHashMap<String,JsonNode>();for(var channel:parsed.path("channels"))channels.put(channel.path("channelName").asText(),channel);
+        var expectedRows=Map.of("燕文专线追踪-普货",190,"燕文专线追踪-特货",198,"燕文专线惠选-普货",34,"燕文化妆品专线",111,"燕文服装专线-普货",51,"燕文精品追踪-普货",12,"中邮上海线下E邮宝",30);
+        assertEquals(expectedRows.keySet(),channels.keySet());int total=0,withEta=0;var unknown=new ArrayList<String>();var etaCounts=new LinkedHashMap<String,Integer>();var etaCountries=new LinkedHashMap<String,Set<String>>();
+        for(var entry:expectedRows.entrySet()) {
+            var channel=channels.get(entry.getKey());assertEquals(entry.getValue(),channel.path("rows").size(),entry.getKey());total+=channel.path("rows").size();
+            var countriesWithEta=new TreeSet<String>();int channelEta=0;for(var row:channel.path("rows"))if(row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt()){withEta++;channelEta++;countriesWithEta.add(row.path("countryCode").asText());}else unknown.add(entry.getKey()+"|"+row.path("countryCode").asText()+"|"+row.path("sourceRow").asInt());etaCounts.put(entry.getKey(),channelEta);etaCountries.put(entry.getKey(),countriesWithEta);
+        }
+        assertEquals(626,total);assertEquals(623,withEta,etaCounts+" countries="+etaCountries);assertEquals(List.of("中邮上海线下E邮宝|EG|32","中邮上海线下E邮宝|MA|33","中邮上海线下E邮宝|ZA|34"),unknown);
+        assertEta(channels.get("燕文专线追踪-普货"),"US",6,12);assertEta(channels.get("燕文专线追踪-普货"),"GB",5,10);assertEta(channels.get("燕文专线追踪-普货"),"FR",6,10);
+        try(var workbook=WorkbookFactory.create(new ByteArrayInputStream(bytes))) {var sheet=workbook.getSheet("燕文精品追踪-普货");assertEquals("12-14天",sheet.getRow(79).getCell(3).getStringCellValue());assertEquals("9-14天",sheet.getRow(80).getCell(3).getStringCellValue());assertEquals("7-15天",sheet.getRow(81).getCell(3).getStringCellValue());}
+        var epacketPairs=new HashSet<String>();for(var row:channels.get("中邮上海线下E邮宝").path("rows"))if(row.path("etaMinDays").asInt()>0)epacketPairs.add(row.path("etaMinDays").asInt()+"-"+row.path("etaMaxDays").asInt());
+        assertEquals(Set.of("10-25","15-25","15-30"),epacketPairs);
+    }
     private void assertSample(JsonNode book,String channel,String country,double weight,double price,double fee){
         var rows=new ArrayList<JsonNode>();for(var c:book.path("channels"))if(c.path("channelName").asText().equals(channel))for(var r:c.path("rows"))if(r.path("countryCode").asText().equals(country)&&r.path("zoneName").asText().isBlank()&&(weight>r.path("weightFromKg").asDouble()||(weight==r.path("weightFromKg").asDouble()&&r.path("weightFromInclusive").asBoolean()))&&(weight<r.path("weightToKg").asDouble()||(weight==r.path("weightToKg").asDouble()&&r.path("weightToInclusive").asBoolean())))rows.add(r);
         assertEquals(1,rows.size(),channel+" sample must be unique");assertEquals(price,rows.getFirst().path("pricePerKg").asDouble());assertEquals(fee,rows.getFirst().path("registrationFee").asDouble());
     }
+    private void assertEta(JsonNode channel,String country,int min,int max){int found=0;for(var row:channel.path("rows"))if(row.path("sourceCountryCode").asText().equals(country)){found++;assertEquals(min,row.path("etaMinDays").asInt(),channel.path("channelName").asText()+" "+country);assertEquals(max,row.path("etaMaxDays").asInt(),channel.path("channelName").asText()+" "+country);}assertTrue(found>0,"missing ETA sample "+country);}
+    private JsonNode findCountry(JsonNode channel,String country){for(var row:channel.path("rows"))if(row.path("countryCode").asText().equals(country))return row;return fail("missing country "+country);}
     static byte[] bytes(Workbook book)throws Exception{var out=new ByteArrayOutputStream();book.write(out);return out.toByteArray();}
     static void row(Sheet s,int number,Object...values){var r=s.createRow(number);for(int i=0;i<values.length;i++){var c=r.createCell(i);if(values[i] instanceof Number n)c.setCellValue(n.doubleValue());else c.setCellValue(String.valueOf(values[i]));}}
 }
