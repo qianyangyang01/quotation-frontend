@@ -47,7 +47,7 @@ class LogisticsQueryPostgresIntegrationTest {
                 .param("id", providerId).param("payload", "{\"id\":\"" + providerId + "\",\"code\":\"YUNTU\",\"name\":\"云途\",\"enabled\":true}").param("now", now).update();
         jdbc.sql("insert into logistics_channel(id,provider_id,code,rule_id,current_version_id,payload,version,created_at,updated_at) values(:id,:provider,'YT-PH',1,null,cast(:payload as jsonb),0,:now,:now)")
                 .param("id", channelId).param("provider", providerId).param("payload", "{\"id\":\"" + channelId + "\",\"providerId\":\"" + providerId + "\",\"name\":\"云途普货\",\"code\":\"YT-PH\",\"type\":\"专线\",\"logisticsAttribute\":\"普货\",\"enabled\":true,\"createdAt\":\"2026-08-24T00:00:00Z\",\"updatedAt\":\"2026-08-24T00:00:00Z\"}").param("now", now).update();
-        var rows = "[{\"areaName\":\"美国\",\"countryCode\":\"US\",\"weightFromKg\":0,\"weightToKg\":2,\"pricePerKg\":55,\"allowedMarks\":\"\",\"prohibitedMarks\":\"\"},{\"areaName\":\"德国\",\"countryCode\":\"DE\",\"weightFromKg\":0,\"weightToKg\":2,\"pricePerKg\":60,\"allowedMarks\":\"\",\"prohibitedMarks\":\"\"}]";
+        var rows = "[{\"areaName\":\"美国\",\"countryCode\":\"US\",\"weightFromKg\":0,\"weightToKg\":2,\"pricePerKg\":55,\"registrationFee\":18,\"etaMinDays\":6,\"etaMaxDays\":10,\"allowedMarks\":\"\",\"prohibitedMarks\":\"\",\"pendingReason\":\"\",\"notes\":\"仅用于物流管理页的长说明\",\"rawValues\":{\"原始列\":\"原始值\"},\"sourceFile\":\"rates.xlsx\",\"sourceRow\":42,\"rowKey\":\"diagnostic-only\"},{\"areaName\":\"德国\",\"countryCode\":\"DE\",\"weightFromKg\":0,\"weightToKg\":2,\"pricePerKg\":60,\"allowedMarks\":\"\",\"prohibitedMarks\":\"\"}]";
         var versionPayload = "{\"id\":\"" + versionId + "\",\"channelId\":\"" + channelId + "\",\"versionNumber\":1,\"status\":\"published\",\"sourceHash\":\"hash-1\",\"fileName\":\"rates.xlsx\",\"importedBy\":\"ADMIN\",\"publishedBy\":\"ADMIN\",\"rows\":" + rows + ",\"issues\":[],\"diffRows\":[],\"summary\":{\"added\":2}}";
         jdbc.sql("insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at,published_at) values(:id,:channel,1,'published','hash-1',cast(:payload as jsonb),:now,:now)")
                 .param("id", versionId).param("channel", channelId).param("payload", versionPayload).param("now", now).update();
@@ -79,6 +79,19 @@ class LogisticsQueryPostgresIntegrationTest {
         assertEquals(1, rules.rules().size());
         assertEquals(1, rules.rules().getFirst().path("prices").size());
         assertTrue(first.countries().stream().anyMatch(country -> country.code().equals("US")));
+
+        var price = rules.rules().getFirst().path("prices").get(0);
+        assertEquals(55, price.path("pricePerKg").asInt());
+        assertEquals(18, price.path("registrationFee").asInt());
+        assertEquals(6, price.path("etaMinDays").asInt());
+        assertEquals(10, price.path("etaMaxDays").asInt());
+        assertTrue(price.path("quoteReady").asBoolean());
+        assertFalse(price.has("notes"));
+        assertFalse(price.has("rawValues"));
+        assertFalse(price.has("sourceFile"));
+        assertFalse(price.has("sourceRow"));
+        assertFalse(price.has("rowKey"));
+        assertFalse(price.has("pendingReason"));
 
         var draftId = UUID.randomUUID();
         jdbc.sql("insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at) values(:id,:channel,2,'draft','draft-hash','{\"rows\":[]}'::jsonb,now())")

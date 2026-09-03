@@ -29,6 +29,16 @@ public class LogisticsQueryService {
     private static final int MAX_PAGE_SIZE = 200;
     private static final int MAX_COUNTRIES = 100;
     private static final int MAX_CHANNEL_CODES = 100;
+    private static final Set<String> QUOTE_PRICE_FIELDS = Set.of(
+            "areaName", "countryCode", "etaMinDays", "etaMaxDays",
+            "prohibitedMarks", "allowedMarks", "maxPerimeterCm", "maxSideCm",
+            "volumeDivisor", "weightFromKg", "weightToKg", "startWeightKg",
+            "pricePerKg", "minChargeWeightKg", "firstWeightKg", "firstWeightPrice",
+            "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee",
+            "surcharge", "fuelSurchargeRate", "prohibitGeneralCargo", "volumetric",
+            "phoneRequired", "zoneName", "zoneExclude", "weightFromInclusive",
+            "weightToInclusive"
+    );
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
 
@@ -116,7 +126,7 @@ public class LogisticsQueryService {
         var revisionParts = jdbc.sql("""
                 select concat_ws('|', p.id::text, p.version::text, p.payload->>'enabled',
                   c.id::text, c.version::text, c.code, c.payload->>'enabled', c.payload->>'name', c.payload->>'type', c.payload->>'logisticsAttribute',
-                  v.id::text, v.source_hash, coalesce(v.published_at::text,''),md5(coalesce(v.payload->'rows','[]'::jsonb)::text),
+                  v.id::text, v.source_hash, coalesce(v.published_at::text,''),v.rows_fingerprint,
                   (select max(a.reviewed_at)::text from logistics_billing_acceptance a where a.version_id=v.id)) as part
                 from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
@@ -177,7 +187,7 @@ public class LogisticsQueryService {
                     and c.dataset_id=logistics_active_dataset()
                     and exists(select 1 from logistics_billing_acceptance accepted
                       where accepted.version_id=v.id
-                      and accepted.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)
+                      and accepted.rows_fingerprint=v.rows_fingerprint
                       and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
                         or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
                 )
@@ -261,7 +271,7 @@ public class LogisticsQueryService {
                     ((v.payload - 'rows' - 'issues' - 'diffRows') || jsonb_build_object('id',v.id,
                       'legacyBillingCompatible',exists(select 1 from logistics_billing_acceptance legacy
                         where legacy.version_id=v.id and legacy.kind='legacy'
-                        and legacy.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text))))::text as version_payload
+                        and legacy.rows_fingerprint=v.rows_fingerprint)))::text as version_payload
                   from logistics_channel c
                   join logistics_provider p on p.id=c.provider_id
                   join logistics_version v on v.id=c.current_version_id and v.status='published'
@@ -271,12 +281,15 @@ public class LogisticsQueryService {
                     and c.dataset_id=logistics_active_dataset()
                     and exists(select 1 from logistics_billing_acceptance accepted
                       where accepted.version_id=v.id
-                      and accepted.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)
+                      and accepted.rows_fingerprint=v.rows_fingerprint
                       and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
                         or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
                 )
                 select rv.channel_id::text as channel_id, rv.rule_id, rv.channel_code,
-                  rv.channel_payload, rv.provider_payload, rv.version_payload, item::text as row_payload
+                  rv.channel_payload, rv.provider_payload, rv.version_payload,
+                  (item - array['notes','rawValues','normalizationNote','sourceFile','sourceRow','sourceSheet',
+                    'sourceCountry','sourceCountryCode','sourceWeightRange','sourceCode','sourceOriginRegion',
+                    'originRegion','rowKey'])::text as row_payload
                 from ready_versions rv
                 cross join lateral jsonb_array_elements(rv.rows_payload) item
                 where (lower(coalesce(item->>'countryCode','')) in
@@ -293,9 +306,9 @@ public class LogisticsQueryService {
         var grouped = new LinkedHashMap<String, ObjectNode>();
         jdbc.sql(sql.toString()).params(params).query((rs, rowNum) -> {
             var row = json(rs.getString("row_payload"));
-            row.put("quoteReady",true);
             if (!LogisticsBillingEngine.available(row)) return null;
             if (!eligible(row, attribute)) return null;
+            row = quotePriceRow(row);
             var channelId = rs.getString("channel_id");
             var rule = grouped.computeIfAbsent(channelId, ignored -> {
                 var channel = json(rsString(rs, "channel_payload"));
@@ -388,6 +401,15 @@ public class LogisticsQueryService {
     private ObjectNode json(String value) {
         try { return (ObjectNode) mapper.readTree(value); }
         catch (Exception exception) { throw new IllegalStateException("物流JSON数据无法解析", exception); }
+    }
+
+    private ObjectNode quotePriceRow(ObjectNode source) {
+        var result = mapper.createObjectNode();
+        QUOTE_PRICE_FIELDS.forEach(field -> {
+            if (source.has(field)) result.set(field, source.path(field).deepCopy());
+        });
+        result.put("quoteReady", true);
+        return result;
     }
 
     private static boolean eligible(JsonNode row, String attribute) {
