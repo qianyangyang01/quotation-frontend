@@ -24,6 +24,7 @@ const query = ref(''), country = ref(''), attribute = ref(''), page = ref(logist
 const pricesLoading = ref(false), pricesLoaded = ref(false)
 const name = ref('物流新库'), files = ref<File[]>([]), replaceDrafts = ref(false)
 const busy = ref(false), error = ref(''), message = ref(''), note = ref(''), removal = ref(false), risk = ref(false)
+const batchPublishProviderId = ref(''), batchPublishVersionIds = ref<string[]>([]), batchPublishReviewedIds = ref<string[]>([]), batchPublishNote = ref('')
 const preparedDownload = ref<PreparedDownload | null>(null)
 function clearDownload() { preparedDownload.value = null }
 watch([query, country, attribute, tab], clearDownload)
@@ -35,6 +36,17 @@ const cutover = ref<Cutover | null>(null), cutoverDirty = ref(false), cutoverNot
 const selected = computed(() => datasets.value.find(d => d.id === datasetId.value))
 const archived = computed(() => selected.value?.status === 'archived')
 const readyTargets = computed(() => workspace.value?.channels.filter(c => c.quoteReady) || [])
+const providersWithDrafts = computed(() => (workspace.value?.providers || []).filter(provider => workspace.value?.channels.some(channel => channel.providerId === provider.id && workspace.value?.versions.some(item => item.channelId === channel.id && item.status === 'draft'))))
+const batchPublishProvider = computed(() => providersWithDrafts.value.find(provider => provider.id === batchPublishProviderId.value))
+const batchPublishDrafts = computed(() => {
+  const providerId = batchPublishProvider.value?.id
+  if (!providerId) return []
+  return (workspace.value?.versions || []).filter(item => item.status === 'draft').map(item => ({ version: item, channel: workspace.value?.channels.find(channel => channel.id === item.channelId) })).filter(item => item.channel?.providerId === providerId)
+})
+const selectedBatchPublishDrafts = computed(() => batchPublishDrafts.value.filter(item => batchPublishVersionIds.value.includes(item.version.id)))
+const batchPublishNeedsReview = (item: typeof batchPublishDrafts.value[number]) => (item.version.summary.removed || 0) > 0 || (item.version.summary.highRisk || 0) > 0
+const batchPublishBlocked = (item: typeof batchPublishDrafts.value[number]) => item.version.errors > 0
+const batchPublishReady = computed(() => selectedBatchPublishDrafts.value.length > 0 && selectedBatchPublishDrafts.value.every(item => !batchPublishBlocked(item) && (!batchPublishNeedsReview(item) || batchPublishReviewedIds.value.includes(item.version.id))) && Boolean(batchPublishNote.value.trim()))
 const filteredDiffs = computed(() => (version.value?.diffRows || []).filter(d => diffType.value === 'all' || d.type === diffType.value))
 const visibleDiffs = computed(() => filteredDiffs.value.slice(detailPage.value * 50, (detailPage.value + 1) * 50))
 const visibleRows = computed(() => (version.value?.rows || []).slice(detailPage.value * 50, (detailPage.value + 1) * 50))
@@ -62,7 +74,7 @@ const batchResultCounts = computed(() => (batch.value?.payload.results || []).re
 const statusLabel: Record<string, string> = { active: '当前生效库', preparing: '新库准备区', archived: '归档旧库', queued: '等待处理', processing: '处理中', completed: '处理完成', failed: '处理失败', interrupted: '处理已中断', draft: '待审核', published: '已生效', superseded: '历史版本', rejected: '已终止', blocked: '存在阻断', unchanged: '价格未变', parsed: '已解析', empty: '空表', metadata: '说明页', review: '待审核', staging: '生成草稿', parsing: '解析表格' }
 const diffLabel: Record<string, string> = { added: '新增', price: '价格变化', rule: '规则变化', removed: '移除', unchanged: '无变化' }
 let pollTimer: ReturnType<typeof setTimeout> | undefined
-let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review'), activationKey = idempotencyKey('logistics-activation')
+let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review'), activationKey = idempotencyKey('logistics-activation'), batchPublishKey = idempotencyKey('logistics-provider-publish')
 let disposed = false, selectionEpoch = 0
 
 async function run(action: () => Promise<void | PreparedDownload>) {
@@ -146,6 +158,19 @@ async function publish() {
 }
 async function recompare() { await run(async () => { version.value = await service.recompare(version.value!); risk.value = false; removal.value = false; reviewKey = idempotencyKey('logistics-review'); message.value = '已按最新正式价格重新对比，请重新审核。' }) }
 async function rollback() { await run(async () => { version.value = await service.rollback(version.value!, note.value); await invalidatePublishedLogisticsCache(); await refresh(); message.value = '已创建新的回滚版本，历史报价没有改写。' }) }
+function selectBatchPublishProvider() {
+  const drafts = batchPublishDrafts.value.filter(item => !batchPublishBlocked(item))
+  batchPublishVersionIds.value = drafts.map(item => item.version.id); batchPublishReviewedIds.value = []; batchPublishNote.value = ''; batchPublishKey = idempotencyKey('logistics-provider-publish')
+}
+async function publishProviderDrafts() {
+  if (!batchPublishProvider.value || !batchPublishReady.value) return
+  const provider = batchPublishProvider.value, selectedDrafts = selectedBatchPublishDrafts.value
+  await run(async () => {
+    const result = await service.publishProvider(provider.id, selectedDrafts.map(item => ({ channelId: item.version.channelId, versionId: item.version.id, removalConfirmed: (item.version.summary.removed || 0) > 0, reviewConfirmed: batchPublishReviewedIds.value.includes(item.version.id) })), batchPublishNote.value.trim(), batchPublishKey)
+    batchPublishKey = idempotencyKey('logistics-provider-publish'); batchPublishVersionIds.value = []; batchPublishReviewedIds.value = []; batchPublishNote.value = ''
+    await invalidatePublishedLogisticsCache(); await refresh(); message.value = `已原子批量发布 ${result.count} 个${provider.name}价格版本；请逐个完成计费验收后再用于自动报价。`
+  })
+}
 async function prepareCutover() { await run(async () => { await service.backup(datasetId.value); cutover.value = await service.preview(datasetId.value); cutoverDirty.value = false; cutoverConfirmed.value = false; unavailable.value = false; activationKey = idempotencyKey('logistics-activation'); message.value = '旧库快照已备份，请核对渠道映射与暂不可用清单。' }) }
 async function updatePreview() { await run(async () => { cutover.value = await service.preview(datasetId.value, cutover.value?.mappings); cutoverDirty.value = false; cutoverConfirmed.value = false }) }
 function mappingChanged() { cutoverDirty.value = true; cutoverConfirmed.value = false }
@@ -189,7 +214,15 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer) })
         </div>
       </section>
 
-      <section v-if="tab === 'history'" class="card"><h2>{{ archived ? '旧库历史档案' : '渠道版本记录' }}</h2><div class="scroll"><table><thead><tr><th>渠道</th><th>版本</th><th>来源</th><th>状态</th><th>价格行</th><th>操作</th></tr></thead><tbody><tr v-for="v in workspace?.versions || []" :key="v.id"><td>{{ workspace?.channels.find(c => c.id === v.channelId)?.name }}</td><td>V{{ v.versionNumber }}</td><td>{{ v.fileName }}<small>{{ v.importedAt }}</small></td><td>{{ statusLabel[v.status] }}</td><td>{{ v.rowCount }}</td><td><button :disabled="busy" @click="openVersion(v.id)">查看与导出</button></td></tr></tbody></table></div></section>
+      <section v-if="tab === 'history'" class="stack">
+        <div v-if="!archived && providersWithDrafts.length" class="card batch-publish"><div class="section-head"><div><h2>按物流商批量审核发布</h2><p>同一物流商的所选草稿在一个数据库事务中发布；任一版本校验失败则全部回滚。</p></div></div>
+          <div class="toolbar"><label>物流商<select v-model="batchPublishProviderId" aria-label="批量发布物流商" @change="selectBatchPublishProvider"><option value="">请选择</option><option v-for="provider in providersWithDrafts" :key="provider.id" :value="provider.id">{{ provider.name }}</option></select></label></div>
+          <template v-if="batchPublishProvider"><div class="scroll"><table><thead><tr><th>选择</th><th>渠道 / 版本</th><th>差异</th><th>风险复核</th></tr></thead><tbody><tr v-for="item in batchPublishDrafts" :key="item.version.id"><td><input v-model="batchPublishVersionIds" type="checkbox" :value="item.version.id" :disabled="busy || batchPublishBlocked(item)" :aria-label="`选择 ${item.channel?.name} V${item.version.versionNumber}`"></td><td><b>{{ item.channel?.name }}</b><small>V{{ item.version.versionNumber }} · {{ item.version.fileName }} · {{ item.version.rowCount }} 行</small></td><td>新增 {{ item.version.summary.added || 0 }} · 调价 {{ item.version.summary.price || 0 }} · 规则 {{ item.version.summary.rule || 0 }} · 移除 {{ item.version.summary.removed || 0 }}<small v-if="batchPublishBlocked(item)" class="warning">阻断错误 {{ item.version.errors }} 个，不能发布</small></td><td><label v-if="batchPublishNeedsReview(item)" class="check"><input v-model="batchPublishReviewedIds" type="checkbox" :value="item.version.id" :disabled="busy">已核对风险和移除项</label><span v-else>无需额外确认</span></td></tr></tbody></table></div>
+            <label>批量审核备注<textarea v-model="batchPublishNote" maxlength="500" placeholder="填写价格来源、影响范围和审核结论" /></label><p class="muted">已选择 {{ selectedBatchPublishDrafts.length }} 个版本。发布后仍需逐版本完成独立计费验收，未验收版本不会开放自动报价。</p><button class="primary" :disabled="busy || !batchPublishReady" @click="publishProviderDrafts">确认原子批量发布</button>
+          </template>
+        </div>
+        <div class="card"><h2>{{ archived ? '旧库历史档案' : '渠道版本记录' }}</h2><div class="scroll"><table><thead><tr><th>渠道</th><th>版本</th><th>来源</th><th>状态</th><th>价格行</th><th>操作</th></tr></thead><tbody><tr v-for="v in workspace?.versions || []" :key="v.id"><td>{{ workspace?.channels.find(c => c.id === v.channelId)?.name }}</td><td>V{{ v.versionNumber }}</td><td>{{ v.fileName }}<small>{{ v.importedAt }}</small></td><td>{{ statusLabel[v.status] }}</td><td>{{ v.rowCount }}</td><td><button :disabled="busy" @click="openVersion(v.id)">查看与导出</button></td></tr></tbody></table></div></div>
+      </section>
 
       <section v-if="version" class="card version-detail"><div class="section-head"><div><p class="eyebrow">VERSION REVIEW</p><h2>{{ workspace?.channels.find(c => c.id === version?.channelId)?.name }} · V{{ version.versionNumber }}</h2><p>{{ statusLabel[version.status] }} · {{ version.fileName }}</p></div><button @click="version = null">关闭详情</button></div>
         <p v-if="version.quoteReady === false" class="notice">该版本的价格可核对和管理，但计费条件尚未完全适配。即使审核价格，也不会开放自动报价。</p>

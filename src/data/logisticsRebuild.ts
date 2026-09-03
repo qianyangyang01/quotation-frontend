@@ -10,7 +10,7 @@ export type Price = {
   zoneName?: string
   providerName?: string; channelName?: string; versionId?: string; versionNumber?: number; quoteReady?: boolean
 }
-export type Channel = { id: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean }
+export type Channel = { id: string; providerId: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean }
 export type Diff = { key: string; type: string; row: Price; previous?: Price; changes: Array<{ field: string; before: unknown; after: unknown; delta?: number; percentChange?: number | null }> }
 export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; quoteReady?: boolean; errors: number; rowCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; publishedAt?: string }
 export type Workspace = { dataset: Dataset; providers: Array<{ id: string; name: string }>; channels: Channel[]; versions: Version[] }
@@ -22,6 +22,8 @@ export type Cutover = { previewToken: string; sourceDatasetId: string; targetDat
 export type PricePage = { items: Price[]; total: number; page: number; size: number; totalPages: number }
 export type RequiredChannels = { revision: number; confirmed: boolean; note?: string; confirmedBy?: string; confirmedAt?: string; channelIds: string[]; channels: Array<Channel & { archived?: boolean; countries: string[]; zones: string[]; priceRows: number; pendingReasons: string[] }> }
 export type BillingAcceptance = { versionId: string; fingerprint: string; engineVersion: string; pricePublished: boolean; quoteReady: boolean; unsupportedReasons: string[]; records: Array<{ kind: string; reviewed_by: string; reviewed_at: string; engine_version: string }> }
+export type BatchPublishSelection = { channelId: string; versionId: string; removalConfirmed: boolean; reviewConfirmed: boolean }
+export type BatchPublishResult = { providerId: string; count: number; published: Array<{ id: string; channelId: string; versionNumber: number; status: string; quoteReady: boolean }> }
 const root = '/logistics/rebuild'
 export const logisticsRebuild = {
   required: (id: string) => api.get<RequiredChannels>(`${root}/datasets/${id}/required-channels`),
@@ -41,6 +43,7 @@ export const logisticsRebuild = {
   retry: (id: string) => api.post<Batch>(`${root}/imports/${id}/retry`),
   version: (id: string) => api.get<Version>(`${root}/versions/${id}`),
   review: (version: Version, note: string, removalConfirmed: boolean, reviewConfirmed: boolean, key: string) => api.post<Version>(`${root}/channels/${version.channelId}/versions/${version.id}/review`, { note, removalConfirmed, reviewConfirmed }, key),
+  publishProvider: (providerId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<BatchPublishResult>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, key),
   recompare: (v: Version) => api.post<Version>(`${root}/channels/${v.channelId}/versions/${v.id}/recompare`),
   rollback: (v: Version, note: string) => api.post<Version>(`/logistics/channels/${v.channelId}/versions/${v.id}/rollback`, { note }, idempotencyKey('rollback')),
   backup: (id: string) => api.post<{ sha256: string }>(`${root}/datasets/${id}/backup`),
