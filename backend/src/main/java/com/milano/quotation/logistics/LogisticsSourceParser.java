@@ -12,12 +12,17 @@ import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.02-v4";
+    public static final String VERSION="providers-2026.09.04-v5";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
+    public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
@@ -32,25 +37,41 @@ public class LogisticsSourceParser {
         if(bytes.length==0 || bytes.length>MAX_FILE_BYTES || filename==null || !filename.toLowerCase(Locale.ROOT).matches(".*\\.xlsx?$"))
             throw AppException.unprocessable("单个物流文件必须是100MB以内的.xls或.xlsx");
         var result=mapper.createObjectNode().put("fileName",filename).put("parserVersion",VERSION);
-        var sheets=result.putArray("sheets"); var channels=new LinkedHashMap<String,ObjectNode>();
+        var sheets=result.putArray("sheets"); var channels=new LinkedHashMap<String,ObjectNode>();var coverageSheets=new LinkedHashSet<String>();
         String provider=provider(filename);
-        try(var book=WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
+        try(var book=WorkbookFactory.create(new ByteArrayInputStream(filterReferenceSheetData(bytes,filename)))) {
             if(book.getNumberOfSheets()>300) throw AppException.unprocessable("单个文件不能超过300张工作表");
             for(var sheet:book) {
-                var source=new Source(sheet); var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isSheetHidden(book.getSheetIndex(sheet)));
+                var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isSheetHidden(book.getSheetIndex(sheet)));
+                boolean referenceOnly=referenceOnlySheet(sheet.getSheetName());
+                if(referenceOnly&&!systemMetadataCandidate(sheet.getSheetName())) {
+                    boolean coverage=coverageReferenceSheet(sheet.getSheetName());
+                    if(coverage)coverageSheets.add(sheet.getSheetName().trim());
+                    report.put("status","reference-only").put("referenceKind",coverage?"coverage":"documentation")
+                            .put("message",coverage?"区域、邮编或派送范围表不作为渠道；关联渠道发布前需人工适配核对":"目录、收寄说明或理赔说明不作为渠道和价格行");
+                    continue;
+                }
+                var source=new Source(sheet);
                 if(source.text(0,0).equals("MILANO_LOGISTICS_DIFF_V1"))throw AppException.unprocessable("价格变化表不能作为价格模板导入");
                 if(source.text(0,0).equals("MILANO_LOGISTICS_METADATA_V1")){report.put("status","metadata");continue;}
+                if(referenceOnly) {
+                    boolean coverage=coverageReferenceSheet(sheet.getSheetName());
+                    if(coverage)coverageSheets.add(sheet.getSheetName().trim());
+                    report.put("status","reference-only").put("referenceKind",coverage?"coverage":"documentation")
+                            .put("message",coverage?"区域、邮编或派送范围表不作为渠道；关联渠道发布前需人工适配核对":"目录、收寄说明或理赔说明不作为渠道和价格行");
+                    continue;
+                }
                 if(source.nonempty==0) { report.put("status","empty").put("message","空表，无价格数据"); continue; }
-                if(sheet.getLastRowNum()>100000) throw AppException.unprocessable("工作表行数超过100000");
                 var parsed=new LinkedHashMap<String,ObjectNode>();
                 boolean recognized=false;
-                for(int r=0;r<=sheet.getLastRowNum();r++) if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst()) && source.text(r,1).equals("国家简码")) {
+                for(int r=0;r<=source.lastContentRow;r++) if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst()) && source.text(r,1).equals("国家简码")) {
                     parseStandard(source,r,provider,filename,parsed); recognized=true; break;
                 }
                 if(!recognized && !provider.isBlank()) {
                     if(provider.equals("通邮") && (sheet.getSheetName().contains("美国专线小包")||sheet.getSheetName().contains("加拿大专线"))) recognized=parseMatrix(source,provider,filename,parsed);
                     else recognized=parseTable(source,provider,filename,parsed);
                 }
+                if(source.parsedRows.size()>MAX_PRICE_ROWS_PER_SHEET)throw AppException.unprocessable("基础运费工作表实际价格行不能超过"+MAX_PRICE_ROWS_PER_SHEET+"行："+sheet.getSheetName());
                 if(!recognized || parsed.isEmpty()) {
                     var pending=channel(provider.isBlank()?"未识别物流商":provider,sheet.getSheetName().trim(),parsed);
                     pending.put("templateStatus","adapter-required");
@@ -94,11 +115,75 @@ public class LogisticsSourceParser {
             }
         } catch(AppException e){throw e;} catch(Exception e){throw AppException.unprocessable("物流文件无法解析："+e.getClass().getSimpleName());}
         var items=result.putArray("channels");
+        for(var reference:coverageSheets) {
+            var matched=channels.values().stream().filter(channel->referenceAppliesToChannel(reference,channel.path("channelName").asText())).toList();
+            var targets=matched.isEmpty()?channels.values():matched;
+            for(var channel:targets){for(var value:channel.path("rows"))pending((ObjectNode)value,"原文件含区域、邮编或派送范围表，需适配核对："+reference);channel.put("quoteReady",false);}
+        }
         for(var c:channels.values()) {
             validateMergedSheets(c);
             c.put("contentHash",businessHash((ArrayNode)c.path("rows")));items.add(c);
         }
         return result;
+    }
+
+    private static boolean referenceOnlySheet(String sheetName) {
+        var name=clean(sheetName);
+        return postalReferenceSheet(name)||name.matches("(?i).*(目录|派送范围|价格区域对应|禁运|禁限运|违禁品|处罚条款|异形件|说明|免责声明|须知|货物交接要求|托运条款|税率参照|VAT费率|揽收区域|理赔标准|赔偿标准|名牌录|可承运品类|无签收轨迹|WpsReserved_CellImgList|清单$|附件$).*");
+    }
+    private static boolean postalReferenceSheet(String name) {
+        return name.matches(".*((邮编|邮政编码).*(分区|可达|不可达|偏远|无服务)|(分区|可达|不可达|偏远|不提供服务|无服务|可发货).*(邮编|邮政编码)).*");
+    }
+    private static boolean systemMetadataCandidate(String sheetName) {return clean(sheetName).equals("填写说明");}
+    private static byte[] filterReferenceSheetData(byte[] bytes,String filename) throws Exception {
+        if(!filename.toLowerCase(Locale.ROOT).endsWith(".xlsx"))return bytes;
+        byte[] workbookXml=null,relationshipsXml=null;
+        try(var zip=new ZipInputStream(new ByteArrayInputStream(bytes))) {
+            for(ZipEntry entry;(entry=zip.getNextEntry())!=null;) {
+                if(entry.getName().equals("xl/workbook.xml"))workbookXml=zip.readAllBytes();
+                else if(entry.getName().equals("xl/_rels/workbook.xml.rels"))relationshipsXml=zip.readAllBytes();
+            }
+        }
+        if(workbookXml==null||relationshipsXml==null)return bytes;
+        var factory=DocumentBuilderFactory.newInstance();factory.setNamespaceAware(true);factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);factory.setFeature("http://xml.org/sax/features/external-general-entities",false);factory.setFeature("http://xml.org/sax/features/external-parameter-entities",false);factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD,"");factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA,"");
+        var builder=factory.newDocumentBuilder();
+        var relationships=builder.parse(new ByteArrayInputStream(relationshipsXml));var targets=new HashMap<String,String>();
+        var relationshipNodes=relationships.getElementsByTagNameNS("*","Relationship");
+        for(int i=0;i<relationshipNodes.getLength();i++){var element=(org.w3c.dom.Element)relationshipNodes.item(i);targets.put(element.getAttribute("Id"),element.getAttribute("Target"));}
+        var workbook=builder.parse(new ByteArrayInputStream(workbookXml));var stripped=new HashSet<String>();var sheetNodes=workbook.getElementsByTagNameNS("*","sheet");
+        for(int i=0;i<sheetNodes.getLength();i++){
+            var element=(org.w3c.dom.Element)sheetNodes.item(i);var sheetName=element.getAttribute("name");
+            if(!referenceOnlySheet(sheetName)||systemMetadataCandidate(sheetName))continue;
+            var relation=element.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id");var target=targets.get(relation);if(target==null||target.isBlank())continue;
+            var normalized=normalizeWorkbookTarget(target);if(!normalized.isBlank())stripped.add(normalized);
+        }
+        if(stripped.isEmpty())return bytes;
+        var output=new java.io.ByteArrayOutputStream(bytes.length);var emptySheet="<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData/></worksheet>".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try(var input=new ZipInputStream(new ByteArrayInputStream(bytes));var zip=new ZipOutputStream(output)) {
+            for(ZipEntry entry;(entry=input.getNextEntry())!=null;){var copy=new ZipEntry(entry.getName());if(entry.getTime()>=0)copy.setTime(entry.getTime());zip.putNextEntry(copy);if(!entry.isDirectory()){if(stripped.contains(entry.getName()))zip.write(emptySheet);else input.transferTo(zip);}zip.closeEntry();}
+        }
+        return output.toByteArray();
+    }
+    private static String normalizeWorkbookTarget(String target) {
+        var raw=target.replace('\\','/');if(raw.contains(":"))return "";
+        while(raw.startsWith("/"))raw=raw.substring(1);
+        var parts=new ArrayDeque<String>();if(!raw.startsWith("xl/"))parts.add("xl");
+        for(var part:raw.split("/")) {
+            if(part.isBlank()||part.equals("."))continue;
+            if(part.equals("..")){if(parts.isEmpty())return "";parts.removeLast();}
+            else parts.add(part);
+        }
+        var normalized=String.join("/",parts);
+        return normalized.startsWith("xl/worksheets/")&&normalized.endsWith(".xml")?normalized:"";
+    }
+    private static boolean coverageReferenceSheet(String sheetName) {
+        var name=clean(sheetName);
+        return postalReferenceSheet(name)||name.matches(".*(派送范围|价格区域对应|揽收区域|禁运|禁限运|违禁品|异形件|可承运品类|无签收轨迹).*");
+    }
+    private static boolean referenceAppliesToChannel(String reference,String channel) {
+        var ref=clean(reference).replaceAll("(?i)(不提供服务的|可达区域|偏远|邮编|邮政编码|及分区|分区|派送范围|清单)","").replaceAll("[^\\p{L}\\p{N}]","").toLowerCase(Locale.ROOT);
+        var candidate=clean(channel).replaceAll("[^\\p{L}\\p{N}]","").replaceAll("^(花海|容鼎|通邮|万邦|云速递|递四方|极通环球|云途|燕文|顺丰)","").toLowerCase(Locale.ROOT);
+        return ref.length()>=2&&candidate.length()>=4&&(ref.contains(candidate)||candidate.contains(ref));
     }
 
     private void validateMergedSheets(ObjectNode channel) {
@@ -126,7 +211,7 @@ public class LogisticsSourceParser {
         for(int c=0;c<LogisticsWorkbookService.HEADERS.size();c++)if(!source.text(header,c).equals(LogisticsWorkbookService.HEADERS.get(c)))throw AppException.unprocessable("标准模板列头不完整或顺序错误："+source.sheet.getSheetName());
         var headers=new HashMap<String,Integer>();
         for(int c=0;c<100;c++) headers.put(source.text(header,c),c);
-        for(int r=header+1;r<=source.sheet.getLastRowNum();r++) {
+        for(int r=header+1;r<=source.lastContentRow;r++) {
             if(source.rowEmpty(r))continue;
             var name=value(source,r,headers,"渠道名称"); var prov=value(source,r,headers,"物流商");
             var effectiveProvider=prov.isBlank()?fallback:prov;
@@ -159,7 +244,7 @@ public class LogisticsSourceParser {
         var yanwenEta=provider.equals("燕文")?yanwenEtaExtractor(source):null;
         int auxiliary=-1;boolean example=false;
         var allNotes=new LinkedHashSet<String>();
-        for(int r=0;r<=source.sheet.getLastRowNum();r++) {
+        for(int r=0;r<=source.lastContentRow;r++) {
             var rowText=String.join("|",source.rowTexts(r));
             if(rowText.contains("试算重量")&&rowText.contains("试算运费")){example=true;columns=null;continue;}
             boolean auxiliaryTitle=source.rowTexts(r).stream().anyMatch(t->t.length()<80&&t.contains("重派费用表"));
@@ -275,14 +360,14 @@ public class LogisticsSourceParser {
     }
     private boolean parseMatrix(Source source,String provider,String file,Map<String,ObjectNode> channels) {
         int header=-1;
-        for(int r=0;r<=source.sheet.getLastRowNum();r++)if(source.text(r,1).contains("运费")&&source.text(r,2).contains("费")){header=r;break;}
+        for(int r=0;r<=source.lastContentRow;r++)if(source.text(r,1).contains("运费")&&source.text(r,2).contains("费")){header=r;break;}
         if(header<0)return false;
         for(int c=1;c<source.width(header);c+=2) {
             if(!source.text(header,c).contains("运费"))continue;
             String name="";for(int h=header-1;h>=0;h--){var label=source.text(h,c);if(!label.isBlank()){name=label;break;}}
             if(name.isBlank())name=source.sheet.getSheetName()+"-"+CellReference.convertNumToColString(c);
             var target=channel(provider,name,channels);
-            for(int r=header+1;r<=source.sheet.getLastRowNum();r++) {
+            for(int r=header+1;r<=source.lastContentRow;r++) {
                 var text=source.text(r,0);if(!looksRange(text))continue;
                 var row=mapper.createObjectNode().put("areaName",source.sheet.getSheetName().contains("加拿大")?"加拿大":"美国")
                         .put("countryCode",source.sheet.getSheetName().contains("加拿大")?"CA":"US").put("currency","CNY").put("pricingModel","per-kg");
@@ -369,7 +454,7 @@ public class LogisticsSourceParser {
     }
     private YanwenEtaExtractor yanwenEtaExtractor(Source source) {
         var index=new YanwenEtaExtractor();
-        for(int header=0;header<=source.sheet.getLastRowNum();header++) {
+        for(int header=0;header<=source.lastContentRow;header++) {
             int code=-1,eta=-1;
             for(int c=0;c<source.width(header);c++) {
                 var label=clean(source.text(header,c));
@@ -377,7 +462,7 @@ public class LogisticsSourceParser {
                 if(label.contains("参考时效"))eta=c;
             }
             if(code<0||eta<0)continue;
-            for(int r=header+1;r<=source.sheet.getLastRowNum();r++) {
+            for(int r=header+1;r<=source.lastContentRow;r++) {
                 if(isPriceHeader(source,r))break;
                 var rawCode=clean(source.text(r,code)).toUpperCase(Locale.ROOT);
                 var rawEta=source.text(r,eta);
@@ -386,7 +471,7 @@ public class LogisticsSourceParser {
                 if(parsed==null)index.invalidCountries.add(rawCode);else index.put(index.countries,index.conflictingCountries,rawCode,parsed);
             }
         }
-        if(source.sheet.getSheetName().trim().equals("中邮上海线下E邮宝"))for(int r=0;r<=source.sheet.getLastRowNum();r++)for(int c=0;c<source.width(r);c++) {
+        if(source.sheet.getSheetName().trim().equals("中邮上海线下E邮宝"))for(int r=0;r<=source.lastContentRow;r++)for(int c=0;c<source.width(r);c++) {
             var text=source.text(r,c);
             for(var continent:List.of("亚洲","欧洲","南美洲","北美洲","大洋洲","非洲"))if(clean(text).startsWith(continent+"：")||clean(text).startsWith(continent+":")) {
                 var parsed=parseEta(text,source.address(r,c));
@@ -592,13 +677,13 @@ public class LogisticsSourceParser {
         double firstKg=0.5,nextKg=0.5;List<Integer> notes=new ArrayList<>();
     }
     private class Source {
-        final Sheet sheet;final int nonempty;final DataFormatter formatter=new DataFormatter(Locale.ROOT);
+        final Sheet sheet;final int nonempty;final int lastContentRow;final DataFormatter formatter=new DataFormatter(Locale.ROOT);
         final Set<Integer> parsedRows=new HashSet<>();
         final Set<Integer> exampleRows=new HashSet<>();
         final Map<Integer,Integer> auxiliaryRows=new HashMap<>();
         final Map<Integer,List<org.apache.poi.ss.util.CellRangeAddress>> merges=new HashMap<>();
-        Source(Sheet sheet){this.sheet=sheet;if(sheet.getLastRowNum()>100000)throw AppException.unprocessable("工作表超过100000行");formatter.setUseCachedValuesForFormulaCells(true);int count=0;for(var r:sheet)for(var c:r)if(!formatter.formatCellValue(c).isBlank())count++;nonempty=count;
-            for(var range:sheet.getMergedRegions())for(int row=range.getFirstRow();row<=Math.min(range.getLastRow(),sheet.getLastRowNum());row++)merges.computeIfAbsent(row,k->new ArrayList<>()).add(range);
+        Source(Sheet sheet){this.sheet=sheet;formatter.setUseCachedValuesForFormulaCells(true);int count=0,last=0;for(var r:sheet){boolean populated=false;for(var c:r)if(!formatter.formatCellValue(c).isBlank()){count++;populated=true;}if(populated)last=Math.max(last,r.getRowNum());}nonempty=count;lastContentRow=last;
+            for(var range:sheet.getMergedRegions())for(int row=range.getFirstRow();row<=Math.min(range.getLastRow(),lastContentRow);row++)merges.computeIfAbsent(row,k->new ArrayList<>()).add(range);
         }
         Cell cell(int r,int c){if(c<0)return null;for(var range:merges.getOrDefault(r,List.of()))if(range.isInRange(r,c)){r=range.getFirstRow();c=range.getFirstColumn();break;}var row=sheet.getRow(r);return row==null?null:row.getCell(c);}
         String numberText(int r,int c){var cell=cell(r,c);return cell!=null&&cell.getCellType()==CellType.NUMERIC?Double.toString(cell.getNumericCellValue()):text(r,c);}

@@ -47,6 +47,77 @@ class LogisticsSourceParserTest {
             parsed=parser.parse(bytes(book),"顺丰.xlsx");assertTrue(parsed.path("channels").get(0).path("errors").asInt()>0);
         }
     }
+    @Test void skipsLargePostalReferenceSheetsWithoutWeakeningThePriceRowLimit()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var prices=book.createSheet("服装专线");
+            row(prices,0,"国家名称","Code","运费/kg","折扣率","结算运费","专递操作费/票","计费重量限制（kg）");
+            row(prices,1,"德国","DE",71,0.64,45.44,22,"0.001-0.1KG");
+            var postal=book.createSheet("国际电商专递CD菲律宾邮编及分区");
+            row(postal,100001,"1000","1区");
+
+            var parsed=parser.parse(bytes(book),"顺丰.xlsx");
+
+            assertEquals("reference-only",parsed.path("sheets").get(1).path("status").asText());
+            assertEquals(1,parsed.path("channels").size());
+            var channel=parsed.path("channels").get(0);
+            assertEquals(1,channel.path("rows").size());
+            assertFalse(channel.path("quoteReady").asBoolean());
+            assertTrue(channel.path("rows").get(0).path("pendingReason").asText().contains("邮编"));
+        }
+        try(var book=new XSSFWorkbook()) {
+            var prices=book.createSheet("服装专线");
+            row(prices,0,"国家","重量段","运费/KG","挂号费/票");
+            for(int index=1;index<=LogisticsSourceParser.MAX_PRICE_ROWS_PER_SHEET+1;index++)row(prices,index,"美国","0-1",55,20);
+            var error=assertThrows(com.milano.quotation.common.AppException.class,()->parser.parse(bytes(book),"顺丰.xlsx"));
+            assertTrue(error.getMessage().contains("500"));
+        }
+    }
+    @Test void distinguishesDocumentationSheetsFromChannelsAndCoverageEvidence()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var prices=book.createSheet("服装专线");row(prices,0,"国家名称","Code","运费/kg","折扣率","结算运费","专递操作费/票","计费重量限制（kg）");row(prices,1,"德国","DE",71,0.64,45.44,22,"0.001-0.1KG");
+            row(book.createSheet("公布价目录"),0,"服装专线","第3页");
+            row(book.createSheet("顺丰国际电商系列产品收寄说明"),0,"说明内容");
+            row(book.createSheet("理赔标准"),0,"理赔说明");
+
+            var parsed=parser.parse(bytes(book),"顺丰.xlsx");
+
+            assertEquals(1,parsed.path("channels").size());
+            assertEquals("documentation",parsed.path("sheets").get(1).path("referenceKind").asText());
+            assertEquals("documentation",parsed.path("sheets").get(2).path("referenceKind").asText());
+            assertEquals("documentation",parsed.path("sheets").get(3).path("referenceKind").asText());
+            assertTrue(parsed.path("channels").get(0).path("quoteReady").asBoolean());
+        }
+    }
+    @Test void linksCoverageReferenceOnlyToItsNamedChannel()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            for(var name:List.of("服装专线","标准专线")){
+                var prices=book.createSheet(name);row(prices,0,"国家名称","Code","运费/kg","折扣率","结算运费","专递操作费/票","计费重量限制（kg）");row(prices,1,"德国","DE",71,0.64,45.44,22,"0.001-0.1KG");
+            }
+            row(book.createSheet("服装专线不提供服务的邮编"),0,"1000","1区");
+
+            var parsed=parser.parse(bytes(book),"顺丰.xlsx");
+
+            assertEquals(2,parsed.path("channels").size());
+            var clothing=findChannel(parsed,"服装专线");var standard=findChannel(parsed,"标准专线");
+            assertFalse(clothing.path("quoteReady").asBoolean());
+            assertTrue(clothing.path("rows").get(0).path("pendingReason").asText().contains("邮编"));
+            assertTrue(standard.path("quoteReady").asBoolean());
+        }
+    }
+    @Test void keepsPostalNamedPriceChannelsWhileSkippingQualifiedPostalReferences()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var prices=book.createSheet("万邦美国特惠专线-精选邮编");
+            row(prices,0,"国家","重量段","运费/KG","挂号费/票");row(prices,1,"美国","0-1",55,20);
+            row(book.createSheet("万邦美国特惠专线-精选邮编可发货邮编"),0,"10001","可发货");
+
+            var parsed=parser.parse(bytes(book),"万邦.xlsx");
+
+            assertEquals(1,parsed.path("channels").size());
+            assertEquals("万邦美国特惠专线-精选邮编",parsed.path("channels").get(0).path("channelName").asText());
+            assertEquals("reference-only",parsed.path("sheets").get(1).path("status").asText());
+            assertFalse(parsed.path("channels").get(0).path("quoteReady").asBoolean());
+        }
+    }
     @Test void normalizesConfirmedHuahaiOneGramTransition()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("普货");row(s,0,"国家","产品名称","重量段始（KG）","重量段终（KG）","运费（RMB/KG）","操作费（RMB/票）");
@@ -221,6 +292,7 @@ class LogisticsSourceParserTest {
         assertEquals(1,rows.size(),channel+" sample must be unique");assertEquals(price,rows.getFirst().path("pricePerKg").asDouble());assertEquals(fee,rows.getFirst().path("registrationFee").asDouble());
     }
     private void assertEta(JsonNode channel,String country,int min,int max){int found=0;for(var row:channel.path("rows"))if(row.path("sourceCountryCode").asText().equals(country)){found++;assertEquals(min,row.path("etaMinDays").asInt(),channel.path("channelName").asText()+" "+country);assertEquals(max,row.path("etaMaxDays").asInt(),channel.path("channelName").asText()+" "+country);}assertTrue(found>0,"missing ETA sample "+country);}
+    private JsonNode findChannel(JsonNode parsed,String name){for(var channel:parsed.path("channels"))if(channel.path("channelName").asText().equals(name))return channel;return fail("missing channel "+name);}
     private JsonNode findCountry(JsonNode channel,String country){for(var row:channel.path("rows"))if(row.path("countryCode").asText().equals(country))return row;return fail("missing country "+country);}
     static byte[] bytes(Workbook book)throws Exception{var out=new ByteArrayOutputStream();book.write(out);return out.toByteArray();}
     static void row(Sheet s,int number,Object...values){var r=s.createRow(number);for(int i=0;i<values.length;i++){var c=r.createCell(i);if(values[i] instanceof Number n)c.setCellValue(n.doubleValue());else c.setCellValue(String.valueOf(values[i]));}}
