@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { calculateLogisticsFee, findPriceRow, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
-import { aggregateChangeSummary, batchComparisonSummary, changeImpact, completedBatchStage, diffKinds, formatTransferBytes, logisticsAdjustmentStatus, logisticsUploadError, rangeImpact, weightLabel, type Batch, type Diff } from './logisticsRebuild'
+import { aggregateChangeSummary, batchComparisonSummary, buildEtaCorrections, changeImpact, completedBatchStage, diffKinds, formatTransferBytes, logisticsAdjustmentStatus, logisticsUploadError, rangeImpact, weightLabel, type Batch, type Diff, type Price } from './logisticsRebuild'
 
 const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): LogisticsRule => ({
   id: 9, name: '边界测试', englishName: '', type: '专线', currency: 'CNY', published: '', status: '启用', dates: '', users: '',
@@ -79,5 +79,11 @@ describe('rebuild pricing safety', () => {
     expect(formatTransferBytes(512)).toBe('512 B')
     expect(formatTransferBytes(1.5 * 1024 * 1024)).toBe('1.5 MB')
     expect(formatTransferBytes(2 * 1024 * 1024 * 1024)).toBe('2.00 GB')
+  })
+  it('submits one ETA correction per route and rejects incomplete ranges', () => {
+    const snapshot = [{ ...row, rowKey: 'a', routeKey: 'route', weightFromKg: 0, weightToKg: 1 }, { ...row, rowKey: 'b', routeKey: 'route', weightFromKg: 1, weightToKg: 2 }] as Price[]
+    const edited = snapshot.map(item => ({ ...item, etaMinDays: 7, etaMaxDays: 15 }))
+    expect(buildEtaCorrections(edited, snapshot)).toEqual([{ routeKey: 'route', etaMinDays: 7, etaMaxDays: 15 }])
+    expect(() => buildEtaCorrections([{ ...edited[0], etaMaxDays: 6 }], snapshot)).toThrow('时效必须填写有效的最早和最晚天数')
   })
 })
