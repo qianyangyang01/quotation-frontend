@@ -8,6 +8,22 @@ export const logisticsRuleTabs = ['物流商', '物流渠道', '运费规则', '
 export type LogisticsRuleTab = typeof logisticsRuleTabs[number]
 export const logisticsRuleDetailColumns = ['国家区域', '重量范围', '计泡系数', '最长边', '最大周长', '商品限制', '每1000g运费', '挂号费', '预计时效', '状态'] as const
 
+export type LogisticsWorkspaceTab = 'prices' | 'imports' | 'history'
+
+export function logisticsWorkspaceLoadPlan(tab: LogisticsWorkspaceTab) {
+  return {
+    workspace: true,
+    pricePage: tab === 'prices',
+    importHistory: false,
+  }
+}
+
+export function matchesLogisticsProviderScope(scope: 'provider' | 'multi', expectedProvider: string, actualProvider: string) {
+  if (scope === 'multi' || !expectedProvider.trim()) return true
+  const normalize = (value: string) => value.replace(/\s+/g, '').toLocaleLowerCase()
+  return normalize(actualProvider) === normalize(expectedProvider)
+}
+
 export function currentPublishedVersion(state: LogisticsWorkspaceState, channel: LogisticsChannelRecord) {
   return state.versions.find(version => version.id === channel.currentVersionId && version.status === 'published')
 }

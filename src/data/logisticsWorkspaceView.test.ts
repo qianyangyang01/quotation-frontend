@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LogisticsChannelRecord, LogisticsChannelVersionRecord, LogisticsWorkspaceState } from './logisticsRepository'
-import { logisticsChannelRows, logisticsProviderRows, logisticsRuleDetailColumns, logisticsRuleTabs, logisticsWorkspaceSummary } from './logisticsWorkspaceView'
+import { logisticsChannelRows, logisticsProviderRows, logisticsRuleDetailColumns, logisticsRuleTabs, logisticsWorkspaceLoadPlan, logisticsWorkspaceSummary, matchesLogisticsProviderScope } from './logisticsWorkspaceView'
 
 function channel(id: string, providerId: string, currentVersionId = ''): LogisticsChannelRecord {
   return { id, providerId, currentVersionId, ruleId: Number(id), name: `渠道${id}`, code: `CODE-${id}`, type: '专线', logisticsAttribute: '普货', enabled: true, createdAt: '', updatedAt: '', _version: 1, archived: false, archivedAt: '', archivedBy: '', archiveReason: '' }
@@ -23,6 +23,18 @@ function workspace(): LogisticsWorkspaceState {
 }
 
 describe('logistics workspace published views', () => {
+  it('keeps the base screen independent from price pages and legacy import history', () => {
+    expect(logisticsWorkspaceLoadPlan('imports')).toEqual({ workspace: true, pricePage: false, importHistory: false })
+    expect(logisticsWorkspaceLoadPlan('history')).toEqual({ workspace: true, pricePage: false, importHistory: false })
+    expect(logisticsWorkspaceLoadPlan('prices')).toEqual({ workspace: true, pricePage: true, importHistory: false })
+  })
+
+  it('keeps single-provider imports scoped while allowing multi-provider batches', () => {
+    expect(matchesLogisticsProviderScope('provider', '万邦', ' 万 邦 ')).toBe(true)
+    expect(matchesLogisticsProviderScope('provider', '万邦', '云途')).toBe(false)
+    expect(matchesLogisticsProviderScope('multi', '万邦', '云途')).toBe(true)
+  })
+
   it('keeps weight restrictions inside rule detail and omits the freight calculator tab', () => {
     expect(logisticsRuleTabs).toEqual(['物流商', '物流渠道', '运费规则', '国家区域'])
     expect(logisticsRuleTabs).not.toContain('重量限制')

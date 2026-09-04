@@ -4,11 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
 import LogisticsPager from '@/components/logistics/LogisticsPager.vue'
 import { clampLogisticsPage, logisticsPageFromQuery, logisticsPageQuery, logisticsPageSize } from '@/components/logistics/logisticsPagination'
-import LogisticsRequiredChannels from '@/components/quotation/LogisticsRequiredChannels.vue'
 import LogisticsBillingReview from '@/components/quotation/LogisticsBillingReview.vue'
 import { idempotencyKey, type PreparedDownload, type UploadProgress } from '@/services/http'
 import { invalidatePublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
-import { logisticsRebuild as service, money, shown, weightLabel, completedBatchStage, diffKinds, aggregateChangeSummary, batchComparisonSummary, rangeImpact, changeImpact, logisticsAdjustmentStatus, logisticsUploadError, formatTransferBytes, type Dataset, type Workspace, type Batch, type BatchSummary, type Version, type Cutover, type PricePage, type Diff, type DiffChange, type DiffKind, type Price, type RowCorrection, type ReadyPublishResult, type Channel, type Provider } from '@/data/logisticsRebuild'
+import { logisticsWorkspaceLoadPlan, matchesLogisticsProviderScope } from '@/data/logisticsWorkspaceView'
+import { logisticsRebuild as service, money, shown, weightLabel, completedBatchStage, diffKinds, aggregateChangeSummary, batchComparisonSummary, rangeImpact, changeImpact, logisticsAdjustmentStatus, logisticsUploadError, formatTransferBytes, type Dataset, type Workspace, type Batch, type Version, type PricePage, type Diff, type DiffChange, type DiffKind, type Price, type RowCorrection, type ReadyPublishResult, type Channel, type Provider } from '@/data/logisticsRebuild'
 
 const route = useRoute(), router = useRouter()
 const requestedPageSize = Number(Array.isArray(route.query.size) ? route.query.size[0] : route.query.size)
@@ -16,14 +16,14 @@ const initialPageSize = logisticsPageSize(requestedPageSize)
 const requestedPage = Number(Array.isArray(route.query.page) ? route.query.page[0] : route.query.page)
 const tab = ref<'prices' | 'imports' | 'history'>(route.query.logisticsTab === 'prices' ? 'prices' : route.query.logisticsTab === 'history' ? 'history' : 'imports')
 const datasets = ref<Dataset[]>([]), datasetId = ref(''), workspace = ref<Workspace | null>(null)
-const batches = ref<BatchSummary[]>([]), batch = ref<Batch | null>(null), version = ref<Version | null>(null)
+const batch = ref<Batch | null>(null), version = ref<Version | null>(null)
 const batchResultQuery = ref(''), batchResultProvider = ref('all'), batchResultStatus = ref('all'), batchResultFocus = ref<'all' | 'added' | 'price' | 'range' | 'issues'>('all'), batchResultPage = ref(0)
 const batchResultPageSize = ref(10)
 const batchResultPageSizes = [10, 30, 50]
 const prices = ref<PricePage>({ items: [], total: 0, page: 0, size: initialPageSize, totalPages: 0 })
-const query = ref(''), country = ref(''), attribute = ref(''), page = ref(logisticsPageFromQuery(requestedPage)), pageSize = ref(initialPageSize)
-const pricesLoading = ref(false), pricesLoaded = ref(false)
-const name = ref('物流新库'), files = ref<File[]>([]), replaceDrafts = ref(false)
+const query = ref(''), country = ref(''), page = ref(logisticsPageFromQuery(requestedPage)), pageSize = ref(initialPageSize)
+const workspaceLoading = ref(false), pricesLoading = ref(false), pricesLoaded = ref(false)
+const files = ref<File[]>([]), replaceDrafts = ref(false)
 const busy = ref(false), error = ref(''), message = ref(''), note = ref(''), removal = ref(false), risk = ref(false)
 const editingRows = ref(false), editSnapshot = ref<Price[]>([])
 const readyPublishNote = ref(''), readyPublishRemoval = ref(false), readyPublishRisk = ref(false), readyPublishResult = ref<ReadyPublishResult | null>(null)
@@ -36,13 +36,12 @@ let cancelActiveUpload: (() => void) | null = null
 const batchPublishProviderId = ref(''), batchPublishVersionIds = ref<string[]>([]), batchPublishReviewedIds = ref<string[]>([]), batchPublishNote = ref('')
 const preparedDownload = ref<PreparedDownload | null>(null)
 const providerSearch = ref(''), selectedProviderId = ref(''), historyChannelId = ref('')
+const uploadScope = ref<'provider' | 'multi'>('multi'), uploadProviderName = ref('')
 function clearDownload() { preparedDownload.value = null }
-watch([query, country, attribute, tab], clearDownload)
+watch([query, country, tab], clearDownload)
 onUnmounted(clearDownload)
-const acceptanceRefresh = ref(0)
-async function acceptanceUpdated() { cutover.value = null; await invalidatePublishedLogisticsCache(); await refresh(); if (version.value) { const id = version.value.id; const latest = await service.version(id); if (version.value?.id === id) version.value = latest } }
+async function acceptanceUpdated() { await invalidatePublishedLogisticsCache(); await refresh(); if (version.value) { const id = version.value.id; const latest = await service.version(id); if (version.value?.id === id) version.value = latest } }
 const diffType = ref('all'), detailTab = ref<'diff' | 'rows' | 'issues'>('diff'), detailPage = ref(0), detailPageSize = ref(20)
-const cutover = ref<Cutover | null>(null), cutoverDirty = ref(false), cutoverNote = ref(''), unavailable = ref(false), cutoverConfirmed = ref(false)
 const statusLabel: Record<string, string> = { active: '当前生效库', preparing: '新库准备区', archived: '归档旧库', queued: '等待处理', processing: '处理中', completed: '处理完成', failed: '处理失败', interrupted: '处理已中断', draft: '待审核', published: '已生效', superseded: '历史版本', rejected: '已终止', blocked: '存在阻断', unchanged: '价格未变', parsed: '已解析', empty: '空表', metadata: '说明页', review: '待审核', staging: '生成草稿', parsing: '解析表格' }
 const selected = computed(() => datasets.value.find(d => d.id === datasetId.value))
 const archived = computed(() => selected.value?.status === 'archived')
@@ -54,7 +53,11 @@ const filteredProviders = computed(() => {
 const selectedProvider = computed(() => (workspace.value?.providers || []).find(provider => provider.id === selectedProviderId.value) || filteredProviders.value[0] || workspace.value?.providers[0])
 const selectedProviderChannels = computed(() => (workspace.value?.channels || []).filter(channel => channel.providerId === selectedProvider.value?.id && !channel.archived))
 const historyVersions = computed(() => (workspace.value?.versions || []).filter(item => !historyChannelId.value || item.channelId === historyChannelId.value))
-const importTarget = computed(() => selected.value ? `${selected.value.name}（${selected.value.status === 'active' ? '当前生效库' : selected.value.status === 'preparing' ? '准备库' : '归档库'}）` : '未选择物流库')
+const importTarget = computed(() => {
+  if (!selected.value) return '未选择物流库'
+  const dataset = `${selected.value.name}（${selected.value.status === 'active' ? '当前生效库' : selected.value.status === 'preparing' ? '准备库' : '归档库'}）`
+  return uploadScope.value === 'provider' && uploadProviderName.value ? `${uploadProviderName.value} · 单物流商更新 · ${dataset}` : `多物流商更新 · ${dataset}`
+})
 const uploadValidation = computed(() => files.value.length ? logisticsUploadError(files.value) : '')
 const activeUploadBatch = computed(() => batch.value?.id === activeUploadBatchId.value ? batch.value : null)
 const uploadStatusVisible = computed(() => uploadInFlight.value || Boolean(activeUploadBatch.value))
@@ -71,7 +74,6 @@ const uploadStatusText = computed(() => {
   return statusLabel[current.phase] || statusLabel[current.status] || current.status
 })
 const displayedUploadFiles = computed(() => files.value.length ? files.value.map(file => ({ name: file.name, size: file.size })) : uploadFileSnapshot.value)
-const readyTargets = computed(() => workspace.value?.channels.filter(c => c.quoteReady) || [])
 const providersWithDrafts = computed(() => (workspace.value?.providers || []).filter(provider => workspace.value?.channels.some(channel => channel.providerId === provider.id && workspace.value?.versions.some(item => item.channelId === channel.id && item.status === 'draft'))))
 const batchPublishProvider = computed(() => providersWithDrafts.value.find(provider => provider.id === batchPublishProviderId.value))
 const batchPublishDrafts = computed(() => {
@@ -123,7 +125,14 @@ const batchFocusCounts = computed(() => {
   }
 })
 const batchFailedFiles = computed(() => batch.value?.payload.fileReports?.filter(file => file.status === 'failed' || file.status === 'template-pending').length || 0)
-const readyBatchResults = computed(() => (batch.value?.payload.results || []).filter(item => currentBatchResultStatus(item) === 'draft' && !(item.errors || 0) && item.pricingReady === true && item.versionId))
+function matchesUploadScope(providerName: string) {
+  return matchesLogisticsProviderScope(uploadScope.value, uploadProviderName.value, providerName)
+}
+const readyBatchResults = computed(() => (batch.value?.payload.results || []).filter(item => currentBatchResultStatus(item) === 'draft' && !(item.errors || 0) && item.pricingReady === true && item.versionId && matchesUploadScope(item.providerName)))
+const outOfScopeBatchResults = computed(() => {
+  if (uploadScope.value !== 'provider' || !uploadProviderName.value) return []
+  return (batch.value?.payload.results || []).filter(item => !matchesUploadScope(item.providerName))
+})
 const readyBatchNeedsRemoval = computed(() => readyBatchResults.value.some(item => hasCoverageRemoval(item.summary)))
 const readyBatchNeedsRisk = computed(() => readyBatchResults.value.some(item => (item.summary?.highRisk || 0) > 0))
 const versionChangeCounts = computed(() => aggregateChangeSummary(version.value ? [{ summary: version.value.summary }] : []))
@@ -168,16 +177,30 @@ function compactPrice(diff: Diff, source = diff.row) {
   return `${currency} ${money(price.pricePerKg)} / kg · 每票 ${money(price.registrationFee)}`
 }
 let pollTimer: ReturnType<typeof setTimeout> | undefined
-let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review'), activationKey = idempotencyKey('logistics-activation'), batchPublishKey = idempotencyKey('logistics-provider-publish')
-let disposed = false, selectionEpoch = 0, autoOpenLatestBatch = false
+let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review'), batchPublishKey = idempotencyKey('logistics-provider-publish')
+let disposed = false, selectionEpoch = 0, priceRequestEpoch = 0
 
 async function run(action: () => Promise<void | PreparedDownload>) {
   if (busy.value) return
   busy.value = true; error.value = ''; message.value = ''
   try { const result = await action(); if (result && !disposed) preparedDownload.value = result } catch (e) { error.value = e instanceof Error ? e.message : '操作失败，请重试' } finally { busy.value = false }
 }
-function filters() { return new URLSearchParams({ query: query.value.trim(), country: country.value.trim(), attribute: attribute.value.trim(), page: String(page.value), size: String(pageSize.value) }) }
+function filters() { return new URLSearchParams({ query: query.value.trim(), country: country.value.trim(), page: String(page.value), size: String(pageSize.value) }) }
 function versionFilters(id: string) { return new URLSearchParams({ versionId: id }) }
+function activeBatchStorageKey(id = datasetId.value) { return `milano.logistics.active-batch.${id}` }
+function rememberActiveBatch(id: string) { sessionStorage.setItem(activeBatchStorageKey(), id) }
+function forgetActiveBatch(id = datasetId.value) { if (id) sessionStorage.removeItem(activeBatchStorageKey(id)) }
+async function restoreActiveBatch() {
+  const id = sessionStorage.getItem(activeBatchStorageKey())
+  if (!id || batch.value) return
+  try {
+    batch.value = await service.batch(id)
+    resetBatchResultView()
+    schedulePoll()
+  } catch {
+    forgetActiveBatch()
+  }
+}
 function currentBatchResultStatus(result: Batch['payload']['results'][number]) { return workspace.value?.versions.find(item => item.id === result.versionId)?.status || result.status }
 function batchResultReadiness(result: Batch['payload']['results'][number]) {
   if ((result.errors || 0) > 0) return `存在 ${result.errors} 个阻断问题，不能发布`
@@ -212,11 +235,6 @@ function batchFileHint(index: number) {
   if (state === '未完成') return batch.value?.payload.error || '批次提前结束，请重试后查看具体原因。'
   return ''
 }
-function preferredReviewBatch(items: BatchSummary[]) {
-  return items.find(item => item.status === 'queued' || item.status === 'processing')
-    || items.find(item => item.status === 'completed')
-    || items[0]
-}
 async function requestPrices(id: string) {
   let result = await service.prices(id, filters())
   if (result.totalPages > 0 && page.value >= result.totalPages) {
@@ -226,36 +244,41 @@ async function requestPrices(id: string) {
   return result
 }
 async function loadPrices() {
-  const id = datasetId.value
+  const id = datasetId.value, selection = selectionEpoch, request = ++priceRequestEpoch
   pricesLoading.value = true
   try {
     const result = await requestPrices(id)
-    if (datasetId.value === id) { prices.value = result; pricesLoaded.value = true }
+    if (!disposed && datasetId.value === id && selectionEpoch === selection && priceRequestEpoch === request) { prices.value = result; pricesLoaded.value = true }
   } finally {
-    if (datasetId.value === id) pricesLoading.value = false
+    if (datasetId.value === id && selectionEpoch === selection && priceRequestEpoch === request) pricesLoading.value = false
   }
+}
+function invalidatePricePage() {
+  priceRequestEpoch++
+  pricesLoading.value = false
+  pricesLoaded.value = false
+  prices.value = { items: [], total: 0, page: 0, size: pageSize.value, totalPages: 0 }
 }
 async function refresh() {
   const id = datasetId.value, epoch = selectionEpoch
-  pricesLoading.value = true
+  workspaceLoading.value = true
+  invalidatePricePage()
   try {
-    const [w, b, pricePage] = await Promise.all([service.workspace(id), service.batches(id), requestPrices(id)])
+    const w = await service.workspace(id)
     if (disposed || id !== datasetId.value || epoch !== selectionEpoch) return
-    workspace.value = w; batches.value = b; prices.value = pricePage; pricesLoaded.value = true; acceptanceRefresh.value++
+    workspace.value = w
     if (!w.providers.some(provider => provider.id === selectedProviderId.value)) selectedProviderId.value = w.providers[0]?.id || ''
-    if (tab.value === 'imports' && autoOpenLatestBatch && !batch.value && b.length) {
-      batch.value = await service.batch(preferredReviewBatch(b)!.id)
-      resetBatchResultView()
-      schedulePoll()
-    }
+    workspaceLoading.value = false
+    if (tab.value === 'imports') await restoreActiveBatch()
+    if (logisticsWorkspaceLoadPlan(tab.value).pricePage) await loadPrices()
   } finally {
-    if (id === datasetId.value && epoch === selectionEpoch) pricesLoading.value = false
+    if (id === datasetId.value && epoch === selectionEpoch) workspaceLoading.value = false
   }
 }
 async function changeDataset() {
   clearDownload()
-  selectionEpoch++; autoOpenLatestBatch = false; clearTimeout(pollTimer); batch.value = null; version.value = null; cutover.value = null; page.value = 0; files.value = []
-  workspace.value = null; batches.value = []; pricesLoaded.value = false; prices.value = { items: [], total: 0, page: 0, size: pageSize.value, totalPages: 0 }
+  selectionEpoch++; priceRequestEpoch++; clearTimeout(pollTimer); batch.value = null; version.value = null; page.value = 0; files.value = []
+  workspace.value = null; invalidatePricePage()
   await run(refresh)
 }
 async function initialize() {
@@ -268,7 +291,8 @@ watch([batchResultQuery, batchResultProvider, batchResultStatus, batchResultFocu
 watch(batchResultTotalPages, totalPages => { batchResultPage.value = clampLogisticsPage(batchResultPage.value, totalPages) })
 watch(detailTotalPages, totalPages => { detailPage.value = clampLogisticsPage(detailPage.value, totalPages) })
 watch(tab, value => {
-  if (value === 'imports' && autoOpenLatestBatch && !batch.value && batches.value.length) void openBatch(preferredReviewBatch(batches.value)!.id)
+  if (value === 'prices' && datasetId.value && !pricesLoaded.value && !pricesLoading.value) void run(loadPrices)
+  else if (value !== 'prices' && pricesLoading.value) invalidatePricePage()
 })
 async function submitPriceFilters() { page.value = 0; await loadPrices() }
 function selectWorkspaceMode(mode: 'base' | 'rules') {
@@ -276,8 +300,10 @@ function selectWorkspaceMode(mode: 'base' | 'rules') {
   if (mode === 'rules') { tab.value = 'prices'; return }
   historyChannelId.value = ''; tab.value = 'imports'
 }
-function beginUpload() {
-  version.value = null; autoOpenLatestBatch = false; clearTimeout(pollTimer); batch.value = null; tab.value = 'imports'
+function beginUpload(scope: 'provider' | 'multi' = 'provider') {
+  uploadScope.value = scope
+  uploadProviderName.value = scope === 'provider' ? selectedProvider.value?.name || '' : ''
+  version.value = null; clearTimeout(pollTimer); forgetActiveBatch(); batch.value = null; tab.value = 'imports'
   void nextTick(() => logisticsFileInput.value?.click())
 }
 function selectUploadFiles(nextFiles: File[]) {
@@ -287,7 +313,7 @@ function selectUploadFiles(nextFiles: File[]) {
   requestKey = idempotencyKey('logistics-import')
   error.value = uploadValidation.value
 }
-function handleFileDrop(event: DragEvent) { selectUploadFiles([...(event.dataTransfer?.files || [])]) }
+function handleFileDrop(event: DragEvent) { uploadScope.value = 'provider'; uploadProviderName.value = selectedProvider.value?.name || ''; selectUploadFiles([...(event.dataTransfer?.files || [])]) }
 function openChannelHistory(channelId: string) { historyChannelId.value = channelId; version.value = null; batch.value = null; tab.value = 'history' }
 function showAllHistory() { historyChannelId.value = ''; version.value = null; batch.value = null; tab.value = 'history' }
 function openProviderPublish(providerId: string) { batchPublishProviderId.value = providerId; selectBatchPublishProvider(); version.value = null; batch.value = null; tab.value = 'history' }
@@ -298,7 +324,6 @@ function changeBatchResultSize(size: number) { batchResultPageSize.value = batch
 function resetDetailTableScroll(behavior: ScrollBehavior = 'smooth') { versionDetail.value?.querySelector<HTMLElement>('.review-main-panel > .scroll')?.scrollTo({ top: 0, behavior }) }
 async function changeDetailPage(nextPage: number) { detailPage.value = clampLogisticsPage(nextPage, detailTotalPages.value); await nextTick(); resetDetailTableScroll() }
 async function changeDetailSize(size: number) { detailPageSize.value = [10, 20, 50].includes(size) ? size : 20; detailPage.value = 0; await nextTick(); resetDetailTableScroll('auto') }
-async function createDataset() { await run(async () => { const d = await service.create(name.value); datasetId.value = d.id; version.value = null; batch.value = null; cutover.value = null; selectionEpoch++; await initialize(); tab.value = 'imports'; message.value = '新库已创建，旧库仍正常生效。' }) }
 function chooseFiles(event: Event) {
   selectUploadFiles([...((event.target as HTMLInputElement).files || [])])
 }
@@ -312,13 +337,13 @@ async function upload() {
     cancelActiveUpload = upload.cancel
     try {
       const result = await upload.promise
-      batch.value = result; activeUploadBatchId.value = result.id; requestKey = idempotencyKey('logistics-import'); files.value = []
+      batch.value = result; activeUploadBatchId.value = result.id; rememberActiveBatch(result.id); requestKey = idempotencyKey('logistics-import'); files.value = []
       if (logisticsFileInput.value) logisticsFileInput.value.value = ''
       await refresh(); schedulePoll()
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         files.value = []; activeUploadBatchId.value = ''; if (logisticsFileInput.value) logisticsFileInput.value.value = ''
-        message.value = '已取消上传；如果服务器已接收完整文件，稍后仍可能在“导入记录”中出现批次。'
+        message.value = '已取消上传；如果服务器已接收完整文件，稍后可从对应渠道的“待处理”状态继续审核。'
         return
       }
       throw e
@@ -341,8 +366,7 @@ function schedulePoll() {
   }, 2000)
 }
 function resetBatchResultView() { batchResultQuery.value = ''; batchResultProvider.value = 'all'; batchResultStatus.value = 'all'; batchResultFocus.value = 'all'; batchResultPage.value = 0; readyPublishResult.value = null }
-async function openBatch(id: string) { autoOpenLatestBatch = true; await run(async () => { batch.value = await service.batch(id); resetBatchResultView(); schedulePoll() }) }
-function closeBatch() { autoOpenLatestBatch = false; clearTimeout(pollTimer); batch.value = null; version.value = null; resetBatchResultView() }
+function closeBatch() { clearTimeout(pollTimer); forgetActiveBatch(); batch.value = null; version.value = null; resetBatchResultView() }
 async function openVersion(id: string) { await run(async () => { version.value = await service.version(id); note.value = ''; removal.value = false; risk.value = false; editingRows.value = false; editSnapshot.value = []; detailPage.value = 0; detailTab.value = version.value.basePublishedVersionId ? 'diff' : 'rows'; diffType.value = 'all'; reviewKey = idempotencyKey('logistics-review'); await nextTick(); versionDetail.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }) }
 function startEditing() { if (!version.value?.rows) return; editSnapshot.value = structuredClone(version.value.rows); editingRows.value = true; detailTab.value = 'rows'; detailPage.value = 0 }
 function cancelEditing() { if (version.value) version.value.rows = structuredClone(editSnapshot.value); editingRows.value = false; editSnapshot.value = [] }
@@ -379,10 +403,6 @@ async function publishReadyBatch() {
   const selections = readyBatchResults.value.map(item => ({ channelId: item.channelId!, versionId: item.versionId!, removalConfirmed: readyPublishRemoval.value, reviewConfirmed: readyPublishRisk.value }))
   await run(async () => { readyPublishResult.value = await service.publishReady(batch.value!.id, selections, readyPublishNote.value.trim(), idempotencyKey('logistics-ready-publish')); await invalidatePublishedLogisticsCache(); await refresh(); batch.value = await service.batch(batch.value!.id); message.value = `成功发布 ${readyPublishResult.value!.publishedCount} 个渠道；跳过 ${readyPublishResult.value!.skippedCount} 个；失败 ${readyPublishResult.value!.failedCount} 个。` })
 }
-async function prepareCutover() { await run(async () => { await service.backup(datasetId.value); cutover.value = await service.preview(datasetId.value); cutoverDirty.value = false; cutoverConfirmed.value = false; unavailable.value = false; activationKey = idempotencyKey('logistics-activation'); message.value = '旧库快照已备份，请核对渠道映射与暂不可用清单。' }) }
-async function updatePreview() { await run(async () => { cutover.value = await service.preview(datasetId.value, cutover.value?.mappings); cutoverDirty.value = false; cutoverConfirmed.value = false }) }
-function mappingChanged() { cutoverDirty.value = true; cutoverConfirmed.value = false }
-async function activate() { await run(async () => { await service.activate(datasetId.value, cutover.value!, cutoverNote.value, unavailable.value, activationKey); await invalidatePublishedLogisticsCache(); cutover.value = null; await initialize(); message.value = '新库已整体生效，旧库已归档。请核对未迁移的模板与草稿。' }) }
 onMounted(() => { void run(initialize) })
 onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload?.() })
 </script>
@@ -401,7 +421,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 
       <section v-if="tab === 'prices'" class="rule-workspace-card">
         <header class="rule-card-head"><div><h2>运费规则列表</h2><p>只读展示已审核发布的正式价格；更新价格请到“基础资料设置”中操作。</p></div><button class="outline-orange" :disabled="busy" @click="run(() => service.exportPrices(datasetId, filters()))">导出正式规则</button></header>
-        <form class="modern-filters" @submit.prevent="run(submitPriceFilters)"><label class="keyword-search"><span>⌕</span><input v-model="query" placeholder="搜索物流商或渠道"></label><label>国家<input v-model="country" placeholder="例如 美国 / US"></label><label>货物属性<input v-model="attribute" placeholder="例如 普货"></label><button class="outline-orange" :disabled="busy">查询</button><button type="button" @click="query='';country='';attribute='';run(submitPriceFilters)">重置</button><span>共 {{ prices.total }} 条正式价格</span></form>
+        <form class="modern-filters" @submit.prevent="run(submitPriceFilters)"><label class="keyword-search"><span>⌕</span><input v-model="query" placeholder="搜索物流商或渠道"></label><label>国家<input v-model="country" placeholder="例如 美国 / US"></label><button class="outline-orange" :disabled="busy">查询</button><button type="button" @click="query='';country='';run(submitPriceFilters)">重置</button><span>共 {{ prices.total }} 条正式价格</span></form>
         <div class="scroll" :aria-busy="pricesLoading"><table><thead><tr><th>物流商 / 渠道</th><th>国家</th><th>重量段</th><th>计费价格</th><th>每票费用</th><th>版本 / 状态</th></tr></thead><tbody><template v-if="pricesLoading"><tr v-for="index in 6" :key="`skeleton-${index}`" class="price-skeleton" aria-hidden="true"><td v-for="column in 6" :key="column"><span /></td></tr></template><template v-else><tr v-for="(r, i) in prices.items" :key="`${r.versionId}-${page}-${i}`"><td><b>{{ r.providerName }}</b><small>{{ r.channelName }}</small></td><td>{{ r.areaName }}<small>{{ r.countryCode }} · {{ r.zoneName || '无分区' }}</small></td><td>{{ weightLabel(r) }}</td><td v-if="r.pricingModel === 'first-next'">首 {{ r.firstWeightKg }}kg / {{ r.currency || 'CNY' }} {{ money(r.firstWeightPrice) }}<small>续 {{ r.nextWeightKg }}kg / {{ r.currency || 'CNY' }} {{ money(r.nextWeightPrice) }}</small></td><td v-else-if="r.intervalPrice">{{ r.currency || 'CNY' }} {{ money(r.intervalPrice) }} / 档</td><td v-else>{{ r.currency || 'CNY' }} {{ money(r.pricePerKg) }} / kg</td><td>{{ r.currency || 'CNY' }} {{ money(r.registrationFee) }}</td><td>V{{ r.versionNumber }}<small :class="{ warning: r.quoteReady === false }">{{ r.quoteReady === false ? '价格已记录 · 计费待适配' : '可自动报价' }}</small></td></tr><tr v-if="!prices.items.length"><td colspan="6" class="empty">当前条件没有正式价格；新库请先导入并审核价格版本。</td></tr></template></tbody></table></div>
         <LogisticsPager v-if="pricesLoaded" :page="page" :size="pageSize" :total="prices.total" :total-pages="prices.totalPages" :loading="busy || pricesLoading" @page-change="changePricePage" @size-change="changePriceSize" />
       </section>
@@ -412,11 +432,12 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
             <header class="review-workbench-head">
               <div class="review-title"><span class="review-icon">▤</span><div><p class="eyebrow">IMPORT REVIEW</p><h2>物流价格批量审核</h2><p>{{ batch.payload.files.map(file => file.name).join('、') }}</p></div></div>
               <div class="review-steps" aria-label="审核步骤"><span class="done"><i>✓</i>已解析</span><b></b><span :class="{ current: batchResultCounts.draft || batchResultCounts.blocked }"><i>2</i>核对变化</span><b></b><span :class="{ done: !batchResultCounts.draft && !batchResultCounts.blocked }"><i>3</i>发布给财务</span></div>
-              <div class="review-head-actions"><button :disabled="busy || batch.status !== 'completed'" @click="run(() => service.exportBatchDiff(batch!.id))">导出差异</button><button @click="closeBatch">上传新价格 / 批次列表</button></div>
+              <div class="review-head-actions"><button :disabled="busy || batch.status !== 'completed'" @click="run(() => service.exportBatchDiff(batch!.id))">导出差异</button><button @click="closeBatch">返回渠道列表</button></div>
             </header>
 
             <div v-if="['queued', 'processing'].includes(batch.status)" class="review-progress"><div><b>{{ uploadStatusText || statusLabel[batch.phase] || batch.phase }}</b><strong>{{ batch.payload.progress || 0 }}%</strong></div><progress :value="batch.payload.progress || 0" max="100" /></div>
             <p v-if="batch.payload.error" class="notice error">批次失败原因：{{ batch.payload.error }}</p>
+            <p v-if="outOfScopeBatchResults.length" class="notice error">本次按“{{ uploadProviderName }}”单物流商更新导入，但解析结果还包含 {{ [...new Set(outOfScopeBatchResults.map(item => item.providerName))].join('、') }}。这些渠道不会被一键发布，请核对文件后分别处理。</p>
             <nav class="review-focus-tabs" aria-label="变化类型筛选">
               <button :class="{ active: batchResultFocus === 'all' }" @click="batchResultFocus = 'all'">全部渠道 <b>{{ batchFocusCounts.all }}</b></button>
               <button :class="{ active: batchResultFocus === 'added' }" @click="batchResultFocus = 'added'">新增渠道 <b>{{ batchFocusCounts.added }}</b></button>
@@ -451,24 +472,18 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 
         <template v-else>
           <section class="base-settings">
-            <div class="base-toolbar"><div><h2>物流商与渠道版本</h2><p>完整 Excel 原表进入异步解析和审核；只有发布后的价格版本参与业务报价。</p></div><div class="provider-toolbar"><label>⌕<input v-model="providerSearch" placeholder="搜索物流商或编码"></label><a class="outline-orange" href="/templates/logistics-v2.xlsx" download="物流标准导入模板V2.xlsx">下载标准模板</a><button class="outline-orange" :disabled="busy || archived" @click="beginUpload">＋ 批量导入价格</button><button @click="showAllHistory">版本历史</button></div></div>
-            <div class="provider-manager">
-              <aside class="provider-list"><div class="provider-sort-hint"><span>物流商列表</span><small>正式渠道数据仓库</small></div><div class="provider-list-scroll"><button v-for="provider in filteredProviders" :key="provider.id" :class="{ active: selectedProvider?.id === provider.id }" @click="selectedProviderId = provider.id"><u>⋮⋮</u><i>{{ provider.name.slice(0, 1) }}</i><span><b>{{ provider.name }}</b><small>{{ provider.code || provider.id.slice(0, 8) }}</small></span><em>{{ providerChannelCount(provider) }}个渠道</em><strong>›</strong></button><div v-if="!filteredProviders.length" class="provider-empty">没有匹配的物流商</div></div><footer>共 {{ workspace?.providers.length || 0 }} 家物流商</footer></aside>
-              <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0, 1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span></h3><small>物流商编码 {{ selectedProvider.code || '自动生成' }} · 渠道、价格和审核的统一入口</small></div><div class="provider-detail-actions"><button class="outline-orange" :disabled="busy || archived" @click="beginUpload">批量导入渠道</button><button class="upload" :disabled="busy || archived" @click="beginUpload">批量更新价格</button><button v-if="selectedProviderChannels.some(channel => draftVersionFor(channel))" class="upload" @click="openProviderPublish(selectedProvider.id)">批量审核</button></div></header>
-                <div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute || channel.type || '物流属性待确认' }}</small></b><div><strong>{{ currentVersionFor(channel) ? `V${currentVersionFor(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersionFor(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ channelCountryCount(channel) }}国 / {{ visibleVersionFor(channel)?.rowCount || 0 }}价格段</div><span class="adjustment-status" :class="channelAdjustmentStatus(channel)">{{ channelAdjustmentLabel(channel) }}</span><time>{{ formatPublishedAt(currentVersionFor(channel)?.publishedAt) }}</time><div class="template-actions"><button :disabled="busy || archived" @click="beginUpload">{{ currentVersionFor(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersionFor(channel)" class="move-template" :disabled="busy" @click="openVersion(draftVersionFor(channel)!.id)">审核发布</button><button @click="openChannelHistory(channel.id)">版本历史</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未生成渠道</div></div>
-                  <button v-if="!archived && !files.length" class="template-dropzone" @dragover.prevent @drop.prevent="handleFileDrop" @click="beginUpload"><i>⇧</i><span>拖拽 1–30 份物流商原表或 38 列标准模板到这里，系统将自动识别并预检</span><strong>支持现有 10 家物流商原表解析</strong></button>
-                  <div v-else-if="files.length || uploadStatusVisible" class="inline-upload-panel" @dragover.prevent @drop.prevent="handleFileDrop"><div class="inline-upload-head"><div><b>{{ importTarget }}</b><small>支持 .xls / .xlsx；单文件不超过100MB，批次不超过500MB</small></div><button :disabled="busy" @click="beginUpload">重新选择</button><button class="primary" :disabled="busy || !files.length || Boolean(uploadValidation)" @click="upload">{{ uploadInFlight ? `${uploadProgress.percent}%` : `上传并解析 ${files.length} 份文件` }}</button></div><p v-if="uploadValidation" class="notice error">{{ uploadValidation }}</p><div v-if="displayedUploadFiles.length" class="upload-file-list"><span v-for="file in displayedUploadFiles" :key="`${file.name}-${file.size}`"><b>{{ file.name }}</b><small>{{ formatTransferBytes(file.size) }}</small></span></div><div v-if="uploadStatusVisible" class="logistics-upload-status" role="status"><div class="upload-status-heading"><b>{{ uploadStatusText }}</b><strong>{{ uploadStatusPercent }}%</strong></div><progress :value="uploadStatusPercent" max="100" /><p v-if="uploadInFlight" class="muted">已上传 {{ formatTransferBytes(uploadProgress.loaded) }} / {{ formatTransferBytes(uploadProgress.total) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatTransferBytes(uploadProgress.bytesPerSecond) }}/s</template></p><p v-else-if="activeUploadBatch" class="muted">批次 {{ activeUploadBatch.id }} · {{ activeUploadBatch.payload.processedFiles || 0 }}/{{ activeUploadBatch.payload.totalFiles || activeUploadBatch.payload.files.length }} 个文件已解析</p><button v-if="uploadInFlight" type="button" @click="cancelUpload">取消上传</button></div><label class="check"><input v-model="replaceDrafts" type="checkbox">已有不同待审稿时，终止旧稿并保留历史</label></div>
+            <div class="base-toolbar"><div><h2>物流商与渠道版本</h2><p>完整 Excel 原表进入异步解析和审核；只有发布后的价格版本参与业务报价。</p></div><div class="provider-toolbar"><label class="provider-search-field">⌕<input v-model="providerSearch" placeholder="搜索物流商或编码"></label><a class="outline-orange" href="/templates/logistics-v2.xlsx" download="物流标准导入模板V2.xlsx">下载标准模板</a><button class="outline-orange" :disabled="busy || archived" @click="beginUpload('multi')">＋ 多物流商更新导入</button><button @click="showAllHistory">版本历史</button></div></div>
+            <div class="provider-manager" :aria-busy="workspaceLoading">
+              <aside class="provider-list"><div class="provider-sort-hint"><span>物流商列表</span><small>正式渠道数据仓库</small></div><div class="provider-list-scroll"><template v-if="workspaceLoading"><div v-for="index in 6" :key="`provider-skeleton-${index}`" class="provider-list-skeleton" aria-hidden="true"><i /><span><b /><small /></span><em /></div></template><template v-else><button v-for="provider in filteredProviders" :key="provider.id" :class="{ active: selectedProvider?.id === provider.id }" @click="selectedProviderId = provider.id"><u>⋮⋮</u><i>{{ provider.name.slice(0, 1) }}</i><span><b>{{ provider.name }}</b><small>{{ provider.code || provider.id.slice(0, 8) }}</small></span><em>{{ providerChannelCount(provider) }}个渠道</em><strong>›</strong></button><div v-if="!filteredProviders.length" class="provider-empty">没有匹配的物流商</div></template></div><footer>{{ workspaceLoading ? '正在加载物流商…' : `共 ${workspace?.providers.length || 0} 家物流商` }}</footer></aside>
+              <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0, 1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span></h3><small>物流商编码 {{ selectedProvider.code || '自动生成' }} · 渠道、价格和审核的统一入口</small></div><div class="provider-detail-actions"><button class="upload" :disabled="busy || archived" @click="beginUpload('provider')">单物流商更新导入</button><button v-if="selectedProviderChannels.some(channel => draftVersionFor(channel))" class="outline-orange" @click="openProviderPublish(selectedProvider.id)">批量审核</button></div></header>
+                <div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute || channel.type || '物流属性待确认' }}</small></b><div><strong>{{ currentVersionFor(channel) ? `V${currentVersionFor(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersionFor(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ channelCountryCount(channel) }}国 / {{ visibleVersionFor(channel)?.rowCount || 0 }}价格段</div><span class="adjustment-status" :class="channelAdjustmentStatus(channel)">{{ channelAdjustmentLabel(channel) }}</span><time>{{ formatPublishedAt(currentVersionFor(channel)?.publishedAt) }}</time><div class="template-actions"><button :disabled="busy || archived" @click="beginUpload('provider')">{{ currentVersionFor(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersionFor(channel)" class="move-template" :disabled="busy" @click="openVersion(draftVersionFor(channel)!.id)">审核发布</button><button @click="openChannelHistory(channel.id)">版本历史</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未生成渠道</div></div>
+                  <button v-if="!archived && !files.length" class="template-dropzone" @dragover.prevent @drop.prevent="handleFileDrop" @click="beginUpload('provider')"><i>⇧</i><span>拖拽 1–30 份物流商原表或 38 列标准模板到这里，系统将自动识别并预检</span><strong>支持现有 10 家物流商原表解析</strong></button>
+                  <div v-else-if="files.length || uploadStatusVisible" class="inline-upload-panel" @dragover.prevent @drop.prevent="handleFileDrop"><div class="inline-upload-head"><div><b>{{ importTarget }}</b><small>支持 .xls / .xlsx；单文件不超过100MB，批次不超过500MB</small></div><button :disabled="busy" @click="beginUpload(uploadScope)">重新选择</button><button class="primary" :disabled="busy || !files.length || Boolean(uploadValidation)" @click="upload">{{ uploadInFlight ? `${uploadProgress.percent}%` : `上传并解析 ${files.length} 份文件` }}</button></div><p v-if="uploadValidation" class="notice error">{{ uploadValidation }}</p><div v-if="displayedUploadFiles.length" class="upload-file-list"><span v-for="file in displayedUploadFiles" :key="`${file.name}-${file.size}`"><b>{{ file.name }}</b><small>{{ formatTransferBytes(file.size) }}</small></span></div><div v-if="uploadStatusVisible" class="logistics-upload-status" role="status"><div class="upload-status-heading"><b>{{ uploadStatusText }}</b><strong>{{ uploadStatusPercent }}%</strong></div><progress :value="uploadStatusPercent" max="100" /><p v-if="uploadInFlight" class="muted">已上传 {{ formatTransferBytes(uploadProgress.loaded) }} / {{ formatTransferBytes(uploadProgress.total) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatTransferBytes(uploadProgress.bytesPerSecond) }}/s</template></p><p v-else-if="activeUploadBatch" class="muted">批次 {{ activeUploadBatch.id }} · {{ activeUploadBatch.payload.processedFiles || 0 }}/{{ activeUploadBatch.payload.totalFiles || activeUploadBatch.payload.files.length }} 个文件已解析</p><button v-if="uploadInFlight" type="button" @click="cancelUpload">取消上传</button></div><label class="check"><input v-model="replaceDrafts" type="checkbox">已有不同待审稿时，终止旧稿并保留历史</label></div>
                 </div>
               </section>
+              <section v-else-if="workspaceLoading" class="provider-detail provider-detail-skeleton" aria-hidden="true"><header><span class="provider-icon" /><div><i /><i /></div></header><div class="provider-detail-body"><i v-for="index in 6" :key="index" /></div></section>
             </div>
           </section>
-
-          <details class="secondary-management"><summary><span><b>导入记录与高级管理</b><small>查看解析批次、必用渠道、整库切换和独立新库</small></span><em>{{ batches.length }} 个导入批次</em></summary><div class="secondary-management-body">
-            <LogisticsRequiredChannels v-if="datasetId" :dataset-id="datasetId" :preparing="selected?.status === 'preparing'" :refresh-key="acceptanceRefresh" @updated="acceptanceUpdated" />
-            <div class="card"><h2>导入记录</h2><div class="scroll"><table><thead><tr><th>时间</th><th>原始文件</th><th>处理情况</th><th>进度</th><th>操作</th></tr></thead><tbody><tr v-for="b in batches" :key="b.id"><td>{{ b.created_at }}</td><td>{{ b.files.map(f => f.name).join('、') }}</td><td>{{ statusLabel[b.status] || b.status }}</td><td>{{ b.progress || 0 }}%</td><td><button :disabled="busy" @click="openBatch(b.id)">查看解析与审核</button></td></tr><tr v-if="!batches.length"><td colspan="5" class="empty">暂无导入批次。</td></tr></tbody></table></div></div>
-            <div v-if="selected?.status === 'preparing'" class="card cutover"><h2>新库整体切换</h2><p>准备完毕后，先备份旧库并核对渠道关联。切换不删除历史报价；无法匹配的财务渠道、模板和草稿需要后续人工处理。</p><button :disabled="busy" @click="prepareCutover">备份旧库并生成切换预览</button><template v-if="cutover"><p class="warning">必用清单{{ cutover.requiredConfirmed ? '已确认' : '未确认' }} · 必用 {{ cutover.requiredCount }} 个 · 未就绪 {{ cutover.requiredNotReady?.length || 0 }} 个</p><p>可自动报价 {{ cutover.readyChannels }} 个 · 暂不可用 {{ cutover.pendingChannels.length }} 个 · 未映射 {{ cutover.unmappedChannels }} 个</p><div class="scroll"><table><thead><tr><th>旧渠道</th><th>新渠道</th><th>匹配结果</th></tr></thead><tbody><tr v-for="m in cutover.mappings" :key="m.oldChannelId"><td>{{ m.oldName }}</td><td><select v-model="m.newChannelId" :disabled="busy" @change="mappingChanged"><option value="">暂不迁移，保留待处理</option><option v-for="c in readyTargets" :key="c.id" :value="c.id">{{ c.providerName }} / {{ c.name }}</option></select></td><td>{{ m.status === 'matched' ? '已匹配，需核对' : '待处理' }}</td></tr></tbody></table></div><button v-if="cutoverDirty" :disabled="busy" @click="updatePreview">按修改后的映射重新生成预览</button><details><summary>查看暂不可用渠道</summary><p v-for="c in cutover.pendingChannels" :key="c.id">{{ c.providerName }} / {{ c.name }}</p></details><details><summary>财务与模板关联变更（{{ cutover.bindingChanges?.length || 0 }} 项）</summary><p>待恢复重计价的报价草稿：{{ cutover.draftsToReprice || 0 }} 份。未映射引用保留待处理，不扩大允许范围。</p><div class="scroll"><table><thead><tr><th>类型 / 标识 / 位置</th><th>迁移前</th><th>迁移后</th><th>状态</th></tr></thead><tbody><tr v-for="(b, i) in cutover.bindingChanges || []" :key="i"><td>{{ b.kind === 'finance' ? '财务渠道限制' : '报价模板' }}<small>{{ b.id }} {{ b.path }}</small></td><td>{{ b.before }}</td><td>{{ b.after }}</td><td>{{ b.status === 'mapped' ? '仅迁移引用' : '保留待处理' }}</td></tr></tbody></table></div></details><label>切换审核备注<textarea v-model="cutoverNote" maxlength="500" /></label><label class="check"><input v-model="unavailable" type="checkbox">已确认未映射及暂不可用渠道：切换后不回退使用旧库价格</label><label class="check"><input v-model="cutoverConfirmed" type="checkbox">已核对映射、备份和影响清单，确认将当前物流列表整体换新</label><button class="primary" :disabled="busy || cutoverDirty || !cutoverConfirmed || !cutoverNote.trim() || !cutover.requiredReady || ((cutover.unmappedChannels > 0 || cutover.pendingChannels.length > 0) && !unavailable)" @click="activate">确认整体切换</button></template></div>
-            <details class="card advanced-operation"><summary><b>新建整套物流价格库（高级操作）</b><span>仅用于整库重建，日常更新价格无需创建</span></summary><div class="advanced-operation-body"><label>新物流库名称<input v-model="name" maxlength="120"></label><button :disabled="busy || !name.trim()" @click="createDataset">创建独立新库</button><span class="muted">不会清空当前库，也不会自动切换为生产生效库。</span></div></details>
-          </div></details>
         </template>
       </section>
 
@@ -486,7 +501,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
         <header class="review-workbench-head">
           <div class="review-title"><span class="review-icon">▤</span><div><p class="eyebrow">PRICE REVIEW</p><h2>{{ workspace?.channels.find(c => c.id === version?.channelId)?.name }} · V{{ version.versionNumber }}</h2><p>{{ version.fileName }} · {{ statusLabel[version.status] }}</p></div></div>
           <div class="review-steps" aria-label="审核步骤"><span class="done"><i>✓</i>已解析</span><b></b><span class="current"><i>2</i>{{ editingRows ? '修正问题' : '核对变化' }}</span><b></b><span :class="{ done: version.status === 'published' }"><i>3</i>发布给财务</span></div>
-          <button @click="version = null">返回批次审核</button>
+          <button @click="version = null">{{ tab === 'history' ? '返回版本历史' : '返回批次审核' }}</button>
         </header>
         <p v-if="version.status === 'published' && version.quoteReady === false" class="notice">该版本已发布，但计费条件尚未完全适配，暂不开放自动报价。</p>
         <p v-else-if="version.status === 'draft' && version.pricingReady === false" class="notice error">发现阻断问题或待适配计费条件。可直接在线修改，不必返回 Excel 重新导入。</p>
@@ -523,5 +538,5 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 .milano-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px}.milano-heading p{margin:0 0 5px;color:#d97800;font-size:10px;font-weight:900;letter-spacing:.16em}.milano-heading h1{margin:0 0 7px;color:#17232e;font-size:28px;letter-spacing:-.5px}.milano-heading span{color:#72808a;font-size:12px}.workspace-switch{display:flex;gap:8px;margin:0 0 16px;padding:5px;background:#e7ecef;border-radius:10px}.workspace-switch button{min-width:180px;height:40px;padding:0 24px;border:0;border-radius:7px;background:transparent;color:#68747e;font-weight:750}.workspace-switch button.active{background:#fff;color:#17232e;box-shadow:0 3px 12px #24313d12}.workspace-switch button:focus-visible{outline:0;box-shadow:0 0 0 3px #ff991033}.hidden-file{display:none}.base-settings,.rule-workspace-card{overflow:hidden;border:1px solid #dfe6ea;border-radius:12px;background:#fff;box-shadow:0 8px 28px #1e2c3810}.base-toolbar,.rule-card-head{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px 24px}.base-toolbar{padding-bottom:12px}.base-toolbar h2,.rule-card-head h2{margin:0 0 5px;color:#17232e;font-size:18px}.base-toolbar p,.rule-card-head p{margin:0;color:#7a858f;font-size:11px}.provider-toolbar,.provider-detail-actions{display:flex;align-items:center;gap:9px}.provider-toolbar label{display:flex;align-items:center;gap:7px;width:260px;height:38px;box-sizing:border-box;padding:0 11px;border:1px solid #dbe2e7;border-radius:7px;color:#72808b}.provider-toolbar input{width:100%;padding:0!important;border:0!important;outline:0;background:transparent}.outline-orange{height:38px;padding:0 16px;border:1px solid #ff9414;color:#d97900;font-weight:800}.provider-manager{display:grid;grid-template-columns:320px minmax(0,1fr);gap:14px;padding:12px 24px 26px}.provider-list,.provider-detail{min-width:0;overflow:hidden;border:1px solid #dfe5e9;border-radius:10px;background:#fff;box-shadow:0 5px 18px rgba(30,44,56,.035)}.provider-sort-hint{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid #e5eaed}.provider-sort-hint span{font-weight:850}.provider-sort-hint small{color:#929da5}.provider-list-scroll{height:458px;padding:8px;overflow:auto;background:#f7f9fa}.provider-list-scroll>button{width:100%;min-height:54px;display:grid;grid-template-columns:14px 36px minmax(0,1fr) auto 12px;align-items:center;gap:8px;margin-bottom:7px;padding:7px 9px;border:1px solid #e0e6ea;border-radius:8px;background:#fff;box-shadow:0 2px 7px #2637440a;text-align:left;color:#26333d}.provider-list-scroll>button:hover{border-color:#f1b967;background:#fffaf2}.provider-list-scroll>button.active{border-color:#ffae42;box-shadow:inset 4px 0 #ff930f,0 4px 12px #bd690014;background:#fff4e4}.provider-list-scroll>button u{color:#aeb7be;text-decoration:none}.provider-list-scroll>button i,.provider-icon{display:grid;place-items:center;border-radius:50%;background:#fff0d9;color:#d97600;font-style:normal;font-weight:900}.provider-list-scroll>button i{width:32px;height:32px}.provider-list-scroll>button span{min-width:0;display:grid;gap:2px}.provider-list-scroll>button b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-list-scroll>button small{color:#9aa3aa;font-size:9px}.provider-list-scroll>button em{color:#84909a;font-size:10px;font-style:normal;white-space:nowrap}.provider-list-scroll>button strong{color:#89959e;font-size:20px}.provider-list-scroll>button.active em,.provider-list-scroll>button.active strong{color:#e17a00}.provider-list>footer{height:38px;display:grid;place-items:center;border-top:1px solid #e8ecef;color:#7f8a93;font-size:11px}.provider-empty{display:grid;place-items:center;height:160px;color:#929ca4}.provider-detail>header{display:flex;align-items:center;gap:12px;min-height:74px;padding:0 18px;border-bottom:1px solid #e8ecef}.provider-icon{width:42px;height:42px;font-size:16px;flex:none}.provider-detail h3{margin:0 0 4px;font-size:17px}.provider-detail h3 span{display:inline-block;margin-left:7px;padding:3px 7px;border-radius:10px;background:#fff0d8;color:#d47600;font-size:9px}.provider-detail header small{color:#8a949c}.provider-detail-actions{margin-left:auto;flex-wrap:wrap;justify-content:flex-end}.provider-detail .upload{height:36px;padding:0 15px;border:0;background:#ff9511;color:#fff;font-weight:800}.provider-detail-body{padding:18px}.provider-detail-body h4{margin:0 0 12px;font-size:14px}.provider-template-table{overflow-x:auto;border:1px solid #dfe5e9;border-radius:8px}.template-table-head,.template-table-row{min-width:1000px;display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(180px,1.2fr) 120px 105px 150px 220px;align-items:center;gap:12px;min-height:48px;padding:0 14px}.template-table-head{min-height:38px;background:#f5f7f8;color:#66737e;font-size:10px;font-weight:800}.template-table-row{border-top:1px solid #edf0f2;font-size:11px}.template-table-row>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.template-table-row>b small,.template-table-row>div>small{display:block;color:#939da5;font-size:9px;font-weight:500}.template-table-row>div>strong{display:block}.template-table-row time{color:#65727c}.adjustment-status{width:max-content;padding:4px 9px;border-radius:10px;font-size:9px;font-weight:850}.adjustment-status.published{background:#e6f6eb;color:#198951}.adjustment-status.pending{background:#fff0d8;color:#d57900}.template-actions{display:flex;align-items:center;flex-wrap:wrap;gap:5px 10px}.template-actions button{padding:0;border:0;background:none;color:#247cb0;font-size:10px}.template-actions .move-template{color:#d87900;font-weight:850}.template-table-empty{display:grid;place-items:center;height:104px;color:#929ca4}.template-dropzone{width:100%;height:130px;display:grid;place-items:center;align-content:center;gap:7px;margin-top:18px;border:1px dashed #ccd7df;border-radius:8px;background:#fbfcfd;color:#6f7d87}.template-dropzone:hover{border-color:#ffae45;background:#fffaf2}.template-dropzone i{color:#9aa7b0;font-size:28px;font-style:normal}.template-dropzone strong{color:#1f80b7}.inline-upload-panel{margin-top:18px;padding:16px;border:1px dashed #e2ad63;border-radius:9px;background:#fffaf3}.inline-upload-head{display:flex;align-items:center;gap:9px}.inline-upload-head>div{min-width:0;display:grid;gap:4px;margin-right:auto}.inline-upload-head small{color:#81909a}.secondary-management{margin-top:16px;border:1px solid #dfe6ea;border-radius:10px;background:#fff}.secondary-management>summary{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 20px;list-style:none}.secondary-management>summary::-webkit-details-marker{display:none}.secondary-management>summary span{display:grid;gap:3px}.secondary-management>summary small{color:#84919a}.secondary-management>summary em{color:#d87b00;font-style:normal;font-weight:800}.secondary-management-body{display:grid;gap:16px;padding:0 18px 18px;border-top:1px solid #e8edef;background:#f8fafb}.secondary-management-body>.card,.secondary-management-body>:deep(.card){margin-top:16px}.rule-card-head{border-bottom:1px solid #e6ebee}.modern-filters{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;padding:15px 20px;border-bottom:1px solid #e6ebee;background:#fafbfc}.modern-filters label{min-width:150px}.modern-filters .keyword-search{min-width:260px;display:flex;flex-direction:row;align-items:center;gap:7px;height:38px;padding:0 11px;border:1px solid #dbe2e7;border-radius:7px;background:#fff}.modern-filters .keyword-search input{width:100%;padding:0;border:0;outline:0}.modern-filters>span{margin-left:auto;color:#7d8992}.history-card .section-head{margin-bottom:16px}.history-card .section-head>button:first-of-type{margin-left:auto}
 @media(max-width:1050px){.milano-heading{align-items:flex-start;flex-direction:column}.provider-manager{grid-template-columns:280px minmax(0,1fr)}.provider-detail>header{align-items:flex-start;flex-wrap:wrap;padding-block:14px}.provider-detail-actions{width:100%;margin-left:54px;justify-content:flex-start}}
 @media(max-width:760px){.workspace-switch button{min-width:0;flex:1;padding:0 10px}.base-toolbar{align-items:flex-start;flex-direction:column}.provider-toolbar{width:100%;flex-wrap:wrap}.provider-toolbar label{width:100%}.provider-manager{grid-template-columns:1fr;padding:10px}.provider-list-scroll{height:250px}.provider-detail-actions{margin-left:0}.inline-upload-head{align-items:stretch;flex-direction:column}.inline-upload-head>div{margin-right:0}.modern-filters{align-items:stretch}.modern-filters label,.modern-filters .keyword-search{width:100%;max-width:none}.dataset-picker{align-items:stretch;flex-direction:column}.dataset-picker select{min-width:0;width:100%}}
-.provider-toolbar a.outline-orange{display:inline-flex;align-items:center;box-sizing:border-box;border-radius:7px;background:#fff;text-decoration:none;white-space:nowrap}
+.provider-list-skeleton{min-height:54px;display:grid;grid-template-columns:36px minmax(0,1fr) 58px;align-items:center;gap:10px;margin-bottom:7px;padding:7px 12px;box-sizing:border-box;border:1px solid #e8edef;border-radius:8px;background:#fff}.provider-list-skeleton i,.provider-list-skeleton b,.provider-list-skeleton small,.provider-list-skeleton em,.provider-detail-skeleton i{display:block;border-radius:6px;background:linear-gradient(90deg,#edf1f4 25%,#f8fafb 50%,#edf1f4 75%);background-size:200% 100%;animation:price-skeleton 1.2s infinite}.provider-list-skeleton>i{width:32px;height:32px;border-radius:50%}.provider-list-skeleton span{display:grid;gap:7px}.provider-list-skeleton b{width:72%;height:11px}.provider-list-skeleton small{width:48%;height:8px}.provider-list-skeleton em{width:58px;height:10px}.provider-detail-skeleton header>div{display:grid;gap:9px;flex:1}.provider-detail-skeleton header>div i:first-child{width:180px;height:16px}.provider-detail-skeleton header>div i:last-child{width:310px;max-width:75%;height:10px}.provider-detail-skeleton .provider-detail-body{display:grid;gap:10px}.provider-detail-skeleton .provider-detail-body>i{height:48px;border:1px solid #edf0f2}.provider-toolbar .provider-search-field{flex-direction:row}.provider-toolbar a.outline-orange{display:inline-flex;align-items:center;box-sizing:border-box;border-radius:7px;background:#fff;text-decoration:none;white-space:nowrap}
 </style>
