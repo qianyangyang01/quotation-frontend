@@ -44,13 +44,8 @@ import {
 import { loadPublishedLogisticsManifest, loadPublishedLogisticsRuleCatalog } from '@/data/publishedLogisticsRepository'
 import { ApiError } from '@/services/http'
 import {
-  loadFinanceRequiredPreview,
-  loadFinanceRequiredPreviewDatasets,
   loadFinanceSettingsWorkspace,
   readFinanceSettingsWorkspace,
-  type FinanceRequiredPreview,
-  type FinanceRequiredPreviewChannel,
-  type FinanceRequiredPreviewDataset,
   type FinanceSettingsWorkspace,
 } from '@/services/financeSettingsWorkspace'
 
@@ -109,12 +104,6 @@ const financeFilterSearch = ref('')
 const financeFilterStatus = ref('')
 const financeFilterCountry = ref('')
 const financeFilterProvider = ref('')
-const financeRequiredDatasets = ref<FinanceRequiredPreviewDataset[]>([])
-const financeRequiredDatasetId = ref('')
-const financeRequiredPreview = ref<FinanceRequiredPreview | null>(null)
-const financeRequiredPreviewState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
-const financeRequiredPreviewError = ref('')
-const financeRequiredSearch = ref('')
 const financeAttributeInput = ref<HTMLInputElement | null>(null)
 const financeAttributePickerOpen = ref(false)
 const financeAttributePickerTyping = ref(false)
@@ -122,6 +111,7 @@ const openFinanceCountryPicker = ref<number | null>(null)
 const financeCountryPickerTyping = ref(false)
 const financeCountrySearches = ref<string[]>([])
 const expandedFinanceCountryRules = ref<number[]>([])
+const financeSelectedCarriers = ref<string[]>([])
 const priorityFinanceCountryNames = ['美国', '英国', '法国', '澳大利亚']
 const emptyFinancePolicyForm = () => ({ category: '普货' as FinanceLogisticsAttribute, countryRules: [] as FinanceCountryChannelRule[], enabled: true })
 const financePolicyForm = ref(emptyFinancePolicyForm())
@@ -200,6 +190,8 @@ const missingProductCount = computed(() => products.value.length - completeProdu
 const tieredProductCount = computed(() => products.value.filter(item => item.priceTiers.length > 1).length)
 const financePolicyCategoryCount = computed(() => new Set(financePolicies.value.filter(policy => policy.enabled).map(policy => policy.category)).size)
 const financePolicyCountryCount = computed(() => new Set(financePolicies.value.filter(policy => policy.enabled).flatMap(policy => policy.countryRules.map(rule => rule.country))).size)
+const financePolicyChannelCount = computed(() => financePolicies.value.filter(policy => policy.enabled).reduce((total, policy) => total + financePolicyCarrierCount(policy), 0))
+const hasActiveFinanceFilters = computed(() => Boolean(financeFilterSearch.value || financeFilterStatus.value || financeFilterCountry.value || financeFilterProvider.value))
 const enabledCustomerGradeCount = computed(() => customerGradeSettings.value.filter(setting => setting.enabled).length)
 const configuredTaxCountryCount = computed(() => financeTaxSettings.value.countries.filter(setting => setting.selected && setting.enabled).length)
 const financeSummaryCards = computed(() => {
@@ -285,16 +277,6 @@ const filteredFinancePolicyCards = computed(() => {
       && (!financeFilterProvider.value || card.countries.some(item => item.groups.some(group => group.provider === financeFilterProvider.value)))
   })
 })
-const filteredFinanceRequiredChannels = computed(() => {
-  const query = financeRequiredSearch.value.trim().toLowerCase()
-  return (financeRequiredPreview.value?.channels || []).filter(channel => !query
-    || `${channel.logisticsAttribute || '普货'} ${channel.providerName} ${channel.name} ${channel.code} ${channel.countries.join(' ')} ${channel.zones.join(' ')}`.toLowerCase().includes(query))
-})
-function financeRequiredBinding(channel: FinanceRequiredPreviewChannel) {
-  const policy = financePolicies.value.find(item => item.enabled && item.category === (channel.logisticsAttribute || '普货'))
-  const matched = channel.countries.filter(country => policy?.countryRules.some(rule => rule.country === country && rule.allowedChannels.includes(channel.channelKey))).length
-  return matched > 0 ? `${matched}/${channel.countries.length} 个国家已关联` : '待切换映射'
-}
 function resetFinanceFilters() {
   financeFilterSearch.value = ''
   financeFilterStatus.value = ''
@@ -486,10 +468,12 @@ async function saveFinanceCountryClassification() {
   financeCountrySettings.value = await saveFinanceCountrySettings(financeCountrySettings.value)
   toast('常用国家设置已保存，业务报价国家列表将同步更新')
 }
-function openFinancePolicyEditor(policy?: FinanceChannelPolicy) {
+async function openFinancePolicyEditor(policy?: FinanceChannelPolicy) {
+  if (!await hydrateFinanceLogisticsContext()) return
   editingFinancePolicyId.value = policy?.id || null
   financePolicyForm.value = policy ? { category: policy.category, countryRules: policy.countryRules.map(rule => ({ ...rule, allowedChannels: [...rule.allowedChannels], unavailableChannels: [...(rule.unavailableChannels || [])] })), enabled: policy.enabled } : emptyFinancePolicyForm()
   financeCountrySearches.value = financePolicyForm.value.countryRules.map(rule => rule.country)
+  financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
   financeAttributePickerOpen.value = false
   financeAttributePickerTyping.value = false
   openFinanceCountryPicker.value = null
@@ -535,6 +519,38 @@ function closeFinanceAttributePicker() {
 }
 function financeChannelsForCountry(country: string) {
   return channelsAvailableForCountry(country, financePolicyForm.value.category)
+}
+function financeCarrierGroupsForCountry(country: string) {
+  const grouped = new Map<string, ReturnType<typeof financeChannelsForCountry>>()
+  financeChannelsForCountry(country).forEach(option => {
+    const channels = grouped.get(option.carrier) || []
+    channels.push(option)
+    grouped.set(option.carrier, channels)
+  })
+  return [...grouped.entries()].map(([carrier, channels]) => ({ carrier, channels }))
+}
+function preferredFinanceCarrier(rule: FinanceCountryChannelRule) {
+  const options = financeChannelsForCountry(rule.country)
+  return options.find(option => rule.allowedChannels.includes(option.key))?.carrier || options[0]?.carrier || ''
+}
+function selectedFinanceCarrier(index: number) {
+  const rule = financePolicyForm.value.countryRules[index]
+  const groups = financeCarrierGroupsForCountry(rule.country)
+  const selected = financeSelectedCarriers.value[index]
+  return groups.some(group => group.carrier === selected) ? selected : preferredFinanceCarrier(rule)
+}
+function selectFinanceCarrier(index: number, carrier: string) {
+  financeSelectedCarriers.value[index] = carrier
+}
+function financeChannelsForSelectedCarrier(index: number) {
+  const rule = financePolicyForm.value.countryRules[index]
+  const carrier = selectedFinanceCarrier(index)
+  return financeCarrierGroupsForCountry(rule.country).find(group => group.carrier === carrier)?.channels || []
+}
+function selectedFinanceCarrierChannelCount(index: number, carrier: string) {
+  const selected = new Set(financePolicyForm.value.countryRules[index].allowedChannels)
+  return financeCarrierGroupsForCountry(financePolicyForm.value.countryRules[index].country)
+    .find(group => group.carrier === carrier)?.channels.filter(channel => selected.has(channel.key)).length || 0
 }
 function financeChannelForKey(country: string, key: string, attribute = financePolicyForm.value.category) {
   return channelsAvailableForCountry(country, attribute).find(option => option.key === key)
@@ -583,6 +599,7 @@ function selectFinanceCountry(index: number, country: string) {
   openFinanceCountryPicker.value = null
   financeCountryPickerTyping.value = false
   normalizeFinanceCarriers(index)
+  financeSelectedCarriers.value[index] = preferredFinanceCarrier(financePolicyForm.value.countryRules[index])
   expandFinanceCountryRule(index)
 }
 function closeFinanceCountrySearch(index: number) {
@@ -605,6 +622,7 @@ async function addFinanceCountryRule() {
     sortOrder: setting?.sortOrder || defaultCountrySortOrder(country, stage),
   })
   financeCountrySearches.value.push(country)
+  financeSelectedCarriers.value.push(preferredFinanceCarrier(financePolicyForm.value.countryRules[financePolicyForm.value.countryRules.length - 1]))
   expandedFinanceCountryRules.value = [...expandedFinanceCountryRules.value, financePolicyForm.value.countryRules.length - 1]
   await nextTick()
   const cards = document.querySelectorAll('.finance-editor .country-rule-card')
@@ -613,6 +631,7 @@ async function addFinanceCountryRule() {
 function removeFinanceCountryRule(index: number) {
   financePolicyForm.value.countryRules.splice(index, 1)
   financeCountrySearches.value.splice(index, 1)
+  financeSelectedCarriers.value.splice(index, 1)
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = expandedFinanceCountryRules.value
     .filter(item => item !== index)
@@ -624,6 +643,7 @@ function handleFinanceCategoryChange() {
     .filter(rule => availableCountries.has(rule.country))
     .map(rule => ({ ...rule, allowedChannels: rule.allowedChannels.filter(channel => financeChannelsForCountry(rule.country).some(option => option.key === channel)) }))
   financeCountrySearches.value = financePolicyForm.value.countryRules.map(rule => rule.country)
+  financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
 }
@@ -719,32 +739,6 @@ function financeSettingsErrorMessage(error: unknown) {
   if (error instanceof ApiError) return `${error.message}（请求编号：${error.requestId}）`
   return error instanceof Error ? error.message : '财务设置加载失败，请稍后重试'
 }
-let financeRequiredPreviewGeneration = 0
-async function hydrateFinanceRequiredPreview() {
-  const datasetId = financeRequiredDatasetId.value, generation = ++financeRequiredPreviewGeneration
-  financeRequiredPreview.value = null; financeRequiredPreviewError.value = ''
-  if (!datasetId) { financeRequiredPreviewState.value = 'ready'; return }
-  financeRequiredPreviewState.value = 'loading'
-  try {
-    const preview = await loadFinanceRequiredPreview(datasetId)
-    if (generation !== financeRequiredPreviewGeneration || datasetId !== financeRequiredDatasetId.value) return
-    financeRequiredPreview.value = preview; financeRequiredPreviewState.value = 'ready'; financeRequiredSearch.value = ''
-  } catch (error) {
-    if (generation !== financeRequiredPreviewGeneration) return
-    financeRequiredPreviewError.value = financeSettingsErrorMessage(error); financeRequiredPreviewState.value = 'error'
-  }
-}
-async function hydrateFinanceRequiredDatasets() {
-  financeRequiredPreviewState.value = 'loading'; financeRequiredPreviewError.value = ''
-  try {
-    financeRequiredDatasets.value = await loadFinanceRequiredPreviewDatasets()
-    const retained = financeRequiredDatasets.value.some(dataset => dataset.id === financeRequiredDatasetId.value)
-    if (!retained) financeRequiredDatasetId.value = financeRequiredDatasets.value.find(dataset => dataset.confirmed && dataset.requiredCount > 0)?.id || financeRequiredDatasets.value[0]?.id || ''
-    await hydrateFinanceRequiredPreview()
-  } catch (error) {
-    financeRequiredPreviewError.value = financeSettingsErrorMessage(error); financeRequiredPreviewState.value = 'error'
-  }
-}
 async function hydrateFinanceSettingsWorkspace(force = false) {
   if (props.mode !== 'members') return
   financeSettingsLoadState.value = 'loading'
@@ -754,21 +748,22 @@ async function hydrateFinanceSettingsWorkspace(force = false) {
     applyFinanceSettingsWorkspace(await loadFinanceSettingsWorkspace({ force }))
     financeSettingsLoadState.value = 'ready'
     void hydrateFinanceLogisticsContext()
-    void hydrateFinanceRequiredDatasets()
   } catch (error) {
     financeSettingsLoadError.value = financeSettingsErrorMessage(error)
     financeSettingsLoadState.value = 'error'
   }
 }
 async function hydrateFinanceLogisticsContext() {
-  if (props.mode !== 'members') return
+  if (props.mode !== 'members') return false
   try {
-    const { manifest } = await loadPublishedLogisticsManifest()
+    const { manifest } = await loadPublishedLogisticsManifest({ allowStale: false })
     const countries = manifest.countries.map(country => country.code || country.name)
     await loadPublishedLogisticsRuleCatalog(manifest.attributes, countries)
     applyFinanceSettingsWorkspace(readFinanceSettingsWorkspace())
+    return true
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '物流正式数据加载失败'
+    return false
   }
 }
 
@@ -931,24 +926,16 @@ function saveEditor() {
           </section>
         </div>
       </section>
-      <FilterPanel v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='logistics'" v-model:search="financeFilterSearch" v-model:status="financeFilterStatus" v-model:country="financeFilterCountry" v-model:provider="financeFilterProvider" :country-options="financeFilterCountryOptions" :provider-options="financeFilterProviderOptions" :total="filteredFinancePolicyCards.length" @reset="resetFinanceFilters" />
       <section v-else-if="mode!=='members'" class="toolbar"><label><span>⌕</span><input v-model="search" placeholder="搜索当前模块数据"></label><select><option>全部状态</option><option>启用</option><option>草稿</option></select><button @click="search = ''">重置筛选</button><span>共 {{ filteredRows.length }} 条数据</span></section>
 
-      <section v-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='logistics'" class="finance-card-list">
-        <section class="finance-required-preview" aria-label="新库必用渠道预览">
-          <header><div><small>PREPARING LOGISTICS DATASET</small><b>新库必用渠道预览</b><span>只读核对，不会提前加入财务授权或当前报价。</span></div><aside><label>准备库<select v-model="financeRequiredDatasetId" aria-label="新库必用渠道预览" @change="hydrateFinanceRequiredPreview"><option v-if="!financeRequiredDatasets.length" value="">暂无准备库</option><option v-for="dataset in financeRequiredDatasets" :key="dataset.id" :value="dataset.id">{{ dataset.name }} · {{ dataset.confirmed ? '已确认' : '未确认' }} · {{ dataset.requiredCount }}个必用</option></select></label><button type="button" :disabled="financeRequiredPreviewState==='loading'" @click="hydrateFinanceRequiredDatasets">刷新预览</button></aside></header>
-          <p v-if="financeRequiredPreviewState==='loading'" class="finance-required-state">正在读取准备库必用渠道…</p>
-          <p v-else-if="financeRequiredPreviewState==='error'" role="alert" class="finance-required-state error">{{ financeRequiredPreviewError }}</p>
-          <template v-else-if="financeRequiredPreview">
-            <div class="finance-required-summary"><span>清单 V{{ financeRequiredPreview.revision }}</span><span :class="{ ready:financeRequiredPreview.confirmed }">{{ financeRequiredPreview.confirmed ? '已确认' : '未确认' }}</span><span>必用 {{ financeRequiredPreview.requiredCount }}</span><span :class="{ ready:financeRequiredPreview.readyCount===financeRequiredPreview.requiredCount && financeRequiredPreview.requiredCount>0 }">可报价 {{ financeRequiredPreview.readyCount }}</span><label>⌕<input v-model="financeRequiredSearch" aria-label="搜索新库必用渠道" placeholder="搜索物流商、渠道、国家"></label></div>
-            <div class="finance-required-table-wrap"><table><thead><tr><th>物流属性</th><th>物流商 / 渠道</th><th>国家 / 分区</th><th>价格行</th><th>价格状态</th><th>计费状态</th><th>财务关联</th></tr></thead><tbody><tr v-for="channel in filteredFinanceRequiredChannels" :key="channel.id"><td><span class="finance-tag">{{ channel.logisticsAttribute || '普货' }}</span></td><td><b>{{ channel.providerName }}</b><small>{{ channel.name }} · {{ channel.code }}</small></td><td>{{ channel.countries.length }} 个国家<small>{{ channel.countries.join('、') || '暂无国家' }}</small><small>{{ channel.zones.length ? `${channel.zones.length} 个分区标记` : '无分区标记' }}</small></td><td>{{ channel.priceRows }}</td><td><em :class="{ warn:!channel.currentVersionId }">{{ channel.currentVersionId ? '价格已发布' : '价格待审核' }}</em></td><td><em :class="{ ready:channel.quoteReady, warn:!channel.quoteReady }">{{ channel.quoteReady ? '可自动报价' : '计费待验收' }}</em></td><td>{{ financeRequiredBinding(channel) }}</td></tr><tr v-if="!filteredFinanceRequiredChannels.length"><td colspan="7" class="finance-required-empty">{{ financeRequiredPreview.requiredCount ? '没有匹配的必用渠道' : '该准备库尚未保存必用渠道' }}</td></tr></tbody></table></div>
-            <footer><span>确认人：{{ financeRequiredPreview.confirmedBy || '—' }} · {{ financeRequiredPreview.confirmedAt || '—' }}</span><span>备注：{{ financeRequiredPreview.note || '—' }}</span><b>准备库切换前，本表所有渠道均不参与正式报价。</b></footer>
-          </template>
-          <p v-else class="finance-required-state">当前没有新库准备区。</p>
-        </section>
-        <header class="finance-list-head"><span>物流属性</span><span>国家</span><span>服务商</span><span>渠道</span><span>匹配</span><span>状态</span><span>更新时间</span><span>操作</span></header>
-        <LogisticsCard v-for="card in filteredFinancePolicyCards" :key="card.key" :attribute="card.policy.category" :countries="card.countries" :preferred-country="financeFilterCountry || card.countries.find(item => !financeFilterProvider || item.groups.some(group => group.provider === financeFilterProvider))?.country" :status="card.policy.enabled ? '启用' : '停用'" :updated-at="card.policy.updatedAt" @maintain="openFinancePolicyEditor(card.policy)" @remove="removeFinancePolicy(card.policy)" />
-        <div v-if="!filteredFinancePolicyCards.length" class="finance-empty"><b>没有找到匹配的物流策略</b><span>请调整关键词或筛选条件后重试</span></div>
+      <section v-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='logistics'" class="finance-logistics-workspace">
+        <header class="finance-logistics-heading"><div><small>ACTIVE LOGISTICS AUTHORIZATION</small><h2>物流属性与渠道授权</h2><p>引用物流模块当前正式价格；这里只维护报价可用的物流属性、国家与渠道。</p></div><aside><span><b>{{ financePolicyCategoryCount }}</b> 个物流属性</span><span><b>{{ financePolicyCountryCount }}</b> 个授权国家</span><span><b>{{ financePolicyChannelCount }}</b> 个渠道配置</span></aside></header>
+        <FilterPanel v-model:search="financeFilterSearch" v-model:status="financeFilterStatus" v-model:country="financeFilterCountry" v-model:provider="financeFilterProvider" :country-options="financeFilterCountryOptions" :provider-options="financeFilterProviderOptions" :total="filteredFinancePolicyCards.length" @reset="resetFinanceFilters" />
+        <div class="finance-card-list">
+          <header class="finance-list-head"><span>物流属性</span><span>国家</span><span>服务商</span><span>渠道</span><span>匹配</span><span>授权状态</span><span>更新时间</span><span>操作</span></header>
+          <LogisticsCard v-for="card in filteredFinancePolicyCards" :key="card.key" :attribute="card.policy.category" :countries="card.countries" :preferred-country="financeFilterCountry || card.countries.find(item => !financeFilterProvider || item.groups.some(group => group.provider === financeFilterProvider))?.country" :status="card.policy.enabled ? '启用' : '停用'" :updated-at="card.policy.updatedAt" @maintain="openFinancePolicyEditor(card.policy)" @remove="removeFinancePolicy(card.policy)" />
+          <div v-if="!filteredFinancePolicyCards.length" class="finance-empty"><b>{{ hasActiveFinanceFilters ? '没有找到匹配的物流策略' : '尚未配置物流属性授权' }}</b><span>{{ hasActiveFinanceFilters ? '请调整关键词或筛选条件后重试' : '物流价格仍由物流模块维护；在这里新增报价可用的国家和渠道授权。' }}</span><button v-if="!hasActiveFinanceFilters" type="button" @click="openFinancePolicyEditor()">＋ 新增物流属性策略</button></div>
+        </div>
       </section>
 
       <section v-else-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab!=='countries' && financeSettingsTab!=='taxes')" class="table-card">
@@ -1093,7 +1080,10 @@ function saveEditor() {
             <div class="country-rule-head"><label class="country-search-label">支持国家（可输入搜索）<div class="country-picker"><span><b>⌕</b><input :value="financeCountrySearches[index] ?? rule.country" autocomplete="off" placeholder="输入国家名称搜索" role="combobox" :aria-expanded="openFinanceCountryPicker===index" @focus="openFinanceCountrySearch(index)" @input="updateFinanceCountrySearch(index,$event)" @blur="closeFinanceCountrySearch(index)" @keydown.esc="openFinanceCountryPicker=null"></span><div v-if="openFinanceCountryPicker===index" class="country-picker-menu" role="listbox"><button v-for="country in filteredFinanceCountries(index)" :key="country.code || country.name" type="button" :class="{ active:country.name===rule.country }" @mousedown.prevent="selectFinanceCountry(index,country.name)"><strong>{{ country.name }}</strong><small>{{ country.code }}</small></button><p v-if="!filteredFinanceCountries(index).length">没有匹配的国家</p></div></div></label><button type="button" @click="removeFinanceCountryRule(index)">移除国家</button></div>
             <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选 {{ rule.allowedChannels.length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道<span v-if="rule.unavailableChannels?.length"> · 待审旧渠道 {{ rule.unavailableChannels.length }} 个</span></span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
             <div v-if="financeCountryRuleExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-list"><b>停用待审旧渠道</b><span v-for="legacy in rule.unavailableChannels" :key="legacy.legacyKey">{{ legacy.providerName }}｜{{ legacy.channelName }}<small>{{ legacy.status === 'ambiguous' ? '存在多个候选，未自动迁移' : '当前库没有可靠等价渠道' }}</small></span></div>
-            <div v-if="financeCountryRuleExpanded(index)" class="country-carrier-grid"><label v-for="option in financeChannelsForCountry(rule.country)" :key="option.key"><input v-model="rule.allowedChannels" type="checkbox" :value="option.key"><span><b>{{ option.carrier }}｜{{ option.channel }}</b><small>渠道编码：{{ option.channelCode || '—' }} · 计费规则：{{ option.ruleName }}</small><em v-if="rule.country==='澳大利亚'" :class="{ warn:option.missingQuoteRegions.length }">{{ option.missingQuoteRegions.length ? `分区不完整：缺${option.missingQuoteRegions.join('、')}` : `澳大利亚分区：${option.quoteRegions.join('、')}` }}</em><em v-else>适用国家：{{ rule.country }}</em></span></label><p v-if="rule.country && !financeChannelsForCountry(rule.country).length">该国家在启用的物流规则中没有可配置渠道</p></div>
+            <div v-if="financeCountryRuleExpanded(index) && financeChannelsForCountry(rule.country).length" class="finance-channel-cascade">
+              <nav aria-label="物流商选择"><header><b>1</b><span>选择物流商</span></header><button v-for="group in financeCarrierGroupsForCountry(rule.country)" :key="group.carrier" type="button" :class="{ active:selectedFinanceCarrier(index)===group.carrier }" @click="selectFinanceCarrier(index,group.carrier)"><span>{{ group.carrier }}</span><em>{{ selectedFinanceCarrierChannelCount(index,group.carrier) }}/{{ group.channels.length }}</em></button></nav>
+              <section><header><div><b>2</b><span>选择“{{ selectedFinanceCarrier(index) }}”下的渠道</span></div><small>该物流商共 {{ financeChannelsForSelectedCarrier(index).length }} 个可用渠道</small></header><div class="country-carrier-grid"><label v-for="option in financeChannelsForSelectedCarrier(index)" :key="option.key"><input v-model="rule.allowedChannels" type="checkbox" :value="option.key"><span><b>{{ option.channel }}</b><small>渠道编码：{{ option.channelCode || '—' }} · 计费规则：{{ option.ruleName }}</small><em v-if="rule.country==='澳大利亚'" :class="{ warn:option.missingQuoteRegions.length }">{{ option.missingQuoteRegions.length ? `分区不完整：缺${option.missingQuoteRegions.join('、')}` : `澳大利亚分区：${option.quoteRegions.join('、')}` }}</em><em v-else>适用国家：{{ rule.country }}</em></span></label></div></section>
+            </div>
             <small v-if="financeCountryRuleExpanded(index) && !financeChannelsForCountry(rule.country).length">当前国家在启用的物流规则中暂无可配置渠道。</small>
           </section>
           <div class="add-country-bottom"><span>物流规则匹配 {{ financeLogisticsCountries.length }} 个可发国家，已选择 {{ financePolicyForm.countryRules.length }} 个</span><button type="button" @click="addFinanceCountryRule">＋ 继续添加匹配国家</button></div>
@@ -1117,12 +1107,14 @@ function saveEditor() {
 .finance-attribute-combobox{position:relative}.finance-attribute-combobox>input{width:100%;box-sizing:border-box;padding-right:38px;background:#fff}.finance-attribute-combobox>button{position:absolute;right:1px;top:1px;width:36px;height:36px;border:0;border-left:1px solid #e1e6e9;border-radius:0 6px 6px 0;background:#fafbfc;color:#53616c;font-size:14px;cursor:pointer}.finance-attribute-combobox:focus-within>input{border-color:#ff9900;box-shadow:0 0 0 3px rgba(255,153,0,.13);outline:0}.finance-attribute-menu{position:absolute;left:0;right:0;top:calc(100% + 5px);z-index:30;display:grid;max-height:264px;overflow:auto;padding:5px;border:1px solid #d7dfe4;border-radius:7px;background:#fff;box-shadow:0 14px 30px rgba(21,34,45,.18)}.finance-attribute-menu>button{height:32px;padding:0 10px;border:0;border-radius:5px;background:#fff;color:#34434e;text-align:left;font-size:11px;cursor:pointer}.finance-attribute-menu>button:hover,.finance-attribute-menu>button.active{background:#fff1da;color:#9e5800;font-weight:800}.finance-attribute-menu>p{margin:0;padding:10px;color:#a05b00;font-size:10px;text-align:center}.finance-policy-form>label>small{color:#8a949c;font-size:9px}
 .finance-tabs{gap:8px;margin-top:14px;padding:8px;background:#fffaf1;border-color:#f1d6ad}.finance-tabs button{min-width:190px;max-width:260px;border:1px solid #ffd39a;background:#fff1d8;color:#8d4d00;font-weight:800;transition:.18s ease}.finance-tabs button:hover{border-color:#ff9b18;background:#ffe3b6;color:#693800}.finance-tabs button.active{border-color:#eb8500;background:#ff9910;color:#17232e;box-shadow:0 4px 12px rgba(224,126,0,.25)}.grade-settings{padding:22px}.grade-settings>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}.grade-settings>header div{display:grid;gap:5px}.grade-settings>header small{color:#7f8992}.grade-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.grade-grid>label{display:grid;grid-template-columns:1fr auto;gap:8px 12px;padding:16px;border:1px solid #dde4e8;border-radius:8px;background:#fafbfc}.grade-grid strong{font-size:17px}.grade-grid span,.grade-grid small{color:#7f8992}.grade-grid input[type=number]{grid-column:1/-1;height:38px;border:1px solid #d9e0e5;border-radius:6px;padding:0 10px;font-size:16px;font-weight:800}.grade-grid em{display:flex;align-items:center;gap:5px;background:none;padding:0;color:#4d5b65}.grade-grid em input{width:auto;height:auto}
 .finance-stats>div{height:100px;box-sizing:border-box;display:flex;align-items:center;gap:14px;padding:16px 18px;box-shadow:0 7px 22px rgba(23,35,46,.045)}.finance-stats>div>i{width:44px;height:44px;display:grid;place-items:center;flex:0 0 44px;border-radius:50%;background:#fff0d7;color:#be6900;font-size:14px;font-style:normal;font-weight:900}.finance-stats>div>section{min-width:0}.finance-stats small{color:#7d8790;font-size:10px;font-weight:700}.finance-stats b{margin:3px 0 2px;color:#17232e;font-size:26px;line-height:1.08}.finance-stats span{overflow:hidden;color:#929ba3;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.finance-tabs{box-shadow:0 7px 18px rgba(24,38,50,.05)}
-.finance-card-list{display:grid;gap:10px;min-width:0}.finance-list-head{display:grid;grid-template-columns:11% 12% 11% minmax(0,29%) 8% 7% 10% minmax(150px,12%);padding:0 16px;color:#77828b;font-size:10px;font-weight:800}.finance-list-head span{min-width:0;padding:0 12px}.finance-list-head span:last-child{text-align:right}.finance-empty{display:grid;justify-items:center;gap:7px;padding:68px 20px;border:1px dashed #d7dfe4;border-radius:8px;background:#fff;color:#35434e}.finance-empty:before{content:"⌕";width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:#fff0d7;color:#c66e00;font-size:22px}.finance-empty span{color:#8b959d;font-size:11px}
-.finance-required-preview{display:grid;gap:14px;margin-bottom:14px;padding:18px;border:1px solid #ead8bd;border-top:3px solid #e08a32;border-radius:10px;background:#fffaf3}.finance-required-preview>header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px}.finance-required-preview>header>div{display:grid;gap:4px}.finance-required-preview>header small{color:#a66a2d;font-size:10px;font-weight:800;letter-spacing:1.2px}.finance-required-preview>header b{color:#263d4b;font-size:17px}.finance-required-preview>header span{color:#778791;font-size:11px}.finance-required-preview>header aside{display:flex;align-items:flex-end;gap:10px}.finance-required-preview>header label{display:grid;gap:5px;color:#687983;font-size:11px}.finance-required-preview select{min-width:320px;padding:9px 11px;border:1px solid #d7c6ad;border-radius:6px;background:#fff}.finance-required-preview button{padding:9px 13px;border:1px solid #d7c6ad;border-radius:6px;background:#fff;color:#7d552b}.finance-required-preview button:disabled{opacity:.5}.finance-required-state{margin:0;padding:20px;text-align:center;color:#7b8b95}.finance-required-state.error{color:#b43d32}.finance-required-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.finance-required-summary>span{padding:6px 10px;border:1px solid #eadfce;border-radius:999px;background:#fff;color:#6d7d87;font-size:11px}.finance-required-summary .ready,.finance-required-table-wrap .ready{color:#287b4d}.finance-required-summary label{display:flex;align-items:center;gap:6px;margin-left:auto;color:#7b8992}.finance-required-summary input{width:240px;padding:8px 10px;border:1px solid #d9cbb8;border-radius:6px}.finance-required-table-wrap{overflow:auto;border:1px solid #eee2d2;border-radius:8px;background:#fff}.finance-required-table-wrap table{width:100%;border-collapse:collapse}.finance-required-table-wrap th,.finance-required-table-wrap td{padding:10px 12px;border-bottom:1px solid #f0e8de;text-align:left;vertical-align:top}.finance-required-table-wrap th{background:#f9f5ee;color:#73828b;font-size:10px;white-space:nowrap}.finance-required-table-wrap td{color:#344954;font-size:12px}.finance-required-table-wrap td small{display:block;max-width:420px;margin-top:3px;color:#82909a;line-height:1.5}.finance-required-table-wrap td em{font-style:normal}.finance-required-table-wrap td .warn{color:#ba6d28}.finance-required-empty{padding:30px!important;text-align:center!important;color:#85949c!important}.finance-required-preview>footer{display:flex;gap:14px;flex-wrap:wrap;color:#7a8992;font-size:11px}.finance-required-preview>footer b{margin-left:auto;color:#a25e24}
-@media(max-width:900px){.finance-required-preview>header{align-items:stretch;flex-direction:column}.finance-required-preview>header aside{align-items:stretch;flex-direction:column}.finance-required-preview select{min-width:0;width:100%}.finance-required-summary label{width:100%;margin-left:0}.finance-required-summary input{flex:1;width:auto}.finance-required-preview>footer b{width:100%;margin-left:0}}
+.finance-channel-cascade{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;margin-top:12px;overflow:hidden;border:1px solid #e0e6ea;border-radius:8px;background:#f8fafb}.finance-channel-cascade>nav{display:flex;flex-direction:column;gap:4px;padding:10px;border-right:1px solid #e0e6ea;background:#f3f6f8}.finance-channel-cascade>nav header,.finance-channel-cascade>section>header>div{display:flex;align-items:center;gap:7px}.finance-channel-cascade header b{width:20px;height:20px;display:grid;place-items:center;padding:0;border-radius:50%;background:#ffedcf;color:#b66600}.finance-channel-cascade>nav header{padding:3px 5px 7px;color:#56656f;font-weight:800}.finance-channel-cascade>nav button{display:flex;align-items:center;justify-content:space-between;width:100%;height:auto;min-height:38px;padding:8px 9px;border-color:transparent;background:transparent;color:#4f5e68;text-align:left}.finance-channel-cascade>nav button:hover{background:#fff}.finance-channel-cascade>nav button.active{border-color:#ffad33;background:#fff7e8;color:#9d5900}.finance-channel-cascade>nav button em{font-style:normal;font-size:9px;color:#8a959d}.finance-channel-cascade>section{min-width:0;padding:12px}.finance-channel-cascade>section>header{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#465660}.finance-channel-cascade>section>header small{color:#8c969e}.finance-channel-cascade .country-carrier-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px;max-height:228px;overflow:auto}.finance-channel-cascade .country-carrier-grid label{background:#fff}
+.finance-logistics-workspace{overflow:hidden;padding:20px;border:1px solid #dfe6ea;border-radius:12px;background:#fff;box-shadow:0 8px 28px rgba(30,44,56,.06)}.finance-logistics-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:22px;margin-bottom:16px}.finance-logistics-heading>div{display:grid;gap:4px}.finance-logistics-heading small{color:#d87900;font-size:9px;font-weight:900;letter-spacing:1.4px}.finance-logistics-heading h2{margin:0;color:#17232e;font-size:18px}.finance-logistics-heading p{margin:0;color:#7a858f;font-size:11px}.finance-logistics-heading aside{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.finance-logistics-heading aside span{padding:7px 10px;border:1px solid #e5eaed;border-radius:8px;background:#f8fafb;color:#71808a;font-size:10px}.finance-logistics-heading aside b{color:#1f2f3b;font-size:13px}.finance-logistics-workspace :deep(.filter-panel){margin-bottom:18px;box-shadow:none}.finance-card-list{display:grid;gap:10px;min-width:0}.finance-list-head{display:grid;grid-template-columns:11% 12% 11% minmax(0,29%) 8% 7% 10% minmax(150px,12%);padding:0 16px;color:#77828b;font-size:10px;font-weight:800}.finance-list-head span{min-width:0;padding:0 12px}.finance-list-head span:last-child{text-align:right}.finance-empty{display:grid;justify-items:center;gap:7px;padding:58px 20px;border:1px dashed #d7dfe4;border-radius:8px;background:#fbfcfd;color:#35434e}.finance-empty:before{content:"⌕";width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:#fff0d7;color:#c66e00;font-size:22px}.finance-empty span{color:#8b959d;font-size:11px;text-align:center}.finance-empty button{height:34px;margin-top:5px;padding:0 14px;border:1px solid #ff9900;border-radius:6px;background:#fff;color:#c66e00;font-size:10px;font-weight:800}
+@media(max-width:900px){.finance-logistics-heading{align-items:flex-start;flex-direction:column}.finance-logistics-heading aside{justify-content:flex-start}}
+@media(max-width:900px){.finance-channel-cascade{grid-template-columns:150px minmax(0,1fr)}}
 @media(max-width:1280px){.finance-list-head{grid-template-columns:10% 12% 11% minmax(0,28%) 8% 7% 10% minmax(150px,14%);padding-inline:10px}.finance-list-head span{padding-inline:8px}}
 @media(max-width:900px){.product-form,.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.freight-tier-editor,.freight-tier-view{grid-template-columns:1fr}.country-carrier-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:900px){.topbar nav{display:none}.stats{grid-template-columns:1fr 1fr}.subtabs{overflow-x:auto}.subtabs button{white-space:nowrap}.finance-list-head{display:none}}@media(max-width:620px){.brand{margin-right:0}.user div{display:none}.page{width:94vw;padding-top:22px}.heading{align-items:flex-start;gap:16px}.stats{grid-template-columns:1fr 1fr}.finance-stats>div{height:92px;padding:12px}.finance-stats>div>i{width:36px;height:36px;flex-basis:36px}.toolbar{flex-wrap:wrap}.toolbar label{width:100%}.toolbar>span{margin-left:0}.form{grid-template-columns:1fr}.country-carrier-grid{grid-template-columns:1fr}.country-rule-head{align-items:stretch;flex-direction:column}.country-rule-head label{max-width:none;width:100%}.detail-mask{padding:10px}.detail-card{padding:22px 16px}.detail-head{display:block;padding-right:28px}.detail-image{margin-top:14px}.detail-grid{grid-template-columns:1fr}.detail-grid .detail-wide{grid-column:auto}.image-preview{padding:18px}.preview-close{right:14px;top:14px}}
+@media(max-width:620px){.finance-channel-cascade{grid-template-columns:1fr}.finance-channel-cascade>nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-right:0;border-bottom:1px solid #e0e6ea}.finance-channel-cascade>nav header{grid-column:1/-1}.finance-channel-cascade .country-carrier-grid{grid-template-columns:1fr}}
 .exchange-settings{padding:24px}.exchange-settings>header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding-bottom:18px;border-bottom:1px solid #e6ebef}.exchange-settings>header div{display:grid;gap:6px}.exchange-settings>header b{font-size:17px}.exchange-settings>header small,.exchange-settings>header>span{color:#7f8992;font-size:10px}.exchange-settings>section{display:grid;grid-template-columns:minmax(360px,1fr) minmax(280px,.7fr);gap:18px;margin-top:20px}.exchange-settings>section>label,.exchange-settings aside{display:grid;gap:12px;padding:20px;border:1px solid #dde4e8;border-radius:10px;background:#fafbfc}.exchange-settings label>span{color:#596773;font-size:12px;font-weight:800}.exchange-settings label>div{display:grid;grid-template-columns:auto minmax(150px,230px) auto;align-items:center;gap:10px}.exchange-settings label>div b,.exchange-settings label>div strong{color:#34434e;font-size:13px;white-space:nowrap}.exchange-settings input{height:46px;border:1px solid #f1a33b;border-radius:7px;padding:0 13px;background:#fff;color:#17232e;font-size:22px;font-weight:900;outline:0}.exchange-settings input:focus{box-shadow:0 0 0 3px rgba(255,153,0,.16)}.exchange-settings label>small,.exchange-settings aside p{margin:0;color:#89949d;font-size:10px;line-height:1.7}.exchange-settings aside{align-content:start;background:#fffaf1;border-color:#f2d8ad}.exchange-settings aside b{color:#9b5900}.exchange-settings>footer{display:flex;justify-content:flex-end;margin-top:20px}.exchange-settings>footer button{min-width:150px}@media(max-width:900px){.exchange-settings>section{grid-template-columns:1fr}}@media(max-width:620px){.exchange-settings{padding:16px}.exchange-settings>header{flex-direction:column}.exchange-settings label>div{grid-template-columns:1fr}}
 .product-table{min-width:1180px;table-layout:fixed;white-space:normal}.product-table .product-select-col{width:3%}.product-table .product-main-col{width:21%}.product-table .product-price-col{width:17%}.product-table .product-weight-col{width:12%}.product-table .product-freight-col{width:18%}.product-table .product-spec-col{width:14%}.product-table .product-status-col{width:7%}.product-table .product-actions-col{width:8%}.product-table th{padding:14px 12px;color:#61707b;font-size:10px;font-weight:850}.product-table td{padding:15px 12px;vertical-align:middle}.product-table tbody tr{transition:background .16s ease}.product-table tbody tr:hover{background:#fffaf2}.product-table .selection-cell{padding-right:4px;text-align:center}.product-table .selection-cell input{width:15px;height:15px;accent-color:#ff9910}.product-table .product-item{align-items:flex-start;gap:11px;min-width:0}.product-table .product-item>span{min-width:0}.product-table .product-item b{display:block;overflow:hidden;color:#17232e;font-size:13px;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}.product-table .product-item small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.product-table .product-maintainer{color:#8b969f;font-size:9px}.purchase-price-cell{display:grid;gap:7px;min-width:0}.purchase-price-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid #edf0f2}.purchase-price-top span{color:#87929b;font-size:9px}.purchase-price-top strong{color:#a55a00;font-size:15px;line-height:1}.purchase-price-grid,.freight-tier-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}.purchase-price-grid>span,.freight-tier-list>span{display:grid;gap:3px;min-width:0;padding:6px 5px;border-radius:6px;background:#f6f8fa;text-align:center}.purchase-price-grid small,.freight-tier-list b{color:#7d8992;font-size:8px;font-weight:700;white-space:nowrap}.purchase-price-grid b{overflow:hidden;color:#26353f;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.weight-cell{display:grid;gap:4px;align-content:center}.weight-cell>small{color:#7c8790;font-size:9px}.weight-cell>b{color:#17232e;font-size:15px;line-height:1.1}.weight-cell>span{color:#87929b;font-size:9px}.weight-cell .min-order{width:max-content;margin-top:2px;padding:3px 6px;background:#edf5f7;color:#4e6975;font-size:8px}.freight-tier-list>span{background:#fff9ef}.freight-tier-list strong{overflow:hidden;color:#a65b00;font-size:10px;text-overflow:ellipsis;white-space:nowrap}.freight-tier-list small{overflow:hidden;color:#909aa2;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.spec-cell,.status-cell{display:grid;gap:4px;min-width:0}.spec-cell b,.spec-cell small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.spec-cell b{color:#293842;font-size:10px}.spec-cell small{color:#87939c;font-size:9px}.status-cell{justify-items:start}.status-cell small{color:#909aa2;font-size:8px;white-space:nowrap}.product-actions{white-space:nowrap}.product-actions .link{display:inline-block;margin:2px 7px 2px 0;padding:3px 0;font-weight:750}@media(max-width:1280px){.product-table{min-width:1120px}.product-table td,.product-table th{padding-inline:9px}.purchase-price-grid>span,.freight-tier-list>span{padding-inline:3px}}@media(max-width:720px){.product-table{min-width:1040px}.product-table .product-main-col{width:23%}.product-table .product-price-col{width:18%}.product-table .product-freight-col{width:19%}.product-table .product-spec-col{width:12%}.product-table .product-actions-col{width:8%}}
 .product-table .product-main-col{width:23%}
