@@ -111,6 +111,7 @@ const openFinanceCountryPicker = ref<number | null>(null)
 const financeCountryPickerTyping = ref(false)
 const financeCountrySearches = ref<string[]>([])
 const expandedFinanceCountryRules = ref<number[]>([])
+const reviewingLegacyCountryRules = ref<number[]>([])
 const financeSelectedCarriers = ref<string[]>([])
 const priorityFinanceCountryNames = ['美国', '英国', '法国', '澳大利亚']
 const emptyFinancePolicyForm = () => ({ category: '普货' as FinanceLogisticsAttribute, countryRules: [] as FinanceCountryChannelRule[], enabled: true })
@@ -478,6 +479,7 @@ async function openFinancePolicyEditor(policy?: FinanceChannelPolicy) {
   financeAttributePickerTyping.value = false
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
+  reviewingLegacyCountryRules.value = []
   showEditor.value = true
 }
 function financeCountryRuleExpanded(index: number) {
@@ -490,6 +492,14 @@ function toggleFinanceCountryRule(index: number) {
 }
 function expandFinanceCountryRule(index: number) {
   if (!financeCountryRuleExpanded(index)) expandedFinanceCountryRules.value = [...expandedFinanceCountryRules.value, index]
+}
+function financeLegacyReviewExpanded(index: number) {
+  return reviewingLegacyCountryRules.value.includes(index)
+}
+function toggleFinanceLegacyReview(index: number) {
+  reviewingLegacyCountryRules.value = financeLegacyReviewExpanded(index)
+    ? reviewingLegacyCountryRules.value.filter(item => item !== index)
+    : [...reviewingLegacyCountryRules.value, index]
 }
 function openFinanceAttributePicker() {
   financeAttributePickerOpen.value = true
@@ -636,6 +646,9 @@ function removeFinanceCountryRule(index: number) {
   expandedFinanceCountryRules.value = expandedFinanceCountryRules.value
     .filter(item => item !== index)
     .map(item => item > index ? item - 1 : item)
+  reviewingLegacyCountryRules.value = reviewingLegacyCountryRules.value
+    .filter(item => item !== index)
+    .map(item => item > index ? item - 1 : item)
 }
 function handleFinanceCategoryChange() {
   const availableCountries = new Set(financeLogisticsCountries.value.map(country => country.name))
@@ -646,6 +659,7 @@ function handleFinanceCategoryChange() {
   financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
+  reviewingLegacyCountryRules.value = []
 }
 async function saveFinancePolicy() {
   const form = financePolicyForm.value
@@ -1035,7 +1049,7 @@ function saveEditor() {
       </section>
     </div>
 
-    <div v-if="showEditor" class="mask" @click.self="showEditor=false"><section class="editor" :class="{ 'product-editor': mode==='products', 'finance-editor': mode==='members' }"><button class="close" @click="showEditor=false">×</button><small>{{ config[0] }}</small><h2>{{ mode==='products' && editingSourceRow !== null ? '编辑采购资料' : config[3] }}</h2>
+    <div v-if="showEditor" class="mask" @click.self="showEditor=false"><section class="editor" :class="{ 'product-editor': mode==='products', 'finance-editor': mode==='members' }"><button class="close" @click="showEditor=false">×</button><small>{{ config[0] }}</small><h2>{{ mode==='products' && editingSourceRow !== null ? '编辑采购资料' : mode==='members' && editingFinancePolicyId ? '维护物流属性策略' : config[3] }}</h2>
       <div v-if="mode==='products'" class="form product-form">
         <h3 class="section-title">采购资料字段</h3>
         <label data-source-field>开票信息<input v-model="productForm.invoiceInfo"></label>
@@ -1079,7 +1093,8 @@ function saveEditor() {
           <section v-for="(rule,index) in financePolicyForm.countryRules" :key="index" class="country-rule-card">
             <div class="country-rule-head"><label class="country-search-label">支持国家（可输入搜索）<div class="country-picker"><span><b>⌕</b><input :value="financeCountrySearches[index] ?? rule.country" autocomplete="off" placeholder="输入国家名称搜索" role="combobox" :aria-expanded="openFinanceCountryPicker===index" @focus="openFinanceCountrySearch(index)" @input="updateFinanceCountrySearch(index,$event)" @blur="closeFinanceCountrySearch(index)" @keydown.esc="openFinanceCountryPicker=null"></span><div v-if="openFinanceCountryPicker===index" class="country-picker-menu" role="listbox"><button v-for="country in filteredFinanceCountries(index)" :key="country.code || country.name" type="button" :class="{ active:country.name===rule.country }" @mousedown.prevent="selectFinanceCountry(index,country.name)"><strong>{{ country.name }}</strong><small>{{ country.code }}</small></button><p v-if="!filteredFinanceCountries(index).length">没有匹配的国家</p></div></div></label><button type="button" @click="removeFinanceCountryRule(index)">移除国家</button></div>
             <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选 {{ rule.allowedChannels.length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道<span v-if="rule.unavailableChannels?.length"> · 待审旧渠道 {{ rule.unavailableChannels.length }} 个</span></span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
-            <div v-if="financeCountryRuleExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-list"><b>停用待审旧渠道</b><span v-for="legacy in rule.unavailableChannels" :key="legacy.legacyKey">{{ legacy.providerName }}｜{{ legacy.channelName }}<small>{{ legacy.status === 'ambiguous' ? '存在多个候选，未自动迁移' : '当前库没有可靠等价渠道' }}</small></span></div>
+            <div v-if="financeCountryRuleExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-summary"><span><b>待审旧渠道 {{ rule.unavailableChannels.length }} 个</b><small>这些旧渠道不参与当前报价，可按需核对。</small></span><button type="button" :aria-expanded="financeLegacyReviewExpanded(index)" @click="toggleFinanceLegacyReview(index)">{{ financeLegacyReviewExpanded(index) ? '收起旧渠道 ↑' : '查看旧渠道 ↓' }}</button></div>
+            <div v-if="financeCountryRuleExpanded(index) && financeLegacyReviewExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-list"><b>停用待审旧渠道</b><span v-for="legacy in rule.unavailableChannels" :key="legacy.legacyKey">{{ legacy.providerName }}｜{{ legacy.channelName }}<small>{{ legacy.status === 'ambiguous' ? '存在多个候选，未自动迁移' : '当前库没有可靠等价渠道' }}</small></span></div>
             <div v-if="financeCountryRuleExpanded(index) && financeChannelsForCountry(rule.country).length" class="finance-channel-cascade">
               <nav aria-label="物流商选择"><header><b>1</b><span>选择物流商</span></header><button v-for="group in financeCarrierGroupsForCountry(rule.country)" :key="group.carrier" type="button" :class="{ active:selectedFinanceCarrier(index)===group.carrier }" @click="selectFinanceCarrier(index,group.carrier)"><span>{{ group.carrier }}</span><em>{{ selectedFinanceCarrierChannelCount(index,group.carrier) }}/{{ group.channels.length }}</em></button></nav>
               <section><header><div><b>2</b><span>选择“{{ selectedFinanceCarrier(index) }}”下的渠道</span></div><small>该物流商共 {{ financeChannelsForSelectedCarrier(index).length }} 个可用渠道</small></header><div class="country-carrier-grid"><label v-for="option in financeChannelsForSelectedCarrier(index)" :key="option.key"><input v-model="rule.allowedChannels" type="checkbox" :value="option.key"><span><b>{{ option.channel }}</b><small>渠道编码：{{ option.channelCode || '—' }} · 计费规则：{{ option.ruleName }}</small><em v-if="rule.country==='澳大利亚'" :class="{ warn:option.missingQuoteRegions.length }">{{ option.missingQuoteRegions.length ? `分区不完整：缺${option.missingQuoteRegions.join('、')}` : `澳大利亚分区：${option.quoteRegions.join('、')}` }}</em><em v-else>适用国家：{{ rule.country }}</em></span></label></div></section>
@@ -1137,5 +1152,5 @@ function saveEditor() {
 @media(max-width:760px){.tax-country-matrix>header>aside,.tax-provider-global>header>aside{align-items:stretch;flex-direction:column}.tax-country-matrix>header>aside label,.tax-provider-global>header>aside label,.tax-add-button{width:100%}.tax-add-row{align-items:stretch;flex-direction:column}.tax-add-search,.tax-add-row select,.tax-add-row button{width:100%}.tax-country-head,.tax-country-rows>article{min-width:650px}.tax-provider-global{overflow-x:auto}.tax-provider-head,.tax-provider-list-compact>article{min-width:680px}}
 .tax-country-head,.tax-country-rows>article{grid-template-columns:minmax(180px,1fr) minmax(260px,1.2fr) 70px 52px}
 .finance-load-state{display:flex;align-items:center;gap:14px;min-height:78px;padding:18px 20px;border:1px solid #dfe6ea;border-left:4px solid var(--o);border-radius:10px;background:#fff;box-shadow:0 10px 28px rgba(24,38,50,.05)}.finance-load-state>i{width:24px;height:24px;flex:0 0 24px;border:3px solid #ffe2b8;border-top-color:var(--o);border-radius:50%;animation:finance-load-spin .8s linear infinite}.finance-load-state>span{display:grid;gap:5px}.finance-load-state b{font-size:14px}.finance-load-state small,.finance-load-state em{padding:0;background:transparent;color:#7e8a93;font-size:10px;font-style:normal}.finance-load-state.error{border-color:#efc9c4;border-left-color:#cc5143;background:#fff8f7}.finance-load-state.error>span{flex:1}.finance-load-state.error em{color:#a35b52}.finance-load-state>button{height:36px;margin-left:auto;padding:0 14px;border:1px solid #cf796f;border-radius:7px;background:#fff;color:#a13d31;font-size:10px;font-weight:850;cursor:pointer}@keyframes finance-load-spin{to{transform:rotate(360deg)}}
-.carrier-list .legacy-channel{background:#fff2dc;color:#9a5b08;border:1px dashed #dfa85c}.legacy-count{display:block;margin-top:4px;color:#a46617}.legacy-review-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px;padding:10px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef}.legacy-review-list>b{grid-column:1/-1;color:#91560b}.legacy-review-list>span{display:grid;gap:3px;padding:7px 9px;border-radius:5px;background:#fff;color:#684d2a}.legacy-review-list small{color:#9a7b53}
+.carrier-list .legacy-channel{background:#fff2dc;color:#9a5b08;border:1px dashed #dfa85c}.legacy-count{display:block;margin-top:4px;color:#a46617}.legacy-review-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:9px 11px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef;color:#91560b}.legacy-review-summary>span{display:grid;gap:2px}.legacy-review-summary small{color:#9a7b53}.legacy-review-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:8px;padding:10px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef;max-height:210px;overflow:auto}.legacy-review-list>b{grid-column:1/-1;color:#91560b}.legacy-review-list>span{display:grid;gap:3px;padding:7px 9px;border-radius:5px;background:#fff;color:#684d2a}.legacy-review-list small{color:#9a7b53}
 </style>
