@@ -10,12 +10,16 @@ export type Price = {
   zoneName?: string; rowKey?: string
   providerName?: string; channelName?: string; versionId?: string; versionNumber?: number; quoteReady?: boolean
 }
-export type Channel = { id: string; providerId: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean }
+export type Provider = { id: string; name: string; code?: string; enabled?: boolean; datasetId?: string; _version?: number }
+export type Channel = {
+  id: string; providerId: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean
+  type?: string; logisticsAttribute?: string; enabled?: boolean; archived?: boolean; updatedAt?: string
+}
 export type DiffKind = 'added' | 'price' | 'rule' | 'range' | 'removed' | 'unchanged'
 export type DiffChange = { field: string; kind?: 'price' | 'rule' | 'range'; price?: boolean; before: unknown; after: unknown; delta?: number; percentChange?: number | null }
 export type Diff = { key: string; type: DiffKind | string; kinds?: DiffKind[]; row: Price; previous?: Price; changes: DiffChange[] }
-export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; fingerprint: string; pricingReady?: boolean; quoteReady?: boolean; errors: number; rowCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; publishedAt?: string }
-export type Workspace = { dataset: Dataset; providers: Array<{ id: string; name: string }>; channels: Channel[]; versions: Version[] }
+export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; fingerprint: string; pricingReady?: boolean; quoteReady?: boolean; errors: number; rowCount?: number; countryCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; importedBy?: string; publishedAt?: string; publishedBy?: string; auditNote?: string }
+export type Workspace = { dataset: Dataset; providers: Provider[]; channels: Channel[]; versions: Version[] }
 export type BatchResult = { channelId?: string; channelName: string; providerName: string; versionId?: string; status: string; message?: string; errors?: number; pricingReady?: boolean; priceRows?: number; pendingReasons?: string[]; basePublishedVersionId?: string; summary?: Record<string, number>; issues?: SourceIssue[] }
 export type Batch = { id: string; dataset_id: string; status: string; phase: string; created_at: string; payload: { progress: number; elapsedMs?: number; error?: string; totalFiles?: number; processedFiles?: number; currentFileIndex?: number; currentFileName?: string; totalChannels?: number; processedChannels?: number; currentChannelName?: string; files: Array<{ name: string; size?: number; sha256?: string; lifecycleStatus?: string; deletedAt?: string; deleteError?: string }>; fileReports?: Array<{ fileName: string; status: string; message?: string; retentionUntil?: string; sourceEvidence?: { sha256: string }; sheets?: Array<{ name: string; status: string; priceRows?: number; errors?: number; message?: string }> }>; results: BatchResult[] } }
 export type BatchSummary = Pick<Batch, 'id' | 'status' | 'phase' | 'created_at'> & { progress: number; files: Array<{ name: string }> }
@@ -28,6 +32,12 @@ export type BatchPublishSelection = { channelId: string; versionId: string; remo
 export type BatchPublishResult = { providerId: string; count: number; published: Array<{ id: string; channelId: string; versionNumber: number; status: string; quoteReady: boolean }> }
 export type ReadyPublishResult = { batchId: string; publishedCount: number; skippedCount: number; failedCount: number; published: Array<{ versionId: string; channelId: string; providerName: string; channelName: string; message: string }>; skipped: Array<{ versionId: string; channelName: string; reason: string }>; failed: Array<{ versionId: string; channelName: string; reason: string }> }
 export type RowCorrection = { rowKey: string; fields: Partial<Pick<Price, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive' | 'pricePerKg' | 'registrationFee' | 'firstWeightKg' | 'firstWeightPrice' | 'nextWeightKg' | 'nextWeightPrice' | 'intervalPrice'>> }
+export type LogisticsAdjustmentStatus = 'published' | 'pending'
+
+export function logisticsAdjustmentStatus(channel: Pick<Channel, 'id' | 'currentVersionId'>, versions: Array<Pick<Version, 'channelId' | 'status'>>, hasPendingImport = false): LogisticsAdjustmentStatus {
+  const hasDraft = versions.some(version => version.channelId === channel.id && version.status === 'draft')
+  return channel.currentVersionId && !hasDraft && !hasPendingImport ? 'published' : 'pending'
+}
 export const LOGISTICS_MAX_FILES = 30
 export const LOGISTICS_MAX_FILE_BYTES = 100 * 1024 * 1024
 export const LOGISTICS_MAX_BATCH_BYTES = 500 * 1024 * 1024

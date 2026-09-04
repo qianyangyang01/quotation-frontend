@@ -116,6 +116,13 @@ public class LogisticsWorkbookService {
             var key = comparisonIdentity(row);
             var matches=previous.get(key);var before=matches==null?null:matches.pollFirst();
             if(matches!=null&&matches.isEmpty())previous.remove(key);
+            if(before==null){
+                var fallbackKey=sourceOriginFallbackIdentity(row);
+                if(fallbackKey!=null){
+                    matches=previous.get(fallbackKey);before=matches==null?null:matches.pollFirst();
+                    if(matches!=null&&matches.isEmpty())previous.remove(fallbackKey);
+                }
+            }
             if (before == null) unmatchedNext.add(row); else comparedDiff(diffRows, summary, diffKey(key,keyOccurrences), row, before);
         }
         var unmatchedPrevious=previous.values().stream().flatMap(Collection::stream).toList();
@@ -227,11 +234,19 @@ public class LogisticsWorkbookService {
         if(!hasBusinessIdentity&&!row.path("rowKey").asText().isBlank())return row.path("rowKey").asText();
         return identity(row);
     }
+    private static String sourceOriginFallbackIdentity(JsonNode row) {
+        // sourceOriginRegion is parser evidence, not an active billing dimension. It is only an alias for legacy
+        // rows that stored the same region in originRegion; the primary identity always uses originRegion itself.
+        if(!row.path("originRegion").asText().isBlank()||row.path("sourceOriginRegion").asText().isBlank())return null;
+        return identity(row,row.path("sourceOriginRegion").asText());
+    }
     private static String identity(JsonNode row) { return rangeIdentity(row)+"|"+row.path("weightFromKg").asText()+"|"+row.path("weightToKg").asText(); }
+    private static String identity(JsonNode row,String originRegion) { return rangeIdentity(row,originRegion)+"|"+row.path("weightFromKg").asText()+"|"+row.path("weightToKg").asText(); }
     private static String rangeIdentity(JsonNode row) {
-        var effectiveOrigin=row.path("originRegion").asText();
-        if(effectiveOrigin.isBlank())effectiveOrigin=row.path("sourceOriginRegion").asText();
-        return String.join("|", row.path("countryCode").asText(), row.path("areaName").asText(), row.path("zoneName").asText(), row.path("zonePostalPrefix").asText(), row.path("zonePostalCode").asText(), row.path("zoneCity").asText(), row.path("zoneState").asText(), effectiveOrigin).toLowerCase(Locale.ROOT);
+        return rangeIdentity(row,row.path("originRegion").asText());
+    }
+    private static String rangeIdentity(JsonNode row,String originRegion) {
+        return String.join("|", row.path("countryCode").asText(), row.path("areaName").asText(), row.path("zoneName").asText(), row.path("zonePostalPrefix").asText(), row.path("zonePostalCode").asText(), row.path("zoneCity").asText(), row.path("zoneState").asText(), originRegion).toLowerCase(Locale.ROOT);
     }
     private static boolean flag(String value) { return value.matches("(?i)^(是|1|true|yes)$"); }
     private static String text(Row row, int column, FormulaEvaluator evaluator) {

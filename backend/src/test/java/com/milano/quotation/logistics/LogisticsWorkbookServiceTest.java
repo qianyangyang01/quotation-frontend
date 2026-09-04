@@ -111,6 +111,45 @@ class LogisticsWorkbookServiceTest {
     }
 
     @Test
+    void ignoresSourceOriginTraceabilityWhenTheBillingOriginIsEmpty() {
+        var mapper = JsonMapper.builder().build();
+        var previous = mapper.createArrayNode();
+        previous.addObject().put("areaName", "美国").put("countryCode", "US")
+                .put("originRegion", "").put("weightFromKg", 0).put("weightToKg", 1)
+                .put("pricePerKg", 50).put("registrationFee", 20);
+        var next = mapper.createArrayNode();
+        next.addObject().put("areaName", "美国").put("countryCode", "US")
+                .put("originRegion", "").put("sourceOriginRegion", "华东")
+                .put("weightFromKg", 0).put("weightToKg", 1)
+                .put("pricePerKg", 55).put("registrationFee", 20);
+
+        var result = service.compare(next, previous);
+
+        assertEquals(1, result.path("summary").path("price").asInt());
+        assertEquals(0, result.path("summary").path("unchanged").asInt());
+        assertEquals(0, result.path("summary").path("added").asInt());
+        assertEquals(0, result.path("summary").path("removed").asInt());
+    }
+
+    @Test
+    void keepsDifferentBillingOriginsAsDistinctBusinessRows() {
+        var mapper = JsonMapper.builder().build();
+        var previous = mapper.createArrayNode();
+        previous.addObject().put("areaName", "美国").put("countryCode", "US")
+                .put("originRegion", "华南").put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 50);
+        var next = mapper.createArrayNode();
+        next.addObject().put("areaName", "美国").put("countryCode", "US")
+                .put("originRegion", "华东").put("sourceOriginRegion", "华南")
+                .put("weightFromKg", 0).put("weightToKg", 1).put("pricePerKg", 50);
+
+        var result = service.compare(next, previous);
+
+        assertEquals(1, result.path("summary").path("added").asInt());
+        assertEquals(1, result.path("summary").path("removed").asInt());
+        assertEquals(0, result.path("summary").path("unchanged").asInt());
+    }
+
+    @Test
     void marksCoverageReductionAndLeavesSplitRangesAsAdditionsAndRemoval() {
         var mapper = JsonMapper.builder().build();
         var previous = mapper.createArrayNode();

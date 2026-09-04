@@ -118,7 +118,10 @@ public class LogisticsDatasetService {
         out.set("versions",array(jdbc.sql("""
                 select (v.workspace_payload || jsonb_build_object(
                 'id',v.id,'channelId',v.channel_id,'status',v.status,'versionNumber',v.version_number,'quoteReady',logistics_version_quote_ready(v.id),
-                'rowCount',v.row_count,'issueCount',v.issue_count))::text
+                'rowCount',v.row_count,'issueCount',v.issue_count,'countryCount',(
+                    select count(distinct coalesce(nullif(price->>'countryCode',''),price->>'areaName'))
+                    from jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) price
+                )))::text
                 from logistics_version v join logistics_channel c on c.id=v.channel_id
                 where c.dataset_id=:id order by v.created_at desc,v.id
                 """).param("id",id).query(String.class).list()));
