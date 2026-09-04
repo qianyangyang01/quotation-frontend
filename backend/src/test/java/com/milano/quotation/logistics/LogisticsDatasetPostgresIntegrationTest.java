@@ -2,10 +2,13 @@ package com.milano.quotation.logistics;
 
 import com.milano.quotation.common.AppException;
 import com.milano.quotation.storage.AssetStorageService;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.*;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
@@ -100,6 +103,24 @@ class LogisticsDatasetPostgresIntegrationTest {
         assertThrows(AppException.class,()->exports.priceSnapshot(empty,null,"","",""));
         assertThrows(AppException.class,()->exports.priceSnapshot(empty,jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",c).query(UUID.class).single(),"","",""));
     }finally{s.setRollbackOnly();}});}
+    @Test void standardizedReviewExportIsTraceableNonImportableAndSnapshotProtected(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();var channel=seed(dataset,"关键字段物流",false);var version=jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",channel).query(UUID.class).single();
+        var payload=(ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:v").param("v",version).query(String.class).single());
+        var row=(ObjectNode)payload.path("rows").get(0);row.put("sourceProductCode","=HYPERLINK(\"https://invalid.example\")").put("sourceFeeLabel","操作费/票").put("sourceFile","原始报价.xlsx").put("sourceSheet","价格表").put("sourceRow",9);
+        jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where id=:v").param("p",payload.toString()).param("v",version).update();
+        var token=exports.standardizedSnapshot(null,version);var bytes=exports.standardized(null,version,token);
+        try(var report=new XSSFWorkbook(new ByteArrayInputStream(bytes))){
+            assertEquals(List.of("关键字段","待补时效","问题清单"),java.util.stream.IntStream.range(0,report.getNumberOfSheets()).mapToObj(i->report.getSheetAt(i).getSheetName()).toList());
+            assertEquals("MILANO_LOGISTICS_REVIEW_V1",report.getSheet("关键字段").getRow(0).getCell(0).getStringCellValue());
+            assertEquals("物流商",report.getSheet("关键字段").getRow(1).getCell(0).getStringCellValue());
+            assertEquals(CellType.STRING,report.getSheet("关键字段").getRow(2).getCell(2).getCellType());
+            assertTrue(report.getSheet("关键字段").getRow(2).getCell(2).getStringCellValue().startsWith("="));
+            assertEquals("缺失",report.getSheet("待补时效").getRow(2).getCell(2).getStringCellValue());
+        }
+        assertThrows(AppException.class,()->parser.parse(bytes,"审核导出.xlsx"));
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,pricePerKg}','99'::jsonb) where id=:v").param("v",version).update();
+        assertThrows(AppException.class,()->exports.standardized(null,version,token));
+    }catch(IOException e){throw new AssertionError(e);}finally{s.setRollbackOnly();}});}
     @Test void unchangedBatchDiffDoesNotReuseHistoricalVersionAdditions(){tx.executeWithoutResult(s->{try{
         var dataset=guard.activeId();var c=seed(dataset,"批次报表",false);
         var v=jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",c).query(UUID.class).single();
@@ -174,6 +195,18 @@ class LogisticsDatasetPostgresIntegrationTest {
             assertEquals(1,result.path("payload").path("results").size());verify(logistics).createDraft(any(),any());
         }finally{worker.close();}
     }finally{s.setRollbackOnly();}});}
+    @Test void startupRecoveryRequeuesAStaleLeaseAndDuplicateDispatchCannotDoubleClaim()throws Exception{
+        var dataset=guard.activeId();var batch=UUID.randomUUID();var payload=mapper.createObjectNode();payload.putArray("files");payload.putArray("results");
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload,lease_id,updated_at) values(:id,:dataset,'QA',:key,'processing','parsing',cast(:payload as jsonb),:lease,now()-interval '16 minutes')")
+                .param("id",batch).param("dataset",dataset).param("key",batch.toString()).param("payload",payload.toString()).param("lease",UUID.randomUUID()).update();
+        var worker=new LogisticsImportService(jdbc,mapper,storage,parser,mock(LogisticsService.class),guard,transactions);ReflectionTestUtils.setField(worker,"resumeOnStart",true);
+        try{
+            worker.resumeQueued();worker.dispatchQueued();
+            var deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(3);String status;
+            do{status=worker.get(batch).path("status").asText();if(!Set.of("queued","processing").contains(status))break;Thread.sleep(20);}while(System.nanoTime()<deadline);
+            assertEquals("failed",status);assertTrue(jdbc.sql("select updated_at>now()-interval '1 minute' from logistics_import_batch where id=:id").param("id",batch).query(Boolean.class).single());
+        }finally{worker.close();jdbc.sql("delete from logistics_import_batch where id=:id").param("id",batch).update();}
+    }
     static UUID seed(UUID dataset,String name,boolean ready){
         var p=UUID.randomUUID();var c=UUID.randomUUID();var v=UUID.randomUUID();var code="SAME-"+name;int rule=guard.nextRuleId();
         var row=mapper.createObjectNode().put("areaName","美国").put("countryCode","US").put("weightFromKg",0).put("weightToKg",1).put("weightFromInclusive",false).put("weightToInclusive",true).put("pricePerKg",50).put("registrationFee",20).put("currency","CNY").put("pricingModel","per-kg").put("originRegion","").put("notes","").put("pendingReason","").put("quoteReady",ready).put("billingStepKg",0).put("linehaulPerKg",0);

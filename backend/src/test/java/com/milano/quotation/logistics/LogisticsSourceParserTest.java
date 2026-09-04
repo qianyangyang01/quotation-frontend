@@ -58,6 +58,14 @@ class LogisticsSourceParserTest {
             assertEquals(7,price.path("etaMinDays").asInt());assertEquals(15,price.path("etaMaxDays").asInt());assertTrue(channel.path("etaReady").asBoolean());
         }
     }
+    @Test void blocksUnknownPriceAddonsInsteadOfTreatingThemAsRegistrationFees()throws Exception {
+        try(var book=new XSSFWorkbook()){
+            var s=book.createSheet("普货");row(s,0,"国家","重量段","运费/KG","超尺寸费","操作费/票","时效");row(s,1,"美国","0-1",55,99,20,"7-15天");
+            var channel=parser.parse(bytes(book),"花海.xlsx").path("channels").get(0);var price=channel.path("rows").get(0);
+            assertEquals(20,price.path("registrationFee").asInt());assertEquals(0,channel.path("errors").asInt(),channel.toString());
+            assertTrue(price.path("blockingReason").asText().contains("未知价格附加费"));assertFalse(channel.path("quoteReady").asBoolean());
+        }
+    }
     @Test void usesSfSettlementOnceAndBlocksUnreliableCriticalFormula()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("服装专线");row(s,0,"国家名称","Code","运费/kg","折扣率","结算运费","专递操作费/票","计费重量限制（kg）");

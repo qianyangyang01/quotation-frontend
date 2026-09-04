@@ -1,0 +1,55 @@
+version: 1
+common:
+  country:
+    exact: ["国家", "国家/地区", "国家名称", "通达国家", "服务国家", "路向"]
+  countryCode:
+    exact: ["CountryCode", "Country Code", "Code"]
+  continent:
+    exact: ["大洲"]
+  channel:
+    exact: ["产品名称", "渠道名称", "系统下单渠道"]
+    contains: ["产品名称"]
+  productCode:
+    exact: ["产品代码", "渠道代码"]
+    contains: ["产品代码"]
+  weightFrom:
+    contains: ["重量段始", "起重", "最小重量"]
+  weightTo:
+    contains: ["重量段终", "限重", "最大重量"]
+  weightRange:
+    exact: ["重量段", "重量区间", "重量", "重量KG", "重量/KG", "重量(KG)", "重量段/KG", "重量段(KG)", "计费重量", "计费重量(KG)"]
+    contains: ["重量段", "重量区间", "计费重量"]
+    excludeContains: ["重量段始", "重量段终", "重派费", "最小计费", "最低计费", "最小重量", "最大重量", "限重", "起重"]
+  minimumWeight:
+    contains: ["最小计费", "最低计费"]
+  billingStep:
+    contains: ["进位"]
+  pricePerKg:
+    exact: ["运费单价", "公斤重"]
+    regex: [".*(?:运费|公斤重|公斤价).*(?:kg|千克|公斤).*", ".*(?:rmb|cny)/(?:kg|千克|公斤).*"]
+    excludeContains: ["结算运费", "收费标准", "附加费", "燃油", "干线"]
+  registrationFee:
+    contains: ["挂号费", "操作费", "处理费", "每票费"]
+    excludeContains: ["附加费", "燃油费", "干线费", "超尺寸费", "重派费"]
+  firstWeightPrice:
+    contains: ["首重"]
+    regex: ["首[0-9.]+kg"]
+    excludeContains: ["续重", "首重重量"]
+  nextWeightPrice:
+    contains: ["续重"]
+    regex: ["续[0-9.]+kg"]
+    excludeContains: ["续重重量"]
+  linehaulPerKg:
+    contains: ["干线费"]
+  originRegion:
+    exact: ["报价区域", "起运仓库"]
+  zone:
+    exact: ["分区"]
+  eta:
+    contains: ["时效"]
+  notes:
+    contains: ["备注", "说明", "尺寸", "附加费", "服务费"]
+providers:
+  顺丰:
+    settlementRate:
+      exact: ["结算运费", "SF折后"]

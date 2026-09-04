@@ -22,7 +22,7 @@ class LogisticsRebuildPermissionTest {
     @BeforeEach void setup(){mvc=webAppContextSetup(context).apply(springSecurity()).build();}
     @Test @WithMockUser(username="NO_LOGISTICS",authorities="PERM_purchase")
     void requiresLogisticsPermissionForHistorySourcesExportsAndWrites()throws Exception {
-        for(var path:new String[]{"/datasets","/datasets/"+id+"/prices.xlsx","/versions/"+id,"/imports/"+id+"/files/0","/imports/"+id+"/changes.xlsx"})
+        for(var path:new String[]{"/datasets","/datasets/"+id+"/prices.xlsx","/versions/"+id,"/imports/"+id+"/files/0","/imports/"+id+"/changes.xlsx","/imports/"+id+"/standardized.xlsx","/versions/"+id+"/standardized.xlsx"})
             mvc.perform(get(root+path)).andExpect(status().isForbidden());
         mvc.perform(post(root+"/datasets").with(csrf()).header("Idempotency-Key","qa-permission-1").contentType("application/json").content("{\"name\":\"QA\"}")).andExpect(status().isForbidden());
         mvc.perform(post(root+"/datasets/"+id+"/activate").with(csrf()).header("Idempotency-Key","qa-permission-2").contentType("application/json").content("{}")).andExpect(status().isForbidden());
@@ -33,5 +33,5 @@ class LogisticsRebuildPermissionTest {
         mvc.perform(get(root+"/imports/"+id+"/files/0/evidence")).andExpect(status().isForbidden());
         mvc.perform(post(root+"/versions/"+id+"/billing-acceptance").with(csrf()).header("Idempotency-Key","qa-billing-permission").contentType("application/json").content("{}")).andExpect(status().isForbidden());
     }
-    @Test void rejectsAnonymousExports()throws Exception {mvc.perform(get(root+"/datasets/"+id+"/prices.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/downloads/prepare?kind=prices&id="+id)).andExpect(status().isUnauthorized());}
+    @Test void rejectsAnonymousExports()throws Exception {mvc.perform(get(root+"/datasets/"+id+"/prices.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/versions/"+id+"/standardized.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/downloads/prepare?kind=prices&id="+id)).andExpect(status().isUnauthorized());}
 }

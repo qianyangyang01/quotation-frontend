@@ -10,6 +10,8 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.context.event.EventListener;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import jakarta.annotation.PreDestroy;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.JsonNode;
@@ -40,21 +42,40 @@ public class LogisticsImportService {
     private final LogisticsService logistics;
     private final LogisticsDatasetGuard guard;
     private final TransactionTemplate tx;
-    private final ExecutorService worker=Executors.newSingleThreadExecutor(r->{var t=new Thread(r,"logistics-import-worker");t.setDaemon(true);return t;});
-    public LogisticsImportService(JdbcClient jdbc,ObjectMapper mapper,AssetStorageService storage,LogisticsSourceParser parser,
-                                  LogisticsService logistics,LogisticsDatasetGuard guard,PlatformTransactionManager manager){
-        this.jdbc=jdbc;this.mapper=mapper;this.storage=storage;this.parser=parser;this.logistics=logistics;this.guard=guard;tx=new TransactionTemplate(manager);
+    private final Executor worker;private final boolean ownsWorker;private final Set<UUID> submitted=ConcurrentHashMap.newKeySet();
+    @Autowired public LogisticsImportService(JdbcClient jdbc,ObjectMapper mapper,AssetStorageService storage,LogisticsSourceParser parser,
+                                  LogisticsService logistics,LogisticsDatasetGuard guard,PlatformTransactionManager manager,
+                                  @Qualifier("logisticsImportExecutor")Executor worker){
+        this(jdbc,mapper,storage,parser,logistics,guard,manager,worker,false);
     }
-    @PreDestroy public void close(){worker.shutdown();}
+    LogisticsImportService(JdbcClient jdbc,ObjectMapper mapper,AssetStorageService storage,LogisticsSourceParser parser,
+                           LogisticsService logistics,LogisticsDatasetGuard guard,PlatformTransactionManager manager){
+        this(jdbc,mapper,storage,parser,logistics,guard,manager,Executors.newSingleThreadExecutor(r->{var t=new Thread(r,"logistics-import-test-worker");t.setDaemon(true);return t;}),true);
+    }
+    private LogisticsImportService(JdbcClient jdbc,ObjectMapper mapper,AssetStorageService storage,LogisticsSourceParser parser,
+                                   LogisticsService logistics,LogisticsDatasetGuard guard,PlatformTransactionManager manager,Executor worker,boolean ownsWorker){
+        this.jdbc=jdbc;this.mapper=mapper;this.storage=storage;this.parser=parser;this.logistics=logistics;this.guard=guard;this.worker=worker;this.ownsWorker=ownsWorker;tx=new TransactionTemplate(manager);
+    }
+    @PreDestroy public void close(){if(ownsWorker&&worker instanceof ExecutorService service)service.shutdown();}
     @EventListener(ApplicationReadyEvent.class)
     public void resumeQueued(){
         if(!resumeOnStart)return;
-        jdbc.sql("update logistics_import_batch set status='interrupted',phase='interrupted' where status='processing' and updated_at<now()-interval '15 minutes'").update();
-        jdbc.sql("select id from logistics_import_batch where status='queued' order by created_at").query(UUID.class).list().forEach(id->worker.submit(()->process(id)));
+        int recovered=jdbc.sql("update logistics_import_batch set status='queued',phase='queued',lease_id=null,updated_at=now() where status='processing' and updated_at<now()-interval '15 minutes'").update();
+        if(recovered>0)log.warn("Recovered {} stale logistics import batches",recovered);dispatchQueued();
+    }
+    @Scheduled(fixedDelayString="${app.logistics.dispatch-delay-ms:5000}")
+    public void dispatchQueued(){
+        if(!resumeOnStart)return;
+        jdbc.sql("select id from logistics_import_batch where status='queued' order by created_at limit 100").query(UUID.class).list().forEach(this::submit);
+    }
+    private void submit(UUID id){
+        if(!submitted.add(id))return;
+        try{worker.execute(()->{try{process(id);}finally{submitted.remove(id);}});}catch(RejectedExecutionException e){submitted.remove(id);log.info("Logistics import queue is full; batch {} remains queued",id);}
     }
     public ObjectNode upload(UUID dataset,List<MultipartFile> files,String actor,String key,boolean replaceDrafts){
         var result=tx.execute(status->{guard.request(actor,"logistics-import",key);return uploadLocked(dataset,files,actor,key,replaceDrafts);});
-        if(result!=null&&result.path("status").asText().equals("queued"))worker.submit(()->process(UUID.fromString(result.path("id").asText())));
+        if(result!=null&&result.path("status").asText().equals("queued"))submit(UUID.fromString(result.path("id").asText()));
+        if(result!=null)log.info("Accepted logistics import batch {} files={} bytes={}",result.path("id").asText(),files.size(),files.stream().mapToLong(MultipartFile::getSize).sum());
         return result;
     }
     private ObjectNode uploadLocked(UUID dataset,List<MultipartFile> files,String actor,String key,boolean replaceDrafts){
@@ -104,7 +125,7 @@ public class LogisticsImportService {
         tx.executeWithoutResult(status->{var batch=get(id);guard.writable(UUID.fromString(batch.path("dataset_id").asText()));
             var count=jdbc.sql("update logistics_import_batch set status='queued',phase='queued',updated_at=now() where id=:id and (status in ('failed','interrupted') or (status='completed' and exists(select 1 from logistics_import_file f where f.batch_id=:id and f.status='failed' and f.retention_until>now())) or (status='processing' and updated_at<now()-interval '15 minutes'))")
                     .param("id",id).update();if(count!=1)throw AppException.conflict("该批次仍在处理或已完成，不能重试");});
-        worker.submit(()->process(id));
+        submit(id);
     }
     public void process(UUID id){
         var lease=UUID.randomUUID();
@@ -123,7 +144,9 @@ public class LogisticsImportService {
                     byte[] bytes=input.readNBytes((int)LogisticsSourceParser.MAX_FILE_BYTES+1);
                     if(bytes.length>LogisticsSourceParser.MAX_FILE_BYTES)throw AppException.unprocessable("单个物流文件不能超过100MB");
                     if(!AssetStorageService.sha256(bytes).equals(file.path("sha256").asText()))throw AppException.conflict("源文件校验失败");
-                    var parsed=parser.parse(bytes,file.path("name").asText());
+                    long fileStart=System.nanoTime();var parsed=parser.parse(bytes,file.path("name").asText());
+                    int parsedRows=0;for(var parsedChannel:parsed.path("channels"))parsedRows+=parsedChannel.path("rows").size();
+                    log.info("Parsed logistics workbook batch={} fileIndex={} bytes={} sheets={} channels={} rows={} elapsedMs={}",id,index,bytes.length,parsed.path("sheets").size(),parsed.path("channels").size(),parsedRows,(System.nanoTime()-fileStart)/1_000_000);
                     var templatePending=false;for(var channel:parsed.path("channels"))if("adapter-required".equals(channel.path("templateStatus").asText()))templatePending=true;
                     var report=parsed.deepCopy();report.remove("channels");report.put("status",templatePending?"template-pending":"parsed").put("fileIndex",index);
                     report.put("originalFileName",file.path("originalName").asText(file.path("name").asText()));
@@ -167,6 +190,7 @@ public class LogisticsImportService {
             var finalStatus=grouped.isEmpty()?"failed":"completed";var finalPhase=grouped.isEmpty()?"failed":"review";
             save(id,lease,finalStatus,finalPhase,payload);
             cleanupParsedFiles(id,payload);save(id,lease,finalStatus,finalPhase,payload);
+            log.info("Completed logistics import batch={} files={} channels={} elapsedMs={} status={}",id,payload.path("files").size(),grouped.size(),payload.path("elapsedMs").asLong(),finalStatus);
         } catch(Exception e){log.error("Logistics import {} batch processing failed",id,e);payload.put("error",safe(e));save(id,lease,"failed","failed",payload);}
     }
     static void validateFiles(List<MultipartFile> files){

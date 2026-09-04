@@ -86,6 +86,8 @@ export const logisticsRebuild = {
   exportPrices: (id: string, filters: URLSearchParams) => downloadFile(new URLSearchParams({ ...Object.fromEntries(filters), kind: 'prices', id })),
   exportDiff: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-diff', id: v.id })),
   exportBatchDiff: (id: string) => downloadFile(new URLSearchParams({ kind: 'batch-diff', id })),
+  exportVersionStandardized: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-standardized', id: v.id })),
+  exportBatchStandardized: (id: string) => downloadFile(new URLSearchParams({ kind: 'batch-standardized', id })),
   original: (id: string, index: number) => downloadFile(new URLSearchParams({ kind: 'source', id, index: String(index) })),
   evidence: (id: string, index: number) => downloadFile(new URLSearchParams({ kind: 'evidence', id, index: String(index) })),
 }

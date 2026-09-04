@@ -63,6 +63,11 @@ management:
         enabled: true
 
 app:
+  logistics:
+    worker-count: ${APP_LOGISTICS_WORKER_COUNT:1}
+    queue-capacity: ${APP_LOGISTICS_QUEUE_CAPACITY:100}
+    dispatch-delay-ms: ${APP_LOGISTICS_DISPATCH_DELAY_MS:5000}
+    resume-on-start: ${APP_LOGISTICS_RESUME_ON_START:true}
   public-base-url: ${APP_PUBLIC_BASE_URL:https://vip.ahmln.com}
   bootstrap-admin:
     account: ${APP_BOOTSTRAP_ADMIN_ACCOUNT:admin}
