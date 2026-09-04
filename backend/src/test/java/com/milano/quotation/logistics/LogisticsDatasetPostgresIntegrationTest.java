@@ -136,6 +136,44 @@ class LogisticsDatasetPostgresIntegrationTest {
             worker.process(id);verifyNoMoreInteractions(logistics);
         }finally{worker.close();}
     }finally{s.setRollbackOnly();}});}
+    @Test void failedSourceRetentionUsesAPostgresCompatibleTimestamp(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();var batch=UUID.randomUUID();var requestKey=batch.toString();
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:dataset,'QA',:key,'processing','parsing','{}'::jsonb)")
+                .param("id",batch).param("dataset",dataset).param("key",requestKey).update();
+        jdbc.sql("insert into logistics_import_file(batch_id,file_index,original_name,object_key,sha256,size_bytes,status) values(:batch,0,'待适配.xlsx','qa/pending',:sha,1,'stored')")
+                .param("batch",batch).param("sha","0".repeat(64)).update();
+        var worker=new LogisticsImportService(jdbc,mapper,storage,parser,mock(LogisticsService.class),guard,transactions);
+        try {
+            var until=java.time.Instant.parse("2026-09-11T06:29:10Z");
+            assertDoesNotThrow(()->worker.markFailed(batch,0,"新模板待适配",until));
+            var state=jdbc.sql("select concat(status,'|',delete_error,'|',retention_until is not null) from logistics_import_file where batch_id=:batch and file_index=0")
+                    .param("batch",batch).query(String.class).single();
+            assertEquals("failed|新模板待适配|t",state);
+        }finally{worker.close();}
+    }finally{s.setRollbackOnly();}});}
+    @Test void oneUnsupportedFileDoesNotAbortTheRemainingBatch(){tx.executeWithoutResult(s->{try{
+        var active=guard.activeId();seed(active,"批次继续解析",true);var supported=exports.prices(active,null,"批次继续解析","","");
+        var unsupported="not-an-excel-workbook".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var dataset=UUID.fromString(datasets.create("混合文件导入准备区","QA").path("id").asText());var batch=UUID.randomUUID();
+        var firstKey="qa/"+batch+"/unsupported";var secondKey="qa/"+batch+"/supported";
+        storage.putRaw(firstKey,new ByteArrayInputStream(unsupported),unsupported.length,"application/octet-stream");
+        storage.putRaw(secondKey,new ByteArrayInputStream(supported),supported.length,"application/octet-stream");
+        var payload=mapper.createObjectNode();var files=payload.putArray("files");
+        files.addObject().put("name","待适配.xlsx").put("objectKey",firstKey).put("sha256",AssetStorageService.sha256(unsupported));
+        files.addObject().put("name","标准.xlsx").put("objectKey",secondKey).put("sha256",AssetStorageService.sha256(supported));
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:dataset,'QA',:key,'queued','queued',cast(:payload as jsonb))")
+                .param("id",batch).param("dataset",dataset).param("key",batch.toString()).param("payload",payload.toString()).update();
+        for(int index=0;index<2;index++){var file=files.get(index);jdbc.sql("insert into logistics_import_file(batch_id,file_index,original_name,object_key,sha256,size_bytes,status) values(:batch,:index,:name,:key,:sha,:size,'stored')")
+                .param("batch",batch).param("index",index).param("name",file.path("name").asText()).param("key",file.path("objectKey").asText()).param("sha",file.path("sha256").asText()).param("size",index==0?unsupported.length:supported.length).update();}
+        var logistics=mock(LogisticsService.class);when(logistics.createDraft(any(),any())).thenAnswer(i->((ObjectNode)i.getArgument(1)).deepCopy().put("id",UUID.randomUUID().toString()).put("versionNumber",1));
+        var worker=new LogisticsImportService(jdbc,mapper,storage,parser,logistics,guard,transactions);
+        try {
+            worker.process(batch);var result=worker.get(batch);assertEquals("completed",result.path("status").asText(),result.toString());
+            assertEquals("failed",result.path("payload").path("fileReports").get(0).path("status").asText());
+            assertEquals("parsed",result.path("payload").path("fileReports").get(1).path("status").asText());
+            assertEquals(1,result.path("payload").path("results").size());verify(logistics).createDraft(any(),any());
+        }finally{worker.close();}
+    }finally{s.setRollbackOnly();}});}
     static UUID seed(UUID dataset,String name,boolean ready){
         var p=UUID.randomUUID();var c=UUID.randomUUID();var v=UUID.randomUUID();var code="SAME-"+name;int rule=guard.nextRuleId();
         var row=mapper.createObjectNode().put("areaName","美国").put("countryCode","US").put("weightFromKg",0).put("weightToKg",1).put("weightFromInclusive",false).put("weightToInclusive",true).put("pricePerKg",50).put("registrationFee",20).put("currency","CNY").put("pricingModel","per-kg").put("originRegion","").put("notes","").put("pendingReason","").put("quoteReady",ready).put("billingStepKg",0).put("linehaulPerKg",0);

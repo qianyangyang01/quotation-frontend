@@ -28,6 +28,18 @@ class LogisticsSourceParserTest {
         assertEquals(10,LogisticsSourceParser.parseRange("<=10KG").to());assertFalse(LogisticsSourceParser.parseRange("<0.5KG").includeTo());
         assertThrows(IllegalArgumentException.class,()->LogisticsSourceParser.parseRange("小于等于某重量"));
     }
+    @Test void parsesLayeredHeadersAndPerTicketWeightMatrices()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var layered=book.createSheet("纯电池线路-日本");row(layered,0,"纯电池线路-日本");row(layered,2,"系统下单渠道","重量 KG","首0.5KG","续0.5KG","国家");
+            row(layered,3,"纯电池线路","0-0.5",38,0,"日本");row(layered,4,"","0.501-20",35,15,"");layered.addMergedRegion(new CellRangeAddress(3,4,0,0));layered.addMergedRegion(new CellRangeAddress(3,4,4,4));
+            var mini=book.createSheet("MINI小包");row(mini,0,"JP-mini小包");row(mini,2,"重量段/KG","JP-mini小包普货X","JP-mini小包带电X");
+            row(mini,3,"","运费RMB/票","运费RMB/票");row(mini,4,.05,13.5,13.7);row(mini,5,.1,14,14.5);
+            var parsed=parser.parse(bytes(book),"通邮价格.xlsx");
+            var battery=findChannel(parsed,"纯电池线路");assertEquals(2,battery.path("rows").size(),battery.toString());assertEquals("JP",battery.path("rows").get(0).path("countryCode").asText());
+            assertEquals("first-next",battery.path("rows").get(0).path("pricingModel").asText());
+            var ordinary=findChannel(parsed,"JP-mini小包普货X");assertEquals(2,ordinary.path("rows").size());assertEquals("interval",ordinary.path("rows").get(0).path("pricingModel").asText());assertEquals(13.5,ordinary.path("rows").get(0).path("intervalPrice").asDouble());
+        }
+    }
     @Test void supportsXlsAndReportsEmptyAndUnrecognizedSheets()throws Exception {
         try(var book=new HSSFWorkbook()) {
             var s=book.createSheet("普通渠道");row(s,0,"国家","重量段","运费/KG","挂号费/票");row(s,1,"美国","0-1",55,20);
@@ -244,6 +256,21 @@ class LogisticsSourceParserTest {
         assertSample(books.get("8.12容鼎.xlsx"),"美国纯商派DDP专线-普货","US",0.5,72,16);
         assertSample(books.get("8.1云速递价格.xlsx"),"全球专线普货","US",0.5,78,20);
         assertSample(books.get("8.7顺丰价格.xlsx"),"服装专线","DE",0.05,45.44,22);
+    }
+    @Test @EnabledIfSystemProperty(named="logistics.candidateDir",matches=".+")
+    void everyCandidateWorkbookHasARecognizedPriceChannel()throws Exception {
+        var root=Path.of(System.getProperty("logistics.candidateDir"));var pending=new ArrayList<String>();var pendingNames=new TreeSet<String>();var files=new ArrayList<Path>();
+        try(var paths=Files.list(root)){files.addAll(paths.filter(p->p.toString().matches("(?i).*\\.xlsx?$")&&!p.getFileName().toString().startsWith("~$")).sorted().toList());}
+        assertFalse(files.isEmpty(),"候选物流文件目录不能为空");
+        for(var path:files) {
+            var parsed=parser.parse(Files.readAllBytes(path),path.getFileName().toString());
+            try(var workbook=WorkbookFactory.create(path.toFile(),null,true)){assertEquals(workbook.getNumberOfSheets(),parsed.path("sheets").size(),path.getFileName().toString());}
+            int recognized=0,rows=0,errors=0;var errorFields=new TreeMap<String,Integer>();for(var channel:parsed.path("channels")){rows+=channel.path("rows").size();errors+=channel.path("errors").asInt();for(var issue:channel.path("issues"))if("error".equals(issue.path("level").asText()))errorFields.merge(issue.path("field").asText(),1,Integer::sum);if("adapter-required".equals(channel.path("templateStatus").asText())){pendingNames.add(channel.path("channelName").asText());pending.add(path.getFileName()+" / "+channel.path("channelName").asText()+" / "+channel.path("issues"));}else recognized++;}
+            System.out.println(path.getFileName()+" sheets="+parsed.path("sheets").size()+" channels="+parsed.path("channels").size()+" recognized="+recognized+" rows="+rows+" errors="+errors+" errorFields="+errorFields);
+            assertTrue(recognized>0,path.getFileName()+" 没有识别到可审核的价格渠道");
+        }
+        var expectedPending=files.stream().anyMatch(path->path.getFileName().toString().contains("通邮"))?Set.of("俄罗斯专线","ebay挂号保建品"):Set.<String>of();
+        assertEquals(expectedPending,pendingNames,()->"待人工确认的模板集合发生变化：\n"+String.join("\n",pending));
     }
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void freezesRealWorkbookBusinessBaselines()throws Exception {

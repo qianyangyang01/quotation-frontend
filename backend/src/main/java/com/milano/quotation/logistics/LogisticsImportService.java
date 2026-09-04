@@ -17,6 +17,8 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 import java.io.*;
 import java.security.MessageDigest;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Pattern;
@@ -147,7 +149,7 @@ public class LogisticsImportService {
                     }
                     if(templatePending){var until=java.time.Instant.now().plus(java.time.Duration.ofDays(7));report.put("retentionUntil",until.toString());((ObjectNode)file).put("lifecycleStatus","failed").put("retentionUntil",until.toString());markFailed(id,index,"新模板待适配",until);}
                     else markParsed(id,index,parsed.path("parserVersion").asText());
-                } catch(Exception e){var until=java.time.Instant.now().plus(java.time.Duration.ofDays(7));fileReports.addObject().put("fileName",file.path("name").asText()).put("originalFileName",file.path("originalName").asText(file.path("name").asText())).put("fileIndex",index).put("status","failed").put("retentionUntil",until.toString()).put("message",safe(e));((ObjectNode)file).put("lifecycleStatus","failed").put("retentionUntil",until.toString());markFailed(id,index,safe(e),until);}
+                } catch(Exception e){log.warn("Logistics import {} file {} parsing failed",id,index,e);var until=java.time.Instant.now().plus(java.time.Duration.ofDays(7));fileReports.addObject().put("fileName",file.path("name").asText()).put("originalFileName",file.path("originalName").asText(file.path("name").asText())).put("fileIndex",index).put("status","failed").put("retentionUntil",until.toString()).put("message",safe(e));((ObjectNode)file).put("lifecycleStatus","failed").put("retentionUntil",until.toString());markFailed(id,index,safe(e),until);}
                 index++;payload.put("processedFiles",index).put("progress",Math.round(index*60.0/payload.path("files").size()));save(id,lease,"processing","parsing",payload);
             }
             payload.put("parsingMs",(System.nanoTime()-start)/1_000_000);long stagingStart=System.nanoTime();
@@ -165,7 +167,7 @@ public class LogisticsImportService {
             var finalStatus=grouped.isEmpty()?"failed":"completed";var finalPhase=grouped.isEmpty()?"failed":"review";
             save(id,lease,finalStatus,finalPhase,payload);
             cleanupParsedFiles(id,payload);save(id,lease,finalStatus,finalPhase,payload);
-        } catch(Exception e){payload.put("error",safe(e));save(id,lease,"failed","failed",payload);}
+        } catch(Exception e){log.error("Logistics import {} batch processing failed",id,e);payload.put("error",safe(e));save(id,lease,"failed","failed",payload);}
     }
     static void validateFiles(List<MultipartFile> files){
         if(files.isEmpty()||files.size()>MAX_FILES)throw AppException.unprocessable("每批请选择1至30个文件");
@@ -228,8 +230,8 @@ public class LogisticsImportService {
             .param("lease",lease).param("id",id).param("status",status).param("phase",phase).param("payload",payload.toString()).update();}
     private void markParsed(UUID batch,int index,String parserVersion){jdbc.sql("update logistics_import_file set status='parsed',parser_version=:parser,retention_until=null,delete_error=null,updated_at=now() where batch_id=:batch and file_index=:idx")
             .param("parser",parserVersion).param("batch",batch).param("idx",index).update();}
-    private void markFailed(UUID batch,int index,String reason,java.time.Instant until){jdbc.sql("update logistics_import_file set status='failed',retention_until=:until,delete_error=:reason,updated_at=now() where batch_id=:batch and file_index=:idx")
-            .param("until",until).param("reason",reason).param("batch",batch).param("idx",index).update();}
+    void markFailed(UUID batch,int index,String reason,java.time.Instant until){jdbc.sql("update logistics_import_file set status='failed',retention_until=:until,delete_error=:reason,updated_at=now() where batch_id=:batch and file_index=:idx")
+            .param("until",OffsetDateTime.ofInstant(until,ZoneOffset.UTC)).param("reason",reason).param("batch",batch).param("idx",index).update();}
     private void cleanupParsedFiles(UUID batch,ObjectNode payload){for(int i=0;i<payload.path("files").size();i++){var file=(ObjectNode)payload.path("files").get(i);var report=payload.path("fileReports").path(i);if(!"parsed".equals(report.path("status").asText()))continue;
             if(storage.removeRaw(file.path("objectKey").asText())){file.put("lifecycleStatus","deleted").put("deletedAt",java.time.Instant.now().toString());jdbc.sql("update logistics_import_file set status='deleted',deleted_at=now(),delete_error=null,updated_at=now() where batch_id=:batch and file_index=:idx").param("batch",batch).param("idx",i).update();}
             else {file.put("lifecycleStatus","delete-pending").put("deleteError","对象存储删除失败，已进入重试队列");jdbc.sql("update logistics_import_file set status='delete-pending',delete_error='对象存储删除失败，已进入重试队列',updated_at=now() where batch_id=:batch and file_index=:idx").param("batch",batch).param("idx",i).update();}}}
@@ -245,5 +247,5 @@ public class LogisticsImportService {
         return display.isBlank()?safe:display;
     }
     static String safeFileName(String name){return name==null?"物流价格表.xlsx":name.replaceAll("[\\r\\n\\\\/]","_").trim();}
-    private static String safe(Exception e){return e instanceof AppException?e.getMessage():"处理失败（"+e.getClass().getSimpleName()+"），正式价格未被替换";}
+    private static String safe(Exception e){var message=e instanceof AppException?e.getMessage():"处理失败（"+e.getClass().getSimpleName()+"），正式价格未被替换";return message.substring(0,Math.min(500,message.length()));}
 }
