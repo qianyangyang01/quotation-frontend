@@ -88,6 +88,10 @@ const readiness = ref<QuotationReadiness | null>(null)
 const logisticsLoadState = ref<'idle' | 'loading' | 'ready' | 'stale' | 'empty' | 'error'>('idle')
 const logisticsLoadError = ref('')
 const logisticsRevision = ref('')
+// The published rules live in a shared, non-reactive array. The manifest revision can
+// stay unchanged across reloads, so keep a local generation to invalidate matrices
+// whenever that array is cleared or repopulated.
+const logisticsRulesGeneration = ref(0)
 const savingQuotation = ref(false)
 let logisticsRequest: AbortController | null = null
 const showRule = ref(false)
@@ -441,6 +445,7 @@ function cancelQuoteLogistics() {
   logisticsRequest?.abort()
   logisticsRequest = null
   replaceLogisticsRules([])
+  logisticsRulesGeneration.value += 1
   logisticsLoadState.value = 'idle'
   logisticsLoadError.value = ''
 }
@@ -452,6 +457,7 @@ async function ensureQuoteLogistics(p: Product) {
   const controller = new AbortController()
   logisticsRequest = controller
   replaceLogisticsRules([])
+  logisticsRulesGeneration.value += 1
   logisticsLoadState.value = 'loading'
   logisticsLoadError.value = ''
   p.channel = ''
@@ -472,6 +478,7 @@ async function ensureQuoteLogistics(p: Product) {
     }
     const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal })
     if (controller.signal.aborted) return
+    logisticsRulesGeneration.value += 1
     financePolicies = loadFinanceChannelPolicies()
     financeTaxSettings.value = loadFinanceTaxSettings()
     logisticsRevision.value = result.revision
@@ -484,6 +491,7 @@ async function ensureQuoteLogistics(p: Product) {
     if (!result.verified) p.status = '已使用缓存物流规则，仅可查看；联网确认版本后才能保存'
   } catch (error) {
     if (controller.signal.aborted) return
+    logisticsRulesGeneration.value += 1
     logisticsLoadState.value = 'error'
     logisticsLoadError.value = error instanceof Error ? error.message : '物流规则加载失败'
     p.channel = ''; p.rule = ''; p.freight = 0; p.status = '物流规则加载失败'
@@ -1010,12 +1018,13 @@ function quoteMatrixContextKey(p: Product) {
   const bundleKey = quoteMode.value === 'bundle'
     ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
-  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${logisticsRevision.value}|${JSON.stringify(selectedQuoteRegions.value)}|${financeTaxSettings.value.updatedAt}`
+  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${logisticsRevision.value}|${logisticsRulesGeneration.value}|${JSON.stringify(selectedQuoteRegions.value)}|${financeTaxSettings.value.updatedAt}`
 }
 // 报价国家和渠道矩阵计算量很大。通过稳定的 computed/函数引用传给三个矩阵，
 // 避免客户名称等无关表单字段每输入一个字符就重算全部国家、渠道和四档报价。
 const activeQuotationCountries = computed(() => {
   void logisticsRevision.value
+  void logisticsRulesGeneration.value
   const p = products.value[0]
   return p ? quotationCountries(p) : []
 })
