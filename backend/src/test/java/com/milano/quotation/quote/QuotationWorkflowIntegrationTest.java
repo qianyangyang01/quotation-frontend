@@ -157,18 +157,10 @@ class QuotationWorkflowIntegrationTest {
         mvc.perform(get("/api/v1/suppliers").session(session))
                 .andExpect(status().isNotFound());
 
-        var migration = mvc.perform(post("/api/v1/migration-jobs/business/preview").session(session).with(csrf())
-                        .contentType("application/json")
-                        .content("{\"schemaVersion\":1,\"sourceOrigin\":\"http://127.0.0.1:5173\",\"entries\":[{\"source\":\"localStorage\",\"container\":\"http://127.0.0.1:5173\",\"key\":\"purchase-products\",\"category\":\"purchase\",\"decision\":\"migrate\",\"reason\":\"approved candidate\",\"count\":1,\"value\":[{\"sku\":\"SKU-1\"}]}]}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("pending_review")).andReturn();
-        var migrationId = mapper.readTree(migration.getResponse().getContentAsByteArray()).path("data").path("id").asText();
-        mvc.perform(post("/api/v1/migration-jobs/business/{id}/approve", migrationId).session(session).with(csrf())
-                        .contentType("application/json").content("{\"approvedEntryKeys\":[\"localStorage/purchase-products\"]}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("approved"));
         mvc.perform(post("/api/v1/migration-jobs/business/preview").session(session).with(csrf())
                         .contentType("application/json")
-                        .content("{\"sourceOrigin\":\"http://127.0.0.1:5173\",\"entries\":[{\"decision\":\"migrate\",\"password\":\"must-not-pass\"}]}"))
-                .andExpect(status().isUnprocessableEntity());
+                        .content("{}"))
+                .andExpect(status().isNotFound());
     }
 
     private MockHttpSession authenticatedSession() throws Exception {

@@ -159,9 +159,10 @@ class FlywayPostgresIntegrationTest {
         assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "22".equals(item.version)));
         assertEquals(true, supplierRecordMigrations.migrations.stream().anyMatch(item -> "23".equals(item.version)));
         seedSupplierRecordBeforeStructuredScoring();
+        seedBusinessMigrationRemoval();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(10, finalMigrations.migrationsExecuted);
+        assertEquals(11, finalMigrations.migrationsExecuted);
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "24".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "25".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "26".equals(item.version)));
@@ -171,6 +172,8 @@ class FlywayPostgresIntegrationTest {
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "30".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "31".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "32".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "33".equals(item.version)));
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "34".equals(item.version)));
         try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
              var statement = connection.createStatement()) {
             try (var result = statement.executeQuery("""
@@ -203,6 +206,53 @@ class FlywayPostgresIntegrationTest {
         assertPurchaseImportRowsAreUniqueWithinSheet();
         assertSupplierRemovalMigration();
         assertSupplierRecordStructuredScoringMigration();
+        assertBusinessMigrationRemoval();
+    }
+
+    private void seedBusinessMigrationRemoval() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    insert into business_migration_batch
+                        (id, source_origin, source_hash, source_type, status, requested_by, counts, report,
+                         diff, errors, checkpoint, version, created_at, updated_at)
+                    values
+                        ('b1111111-1111-1111-1111-111111111111', 'http://legacy.example', repeat('b', 64),
+                         'legacy-browser-report', 'completed', 'ADMIN', '{"total":1}'::jsonb,
+                         '{"execution":{"productsCreated":1}}'::jsonb, '{}'::jsonb, '[]'::jsonb,
+                         '{"completed":true}'::jsonb, 0, now(), now())
+                    """);
+            statement.executeUpdate("""
+                    insert into audit_log(id, request_id, actor_account, action, resource_type, resource_id, outcome, detail, created_at)
+                    values ('b2222222-2222-2222-2222-222222222222', 'request-v34', 'ADMIN',
+                            'migration.business-execute', 'business-migration',
+                            'b1111111-1111-1111-1111-111111111111', 'success',
+                            '{"marker":"migration-audit-kept"}'::jsonb, now())
+                    """);
+            statement.executeUpdate("""
+                    update purchase_product
+                    set payload = payload || '{"legacyMigrationSource":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'::jsonb
+                    where sku = 'BIZ-NO-DIMENSIONS'
+                    """);
+        }
+    }
+
+    private void assertBusinessMigrationRemoval() throws Exception {
+        try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             var statement = connection.createStatement()) {
+            try (var result = statement.executeQuery("select to_regclass('public.business_migration_batch') is null")) {
+                result.next();
+                assertEquals(true, result.getBoolean(1));
+            }
+            try (var result = statement.executeQuery("select count(*) from audit_log where detail ->> 'marker' = 'migration-audit-kept'")) {
+                result.next();
+                assertEquals(1, result.getInt(1));
+            }
+            try (var result = statement.executeQuery("select payload ->> 'legacyMigrationSource' from purchase_product where sku = 'BIZ-NO-DIMENSIONS'")) {
+                result.next();
+                assertEquals("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", result.getString(1));
+            }
+        }
     }
 
     private void assertPurchaseImportRowsAreUniqueWithinSheet() throws Exception {

@@ -377,7 +377,7 @@ class PurchaseImportContinuationWorkflowPostgresTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
         var mappings=webContext.getBean("requestMappingHandlerMapping",org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping.class);
         assertTrue(mappings.getHandlerMethods().values().stream().noneMatch(method->method.getBeanType().getSimpleName().startsWith("ImageMigration")));
-        assertTrue(mappings.getHandlerMethods().values().stream().anyMatch(method->method.getBeanType().getSimpleName().equals("BusinessMigrationController")));
+        assertTrue(mappings.getHandlerMethods().values().stream().noneMatch(method->method.getBeanType().getSimpleName().equals("BusinessMigrationController")));
     }
 
     private String businessFingerprint(){

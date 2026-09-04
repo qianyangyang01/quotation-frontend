@@ -15,7 +15,6 @@ const navItems = computed(() => [
   { label: '我的报价记录', path: '/quotation/my-records', permissions: ['myRecords', 'allRecords'] },
   { label: '报价记录', path: '/quotation/records', permissions: ['allRecords'] },
   { label: '权限管理', path: '/quotation/permissions', permissions: ['permissions'] },
-  { label: '数据迁移', path: '/quotation/migrations', permissions: ['permissions'] },
 ].filter(item => hasAnyPermission(...item.permissions as PermissionKey[])))
 const home = computed(() => defaultHomeForRole())
 const initials = computed(() => currentAuthUser.value.name.slice(0, 2).toUpperCase())

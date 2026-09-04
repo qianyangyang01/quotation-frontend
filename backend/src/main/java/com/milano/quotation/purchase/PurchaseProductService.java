@@ -124,14 +124,6 @@ public class PurchaseProductService {
         try{var asset=storage.storeImage(file.getBytes(),file.getOriginalFilename());link(product.id,asset.id,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+asset.id);if(type.equals("product"))payload.put("image","/api/v1/assets/"+asset.id);product.updatedAt=Instant.now();return view(product);}catch(java.io.IOException e){throw AppException.unprocessable("图片读取失败");}
     }
 
-    @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId){
-        // The parser already writes the staged asset URLs into the payload and
-        // upsert() materializes those links through linkFromUrl(). Linking the
-        // same assets again here leaves a delete/insert pair in one Hibernate
-        // batch and violates the unique product/asset/type constraint on real
-        // PostgreSQL.
-        return upsert(payload,false,null,null);
-    }
     @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId,String importMode,String sourceHash){
         var complete=payload instanceof ObjectNode object&&completeForQuotation(object);
         var catalogState="pending_template".equals(importMode)||!complete?CATALOG_PENDING_TEMPLATE:CATALOG_READY;
