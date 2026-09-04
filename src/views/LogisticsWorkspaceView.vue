@@ -33,7 +33,6 @@ const uploadProgress = ref<UploadProgress>({ loaded: 0, total: 0, percent: 0, by
 const uploadInFlight = ref(false), activeUploadBatchId = ref('')
 const uploadFileSnapshot = ref<Array<{ name: string; size: number }>>([])
 let cancelActiveUpload: (() => void) | null = null
-const batchPublishProviderId = ref(''), batchPublishVersionIds = ref<string[]>([]), batchPublishReviewedIds = ref<string[]>([]), batchPublishNote = ref('')
 const preparedDownload = ref<PreparedDownload | null>(null)
 const providerSearch = ref(''), selectedProviderId = ref(''), historyChannelId = ref('')
 const uploadScope = ref<'provider' | 'multi'>('multi'), uploadProviderName = ref('')
@@ -74,18 +73,7 @@ const uploadStatusText = computed(() => {
   return statusLabel[current.phase] || statusLabel[current.status] || current.status
 })
 const displayedUploadFiles = computed(() => files.value.length ? files.value.map(file => ({ name: file.name, size: file.size })) : uploadFileSnapshot.value)
-const providersWithDrafts = computed(() => (workspace.value?.providers || []).filter(provider => workspace.value?.channels.some(channel => channel.providerId === provider.id && workspace.value?.versions.some(item => item.channelId === channel.id && item.status === 'draft'))))
-const batchPublishProvider = computed(() => providersWithDrafts.value.find(provider => provider.id === batchPublishProviderId.value))
-const batchPublishDrafts = computed(() => {
-  const providerId = batchPublishProvider.value?.id
-  if (!providerId) return []
-  return (workspace.value?.versions || []).filter(item => item.status === 'draft').map(item => ({ version: item, channel: workspace.value?.channels.find(channel => channel.id === item.channelId) })).filter(item => item.channel?.providerId === providerId)
-})
-const selectedBatchPublishDrafts = computed(() => batchPublishDrafts.value.filter(item => batchPublishVersionIds.value.includes(item.version.id)))
 const hasCoverageRemoval = (summary: Record<string, number> | undefined) => (summary?.removed || 0) > 0 || (summary?.coverageReduced || 0) > 0
-const batchPublishNeedsReview = (item: typeof batchPublishDrafts.value[number]) => hasCoverageRemoval(item.version.summary) || (item.version.summary.highRisk || 0) > 0
-const batchPublishBlocked = (item: typeof batchPublishDrafts.value[number]) => item.version.errors > 0
-const batchPublishReady = computed(() => selectedBatchPublishDrafts.value.length > 0 && selectedBatchPublishDrafts.value.every(item => !batchPublishBlocked(item) && (!batchPublishNeedsReview(item) || batchPublishReviewedIds.value.includes(item.version.id))) && Boolean(batchPublishNote.value.trim()))
 const filteredDiffs = computed(() => (version.value?.diffRows || []).filter(d => diffType.value === 'all' ? !diffKinds(d).includes('unchanged') : diffKinds(d).includes(diffType.value as DiffKind)))
 const visibleDiffs = computed(() => filteredDiffs.value.slice(detailPage.value * detailPageSize.value, (detailPage.value + 1) * detailPageSize.value))
 const visibleRows = computed(() => (version.value?.rows || []).slice(detailPage.value * detailPageSize.value, (detailPage.value + 1) * detailPageSize.value))
@@ -177,7 +165,7 @@ function compactPrice(diff: Diff, source = diff.row) {
   return `${currency} ${money(price.pricePerKg)} / kg · 每票 ${money(price.registrationFee)}`
 }
 let pollTimer: ReturnType<typeof setTimeout> | undefined
-let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review'), batchPublishKey = idempotencyKey('logistics-provider-publish')
+let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review')
 let disposed = false, selectionEpoch = 0, priceRequestEpoch = 0
 
 async function run(action: () => Promise<void | PreparedDownload>) {
@@ -316,7 +304,6 @@ function selectUploadFiles(nextFiles: File[]) {
 function handleFileDrop(event: DragEvent) { uploadScope.value = 'provider'; uploadProviderName.value = selectedProvider.value?.name || ''; selectUploadFiles([...(event.dataTransfer?.files || [])]) }
 function openChannelHistory(channelId: string) { historyChannelId.value = channelId; version.value = null; batch.value = null; tab.value = 'history' }
 function showAllHistory() { historyChannelId.value = ''; version.value = null; batch.value = null; tab.value = 'history' }
-function openProviderPublish(providerId: string) { batchPublishProviderId.value = providerId; selectBatchPublishProvider(); version.value = null; batch.value = null; tab.value = 'history' }
 async function changePricePage(nextPage: number) { if (nextPage === page.value) return; page.value = nextPage; await run(loadPrices) }
 async function changePriceSize(size: number) { const nextSize = logisticsPageSize(size); if (nextSize === pageSize.value) return; pageSize.value = nextSize; page.value = 0; await run(loadPrices) }
 function changeBatchResultPage(nextPage: number) { batchResultPage.value = clampLogisticsPage(nextPage, batchResultTotalPages.value) }
@@ -385,19 +372,6 @@ async function publish() {
 }
 async function recompare() { await run(async () => { version.value = await service.recompare(version.value!); risk.value = false; removal.value = false; reviewKey = idempotencyKey('logistics-review'); message.value = '已按最新正式价格重新对比，请重新审核。' }) }
 async function rollback() { await run(async () => { version.value = await service.rollback(version.value!, note.value); await invalidatePublishedLogisticsCache(); await refresh(); message.value = '已创建新的回滚版本，历史报价没有改写。' }) }
-function selectBatchPublishProvider() {
-  const drafts = batchPublishDrafts.value.filter(item => !batchPublishBlocked(item))
-  batchPublishVersionIds.value = drafts.map(item => item.version.id); batchPublishReviewedIds.value = []; batchPublishNote.value = ''; batchPublishKey = idempotencyKey('logistics-provider-publish')
-}
-async function publishProviderDrafts() {
-  if (!batchPublishProvider.value || !batchPublishReady.value) return
-  const provider = batchPublishProvider.value, selectedDrafts = selectedBatchPublishDrafts.value
-  await run(async () => {
-    const result = await service.publishProvider(provider.id, selectedDrafts.map(item => ({ channelId: item.version.channelId, versionId: item.version.id, removalConfirmed: hasCoverageRemoval(item.version.summary), reviewConfirmed: batchPublishReviewedIds.value.includes(item.version.id) })), batchPublishNote.value.trim(), batchPublishKey)
-    batchPublishKey = idempotencyKey('logistics-provider-publish'); batchPublishVersionIds.value = []; batchPublishReviewedIds.value = []; batchPublishNote.value = ''
-    await invalidatePublishedLogisticsCache(); await refresh(); message.value = `已原子批量发布 ${result.count} 个${provider.name}价格版本；请逐个完成计费验收后再用于自动报价。`
-  })
-}
 async function publishReadyBatch() {
   if (!batch.value || !readyBatchResults.value.length || !readyPublishNote.value.trim()) return
   const selections = readyBatchResults.value.map(item => ({ channelId: item.channelId!, versionId: item.versionId!, removalConfirmed: readyPublishRemoval.value, reviewConfirmed: readyPublishRisk.value }))
@@ -475,7 +449,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
             <div class="base-toolbar"><div><h2>物流商与渠道版本</h2><p>完整 Excel 原表进入异步解析和审核；只有发布后的价格版本参与业务报价。</p></div><div class="provider-toolbar"><label class="provider-search-field">⌕<input v-model="providerSearch" placeholder="搜索物流商或编码"></label><a class="outline-orange" href="/templates/logistics-v2.xlsx" download="物流标准导入模板V2.xlsx">下载标准模板</a><button class="outline-orange" :disabled="busy || archived" @click="beginUpload('multi')">＋ 多物流商更新导入</button><button @click="showAllHistory">版本历史</button></div></div>
             <div class="provider-manager" :aria-busy="workspaceLoading">
               <aside class="provider-list"><div class="provider-sort-hint"><span>物流商列表</span><small>正式渠道数据仓库</small></div><div class="provider-list-scroll"><template v-if="workspaceLoading"><div v-for="index in 6" :key="`provider-skeleton-${index}`" class="provider-list-skeleton" aria-hidden="true"><i /><span><b /><small /></span><em /></div></template><template v-else><button v-for="provider in filteredProviders" :key="provider.id" :class="{ active: selectedProvider?.id === provider.id }" @click="selectedProviderId = provider.id"><u>⋮⋮</u><i>{{ provider.name.slice(0, 1) }}</i><span><b>{{ provider.name }}</b><small>{{ provider.code || provider.id.slice(0, 8) }}</small></span><em>{{ providerChannelCount(provider) }}个渠道</em><strong>›</strong></button><div v-if="!filteredProviders.length" class="provider-empty">没有匹配的物流商</div></template></div><footer>{{ workspaceLoading ? '正在加载物流商…' : `共 ${workspace?.providers.length || 0} 家物流商` }}</footer></aside>
-              <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0, 1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span></h3><small>物流商编码 {{ selectedProvider.code || '自动生成' }} · 渠道、价格和审核的统一入口</small></div><div class="provider-detail-actions"><button class="upload" :disabled="busy || archived" @click="beginUpload('provider')">单物流商更新导入</button><button v-if="selectedProviderChannels.some(channel => draftVersionFor(channel))" class="outline-orange" @click="openProviderPublish(selectedProvider.id)">批量审核</button></div></header>
+              <section v-if="selectedProvider" class="provider-detail"><header><div class="provider-icon">{{ selectedProvider.name.slice(0, 1) }}</div><div><h3>{{ selectedProvider.name }} <span>{{ selectedProviderChannels.length }}个渠道</span></h3><small>物流商编码 {{ selectedProvider.code || '自动生成' }} · 渠道、价格和审核的统一入口</small></div><div class="provider-detail-actions"><button class="upload" :disabled="busy || archived" @click="beginUpload('provider')">单物流商更新导入</button></div></header>
                 <div class="provider-detail-body"><h4>渠道价格与版本</h4><div class="provider-template-table version-table"><div class="template-table-head"><span>渠道名称</span><span>当前正式版本</span><span>数据规模</span><span>调价状态</span><span>最近发布</span><span>操作</span></div><div v-for="channel in selectedProviderChannels" :key="channel.id" class="template-table-row"><b>{{ channel.name }}<small>{{ channel.code }} · {{ channel.logisticsAttribute || channel.type || '物流属性待确认' }}</small></b><div><strong>{{ currentVersionFor(channel) ? `V${currentVersionFor(channel)!.versionNumber}` : '尚未发布' }}</strong><small>{{ visibleVersionFor(channel)?.fileName || '等待首个价格文件' }}</small></div><div>{{ channelCountryCount(channel) }}国 / {{ visibleVersionFor(channel)?.rowCount || 0 }}价格段</div><span class="adjustment-status" :class="channelAdjustmentStatus(channel)">{{ channelAdjustmentLabel(channel) }}</span><time>{{ formatPublishedAt(currentVersionFor(channel)?.publishedAt) }}</time><div class="template-actions"><button :disabled="busy || archived" @click="beginUpload('provider')">{{ currentVersionFor(channel) ? '更新价格' : '上传价格' }}</button><button v-if="draftVersionFor(channel)" class="move-template" :disabled="busy" @click="openVersion(draftVersionFor(channel)!.id)">审核发布</button><button @click="openChannelHistory(channel.id)">版本历史</button></div></div><div v-if="!selectedProviderChannels.length" class="template-table-empty">当前物流商尚未生成渠道</div></div>
                   <button v-if="!archived && !files.length" class="template-dropzone" @dragover.prevent @drop.prevent="handleFileDrop" @click="beginUpload('provider')"><i>⇧</i><span>拖拽 1–30 份物流商原表或 38 列标准模板到这里，系统将自动识别并预检</span><strong>支持现有 10 家物流商原表解析</strong></button>
                   <div v-else-if="files.length || uploadStatusVisible" class="inline-upload-panel" @dragover.prevent @drop.prevent="handleFileDrop"><div class="inline-upload-head"><div><b>{{ importTarget }}</b><small>支持 .xls / .xlsx；单文件不超过100MB，批次不超过500MB</small></div><button :disabled="busy" @click="beginUpload(uploadScope)">重新选择</button><button class="primary" :disabled="busy || !files.length || Boolean(uploadValidation)" @click="upload">{{ uploadInFlight ? `${uploadProgress.percent}%` : `上传并解析 ${files.length} 份文件` }}</button></div><p v-if="uploadValidation" class="notice error">{{ uploadValidation }}</p><div v-if="displayedUploadFiles.length" class="upload-file-list"><span v-for="file in displayedUploadFiles" :key="`${file.name}-${file.size}`"><b>{{ file.name }}</b><small>{{ formatTransferBytes(file.size) }}</small></span></div><div v-if="uploadStatusVisible" class="logistics-upload-status" role="status"><div class="upload-status-heading"><b>{{ uploadStatusText }}</b><strong>{{ uploadStatusPercent }}%</strong></div><progress :value="uploadStatusPercent" max="100" /><p v-if="uploadInFlight" class="muted">已上传 {{ formatTransferBytes(uploadProgress.loaded) }} / {{ formatTransferBytes(uploadProgress.total) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatTransferBytes(uploadProgress.bytesPerSecond) }}/s</template></p><p v-else-if="activeUploadBatch" class="muted">批次 {{ activeUploadBatch.id }} · {{ activeUploadBatch.payload.processedFiles || 0 }}/{{ activeUploadBatch.payload.totalFiles || activeUploadBatch.payload.files.length }} 个文件已解析</p><button v-if="uploadInFlight" type="button" @click="cancelUpload">取消上传</button></div><label class="check"><input v-model="replaceDrafts" type="checkbox">已有不同待审稿时，终止旧稿并保留历史</label></div>
@@ -488,12 +462,6 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
       </section>
 
       <section v-if="tab === 'history'" class="stack">
-        <div v-if="!archived && providersWithDrafts.length" class="card batch-publish"><div class="section-head"><div><h2>按物流商批量审核发布</h2><p>同一物流商的所选草稿在一个数据库事务中发布；任一版本校验失败则全部回滚。</p></div></div>
-          <div class="toolbar"><label>物流商<select v-model="batchPublishProviderId" aria-label="批量发布物流商" @change="selectBatchPublishProvider"><option value="">请选择</option><option v-for="provider in providersWithDrafts" :key="provider.id" :value="provider.id">{{ provider.name }}</option></select></label></div>
-          <template v-if="batchPublishProvider"><div class="scroll"><table><thead><tr><th>选择</th><th>渠道 / 版本</th><th>差异</th><th>风险复核</th></tr></thead><tbody><tr v-for="item in batchPublishDrafts" :key="item.version.id"><td><input v-model="batchPublishVersionIds" type="checkbox" :value="item.version.id" :disabled="busy || batchPublishBlocked(item)" :aria-label="`选择 ${item.channel?.name} V${item.version.versionNumber}`"></td><td><b>{{ item.channel?.name }}</b><small>V{{ item.version.versionNumber }} · {{ item.version.fileName }} · {{ item.version.rowCount }} 行</small></td><td><div class="inline-change-summary"><span v-for="key in changeKeys" :key="key" :class="`change-${key}`">{{ diffLabel[key] }} {{ changeCount(item.version.summary, key) }}</span></div><small v-if="batchPublishBlocked(item)" class="warning">阻断错误 {{ item.version.errors }} 个，不能发布</small></td><td><label v-if="batchPublishNeedsReview(item)" class="check"><input v-model="batchPublishReviewedIds" type="checkbox" :value="item.version.id" :disabled="busy">已核对风险、移除及覆盖缩小项</label><span v-else>无需额外确认</span></td></tr></tbody></table></div>
-            <label>批量审核备注<textarea v-model="batchPublishNote" maxlength="500" placeholder="填写价格来源、影响范围和审核结论" /></label><p class="muted">已选择 {{ selectedBatchPublishDrafts.length }} 个版本。发布后仍需逐版本完成独立计费验收，未验收版本不会开放自动报价。</p><button class="primary" :disabled="busy || !batchPublishReady" @click="publishProviderDrafts">确认原子批量发布</button>
-          </template>
-        </div>
         <div class="card history-card"><div class="section-head"><div><h2>{{ archived ? '旧库历史档案' : '渠道版本记录' }}</h2><p v-if="historyChannelId">正在查看 {{ workspace?.channels.find(c => c.id === historyChannelId)?.name }} 的全部历史版本</p><p v-else>保留每次导入、审核和发布后的差异记录。</p></div><button v-if="historyChannelId" @click="historyChannelId = ''">查看全部渠道</button><button @click="tab = 'imports'">返回基础资料</button></div><div class="scroll"><table><thead><tr><th>渠道</th><th>版本</th><th>来源</th><th>状态</th><th>价格行</th><th>操作</th></tr></thead><tbody><tr v-for="v in historyVersions" :key="v.id"><td>{{ workspace?.channels.find(c => c.id === v.channelId)?.name }}</td><td>V{{ v.versionNumber }}</td><td>{{ v.fileName }}<small>{{ v.importedAt }}</small></td><td>{{ statusLabel[v.status] }}</td><td>{{ v.rowCount }}</td><td><button :disabled="busy" @click="openVersion(v.id)">查看变动内容</button></td></tr><tr v-if="!historyVersions.length"><td colspan="6" class="empty">暂无版本记录。</td></tr></tbody></table></div></div>
       </section>
 
