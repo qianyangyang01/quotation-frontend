@@ -105,7 +105,8 @@ class LogisticsSourceParserTest {
             assertEquals("documentation",parsed.path("sheets").get(1).path("referenceKind").asText());
             assertEquals("documentation",parsed.path("sheets").get(2).path("referenceKind").asText());
             assertEquals("documentation",parsed.path("sheets").get(3).path("referenceKind").asText());
-            assertTrue(parsed.path("channels").get(0).path("quoteReady").asBoolean());
+            assertFalse(parsed.path("channels").get(0).path("quoteReady").asBoolean());
+            assertFalse(parsed.path("channels").get(0).path("etaReady").asBoolean());
         }
     }
     @Test void linksCoverageReferenceOnlyToItsNamedChannel()throws Exception {
@@ -121,7 +122,9 @@ class LogisticsSourceParserTest {
             var clothing=findChannel(parsed,"服装专线");var standard=findChannel(parsed,"标准专线");
             assertFalse(clothing.path("quoteReady").asBoolean());
             assertTrue(clothing.path("rows").get(0).path("pendingReason").asText().contains("邮编"));
-            assertTrue(standard.path("quoteReady").asBoolean());
+            assertFalse(standard.path("quoteReady").asBoolean());
+            assertFalse(standard.path("rows").get(0).path("pendingReason").asText().contains("邮编"));
+            assertFalse(standard.path("etaReady").asBoolean());
         }
     }
     @Test void keepsPostalNamedPriceChannelsWhileSkippingQualifiedPostalReferences()throws Exception {
