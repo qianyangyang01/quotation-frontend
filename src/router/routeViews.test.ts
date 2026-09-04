@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { prefetchRouteView } from './routeViews'
+import { prefetchRouteView, routeViewLoaders } from './routeViews'
 
 describe('route view prefetch', () => {
   it('warms a route only once', async () => {
@@ -30,5 +30,9 @@ describe('route view prefetch', () => {
 
   it('ignores paths without a registered view', () => {
     expect(() => prefetchRouteView('/missing', {})).not.toThrow()
+  })
+
+  it('keeps purchase independent from the finance module chunk', () => {
+    expect(routeViewLoaders['/quotation/products']).not.toBe(routeViewLoaders['/quotation/members'])
   })
 })

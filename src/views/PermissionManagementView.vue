@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import AppTopbar from '@/components/AppTopbar.vue'
 import {
   authState,
   currentAuthUser,
@@ -77,7 +76,6 @@ onMounted(async () => { try { await loadAuthUsers() } catch (error) { toast(erro
 
 <template>
   <div class="permission-page">
-    <AppTopbar />
     <main>
       <header class="page-head"><div><p>ACCESS CONTROL</p><h1>权限管理</h1><span>按岗位分配可见模块；页面入口和直接地址访问使用同一套权限规则。</span></div><button @click="showAdd=!showAdd">＋ 新增账号</button></header>
       <section class="summary"><article><small>角色数量</small><b>5</b><span>按岗位预设权限</span></article><article><small>账号数量</small><b>{{ authState.users.length }}</b><span>报价服务器账号</span></article><article><small>启用账号</small><b>{{ enabledCount }}</b><span>可进入系统</span></article><article><small>当前角色</small><b>{{ roleName(currentAuthUser.role) }}</b><span>{{ currentAuthUser.account }}</span></article></section>

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import AppTopbar from '@/components/AppTopbar.vue'
 import type { LogisticsRule } from '@/data/logistics'
 import { loadPublishedLogisticsManifest } from '@/data/publishedLogisticsRepository'
 import {
@@ -459,7 +458,6 @@ function exportAreas() { if (!activeRule.value) return; const link = document.cr
 
 <template>
   <div class="erp">
-    <AppTopbar />
     <section class="workspace">
       <div v-if="workspaceLoading" class="workspace-loading"><i></i><span><b>正在加载物流工作区</b><small>先读取物流商、渠道和版本摘要，价格段将在打开明细时加载</small></span></div>
       <div v-else-if="workspaceError" class="workspace-loading error"><span><b>物流工作区加载失败</b><small>{{ workspaceError }}</small></span><button @click="refreshWorkspace">重新加载</button></div>

@@ -2,7 +2,7 @@ import type { Component } from 'vue'
 
 export type RouteViewLoader = () => Promise<{ default: Component }>
 
-const jerryModuleView: RouteViewLoader = () => import('@/views/JerryModuleView.vue')
+const financeModuleView: RouteViewLoader = () => import('@/views/JerryModuleView.vue')
 const quotationRecordsView: RouteViewLoader = () => import('@/views/QuotationRecordsView.vue')
 
 export const routeViewLoaders: Record<string, RouteViewLoader> = {
@@ -10,9 +10,9 @@ export const routeViewLoaders: Record<string, RouteViewLoader> = {
   '/change-password': () => import('@/views/ChangePasswordView.vue'),
   '/quotation/overview': () => import('@/views/QuotationOverviewView.vue'),
   '/quotation': () => import('@/views/QuotationSystemView.vue'),
-  '/quotation/products': jerryModuleView,
+  '/quotation/products': () => import('@/views/PurchaseWorkspaceView.vue'),
   '/quotation/logistics': () => import('@/views/LogisticsWorkspaceView.vue'),
-  '/quotation/members': jerryModuleView,
+  '/quotation/members': financeModuleView,
   '/quotation/my-records': quotationRecordsView,
   '/quotation/records': quotationRecordsView,
   '/quotation/permissions': () => import('@/views/PermissionManagementView.vue'),

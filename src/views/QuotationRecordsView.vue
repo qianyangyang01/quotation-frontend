@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import AppTopbar from '@/components/AppTopbar.vue'
 import { loadQuotationRecords, updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
 import { loadPurchaseProducts } from '@/data/purchaseStore'
 import { quotationProductCategories } from '@/components/quotation/types'
@@ -174,7 +173,6 @@ watch(() => route.query.record, recordId => {
 
 <template>
   <div class="app">
-    <AppTopbar />
     <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '跟进本人系统报价与客户实际成交结果' : '查看全体业务员的报价与成交回填记录' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>需要回填成交结果</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>已完成真实报价回填</em></span></article><article><i>×</i><span><small>未成交</small><b>{{ lost }}</b><em>已确认但没有成交</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ scoped.length }}</b><em>保留系统报价快照</em></span></article></section>
       <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="won">已成交</option><option value="lost">未成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="search='';filterStatus='';filterCategory='';filterCountry=''">重置</button><b>共 {{ list.length }} 条记录</b></section>

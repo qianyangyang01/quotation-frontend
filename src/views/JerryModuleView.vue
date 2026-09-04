@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import AppTopbar from '@/components/AppTopbar.vue'
 import FilterPanel from '@/components/finance/FilterPanel.vue'
 import LogisticsCard, { type ProviderGroup } from '@/components/finance/LogisticsCard.vue'
 import PurchaseDataWorkspace from '@/components/purchase/PurchaseDataWorkspace.vue'
@@ -869,8 +868,6 @@ function saveEditor() {
 
 <template>
   <div class="module-app">
-    <AppTopbar />
-
     <main v-if="showPurchaseWorkspace" class="page"><PurchaseDataWorkspace /></main>
     <main v-else class="page">
       <section class="heading"><div><p>{{ config[0] }}</p><h1>{{ config[1] }}</h1><span>{{ config[2] }}</span></div><button v-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab==='logistics')" class="primary" @click="primaryAction">＋ {{ config[3] }}</button></section>

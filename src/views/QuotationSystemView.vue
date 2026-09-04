@@ -8,7 +8,6 @@ import { validateQuotationConditions } from '@/services/quotationValidation'
 import { buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules, validatePublishedLogisticsRevision } from '@/data/publishedLogisticsRepository'
 import { loadQuotationWorkspaceConfiguration } from '@/services/quotationWorkspaceBootstrap'
 import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
-import AppTopbar from '@/components/AppTopbar.vue'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
 import QuotationCondition from '@/components/quotation/QuotationCondition.vue'
 import ProductInfoCard from '@/components/quotation/ProductInfoCard.vue'
@@ -1402,7 +1401,6 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
 <template>
   <div class="jerry-app">
-    <AppTopbar />
 
     <main class="quotation-page">
       <QuotationHeader :salesperson="selectedSalesperson" :rate="exchange.usd" :status="products[0]?.status || '待查询'" :mode-label="quoteMode === 'bundle' ? '组合 SKU 报价' : '单品 SKU 报价'" @show-rule="showRule=true" />

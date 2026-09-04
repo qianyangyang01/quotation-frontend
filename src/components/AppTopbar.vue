@@ -27,7 +27,11 @@ onMounted(() => { cancelPrefetch = scheduleRouteViewPrefetch(navItems.value.map(
 onUnmounted(() => cancelPrefetch())
 
 function prepareNavigation(path: string) { prefetchRouteView(path) }
-function beginNavigation(path: string) { pendingPath.value = path; prepareNavigation(path) }
+function beginNavigation(path: string) {
+  if (path === route.path) return
+  pendingPath.value = path
+  prepareNavigation(path)
+}
 
 async function signOut() {
   accountMenuOpen.value = false

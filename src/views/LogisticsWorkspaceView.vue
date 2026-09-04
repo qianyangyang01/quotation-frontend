@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import AppTopbar from '@/components/AppTopbar.vue'
 import LogisticsPager from '@/components/logistics/LogisticsPager.vue'
 import { clampLogisticsPage, logisticsPageFromQuery, logisticsPageQuery, logisticsPageSize } from '@/components/logistics/logisticsPagination'
 import LogisticsBillingReview from '@/components/quotation/LogisticsBillingReview.vue'
 import { idempotencyKey, type PreparedDownload, type UploadProgress } from '@/services/http'
 import { invalidatePublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
 import { LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE, logisticsWorkspaceLoadPlan, matchesLogisticsProviderScope, paginateLogisticsProviderChannels } from '@/data/logisticsWorkspaceView'
+import { initializeLogisticsWorkspace } from '@/data/logisticsWorkspaceInitialization'
 import { logisticsRebuild as service, money, shown, weightLabel, completedBatchStage, diffKinds, aggregateChangeSummary, batchComparisonSummary, rangeImpact, changeImpact, logisticsAdjustmentStatus, logisticsUploadError, formatTransferBytes, type Dataset, type Workspace, type Batch, type Version, type PricePage, type Diff, type DiffChange, type DiffKind, type Price, type RowCorrection, type ReadyPublishResult, type Channel, type Provider } from '@/data/logisticsRebuild'
 
 const route = useRoute(), router = useRouter()
@@ -266,9 +266,12 @@ async function refresh() {
   }
 }
 async function initialize() {
-  datasets.value = await service.datasets()
-  datasetId.value ||= datasets.value.find(d => d.id === route.query.dataset)?.id || datasets.value.find(d => d.status === 'active')?.id || datasets.value[0]?.id || ''
-  if (datasetId.value) await refresh()
+  const initialized = await initializeLogisticsWorkspace(route.query.dataset, service.datasets, async id => {
+    datasetId.value = id
+    await refresh()
+  })
+  datasets.value = initialized.datasets
+  datasetId.value = initialized.datasetId
 }
 watch([datasetId, tab, page, pageSize], () => { if (datasetId.value) void router.replace({ query: { ...route.query, dataset: datasetId.value, logisticsTab: tab.value, ...logisticsPageQuery(page.value, pageSize.value) } }) })
 watch([batchResultQuery, batchResultProvider, batchResultStatus, batchResultFocus], () => { batchResultPage.value = 0 })
@@ -382,7 +385,6 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 
 <template>
   <div class="logistics-page">
-    <AppTopbar />
     <main>
       <header class="milano-heading"><div><p>LOGISTICS CONFIGURATION</p><h1>物流规则</h1><span>维护物流渠道、国家区域、重量限制与分段运费，供米莱诺报价计算直接调用。</span></div></header>
       <p v-if="error" role="alert" class="notice error">{{ error }}</p><p v-if="message" role="status" class="notice success">{{ message }}</p>
