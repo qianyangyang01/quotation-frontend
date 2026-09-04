@@ -9,6 +9,7 @@ export type LogisticsRuleTab = typeof logisticsRuleTabs[number]
 export const logisticsRuleDetailColumns = ['国家区域', '重量范围', '计泡系数', '最长边', '最大周长', '商品限制', '每1000g运费', '挂号费', '预计时效', '状态'] as const
 
 export type LogisticsWorkspaceTab = 'prices' | 'imports' | 'history'
+export const LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE = 8
 
 export function logisticsWorkspaceLoadPlan(tab: LogisticsWorkspaceTab) {
   return {
@@ -22,6 +23,21 @@ export function matchesLogisticsProviderScope(scope: 'provider' | 'multi', expec
   if (scope === 'multi' || !expectedProvider.trim()) return true
   const normalize = (value: string) => value.replace(/\s+/g, '').toLocaleLowerCase()
   return normalize(actualProvider) === normalize(expectedProvider)
+}
+
+export function paginateLogisticsProviderChannels<T>(channels: T[], requestedPage: number) {
+  const total = channels.length
+  const totalPages = Math.max(1, Math.ceil(total / LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE))
+  const page = Math.min(Math.max(0, Math.trunc(Number.isFinite(requestedPage) ? requestedPage : 0)), totalPages - 1)
+  const start = page * LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE
+  return {
+    items: channels.slice(start, start + LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE),
+    page,
+    total,
+    totalPages,
+    from: total ? start + 1 : 0,
+    to: Math.min(total, start + LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE),
+  }
 }
 
 export function currentPublishedVersion(state: LogisticsWorkspaceState, channel: LogisticsChannelRecord) {

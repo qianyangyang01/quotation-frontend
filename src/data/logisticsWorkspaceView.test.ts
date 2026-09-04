@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LogisticsChannelRecord, LogisticsChannelVersionRecord, LogisticsWorkspaceState } from './logisticsRepository'
-import { logisticsChannelRows, logisticsProviderRows, logisticsRuleDetailColumns, logisticsRuleTabs, logisticsWorkspaceLoadPlan, logisticsWorkspaceSummary, matchesLogisticsProviderScope } from './logisticsWorkspaceView'
+import { LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE, logisticsChannelRows, logisticsProviderRows, logisticsRuleDetailColumns, logisticsRuleTabs, logisticsWorkspaceLoadPlan, logisticsWorkspaceSummary, matchesLogisticsProviderScope, paginateLogisticsProviderChannels } from './logisticsWorkspaceView'
 
 function channel(id: string, providerId: string, currentVersionId = ''): LogisticsChannelRecord {
   return { id, providerId, currentVersionId, ruleId: Number(id), name: `渠道${id}`, code: `CODE-${id}`, type: '专线', logisticsAttribute: '普货', enabled: true, createdAt: '', updatedAt: '', _version: 1, archived: false, archivedAt: '', archivedBy: '', archiveReason: '' }
@@ -33,6 +33,14 @@ describe('logistics workspace published views', () => {
     expect(matchesLogisticsProviderScope('provider', '万邦', ' 万 邦 ')).toBe(true)
     expect(matchesLogisticsProviderScope('provider', '万邦', '云途')).toBe(false)
     expect(matchesLogisticsProviderScope('multi', '万邦', '云途')).toBe(true)
+  })
+
+  it('paginates provider channels in fixed groups of eight and clamps stale pages', () => {
+    const channels = Array.from({ length: 31 }, (_, index) => index + 1)
+    expect(LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE).toBe(8)
+    expect(paginateLogisticsProviderChannels(channels, 0)).toMatchObject({ items: [1, 2, 3, 4, 5, 6, 7, 8], page: 0, total: 31, totalPages: 4, from: 1, to: 8 })
+    expect(paginateLogisticsProviderChannels(channels, 3)).toMatchObject({ items: [25, 26, 27, 28, 29, 30, 31], page: 3, from: 25, to: 31 })
+    expect(paginateLogisticsProviderChannels(channels.slice(0, 5), 3)).toMatchObject({ items: [1, 2, 3, 4, 5], page: 0, totalPages: 1, from: 1, to: 5 })
   })
 
   it('keeps weight restrictions inside rule detail and omits the freight calculator tab', () => {
