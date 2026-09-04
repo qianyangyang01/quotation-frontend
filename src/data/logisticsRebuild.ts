@@ -6,8 +6,9 @@ export type Price = {
   areaName: string; countryCode: string; weightFromKg: number; weightToKg: number
   weightFromInclusive?: boolean; weightToInclusive?: boolean; pricePerKg?: number; registrationFee?: number
   firstWeightPrice?: number; firstWeightKg?: number; nextWeightPrice?: number; nextWeightKg?: number; intervalPrice?: number
-  sourceSheet?: string; sourceRow?: number; notes?: string; pendingReason?: string; pricingModel?: string; currency?: string
-  zoneName?: string; rowKey?: string
+  sourceSheet?: string; sourceRow?: number; notes?: string; pendingReason?: string; blockingReason?: string; reviewWarning?: string; pricingModel?: string; currency?: string
+  zoneName?: string; originRegion?: string; sourceOriginRegion?: string; rowKey?: string; routeKey?: string; sourceProductCode?: string; sourceFeeLabel?: string
+  etaMinDays?: number; etaMaxDays?: number; etaSource?: string
   providerName?: string; channelName?: string; versionId?: string; versionNumber?: number; quoteReady?: boolean
 }
 export type Provider = { id: string; name: string; code?: string; enabled?: boolean; datasetId?: string; _version?: number }
@@ -18,10 +19,11 @@ export type Channel = {
 export type DiffKind = 'added' | 'price' | 'rule' | 'range' | 'removed' | 'unchanged'
 export type DiffChange = { field: string; kind?: 'price' | 'rule' | 'range'; price?: boolean; before: unknown; after: unknown; delta?: number; percentChange?: number | null }
 export type Diff = { key: string; type: DiffKind | string; kinds?: DiffKind[]; row: Price; previous?: Price; changes: DiffChange[] }
-export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; fingerprint: string; pricingReady?: boolean; quoteReady?: boolean; errors: number; rowCount?: number; countryCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; importedBy?: string; publishedAt?: string; publishedBy?: string; auditNote?: string }
+export type MissingEtaRoute = { routeKey: string; status: 'missing' | 'partial' | 'conflict'; areaName: string; countryCode: string; zoneName?: string; originRegion?: string; sourceOriginRegion?: string; sourceProductCode?: string; sourceSheet?: string; sourceRow?: number }
+export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; fingerprint: string; pricingReady?: boolean; quoteReady?: boolean; etaReady?: boolean; etaMissingCount?: number; errors: number; rowCount?: number; countryCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; missingEtaRoutes?: MissingEtaRoute[]; blockingReasons?: string[]; reviewWarnings?: string[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; importedBy?: string; publishedAt?: string; publishedBy?: string; auditNote?: string }
 export type Workspace = { dataset: Dataset; providers: Provider[]; channels: Channel[]; versions: Version[] }
-export type BatchResult = { channelId?: string; channelName: string; providerName: string; versionId?: string; status: string; message?: string; errors?: number; pricingReady?: boolean; priceRows?: number; pendingReasons?: string[]; basePublishedVersionId?: string; summary?: Record<string, number>; issues?: SourceIssue[] }
-export type Batch = { id: string; dataset_id: string; status: string; phase: string; created_at: string; payload: { progress: number; elapsedMs?: number; error?: string; totalFiles?: number; processedFiles?: number; currentFileIndex?: number; currentFileName?: string; totalChannels?: number; processedChannels?: number; currentChannelName?: string; files: Array<{ name: string; size?: number; sha256?: string; lifecycleStatus?: string; deletedAt?: string; deleteError?: string }>; fileReports?: Array<{ fileName: string; status: string; message?: string; retentionUntil?: string; sourceEvidence?: { sha256: string }; sheets?: Array<{ name: string; status: string; priceRows?: number; errors?: number; message?: string }> }>; results: BatchResult[] } }
+export type BatchResult = { channelId?: string; channelName: string; providerName: string; versionId?: string; status: string; message?: string; errors?: number; pricingReady?: boolean; etaReady?: boolean; etaMissingCount?: number; priceRows?: number; pendingReasons?: string[]; missingEtaRoutes?: MissingEtaRoute[]; blockingReasons?: string[]; reviewWarnings?: string[]; basePublishedVersionId?: string; summary?: Record<string, number>; issues?: SourceIssue[] }
+export type Batch = { id: string; dataset_id: string; status: string; phase: string; created_at: string; payload: { progress: number; elapsedMs?: number; error?: string; etaReady?: boolean; etaMissingCount?: number; missingEtaRoutes?: Array<MissingEtaRoute & { providerName?: string; channelName?: string }>; blockingReasons?: string[]; reviewWarnings?: string[]; totalFiles?: number; processedFiles?: number; currentFileIndex?: number; currentFileName?: string; totalChannels?: number; processedChannels?: number; currentChannelName?: string; files: Array<{ name: string; size?: number; sha256?: string; lifecycleStatus?: string; deletedAt?: string; deleteError?: string }>; fileReports?: Array<{ fileName: string; status: string; message?: string; retentionUntil?: string; sourceEvidence?: { sha256: string }; sheets?: Array<{ name: string; status: string; priceRows?: number; errors?: number; message?: string }> }>; results: BatchResult[] } }
 export type BatchSummary = Pick<Batch, 'id' | 'status' | 'phase' | 'created_at'> & { progress: number; files: Array<{ name: string }> }
 export type Mapping = { oldChannelId: string; oldName: string; newChannelId: string; status: string; candidates: Channel[] }
 export type Cutover = { previewToken: string; sourceDatasetId: string; targetDatasetId: string; readyChannels: number; requiredReady: boolean; requiredConfirmed: boolean; requiredCount: number; requiredNotReady: Channel[]; unmappedChannels: number; mappings: Mapping[]; pendingChannels: Channel[]; draftsToReprice?: number; bindingChanges?: Array<{ kind: string; id: string; path: string; before: string; after: string; status: string }> }
@@ -32,7 +34,20 @@ export type BatchPublishSelection = { channelId: string; versionId: string; remo
 export type BatchPublishResult = { providerId: string; count: number; published: Array<{ id: string; channelId: string; versionNumber: number; status: string; quoteReady: boolean }> }
 export type ReadyPublishResult = { batchId: string; publishedCount: number; skippedCount: number; failedCount: number; published: Array<{ versionId: string; channelId: string; providerName: string; channelName: string; message: string }>; skipped: Array<{ versionId: string; channelName: string; reason: string }>; failed: Array<{ versionId: string; channelName: string; reason: string }> }
 export type RowCorrection = { rowKey: string; fields: Partial<Pick<Price, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive' | 'pricePerKg' | 'registrationFee' | 'firstWeightKg' | 'firstWeightPrice' | 'nextWeightKg' | 'nextWeightPrice' | 'intervalPrice'>> }
+export type EtaCorrection = { routeKey: string; etaMinDays: number; etaMaxDays: number }
 export type LogisticsAdjustmentStatus = 'published' | 'pending'
+
+export function buildEtaCorrections(rows: Price[], snapshot: Price[]): EtaCorrection[] {
+  const original = new Map(snapshot.map(row => [row.rowKey, row]))
+  const changes = new Map<string, EtaCorrection>()
+  for (const row of rows) {
+    const before = original.get(row.rowKey)
+    if (!before || !row.routeKey || (row.etaMinDays === before.etaMinDays && row.etaMaxDays === before.etaMaxDays)) continue
+    if (!Number.isInteger(row.etaMinDays) || !Number.isInteger(row.etaMaxDays) || Number(row.etaMinDays) <= 0 || Number(row.etaMaxDays) < Number(row.etaMinDays) || Number(row.etaMaxDays) > 365) throw new Error('时效必须填写有效的最早和最晚天数')
+    changes.set(row.routeKey, { routeKey: row.routeKey, etaMinDays: Number(row.etaMinDays), etaMaxDays: Number(row.etaMaxDays) })
+  }
+  return [...changes.values()]
+}
 
 export function logisticsAdjustmentStatus(channel: Pick<Channel, 'id' | 'currentVersionId'>, versions: Array<Pick<Version, 'channelId' | 'status'>>, hasPendingImport = false): LogisticsAdjustmentStatus {
   const hasDraft = versions.some(version => version.channelId === channel.id && version.status === 'draft')
@@ -59,7 +74,7 @@ export const logisticsRebuild = {
   },
   retry: (id: string) => api.post<Batch>(`${root}/imports/${id}/retry`),
   version: (id: string) => api.get<Version>(`${root}/versions/${id}`),
-  patchRows: (version: Version, changes: RowCorrection[]) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes }),
+  patchRows: (version: Version, changes: RowCorrection[], etaChanges: EtaCorrection[] = []) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes, etaChanges }),
   review: (version: Version, note: string, removalConfirmed: boolean, reviewConfirmed: boolean, key: string) => api.post<Version>(`${root}/channels/${version.channelId}/versions/${version.id}/review`, { note, removalConfirmed, reviewConfirmed }, key),
   publishProvider: (providerId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<BatchPublishResult>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, key),
   publishReady: (batchId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<ReadyPublishResult>(`${root}/imports/${batchId}/publish-ready`, { selections, note }, key),

@@ -163,7 +163,7 @@ public class LogisticsImportService {
                 catch(Exception e){log.warn("Logistics import {} channel staging failed",id,e);outcome=mapper.createObjectNode().put("providerName",channel.path("providerName").asText()).put("channelName",channel.path("channelName").asText()).put("status","blocked").put("message",safe(e));outcome.set("parsed",channel);}
                 results.add(outcome);completed++;payload.put("processedChannels",completed).put("progress",60+Math.round(completed*40.0/Math.max(1,grouped.size())));save(id,lease,"processing","staging",payload);
             }
-            payload.remove("currentFileName");payload.remove("currentChannelName");payload.put("progress",100).put("elapsedMs",(System.nanoTime()-start)/1_000_000).put("stagingMs",(System.nanoTime()-stagingStart)/1_000_000);
+            payload.remove("currentFileName");payload.remove("currentChannelName");payload.put("progress",100).put("elapsedMs",(System.nanoTime()-start)/1_000_000).put("stagingMs",(System.nanoTime()-stagingStart)/1_000_000);LogisticsReadiness.applyBatch(payload);
             var finalStatus=grouped.isEmpty()?"failed":"completed";var finalPhase=grouped.isEmpty()?"failed":"review";
             save(id,lease,finalStatus,finalPhase,payload);
             cleanupParsedFiles(id,payload);save(id,lease,finalStatus,finalPhase,payload);
@@ -211,8 +211,10 @@ public class LogisticsImportService {
         var pendingReasons=new TreeSet<String>();
         for(var row:input.path("rows"))for(var reason:row.path("pendingReason").asText().split("；"))if(!reason.isBlank())pendingReasons.add(reason.trim());
         var outcome=mapper.createObjectNode().put("channelId",channelId.toString()).put("providerName",providerName).put("channelName",input.path("channelName").asText())
-                .put("errors",input.path("errors").asInt()).put("pricingReady",input.path("quoteReady").asBoolean()).put("priceRows",input.path("rows").size()).put("sourceFileIndex",input.path("sourceFileIndex").asInt());
+                .put("errors",input.path("errors").asInt()).put("pricingReady",input.path("quoteReady").asBoolean()).put("etaReady",input.path("etaReady").asBoolean(false))
+                .put("etaMissingCount",input.path("etaMissingCount").asInt()).put("priceRows",input.path("rows").size()).put("sourceFileIndex",input.path("sourceFileIndex").asInt());
         outcome.set("pendingReasons",mapper.valueToTree(pendingReasons));
+        outcome.set("missingEtaRoutes",input.path("missingEtaRoutes").deepCopy());outcome.set("blockingReasons",input.path("blockingReasons").deepCopy());outcome.set("reviewWarnings",input.path("reviewWarnings").deepCopy());
         if(current.isPresent() && input.path("errors").asInt()==0) {
             var published=mapper.readTree(current.get());
             if(input.path("contentHash").asText().equals(published.path("contentHash").asText())){
@@ -224,6 +226,8 @@ public class LogisticsImportService {
         var version=replaceDrafts?logistics.createDraftReplacing(channelId,body,"用户确认由新导入终止旧待审稿"):logistics.createDraft(channelId,body);
         outcome.put("versionId",version.path("id").asText()).put("versionNumber",version.path("versionNumber").asInt()).put("status",input.path("errors").asInt()>0?"blocked":"draft")
                 .put("basePublishedVersionId",version.path("basePublishedVersionId").asText());
+        outcome.put("pricingReady",version.path("pricingReady").asBoolean(false)).put("etaReady",version.path("etaReady").asBoolean(false)).put("etaMissingCount",version.path("etaMissingCount").asInt());
+        outcome.set("missingEtaRoutes",version.path("missingEtaRoutes").deepCopy());outcome.set("blockingReasons",version.path("blockingReasons").deepCopy());outcome.set("reviewWarnings",version.path("reviewWarnings").deepCopy());
         outcome.set("summary",version.path("summary"));outcome.set("issues",input.path("issues"));return outcome;
     }
     private void save(UUID id,UUID lease,String status,String phase,ObjectNode payload){jdbc.sql("update logistics_import_batch set status=:status,phase=:phase,payload=cast(:payload as jsonb),updated_at=now() where id=:id and lease_id=:lease")

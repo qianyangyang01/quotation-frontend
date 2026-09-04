@@ -182,6 +182,27 @@ class LogisticsSourceLayoutRegressionTest {
     }
 
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
+    void exposesTheApprovedNarrowImportBaselineForAllTenProviders() throws Exception {
+        var root=Path.of(System.getProperty("logistics.corpusDir"));var providers=new TreeSet<String>();
+        int channels=0,rows=0,perKg=0,firstNext=0,sourceEta=0,missingEtaRoutes=0,sourceCodes=0,sourceOrigins=0;
+        try(var paths=Files.list(root)) {
+            for(var path:paths.filter(p->p.toString().matches("(?i).*\\.xlsx?$")&&!p.getFileName().toString().startsWith("~$")&&!p.getFileName().toString().equalsIgnoreCase("4px价格.xlsx")).sorted().toList()) {
+                var parsed=parser.parse(Files.readAllBytes(path),path.getFileName().toString());
+                for(var channel:parsed.path("channels")) {
+                    providers.add(channel.path("providerName").asText());channels++;missingEtaRoutes+=channel.path("missingEtaRoutes").size();
+                    for(var row:channel.path("rows")) {
+                        rows++;if(row.path("pricingModel").asText().equals("per-kg"))perKg++;if(row.path("pricingModel").asText().equals("first-next"))firstNext++;
+                        if(row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt()&&!row.path("etaSource").asText().equals("route-inherited"))sourceEta++;
+                        if(!row.path("sourceProductCode").asText().isBlank())sourceCodes++;if(!row.path("sourceOriginRegion").asText().isBlank())sourceOrigins++;
+                    }
+                }
+            }
+        }
+        assertEquals(10,providers.size());assertEquals(88,channels);assertEquals(3081,rows);assertEquals(3049,perKg);assertEquals(32,firstNext);
+        assertEquals(2808,sourceEta);assertEquals(74,missingEtaRoutes);assertEquals(881,sourceCodes);assertEquals(195,sourceOrigins);
+    }
+
+    @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void everyAvailableRealPriceRowCanBeSelectedWithoutCrossZoneFallback() throws Exception {
         var engine=new LogisticsBillingEngine(mapper);var root=Path.of(System.getProperty("logistics.corpusDir"));int checked=0;var failures=new LinkedHashSet<String>();
         try(var paths=Files.list(root)) {
@@ -243,7 +264,7 @@ class LogisticsSourceLayoutRegressionTest {
         var root=Path.of(System.getProperty("logistics.corpusDir"));
         for(var entry:expected.entrySet()) {
             var path=root.resolve(entry.getKey());var originalBytes=Files.readAllBytes(path);var before=parser.parse(originalBytes,entry.getKey());
-            int count=0;for(var c:before.path("channels")){assertEquals(0,c.path("errors").asInt(),entry.getKey()+c.path("issues"));count+=c.path("rows").size();assertFalse(c.path("quoteReady").asBoolean(),entry.getKey()+c.path("channelName"));}
+            int count=0;for(var c:before.path("channels")){assertEquals(0,c.path("errors").asInt(),entry.getKey()+c.path("issues"));count+=c.path("rows").size();assertEquals(c.path("etaReady").asBoolean()&&c.path("blockingReasons").isEmpty(),c.path("quoteReady").asBoolean(),entry.getKey()+c.path("channelName"));}
             assertEquals(entry.getValue(),count,entry.getKey());
             try(var book=WorkbookFactory.create(new java.io.ByteArrayInputStream(originalBytes))) {
                 for(var s:book)if(s.getLastRowNum()>0)s.shiftRows(0,s.getLastRowNum(),12);

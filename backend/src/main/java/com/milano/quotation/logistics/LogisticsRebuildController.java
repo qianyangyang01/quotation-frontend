@@ -125,7 +125,7 @@ public class LogisticsRebuildController {
     @GetMapping("/versions/{id}") public ApiResponse<?> version(@PathVariable UUID id){var result=draftReview.load(id,false);result.put("quoteReady",guard.quoteReady(id));return ApiResponse.ok(result);}
     @PatchMapping("/versions/{id}/rows")
     public ApiResponse<?> patchRows(@PathVariable UUID id,@RequestBody ObjectNode input,Authentication auth){
-        var result=draftReview.patch(id,input,actor(auth));audit.record("logistics.draft-correct","logistics-version",id.toString(),"success",Map.of("changeCount",input.path("changes").size()));return ApiResponse.ok(result);
+        var result=draftReview.patch(id,input,actor(auth));audit.record("logistics.draft-correct","logistics-version",id.toString(),"success",Map.of("changeCount",input.path("changes").size()+input.path("etaChanges").size()));return ApiResponse.ok(result);
     }
     @PostMapping("/imports/{id}/publish-ready")
     public ApiResponse<?> publishReady(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){

@@ -50,6 +50,14 @@ class LogisticsSourceParserTest {
             assertEquals(55,parsed.path("channels").get(0).path("rows").get(0).path("pricePerKg").asDouble());
         }
     }
+    @Test void mapsPerTicketAliasesButNeverMapsSurchargesIntoRegistrationFee()throws Exception {
+        for(var label:List.of("挂号费/票","操作费（RMB/票）","处理费(元/件)","每票费"))try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("普货");row(s,0,"国家","产品代码","重量段","运费/KG","燃油附加费",label,"时效");row(s,1,"美国","PX-US","0-1",55,99,20,"7-15天");
+            var channel=parser.parse(bytes(book),"花海.xlsx").path("channels").get(0);var price=channel.path("rows").get(0);
+            assertEquals(20,price.path("registrationFee").asInt(),label);assertEquals(label,price.path("sourceFeeLabel").asText());assertEquals("PX-US",price.path("sourceProductCode").asText());
+            assertEquals(7,price.path("etaMinDays").asInt());assertEquals(15,price.path("etaMaxDays").asInt());assertTrue(channel.path("etaReady").asBoolean());
+        }
+    }
     @Test void usesSfSettlementOnceAndBlocksUnreliableCriticalFormula()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("服装专线");row(s,0,"国家名称","Code","运费/kg","折扣率","结算运费","专递操作费/票","计费重量限制（kg）");
@@ -294,8 +302,7 @@ class LogisticsSourceParserTest {
         }
         var unrelatedHash=LogisticsDatasetService.hash(mapper.writeValueAsString(unrelated));
         var yanwenCoreHash=LogisticsDatasetService.hash(mapper.writeValueAsString(yanwenCore));
-        assertEquals("97172f01a81ec6389773fa8a36864fbd1f356b5f5e1ac83463bee62ad0d3aa7b",unrelatedHash);
-        assertEquals("06461d6ecc61d5055d84d4cd794c242d9a146ce11591c8420655bcd6596a9ecb",yanwenCoreHash);
+        assertEquals(Map.of("unrelated","03c73cd176eef464e8b00c199d447300377f9d0784005ba96a61db983c748a5d","yanwen","6e988bdcac50d4e64833fb535c84c3024979c1d3b74562e51597e0aa307d620c"),Map.of("unrelated",unrelatedHash,"yanwen",yanwenCoreHash));
     }
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void enrichesThePinnedRealYanwenWorkbookWithoutChangingRows()throws Exception {
