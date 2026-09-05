@@ -35,8 +35,9 @@ class LogisticsSourceParserTest {
             var mini=book.createSheet("MINI小包");row(mini,0,"JP-mini小包");row(mini,2,"重量段/KG","JP-mini小包普货X","JP-mini小包带电X");
             row(mini,3,"","运费RMB/票","运费RMB/票");row(mini,4,.05,13.5,13.7);row(mini,5,.1,14,14.5);
             var parsed=parser.parse(bytes(book),"通邮价格.xlsx");
-            var battery=findChannel(parsed,"纯电池线路");assertEquals(2,battery.path("rows").size(),battery.toString());assertEquals("JP",battery.path("rows").get(0).path("countryCode").asText());
-            assertEquals("first-next",battery.path("rows").get(0).path("pricingModel").asText());
+            assertEquals("filtered",parsed.path("sheets").get(0).path("status").asText());
+            assertEquals(2,parsed.path("sheets").get(0).path("filteredFirstNextRows").size());
+            assertTrue(parsed.path("channels").valueStream().noneMatch(c->c.path("channelName").asText().equals("纯电池线路")));
             var ordinary=findChannel(parsed,"JP-mini小包普货X");assertEquals(2,ordinary.path("rows").size());assertEquals("interval",ordinary.path("rows").get(0).path("pricingModel").asText());assertEquals(13.5,ordinary.path("rows").get(0).path("intervalPrice").asDouble());
         }
     }
@@ -198,9 +199,9 @@ class LogisticsSourceParserTest {
     @Test void shippedTemplateIsImportableAndExamplesCannotQuote()throws Exception {
         var parsed=parser.parse(Files.readAllBytes(Path.of("../public/templates/logistics-v2.xlsx")),"标准模板.xlsx");
         assertEquals("metadata",parsed.path("sheets").get(0).path("status").asText());
-        assertEquals(3,parsed.path("channels").size());int rows=0;
+        assertEquals(2,parsed.path("channels").size());int rows=0;
         for(var channel:parsed.path("channels")){assertEquals(0,channel.path("errors").asInt(),channel.toString());assertFalse(channel.path("quoteReady").asBoolean());rows+=channel.path("rows").size();}
-        assertEquals(4,rows);
+        assertEquals(3,rows);
     }
     @Test void changedGlobalFeeClauseChangesBusinessFingerprint()throws Exception {
         try(var book=new XSSFWorkbook()) {
@@ -313,20 +314,20 @@ class LogisticsSourceParserTest {
         }
         var unrelatedHash=LogisticsDatasetService.hash(mapper.writeValueAsString(unrelated));
         var yanwenCoreHash=LogisticsDatasetService.hash(mapper.writeValueAsString(yanwenCore));
-        assertEquals(Map.of("unrelated","03c73cd176eef464e8b00c199d447300377f9d0784005ba96a61db983c748a5d","yanwen","6e988bdcac50d4e64833fb535c84c3024979c1d3b74562e51597e0aa307d620c"),Map.of("unrelated",unrelatedHash,"yanwen",yanwenCoreHash));
+        assertEquals(Map.of("unrelated","955e5ec198a45bb221c5762854e5af5c4403930f0bbbe574ca1ac714db98ec8c","yanwen","e93803b19029147e8f7c5fa198201fed0e2b175802896889714be68cbbbcdc15"),Map.of("unrelated",unrelatedHash,"yanwen",yanwenCoreHash));
     }
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void enrichesThePinnedRealYanwenWorkbookWithoutChangingRows()throws Exception {
         var path=Path.of(System.getProperty("logistics.corpusDir")).resolve("8.27燕文价格.xlsx");var bytes=Files.readAllBytes(path);
         assertEquals("67D6E7A198E1AB685F816195BF930731C47298E27A780AA77210569894B525E4",HexFormat.of().withUpperCase().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)));
         var parsed=parser.parse(bytes,path.getFileName().toString());var channels=new LinkedHashMap<String,JsonNode>();for(var channel:parsed.path("channels"))channels.put(channel.path("channelName").asText(),channel);
-        var expectedRows=Map.of("燕文专线追踪-普货",190,"燕文专线追踪-特货",198,"燕文专线惠选-普货",34,"燕文化妆品专线",111,"燕文服装专线-普货",51,"燕文精品追踪-普货",12,"中邮上海线下E邮宝",30);
+        var expectedRows=Map.of("燕文专线追踪-普货",187,"燕文专线追踪-特货",195,"燕文专线惠选-普货",34,"燕文化妆品专线",111,"燕文服装专线-普货",51,"燕文精品追踪-普货",12,"中邮上海线下E邮宝",30);
         assertEquals(expectedRows.keySet(),channels.keySet());int total=0,withEta=0;var unknown=new ArrayList<String>();var etaCounts=new LinkedHashMap<String,Integer>();var etaCountries=new LinkedHashMap<String,Set<String>>();
         for(var entry:expectedRows.entrySet()) {
             var channel=channels.get(entry.getKey());assertEquals(entry.getValue(),channel.path("rows").size(),entry.getKey());total+=channel.path("rows").size();
             var countriesWithEta=new TreeSet<String>();int channelEta=0;for(var row:channel.path("rows"))if(row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt()){withEta++;channelEta++;countriesWithEta.add(row.path("countryCode").asText());}else unknown.add(entry.getKey()+"|"+row.path("countryCode").asText()+"|"+row.path("sourceRow").asInt());etaCounts.put(entry.getKey(),channelEta);etaCountries.put(entry.getKey(),countriesWithEta);
         }
-        assertEquals(626,total);assertEquals(623,withEta,etaCounts+" countries="+etaCountries);assertEquals(List.of("中邮上海线下E邮宝|EG|32","中邮上海线下E邮宝|MA|33","中邮上海线下E邮宝|ZA|34"),unknown);
+        assertEquals(620,total);assertEquals(617,withEta,etaCounts+" countries="+etaCountries);assertEquals(List.of("中邮上海线下E邮宝|EG|32","中邮上海线下E邮宝|MA|33","中邮上海线下E邮宝|ZA|34"),unknown);
         assertEta(channels.get("燕文专线追踪-普货"),"US",6,12);assertEta(channels.get("燕文专线追踪-普货"),"GB",5,10);assertEta(channels.get("燕文专线追踪-普货"),"FR",6,10);
         try(var workbook=WorkbookFactory.create(new ByteArrayInputStream(bytes))) {var sheet=workbook.getSheet("燕文精品追踪-普货");assertEquals("12-14天",sheet.getRow(79).getCell(3).getStringCellValue());assertEquals("9-14天",sheet.getRow(80).getCell(3).getStringCellValue());assertEquals("7-15天",sheet.getRow(81).getCell(3).getStringCellValue());}
         var epacketPairs=new HashSet<String>();for(var row:channels.get("中邮上海线下E邮宝").path("rows"))if(row.path("etaMinDays").asInt()>0)epacketPairs.add(row.path("etaMinDays").asInt()+"-"+row.path("etaMaxDays").asInt());

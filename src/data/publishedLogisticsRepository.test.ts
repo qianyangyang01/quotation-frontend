@@ -163,7 +163,7 @@ describe('published logistics version cache', () => {
     await expect(repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }))
       .resolves.toMatchObject({ revision: 'r2', source: 'network' })
 
-    expect(open).toHaveBeenCalledWith('milano-quotation-cache', 2)
+    expect(open).toHaveBeenCalledWith('milano-quotation-cache', 3)
     expect(cleared).toHaveBeenCalledTimes(1)
     expect(database.onversionchange).toBeTypeOf('function')
     database.onversionchange?.()

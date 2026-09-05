@@ -167,7 +167,7 @@ public class LogisticsDatasetService {
                 ), stats as (select count(*) total from filtered), page_rows as (
                   select (item || jsonb_build_object('providerName',provider_name,'channelName',channel_name,
                            'channelId',channel_id,'versionId',version_id,'versionNumber',version_number,
-                           'quoteReady',quote_ready,'logisticsAttribute',logistics_attribute)) payload,
+                           'quoteReady',quote_ready and logistics_price_row_quote_supported(item),'logisticsAttribute',logistics_attribute)) payload,
                          provider_name,channel_name,item->>'countryCode' country_code,(item->>'weightFromKg')::numeric weight_from
                   from filtered order by provider_name,channel_name,item->>'countryCode',(item->>'weightFromKg')::numeric
                   limit :limit offset :offset

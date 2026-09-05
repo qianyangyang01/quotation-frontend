@@ -148,7 +148,7 @@ public class LogisticsImportService {
                     int parsedRows=0;for(var parsedChannel:parsed.path("channels"))parsedRows+=parsedChannel.path("rows").size();
                     log.info("Parsed logistics workbook batch={} fileIndex={} bytes={} sheets={} channels={} rows={} elapsedMs={}",id,index,bytes.length,parsed.path("sheets").size(),parsed.path("channels").size(),parsedRows,(System.nanoTime()-fileStart)/1_000_000);
                     var templatePending=false;for(var channel:parsed.path("channels"))if("adapter-required".equals(channel.path("templateStatus").asText()))templatePending=true;
-                    var report=parsed.deepCopy();report.remove("channels");report.put("status",templatePending?"template-pending":"parsed").put("fileIndex",index);
+                    var report=parsed.deepCopy();report.remove("channels");report.put("status",templatePending?"template-pending":parsed.path("channels").isEmpty()&&parsed.path("sheets").valueStream().anyMatch(sheet->sheet.path("status").asText().equals("filtered"))?"filtered":"parsed").put("fileIndex",index);
                     report.put("originalFileName",file.path("originalName").asText(file.path("name").asText()));
                     // Persist cell-level evidence once. Rewriting it on every channel progress tick
                     // makes multi-provider standard workbooks needlessly expensive to import/poll.
@@ -187,7 +187,8 @@ public class LogisticsImportService {
                 results.add(outcome);completed++;payload.put("processedChannels",completed).put("progress",60+Math.round(completed*40.0/Math.max(1,grouped.size())));save(id,lease,"processing","staging",payload);
             }
             payload.remove("currentFileName");payload.remove("currentChannelName");payload.put("progress",100).put("elapsedMs",(System.nanoTime()-start)/1_000_000).put("stagingMs",(System.nanoTime()-stagingStart)/1_000_000);LogisticsReadiness.applyBatch(payload);
-            var finalStatus=grouped.isEmpty()?"failed":"completed";var finalPhase=grouped.isEmpty()?"failed":"review";
+            boolean filteredOnly=grouped.isEmpty()&&!fileReports.isEmpty()&&fileReports.valueStream().allMatch(report->report.path("status").asText().equals("filtered"));
+            var finalStatus=grouped.isEmpty()&&!filteredOnly?"failed":"completed";var finalPhase=finalStatus.equals("failed")?"failed":"review";
             save(id,lease,finalStatus,finalPhase,payload);
             cleanupParsedFiles(id,payload);save(id,lease,finalStatus,finalPhase,payload);
             log.info("Completed logistics import batch={} files={} channels={} elapsedMs={} status={}",id,payload.path("files").size(),grouped.size(),payload.path("elapsedMs").asLong(),finalStatus);

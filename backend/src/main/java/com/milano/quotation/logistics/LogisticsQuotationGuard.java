@@ -23,7 +23,7 @@ public class LogisticsQuotationGuard {
         var policies=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies' for share").query(String.class).optional().orElse("[]"));
         var channels=jdbc.sql("""
             select jsonb_build_object('key',concat(c.rule_id,'::',p.payload->>'name','::',c.code),
-                'versionId',v.id,'channelId',c.id,'rows',v.payload->'rows',
+                'versionId',v.id,'channelId',c.id,'rows',coalesce((select jsonb_agg(item) from jsonb_array_elements(v.payload->'rows') item where logistics_price_row_quote_supported(item)),'[]'::jsonb),
                 'legacy',exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy' and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)))::text
             from logistics_channel c join logistics_provider p on p.id=c.provider_id
             join logistics_version v on v.id=c.current_version_id and v.status='published'

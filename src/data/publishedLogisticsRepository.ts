@@ -26,8 +26,8 @@ export function buildQuoteLogisticsCountryQuery(
 }
 
 const DB_NAME = 'milano-quotation-cache'
-const DB_VERSION = 2
-const CACHE_SCHEMA = 'published-logistics-v2'
+const DB_VERSION = 3
+const CACHE_SCHEMA = 'published-logistics-v3-weight-range'
 const MANIFEST_STORE = 'logisticsManifest'
 const RULE_STORE = 'publishedRuleQueries'
 const CACHE_EVENT = 'milano:published-logistics-cache'

@@ -73,7 +73,7 @@ function normalizeLogisticsVersion(version: LogisticsChannelVersionRecord): Logi
 
 export function normalizeLogisticsPriceRow(row: Partial<LogisticsRateRow>): LogisticsPriceRow {
   return {
-    weightFromInclusive: row.weightFromInclusive, weightToInclusive: row.weightToInclusive, quoteReady: row.quoteReady,
+    pricingModel: row.pricingModel, weightFromInclusive: row.weightFromInclusive, weightToInclusive: row.weightToInclusive, quoteReady: row.quoteReady,
     areaName: String(row.areaName || ''), countryCode: String(row.countryCode || ''), etaMinDays: numberOrZero(row.etaMinDays), etaMaxDays: numberOrZero(row.etaMaxDays),
     prohibitedMarks: String(row.prohibitedMarks || ''), allowedMarks: String(row.allowedMarks || ''), maxPerimeterCm: numberOrZero(row.maxPerimeterCm), maxSideCm: numberOrZero(row.maxSideCm),
     volumeDivisor: numberOrZero(row.volumeDivisor), weightFromKg: numberOrZero(row.weightFromKg), weightToKg: numberOrZero(row.weightToKg), startWeightKg: numberOrZero(row.startWeightKg),

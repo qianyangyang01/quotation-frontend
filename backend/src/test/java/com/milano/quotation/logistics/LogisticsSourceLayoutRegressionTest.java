@@ -82,7 +82,7 @@ class LogisticsSourceLayoutRegressionTest {
         }
     }
 
-    @Test void splitsSfCountryCodeUsesDiscountedFirstPriceAndPreservesSuspension() throws Exception {
+    @Test void splitsSfCountryCodeAndSkipsFirstNextSection() throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("国际电商专递-CD");row(s,0,"国家名称","Code","运费/kg","结算运费","专递操作费/票","计费重量限制（kg）","备注");
             row(s,1,"澳大利亚","AU-1",40,29.6,20,"0.001-1KG","");row(s,2,"澳大利亚","AU-2",40,29.6,30,"0.001-1KG","");
@@ -92,7 +92,7 @@ class LogisticsSourceLayoutRegressionTest {
             var c=only(parser.parse(bytes(book),"顺丰.xlsx"));assertEquals(0,c.path("errors").asInt(),c.path("issues").toString());
             var au=find(c,"AU",1);assertEquals("1区",au.path("zoneName").asText());
             var nz=find(c,"NZ",5);assertEquals(1.001,nz.path("weightFromKg").asDouble());assertTrue(nz.path("sourceWeightRange").asText().contains(","));
-            var id=find(c,"ID",30);assertEquals(18.4,id.path("firstWeightPrice").asDouble());assertEquals(12,id.path("nextWeightPrice").asDouble());assertEquals(0.1,id.path("firstWeightKg").asDouble());assertEquals(0,id.path("pricePerKg").asDouble());assertTrue(id.path("pendingReason").asText().contains("暂停"));assertFalse(id.path("quoteReady").asBoolean());
+            assertEquals(3,c.path("rows").size());assertTrue(c.path("rows").valueStream().noneMatch(r->r.path("countryCode").asText().equals("ID")));
         }
     }
 
@@ -164,7 +164,7 @@ class LogisticsSourceLayoutRegressionTest {
             assertEquals(0,c.path("errors").asInt(),c.path("issues").toString());assertFalse(c.path("quoteReady").asBoolean());
             assertEquals(before.path("rows").size(),c.path("rows").size());assertEquals(before.path("contentHash"),c.path("contentHash"),c.path("channelName").asText());rows+=c.path("rows").size();
         }
-        assertEquals(3081,rows);
+        assertEquals(3049,rows);
     }
 
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
@@ -178,7 +178,7 @@ class LogisticsSourceLayoutRegressionTest {
                     channels++;rows+=channel.path("rows").size();
                 }
         }
-        assertEquals(88,channels);assertEquals(3081,rows);assertTrue(blocked.isEmpty(),blocked.toString());
+        assertEquals(88,channels);assertEquals(3049,rows);assertTrue(blocked.isEmpty(),blocked.toString());
     }
 
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
@@ -198,8 +198,9 @@ class LogisticsSourceLayoutRegressionTest {
                 }
             }
         }
-        assertEquals(10,providers.size());assertEquals(88,channels);assertEquals(3081,rows);assertEquals(3049,perKg);assertEquals(32,firstNext);
-        assertEquals(2808,sourceEta);assertEquals(74,missingEtaRoutes);assertEquals(881,sourceCodes);assertEquals(195,sourceOrigins);
+        System.out.printf("RANGE_BASELINE channels=%d rows=%d perKg=%d firstNext=%d sourceEta=%d missingEta=%d codes=%d origins=%d%n",channels,rows,perKg,firstNext,sourceEta,missingEtaRoutes,sourceCodes,sourceOrigins);
+        assertEquals(10,providers.size());assertEquals(88,channels);assertEquals(3049,rows);assertEquals(3049,perKg);assertEquals(0,firstNext);
+        assertEquals(2776,sourceEta);assertEquals(74,missingEtaRoutes);assertEquals(879,sourceCodes);assertEquals(195,sourceOrigins);
     }
 
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
@@ -260,7 +261,7 @@ class LogisticsSourceLayoutRegressionTest {
 
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void allRealWorkbooksRetainPricesWhenHeadersAndMergedBlocksMove() throws Exception {
-        var expected=Map.ofEntries(Map.entry("4px价格.xlsx",195),Map.entry("7.30花海.xlsx",263),Map.entry("8.12容鼎.xlsx",30),Map.entry("8.17万邦价格.xlsx",249),Map.entry("8.17通邮价格.xlsx",388),Map.entry("8.1云速递价格.xlsx",264),Map.entry("8.24云途价格.xlsx",633),Map.entry("8.24极通环球价格.xls",193),Map.entry("8.24递四方价格.xlsx",195),Map.entry("8.27燕文价格.xlsx",626),Map.entry("8.7顺丰价格.xlsx",240));
+        var expected=Map.ofEntries(Map.entry("4px价格.xlsx",195),Map.entry("7.30花海.xlsx",263),Map.entry("8.12容鼎.xlsx",30),Map.entry("8.17万邦价格.xlsx",247),Map.entry("8.17通邮价格.xlsx",388),Map.entry("8.1云速递价格.xlsx",261),Map.entry("8.24云途价格.xlsx",629),Map.entry("8.24极通环球价格.xls",193),Map.entry("8.24递四方价格.xlsx",195),Map.entry("8.27燕文价格.xlsx",620),Map.entry("8.7顺丰价格.xlsx",223));
         var root=Path.of(System.getProperty("logistics.corpusDir"));
         for(var entry:expected.entrySet()) {
             var path=root.resolve(entry.getKey());var originalBytes=Files.readAllBytes(path);var before=parser.parse(originalBytes,entry.getKey());

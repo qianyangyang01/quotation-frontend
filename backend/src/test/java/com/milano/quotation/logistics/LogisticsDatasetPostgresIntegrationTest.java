@@ -207,6 +207,21 @@ class LogisticsDatasetPostgresIntegrationTest {
             assertEquals("failed",status);assertTrue(jdbc.sql("select updated_at>now()-interval '1 minute' from logistics_import_batch where id=:id").param("id",batch).query(Boolean.class).single());
         }finally{worker.close();jdbc.sql("delete from logistics_import_batch where id=:id").param("id",batch).update();}
     }
+    @Test void allFirstNextImportCompletesWithoutDraftsOrPublicationChecks(){tx.executeWithoutResult(s->{try(var book=new XSSFWorkbook()){
+        var sheet=book.createSheet("首续重");LogisticsSourceParserTest.row(sheet,0,"国家","重量段","首重0.5kg","续重0.5kg");
+        LogisticsSourceParserTest.row(sheet,1,"美国","0-2","无效首重价","无效续重价");
+        var bytes=LogisticsSourceParserTest.bytes(book);var id=UUID.randomUUID();var key="qa/"+id;
+        storage.putRaw(key,new ByteArrayInputStream(bytes),bytes.length,"application/octet-stream");
+        var payload=mapper.createObjectNode();payload.putArray("files").addObject().put("name","花海.xlsx").put("objectKey",key).put("sha256",AssetStorageService.sha256(bytes));
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:d,'QA',:key,'queued','queued',cast(:p as jsonb))")
+            .param("id",id).param("d",guard.activeId()).param("key",id.toString()).param("p",payload.toString()).update();
+        var logistics=mock(LogisticsService.class);var worker=new LogisticsImportService(jdbc,mapper,storage,parser,logistics,guard,transactions);
+        try {worker.process(id);var result=worker.get(id);assertEquals("completed",result.path("status").asText());
+            assertTrue(result.path("payload").path("results").isEmpty());assertEquals("filtered",result.path("payload").path("fileReports").get(0).path("status").asText());
+            verifyNoInteractions(logistics);
+        }finally{worker.close();}
+    }catch(Exception e){throw new AssertionError(e);}finally{s.setRollbackOnly();}});}
+
     static UUID seed(UUID dataset,String name,boolean ready){
         var p=UUID.randomUUID();var c=UUID.randomUUID();var v=UUID.randomUUID();var code="SAME-"+name;int rule=guard.nextRuleId();
         var row=mapper.createObjectNode().put("areaName","美国").put("countryCode","US").put("weightFromKg",0).put("weightToKg",1).put("weightFromInclusive",false).put("weightToInclusive",true).put("pricePerKg",50).put("registrationFee",20).put("currency","CNY").put("pricingModel","per-kg").put("originRegion","").put("notes","").put("pendingReason","").put("quoteReady",ready).put("billingStepKg",0).put("linehaulPerKg",0);

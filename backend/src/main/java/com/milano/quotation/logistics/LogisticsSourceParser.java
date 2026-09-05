@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.04-v8";
+    public static final String VERSION="providers-2026.09.05-v9";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
@@ -77,6 +77,13 @@ public class LogisticsSourceParser {
                     else recognized=parseTable(source,provider,filename,parsed);
                 }
                 if(source.parsedRows.size()>MAX_PRICE_ROWS_PER_SHEET)throw AppException.unprocessable("基础运费工作表实际价格行不能超过"+MAX_PRICE_ROWS_PER_SHEET+"行："+sheet.getSheetName());
+                var filtered=report.putArray("filteredFirstNextRows");
+                source.filteredFirstNextRows.stream().sorted().forEach(r->filtered.add(r+1));
+                if(!filtered.isEmpty())report.put("message","首重续重已过滤，不解析、不进入发布前检查");
+                if(parsed.isEmpty()&&!filtered.isEmpty()) {
+                    report.put("status","filtered").put("priceRows",0).put("channels",0).put("errors",0);
+                    continue;
+                }
                 if(!recognized || parsed.isEmpty()) {
                     var pending=channel(provider.isBlank()?"未识别物流商":provider,sheet.getSheetName().trim(),parsed);
                     pending.put("templateStatus","adapter-required");
@@ -89,7 +96,7 @@ public class LogisticsSourceParser {
                 var conditional=report.putArray("conditionalPriceRows");var conditionalEvidence=new ArrayList<String>();
                 for(var rawRow:sheet) {
                     int r=rawRow.getRowNum();
-                    if(source.parsedRows.contains(r)||source.exampleRows.contains(r))continue;
+                    if(source.parsedRows.contains(r)||source.exampleRows.contains(r)||source.filteredFirstNextRows.contains(r))continue;
                     boolean range=false,number=false;
                     for(var cell:rawRow){if(looksRange(source.text(r,cell.getColumnIndex())))range=true;if(cell.getCellType()==CellType.NUMERIC)number=true;}
                     if(range&&number) {
@@ -219,6 +226,12 @@ public class LogisticsSourceParser {
         for(int c=0;c<100;c++) headers.put(source.text(header,c),c);
         for(int r=header+1;r<=source.lastContentRow;r++) {
             if(source.rowEmpty(r))continue;
+            var pricingModel=value(source,r,headers,"计费方式");
+            final int sourceRowIndex=r;
+            if(pricingModel.equals("first-next")||pricingModel.contains("首重")||pricingModel.contains("续重")
+                    ||List.of("首重","首重价","续重","续重单价").stream().anyMatch(label->hasFirstNextValue(value(source,sourceRowIndex,headers,label)))) {
+                source.filteredFirstNextRows.add(r);continue;
+            }
             var name=value(source,r,headers,"渠道名称"); var prov=value(source,r,headers,"物流商");
             var effectiveProvider=prov.isBlank()?fallback:prov;
             var sourceOrigin=value(source,r,headers,"发货区域");
@@ -271,6 +284,11 @@ public class LogisticsSourceParser {
             if(auxiliary>=0){source.auxiliaryRows.put(r,auxiliary);continue;}
             if(provider.equals("顺丰") && source.text(r,1).matches(".*[①②③④].*专线.*"))section=source.text(r,1).replaceAll("^[①②③④\\s]+","").trim();
             if(columns==null) continue;
+            if((columns.firstPrice>=0||columns.nextPrice>=0)&&(columns.rate<0
+                    ||hasFirstNextValue(source.text(r,columns.firstPrice))||hasFirstNextValue(source.text(r,columns.nextPrice)))) {
+                if(!source.rowEmpty(r))source.filteredFirstNextRows.add(r);
+                continue;
+            }
             var weight=!columns.fixedWeight.isBlank()?columns.fixedWeight:columns.from>=0?
                     source.numberText(r,columns.from)+(columns.boundsInGrams?"G":"")+"-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):
                     source.text(r,columns.weight);
@@ -285,8 +303,8 @@ public class LogisticsSourceParser {
             var sourceOrigin=columns.origin>=0?source.text(r,columns.origin):"";
             if(excludeSouthChinaPrice(provider,sourceOrigin)){source.parsedRows.add(r);continue;}
             var target=channel(provider,name,channels);
-            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",columns.firstPrice>=0?"first-next":"per-kg");
-            for(var label:columns.blockingFeeHeaders)pending(row,"未知价格附加费“"+label+"”未映射到两种基础计费模型");
+            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg");
+            for(var label:columns.blockingFeeHeaders)pending(row,"未知价格附加费“"+label+"”未映射到公斤价或每票费");
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
             String sourceContinent=columns.continent>=0?source.text(r,columns.continent):"";
             String normalizedCode=rawCode.replaceFirst("^([A-Z]{2})-[1-9][0-9]*$","$1");
@@ -320,16 +338,9 @@ public class LogisticsSourceParser {
             try { var range=parseRange(parseWeight.replaceAll("[（(].*$","")); row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo); }
             catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
             row.put("sourceWeightRange",weight);
-            if(columns.firstPrice>=0) {
-                numeric(row,"firstWeightPrice",source,r,columns.firstPrice,target,false);
-                numeric(row,"nextWeightPrice",source,r,columns.nextPrice,target,false);
-                row.put("firstWeightKg",columns.firstKg);row.put("nextWeightKg",columns.nextKg);
-                row.put("pricePerKg",0).put("registrationFee",0);
-            } else {
-                numeric(row,"pricePerKg",source,r,columns.rate,target,false);
-                numeric(row,"registrationFee",source,r,columns.fee,target,false);
-                row.put("sourceFeeLabel",columns.fee>=0?source.text(columns.feeHeaderRow,columns.fee):"");
-            }
+            numeric(row,"pricePerKg",source,r,columns.rate,target,false);
+            numeric(row,"registrationFee",source,r,columns.fee,target,false);
+            row.put("sourceFeeLabel",columns.fee>=0?source.text(columns.feeHeaderRow,columns.fee):"");
             if(columns.minimum>=0)numeric(row,"minChargeWeightKg",source,r,columns.minimum,target,true);
             if(columns.step>=0)numeric(row,"billingStepKg",source,r,columns.step,target,true);
             if(columns.linehaul>=0) {
@@ -717,9 +728,11 @@ public class LogisticsSourceParser {
         int headerRow=-1,feeHeaderRow=-1,country=-1,countryCode=-1,continent=-1,channel=-1,code=-1,weight=-1,from=-1,to=-1,rate=-1,fee=-1,settlement=-1,minimum=-1,step=-1,origin=-1,zone=-1,eta=-1,linehaul=-1,firstPrice=-1,nextPrice=-1;
         double firstKg=0.5,nextKg=0.5;boolean boundsInGrams=false;String fixedWeight="";List<Integer> notes=new ArrayList<>();Set<String> blockingFeeHeaders=new LinkedHashSet<>();
     }
+    private static boolean hasFirstNextValue(String value) {return !value.isBlank()&&!value.matches("0+(\\.0+)?|[-—/]");}
     private class Source {
         final Sheet sheet;final int nonempty;final int lastContentRow;final DataFormatter formatter=new DataFormatter(Locale.ROOT);
         final Set<Integer> parsedRows=new HashSet<>();
+        final Set<Integer> filteredFirstNextRows=new HashSet<>();
         final Set<Integer> exampleRows=new HashSet<>();
         final Map<Integer,Integer> auxiliaryRows=new HashMap<>();
         final Map<Integer,List<org.apache.poi.ss.util.CellRangeAddress>> merges=new HashMap<>();

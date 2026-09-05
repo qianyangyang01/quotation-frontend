@@ -11,8 +11,34 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers(disabledWithoutDocker=true)
 class LogisticsAcceptanceMigrationTest {
+    @Test void weightRangePolicyExcludesHistoricalFirstNextWithoutChangingRowsOrApprovals(){
+        resetDatabase();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("34").load().migrate();
+        var jdbc=JdbcClient.create(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
+        var dataset=UUID.fromString("00000000-0000-0000-0000-000000000001");
+        var normal=seed(jdbc,dataset,"published",true,1);var firstNext=seed(jdbc,dataset,"published",true,2);
+        var mixed=seed(jdbc,dataset,"published",true,3);
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',cast(:rows as jsonb)) where id=:id")
+            .param("id",firstNext).param("rows","[{\"pricingModel\":\"first-next\",\"firstWeightKg\":0.5,\"firstWeightPrice\":20,\"nextWeightKg\":0.5,\"nextWeightPrice\":5}]").update();
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',(payload->'rows')||cast(:extra as jsonb)) where id=:id")
+            .param("id",mixed).param("extra","[{\"countryCode\":\"JP\",\"areaName\":\"日本\",\"pricingModel\":\"first-next\",\"firstWeightKg\":0.5,\"firstWeightPrice\":20,\"nextWeightKg\":0.5,\"nextWeightPrice\":5}]").update();
+        for(var version:java.util.List.of(normal,firstNext,mixed))jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select :id,id,rows_fingerprint,'logistics-billing-v3','verified','{}','QA' from logistics_version where id=:version")
+            .param("id",UUID.randomUUID()).param("version",version).update();
+        assertTrue(ready(jdbc,normal));assertTrue(ready(jdbc,firstNext));
+        var before=jdbc.sql("select payload::text from logistics_version where id=:id").param("id",firstNext).query(String.class).single();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
+        assertTrue(ready(jdbc,normal));assertFalse(ready(jdbc,firstNext));
+        assertEquals(before,jdbc.sql("select payload::text from logistics_version where id=:id").param("id",firstNext).query(String.class).single());
+        assertTrue(ready(jdbc,mixed));assertEquals(3,jdbc.sql("select count(*) from logistics_billing_acceptance").query(Integer.class).single());
+        var queries=new LogisticsQueryService(jdbc,new tools.jackson.databind.ObjectMapper());
+        assertEquals(2,queries.manifest().publishedChannels());assertEquals(2,queries.publishedCatalog(null).rules().size());
+        assertTrue(queries.manifest().countries().stream().noneMatch(country->country.code().equals("JP")));
+        for(var rule:queries.publishedRules(null,"普货",java.util.List.of("US","JP"),java.util.List.of()).rules()) {
+            assertEquals(1,rule.path("prices").size());assertEquals("US",rule.path("prices").get(0).path("countryCode").asText());
+        }
+    }
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
-    @Test void upgradesProductionV26DataToV34WithoutChangingBusinessPayloads(){
+    @Test void upgradesProductionV26DataToV35WithoutChangingBusinessPayloads(){
         resetDatabase();
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("26").load().migrate();
         var jdbc=JdbcClient.create(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
@@ -27,7 +53,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("34",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("35",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_provider where id=:id").param("id",provider).query(UUID.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
         assertEquals(version,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
@@ -68,7 +94,7 @@ class LogisticsAcceptanceMigrationTest {
         var p=UUID.randomUUID();var c=UUID.randomUUID();var v=UUID.randomUUID();
         jdbc.sql("insert into logistics_provider(id,dataset_id,code,payload,created_at,updated_at) values(:id,:d,:code,'{}',now(),now())").param("id",p).param("d",dataset).param("code",p.toString()).update();
         jdbc.sql("insert into logistics_channel(id,dataset_id,provider_id,code,rule_id,payload,created_at,updated_at) values(:id,:d,:p,:code,:rule,'{}',now(),now())").param("id",c).param("d",dataset).param("p",p).param("code",c.toString()).param("rule",rule).update();
-        jdbc.sql("insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at) values(:id,:c,1,:status,'test',jsonb_build_object('quoteReady',:ready,'rows','[]'::jsonb),now())").param("id",v).param("c",c).param("status",status).param("ready",quoteReady).update();
+        jdbc.sql("insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at) values(:id,:c,1,:status,'test',jsonb_build_object('quoteReady',:ready,'rows',jsonb_build_array(jsonb_build_object('pricingModel','per-kg','pricePerKg',10,'registrationFee',2,'areaName','美国','countryCode','US'))),now())").param("id",v).param("c",c).param("status",status).param("ready",quoteReady).update();
         jdbc.sql("update logistics_channel set current_version_id=:v where id=:c").param("v",v).param("c",c).update();return v;
     }
 }

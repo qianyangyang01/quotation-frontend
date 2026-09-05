@@ -34,7 +34,7 @@ public class LogisticsQueryService {
             "prohibitedMarks", "allowedMarks", "maxPerimeterCm", "maxSideCm",
             "volumeDivisor", "weightFromKg", "weightToKg", "startWeightKg",
             "pricePerKg", "minChargeWeightKg", "firstWeightKg", "firstWeightPrice",
-            "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee",
+            "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee", "pricingModel",
             "surcharge", "fuelSurchargeRate", "prohibitGeneralCargo", "volumetric",
             "phoneRequired", "zoneName", "zoneExclude", "weightFromInclusive",
             "weightToInclusive"
@@ -159,7 +159,7 @@ public class LogisticsQueryService {
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
                   and logistics_version_quote_ready(v.id)
-                  and coalesce(item->>'areaName','')<>''
+                  and coalesce(item->>'areaName','')<>'' and logistics_price_row_quote_supported(item)
                 order by name, code
                 """).query((rs, rowNum) -> new PublishedCountry(rs.getString("code"), rs.getString("name"))).list();
         var attributes = jdbc.sql("""
@@ -194,11 +194,7 @@ public class LogisticsQueryService {
                     and coalesce((c.payload->>'enabled')::boolean,true)=true
                     and c.archived_at is null
                     and c.dataset_id=logistics_active_dataset()
-                    and exists(select 1 from logistics_billing_acceptance accepted
-                      where accepted.version_id=v.id
-                      and accepted.rows_fingerprint=v.rows_fingerprint
-                      and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
-                        or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                    and logistics_version_quote_ready(v.id)
                 )
                 select distinct ready.channel_id::text as channel_id, ready.rule_id, ready.channel_code,
                   ready.channel_payload, ready.provider_payload,
@@ -207,7 +203,7 @@ public class LogisticsQueryService {
                 from ready_ids ready
                 join logistics_version v on v.id=ready.version_id
                 cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
-                where coalesce(item->>'countryCode','')<>'' or coalesce(item->>'areaName','')<>''
+                where (coalesce(item->>'countryCode','')<>'' or coalesce(item->>'areaName','')<>'') and logistics_price_row_quote_supported(item)
                 order by ready.rule_id, country_code, area_name, zone_name, zone_exclude
                 """;
         var grouped = new LinkedHashMap<String, ObjectNode>();
@@ -292,11 +288,7 @@ public class LogisticsQueryService {
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
-                  and exists(select 1 from logistics_billing_acceptance accepted
-                    where accepted.version_id=v.id
-                    and accepted.rows_fingerprint=v.rows_fingerprint
-                    and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
-                      or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                  and logistics_version_quote_ready(v.id)
                 """);
         var rowSql = new StringBuilder("""
                 select c.id::text as channel_id,
@@ -314,11 +306,7 @@ public class LogisticsQueryService {
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
-                  and exists(select 1 from logistics_billing_acceptance accepted
-                    where accepted.version_id=v.id
-                    and accepted.rows_fingerprint=v.rows_fingerprint
-                    and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
-                      or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                  and logistics_version_quote_ready(v.id)
                 """);
         if (!normalizedChannels.isEmpty()) {
             params.put("channels", mapper.valueToTree(normalizedChannels.stream().map(value -> value.toLowerCase(Locale.ROOT)).toList()).toString());
@@ -326,6 +314,7 @@ public class LogisticsQueryService {
             metadataSql.append(channelFilter);
             rowSql.append(channelFilter);
         }
+        rowSql.append(" and logistics_price_row_quote_supported(item)");
         metadataSql.append(" order by c.rule_id");
         rowSql.append(" order by c.rule_id, coalesce(item->>'countryCode',''), coalesce((item->>'weightFromKg')::numeric,0)");
 

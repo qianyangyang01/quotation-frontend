@@ -12,7 +12,7 @@ import java.util.*;
 /** Fail-closed evaluator for explicitly supported, fully specified price rules. */
 @Component
 public class LogisticsBillingEngine {
-    public static final String VERSION="logistics-billing-v3";
+    public static final String VERSION="logistics-billing-v4";
     private final ObjectMapper mapper;
     public LogisticsBillingEngine(ObjectMapper mapper){this.mapper=mapper;}
 
@@ -21,6 +21,9 @@ public class LogisticsBillingEngine {
         var routePrices=new LinkedHashMap<String,Set<String>>();
         if(!rows.isArray()||rows.isEmpty())reasons.add("没有完整价格行");
         for(var row:rows){
+            if(!model(row).equals("per-kg")||List.of("firstWeightKg","firstWeightPrice","nextWeightKg","nextWeightPrice","intervalPrice").stream().anyMatch(f->n(row,f).signum()>0))
+                reasons.add("当前仅支持重量段公斤价加每票费，首重续重和区间一口价不参与报价");
+            if(n(row,"surcharge").signum()>0)reasons.add("当前仅支持公斤价和每票费，附加费尚未接入报价");
             long baseTypes=List.of("pricePerKg","intervalPrice","firstWeightPrice").stream().filter(f->n(row,f).signum()>0).count();
             if(baseTypes!=1)reasons.add("基础计费价格必须唯一，不能同时使用公斤价、区间价和首重价");
             if(!row.path("currency").asText("CNY").equals("CNY"))reasons.add("非人民币计价未适配");
@@ -51,15 +54,9 @@ public class LogisticsBillingEngine {
             if(!zones.isEmpty()&&!zoneMatches(row.path("zoneName").asText(),requestedZone))continue;
             BigDecimal charge=weight,volume=BigDecimal.ZERO;
             if(!includes(row,charge))continue;
-            BigDecimal base;
-            switch(model(row)){
-                case "interval" -> base=n(row,"intervalPrice");
-                case "first-next" -> base=n(row,"firstWeightPrice").add(charge.subtract(n(row,"firstWeightKg")).max(BigDecimal.ZERO)
-                        .divide(n(row,"nextWeightKg"),0,RoundingMode.CEILING).multiply(n(row,"nextWeightPrice")));
-                default -> base=charge.multiply(n(row,"pricePerKg"));
-            }
+            BigDecimal base=charge.multiply(n(row,"pricePerKg"));
             matches.add(mapper.createObjectNode().put("rowIndex",current).put("base",base).put("chargeWeightKg",charge).put("volumeWeightKg",volume)
-                    .put("total",base.add(n(row,"registrationFee")).add(n(row,"surcharge")).setScale(2,RoundingMode.HALF_UP)).put("engineVersion",VERSION));
+                    .put("total",base.add(n(row,"registrationFee")).setScale(2,RoundingMode.HALF_UP)).put("engineVersion",VERSION));
         }
         if(matches.isEmpty())throw AppException.unprocessable("国家、重量或货物属性不在已核验范围");
         if(matches.size()>1){var totals=new HashSet<String>();for(var match:matches)totals.add(match.path("total").decimalValue().stripTrailingZeros().toPlainString());if(totals.size()>1)throw AppException.unprocessable("存在多个匹配价格，禁止自动选择最低价");}

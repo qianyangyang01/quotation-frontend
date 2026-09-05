@@ -17,6 +17,8 @@ describe('rebuild pricing safety', () => {
     expect(completedBatchStage(batch(['draft', 'blocked']))).toBe('存在阻断，请核对')
     const failedFile = batch(['unchanged']); failedFile.payload.fileReports = [{ fileName: '损坏.xlsx', status: 'failed' }]
     expect(completedBatchStage(failedFile)).toBe('存在文件解析失败或新模板待适配，请核对')
+    const filtered = batch([]); filtered.payload.fileReports = [{ fileName: '首重续重.xlsx', status: 'filtered' }]
+    expect(completedBatchStage(filtered)).toBe('首重续重已过滤，无需审核')
   })
   it('preserves the confirmed 200g/201g boundary through API normalization', () => {
     const rule = makeRule([{ ...row, weightFromKg: 0, weightToKg: 0.2, pricePerKg: 10 }, { ...row, weightFromKg: 0.201, weightToKg: 0.5, weightFromInclusive: true, pricePerKg: 20 }])
@@ -36,10 +38,12 @@ describe('rebuild pricing safety', () => {
     const actual = makeRule([{ ...row, weightFromKg: 0, weightToKg: 10, pricePerKg: 10, volumetric: false, volumeDivisor: 8000 }])
     expect(calculateLogisticsFee(actual, 'FR', 1, [], { lengthCm: 40, widthCm: 30, heightCm: 20, volumeMultiplier: 2 })?.total).toBe(12)
   })
-  it('does not add an extra continuation unit from floating point error', () => {
+  it('rejects historical first-next rules even with verified billing', () => {
     const firstNext = makeRule([{ ...row, registrationFee: 0, weightFromKg: 0, weightToKg: 2, firstWeightKg: 0.5, firstWeightPrice: 35, nextWeightKg: 0.1, nextWeightPrice: 5 }])
-    expect(calculateLogisticsFee(firstNext, 'FR', 0.8)?.total).toBe(50)
-    expect(calculateLogisticsFee(firstNext, 'FR', 0.801)?.total).toBe(55)
+    expect(calculateLogisticsFee(firstNext, 'FR', 0.8)).toBeNull()
+    firstNext.billingVerified = true
+    expect(calculateLogisticsFee(firstNext, 'FR', 0.801)).toBeNull()
+    expect(findPriceRow(firstNext, 'FR', 0.8)).toBeUndefined()
   })
   it('aggregates overlapping change categories and keeps legacy diff compatibility', () => {
     expect(aggregateChangeSummary([

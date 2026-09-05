@@ -6,7 +6,7 @@ export interface LogisticsPriceRow {
   nextWeightKg: number; nextWeightPrice: number; intervalPrice: number; registrationFee: number
   surcharge: number; fuelSurchargeRate: number; prohibitGeneralCargo: boolean; volumetric: boolean
   phoneRequired: boolean; zoneName: string; zoneExclude: boolean
-  weightFromInclusive?: boolean; weightToInclusive?: boolean; quoteReady?: boolean
+  pricingModel?: string; weightFromInclusive?: boolean; weightToInclusive?: boolean; quoteReady?: boolean
 }
 export interface LogisticsRelation { carrier: string; channel: string; channelCode: string; discounts: string }
 export interface LogisticsRule {
@@ -100,8 +100,12 @@ function normalizeShippingMarks(marks: string[]) {
   const normalized = marks.flatMap(mark => mark === '化妆品' ? ['非液体化妆品'] : [mark]).filter(Boolean)
   return [...new Set(normalized.length ? normalized : ['普货'])]
 }
+export function isWeightRangePrice(price: LogisticsPriceRow) {
+  return (!price.pricingModel || price.pricingModel === 'per-kg') && price.pricePerKg > 0
+    && ![price.firstWeightKg, price.firstWeightPrice, price.nextWeightKg, price.nextWeightPrice, price.intervalPrice, price.surcharge].some(value => value > 0)
+}
 export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: string[] = ['普货']) {
-  if (price.quoteReady === false) return false
+  if (price.quoteReady === false || !isWeightRangePrice(price)) return false
   const marks = normalizeShippingMarks(productMarks)
   const prohibited = new Set(splitMarks(price.prohibitedMarks))
   if (marks.some(mark => prohibited.has(mark))) return false
@@ -111,7 +115,7 @@ export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: strin
 }
 export function findPriceRow(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], quoteRegion = '') {
   const countryRows = rule.prices.filter(price => countryMatches(price, country)
-    && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks)))
+    && (isWeightRangePrice(price) && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks))))
   const zoneRequired = meaningfulZoneOptions(countryRows).length > 0
   return countryRows.find(price => priceMatchesRegion(price, quoteRegion, zoneRequired) && weightMatchesPrice(price, weightKg))
 }
@@ -123,7 +127,7 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   void dimensions
   const actualWeightKg = Math.max(0, Number(weightKg) || 0)
   const countryRows = rule.prices.filter(price => countryMatches(price, country)
-    && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks)))
+    && (isWeightRangePrice(price) && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks))))
   const zoneRequired = meaningfulZoneOptions(countryRows).length > 0
   const candidates = countryRows.filter(price => priceMatchesRegion(price, quoteRegion, zoneRequired))
   if (zoneRequired && !quoteRegion) return null
@@ -132,15 +136,8 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   const volumeDivisor = 0
   const price = candidates.find(candidate => weightMatchesPrice(candidate, chargeWeightKg))
   if (!price) return null
-  let base: number
-  if (price.intervalPrice > 0) base = price.intervalPrice
-  else if (price.firstWeightKg > 0 && price.firstWeightPrice > 0) {
-    const extraWeight = Math.max(0, chargeWeightKg - price.firstWeightKg)
-    const extraUnits = price.nextWeightKg > 0 ? Math.ceil(extraWeight / price.nextWeightKg - 1e-9) : 0
-    base = price.firstWeightPrice + extraUnits * price.nextWeightPrice
-  } else base = chargeWeightKg * price.pricePerKg
-  // 当前业务只使用价格和每票固定费用；其他导入字段保留用于追溯和后续扩展。
-  const surcharge = Math.max(0, price.surcharge || 0)
-  const total = base + (price.registrationFee || 0) + surcharge
+  const base = chargeWeightKg * price.pricePerKg
+  const surcharge = 0
+  const total = base + (price.registrationFee || 0)
   return { total: Number(total.toFixed(2)), base, surcharge, price, actualWeightKg, volumeWeightKg, chargeWeightKg, volumeDivisor }
 }
