@@ -28,6 +28,9 @@ public class PurchaseProductController {
     @PutMapping("/batch") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<List<JsonNode>> batch(@RequestBody List<JsonNode> body) {
         var result=products.upsertAll(body); audit.record("purchase.batch-upsert","purchase-product","batch","success", Map.of("count",result.size())); return ApiResponse.ok(result);
     }
+    @PostMapping("/paste") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<List<JsonNode>> paste(@RequestBody List<JsonNode> body) {
+        var result=products.createPasted(body); audit.record("purchase.paste-create","purchase-product","batch","success",Map.of("count",result.size())); return ApiResponse.ok(result);
+    }
     @PostMapping("/{sku}/promote") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<JsonNode> promote(@PathVariable String sku,@RequestBody PromoteInput body){
         var result=products.promote(sku,body.targetSku(),body.expectedVersion());audit.record("purchase.promote","purchase-product",sku,"success",Map.of("targetSku",body.targetSku()));return ApiResponse.ok(result);
     }

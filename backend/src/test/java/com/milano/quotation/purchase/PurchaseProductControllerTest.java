@@ -13,6 +13,14 @@ class PurchaseProductControllerTest {
     private PurchaseProductService products; private AuditService audit; private PurchaseProductController controller;
 
     @BeforeEach void setup(){products=mock(PurchaseProductService.class);audit=mock(AuditService.class);controller=new PurchaseProductController(products,audit);}
+    @Test void pastedCreationUsesDedicatedValidationAndAudit() {
+        var rows=java.util.List.<tools.jackson.databind.JsonNode>of(JsonNodeFactory.instance.objectNode().put("sku","P-1"));
+        when(products.createPasted(rows)).thenReturn(rows);
+        controller.paste(rows);
+        verify(products).createPasted(rows);
+        verify(audit).record(eq("purchase.paste-create"),eq("purchase-product"),eq("batch"),eq("success"),argThat(detail->detail.get("count").equals(1)));
+        verify(products,never()).upsertAll(any());
+    }
     @Test void rejectsArrayInputBeforeCastingAndWriting() {
         assertThrows(com.milano.quotation.common.AppException.class,()->controller.upsert("QA-INVALID",JsonNodeFactory.instance.arrayNode()));
         verifyNoInteractions(products);

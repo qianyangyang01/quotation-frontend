@@ -9,6 +9,10 @@ import { checkPurchaseImportRemoval, deletePurchaseImportTask, archivePurchaseIm
 import { preparePurchaseWorkbookTextOnly } from '@/services/purchaseWorkbookTextOnlyClient'
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
+import PurchasePasteDialog from './PurchasePasteDialog.vue'
+
+const showPasteDialog = ref(false)
+function pasteSaved(count: number) { showPasteDialog.value = false; toast(`已新增${count}条采购资料`); reload() }
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
 const records = ref<PurchaseProductRecord[]>([])
@@ -333,11 +337,13 @@ const detailFields = computed(() => detail.value ? [
 </script>
 
 <template>
+  <PurchasePasteDialog v-if="showPasteDialog" @close="showPasteDialog=false" @saved="pasteSaved" />
   <section class="purchase-heading">
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
       <button class="outline" :class="{ active:showSupplierRecords }" @click="showSupplierRecords=true">供应商</button>
+      <button class="new-import" @click="showPasteDialog=true">粘贴新增</button>
       <button class="new-import" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='standard' ? `${uploadProgress.percent}%` : '新数据导入' }}</button>
       <button class="legacy-import" :disabled="asyncUploading" @click="legacyFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='legacy-2026' ? `${uploadProgress.percent}%` : '旧数据导入' }}</button>
       <button class="outline" @click="showTaskCenter=true">导入任务</button>

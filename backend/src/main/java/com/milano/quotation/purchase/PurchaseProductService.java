@@ -92,6 +92,23 @@ public class PurchaseProductService {
         return rows.stream().map(this::upsert).toList();
     }
 
+    @Transactional public List<JsonNode> createPasted(List<JsonNode> rows) {
+        if (rows == null || rows.isEmpty() || rows.size() > 100) throw AppException.unprocessable("粘贴新增每次须为1至100条");
+        var inputs = new ArrayList<JsonNode>(); var skus = new HashSet<String>();
+        for (int i = 0; i < rows.size(); i++) {
+            if (!(rows.get(i) instanceof ObjectNode node)) throw AppException.unprocessable("第"+(i+1)+"行商品格式错误");
+            var copy = node.deepCopy(); var sourceRow = copy.path("sourceRow").asInt(i + 1);
+            if (sourceRow < 1 || sourceRow > 100) sourceRow = i + 1;
+            PurchasePasteValidator.validate(copy, sourceRow); validatePayload(copy);
+            var sku = copy.path("sku").asText();
+            if (!skus.add(sku)) throw AppException.unprocessable("第"+sourceRow+"行SKU "+sku+" 在本次粘贴中重复");
+            if (products.findBySku(sku).isPresent()) throw AppException.conflict("第"+sourceRow+"行SKU "+sku+" 已存在，本次未保存；请删除该行或修改SKU后重试");
+            inputs.add(copy);
+        }
+        // All rows validated before writes. Missing version also prevents a concurrent SKU from being overwritten.
+        return inputs.stream().map(this::upsert).toList();
+    }
+
     @Transactional(readOnly=true) public PurchaseProductDeletionGuard.DeletionCheck deletionCheck(String sku) {
         var row=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
         return deletionGuard.inspect(row.id,row.sku,row.version);
