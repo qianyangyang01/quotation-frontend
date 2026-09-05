@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateLogisticsFee, formatLogisticsEta, type LogisticsRule } from './logistics'
+import { calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsQuoteRegions, replaceLogisticsRules, logisticsRuleByName, type LogisticsRule } from './logistics'
 
 it('keeps a usable base quote when ETA is absent and displays an explicit explanation', () => {
   expect(formatLogisticsEta({ etaMinDays: 0, etaMaxDays: 0 })).toBe('该物流暂无时效说明')
@@ -72,4 +72,25 @@ describe('logistics fee calculation', () => {
     expect(result?.volumeDivisor).toBe(0)
     expect(result?.chargeWeightKg).toBe(0.18)
   })
+})
+
+it('indexes a published snapshot without changing zone, weight-boundary or eligibility results and resets on replacement', () => {
+  const rule = { ...publishedRule, name: '区域索引', prices: [
+    { ...publishedRule.prices[0]!, areaName: '澳大利亚', countryCode: 'AU', zoneName: '澳大利亚1区', weightToKg: .5 },
+    { ...publishedRule.prices[0]!, areaName: '澳大利亚', countryCode: 'AU', zoneName: '澳大利亚2区', pricePerKg: 99 },
+    { ...publishedRule.prices[0]!, areaName: '澳大利亚', countryCode: 'AU', zoneName: '澳大利亚1区', weightFromKg: .5, pricePerKg: 66 },
+  ] }
+  const cases = ['AU','au','澳大利亚'].flatMap(country => ['', '澳大利亚1区','澳大利亚2区'].flatMap(zone => [0,.5,.500001,1,1.01].map(weight => ({ country, zone, weight }))))
+  const before = cases.map(c => calculateLogisticsFee(rule,c.country,c.weight,['普货'],undefined,c.zone))
+  replaceLogisticsRules([rule])
+  expect(cases.map(c => calculateLogisticsFee(rule,c.country,c.weight,['普货'],undefined,c.zone))).toEqual(before)
+  expect(findPriceRow(rule,'AU',.5,['普货'],'澳大利亚1区')?.pricePerKg).toBe(78)
+  expect(logisticsQuoteRegions('AU')).toEqual(['澳大利亚1区','澳大利亚2区'])
+  expect(logisticsRuleByName(rule.name)).toBe(rule)
+  const replacement = { ...rule, prices: [{ ...rule.prices[0]!, zoneName: '', pricePerKg: 10 }] }
+  replaceLogisticsRules([replacement])
+  expect(logisticsQuoteRegions('AU')).toEqual([])
+  expect(calculateLogisticsFee(replacement,'AU',.5)?.total).toBe(25)
+  expect(logisticsRuleByName(rule.name)).toBe(replacement)
+  replaceLogisticsRules([])
 })

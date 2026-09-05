@@ -70,8 +70,8 @@ public class QuotationReadinessService {
             case "country-classification", "channel-policies", "customer-grades" -> payload.isArray() && !payload.isEmpty();
             case "exchange-rate" -> payload.isObject() && payload.path("usdCny").asDouble(0) > 0;
             case "tax-settings" -> payload.isObject()
-                    && payload.path("countries").isArray() && !payload.path("countries").isEmpty()
-                    && payload.path("providers").isArray() && !payload.path("providers").isEmpty()
+                    && payload.path("countries").isArray()
+                    && payload.path("providers").isArray()
                     && !payload.path("updatedAt").asText("").isBlank()
                     && !payload.path("updatedAt").asText("").contains("尚未保存");
             default -> false;

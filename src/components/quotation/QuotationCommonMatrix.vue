@@ -4,7 +4,8 @@ import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelect
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  active?: boolean
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
   contextKey: string
@@ -16,7 +17,7 @@ const props = defineProps<{
   customQuantity?: number
   presetSelection?: QuotationPresetSelection[]
   presetVersion?: number
-}>()
+}>(), { active: true })
 
 const emit = defineEmits<{
   adopt: [row: QuotationMatrixRow]
@@ -44,6 +45,7 @@ const commonCountries = computed(() => props.countries
   .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-CN')))
 
 function availableRows(country: string) {
+  if (props.active === false) return []
   void props.contextKey
   return props.quoteRowsForCountry(country).filter(row => row.available !== false)
 }
@@ -57,7 +59,7 @@ function presetMatchesRow(preset: QuotationPresetSelection, row: QuotationMatrix
 }
 function applyPresetSelection() {
   const presets = props.presetSelection || []
-  const allRows = commonCountries.value.flatMap(country => availableRows(country.name))
+  const allRows = [...new Set(presets.map(preset => preset.country))].flatMap(availableRows)
   if (!presets.length) {
     selectedKeys.value = []
     emit('selectionChange', [])
@@ -75,7 +77,10 @@ function applyPresetSelection() {
   pendingPreset = false
 }
 function isSelected(row: QuotationMatrixRow) { return selectedKeys.value.includes(rowKey(row)) }
-function selectedQuoteRows() { return commonCountries.value.flatMap(country => availableRows(country.name)).filter(isSelected) }
+function selectedQuoteRows() {
+  const countries = new Set(selectedKeys.value.map(key => key.split('|||')[0]!))
+  return [...countries].flatMap(availableRows).filter(isSelected)
+}
 function toggleSelection(row: QuotationMatrixRow) {
   const key = rowKey(row)
   const removing = isSelected(row)
@@ -134,7 +139,8 @@ function countryFlag(code: string) {
 function formatUsd(value: number | null) { return value == null ? '—' : `$${value.toFixed(2)}` }
 function formatCny(value: number | null) { return value == null ? '—' : `¥${(value * props.exchangeRate).toFixed(2)}` }
 
-watch([commonCountries, () => props.contextKey, () => props.presetVersion], () => {
+watch([() => props.active, commonCountries, () => props.contextKey, () => props.presetVersion], () => {
+  if (props.active === false) return
   if ((props.presetVersion || 0) !== observedPresetVersion) {
     observedPresetVersion = props.presetVersion || 0
     pendingPreset = observedPresetVersion > 0
@@ -146,7 +152,8 @@ watch([commonCountries, () => props.contextKey, () => props.presetVersion], () =
   page.value = 1
   if (pendingPreset) applyPresetSelection()
 }, { immediate: true })
-watch([() => props.contextKey, () => props.customQuantity], () => {
+watch([() => props.active, () => props.contextKey, () => props.customQuantity], () => {
+  if (props.active === false) return
   if (!selectedKeys.value.length) return
   const refreshed = selectedQuoteRows()
   const validKeys = new Set(refreshed.map(rowKey))
@@ -196,7 +203,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 </script>
 
 <template>
-  <section class="common-matrix">
+  <section v-if="active !== false" class="common-matrix">
     <header class="common-head">
       <div><p>MODE A · COMMON COUNTRY QUOTATION</p><h2>常用国家快速报价</h2><span>国家清单与财务设置同步，选择国家后查看该国全部可用渠道。</span></div>
       <div class="common-head-actions">
@@ -207,7 +214,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 
     <div v-if="filteredCountries.length" class="country-grid">
       <button v-for="country in filteredCountries" :key="country.name" draggable="true" :class="{ active:activeCountry===country.name, dragging:draggedCountry===country.name, 'drag-over':dragOverCountry===country.name }" title="按住卡片拖动排序" @click="activeCountry=country.name" @dragstart="startCountryDrag(country.name,$event)" @dragover="moveCountryOver(country.name,$event)" @drop="dropCountry(country.name,$event)" @dragend="endCountryDrag">
-        <u aria-hidden="true">⋮⋮</u><i>{{ countryFlag(country.code) }}</i><span><b>{{ country.name }}</b><small>{{ country.code }} · {{ availableRows(country.name).length }} 条可用渠道</small></span><em v-if="activeCountry===country.name">已选择</em>
+        <u aria-hidden="true">⋮⋮</u><i>{{ countryFlag(country.code) }}</i><span><b>{{ country.name }}</b><small>{{ country.code }} · {{ country.channelCount }} 条可用渠道</small></span><em v-if="activeCountry===country.name">已选择</em>
       </button>
     </div>
     <div v-else class="empty-countries">财务设置中暂未配置匹配的常用国家</div>

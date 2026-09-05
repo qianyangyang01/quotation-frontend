@@ -14,7 +14,8 @@ import {
   type QuotationTemplateSelectionItem,
 } from '@/data/quotationTemplates'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  active?: boolean
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
   contextKey: string
@@ -29,7 +30,7 @@ const props = defineProps<{
   draftSelection?: QuotationPresetSelection[]
   draftTemplate?: { id: string; name: string } | null
   draftVersion?: number
-}>()
+}>(), { active: true })
 
 const emit = defineEmits<{
   'update:customQuantity': [value: number]
@@ -334,6 +335,7 @@ function formatTime(value: string) {
 
     <QuotationMatrix
       variant="template"
+      :active="active"
       :countries="countries"
       :quote-rows-for-country="quoteRowsForCountry"
       :context-key="contextKey"

@@ -3,6 +3,7 @@ package com.milano.quotation.logistics;
 import com.milano.quotation.common.AppException;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -54,6 +55,45 @@ class LogisticsQueryPostgresIntegrationTest {
         jdbc.sql("update logistics_channel set current_version_id=:version where id=:id").param("version", versionId).param("id", channelId).update();
         // This suite exercises pre-migration legacy query compatibility, not new-version approval.
         jdbc.sql("insert into logistics_billing_acceptance select gen_random_uuid(),id,md5((payload->'rows')::text),'legacy','legacy','{}','QA',now() from logistics_version where id=:id").param("id",versionId).update();
+    }
+
+    @BeforeEach
+    void restorePublishedChannel() {
+        jdbc.sql("update logistics_channel set archived_at=null, archived_by=null, archive_reason=null, payload=jsonb_set(payload,'{enabled}','true'::jsonb), version=version+1 where id=:id").param("id", channelId).update();
+    }
+
+    @Test
+    void cachedPublishedRulesCannotSurviveChannelDisableUnderAnOldRevision() {
+        var service = new LogisticsQueryService(jdbc, new ObjectMapper());
+        var original = jdbc.sql("select payload::text from logistics_channel where id=:id").param("id",channelId).query(String.class).single();
+        var revision = service.manifestRevision().revision();
+        var first = service.publishedRules(revision, "普货", List.of("US"), List.of());
+        assertEquals(1, first.rules().size());
+        org.junit.jupiter.api.Assertions.assertSame(first, service.publishedRules(revision, "普货", List.of("US"), List.of()));
+        try {
+            jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false'::jsonb) where id=:id").param("id",channelId).update();
+            org.junit.jupiter.api.Assertions.assertThrows(AppException.class, () -> service.publishedRules(revision, "普货", List.of("US"), List.of()));
+            assertTrue(service.publishedRules("", "普货", List.of("US"), List.of()).rules().isEmpty());
+        } finally {
+            jdbc.sql("update logistics_channel set payload=cast(:payload as jsonb) where id=:id").param("payload",original).param("id",channelId).update();
+        }
+    }
+
+    @Test
+    void acceptanceEligibilityChangesInvalidateCachedCountEvenWithoutANewReviewTime() {
+        var service = new LogisticsQueryService(jdbc, new ObjectMapper());
+        var before = service.manifest();
+        assertEquals(1, before.publishedChannels());
+        try {
+            jdbc.sql("update logistics_billing_acceptance set kind='verified',engine_version='unsupported-engine' where version_id=:id").param("id",versionId).update();
+            var after = service.manifest();
+            assertNotEquals(before.revision(), after.revision());
+            assertEquals(0, after.publishedChannels());
+            assertThrows(AppException.class, () -> service.publishedRules(before.revision(), "普货", List.of("US"), List.of()));
+        } finally {
+            jdbc.sql("update logistics_billing_acceptance set kind='legacy',engine_version='legacy' where version_id=:id").param("id",versionId).update();
+        }
+        assertEquals(1, service.manifest().publishedChannels());
     }
 
     @Test

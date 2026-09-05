@@ -93,7 +93,7 @@ export type QuotationMatrixRow = {
   taxConfigured: boolean
   taxRatePercent: number | null
   countryFixedTaxUsd: number
-  taxFeeMode: 'exempt' | 'fixed-order' | 'missing'
+  taxFeeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'missing'
   taxLabel: string
   tax1Usd: number | null
   tax2Usd: number | null

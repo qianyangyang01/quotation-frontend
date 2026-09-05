@@ -35,7 +35,7 @@ export type FinanceQuoteTaxResult = {
   configured: boolean
   ratePercent: null
   fixedFeeUsd: number
-  feeMode: 'exempt' | 'fixed-order' | 'missing'
+  feeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'missing'
   taxUsd: number
   totalUsd: number
   label: string
@@ -99,7 +99,7 @@ export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | 
         country: fallback.country,
         fixedFeeUsd,
         selected: typeof stored?.selected === 'boolean' ? stored.selected : Boolean(stored && (stored.enabled === true || fixedFeeUsd > 0)),
-        enabled: fixedFeeUsd > 0,
+        enabled: stored?.enabled !== false && fixedFeeUsd > 0,
         sortOrder: Number.isFinite(Number(stored?.sortOrder)) ? Math.max(1, Number(stored?.sortOrder)) : fallback.sortOrder,
       }
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
@@ -137,17 +137,16 @@ export function calculateFinanceQuoteTax(
   baseQuoteUsd: number,
 ): FinanceQuoteTaxResult {
   const normalizedBase = Number.isFinite(Number(baseQuoteUsd)) ? Math.max(0, Number(baseQuoteUsd)) : 0
+  const countrySetting = settings.countries.find(item => item.selected && item.country === country)
+  if (!countrySetting?.enabled || finiteNonNegative(countrySetting.fixedFeeUsd) === 0) {
+    return { included: false, configured: true, ratePercent: null, fixedFeeUsd: 0, feeMode: 'no-tax', taxUsd: 0, totalUsd: normalizedBase, label: '无关税' }
+  }
   const providerSetting = settings.providers.find(item => item.selected && item.provider.trim() === provider.trim())
   if (!providerSetting) {
     return { included: false, configured: false, ratePercent: null, fixedFeeUsd: 0, feeMode: 'missing', taxUsd: 0, totalUsd: normalizedBase, label: '物流商税务属性待设置' }
   }
   if (providerSetting.mode === 'exempt') {
     return { included: true, configured: true, ratePercent: null, fixedFeeUsd: 0, feeMode: 'exempt', taxUsd: 0, totalUsd: normalizedBase, label: '免税' }
-  }
-
-  const countrySetting = settings.countries.find(item => item.selected && item.country === country)
-  if (!countrySetting?.enabled) {
-    return { included: false, configured: false, ratePercent: null, fixedFeeUsd: 0, feeMode: 'missing', taxUsd: 0, totalUsd: normalizedBase, label: `${country || '当前国家'}关税待设置` }
   }
 
   const fixedFeeUsd = finiteNonNegative(countrySetting.fixedFeeUsd)

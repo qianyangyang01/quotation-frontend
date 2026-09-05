@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
+import { createCountryQuotationCache } from '@/services/countryQuotationCache'
+import { financeSettingsAreHydrated } from '@/services/financeSettings'
 import { ApiError } from '@/services/http'
 import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { validateQuotationConditions } from '@/services/quotationValidation'
@@ -18,7 +20,7 @@ import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
-import { calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
+import { calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleByName, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
@@ -65,13 +67,13 @@ function channelsForShipment(logisticsAttribute: string, country: string, weight
   return [...new Set(logisticsRules
     .filter(rule => ruleSupportsShipment(rule, country, weightKg, logisticsAttribute))
     .flatMap(rule => rule.relations
-      .filter(relation => financeAllowsLogisticsChannel(financePolicies, logisticsAttribute, country, rule.id, relation))
+      .filter(relation => financeAllowsLogisticsChannel(financePolicies.value, logisticsAttribute, country, rule.id, relation))
       .map(relation => relation.carrier)))]
 }
 function rulesForShipment(logisticsAttribute: string, carrier: string, country: string, weightKg: number) {
   return logisticsRules
     .filter(rule => ruleSupportsShipment(rule, country, weightKg, logisticsAttribute)
-      && rule.relations.some(relation => relation.carrier === carrier && financeAllowsLogisticsChannel(financePolicies, logisticsAttribute, country, rule.id, relation)))
+      && rule.relations.some(relation => relation.carrier === carrier && financeAllowsLogisticsChannel(financePolicies.value, logisticsAttribute, country, rule.id, relation)))
     .map(rule => rule.name)
 }
 const currentSalespersonName = computed(() => currentAuthUser.value.name)
@@ -101,15 +103,17 @@ const selectedQuoteRegions = ref<Record<string, string>>({})
 const specifiedQuoteRows = ref<QuotationMatrixRow[]>([])
 const templateQuoteRows = ref<QuotationMatrixRow[]>([])
 const commonQuoteRows = ref<QuotationMatrixRow[]>([])
+// Keep draft identities independently of whether a hidden matrix has calculated prices.
+const modeSelections = ref<Record<'common' | 'specified' | 'template', DraftChannelSelection[]>>({ common: [], specified: [], template: [] })
 const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
 const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('common')
 const quoteMode = ref<QuotationMode>('single')
 const route = useRoute()
 const purchaseRecords = ref<PurchaseProductRecord[]>([])
-let financePolicies = loadFinanceChannelPolicies()
+const financePolicies = shallowRef(loadFinanceChannelPolicies())
 const financeCountrySettings = ref(loadFinanceCountrySettings())
 const financeTaxSettings = ref(loadFinanceTaxSettings())
-const quotationAttributeOptions = [...new Set([...financeLogisticsAttributeOptions, ...financePolicies.map(policy => policy.category)])]
+const quotationAttributeOptions = [...new Set([...financeLogisticsAttributeOptions, ...financePolicies.value.map(policy => policy.category)])]
 const skuSearch = ref('')
 const customerName = ref('')
 const productCategory = ref('')
@@ -142,7 +146,7 @@ function purchasePriceForMonthlySales(record: PurchaseProductRecord, invoiceTaxA
   return calculatePurchasePriceForMonthlySales(record, monthlySalesEstimate.value, invoiceTaxApplied)
 }
 const initialLogisticsAttribute = quotationAttributeOptions[0] || '普货'
-const initialCountry = financeCountryOptionsForCategory(financePolicies, initialLogisticsAttribute, financeCountrySettings.value)[0]?.name || ''
+const initialCountry = financeCountryOptionsForCategory(financePolicies.value, initialLogisticsAttribute, financeCountrySettings.value)[0]?.name || ''
 const initialWeight = 0.001
 const initialChannel = channelsForShipment(initialLogisticsAttribute, initialCountry, initialWeight)[0] || ''
 const initialRule = rulesForShipment(initialLogisticsAttribute, initialChannel, initialCountry, initialWeight)[0] || ''
@@ -153,7 +157,7 @@ function quoteRegionForCountry(country: string) {
 }
 function changeQuoteRegion(p: Product, payload: { country: string; region: string }) {
   if (!logisticsQuoteRegions(payload.country).includes(payload.region)) return
-  selectedQuoteRegions.value = { ...selectedQuoteRegions.value, [payload.country]: payload.region }
+  selectedQuoteRegions.value[payload.country] = payload.region
   if (p.country === payload.country) normalizeRule(p, true)
   toast(`已切换为${payload.region}，渠道与报价已按该区运费重新匹配`)
 }
@@ -479,7 +483,7 @@ async function ensureQuoteLogistics(p: Product) {
     const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal })
     if (controller.signal.aborted) return
     logisticsRulesGeneration.value += 1
-    financePolicies = loadFinanceChannelPolicies()
+    financePolicies.value = loadFinanceChannelPolicies()
     financeTaxSettings.value = loadFinanceTaxSettings()
     logisticsRevision.value = result.revision
     logisticsLoadState.value = result.rules.length ? (result.verified ? 'ready' : 'stale') : 'empty'
@@ -570,7 +574,7 @@ function selectionFromRows(rows: QuotationMatrixRow[]): DraftChannelSelection[] 
 }
 function draftPayload(): QuotationDraftPayload {
   const p = products.value[0] || emptyQuotationProduct()
-  const primary = [...commonQuoteRows.value, ...specifiedQuoteRows.value, ...templateQuoteRows.value]
+  const primary = [...commonQuoteRows.value, ...specifiedQuoteRows.value, ...templateQuoteRows.value, ...Object.values(modeSelections.value).flat()]
     .find(row => row.country === p.country && row.rule === p.rule && row.carrier === p.channel)
   return {
     schemaVersion: 2,
@@ -601,9 +605,9 @@ function draftPayload(): QuotationDraftPayload {
       primaryCarrier: p.channel,
     },
     bundleItems: bundleItems.value.map(item => ({ sku: item.sku, quantityPerSet: normalizedBundleSets(item.quantityPerSet), customWeightKg: item.customWeightKg == null ? null : Math.max(0, Number(item.customWeightKg) || 0), purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied })),
-    commonSelections: selectionFromRows(commonQuoteRows.value),
-    specifiedSelections: selectionFromRows(specifiedQuoteRows.value),
-    templateSelections: selectionFromRows(templateQuoteRows.value),
+    commonSelections: modeSelections.value.common,
+    specifiedSelections: modeSelections.value.specified,
+    templateSelections: modeSelections.value.template,
     activeTemplate: activeTemplateSnapshot.value ? { ...activeTemplateSnapshot.value } : null,
   }
 }
@@ -706,6 +710,11 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
     }
     bundleItems.value = restoredItems.length ? restoredItems : [bundleItemFromRecord()]
   } else bundleItems.value = [bundleItemFromRecord()]
+  modeSelections.value = {
+    common: draftSelection(payload.commonSelections || []),
+    specified: draftSelection(payload.specifiedSelections || []),
+    template: draftSelection(payload.templateSelections || []),
+  }
   restoredCommonSelections.value = draftSelection(payload.commonSelections || [])
   restoredSpecifiedSelections.value = draftSelection(payload.specifiedSelections || [])
   restoredTemplateSelections.value = draftSelection(payload.templateSelections || [])
@@ -746,6 +755,7 @@ async function loadAndRestoreDraft() {
   return state
 }
 async function resetLocalDraft() {
+  modeSelections.value = { common: [], specified: [], template: [] }
   draftReady.value = false
   window.clearTimeout(draftTimer)
   draftError.value = ''
@@ -782,7 +792,7 @@ async function initializeQuotationWorkspace() {
     const configuration = await loadQuotationWorkspaceConfiguration()
     financeCountrySettings.value = configuration.countrySettings
     financeTaxSettings.value = configuration.taxSettings
-    financePolicies = configuration.channelPolicies
+    financePolicies.value = configuration.channelPolicies
     readiness.value = await loadQuotationReadiness()
     const restored = await loadAndRestoreDraft()
     const requestedSku = String(route.query.sku || '').trim()
@@ -891,7 +901,7 @@ function cancelLeave() {
 }
 function matchedLogistics(p: Product, country = p.country) {
   return logisticsRules.flatMap(rule => {
-    const relations = rule.relations.filter(relation => financeAllowsLogisticsChannel(financePolicies, p.logisticsAttribute, country, rule.id, relation))
+    const relations = rule.relations.filter(relation => financeAllowsLogisticsChannel(financePolicies.value, p.logisticsAttribute, country, rule.id, relation))
     if (!relations.length || rule.status !== '启用') return []
     const result = calculateLogisticsFee(
       rule,
@@ -918,7 +928,7 @@ function matchedLogistics(p: Product, country = p.country) {
   }).sort((a, b) => a.freight - b.freight)
 }
 function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, country = p.country, provider = '') {
-  const rule = logisticsRules.find(item => item.name === ruleName)
+  const rule = logisticsRuleByName(ruleName)
   if (!rule) return null
   const normalizedQuantity = normalizedBundleSets(quantity)
   const weightKg = quoteMode.value === 'bundle'
@@ -953,10 +963,15 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
   const quantity = Math.max(1, customQuoteQuantity.value || 1)
   const currentQuantity = quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)
   return matchedLogistics(p, country).map(option => {
-    const quote1 = quantityCostBreakdown(p, option.rule, 1, country, option.carrier)
-    const quote2 = quantityCostBreakdown(p, option.rule, 2, country, option.carrier)
-    const quote3 = quantityCostBreakdown(p, option.rule, 3, country, option.carrier)
-    const custom = quantityCostBreakdown(p, option.rule, quantity, country, option.carrier)
+    const costs = new Map<number, ReturnType<typeof quantityCostBreakdown>>()
+    const costFor = (count: number) => {
+      if (!costs.has(count)) costs.set(count, quantityCostBreakdown(p, option.rule, count, country, option.carrier))
+      return costs.get(count)!
+    }
+    const quote1 = costFor(1)
+    const quote2 = costFor(2)
+    const quote3 = costFor(3)
+    const custom = costFor(quantity)
     const current = currentQuantity === 1
       ? quote1
       : currentQuantity === 2
@@ -965,7 +980,7 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
           ? quote3
           : currentQuantity === quantity
             ? custom
-            : quantityCostBreakdown(p, option.rule, currentQuantity, country, option.carrier)
+            : costFor(currentQuantity)
     const tax = custom?.tax || taxResult(country, option.carrier, 0)
     const row: QuotationMatrixRow = {
         ...option,
@@ -996,6 +1011,18 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
   }).sort((a, b) => a.sortQuote - b.sortQuote || a.row.freight - b.row.freight)
     .map(item => item.row)
 }
+const countryChannelCount = createCountryQuotationCache(country => {
+  void logisticsRevision.value
+  void logisticsRulesGeneration.value
+  const p = products.value[0]
+  return p ? matchedLogistics(p, country).length : 0
+})
+const countryQuoteRows = createCountryQuotationCache(country => {
+  void logisticsRevision.value
+  void logisticsRulesGeneration.value
+  const p = products.value[0]
+  return p ? excelQuoteRows(p, country) : []
+})
 function quotationCountries(p: Product): QuotationCountrySummary[] {
   const settingMap = new Map(financeCountrySettings.value.map(option => [option.country, option]))
   return countriesAvailableForCategory(p.logisticsAttribute).map(country => {
@@ -1004,7 +1031,7 @@ function quotationCountries(p: Product): QuotationCountrySummary[] {
     const common = option?.enabled && option.stage === 'common'
     // 国家选择器只需要显示可用渠道数量，不应为全球每个国家预先计算四档完整报价。
     // 用户真正选择/打开某个国家时，再由矩阵按需调用 excelQuoteRows。
-    const channelCount = matchedLogistics(p, name).length
+    const channelCount = countryChannelCount(name)
     return {
       name,
       code: String(country.code || logisticsCountries.find(item => item.name === name)?.code || '').toUpperCase(),
@@ -1023,7 +1050,16 @@ function quoteMatrixContextKey(p: Product) {
   const bundleKey = quoteMode.value === 'bundle'
     ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
-  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${logisticsRevision.value}|${logisticsRulesGeneration.value}|${JSON.stringify(selectedQuoteRegions.value)}|${financeTaxSettings.value.updatedAt}`
+  const priceInputs = {
+    tax: financeTaxSettings.value, policies: financePolicies.value,
+    quantity: p.quantity, customQuantity: customQuoteQuantity.value,
+    purchase: p.purchase, freight: p.purchaseFreightPerUnit, invoiceTax: p.purchaseInvoiceTaxApplied,
+    monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd,
+    purchaseCost: quoteMode.value === 'bundle' ? bundlePurchaseCost(1)
+      : purchaseRecords.value.map(record => purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied)),
+    bundleFreight: bundleDomesticFreight(1),
+  }
+  return `${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${logisticsRevision.value}|${logisticsRulesGeneration.value}|${JSON.stringify(selectedQuoteRegions.value)}|${JSON.stringify(priceInputs)}`
 }
 // 报价国家和渠道矩阵计算量很大。通过稳定的 computed/函数引用传给三个矩阵，
 // 避免客户名称等无关表单字段每输入一个字符就重算全部国家、渠道和四档报价。
@@ -1039,8 +1075,7 @@ const activeQuoteMatrixContextKey = computed(() => {
 })
 const activeCommonCountryCount = computed(() => activeQuotationCountries.value.filter(country => country.stage === 'common').length)
 function activeQuoteRowsForCountry(country: string) {
-  const p = products.value[0]
-  return p ? excelQuoteRows(p, country) : []
+  return countryQuoteRows(country)
 }
 function matrixRowsSignature(items: QuotationMatrixRow[]) {
   return items.map(row => [
@@ -1062,14 +1097,17 @@ function matrixRowsSignature(items: QuotationMatrixRow[]) {
   ].join('|')).join('||')
 }
 function updateSpecifiedQuotes(rows: QuotationMatrixRow[]) {
+  modeSelections.value.specified = selectionFromRows(rows)
   if (matrixRowsSignature(specifiedQuoteRows.value) === matrixRowsSignature(rows)) return
   specifiedQuoteRows.value = rows
 }
 function updateCommonQuotes(rows: QuotationMatrixRow[]) {
+  modeSelections.value.common = selectionFromRows(rows)
   if (matrixRowsSignature(commonQuoteRows.value) === matrixRowsSignature(rows)) return
   commonQuoteRows.value = rows
 }
 function updateTemplateQuotes(rows: QuotationMatrixRow[]) {
+  modeSelections.value.template = selectionFromRows(rows)
   if (matrixRowsSignature(templateQuoteRows.value) === matrixRowsSignature(rows)) return
   templateQuoteRows.value = rows
 }
@@ -1144,13 +1182,14 @@ const showSaveValidation = ref(false)
 const saveValidationIssues = computed(() => {
   const p = products.value[0]
   const issues: Array<{ key: string; label: string; message: string }> = []
+  if (draftInitializationFailed.value || !financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: '财务设置尚未完整加载，请重试读取后保存' })
   const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'预估月销量' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
   const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
-  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'存在不免税物流商对应国家尚未设置关税，请到财务设置补齐' })
+  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'应税国家的物流商税务属性待设置，请到财务设置补齐' })
   if (readiness.value && !readiness.value.ready) issues.push({ key:'businessReadiness', label:'业务就绪条件', message:`报价业务尚未就绪：${readiness.value.missing.join('；')}` })
   if (p?.sku && logisticsLoadState.value === 'idle') issues.push({ key:'logisticsRules', label:'物流规则', message:'请加载当前商品的物流规则' })
   if (logisticsLoadState.value === 'loading') issues.push({ key:'logisticsRules', label:'物流规则', message:'物流规则正在加载，请稍候' })
@@ -1220,7 +1259,7 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
       row.carrier,
       row.transport,
       row.eta,
-      row.taxIncluded ? '免税' : row.taxConfigured ? '不免税' : '不免税（关税待设置）',
+      row.taxFeeMode === 'no-tax' ? '无关税' : row.taxIncluded ? '免税' : row.taxConfigured ? '不免税' : '物流商税务属性待设置',
       row.taxFeeMode === 'fixed-order' ? row.countryFixedTaxUsd.toFixed(2) : '',
       row.quote1 == null ? '' : row.quote1.toFixed(2),
       row.quote1 == null ? '' : (row.quote1 * exchange.value.usd).toFixed(2),
@@ -1251,7 +1290,7 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   toast(`已复制 ${countryCount} 个国家、${rows.length} 条指定报价，打开 Excel 后按 Ctrl+V 粘贴`)
 }
 function useLogistics(p: Product, option: { country: string; quoteRegion?: string; rule: string; carrier: string; freight: number }) {
-  if (option.quoteRegion) selectedQuoteRegions.value = { ...selectedQuoteRegions.value, [option.country]: option.quoteRegion }
+  if (option.quoteRegion) selectedQuoteRegions.value[option.country] = option.quoteRegion
   p.country = option.country
   p.channel = option.carrier
   p.rule = option.rule
@@ -1261,6 +1300,7 @@ function useLogistics(p: Product, option: { country: string; quoteRegion?: strin
   toast(`已采用“${option.rule}”，运费 ¥${option.freight.toFixed(2)}`)
 }
 async function save() {
+  if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
   const customer = customerName.value.trim()
   const selectedMatrixRows = savedQuoteRows.value
@@ -1268,7 +1308,7 @@ async function save() {
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
   if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
-  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('存在不免税物流商对应国家尚未设置关税，请先到财务设置补齐'); return }
+  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('应税国家的物流商税务属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const snapshotQuantity = quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)
   const snapshotBaseWeightKg = quoteMode.value === 'bundle' ? bundleBaseWeight(1) : singleBaseWeight(p, snapshotQuantity)
@@ -1471,7 +1511,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
-          <QuotationCommonMatrix
+          <QuotationCommonMatrix :active="quoteMatrixMode==='common'"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
@@ -1481,7 +1521,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </div>
 
         <div v-show="quoteMatrixMode==='specified'" class="matrix-mode-panel">
-          <QuotationMatrix
+          <QuotationMatrix :active="quoteMatrixMode==='specified'"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'"
@@ -1491,7 +1531,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </div>
 
         <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel">
-          <QuotationTemplateMatrix
+          <QuotationTemplateMatrix :active="quoteMatrixMode==='template'"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"

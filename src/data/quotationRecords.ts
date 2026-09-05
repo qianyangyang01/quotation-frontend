@@ -44,7 +44,7 @@ export interface QuotationRecordQuoteOption {
   taxRatePercent?: number | null
   countryFixedTaxUsd?: number
   taxCustomerType?: 'A' | 'B'
-  taxFeeMode?: 'exempt' | 'fixed-order' | 'per-item' | 'missing'
+  taxFeeMode?: 'no-tax' | 'exempt' | 'fixed-order' | 'per-item' | 'missing'
   taxPerItemFeeUsd?: number
   taxLabel?: string
   tax1Usd?: number | null
@@ -201,7 +201,7 @@ function normalizeQuoteOptions(value: unknown, recordId: string, rawRecord: Part
     option.taxRatePercent = raw?.taxRatePercent == null ? null : optionalN(raw.taxRatePercent)
     option.countryFixedTaxUsd = optionalNumber(raw?.countryFixedTaxUsd)
     option.taxCustomerType = raw?.taxCustomerType === 'B' ? 'B' : raw?.taxCustomerType === 'A' ? 'A' : undefined
-    option.taxFeeMode = raw?.taxFeeMode === 'exempt' || raw?.taxFeeMode === 'fixed-order' || raw?.taxFeeMode === 'per-item' || raw?.taxFeeMode === 'missing' ? raw.taxFeeMode : undefined
+    option.taxFeeMode = raw?.taxFeeMode === 'no-tax' || raw?.taxFeeMode === 'exempt' || raw?.taxFeeMode === 'fixed-order' || raw?.taxFeeMode === 'per-item' || raw?.taxFeeMode === 'missing' ? raw.taxFeeMode : undefined
     option.taxPerItemFeeUsd = optionalNumber(raw?.taxPerItemFeeUsd)
     option.taxLabel = optionalText(raw?.taxLabel)
     option.tax1Usd = raw?.tax1Usd == null ? null : optionalN(raw.tax1Usd)

@@ -40,6 +40,32 @@ export const logisticsCarriers: string[] = []
 export const logisticsChannels: Array<LogisticsRelation & { ruleId: number; ruleName: string }> = []
 export const logisticsCountries: Array<{ code: string; name: string }> = []
 let publishedCountryCatalog: Array<{ code: string; name: string }> = []
+let indexedRules = new WeakMap<LogisticsRule, Map<string, LogisticsPriceRow[]>>()
+let eligibleRows = new WeakMap<LogisticsRule, Map<string, { rows: LogisticsPriceRow[]; zoneRequired: boolean }>>()
+const regionIndex = new Map<string, string[]>()
+const ruleNameIndex = new Map<string, LogisticsRule>()
+const ruleIdIndex = new Map<number, LogisticsRule>()
+
+export function logisticsRuleByName(name: string) { return ruleNameIndex.get(name) }
+export function logisticsRuleById(id: number) { return ruleIdIndex.get(id) }
+
+function countryRowsForRule(rule: LogisticsRule, country: string) {
+  const index = indexedRules.get(rule)
+  return index ? (index.get(country.toLowerCase()) || []).filter(row => countryMatches(row, country))
+    : rule.prices.filter(row => countryMatches(row, country))
+}
+
+function eligibleCountryRows(rule: LogisticsRule, country: string, marks: string[]) {
+  const cache = eligibleRows.get(rule)
+  const key = JSON.stringify([country, rule.billingVerified, marks])
+  const cached = cache?.get(key)
+  if (cached) return cached
+  const rows = countryRowsForRule(rule, country).filter(price =>
+    isWeightRangePrice(price) && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, marks)))
+  const result = { rows, zoneRequired: meaningfulZoneOptions(rows).length > 0 }
+  cache?.set(key, result)
+  return result
+}
 
 function rebuildLogisticsIndexes() {
   const carriers = [...new Set(logisticsRules.flatMap(rule => rule.relations.map(item => item.carrier)).filter(Boolean))].sort()
@@ -55,6 +81,25 @@ function rebuildLogisticsIndexes() {
 
 export function replaceLogisticsRules(rules: LogisticsRule[]) {
   logisticsRules.splice(0, logisticsRules.length, ...rules)
+  indexedRules = new WeakMap()
+  eligibleRows = new WeakMap()
+  regionIndex.clear()
+  ruleNameIndex.clear()
+  ruleIdIndex.clear()
+  for (const rule of rules) {
+    const rowsByCountry = new Map<string, LogisticsPriceRow[]>()
+    for (const row of rule.prices) {
+      for (const key of new Set([row.areaName.toLowerCase(), row.countryCode.toLowerCase()])) {
+        const bucket = rowsByCountry.get(key) || []
+        bucket.push(row)
+        rowsByCountry.set(key, bucket)
+      }
+    }
+    indexedRules.set(rule, rowsByCountry)
+    eligibleRows.set(rule, new Map())
+    if (!ruleNameIndex.has(rule.name)) ruleNameIndex.set(rule.name, rule)
+    ruleIdIndex.set(rule.id, rule)
+  }
   rebuildLogisticsIndexes()
 }
 
@@ -75,9 +120,13 @@ export function normalizeAustraliaQuoteRegion(value: string) {
 }
 
 export function logisticsQuoteRegions(country: string) {
+  const cached = regionIndex.get(country)
+  if (cached) return cached
   const regions = new Set<string>()
-  for (const rule of logisticsRules) meaningfulZoneOptions(rule.prices.filter(price => countryMatches(price, country))).forEach(region => regions.add(region))
-  return [...regions].map(region => (country === '澳大利亚' || country.toUpperCase() === 'AU') && normalizeZone(region) !== '全国统一' ? `澳大利亚${normalizeZone(region)}` : region)
+  for (const rule of logisticsRules) meaningfulZoneOptions(countryRowsForRule(rule, country)).forEach(region => regions.add(region))
+  const result = [...regions].map(region => (country === '澳大利亚' || country.toUpperCase() === 'AU') && normalizeZone(region) !== '全国统一' ? `澳大利亚${normalizeZone(region)}` : region)
+  regionIndex.set(country, result)
+  return result
 }
 
 function countryMatches(price: LogisticsPriceRow, country: string) {
@@ -119,9 +168,7 @@ export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: strin
   return !allowed.size || marks.every(mark => mark === '普货' || allowed.has(mark))
 }
 export function findPriceRow(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], quoteRegion = '') {
-  const countryRows = rule.prices.filter(price => countryMatches(price, country)
-    && (isWeightRangePrice(price) && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks))))
-  const zoneRequired = meaningfulZoneOptions(countryRows).length > 0
+  const { rows: countryRows, zoneRequired } = eligibleCountryRows(rule, country, productMarks)
   return countryRows.find(price => priceMatchesRegion(price, quoteRegion, zoneRequired) && weightMatchesPrice(price, weightKg))
 }
 export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive'>, weightKg: number) {
@@ -131,15 +178,12 @@ export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg'
 export function calculateLogisticsFee(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], dimensions?: ShipmentDimensions, quoteRegion = '') {
   void dimensions
   const actualWeightKg = Math.max(0, Number(weightKg) || 0)
-  const countryRows = rule.prices.filter(price => countryMatches(price, country)
-    && (isWeightRangePrice(price) && (rule.billingVerified ? price.quoteReady !== false : isPriceRowEligible(price, productMarks))))
-  const zoneRequired = meaningfulZoneOptions(countryRows).length > 0
-  const candidates = countryRows.filter(price => priceMatchesRegion(price, quoteRegion, zoneRequired))
+  const { rows: countryRows, zoneRequired } = eligibleCountryRows(rule, country, productMarks)
   if (zoneRequired && !quoteRegion) return null
   const chargeWeightKg = actualWeightKg
   const volumeWeightKg = 0
   const volumeDivisor = 0
-  const price = candidates.find(candidate => weightMatchesPrice(candidate, chargeWeightKg))
+  const price = countryRows.find(candidate => priceMatchesRegion(candidate, quoteRegion, zoneRequired) && weightMatchesPrice(candidate, chargeWeightKg))
   if (!price) return null
   const base = chargeWeightKg * price.pricePerKg
   const surcharge = 0

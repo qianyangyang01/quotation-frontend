@@ -48,3 +48,17 @@ describe('quotation tax calculation', () => {
     expect(normalized.providers).toEqual(expect.arrayContaining(settings.providers))
   })
 })
+
+it('treats absent, unselected, disabled and zero duty countries as configured no-tax before provider lookup', () => {
+  for (const country of ['澳大利亚', '英国', '加拿大']) {
+    for (const provider of ['应税物流', '免税物流', '未配置物流']) {
+      expect(calculateFinanceQuoteTax(settings, country, provider, 12)).toMatchObject({ configured: true, feeMode: 'no-tax', label: '无关税', taxUsd: 0, totalUsd: 12 })
+    }
+  }
+  for (const change of [{ selected: false }, { enabled: false }, { fixedFeeUsd: 0 }]) {
+    const modified = { ...settings, countries: [{ ...settings.countries[0]!, ...change }] }
+    expect(calculateFinanceQuoteTax(normalizeFinanceTaxSettings(modified), '美国', '未配置物流', 12).feeMode).toBe('no-tax')
+  }
+  const second = { ...settings, countries: [...settings.countries, { ...settings.countries[0]!, country: '澳大利亚', fixedFeeUsd: 3 }] }
+  expect(calculateFinanceQuoteTax(second, '澳大利亚', '应税物流', 12)).toMatchObject({ feeMode: 'fixed-order', totalUsd: 15 })
+})

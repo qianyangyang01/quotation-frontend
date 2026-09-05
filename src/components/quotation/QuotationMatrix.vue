@@ -5,7 +5,8 @@ import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
 
 const DEFAULT_COUNTRIES = ['美国', '英国', '加拿大', '澳大利亚']
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  active?: boolean
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
   contextKey: string
@@ -18,7 +19,7 @@ const props = defineProps<{
   variant?: 'specified' | 'template'
   presetSelection?: QuotationPresetSelection[]
   presetVersion?: number
-}>()
+}>(), { active: true })
 
 const emit = defineEmits<{
   'update:customQuantity': [value: number]
@@ -62,6 +63,7 @@ function findPresetRow(preset: QuotationPresetSelection, rows: QuotationMatrixRo
   return rows.find(row => presetFallbackMatchesRow(preset, row))
 }
 function availableRows(country: string) {
+  if (props.active === false) return []
   void props.contextKey
   return props.quoteRowsForCountry(country).filter(row => row.available !== false)
 }
@@ -138,9 +140,22 @@ function resetSelectionForMode() {
   else resetDefaultSelection()
 }
 
+let initialized = false
+let appliedPresetVersion = -1
 watch(
-  [() => props.contextKey, () => props.presetVersion, () => props.variant],
-  resetSelectionForMode,
+  [() => props.active, () => props.contextKey, () => props.presetVersion, () => props.variant, () => props.countries],
+  () => {
+    if (props.active === false) return
+    const version = props.presetVersion || 0
+    if (version !== appliedPresetVersion && (version > 0 || props.variant === 'template')) {
+      applyPresetSelection()
+      appliedPresetVersion = version
+      initialized = true
+    } else if (!initialized && props.countries.length) {
+      resetSelectionForMode()
+      initialized = selectedCountries.value.some(country => availableRows(country).length > 0)
+    }
+  },
   { immediate: true },
 )
 
@@ -158,8 +173,11 @@ const selectedRowsSignature = computed(() => allSelectedRows.value.map(row => [
   row.quote2,
   row.quote3,
   row.quoteCustom,
+  row.taxConfigured,
+  row.taxFeeMode,
+  row.taxLabel,
 ].join('|')).join('||'))
-watch(selectedRowsSignature, () => emit('selectionChange', allSelectedRows.value), { immediate: true })
+watch(selectedRowsSignature, () => { if (props.active !== false) emit('selectionChange', allSelectedRows.value) }, { immediate: true })
 
 const countryOptions = computed(() => {
   const query = countrySearch.value.trim().toLowerCase()
@@ -261,7 +279,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${(
 </script>
 
 <template>
-  <section class="specified-card">
+  <section v-if="active !== false" class="specified-card">
     <header class="specified-head">
       <div v-if="variant === 'template'"><p>MODE C · TEMPLATE QUOTATION MATRIX</p><h2>报价模板应用清单</h2><span>已按个人模板带出国家与渠道；本次可临时增删，不会改动原模板。</span></div>
       <div v-else><p>MODE B · SPECIFIED QUOTATION</p><h2>指定报价清单</h2><span>美、英、加、澳默认展示，也可按客户要求增加国家和渠道。</span></div>

@@ -39,3 +39,14 @@ describe('quotation record bundle snapshots', () => {
     expect(record?.bundleItems).toBeUndefined()
   })
 })
+
+it('preserves new no-tax snapshots and legacy tax snapshots without recomputing history', () => {
+  for (const taxFeeMode of ['no-tax','missing','exempt','fixed-order'] as const) {
+    const record = normalizeQuotationRecord({ ...baseRecord(), quoteOptions: [{
+      id:'q1',country:'澳大利亚',carrier:'物流商',channel:'渠道',rule:'规则',eta:'',
+      quote1Usd:12,quote2Usd:24,quote3Usd:36,quoteCustomUsd:60,
+      taxFeeMode,taxLabel:taxFeeMode === 'no-tax' ? '无关税' : '历史文案',taxConfigured:taxFeeMode !== 'missing',
+    }] })
+    expect(record?.quoteOptions?.[0]).toMatchObject({ taxFeeMode,quote1Usd:12,taxLabel:taxFeeMode === 'no-tax' ? '无关税' : '历史文案' })
+  }
+})

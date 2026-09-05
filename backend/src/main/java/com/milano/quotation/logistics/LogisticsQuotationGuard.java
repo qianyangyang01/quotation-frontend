@@ -21,16 +21,20 @@ public class LogisticsQuotationGuard {
         jdbc.sql("select id from logistics_provider where dataset_id=:id order by id for share").param("id",dataset).query(UUID.class).list();
         if(!queries.manifestRevision().revision().equals(quotation.path("logisticsRevision").asText()))throw AppException.conflict("物流版本已更新或缺少版本信息，请重新加载并计价后提交");
         var policies=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies' for share").query(String.class).optional().orElse("[]"));
+        var requestedKeys = new ArrayList<String>();
+        quotation.path("quoteOptions").forEach(option -> requestedKeys.add(option.path("channelKey").asText()));
+        if (requestedKeys.isEmpty()) throw AppException.unprocessable("请至少选择一条报价渠道");
         var channels=jdbc.sql("""
             select jsonb_build_object('key',concat(c.rule_id,'::',p.payload->>'name','::',c.code),
-                'versionId',v.id,'channelId',c.id,'rows',coalesce((select jsonb_agg(item) from jsonb_array_elements(v.payload->'rows') item where logistics_price_row_quote_supported(item)),'[]'::jsonb),
-                'legacy',exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy' and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)))::text
+                'versionId',v.id,'channelId',c.id,'rows',v.quote_rows,
+                'legacy',exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy' and a.rows_fingerprint=v.rows_fingerprint))::text
             from logistics_channel c join logistics_provider p on p.id=c.provider_id
             join logistics_version v on v.id=c.current_version_id and v.status='published'
             where c.dataset_id=:id and c.archived_at is null
             and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)
             and logistics_version_quote_ready(v.id)
-            """).param("id",dataset).query((rs,n)->mapper.readTree(rs.getString(1))).list();
+            and concat(c.rule_id,'::',p.payload->>'name','::',c.code) in (:keys)
+            """).param("id",dataset).param("keys",requestedKeys).query((rs,n)->mapper.readTree(rs.getString(1))).list();
         for(var option:quotation.path("quoteOptions")) {
             var key=option.path("channelKey").asText();var country=option.path("country").asText();
             var channel=channels.stream().filter(c->c.path("key").asText().equals(key)).findFirst().orElseThrow(()->AppException.conflict("报价渠道已归档、未适配或不存在，请重新选择"));

@@ -5,8 +5,9 @@ import type { QuotationMatrixRow } from './types'
 const props = defineProps<{ row: QuotationMatrixRow }>()
 const missing = computed(() => !props.row.taxIncluded && !props.row.taxConfigured)
 const badgeText = computed(() => {
+  if (props.row.taxFeeMode === 'no-tax') return '无关税'
   if (props.row.taxIncluded) return '免税'
-  if (missing.value) return '关税待设置'
+  if (missing.value) return props.row.taxLabel || '物流商税务属性待设置'
   return `关税 $${Number(props.row.countryFixedTaxUsd || 0).toFixed(2)}/单`
 })
 </script>

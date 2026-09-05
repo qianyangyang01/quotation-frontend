@@ -1,5 +1,5 @@
 <template>
-  <div class="tax-legend" aria-label="关税说明"><span><b>关税</b>按国家固定计入整张报价单</span><span><b>免税</b>不增加关税</span></div>
+  <div class="tax-legend" aria-label="关税说明"><span><b>关税</b>按国家固定计入整张报价单</span><span><b>无关税</b>该国家未配置关税，不增加税费</span><span><b>免税</b>不增加关税</span></div>
 </template>
 
 <style scoped>

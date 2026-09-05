@@ -39,6 +39,11 @@ public class LogisticsQueryService {
             "phoneRequired", "zoneName", "zoneExclude", "weightFromInclusive",
             "weightToInclusive"
     );
+    private record RuleCacheKey(String revision, String attribute, List<String> countries, List<String> channels) {}
+    private final RevisionQueryCache<PublishedRules> ruleCache = new RevisionQueryCache<>(16, 32L * 1024 * 1024,
+            value -> value.rules().stream().mapToLong(rule -> 4096L + rule.path("prices").size() * 4096L).sum());
+    private final RevisionQueryCache<PublishedManifest> manifestCache = new RevisionQueryCache<>(4, 1024 * 1024, value -> 65536);
+    private final RevisionQueryCache<Long> publishedCountCache = new RevisionQueryCache<>(16, 128, value -> 8);
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
 
@@ -127,7 +132,8 @@ public class LogisticsQueryService {
                 select concat_ws('|', p.id::text, p.version::text, p.payload->>'enabled',
                   c.id::text, c.version::text, c.code, c.payload->>'enabled', c.payload->>'name', c.payload->>'type', c.payload->>'logisticsAttribute',
                   v.id::text, v.source_hash, coalesce(v.published_at::text,''),v.rows_fingerprint,
-                  (select max(a.reviewed_at)::text from logistics_billing_acceptance a where a.version_id=v.id)) as part
+                  (select md5(string_agg(concat_ws(':',a.id::text,a.kind,a.engine_version,a.rows_fingerprint,a.reviewed_at::text),',' order by a.id))
+                   from logistics_billing_acceptance a where a.version_id=v.id)) as part
                 from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
@@ -135,10 +141,23 @@ public class LogisticsQueryService {
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
                   and c.dataset_id=logistics_active_dataset()
-                  and logistics_version_quote_ready(v.id)
                 order by c.id
                 """).query(String.class).list();
-        return new ManifestRevision(sha256(String.join("\n", revisionParts)), revisionParts.size());
+        var dataset = jdbc.sql("select logistics_active_dataset()::text").query(String.class).single();
+        // Fingerprint all active published candidates, including currently unready ones.
+        // Eligibility is expensive and only needs reevaluation when these inputs change.
+        var revision = sha256(dataset + "\n" + String.join("\n", revisionParts));
+        var publishedChannels = publishedCountCache.get(revision, () -> jdbc.sql("""
+                select count(*) from logistics_channel c
+                join logistics_provider p on p.id=c.provider_id
+                join logistics_version v on v.id=c.current_version_id and v.status='published'
+                where coalesce((p.payload->>'enabled')::boolean,true)=true
+                  and coalesce((c.payload->>'enabled')::boolean,true)=true
+                  and c.archived_at is null
+                  and c.dataset_id=logistics_active_dataset()
+                  and logistics_version_quote_ready(v.id)
+                """).query(Long.class).single());
+        return new ManifestRevision(revision, publishedChannels);
     }
 
     @Transactional(readOnly = true)
@@ -148,6 +167,20 @@ public class LogisticsQueryService {
 
     @Transactional(readOnly = true)
     public PublishedManifest manifest(ManifestRevision revisionState) {
+        return manifestCache.get(revisionState.revision(), () -> {
+            var result = readManifest(revisionState);
+            requireCurrentRevision(revisionState.revision());
+            return result;
+        });
+    }
+
+    private void requireCurrentRevision(String revision) {
+        if (!revision.equals(manifestRevision().revision())) {
+            throw new AppException(HttpStatus.CONFLICT, "LOGISTICS_REVISION_CHANGED", "物流正式版本已更新，请重新加载规则");
+        }
+    }
+
+    private PublishedManifest readManifest(ManifestRevision revisionState) {
         var countries = jdbc.sql("""
                 select distinct coalesce(item->>'countryCode','') as code, coalesce(item->>'areaName','') as name
                 from logistics_channel c
@@ -265,6 +298,16 @@ public class LogisticsQueryService {
         }
         var normalizedCountries = normalized(countries, MAX_COUNTRIES, "报价国家不能为空", "报价国家一次最多查询100个");
         var normalizedChannels = normalizedOptional(channelCodes, MAX_CHANNEL_CODES, "渠道一次最多查询100个");
+        var key = new RuleCacheKey(revision, attribute == null ? "" : attribute,
+                normalizedCountries.stream().sorted().toList(), normalizedChannels.stream().sorted().toList());
+        return ruleCache.get(key, () -> {
+            var result = readPublishedRules(revision, attribute, normalizedCountries, normalizedChannels);
+            requireCurrentRevision(revision);
+            return result;
+        });
+    }
+
+    private PublishedRules readPublishedRules(String revision, String attribute, List<String> normalizedCountries, List<String> normalizedChannels) {
         var params = new LinkedHashMap<String, Object>();
         var countryVariants = normalizedCountries.stream()
                 .flatMap(value -> java.util.stream.Stream.of(value, value.toLowerCase(Locale.ROOT), value.toUpperCase(Locale.ROOT)))
