@@ -17,7 +17,7 @@ common:
   weightTo:
     contains: ["重量段终", "限重", "最大重量"]
   weightRange:
-    exact: ["重量段", "重量区间", "重量", "重量KG", "重量/KG", "重量(KG)", "重量段/KG", "重量段(KG)", "计费重量", "计费重量(KG)"]
+    exact: ["重量段", "重量区间", "重量", "重量KG", "重量/KG", "重量(KG)", "重量段/KG", "重量段(KG)", "计费重量", "计费重量(KG)", "重量限制", "重量限制(kg)"]
     contains: ["重量段", "重量区间", "计费重量"]
     excludeContains: ["重量段始", "重量段终", "重派费", "最小计费", "最低计费", "最小重量", "最大重量", "限重", "起重"]
   minimumWeight:
@@ -33,11 +33,11 @@ common:
     excludeContains: ["附加费", "燃油费", "干线费", "超尺寸费", "重派费"]
   firstWeightPrice:
     contains: ["首重"]
-    regex: ["首[0-9.]+kg"]
+    regex: ["首[0-9.]+(?:kg|g|克|公斤)"]
     excludeContains: ["续重", "首重重量"]
   nextWeightPrice:
     contains: ["续重"]
-    regex: ["续[0-9.]+kg"]
+    regex: ["续[0-9.]+(?:kg|g|克|公斤)"]
     excludeContains: ["续重重量"]
   linehaulPerKg:
     contains: ["干线费"]
@@ -52,4 +52,4 @@ common:
 providers:
   顺丰:
     settlementRate:
-      exact: ["结算运费", "SF折后"]
+      exact: ["结算运费", "SF折后", "折后运费"]

@@ -46,7 +46,8 @@ public class LogisticsService{
         var contentHash=body.path("contentHash").asText(required(body,"sourceHash",128));
         var sourceHash=LogisticsDatasetService.hash(contentHash+":"+base);
         var duplicate=versions.findByChannelIdAndSourceHash(channelId,sourceHash);
-        if(duplicate.isPresent() && ("draft".equals(duplicate.get().status) || duplicate.get().id.equals(channel.currentVersionId))) return versionView(duplicate.get());
+        if(duplicate.isPresent() && ("draft".equals(duplicate.get().status) || duplicate.get().id.equals(channel.currentVersionId))
+            &&(!body.has("parserVersion")||body.path("parserVersion").asText().equals(duplicate.get().payload.path("parserVersion").asText()))) return versionView(duplicate.get());
         if(duplicate.isPresent()) sourceHash=sourceHash+":"+UUID.randomUUID();
         var activeDrafts=versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().filter(v->"draft".equals(v.status)).toList();
         if(!activeDrafts.isEmpty()&&!replaceDrafts)throw AppException.conflict("渠道已有不同的待审核版本，请先终止旧草稿或明确替换");
@@ -134,7 +135,7 @@ public class LogisticsService{
         result.put("providerId",providerId.toString()).put("count",published.size());return result;
     }
     private void validatePublish(LogisticsChannelEntity channel,LogisticsVersionEntity target,boolean removalConfirmed){datasetGuard.channel(channel.id);validateBaseline(channel,target);if(target.payload.path("errors").asInt()>0)throw AppException.unprocessable("当前版本存在阻断错误，禁止发布");LogisticsReadiness.apply((ObjectNode)target.payload);if(!target.channelId.equals(channel.id))throw AppException.conflict("版本不属于该渠道");if(!"draft".equals(target.status))throw AppException.conflict("只有待审核草稿可以发布");validateReadiness(target.payload);if(hasCoverageRemoval(target.payload)&&!removalConfirmed)throw AppException.unprocessable("存在移除或重量覆盖缩小项时必须明确确认");}
-    private static void validateReadiness(JsonNode payload){if(payload.path("errors").asInt()>0)throw AppException.unprocessable("当前版本存在阻断错误，禁止发布");if(!payload.path("etaReady").asBoolean(false))throw AppException.unprocessable("当前版本存在未补齐或冲突时效，禁止发布");if(!payload.path("blockingReasons").isEmpty()||!payload.path("pricingReady").asBoolean(false))throw AppException.unprocessable("当前版本存在待适配计费条件，禁止发布");}
+    private static void validateReadiness(JsonNode payload){if(payload.path("errors").asInt()>0)throw AppException.unprocessable("当前版本存在阻断错误，禁止发布");if(!payload.path("blockingReasons").isEmpty()||!payload.path("pricingReady").asBoolean(false))throw AppException.unprocessable("当前版本存在待适配计费条件，禁止发布");}
     private static boolean hasCoverageRemoval(JsonNode payload){var summary=payload.path("summary");return summary.path("removed").asInt()>0||summary.path("coverageReduced").asInt()>0;}
     private void validateBaseline(LogisticsChannelEntity channel,LogisticsVersionEntity target){
         var current=channel.currentVersionId==null?"":channel.currentVersionId.toString();

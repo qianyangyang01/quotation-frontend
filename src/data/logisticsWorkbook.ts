@@ -12,7 +12,7 @@ export type LogisticsRateRow = {
   pricingModel?: string;
   weightFromInclusive?: boolean; weightToInclusive?: boolean; quoteReady?: boolean
   sourceRow: number
-  areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number
+  areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number; etaStatus?: string
   prohibitedMarks: string; allowedMarks: string; maxPerimeterCm: number; maxSideCm: number
   volumeDivisor: number; minLengthCm: number; maxLengthCm: number; minWidthCm: number; maxWidthCm: number
   minSideAreaCm2: number; maxSideAreaCm2: number; weightFromKg: number; weightToKg: number

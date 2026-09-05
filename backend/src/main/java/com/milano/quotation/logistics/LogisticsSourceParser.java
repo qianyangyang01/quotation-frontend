@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.05-v9";
+    public static final String VERSION="providers-2026.09.05-v10";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
@@ -73,14 +73,16 @@ public class LogisticsSourceParser {
                 }
                 if(!recognized && !provider.isBlank()) {
                     if(provider.equals("通邮")&&sheet.getSheetName().toUpperCase(Locale.ROOT).contains("MINI"))recognized=parseIntervalMatrix(source,provider,filename,parsed);
-                    else if(provider.equals("通邮") && (sheet.getSheetName().contains("美国专线小包")||sheet.getSheetName().contains("加拿大专线"))) recognized=parseMatrix(source,provider,filename,parsed);
+                    else if(provider.equals("通邮") && (sheet.getSheetName().contains("美国专线小包")||sheet.getSheetName().contains("加拿大专线")||sheet.getSheetName().equals("ebay挂号保建品")||sheet.getSheetName().equals("通邮专线特货-澳大利亚"))) recognized=parseMatrix(source,provider,filename,parsed);
                     else recognized=parseTable(source,provider,filename,parsed);
                 }
                 if(source.parsedRows.size()>MAX_PRICE_ROWS_PER_SHEET)throw AppException.unprocessable("基础运费工作表实际价格行不能超过"+MAX_PRICE_ROWS_PER_SHEET+"行："+sheet.getSheetName());
                 var filtered=report.putArray("filteredFirstNextRows");
                 source.filteredFirstNextRows.stream().sorted().forEach(r->filtered.add(r+1));
+                var excluded=report.putArray("filteredOtherRows");source.filteredOtherRows.forEach((r,reason)->excluded.addObject().put("row",r+1).put("reason",reason));
                 if(!filtered.isEmpty())report.put("message","首重续重已过滤，不解析、不进入发布前检查");
-                if(parsed.isEmpty()&&!filtered.isEmpty()) {
+                if(parsed.isEmpty()&&(!filtered.isEmpty()||!excluded.isEmpty())) {
+                    if(filtered.isEmpty())report.put("message","已过滤未纳入当前公斤价报价的价格行");
                     report.put("status","filtered").put("priceRows",0).put("channels",0).put("errors",0);
                     continue;
                 }
@@ -96,7 +98,8 @@ public class LogisticsSourceParser {
                 var conditional=report.putArray("conditionalPriceRows");var conditionalEvidence=new ArrayList<String>();
                 for(var rawRow:sheet) {
                     int r=rawRow.getRowNum();
-                    if(source.parsedRows.contains(r)||source.exampleRows.contains(r)||source.filteredFirstNextRows.contains(r))continue;
+                    if(source.parsedRows.contains(r)||source.exampleRows.contains(r)||source.filteredFirstNextRows.contains(r)||source.filteredOtherRows.containsKey(r)||source.referenceRows.contains(r))continue;
+                    if(source.resolvedTexts(r).stream().anyMatch(t->t.matches("(?s).*(暂时关停|暂停服务|暂停收寄|停止收寄).*"))){source.filteredOtherRows.put(r,"暂停服务");continue;}
                     boolean range=false,number=false;
                     for(var cell:rawRow){if(looksRange(source.text(r,cell.getColumnIndex())))range=true;if(cell.getCellType()==CellType.NUMERIC)number=true;}
                     if(range&&number) {
@@ -105,11 +108,14 @@ public class LogisticsSourceParser {
                         else uncovered.add(r+1);
                     }
                 }
+                excluded.removeAll();source.filteredOtherRows.forEach((r,reason)->excluded.addObject().put("row",r+1).put("reason",reason));
                 if(!conditional.isEmpty())for(var c:parsed.values())for(var value:c.path("rows")) {
                     var row=(ObjectNode)value;pending(row,"附加或重派费用表需适配核对");
                     row.put("notes",row.path("notes").asText()+"\n[附加费用原表区域]\n"+String.join("\n",conditionalEvidence));
                 }
                 if(!uncovered.isEmpty())for(var c:parsed.values())issue(c,0,"未覆盖价格行","存在未完整识别的价格区域，禁止部分替换；原始行号："+uncovered,"error");
+                applyFooterEta(source,parsed);
+                splitDistinctProducts(parsed,provider);
                 int rows=0; int errors=0;
                 for(var channel:parsed.values()) {
                     finish(channel,provider);
@@ -232,6 +238,7 @@ public class LogisticsSourceParser {
                     ||List.of("首重","首重价","续重","续重单价").stream().anyMatch(label->hasFirstNextValue(value(source,sourceRowIndex,headers,label)))) {
                 source.filteredFirstNextRows.add(r);continue;
             }
+            if(pricingModel.equals("interval")||hasFirstNextValue(value(source,r,headers,"区间运费"))){source.filteredOtherRows.put(r,"整票档位价");continue;}
             var name=value(source,r,headers,"渠道名称"); var prov=value(source,r,headers,"物流商");
             var effectiveProvider=prov.isBlank()?fallback:prov;
             var sourceOrigin=value(source,r,headers,"发货区域");
@@ -254,7 +261,7 @@ public class LogisticsSourceParser {
             row.put("sourceCode",row.path("sourceProductCode").asText()).put("sourceFeeLabel","挂号费");
             if(row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt())row.put("etaSource","source-row");
             if(headers.containsKey("计费进位KG"))numeric(row,"billingStepKg",source,r,headers.get("计费进位KG"),target,true);
-            row.put("pendingReason",value(source,r,headers,"待适配原因"));
+            pending(row,value(source,r,headers,"待适配原因"));
             if(headers.containsKey("干线费每KG"))numeric(row,"linehaulPerKg",source,r,headers.get("干线费每KG"),target,true);
             target.put("logisticsAttribute",defaultText(value(source,r,headers,"货物属性"),"普货"));
             add(target,row,source,r,file);
@@ -264,12 +271,16 @@ public class LogisticsSourceParser {
     private boolean parseTable(Source source,String provider,String file,Map<String,ObjectNode> channels) {
         Columns columns=null; boolean recognized=false; String section=source.sheet.getSheetName().trim();
         var yanwenEta=provider.equals("燕文")?yanwenEtaExtractor(source):null;
-        int auxiliary=-1;boolean example=false;
+        int auxiliary=-1;boolean example=false,reference=false;
         var allNotes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
             var rowText=String.join("|",source.rowTexts(r));
+            if(rowText.isBlank())continue;
+            if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
+            if(reference){if(detect(source,r,provider)!=null)reference=false;else{source.referenceRows.add(r);continue;}}
+            if(rowText.matches("(?s).*(注意事项说明如下|客户须知).*")){columns=null;continue;}
             if(rowText.contains("试算重量")&&rowText.contains("试算运费")){example=true;columns=null;continue;}
-            boolean auxiliaryTitle=source.rowTexts(r).stream().anyMatch(t->t.length()<80&&t.contains("重派费用表"));
+            boolean auxiliaryTitle=source.rowTexts(r).stream().anyMatch(t->t.length()<80&&(t.contains("重派费用表")||t.contains("重派收费")));
             if(auxiliaryTitle||(rowText.length()<160&&rowText.contains("重量")&&rowText.matches("(?s).*(重派费|附加费).*"))) {
                 if(!rowText.matches("(?s).*(运费/kg|运费/KG|结算运费|首重).*")){auxiliary=r;example=false;columns=null;continue;}
             }
@@ -284,6 +295,8 @@ public class LogisticsSourceParser {
             if(auxiliary>=0){source.auxiliaryRows.put(r,auxiliary);continue;}
             if(provider.equals("顺丰") && source.text(r,1).matches(".*[①②③④].*专线.*"))section=source.text(r,1).replaceAll("^[①②③④\\s]+","").trim();
             if(columns==null) continue;
+            if(source.resolvedTexts(r).stream().anyMatch(t->t.matches("(?s).*(暂时关停|暂停服务|暂停收寄|停止收寄).*"))){source.filteredOtherRows.put(r,"暂停服务");continue;}
+            if(!columns.fixedWeight.isBlank()&&aliases.matches(provider,"country",source.text(r,columns.country)))continue;
             if((columns.firstPrice>=0||columns.nextPrice>=0)&&(columns.rate<0
                     ||hasFirstNextValue(source.text(r,columns.firstPrice))||hasFirstNextValue(source.text(r,columns.nextPrice)))) {
                 if(!source.rowEmpty(r))source.filteredFirstNextRows.add(r);
@@ -308,7 +321,7 @@ public class LogisticsSourceParser {
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
             String sourceContinent=columns.continent>=0?source.text(r,columns.continent):"";
             String normalizedCode=rawCode.replaceFirst("^([A-Z]{2})-[1-9][0-9]*$","$1");
-            if(!Arrays.asList(Locale.getISOCountries()).contains(normalizedCode))normalizedCode=countryCode(countryRaw);
+            if(!supportedCountryCode(normalizedCode))normalizedCode=countryCode(countryRaw);
             row.put("areaName",countryName(countryRaw)); row.put("countryCode",normalizedCode).put("sourceCountryCode",rawCode);
             row.put("sourceCountry",countryRaw).put("sourceCode",columns.code>=0?source.text(r,columns.code):"");
             row.put("sourceProductCode",row.path("sourceCode").asText());
@@ -331,11 +344,11 @@ public class LogisticsSourceParser {
                 }
             }
             row.put("zoneName",normalizeZone(zoneName));
-            if(provider.equals("顺丰")&&section.equals("国际电商专递-CD")&&countryCode(countryRaw).equals("NZ")&&clean(parseWeight).equalsIgnoreCase("1,001-5KG")) {
+            if(provider.equals("顺丰")&&countryCode(countryRaw).equals("NZ")&&clean(parseWeight).equalsIgnoreCase("1,001-5KG")) {
                 parseWeight="1.001-5KG";row.put("normalizationNote","用户确认：新西兰1,001-5KG表示1.001-5KG");
             }
             if(parseWeight.contains("(")||parseWeight.contains("（"))pending(row,"重量范围附带首续重条件，需核对完整规则");
-            try { var range=parseRange(parseWeight.replaceAll("[（(].*$","")); row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo); }
+            try { var range=parseRange(parseWeight.contains("以内")?parseWeight:parseWeight.replaceAll("[（(].*$","")); row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo); }
             catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
             row.put("sourceWeightRange",weight);
             numeric(row,"pricePerKg",source,r,columns.rate,target,false);
@@ -356,7 +369,8 @@ public class LogisticsSourceParser {
                 } else {
                     var eta=numbers(rawEta);
                     if(!eta.isEmpty())row.put("etaMinDays",eta.getFirst());if(eta.size()>1)row.put("etaMaxDays",eta.get(1));
-                    if(eta.size()>1)row.put("etaSource","source-row").put("sourceEtaCell",source.address(r,columns.eta)).put("sourceEtaText",rawEta);
+                    if(eta.size()==1&&rawEta.matches(".*(?:天|日).*"))row.put("etaMaxDays",eta.getFirst());
+                    if(row.path("etaMaxDays").asInt()>0)row.put("etaSource","source-row").put("sourceEtaCell",source.address(r,columns.eta)).put("sourceEtaText",rawEta);
                 }
             }
             if(yanwenEta!=null)yanwenEta.apply(row,target,r+1,sourceContinent);
@@ -395,11 +409,15 @@ public class LogisticsSourceParser {
             if(!source.text(header,c).contains("运费"))continue;
             String name="";for(int h=header-1;h>=0;h--){var label=source.text(h,c);if(!label.isBlank()){name=label;break;}}
             if(name.isBlank())name=source.sheet.getSheetName()+"-"+CellReference.convertNumToColString(c);
+            boolean zoned=name.matches("[1-9一二三四五六七八九]区");String zone=zoned?normalizeZone(name):"";
+            if(zoned||source.sheet.getSheetName().equals("ebay挂号保建品"))name=source.sheet.getSheetName();
             var target=channel(provider,name,channels);
             for(int r=header+1;r<=source.lastContentRow;r++) {
+                if(source.text(r,0).contains("邮编分区")||source.text(r,0).equals("分区")){for(int i=r;i<=source.lastContentRow;i++)source.referenceRows.add(i);break;}
                 var text=source.text(r,0);if(!looksRange(text))continue;
-                var row=mapper.createObjectNode().put("areaName",source.sheet.getSheetName().contains("加拿大")?"加拿大":"美国")
-                        .put("countryCode",source.sheet.getSheetName().contains("加拿大")?"CA":"US").put("currency","CNY").put("pricingModel","per-kg");
+                var destination=source.sheet.getSheetName().contains("加拿大")?"加拿大":source.sheet.getSheetName().contains("澳大利亚")?"澳大利亚":"美国";
+                var row=mapper.createObjectNode().put("areaName",destination).put("zoneName",zone)
+                        .put("countryCode",countryCode(destination)).put("currency","CNY").put("pricingModel","per-kg");
                 try{var range=parseRange(text);row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo);}
                 catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
                 numeric(row,"pricePerKg",source,r,c,target,false);numeric(row,"registrationFee",source,r,c+1,target,false);
@@ -415,13 +433,10 @@ public class LogisticsSourceParser {
         if(header<0)return false;boolean recognized=false;
         for(int c=1;c<Math.min(source.width(header),80);c++) {
             var name=source.text(header,c);if(name.isBlank()||!source.text(header+1,c).matches("(?i).*(运费|价格).*(票|件).*"))continue;
-            var target=channel(provider,name,channels);double previous=0;
+            double previous=0;
             for(int r=header+2;r<=source.lastContentRow;r++) {
                 var raw=clean(source.numberText(r,0));if(!raw.matches("[0-9.]+"))continue;double upper=Double.parseDouble(raw);if(upper<=previous)continue;
-                var row=mapper.createObjectNode().put("areaName","日本").put("countryCode","JP").put("currency","CNY").put("pricingModel","interval")
-                        .put("weightFromKg",previous).put("weightToKg",upper).put("weightFromInclusive",false).put("weightToInclusive",true)
-                        .put("intervalPrice",0).put("pricePerKg",0).put("registrationFee",0).put("sourceWeightRange",previous+"-"+upper+"KG");
-                numeric(row,"intervalPrice",source,r,c,target,false);pending(row,"按重量档位计费，发布前需核对档位边界和表尾收寄规则");add(target,row,source,r,file);previous=upper;recognized=true;
+                source.filteredOtherRows.put(r,"整票档位价");previous=upper;recognized=true;
             }
         }
         return recognized;
@@ -489,7 +504,7 @@ public class LogisticsSourceParser {
             }
             if(!c.fixedWeight.isBlank())break;
         }
-        if(c.settlement>=0){if(c.firstPrice>=0)c.firstPrice=c.settlement;else c.rate=c.settlement;}
+        // Quote the original per-kg column; discount and settlement columns are evidence only.
         // Two-level 4PX headers place fee/rate on the row below the country/weight header.
         if(c.weight>=0 && c.country>=0 && c.rate<0 && aliases.matches(provider,"pricePerKg",source.text(r+1,5))) {c.rate=5;c.fee=6;c.feeHeaderRow=r+1;}
         // Rongding has a title-defined destination rather than a country column.
@@ -501,6 +516,46 @@ public class LogisticsSourceParser {
         row.set("rawValues",source.rawRow(r));
         row.put("quoteReady",row.path("pendingReason").asText().isBlank());
         ((ArrayNode)target.path("rows")).add(row);
+    }
+    private void splitDistinctProducts(Map<String,ObjectNode> channels,String provider) {
+        if(!provider.equals("万邦"))return;
+        for(var entry:new ArrayList<>(channels.entrySet())) {
+            var original=entry.getValue();var tiers=new HashMap<String,Set<String>>();
+            for(var row:original.path("rows"))tiers.computeIfAbsent(scope(row)+"|"+row.path("weightFromKg")+"|"+row.path("weightToKg"),ignored->new HashSet<>()).add(row.path("sourceProductCode").asText());
+            if(tiers.values().stream().noneMatch(codes->codes.size()>1&&!codes.contains("")))continue;
+            channels.remove(entry.getKey());
+            for(var row:original.path("rows")) {
+                var code=row.path("sourceProductCode").asText();
+                var target=channel(provider,original.path("channelName").asText()+"（"+code+"）",original.path("logisticsAttribute").asText(),channels);
+                ((ArrayNode)target.path("rows")).add(row);
+                if(!target.has("sourceNotes")) {target.set("sourceNotes",original.path("sourceNotes"));((ArrayNode)target.path("issues")).addAll((ArrayNode)original.path("issues"));}
+            }
+        }
+    }
+    private void applyFooterEta(Source source,Map<String,ObjectNode> channels) {
+        if(channels.values().stream().anyMatch(c->c.path("providerName").asText().equals("燕文")))return;
+        var candidates=new LinkedHashMap<String,List<EtaReference>>();
+        var countries=new LinkedHashMap<String,String>();
+        for(var channel:channels.values())for(var row:channel.path("rows"))countries.put(row.path("areaName").asText(),row.path("countryCode").asText());
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(source.parsedRows.contains(r))continue;
+            var text=java.text.Normalizer.normalize(String.join(" ",new LinkedHashSet<>(source.resolvedTexts(r))),java.text.Normalizer.Form.NFKC);
+            if((!text.contains("时效")&&!text.contains("签收"))||text.matches(".*(亚洲|欧洲|非洲|大洋洲|美洲).*"))continue;
+            var eta=parseEta(text,"第"+(r+1)+"行");if(eta==null)continue;
+            var named=countries.entrySet().stream().filter(e->!e.getKey().isBlank()&&text.contains(e.getKey())).toList();
+            // A note for a country absent from this price table must never become a global ETA.
+            if(named.isEmpty()&&COUNTRIES.keySet().stream().anyMatch(name->name.length()>1&&text.contains(name)))continue;
+            if(named.size()>1)continue;
+            var scope=named.size()==1?named.getFirst().getValue():"*";
+            candidates.computeIfAbsent(scope,ignored->new ArrayList<>()).add(eta);
+        }
+        for(var channel:channels.values())for(var item:channel.path("rows")) {
+            var row=(ObjectNode)item;if(row.path("etaMinDays").asInt()>0||row.path("etaMaxDays").asInt()>0)continue;
+            var references=candidates.getOrDefault(row.path("countryCode").asText(),candidates.getOrDefault("*",List.of()));
+            if(references.isEmpty())continue;
+            var first=references.getFirst();if(references.stream().anyMatch(e->e.min!=first.min||e.max!=first.max))continue;
+            applyEta(row,first,"footer");
+        }
     }
     private YanwenEtaExtractor yanwenEtaExtractor(Source source) {
         var index=new YanwenEtaExtractor();
@@ -615,10 +670,10 @@ public class LogisticsSourceParser {
                             .put("normalizationNote","按用户确认：上一档上限+1g，原始范围保留");from=end+0.001;
                 }
                 if(from<end-1e-8)issue(channel,row.path("sourceRow").asInt(),"重量段","同一国家/分区/发货区域存在重叠档位","error");
-                if(from>end+0.00100001)issue(channel,row.path("sourceRow").asInt(),"重量段","相邻档位存在超过1g的缺口，需要确认","error");
+                if(from>end+0.00100001)issue(channel,row.path("sourceRow").asInt(),"重量段","原表重量区间不连续，缺口内不报价","warning");
             }
             previous.put(group,row);
-            if(!Arrays.asList(Locale.getISOCountries()).contains(row.path("countryCode").asText())||row.path("areaName").asText().isBlank())issue(channel,row.path("sourceRow").asInt(),"国家","国家不能准确识别","error");
+            if(!supportedCountryCode(row.path("countryCode").asText())||row.path("areaName").asText().isBlank())issue(channel,row.path("sourceRow").asInt(),"国家","国家不能准确识别","error");
             if(to<=from)issue(channel,row.path("sourceRow").asInt(),"重量段","重量上下限不合法","error");
             if(!(row.path("pricePerKg").asDouble()>0||row.path("firstWeightPrice").asDouble()>0||row.path("intervalPrice").asDouble()>0))issue(channel,row.path("sourceRow").asInt(),"价格","缺少有效计费价格","error");
             var model=row.path("pricingModel").asText();
@@ -658,7 +713,7 @@ public class LogisticsSourceParser {
         var normalized=new ArrayList<String>();
         for(var row:rows) {
             var fields=new TreeMap<String,JsonNode>();
-            row.properties().forEach(e->{if(!e.getKey().startsWith("source")&&!Set.of("rawValues","normalizationNote","rowKey","routeKey","quoteReady","pendingReason","blockingReason","reviewWarning","etaSource").contains(e.getKey()))fields.put(e.getKey(),e.getValue().isNumber()?mapper.getNodeFactory().numberNode(e.getValue().decimalValue().stripTrailingZeros()):e.getValue());});
+            row.properties().forEach(e->{if(!e.getKey().startsWith("source")&&!Set.of("rawValues","notes","normalizationNote","rowKey","routeKey","quoteReady","pendingReason","blockingReason","reviewWarning","etaSource","etaStatus").contains(e.getKey()))fields.put(e.getKey(),e.getValue().isNumber()?mapper.getNodeFactory().numberNode(e.getValue().decimalValue().stripTrailingZeros()):e.getValue());});
             normalized.add(mapper.writeValueAsString(fields));
         }
         Collections.sort(normalized);
@@ -695,10 +750,15 @@ public class LogisticsSourceParser {
     static String defaultText(String value,String fallback){return value.isBlank()?fallback:value;}
     static List<Double> numbers(String text){var m=NUM.matcher(text);var values=new ArrayList<Double>();while(m.find())values.add(Double.parseDouble(m.group()));return values;}
     static double firstNumber(String text,double fallback){var nums=numbers(text);return nums.isEmpty()?fallback:nums.getFirst();}
-    static boolean looksRange(String value){return clean(value).matches("(?i)^(?:[1-9一二三四五六七八九]区\\(.*|[0-9.,]+(?:KG|K|G|克)?[-—–~～<>≤≥＜＞=]+(?:W|重量)?[<≤=]*[0-9.]+.*|(?:W|重量)?(?:<=|<|≤|＜)[0-9.]+(?:KG|K|G|克|公斤|千克)?(?:\\(.*)?)$");}
+    static boolean looksRange(String value){return clean(normalizeWeightText(value)).matches("(?i)^(?:[1-9一二三四五六七八九]区\\(.*|[0-9.,]+(?:KG|K|G|克)?[-—–~～<>≤≥＜＞=]+(?:W|重量)?[<≤=]*[0-9.]+.*|(?:W|重量)?(?:<=|<|≤|＜)[0-9.]+(?:KG|K|G|克|公斤|千克)?(?:\\(.*)?)$");}
     public record WeightRange(double from,double to,boolean includeFrom,boolean includeTo){}
+    private static String normalizeWeightText(String value) {
+        var text=java.text.Normalizer.normalize(value,java.text.Normalizer.Form.NFKC);
+        var limit=Pattern.compile("(?i)^[0-9.]+KG以内\\(不含[0-9.]+KG[,，]([0-9.]+)KG止\\)$").matcher(clean(text));
+        return limit.matches()?"W<="+limit.group(1):text;
+    }
     public static WeightRange parseRange(String raw) {
-        raw=java.text.Normalizer.normalize(raw,java.text.Normalizer.Form.NFKC);
+        raw=normalizeWeightText(raw);
         var units=clean(raw).toUpperCase(Locale.ROOT).replace("千克","KG").replace("公斤","KG").replace("克","G");
         var endpoints=Pattern.compile("^([0-9.]+)(KG|G)?[-—–~～]([0-9.]+)(KG|G)?$").matcher(units);
         if(endpoints.matches()) {
@@ -717,13 +777,15 @@ public class LogisticsSourceParser {
         if(value.matches("[0-9.]+-[0-9.]+")){var parts=value.split("-");double from=Double.parseDouble(parts[0]);return new WeightRange(from,Double.parseDouble(parts[1]),from>0,true);}
         throw new IllegalArgumentException("无法准确识别重量边界："+raw);
     }
+    // AC/XK and the carrier's separate Hawaii destination are explicit routing codes.
+    private static boolean supportedCountryCode(String code){return Arrays.asList(Locale.getISOCountries()).contains(code)||Set.of("AC","XK","HI").contains(code);}
     static String countryCode(String text){return COUNTRIES.entrySet().stream().filter(e->text.startsWith(e.getKey())).max(Comparator.comparingInt(e->e.getKey().length())).map(Map.Entry::getValue).orElse("");}
     static String countryName(String text){return COUNTRIES.keySet().stream().filter(text::startsWith).max(Comparator.comparingInt(String::length)).orElse(text);}
     static String inferredCountry(String text){return COUNTRIES.keySet().stream().filter(text::contains).max(Comparator.comparingInt(String::length)).orElse("");}
     static String zone(String text){var name=countryName(text);return text.equals(name)?"":text.substring(name.length()).trim();}
     private static String normalizeZone(String value){var v=clean(value).replaceAll("^[/（(]+|[）)]+$","");for(int i=0;i<9;i++)v=v.replace("一二三四五六七八九".substring(i,i+1)+"区",(i+1)+"区");return v.replaceAll("[.、，]","/");}
     private static String scope(JsonNode row){return row.path("countryCode").asText()+"|"+row.path("areaName").asText()+"|"+row.path("zoneName").asText()+"|"+row.path("originRegion").asText();}
-    private static Map<String,String> countries(){var m=new HashMap<String,String>();for(var code:Locale.getISOCountries())m.put(new Locale.Builder().setRegion(code).build().getDisplayCountry(Locale.SIMPLIFIED_CHINESE),code);m.put("英国","GB");m.put("韩国","KR");m.put("捷克","CZ");m.put("中国台湾","TW");m.put("台湾","TW");m.put("中国香港","HK");m.put("香港","HK");m.put("俄罗斯","RU");m.put("阿联酋","AE");m.put("土库曼","TM");return m;}
+    private static Map<String,String> countries(){var m=new HashMap<String,String>();for(var code:Locale.getISOCountries())m.put(new Locale.Builder().setRegion(code).build().getDisplayCountry(Locale.SIMPLIFIED_CHINESE),code);m.put("英国","GB");m.put("韩国","KR");m.put("捷克","CZ");m.put("中国台湾","TW");m.put("台湾","TW");m.put("中国香港","HK");m.put("香港","HK");m.put("俄罗斯","RU");m.put("阿联酋","AE");m.put("土库曼","TM");m.putAll(Map.ofEntries(Map.entry("马其顿","MK"),Map.entry("刚果","CG"),Map.entry("圣基茨","KN"),Map.entry("圣尤斯特歇斯岛","BQ"),Map.entry("圣巴特勒米岛","BL"),Map.entry("塞拉里昂","SL"),Map.entry("安提瓜及巴布达","AG"),Map.entry("布维岛","BV"),Map.entry("瓦利斯群岛和富图纳群岛","WF"),Map.entry("科科斯群岛","CC"),Map.entry("科索沃","XK"),Map.entry("蒙特塞拉岛","MS"),Map.entry("西萨摩亚","WS"),Map.entry("阿森松","AC"),Map.entry("夏威夷","HI")));return m;}
     private static class Columns {
         int headerRow=-1,feeHeaderRow=-1,country=-1,countryCode=-1,continent=-1,channel=-1,code=-1,weight=-1,from=-1,to=-1,rate=-1,fee=-1,settlement=-1,minimum=-1,step=-1,origin=-1,zone=-1,eta=-1,linehaul=-1,firstPrice=-1,nextPrice=-1;
         double firstKg=0.5,nextKg=0.5;boolean boundsInGrams=false;String fixedWeight="";List<Integer> notes=new ArrayList<>();Set<String> blockingFeeHeaders=new LinkedHashSet<>();
@@ -733,6 +795,8 @@ public class LogisticsSourceParser {
         final Sheet sheet;final int nonempty;final int lastContentRow;final DataFormatter formatter=new DataFormatter(Locale.ROOT);
         final Set<Integer> parsedRows=new HashSet<>();
         final Set<Integer> filteredFirstNextRows=new HashSet<>();
+        final Map<Integer,String> filteredOtherRows=new TreeMap<>();
+        final Set<Integer> referenceRows=new HashSet<>();
         final Set<Integer> exampleRows=new HashSet<>();
         final Map<Integer,Integer> auxiliaryRows=new HashMap<>();
         final Map<Integer,List<org.apache.poi.ss.util.CellRangeAddress>> merges=new HashMap<>();

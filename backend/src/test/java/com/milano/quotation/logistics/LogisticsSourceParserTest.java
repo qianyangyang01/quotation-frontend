@@ -21,6 +21,14 @@ class LogisticsSourceParserTest {
     final LogisticsWorkbookService standard=new LogisticsWorkbookService(mapper);
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,standard);
 
+    @Test void footerEtaMustBeUnambiguousAndBelongToTheDestination()throws Exception {
+        for(var note:List.of("参考时效：7-15天","加拿大参考时效：7-15天","参考时效：7-15天，特殊情况20-30天"))try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("普通渠道");row(s,0,"国家","重量段","运费/KG","挂号费/票");row(s,1,"美国","0-1",55,20);row(s,3,note);
+            var channel=parser.parse(bytes(book),"花海.xlsx").path("channels").get(0);
+            assertEquals(note.equals("参考时效：7-15天"),channel.path("etaReady").asBoolean(),note);
+        }
+    }
+
     @Test void preservesStrictBoundsWithoutInventingBillingRounding(){
         var range=LogisticsSourceParser.parseRange("0.2＜W<0.5KG");
         assertEquals(0.2,range.from());assertEquals(0.5,range.to());assertFalse(range.includeFrom());assertFalse(range.includeTo());
@@ -38,7 +46,9 @@ class LogisticsSourceParserTest {
             assertEquals("filtered",parsed.path("sheets").get(0).path("status").asText());
             assertEquals(2,parsed.path("sheets").get(0).path("filteredFirstNextRows").size());
             assertTrue(parsed.path("channels").valueStream().noneMatch(c->c.path("channelName").asText().equals("纯电池线路")));
-            var ordinary=findChannel(parsed,"JP-mini小包普货X");assertEquals(2,ordinary.path("rows").size());assertEquals("interval",ordinary.path("rows").get(0).path("pricingModel").asText());assertEquals(13.5,ordinary.path("rows").get(0).path("intervalPrice").asDouble());
+            assertTrue(parsed.path("channels").isEmpty());
+            assertEquals("filtered",parsed.path("sheets").get(1).path("status").asText());
+            assertEquals(2,parsed.path("sheets").get(1).path("filteredOtherRows").size());
         }
     }
     @Test void supportsXlsAndReportsEmptyAndUnrecognizedSheets()throws Exception {
@@ -59,20 +69,24 @@ class LogisticsSourceParserTest {
             assertEquals(7,price.path("etaMinDays").asInt());assertEquals(15,price.path("etaMaxDays").asInt());assertTrue(channel.path("etaReady").asBoolean());
         }
     }
-    @Test void blocksUnknownPriceAddonsInsteadOfTreatingThemAsRegistrationFees()throws Exception {
+    @Test void preservesUnknownPriceAddonsAsEvidenceWithoutAddingThemToBasePrice()throws Exception {
         try(var book=new XSSFWorkbook()){
             var s=book.createSheet("普货");row(s,0,"国家","重量段","运费/KG","超尺寸费","操作费/票","时效");row(s,1,"美国","0-1",55,99,20,"7-15天");
             var channel=parser.parse(bytes(book),"花海.xlsx").path("channels").get(0);var price=channel.path("rows").get(0);
             assertEquals(20,price.path("registrationFee").asInt());assertEquals(0,channel.path("errors").asInt(),channel.toString());
-            assertTrue(price.path("blockingReason").asText().contains("未知价格附加费"));assertFalse(channel.path("quoteReady").asBoolean());
+            assertTrue(price.path("reviewWarning").asText().contains("未知价格附加费"));assertTrue(channel.path("quoteReady").asBoolean());
+            assertEquals(75,new LogisticsBillingEngine(mapper).calculate(channel.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",1)).path("total").asDouble());
         }
     }
-    @Test void usesSfSettlementOnceAndBlocksUnreliableCriticalFormula()throws Exception {
+    @Test void usesOriginalSfPriceIgnoresDiscountAndBlocksUnreliableBaseFormula()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("服装专线");row(s,0,"国家名称","Code","运费/kg","折扣率","结算运费","专递操作费/票","计费重量限制（kg）");
             row(s,1,"德国","DE",71,0.64,45.44,22,"0.001-0.1KG");
-            var parsed=parser.parse(bytes(book),"顺丰.xlsx");assertEquals(45.44,parsed.path("channels").get(0).path("rows").get(0).path("pricePerKg").asDouble());
+            var parsed=parser.parse(bytes(book),"顺丰.xlsx");assertEquals(71,parsed.path("channels").get(0).path("rows").get(0).path("pricePerKg").asDouble());
             s.getRow(1).getCell(4).setCellFormula("1/0");book.getCreationHelper().createFormulaEvaluator().evaluateAll();
+            parsed=parser.parse(bytes(book),"顺丰.xlsx");assertEquals(0,parsed.path("channels").get(0).path("errors").asInt());
+            assertEquals(71,parsed.path("channels").get(0).path("rows").get(0).path("pricePerKg").asDouble());
+            s.getRow(1).getCell(2).setCellFormula("1/0");book.getCreationHelper().createFormulaEvaluator().evaluateAll();
             parsed=parser.parse(bytes(book),"顺丰.xlsx");assertTrue(parsed.path("channels").get(0).path("errors").asInt()>0);
         }
     }
@@ -90,8 +104,8 @@ class LogisticsSourceParserTest {
             assertEquals(1,parsed.path("channels").size());
             var channel=parsed.path("channels").get(0);
             assertEquals(1,channel.path("rows").size());
-            assertFalse(channel.path("quoteReady").asBoolean());
-            assertTrue(channel.path("rows").get(0).path("pendingReason").asText().contains("邮编"));
+            assertTrue(channel.path("quoteReady").asBoolean());
+            assertTrue(channel.path("rows").get(0).path("reviewWarning").asText().contains("邮编"));
         }
         try(var book=new XSSFWorkbook()) {
             var prices=book.createSheet("服装专线");
@@ -114,7 +128,7 @@ class LogisticsSourceParserTest {
             assertEquals("documentation",parsed.path("sheets").get(1).path("referenceKind").asText());
             assertEquals("documentation",parsed.path("sheets").get(2).path("referenceKind").asText());
             assertEquals("documentation",parsed.path("sheets").get(3).path("referenceKind").asText());
-            assertFalse(parsed.path("channels").get(0).path("quoteReady").asBoolean());
+            assertTrue(parsed.path("channels").get(0).path("quoteReady").asBoolean());
             assertFalse(parsed.path("channels").get(0).path("etaReady").asBoolean());
         }
     }
@@ -129,9 +143,9 @@ class LogisticsSourceParserTest {
 
             assertEquals(2,parsed.path("channels").size());
             var clothing=findChannel(parsed,"服装专线");var standard=findChannel(parsed,"标准专线");
-            assertFalse(clothing.path("quoteReady").asBoolean());
-            assertTrue(clothing.path("rows").get(0).path("pendingReason").asText().contains("邮编"));
-            assertFalse(standard.path("quoteReady").asBoolean());
+            assertTrue(clothing.path("quoteReady").asBoolean());
+            assertTrue(clothing.path("rows").get(0).path("reviewWarning").asText().contains("邮编"));
+            assertTrue(standard.path("quoteReady").asBoolean());
             assertFalse(standard.path("rows").get(0).path("pendingReason").asText().contains("邮编"));
             assertFalse(standard.path("etaReady").asBoolean());
         }
@@ -147,7 +161,7 @@ class LogisticsSourceParserTest {
             assertEquals(1,parsed.path("channels").size());
             assertEquals("万邦美国特惠专线-精选邮编",parsed.path("channels").get(0).path("channelName").asText());
             assertEquals("reference-only",parsed.path("sheets").get(1).path("status").asText());
-            assertFalse(parsed.path("channels").get(0).path("quoteReady").asBoolean());
+            assertTrue(parsed.path("channels").get(0).path("quoteReady").asBoolean());
         }
     }
     @Test void normalizesConfirmedHuahaiOneGramTransition()throws Exception {
@@ -194,24 +208,25 @@ class LogisticsSourceParserTest {
         var before=mapper.createArrayNode();before.addObject().put("rowKey","same").put("billingStepKg",0).put("linehaulPerKg",0).put("pendingReason","");
         var after=before.deepCopy();((ObjectNode)after.get(0)).put("billingStepKg",0.1).put("linehaulPerKg",5).put("pendingReason","需适配");
         var diff=standard.compare(after,before).path("diffRows").get(0);
-        assertEquals(3,diff.path("changes").size());assertNotEquals("unchanged",diff.path("type").asText());
+        assertEquals(2,diff.path("changes").size());assertNotEquals("unchanged",diff.path("type").asText());
     }
     @Test void shippedTemplateIsImportableAndExamplesCannotQuote()throws Exception {
         var parsed=parser.parse(Files.readAllBytes(Path.of("../public/templates/logistics-v2.xlsx")),"标准模板.xlsx");
         assertEquals("metadata",parsed.path("sheets").get(0).path("status").asText());
-        assertEquals(2,parsed.path("channels").size());int rows=0;
+        assertEquals(1,parsed.path("channels").size());int rows=0;
         for(var channel:parsed.path("channels")){assertEquals(0,channel.path("errors").asInt(),channel.toString());assertFalse(channel.path("quoteReady").asBoolean());rows+=channel.path("rows").size();}
-        assertEquals(3,rows);
+        assertEquals(2,rows);
     }
-    @Test void changedGlobalFeeClauseChangesBusinessFingerprint()throws Exception {
+    @Test void changedShippingNotesRemainTraceableWithoutGeneratingPriceReview()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("普货");row(s,0,"国家","重量段","运费/KG","挂号费/票");row(s,1,"美国","0-1",55,20);
             row(s,2,"附加费规则：偏远地区每票附加操作费用人民币20元，需要在报价时另行核对。");
             var first=parser.parse(bytes(book),"花海.xlsx").path("channels").get(0);
             s.getRow(2).getCell(0).setCellValue("附加费规则：偏远地区每票附加操作费用人民币30元，需要在报价时另行核对。");
             var second=parser.parse(bytes(book),"花海.xlsx").path("channels").get(0);
-            assertNotEquals(first.path("contentHash"),second.path("contentHash"));
-            assertEquals("rule",standard.compare((tools.jackson.databind.node.ArrayNode)second.path("rows"),(tools.jackson.databind.node.ArrayNode)first.path("rows")).path("diffRows").get(0).path("type").asText());
+            assertEquals(first.path("contentHash"),second.path("contentHash"));
+            assertNotEquals(first.path("rows").get(0).path("notes"),second.path("rows").get(0).path("notes"));
+            assertEquals("unchanged",standard.compare((tools.jackson.databind.node.ArrayNode)second.path("rows"),(tools.jackson.databind.node.ArrayNode)first.path("rows")).path("diffRows").get(0).path("type").asText());
         }
     }
     @Test void keepsSecondaryRedeliveryFeeTableAsPendingEvidenceNotBaseFreight()throws Exception {
@@ -219,7 +234,7 @@ class LogisticsSourceParserTest {
             var s=book.createSheet("普货");row(s,0,"国家","重量段","运费/KG","挂号费/票");row(s,1,"美国","<=1KG",55,20);
             row(s,3,"重量（KG）","重派费（CNY）");row(s,4,"0-0.5KG",30);
             var result=parser.parse(bytes(book),"顺丰.xlsx");var c=result.path("channels").get(0);
-            assertEquals(1,c.path("rows").size());assertEquals(0,c.path("errors").asInt());assertFalse(c.path("quoteReady").asBoolean());
+            assertEquals(1,c.path("rows").size());assertEquals(0,c.path("errors").asInt());assertTrue(c.path("quoteReady").asBoolean());
             assertEquals(1,result.path("sheets").get(0).path("conditionalPriceRows").size());assertTrue(c.path("rows").get(0).path("notes").asText().contains("30"));
         }
     }
@@ -254,7 +269,7 @@ class LogisticsSourceParserTest {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("燕文专线惠选-普货");row(s,0,"国家","CountryCode","公斤运费(元/KG)","处理费(元/件)","重量段(KG)");row(s,1,"美国","US",100,20,"0.001-1");
             row(s,3,"国家","Country Code","参考时效 (工作日)");row(s,4,"美国","US","6-12工作日");row(s,5,"美国","US","8-15工作日");
-            var channel=parser.parse(bytes(book),"燕文价格.xlsx").path("channels").get(0);assertTrue(channel.path("errors").asInt()>0);assertEquals(0,findCountry(channel,"US").path("etaMinDays").asInt());
+            var channel=parser.parse(bytes(book),"燕文价格.xlsx").path("channels").get(0);assertEquals(0,channel.path("errors").asInt());assertTrue(channel.path("quoteReady").asBoolean());assertEquals(0,findCountry(channel,"US").path("etaMinDays").asInt());
         }
     }
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
@@ -275,7 +290,7 @@ class LogisticsSourceParserTest {
         assertSample(books.get("7.30花海.xlsx"),"美国精选商派专线-普货","US",0.5,64,18);
         assertSample(books.get("8.12容鼎.xlsx"),"美国纯商派DDP专线-普货","US",0.5,72,16);
         assertSample(books.get("8.1云速递价格.xlsx"),"全球专线普货","US",0.5,78,20);
-        assertSample(books.get("8.7顺丰价格.xlsx"),"服装专线","DE",0.05,45.44,22);
+        assertSample(books.get("8.7顺丰价格.xlsx"),"服装专线","DE",0.05,71,22);
     }
     @Test @EnabledIfSystemProperty(named="logistics.candidateDir",matches=".+")
     void everyCandidateWorkbookHasARecognizedPriceChannel()throws Exception {
@@ -289,7 +304,7 @@ class LogisticsSourceParserTest {
             System.out.println(path.getFileName()+" sheets="+parsed.path("sheets").size()+" channels="+parsed.path("channels").size()+" recognized="+recognized+" rows="+rows+" errors="+errors+" errorFields="+errorFields);
             assertTrue(recognized>0,path.getFileName()+" 没有识别到可审核的价格渠道");
         }
-        var expectedPending=files.stream().anyMatch(path->path.getFileName().toString().contains("通邮"))?Set.of("俄罗斯专线","ebay挂号保建品"):Set.<String>of();
+        var expectedPending=Set.<String>of();
         assertEquals(expectedPending,pendingNames,()->"待人工确认的模板集合发生变化：\n"+String.join("\n",pending));
     }
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")

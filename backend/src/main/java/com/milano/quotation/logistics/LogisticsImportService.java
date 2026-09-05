@@ -233,6 +233,11 @@ public class LogisticsImportService {
         }
         var current=jdbc.sql("select v.payload::text from logistics_channel c join logistics_version v on v.id=c.current_version_id where c.id=:id")
                 .param("id",channelId).query(String.class).optional();
+        var priorDraft=jdbc.sql("select payload::text from logistics_version where channel_id=:id and status='draft' order by version_number desc limit 1")
+                .param("id",channelId).query(String.class).optional();
+        if(priorDraft.isPresent())inheritManualEta(input,mapper.readTree(priorDraft.get()));
+        if(current.isPresent())inheritManualEta(input,mapper.readTree(current.get()));
+        LogisticsReadiness.apply(input);input.put("contentHash",parser.businessHash((ArrayNode)input.path("rows")));
         var pendingReasons=new TreeSet<String>();
         for(var row:input.path("rows"))for(var reason:row.path("pendingReason").asText().split("；"))if(!reason.isBlank())pendingReasons.add(reason.trim());
         var outcome=mapper.createObjectNode().put("channelId",channelId.toString()).put("providerName",providerName).put("channelName",input.path("channelName").asText())
@@ -242,18 +247,32 @@ public class LogisticsImportService {
         outcome.set("missingEtaRoutes",input.path("missingEtaRoutes").deepCopy());outcome.set("blockingReasons",input.path("blockingReasons").deepCopy());outcome.set("reviewWarnings",input.path("reviewWarnings").deepCopy());
         if(current.isPresent() && input.path("errors").asInt()==0) {
             var published=mapper.readTree(current.get());
-            if(input.path("contentHash").asText().equals(published.path("contentHash").asText())){
+            if(input.path("parserVersion").asText().equals(published.path("parserVersion").asText())
+                &&input.path("contentHash").asText().equals(parser.businessHash((ArrayNode)published.path("rows")))){
                 outcome.putObject("summary").put("added",0).put("price",0).put("rule",0).put("removed",0).put("unchanged",published.path("rows").size());
                 return outcome.put("status","unchanged").put("versionId",published.path("id").asText()).put("basePublishedVersionId",published.path("id").asText());
             }
         }
         var body=input.deepCopy().put("sourceHash",input.path("contentHash").asText()).put("importedBy",actor);
-        var version=replaceDrafts?logistics.createDraftReplacing(channelId,body,"用户确认由新导入终止旧待审稿"):logistics.createDraft(channelId,body);
+        var version=replaceDrafts&&input.path("errors").asInt()==0?logistics.createDraftReplacing(channelId,body,"用户确认由新导入终止旧待审稿"):logistics.createDraft(channelId,body);
         outcome.put("versionId",version.path("id").asText()).put("versionNumber",version.path("versionNumber").asInt()).put("status",input.path("errors").asInt()>0?"blocked":"draft")
                 .put("basePublishedVersionId",version.path("basePublishedVersionId").asText());
         outcome.put("pricingReady",version.path("pricingReady").asBoolean(false)).put("etaReady",version.path("etaReady").asBoolean(false)).put("etaMissingCount",version.path("etaMissingCount").asInt());
         outcome.set("missingEtaRoutes",version.path("missingEtaRoutes").deepCopy());outcome.set("blockingReasons",version.path("blockingReasons").deepCopy());outcome.set("reviewWarnings",version.path("reviewWarnings").deepCopy());
         outcome.set("summary",version.path("summary"));outcome.set("issues",input.path("issues"));return outcome;
+    }
+    static void inheritManualEta(ObjectNode incoming,JsonNode previous) {
+        var manual=new HashMap<String,JsonNode>();var conflict=new HashSet<String>();
+        for(var row:previous.path("rows"))if(row.path("etaSource").asText().startsWith("manual-review")&&row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt()) {
+            var key=LogisticsReadiness.routeKey(row);var prior=manual.putIfAbsent(key,row);
+            if(prior!=null&&(prior.path("etaMinDays").asInt()!=row.path("etaMinDays").asInt()||prior.path("etaMaxDays").asInt()!=row.path("etaMaxDays").asInt()))conflict.add(key);
+        }
+        for(var item:incoming.path("rows")) {
+            var row=(ObjectNode)item;if(row.path("etaMinDays").asInt()>0||row.path("etaMaxDays").asInt()>0)continue;
+            var key=LogisticsReadiness.routeKey(row);var prior=manual.get(key);if(prior==null||conflict.contains(key))continue;
+            row.put("etaMinDays",prior.path("etaMinDays").asInt()).put("etaMaxDays",prior.path("etaMaxDays").asInt())
+                .put("etaSource","manual-review-inherited").put("sourceEtaVersionId",previous.path("id").asText());
+        }
     }
     private void save(UUID id,UUID lease,String status,String phase,ObjectNode payload){jdbc.sql("update logistics_import_batch set status=:status,phase=:phase,payload=cast(:payload as jsonb),updated_at=now() where id=:id and lease_id=:lease")
             .param("lease",lease).param("id",id).param("status",status).param("phase",phase).param("payload",payload.toString()).update();}

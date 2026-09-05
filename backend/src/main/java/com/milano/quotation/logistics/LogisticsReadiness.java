@@ -9,7 +9,7 @@ import java.util.*;
 
 /** Derives route-level ETA readiness and review flags without changing billing identity. */
 final class LogisticsReadiness {
-    private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg","first-next");
+    private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg");
     private static final Set<String> GENERATED_ETA_CODES=Set.of("ETA_MISSING","ETA_PARTIAL","ETA_CONFLICT");
     private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式");
 
@@ -21,6 +21,9 @@ final class LogisticsReadiness {
         int priorErrors=target.path("errors").asInt();
         var rows=target.withArray("rows");
         var issues=target.withArray("issues");
+        for(var issue:issues)if((GENERATED_ETA_CODES.contains(issue.path("code").asText())||issue.path("field").asText().contains("时效"))&&issue.path("level").asText().equals("error")) {
+            priorErrors=Math.max(0,priorErrors-1);((ObjectNode)issue).put("level","warning");
+        }
         var preserved=tools.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
         for(var issue:issues)if(!GENERATED_ETA_CODES.contains(issue.path("code").asText()))preserved.add(issue.deepCopy());
         issues.removeAll();issues.addAll(preserved);
@@ -33,6 +36,11 @@ final class LogisticsReadiness {
             row.put("blockingReason",withoutGenerated(row.path("blockingReason").asText(row.path("pendingReason").asText())));
             row.put("pendingReason",row.path("blockingReason").asText());
             row.put("reviewWarning",withoutGenerated(row.path("reviewWarning").asText()));
+            var priceBlockers=new LinkedHashSet<String>();
+            for(var reason:split(row.path("blockingReason").asText())) {
+                if(advisory(reason))warn(row,reason);else priceBlockers.add(reason);
+            }
+            row.put("blockingReason",String.join("；",priceBlockers)).put("pendingReason",String.join("；",priceBlockers));
             if(row.path("sourceProductCode").asText().isBlank())warn(row,"原表未提供产品代码，使用系统渠道编码");
             if(row.path("originRegion").asText().isBlank()&&row.path("sourceOriginRegion").asText().isBlank())warn(row,"原表未标注报价区域");
             var model=row.path("pricingModel").asText();
@@ -69,18 +77,19 @@ final class LogisticsReadiness {
                 else if(min>0||max>0)partial.add(row);
             }
             if(!partial.isEmpty()) {
-                for(var row:entry.getValue())block(row,"时效范围不完整");
+                for(var row:entry.getValue()){warn(row,"时效范围不完整，不影响报价");row.put("etaStatus","partial");}
                 for(var row:partial)issue(issues,row,"ETA_PARTIAL","时效","时效最早和最晚天数必须同时填写");
                 missing.add(routeView(entry.getKey(),entry.getValue().getFirst(),"partial"));
             } else if(values.size()>1) {
-                for(var row:entry.getValue())block(row,"同一路线存在冲突时效");
+                for(var row:entry.getValue()){warn(row,"同一路线存在冲突时效，不影响报价");row.put("etaStatus","conflict");}
                 issue(issues,entry.getValue().getFirst(),"ETA_CONFLICT","时效","同一渠道、国家、分区和报价区域存在不同的时效范围");
                 missing.add(routeView(entry.getKey(),entry.getValue().getFirst(),"conflict"));
             } else if(values.isEmpty()) {
-                for(var row:entry.getValue())block(row,"缺少时效");
+                for(var row:entry.getValue()){warn(row,"该物流暂无时效说明");row.put("etaStatus","missing");}
                 missing.add(routeView(entry.getKey(),entry.getValue().getFirst(),"missing"));
             } else {
                 var eta=values.iterator().next();
+                for(var row:entry.getValue())row.put("etaStatus","ready");
                 for(var row:entry.getValue())if(row.path("etaMinDays").asInt()<=0||row.path("etaMaxDays").asInt()<=0) {
                     row.put("etaMinDays",eta.min).put("etaMaxDays",eta.max).put("etaSource","route-inherited");
                 } else if(row.path("etaSource").asText().isBlank())row.put("etaSource","source-row");
@@ -100,7 +109,7 @@ final class LogisticsReadiness {
         int errors=0;for(var issue:issues)if("error".equals(issue.path("level").asText()))errors++;
         errors=Math.max(errors,priorErrors);
         boolean etaReady=missing.isEmpty();
-        boolean ready=errors==0&&etaReady&&blockers.isEmpty()&&!rows.isEmpty()&&"known".equals(target.path("templateStatus").asText("known"));
+        boolean ready=errors==0&&blockers.isEmpty()&&!rows.isEmpty()&&"known".equals(target.path("templateStatus").asText("known"));
         for(var value:rows)((ObjectNode)value).put("quoteReady",ready&&((ObjectNode)value).path("blockingReason").asText().isBlank());
         target.put("errors",errors).put("warnings",warningRows).put("etaReady",etaReady).put("etaMissingCount",missing.size())
                 .put("pendingRows",blockedRows).put("reviewWarningRows",warningRows).put("quoteReady",ready).put("pricingReady",ready);
@@ -135,14 +144,23 @@ final class LogisticsReadiness {
     private static void issue(ArrayNode issues,ObjectNode row,String code,String field,String message) {
         issues.addObject().put("row",row.path("sourceRow").asInt()).put("sourceSheet",row.path("sourceSheet").asText())
                 .put("rowKey",row.path("rowKey").asText()).put("routeKey",row.path("routeKey").asText())
-                .put("code",code).put("field",field).put("message",message).put("level","error");
+                .put("code",code).put("field",field).put("message",message).put("level","warning");
     }
 
-    static void block(ObjectNode row,String reason) {row.put("blockingReason",append(row.path("blockingReason").asText(),reason));row.put("pendingReason",row.path("blockingReason").asText());}
+    // The confirmed product is a base-price quote. Shipping conditions remain source evidence,
+    // ETA is optional; ambiguous/invalid price data continue to block publication.
+    static boolean advisory(String reason) {
+        return reason.startsWith("未知价格附加费")||reason.startsWith("原文件含区域、邮编或派送范围表")
+            ||Set.of("附加或重派费用表需适配核对","行级价格条件需适配核对","表尾计费/适用规则需适配核对",
+                "横向渠道表的收寄条件和表尾附加规则待核对","分区、不同下单产品及附加操作费需核对，暂不开放自动报价",
+                "同表含多个下单产品及附加操作费，价格仅供管理，需人工确认适用产品","重量范围附带首续重条件，需核对完整规则",
+                "燃油附加费率尚未接入自动计费","干线费需要明确计费叠加规则","普通计费进位规则需要适配").contains(reason);
+    }
+    static void block(ObjectNode row,String reason) {if(advisory(reason)){warn(row,reason);return;}row.put("blockingReason",append(row.path("blockingReason").asText(),reason));row.put("pendingReason",row.path("blockingReason").asText());}
     static void warn(ObjectNode row,String reason) {row.put("reviewWarning",append(row.path("reviewWarning").asText(),reason));}
     private static String append(String prior,String value){var values=split(prior);values.add(value);return String.join("；",values);}
     private static LinkedHashSet<String> split(String value){var values=new LinkedHashSet<String>();for(var item:value.split("；"))if(!item.isBlank())values.add(item.trim());return values;}
-    private static String withoutGenerated(String value){var values=split(value);values.removeAll(GENERATED_REASONS);return String.join("；",values);}
+    private static String withoutGenerated(String value){var values=split(value);values.removeAll(GENERATED_REASONS);values.removeAll(Set.of("该物流暂无时效说明","时效范围不完整，不影响报价","同一路线存在冲突时效，不影响报价"));return String.join("；",values);}
     private static String normalize(String value){return value.replaceAll("[\\s（）()]","").toLowerCase(Locale.ROOT);}
     private record Eta(int min,int max){}
 }

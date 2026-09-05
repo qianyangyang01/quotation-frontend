@@ -8,7 +8,7 @@ export type Price = {
   firstWeightPrice?: number; firstWeightKg?: number; nextWeightPrice?: number; nextWeightKg?: number; intervalPrice?: number
   sourceSheet?: string; sourceRow?: number; notes?: string; pendingReason?: string; blockingReason?: string; reviewWarning?: string; pricingModel?: string; currency?: string
   zoneName?: string; originRegion?: string; sourceOriginRegion?: string; rowKey?: string; routeKey?: string; sourceProductCode?: string; sourceFeeLabel?: string
-  etaMinDays?: number; etaMaxDays?: number; etaSource?: string
+  etaMinDays?: number; etaMaxDays?: number; etaSource?: string; etaStatus?: string
   providerName?: string; channelName?: string; versionId?: string; versionNumber?: number; quoteReady?: boolean
 }
 export type Provider = { id: string; name: string; code?: string; enabled?: boolean; datasetId?: string; _version?: number }

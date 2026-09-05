@@ -30,7 +30,7 @@ public class LogisticsQueryService {
     private static final int MAX_COUNTRIES = 100;
     private static final int MAX_CHANNEL_CODES = 100;
     private static final Set<String> QUOTE_PRICE_FIELDS = Set.of(
-            "areaName", "countryCode", "etaMinDays", "etaMaxDays",
+            "areaName", "countryCode", "etaMinDays", "etaMaxDays", "etaStatus",
             "prohibitedMarks", "allowedMarks", "maxPerimeterCm", "maxSideCm",
             "volumeDivisor", "weightFromKg", "weightToKg", "startWeightKg",
             "pricePerKg", "minChargeWeightKg", "firstWeightKg", "firstWeightPrice",

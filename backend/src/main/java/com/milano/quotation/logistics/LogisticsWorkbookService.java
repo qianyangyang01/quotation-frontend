@@ -50,8 +50,7 @@ public class LogisticsWorkbookService {
             Map.entry("nextWeightKg", "续重"), Map.entry("specialGoodsContent", "特殊品含量"),
             Map.entry("volumetric", "是否计抛"), Map.entry("currency", "币种"), Map.entry("pricingModel", "计费方式"), Map.entry("prohibitGeneralCargo", "是否禁止普货"),
             Map.entry("phoneRequired", "电话是否必需"), Map.entry("zoneExclude", "排除"),
-            Map.entry("billingStepKg", "计费进位KG"), Map.entry("originRegion", "发货区域"),
-            Map.entry("notes", "规则备注"), Map.entry("pendingReason", "待适配原因"), Map.entry("quoteReady", "自动报价可用性"));
+            Map.entry("billingStepKg", "计费进位KG"), Map.entry("originRegion", "发货区域"));
     private final ObjectMapper mapper;
 
     public LogisticsWorkbookService(ObjectMapper mapper) { this.mapper = mapper; }
@@ -160,11 +159,11 @@ public class LogisticsWorkbookService {
                 var before=ordered.get(i-1);var current=ordered.get(i);
                 var oldTo=before.path("weightToKg").asDouble();var nextFrom=current.path("weightFromKg").asDouble();
                 var overlap=nextFrom<oldTo-0.000000001 || (Math.abs(nextFrom-oldTo)<0.000000001&&before.path("weightToInclusive").asBoolean(true)&&current.path("weightFromInclusive").asBoolean(false)==true);
-                var gap=nextFrom>oldTo+0.000000001 || (Math.abs(nextFrom-oldTo)<0.000000001&&!before.path("weightToInclusive").asBoolean(true)&&!current.path("weightFromInclusive").asBoolean(false));
+                var gap=nextFrom>oldTo+0.00100001 || (Math.abs(nextFrom-oldTo)<0.000000001&&!before.path("weightToInclusive").asBoolean(true)&&!current.path("weightFromInclusive").asBoolean(false));
                 if(overlap||gap){
                     var issue=issues.addObject().put("row",current.path("sourceRow").asInt()).put("field","重量连续性")
-                            .put("code",overlap?"WEIGHT_OVERLAP":"WEIGHT_GAP").put("level","error")
-                            .put("message",overlap?"与上一重量档重叠":"与上一重量档存在断档")
+                            .put("code",overlap?"WEIGHT_OVERLAP":"WEIGHT_GAP").put("level",overlap?"error":"warning")
+                            .put("message",overlap?"与上一重量档重叠":"原表重量区间不连续，缺口内不报价")
                             .put("sourceSheet",current.path("sourceSheet").asText()).put("rowKey",current.path("rowKey").asText()).put("relatedRowKey",before.path("rowKey").asText());
                     issue.putObject("suggestedFields").put("weightFromKg",oldTo).put("weightFromInclusive",!before.path("weightToInclusive").asBoolean(true));
                 }

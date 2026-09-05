@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { calculateLogisticsFee, type LogisticsRule } from './logistics'
+import { calculateLogisticsFee, formatLogisticsEta, type LogisticsRule } from './logistics'
+
+it('keeps a usable base quote when ETA is absent and displays an explicit explanation', () => {
+  expect(formatLogisticsEta({ etaMinDays: 0, etaMaxDays: 0 })).toBe('该物流暂无时效说明')
+  expect(formatLogisticsEta({ etaMinDays: 7, etaMaxDays: 15, etaStatus: 'conflict' })).toBe('该物流暂无时效说明')
+  expect(formatLogisticsEta({ etaMinDays: 7, etaMaxDays: 15 })).toBe('7～15 天')
+  const rule = { ...publishedRule, prices: publishedRule.prices.map(row => ({ ...row, etaMinDays: 0, etaMaxDays: 0 })) }
+  expect(calculateLogisticsFee(rule, '美国', 0.5)?.total).toBe(59)
+  expect(calculateLogisticsFee(rule, '美国', 0.5)?.total).toBe(calculateLogisticsFee(publishedRule, '美国', 0.5)?.total)
+})
 
 const publishedRule: LogisticsRule = {
   id: 1,

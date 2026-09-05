@@ -1,5 +1,5 @@
 export interface LogisticsPriceRow {
-  areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number
+  areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number; etaStatus?: string
   prohibitedMarks: string; allowedMarks: string; maxPerimeterCm: number; maxSideCm: number
   volumeDivisor: number; weightFromKg: number; weightToKg: number; startWeightKg: number
   pricePerKg: number; minChargeWeightKg: number; firstWeightKg: number; firstWeightPrice: number
@@ -9,6 +9,11 @@ export interface LogisticsPriceRow {
   pricingModel?: string; weightFromInclusive?: boolean; weightToInclusive?: boolean; quoteReady?: boolean
 }
 export interface LogisticsRelation { carrier: string; channel: string; channelCode: string; discounts: string }
+export function formatLogisticsEta(row: { etaMinDays?: number; etaMaxDays?: number; etaStatus?: string }) {
+  const min = Number(row.etaMinDays), max = Number(row.etaMaxDays)
+  if ((row.etaStatus && row.etaStatus !== 'ready') || !Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min) return '该物流暂无时效说明'
+  return `${min}～${max} 天`
+}
 export interface LogisticsRule {
   logisticsChannelId?: string; logisticsVersionId?: string; billingVerified?: boolean
   id: number; name: string; englishName: string; type: string; currency: string; published: string

@@ -18,7 +18,7 @@ import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
-import { calculateLogisticsFee, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
+import { calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
@@ -907,7 +907,7 @@ function matchedLogistics(p: Product, country = p.country) {
       freight: Number(result.total.toFixed(2)),
       baseFee: Number(result.base.toFixed(2)),
       registrationFee: result.price.registrationFee,
-      eta: `${result.price.etaMinDays || '-'}～${result.price.etaMaxDays || '-'} 天`,
+      eta: formatLogisticsEta(result.price),
       weightRange: `${displayGrams(result.price.weightFromKg)}～${displayGrams(result.price.weightToKg)} g`,
     }))
   }).sort((a, b) => a.freight - b.freight)
