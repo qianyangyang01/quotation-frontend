@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { channelsAvailableForCountry, financeAllowsLogisticsChannel, financeChannelKey, type FinanceChannelPolicy } from './financeChannelPolicies'
 import { calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsQuoteRegions, replaceLogisticsRules, logisticsRuleByName, type LogisticsRule } from './logistics'
 
 it('keeps a usable base quote when ETA is absent and displays an explicit explanation', () => {
@@ -93,4 +94,34 @@ it('indexes a published snapshot without changing zone, weight-boundary or eligi
   expect(calculateLogisticsFee(replacement,'AU',.5)?.total).toBe(25)
   expect(logisticsRuleByName(rule.name)).toBe(replacement)
   replaceLogisticsRules([])
+})
+
+it('keeps direct finance eligibility identical to the channel list and rejects stale permissions after replacement', () => {
+  const rules = [publishedRule, { ...publishedRule, id: publishedRule.id + 1, status: '停用' as const }]
+  const countryNames = ['美国', 'US', 'us', '澳大利亚', 'AU']
+  const relations = [...publishedRule.relations, { carrier: '不存在', channel: '不存在', channelCode: 'MISSING' }]
+  const keys = rules.flatMap(rule => relations.map(relation => financeChannelKey(rule.id, relation)))
+  const policies: FinanceChannelPolicy[] = [{ id: '普货', category: '普货', enabled: true, updatedAt: '', countryRules: countryNames.map(country => ({ country, allowedChannels: keys, stage: 'common', continent: '北美洲', sortOrder: 1 })) }]
+  try {
+    replaceLogisticsRules(rules)
+    for (const country of countryNames) {
+      const expected = new Set(channelsAvailableForCountry(country).map(option => option.key))
+      for (const rule of rules) for (const relation of relations) {
+        expect(financeAllowsLogisticsChannel(policies, '普货', country, rule.id, relation)).toBe(expected.has(financeChannelKey(rule.id, relation)))
+      }
+    }
+    expect(financeAllowsLogisticsChannel(policies, '带电', '美国', publishedRule.id, publishedRule.relations[0]!)).toBe(false)
+    policies[0]!.enabled = false
+    expect(financeAllowsLogisticsChannel(policies, '普货', '美国', publishedRule.id, publishedRule.relations[0]!)).toBe(false)
+    policies[0]!.enabled = true
+    replaceLogisticsRules([])
+    expect(financeAllowsLogisticsChannel(policies, '普货', '美国', publishedRule.id, publishedRule.relations[0]!)).toBe(false)
+  } finally { replaceLogisticsRules([]) }
+})
+
+it('deduplicates equivalent Australia zone labels after normalization', () => {
+  try {
+    replaceLogisticsRules([{ ...publishedRule, prices: ['1区', '澳大利亚1区', '2区', '澳大利亚二区'].map(zoneName => ({ ...publishedRule.prices[0]!, areaName: '澳大利亚', countryCode: 'AU', zoneName })) }])
+    expect(logisticsQuoteRegions('澳大利亚')).toEqual(['澳大利亚1区', '澳大利亚2区'])
+  } finally { replaceLogisticsRules([]) }
 })

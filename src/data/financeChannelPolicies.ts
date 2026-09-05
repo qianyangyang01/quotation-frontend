@@ -1,4 +1,4 @@
-import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation, type LogisticsPriceRow } from './logistics'
+import { australiaQuoteRegions, logisticsCountries, logisticsRules, logisticsRuleById, normalizeAustraliaQuoteRegion, type LogisticsRelation, type LogisticsPriceRow } from './logistics'
 import {
   defaultCountrySortOrder,
   defaultCountryStage,
@@ -331,6 +331,11 @@ export function financeAllowsLogisticsChannel(
   const policy = policies.find(item => item.enabled && item.category === attribute)
   const countryRule = policy?.countryRules.find(rule => rule.country === country)
   const key = financeChannelKey(ruleId, relation)
-  return (countryRule?.allowedChannels.includes(key) ?? false)
-    && channelsAvailableForCountry(country, attribute).some(option => option.key === key)
+  if (!countryRule?.allowedChannels.includes(key)) return false
+  // Quote eligibility needs one membership check, not the finance editor's
+  // complete sorted channel list and Australia region descriptions per channel.
+  const rule = logisticsRuleById(ruleId)
+  return !!rule && rule.status === '启用'
+    && rule.prices.some(price => price.areaName === country || price.countryCode.toLowerCase() === country.toLowerCase())
+    && rule.relations.some(candidate => candidate.carrier && candidate.channel && financeChannelKey(ruleId, candidate) === key)
 }

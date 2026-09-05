@@ -6,6 +6,8 @@ const dependencies = vi.hoisted(() => ({
   loadFinanceCountrySettings: vi.fn(),
   loadFinanceTaxSettings: vi.fn(),
   loadFinanceChannelPolicies: vi.fn(),
+  loadFinanceExchangeRate: vi.fn(),
+  loadCustomerGradeSettings: vi.fn(),
 }))
 
 vi.mock('@/services/financeSettings', () => ({ hydrateFinanceSettings: dependencies.hydrateFinanceSettings }))
@@ -13,6 +15,8 @@ vi.mock('@/data/publishedLogisticsRepository', () => ({ loadPublishedLogisticsMa
 vi.mock('@/data/financeChannelPolicies', () => ({
   loadFinanceCountrySettings: dependencies.loadFinanceCountrySettings,
   loadFinanceChannelPolicies: dependencies.loadFinanceChannelPolicies,
+  loadFinanceExchangeRate: dependencies.loadFinanceExchangeRate,
+  loadCustomerGradeSettings: dependencies.loadCustomerGradeSettings,
 }))
 vi.mock('@/data/financeTaxSettings', () => ({ loadFinanceTaxSettings: dependencies.loadFinanceTaxSettings }))
 
@@ -43,5 +47,22 @@ describe('quotation workspace configuration bootstrap', () => {
     expect(configuration.countrySettings.map(setting => setting.country)).toEqual(['美国', '英国', '法国', '澳大利亚'])
     expect(dependencies.loadFinanceCountrySettings).toHaveBeenCalledOnce()
     expect(dependencies.loadFinanceChannelPolicies).toHaveBeenCalledOnce()
+  })
+
+  it('reads recovered exchange rates and grades only after a failed finance load succeeds on retry', async () => {
+    dependencies.loadPublishedLogisticsManifest.mockResolvedValue(undefined)
+    dependencies.hydrateFinanceSettings.mockRejectedValueOnce(new Error('finance unavailable'))
+    const { loadQuotationWorkspaceConfiguration } = await import('./quotationWorkspaceBootstrap')
+    await expect(loadQuotationWorkspaceConfiguration()).rejects.toThrow('finance unavailable')
+    expect(dependencies.loadFinanceExchangeRate).not.toHaveBeenCalled()
+    expect(dependencies.loadCustomerGradeSettings).not.toHaveBeenCalled()
+
+    dependencies.hydrateFinanceSettings.mockImplementationOnce(async () => {
+      dependencies.loadFinanceExchangeRate.mockReturnValue({ usdCny: 7, updatedAt: 'recovered' })
+      dependencies.loadCustomerGradeSettings.mockReturnValue([{ grade: 'S', enabled: true, coefficient: 1.23 }])
+    })
+    const recovered = await loadQuotationWorkspaceConfiguration()
+    expect(recovered.exchangeRate).toEqual({ usdCny: 7, updatedAt: 'recovered' })
+    expect(recovered.customerGrades).toEqual([{ grade: 'S', enabled: true, coefficient: 1.23 }])
   })
 })

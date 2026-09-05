@@ -91,7 +91,8 @@ const visiblePages = computed<(number | 'ellipsis-start' | 'ellipsis-end')[]>(()
 })
 
 let searchTimer=0
-watch(search, () => { currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(reload,250) })
+let purchaseReadVersion=0
+watch(search, () => { purchaseReadVersion+=1;loading.value=true;currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(reload,250) })
 watch(pageSize, () => { currentPage.value = 1;reload() })
 watch(totalPages, total => {
   if (currentPage.value > total) currentPage.value = total
@@ -102,18 +103,22 @@ function goToPage(page: number) {
   reload()
 }
 function resetFilters() {
+  const alreadyEmpty = search.value === ''
   search.value = ''
   currentPage.value = 1
+  if (alreadyEmpty) void reload()
 }
 
 async function reload() {
+  window.clearTimeout(searchTimer)
+  const requestVersion=++purchaseReadVersion
   loading.value = true
-  try { const [page,stats]=await Promise.all([loadPurchaseProductPage(search.value.trim(),currentPage.value-1,pageSize.value),loadPurchaseStats()]);records.value=page.items;totalRecords.value=page.total;serverTotalPages.value=page.totalPages;purchaseStats.value=stats }
-  catch (error) { toast(error instanceof Error ? error.message : '采购数据读取失败') }
-  finally { loading.value = false }
+  try { const [page,stats]=await Promise.all([loadPurchaseProductPage(search.value.trim(),currentPage.value-1,pageSize.value),loadPurchaseStats()]);if(requestVersion!==purchaseReadVersion)return;records.value=page.items;totalRecords.value=page.total;serverTotalPages.value=page.totalPages;purchaseStats.value=stats }
+  catch (error) { if(requestVersion===purchaseReadVersion)toast(error instanceof Error ? error.message : '采购数据读取失败') }
+  finally { if(requestVersion===purchaseReadVersion)loading.value = false }
 }
 onMounted(() => { reload() })
-onUnmounted(() => { stopJobPolling();window.clearTimeout(searchTimer) })
+onUnmounted(() => { purchaseReadVersion+=1;stopJobPolling();window.clearTimeout(searchTimer) })
 
 watch(showTaskCenter, open => {
   if (open) {

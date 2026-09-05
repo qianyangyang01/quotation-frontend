@@ -124,7 +124,7 @@ export function logisticsQuoteRegions(country: string) {
   if (cached) return cached
   const regions = new Set<string>()
   for (const rule of logisticsRules) meaningfulZoneOptions(countryRowsForRule(rule, country)).forEach(region => regions.add(region))
-  const result = [...regions].map(region => (country === '澳大利亚' || country.toUpperCase() === 'AU') && normalizeZone(region) !== '全国统一' ? `澳大利亚${normalizeZone(region)}` : region)
+  const result = [...new Set([...regions].map(region => (country === '澳大利亚' || country.toUpperCase() === 'AU') && normalizeZone(region) !== '全国统一' ? `澳大利亚${normalizeZone(region)}` : region))]
   regionIndex.set(country, result)
   return result
 }

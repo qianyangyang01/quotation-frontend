@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, reactive, shallowRef, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
@@ -81,7 +81,7 @@ const currentSalespersonAccount = computed(() => currentAuthUser.value.account |
 const selectedSalesperson = computed(() => currentSalespersonAccount.value === '—'
   ? currentSalespersonName.value
   : `${currentSalespersonName.value}（${currentSalespersonAccount.value}）`)
-const customerGradeSettings = loadCustomerGradeSettings()
+const customerGradeSettings = reactive(loadCustomerGradeSettings())
 const selectedCustomerGrade = ref<CustomerGrade>('S')
 const financeExchangeRate = loadFinanceExchangeRate()
 const exchange = ref({ usd: financeExchangeRate.usdCny, eur: 7.86, updatedAt: financeExchangeRate.updatedAt })
@@ -153,7 +153,8 @@ const initialRule = rulesForShipment(initialLogisticsAttribute, initialChannel, 
 
 function quoteRegionForCountry(country: string) {
   const regions = logisticsQuoteRegions(country)
-  return regions.length ? (selectedQuoteRegions.value[country] || '') : ''
+  const selected = selectedQuoteRegions.value[country] || ''
+  return regions.includes(selected) ? selected : ''
 }
 function changeQuoteRegion(p: Product, payload: { country: string; region: string }) {
   if (!logisticsQuoteRegions(payload.country).includes(payload.region)) return
@@ -671,7 +672,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
   customQuoteQuantity.value = Math.max(1, Math.floor(Number(payload.customQuoteQuantity) || 1))
   quoteMatrixMode.value = ['specified', 'template'].includes(payload.quoteMatrixMode) ? payload.quoteMatrixMode : 'common'
   selectedQuoteRegions.value = Object.fromEntries(Object.entries(payload.selectedQuoteRegions || {})
-    .filter(([country, region]) => logisticsQuoteRegions(country).includes(String(region)))) as Record<string, string>
+    .filter(([country, region]) => country && typeof region === 'string')) as Record<string, string>
   const p = emptyQuotationProduct()
   p.logisticsAttribute = quotationAttributeOptions.includes(payload.logisticsAttribute) ? payload.logisticsAttribute : initialLogisticsAttribute
   products.value = [p]
@@ -724,6 +725,10 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
     : Boolean(p.sku)
   if (hasRestoredProduct && productCategory.value) {
     await ensureQuoteLogistics(p)
+    // A fresh page has no logistics rules when the draft is first read. Validate
+    // saved regions only after loading its rules, or valid regions are lost.
+    if (logisticsLoadState.value === 'ready') selectedQuoteRegions.value = Object.fromEntries(Object.entries(selectedQuoteRegions.value)
+      .filter(([country, region]) => logisticsQuoteRegions(country).includes(region)))
     const primaryRows = productState?.primaryCountry ? excelQuoteRows(p, productState.primaryCountry) : []
     const primary = primaryRows.find(row => productState.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
       || (!productState.primaryChannelKey ? primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier) : undefined)
@@ -793,6 +798,8 @@ async function initializeQuotationWorkspace() {
     financeCountrySettings.value = configuration.countrySettings
     financeTaxSettings.value = configuration.taxSettings
     financePolicies.value = configuration.channelPolicies
+    exchange.value = { ...exchange.value, usd: configuration.exchangeRate.usdCny, updatedAt: configuration.exchangeRate.updatedAt }
+    customerGradeSettings.splice(0, customerGradeSettings.length, ...configuration.customerGrades)
     readiness.value = await loadQuotationReadiness()
     const restored = await loadAndRestoreDraft()
     const requestedSku = String(route.query.sku || '').trim()
@@ -1448,7 +1455,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
   : draftStatus.value === 'saving' ? '正在自动保存'
     : draftStatus.value === 'dirty' ? '内容已修改，等待自动保存'
       : draftStatus.value === 'saved' ? `${draftRestored.value ? '已恢复并保存草稿' : '草稿已保存'}${draftUpdatedAt.value ? ` · ${draftTime(draftUpdatedAt.value)}` : ''}`
-        : draftStatus.value === 'error' ? `草稿保存失败：${draftError.value}`
+        : draftStatus.value === 'error' ? `${draftInitializationFailed.value ? '报价工作区读取失败' : '草稿保存失败'}：${draftError.value}`
           : draftStatus.value === 'conflict' ? '草稿已在另一个页面更新，请处理冲突'
             : '自动草稿已开启')
 </script>

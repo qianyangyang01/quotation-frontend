@@ -1,0 +1,4110 @@
+{
+  "generatedAt": "2026-09-05T13:34:40.961Z",
+  "phases": [
+    {
+      "name": "soak-50-hot-read",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T12:42:03.279Z",
+      "finishedAt": "2026-09-05T12:53:03.553Z",
+      "users": 50,
+      "warmupSeconds": 60,
+      "durationSeconds": 600,
+      "readOnly": true,
+      "total": 101221,
+      "failures": 0,
+      "failureRate": 0,
+      "operations": {
+        "sku-query": {
+          "count": 50597,
+          "p50Ms": 16.73,
+          "p95Ms": 111.16,
+          "p99Ms": 152.86,
+          "maxMs": 430.78
+        },
+        "logistics-query": {
+          "count": 15195,
+          "p50Ms": 64.24,
+          "p95Ms": 354.62,
+          "p99Ms": 541.63,
+          "maxMs": 860.45
+        },
+        "purchase-list": {
+          "count": 18224,
+          "p50Ms": 19.31,
+          "p95Ms": 74.68,
+          "p99Ms": 150.28,
+          "maxMs": 284.67
+        },
+        "quotation-list": {
+          "count": 17205,
+          "p50Ms": 24.95,
+          "p95Ms": 144.97,
+          "p99Ms": 249.09,
+          "maxMs": 481.42
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": true,
+        "failed": []
+      },
+      "failureSamples": [],
+      "minutes": [
+        {
+          "minute": 0,
+          "total": 7435,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 3728,
+              "p95Ms": 228.46,
+              "p99Ms": 248.61
+            },
+            "logistics-query": {
+              "count": 1132,
+              "p95Ms": 641.8,
+              "p99Ms": 749.24
+            },
+            "purchase-list": {
+              "count": 1312,
+              "p95Ms": 166.26,
+              "p99Ms": 246.16
+            },
+            "quotation-list": {
+              "count": 1263,
+              "p95Ms": 257.69,
+              "p99Ms": 350.48
+            }
+          }
+        },
+        {
+          "minute": 1,
+          "total": 8783,
+          "failures": 0,
+          "operations": {
+            "purchase-list": {
+              "count": 1616,
+              "p95Ms": 137.01,
+              "p99Ms": 160.37
+            },
+            "sku-query": {
+              "count": 4362,
+              "p95Ms": 139.5,
+              "p99Ms": 157.2
+            },
+            "logistics-query": {
+              "count": 1304,
+              "p95Ms": 384.16,
+              "p99Ms": 473.33
+            },
+            "quotation-list": {
+              "count": 1501,
+              "p95Ms": 164.94,
+              "p99Ms": 253.31
+            }
+          }
+        },
+        {
+          "minute": 2,
+          "total": 10447,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 5222,
+              "p95Ms": 48.97,
+              "p99Ms": 73.59
+            },
+            "purchase-list": {
+              "count": 1871,
+              "p95Ms": 49.09,
+              "p99Ms": 72.38
+            },
+            "quotation-list": {
+              "count": 1776,
+              "p95Ms": 63.76,
+              "p99Ms": 91.48
+            },
+            "logistics-query": {
+              "count": 1578,
+              "p95Ms": 162.87,
+              "p99Ms": 211.39
+            }
+          }
+        },
+        {
+          "minute": 3,
+          "total": 10676,
+          "failures": 0,
+          "operations": {
+            "purchase-list": {
+              "count": 1904,
+              "p95Ms": 38.95,
+              "p99Ms": 66.52
+            },
+            "sku-query": {
+              "count": 5365,
+              "p95Ms": 38.64,
+              "p99Ms": 65.71
+            },
+            "logistics-query": {
+              "count": 1600,
+              "p95Ms": 137.2,
+              "p99Ms": 186.06
+            },
+            "quotation-list": {
+              "count": 1807,
+              "p95Ms": 56.43,
+              "p99Ms": 92.31
+            }
+          }
+        },
+        {
+          "minute": 4,
+          "total": 10607,
+          "failures": 0,
+          "operations": {
+            "logistics-query": {
+              "count": 1595,
+              "p95Ms": 171.68,
+              "p99Ms": 243.08
+            },
+            "sku-query": {
+              "count": 5310,
+              "p95Ms": 46.81,
+              "p99Ms": 77.21
+            },
+            "purchase-list": {
+              "count": 1920,
+              "p95Ms": 41.15,
+              "p99Ms": 70.12
+            },
+            "quotation-list": {
+              "count": 1782,
+              "p95Ms": 61.22,
+              "p99Ms": 105.62
+            }
+          }
+        },
+        {
+          "minute": 5,
+          "total": 10554,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 5295,
+              "p95Ms": 46,
+              "p99Ms": 88.93
+            },
+            "purchase-list": {
+              "count": 1908,
+              "p95Ms": 48.57,
+              "p99Ms": 81.77
+            },
+            "quotation-list": {
+              "count": 1777,
+              "p95Ms": 56.5,
+              "p99Ms": 118.09
+            },
+            "logistics-query": {
+              "count": 1574,
+              "p95Ms": 173.4,
+              "p99Ms": 285.49
+            }
+          }
+        },
+        {
+          "minute": 6,
+          "total": 10649,
+          "failures": 0,
+          "operations": {
+            "quotation-list": {
+              "count": 1803,
+              "p95Ms": 50.47,
+              "p99Ms": 84.49
+            },
+            "sku-query": {
+              "count": 5327,
+              "p95Ms": 43.56,
+              "p99Ms": 73.04
+            },
+            "logistics-query": {
+              "count": 1614,
+              "p95Ms": 145.42,
+              "p99Ms": 259.06
+            },
+            "purchase-list": {
+              "count": 1905,
+              "p95Ms": 42.1,
+              "p99Ms": 59.64
+            }
+          }
+        },
+        {
+          "minute": 7,
+          "total": 10709,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 5326,
+              "p95Ms": 38.41,
+              "p99Ms": 67.82
+            },
+            "purchase-list": {
+              "count": 1944,
+              "p95Ms": 32.45,
+              "p99Ms": 57.99
+            },
+            "quotation-list": {
+              "count": 1852,
+              "p95Ms": 46.88,
+              "p99Ms": 85.13
+            },
+            "logistics-query": {
+              "count": 1587,
+              "p95Ms": 143.78,
+              "p99Ms": 208.15
+            }
+          }
+        },
+        {
+          "minute": 8,
+          "total": 10647,
+          "failures": 0,
+          "operations": {
+            "purchase-list": {
+              "count": 1917,
+              "p95Ms": 35.09,
+              "p99Ms": 66.67
+            },
+            "sku-query": {
+              "count": 5318,
+              "p95Ms": 43.46,
+              "p99Ms": 78.63
+            },
+            "quotation-list": {
+              "count": 1811,
+              "p95Ms": 47.98,
+              "p99Ms": 79.46
+            },
+            "logistics-query": {
+              "count": 1601,
+              "p95Ms": 152.3,
+              "p99Ms": 212.66
+            }
+          }
+        },
+        {
+          "minute": 9,
+          "total": 10714,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 5344,
+              "p95Ms": 39.45,
+              "p99Ms": 70.38
+            },
+            "quotation-list": {
+              "count": 1833,
+              "p95Ms": 45.43,
+              "p99Ms": 76.17
+            },
+            "logistics-query": {
+              "count": 1610,
+              "p95Ms": 146.86,
+              "p99Ms": 173.46
+            },
+            "purchase-list": {
+              "count": 1927,
+              "p95Ms": 33.87,
+              "p99Ms": 61.55
+            }
+          }
+        }
+      ],
+      "resources": {
+        "sampleCount": 68,
+        "failures": 0,
+        "peakConnections": 11,
+        "peakLockWaits": 0,
+        "containers": {
+          "quotation-interaction-perf-quotation-backend-1": {
+            "cpuPeakPercent": 136.15,
+            "cpuMeanPercent": 95.91,
+            "memoryPeakMiB": 468.3,
+            "memoryFirstMiB": 370.9,
+            "memoryLastMiB": 468.1
+          },
+          "quotation-interaction-perf-quotation-postgres-1": {
+            "cpuPeakPercent": 76.78,
+            "cpuMeanPercent": 49.34,
+            "memoryPeakMiB": 81.08,
+            "memoryFirstMiB": 41.98,
+            "memoryLastMiB": 79.95
+          },
+          "quotation-interaction-perf-quotation-redis-1": {
+            "cpuPeakPercent": 11.32,
+            "cpuMeanPercent": 6.07,
+            "memoryPeakMiB": 5.16,
+            "memoryFirstMiB": 4.992,
+            "memoryLastMiB": 5.113
+          }
+        }
+      }
+    },
+    {
+      "name": "soak-50-roles",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T12:53:35.037Z",
+      "finishedAt": "2026-09-05T13:04:35.949Z",
+      "users": 50,
+      "warmupSeconds": 60,
+      "durationSeconds": 600,
+      "readOnly": false,
+      "roleMix": true,
+      "total": 42767,
+      "failures": 242,
+      "failureRate": 0.005659,
+      "operations": {
+        "sku-query": {
+          "count": 13921,
+          "p50Ms": 243.05,
+          "p95Ms": 640.44,
+          "p99Ms": 840.4,
+          "maxMs": 1338.98
+        },
+        "purchase-list": {
+          "count": 6246,
+          "p50Ms": 241.64,
+          "p95Ms": 636.31,
+          "p99Ms": 839.22,
+          "maxMs": 1350.07
+        },
+        "logistics-query": {
+          "count": 5230,
+          "p50Ms": 757.29,
+          "p95Ms": 1357.9,
+          "p99Ms": 1687.41,
+          "maxMs": 2657.48
+        },
+        "finance-quotation-list": {
+          "count": 587,
+          "p50Ms": 415.59,
+          "p95Ms": 761.54,
+          "p99Ms": 1049.85,
+          "maxMs": 1351.23
+        },
+        "purchase-role-detail": {
+          "count": 722,
+          "p50Ms": 239.87,
+          "p95Ms": 543.6,
+          "p99Ms": 839,
+          "maxMs": 1034.02
+        },
+        "quotation-save-single": {
+          "count": 1727,
+          "p50Ms": 864.68,
+          "p95Ms": 1339.51,
+          "p99Ms": 1629.04,
+          "maxMs": 2130.15
+        },
+        "purchase-role-search": {
+          "count": 1198,
+          "p50Ms": 1034.99,
+          "p95Ms": 2433.72,
+          "p99Ms": 2742.56,
+          "maxMs": 3044.35
+        },
+        "quotation-list": {
+          "count": 5933,
+          "p50Ms": 251.43,
+          "p95Ms": 649.86,
+          "p99Ms": 849.85,
+          "maxMs": 1249.9
+        },
+        "logistics-role-versions": {
+          "count": 264,
+          "p50Ms": 1056.75,
+          "p95Ms": 1443.11,
+          "p99Ms": 1635.54,
+          "maxMs": 1843.66
+        },
+        "purchase-role-stats": {
+          "count": 242,
+          "p50Ms": 253.05,
+          "p95Ms": 639.7,
+          "p99Ms": 740.82,
+          "maxMs": 838.64
+        },
+        "quotation-save-bundle": {
+          "count": 1751,
+          "p50Ms": 926.71,
+          "p95Ms": 1352.16,
+          "p99Ms": 1634.47,
+          "maxMs": 1937.05
+        },
+        "logistics-provider-add": {
+          "count": 264,
+          "p50Ms": 338.89,
+          "p95Ms": 739.53,
+          "p99Ms": 945.22,
+          "maxMs": 1035.95
+        },
+        "finance-save-verify": {
+          "count": 293,
+          "p50Ms": 639.52,
+          "p95Ms": 1231.45,
+          "p99Ms": 1431.35,
+          "maxMs": 1829.2
+        },
+        "logistics-role-channels": {
+          "count": 1051,
+          "p50Ms": 247.72,
+          "p95Ms": 652.83,
+          "p99Ms": 936.2,
+          "maxMs": 1122.95
+        },
+        "finance-settings-read": {
+          "count": 2051,
+          "p50Ms": 245.67,
+          "p95Ms": 641.22,
+          "p99Ms": 849.88,
+          "maxMs": 1540.26
+        },
+        "logistics-role-providers": {
+          "count": 1045,
+          "p50Ms": 346.41,
+          "p95Ms": 749.72,
+          "p99Ms": 1033.99,
+          "maxMs": 1343.57
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": false,
+        "failed": [
+          "logistics-query",
+          "purchase-role-search",
+          "logistics-role-versions",
+          "purchase-create-verify"
+        ]
+      },
+      "failureSamples": [
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        },
+        {
+          "operation": "purchase-create-verify",
+          "message": "采购新增读回不一致"
+        }
+      ],
+      "minutes": [
+        {
+          "minute": 0,
+          "total": 4635,
+          "failures": 32,
+          "operations": {
+            "sku-query": {
+              "count": 1489,
+              "p95Ms": 544.88,
+              "p99Ms": 811.28
+            },
+            "purchase-list": {
+              "count": 647,
+              "p95Ms": 531.96,
+              "p99Ms": 727.36
+            },
+            "logistics-query": {
+              "count": 560,
+              "p95Ms": 1255.38,
+              "p99Ms": 1579.29
+            },
+            "finance-quotation-list": {
+              "count": 65,
+              "p95Ms": 641.24,
+              "p99Ms": 844.77
+            },
+            "purchase-role-detail": {
+              "count": 97,
+              "p95Ms": 444.39,
+              "p99Ms": 627.73
+            },
+            "quotation-save-single": {
+              "count": 171,
+              "p95Ms": 1439.61,
+              "p99Ms": 1630.77
+            },
+            "purchase-role-search": {
+              "count": 161,
+              "p95Ms": 1341.81,
+              "p99Ms": 1541.26
+            },
+            "quotation-list": {
+              "count": 633,
+              "p95Ms": 556.96,
+              "p99Ms": 737.77
+            },
+            "logistics-role-versions": {
+              "count": 30,
+              "p95Ms": 1328.48,
+              "p99Ms": 1541.1
+            },
+            "purchase-role-stats": {
+              "count": 32,
+              "p95Ms": 536.8,
+              "p99Ms": 543.33
+            },
+            "quotation-save-bundle": {
+              "count": 200,
+              "p95Ms": 1540.27,
+              "p99Ms": 1742.39
+            },
+            "logistics-provider-add": {
+              "count": 30,
+              "p95Ms": 642.31,
+              "p99Ms": 733.76
+            },
+            "finance-save-verify": {
+              "count": 33,
+              "p95Ms": 1350.7,
+              "p99Ms": 1416.48
+            },
+            "logistics-role-channels": {
+              "count": 120,
+              "p95Ms": 536.72,
+              "p99Ms": 833.99
+            },
+            "finance-settings-read": {
+              "count": 216,
+              "p95Ms": 539.82,
+              "p99Ms": 641.22
+            },
+            "logistics-role-providers": {
+              "count": 119,
+              "p95Ms": 554.15,
+              "p99Ms": 646.54
+            }
+          }
+        },
+        {
+          "minute": 1,
+          "total": 4473,
+          "failures": 30,
+          "operations": {
+            "sku-query": {
+              "count": 1432,
+              "p95Ms": 547.42,
+              "p99Ms": 759.17
+            },
+            "logistics-role-versions": {
+              "count": 30,
+              "p95Ms": 1341.94,
+              "p99Ms": 1344.68
+            },
+            "finance-settings-read": {
+              "count": 214,
+              "p95Ms": 555.34,
+              "p99Ms": 846.84
+            },
+            "logistics-query": {
+              "count": 534,
+              "p95Ms": 1332.76,
+              "p99Ms": 1659.06
+            },
+            "purchase-list": {
+              "count": 657,
+              "p95Ms": 546.44,
+              "p99Ms": 733.88
+            },
+            "purchase-role-detail": {
+              "count": 90,
+              "p95Ms": 448.42,
+              "p99Ms": 542.89
+            },
+            "logistics-role-providers": {
+              "count": 110,
+              "p95Ms": 556.22,
+              "p99Ms": 741.45
+            },
+            "quotation-list": {
+              "count": 614,
+              "p95Ms": 558.48,
+              "p99Ms": 742.47
+            },
+            "quotation-save-single": {
+              "count": 164,
+              "p95Ms": 1526.49,
+              "p99Ms": 1815.22
+            },
+            "purchase-role-stats": {
+              "count": 31,
+              "p95Ms": 645.83,
+              "p99Ms": 648.72
+            },
+            "logistics-provider-add": {
+              "count": 29,
+              "p95Ms": 649.28,
+              "p99Ms": 742.42
+            },
+            "purchase-role-search": {
+              "count": 141,
+              "p95Ms": 1544.67,
+              "p99Ms": 1745.42
+            },
+            "logistics-role-channels": {
+              "count": 112,
+              "p95Ms": 652.83,
+              "p99Ms": 848.35
+            },
+            "finance-quotation-list": {
+              "count": 60,
+              "p95Ms": 748.31,
+              "p99Ms": 1049.85
+            },
+            "finance-save-verify": {
+              "count": 30,
+              "p95Ms": 1242.88,
+              "p99Ms": 1829.2
+            },
+            "quotation-save-bundle": {
+              "count": 195,
+              "p95Ms": 1441.8,
+              "p99Ms": 1557.11
+            }
+          }
+        },
+        {
+          "minute": 2,
+          "total": 4336,
+          "failures": 26,
+          "operations": {
+            "sku-query": {
+              "count": 1403,
+              "p95Ms": 638.07,
+              "p99Ms": 917.36
+            },
+            "purchase-list": {
+              "count": 629,
+              "p95Ms": 637.1,
+              "p99Ms": 825.4
+            },
+            "finance-settings-read": {
+              "count": 209,
+              "p95Ms": 630.77,
+              "p99Ms": 743.6
+            },
+            "quotation-list": {
+              "count": 608,
+              "p95Ms": 650.43,
+              "p99Ms": 854.88
+            },
+            "logistics-query": {
+              "count": 535,
+              "p95Ms": 1352.05,
+              "p99Ms": 1644.15
+            },
+            "quotation-save-single": {
+              "count": 188,
+              "p95Ms": 1429.03,
+              "p99Ms": 1637.32
+            },
+            "logistics-role-channels": {
+              "count": 108,
+              "p95Ms": 651.26,
+              "p99Ms": 862.28
+            },
+            "logistics-provider-add": {
+              "count": 26,
+              "p95Ms": 649.27,
+              "p99Ms": 830.51
+            },
+            "purchase-role-detail": {
+              "count": 73,
+              "p95Ms": 449.16,
+              "p99Ms": 733.02
+            },
+            "quotation-save-bundle": {
+              "count": 157,
+              "p95Ms": 1345.6,
+              "p99Ms": 1532.89
+            },
+            "purchase-role-search": {
+              "count": 127,
+              "p95Ms": 1637.54,
+              "p99Ms": 1932.87
+            },
+            "logistics-role-providers": {
+              "count": 106,
+              "p95Ms": 648.55,
+              "p99Ms": 1036.8
+            },
+            "purchase-role-stats": {
+              "count": 25,
+              "p95Ms": 521.29,
+              "p99Ms": 529.77
+            },
+            "finance-quotation-list": {
+              "count": 60,
+              "p95Ms": 741.5,
+              "p99Ms": 1351.23
+            },
+            "finance-save-verify": {
+              "count": 30,
+              "p95Ms": 1336.36,
+              "p99Ms": 1531.46
+            },
+            "logistics-role-versions": {
+              "count": 26,
+              "p95Ms": 1438.19,
+              "p99Ms": 1635.54
+            }
+          }
+        },
+        {
+          "minute": 3,
+          "total": 4714,
+          "failures": 30,
+          "operations": {
+            "sku-query": {
+              "count": 1519,
+              "p95Ms": 539.91,
+              "p99Ms": 732.02
+            },
+            "purchase-list": {
+              "count": 682,
+              "p95Ms": 538.32,
+              "p99Ms": 652.29
+            },
+            "quotation-save-bundle": {
+              "count": 177,
+              "p95Ms": 1250.3,
+              "p99Ms": 1348.94
+            },
+            "quotation-list": {
+              "count": 655,
+              "p95Ms": 553.66,
+              "p99Ms": 651.53
+            },
+            "purchase-role-search": {
+              "count": 153,
+              "p95Ms": 1353.79,
+              "p99Ms": 1454.63
+            },
+            "finance-settings-read": {
+              "count": 225,
+              "p95Ms": 538.09,
+              "p99Ms": 741.94
+            },
+            "logistics-query": {
+              "count": 564,
+              "p95Ms": 1159.02,
+              "p99Ms": 1365.02
+            },
+            "logistics-role-providers": {
+              "count": 113,
+              "p95Ms": 649.13,
+              "p99Ms": 820.01
+            },
+            "purchase-role-detail": {
+              "count": 95,
+              "p95Ms": 445.02,
+              "p99Ms": 840.06
+            },
+            "logistics-provider-add": {
+              "count": 29,
+              "p95Ms": 544.62,
+              "p99Ms": 739.53
+            },
+            "logistics-role-channels": {
+              "count": 114,
+              "p95Ms": 452.39,
+              "p99Ms": 647.5
+            },
+            "quotation-save-single": {
+              "count": 200,
+              "p95Ms": 1233.94,
+              "p99Ms": 1451.34
+            },
+            "logistics-role-versions": {
+              "count": 28,
+              "p95Ms": 1242.89,
+              "p99Ms": 1246.63
+            },
+            "purchase-role-stats": {
+              "count": 31,
+              "p95Ms": 433.49,
+              "p99Ms": 441.65
+            },
+            "finance-quotation-list": {
+              "count": 66,
+              "p95Ms": 644.97,
+              "p99Ms": 833.32
+            },
+            "finance-save-verify": {
+              "count": 33,
+              "p95Ms": 847.17,
+              "p99Ms": 1050.71
+            }
+          }
+        },
+        {
+          "minute": 4,
+          "total": 4634,
+          "failures": 29,
+          "operations": {
+            "sku-query": {
+              "count": 1497,
+              "p95Ms": 539.57,
+              "p99Ms": 736.16
+            },
+            "logistics-role-versions": {
+              "count": 28,
+              "p95Ms": 1431.95,
+              "p99Ms": 1551.11
+            },
+            "finance-settings-read": {
+              "count": 225,
+              "p95Ms": 630.37,
+              "p99Ms": 740.32
+            },
+            "logistics-query": {
+              "count": 562,
+              "p95Ms": 1158.52,
+              "p99Ms": 1443.88
+            },
+            "logistics-role-channels": {
+              "count": 112,
+              "p95Ms": 552.74,
+              "p99Ms": 734.34
+            },
+            "quotation-list": {
+              "count": 637,
+              "p95Ms": 556.7,
+              "p99Ms": 746.2
+            },
+            "quotation-save-bundle": {
+              "count": 177,
+              "p95Ms": 1244.49,
+              "p99Ms": 1450.05
+            },
+            "purchase-list": {
+              "count": 677,
+              "p95Ms": 541.4,
+              "p99Ms": 832.28
+            },
+            "logistics-provider-add": {
+              "count": 28,
+              "p95Ms": 546.65,
+              "p99Ms": 629.23
+            },
+            "purchase-role-detail": {
+              "count": 85,
+              "p95Ms": 445.66,
+              "p99Ms": 834.3
+            },
+            "logistics-role-providers": {
+              "count": 113,
+              "p95Ms": 652.17,
+              "p99Ms": 839.18
+            },
+            "purchase-role-stats": {
+              "count": 28,
+              "p95Ms": 548.29,
+              "p99Ms": 645.69
+            },
+            "purchase-role-search": {
+              "count": 149,
+              "p95Ms": 1634.68,
+              "p99Ms": 1855.53
+            },
+            "finance-quotation-list": {
+              "count": 62,
+              "p95Ms": 725.34,
+              "p99Ms": 1145.69
+            },
+            "quotation-save-single": {
+              "count": 195,
+              "p95Ms": 1254.43,
+              "p99Ms": 1434.46
+            },
+            "finance-save-verify": {
+              "count": 30,
+              "p95Ms": 1133.59,
+              "p99Ms": 1148.64
+            }
+          }
+        },
+        {
+          "minute": 5,
+          "total": 4349,
+          "failures": 24,
+          "operations": {
+            "sku-query": {
+              "count": 1415,
+              "p95Ms": 633.92,
+              "p99Ms": 831.67
+            },
+            "purchase-list": {
+              "count": 635,
+              "p95Ms": 549.39,
+              "p99Ms": 812.78
+            },
+            "quotation-save-single": {
+              "count": 168,
+              "p95Ms": 1228.16,
+              "p99Ms": 1439.54
+            },
+            "logistics-role-versions": {
+              "count": 26,
+              "p95Ms": 1542.12,
+              "p99Ms": 1571.38
+            },
+            "logistics-query": {
+              "count": 529,
+              "p95Ms": 1360.81,
+              "p99Ms": 1601.55
+            },
+            "purchase-role-search": {
+              "count": 126,
+              "p95Ms": 1740.61,
+              "p99Ms": 1923.3
+            },
+            "quotation-list": {
+              "count": 613,
+              "p95Ms": 658.38,
+              "p99Ms": 959.49
+            },
+            "finance-settings-read": {
+              "count": 205,
+              "p95Ms": 635.07,
+              "p99Ms": 834.63
+            },
+            "purchase-role-stats": {
+              "count": 26,
+              "p95Ms": 680.9,
+              "p99Ms": 728.55
+            },
+            "quotation-save-bundle": {
+              "count": 180,
+              "p95Ms": 1314.07,
+              "p99Ms": 1758.82
+            },
+            "logistics-role-providers": {
+              "count": 103,
+              "p95Ms": 814.47,
+              "p99Ms": 939.02
+            },
+            "finance-quotation-list": {
+              "count": 60,
+              "p95Ms": 741.38,
+              "p99Ms": 761.54
+            },
+            "logistics-role-channels": {
+              "count": 104,
+              "p95Ms": 643.87,
+              "p99Ms": 756.1
+            },
+            "finance-save-verify": {
+              "count": 30,
+              "p95Ms": 1144.71,
+              "p99Ms": 1295.72
+            },
+            "purchase-role-detail": {
+              "count": 79,
+              "p95Ms": 536.82,
+              "p99Ms": 1034.02
+            },
+            "logistics-provider-add": {
+              "count": 26,
+              "p95Ms": 850.44,
+              "p99Ms": 909.85
+            }
+          }
+        },
+        {
+          "minute": 6,
+          "total": 4075,
+          "failures": 21,
+          "operations": {
+            "sku-query": {
+              "count": 1341,
+              "p95Ms": 635.95,
+              "p99Ms": 936.3
+            },
+            "purchase-role-stats": {
+              "count": 20,
+              "p95Ms": 628.55,
+              "p99Ms": 637.77
+            },
+            "purchase-list": {
+              "count": 612,
+              "p95Ms": 648.36,
+              "p99Ms": 926.16
+            },
+            "finance-settings-read": {
+              "count": 202,
+              "p95Ms": 634.88,
+              "p99Ms": 852.63
+            },
+            "quotation-list": {
+              "count": 560,
+              "p95Ms": 742.66,
+              "p99Ms": 850.18
+            },
+            "logistics-role-providers": {
+              "count": 98,
+              "p95Ms": 852.1,
+              "p99Ms": 1144.94
+            },
+            "quotation-save-single": {
+              "count": 142,
+              "p95Ms": 1336.11,
+              "p99Ms": 1456.5
+            },
+            "purchase-role-detail": {
+              "count": 58,
+              "p95Ms": 664.29,
+              "p99Ms": 743.85
+            },
+            "logistics-query": {
+              "count": 502,
+              "p95Ms": 1447.28,
+              "p99Ms": 1646.72
+            },
+            "logistics-role-channels": {
+              "count": 96,
+              "p95Ms": 740.95,
+              "p99Ms": 1034.37
+            },
+            "finance-save-verify": {
+              "count": 28,
+              "p95Ms": 1129.58,
+              "p99Ms": 1231.45
+            },
+            "quotation-save-bundle": {
+              "count": 189,
+              "p95Ms": 1338.71,
+              "p99Ms": 1545.44
+            },
+            "purchase-role-search": {
+              "count": 100,
+              "p95Ms": 2445.15,
+              "p99Ms": 2557.25
+            },
+            "finance-quotation-list": {
+              "count": 57,
+              "p95Ms": 839.82,
+              "p99Ms": 851.99
+            },
+            "logistics-role-versions": {
+              "count": 25,
+              "p95Ms": 1440.01,
+              "p99Ms": 1843.66
+            },
+            "logistics-provider-add": {
+              "count": 24,
+              "p95Ms": 654.9,
+              "p99Ms": 945.22
+            }
+          }
+        },
+        {
+          "minute": 7,
+          "total": 3761,
+          "failures": 15,
+          "operations": {
+            "quotation-save-single": {
+              "count": 175,
+              "p95Ms": 1430.03,
+              "p99Ms": 1547.48
+            },
+            "purchase-list": {
+              "count": 560,
+              "p95Ms": 742.07,
+              "p99Ms": 1039.46
+            },
+            "logistics-role-providers": {
+              "count": 94,
+              "p95Ms": 935.57,
+              "p99Ms": 1035.32
+            },
+            "quotation-save-bundle": {
+              "count": 144,
+              "p95Ms": 1440.79,
+              "p99Ms": 1641.7
+            },
+            "logistics-query": {
+              "count": 469,
+              "p95Ms": 1634.98,
+              "p99Ms": 2079.91
+            },
+            "sku-query": {
+              "count": 1260,
+              "p95Ms": 733.78,
+              "p99Ms": 1027.86
+            },
+            "purchase-role-detail": {
+              "count": 43,
+              "p95Ms": 839,
+              "p99Ms": 944.92
+            },
+            "logistics-provider-add": {
+              "count": 24,
+              "p95Ms": 834.36,
+              "p99Ms": 838.09
+            },
+            "logistics-role-channels": {
+              "count": 94,
+              "p95Ms": 871.08,
+              "p99Ms": 1041.22
+            },
+            "finance-settings-read": {
+              "count": 179,
+              "p95Ms": 835.87,
+              "p99Ms": 1040.42
+            },
+            "quotation-list": {
+              "count": 513,
+              "p95Ms": 744.76,
+              "p99Ms": 942.61
+            },
+            "finance-quotation-list": {
+              "count": 51,
+              "p95Ms": 1046.21,
+              "p99Ms": 1246.04
+            },
+            "finance-save-verify": {
+              "count": 27,
+              "p95Ms": 1156.21,
+              "p99Ms": 1234.09
+            },
+            "purchase-role-stats": {
+              "count": 15,
+              "p95Ms": 838.64,
+              "p99Ms": 838.64
+            },
+            "purchase-role-search": {
+              "count": 75,
+              "p95Ms": 2852.5,
+              "p99Ms": 3044.35
+            },
+            "logistics-role-versions": {
+              "count": 23,
+              "p95Ms": 1545.5,
+              "p99Ms": 1633.38
+            }
+          }
+        },
+        {
+          "minute": 8,
+          "total": 3984,
+          "failures": 19,
+          "operations": {
+            "purchase-list": {
+              "count": 595,
+              "p95Ms": 647.71,
+              "p99Ms": 849.34
+            },
+            "sku-query": {
+              "count": 1314,
+              "p95Ms": 730.44,
+              "p99Ms": 842.53
+            },
+            "finance-settings-read": {
+              "count": 189,
+              "p95Ms": 640.63,
+              "p99Ms": 843
+            },
+            "logistics-query": {
+              "count": 491,
+              "p95Ms": 1452.56,
+              "p99Ms": 1750.21
+            },
+            "logistics-role-channels": {
+              "count": 95,
+              "p95Ms": 731.6,
+              "p99Ms": 1122.95
+            },
+            "quotation-list": {
+              "count": 553,
+              "p95Ms": 737.66,
+              "p99Ms": 951.53
+            },
+            "quotation-save-bundle": {
+              "count": 182,
+              "p95Ms": 1441.63,
+              "p99Ms": 1533.69
+            },
+            "logistics-role-versions": {
+              "count": 23,
+              "p95Ms": 1444.6,
+              "p99Ms": 1742.31
+            },
+            "purchase-role-search": {
+              "count": 89,
+              "p95Ms": 2151.15,
+              "p99Ms": 2442.67
+            },
+            "logistics-provider-add": {
+              "count": 23,
+              "p95Ms": 747.74,
+              "p99Ms": 934.85
+            },
+            "purchase-role-detail": {
+              "count": 57,
+              "p95Ms": 836.59,
+              "p99Ms": 946.3
+            },
+            "logistics-role-providers": {
+              "count": 96,
+              "p95Ms": 938.12,
+              "p99Ms": 1343.57
+            },
+            "finance-quotation-list": {
+              "count": 56,
+              "p95Ms": 938.89,
+              "p99Ms": 1044.94
+            },
+            "quotation-save-single": {
+              "count": 156,
+              "p95Ms": 1339.32,
+              "p99Ms": 1653.45
+            },
+            "purchase-role-stats": {
+              "count": 19,
+              "p95Ms": 542.19,
+              "p99Ms": 542.19
+            },
+            "finance-save-verify": {
+              "count": 27,
+              "p95Ms": 1344.77,
+              "p99Ms": 1431.35
+            }
+          }
+        },
+        {
+          "minute": 9,
+          "total": 3783,
+          "failures": 16,
+          "operations": {
+            "sku-query": {
+              "count": 1249,
+              "p95Ms": 739.15,
+              "p99Ms": 937.68
+            },
+            "quotation-list": {
+              "count": 546,
+              "p95Ms": 747.26,
+              "p99Ms": 943.63
+            },
+            "finance-settings-read": {
+              "count": 187,
+              "p95Ms": 742.32,
+              "p99Ms": 1036.56
+            },
+            "logistics-query": {
+              "count": 474,
+              "p95Ms": 1546.29,
+              "p99Ms": 1744.71
+            },
+            "quotation-save-single": {
+              "count": 168,
+              "p95Ms": 1432.35,
+              "p99Ms": 1630.72
+            },
+            "purchase-list": {
+              "count": 550,
+              "p95Ms": 743.54,
+              "p99Ms": 939.62
+            },
+            "quotation-save-bundle": {
+              "count": 146,
+              "p95Ms": 1441.22,
+              "p99Ms": 1644.61
+            },
+            "logistics-role-versions": {
+              "count": 25,
+              "p95Ms": 1443.11,
+              "p99Ms": 1544.55
+            },
+            "finance-save-verify": {
+              "count": 25,
+              "p95Ms": 1209.28,
+              "p99Ms": 1233.63
+            },
+            "logistics-role-channels": {
+              "count": 95,
+              "p95Ms": 851.4,
+              "p99Ms": 1041.61
+            },
+            "purchase-role-search": {
+              "count": 75,
+              "p95Ms": 2744.36,
+              "p99Ms": 2836.12
+            },
+            "logistics-provider-add": {
+              "count": 25,
+              "p95Ms": 948.65,
+              "p99Ms": 1035.95
+            },
+            "logistics-role-providers": {
+              "count": 93,
+              "p95Ms": 850.02,
+              "p99Ms": 1243.41
+            },
+            "finance-quotation-list": {
+              "count": 49,
+              "p95Ms": 1044.94,
+              "p99Ms": 1068.61
+            },
+            "purchase-role-detail": {
+              "count": 45,
+              "p95Ms": 738.25,
+              "p99Ms": 937.75
+            },
+            "purchase-role-stats": {
+              "count": 15,
+              "p95Ms": 740.82,
+              "p99Ms": 740.82
+            }
+          }
+        },
+        {
+          "minute": 10,
+          "total": 23,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2,
+              "p95Ms": 234.38,
+              "p99Ms": 234.38
+            },
+            "logistics-query": {
+              "count": 10,
+              "p95Ms": 1144.43,
+              "p99Ms": 1144.43
+            },
+            "logistics-role-channels": {
+              "count": 1,
+              "p95Ms": 241.98,
+              "p99Ms": 241.98
+            },
+            "purchase-role-search": {
+              "count": 2,
+              "p95Ms": 2251.12,
+              "p99Ms": 2251.12
+            },
+            "quotation-list": {
+              "count": 1,
+              "p95Ms": 258.88,
+              "p99Ms": 258.88
+            },
+            "purchase-list": {
+              "count": 2,
+              "p95Ms": 323.88,
+              "p99Ms": 323.88
+            },
+            "finance-quotation-list": {
+              "count": 1,
+              "p95Ms": 339.79,
+              "p99Ms": 339.79
+            },
+            "quotation-save-bundle": {
+              "count": 4,
+              "p95Ms": 828.27,
+              "p99Ms": 828.27
+            }
+          }
+        }
+      ],
+      "resources": {
+        "sampleCount": 68,
+        "failures": 0,
+        "peakConnections": 11,
+        "peakLockWaits": 6,
+        "containers": {
+          "quotation-interaction-perf-quotation-backend-1": {
+            "cpuPeakPercent": 105.07,
+            "cpuMeanPercent": 38.44,
+            "memoryPeakMiB": 498,
+            "memoryFirstMiB": 467.8,
+            "memoryLastMiB": 497.6
+          },
+          "quotation-interaction-perf-quotation-postgres-1": {
+            "cpuPeakPercent": 82.08,
+            "cpuMeanPercent": 72.58,
+            "memoryPeakMiB": 137.4,
+            "memoryFirstMiB": 80.03,
+            "memoryLastMiB": 123.4
+          },
+          "quotation-interaction-perf-quotation-redis-1": {
+            "cpuPeakPercent": 6.38,
+            "cpuMeanPercent": 3.31,
+            "memoryPeakMiB": 6.15,
+            "memoryFirstMiB": 4.863,
+            "memoryLastMiB": 5.066
+          }
+        }
+      }
+    },
+    {
+      "name": "soak-50-roles-capacity",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T13:06:24.774Z",
+      "finishedAt": "2026-09-05T13:17:25.244Z",
+      "users": 50,
+      "warmupSeconds": 60,
+      "durationSeconds": 600,
+      "readOnly": false,
+      "roleMix": true,
+      "total": 70487,
+      "failures": 0,
+      "failureRate": 0,
+      "operations": {
+        "purchase-list": {
+          "count": 10465,
+          "p50Ms": 49.05,
+          "p95Ms": 243.2,
+          "p99Ms": 345.11,
+          "maxMs": 632.73
+        },
+        "logistics-role-channels": {
+          "count": 1779,
+          "p50Ms": 56.62,
+          "p95Ms": 251.75,
+          "p99Ms": 349.29,
+          "maxMs": 729.31
+        },
+        "sku-query": {
+          "count": 23282,
+          "p50Ms": 48.95,
+          "p95Ms": 245.58,
+          "p99Ms": 360.28,
+          "maxMs": 642.85
+        },
+        "logistics-query": {
+          "count": 8722,
+          "p50Ms": 265.69,
+          "p95Ms": 593.09,
+          "p99Ms": 763.02,
+          "maxMs": 1145.03
+        },
+        "quotation-save-single": {
+          "count": 2892,
+          "p50Ms": 422.6,
+          "p95Ms": 647.41,
+          "p99Ms": 782.5,
+          "maxMs": 1124.6
+        },
+        "finance-settings-read": {
+          "count": 3270,
+          "p50Ms": 55.62,
+          "p95Ms": 245.95,
+          "p99Ms": 348.56,
+          "maxMs": 622.8
+        },
+        "quotation-list": {
+          "count": 9860,
+          "p50Ms": 61.31,
+          "p95Ms": 252.69,
+          "p99Ms": 360.29,
+          "maxMs": 651.33
+        },
+        "purchase-role-search": {
+          "count": 1611,
+          "p50Ms": 874.07,
+          "p95Ms": 1342.07,
+          "p99Ms": 1451.59,
+          "maxMs": 1733.9
+        },
+        "logistics-role-providers": {
+          "count": 1782,
+          "p50Ms": 58.69,
+          "p95Ms": 250.03,
+          "p99Ms": 355.4,
+          "maxMs": 561.98
+        },
+        "purchase-role-detail": {
+          "count": 963,
+          "p50Ms": 48.48,
+          "p95Ms": 238.19,
+          "p99Ms": 339.67,
+          "maxMs": 530.06
+        },
+        "logistics-role-versions": {
+          "count": 446,
+          "p50Ms": 539.87,
+          "p95Ms": 742.38,
+          "p99Ms": 847.85,
+          "maxMs": 1048.92
+        },
+        "quotation-save-bundle": {
+          "count": 2929,
+          "p50Ms": 418.64,
+          "p95Ms": 648.11,
+          "p99Ms": 800.88,
+          "maxMs": 1056.25
+        },
+        "logistics-provider-add": {
+          "count": 445,
+          "p50Ms": 137.02,
+          "p95Ms": 327.17,
+          "p99Ms": 449.06,
+          "maxMs": 732.76
+        },
+        "finance-quotation-list": {
+          "count": 934,
+          "p50Ms": 154.82,
+          "p95Ms": 358.17,
+          "p99Ms": 530.76,
+          "maxMs": 647
+        },
+        "purchase-role-stats": {
+          "count": 321,
+          "p50Ms": 80.84,
+          "p95Ms": 246.7,
+          "p99Ms": 342.86,
+          "maxMs": 365.59
+        },
+        "purchase-create-verify": {
+          "count": 320,
+          "p50Ms": 155.87,
+          "p95Ms": 449.81,
+          "p99Ms": 630.51,
+          "maxMs": 848.91
+        },
+        "finance-save-verify": {
+          "count": 466,
+          "p50Ms": 231.38,
+          "p95Ms": 534.85,
+          "p99Ms": 655.35,
+          "maxMs": 743.46
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": false,
+        "failed": [
+          "purchase-role-search"
+        ]
+      },
+      "failureSamples": [],
+      "minutes": [
+        {
+          "minute": 0,
+          "total": 7219,
+          "failures": 0,
+          "operations": {
+            "purchase-list": {
+              "count": 1067,
+              "p95Ms": 243.91,
+              "p99Ms": 349.07
+            },
+            "logistics-role-channels": {
+              "count": 182,
+              "p95Ms": 253.03,
+              "p99Ms": 520.64
+            },
+            "sku-query": {
+              "count": 2393,
+              "p95Ms": 242.7,
+              "p99Ms": 394.29
+            },
+            "logistics-query": {
+              "count": 891,
+              "p95Ms": 578.92,
+              "p99Ms": 764.31
+            },
+            "quotation-save-single": {
+              "count": 289,
+              "p95Ms": 724.24,
+              "p99Ms": 828.01
+            },
+            "finance-settings-read": {
+              "count": 333,
+              "p95Ms": 229.21,
+              "p99Ms": 334.54
+            },
+            "quotation-list": {
+              "count": 976,
+              "p95Ms": 246.6,
+              "p99Ms": 356.97
+            },
+            "purchase-role-search": {
+              "count": 177,
+              "p95Ms": 1257.36,
+              "p99Ms": 1453.78
+            },
+            "logistics-role-providers": {
+              "count": 182,
+              "p95Ms": 240.07,
+              "p99Ms": 360.44
+            },
+            "purchase-role-detail": {
+              "count": 105,
+              "p95Ms": 228.25,
+              "p99Ms": 240.54
+            },
+            "logistics-role-versions": {
+              "count": 46,
+              "p95Ms": 749.4,
+              "p99Ms": 1048.92
+            },
+            "quotation-save-bundle": {
+              "count": 320,
+              "p95Ms": 718.74,
+              "p99Ms": 837.07
+            },
+            "logistics-provider-add": {
+              "count": 45,
+              "p95Ms": 255.11,
+              "p99Ms": 448.42
+            },
+            "finance-quotation-list": {
+              "count": 96,
+              "p95Ms": 438.64,
+              "p99Ms": 635.53
+            },
+            "purchase-role-stats": {
+              "count": 35,
+              "p95Ms": 246.7,
+              "p99Ms": 262.19
+            },
+            "purchase-create-verify": {
+              "count": 34,
+              "p95Ms": 517.48,
+              "p99Ms": 550.04
+            },
+            "finance-save-verify": {
+              "count": 48,
+              "p95Ms": 545.18,
+              "p99Ms": 647.98
+            }
+          }
+        },
+        {
+          "minute": 1,
+          "total": 7292,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2386,
+              "p95Ms": 239.8,
+              "p99Ms": 340.36
+            },
+            "purchase-list": {
+              "count": 1081,
+              "p95Ms": 237.25,
+              "p99Ms": 341.56
+            },
+            "logistics-provider-add": {
+              "count": 46,
+              "p95Ms": 350.54,
+              "p99Ms": 426.89
+            },
+            "logistics-query": {
+              "count": 893,
+              "p95Ms": 564.57,
+              "p99Ms": 684.69
+            },
+            "quotation-save-single": {
+              "count": 295,
+              "p95Ms": 647.63,
+              "p99Ms": 744.42
+            },
+            "logistics-role-channels": {
+              "count": 186,
+              "p95Ms": 246.46,
+              "p99Ms": 330.38
+            },
+            "finance-settings-read": {
+              "count": 335,
+              "p95Ms": 245.47,
+              "p99Ms": 409.85
+            },
+            "quotation-list": {
+              "count": 1061,
+              "p95Ms": 245.48,
+              "p99Ms": 348.52
+            },
+            "purchase-create-verify": {
+              "count": 36,
+              "p95Ms": 443.7,
+              "p99Ms": 542.18
+            },
+            "purchase-role-detail": {
+              "count": 106,
+              "p95Ms": 217.19,
+              "p99Ms": 336.88
+            },
+            "logistics-role-providers": {
+              "count": 187,
+              "p95Ms": 246.6,
+              "p99Ms": 431.55
+            },
+            "purchase-role-search": {
+              "count": 176,
+              "p95Ms": 1153.91,
+              "p99Ms": 1340.23
+            },
+            "purchase-role-stats": {
+              "count": 35,
+              "p95Ms": 245.73,
+              "p99Ms": 255.83
+            },
+            "logistics-role-versions": {
+              "count": 45,
+              "p95Ms": 651.85,
+              "p99Ms": 841.71
+            },
+            "finance-quotation-list": {
+              "count": 96,
+              "p95Ms": 424.75,
+              "p99Ms": 560.98
+            },
+            "quotation-save-bundle": {
+              "count": 281,
+              "p95Ms": 656.22,
+              "p99Ms": 749.5
+            },
+            "finance-save-verify": {
+              "count": 47,
+              "p95Ms": 462.2,
+              "p99Ms": 628.23
+            }
+          }
+        },
+        {
+          "minute": 2,
+          "total": 7014,
+          "failures": 0,
+          "operations": {
+            "logistics-role-providers": {
+              "count": 177,
+              "p95Ms": 235.15,
+              "p99Ms": 353.23
+            },
+            "quotation-list": {
+              "count": 945,
+              "p95Ms": 255.84,
+              "p99Ms": 360.23
+            },
+            "sku-query": {
+              "count": 2330,
+              "p95Ms": 249.31,
+              "p99Ms": 410.21
+            },
+            "purchase-list": {
+              "count": 1037,
+              "p95Ms": 241.93,
+              "p99Ms": 337.29
+            },
+            "quotation-save-single": {
+              "count": 274,
+              "p95Ms": 653.8,
+              "p99Ms": 841.96
+            },
+            "logistics-query": {
+              "count": 868,
+              "p95Ms": 651.93,
+              "p99Ms": 775.03
+            },
+            "purchase-role-detail": {
+              "count": 98,
+              "p95Ms": 240.64,
+              "p99Ms": 530.06
+            },
+            "purchase-role-search": {
+              "count": 168,
+              "p95Ms": 1352,
+              "p99Ms": 1442.89
+            },
+            "finance-settings-read": {
+              "count": 327,
+              "p95Ms": 243.21,
+              "p99Ms": 329.95
+            },
+            "logistics-role-versions": {
+              "count": 45,
+              "p95Ms": 723.74,
+              "p99Ms": 742.29
+            },
+            "logistics-provider-add": {
+              "count": 45,
+              "p95Ms": 358.28,
+              "p99Ms": 517.96
+            },
+            "finance-save-verify": {
+              "count": 46,
+              "p95Ms": 632.56,
+              "p99Ms": 743.46
+            },
+            "quotation-save-bundle": {
+              "count": 319,
+              "p95Ms": 735.59,
+              "p99Ms": 835.07
+            },
+            "purchase-role-stats": {
+              "count": 33,
+              "p95Ms": 342.86,
+              "p99Ms": 343.44
+            },
+            "logistics-role-channels": {
+              "count": 179,
+              "p95Ms": 332.66,
+              "p99Ms": 434.72
+            },
+            "purchase-create-verify": {
+              "count": 33,
+              "p95Ms": 542.91,
+              "p99Ms": 617.27
+            },
+            "finance-quotation-list": {
+              "count": 90,
+              "p95Ms": 368.3,
+              "p99Ms": 647
+            }
+          }
+        },
+        {
+          "minute": 3,
+          "total": 7094,
+          "failures": 0,
+          "operations": {
+            "quotation-list": {
+              "count": 1021,
+              "p95Ms": 250.24,
+              "p99Ms": 353.6
+            },
+            "sku-query": {
+              "count": 2325,
+              "p95Ms": 244.91,
+              "p99Ms": 356.8
+            },
+            "purchase-list": {
+              "count": 1069,
+              "p95Ms": 239.34,
+              "p99Ms": 338.44
+            },
+            "logistics-role-providers": {
+              "count": 178,
+              "p95Ms": 252.46,
+              "p99Ms": 441.28
+            },
+            "quotation-save-single": {
+              "count": 288,
+              "p95Ms": 640.18,
+              "p99Ms": 767.82
+            },
+            "logistics-role-channels": {
+              "count": 180,
+              "p95Ms": 263.25,
+              "p99Ms": 352.12
+            },
+            "finance-settings-read": {
+              "count": 324,
+              "p95Ms": 245.01,
+              "p99Ms": 342.22
+            },
+            "purchase-role-detail": {
+              "count": 96,
+              "p95Ms": 224.92,
+              "p99Ms": 333.75
+            },
+            "logistics-query": {
+              "count": 875,
+              "p95Ms": 571.09,
+              "p99Ms": 667.87
+            },
+            "purchase-role-search": {
+              "count": 160,
+              "p95Ms": 1342.69,
+              "p99Ms": 1631.93
+            },
+            "logistics-role-versions": {
+              "count": 45,
+              "p95Ms": 739.32,
+              "p99Ms": 748.66
+            },
+            "finance-quotation-list": {
+              "count": 96,
+              "p95Ms": 345.96,
+              "p99Ms": 560.08
+            },
+            "logistics-provider-add": {
+              "count": 45,
+              "p95Ms": 241.2,
+              "p99Ms": 329.49
+            },
+            "purchase-role-stats": {
+              "count": 32,
+              "p95Ms": 337.18,
+              "p99Ms": 339.45
+            },
+            "finance-save-verify": {
+              "count": 48,
+              "p95Ms": 449.51,
+              "p99Ms": 658.77
+            },
+            "purchase-create-verify": {
+              "count": 32,
+              "p95Ms": 448.79,
+              "p99Ms": 635.45
+            },
+            "quotation-save-bundle": {
+              "count": 280,
+              "p95Ms": 651.61,
+              "p99Ms": 752.93
+            }
+          }
+        },
+        {
+          "minute": 4,
+          "total": 6886,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2275,
+              "p95Ms": 315.64,
+              "p99Ms": 435.45
+            },
+            "quotation-list": {
+              "count": 945,
+              "p95Ms": 256.84,
+              "p99Ms": 436.21
+            },
+            "logistics-query": {
+              "count": 861,
+              "p95Ms": 653.64,
+              "p99Ms": 850.5
+            },
+            "purchase-list": {
+              "count": 1014,
+              "p95Ms": 245.8,
+              "p99Ms": 348.83
+            },
+            "finance-settings-read": {
+              "count": 323,
+              "p95Ms": 239.78,
+              "p99Ms": 342.95
+            },
+            "quotation-save-single": {
+              "count": 291,
+              "p95Ms": 724.81,
+              "p99Ms": 754.21
+            },
+            "logistics-role-providers": {
+              "count": 178,
+              "p95Ms": 326.03,
+              "p99Ms": 355.4
+            },
+            "purchase-role-search": {
+              "count": 152,
+              "p95Ms": 1340.3,
+              "p99Ms": 1538.42
+            },
+            "logistics-role-channels": {
+              "count": 171,
+              "p95Ms": 244.48,
+              "p99Ms": 256.48
+            },
+            "purchase-role-detail": {
+              "count": 95,
+              "p95Ms": 321.62,
+              "p99Ms": 438.75
+            },
+            "logistics-role-versions": {
+              "count": 44,
+              "p95Ms": 722.16,
+              "p99Ms": 736.46
+            },
+            "logistics-provider-add": {
+              "count": 43,
+              "p95Ms": 330.6,
+              "p99Ms": 549.08
+            },
+            "purchase-role-stats": {
+              "count": 31,
+              "p95Ms": 165.95,
+              "p99Ms": 226.09
+            },
+            "purchase-create-verify": {
+              "count": 31,
+              "p95Ms": 448.3,
+              "p99Ms": 630.51
+            },
+            "finance-quotation-list": {
+              "count": 90,
+              "p95Ms": 416.36,
+              "p99Ms": 536.44
+            },
+            "finance-save-verify": {
+              "count": 45,
+              "p95Ms": 442.66,
+              "p99Ms": 655.35
+            },
+            "quotation-save-bundle": {
+              "count": 297,
+              "p95Ms": 650.31,
+              "p99Ms": 845.01
+            }
+          }
+        },
+        {
+          "minute": 5,
+          "total": 7083,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2353,
+              "p95Ms": 252.34,
+              "p99Ms": 426.91
+            },
+            "finance-settings-read": {
+              "count": 332,
+              "p95Ms": 261.2,
+              "p99Ms": 356.16
+            },
+            "logistics-provider-add": {
+              "count": 45,
+              "p95Ms": 262.64,
+              "p99Ms": 364.99
+            },
+            "logistics-query": {
+              "count": 870,
+              "p95Ms": 651.9,
+              "p99Ms": 860.93
+            },
+            "logistics-role-channels": {
+              "count": 178,
+              "p95Ms": 245.55,
+              "p99Ms": 338.09
+            },
+            "purchase-list": {
+              "count": 1055,
+              "p95Ms": 249.33,
+              "p99Ms": 426.33
+            },
+            "quotation-save-bundle": {
+              "count": 281,
+              "p95Ms": 642.02,
+              "p99Ms": 829.84
+            },
+            "quotation-save-single": {
+              "count": 279,
+              "p95Ms": 656.44,
+              "p99Ms": 843.29
+            },
+            "purchase-role-detail": {
+              "count": 93,
+              "p95Ms": 246.04,
+              "p99Ms": 437.8
+            },
+            "logistics-role-versions": {
+              "count": 45,
+              "p95Ms": 845.33,
+              "p99Ms": 846.1
+            },
+            "quotation-list": {
+              "count": 1008,
+              "p95Ms": 250.65,
+              "p99Ms": 451.6
+            },
+            "purchase-role-search": {
+              "count": 158,
+              "p95Ms": 1358.33,
+              "p99Ms": 1628.87
+            },
+            "purchase-role-stats": {
+              "count": 31,
+              "p95Ms": 250.62,
+              "p99Ms": 251.99
+            },
+            "finance-quotation-list": {
+              "count": 96,
+              "p95Ms": 348.73,
+              "p99Ms": 533.5
+            },
+            "logistics-role-providers": {
+              "count": 180,
+              "p95Ms": 249.5,
+              "p99Ms": 348.07
+            },
+            "purchase-create-verify": {
+              "count": 31,
+              "p95Ms": 435.94,
+              "p99Ms": 462.04
+            },
+            "finance-save-verify": {
+              "count": 48,
+              "p95Ms": 517.53,
+              "p99Ms": 557.74
+            }
+          }
+        },
+        {
+          "minute": 6,
+          "total": 6962,
+          "failures": 0,
+          "operations": {
+            "logistics-query": {
+              "count": 863,
+              "p95Ms": 644.52,
+              "p99Ms": 766.87
+            },
+            "sku-query": {
+              "count": 2287,
+              "p95Ms": 242.6,
+              "p99Ms": 340.65
+            },
+            "quotation-save-bundle": {
+              "count": 279,
+              "p95Ms": 648.82,
+              "p99Ms": 851.67
+            },
+            "logistics-role-channels": {
+              "count": 179,
+              "p95Ms": 262.86,
+              "p99Ms": 355.57
+            },
+            "finance-settings-read": {
+              "count": 328,
+              "p95Ms": 257.45,
+              "p99Ms": 348.56
+            },
+            "quotation-list": {
+              "count": 977,
+              "p95Ms": 250.28,
+              "p99Ms": 363.06
+            },
+            "purchase-list": {
+              "count": 1023,
+              "p95Ms": 245.54,
+              "p99Ms": 346.63
+            },
+            "quotation-save-single": {
+              "count": 313,
+              "p95Ms": 639.69,
+              "p99Ms": 738.57
+            },
+            "logistics-provider-add": {
+              "count": 44,
+              "p95Ms": 259.54,
+              "p99Ms": 348.98
+            },
+            "purchase-role-detail": {
+              "count": 94,
+              "p95Ms": 247.15,
+              "p99Ms": 340.5
+            },
+            "purchase-role-search": {
+              "count": 157,
+              "p95Ms": 1345.71,
+              "p99Ms": 1543.77
+            },
+            "logistics-role-versions": {
+              "count": 43,
+              "p95Ms": 753.38,
+              "p99Ms": 1025.32
+            },
+            "finance-quotation-list": {
+              "count": 92,
+              "p95Ms": 338.58,
+              "p99Ms": 530.76
+            },
+            "purchase-role-stats": {
+              "count": 32,
+              "p95Ms": 236.76,
+              "p99Ms": 246.05
+            },
+            "purchase-create-verify": {
+              "count": 31,
+              "p95Ms": 550.57,
+              "p99Ms": 766
+            },
+            "logistics-role-providers": {
+              "count": 174,
+              "p95Ms": 252.31,
+              "p99Ms": 339.67
+            },
+            "finance-save-verify": {
+              "count": 46,
+              "p95Ms": 349.04,
+              "p99Ms": 534.85
+            }
+          }
+        },
+        {
+          "minute": 7,
+          "total": 7104,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2360,
+              "p95Ms": 240.21,
+              "p99Ms": 343.02
+            },
+            "quotation-list": {
+              "count": 991,
+              "p95Ms": 250.69,
+              "p99Ms": 348.64
+            },
+            "logistics-query": {
+              "count": 877,
+              "p95Ms": 559.55,
+              "p99Ms": 671.64
+            },
+            "purchase-role-detail": {
+              "count": 96,
+              "p95Ms": 222.03,
+              "p99Ms": 240.84
+            },
+            "logistics-role-versions": {
+              "count": 46,
+              "p95Ms": 648.58,
+              "p99Ms": 711.42
+            },
+            "logistics-role-channels": {
+              "count": 176,
+              "p95Ms": 251.75,
+              "p99Ms": 343.77
+            },
+            "purchase-role-search": {
+              "count": 158,
+              "p95Ms": 1267.09,
+              "p99Ms": 1353.47
+            },
+            "quotation-save-bundle": {
+              "count": 293,
+              "p95Ms": 631.06,
+              "p99Ms": 723.05
+            },
+            "purchase-list": {
+              "count": 1071,
+              "p95Ms": 239.64,
+              "p99Ms": 335.15
+            },
+            "finance-quotation-list": {
+              "count": 95,
+              "p95Ms": 423.88,
+              "p99Ms": 541.51
+            },
+            "purchase-create-verify": {
+              "count": 32,
+              "p95Ms": 457.37,
+              "p99Ms": 848.91
+            },
+            "logistics-role-providers": {
+              "count": 178,
+              "p95Ms": 250.02,
+              "p99Ms": 350.54
+            },
+            "finance-settings-read": {
+              "count": 325,
+              "p95Ms": 251.57,
+              "p99Ms": 344.04
+            },
+            "quotation-save-single": {
+              "count": 282,
+              "p95Ms": 631.13,
+              "p99Ms": 744.44
+            },
+            "logistics-provider-add": {
+              "count": 45,
+              "p95Ms": 245.08,
+              "p99Ms": 457.32
+            },
+            "finance-save-verify": {
+              "count": 47,
+              "p95Ms": 427.75,
+              "p99Ms": 629.84
+            },
+            "purchase-role-stats": {
+              "count": 32,
+              "p95Ms": 328.61,
+              "p99Ms": 365.59
+            }
+          }
+        },
+        {
+          "minute": 8,
+          "total": 6961,
+          "failures": 0,
+          "operations": {
+            "logistics-query": {
+              "count": 873,
+              "p95Ms": 567.81,
+              "p99Ms": 741.67
+            },
+            "sku-query": {
+              "count": 2288,
+              "p95Ms": 241.99,
+              "p99Ms": 342.25
+            },
+            "purchase-list": {
+              "count": 1027,
+              "p95Ms": 240.55,
+              "p99Ms": 332.99
+            },
+            "finance-settings-read": {
+              "count": 321,
+              "p95Ms": 247.76,
+              "p99Ms": 351.09
+            },
+            "logistics-role-channels": {
+              "count": 177,
+              "p95Ms": 257.25,
+              "p99Ms": 345.2
+            },
+            "quotation-list": {
+              "count": 989,
+              "p95Ms": 254.99,
+              "p99Ms": 358.07
+            },
+            "logistics-provider-add": {
+              "count": 44,
+              "p95Ms": 324.86,
+              "p99Ms": 449.06
+            },
+            "finance-quotation-list": {
+              "count": 91,
+              "p95Ms": 352.48,
+              "p99Ms": 515.03
+            },
+            "purchase-role-search": {
+              "count": 151,
+              "p95Ms": 1354.93,
+              "p99Ms": 1446.44
+            },
+            "purchase-create-verify": {
+              "count": 30,
+              "p95Ms": 442.31,
+              "p99Ms": 449.21
+            },
+            "quotation-save-bundle": {
+              "count": 276,
+              "p95Ms": 564.89,
+              "p99Ms": 741.9
+            },
+            "finance-save-verify": {
+              "count": 46,
+              "p95Ms": 616.39,
+              "p99Ms": 719.12
+            },
+            "logistics-role-providers": {
+              "count": 174,
+              "p95Ms": 267.17,
+              "p99Ms": 435.69
+            },
+            "purchase-role-detail": {
+              "count": 92,
+              "p95Ms": 247.49,
+              "p99Ms": 327.09
+            },
+            "quotation-save-single": {
+              "count": 309,
+              "p95Ms": 629.34,
+              "p99Ms": 715.64
+            },
+            "purchase-role-stats": {
+              "count": 30,
+              "p95Ms": 160.77,
+              "p99Ms": 243.13
+            },
+            "logistics-role-versions": {
+              "count": 43,
+              "p95Ms": 731.91,
+              "p99Ms": 847.85
+            }
+          }
+        },
+        {
+          "minute": 9,
+          "total": 6862,
+          "failures": 0,
+          "operations": {
+            "logistics-query": {
+              "count": 846,
+              "p95Ms": 653.97,
+              "p99Ms": 768.65
+            },
+            "quotation-save-bundle": {
+              "count": 302,
+              "p95Ms": 636.72,
+              "p99Ms": 760.81
+            },
+            "logistics-role-providers": {
+              "count": 174,
+              "p95Ms": 249.73,
+              "p99Ms": 443.72
+            },
+            "finance-settings-read": {
+              "count": 322,
+              "p95Ms": 249.97,
+              "p99Ms": 435.2
+            },
+            "quotation-save-single": {
+              "count": 271,
+              "p95Ms": 662.92,
+              "p99Ms": 947.22
+            },
+            "sku-query": {
+              "count": 2284,
+              "p95Ms": 253.6,
+              "p99Ms": 420.83
+            },
+            "purchase-list": {
+              "count": 1021,
+              "p95Ms": 249.92,
+              "p99Ms": 347.73
+            },
+            "purchase-create-verify": {
+              "count": 30,
+              "p95Ms": 358.43,
+              "p99Ms": 550.89
+            },
+            "quotation-list": {
+              "count": 947,
+              "p95Ms": 269.44,
+              "p99Ms": 440.49
+            },
+            "logistics-role-channels": {
+              "count": 171,
+              "p95Ms": 262.35,
+              "p99Ms": 427.89
+            },
+            "purchase-role-detail": {
+              "count": 88,
+              "p95Ms": 237.11,
+              "p99Ms": 354.61
+            },
+            "purchase-role-search": {
+              "count": 152,
+              "p95Ms": 1348.85,
+              "p99Ms": 1464.72
+            },
+            "purchase-role-stats": {
+              "count": 30,
+              "p95Ms": 324.36,
+              "p99Ms": 344.97
+            },
+            "logistics-role-versions": {
+              "count": 44,
+              "p95Ms": 837.36,
+              "p99Ms": 928.82
+            },
+            "finance-quotation-list": {
+              "count": 92,
+              "p95Ms": 355.73,
+              "p99Ms": 369.52
+            },
+            "logistics-provider-add": {
+              "count": 43,
+              "p95Ms": 259.74,
+              "p99Ms": 732.76
+            },
+            "finance-save-verify": {
+              "count": 45,
+              "p95Ms": 546.73,
+              "p99Ms": 644.58
+            }
+          }
+        },
+        {
+          "minute": 10,
+          "total": 10,
+          "failures": 0,
+          "operations": {
+            "logistics-query": {
+              "count": 5,
+              "p95Ms": 669.43,
+              "p99Ms": 669.43
+            },
+            "sku-query": {
+              "count": 1,
+              "p95Ms": 100.55,
+              "p99Ms": 100.55
+            },
+            "purchase-role-search": {
+              "count": 2,
+              "p95Ms": 926.23,
+              "p99Ms": 926.23
+            },
+            "quotation-save-bundle": {
+              "count": 1,
+              "p95Ms": 332.64,
+              "p99Ms": 332.64
+            },
+            "quotation-save-single": {
+              "count": 1,
+              "p95Ms": 218.71,
+              "p99Ms": 218.71
+            }
+          }
+        }
+      ],
+      "resources": {
+        "sampleCount": 68,
+        "failures": 0,
+        "peakConnections": 11,
+        "peakLockWaits": 5,
+        "containers": {
+          "quotation-interaction-perf-quotation-backend-1": {
+            "cpuPeakPercent": 100.84,
+            "cpuMeanPercent": 62.79,
+            "memoryPeakMiB": 518.6,
+            "memoryFirstMiB": 492.8,
+            "memoryLastMiB": 513.1
+          },
+          "quotation-interaction-perf-quotation-postgres-1": {
+            "cpuPeakPercent": 162.03,
+            "cpuMeanPercent": 147.11,
+            "memoryPeakMiB": 167.6,
+            "memoryFirstMiB": 116.5,
+            "memoryLastMiB": 160.1
+          },
+          "quotation-interaction-perf-quotation-redis-1": {
+            "cpuPeakPercent": 6.88,
+            "cpuMeanPercent": 4.35,
+            "memoryPeakMiB": 5.64,
+            "memoryFirstMiB": 5.289,
+            "memoryLastMiB": 5.434
+          }
+        }
+      }
+    },
+    {
+      "name": "soak-50-roles-index-tuned",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T13:23:17.177Z",
+      "finishedAt": "2026-09-05T13:34:17.527Z",
+      "users": 50,
+      "warmupSeconds": 60,
+      "durationSeconds": 600,
+      "readOnly": false,
+      "roleMix": true,
+      "total": 81375,
+      "failures": 0,
+      "failureRate": 0,
+      "operations": {
+        "sku-query": {
+          "count": 26341,
+          "p50Ms": 35.76,
+          "p95Ms": 204.57,
+          "p99Ms": 258.62,
+          "maxMs": 615.47
+        },
+        "purchase-create-verify": {
+          "count": 537,
+          "p50Ms": 104.04,
+          "p95Ms": 368.65,
+          "p99Ms": 547.93,
+          "maxMs": 833.76
+        },
+        "logistics-role-versions": {
+          "count": 502,
+          "p50Ms": 439.74,
+          "p95Ms": 645.09,
+          "p99Ms": 744.39,
+          "maxMs": 828.93
+        },
+        "purchase-list": {
+          "count": 11870,
+          "p50Ms": 39.84,
+          "p95Ms": 152.57,
+          "p99Ms": 249.52,
+          "maxMs": 535.7
+        },
+        "purchase-role-search": {
+          "count": 2684,
+          "p50Ms": 246.89,
+          "p95Ms": 719.42,
+          "p99Ms": 844.22,
+          "maxMs": 1033.57
+        },
+        "logistics-query": {
+          "count": 9872,
+          "p50Ms": 169.34,
+          "p95Ms": 459.35,
+          "p99Ms": 591.81,
+          "maxMs": 879.91
+        },
+        "quotation-list": {
+          "count": 11169,
+          "p50Ms": 50.8,
+          "p95Ms": 165.54,
+          "p99Ms": 261.42,
+          "maxMs": 545.38
+        },
+        "quotation-save-bundle": {
+          "count": 3309,
+          "p50Ms": 337.62,
+          "p95Ms": 564,
+          "p99Ms": 673.82,
+          "maxMs": 913.08
+        },
+        "purchase-role-detail": {
+          "count": 1610,
+          "p50Ms": 37.73,
+          "p95Ms": 151.37,
+          "p99Ms": 243.61,
+          "maxMs": 368.03
+        },
+        "finance-quotation-list": {
+          "count": 1033,
+          "p50Ms": 152.5,
+          "p95Ms": 338.11,
+          "p99Ms": 443.68,
+          "maxMs": 545.23
+        },
+        "logistics-role-providers": {
+          "count": 2001,
+          "p50Ms": 47.01,
+          "p95Ms": 215.47,
+          "p99Ms": 261.16,
+          "maxMs": 518.7
+        },
+        "logistics-provider-add": {
+          "count": 501,
+          "p50Ms": 56.1,
+          "p95Ms": 242.36,
+          "p99Ms": 351.33,
+          "maxMs": 520.76
+        },
+        "finance-save-verify": {
+          "count": 517,
+          "p50Ms": 130.27,
+          "p95Ms": 349.88,
+          "p99Ms": 523.48,
+          "maxMs": 625.86
+        },
+        "logistics-role-channels": {
+          "count": 2002,
+          "p50Ms": 46.11,
+          "p95Ms": 218.18,
+          "p99Ms": 272.82,
+          "maxMs": 441.34
+        },
+        "purchase-role-stats": {
+          "count": 537,
+          "p50Ms": 56.74,
+          "p95Ms": 210.47,
+          "p99Ms": 329.95,
+          "maxMs": 515.88
+        },
+        "finance-settings-read": {
+          "count": 3613,
+          "p50Ms": 44.48,
+          "p95Ms": 161.88,
+          "p99Ms": 252.22,
+          "maxMs": 422.99
+        },
+        "quotation-save-single": {
+          "count": 3277,
+          "p50Ms": 335.28,
+          "p95Ms": 563.98,
+          "p99Ms": 722.62,
+          "maxMs": 931.23
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": true,
+        "failed": []
+      },
+      "failureSamples": [],
+      "minutes": [
+        {
+          "minute": 0,
+          "total": 8227,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2657,
+              "p95Ms": 154.81,
+              "p99Ms": 244.69
+            },
+            "purchase-create-verify": {
+              "count": 56,
+              "p95Ms": 447,
+              "p99Ms": 553.02
+            },
+            "logistics-role-versions": {
+              "count": 51,
+              "p95Ms": 644.38,
+              "p99Ms": 727.19
+            },
+            "purchase-list": {
+              "count": 1225,
+              "p95Ms": 150.87,
+              "p99Ms": 244.1
+            },
+            "purchase-role-search": {
+              "count": 276,
+              "p95Ms": 641.86,
+              "p99Ms": 841.81
+            },
+            "logistics-query": {
+              "count": 985,
+              "p95Ms": 449.88,
+              "p99Ms": 646.36
+            },
+            "quotation-list": {
+              "count": 1115,
+              "p95Ms": 159.99,
+              "p99Ms": 249.88
+            },
+            "quotation-save-bundle": {
+              "count": 366,
+              "p95Ms": 639.33,
+              "p99Ms": 737.57
+            },
+            "purchase-role-detail": {
+              "count": 169,
+              "p95Ms": 145.16,
+              "p99Ms": 243.61
+            },
+            "finance-quotation-list": {
+              "count": 107,
+              "p95Ms": 248.75,
+              "p99Ms": 342.8
+            },
+            "logistics-role-providers": {
+              "count": 203,
+              "p95Ms": 197.53,
+              "p99Ms": 325.73
+            },
+            "logistics-provider-add": {
+              "count": 51,
+              "p95Ms": 234.57,
+              "p99Ms": 358.07
+            },
+            "finance-save-verify": {
+              "count": 54,
+              "p95Ms": 353.61,
+              "p99Ms": 541.99
+            },
+            "logistics-role-channels": {
+              "count": 203,
+              "p95Ms": 154.43,
+              "p99Ms": 232.51
+            },
+            "purchase-role-stats": {
+              "count": 55,
+              "p95Ms": 224.84,
+              "p99Ms": 341.43
+            },
+            "finance-settings-read": {
+              "count": 366,
+              "p95Ms": 155.48,
+              "p99Ms": 325.67
+            },
+            "quotation-save-single": {
+              "count": 288,
+              "p95Ms": 564,
+              "p99Ms": 655.09
+            }
+          }
+        },
+        {
+          "minute": 1,
+          "total": 8089,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2607,
+              "p95Ms": 219.78,
+              "p99Ms": 334.94
+            },
+            "purchase-list": {
+              "count": 1149,
+              "p95Ms": 152.08,
+              "p99Ms": 250.3
+            },
+            "quotation-list": {
+              "count": 1092,
+              "p95Ms": 221.65,
+              "p99Ms": 344.61
+            },
+            "logistics-role-channels": {
+              "count": 201,
+              "p95Ms": 245.06,
+              "p99Ms": 345.22
+            },
+            "finance-settings-read": {
+              "count": 365,
+              "p95Ms": 165.75,
+              "p99Ms": 327.63
+            },
+            "logistics-query": {
+              "count": 984,
+              "p95Ms": 460.13,
+              "p99Ms": 655.54
+            },
+            "purchase-role-detail": {
+              "count": 168,
+              "p95Ms": 206.1,
+              "p99Ms": 252.4
+            },
+            "quotation-save-bundle": {
+              "count": 324,
+              "p95Ms": 633.82,
+              "p99Ms": 748.82
+            },
+            "purchase-role-search": {
+              "count": 282,
+              "p95Ms": 722.62,
+              "p99Ms": 928.89
+            },
+            "purchase-role-stats": {
+              "count": 56,
+              "p95Ms": 243.75,
+              "p99Ms": 515.88
+            },
+            "logistics-role-providers": {
+              "count": 199,
+              "p95Ms": 158.74,
+              "p99Ms": 241.72
+            },
+            "quotation-save-single": {
+              "count": 349,
+              "p95Ms": 650.88,
+              "p99Ms": 756.3
+            },
+            "logistics-role-versions": {
+              "count": 51,
+              "p95Ms": 628.68,
+              "p99Ms": 731.69
+            },
+            "purchase-create-verify": {
+              "count": 56,
+              "p95Ms": 367.54,
+              "p99Ms": 833.76
+            },
+            "logistics-provider-add": {
+              "count": 50,
+              "p95Ms": 231.09,
+              "p99Ms": 520.76
+            },
+            "finance-quotation-list": {
+              "count": 104,
+              "p95Ms": 310.03,
+              "p99Ms": 451.31
+            },
+            "finance-save-verify": {
+              "count": 52,
+              "p95Ms": 340.61,
+              "p99Ms": 465.17
+            }
+          }
+        },
+        {
+          "minute": 2,
+          "total": 8306,
+          "failures": 0,
+          "operations": {
+            "purchase-role-stats": {
+              "count": 56,
+              "p95Ms": 152.88,
+              "p99Ms": 170.7
+            },
+            "quotation-save-single": {
+              "count": 362,
+              "p95Ms": 534.81,
+              "p99Ms": 622.17
+            },
+            "purchase-list": {
+              "count": 1206,
+              "p95Ms": 152.16,
+              "p99Ms": 249.7
+            },
+            "logistics-provider-add": {
+              "count": 52,
+              "p95Ms": 226.25,
+              "p99Ms": 337.51
+            },
+            "sku-query": {
+              "count": 2677,
+              "p95Ms": 148.83,
+              "p99Ms": 242.07
+            },
+            "logistics-role-providers": {
+              "count": 204,
+              "p95Ms": 213.03,
+              "p99Ms": 334.58
+            },
+            "finance-settings-read": {
+              "count": 368,
+              "p95Ms": 165.89,
+              "p99Ms": 245.15
+            },
+            "logistics-query": {
+              "count": 1008,
+              "p95Ms": 441.84,
+              "p99Ms": 538.99
+            },
+            "purchase-role-detail": {
+              "count": 165,
+              "p95Ms": 144.65,
+              "p99Ms": 227.17
+            },
+            "purchase-role-search": {
+              "count": 276,
+              "p95Ms": 654.14,
+              "p99Ms": 756.84
+            },
+            "quotation-list": {
+              "count": 1164,
+              "p95Ms": 162.65,
+              "p99Ms": 257.4
+            },
+            "logistics-role-channels": {
+              "count": 201,
+              "p95Ms": 154.05,
+              "p99Ms": 235.48
+            },
+            "purchase-create-verify": {
+              "count": 55,
+              "p95Ms": 423.44,
+              "p99Ms": 429.44
+            },
+            "finance-quotation-list": {
+              "count": 106,
+              "p95Ms": 318.26,
+              "p99Ms": 333.18
+            },
+            "logistics-role-versions": {
+              "count": 51,
+              "p95Ms": 555.34,
+              "p99Ms": 648.51
+            },
+            "finance-save-verify": {
+              "count": 52,
+              "p95Ms": 316.7,
+              "p99Ms": 339.36
+            },
+            "quotation-save-bundle": {
+              "count": 303,
+              "p95Ms": 556.15,
+              "p99Ms": 650.54
+            }
+          }
+        },
+        {
+          "minute": 3,
+          "total": 8195,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2666,
+              "p95Ms": 159.34,
+              "p99Ms": 244.41
+            },
+            "purchase-list": {
+              "count": 1215,
+              "p95Ms": 148.4,
+              "p99Ms": 244.3
+            },
+            "purchase-role-detail": {
+              "count": 154,
+              "p95Ms": 153.35,
+              "p99Ms": 264.67
+            },
+            "logistics-role-providers": {
+              "count": 203,
+              "p95Ms": 158.64,
+              "p99Ms": 237.26
+            },
+            "quotation-list": {
+              "count": 1128,
+              "p95Ms": 161.07,
+              "p99Ms": 255.61
+            },
+            "finance-save-verify": {
+              "count": 52,
+              "p95Ms": 420.91,
+              "p99Ms": 625.86
+            },
+            "purchase-create-verify": {
+              "count": 53,
+              "p95Ms": 336,
+              "p99Ms": 630.18
+            },
+            "logistics-query": {
+              "count": 992,
+              "p95Ms": 450.82,
+              "p99Ms": 575.05
+            },
+            "quotation-save-single": {
+              "count": 289,
+              "p95Ms": 477.53,
+              "p99Ms": 574.99
+            },
+            "purchase-role-search": {
+              "count": 257,
+              "p95Ms": 653.6,
+              "p99Ms": 762.53
+            },
+            "logistics-role-channels": {
+              "count": 206,
+              "p95Ms": 149.4,
+              "p99Ms": 236.46
+            },
+            "finance-settings-read": {
+              "count": 368,
+              "p95Ms": 150.46,
+              "p99Ms": 247.21
+            },
+            "quotation-save-bundle": {
+              "count": 356,
+              "p95Ms": 562.74,
+              "p99Ms": 664.72
+            },
+            "purchase-role-stats": {
+              "count": 52,
+              "p95Ms": 149.9,
+              "p99Ms": 157.11
+            },
+            "finance-quotation-list": {
+              "count": 102,
+              "p95Ms": 344.47,
+              "p99Ms": 435.91
+            },
+            "logistics-role-versions": {
+              "count": 51,
+              "p95Ms": 570.7,
+              "p99Ms": 626.32
+            },
+            "logistics-provider-add": {
+              "count": 51,
+              "p95Ms": 244.62,
+              "p99Ms": 332.71
+            }
+          }
+        },
+        {
+          "minute": 4,
+          "total": 8345,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2695,
+              "p95Ms": 163.51,
+              "p99Ms": 250.13
+            },
+            "purchase-list": {
+              "count": 1200,
+              "p95Ms": 149.91,
+              "p99Ms": 253.25
+            },
+            "quotation-save-single": {
+              "count": 358,
+              "p95Ms": 542.87,
+              "p99Ms": 714.17
+            },
+            "quotation-list": {
+              "count": 1126,
+              "p95Ms": 169.23,
+              "p99Ms": 246.89
+            },
+            "quotation-save-bundle": {
+              "count": 341,
+              "p95Ms": 528,
+              "p99Ms": 632.22
+            },
+            "logistics-role-providers": {
+              "count": 206,
+              "p95Ms": 171.1,
+              "p99Ms": 244.28
+            },
+            "logistics-role-channels": {
+              "count": 205,
+              "p95Ms": 207.78,
+              "p99Ms": 239.82
+            },
+            "finance-quotation-list": {
+              "count": 108,
+              "p95Ms": 330.19,
+              "p99Ms": 422.31
+            },
+            "purchase-role-search": {
+              "count": 287,
+              "p95Ms": 737.44,
+              "p99Ms": 839.21
+            },
+            "finance-settings-read": {
+              "count": 365,
+              "p95Ms": 154.62,
+              "p99Ms": 248.33
+            },
+            "logistics-query": {
+              "count": 1013,
+              "p95Ms": 451.86,
+              "p99Ms": 567.31
+            },
+            "purchase-role-detail": {
+              "count": 174,
+              "p95Ms": 152.27,
+              "p99Ms": 240.89
+            },
+            "finance-save-verify": {
+              "count": 53,
+              "p95Ms": 342.57,
+              "p99Ms": 442.59
+            },
+            "logistics-role-versions": {
+              "count": 51,
+              "p95Ms": 627.83,
+              "p99Ms": 746.21
+            },
+            "purchase-role-stats": {
+              "count": 56,
+              "p95Ms": 152.86,
+              "p99Ms": 227.12
+            },
+            "logistics-provider-add": {
+              "count": 51,
+              "p95Ms": 161.24,
+              "p99Ms": 360.17
+            },
+            "purchase-create-verify": {
+              "count": 56,
+              "p95Ms": 342.26,
+              "p99Ms": 449.99
+            }
+          }
+        },
+        {
+          "minute": 5,
+          "total": 8088,
+          "failures": 0,
+          "operations": {
+            "purchase-list": {
+              "count": 1178,
+              "p95Ms": 154.3,
+              "p99Ms": 246.56
+            },
+            "sku-query": {
+              "count": 2605,
+              "p95Ms": 221.69,
+              "p99Ms": 322.83
+            },
+            "logistics-role-channels": {
+              "count": 199,
+              "p95Ms": 152.36,
+              "p99Ms": 428.38
+            },
+            "purchase-role-search": {
+              "count": 263,
+              "p95Ms": 736.38,
+              "p99Ms": 845.28
+            },
+            "quotation-list": {
+              "count": 1135,
+              "p95Ms": 167.44,
+              "p99Ms": 263.33
+            },
+            "purchase-role-stats": {
+              "count": 54,
+              "p95Ms": 234.53,
+              "p99Ms": 304.4
+            },
+            "logistics-role-providers": {
+              "count": 201,
+              "p95Ms": 158.68,
+              "p99Ms": 247.12
+            },
+            "quotation-save-single": {
+              "count": 347,
+              "p95Ms": 554,
+              "p99Ms": 661.55
+            },
+            "finance-save-verify": {
+              "count": 51,
+              "p95Ms": 338.4,
+              "p99Ms": 538.49
+            },
+            "logistics-query": {
+              "count": 981,
+              "p95Ms": 472.88,
+              "p99Ms": 575.71
+            },
+            "finance-settings-read": {
+              "count": 361,
+              "p95Ms": 213.51,
+              "p99Ms": 262.77
+            },
+            "purchase-create-verify": {
+              "count": 54,
+              "p95Ms": 349.22,
+              "p99Ms": 622.16
+            },
+            "quotation-save-bundle": {
+              "count": 301,
+              "p95Ms": 551.63,
+              "p99Ms": 652.34
+            },
+            "logistics-role-versions": {
+              "count": 50,
+              "p95Ms": 733.64,
+              "p99Ms": 828.93
+            },
+            "purchase-role-detail": {
+              "count": 156,
+              "p95Ms": 144.33,
+              "p99Ms": 242.68
+            },
+            "finance-quotation-list": {
+              "count": 102,
+              "p95Ms": 344.27,
+              "p99Ms": 452.24
+            },
+            "logistics-provider-add": {
+              "count": 50,
+              "p95Ms": 197.36,
+              "p99Ms": 344.06
+            }
+          }
+        },
+        {
+          "minute": 6,
+          "total": 8023,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2627,
+              "p95Ms": 160.03,
+              "p99Ms": 238.56
+            },
+            "purchase-list": {
+              "count": 1180,
+              "p95Ms": 154.12,
+              "p99Ms": 244.49
+            },
+            "purchase-role-search": {
+              "count": 252,
+              "p95Ms": 735.52,
+              "p99Ms": 854.32
+            },
+            "logistics-role-channels": {
+              "count": 199,
+              "p95Ms": 225.92,
+              "p99Ms": 253.02
+            },
+            "quotation-list": {
+              "count": 1103,
+              "p95Ms": 164.08,
+              "p99Ms": 255.32
+            },
+            "quotation-save-bundle": {
+              "count": 344,
+              "p95Ms": 560.13,
+              "p99Ms": 705.82
+            },
+            "quotation-save-single": {
+              "count": 293,
+              "p95Ms": 552.07,
+              "p99Ms": 715.88
+            },
+            "logistics-query": {
+              "count": 976,
+              "p95Ms": 455.93,
+              "p99Ms": 564.79
+            },
+            "finance-save-verify": {
+              "count": 52,
+              "p95Ms": 351.48,
+              "p99Ms": 433.11
+            },
+            "purchase-role-detail": {
+              "count": 151,
+              "p95Ms": 151.25,
+              "p99Ms": 239.38
+            },
+            "finance-settings-read": {
+              "count": 353,
+              "p95Ms": 155.94,
+              "p99Ms": 252.15
+            },
+            "logistics-role-versions": {
+              "count": 49,
+              "p95Ms": 728.86,
+              "p99Ms": 744.39
+            },
+            "logistics-provider-add": {
+              "count": 49,
+              "p95Ms": 249.6,
+              "p99Ms": 432.88
+            },
+            "logistics-role-providers": {
+              "count": 194,
+              "p95Ms": 152.94,
+              "p99Ms": 248.21
+            },
+            "finance-quotation-list": {
+              "count": 102,
+              "p95Ms": 345.72,
+              "p99Ms": 366.76
+            },
+            "purchase-role-stats": {
+              "count": 50,
+              "p95Ms": 191.27,
+              "p99Ms": 257.18
+            },
+            "purchase-create-verify": {
+              "count": 49,
+              "p95Ms": 362.31,
+              "p99Ms": 458.49
+            }
+          }
+        },
+        {
+          "minute": 7,
+          "total": 8092,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2607,
+              "p95Ms": 153.55,
+              "p99Ms": 252.38
+            },
+            "purchase-role-detail": {
+              "count": 167,
+              "p95Ms": 147.68,
+              "p99Ms": 243.47
+            },
+            "purchase-list": {
+              "count": 1175,
+              "p95Ms": 146.34,
+              "p99Ms": 248.14
+            },
+            "finance-settings-read": {
+              "count": 357,
+              "p95Ms": 154.26,
+              "p99Ms": 235.48
+            },
+            "logistics-role-channels": {
+              "count": 195,
+              "p95Ms": 214.28,
+              "p99Ms": 319.88
+            },
+            "logistics-role-providers": {
+              "count": 201,
+              "p95Ms": 161.67,
+              "p99Ms": 229.62
+            },
+            "purchase-role-search": {
+              "count": 275,
+              "p95Ms": 654.18,
+              "p99Ms": 776.79
+            },
+            "quotation-list": {
+              "count": 1096,
+              "p95Ms": 161.69,
+              "p99Ms": 254.01
+            },
+            "purchase-create-verify": {
+              "count": 54,
+              "p95Ms": 542.68,
+              "p99Ms": 549.15
+            },
+            "logistics-query": {
+              "count": 984,
+              "p95Ms": 466.53,
+              "p99Ms": 652.08
+            },
+            "quotation-save-single": {
+              "count": 336,
+              "p95Ms": 614,
+              "p99Ms": 698.59
+            },
+            "quotation-save-bundle": {
+              "count": 343,
+              "p95Ms": 551.08,
+              "p99Ms": 653.1
+            },
+            "purchase-role-stats": {
+              "count": 54,
+              "p95Ms": 245.06,
+              "p99Ms": 337.44
+            },
+            "logistics-role-versions": {
+              "count": 50,
+              "p95Ms": 639.12,
+              "p99Ms": 733.86
+            },
+            "logistics-provider-add": {
+              "count": 49,
+              "p95Ms": 257.16,
+              "p99Ms": 355.82
+            },
+            "finance-quotation-list": {
+              "count": 100,
+              "p95Ms": 338.11,
+              "p99Ms": 444.76
+            },
+            "finance-save-verify": {
+              "count": 49,
+              "p95Ms": 347.41,
+              "p99Ms": 450.36
+            }
+          }
+        },
+        {
+          "minute": 8,
+          "total": 8069,
+          "failures": 0,
+          "operations": {
+            "logistics-query": {
+              "count": 981,
+              "p95Ms": 462.24,
+              "p99Ms": 563.24
+            },
+            "sku-query": {
+              "count": 2611,
+              "p95Ms": 214.6,
+              "p99Ms": 248.62
+            },
+            "finance-quotation-list": {
+              "count": 101,
+              "p95Ms": 352.64,
+              "p99Ms": 440.21
+            },
+            "quotation-save-bundle": {
+              "count": 299,
+              "p95Ms": 552.24,
+              "p99Ms": 636.67
+            },
+            "finance-save-verify": {
+              "count": 51,
+              "p95Ms": 420.8,
+              "p99Ms": 539.53
+            },
+            "quotation-save-single": {
+              "count": 338,
+              "p95Ms": 556.33,
+              "p99Ms": 659.14
+            },
+            "purchase-list": {
+              "count": 1179,
+              "p95Ms": 158.93,
+              "p99Ms": 250.04
+            },
+            "purchase-role-detail": {
+              "count": 156,
+              "p95Ms": 208.7,
+              "p99Ms": 249.01
+            },
+            "finance-settings-read": {
+              "count": 354,
+              "p95Ms": 170.23,
+              "p99Ms": 253.35
+            },
+            "quotation-list": {
+              "count": 1143,
+              "p95Ms": 225.37,
+              "p99Ms": 261.7
+            },
+            "purchase-role-stats": {
+              "count": 53,
+              "p95Ms": 251.64,
+              "p99Ms": 335.54
+            },
+            "logistics-provider-add": {
+              "count": 50,
+              "p95Ms": 244.94,
+              "p99Ms": 351.33
+            },
+            "logistics-role-providers": {
+              "count": 195,
+              "p95Ms": 236.21,
+              "p99Ms": 254.2
+            },
+            "logistics-role-channels": {
+              "count": 197,
+              "p95Ms": 231.83,
+              "p99Ms": 330.33
+            },
+            "purchase-create-verify": {
+              "count": 53,
+              "p95Ms": 332.48,
+              "p99Ms": 355.09
+            },
+            "logistics-role-versions": {
+              "count": 49,
+              "p95Ms": 737.57,
+              "p99Ms": 761.29
+            },
+            "purchase-role-search": {
+              "count": 259,
+              "p95Ms": 708.1,
+              "p99Ms": 914.76
+            }
+          }
+        },
+        {
+          "minute": 9,
+          "total": 7934,
+          "failures": 0,
+          "operations": {
+            "sku-query": {
+              "count": 2589,
+              "p95Ms": 225.03,
+              "p99Ms": 320.89
+            },
+            "finance-settings-read": {
+              "count": 356,
+              "p95Ms": 208.35,
+              "p99Ms": 244.87
+            },
+            "purchase-create-verify": {
+              "count": 51,
+              "p95Ms": 452.98,
+              "p99Ms": 547.39
+            },
+            "finance-quotation-list": {
+              "count": 101,
+              "p95Ms": 337.06,
+              "p99Ms": 342.73
+            },
+            "logistics-query": {
+              "count": 968,
+              "p95Ms": 485.76,
+              "p99Ms": 654.1
+            },
+            "quotation-save-single": {
+              "count": 316,
+              "p95Ms": 629.55,
+              "p99Ms": 759.12
+            },
+            "purchase-role-search": {
+              "count": 255,
+              "p95Ms": 671.13,
+              "p99Ms": 837.08
+            },
+            "quotation-save-bundle": {
+              "count": 331,
+              "p95Ms": 566.4,
+              "p99Ms": 652.97
+            },
+            "quotation-list": {
+              "count": 1067,
+              "p95Ms": 222.98,
+              "p99Ms": 320.27
+            },
+            "logistics-role-channels": {
+              "count": 196,
+              "p95Ms": 236.27,
+              "p99Ms": 419.99
+            },
+            "purchase-list": {
+              "count": 1160,
+              "p95Ms": 168.8,
+              "p99Ms": 254.09
+            },
+            "purchase-role-stats": {
+              "count": 51,
+              "p95Ms": 220.58,
+              "p99Ms": 245.09
+            },
+            "logistics-role-providers": {
+              "count": 195,
+              "p95Ms": 260.01,
+              "p99Ms": 348.34
+            },
+            "finance-save-verify": {
+              "count": 51,
+              "p95Ms": 341.08,
+              "p99Ms": 510.98
+            },
+            "purchase-role-detail": {
+              "count": 150,
+              "p95Ms": 150.06,
+              "p99Ms": 251.14
+            },
+            "logistics-role-versions": {
+              "count": 49,
+              "p95Ms": 642.32,
+              "p99Ms": 725.72
+            },
+            "logistics-provider-add": {
+              "count": 48,
+              "p95Ms": 251.52,
+              "p99Ms": 331.95
+            }
+          }
+        },
+        {
+          "minute": 10,
+          "total": 7,
+          "failures": 0,
+          "operations": {
+            "purchase-list": {
+              "count": 3,
+              "p95Ms": 29.76,
+              "p99Ms": 29.76
+            },
+            "quotation-save-single": {
+              "count": 1,
+              "p95Ms": 198.25,
+              "p99Ms": 198.25
+            },
+            "purchase-role-search": {
+              "count": 2,
+              "p95Ms": 428.76,
+              "p99Ms": 428.76
+            },
+            "quotation-save-bundle": {
+              "count": 1,
+              "p95Ms": 68.44,
+              "p99Ms": 68.44
+            }
+          }
+        }
+      ],
+      "resources": {
+        "sampleCount": 68,
+        "failures": 0,
+        "peakConnections": 12,
+        "peakLockWaits": 4,
+        "containers": {
+          "quotation-interaction-perf-quotation-backend-1": {
+            "cpuPeakPercent": 91.34,
+            "cpuMeanPercent": 69.97,
+            "memoryPeakMiB": 518.4,
+            "memoryFirstMiB": 507.5,
+            "memoryLastMiB": 515.2
+          },
+          "quotation-interaction-perf-quotation-postgres-1": {
+            "cpuPeakPercent": 159.65,
+            "cpuMeanPercent": 143.41,
+            "memoryPeakMiB": 205.1,
+            "memoryFirstMiB": 165.7,
+            "memoryLastMiB": 203.8
+          },
+          "quotation-interaction-perf-quotation-redis-1": {
+            "cpuPeakPercent": 6.98,
+            "cpuMeanPercent": 4.9,
+            "memoryPeakMiB": 5.68,
+            "memoryFirstMiB": 5.141,
+            "memoryLastMiB": 5.406
+          }
+        }
+      }
+    }
+  ],
+  "abnormal": {
+    "baseUrl": "http://127.0.0.1:18098",
+    "finishedAt": "2026-09-05T13:05:12.666Z",
+    "cases": [
+      {
+        "name": "unauthenticated-read",
+        "concurrency": 50,
+        "elapsedMs": 46,
+        "statuses": {
+          "401": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "missing-product",
+        "concurrency": 50,
+        "elapsedMs": 141,
+        "statuses": {
+          "404": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "employee-cannot-write-finance",
+        "concurrency": 50,
+        "elapsedMs": 210,
+        "statuses": {
+          "403": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "employee-cannot-write-purchase",
+        "concurrency": 50,
+        "elapsedMs": 286,
+        "statuses": {
+          "403": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "purchase-cannot-manage-logistics",
+        "concurrency": 50,
+        "elapsedMs": 198,
+        "statuses": {
+          "403": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "missing-csrf-write",
+        "concurrency": 50,
+        "elapsedMs": 30,
+        "statuses": {
+          "403": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "negative-purchase-cost",
+        "concurrency": 50,
+        "elapsedMs": 169,
+        "statuses": {
+          "422": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "invalid-quotation",
+        "concurrency": 50,
+        "elapsedMs": 119,
+        "statuses": {
+          "422": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "stale-logistics-revision",
+        "concurrency": 50,
+        "elapsedMs": 2421,
+        "statuses": {
+          "409": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "tampered-freight",
+        "concurrency": 50,
+        "elapsedMs": 2610,
+        "statuses": {
+          "409": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "purchase-optimistic-concurrent-edit",
+        "concurrency": 50,
+        "elapsedMs": 159,
+        "statuses": {
+          "200": 1,
+          "409": 49
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "finance-optimistic-concurrent-edit",
+        "concurrency": 50,
+        "elapsedMs": 178,
+        "statuses": {
+          "200": 1,
+          "409": 49
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "same-key-concurrent-quotation",
+        "concurrency": 50,
+        "elapsedMs": 187,
+        "statuses": {
+          "200": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "idempotent-replay-same-record",
+        "passed": true
+      },
+      {
+        "name": "same-key-different-body",
+        "concurrency": 50,
+        "elapsedMs": 202,
+        "statuses": {
+          "409": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "other-owner-cannot-edit-quotation",
+        "concurrency": 50,
+        "elapsedMs": 195,
+        "statuses": {
+          "403": 50
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "duplicate-logistics-provider-code",
+        "concurrency": 50,
+        "elapsedMs": 292,
+        "statuses": {
+          "200": 1,
+          "409": 49
+        },
+        "passed": true,
+        "unexpected": []
+      },
+      {
+        "name": "draft-concurrent-edit",
+        "concurrency": 50,
+        "elapsedMs": 189,
+        "statuses": {
+          "200": 1,
+          "409": 49
+        },
+        "passed": true,
+        "unexpected": []
+      }
+    ],
+    "passed": true
+  },
+  "browserBefore": {
+    "environment": "Isolated browser, PERFADMIN, PERF-SKU-00004, 175 published channels / 4911 price rows; simultaneous 50-user hot-read load",
+    "method": "Trusted UI event capture to second requestAnimationFrame; rendering opportunity approximation, not presentation timestamp or production INP",
+    "searchMs": [
+      18.3,
+      34.1,
+      18.4,
+      28.4,
+      25.3,
+      23.8,
+      28.1,
+      29.9,
+      22,
+      15.3,
+      29.8,
+      24.6,
+      20.6,
+      26.9,
+      19.2,
+      29.4,
+      18.9,
+      25.6
+    ],
+    "australiaRegionMs": [
+      202.6,
+      182.3,
+      145.8,
+      169.8,
+      165,
+      144.8,
+      205.3,
+      173,
+      198.3,
+      182.4,
+      163.2
+    ],
+    "australiaRegionLongTasksMs": [
+      162,
+      182,
+      145,
+      168,
+      164,
+      134,
+      204,
+      170,
+      197,
+      180,
+      161
+    ],
+    "cachedCountryMs": [
+      25.5,
+      30.5,
+      31.7,
+      31.7,
+      32.7,
+      32.6,
+      30.1,
+      31.9,
+      32,
+      35.3,
+      32.1,
+      32.1,
+      26.7,
+      29.7,
+      30.3,
+      31.7,
+      30.3,
+      28.6,
+      31.8,
+      31.3
+    ],
+    "sortMs": [
+      28.5,
+      31.2,
+      28.1,
+      30.4,
+      23.9,
+      29.6,
+      30.9,
+      30.9,
+      32.6,
+      31.6,
+      30.5,
+      31.3,
+      31.5,
+      31.6,
+      32.4,
+      32.2,
+      32,
+      32,
+      30.2,
+      32
+    ],
+    "pageMs": [
+      31.8,
+      31.7,
+      30.9,
+      29.4,
+      30.6,
+      32.3,
+      30.5,
+      32.5,
+      29.7,
+      30.6,
+      31.1,
+      31.5,
+      28.4,
+      31,
+      31.7,
+      32.5,
+      32.5,
+      32.2,
+      32.2,
+      32.7
+    ]
+  },
+  "browserAfter": {
+    "environment": "Isolated same browser and SKU, simultaneous 50-user mixed role load; frontend fixes, deployed backend unchanged",
+    "method": "UI change capture to second requestAnimationFrame, rendering opportunity approximation",
+    "australiaRegionMs": [
+      68.3,
+      30.2,
+      33.1,
+      42,
+      41.8,
+      23.9,
+      33.1,
+      27.7,
+      30.3,
+      39.8,
+      26.3,
+      31.5,
+      29,
+      29,
+      41.1,
+      24.6,
+      30.7,
+      42.4,
+      42.1,
+      27.7
+    ],
+    "longTasksDuringRegions": [],
+    "regionOptions": [
+      "澳大利亚1区",
+      "澳大利亚2区",
+      "澳大利亚3区",
+      "澳大利亚4区"
+    ]
+  }
+}

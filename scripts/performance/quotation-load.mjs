@@ -8,9 +8,12 @@ const durationSeconds = Math.max(1, Number(process.env.PERF_DURATION_SECONDS || 
 const warmupSeconds = Math.max(0, Number(process.env.PERF_WARMUP_SECONDS || 60))
 // Only the measured workload is read-only; fixture preflight still writes locally.
 const readOnly = process.env.PERF_READ_ONLY === 'true'
+const roleMix = process.env.PERF_ROLE_MIX === 'true'
+const runId = Date.now().toString(36)
 const password = process.env.PERF_PASSWORD || 'PerfAdmin123!'
 const output = process.env.PERF_OUTPUT || 'artifacts/performance-result.json'
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(baseUrl)) throw new Error('压力测试仅允许独立本地环境')
+if (roleMix && (users !== 50 || readOnly)) throw new Error('多角色场景要求50用户且PERF_READ_ONLY=false，包含隔离写入')
 let logisticsRevision = ''
 
 class Session {
@@ -47,12 +50,23 @@ function percentile(sorted, value) {
 }
 
 const samples = new Map()
+const minuteSamples = new Map()
 const failures = []
 let total = 0
 let warm = true
 function record(operation, elapsed, error) {
   if (warm) return
   total += 1
+  const minute = Math.max(0, Math.floor((performance.now() - warmupEnds) / 60_000))
+  const bucket = minuteSamples.get(minute) || { total: 0, failures: 0, operations: new Map() }
+  bucket.total += 1
+  if (error) bucket.failures += 1
+  else {
+    const values = bucket.operations.get(operation) || []
+    values.push(elapsed)
+    bucket.operations.set(operation, values)
+  }
+  minuteSamples.set(minute, bucket)
   if (error) failures.push({ operation, message: String(error.message || error) })
   else {
     const values = samples.get(operation) || []
@@ -62,6 +76,7 @@ function record(operation, elapsed, error) {
 }
 
 async function operation(session, sequence) {
+  if (roleMix && session.role !== 'employee') return roleOperation(session, sequence)
   const value = performanceProductNumber(sequence)
   const sku = performanceSku(value)
   const roll = (sequence * 37) % 100
@@ -80,6 +95,35 @@ async function operation(session, sequence) {
   })]
 }
 
+async function roleOperation(session, sequence) {
+  const step = sequence % 10
+  if (session.role === 'purchase') {
+    if (step < 5) return ['purchase-role-search', () => session.request(`/purchase-products?q=PERF-SKU-${String(sequence % 100).padStart(3, '0')}&page=0&size=50`)]
+    if (step < 8) return ['purchase-role-detail', () => session.request('/purchase-products/PERF-SKU-00001')]
+    if (step === 8) return ['purchase-role-stats', () => session.request('/purchase-products/stats')]
+    const sku = `SOAK-${runId}-${session.account}-${sequence}`.toUpperCase()
+    return ['purchase-create-verify', async () => {
+      const saved = await session.request(`/purchase-products/${sku}`, { method: 'PUT', body: { sku, category: '服装', weightG: 100, minOrderQty: 1, purchasePriceCny: 10, singleFreightCny: 1, stockStatus: '有货', quotationOwner: session.account } })
+      const result = await session.request(`/purchase-products/${sku}`)
+      if (saved.sku !== sku || result.purchasePriceCny !== 10) throw new Error('采购新增读回不一致')
+    }]
+  }
+  if (session.role === 'finance') {
+    if (step < 7) return ['finance-settings-read', () => session.request('/finance-settings')]
+    if (step < 9) return ['finance-quotation-list', () => session.request('/quotations?scope=company&page=0&size=50')]
+    const key = ['exchange-rate', 'customer-grades', 'tax-settings'][session.roleIndex]
+    return ['finance-save-verify', async () => {
+      const before = await session.request(`/finance-settings/${key}`)
+      const saved = await session.request(`/finance-settings/${key}`, { method: 'PUT', headers: { 'If-Match': String(before._version) }, body: before.value })
+      if (JSON.stringify(saved.value) !== JSON.stringify(before.value)) throw new Error('财务保存读回不一致')
+    }]
+  }
+  if (step < 4) return ['logistics-role-channels', () => session.request('/logistics/channels?page=0&size=50')]
+  if (step < 8) return ['logistics-role-providers', () => session.request('/logistics/providers?page=0&size=50')]
+  if (step === 8) return ['logistics-role-versions', () => session.request('/logistics/versions?page=0&size=20')]
+  return ['logistics-provider-add', () => session.request('/logistics/providers', { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: { name: `隔离测试-${session.account}-${sequence}`, code: `SOAK-${runId}-${session.account}-${sequence}`, enabled: false } })]
+}
+
 const sessions = []
 // Approve the deterministic isolated fixture using independently specified expected totals.
 const setup = new Session('PERFADMIN'); await setup.login()
@@ -96,6 +140,8 @@ if (!acceptance.quoteReady) {
 for (let index = 0; index < users; index += 1) {
   const session = new Session(`PERF${String(index + 1).padStart(2, '0')}`)
   await session.login()
+  session.role = !roleMix || index < 40 ? 'employee' : index < 44 ? 'purchase' : index < 47 ? 'finance' : 'logistics'
+  session.roleIndex = index - 44
   sessions.push(session)
 }
 
@@ -141,16 +187,27 @@ const operations = Object.fromEntries([...samples].map(([name, values]) => {
 }))
 const failureRate = total ? failures.length / total : 1
 const queryNames = ['sku-query', 'purchase-list', 'logistics-query', 'quotation-list']
+if (roleMix) queryNames.push('purchase-role-search', 'purchase-role-detail', 'purchase-role-stats', 'finance-settings-read', 'finance-quotation-list', 'logistics-role-channels', 'logistics-role-providers', 'logistics-role-versions')
 const thresholdFailures = queryNames.filter(name => (operations[name]?.p95Ms ?? Number.POSITIVE_INFINITY) > 1000)
 for (const name of ['quotation-save-single', 'quotation-save-bundle']) {
   if (!readOnly && (operations[name]?.p95Ms ?? Number.POSITIVE_INFINITY) > 1500) thresholdFailures.push(name)
 }
 if (failureRate >= 0.01) thresholdFailures.push('error-rate')
+if (roleMix) for (const name of ['purchase-create-verify', 'finance-save-verify', 'logistics-provider-add']) {
+  if ((operations[name]?.p95Ms ?? Infinity) > 1500) thresholdFailures.push(name)
+}
 const report = {
-  baseUrl, startedAt, finishedAt: new Date().toISOString(), users, warmupSeconds, durationSeconds, readOnly, total,
+  baseUrl, startedAt, finishedAt: new Date().toISOString(), users, warmupSeconds, durationSeconds, readOnly, roleMix, total,
   failures: failures.length, failureRate: Number(failureRate.toFixed(6)), operations,
   thresholds: { queryP95Ms: 1000, saveP95Ms: 1500, maxErrorRate: 0.01, passed: thresholdFailures.length === 0, failed: thresholdFailures },
   failureSamples: failures.slice(0, 20),
+  minutes: [...minuteSamples].map(([minute, bucket]) => ({
+    minute, total: bucket.total, failures: bucket.failures,
+    operations: Object.fromEntries([...bucket.operations].map(([name, values]) => {
+      values.sort((a, b) => a - b)
+      return [name, { count: values.length, p95Ms: Number(percentile(values, 0.95).toFixed(2)), p99Ms: Number(percentile(values, 0.99).toFixed(2)) }]
+    })),
+  })),
 }
 await writeFile(output, `${JSON.stringify(report, null, 2)}\n`)
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
