@@ -165,10 +165,8 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 watch(list, rows => {
   if (selected.value && !rows.some(row => row.id === selected.value?.id)) closeDrawer()
 })
-watch(() => route.query.record, recordId => {
-  if (isMine.value || typeof recordId !== 'string') return
-  const record = records.value.find(item => item.id === recordId)
-  if (record) open(record)
+watch(() => records.value.find(item => item.id === route.query.record), record => {
+  if (!isMine.value && record && selected.value?.id !== record.id) open(record)
 }, { immediate: true })
 </script>
 
