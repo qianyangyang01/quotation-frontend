@@ -1,4 +1,4 @@
-import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation } from './logistics'
+import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation, type LogisticsPriceRow } from './logistics'
 import {
   defaultCountrySortOrder,
   defaultCountryStage,
@@ -20,6 +20,7 @@ export type FinanceLogisticsChannelOption = {
   channelCode: string
   quoteRegions: string[]
   missingQuoteRegions: string[]
+  quoteRegionSummary: string
 }
 
 export type FinanceUnavailableChannel = {
@@ -171,6 +172,19 @@ export function financeChannelKey(ruleId: number, relation: Pick<LogisticsRelati
   return `${ruleId}::${relation.carrier}::${relation.channelCode || relation.channel}`
 }
 
+export function describeAustraliaQuoteRegions(prices: Array<Pick<LogisticsPriceRow, 'zoneName' | 'zoneExclude'>>) {
+  const included = prices.filter(price => !price.zoneExclude)
+  const hasUnzoned = included.some(price => !price.zoneName?.trim())
+  const quoteRegions = [...new Set(included.flatMap(price => String(price.zoneName || '').split(/[/／、,，;；|]/)
+    .map(normalizeAustraliaQuoteRegion).filter(Boolean)))].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+  const hasNumberedRegions = quoteRegions.some(region => (australiaQuoteRegions as readonly string[]).includes(region))
+  const missingQuoteRegions = hasNumberedRegions && !hasUnzoned ? australiaQuoteRegions.filter(region => !quoteRegions.includes(region)) : []
+  const quoteRegionSummary = quoteRegions.length
+    ? `${hasNumberedRegions ? '已提供分区' : '原表分区'}：${quoteRegions.join('、')}${hasUnzoned ? '；另有未分区价格' : missingQuoteRegions.length ? `；未提供${missingQuoteRegions.join('、')}价格` : ''}`
+    : hasUnzoned ? '原表未区分澳大利亚分区，按该渠道国家价格报价' : '原表仅有排除分区，请核对渠道说明'
+  return { quoteRegions, missingQuoteRegions, quoteRegionSummary }
+}
+
 export function channelsAvailableForCountry(country: string, attribute = '普货'): FinanceLogisticsChannelOption[] {
   void attribute
   const options = logisticsRules
@@ -179,13 +193,12 @@ export function channelsAvailableForCountry(country: string, attribute = '普货
     .flatMap(rule => rule.relations
       .filter(relation => relation.carrier && relation.channel)
       .map(relation => {
-        const quoteRegions = country === '澳大利亚'
-          ? [...new Set(rule.prices.filter(price => price.areaName === country && price.zoneName && !price.zoneExclude).map(price => normalizeAustraliaQuoteRegion(price.zoneName)))]
-          : []
+        const regionInfo = country === '澳大利亚' || country.toUpperCase() === 'AU'
+          ? describeAustraliaQuoteRegions(rule.prices.filter(price => price.areaName === '澳大利亚' || price.countryCode.toUpperCase() === 'AU'))
+          : { quoteRegions: [], missingQuoteRegions: [], quoteRegionSummary: '' }
         return {
           key: financeChannelKey(rule.id, relation), ruleId: rule.id, ruleName: rule.name, carrier: relation.carrier, channel: relation.channel, channelCode: relation.channelCode,
-          quoteRegions,
-          missingQuoteRegions: country === '澳大利亚' ? australiaQuoteRegions.filter(region => !quoteRegions.includes(region)) : [],
+          ...regionInfo,
         }
       }))
   return [...new Map(options.map(option => [option.key, option])).values()]

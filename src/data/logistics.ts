@@ -70,7 +70,7 @@ export const australiaQuoteRegions = ['澳大利亚1区', '澳大利亚2区', '�
 export function normalizeAustraliaQuoteRegion(value: string) {
   const normalized = String(value || '').replace(/[（）()\s]/g, '')
     .replace('一区', '1区').replace('二区', '2区').replace('三区', '3区').replace('四区', '4区')
-  const match = normalized.match(/澳大利亚([1-4])区/)
+  const match = normalized.match(/^(?:澳大利亚)?([1-4])区$/)
   return match ? `澳大利亚${match[1]}区` : normalized
 }
 
