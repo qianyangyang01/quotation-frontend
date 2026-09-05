@@ -58,12 +58,15 @@ class LogisticsPriceWorkflowPostgresTest {
         assertEquals("missing",quoteRows.get(0).path("etaStatus").asText());assertEquals(0,quoteRows.get(0).path("etaMinDays").asInt());
         first=upload(imports,11,"运输说明更新。");item=first.path("payload").path("results").get(0);
         var version=UUID.fromString(item.path("versionId").asText());var channel=item.path("channelId").asText();
-        var draft=review.load(version,false);var patch=mapper.createObjectNode().put("fingerprint",draft.path("fingerprint").asText());patch.putArray("changes");
+        var draft=review.load(version,false);var patch=mapper.createObjectNode().put("fingerprint",draft.path("fingerprint").asText());
+        patch.putArray("changes").addObject().put("rowKey",draft.path("rows").get(0).path("rowKey").asText()).putObject("fields").put("pricePerKg",12).put("registrationFee",3).put("weightFromKg",0.1);
         patch.putArray("etaChanges").addObject().put("routeKey",draft.path("missingEtaRoutes").get(0).path("routeKey").asText()).put("etaMinDays",7).put("etaMaxDays",15);
         var fixed=review.patch(version,patch,"TEST-ETA");assertTrue(fixed.path("pricingReady").asBoolean(),fixed.toString());
+        assertEquals(0.1,fixed.path("rows").get(0).path("weightFromKg").asDouble());
+        assertEquals(12,fixed.path("rows").get(0).path("pricePerKg").asDouble());assertEquals(3,fixed.path("rows").get(0).path("registrationFee").asDouble());
         var refreshed=imports.get(UUID.fromString(first.path("id").asText()));
         assertTrue(refreshed.path("payload").path("results").get(0).path("pendingReasons").isEmpty(),refreshed.toString());
-        publish(first);assertTrue(guard.quoteReady(version));assertEquals(13,total(version,1));
+        publish(first);assertTrue(guard.quoteReady(version));assertEquals(15,total(version,1));
         var catalog=query.publishedCatalog(null);assertEquals(1,catalog.rules().size());
         var binding=catalog.rules().getFirst().path("logisticsChannelId").asText();assertEquals(channel,binding);
 
@@ -75,6 +78,7 @@ class LogisticsPriceWorkflowPostgresTest {
         assertEquals(binding,query.publishedCatalog(null).rules().getFirst().path("logisticsChannelId").asText());
         assertEquals(secondId,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",UUID.fromString(channel)).query(UUID.class).single());
         assertEquals("superseded",jdbc.sql("select status from logistics_version where id=:id").param("id",version).query(String.class).single());
+        assertTrue(publish.progress(UUID.fromString(first.path("id").asText())).path("publishedVersionIds").isEmpty(),"A superseded version must not appear as currently published");
 
         var repeated=upload(imports,20,"运输说明再次调整，不影响价格。");
         assertEquals("unchanged",repeated.path("payload").path("results").get(0).path("status").asText(),repeated.toString());
@@ -91,8 +95,12 @@ class LogisticsPriceWorkflowPostgresTest {
         }
     }
     private void publish(JsonNode batch){
+        var batchId=UUID.fromString(batch.path("id").asText());
+        assertTrue(publish.progress(batchId).path("publishedVersionIds").isEmpty(),"Drafts must not advance publication progress");
         var input=mapper.createObjectNode().put("note","仅隔离测试，核对价格和重量区间");input.putArray("selections").addObject().put("versionId",batch.path("payload").path("results").get(0).path("versionId").asText()).put("reviewConfirmed",true).put("removalConfirmed",true);
         var result=publish.publishReady(UUID.fromString(batch.path("id").asText()),input,"TEST-PUBLISH");assertEquals(1,result.path("publishedCount").asInt(),result.toString());
+        var progress=publish.progress(batchId);assertEquals(1,progress.path("publishedVersionIds").size());
+        assertEquals(batch.path("payload").path("results").get(0).path("versionId").asText(),progress.path("publishedVersionIds").get(0).asText());
     }
     private double total(UUID id,double weight){
         var payload=review.load(id,false);return new LogisticsBillingEngine(mapper).calculate(payload.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",weight)).path("total").asDouble();

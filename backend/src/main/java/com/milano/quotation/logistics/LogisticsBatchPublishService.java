@@ -15,6 +15,19 @@ public class LogisticsBatchPublishService {
     private final JdbcClient jdbc;private final ObjectMapper mapper;private final LogisticsService logistics;private final LogisticsBillingAcceptanceService billing;private final TransactionTemplate tx;
     public LogisticsBatchPublishService(JdbcClient jdbc,ObjectMapper mapper,LogisticsService logistics,LogisticsBillingAcceptanceService billing,PlatformTransactionManager manager){this.jdbc=jdbc;this.mapper=mapper;this.logistics=logistics;this.billing=billing;this.tx=new TransactionTemplate(manager);}
 
+    public ObjectNode progress(UUID batchId){
+        if(!jdbc.sql("select exists(select 1 from logistics_import_batch where id=:id)").param("id",batchId).query(Boolean.class).single())throw AppException.notFound("导入批次不存在");
+        var ids=jdbc.sql("""
+            select distinct v.id::text from logistics_import_batch b
+            cross join lateral jsonb_array_elements(b.payload->'results') r
+            join logistics_version v on v.id::text=r->>'versionId'
+            join logistics_channel c on c.current_version_id=v.id
+            where b.id=:id and v.status='published'
+            """).param("id",batchId).query(String.class).list();
+        var result=mapper.createObjectNode().put("batchId",batchId.toString());
+        var published=result.putArray("publishedVersionIds");ids.forEach(published::add);return result;
+    }
+
     public ObjectNode publishReady(UUID batchId,ObjectNode input,String actor){
         var batch=jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",batchId).query(String.class).optional().orElseThrow(()->AppException.notFound("导入批次不存在"));
         ObjectNode payload;try{payload=(ObjectNode)mapper.readTree(batch);}catch(Exception e){throw new IllegalStateException(e);}

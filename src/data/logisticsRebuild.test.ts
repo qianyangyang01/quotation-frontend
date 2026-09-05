@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { ref } from 'vue'
+import { clonePriceRows } from './logisticsRebuild'
 import { calculateLogisticsFee, findPriceRow, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
 import { aggregateChangeSummary, batchComparisonSummary, buildEtaCorrections, changeImpact, completedBatchStage, diffKinds, formatTransferBytes, logisticsAdjustmentStatus, logisticsUploadError, rangeImpact, weightLabel, type Batch, type Diff, type Price } from './logisticsRebuild'
@@ -9,6 +11,23 @@ const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): Log
 })
 const row = { areaName: '法国', countryCode: 'FR', registrationFee: 2 }
 describe('rebuild pricing safety', () => {
+  it('can snapshot reactive prices, edit across rows and cancel without changing the snapshot', () => {
+    const prices = ref<Price[]>([
+      { ...row, rowKey: 'fr-18', weightFromKg: 0.201, weightToKg: 4, pricePerKg: 97, registrationFee: 20, sourceRow: 18 },
+      { ...row, rowKey: 'fr-19', weightFromKg: 0.401, weightToKg: 30, pricePerKg: 95, registrationFee: 23, sourceRow: 19 },
+    ])
+    const snapshot = ref(clonePriceRows(prices.value))
+    prices.value[0]!.weightToKg = 0.4
+    prices.value[1]!.pricePerKg = 96
+    prices.value[1]!.registrationFee = 24
+    expect(snapshot.value[0]!.weightToKg).toBe(4)
+    expect(snapshot.value[1]!.pricePerKg).toBe(95)
+    prices.value = clonePriceRows(snapshot.value)
+    expect(prices.value).toEqual(snapshot.value)
+    prices.value[0]!.weightFromInclusive = false
+    expect(snapshot.value[0]!.weightFromInclusive).toBeUndefined()
+    expect(prices.value[0]!.sourceRow).toBe(18)
+  })
   it('does not label unchanged imports as awaiting review', () => {
     const batch = (statuses: string[]) => ({ status: 'completed', payload: { results: statuses.map(status => ({ status })) } }) as Batch
     expect(completedBatchStage(batch(['unchanged']))).toBe('无需审核')

@@ -31,6 +31,7 @@ class LogisticsRebuildPermissionTest {
         mvc.perform(put(root+"/datasets/"+id+"/required-channels").with(csrf()).header("Idempotency-Key","qa-required-permission").contentType("application/json").content("{}")).andExpect(status().isForbidden());
         mvc.perform(get(root+"/versions/"+id+"/billing-acceptance")).andExpect(status().isForbidden());
         mvc.perform(get(root+"/imports/"+id+"/files/0/evidence")).andExpect(status().isForbidden());
+        mvc.perform(get(root+"/imports/"+id+"/publish-progress")).andExpect(status().isForbidden());
         mvc.perform(post(root+"/versions/"+id+"/billing-acceptance").with(csrf()).header("Idempotency-Key","qa-billing-permission").contentType("application/json").content("{}")).andExpect(status().isForbidden());
     }
     @Test void rejectsAnonymousExports()throws Exception {mvc.perform(get(root+"/datasets/"+id+"/prices.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/versions/"+id+"/standardized.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/downloads/prepare?kind=prices&id="+id)).andExpect(status().isUnauthorized());}

@@ -11,6 +11,8 @@ export type Price = {
   etaMinDays?: number; etaMaxDays?: number; etaSource?: string; etaStatus?: string
   providerName?: string; channelName?: string; versionId?: string; versionNumber?: number; quoteReady?: boolean
 }
+// Price rows contain scalar fields; copying each row also unwraps Vue proxies.
+export function clonePriceRows(rows: Price[]): Price[] { return rows.map(row => ({ ...row })) }
 export type Provider = { id: string; name: string; code?: string; enabled?: boolean; datasetId?: string; _version?: number }
 export type Channel = {
   id: string; providerId: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean
@@ -68,6 +70,7 @@ export const logisticsRebuild = {
   prices: (id: string, filters: URLSearchParams) => api.get<PricePage>(`${root}/datasets/${id}/prices?${filters}`),
   batches: (id: string) => api.get<BatchSummary[]>(`${root}/datasets/${id}/imports`),
   batch: (id: string) => api.get<Batch>(`${root}/imports/${id}`),
+  publishProgress: (id: string) => api.get<{ batchId: string; publishedVersionIds: string[] }>(`${root}/imports/${id}/publish-progress`),
   upload: (id: string, files: File[], replaceDrafts: boolean, key: string, progress?: (value: UploadProgress) => void) => {
     const form = new FormData(); files.forEach(file => form.append('files', file)); form.append('replaceDrafts', String(replaceDrafts))
     return uploadForm<Batch>(`${root}/datasets/${id}/imports`, form, progress, { 'Idempotency-Key': key })

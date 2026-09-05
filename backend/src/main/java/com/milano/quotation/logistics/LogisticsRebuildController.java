@@ -129,6 +129,8 @@ public class LogisticsRebuildController {
     public ApiResponse<?> patchRows(@PathVariable UUID id,@RequestBody ObjectNode input,Authentication auth){
         var result=draftReview.patch(id,input,actor(auth));audit.record("logistics.draft-correct","logistics-version",id.toString(),"success",Map.of("changeCount",input.path("changes").size()+input.path("etaChanges").size()));return ApiResponse.ok(result);
     }
+    @GetMapping("/imports/{id}/publish-progress")
+    public ApiResponse<?> publishProgress(@PathVariable UUID id){return ApiResponse.ok(batchPublish.progress(id));}
     @PostMapping("/imports/{id}/publish-ready")
     public ApiResponse<?> publishReady(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
         var actor=actor(auth);input.put("batchId",id.toString());var prior=idempotency.existing(actor,"logistics-batch-publish-ready",key,input);if(prior.isPresent())return ApiResponse.ok(prior.get());
