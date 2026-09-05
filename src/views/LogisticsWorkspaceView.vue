@@ -5,6 +5,7 @@ import LogisticsPager from '@/components/logistics/LogisticsPager.vue'
 import LogisticsPublishStatus from '@/components/logistics/LogisticsPublishStatus.vue'
 import { createLogisticsPublishFeedback } from '@/data/logisticsPublishFeedback'
 import { clonePriceRows } from '@/data/logisticsRebuild'
+import { batchReviewStatus, batchReviewStatusLabels, countBatchReviewStatuses, type BatchReviewStatus } from '@/data/logisticsBatchStatus'
 import { priceIssueCountries, priceRowsForIssueCountries, priceIssueRowIndexes, prioritizePriceIssueRows } from '@/data/logisticsPriceIssueScope'
 import { clampLogisticsPage, logisticsPageFromQuery, logisticsPageQuery, logisticsPageSize } from '@/components/logistics/logisticsPagination'
 import LogisticsBillingReview from '@/components/quotation/LogisticsBillingReview.vue'
@@ -21,7 +22,7 @@ const requestedPage = Number(Array.isArray(route.query.page) ? route.query.page[
 const tab = ref<'prices' | 'imports' | 'history'>(route.query.logisticsTab === 'prices' ? 'prices' : route.query.logisticsTab === 'history' ? 'history' : 'imports')
 const datasets = ref<Dataset[]>([]), datasetId = ref(''), workspace = ref<Workspace | null>(null)
 const batch = ref<Batch | null>(null), version = ref<Version | null>(null)
-const batchResultQuery = ref(''), batchResultProvider = ref('all'), batchResultStatus = ref('all'), batchResultFocus = ref<'all' | 'added' | 'price' | 'range' | 'issues'>('all'), batchResultPage = ref(0)
+const batchResultQuery = ref(''), batchResultProvider = ref('all'), batchResultStatus = ref<'all' | BatchReviewStatus>('all'), batchResultFocus = ref<'all' | 'added' | 'price' | 'range' | 'issues'>('all'), batchResultPage = ref(0)
 const batchResultPageSize = ref(10)
 const batchResultPageSizes = [10, 30, 50]
 const prices = ref<PricePage>({ items: [], total: 0, page: 0, size: initialPageSize, totalPages: 0 })
@@ -116,15 +117,7 @@ const filteredBatchResults = computed(() => {
 })
 const visibleBatchResults = computed(() => filteredBatchResults.value.slice(batchResultPage.value * batchResultPageSize.value, (batchResultPage.value + 1) * batchResultPageSize.value))
 const batchResultTotalPages = computed(() => Math.max(1, Math.ceil(filteredBatchResults.value.length / batchResultPageSize.value)))
-const batchResultCounts = computed(() => (batch.value?.payload.results || []).reduce((counts, result) => {
-  counts.total++
-  const status = currentBatchResultStatus(result)
-  if (status === 'draft') counts.draft++
-  else if (status === 'blocked') counts.blocked++
-  else if (status === 'published') counts.published++
-  return counts
-}, { total: 0, draft: 0, blocked: 0, published: 0 }))
-const batchChangeCounts = computed(() => aggregateChangeSummary(batch.value?.payload.results || []))
+const batchResultCounts = computed(() => countBatchReviewStatuses((batch.value?.payload.results || []).map(currentBatchResultStatus)))
 const batchFocusCounts = computed(() => {
   const results = batch.value?.payload.results || []
   return {
@@ -139,7 +132,7 @@ const batchFailedFiles = computed(() => batch.value?.payload.fileReports?.filter
 function matchesUploadScope(providerName: string) {
   return matchesLogisticsProviderScope(uploadScope.value, uploadProviderName.value, providerName)
 }
-const readyBatchResults = computed(() => (batch.value?.payload.results || []).filter(item => currentBatchResultStatus(item) === 'draft' && !(item.errors || 0) && item.pricingReady === true && item.versionId && matchesUploadScope(item.providerName)))
+const readyBatchResults = computed(() => (batch.value?.payload.results || []).filter(item => currentBatchResultStatus(item) === 'draft'))
 const outOfScopeBatchResults = computed(() => {
   if (uploadScope.value !== 'provider' || !uploadProviderName.value) return []
   return (batch.value?.payload.results || []).filter(item => !matchesUploadScope(item.providerName))
@@ -212,7 +205,16 @@ async function restoreActiveBatch() {
     forgetActiveBatch()
   }
 }
-function currentBatchResultStatus(result: Batch['payload']['results'][number]) { return readyPublishResult.value?.published.some(item => item.versionId === result.versionId) ? 'published' : workspace.value?.versions.find(item => item.id === result.versionId)?.status || result.status }
+function currentBatchResultStatus(result: Batch['payload']['results'][number]) {
+  return batchReviewStatus(result, workspace.value?.versions.find(item => item.id === result.versionId)?.status,
+    readyPublishResult.value?.published.some(item => item.versionId === result.versionId), matchesUploadScope(result.providerName))
+}
+function selectBatchStatus(status: 'all' | BatchReviewStatus) {
+  batchResultStatus.value = status; batchResultFocus.value = 'all'; batchResultQuery.value = ''; batchResultProvider.value = 'all'
+}
+function selectBatchFocus(focus: typeof batchResultFocus.value) {
+  batchResultFocus.value = focus; batchResultStatus.value = 'all'; batchResultQuery.value = ''; batchResultProvider.value = 'all'
+}
 function batchResultReadiness(result: Batch['payload']['results'][number]) {
   if ((result.errors || 0) > 0) return `存在 ${result.errors} 个阻断问题，不能发布`
   if (result.pendingReasons?.length) return `暂不能自动报价：${result.pendingReasons.slice(0, 2).join('；')}${result.pendingReasons.length > 2 ? `；另有 ${result.pendingReasons.length - 2} 项` : ''}`
@@ -220,7 +222,8 @@ function batchResultReadiness(result: Batch['payload']['results'][number]) {
   const channel = workspace.value?.channels.find(item => item.id === result.channelId)
   if (status === 'published' && channel?.quoteReady) return '已发布并通过计费验收，可用于报价'
   if (status === 'published') return '价格已发布，尚需完成计费验收才能用于报价'
-  if (status === 'unchanged') return '与当前正式价格一致，无需生成新版本'
+  if (status === 'unchanged') return '与已生效版本一致，无需重复发布'
+  if (!matchesUploadScope(result.providerName)) return '不属于本次指定物流商，请分别处理'
   return result.pricingReady === true ? '价格结构已校验，可一键发布并同步财务' : '请打开价格明细核对计费条件'
 }
 function rangeBarStyle(row: Price, other?: Price) {
@@ -468,35 +471,36 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
             <div v-if="['queued', 'processing'].includes(batch.status)" class="review-progress"><div><b>{{ uploadStatusText || statusLabel[batch.phase] || batch.phase }}</b><strong>{{ batch.payload.progress || 0 }}%</strong></div><progress :value="batch.payload.progress || 0" max="100" /></div>
             <p v-if="batch.payload.error" class="notice error">批次失败原因：{{ batch.payload.error }}</p>
             <p v-if="outOfScopeBatchResults.length" class="notice error">本次按“{{ uploadProviderName }}”单物流商更新导入，但解析结果还包含 {{ [...new Set(outOfScopeBatchResults.map(item => item.providerName))].join('、') }}。这些渠道不会被一键发布，请核对文件后分别处理。</p>
-            <nav class="review-focus-tabs" aria-label="变化类型筛选">
-              <button :class="{ active: batchResultFocus === 'all' }" @click="batchResultFocus = 'all'">全部渠道 <b>{{ batchFocusCounts.all }}</b></button>
-              <button :class="{ active: batchResultFocus === 'added' }" @click="batchResultFocus = 'added'">新增渠道 <b>{{ batchFocusCounts.added }}</b></button>
-              <button :class="{ active: batchResultFocus === 'price' }" @click="batchResultFocus = 'price'">价格变化 <b>{{ batchFocusCounts.price }}</b></button>
-              <button :class="{ active: batchResultFocus === 'range' }" @click="batchResultFocus = 'range'">重量区间 <b>{{ batchFocusCounts.range }}</b></button>
-              <button class="issue-tab" :class="{ active: batchResultFocus === 'issues' }" @click="batchResultFocus = 'issues'">价格 / 重量问题 <b>{{ batchFocusCounts.issues + batchFailedFiles }}</b></button>
+            <div class="batch-status-overview">
+              <nav class="batch-status-tabs" aria-label="渠道发布状态">
+                <button :class="{ active: batchResultStatus === 'all' }" @click="selectBatchStatus('all')"><span>全部渠道</span><b>{{ batchResultCounts.total }}</b></button>
+                <button v-for="key in (['draft', 'unchanged', 'blocked', 'published'] as const)" :key="key" :class="[key, { active: batchResultStatus === key }]" @click="selectBatchStatus(key)"><span>{{ batchReviewStatusLabels[key] }}</span><b>{{ batchResultCounts[key] }}</b></button>
+              </nav>
+              <p>全部 {{ batchResultCounts.total }} = 可发布 {{ batchResultCounts.draft }} + 无需发布 {{ batchResultCounts.unchanged }} + 待处理 {{ batchResultCounts.blocked }} + 本批已发布 {{ batchResultCounts.published }}<span>无需发布：与已生效版本一致</span></p>
+            </div>
+            <nav class="review-focus-tabs batch-change-tabs" aria-label="变化类型筛选">
+              <span class="change-filter-label">变化类型<small>同一渠道可有多种变化</small></span>
+              <button :class="{ active: batchResultFocus === 'all' }" @click="selectBatchFocus('all')">全部变化</button>
+              <button :class="{ active: batchResultFocus === 'added' }" @click="selectBatchFocus('added')">新增渠道 <b>{{ batchFocusCounts.added }}</b></button>
+              <button :class="{ active: batchResultFocus === 'price' }" @click="selectBatchFocus('price')">价格变化 <b>{{ batchFocusCounts.price }}</b></button>
+              <button :class="{ active: batchResultFocus === 'range' }" @click="selectBatchFocus('range')">重量区间 <b>{{ batchFocusCounts.range }}</b></button>
             </nav>
+            <p v-if="batchFailedFiles" class="notice error">另有 {{ batchFailedFiles }} 个文件解析失败或待适配，未计入渠道总数。请在下方“原始文件与解析证据”查看。</p>
 
             <div class="batch-review-layout">
               <section class="review-main-panel">
-                <div class="batch-result-toolbar"><label>搜索渠道<input v-model="batchResultQuery" placeholder="物流商或渠道名称"></label><label>物流商<select v-model="batchResultProvider"><option value="all">全部物流商</option><option v-for="provider in batchProviders" :key="provider" :value="provider">{{ provider }}</option></select></label><label>处理状态<select v-model="batchResultStatus"><option value="all">全部状态</option><option value="draft">待审核</option><option value="published">已发布</option><option value="blocked">存在阻断</option><option value="unchanged">价格未变</option></select></label></div>
-                <div class="scroll"><table class="batch-results-table"><thead><tr><th>渠道</th><th>本次变化</th><th>审核结论</th><th>操作</th></tr></thead><tbody><tr v-for="(r, i) in visibleBatchResults" :key="`${r.versionId || r.channelId || r.channelName}-${i}`" :class="{ 'row-has-issue': batchResultHasIssues(r) }"><td><b>{{ r.channelName }}</b><small>{{ r.providerName }} · {{ r.priceRows ? `${r.priceRows} 条价格` : '已生成价格版本' }}</small></td><td><b class="comparison-explanation">{{ batchComparisonSummary(r) }}</b><div class="inline-change-summary"><span v-for="key in changeKeys" :key="key" :class="`change-${key}`">{{ diffLabel[key] }} {{ changeCount(r.summary, key) }}</span></div></td><td><strong class="review-status" :class="currentBatchResultStatus(r)">{{ statusLabel[currentBatchResultStatus(r)] || currentBatchResultStatus(r) }}</strong><small :class="{ warning: batchResultHasIssues(r) }">{{ r.message || batchResultReadiness(r) }}</small></td><td><button v-if="r.versionId" class="row-action" :disabled="busy" @click="openVersion(r.versionId)">{{ batchResultHasIssues(r) ? '修正问题' : '核对价格' }} →</button><details v-else open><summary>查看失败原因</summary><p>{{ r.message || '该渠道没有生成价格版本' }}</p><p v-for="(issue, j) in r.issues || []" :key="j">第 {{ issue.row || '—' }} 行 · {{ issue.field }}：{{ issue.message }}</p></details></td></tr><tr v-if="!visibleBatchResults.length"><td colspan="4" class="empty">当前筛选条件没有渠道结果。</td></tr></tbody></table></div>
+                <div class="batch-result-toolbar"><label>搜索渠道<input v-model="batchResultQuery" placeholder="物流商或渠道名称"></label><label>物流商<select v-model="batchResultProvider"><option value="all">全部物流商</option><option v-for="provider in batchProviders" :key="provider" :value="provider">{{ provider }}</option></select></label></div>
+                <div class="scroll"><table class="batch-results-table"><thead><tr><th>渠道</th><th>本次变化</th><th>审核结论</th><th>操作</th></tr></thead><tbody><tr v-for="(r, i) in visibleBatchResults" :key="`${r.versionId || r.channelId || r.channelName}-${i}`" :class="{ 'row-has-issue': batchResultHasIssues(r) }"><td><b>{{ r.channelName }}</b><small>{{ r.providerName }} · {{ r.priceRows ? `${r.priceRows} 条价格` : '已生成价格版本' }}</small></td><td><b class="comparison-explanation">{{ batchComparisonSummary(r) }}</b><div class="inline-change-summary"><span v-for="key in changeKeys" :key="key" :class="`change-${key}`">{{ diffLabel[key] }} {{ changeCount(r.summary, key) }}</span></div></td><td><strong class="review-status" :class="currentBatchResultStatus(r)">{{ batchReviewStatusLabels[currentBatchResultStatus(r)] }}</strong><small :class="{ warning: batchResultHasIssues(r) }">{{ r.message || batchResultReadiness(r) }}</small></td><td><button v-if="r.versionId" class="row-action" :disabled="busy" @click="openVersion(r.versionId)">{{ batchResultHasIssues(r) ? '修正问题' : '核对价格' }} →</button><details v-else open><summary>查看失败原因</summary><p>{{ r.message || '该渠道没有生成价格版本' }}</p><p v-for="(issue, j) in r.issues || []" :key="j">第 {{ issue.row || '—' }} 行 · {{ issue.field }}：{{ issue.message }}</p></details></td></tr><tr v-if="!visibleBatchResults.length"><td colspan="4" class="empty">当前筛选条件没有渠道结果。</td></tr></tbody></table></div>
                 <LogisticsPager class="batch-result-pager" :page="batchResultPage" :size="batchResultPageSize" :total="filteredBatchResults.length" :total-pages="batchResultTotalPages" :loading="busy" :size-options="batchResultPageSizes" aria-label="导入批次渠道结果分页" @page-change="changeBatchResultPage" @size-change="changeBatchResultSize" />
                 <details class="batch-source-files"><summary>原始文件与解析证据（{{ batch.payload.files.length }}）</summary><div class="batch-file-list"><details v-for="(file, i) in batch.payload.files" :key="i" :open="batchFileState(i) === '解析失败'"><summary><span>{{ file.name }}</span><b :class="{ warning: ['解析失败', '未完成'].includes(batchFileState(i)) }">{{ batchFileState(i) }}</b><button :disabled="busy || file.lifecycleStatus === 'deleted'" @click.stop="run(() => service.original(batch!.id, i))">{{ file.lifecycleStatus === 'deleted' ? '原文件已删除' : '下载原文件' }}</button><button v-if="batch.payload.fileReports?.[i]?.sourceEvidence" :disabled="busy" @click.stop="run(() => service.evidence(batch!.id, i))">解析证据</button></summary><p v-if="file.lifecycleStatus === 'deleted'" class="muted">原文件已按清理策略删除；SHA-256：{{ file.sha256 }}</p><p v-else-if="batch.payload.fileReports?.[i]?.retentionUntil" class="warning">解析失败，原文件保留至 {{ batch.payload.fileReports?.[i]?.retentionUntil }}。</p><p v-if="batchFileHint(i)" :class="{ warning: ['解析失败', '未完成'].includes(batchFileState(i)) }">{{ batchFileHint(i) }}</p></details></div></details>
               </section>
 
-              <aside class="release-check-panel">
-                <h3>发布前检查</h3>
-                <button @click="batchResultFocus = 'price'"><span class="check-dot price">¥</span><span>价格变化<small>需核对旧价、新价和涨跌幅</small></span><b>{{ batchChangeCounts.price }}</b></button>
-                <button @click="batchResultFocus = 'range'"><span class="check-dot range">↔</span><span>重量区间变化<small>包含扩大、缩小、重叠和断档</small></span><b>{{ batchChangeCounts.range }}</b></button>
-                <button @click="batchResultFocus = 'issues'"><span class="check-dot issue">!</span><span>价格 / 重量问题<small>红色问题修正后才能发布</small></span><b>{{ batchFocusCounts.issues + batchFailedFiles }}</b></button>
-                <button @click="batchResultStatus = 'draft'; batchResultFocus = 'all'"><span class="check-dot ready">✓</span><span>可发布渠道<small>逐渠道独立事务，不互相阻塞</small></span><b>{{ readyBatchResults.length }}</b></button>
-                <p class="release-note">已有渠道发布后自动切换新价格；新增渠道进入财务设置列表，默认不勾选。</p>
-                <button v-if="(['failed', 'interrupted'].includes(batch.status) || batch.payload.fileReports?.some(file => file.status === 'failed')) && !archived" class="retry-button" :disabled="busy" @click="run(async () => { batch = await service.retry(batch!.id); schedulePoll() })">重试失败 / 超时文件</button>
-              </aside>
+
             </div>
 
+            <div class="batch-release-note"><span>已有渠道发布后自动切换新价格；新增渠道进入财务设置列表，默认不勾选。</span><button v-if="(['failed', 'interrupted'].includes(batch.status) || batch.payload.fileReports?.some(file => file.status === 'failed')) && !archived" :disabled="busy" @click="run(async () => { batch = await service.retry(batch!.id); schedulePoll() })">重试失败 / 超时文件</button></div>
             <div v-if="readyPublishResult" class="publish-result"><b>发布结果：成功 {{ readyPublishResult.publishedCount }} · 跳过 {{ readyPublishResult.skippedCount }} · 失败 {{ readyPublishResult.failedCount }}</b><p v-for="item in readyPublishResult.skipped" :key="item.versionId">跳过 {{ item.channelName }}：{{ item.reason }}</p><p v-for="item in readyPublishResult.failed" :key="item.versionId">失败 {{ item.channelName }}：{{ item.reason }}</p></div>
-            <footer class="review-publish-bar"><LogisticsPublishStatus v-if="publishScope === 'batch'" :phase="publishPhase" :detail="publishDetail" :elapsed="publishElapsed" :completed="publishCompleted" :total="publishTotal" :summary="publishSummary" /><div><b>{{ batchResultCounts.blocked || batchFocusCounts.issues + batchFailedFiles ? `还有 ${batchFocusCounts.issues + batchFailedFiles} 个问题需要处理` : '本批检查通过' }}</b><small>正常渠道不必等待失败文件，可直接发布给财务使用。</small></div><label>审核备注<input v-model="readyPublishNote" :disabled="busy" maxlength="500" placeholder="填写价格来源和审核结论"></label><label v-if="readyBatchNeedsRemoval || readyBatchNeedsRisk" class="check"><input v-model="readyPublishConfirmed" :disabled="busy" type="checkbox">已确认物流变化内容</label><button class="primary publish-all" :disabled="busy || !readyBatchResults.length || !readyPublishNote.trim() || ((readyBatchNeedsRemoval || readyBatchNeedsRisk) && !readyPublishConfirmed)" @click="publishReadyBatch">{{ publishScope === 'batch' && publishPhase === 'publishing' ? `发布中 ${publishCompleted}/${publishTotal}…` : publishScope === 'batch' && publishPhase === 'refreshing' ? '正在更新列表…' : `一键发布 ${readyBatchResults.length} 个可用渠道` }}</button></footer>
+            <footer class="review-publish-bar"><LogisticsPublishStatus v-if="publishScope === 'batch'" :phase="publishPhase" :detail="publishDetail" :elapsed="publishElapsed" :completed="publishCompleted" :total="publishTotal" :summary="publishSummary" /><div><b>{{ batchResultCounts.blocked || batchFailedFiles ? `${batchResultCounts.blocked} 个渠道待处理，${batchFailedFiles} 个文件需处理` : '本批检查通过' }}</b><small>正常渠道不必等待失败文件，可直接发布给财务使用。</small></div><label>审核备注<input v-model="readyPublishNote" :disabled="busy" maxlength="500" placeholder="填写价格来源和审核结论"></label><label v-if="readyBatchNeedsRemoval || readyBatchNeedsRisk" class="check"><input v-model="readyPublishConfirmed" :disabled="busy" type="checkbox">已确认物流变化内容</label><button class="primary publish-all" :disabled="busy || !readyBatchResults.length || !readyPublishNote.trim() || ((readyBatchNeedsRemoval || readyBatchNeedsRisk) && !readyPublishConfirmed)" @click="publishReadyBatch">{{ publishScope === 'batch' && publishPhase === 'publishing' ? `发布中 ${publishCompleted}/${publishTotal}…` : publishScope === 'batch' && publishPhase === 'refreshing' ? '正在更新列表…' : `一键发布 ${readyBatchResults.length} 个可用渠道` }}</button></footer>
           </div>
         </template>
 
@@ -556,6 +560,19 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 </template>
 
 <style scoped>
+.batch-status-overview{padding:20px 24px 14px;border-bottom:1px solid #e5eaee;background:#fff}
+.batch-status-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.batch-status-tabs button{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 18px;background:#fafcfe;border:1px solid #dce5ec;border-radius:8px;color:#4a6073;text-align:left}
+.batch-status-tabs button b{font-size:25px;line-height:1.2;font-variant-numeric:tabular-nums}
+.batch-status-tabs button.active{background:#eff6ff;border-color:#2b73d2;box-shadow:0 0 0 1px #2b73d2;color:#1e62b4}
+.batch-status-tabs .draft b,.batch-status-tabs .published b{color:#24805a}.batch-status-tabs .blocked b{color:#c13e36}
+.batch-status-overview p{display:flex;flex-wrap:wrap;gap:8px 20px;margin:12px 0 0;color:#64798b;font-size:12px}.batch-status-overview p span{color:#82929f}
+.batch-change-tabs{align-items:center;flex-wrap:wrap;padding:12px 24px!important}.change-filter-label{margin-right:8px;color:#50697c;font-weight:650}.change-filter-label small{display:block;font-weight:400;font-size:11px;color:#82929f}
+.batch-review-layout{grid-template-columns:minmax(0,1fr)!important}.batch-review-layout .batch-result-toolbar{display:grid;grid-template-columns:minmax(240px,1fr) minmax(180px,280px)}
+.batch-release-note{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 24px 16px;background:#f7f9fb;color:#718697;font-size:12px}
+.review-status.unchanged{background:#eef3fa;color:#4c6d94}
+@media(max-width:800px){.batch-status-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.batch-status-tabs button:first-child{grid-column:1/-1}.batch-review-layout .batch-result-toolbar{grid-template-columns:1fr}.batch-status-overview{padding:16px}}
+
 .editor-issue-tag{display:block;margin-top:5px;padding:3px 6px;border:1px solid #edb4ad;border-radius:4px;background:#fff0ed;color:#ae2e24;font-size:11px;white-space:nowrap}.editor-context-tag{color:#617687}.price-editor .row-has-issue td:first-child{border-left:4px solid #d8493e}.price-editor .row-issue-context{background:#f7fafc}
 .editor-scope{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:12px 0;padding:12px 14px;border:1px solid #b9d7f5;border-radius:8px;background:#f1f7ff;color:#245f92}.editor-scope p{margin:5px 0 0;font-size:12px;line-height:1.5}.editor-scope button{flex-shrink:0}@media(max-width:700px){.editor-scope{align-items:flex-start;flex-direction:column}}
 .edit-error{grid-column:1/-1;margin:0;color:#b42318}
