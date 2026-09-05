@@ -12,7 +12,7 @@ import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
 
 const showPasteDialog = ref(false)
-function pasteSaved(count: number) { showPasteDialog.value = false; toast(`已新增${count}条采购资料`); reload() }
+function pasteSaved(count: number) { toast(`已新增${count}条采购资料`); reload() }
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
 const records = ref<PurchaseProductRecord[]>([])

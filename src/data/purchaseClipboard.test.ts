@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { parsePurchaseHtmlTable, readPurchaseClipboard } from './purchaseClipboard'
+import { parsePurchaseHtmlTable, readPurchaseClipboard, readPurchaseClipboardResult } from './purchaseClipboard'
 import { emptyPurchasePasteRow, parsePurchaseClipboard, validatePurchasePaste } from './purchasePaste'
 
 export function multilinePurchaseFixture() {
@@ -13,6 +13,30 @@ const htmlFor = (rows: string[][]) => `<html><body><!--StartFragment--><table><t
 const clipboard = (text: string, html = '') => ({ getData: (type: string) => type === 'text/html' ? html : text })
 
 describe('spreadsheet clipboard boundaries', () => {
+  it('filters three blank/image columns from whole rows while retaining multiline fields and prices', () => {
+    const rows = multilinePurchaseFixture()
+    const html = htmlFor(rows.map(row => ['', '', '', ...row])).replace('<td></td>', '<td><img src="https://invalid.example/a.png"><svg><text>图片</text></svg></td>')
+    const result = readPurchaseClipboardResult(clipboard('', html), 0)
+    expect(result).toEqual({ rows, skippedImageColumns: true })
+    expect(validatePurchasePaste(result.rows).issues).toEqual([])
+    const quoted = rows.map(row => ['', '[图片]', '=DISPIMG("id",1)', ...row].map(value => `"${value.replace(/"/g, '""')}"`).join('\t')).join('\r\n')
+    expect(readPurchaseClipboard(clipboard(quoted), 0)).toEqual(rows)
+  })
+  it('accepts unused trailing Excel columns and partial source ranges with explicit data anchors', () => {
+    const rows = multilinePurchaseFixture()
+    const html = htmlFor(rows.map(row => ['', '', '', ...row])).replace(/<\/tr>/g, '<td colspan="16349"></td></tr>')
+    expect(readPurchaseClipboard(clipboard('', html), 0)).toEqual(rows)
+    const simple = rows.map(row => ['', '', '', ...row.map(value => value.replace(/[\t\n]/g, ' ')), ...Array(200).fill('')])
+    expect(readPurchaseClipboard(clipboard(simple.map(r => r.join('\t')).join('\r\n')), 0)).toEqual(rows.map(row => row.map(value => value.replace(/[\t\n]/g, ' '))))
+    expect(readPurchaseClipboard(clipboard('', htmlFor(rows.map(row => ['', '', '', ...row.slice(0, 26)]))), 0)).toEqual(rows.map(row => row.slice(0, 26)))
+  })
+  it('never removes three optional business columns or silently discards other source columns', () => {
+    const rows = multilinePurchaseFixture().map(row => ['', '', '', ...row.slice(3)])
+    expect(readPurchaseClipboardResult(clipboard('', htmlFor(rows)), 0)).toEqual({ rows, skippedImageColumns: false })
+    expect(()=>readPurchaseClipboard(clipboard('', htmlFor(rows.map(row => [...row, '', '', '']))), 0)).toThrow('列数')
+    expect(()=>readPurchaseClipboard(clipboard('', htmlFor(multilinePurchaseFixture().map(row => ['', '', '', ...row]))), 1)).toThrow('报价日期')
+    expect(()=>readPurchaseClipboard(clipboard('', htmlFor(multilinePurchaseFixture().map(row => ['', '', '', ...row, '意外数据']))), 0)).toThrow('非空列')
+  })
   it('reads two actual table rows despite unquoted newlines and tabs in plain text', () => {
     const rows = multilinePurchaseFixture(); const plain = rows.map(r=>r.join('\t')).join('\n')
     expect(parsePurchaseClipboard(plain).length).toBeGreaterThan(2)
