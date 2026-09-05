@@ -25,9 +25,9 @@ async function parseEnvelope<T>(response: Response): Promise<ApiEnvelope<T>> {
   return body
 }
 
-async function ensureCsrf() {
+async function ensureCsrf(signal?: AbortSignal | null) {
   if (csrf) return csrf
-  const response = await fetch(`${API_BASE}/auth/csrf`, { credentials: 'include', headers: { Accept: 'application/json' } })
+  const response = await fetch(`${API_BASE}/auth/csrf`, { credentials: 'include', headers: { Accept: 'application/json' }, signal: signal || AbortSignal.timeout(20_000) })
   csrf = (await parseEnvelope<{ headerName: string; token: string }>(response)).data
   return csrf
 }
@@ -39,7 +39,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   headers.set('X-Request-Id', crypto.randomUUID())
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    const token = await ensureCsrf()
+    const token = await ensureCsrf(init.signal)
     headers.set(token.headerName, token.token)
   }
   const response = await fetch(`${API_BASE}${path}`, { ...init, method, headers, credentials: 'include' })

@@ -22,6 +22,7 @@ public class PurchaseProductController {
     @GetMapping("/{sku}") @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<JsonNode> get(@PathVariable String sku){return ApiResponse.ok(products.get(sku));}
     @GetMapping("/{sku}/deletion-check") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<PurchaseProductDeletionGuard.DeletionCheck> deletionCheck(@PathVariable String sku){return ApiResponse.ok(products.deletionCheck(sku));}
     @PutMapping("/{sku}") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<JsonNode> upsert(@PathVariable String sku, @RequestBody JsonNode body) {
+        if (!(body instanceof tools.jackson.databind.node.ObjectNode)) throw com.milano.quotation.common.AppException.unprocessable("商品数据必须为对象");
         ((tools.jackson.databind.node.ObjectNode) body).put("sku", sku); var result=products.upsert(body); audit.record("purchase.upsert","purchase-product",sku,"success", Map.of()); return ApiResponse.ok(result);
     }
     @PutMapping("/batch") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<List<JsonNode>> batch(@RequestBody List<JsonNode> body) {

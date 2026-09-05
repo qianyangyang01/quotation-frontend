@@ -7,6 +7,22 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuotationSubmissionValidatorTest {
+    @Test void rejectsNegativeQuoteAmountsButAllowsMissingOptionalAmountsAndLosses() {
+        var input = valid();
+        ((tools.jackson.databind.node.ObjectNode) input.path("quoteOptions").get(0)).put("quoteCustomUsd", -10);
+        assertThrows(FieldValidationException.class, () -> validator.validate(input));
+        ((tools.jackson.databind.node.ObjectNode) input.path("quoteOptions").get(0)).putNull("quoteCustomUsd").put("profitCny", -1);
+        assertDoesNotThrow(() -> validator.validate(input));
+    }
+    @Test void rejectsInvalidOutcomeAmountsQuantitiesAndStatus() {
+        var patch = JsonNodeFactory.instance.objectNode().put("status", "won").put("actualQuoteCny", -999).put("dealQuantity", -2);
+        assertThrows(FieldValidationException.class, () -> validator.validateUpdate(patch));
+        patch.put("actualQuoteCny", 100).put("dealQuantity", 2);
+        assertDoesNotThrow(() -> validator.validateUpdate(patch));
+        patch.put("status", "fake"); assertThrows(FieldValidationException.class, () -> validator.validateUpdate(patch));
+        patch.put("status", "won").putArray("dealLines").addObject().put("quantity", 1.5).put("unitPriceUsd", 10);
+        assertThrows(FieldValidationException.class, () -> validator.validateUpdate(patch));
+    }
     private final QuotationSubmissionValidator validator = new QuotationSubmissionValidator();
 
     @Test void acceptsCompleteQuotationConditions() {

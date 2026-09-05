@@ -162,6 +162,10 @@ public class PurchaseProductService {
     private static Optional<String> referencedSku(String value){if(value==null)return Optional.empty();var sku=value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+","");return sku.isEmpty()||sku.length()>96||!sku.matches("[A-Z0-9._/-]+")?Optional.empty():Optional.of(sku);}
     private static void addReferencedSku(Collection<String> skus,String value){referencedSku(value).ifPresent(skus::add);}
     private static void validatePayload(ObjectNode object) {
+        for (var field : List.of("weightG", "minOrderQty", "purchasePriceCny", "tier2PriceCny", "tier3PriceCny", "taxIncludedPriceCny", "singleFreightCny")) {
+            var value=object.path(field);
+            if (object.hasNonNull(field) && (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble()<0)) throw AppException.unprocessable(field+"必须为有效非负数");
+        }
         for (String field : List.of("productImage", "physicalImage", "image")) {
             var value = object.path(field).asText("");
             if (value.startsWith("data:")) throw AppException.unprocessable("图片不能以Base64保存到数据库，请使用图片上传接口");

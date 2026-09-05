@@ -80,7 +80,7 @@ services:
       APP_PUBLIC_BASE_URL: ${QUOTATION_PUBLIC_BASE_URL}
       APP_CORS_ALLOWED_ORIGIN: ${QUOTATION_PUBLIC_BASE_URL}
       APP_COOKIE_SECURE: ${QUOTATION_COOKIE_SECURE:-true}
-      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -Duser.timezone=UTC
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC
     expose: ["8088"]
     networks: [quotation-internal, ahmln-edge]
     healthcheck:

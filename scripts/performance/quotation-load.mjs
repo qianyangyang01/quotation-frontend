@@ -8,6 +8,8 @@ const durationSeconds = Math.max(1, Number(process.env.PERF_DURATION_SECONDS || 
 const warmupSeconds = Math.max(0, Number(process.env.PERF_WARMUP_SECONDS || 60))
 const password = process.env.PERF_PASSWORD || 'PerfAdmin123!'
 const output = process.env.PERF_OUTPUT || 'artifacts/performance-result.json'
+if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(baseUrl)) throw new Error('压力测试仅允许独立本地环境')
+let logisticsRevision = ''
 
 class Session {
   constructor(account) { this.account = account; this.cookies = new Map(); this.csrf = null }
@@ -25,7 +27,7 @@ class Session {
     if (this.cookies.size) requestHeaders.Cookie = this.cookieHeader()
     if (body !== undefined) requestHeaders['Content-Type'] = 'application/json'
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && this.csrf) requestHeaders[this.csrf.headerName] = this.csrf.token
-    const response = await fetch(`${baseUrl}/api/v1${path}`, { method, headers: requestHeaders, body: body === undefined ? undefined : JSON.stringify(body) })
+    const response = await fetch(`${baseUrl}/api/v1${path}`, { method, headers: requestHeaders, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(30_000) })
     this.absorb(response)
     const envelope = await response.json().catch(() => null)
     if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status} ${envelope?.code || ''} ${envelope?.message || ''}`)
@@ -71,25 +73,38 @@ async function operation(session, sequence) {
   const bundle = roll % 2 === 0
   return [bundle ? 'quotation-save-bundle' : 'quotation-save-single', () => session.request('/quotations', {
     method: 'POST', headers: { 'Idempotency-Key': `perf:${session.account}:${sequence}:${crypto.randomUUID()}` },
-    body: buildQuotationPayload(session.account, sequence, bundle),
+    body: buildQuotationPayload(session.account, sequence, bundle, logisticsRevision),
   })]
 }
 
 const sessions = []
+// Approve the deterministic isolated fixture using independently specified expected totals.
+const setup = new Session('PERFADMIN'); await setup.login()
+const fixtureId = '33333333-3333-4333-8333-333333333333'
+const acceptance = await setup.request(`/logistics/rebuild/versions/${fixtureId}/billing-acceptance`)
+if (!acceptance.quoteReady) {
+  const samples = []
+  for (const [country, zoneName, price, fee] of [['US', '', 48, 8], ['AU', '澳大利亚1区', 55, 10], ['AU', '澳大利亚2区', 58, 10], ['AU', '澳大利亚3区', 61, 10], ['AU', '澳大利亚4区', 64, 10]]) {
+    for (const weightKg of [1, 2]) samples.push({ input: { country, zoneName, weightKg }, expectedTotal: weightKg * price + fee, sourceReference: 'seed.sql independent per-kg price and ticket fee' })
+  }
+  samples.push({ input: { country: 'US', weightKg: 31 }, expectRejected: true, sourceReference: 'seed.sql maximum 30kg' })
+  await setup.request(`/logistics/rebuild/versions/${fixtureId}/billing-acceptance`, { method: 'POST', headers: { 'Idempotency-Key': `perf-accept-${crypto.randomUUID()}` }, body: { fingerprint: acceptance.fingerprint, engineVersion: acceptance.engineVersion, reviewConfirmed: true, note: 'Isolated performance fixture independent calculation', samples } })
+}
 for (let index = 0; index < users; index += 1) {
   const session = new Session(`PERF${String(index + 1).padStart(2, '0')}`)
   await session.login()
   sessions.push(session)
 }
 
+logisticsRevision = (await sessions[0].request('/logistics/published/manifest')).revision
 try {
   await sessions[0].request('/quotations', {
     method: 'POST', headers: { 'Idempotency-Key': `perf:preflight:single:${crypto.randomUUID()}` },
-    body: buildQuotationPayload(sessions[0].account, 0, false),
+    body: buildQuotationPayload(sessions[0].account, 0, false, logisticsRevision),
   })
   await sessions[0].request('/quotations', {
     method: 'POST', headers: { 'Idempotency-Key': `perf:preflight:bundle:${crypto.randomUUID()}` },
-    body: buildQuotationPayload(sessions[0].account, 1, true),
+    body: buildQuotationPayload(sessions[0].account, 1, true, logisticsRevision),
   })
 } catch (error) {
   throw new Error(`性能夹具契约失败：${String(error?.message || error)}`, { cause: error })

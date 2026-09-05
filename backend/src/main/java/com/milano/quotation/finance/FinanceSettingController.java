@@ -27,6 +27,7 @@ public class FinanceSettingController {
     @GetMapping("/logistics-required-previews/{datasetId}") @PreAuthorize("isAuthenticated()") ApiResponse<?> logisticsRequiredPreview(@PathVariable UUID datasetId){return ApiResponse.ok(logisticsDatasets.requiredChannelPreview(datasetId));}
     @PutMapping("/{key}") @PreAuthorize("hasAuthority('PERM_finance')") @Transactional ApiResponse<JsonNode> put(@PathVariable String key,@RequestBody JsonNode body,@RequestHeader("If-Match") long expectedVersion){
         validateKey(key); if(body.toString().length()>2_000_000) throw AppException.unprocessable("财务设置数据过大");
+        FinanceSettingValidation.validate(key,body);
         var existing=settings.findById(key);if(existing.isPresent()&&existing.get().version!=expectedVersion)throw AppException.conflict("财务设置已被其他用户修改，请刷新后重试");if(existing.isEmpty()&&expectedVersion!=-1)throw AppException.conflict("财务设置版本不一致，请刷新后重试");
         var row=existing.orElseGet(()->FinanceSetting.create(key,body.deepCopy())); row.payload=body.deepCopy(); row.updatedAt=Instant.now(); settings.saveAndFlush(row);
         audit.record("finance.update","finance-setting",key,"success",Map.of()); return ApiResponse.ok(view(row));

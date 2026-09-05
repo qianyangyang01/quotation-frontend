@@ -39,6 +39,35 @@ class LogisticsPriceWorkflowPostgresTest {
     @Autowired LogisticsService logistics; @Autowired LogisticsDatasetGuard guard; @Autowired PlatformTransactionManager manager;
     @Autowired LogisticsDraftReviewService review; @Autowired LogisticsBatchPublishService publish;
     @Autowired LogisticsQueryService query; @MockitoBean AssetStorageService storage;
+    @Autowired com.milano.quotation.idempotency.IdempotencyService idempotency;
+
+    @Test void independentPublicationClaimRejectsOverlapAndReplaysCompletedResult() throws Exception {
+        var key=UUID.randomUUID().toString();var body=mapper.createObjectNode().put("batch","qa");var started=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        try(var worker=java.util.concurrent.Executors.newSingleThreadExecutor()){
+            var first=worker.submit(()->idempotency.executeIndependent("QA","publish",key,body,()->{started.countDown();try{release.await(10,java.util.concurrent.TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException(e);}return mapper.createObjectNode().put("publishedCount",2);}));
+            assertTrue(started.await(5,java.util.concurrent.TimeUnit.SECONDS));
+            assertThrows(com.milano.quotation.common.AppException.class,()->idempotency.executeIndependent("QA","publish",key,body,()->{fail("Concurrent publish executed twice");return null;}));
+            release.countDown();var result=first.get(5,java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(result,idempotency.executeIndependent("QA","publish",key,body,()->{fail("Completed publish replay executed again");return null;}));
+        }
+        var retryKey=UUID.randomUUID().toString();
+        assertThrows(IllegalStateException.class,()->idempotency.executeIndependent("QA","publish",retryKey,body,()->{throw new IllegalStateException("injected failure");}));
+        assertEquals(1,idempotency.executeIndependent("QA","publish",retryKey,body,()->mapper.createObjectNode().put("publishedCount",1)).path("publishedCount").asInt());
+    }
+
+    @Test void concurrentIdempotentTransactionsExecuteBusinessWriteOnce() throws Exception {
+        var key=UUID.randomUUID().toString();var count=new java.util.concurrent.atomic.AtomicInteger();
+        var gate=new java.util.concurrent.CountDownLatch(1);var body=mapper.createObjectNode().put("request","same");
+        try(var workers=java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            var futures=new ArrayList<java.util.concurrent.Future<String>>();
+            for(int i=0;i<8;i++) futures.add(workers.submit(()->{gate.await();return new org.springframework.transaction.support.TransactionTemplate(manager).execute(status->{
+                var prior=idempotency.existing("TEST-RETRY","qa-concurrent",key,body);if(prior.isPresent())return prior.get().path("id").asText();
+                count.incrementAndGet();var response=mapper.createObjectNode().put("id",UUID.randomUUID().toString());idempotency.save("TEST-RETRY","qa-concurrent",key,body,response);return response.path("id").asText();
+            });}));
+            gate.countDown();var ids=new HashSet<String>();for(var future:futures)ids.add(future.get(20,java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(1,count.get());assertEquals(1,ids.size());
+        }
+    }
 
     @Test void importFillEtaPublishAndUpdateKeepTheFinanceChannelAndUseNewBasePrice()throws Exception {
         var objects=new HashMap<String,byte[]>();
@@ -52,6 +81,11 @@ class LogisticsPriceWorkflowPostgresTest {
         var item=first.path("payload").path("results").get(0);
         assertEquals("draft",item.path("status").asText(),first.toString());assertFalse(item.path("etaReady").asBoolean());
         var noEtaVersion=UUID.fromString(item.path("versionId").asText());
+        var batchId=UUID.fromString(first.path("id").asText());var invalid=mapper.createObjectNode().put("note","非法选择不能发布");invalid.putArray("selections");
+        assertThrows(com.milano.quotation.common.AppException.class,()->publish.publishReady(batchId,invalid,"TEST-PUBLISH"));
+        invalid.withArray("selections").addObject().put("versionId",noEtaVersion.toString()).put("channelId",UUID.randomUUID().toString());
+        assertThrows(com.milano.quotation.common.AppException.class,()->publish.publishReady(batchId,invalid,"TEST-PUBLISH"));
+        assertTrue(publish.progress(batchId).path("publishedVersionIds").isEmpty());
         publish(first);assertTrue(guard.quoteReady(noEtaVersion));assertEquals(12,total(noEtaVersion,1));
         assertEquals(1,query.publishedCatalog(null).rules().size());
         var quoteRows=query.publishedRules(null,null,List.of("US"),List.of()).rules().getFirst().path("prices");
@@ -97,7 +131,7 @@ class LogisticsPriceWorkflowPostgresTest {
     private void publish(JsonNode batch){
         var batchId=UUID.fromString(batch.path("id").asText());
         assertTrue(publish.progress(batchId).path("publishedVersionIds").isEmpty(),"Drafts must not advance publication progress");
-        var input=mapper.createObjectNode().put("note","仅隔离测试，核对价格和重量区间");input.putArray("selections").addObject().put("versionId",batch.path("payload").path("results").get(0).path("versionId").asText()).put("reviewConfirmed",true).put("removalConfirmed",true);
+        var input=mapper.createObjectNode().put("note","仅隔离测试，核对价格和重量区间");input.putArray("selections").addObject().put("versionId",batch.path("payload").path("results").get(0).path("versionId").asText()).put("channelId",batch.path("payload").path("results").get(0).path("channelId").asText()).put("reviewConfirmed",true).put("removalConfirmed",true);
         var result=publish.publishReady(UUID.fromString(batch.path("id").asText()),input,"TEST-PUBLISH");assertEquals(1,result.path("publishedCount").asInt(),result.toString());
         var progress=publish.progress(batchId);assertEquals(1,progress.path("publishedVersionIds").size());
         assertEquals(batch.path("payload").path("results").get(0).path("versionId").asText(),progress.path("publishedVersionIds").get(0).asText());

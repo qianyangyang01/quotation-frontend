@@ -29,8 +29,37 @@ public class QuotationSubmissionValidator {
         validateBundle(errors, input);
         if (!input.path("quoteOptions").isArray() || input.path("quoteOptions").isEmpty()) {
             errors.add(new ApiResponse.FieldError("quoteOptions", "请至少选择一条报价渠道"));
+        } else {
+            int index = 0;
+            for (var option : input.path("quoteOptions")) {
+                if (!option.isObject()) addOnce(errors, "quoteOptions", "报价渠道格式错误");
+                else optionalAmounts(errors, option, "quoteOptions[" + index + "].", "quote1Usd", "quote2Usd", "quote3Usd", "quoteCustomUsd", "quoteCny", "freightCny", "totalCostCny");
+                index++;
+            }
         }
+        optionalAmounts(errors, input, "", "systemQuoteCny", "systemQuoteUsd", "totalCostCny", "purchaseUnitPriceCny");
+        if (input.hasNonNull("exchangeRate") && !positiveNumber(input.path("exchangeRate"))) addOnce(errors, "exchangeRate", "汇率必须为有效正数");
         if (!errors.isEmpty()) throw new FieldValidationException(errors);
+    }
+
+    public void validateUpdate(ObjectNode patch) {
+        var errors = new ArrayList<ApiResponse.FieldError>();
+        if (patch.has("status")) oneOf(errors, patch, "status", Set.of("pending", "won", "lost"), "成交状态不合法");
+        optionalAmounts(errors, patch, "", "actualQuoteUsd", "actualQuoteCny");
+        if (patch.hasNonNull("dealQuantity") && (!patch.path("dealQuantity").isIntegralNumber() || patch.path("dealQuantity").asLong() <= 0)) addOnce(errors, "dealQuantity", "成交数量必须为正整数");
+        if (patch.has("dealLines")) {
+            if (!patch.path("dealLines").isArray()) addOnce(errors, "dealLines", "成交明细必须为列表");
+            else for (var line : patch.path("dealLines")) {
+                if (!line.isObject() || !positiveNumber(line.path("unitPriceUsd")) || !line.path("quantity").isIntegralNumber() || line.path("quantity").asLong() <= 0) addOnce(errors, "dealLines", "成交单价必须大于零，数量必须为正整数");
+                optionalAmounts(errors, line, "dealLines.", "amountUsd");
+            }
+        }
+        if (patch.has("customerName")) required(errors, patch, "customerName", "客户名称不能为空且不能超过120字", 120);
+        if (!errors.isEmpty()) throw new FieldValidationException(errors);
+    }
+
+    private static void optionalAmounts(ArrayList<ApiResponse.FieldError> errors, tools.jackson.databind.JsonNode input, String prefix, String... fields) {
+        for (var field : fields) if (input.hasNonNull(field) && !nonNegativeNumber(input.path(field))) addOnce(errors, prefix + field, "金额必须为有效非负数");
     }
 
     private static void required(ArrayList<ApiResponse.FieldError> errors, ObjectNode input, String field, String message, int max) {

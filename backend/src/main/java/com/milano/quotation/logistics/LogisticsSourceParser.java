@@ -37,7 +37,7 @@ public class LogisticsSourceParser {
     @Autowired public LogisticsSourceParser(ObjectMapper mapper,LogisticsWorkbookService standard,LogisticsParserAliases aliases){this.mapper=mapper;this.standard=standard;this.aliases=aliases;}
     LogisticsSourceParser(ObjectMapper mapper,LogisticsWorkbookService standard){this(mapper,standard,new LogisticsParserAliases());}
 
-    public ObjectNode parse(byte[] bytes,String filename) {
+    public synchronized ObjectNode parse(byte[] bytes,String filename) {
         if(bytes.length==0 || bytes.length>MAX_FILE_BYTES || filename==null || !filename.toLowerCase(Locale.ROOT).matches(".*\\.xlsx?$"))
             throw AppException.unprocessable("单个物流文件必须是100MB以内的.xls或.xlsx");
         var result=mapper.createObjectNode().put("fileName",filename).put("parserVersion",VERSION);
@@ -176,10 +176,9 @@ public class LogisticsSourceParser {
             var relation=element.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id");var target=targets.get(relation);if(target==null||target.isBlank())continue;
             var normalized=normalizeWorkbookTarget(target);if(!normalized.isBlank())stripped.add(normalized);
         }
-        if(stripped.isEmpty())return bytes;
         var output=new java.io.ByteArrayOutputStream(bytes.length);var emptySheet="<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData/></worksheet>".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         try(var input=new ZipInputStream(new ByteArrayInputStream(bytes));var zip=new ZipOutputStream(output)) {
-            for(ZipEntry entry;(entry=input.getNextEntry())!=null;){var copy=new ZipEntry(entry.getName());if(entry.getTime()>=0)copy.setTime(entry.getTime());zip.putNextEntry(copy);if(!entry.isDirectory()){if(stripped.contains(entry.getName()))zip.write(emptySheet);else input.transferTo(zip);}zip.closeEntry();}
+            for(ZipEntry entry;(entry=input.getNextEntry())!=null;){var copy=new ZipEntry(entry.getName());if(entry.getTime()>=0)copy.setTime(entry.getTime());zip.putNextEntry(copy);if(!entry.isDirectory()){if(stripped.contains(entry.getName()))zip.write(emptySheet);else if(entry.getName().matches("xl/worksheets/sheet[0-9]+\\.xml"))LogisticsWorksheetCompactor.copy(input,zip);else input.transferTo(zip);}zip.closeEntry();}
         }
         return output.toByteArray();
     }
@@ -275,6 +274,7 @@ public class LogisticsSourceParser {
         var allNotes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
             var rowText=String.join("|",source.rowTexts(r));
+            if(rowText.isBlank()&&source.width(r)>0)rowText=String.join("|",source.resolvedTexts(r));
             if(rowText.isBlank())continue;
             if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
             if(reference){if(detect(source,r,provider)!=null)reference=false;else{source.referenceRows.add(r);continue;}}
@@ -478,7 +478,7 @@ public class LogisticsSourceParser {
     }
 
     private Columns detect(Source source,int r,String provider) {
-        var c=new Columns();c.headerRow=r;c.feeHeaderRow=r;int last=source.sheet.getRow(r)==null?0:source.sheet.getRow(r).getLastCellNum();
+        var c=new Columns();c.headerRow=r;c.feeHeaderRow=r;int last=source.width(r);
         for(int col=0;col<Math.min(last,80);col++) {
             String t=clean(source.text(r,col)); String lower=t.toLowerCase(Locale.ROOT);
             var field=t.length()>60?"":aliases.firstMatch(provider,t,HEADER_FIELDS);

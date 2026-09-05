@@ -13,6 +13,10 @@ class PurchaseProductControllerTest {
     private PurchaseProductService products; private AuditService audit; private PurchaseProductController controller;
 
     @BeforeEach void setup(){products=mock(PurchaseProductService.class);audit=mock(AuditService.class);controller=new PurchaseProductController(products,audit);}
+    @Test void rejectsArrayInputBeforeCastingAndWriting() {
+        assertThrows(com.milano.quotation.common.AppException.class,()->controller.upsert("QA-INVALID",JsonNodeFactory.instance.arrayNode()));
+        verifyNoInteractions(products);
+    }
 
     @Test void auditsCatalogStateSuccessAndFailure(){
         var input=new PurchaseProductController.CatalogStateInput("disabled",4);

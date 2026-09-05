@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { buildQuotationPayload, performanceBundleItem } from './quotation-payload.mjs'
 
 describe('performance quotation payload', () => {
+  it('sends current logistics revision and independently calculated bundled freight', () => {
+    const payload = buildQuotationPayload('PERF01', 0, true, 'revision-test')
+    expect(payload.logisticsRevision).toBe('revision-test')
+    expect(payload.quoteOptions[0].logisticsInput.weightKg).toBe(0.305)
+    expect(payload.quoteOptions[0].freightCny).toBe(22.64)
+  })
   it('keeps single quotations free of bundle items', () => {
     const payload = buildQuotationPayload('PERF01', 0, false)
     expect(payload.quoteMode).toBe('single')

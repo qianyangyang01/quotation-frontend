@@ -20,6 +20,11 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void negativePriceCannotBecomeAReadyProduct() {
+        var input=JsonNodeFactory.instance.objectNode().put("sku","QA-NEGATIVE").put("weightG",100).put("minOrderQty",1).put("purchasePriceCny",-1).put("tier2PriceCny",10);
+        assertThrows(AppException.class,()->service.upsert(input));
+        verify(products,never()).saveAndFlush(any());
+    }
     private PurchaseProductRepository products;
     private PurchaseProductImageRepository images;
     private AssetStorageService storage;

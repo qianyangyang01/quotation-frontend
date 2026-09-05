@@ -526,7 +526,12 @@ function normalizeRule(p: Product, silent = false) {
     p.status = `财务未配置“${p.logisticsAttribute}”物流属性的可发国家与渠道`
     return
   }
-  const best = bestLogisticsOption(p, p.country)
+  let best = bestLogisticsOption(p, p.country)
+  // A country awaiting zone selection must not hide another country's usable channel.
+  if (!best) for (const country of policyCountries) {
+    const candidate = bestLogisticsOption(p, country)
+    if (candidate) { p.country = country; best = candidate; break }
+  }
   if (!best) {
     p.channel = ''
     p.rule = ''

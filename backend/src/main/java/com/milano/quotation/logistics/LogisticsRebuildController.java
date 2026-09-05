@@ -133,8 +133,8 @@ public class LogisticsRebuildController {
     public ApiResponse<?> publishProgress(@PathVariable UUID id){return ApiResponse.ok(batchPublish.progress(id));}
     @PostMapping("/imports/{id}/publish-ready")
     public ApiResponse<?> publishReady(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
-        var actor=actor(auth);input.put("batchId",id.toString());var prior=idempotency.existing(actor,"logistics-batch-publish-ready",key,input);if(prior.isPresent())return ApiResponse.ok(prior.get());
-        var result=batchPublish.publishReady(id,input,actor);idempotency.save(actor,"logistics-batch-publish-ready",key,input,result);
+        var actor=actor(auth);input.put("batchId",id.toString());
+        var result=idempotency.executeIndependent(actor,"logistics-batch-publish-ready",key,input,()->batchPublish.publishReady(id,input,actor));
         audit.record("logistics.batch-publish-ready","logistics-import",id.toString(),"success",Map.of("published",result.path("publishedCount").asInt(),"skipped",result.path("skippedCount").asInt(),"failed",result.path("failedCount").asInt()));return ApiResponse.ok(result);
     }
     @PostMapping("/channels/{channel}/versions/{version}/review") @Transactional

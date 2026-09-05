@@ -1,0 +1,43 @@
+[
+  {
+    "case": "empty",
+    "status": 422,
+    "code": "VALIDATION_ERROR",
+    "message": "只支持非空xls/xlsx文件"
+  },
+  {
+    "case": "corrupt",
+    "status": 200,
+    "code": "SUCCESS",
+    "message": "操作成功",
+    "batch": "3f2e4521-6d34-43a4-96d0-d13f73f88eec",
+    "outcome": "failed",
+    "fileReports": [
+      {
+        "status": "failed",
+        "message": "物流文件无法解析：IOException"
+      }
+    ]
+  },
+  {
+    "case": "extension",
+    "status": 422,
+    "code": "VALIDATION_ERROR",
+    "message": "只支持非空xls/xlsx文件"
+  },
+  {
+    "case": "concurrent price correction",
+    "expected": "one success one 409",
+    "responses": [
+      {
+        "status": 200,
+        "errors": 0,
+        "code": "SUCCESS"
+      },
+      {
+        "status": 409,
+        "code": "CONFLICT"
+      }
+    ]
+  }
+]

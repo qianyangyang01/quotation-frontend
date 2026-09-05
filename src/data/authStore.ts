@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue'
-import { api, resetCsrf } from '@/services/http'
+import { api, request, resetCsrf } from '@/services/http'
 import { clearPublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
 import { clearFinanceSettingsCache, hydrateFinanceSettings } from '@/services/financeSettings'
 
@@ -85,10 +85,10 @@ export function hasAnyPermission(...permissions: PermissionKey[]) { return permi
 export function canAccessMyRecords(permissions: readonly PermissionKey[]) { return permissions.includes('myRecords') || permissions.includes('allRecords') }
 export function defaultHomeForRole(role = currentAuthUser.value.role) { if (role === 'logistics') return '/quotation/logistics'; if (role === 'purchase') return '/quotation/products'; if (role === 'employee') return '/quotation'; return '/quotation/overview' }
 
-export async function loadAuthUsers() { authState.users = await api.get<AuthUser[]>('/users'); return authState.users }
+export async function loadAuthUsers() { authState.users = await api.get<AuthUser[]>('/users', { signal: AbortSignal.timeout(20_000) }); return authState.users }
 export async function saveAuthUser(input: { name: string; account: string; role: RoleKey; status: AccountStatus; password?: string }) {
   if (!input.password) throw new Error('请设置初始密码')
-  const result = await api.post<AuthUser>('/users', input); authState.users.push(result); return result
+  const result = await request<AuthUser>('/users', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(20_000) }); authState.users.push(result); return result
 }
 export async function updateAuthUserRole(id: string, role: RoleKey) {
   const current = authState.users.find(user => user.id === id); if (!current) throw new Error('账号不存在')

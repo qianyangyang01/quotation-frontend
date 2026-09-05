@@ -20,11 +20,14 @@ export function performanceBundleItem(number, quantityPerSet = 1) {
   }
 }
 
-export function buildQuotationPayload(account, sequence, bundle) {
+export function buildQuotationPayload(account, sequence, bundle, logisticsRevision = '') {
   const firstNumber = performanceProductNumber(sequence)
   const secondNumber = firstNumber === PRODUCT_COUNT ? 1 : firstNumber + 1
   const firstSku = performanceSku(firstNumber)
   const secondSku = performanceSku(secondNumber)
+  const weightKg = Number((bundle
+    ? performanceBundleItem(firstNumber).effectiveWeightKg + 2 * performanceBundleItem(secondNumber).effectiveWeightKg
+    : performanceBundleItem(firstNumber).effectiveWeightKg).toFixed(3))
   return {
     customerName: `性能客户-${account}-${sequence}`,
     quoteMode: bundle ? 'bundle' : 'single',
@@ -36,6 +39,11 @@ export function buildQuotationPayload(account, sequence, bundle) {
     taxCustomerType: 'A',
     monthlySalesEstimate: '100',
     productSummary: bundle ? `${firstSku} × 1 + ${secondSku} × 2` : firstSku,
-    quoteOptions: [{ country: '美国', carrier: '燕文', channel: '性能普货专线', quoteCustomUsd: 12.34 }],
+    logisticsRevision,
+    quoteOptions: [{ country: '美国', carrier: '燕文', channel: '性能普货专线', quoteCustomUsd: 12.34,
+      channelKey: '9001::燕文::PERF-CHANNEL', logisticsVersionId: '33333333-3333-4333-8333-333333333333',
+      logisticsChannelId: '22222222-2222-4222-8222-222222222222', logisticsInput: { country: '美国', weightKg },
+      freightCny: Math.round((weightKg * 48 + 8) * 100) / 100,
+    }],
   }
 }

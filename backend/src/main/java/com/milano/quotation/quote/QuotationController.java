@@ -79,6 +79,7 @@ public class QuotationController {
     @Transactional
     ApiResponse<JsonNode> update(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
         var row = mine(id, auth); assertVersion(row, patch.path("_version").asLong(-1));
+        submissionValidator.validateUpdate(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
         patch.properties().forEach(entry -> {
             if (PATCH_FIELDS.contains(entry.getKey())) {

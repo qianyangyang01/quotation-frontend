@@ -210,7 +210,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 
     <template v-if="activeCountry">
       <div class="country-summary">
-        <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>财务已授权 {{ rows.length }} 个可用渠道</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
+        <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请选择报价区域以匹配渠道' : `当前条件下 ${rows.length} 个可用渠道` }}</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
         <div class="metric lowest"><i>¥</i><span><small>最低价渠道</small><b>{{ formatUsd(lowest?.quote1 ?? null) }}</b><em>{{ lowest ? `${lowest.carrier}｜${lowest.transport}` : '暂无可用渠道' }}</em></span></div>
         <div class="metric fastest"><i>⚡</i><span><small>最快渠道</small><b>{{ fastest?.eta || '—' }}</b><em>{{ fastest ? `${fastest.carrier}｜${fastest.transport}` : '暂无可用渠道' }}</em></span></div>
         <button :disabled="!rows.length" @click="$emit('copy',sortedRows)">▦ 复制当前国家</button>
@@ -232,7 +232,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
           <div class="selection-actions"><button @click="toggleSelection(row)">{{ isSelected(row) ? '已加入' : '加入报价单' }}</button><button v-if="isSelected(row)" class="primary-action" @click="$emit('adopt',row)">{{ adoptedCountry===activeCountry && adoptedRule===row.rule && adoptedCarrier===row.carrier ? '首选' : '设为首选' }}</button></div>
         </article>
       </div>
-      <div v-else class="empty-rows">该国家已配置为常用国家，但当前物流属性暂无授权渠道</div>
+      <div v-else class="empty-rows">{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请先选择报价区域，再查看该分区的渠道和价格' : '当前重量和物流属性下暂无可用渠道，请检查财务授权或调整报价条件' }}</div>
       <footer><span>共 {{ rows.length }} 条渠道</span><label>每页 <select v-model.number="pageSize"><option :value="5">5</option><option :value="10">10</option><option :value="20">20</option></select> 条</label><button :disabled="page<=1" @click="page--">上一页</button><b>{{ page }} / {{ pageCount }}</b><button :disabled="page>=pageCount" @click="page++">下一页</button></footer>
     </template>
   </section>
