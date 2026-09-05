@@ -407,7 +407,6 @@ async function saveCorrections() {
   const changes: RowCorrection[] = version.value.rows.flatMap(row => { const before = original.get(row.rowKey); if (!before || !row.rowKey) return []; const fields: Record<string, number | boolean> = {}; for (const key of keys) if (row[key] !== before[key] && (typeof row[key] === 'number' || typeof row[key] === 'boolean')) fields[key] = row[key] as number | boolean; return Object.keys(fields).length ? [{ rowKey: row.rowKey, fields }] : [] })
   let etaChanges
   try { etaChanges = buildEtaCorrections(version.value.rows, editSnapshot.value) } catch (e) { error.value = e instanceof Error ? e.message : '时效格式不正确'; return }
-  if (!changes.length && !etaChanges.length) { editingRows.value = false; return }
   await run(async () => { version.value = await service.patchRows(version.value!, changes, etaChanges); editingRows.value = false; editSnapshot.value = []; changesConfirmed.value = false; await refresh(); if (batch.value && version.value?.batchId === batch.value.id) batch.value = await service.batch(batch.value.id); message.value = version.value!.etaReady === false ? `修正已保存，仍有 ${version.value!.etaMissingCount || 0} 条路线缺少或冲突时效。` : version.value!.errors ? `已保存修正并重新校验，仍有 ${version.value!.errors} 个阻断问题。` : '修正已保存，完整渠道已重新校验并更新差异。' })
 }
 async function publish() {

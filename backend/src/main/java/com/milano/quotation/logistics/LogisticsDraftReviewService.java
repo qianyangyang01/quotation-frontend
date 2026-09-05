@@ -23,7 +23,7 @@ public class LogisticsDraftReviewService {
         var fingerprint=input.path("fingerprint").asText();if(fingerprint.isBlank()||!fingerprint.equals(stored.path("fingerprint").asText()))throw AppException.conflict("价格已被其他人修改，请刷新后重试");
         var changes=input.path("changes");var etaChanges=input.path("etaChanges");
         int changeCount=(changes.isArray()?changes.size():0)+(etaChanges.isArray()?etaChanges.size():0);
-        if(changeCount<1||changeCount>5000)throw AppException.unprocessable("请选择1至5000条价格或时效修正");
+        if(changeCount>5000||(changeCount<1&&!input.path("revalidate").asBoolean(false)))throw AppException.unprocessable("请选择1至5000条价格或时效修正，或明确重新校验");
         if(!changes.isMissingNode()&&!changes.isArray())throw AppException.unprocessable("价格修正格式不正确");
         if(!etaChanges.isMissingNode()&&!etaChanges.isArray())throw AppException.unprocessable("时效修正格式不正确");
         var payload=(ObjectNode)stored.deepCopy();payload.remove("fingerprint");LogisticsReadiness.apply(payload,mapper);var rows=(ArrayNode)payload.withArray("rows");var byKey=new LinkedHashMap<String,ObjectNode>();
@@ -51,7 +51,7 @@ public class LogisticsDraftReviewService {
             etaAudit.addObject().put("routeKey",routeKey).put("affectedRows",routeRows.size()).set("before",beforeValues);
             ((ObjectNode)etaAudit.get(etaAudit.size()-1)).set("after",mapper.createObjectNode().put("etaMinDays",min.asInt()).put("etaMaxDays",max.asInt()).put("etaSource","manual-review"));
         }
-        var preserved=mapper.createArrayNode();for(var issue:payload.path("issues"))if(!isEditableIssue(issue))preserved.add(issue.deepCopy());
+        var preserved=mapper.createArrayNode();for(var issue:payload.path("issues"))if(!isEditableIssue(issue,rows))preserved.add(issue.deepCopy());
         var generated=workbooks.validateEditableRows(rows);preserved.addAll(generated);payload.set("issues",preserved);
         payload.put("errors",count(preserved,"error"));
         LogisticsReadiness.apply(payload,mapper);
@@ -59,7 +59,7 @@ public class LogisticsDraftReviewService {
         var previous=mapper.createArrayNode();var baseline=payload.path("basePublishedVersionId").asText();if(!baseline.isBlank())jdbc.sql("select payload->'rows' from logistics_version where id=:id").param("id",UUID.fromString(baseline)).query(String.class).optional().ifPresent(raw->{try{previous.addAll((ArrayNode)mapper.readTree(raw));}catch(Exception ignored){}});
         var comparison=workbooks.compare(rows,previous);payload.set("diffRows",comparison.path("diffRows"));payload.set("summary",comparison.path("summary"));
         var editedAt=java.time.Instant.now().toString();payload.put("lastEditedBy",actor).put("lastEditedAt",editedAt);
-        var history=payload.withArray("correctionHistory");var event=history.addObject().put("editedBy",actor).put("editedAt",editedAt);event.set("changes",audit);event.set("etaChanges",etaAudit);
+        var history=payload.withArray("correctionHistory");var event=history.addObject().put("editedBy",actor).put("editedAt",editedAt).put("kind",changeCount==0?"revalidation":"correction");event.set("changes",audit);event.set("etaChanges",etaAudit);
         var updated=jdbc.sql("update logistics_version set payload=cast(:payload as jsonb) where id=:id and status='draft' and rows_fingerprint=:fingerprint")
                 .param("payload",payload.toString()).param("id",versionId).param("fingerprint",fingerprint).update();
         if(updated!=1)throw AppException.conflict("价格已被其他人修改，请刷新后重试");var result=load(versionId,false);syncBatch(result);return result;
@@ -70,7 +70,21 @@ public class LogisticsDraftReviewService {
         var pricingReady=result.path("quoteReady").asBoolean(false);
         result.put("pricingReady",pricingReady);
         result.put("id",row.path("id").asText()).put("channelId",row.path("channelId").asText()).put("versionNumber",row.path("versionNumber").asInt()).put("status",row.path("status").asText()).put("fingerprint",row.path("fingerprint").asText()).put("quoteReady","published".equals(row.path("status").asText())&&pricingReady);return result;}
-    private static boolean isEditableIssue(JsonNode issue){var code=issue.path("code").asText();if(code.startsWith("WEIGHT_")||code.startsWith("ETA_"))return true;var field=issue.path("field").asText();return Set.of("重量区间","计费价格","区域/重量区间","重量连续性","时效","参考时效").contains(field);}
+    private static boolean isEditableIssue(JsonNode issue,ArrayNode rows){
+        var code=issue.path("code").asText();if(code.startsWith("WEIGHT_")||code.startsWith("ETA_"))return true;
+        var field=issue.path("field").asText();if(Set.of("重量区间","计费价格","区域/重量区间","重量连续性","时效","参考时效").contains(field))return true;
+        // Legacy provider validation used different field names and no error codes.
+        // Only replace known row-validation findings; unreadable/omitted source rows must remain blocked.
+        var known= switch(field){
+            case "重量段" -> Set.of("同一国家/分区/发货区域存在重叠档位","原表重量区间不连续，缺口内不报价","重量上下限不合法","重复计费档位").contains(issue.path("message").asText());
+            case "跨表重量段" -> issue.path("message").asText().equals("同一渠道不同工作表的重量档位重叠，必须核对后才能覆盖价格");
+            case "价格" -> issue.path("message").asText().equals("缺少有效计费价格");
+            default -> false;
+        };
+        if(!known||issue.path("row").asInt()<=0)return false;
+        for(var row:rows)if(row.path("sourceRow").asInt()==issue.path("row").asInt()&&(issue.path("sourceSheet").asText().isBlank()||issue.path("sourceSheet").asText().equals(row.path("sourceSheet").asText())))return true;
+        return false;
+    }
     private static int count(ArrayNode issues,String level){int count=0;for(var issue:issues)if(level.equals(issue.path("level").asText()))count++;return count;}
     private void syncBatch(ObjectNode version){var batchId=version.path("batchId").asText();if(batchId.isBlank())return;UUID id;try{id=UUID.fromString(batchId);}catch(Exception ignored){return;}
         var raw=jdbc.sql("select payload::text from logistics_import_batch where id=:id for update").param("id",id).query(String.class).optional();if(raw.isEmpty())return;

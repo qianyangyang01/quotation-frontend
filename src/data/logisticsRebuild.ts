@@ -77,7 +77,7 @@ export const logisticsRebuild = {
   },
   retry: (id: string) => api.post<Batch>(`${root}/imports/${id}/retry`),
   version: (id: string) => api.get<Version>(`${root}/versions/${id}`),
-  patchRows: (version: Version, changes: RowCorrection[], etaChanges: EtaCorrection[] = []) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes, etaChanges }),
+  patchRows: (version: Version, changes: RowCorrection[], etaChanges: EtaCorrection[] = []) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes, etaChanges, revalidate: true }),
   review: (version: Version, note: string, removalConfirmed: boolean, reviewConfirmed: boolean, key: string) => api.post<Version>(`${root}/channels/${version.channelId}/versions/${version.id}/review`, { note, removalConfirmed, reviewConfirmed }, key),
   publishProvider: (providerId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<BatchPublishResult>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, key),
   publishReady: (batchId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<ReadyPublishResult>(`${root}/imports/${batchId}/publish-ready`, { selections, note }, key),
