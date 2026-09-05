@@ -68,6 +68,14 @@ const financeExchangeRate = ref<FinanceExchangeRateSetting>({ usdCny: 0, updated
 const financeTaxSettings = ref<FinanceTaxSettings>({ countries: [], providers: [], updatedAt: '' })
 const financeSettingsLoadState = ref<'loading' | 'ready' | 'error'>(props.mode === 'members' ? 'loading' : 'ready')
 const financeSettingsLoadError = ref('')
+const financeLogisticsContextState = ref<'loading' | 'ready' | 'error'>('loading')
+const financeLogisticsContextError = ref('')
+const financeLogisticsDataEpoch = ref(0)
+const financePolicySaving = ref(false)
+let financeContextRequest: Promise<boolean> | null = null
+let financeEditorRequestId = 0
+const financeChannelCache = new Map<string, ReturnType<typeof channelsAvailableForCountry>>()
+const financeCarrierCache = new Map<string, Array<{ carrier: string; channels: ReturnType<typeof channelsAvailableForCountry> }>>()
 type FinanceSettingsTab = 'countries' | 'logistics' | 'grades' | 'exchange' | 'taxes'
 const FINANCE_TAB_ORDER_STORAGE_KEY = 'milano.finance-settings-card-order.v1'
 const defaultFinanceTabOrder: FinanceSettingsTab[] = ['countries', 'logistics', 'grades', 'exchange', 'taxes']
@@ -120,12 +128,15 @@ const filteredFinanceAttributeOptions = computed(() => {
   const query = financePolicyForm.value.category.trim().toLowerCase()
   return financeLogisticsAttributeOptions.filter(attribute => !query || attribute.toLowerCase().includes(query))
 })
-const financeLogisticsCountries = computed(() => [...countriesAvailableForCategory(financePolicyForm.value.category)].sort((a, b) => {
+const financeLogisticsCountries = computed(() => {
+  void financeLogisticsDataEpoch.value
+  return [...countriesAvailableForCategory(financePolicyForm.value.category)].sort((a, b) => {
   const aPriority = priorityFinanceCountryNames.indexOf(a.name)
   const bPriority = priorityFinanceCountryNames.indexOf(b.name)
   if (aPriority >= 0 || bPriority >= 0) return (aPriority < 0 ? Number.MAX_SAFE_INTEGER : aPriority) - (bPriority < 0 ? Number.MAX_SAFE_INTEGER : bPriority)
   return a.name.localeCompare(b.name, 'zh-CN')
-}))
+})
+})
 const financeCountrySettingMap = computed(() => new Map(financeCountrySettings.value.map(setting => [setting.country, setting])))
 function financeCountryStageDisplay(country: string) {
   const setting = financeCountrySettingMap.value.get(country)
@@ -469,17 +480,19 @@ async function saveFinanceCountryClassification() {
   toast('常用国家设置已保存，业务报价国家列表将同步更新')
 }
 async function openFinancePolicyEditor(policy?: FinanceChannelPolicy) {
-  if (!await hydrateFinanceLogisticsContext()) return
+  const requestId = ++financeEditorRequestId
   editingFinancePolicyId.value = policy?.id || null
   financePolicyForm.value = policy ? { category: policy.category, countryRules: policy.countryRules.map(rule => ({ ...rule, allowedChannels: [...rule.allowedChannels], unavailableChannels: [...(rule.unavailableChannels || [])] })), enabled: policy.enabled } : emptyFinancePolicyForm()
   financeCountrySearches.value = financePolicyForm.value.countryRules.map(rule => rule.country)
-  financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
+  financeSelectedCarriers.value = []
   financeAttributePickerOpen.value = false
   financeAttributePickerTyping.value = false
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
   reviewingLegacyCountryRules.value = []
   showEditor.value = true
+  if (!await hydrateFinanceLogisticsContext()) return
+  if (requestId === financeEditorRequestId && showEditor.value) financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
 }
 function financeCountryRuleExpanded(index: number) {
   return expandedFinanceCountryRules.value.includes(index)
@@ -527,16 +540,29 @@ function closeFinanceAttributePicker() {
   }, 120)
 }
 function financeChannelsForCountry(country: string) {
-  return channelsAvailableForCountry(country, financePolicyForm.value.category)
+  return cachedFinanceChannels(country, financePolicyForm.value.category)
+}
+function cachedFinanceChannels(country: string, attribute: string) {
+  void financeLogisticsDataEpoch.value
+  const key = `${attribute}::${country}`
+  let options = financeChannelCache.get(key)
+  if (!options) { options = channelsAvailableForCountry(country, attribute); financeChannelCache.set(key, options) }
+  return options
 }
 function financeCarrierGroupsForCountry(country: string) {
+  void financeLogisticsDataEpoch.value
+  const key = `${financePolicyForm.value.category}::${country}`
+  const cached = financeCarrierCache.get(key)
+  if (cached) return cached
   const grouped = new Map<string, ReturnType<typeof financeChannelsForCountry>>()
   financeChannelsForCountry(country).forEach(option => {
     const channels = grouped.get(option.carrier) || []
     channels.push(option)
     grouped.set(option.carrier, channels)
   })
-  return [...grouped.entries()].map(([carrier, channels]) => ({ carrier, channels }))
+  const groups = [...grouped.entries()].map(([carrier, channels]) => ({ carrier, channels }))
+  financeCarrierCache.set(key, groups)
+  return groups
 }
 function preferredFinanceCarrier(rule: FinanceCountryChannelRule) {
   const options = financeChannelsForCountry(rule.country)
@@ -562,7 +588,7 @@ function selectedFinanceCarrierChannelCount(index: number, carrier: string) {
     .find(group => group.carrier === carrier)?.channels.filter(channel => selected.has(channel.key)).length || 0
 }
 function financeChannelForKey(country: string, key: string, attribute = financePolicyForm.value.category) {
-  return channelsAvailableForCountry(country, attribute).find(option => option.key === key)
+  return cachedFinanceChannels(country, attribute).find(option => option.key === key)
 }
 function normalizeFinanceCarriers(index: number) {
   const rule = financePolicyForm.value.countryRules[index]
@@ -661,6 +687,12 @@ function handleFinanceCategoryChange() {
   reviewingLegacyCountryRules.value = []
 }
 async function saveFinancePolicy() {
+  if (financePolicySaving.value) return
+  financePolicySaving.value = true
+  const editorRequestId = financeEditorRequestId
+  try {
+  if (!await hydrateFinanceLogisticsContext()) return
+  if (!showEditor.value || editorRequestId !== financeEditorRequestId || props.mode !== 'members') return
   const form = financePolicyForm.value
   const category = form.category.trim()
   form.countryRules.forEach(rule => { rule.country = rule.country.trim() })
@@ -669,6 +701,7 @@ async function saveFinancePolicy() {
   if (form.countryRules.some(rule => !financeCountryNameSet.has(rule.country))) { toast('所选国家与当前品类的物流规则不匹配'); return }
   if (new Set(form.countryRules.map(rule => rule.country)).size !== form.countryRules.length) { toast('同一品类不能重复配置同一个国家'); return }
   if (form.countryRules.some(rule => !rule.country || (!rule.allowedChannels.length && !rule.unavailableChannels?.length))) { toast('每个国家都必须至少选择一个允许渠道，或保留待审旧渠道'); return }
+  if (form.countryRules.some(rule => rule.allowedChannels.some(key => !financeChannelsForCountry(rule.country).some(option => option.key === key)))) { toast('部分已选渠道已停用或更新，请重新核对渠道后保存'); return }
   const duplicate = financePolicies.value.find(policy => policy.category === category && policy.id !== editingFinancePolicyId.value)
   if (duplicate) { toast(`${category} 已存在策略，请直接编辑该品类`); return }
   const policy: FinanceChannelPolicy = {
@@ -693,6 +726,7 @@ async function saveFinancePolicy() {
   } catch (error) {
     toast(error instanceof Error ? `保存失败：${error.message}` : '保存失败，请刷新后重试')
   }
+  } finally { financePolicySaving.value = false }
 }
 async function removeFinancePolicy(policy: FinanceChannelPolicy) {
   const nextPolicies = financePolicies.value.filter(item => item.id !== policy.id)
@@ -768,16 +802,30 @@ async function hydrateFinanceSettingsWorkspace(force = false) {
 }
 async function hydrateFinanceLogisticsContext() {
   if (props.mode !== 'members') return false
-  try {
-    const { manifest } = await loadPublishedLogisticsManifest({ allowStale: false })
-    const countries = manifest.countries.map(country => country.code || country.name)
-    await loadPublishedLogisticsRuleCatalog(manifest.attributes, countries)
-    applyFinanceSettingsWorkspace(readFinanceSettingsWorkspace())
-    return true
-  } catch (error) {
-    notice.value = error instanceof Error ? error.message : '物流正式数据加载失败'
-    return false
-  }
+  if (financeContextRequest) return financeContextRequest
+  financeLogisticsContextState.value = 'loading'
+  financeLogisticsContextError.value = ''
+  const request = (async () => {
+    try {
+      const { manifest } = await loadPublishedLogisticsManifest({ allowStale: false })
+      const countries = manifest.countries.map(country => country.code || country.name)
+      await loadPublishedLogisticsRuleCatalog(manifest.attributes, countries, { manifest })
+      if (props.mode !== 'members') return false
+      financeChannelCache.clear()
+      financeCarrierCache.clear()
+      financeLogisticsDataEpoch.value += 1
+      applyFinanceSettingsWorkspace(readFinanceSettingsWorkspace())
+      financeLogisticsContextState.value = 'ready'
+      return true
+    } catch (error) {
+      financeLogisticsContextError.value = error instanceof Error ? error.message : '物流正式数据加载失败'
+      financeLogisticsContextState.value = 'error'
+      return false
+    }
+  })()
+  financeContextRequest = request
+  try { return await request }
+  finally { if (financeContextRequest === request) financeContextRequest = null }
 }
 
 onMounted(() => {
@@ -788,7 +836,11 @@ watch(() => props.mode, mode => {
   showEditor.value = false
   if (mode === 'members') void hydrateFinanceSettingsWorkspace()
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', handlePreviewKeydown))
+onBeforeUnmount(() => {
+  financeEditorRequestId += 1
+  showEditor.value = false
+  window.removeEventListener('keydown', handlePreviewKeydown)
+})
 function buildPriceTiers(raw: string, basePrice: number | null, minQty: number) {
   const normalized = raw.replace(/[，；—～~]/g, match => ({ '，': ',', '；': ';', '—': '-', '～': '-', '~': '-' }[match] || match))
   const tiers: PurchaseProductRecord['priceTiers'] = []
@@ -1047,6 +1099,7 @@ function saveEditor() {
     </div>
 
     <div v-if="showEditor" class="mask" @click.self="showEditor=false"><section class="editor" :class="{ 'product-editor': mode==='products', 'finance-editor': mode==='members' }"><button class="close" @click="showEditor=false">×</button><small>{{ config[0] }}</small><h2>{{ mode==='products' && editingSourceRow !== null ? '编辑采购资料' : mode==='members' && editingFinancePolicyId ? '维护物流属性策略' : config[3] }}</h2>
+      <div v-if="mode==='members' && financeLogisticsContextState!=='ready'" class="finance-context-status" role="status"><span>{{ financeLogisticsContextState==='loading' ? '正在核对最新物流渠道，请稍候…' : financeLogisticsContextError }}</span><button v-if="financeLogisticsContextState==='error'" type="button" @click="hydrateFinanceLogisticsContext()">重新加载</button></div>
       <div v-if="mode==='products'" class="form product-form">
         <h3 class="section-title">采购资料字段</h3>
         <label data-source-field>开票信息<input v-model="productForm.invoiceInfo"></label>
@@ -1082,7 +1135,7 @@ function saveEditor() {
         <label>商品名称<input v-model="productForm.name" placeholder="原表无商品名称，可在系统补充"></label>
       </div>
       <div v-else-if="mode==='logistics'" class="form"><label>规则名称<input value="新运费规则"></label><label>物流商<select><option>云途物流</option><option>燕文物流</option></select></label><label>规则类型<select><option>专线</option><option>挂号</option></select></label><label>适用国家<select><option>常用欧洲国家</option><option>北美国家</option></select></label><label>基础费<input type="number" value="0"></label><label>每 1000g 单价<input type="number" value="0"></label><label>挂号费<input type="number" value="0"></label><label>最大重量（g）<input type="number" value="2000" min="0" step="1"></label></div>
-      <div v-else-if="mode==='members'" class="form finance-policy-form">
+      <div v-else-if="mode==='members'" class="form finance-policy-form" :inert="financeLogisticsContextState!=='ready'">
         <label>物流属性<div class="finance-attribute-combobox"><input ref="financeAttributeInput" :value="financePolicyForm.category" autocomplete="off" placeholder="选择或输入物流属性" role="combobox" :aria-expanded="financeAttributePickerOpen" @focus="openFinanceAttributePicker" @click="openFinanceAttributePicker" @input="updateFinanceAttribute" @blur="closeFinanceAttributePicker" @keydown.esc="financeAttributePickerOpen=false"><button type="button" aria-label="展开物流属性" @mousedown.prevent="toggleFinanceAttributePicker">⌄</button><div v-if="financeAttributePickerOpen" class="finance-attribute-menu" role="listbox"><button v-for="attribute in filteredFinanceAttributeOptions" :key="attribute" type="button" :class="{ active:attribute===financePolicyForm.category }" @mousedown.prevent="selectFinanceAttribute(attribute)">{{ attribute }}</button><p v-if="!filteredFinanceAttributeOptions.length && financePolicyForm.category.trim()">按当前输入创建“{{ financePolicyForm.category.trim() }}”</p></div></div><small>点击显示已有属性，也可以直接输入新的物流属性</small></label>
         <label>状态<select v-model="financePolicyForm.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label>
         <div class="wide country-rule-editor">
@@ -1102,7 +1155,7 @@ function saveEditor() {
         </div>
       </div>
       <div v-else class="form"><label>规则名称<input value="新规则"></label><label>状态<select><option>启用</option><option>停用</option></select></label></div>
-      <footer><button @click="showEditor=false">取消</button><button class="primary" @click="saveEditor">保存设置</button></footer></section></div>
+      <footer><button @click="showEditor=false">取消</button><button class="primary" :disabled="mode==='members' && (financeLogisticsContextState!=='ready' || financePolicySaving)" @click="saveEditor">{{ mode==='members' && financePolicySaving ? '正在保存…' : '保存设置' }}</button></footer></section></div>
     <div v-if="previewImage" class="image-preview" role="dialog" aria-modal="true" :aria-label="`${previewImageAlt} 商品图片预览`" @click.self="closeImagePreview">
       <button class="preview-close" type="button" aria-label="关闭图片预览" @click="closeImagePreview">×</button>
       <figure><img :src="previewImage" :alt="previewImageAlt"><figcaption>{{ previewImageAlt }}</figcaption></figure>
@@ -1112,6 +1165,8 @@ function saveEditor() {
 </template>
 
 <style scoped>
+.finance-context-status{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;margin-bottom:12px;background:#eef6ff;border:1px solid #bad8ff;border-radius:8px;color:#235886}.finance-policy-form[inert]{opacity:.55}.editor .primary:disabled{opacity:.5;cursor:wait}
+
 :global(body){margin:0}.module-app{--o:#ff9910;--ink:#17232e;--line:#e3e8ec;min-height:100vh;background:#f4f6f8;color:var(--ink);font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif}.topbar{height:68px;display:flex;align-items:center;padding:0 4vw;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}.brand{display:flex;align-items:center;gap:11px;margin-right:56px}.brand>span{width:39px;height:39px;display:grid;place-items:center;border-radius:10px;background:var(--o);font-size:21px;font-weight:950}.brand strong,.brand small,.user small,.item small,td>small{display:block}.brand small{color:#9199a2;font-size:8px;letter-spacing:.18em}.topbar nav{display:flex;align-items:center;gap:31px;height:100%}.topbar nav a{height:100%;display:flex;align-items:center;position:relative;color:#66717c;font-size:13px}.topbar nav a.active{color:var(--ink);font-weight:850}.topbar nav a.active:after{content:"";position:absolute;inset:auto 0 0;height:3px;background:var(--o)}.user{display:flex;align-items:center;gap:10px;margin-left:auto;font-size:11px}.user>span{width:35px;height:35px;display:grid;place-items:center;border-radius:50%;background:#1b2731;color:#fff}.user small{color:#929ba4}.page{width:min(1500px,94vw);margin:auto;padding:36px 0 70px}.heading{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:24px}.heading p{margin:0 0 8px;color:#dd7c00;font-size:10px;font-weight:900;letter-spacing:.2em}.heading h1{margin:0 0 7px;font-size:30px}.heading>div>span{color:#75808a;font-size:12px}.primary{height:40px;padding:0 20px;border:0;border-radius:7px;background:var(--o);font-weight:850}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}.stats>div{padding:18px;background:#fff;border:1px solid var(--line);border-radius:8px}.stats small,.stats span{display:block;color:#89939c;font-size:9px}.stats b{display:block;margin:6px 0;font-size:23px}.orange{color:#dd7d00!important}.subtabs{display:flex;margin-bottom:16px;padding:7px;background:#fff;border:1px solid var(--line);border-radius:8px}.subtabs button{height:35px;padding:0 18px;border:0;border-radius:5px;background:none;color:#6f7a84;font-size:11px}.subtabs button.active{background:#1b2731;color:#fff}.toolbar{display:flex;align-items:center;gap:9px;margin-bottom:11px}.toolbar label{width:290px;height:39px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#fff;border:1px solid #dce1e5;border-radius:7px}.toolbar input{width:100%;border:0;outline:0}.toolbar select,.toolbar>button{height:39px;border:1px solid #dce1e5;border-radius:7px;background:#fff;padding:0 12px}.toolbar>span{margin-left:auto;color:#89939c;font-size:10px}.table-card{overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 35px rgba(27,38,48,.05)}table{width:100%;border-collapse:collapse;white-space:nowrap}th{padding:13px 15px;background:#fafbfc;border-bottom:1px solid var(--line);color:#69747e;font-size:10px;text-align:left}td{padding:14px 15px;border-bottom:1px solid #edf0f2;color:#54606a;font-size:10px}td b{color:#24303a}.item{display:flex;align-items:center;gap:10px}.item i,.item img{width:42px;height:42px;display:grid;place-items:center;border-radius:7px;background:#e5eeef;color:#47787a;font-style:normal;font-weight:900;object-fit:cover}.item small,td>small{margin-top:4px;color:#939ca4}.tag{padding:4px 7px;border-radius:4px;background:#f0f3f5}em{padding:4px 8px;border-radius:999px;background:#e7f6ee;color:#218954;font-style:normal;font-size:9px}em.warn{background:#fff1d9;color:#ae7000}.link{margin-right:9px;border:0;background:none;color:#ce7500;font-size:10px}.empty{padding:70px;text-align:center;color:#919ba4}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 15px;background:#fafbfc;color:#69747e;font-size:10px}.pagination select,.pagination button{height:30px;border:1px solid #dce1e5;border-radius:5px;background:#fff;padding:0 10px}.pagination button:disabled{opacity:.45}.mask{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(17,24,31,.5);backdrop-filter:blur(4px)}.editor{position:relative;width:min(680px,92vw);max-height:86vh;overflow:auto;padding:30px;background:#fff;border-radius:12px}.close{position:absolute;right:17px;top:14px;border:0;background:none;font-size:22px}.editor>small{color:#db7d00;font-weight:800;letter-spacing:.16em}.editor h2{margin:8px 0 22px}.form{display:grid;grid-template-columns:1fr 1fr;gap:13px}.form label{display:grid;gap:6px;color:#6d7881;font-size:10px}.form label.wide{grid-column:1/-1}.form input,.form select,.form textarea{border:1px solid #dce1e5;border-radius:6px;padding:0 10px;font:inherit}.form input,.form select{height:38px}.form textarea{padding:10px;resize:vertical}.editor footer{display:flex;justify-content:flex-end;gap:9px;margin-top:24px}.editor footer>button:not(.primary){height:40px;padding:0 18px;border:1px solid #dce1e5;border-radius:7px;background:#fff}.toast{position:fixed;right:24px;bottom:24px;z-index:120;padding:13px 18px;border-radius:8px;background:#1b2630;color:#fff}.toast-enter-active,.toast-leave-active{transition:.2s}.toast-enter-from,.toast-leave-to{opacity:0;transform:translateY(8px)}
 .product-editor{width:min(1080px,94vw)}.product-form{grid-template-columns:repeat(3,minmax(0,1fr))}.product-form .section-title{grid-column:1/-1;margin:10px 0 0;padding:10px 0;border-bottom:1px solid #e5eaee;color:#34434e;font-size:13px}.product-form .section-title:first-child{margin-top:-6px}.image-upload-row{display:flex;align-items:center;gap:10px;min-height:64px;padding:8px;border:1px solid #dce1e5;border-radius:6px;background:#fafbfc}.image-upload-row img{width:56px;height:56px;border-radius:6px;object-fit:cover}.image-upload-row input{height:auto;min-width:0;flex:1;padding:0;border:0}.image-upload-row button{height:30px;padding:0 10px;border:1px solid #e0e5e9;border-radius:5px;background:#fff;color:#a34f00;font-size:10px}.product-editor>footer{position:sticky;bottom:-30px;margin:24px -30px -30px;padding:16px 30px;background:#fff;border-top:1px solid #e5eaee;box-shadow:0 -10px 24px rgba(23,35,46,.05)}.detail-mask{z-index:105;padding:28px}.detail-card{position:relative;width:min(1080px,94vw);max-height:90vh;overflow:auto;padding:30px;background:#fff;border-radius:12px;box-shadow:0 24px 70px rgba(11,22,31,.28)}.detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:0 44px 22px 0;border-bottom:1px solid var(--line)}.detail-head small{color:#d87a00;font-size:10px;font-weight:900;letter-spacing:.16em}.detail-head h2{margin:7px 0 5px;font-size:24px}.detail-head p{margin:0;color:#89939c;font-size:11px}.detail-image{display:flex;align-items:center;gap:10px;padding:7px 12px 7px 7px;border:1px solid #dce3e8;border-radius:8px;background:#f7fafb;color:#61707b;font-size:10px;cursor:zoom-in}.detail-image img{width:58px;height:58px;border-radius:6px;object-fit:cover}.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:18px}.detail-grid>div{min-width:0;padding:12px 14px;border:1px solid #e5eaee;border-radius:7px;background:#fafbfc}.detail-grid .detail-wide{grid-column:1/-1}.detail-grid small{display:block;margin-bottom:6px;color:#7d8993;font-size:9px}.detail-grid p{margin:0;overflow-wrap:anywhere;white-space:pre-wrap;color:#26343f;font-size:11px;line-height:1.65}.detail-grid a{color:#cf7500;text-decoration:underline;text-underline-offset:2px}.detail-card>footer{display:flex;justify-content:flex-end;gap:9px;margin-top:22px}.detail-card>footer>button:not(.primary){height:40px;padding:0 18px;border:1px solid #dce1e5;border-radius:7px;background:#fff}.image-thumb{width:42px;height:42px;flex:0 0 42px;padding:0;border:0;border-radius:7px;background:#e5eeef;overflow:hidden;cursor:zoom-in}.image-thumb img{width:100%;height:100%;display:block;object-fit:cover;transition:transform .18s ease}.image-thumb:hover img{transform:scale(1.06)}.image-thumb:focus-visible{outline:3px solid rgba(255,153,16,.35);outline-offset:2px}.image-preview{position:fixed;inset:0;z-index:130;display:grid;place-items:center;padding:32px;background:rgba(8,14,20,.84);backdrop-filter:blur(6px)}.image-preview figure{margin:0;max-width:min(920px,90vw);max-height:88vh;display:grid;gap:12px;justify-items:center}.image-preview img{display:block;max-width:100%;max-height:80vh;border-radius:10px;background:#fff;box-shadow:0 24px 70px rgba(0,0,0,.45);object-fit:contain}.image-preview figcaption{color:#fff;font-size:13px}.preview-close{position:fixed;right:28px;top:22px;width:42px;height:42px;border:1px solid rgba(255,255,255,.28);border-radius:50%;background:rgba(0,0,0,.35);color:#fff;font-size:28px;line-height:1;cursor:pointer}.preview-close:hover{background:rgba(255,255,255,.18)}
 .product-form>.wide{grid-column:1/-1}.source-field-control{min-width:0;display:grid;gap:8px;color:#6d7881;font-size:10px}.field-label{font-weight:700;color:#45545f}.freight-tier-editor,.freight-tier-view{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.freight-tier-editor{padding:12px;border:1px solid #dce1e5;border-radius:7px;background:#fafbfc}.freight-tier-editor label{min-width:0;padding:12px;border-radius:6px;background:#fff;border:1px solid #e4e9ed;white-space:normal}.freight-tier-editor input{width:100%;box-sizing:border-box}.freight-tier-editor small{color:#d17400;font-weight:750}.freight-tier-view span{display:grid;gap:3px;padding:10px 12px;border-radius:6px;background:#f3f6f8;color:#4c5b66}.freight-tier-view b{color:#1e2d37}.freight-tier-view i{color:#d17400;font-style:normal;font-weight:750}

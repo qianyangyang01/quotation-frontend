@@ -36,6 +36,9 @@ let manifestMemory: StoredManifest | null = null
 const rulesMemory = new Map<string, StoredRules>()
 let manifestRequest: Promise<{ manifest: PublishedLogisticsManifest; changed: boolean; verified: boolean }> | null = null
 const ruleRequests = new Map<string, Promise<LogisticsRule[]>>()
+let catalogGeneration = 0
+let catalogMemory: StoredRules | null = null
+const catalogRequests = new Map<string, Promise<StoredRules>>()
 let databasePromise: Promise<IDBDatabase | null> | null = null
 const cacheChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(CACHE_EVENT) : null
 
@@ -134,6 +137,9 @@ async function cachedManifest() {
 }
 
 async function purgeRuleCache() {
+  catalogGeneration += 1
+  catalogMemory = null
+  catalogRequests.clear()
   rulesMemory.clear()
   ruleRequests.clear()
   replaceLogisticsRules([])
@@ -210,21 +216,41 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: { s
   return { revision: manifest.revision, rules: await request, source: 'network' as const, verified }
 }
 
-export async function loadPublishedLogisticsRuleCatalog(attributes: string[], countries: string[], options: { signal?: AbortSignal } = {}) {
+export async function loadPublishedLogisticsRuleCatalog(attributes: string[], countries: string[], options: { signal?: AbortSignal; manifest?: PublishedLogisticsManifest } = {}) {
   void attributes
+  const { manifest, verified } = options.manifest
+    ? { manifest: options.manifest, verified: true }
+    : await loadPublishedLogisticsManifest({ signal: options.signal, allowStale: false })
+  options.signal?.throwIfAborted()
   if (!normalized(countries).length) {
     replaceLogisticsRules([])
-    return { revision: (await loadPublishedLogisticsManifest({ signal: options.signal })).manifest.revision, rules: [] as LogisticsRule[], verified: true }
+    return { revision: manifest.revision, rules: [] as LogisticsRule[], verified }
   }
+  const generation = catalogGeneration
   try {
-    const { manifest, verified } = await loadPublishedLogisticsManifest({ signal: options.signal })
-    const parameters = new URLSearchParams({ revision: manifest.revision })
-    const response = await conditionalGet<{ revision: string; rules: LogisticsRule[] }>(`/logistics/published/catalog?${parameters}`, { signal: options.signal })
-    if (response.status === 304) throw new Error('物流渠道目录缓存不存在，请重新加载')
-    replaceLogisticsRules(response.data.rules)
-    return { revision: response.data.revision, rules: response.data.rules, verified }
+    let cached = catalogMemory?.revision === manifest.revision ? catalogMemory : null
+    if (!cached) {
+      let request = options.signal ? undefined : catalogRequests.get(manifest.revision)
+      if (!request) {
+        const parameters = new URLSearchParams({ revision: manifest.revision })
+        request = conditionalGet<{ revision: string; rules: LogisticsRule[] }>(`/logistics/published/catalog?${parameters}`, { signal: options.signal })
+          .then(response => {
+            if (response.status === 304 || response.data.revision !== manifest.revision) throw new Error('物流目录版本已变化，请重新加载')
+            const value: StoredRules = { key: 'catalog', revision: response.data.revision, rules: response.data.rules, storedAt: Date.now() }
+            if (generation === catalogGeneration) catalogMemory = value
+            return value
+          })
+        if (!options.signal) catalogRequests.set(manifest.revision, request)
+      }
+      try { cached = await request }
+      finally { if (catalogRequests.get(manifest.revision) === request) catalogRequests.delete(manifest.revision) }
+    }
+    options.signal?.throwIfAborted()
+    if (generation !== catalogGeneration) throw new Error('物流目录已失效，请重新加载')
+    replaceLogisticsRules(cached.rules)
+    return { revision: cached.revision, rules: cached.rules, verified }
   } catch (error) {
-    replaceLogisticsRules([])
+    if (generation === catalogGeneration) replaceLogisticsRules([])
     throw error
   }
 }

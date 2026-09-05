@@ -57,6 +57,33 @@ class LogisticsQueryPostgresIntegrationTest {
     }
 
     @Test
+    void compactReadProjectionPreservesEligibilityAndTracksSourceEdits() {
+        var original = jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single();
+        try {
+            var mapper = new ObjectMapper();
+            var source = (tools.jackson.databind.node.ObjectNode) mapper.readTree(original);
+            source.put("sourceEvidence", "large source explanation ".repeat(30000));
+            var first = (tools.jackson.databind.node.ObjectNode) source.path("rows").get(0);
+            first.put("pendingReason", "暂停收货");
+            first.put("pricePerKg", 77);
+            source.withArray("rows").addObject().put("areaName","美国").put("countryCode","US").put("pricingModel","first-next").put("firstWeightPrice",10);
+            jdbc.sql("update logistics_version set payload=cast(:payload as jsonb) where id=:id").param("payload",source.toString()).param("id",versionId).update();
+            var projected = mapper.readTree(jdbc.sql("select quote_rows::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
+            assertEquals(2,projected.size());
+            assertEquals(77,projected.get(0).path("pricePerKg").asInt());
+            assertEquals("暂停收货",projected.get(0).path("pendingReason").asText());
+            assertFalse(LogisticsBillingEngine.available(projected.get(0)));
+            assertFalse(projected.get(0).has("rawValues"));
+            assertFalse(projected.get(0).has("notes"));
+            assertTrue(jdbc.sql("select rows_fingerprint=md5((payload->'rows')::text) and length(quote_rows::text)<length(payload::text)/100 from logistics_version where id=:id").param("id",versionId).query(Boolean.class).single());
+            assertFalse(jdbc.sql("select logistics_version_quote_ready(:id)").param("id",versionId).query(Boolean.class).single());
+            assertEquals(source,jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query((rs,n)->mapper.readTree(rs.getString(1))).single());
+        } finally {
+            jdbc.sql("update logistics_version set payload=cast(:payload as jsonb) where id=:id").param("payload",original).param("id",versionId).update();
+        }
+    }
+
+    @Test
     void returnsPagedSummariesAndVersionArraysWithoutEmbeddingTheWorkspace() {
         var providers = service.providers(0, 50, "云途", true);
         var versions = service.versions(0, 50, channelId, "published");

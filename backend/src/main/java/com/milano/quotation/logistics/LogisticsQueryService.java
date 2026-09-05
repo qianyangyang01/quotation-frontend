@@ -153,7 +153,7 @@ public class LogisticsQueryService {
                 from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
-                cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
+                cross join lateral jsonb_array_elements(v.quote_rows) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
@@ -202,7 +202,7 @@ public class LogisticsQueryService {
                   coalesce(item->>'zoneName','') as zone_name, coalesce((item->>'zoneExclude')::boolean,false) as zone_exclude
                 from ready_ids ready
                 join logistics_version v on v.id=ready.version_id
-                cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
+                cross join lateral jsonb_array_elements(v.quote_rows) item
                 where (coalesce(item->>'countryCode','')<>'' or coalesce(item->>'areaName','')<>'') and logistics_price_row_quote_supported(item)
                 order by ready.rule_id, country_code, area_name, zone_name, zone_exclude
                 """;
@@ -299,7 +299,7 @@ public class LogisticsQueryService {
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 cross join lateral jsonb_path_query(
-                  coalesce(v.payload->'rows','[]'::jsonb),
+                  v.quote_rows,
                   '$[*] ? (@.countryCode == $countries[*] || @.areaName == $countries[*])',
                   jsonb_build_object('countries',cast(:countries as jsonb))) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
