@@ -185,6 +185,15 @@ export function describeAustraliaQuoteRegions(prices: Array<Pick<LogisticsPriceR
   return { quoteRegions, missingQuoteRegions, quoteRegionSummary }
 }
 
+export function toggleFinanceChannelSelection(selected: string[], channelKeys: string[]) {
+  const keys = new Set(channelKeys)
+  if (!keys.size) return [...selected]
+  const current = new Set(selected)
+  return [...keys].every(key => current.has(key))
+    ? selected.filter(key => !keys.has(key))
+    : [...new Set([...selected, ...keys])]
+}
+
 export function channelsAvailableForCountry(country: string, attribute = '普货'): FinanceLogisticsChannelOption[] {
   void attribute
   const options = logisticsRules

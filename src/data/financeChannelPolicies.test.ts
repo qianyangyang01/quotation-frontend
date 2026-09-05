@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { COMMON_COUNTRY_LIMIT, describeAustraliaQuoteRegions, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings, normalizePolicies } from './financeChannelPolicies'
+import { COMMON_COUNTRY_LIMIT, describeAustraliaQuoteRegions, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings, normalizePolicies, toggleFinanceChannelSelection } from './financeChannelPolicies'
+
+it('selects a whole provider without duplicating existing channels or removing another provider', () => {
+  const original = ['other-provider', 'sf-1']
+  expect(toggleFinanceChannelSelection(original, ['sf-1', 'sf-2', 'sf-3'])).toEqual(['other-provider', 'sf-1', 'sf-2', 'sf-3'])
+  expect(original).toEqual(['other-provider', 'sf-1'])
+  expect(toggleFinanceChannelSelection(['other-provider', 'sf-1', 'sf-2'], ['sf-1', 'sf-2'])).toEqual(['other-provider'])
+  expect(toggleFinanceChannelSelection(original, [])).toEqual(original)
+})
 
 describe('Australia channel region descriptions', () => {
   const prices = (zones: string[]) => zones.map(zoneName => ({ zoneName, zoneExclude: false }))
