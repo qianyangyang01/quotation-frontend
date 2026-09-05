@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { request } from '@/services/http'
-import { applyPurchasePaste, emptyPurchasePasteRow, parsePurchaseClipboard, PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, validatePurchasePaste } from '@/data/purchasePaste'
+import { applyPurchasePaste, emptyPurchasePasteRow, PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, validatePurchasePaste } from '@/data/purchasePaste'
+import { readPurchaseClipboard } from '@/data/purchaseClipboard'
 
 const emit = defineEmits<{ close: []; saved: [count: number] }>()
 const grid = ref(Array.from({ length: 10 }, emptyPurchasePasteRow))
@@ -16,7 +17,8 @@ function paste(event: ClipboardEvent, row: number, col: number) {
   event.preventDefault()
   if (busy.value) return
   try {
-    const cells = parsePurchaseClipboard(event.clipboardData?.getData('text/plain') || '')
+    if (!event.clipboardData) throw new Error('未读取到剪贴板内容，请重新复制单元格区域')
+    const cells = readPurchaseClipboard(event.clipboardData, col)
     grid.value = applyPurchasePaste(grid.value, cells, row, col)
     message.value = cells.length ? `已粘贴${cells.length}行，空白单元格已跳过并保留列位置` : '剪贴板中没有表格文字'
   } catch (error) { message.value = error instanceof Error ? error.message : '粘贴失败' }

@@ -19,15 +19,28 @@ export const emptyPurchasePasteRow = () => PURCHASE_PASTE_COLUMNS.map(() => '')
 export function parsePurchaseClipboard(text: string): string[][] {
   if (text.length > 1_000_000) throw new Error('粘贴内容过大，每次最多100行')
   const rows: string[][] = []; let row: string[] = []; let cell = ''; let quoted = false
-  const source = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')
+  const source = text.replace(/^\uFEFF/, '')
+  // WPS can separate records with CRLF but leave unquoted LF inside a cell.
+  // Detect record separators before normalizing line endings, and ignore quoted CRLF.
+  let scanQuoted = false; let scanCellStart = true; let crlfRows = false
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]
+    if (ch === '"' && (scanQuoted || scanCellStart)) {
+      if (scanQuoted && source[i + 1] === '"') i++
+      else scanQuoted = !scanQuoted
+      scanCellStart = false
+    } else if (!scanQuoted && ch === '\r' && source[i + 1] === '\n') { crlfRows = true; break }
+    else scanCellStart = !scanQuoted && (ch === '\t' || ch === '\n' || ch === '\r')
+  }
   for (let i = 0; i < source.length; i++) {
     const ch = source[i]
     if (ch === '"' && (quoted || cell === '')) {
       if (quoted && source[i + 1] === '"') { cell += '"'; i++ } else quoted = !quoted
-    } else if (!quoted && (ch === '\t' || ch === '\n')) {
+    } else if (!quoted && (ch === '\t' || ch === '\r' || (ch === '\n' && !crlfRows))) {
       row.push(cell); cell = ''
-      if (ch === '\n') { rows.push(row); row = [] }
-    } else cell += ch
+      if (ch !== '\t') { rows.push(row); row = []; if (ch === '\r' && source[i + 1] === '\n') i++ }
+    } else if (ch === '\r') { cell += '\n'; if (source[i + 1] === '\n') i++ }
+    else cell += ch
   }
   if (quoted) throw new Error('粘贴内容中的引号未闭合，请重新复制完整单元格')
   row.push(cell); rows.push(row)
@@ -68,7 +81,9 @@ export function validatePurchasePaste(grid: string[][]) {
     const sku = String(data.sku).toUpperCase().replace(/\s+/g, '')
     data.sku = sku
     if (!/^[A-Z0-9._/-]{1,96}$/.test(sku) || /^(TESTP|TEST|DEMO|MOCK|AUTO-)/i.test(sku)) issue('sku', '请填写有效的正式SKU')
-    if (seen.has(sku)) { issue('sku', `与第${seen.get(sku)! + 1}行SKU重复`); issues.push({ row: seen.get(sku)!, column: 3, message: `与第${row + 1}行SKU重复` }) } else seen.set(sku, row)
+    if (sku) {
+      if (seen.has(sku)) { issue('sku', `与第${seen.get(sku)! + 1}行SKU重复`); issues.push({ row: seen.get(sku)!, column: 3, message: `与第${row + 1}行SKU重复` }) } else seen.set(sku, row)
+    }
     for (const field of ['weightG', 'minOrderQty']) {
       if (data[field] == null || Number(data[field]) <= 0) issue(field, '必填，须大于0')
     }
