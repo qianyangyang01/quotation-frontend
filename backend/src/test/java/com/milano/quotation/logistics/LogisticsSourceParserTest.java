@@ -78,14 +78,14 @@ class LogisticsSourceParserTest {
             assertEquals(75,new LogisticsBillingEngine(mapper).calculate(channel.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",1)).path("total").asDouble());
         }
     }
-    @Test void usesOriginalSfPriceIgnoresDiscountAndBlocksUnreliableBaseFormula()throws Exception {
+    @Test void usesSfSettlementOnceAndBlocksUnreliableSettlementFormula()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("服装专线");row(s,0,"国家名称","Code","运费/kg","折扣率","结算运费","专递操作费/票","计费重量限制（kg）");
             row(s,1,"德国","DE",71,0.64,45.44,22,"0.001-0.1KG");
-            var parsed=parser.parse(bytes(book),"顺丰.xlsx");assertEquals(71,parsed.path("channels").get(0).path("rows").get(0).path("pricePerKg").asDouble());
+            var parsed=parser.parse(bytes(book),"顺丰.xlsx");assertEquals(45.44,parsed.path("channels").get(0).path("rows").get(0).path("pricePerKg").asDouble());
             s.getRow(1).getCell(4).setCellFormula("1/0");book.getCreationHelper().createFormulaEvaluator().evaluateAll();
-            parsed=parser.parse(bytes(book),"顺丰.xlsx");assertEquals(0,parsed.path("channels").get(0).path("errors").asInt());
-            assertEquals(71,parsed.path("channels").get(0).path("rows").get(0).path("pricePerKg").asDouble());
+            parsed=parser.parse(bytes(book),"顺丰.xlsx");assertTrue(parsed.path("channels").get(0).path("errors").asInt()>0);
+            assertFalse(parsed.path("channels").get(0).path("rows").get(0).path("quoteReady").asBoolean());
             s.getRow(1).getCell(2).setCellFormula("1/0");book.getCreationHelper().createFormulaEvaluator().evaluateAll();
             parsed=parser.parse(bytes(book),"顺丰.xlsx");assertTrue(parsed.path("channels").get(0).path("errors").asInt()>0);
         }
@@ -290,7 +290,7 @@ class LogisticsSourceParserTest {
         assertSample(books.get("7.30花海.xlsx"),"美国精选商派专线-普货","US",0.5,64,18);
         assertSample(books.get("8.12容鼎.xlsx"),"美国纯商派DDP专线-普货","US",0.5,72,16);
         assertSample(books.get("8.1云速递价格.xlsx"),"全球专线普货","US",0.5,78,20);
-        assertSample(books.get("8.7顺丰价格.xlsx"),"服装专线","DE",0.05,71,22);
+        assertSample(books.get("8.7顺丰价格.xlsx"),"服装专线","DE",0.05,45.44,22);
     }
     @Test @EnabledIfSystemProperty(named="logistics.candidateDir",matches=".+")
     void everyCandidateWorkbookHasARecognizedPriceChannel()throws Exception {

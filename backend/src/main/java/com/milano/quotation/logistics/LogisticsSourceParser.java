@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.05-v10";
+    public static final String VERSION="providers-2026.09.05-v11";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
@@ -351,7 +351,8 @@ public class LogisticsSourceParser {
             try { var range=parseRange(parseWeight.contains("以内")?parseWeight:parseWeight.replaceAll("[（(].*$","")); row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo); }
             catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
             row.put("sourceWeightRange",weight);
-            numeric(row,"pricePerKg",source,r,columns.rate,target,false);
+            if(provider.equals("顺丰"))sfPrice(row,source,r,columns,target);
+            else numeric(row,"pricePerKg",source,r,columns.rate,target,false);
             numeric(row,"registrationFee",source,r,columns.fee,target,false);
             row.put("sourceFeeLabel",columns.fee>=0?source.text(columns.feeHeaderRow,columns.fee):"");
             if(columns.minimum>=0)numeric(row,"minChargeWeightKg",source,r,columns.minimum,target,true);
@@ -481,12 +482,16 @@ public class LogisticsSourceParser {
         var c=new Columns();c.headerRow=r;c.feeHeaderRow=r;int last=source.width(r);
         for(int col=0;col<Math.min(last,80);col++) {
             String t=clean(source.text(r,col)); String lower=t.toLowerCase(Locale.ROOT);
+            if(provider.equals("顺丰") && t.matches("折扣|折扣率")) {
+                if(c.discount>=0)c.ambiguousSfPrice=true;
+                c.discount=col;
+            }
             var field=t.length()>60?"":aliases.firstMatch(provider,t,HEADER_FIELDS);
             switch(field){
                 case "country"->c.country=col;case "countryCode"->c.countryCode=col;case "continent"->c.continent=col;case "channel"->c.channel=col;case "productCode"->c.code=col;
                 case "weightFrom"->{c.from=col;if(t.contains("克"))c.boundsInGrams=true;}case "weightTo"->{c.to=col;if(t.contains("克"))c.boundsInGrams=true;}
                 case "minimumWeight"->c.minimum=col;case "billingStep"->c.step=col;case "weightRange"->c.weight=col;case "pricePerKg"->c.rate=col;
-                case "settlementRate"->c.settlement=col;case "registrationFee"->c.fee=col;
+                case "settlementRate"->{if(c.settlement>=0)c.ambiguousSfPrice=true;c.settlement=col;}case "registrationFee"->c.fee=col;
                 case "firstWeightPrice"->{c.firstPrice=col;c.firstKg=firstNumber(t,0.5);}case "nextWeightPrice"->{c.nextPrice=col;c.nextKg=firstNumber(t,0.5);}
                 case "linehaulPerKg"->c.linehaul=col;case "originRegion"->c.origin=col;case "zone"->c.zone=col;case "eta"->c.eta=col;case "notes"->c.notes.add(col);default->{}
             }
@@ -504,11 +509,11 @@ public class LogisticsSourceParser {
             }
             if(!c.fixedWeight.isBlank())break;
         }
-        // Quote the original per-kg column; discount and settlement columns are evidence only.
+        // Other providers keep their existing original-price behavior.
         // Two-level 4PX headers place fee/rate on the row below the country/weight header.
         if(c.weight>=0 && c.country>=0 && c.rate<0 && aliases.matches(provider,"pricePerKg",source.text(r+1,5))) {c.rate=5;c.fee=6;c.feeHeaderRow=r+1;}
         // Rongding has a title-defined destination rather than a country column.
-        return (c.weight>=0 || (c.from>=0&&c.to>=0)||!c.fixedWeight.isBlank()) && (c.rate>=0 || c.firstPrice>=0)?c:null;
+        return (c.weight>=0 || (c.from>=0&&c.to>=0)||!c.fixedWeight.isBlank()) && (c.rate>=0 || c.firstPrice>=0 || (provider.equals("顺丰")&&c.settlement>=0))?c:null;
     }
     private void add(ObjectNode target,ObjectNode row,Source source,int r,String file) {
         source.parsedRows.add(r);
@@ -719,6 +724,41 @@ public class LogisticsSourceParser {
         Collections.sort(normalized);
         return LogisticsDatasetService.hash(mapper.writeValueAsString(normalized));
     }
+    private void sfPrice(ObjectNode out,Source source,int r,Columns columns,ObjectNode channel) {
+        for(var entry:Map.of("OriginalRate",columns.rate,"Discount",columns.discount,"SettlementRate",columns.settlement).entrySet()) {
+            if(entry.getValue()>=0)out.put("source"+entry.getKey(),source.text(r,entry.getValue()))
+                    .put("source"+entry.getKey()+"Cell",source.address(r,entry.getValue()));
+        }
+        if(columns.ambiguousSfPrice) {
+            issue(channel,r+1,"pricePerKg","顺丰折扣/折后运费列重复，需明确使用哪一列","error");
+            pending(out,"顺丰计价列存在歧义");return;
+        }
+        int priceColumn=columns.settlement>=0?columns.settlement:columns.rate;
+        numeric(out,"pricePerKg",source,r,priceColumn,channel,false);
+        out.put("sourcePricingBasis",columns.settlement>=0?"settlement":columns.discount>=0?"original-times-discount":"original");
+        if(columns.settlement<0 && columns.discount>=0) {
+            try {
+                var cell=source.cell(r,columns.discount);
+                if(cell!=null&&cell.getCellType()==CellType.FORMULA && (cell.getCellFormula().contains("[")||cell.getCachedFormulaResultType()!=CellType.NUMERIC))throw new NumberFormatException();
+                String raw=clean(source.text(r,columns.discount));
+                BigDecimal discount;
+                if(cell!=null&&(cell.getCellType()==CellType.NUMERIC||cell.getCellType()==CellType.FORMULA))discount=BigDecimal.valueOf(cell.getNumericCellValue());
+                else if(raw.endsWith("%")||raw.endsWith("％"))discount=new BigDecimal(raw.substring(0,raw.length()-1)).movePointLeft(2);
+                else if(raw.endsWith("折"))discount=new BigDecimal(raw.substring(0,raw.length()-1)).movePointLeft(1);
+                else discount=new BigDecimal(raw);
+                if(discount.signum()<=0||discount.compareTo(BigDecimal.ONE)>0)throw new NumberFormatException();
+                if(out.has("pricePerKg"))out.put("pricePerKg",out.path("pricePerKg").decimalValue().multiply(discount).stripTrailingZeros());
+                out.put("sourceDiscountFactor",discount);
+            } catch(Exception e) {
+                out.remove("pricePerKg");
+                issue(channel,r+1,"pricePerKg","顺丰折扣不是明确的有效折扣（须为0到1之间的系数、百分比或几折）","error");
+            }
+        }
+        if(!out.has("pricePerKg")||out.path("pricePerKg").decimalValue().signum()<=0) {
+            out.remove("pricePerKg");pending(out,"顺丰有效运费缺失或无效，禁止回退原价或按零计价");
+            issue(channel,r+1,"pricePerKg","顺丰有效运费必须大于0","error");
+        }
+    }
     private void numeric(ObjectNode out,String key,Source source,int r,int c,ObjectNode channel,boolean blankZero) {
         String raw=c<0?"":source.text(r,c);
         if(raw.isBlank()&&blankZero){out.put(key,0);return;}
@@ -788,6 +828,7 @@ public class LogisticsSourceParser {
     private static Map<String,String> countries(){var m=new HashMap<String,String>();for(var code:Locale.getISOCountries())m.put(new Locale.Builder().setRegion(code).build().getDisplayCountry(Locale.SIMPLIFIED_CHINESE),code);m.put("英国","GB");m.put("韩国","KR");m.put("捷克","CZ");m.put("中国台湾","TW");m.put("台湾","TW");m.put("中国香港","HK");m.put("香港","HK");m.put("俄罗斯","RU");m.put("阿联酋","AE");m.put("土库曼","TM");m.putAll(Map.ofEntries(Map.entry("马其顿","MK"),Map.entry("刚果","CG"),Map.entry("圣基茨","KN"),Map.entry("圣尤斯特歇斯岛","BQ"),Map.entry("圣巴特勒米岛","BL"),Map.entry("塞拉里昂","SL"),Map.entry("安提瓜及巴布达","AG"),Map.entry("布维岛","BV"),Map.entry("瓦利斯群岛和富图纳群岛","WF"),Map.entry("科科斯群岛","CC"),Map.entry("科索沃","XK"),Map.entry("蒙特塞拉岛","MS"),Map.entry("西萨摩亚","WS"),Map.entry("阿森松","AC"),Map.entry("夏威夷","HI")));return m;}
     private static class Columns {
         int headerRow=-1,feeHeaderRow=-1,country=-1,countryCode=-1,continent=-1,channel=-1,code=-1,weight=-1,from=-1,to=-1,rate=-1,fee=-1,settlement=-1,minimum=-1,step=-1,origin=-1,zone=-1,eta=-1,linehaul=-1,firstPrice=-1,nextPrice=-1;
+        int discount=-1;boolean ambiguousSfPrice=false;
         double firstKg=0.5,nextKg=0.5;boolean boundsInGrams=false;String fixedWeight="";List<Integer> notes=new ArrayList<>();Set<String> blockingFeeHeaders=new LinkedHashSet<>();
     }
     private static boolean hasFirstNextValue(String value) {return !value.isBlank()&&!value.matches("0+(\\.0+)?|[-—/]");}
