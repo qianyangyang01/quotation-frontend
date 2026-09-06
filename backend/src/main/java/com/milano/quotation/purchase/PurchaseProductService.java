@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class PurchaseProductService {
+    private final tools.jackson.databind.ObjectMapper searchMapper = new tools.jackson.databind.ObjectMapper();
     public static final String CATALOG_PENDING_TEMPLATE = "pending_template";
     public static final String CATALOG_READY = "ready";
     public static final String CATALOG_DISABLED = "disabled";
@@ -29,12 +30,22 @@ public class PurchaseProductService {
             var content=pageable.getPageNumber()==0?List.of(view(exact.get())):List.<JsonNode>of();
             return new PageImpl<>(content,pageable,1);
         }
-        return products.search(cleaned,pageable).map(this::view);
+        if(cleaned.isEmpty()) return products.findAll(org.springframework.data.domain.PageRequest.of(
+                pageable.getPageNumber(),pageable.getPageSize(),org.springframework.data.domain.Sort.by(
+                        org.springframework.data.domain.Sort.Order.desc("updatedAt"),org.springframework.data.domain.Sort.Order.asc("id")))).map(this::view);
+        var rows=products.searchPage(cleaned,pageable.getPageSize(),pageable.getOffset());
+        var content=rows.stream().filter(row->row.getSku()!=null).map(row->{
+            var value=(ObjectNode)searchMapper.readTree(row.getPayload());
+            value.put("sku",row.getSku());value.put("_version",row.getVersion());
+            value.put("catalogState",row.getCatalogState());value.put("quoteReady",row.getQuoteReady());
+            value.put("_updatedAt",row.getUpdatedAt().toString());return (JsonNode)value;
+        }).toList();
+        return new PageImpl<>(content,pageable,rows.isEmpty()?0:rows.getFirst().getTotal());
     }
     @Transactional(readOnly=true) public JsonNode get(String sku) { return products.findBySku(normalizeSku(sku)).map(this::view).orElseThrow(()->AppException.notFound("商品不存在")); }
     @Transactional(readOnly=true) public boolean exists(String sku) { return products.findBySku(normalizeSku(sku)).isPresent(); }
     @Transactional(readOnly=true) public long readyCount() { return products.countByQuoteReadyTrue(); }
-    @Transactional(readOnly=true) public Stats stats() {var total=products.count();var ready=products.countByQuoteReadyTrue();return new Stats(total,ready,total-ready,products.countGeneratedSku());}
+    @Transactional(readOnly=true) public Stats stats() {var result=products.statistics();return new Stats(result.getTotal(),result.getReady(),result.getTotal()-result.getReady(),result.getGenerated());}
     @Transactional(readOnly=true) public boolean isQuoteReady(String sku) { return products.findBySku(normalizeSku(sku)).map(row -> row.quoteReady).orElse(false); }
 
     @Transactional

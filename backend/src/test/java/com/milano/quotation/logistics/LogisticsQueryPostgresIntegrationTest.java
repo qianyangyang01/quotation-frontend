@@ -202,6 +202,10 @@ class LogisticsQueryPostgresIntegrationTest {
         assertTrue(catalog.rules().getFirst().path("prices").toString().contains("DE"));
         assertFalse(catalog.rules().getFirst().has("logisticsVersionId"));
         assertFalse(catalog.rules().getFirst().path("prices").get(0).has("weightFromKg"));
+        assertEquals(catalog,service.publishedCatalog(revision));
+        jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false'::jsonb),version=version+1 where id=:id").param("id",channelId).update();
+        assertThrows(AppException.class,()->service.publishedCatalog(revision));
+        assertTrue(service.publishedCatalog("").rules().isEmpty());
     }
 
     @Test

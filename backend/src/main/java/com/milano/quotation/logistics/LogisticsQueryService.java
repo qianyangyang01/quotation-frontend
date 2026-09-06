@@ -43,6 +43,8 @@ public class LogisticsQueryService {
     private final RevisionQueryCache<PublishedRules> ruleCache = new RevisionQueryCache<>(16, 32L * 1024 * 1024,
             value -> value.rules().stream().mapToLong(rule -> 4096L + rule.path("prices").size() * 4096L).sum());
     private final RevisionQueryCache<PublishedManifest> manifestCache = new RevisionQueryCache<>(4, 1024 * 1024, value -> 65536);
+    private final RevisionQueryCache<PublishedRules> catalogCache = new RevisionQueryCache<>(4, 16L * 1024 * 1024,
+            value -> value.rules().stream().mapToLong(rule -> 2048L + rule.path("prices").size() * 512L).sum());
     private final RevisionQueryCache<Long> publishedCountCache = new RevisionQueryCache<>(16, 128, value -> 8);
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
@@ -55,7 +57,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> providers(int page, int size, String query, Boolean enabled) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where dataset_id=logistics_active_dataset()");
+        var where = new StringBuilder(" where dataset_id=(select logistics_active_dataset())");
         if (query != null && !query.isBlank()) {
             where.append(" and (lower(payload->>'name') like :query or lower(code) like :query)");
             params.put("query", "%" + query.trim().toLowerCase(Locale.ROOT) + "%");
@@ -70,7 +72,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> channels(int page, int size, String query, UUID providerId, Boolean enabled, Boolean archived) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where dataset_id=logistics_active_dataset()");
+        var where = new StringBuilder(" where dataset_id=(select logistics_active_dataset())");
         if (query != null && !query.isBlank()) {
             where.append(" and (lower(payload->>'name') like :query or lower(code) like :query)");
             params.put("query", "%" + query.trim().toLowerCase(Locale.ROOT) + "%");
@@ -91,7 +93,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> versions(int page, int size, UUID channelId, String status) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where channel_id in (select id from logistics_channel where dataset_id=logistics_active_dataset())");
+        var where = new StringBuilder(" where channel_id in (select id from logistics_channel where dataset_id=(select logistics_active_dataset()))");
         if (channelId != null) {
             where.append(" and channel_id = :channelId");
             params.put("channelId", channelId);
@@ -140,7 +142,7 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                 order by c.id
                 """).query(String.class).list();
         var dataset = jdbc.sql("select logistics_active_dataset()::text").query(String.class).single();
@@ -154,7 +156,7 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 """).query(Long.class).single());
         return new ManifestRevision(revision, publishedChannels);
@@ -190,7 +192,7 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                   and coalesce(item->>'areaName','')<>'' and logistics_price_row_quote_supported(item)
                 order by name, code
@@ -203,7 +205,7 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 order by attribute
                 """).query(String.class).list();
@@ -216,6 +218,14 @@ public class LogisticsQueryService {
         if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(revision)) {
             throw new AppException(HttpStatus.CONFLICT, "LOGISTICS_REVISION_CHANGED", "物流正式版本已更新，请重新加载规则");
         }
+        return catalogCache.get(revision, () -> {
+            var result = readPublishedCatalog(revision);
+            requireCurrentRevision(revision);
+            return result;
+        });
+    }
+
+    private PublishedRules readPublishedCatalog(String revision) {
         var sql = """
                 with ready_ids as materialized (
                   select c.id as channel_id, c.rule_id, c.code as channel_code,
@@ -226,7 +236,7 @@ public class LogisticsQueryService {
                   where coalesce((p.payload->>'enabled')::boolean,true)=true
                     and coalesce((c.payload->>'enabled')::boolean,true)=true
                     and c.archived_at is null
-                    and c.dataset_id=logistics_active_dataset()
+                    and c.dataset_id=(select logistics_active_dataset())
                     and logistics_version_quote_ready(v.id)
                 )
                 select distinct ready.channel_id::text as channel_id, ready.rule_id, ready.channel_code,
@@ -330,7 +340,7 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 """);
         var rowSql = new StringBuilder("""
@@ -348,7 +358,7 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 """);
         if (!normalizedChannels.isEmpty()) {

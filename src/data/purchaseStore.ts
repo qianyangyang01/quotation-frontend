@@ -110,11 +110,11 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
 
 export type PurchasePage = { items: PurchaseProductRecord[]; page: number; size: number; total: number; totalPages: number }
 export type PurchaseStats = { total:number;ready:number;pending:number;generatedSku:number }
-export async function loadPurchaseProductPage(query='',page=0,size=50):Promise<PurchasePage>{
-  const result=await api.get<PurchasePage>(`/purchase-products?q=${encodeURIComponent(query)}&page=${page}&size=${size}`)
+export async function loadPurchaseProductPage(query='',page=0,size=50,signal?:AbortSignal):Promise<PurchasePage>{
+  const result=await api.get<PurchasePage>(`/purchase-products?q=${encodeURIComponent(query)}&page=${page}&size=${size}`,signal?{signal}:undefined)
   return {...result,items:result.items.map(normalizePurchaseRecord)}
 }
-export const loadPurchaseStats=()=>api.get<PurchaseStats>('/purchase-products/stats')
+export const loadPurchaseStats=(signal?:AbortSignal)=>api.get<PurchaseStats>('/purchase-products/stats',signal?{signal}:undefined)
 export async function loadPurchaseProducts(query = '', page = 0, size = 500): Promise<PurchaseProductRecord[]> {
   const result = await loadPurchaseProductPage(query,page,size)
   return result.items
@@ -129,8 +129,9 @@ export async function savePurchaseProducts(records: PurchaseProductRecord[]) {
 }
 
 export async function upsertPurchaseProducts(records: PurchaseProductRecord[]) {
-  if (!records.length) return
-  await api.put('/purchase-products/batch', records.map(normalizePurchaseRecord))
+  if (!records.length) return []
+  const saved=await api.put<PurchaseProductRecord[]>('/purchase-products/batch', records.map(normalizePurchaseRecord))
+  return saved.map(normalizePurchaseRecord)
 }
 
 export async function loadPurchaseDeletionCheck(sku: string) {

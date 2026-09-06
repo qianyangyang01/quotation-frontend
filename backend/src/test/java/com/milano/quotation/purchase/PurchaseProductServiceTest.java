@@ -81,9 +81,13 @@ class PurchaseProductServiceTest {
         assertEquals("真实商品", service.get("ab 12").path("name").asText());
         assertTrue(service.exists("AB12"));
         assertEquals("AB12", service.page(" ab 12 ", PageRequest.of(0, 10)).getContent().getFirst().path("sku").asText());
-        verify(products, never()).search(eq("ab 12"), any());
-        when(products.search("AB", PageRequest.of(0, 10)))
-                .thenReturn(new PageImpl<>(List.of(rows.get("AB12"))));
+        verify(products, never()).searchPage(anyString(), anyInt(), anyLong());
+        var searchRow=mock(PurchaseProductRepository.SearchRow.class);
+        when(searchRow.getSku()).thenReturn("AB12");when(searchRow.getPayload()).thenReturn(rows.get("AB12").payload.toString());
+        when(searchRow.getVersion()).thenReturn(0L);when(searchRow.getCatalogState()).thenReturn("ready");
+        when(searchRow.getQuoteReady()).thenReturn(false);when(searchRow.getUpdatedAt()).thenReturn(rows.get("AB12").updatedAt);
+        when(searchRow.getTotal()).thenReturn(1L);
+        when(products.searchPage("AB",10,0)).thenReturn(List.of(searchRow));
         assertEquals(1, service.page(" AB ", PageRequest.of(0, 10)).getTotalElements());
         service.delete("AB12");
         assertFalse(rows.containsKey("AB12"));
