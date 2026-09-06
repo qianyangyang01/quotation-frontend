@@ -9,7 +9,7 @@ export type PurchasePriceBasis = 'tax_included' | 'quoted' | ''
 export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageCount:number;quotationRecords:number;drafts:number;templates:number;importBatches:number }
 
 export type PurchaseProductRecord = {
-  sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number
+  sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number; _updatedAt?: string
   dataSource: PurchaseDataSource; purchasePriceBasis: PurchasePriceBasis; sourceQuotedPriceCny: number | null
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
   size: string; color: string; weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null
@@ -70,7 +70,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const taxPointExplicit = Object.prototype.hasOwnProperty.call(input, 'taxPoint') || input.taxPointExplicit === true
   const catalogState: PurchaseCatalogState = input.catalogState === 'pending_template' || input.catalogState === 'disabled' ? input.catalogState : 'ready'
   const base = {
-    sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version),
+    sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version), _updatedAt: input._updatedAt == null ? undefined : String(input._updatedAt),
     dataSource, purchasePriceBasis: input.purchasePriceBasis === 'tax_included' || input.purchasePriceBasis === 'quoted' ? input.purchasePriceBasis : '' as PurchasePriceBasis,
     sourceQuotedPriceCny: numberOrNull(input.sourceQuotedPriceCny),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
@@ -120,8 +120,9 @@ export async function loadPurchaseProducts(query = '', page = 0, size = 500): Pr
   return result.items
 }
 
-export async function loadPurchaseProduct(sku: string): Promise<PurchaseProductRecord> {
-  return normalizePurchaseRecord(await api.get<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sku)}`))
+export async function loadPurchaseProduct(sku: string, signal?: AbortSignal): Promise<PurchaseProductRecord> {
+  const timeout = AbortSignal.timeout(20000)
+  return normalizePurchaseRecord(await api.get<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sku)}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, cache: 'no-store' }))
 }
 
 export async function savePurchaseProducts(records: PurchaseProductRecord[]) {

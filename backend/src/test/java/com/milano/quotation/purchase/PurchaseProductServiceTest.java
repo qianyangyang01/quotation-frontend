@@ -20,6 +20,19 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void quotationVersionChecksOnlyReferencedProductsAndDetectsRecreatedSku() {
+        var row=PurchaseProduct.create("CURRENT",pasted("CURRENT"),"ready",true,null);
+        when(products.findAllLockedBySkuIn(anyCollection())).thenReturn(List.of(row));
+        var quote=JsonNodeFactory.instance.objectNode().put("primarySku","CURRENT");
+        quote.putObject("purchaseVersions").put("CURRENT",row.version+":"+row.updatedAt);
+        assertDoesNotThrow(()->service.assertQuotationVersions(quote));
+        verify(products).findAllLockedBySkuIn(java.util.Set.of("CURRENT"));
+        verify(products,never()).findAll();
+        row.updatedAt=row.updatedAt.plusSeconds(1);
+        assertEquals(409,assertThrows(AppException.class,()->service.assertQuotationVersions(quote)).status().value());
+        quote.remove("purchaseVersions");
+        assertDoesNotThrow(()->service.assertQuotationVersions(quote));
+    }
     private tools.jackson.databind.node.ObjectNode pasted(String sku) {
         return JsonNodeFactory.instance.objectNode().put("sku",sku).put("weightG",50).put("minOrderQty",1).put("purchasePriceCny",9.24).put("singleFreightCny",3.5).put("freight10Cny",3.5);
     }

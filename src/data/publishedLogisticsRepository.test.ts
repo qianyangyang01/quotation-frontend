@@ -7,6 +7,21 @@ const manifest = (revision: string) => ({ revision, generatedAt: '2026-08-24T00:
 const rule = { id: 1, name: '云途普货', englishName: 'yt', type: '专线', currency: 'CNY', published: '发布', status: '启用', dates: '|', users: '|', relations: [{ carrier: '云途', channel: '云途普货', channelCode: 'YT', discounts: '-' }], phoneRequired: false, areaCount: 1, priceRowCount: 1, prices: [{ areaName: '美国', countryCode: 'US' }] }
 
 describe('published logistics version cache', () => {
+  it('keeps the displayed quote while an unrelated new catalog is fetched in the background', async () => {
+    const repository = await import('./publishedLogisticsRepository')
+    const logistics = await import('./logistics')
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('r1'), etag: 'r1' }
+      : { status: 200, data: { revision: 'r1', rules: [rule] }, etag: 'r1' }))
+    await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] })
+    const before = [...logistics.logisticsRules]
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('r2'), etag: 'r2' }
+      : { status: 200, data: { revision: 'r2', rules: [{ ...rule, name: 'new data' }] }, etag: 'r2' }))
+    const next = await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }, { apply: false })
+    expect(next.revision).toBe('r2')
+    expect(logistics.logisticsRules).toEqual(before)
+  })
   beforeEach(() => {
     vi.resetModules()
     vi.stubGlobal('indexedDB', undefined)

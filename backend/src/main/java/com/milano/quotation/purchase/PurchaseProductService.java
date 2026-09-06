@@ -73,6 +73,23 @@ public class PurchaseProductService {
     }
 
     @Transactional
+    public void assertQuotationVersions(JsonNode payload) {
+        // Existing saved records and old API clients remain compatible. New clients supply
+        // every referenced SKU, and rows stay locked through the quotation transaction.
+        if(!payload.has("purchaseVersions")) return;
+        var expected=payload.path("purchaseVersions");
+        if(!expected.isObject()) throw AppException.unprocessable("采购版本格式错误");
+        var skus=new TreeSet<String>();
+        for(var sku:payload.path("primarySku").asText("").split("[,，、+\\s]+")) addReferencedSku(skus,sku);
+        payload.path("bundleItems").forEach(item->addReferencedSku(skus,item.path("sku").asText("")));
+        if(skus.isEmpty()||skus.size()>100||expected.size()!=skus.size()) throw AppException.conflict("采购资料版本不完整，请重新查询后保存");
+        var rows=products.findAllLockedBySkuIn(skus);
+        if(rows.size()!=skus.size()) throw AppException.conflict("采购商品已移除，请重新查询后保存");
+        for(var row:rows) if(!row.quoteReady||!expected.path(row.sku).asText().equals(row.version+":"+row.updatedAt))
+            throw AppException.conflict("采购资料已更新，请更新报价并确认后保存："+row.sku);
+    }
+
+    @Transactional
     public JsonNode upsert(JsonNode input) {
         return upsert(input, true, null, null);
     }

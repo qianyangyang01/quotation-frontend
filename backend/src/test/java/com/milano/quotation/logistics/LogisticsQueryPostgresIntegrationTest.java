@@ -55,6 +55,11 @@ class LogisticsQueryPostgresIntegrationTest {
         jdbc.sql("update logistics_channel set current_version_id=:version where id=:id").param("version", versionId).param("id", channelId).update();
         // This suite exercises pre-migration legacy query compatibility, not new-version approval.
         jdbc.sql("insert into logistics_billing_acceptance select gen_random_uuid(),id,md5((payload->'rows')::text),'legacy','legacy','{}','QA',now() from logistics_version where id=:id").param("id",versionId).update();
+        jdbc.sql("""
+            insert into finance_setting(setting_key,payload,version,updated_at)
+            values('channel-policies','[{"enabled":true,"category":"普货","countryRules":[{"country":"美国","allowedChannels":["1::云途::YT-PH"]}]}]'::jsonb,0,now())
+            on conflict(setting_key) do update set payload=excluded.payload
+            """).update();
     }
 
     @BeforeEach
@@ -77,6 +82,55 @@ class LogisticsQueryPostgresIntegrationTest {
         } finally {
             jdbc.sql("update logistics_channel set payload=cast(:payload as jsonb) where id=:id").param("payload",original).param("id",channelId).update();
         }
+    }
+
+    private tools.jackson.databind.node.ObjectNode selectedQuotation() {
+        var mapper=new ObjectMapper();
+        var input=mapper.createObjectNode().put("logisticsSyncScope","selected").put("logisticsAttribute","普货").put("logisticsRevision","older-library");
+        var option=input.putArray("quoteOptions").addObject().put("country","美国").put("quoteRegion","")
+                .put("channelKey","1::云途::YT-PH").put("logisticsChannelId",channelId.toString()).put("logisticsVersionId",versionId.toString()).put("freightCny",73);
+        option.putObject("logisticsInput").put("country","美国").put("weightKg",1);
+        var samples=option.putArray("logisticsSamples");
+        for(int quantity=1;quantity<=3;quantity++){
+            var sample=samples.addObject().put("etaMinDays",6).put("etaMaxDays",10);
+            if(quantity<=2) sample.put("total",55*quantity+18); else sample.putNull("total");
+            sample.putObject("input").put("country","美国").put("zoneName","").put("weightKg",quantity);
+        }
+        return input;
+    }
+    private void updateFixtureRows(tools.jackson.databind.node.ObjectNode payload) {
+        jdbc.sql("update logistics_version set payload=cast(:payload as jsonb) where id=:id").param("payload",payload.toString()).param("id",versionId).update();
+        jdbc.sql("update logistics_billing_acceptance set rows_fingerprint=(select rows_fingerprint from logistics_version where id=:id) where version_id=:id").param("id",versionId).update();
+    }
+    @Test
+    void selectedQuotesIgnoreUnrelatedLibraryAndOtherCountryPriceChangesButRejectApplicableChanges() {
+        var mapper=new ObjectMapper();var guard=new LogisticsQuotationGuard(jdbc,service,mapper);
+        var original=(tools.jackson.databind.node.ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
+        try {
+            var input=selectedQuotation();
+            guard.validate(input); // The library revision alone does not block the new client.
+            var modified=original.deepCopy();
+            ((tools.jackson.databind.node.ObjectNode)modified.path("rows").get(1)).put("pricePerKg",99);
+            updateFixtureRows(modified);
+            guard.validate(selectedQuotation()); // Germany changed; the US quote remains valid.
+            ((tools.jackson.databind.node.ObjectNode)modified.path("rows").get(0)).put("pricePerKg",56);
+            updateFixtureRows(modified);
+            assertEquals(409,assertThrows(AppException.class,()->guard.validate(selectedQuotation())).status().value());
+            updateFixtureRows(original);
+            var tampered=selectedQuotation();((tools.jackson.databind.node.ObjectNode)tampered.path("quoteOptions").get(0)).put("freightCny",1);
+            assertThrows(AppException.class,()->guard.validate(tampered));
+            var oldClient=selectedQuotation();oldClient.remove("logisticsSyncScope");
+            assertThrows(AppException.class,()->guard.validate(oldClient));
+        } finally {updateFixtureRows(original);}
+    }
+    @Test
+    void selectedQuantityAndAvailabilityRemainGuarded() {
+        var mapper=new ObjectMapper();var guard=new LogisticsQuotationGuard(jdbc,service,mapper);
+        var wrongTier=selectedQuotation();
+        ((tools.jackson.databind.node.ObjectNode)wrongTier.path("quoteOptions").get(0).path("logisticsSamples").get(1)).put("total",1);
+        assertThrows(AppException.class,()->guard.validate(wrongTier));
+        jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false'::jsonb) where id=:id").param("id",channelId).update();
+        assertThrows(AppException.class,()->guard.validate(selectedQuotation()));
     }
 
     @Test

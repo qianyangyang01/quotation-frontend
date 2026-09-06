@@ -19,7 +19,7 @@ async function sample(){
 }
 await sample()
 const timer=setInterval(sample,10000)
-const child=spawn(process.execPath,['scripts/performance/roles50/accounts-load.mjs'],{stdio:'inherit',env:process.env})
+const child=spawn(process.execPath,[process.env.PERF_SCRIPT || 'scripts/performance/roles50/accounts-load.mjs'],{stdio:'inherit',env:process.env})
 const code=await new Promise(resolve=>child.on('exit',resolve))
 clearInterval(timer)
 while(collecting)await new Promise(resolve=>setTimeout(resolve,50))

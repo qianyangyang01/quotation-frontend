@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { loadQuotationSync, startQuotationSync } from '@/services/quotationSync'
 import FilterPanel from '@/components/finance/FilterPanel.vue'
 import LogisticsCard, { type ProviderGroup } from '@/components/finance/LogisticsCard.vue'
 import PurchaseDataWorkspace from '@/components/purchase/PurchaseDataWorkspace.vue'
@@ -826,6 +827,7 @@ async function hydrateFinanceLogisticsContext() {
       financeLogisticsDataEpoch.value += 1
       applyFinanceSettingsWorkspace(readFinanceSettingsWorkspace())
       financeLogisticsContextState.value = 'ready'
+      financeObservedRevision = manifest.revision
       return true
     } catch (error) {
       financeLogisticsContextError.value = error instanceof Error ? error.message : '物流正式数据加载失败'
@@ -838,15 +840,23 @@ async function hydrateFinanceLogisticsContext() {
   finally { if (financeContextRequest === request) financeContextRequest = null }
 }
 
+let financeObservedRevision = ''
+let stopFinanceSync: (() => void) | undefined
 onMounted(() => {
   window.addEventListener('keydown', handlePreviewKeydown)
   void hydrateFinanceSettingsWorkspace()
+  stopFinanceSync = startQuotationSync(async signal => {
+    if (props.mode !== 'members' || showEditor.value || financeLogisticsContextState.value !== 'ready') return
+    const snapshot = await loadQuotationSync([], signal)
+    if (!signal.aborted && props.mode === 'members' && !showEditor.value && snapshot.logisticsRevision !== financeObservedRevision) await hydrateFinanceLogisticsContext()
+  }, () => { /* Existing settings remain editable; the next check retries. */ })
 })
 watch(() => props.mode, mode => {
   showEditor.value = false
   if (mode === 'members') void hydrateFinanceSettingsWorkspace()
 })
 onBeforeUnmount(() => {
+  stopFinanceSync?.()
   financeEditorRequestId += 1
   showEditor.value = false
   window.removeEventListener('keydown', handlePreviewKeydown)

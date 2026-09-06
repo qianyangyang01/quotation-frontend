@@ -1,0 +1,58 @@
+{
+  "base": "http://127.0.0.1:18098",
+  "phase": "read-background",
+  "users": 50,
+  "roleMix": {
+    "business": 20,
+    "purchase": 28,
+    "logistics": 2
+  },
+  "startedAt": "2026-09-06T12:28:13.454Z",
+  "finishedAt": "2026-09-06T12:30:23.730Z",
+  "warmupSeconds": 10,
+  "durationSeconds": 120,
+  "addedIncludingWarmup": 0,
+  "newSkuReadsIncludingWarmup": 0,
+  "total": 21032,
+  "failures": 0,
+  "operations": {
+    "purchase-read": {
+      "count": 12135,
+      "p95Ms": 40.95,
+      "p99Ms": 91.01,
+      "maxMs": 371.19
+    },
+    "business-sku": {
+      "count": 3295,
+      "p95Ms": 32.66,
+      "p99Ms": 63.03,
+      "maxMs": 248.87
+    },
+    "quotation-save": {
+      "count": 1635,
+      "p95Ms": 148.32,
+      "p99Ms": 233.6,
+      "maxMs": 441.18
+    },
+    "current-sku-version": {
+      "count": 1649,
+      "p95Ms": 47.24,
+      "p99Ms": 73.62,
+      "maxMs": 153.64
+    },
+    "logistics-versions": {
+      "count": 678,
+      "p95Ms": 162.66,
+      "p99Ms": 226.86,
+      "maxMs": 313.91
+    },
+    "selected-logistics-check": {
+      "count": 1640,
+      "p95Ms": 56.92,
+      "p99Ms": 96.17,
+      "maxMs": 292.9
+    }
+  },
+  "passed": true,
+  "errors": []
+}

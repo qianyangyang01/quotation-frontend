@@ -97,6 +97,8 @@ export interface QuotationRecordEditor {
 }
 
 export interface QuotationRecord {
+  purchaseVersions?: Record<string, string>
+  logisticsSyncScope?: 'selected'
   id: string; no: string; _version?: number; salespersonName: string; salespersonAccount: string; customerName: string
   quoteMode: 'single' | 'bundle'; productSummary: string; productImage?: string; primarySku: string; bundleItems?: QuotationRecordBundleItem[]; productCategory?: string; logisticsAttribute: string
   purchaseBaseUnitPriceCny?: number; purchaseInvoiceType?: string; purchaseInvoiceRatePercent?: number; purchaseInvoiceTaxApplied?: boolean; purchaseUnitPriceCny?: number

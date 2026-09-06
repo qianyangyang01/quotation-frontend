@@ -142,7 +142,7 @@ async function purgeRuleCache() {
   catalogRequests.clear()
   rulesMemory.clear()
   ruleRequests.clear()
-  replaceLogisticsRules([])
+  // Evict cached queries, but keep the displayed snapshot until a new one is ready.
   await clearStore(RULE_STORE)
 }
 
@@ -177,12 +177,12 @@ export async function loadPublishedLogisticsManifest(options: { signal?: AbortSi
   finally { if (!options.signal && allowStale) manifestRequest = null }
 }
 
-export async function loadPublishedLogisticsRules(query: RuleQuery, options: { signal?: AbortSignal } = {}) {
+export async function loadPublishedLogisticsRules(query: RuleQuery, options: { signal?: AbortSignal; apply?: boolean } = {}) {
   const countries = normalized(query.countries)
   const { manifest, verified } = await loadPublishedLogisticsManifest({ signal: options.signal })
   options.signal?.throwIfAborted()
   if (!countries.length) {
-    replaceLogisticsRules([])
+    if (options.apply !== false) replaceLogisticsRules([])
     return { revision: manifest.revision, rules: [], source: 'manifest' as const, verified }
   }
   const key = queryKey(manifest.revision, query)
@@ -193,7 +193,7 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: { s
   }
   options.signal?.throwIfAborted()
   if (cached?.revision === manifest.revision) {
-    replaceLogisticsRules(cached.rules)
+    if (options.apply !== false) replaceLogisticsRules(cached.rules)
     return { revision: manifest.revision, rules: cached.rules, source: 'cache' as const, verified }
   }
   const existing = options.signal ? undefined : ruleRequests.get(key)
@@ -208,7 +208,7 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: { s
       const value: StoredRules = { key, revision: response.data.revision, rules: response.data.rules, storedAt: Date.now() }
       rulesMemory.set(key, value)
       void writeStore(RULE_STORE, value)
-      replaceLogisticsRules(value.rules)
+      if (options.apply !== false) replaceLogisticsRules(value.rules)
       return value.rules
     })
     .finally(() => { if (ruleRequests.get(key) === request) ruleRequests.delete(key) })
@@ -276,7 +276,6 @@ export async function clearPublishedLogisticsCache() {
 cacheChannel?.addEventListener('message', event => {
   if (event.data?.type !== 'revision' && event.data?.type !== 'invalidate') return
   manifestMemory = null
-  replaceLogisticsRules([])
   void purgeRuleCache()
 })
 

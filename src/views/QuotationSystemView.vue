@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
-import { financeSettingsAreHydrated } from '@/services/financeSettings'
+import { financeSettingsAreHydrated, hydrateFinanceSettings } from '@/services/financeSettings'
+import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { validateQuotationConditions } from '@/services/quotationValidation'
-import { buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules, validatePublishedLogisticsRevision } from '@/data/publishedLogisticsRepository'
+import { buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import { loadQuotationWorkspaceConfiguration } from '@/services/quotationWorkspaceBootstrap'
 import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
@@ -81,7 +82,7 @@ const currentSalespersonAccount = computed(() => currentAuthUser.value.account |
 const selectedSalesperson = computed(() => currentSalespersonAccount.value === '—'
   ? currentSalespersonName.value
   : `${currentSalespersonName.value}（${currentSalespersonAccount.value}）`)
-const customerGradeSettings = loadCustomerGradeSettings()
+const customerGradeSettings = reactive(loadCustomerGradeSettings())
 const selectedCustomerGrade = ref<CustomerGrade>('S')
 const financeExchangeRate = loadFinanceExchangeRate()
 const exchange = ref({ usd: financeExchangeRate.usdCny, eur: 7.86, updatedAt: financeExchangeRate.updatedAt })
@@ -95,6 +96,16 @@ const logisticsRevision = ref('')
 // whenever that array is cleared or repopulated.
 const logisticsRulesGeneration = ref(0)
 const savingQuotation = ref(false)
+const syncPending = ref('')
+const syncError = ref('')
+const syncRefreshing = ref(false)
+const productQueryBusy = ref(false)
+const purchaseQueryError = ref('')
+let stopLiveSync: (() => void) | undefined
+let viewDisposed = false
+let productQueryGeneration = 0
+let productQueryAbort: AbortController | null = null
+const bundleQueryGenerations = new WeakMap<BundleQuoteItem, number>()
 let logisticsRequest: AbortController | null = null
 const showRule = ref(false)
 const showHistory = ref(false)
@@ -267,6 +278,7 @@ function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProdu
   item.purchasePriceBasis = record.purchasePriceBasis
 }
 function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = true) {
+  purchaseQueryError.value = ''
   p.sku = record.sku
   p.name = purchaseDisplayName(record)
   p.supplier = record.quotationOwner || '待补充'
@@ -312,13 +324,24 @@ async function queryProduct() {
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: false }))) return
   cancelQuoteLogistics()
   const normalizedSku = skuSearch.value.trim().toUpperCase().replace(/\s+/g, '')
-  let candidates = purchaseRecords.value.filter(item => item.sku === normalizedSku)
-  if (!candidates.length) {
-    try { const remote = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(remote); candidates = [remote] }
-    catch { /* the unified not-found message below is clearer to the user */ }
-  }
+  const request = ++productQueryGeneration
+  productQueryAbort?.abort()
+  const controller = new AbortController(); productQueryAbort = controller
+  productQueryBusy.value = true
+  let candidates: PurchaseProductRecord[]
+  try {
+    const remote = await loadPurchaseProduct(normalizedSku, controller.signal)
+    if (request !== productQueryGeneration || skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== normalizedSku || quoteMode.value !== 'single') return
+    rememberPurchase(remote); candidates = [remote]
+  } catch (error) {
+    if (controller.signal.aborted) return
+    if (request !== productQueryGeneration) return
+    purchaseQueryError.value = error instanceof Error ? error.message : '采购资料读取失败，请重试'
+    toast(purchaseQueryError.value)
+    return
+  } finally { if (request === productQueryGeneration) productQueryBusy.value = false }
   const matches = candidates.filter(item => item.quoteReady)
-  if (!matches.length && candidates.length) { toast(purchaseQuoteBlockingMessage(candidates[0])); return }
+  if (!matches.length && candidates.length) { purchaseQueryError.value = purchaseQuoteBlockingMessage(candidates[0]); toast(purchaseQueryError.value); return }
   if (!matches.length) { toast(`未找到可报价 SKU：${skuSearch.value}，请确认采购资料已完整保存`); return }
   const p = products.value[0]
   applyPurchaseRecord(p, matches[0])
@@ -347,8 +370,13 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   if (!item.sku.trim()) preIssues.push({ key: 'sku', message: '请输入组合商品SKU' })
   if (blockConditionProgress(preIssues)) return false
   const normalizedSku = item.sku.trim().toUpperCase().replace(/\s+/g, '')
-  let record = purchaseRecords.value.find(candidate => candidate.sku === normalizedSku)
-  if (!record) { try { record = await loadPurchaseProduct(normalizedSku); purchaseRecords.value.unshift(record) } catch { /* handled below */ } }
+  const generation = (bundleQueryGenerations.get(item) || 0) + 1
+  bundleQueryGenerations.set(item, generation)
+  let record: PurchaseProductRecord | undefined
+  try { record = await loadPurchaseProduct(normalizedSku) }
+  catch (error) { toast(error instanceof Error ? error.message : '采购资料读取失败，请重试'); return false }
+  if (bundleQueryGenerations.get(item) !== generation || !bundleItems.value.includes(item) || item.sku.trim().toUpperCase().replace(/\s+/g, '') !== normalizedSku) return false
+  rememberPurchase(record)
   if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return false }
   if (!record.quoteReady) { toast(purchaseQuoteBlockingMessage(record)); return false }
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
@@ -469,6 +497,9 @@ async function ensureQuoteLogistics(p: Product) {
   p.freight = 0
   p.status = '正在加载当前商品所需物流规则'
   try {
+    await hydrateFinanceSettings({ force: true, signal: controller.signal })
+    controller.signal.throwIfAborted()
+    applyLiveFinance()
     const selectedCountries = quoteMatrixMode.value === 'specified'
       ? specifiedQuoteRows.value.map(row => row.country)
       : quoteMatrixMode.value === 'template'
@@ -493,6 +524,8 @@ async function ensureQuoteLogistics(p: Product) {
     }
     normalizeRule(p, true)
     if (!result.verified) p.status = '已使用缓存物流规则，仅可查看；联网确认版本后才能保存'
+    syncPending.value = ''
+    syncError.value = ''
   } catch (error) {
     if (controller.signal.aborted) return
     logisticsRulesGeneration.value += 1
@@ -508,17 +541,89 @@ async function changeLogisticsAttribute(p: Product, attribute: string) {
   if (p.sku || bundleItems.value.some(item => item.sku)) await ensureQuoteLogistics(p)
 }
 async function retryQuoteLogistics() { await ensureQuoteLogistics(products.value[0]) }
-async function verifyFocusedLogisticsRevision() {
-  if (!products.value[0]?.sku && !bundleItems.value.some(item => item.sku)) return
-  try {
-    const result = await validatePublishedLogisticsRevision()
-    if (result.changed) {
-      await ensureQuoteLogistics(products.value[0])
-      toast('物流版本已更新，报价已按最新规则重新计算')
-    } else if (logisticsLoadState.value === 'stale') logisticsLoadState.value = 'ready'
-  } catch {
-    if (logisticsRules.length) logisticsLoadState.value = 'stale'
+function rememberPurchase(record: PurchaseProductRecord) {
+  purchaseRecords.value = [record, ...purchaseRecords.value.filter(item => item.sku !== record.sku)]
+}
+function activePurchaseSkus() {
+  return [...new Set((quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || '']).filter(Boolean))].sort()
+}
+async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
+  const skus = activePurchaseSkus()
+  const key = draftSignature()
+  const result = await loadQuotationSync(skus, signal)
+  if (signal?.aborted || key !== draftSignature() || logisticsLoadState.value === 'loading' || productQueryBusy.value) return false
+  const changed: string[] = []
+  if (skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
+  const newerLogistics = Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
+  // A library revision is only a signal to check. It is never itself a save blocker.
+  if ((newerLogistics || beforeSave) && savedQuoteRows.value.length) {
+    try { await checkSelectedLogistics({ logisticsAttribute: products.value[0].logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal) }
+    catch (error) {
+      if (error instanceof ApiError && [409, 422].includes(error.status)) changed.push('已选渠道的适用价格或可用性')
+      else throw error
+    }
   }
+  if (signal?.aborted || key !== draftSignature()) return false
+  syncPending.value = changed.join('、')
+  syncError.value = ''
+  if (newerLogistics && !changed.length && !beforeSave) {
+    // Fetch in the background without clearing the working quote or disabling Save.
+    const p = products.value[0]
+    const countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country,
+      [...specifiedQuoteRows.value, ...templateQuoteRows.value].map(row => row.country))
+    const latest = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal, apply: false })
+    if (!latest.verified || signal?.aborted || key !== draftSignature() || quoteLogisticsBusy()) return false
+    if (savedQuoteRows.value.length) {
+      try {
+        const checked = await checkSelectedLogistics({ logisticsAttribute: p.logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal)
+        if (checked.revision !== latest.revision) return true
+      } catch (error) {
+        if (error instanceof ApiError && [409,422].includes(error.status)) { syncPending.value = '已选渠道的适用价格或可用性'; return false }
+        throw error
+      }
+    }
+    if (signal?.aborted || key !== draftSignature()) return false
+    replaceLogisticsRules(latest.rules)
+    logisticsRulesGeneration.value++
+    logisticsRevision.value = latest.revision
+    logisticsLoadState.value = latest.rules.length ? 'ready' : 'empty'
+  }
+  return changed.length === 0
+}
+function quoteLogisticsBusy() { return logisticsLoadState.value === 'loading' }
+function applyLiveFinance() {
+  financePolicies.value = loadFinanceChannelPolicies()
+  financeCountrySettings.value = loadFinanceCountrySettings()
+  financeTaxSettings.value = loadFinanceTaxSettings()
+  customerGradeSettings.splice(0, customerGradeSettings.length, ...loadCustomerGradeSettings())
+  const rate = loadFinanceExchangeRate()
+  exchange.value = { ...exchange.value, usd: rate.usdCny, updatedAt: rate.updatedAt }
+}
+async function reloadLiveConfiguration() {
+  await hydrateFinanceSettings({ force: true })
+  await loadPublishedLogisticsManifest({ allowStale: false })
+  applyLiveFinance()
+  readiness.value = await loadQuotationReadiness()
+}
+async function updateLiveQuotation() {
+  if (syncRefreshing.value || savingQuotation.value) return
+  syncRefreshing.value = true
+  const payload = draftPayload()
+  try {
+    await flushDraft()
+    const freshPurchases = new Map<string, PurchaseProductRecord | undefined>(await Promise.all(activePurchaseSkus().map(async sku => {
+      try { return [sku, await loadPurchaseProduct(sku)] as const }
+      catch (error) { if (error instanceof ApiError && error.status === 404) return [sku, undefined] as const; throw error }
+    })))
+    await reloadLiveConfiguration()
+    purchaseRecords.value = []
+    await applyDraftPayload(payload, freshPurchases)
+    draftReady.value = true
+    markDraftDirty()
+    await checkLiveVersions()
+    toast(syncPending.value ? '资料再次更新，请重新核对' : '已按最新资料更新报价，请核对价格后保存')
+  } catch (error) { syncError.value = error instanceof Error ? error.message : '更新失败，请重试' }
+  finally { draftReady.value = true; syncRefreshing.value = false }
 }
 function normalizeRule(p: Product, silent = false) {
   const policyCountries = availableQuoteCountries(p)
@@ -650,17 +755,20 @@ async function flushDraft() {
   })().finally(() => { draftSavePromise = null })
   return draftSavePromise
 }
-async function recordForDraftSku(sku: string) {
+async function recordForDraftSku(sku: string, freshPurchases?: Map<string, PurchaseProductRecord | undefined>) {
   const normalized = sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!normalized) return undefined
-  let record = findPurchaseProduct(purchaseRecords.value, normalized)
-  if (!record) {
-    try { record = await loadPurchaseProduct(normalized); purchaseRecords.value.unshift(record) }
-    catch { return undefined }
+  if (freshPurchases?.has(normalized)) {
+    const record = freshPurchases.get(normalized)
+    if (record) rememberPurchase(record)
+    return record?.quoteReady ? record : undefined
   }
+  let record: PurchaseProductRecord
+  try { record = await loadPurchaseProduct(normalized); rememberPurchase(record) }
+  catch (error) { if (error instanceof ApiError && error.status === 404) return undefined; throw error }
   return record?.quoteReady ? record : undefined
 }
-async function applyDraftPayload(payload: QuotationDraftPayload) {
+async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>) {
   draftReady.value = false
   quoteMode.value = payload.quoteMode === 'bundle' ? 'bundle' : 'single'
   customerName.value = String(payload.customerName || '').slice(0, 120)
@@ -678,7 +786,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
   const singleSku = payload.product?.sku || payload.skuSearch
   let restoredFromPurchase = false
   if (quoteMode.value === 'single' && singleSku) {
-    const record = await recordForDraftSku(singleSku)
+    const record = await recordForDraftSku(singleSku, freshPurchases)
     if (record) {
       applyPurchaseRecord(p, record, payload.product?.purchaseInvoiceTaxApplied === true)
       restoredFromPurchase = true
@@ -701,7 +809,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload) {
   if (quoteMode.value === 'bundle') {
     const restoredItems: BundleQuoteItem[] = []
     for (const savedItem of payload.bundleItems || []) {
-      const record = await recordForDraftSku(savedItem.sku)
+      const record = await recordForDraftSku(savedItem.sku, freshPurchases)
       const item = bundleItemFromRecord(record, savedItem.purchaseInvoiceTaxApplied === true)
       item.sku = record?.sku || String(savedItem.sku || '').trim().toUpperCase()
       item.quantityPerSet = normalizedBundleSets(savedItem.quantityPerSet)
@@ -755,6 +863,7 @@ async function loadAndRestoreDraft() {
   return state
 }
 async function resetLocalDraft() {
+  purchaseQueryError.value = ''
   modeSelections.value = { common: [], specified: [], template: [] }
   draftReady.value = false
   window.clearTimeout(draftTimer)
@@ -849,17 +958,27 @@ onMounted(async () => {
   window.addEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.addEventListener('storage', refreshFinanceCountrySettings)
   window.addEventListener('storage', refreshFinanceTaxSettings)
-  window.addEventListener('focus', verifyFocusedLogisticsRevision)
   window.addEventListener('beforeunload', beforeWindowUnload)
   try { await initializeQuotationWorkspace() }
   catch { toast('报价工作区读取失败，请检查网络后重试') }
+  if (viewDisposed) return
+  stopLiveSync = startQuotationSync(async signal => {
+    if (!draftReady.value || syncRefreshing.value || savingQuotation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
+    await checkLiveVersions(signal)
+    if (!signal.aborted && !activePurchaseSkus().length && syncPending.value) {
+      await reloadLiveConfiguration(); syncPending.value = ''
+    }
+  }, error => { syncError.value = error instanceof Error ? error.message : '暂时无法核验最新资料，请重试' })
 })
 onBeforeUnmount(() => {
+  viewDisposed = true
   window.removeEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.removeEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.removeEventListener('storage', refreshFinanceCountrySettings)
   window.removeEventListener('storage', refreshFinanceTaxSettings)
-  window.removeEventListener('focus', verifyFocusedLogisticsRevision)
+  stopLiveSync?.()
+  productQueryAbort?.abort()
+  productQueryGeneration++
   window.removeEventListener('beforeunload', beforeWindowUnload)
   window.clearTimeout(draftTimer)
   logisticsRequest?.abort()
@@ -1182,6 +1301,8 @@ const showSaveValidation = ref(false)
 const saveValidationIssues = computed(() => {
   const p = products.value[0]
   const issues: Array<{ key: string; label: string; message: string }> = []
+  if (quoteMode.value === 'single' && (purchaseQueryError.value || (p?.sku && skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== p.sku))) issues.push({ key: 'sku', label: '商品 SKU', message: purchaseQueryError.value || 'SKU 已改变，请重新查询商品后保存' })
+  if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || '最新资料正在读取，请稍候' })
   if (draftInitializationFailed.value || !financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: '财务设置尚未完整加载，请重试读取后保存' })
   const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'预估月销量' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
@@ -1206,29 +1327,23 @@ const logisticsSaveBlockReason = computed(() => logisticsLoadState.value === 'lo
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : '')
-const displayedSaveBlockReason = computed(() => logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')
+const displayedSaveBlockReason = computed(() => syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || ''))
 const displayedInvalidFields = computed(() => [...new Set([...queryValidationFields.value, ...displayedSaveValidationIssues.value.map(issue => issue.key)])])
 async function attemptSave() {
+  if (savingQuotation.value) return
   showSaveValidation.value = true
   if (saveValidationIssues.value.length) {
     toast(`暂时无法保存：还需完成 ${saveValidationIssues.value.length} 项必填内容`)
     return
   }
   savingQuotation.value = true
-  let logisticsRevisionConfirmed = false
   try {
+    if (!await checkLiveVersions(undefined, true)) { toast('当前报价资料有变化，请核对后再保存'); return }
     await flushDraft()
-    const validation = await validatePublishedLogisticsRevision()
-    logisticsRevisionConfirmed = true
-    if (validation.changed) {
-      await ensureQuoteLogistics(products.value[0])
-      toast('物流版本已更新，已重新计算，请确认后再保存')
-      return
-    }
     logisticsLoadState.value = 'ready'
     await save()
   } catch (error) {
-    if (!logisticsRevisionConfirmed && logisticsRules.length) logisticsLoadState.value = 'stale'
+    if (error instanceof ApiError && error.status === 409) syncPending.value = '报价依据'
     const details = error instanceof ApiError && error.fieldErrors.length
       ? `：${error.fieldErrors.map(item => item.message).join('；')}`
       : ''
@@ -1299,22 +1414,25 @@ function useLogistics(p: Product, option: { country: string; quoteRegion?: strin
   p.status = '已试算'
   toast(`已采用“${option.rule}”，运费 ¥${option.freight.toFixed(2)}`)
 }
-async function save() {
-  if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
+function logisticsSamplesFor(row: QuotationMatrixRow, p: Product) {
+  const quantities = [...new Set([1, 2, 3, Math.max(1, customQuoteQuantity.value || 1), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)])]
+  const rule = logisticsRules.find(item => item.id === row.ruleId)
+  return quantities.map(quantity => {
+    const weightKg = quoteMode.value === 'bundle' ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity)
+    const result = rule ? calculateLogisticsFee(rule, row.country, weightKg, [p.logisticsAttribute], undefined, row.quoteRegion) : null
+    return { input: { country: row.country, zoneName: row.quoteRegion || '', weightKg, marks: [p.logisticsAttribute] },
+      total: result ? Number(result.total.toFixed(2)) : null,
+      etaMinDays: result?.price.etaMinDays || 0, etaMaxDays: result?.price.etaMaxDays || 0 }
+  })
+}
+function buildQuoteOptions() {
   const p = products.value[0]
-  const customer = customerName.value.trim()
   const selectedMatrixRows = savedQuoteRows.value
-  if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
-  if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
-  if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
-  if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
-  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('应税国家的物流商税务属性待设置，请先到财务设置补齐'); return }
-  const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const snapshotQuantity = quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)
   const snapshotBaseWeightKg = quoteMode.value === 'bundle' ? bundleBaseWeight(1) : singleBaseWeight(p, snapshotQuantity)
   const snapshotPackagingWeightKg = quoteMode.value === 'bundle' ? bundlePackagingWeight(1) : singlePackagingWeight(p, snapshotQuantity)
   const snapshotWeightKg = snapshotBaseWeightKg + snapshotPackagingWeightKg
-  const quoteOptions = selectedMatrixRows.map((row) => {
+  return selectedMatrixRows.map((row) => {
     const countryCode = quotationCountries(p).find(country => country.name === row.country)?.code
       || logisticsCountries.find(country => country.name === row.country)?.code
       || ''
@@ -1333,6 +1451,7 @@ async function save() {
       freightCny: row.freight,
       logisticsChannelId: logisticsRules.find(rule => rule.id === row.ruleId)?.logisticsChannelId,
       logisticsVersionId: logisticsRules.find(rule => rule.id === row.ruleId)?.logisticsVersionId,
+      logisticsSamples: logisticsSamplesFor(row, p),
       logisticsInput: {
         country: row.country,
         baseWeightKg: snapshotBaseWeightKg,
@@ -1361,6 +1480,19 @@ async function save() {
       taxCustomUsd: row.taxCustomUsd,
     }
   })
+}
+async function save() {
+  if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
+  const p = products.value[0]
+  const customer = customerName.value.trim()
+  const selectedMatrixRows = savedQuoteRows.value
+  if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
+  if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
+  if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
+  if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
+  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('应税国家的物流商税务属性待设置，请先到财务设置补齐'); return }
+  const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
+  const quoteOptions = buildQuoteOptions()
   const productSummary = quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
@@ -1379,6 +1511,7 @@ async function save() {
     }
   }) : undefined
   const record = await createQuotationRecord({
+    purchaseVersions: Object.fromEntries(activePurchaseSkus().map(sku => [sku, purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)) || ''])),
     logisticsRevision: logisticsRevision.value,
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
     customerName: customer, quoteMode: quoteMode.value, productSummary,
@@ -1456,7 +1589,11 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 <template>
   <div class="jerry-app">
 
-    <main class="quotation-page">
+    <main class="quotation-page" :inert="syncRefreshing || undefined">
+      <section v-if="syncPending || syncError || syncRefreshing" class="live-data-notice" role="status">
+        <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}已更新，当前报价尚未采用新数据。` : `同步暂不可用：${syncError}` }}</span>
+        <button type="button" :disabled="syncRefreshing || savingQuotation" @click="updateLiveQuotation">{{ syncRefreshing ? '更新中…' : '更新报价' }}</button>
+      </section>
       <QuotationHeader :salesperson="selectedSalesperson" :rate="exchange.usd" :status="products[0]?.status || '待查询'" :mode-label="quoteMode === 'bundle' ? '组合 SKU 报价' : '单品 SKU 报价'" @show-rule="showRule=true" />
 
       <nav class="workflow" aria-label="报价流程"><span class="active"><i>1</i>填写报价条件</span><b>→</b><span><i>2</i>核对成本与重量</span><b>→</b><span><i>3</i>选择报价方式与渠道</span><b>→</b><span><i>4</i>确认并保存报价单</span></nav>
@@ -1604,4 +1741,5 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 .matrix-mode-switcher{overflow:hidden;border:1px solid #dfe6eb;border-radius:12px;background:#fff;box-shadow:0 10px 28px rgba(20,34,45,.05)}.matrix-mode-switcher>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 21px;border-bottom:1px solid #e5eaee}.matrix-mode-switcher>header p{margin:0 0 4px;color:#d97800;font-size:9px;font-weight:900;letter-spacing:.15em}.matrix-mode-switcher>header h2{margin:0;font-size:19px}.matrix-mode-switcher>header>span{color:#77848e;font-size:10px}.matrix-mode-switcher>nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 18px;background:#f7f9fb}.matrix-mode-switcher>nav button{display:flex;align-items:center;gap:11px;min-height:66px;padding:11px 13px;border:1px solid #dce4e9;border-radius:9px;background:#fff;color:#17232d;text-align:left;cursor:pointer}.matrix-mode-switcher>nav button.active{border-color:#ff9700;background:#fff6e8;box-shadow:inset 3px 0 #ff9700,0 0 0 2px rgba(255,151,0,.06)}.matrix-mode-switcher>nav button>i{width:36px;height:36px;display:grid;place-items:center;flex:0 0 36px;border-radius:9px;background:#f0f3f5;color:#d77900;font-size:16px;font-style:normal}.matrix-mode-switcher>nav button.active>i{background:#ffedd0}.matrix-mode-switcher>nav button>span{display:grid;gap:3px;min-width:0}.matrix-mode-switcher>nav button b{font-size:13px}.matrix-mode-switcher>nav button small{overflow:hidden;color:#77848e;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.matrix-mode-switcher>nav button em{margin-left:auto;padding:5px 8px;border-radius:12px;background:#f0f3f5;color:#65737e;font-size:9px;font-style:normal;white-space:nowrap}.matrix-mode-switcher>nav button.active em{background:#ff9700;color:#fff}.matrix-mode-panel{min-width:0}@media(max-width:1000px){.matrix-mode-switcher>nav{grid-template-columns:1fr 1fr}}@media(max-width:760px){.matrix-mode-switcher>header{align-items:flex-start;flex-direction:column}.matrix-mode-switcher>nav{grid-template-columns:1fr}.matrix-mode-switcher>nav button small{white-space:normal}}
 .logistics-load-panel{display:flex;align-items:center;gap:12px;padding:14px 17px;border:1px solid #dce6eb;border-left:4px solid #ff9700;border-radius:10px;background:#fff}.logistics-load-panel>i{width:20px;height:20px;flex:0 0 20px;border:3px solid #ffe2b8;border-top-color:#ff9700;border-radius:50%;animation:quote-logistics-spin .8s linear infinite}.logistics-load-panel>span{display:grid;gap:3px}.logistics-load-panel small{color:#77858f;font-size:9px}.logistics-load-panel>button{height:32px;margin-left:auto;padding:0 12px;border:1px solid #df9121;border-radius:6px;background:#fff;color:#a75b00;font-size:9px;font-weight:800}.logistics-load-panel.stale,.logistics-load-panel.empty{border-left-color:#e2a223;background:#fffaf1}.logistics-load-panel.error{border-left-color:#cc5143;background:#fff8f7}.logistics-load-panel:not(.loading)>i{border:0;background:#e69a1a;animation:none}.logistics-load-panel.error>i{background:#cc5143}@keyframes quote-logistics-spin{to{transform:rotate(360deg)}}
 .draft-status-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid #dce5ea;border-left:4px solid #6d8da0;border-radius:9px;background:#fff}.draft-status-bar>i{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#eaf0f4;color:#496575;font-style:normal;font-weight:900}.draft-status-bar>span{display:grid;gap:3px;min-width:0}.draft-status-bar b{font-size:11px}.draft-status-bar small{color:#7d8992;font-size:9px}.draft-status-bar>button{height:30px;margin-left:auto;padding:0 11px;border:1px solid #d5dde2;border-radius:6px;background:#fff;color:#5e6e78;font-size:9px;font-weight:800}.draft-status-bar>button+button{margin-left:0}.draft-status-bar.saved{border-left-color:#2a9360}.draft-status-bar.saved>i{background:#e5f5ec;color:#278657}.draft-status-bar.dirty,.draft-status-bar.saving{border-left-color:#e69a1a}.draft-status-bar.error,.draft-status-bar.conflict{border-left-color:#ce4e43;background:#fff9f8}.draft-status-bar.error>i,.draft-status-bar.conflict>i{background:#ffe9e6;color:#bd4037}.draft-dialog-mask{z-index:140}.draft-dialog{width:min(560px,92vw)}.draft-dialog>p{color:#66747e;line-height:1.7}.draft-dialog>footer{display:flex;justify-content:flex-end;gap:9px;margin-top:24px}.draft-dialog>footer button{height:36px;padding:0 14px;border:1px solid #d7dfe4;border-radius:7px;background:#fff;color:#53616c;font-size:10px;font-weight:800}.draft-dialog>footer button.primary{border-color:#17232d;background:#17232d;color:#fff}.draft-dialog>footer button.danger{border-color:#e5b9b5;color:#bd443b}@media(max-width:680px){.draft-status-bar{align-items:flex-start;flex-wrap:wrap}.draft-status-bar>span{width:calc(100% - 40px)}.draft-status-bar>button{margin-left:36px}.draft-dialog>footer{align-items:stretch;flex-direction:column}}
+.live-data-notice{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;border:1px solid #efc77d;border-radius:10px;background:#fff8ea;color:#784900;font-size:13px}.live-data-notice button{flex-shrink:0;padding:8px 14px;border:1px solid #d99127;border-radius:6px;background:#fff;color:#784900;cursor:pointer}
 </style>

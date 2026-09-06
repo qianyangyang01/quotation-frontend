@@ -1,0 +1,662 @@
+[
+  {
+    "at": "2026-09-06T12:28:05.778Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 32.8kB",
+        "CPUPerc": "2.79%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "35.49%",
+        "MemUsage": "363.4MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "96.3kB / 51.4kB",
+        "PIDs": "37"
+      },
+      {
+        "BlockIO": "32.8kB / 414kB",
+        "CPUPerc": "0.20%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "7.48%",
+        "MemUsage": "38.28MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "52.4kB / 93.6kB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "9.86MB / 0B",
+        "CPUPerc": "0.35%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.45%",
+        "MemUsage": "3.926MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "1.25kB / 126B",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 1,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0
+    }
+  },
+  {
+    "at": "2026-09-06T12:28:17.977Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 49.2kB",
+        "CPUPerc": "199.36%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "40.83%",
+        "MemUsage": "418.1MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "17.2MB / 2.62MB",
+        "PIDs": "79"
+      },
+      {
+        "BlockIO": "6.65MB / 414kB",
+        "CPUPerc": "136.18%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "15.50%",
+        "MemUsage": "79.38MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "1.17MB / 15.2MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "9.91MB / 176kB",
+        "CPUPerc": "3.31%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.52%",
+        "MemUsage": "4.035MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "441kB / 933kB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0
+    }
+  },
+  {
+    "at": "2026-09-06T12:28:27.974Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 49.2kB",
+        "CPUPerc": "175.91%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "43.88%",
+        "MemUsage": "449.4MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "58.8MB / 8.75MB",
+        "PIDs": "79"
+      },
+      {
+        "BlockIO": "6.86MB / 414kB",
+        "CPUPerc": "162.25%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "16.74%",
+        "MemUsage": "85.71MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "3.47MB / 49.1MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "9.95MB / 668kB",
+        "CPUPerc": "4.57%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.41%",
+        "MemUsage": "3.863MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "1.65MB / 4.27MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.044237
+    }
+  },
+  {
+    "at": "2026-09-06T12:28:37.986Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 65.5kB",
+        "CPUPerc": "167.30%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "44.54%",
+        "MemUsage": "456MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "103MB / 14.9MB",
+        "PIDs": "79"
+      },
+      {
+        "BlockIO": "6.86MB / 446kB",
+        "CPUPerc": "134.77%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "17.40%",
+        "MemUsage": "89.1MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "6.59MB / 95.5MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "9.99MB / 1.35MB",
+        "CPUPerc": "3.86%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.39%",
+        "MemUsage": "3.824MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "3.19MB / 8.44MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 3,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.012596
+    }
+  },
+  {
+    "at": "2026-09-06T12:28:47.984Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 81.9kB",
+        "CPUPerc": "134.94%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "44.99%",
+        "MemUsage": "460.7MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "153MB / 22MB",
+        "PIDs": "79"
+      },
+      {
+        "BlockIO": "6.86MB / 446kB",
+        "CPUPerc": "135.93%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "17.59%",
+        "MemUsage": "90.05MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "9.23MB / 136MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10MB / 1.93MB",
+        "CPUPerc": "3.74%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.37%",
+        "MemUsage": "3.797MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "4.62MB / 12.3MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.086464
+    }
+  },
+  {
+    "at": "2026-09-06T12:28:57.996Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 81.9kB",
+        "CPUPerc": "131.80%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "44.80%",
+        "MemUsage": "458.7MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "210MB / 29.9MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.86MB / 606kB",
+        "CPUPerc": "141.30%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "17.92%",
+        "MemUsage": "91.73MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "12.5MB / 186MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.1MB / 2.45MB",
+        "CPUPerc": "3.77%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.38%",
+        "MemUsage": "3.801MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "5.91MB / 15.8MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.032142
+    }
+  },
+  {
+    "at": "2026-09-06T12:29:08.008Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 98.3kB",
+        "CPUPerc": "88.23%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "44.76%",
+        "MemUsage": "458.4MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "254MB / 36.2MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.86MB / 606kB",
+        "CPUPerc": "114.98%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "18.22%",
+        "MemUsage": "93.26MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "15.5MB / 231MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.1MB / 3.03MB",
+        "CPUPerc": "4.03%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.38%",
+        "MemUsage": "3.809MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "7.33MB / 19.7MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 9,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0
+    }
+  },
+  {
+    "at": "2026-09-06T12:29:18.020Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 115kB",
+        "CPUPerc": "58.72%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "44.89%",
+        "MemUsage": "459.6MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "311MB / 44MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.86MB / 606kB",
+        "CPUPerc": "121.66%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "18.09%",
+        "MemUsage": "92.63MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "18.4MB / 277MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.2MB / 3.61MB",
+        "CPUPerc": "3.98%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.39%",
+        "MemUsage": "3.824MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "8.75MB / 23.6MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 3,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0
+    }
+  },
+  {
+    "at": "2026-09-06T12:29:28.004Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 115kB",
+        "CPUPerc": "50.62%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "45.00%",
+        "MemUsage": "460.8MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "361MB / 51.1MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.87MB / 606kB",
+        "CPUPerc": "126.79%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "18.22%",
+        "MemUsage": "93.29MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "21.1MB / 317MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.2MB / 4.19MB",
+        "CPUPerc": "3.55%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.37%",
+        "MemUsage": "3.789MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "10.2MB / 27.5MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.042767
+    }
+  },
+  {
+    "at": "2026-09-06T12:29:38.008Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 127kB",
+        "CPUPerc": "53.66%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "45.06%",
+        "MemUsage": "461.5MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "411MB / 58.2MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.87MB / 606kB",
+        "CPUPerc": "122.31%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "18.43%",
+        "MemUsage": "94.36MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "24.1MB / 362MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.2MB / 4.84MB",
+        "CPUPerc": "3.36%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.36%",
+        "MemUsage": "3.781MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "11.6MB / 31.4MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.038556
+    }
+  },
+  {
+    "at": "2026-09-06T12:29:48.027Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 139kB",
+        "CPUPerc": "50.11%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "45.09%",
+        "MemUsage": "461.7MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "457MB / 64.5MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.87MB / 2.75MB",
+        "CPUPerc": "125.15%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "18.65%",
+        "MemUsage": "95.51MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "27.3MB / 410MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.3MB / 5.47MB",
+        "CPUPerc": "3.42%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.54%",
+        "MemUsage": "4.062MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "13.2MB / 35.6MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 3,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.052734
+    }
+  },
+  {
+    "at": "2026-09-06T12:29:58.026Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 139kB",
+        "CPUPerc": "47.99%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "45.12%",
+        "MemUsage": "462.1MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "506MB / 71.5MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.87MB / 5.09MB",
+        "CPUPerc": "146.96%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "18.88%",
+        "MemUsage": "96.69MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "30.3MB / 456MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.3MB / 5.99MB",
+        "CPUPerc": "3.29%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.40%",
+        "MemUsage": "3.844MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "14.4MB / 39.1MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.034035
+    }
+  },
+  {
+    "at": "2026-09-06T12:30:08.040Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 152kB",
+        "CPUPerc": "49.48%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "45.17%",
+        "MemUsage": "462.6MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "563MB / 79.2MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "6.87MB / 7.55MB",
+        "CPUPerc": "141.07%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "18.55%",
+        "MemUsage": "94.99MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "33.2MB / 501MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.4MB / 6.5MB",
+        "CPUPerc": "3.24%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.39%",
+        "MemUsage": "3.828MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "15.9MB / 42.9MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 3,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0.099443
+    }
+  },
+  {
+    "at": "2026-09-06T12:30:18.048Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 164kB",
+        "CPUPerc": "45.69%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "45.28%",
+        "MemUsage": "463.7MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "612MB / 86.2MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "19.6MB / 10.3MB",
+        "CPUPerc": "108.14%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "19.38%",
+        "MemUsage": "99.23MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "36.1MB / 545MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.4MB / 7.08MB",
+        "CPUPerc": "3.90%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.39%",
+        "MemUsage": "3.824MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "17.3MB / 46.8MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 2,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0
+    }
+  },
+  {
+    "at": "2026-09-06T12:30:25.914Z",
+    "containers": [
+      {
+        "BlockIO": "0B / 164kB",
+        "CPUPerc": "1.11%",
+        "Container": "quotation-interaction-perf-quotation-backend-1",
+        "ID": "3bc232a9a88f",
+        "MemPerc": "45.26%",
+        "MemUsage": "463.5MiB / 1GiB",
+        "Name": "quotation-interaction-perf-quotation-backend-1",
+        "NetIO": "640MB / 90.2MB",
+        "PIDs": "77"
+      },
+      {
+        "BlockIO": "19.6MB / 24.1MB",
+        "CPUPerc": "0.14%",
+        "Container": "quotation-interaction-perf-quotation-postgres-1",
+        "ID": "78512aa77a70",
+        "MemPerc": "19.40%",
+        "MemUsage": "99.35MiB / 512MiB",
+        "Name": "quotation-interaction-perf-quotation-postgres-1",
+        "NetIO": "37.8MB / 569MB",
+        "PIDs": "16"
+      },
+      {
+        "BlockIO": "10.4MB / 7.51MB",
+        "CPUPerc": "0.35%",
+        "Container": "quotation-interaction-perf-quotation-redis-1",
+        "ID": "15d37b90095d",
+        "MemPerc": "2.53%",
+        "MemUsage": "4.047MiB / 160MiB",
+        "Name": "quotation-interaction-perf-quotation-redis-1",
+        "NetIO": "18.2MB / 49.4MB",
+        "PIDs": "6"
+      }
+    ],
+    "db": {
+      "connections": 11,
+      "active": 1,
+      "lockWaits": 0,
+      "longestActiveSeconds": 0
+    }
+  }
+]
