@@ -47,6 +47,18 @@ it('reloads the last available page after concurrent deletions shrink the page c
   expect(mocks.stats).toHaveBeenCalledTimes(1)
 })
 
+it('shares repeated clicks on the same loading page',async()=>{
+  mocks.page.mockResolvedValueOnce({...page('FIRST'),total:20,totalPages:2})
+  await mount()
+  let resolvePage!:(value:ReturnType<typeof page>)=>void
+  mocks.page.mockImplementationOnce(()=>new Promise(resolve=>{resolvePage=resolve}))
+  const next=Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.trim()==='2')!
+  next.click();next.click();await nextTick()
+  expect(mocks.page).toHaveBeenCalledTimes(2)
+  resolvePage({...page('SECOND'),total:20,totalPages:2});await flush()
+  expect(document.querySelector('table')?.textContent).toContain('SECOND')
+})
+
 it('uses authoritative save data on the unfiltered first page without a second list read',async()=>{
   await mount()
   Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.includes('新增采购资料'))!.click();await flush()

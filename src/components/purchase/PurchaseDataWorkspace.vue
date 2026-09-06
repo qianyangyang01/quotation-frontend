@@ -97,6 +97,7 @@ let pageAbort:AbortController|null=null
 let statsRequest=0
 let statsAbort:AbortController|null=null
 let statsTimer=0
+let pendingPage:{key:string;request:Promise<void>}|null=null
 function invalidatePage(){pageRequest++;pageAbort?.abort()}
 watch(search, () => { invalidatePage();loading.value=true;currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void reload(false),250) })
 watch(pageSize, () => { currentPage.value = 1;void reload(false) })
@@ -119,7 +120,16 @@ async function refreshStats(){
   try{const stats=await loadPurchaseStats(controller.signal);if(request===statsRequest)purchaseStats.value=stats}
   catch(error){if(!controller.signal.aborted&&request===statsRequest)toast(error instanceof Error?error.message:'采购统计读取失败')}
 }
-async function reload(refreshStatistics=true) {
+function reload(refreshStatistics=true):Promise<void>{
+  const key=JSON.stringify([search.value.trim(),currentPage.value,pageSize.value])
+  // Share only an active read in this component. Mutations always force a fresh read.
+  if(!refreshStatistics&&pendingPage?.key===key&&!pageAbort?.signal.aborted)return pendingPage.request
+  const request=readPage(refreshStatistics)
+  pendingPage={key,request}
+  void request.finally(()=>{if(pendingPage?.request===request)pendingPage=null})
+  return request
+}
+async function readPage(refreshStatistics:boolean) {
   window.clearTimeout(searchTimer)
   invalidatePage();const request=pageRequest
   const controller=new AbortController();pageAbort=controller
