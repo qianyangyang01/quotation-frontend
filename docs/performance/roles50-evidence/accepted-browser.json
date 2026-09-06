@@ -1,0 +1,46 @@
+{
+  "verifiedAt": "2026-09-06T08:54:08.081Z",
+  "base": "http://127.0.0.1:18098",
+  "buildCommit": "d707d269ad37aa3da5fc9712038038d21c7d1a35",
+  "loadActive": true,
+  "checks": [
+    {
+      "role": "purchase",
+      "account": "PERFPUR",
+      "visibleModules": [
+        "采购"
+      ],
+      "results": [
+        "快速填入PERF-SKU-00002再00003，最终仅返回00003，共1条",
+        "不存在的工厂返回0条",
+        "PERF-SKU-000返回99条，下一页显示11–20条，第2/10页"
+      ]
+    },
+    {
+      "role": "logistics",
+      "account": "PERFLOG",
+      "visibleModules": [
+        "物流"
+      ],
+      "results": [
+        "登录跳转物流页面"
+      ]
+    },
+    {
+      "role": "employee",
+      "account": "PERF01",
+      "visibleModules": [
+        "我的报价",
+        "我的报价记录"
+      ],
+      "results": [
+        "SKU PERF-SKU-00001加载文胸及7国渠道摘要",
+        "澳大利亚切换后提示选择分区并展示分区选项"
+      ]
+    }
+  ],
+  "limitations": [
+    "Browser functional checks only; no frontend latency percentile measured",
+    "No production browser acceptance performed this turn"
+  ]
+}
