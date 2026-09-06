@@ -38,6 +38,15 @@ class PurchaseSearchPostgresIntegrationTest {
                 UUID.randomUUID(),"BIZ-"+i,"{\"name\":\"工厂蓝色\",\"size\":\"XL\",\"note\":\"100%_ " + i + "\"}");
     }
     @AfterAll static void close(){if(em!=null)em.close();if(factory!=null)factory.destroy();}
+    @BeforeEach void begin(){em.getTransaction().begin();}
+    @AfterEach void rollback(){em.getTransaction().rollback();}
+    @Test void searchPlanSettingDoesNotLeakToTheNextTransaction(){
+        assertEquals("auto",em.createNativeQuery("show plan_cache_mode").getSingleResult());
+        repository.useCustomSearchPlan();
+        assertEquals("force_custom_plan",em.createNativeQuery("show plan_cache_mode").getSingleResult());
+        em.getTransaction().rollback();em.getTransaction().begin();
+        assertEquals("auto",em.createNativeQuery("show plan_cache_mode").getSingleResult());
+    }
     @Test void matchingAndTotalsAgreeWithOriginalSearchAcrossPages(){
         for(var query:List.of("BIZ-","蓝色","xl","100%_","not-found")){
             var expected=jdbc.queryForList("select sku from purchase_product where lower(sku) like concat('%',lower(?),'%') or lower(payload::text) like concat('%',lower(?),'%') order by updated_at desc,id",String.class,query,query);

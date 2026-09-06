@@ -33,6 +33,9 @@ public class PurchaseProductService {
         if(cleaned.isEmpty()) return products.findAll(org.springframework.data.domain.PageRequest.of(
                 pageable.getPageNumber(),pageable.getPageSize(),org.springframework.data.domain.Sort.by(
                         org.springframework.data.domain.Sort.Order.desc("updatedAt"),org.springframework.data.domain.Sort.Order.asc("id")))).map(this::view);
+        // Short/common words need a different plan from selective SKUs. Limit the setting
+        // to this read transaction; a cached generic GIN plan scans the entire index for them.
+        products.useCustomSearchPlan();
         var rows=products.searchPage(cleaned,pageable.getPageSize(),pageable.getOffset());
         var content=rows.stream().filter(row->row.getSku()!=null).map(row->{
             var value=(ObjectNode)searchMapper.readTree(row.getPayload());

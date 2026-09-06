@@ -26,8 +26,8 @@ public interface PurchaseProductRepository extends JpaRepository<PurchaseProduct
     @Query(value="""
         WITH matches AS MATERIALIZED (
           SELECT id, updated_at FROM purchase_product
-          WHERE lower(sku) LIKE concat('%',lower(:query),'%')
-             OR lower(payload::text) LIKE concat('%',lower(:query),'%')
+          WHERE lower(sku) LIKE ('%' || lower(:query) || '%')
+             OR lower(payload::text) LIKE ('%' || lower(:query) || '%')
         ), selected AS (
           SELECT id FROM matches ORDER BY updated_at DESC,id LIMIT :limit OFFSET :offset
         )
@@ -38,6 +38,8 @@ public interface PurchaseProductRepository extends JpaRepository<PurchaseProduct
         ORDER BY p.updated_at DESC,p.id
         """,nativeQuery=true)
     List<SearchRow> searchPage(@Param("query") String query,@Param("limit") int limit,@Param("offset") long offset);
+    @Query(value="select set_config('plan_cache_mode','force_custom_plan',true)",nativeQuery=true)
+    String useCustomSearchPlan();
     interface SearchRow {
         String getPayload(); String getSku(); Long getVersion(); String getCatalogState();
         Boolean getQuoteReady(); java.time.Instant getUpdatedAt(); long getTotal();
