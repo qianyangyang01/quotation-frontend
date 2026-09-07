@@ -1148,7 +1148,7 @@ function saveEditor() {
         </div>
       </section>
 
-      <section v-else-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab!=='countries' && financeSettingsTab!=='taxes')" class="table-card">
+      <section v-else-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab!=='countries' && financeSettingsTab!=='taxes' && financeSettingsTab!=='surcharges')" class="table-card">
         <table v-if="mode === 'products'" class="product-table">
           <colgroup><col class="product-main-col"><col class="product-price-col"><col class="product-weight-col"><col class="product-freight-col"><col class="product-spec-col"><col class="product-status-col"><col class="product-actions-col"></colgroup>
           <thead><tr><th>商品 / SKU</th><th>采购价格（CNY）</th><th>重量与起订量</th><th>国内运费档位（CNY）</th><th>规格信息</th><th>资料状态</th><th>操作</th></tr></thead>
