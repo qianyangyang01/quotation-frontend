@@ -5,6 +5,7 @@ const dependencies = vi.hoisted(() => ({
   loadPublishedLogisticsManifest: vi.fn(),
   loadFinanceCountrySettings: vi.fn(),
   loadFinanceTaxSettings: vi.fn(),
+  loadFinanceSurchargeSettings: vi.fn(() => ({ countries: [], providers: [], updatedAt: '尚未保存' })),
   loadFinanceChannelPolicies: vi.fn(),
 }))
 
@@ -14,6 +15,7 @@ vi.mock('@/data/financeChannelPolicies', () => ({
   loadFinanceCountrySettings: dependencies.loadFinanceCountrySettings,
   loadFinanceChannelPolicies: dependencies.loadFinanceChannelPolicies,
 }))
+vi.mock('@/data/financeSurchargeSettings', () => ({ loadFinanceSurchargeSettings: dependencies.loadFinanceSurchargeSettings }))
 vi.mock('@/data/financeTaxSettings', () => ({ loadFinanceTaxSettings: dependencies.loadFinanceTaxSettings }))
 
 describe('quotation workspace configuration bootstrap', () => {

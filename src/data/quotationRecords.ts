@@ -46,6 +46,11 @@ export interface QuotationRecordQuoteOption {
   taxCustomerType?: 'A' | 'B'
   taxFeeMode?: 'no-tax' | 'exempt' | 'fixed-order' | 'per-item' | 'missing'
   taxPerItemFeeUsd?: number
+  surchargeEnabled?: boolean
+  surchargeConfigured?: boolean
+  surchargeExempt?: boolean
+  surchargeUsd?: number
+  surchargeLabel?: string
   taxLabel?: string
   tax1Usd?: number | null
   tax2Usd?: number | null
@@ -205,6 +210,11 @@ function normalizeQuoteOptions(value: unknown, recordId: string, rawRecord: Part
     option.taxCustomerType = raw?.taxCustomerType === 'B' ? 'B' : raw?.taxCustomerType === 'A' ? 'A' : undefined
     option.taxFeeMode = raw?.taxFeeMode === 'no-tax' || raw?.taxFeeMode === 'exempt' || raw?.taxFeeMode === 'fixed-order' || raw?.taxFeeMode === 'per-item' || raw?.taxFeeMode === 'missing' ? raw.taxFeeMode : undefined
     option.taxPerItemFeeUsd = optionalNumber(raw?.taxPerItemFeeUsd)
+    option.surchargeEnabled = typeof raw?.surchargeEnabled === 'boolean' ? raw.surchargeEnabled : undefined
+    option.surchargeConfigured = typeof raw?.surchargeConfigured === 'boolean' ? raw.surchargeConfigured : undefined
+    option.surchargeExempt = typeof raw?.surchargeExempt === 'boolean' ? raw.surchargeExempt : undefined
+    option.surchargeUsd = optionalNumber(raw?.surchargeUsd)
+    option.surchargeLabel = optionalText(raw?.surchargeLabel)
     option.taxLabel = optionalText(raw?.taxLabel)
     option.tax1Usd = raw?.tax1Usd == null ? null : optionalN(raw.tax1Usd)
     option.tax2Usd = raw?.tax2Usd == null ? null : optionalN(raw.tax2Usd)

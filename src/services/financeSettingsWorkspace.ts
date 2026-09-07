@@ -1,3 +1,4 @@
+import { loadFinanceSurchargeSettings, type FinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import {
   loadCustomerGradeSettings,
   loadFinanceChannelPolicies,
@@ -58,6 +59,7 @@ export type FinanceSettingsWorkspace = {
   countries: FinanceCountrySetting[]
   customerGrades: CustomerGradeSetting[]
   exchangeRate: FinanceExchangeRateSetting
+  surchargeSettings: FinanceSurchargeSettings
   taxSettings: FinanceTaxSettings
 }
 
@@ -68,6 +70,7 @@ export function readFinanceSettingsWorkspace(): FinanceSettingsWorkspace {
     customerGrades: loadCustomerGradeSettings(),
     exchangeRate: loadFinanceExchangeRate(),
     taxSettings: loadFinanceTaxSettings(),
+    surchargeSettings: loadFinanceSurchargeSettings(),
   }
 }
 

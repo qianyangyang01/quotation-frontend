@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { calculateFinanceQuoteFees, FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
@@ -25,7 +26,7 @@ import { calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCount
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
-import { calculateFinanceQuoteTax, FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings } from '@/data/financeTaxSettings'
+import { FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings } from '@/data/financeTaxSettings'
 import { inferCountryContinent } from '@/data/countryClassification'
 import {
   customerGradeCoefficient,
@@ -123,6 +124,7 @@ const route = useRoute()
 const purchaseRecords = ref<PurchaseProductRecord[]>([])
 const financePolicies = shallowRef(loadFinanceChannelPolicies())
 const financeCountrySettings = ref(loadFinanceCountrySettings())
+const financeSurchargeSettings = ref(loadFinanceSurchargeSettings())
 const financeTaxSettings = ref(loadFinanceTaxSettings())
 const quotationAttributeOptions = [...new Set([...financeLogisticsAttributeOptions, ...financePolicies.value.map(policy => policy.category)])]
 const skuSearch = ref('')
@@ -251,7 +253,7 @@ function selectedGradeCoefficient() { return customerGradeCoefficient(customerGr
 function salePrice(p: Product) { return totalCost(p) * selectedGradeCoefficient() }
 function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
 function taxResult(country: string, provider: string, baseQuoteCny: number) {
-  return calculateFinanceQuoteTax(financeTaxSettings.value, country, provider, usdPriceFromCny(baseQuoteCny))
+  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny))
 }
 function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p)).totalUsd * exchange.value.usd }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
@@ -516,6 +518,7 @@ async function ensureQuoteLogistics(p: Product) {
     logisticsRulesGeneration.value += 1
     financePolicies.value = loadFinanceChannelPolicies()
     financeTaxSettings.value = loadFinanceTaxSettings()
+  financeSurchargeSettings.value = loadFinanceSurchargeSettings()
     logisticsRevision.value = result.revision
     logisticsLoadState.value = result.rules.length ? (result.verified ? 'ready' : 'stale') : 'empty'
     if (!result.rules.length) {
@@ -595,6 +598,7 @@ function applyLiveFinance() {
   financePolicies.value = loadFinanceChannelPolicies()
   financeCountrySettings.value = loadFinanceCountrySettings()
   financeTaxSettings.value = loadFinanceTaxSettings()
+  financeSurchargeSettings.value = loadFinanceSurchargeSettings()
   customerGradeSettings.splice(0, customerGradeSettings.length, ...loadCustomerGradeSettings())
   const rate = loadFinanceExchangeRate()
   exchange.value = { ...exchange.value, usd: rate.usdCny, updatedAt: rate.updatedAt }
@@ -663,6 +667,7 @@ function refreshFinanceCountrySettings(event?: Event) {
 function refreshFinanceTaxSettings(event?: Event) {
   if (event instanceof StorageEvent && event.key && event.key !== 'milano.finance-tax-settings.v1') return
   financeTaxSettings.value = loadFinanceTaxSettings()
+  financeSurchargeSettings.value = loadFinanceSurchargeSettings()
   products.value.forEach(product => normalizeRule(product, true))
 }
 async function reorderCommonCountries(countries: string[]) {
@@ -901,6 +906,7 @@ async function initializeQuotationWorkspace() {
     const configuration = await loadQuotationWorkspaceConfiguration()
     financeCountrySettings.value = configuration.countrySettings
     financeTaxSettings.value = configuration.taxSettings
+    financeSurchargeSettings.value = configuration.surchargeSettings
     financePolicies.value = configuration.channelPolicies
     readiness.value = await loadQuotationReadiness()
     const restored = await loadAndRestoreDraft()
@@ -956,6 +962,7 @@ watch(draftSignature, signature => markDraftDirty(signature))
 onMounted(async () => {
   window.addEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.addEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
+  window.addEventListener(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.addEventListener('storage', refreshFinanceCountrySettings)
   window.addEventListener('storage', refreshFinanceTaxSettings)
   window.addEventListener('beforeunload', beforeWindowUnload)
@@ -974,6 +981,7 @@ onBeforeUnmount(() => {
   viewDisposed = true
   window.removeEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.removeEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
+  window.removeEventListener(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.removeEventListener('storage', refreshFinanceCountrySettings)
   window.removeEventListener('storage', refreshFinanceTaxSettings)
   stopLiveSync?.()
@@ -1121,6 +1129,11 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
         countryFixedTaxUsd: tax.fixedFeeUsd,
         taxFeeMode: tax.feeMode,
         taxLabel: tax.label,
+        surchargeEnabled: tax.surchargeEnabled,
+        surchargeConfigured: tax.surchargeConfigured,
+        surchargeExempt: tax.surchargeExempt,
+        surchargeUsd: tax.surchargeUsd,
+        surchargeLabel: tax.surchargeLabel,
         tax1Usd: quote1?.tax.taxUsd ?? null,
         tax2Usd: quote2?.tax.taxUsd ?? null,
         tax3Usd: quote3?.tax.taxUsd ?? null,
@@ -1170,7 +1183,7 @@ function quoteMatrixContextKey(p: Product) {
     ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
   const priceInputs = {
-    tax: financeTaxSettings.value, policies: financePolicies.value,
+    tax: financeTaxSettings.value, surcharge: financeSurchargeSettings.value, policies: financePolicies.value,
     quantity: p.quantity, customQuantity: customQuoteQuantity.value,
     purchase: p.purchase, freight: p.purchaseFreightPerUnit, invoiceTax: p.purchaseInvoiceTaxApplied,
     monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd,
@@ -1209,6 +1222,7 @@ function matrixRowsSignature(items: QuotationMatrixRow[]) {
     row.quote3,
     row.quoteCustom,
     row.taxLabel,
+    row.surchargeLabel,
     row.tax1Usd,
     row.tax2Usd,
     row.tax3Usd,
@@ -1277,6 +1291,11 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     countryFixedTaxUsd: tax.fixedFeeUsd,
     taxFeeMode: tax.feeMode,
     taxLabel: tax.label,
+        surchargeEnabled: tax.surchargeEnabled,
+        surchargeConfigured: tax.surchargeConfigured,
+        surchargeExempt: tax.surchargeExempt,
+        surchargeUsd: tax.surchargeUsd,
+        surchargeLabel: tax.surchargeLabel,
     tax1Usd: quote1?.tax.taxUsd ?? null,
     tax2Usd: quote2?.tax.taxUsd ?? null,
     tax3Usd: quote3?.tax.taxUsd ?? null,
@@ -1310,7 +1329,7 @@ const saveValidationIssues = computed(() => {
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
-  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'应税国家的物流商税务属性待设置，请到财务设置补齐' })
+  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message:'物流商税务或附加费属性待设置，请到对应财务模块补齐' })
   if (readiness.value && !readiness.value.ready) issues.push({ key:'businessReadiness', label:'业务就绪条件', message:`报价业务尚未就绪：${readiness.value.missing.join('；')}` })
   if (p?.sku && logisticsLoadState.value === 'idle') issues.push({ key:'logisticsRules', label:'物流规则', message:'请加载当前商品的物流规则' })
   if (logisticsLoadState.value === 'loading') issues.push({ key:'logisticsRules', label:'物流规则', message:'物流规则正在加载，请稍候' })
@@ -1367,15 +1386,17 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   }
   const unit = quoteMode.value === 'bundle' ? '套' : '件'
   const values = [
-    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（USD）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（CNY）`],
+    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', '附加费属性', '附加费（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（USD）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（CNY）`],
     ...rows.map(row => [
       row.country,
       row.quoteRegion || '全国统一',
       row.carrier,
       row.transport,
       row.eta,
-      row.taxFeeMode === 'no-tax' ? '无关税' : row.taxIncluded ? '免税' : row.taxConfigured ? '不免税' : '物流商税务属性待设置',
+      row.taxFeeMode === 'no-tax' ? '无关税' : row.taxIncluded ? '免税' : row.taxFeeMode !== 'missing' ? '不免税' : '物流商税务属性待设置',
       row.taxFeeMode === 'fixed-order' ? row.countryFixedTaxUsd.toFixed(2) : '',
+      row.surchargeLabel || '无附加费',
+      row.surchargeEnabled ? Number(row.surchargeUsd || 0).toFixed(2) : '',
       row.quote1 == null ? '' : row.quote1.toFixed(2),
       row.quote1 == null ? '' : (row.quote1 * exchange.value.usd).toFixed(2),
       row.quote2 == null ? '' : row.quote2.toFixed(2),
@@ -1474,6 +1495,11 @@ function buildQuoteOptions() {
       countryFixedTaxUsd: row.countryFixedTaxUsd,
       taxFeeMode: row.taxFeeMode,
       taxLabel: row.taxLabel,
+      surchargeEnabled: row.surchargeEnabled,
+      surchargeConfigured: row.surchargeConfigured,
+      surchargeExempt: row.surchargeExempt,
+      surchargeUsd: row.surchargeUsd,
+      surchargeLabel: row.surchargeLabel,
       tax1Usd: row.tax1Usd,
       tax2Usd: row.tax2Usd,
       tax3Usd: row.tax3Usd,
@@ -1490,7 +1516,7 @@ async function save() {
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
   if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
-  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('应税国家的物流商税务属性待设置，请先到财务设置补齐'); return }
+  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const quoteOptions = buildQuoteOptions()
   const productSummary = quoteMode.value === 'bundle'

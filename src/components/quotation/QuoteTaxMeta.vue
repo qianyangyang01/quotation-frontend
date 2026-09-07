@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { QuotationMatrixRow } from './types'
 
 const props = defineProps<{ row: QuotationMatrixRow }>()
-const missing = computed(() => !props.row.taxIncluded && !props.row.taxConfigured)
+const missing = computed(() => props.row.taxFeeMode === 'missing')
 const badgeText = computed(() => {
   if (props.row.taxFeeMode === 'no-tax') return '无关税'
   if (props.row.taxIncluded) return '免税'
@@ -14,6 +14,7 @@ const badgeText = computed(() => {
 
 <template>
   <mark class="tax-channel-badge" :class="{ exempt:row.taxIncluded, missing }">{{ badgeText }}</mark>
+  <mark v-if="row.surchargeEnabled" class="tax-channel-badge" :class="{ missing: row.surchargeConfigured === false }" :title="row.surchargeConfigured === false ? '请在财务附加费设置中配置该物流商' : '附加费已计入各数量的最终报价，整单收取一次'">{{ row.surchargeLabel }}</mark>
 </template>
 
 <style scoped>

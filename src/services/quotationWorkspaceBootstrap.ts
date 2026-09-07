@@ -1,3 +1,4 @@
+import { loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { loadFinanceChannelPolicies, loadFinanceCountrySettings } from '@/data/financeChannelPolicies'
 import { loadFinanceTaxSettings } from '@/data/financeTaxSettings'
 import { loadPublishedLogisticsManifest } from '@/data/publishedLogisticsRepository'
@@ -12,6 +13,7 @@ export async function loadQuotationWorkspaceConfiguration() {
   return {
     countrySettings: loadFinanceCountrySettings(),
     taxSettings: loadFinanceTaxSettings(),
+    surchargeSettings: loadFinanceSurchargeSettings(),
     channelPolicies: loadFinanceChannelPolicies(),
   }
 }

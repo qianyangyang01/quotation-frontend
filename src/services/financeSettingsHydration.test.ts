@@ -8,6 +8,7 @@ import {
   financeSettingsAreHydrated,
   hydrateFinanceSettings,
   readFinanceSetting,
+  writeFinanceSetting,
 } from './financeSettings'
 
 function settings(exchangeRate = 6.75) {
@@ -41,6 +42,17 @@ describe('finance settings hydration', () => {
     expect(financeSettingsAreHydrated()).toBe(true)
     expect(readFinanceSetting<{ usdCny: number }>('exchange-rate')?.usdCny).toBe(6.75)
     expect(readFinanceSetting<unknown[]>('customer-grades')).toHaveLength(1)
+  })
+
+  it('loads a newly unconfigured surcharge separately and creates it with version -1', async () => {
+    http.get.mockResolvedValue(settings())
+    await hydrateFinanceSettings()
+    expect(readFinanceSetting('surcharge-settings')).toMatchObject({ countries: [], providers: [] })
+    const value = { countries: [], providers: [], updatedAt: 'test' }
+    http.put.mockResolvedValue({value, _version: 0})
+    await writeFinanceSetting('surcharge-settings', value)
+    expect(http.put).toHaveBeenCalledWith('/finance-settings/surcharge-settings', value, {'If-Match': '-1'})
+    expect(readFinanceSetting('tax-settings')).toMatchObject({updatedAt: '财务维护'})
   })
 
   it('marks a failed forced refresh unavailable instead of exposing stale values', async () => {
