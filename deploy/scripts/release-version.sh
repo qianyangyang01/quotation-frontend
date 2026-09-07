@@ -73,6 +73,13 @@ chmod 0600 "$release_deploy_dir/.env"
 sed -i "s/^QUOTATION_RELEASE=.*/QUOTATION_RELEASE=$release/" "$release_deploy_dir/.env"
 docker compose --project-name quotation-prod --env-file "$release_deploy_dir/.env" -f "$release_deploy_dir/docker-compose.yml" \
   pull quotation-postgres quotation-redis quotation-minio
+if [[ -n "$existing_containers" ]]; then
+  active_imports="$(docker exec quotation-prod-quotation-postgres-1 psql -U "${QUOTATION_DB_USER:-quotation_app}" -d "${QUOTATION_DB_NAME:-quotation_prod}" -Atc "select count(*) from logistics_import_batch where status in ('queued','processing')")"
+  if [[ "$active_imports" != "0" ]]; then
+    echo "ERROR: $active_imports logistics imports are active; finish them before switching containers" >&2
+    exit 1
+  fi
+fi
 docker compose --project-name quotation-prod --env-file "$release_deploy_dir/.env" -f "$release_deploy_dir/docker-compose.yml" up -d --remove-orphans
 bash "$release_deploy_dir/scripts/container-healthcheck.sh" "$release_deploy_dir"
 

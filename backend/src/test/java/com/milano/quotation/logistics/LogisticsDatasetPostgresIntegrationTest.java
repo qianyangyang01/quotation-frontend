@@ -156,6 +156,13 @@ class LogisticsDatasetPostgresIntegrationTest {
             assertEquals("draft",batch.path("payload").path("results").get(0).path("status").asText(),batch.toString());
             assertEquals(1,datasets.workspace(dataset).path("channels").size());verify(logistics).createDraft(any(),any());
             worker.process(id);verifyNoMoreInteractions(logistics);
+            payload.put("error","prior interrupted attempt");
+            jdbc.sql("update logistics_import_batch set status='queued',payload=cast(:payload as jsonb) where id=:id").param("id",id).param("payload",payload.toString()).update();
+            reset(logistics);when(logistics.createDraft(any(),any())).thenThrow(com.milano.quotation.common.AppException.conflict("已有不同待审稿"));
+            worker.process(id);var conflicted=worker.get(id).path("payload");
+            assertFalse(conflicted.has("error"));
+            var outcome=conflicted.path("results").get(0);assertEquals("blocked",outcome.path("status").asText());
+            assertFalse(outcome.has("parsed"));assertTrue(outcome.path("priceRows").asInt()>0);
         }finally{worker.close();}
     }finally{s.setRollbackOnly();}});}
     @Test void failedSourceRetentionUsesAPostgresCompatibleTimestamp(){tx.executeWithoutResult(s->{try{

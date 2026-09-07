@@ -163,6 +163,7 @@ public class LogisticsImportService {
         var lease=UUID.randomUUID();
         if(jdbc.sql("update logistics_import_batch set status='processing',phase='parsing',lease_id=:lease,updated_at=now() where id=:id and status='queued'").param("lease",lease).param("id",id).update()!=1)return;
         var batch=get(id);var payload=(ObjectNode)batch.path("payload").deepCopy();var dataset=UUID.fromString(batch.path("dataset_id").asText());
+        payload.remove("error");
         var actor=batch.path("requested_by").asText();long start=System.nanoTime();
         var priorReports=payload.path("fileReports").deepCopy();var priorResults=payload.path("results").deepCopy();
         var fileReports=payload.putArray("fileReports");
@@ -234,7 +235,7 @@ public class LogisticsImportService {
                 if(System.nanoTime()-lastProgress>1_000_000_000L){save(id,lease,"processing","staging",payload);lastProgress=System.nanoTime();}
                 ObjectNode outcome;
                 try {outcome=tx.execute(status->{guard.writable(dataset);var owner=jdbc.sql("select lease_id from logistics_import_batch where id=:id and status='processing' for update").param("id",id).query(UUID.class).optional();if(owner.isEmpty()||!owner.get().equals(lease))throw AppException.conflict("导入执行权已转移，请刷新批次");return importChannel(dataset,channel,actor,payload.path("replaceDrafts").asBoolean());});}
-                catch(Exception e){log.warn("Logistics import {} channel staging failed",id,e);outcome=mapper.createObjectNode().put("providerName",channel.path("providerName").asText()).put("channelName",channel.path("channelName").asText()).put("status","blocked").put("message",safe(e));outcome.set("parsed",channel);}
+                catch(Exception e){log.warn("Logistics import {} channel staging failed",id,e);outcome=mapper.createObjectNode().put("providerName",channel.path("providerName").asText()).put("channelName",channel.path("channelName").asText()).put("status","blocked").put("message",safe(e));outcome.put("sourceFileIndex",channel.path("sourceFileIndex").asInt()).put("priceRows",channel.path("rows").size()).put("errors",1).put("pricingReady",false);}
                 results.add(outcome);completed++;payload.put("processedChannels",completed).put("progress",60+Math.round(completed*40.0/Math.max(1,grouped.size())));
             }
             payload.remove("currentFileName");payload.remove("currentChannelName");payload.put("progress",100).put("elapsedMs",(System.nanoTime()-start)/1_000_000).put("stagingMs",(System.nanoTime()-stagingStart)/1_000_000);LogisticsReadiness.applyBatch(payload);
@@ -282,9 +283,9 @@ public class LogisticsImportService {
             jdbc.sql("insert into logistics_channel(id,dataset_id,provider_id,code,rule_id,payload,created_at,updated_at) values(:id,:dataset,:provider,:code,:rule,cast(:payload as jsonb),now(),now())")
                     .param("id",channelId).param("dataset",dataset).param("provider",providerId).param("code",channelCode).param("rule",rule).param("payload",c.toString()).update();
         }
-        var current=jdbc.sql("select v.payload::text from logistics_channel c join logistics_version v on v.id=c.current_version_id where c.id=:id")
+        var current=jdbc.sql("select (v.payload-'diffRows'-'sourceCells')::text from logistics_channel c join logistics_version v on v.id=c.current_version_id where c.id=:id")
                 .param("id",channelId).query(String.class).optional();
-        var priorDraft=jdbc.sql("select payload::text from logistics_version where channel_id=:id and status='draft' order by version_number desc limit 1")
+        var priorDraft=jdbc.sql("select (payload-'diffRows'-'sourceCells')::text from logistics_version where channel_id=:id and status='draft' order by version_number desc limit 1")
                 .param("id",channelId).query(String.class).optional();
         if(priorDraft.isPresent())inheritManualEta(input,mapper.readTree(priorDraft.get()));
         if(current.isPresent())inheritManualEta(input,mapper.readTree(current.get()));

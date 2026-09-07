@@ -21,7 +21,10 @@ csrf = await request('/auth/csrf')
 const user = await request('/auth/login', 'POST', { account: 'VALIDATION', password: process.env.LOGISTICS_TEST_PASSWORD })
 csrf = await request('/auth/csrf')
 if (user.mustChangePassword) await request('/auth/change-password', 'POST', { currentPassword: process.env.LOGISTICS_TEST_PASSWORD, newPassword: process.env.LOGISTICS_TEST_PASSWORD + 'Changed' })
-const dataset = await request('/logistics/rebuild/datasets', 'POST', { name: 'Isolated acceptance ' + Date.now() })
+const dataset = process.env.LOGISTICS_TEST_DATASET
+  ? (await request('/logistics/rebuild/datasets')).find(item => item.id === process.env.LOGISTICS_TEST_DATASET)
+  : await request('/logistics/rebuild/datasets', 'POST', { name: 'Isolated acceptance ' + Date.now() })
+if (!dataset) throw new Error('Local historical validation dataset is missing')
 const samples = [], failures = []
 async function probe() { const start = performance.now(); try { await request('/logistics/rebuild/datasets'); samples.push(performance.now() - start) } catch (error) { failures.push(error.message) } }
 for (let i = 0; i < 10; i++) await probe()
@@ -29,7 +32,7 @@ const baseline = samples.splice(0)
 const interval = setInterval(() => { void probe() }, 500)
 try {
   const files = []
-  for (const name of (await readdir(corpus)).filter(name => /\.xlsx?$/i.test(name)).sort()) {
+  for (const name of (await readdir(corpus)).filter(name => /\.xlsx?$/i.test(name) && !name.startsWith('~$')).sort()) {
     const bytes = await readFile(path.join(corpus, name)); files.push({ name, bytes, size: bytes.length, sha256: await hash(bytes) })
   }
   const started = performance.now()

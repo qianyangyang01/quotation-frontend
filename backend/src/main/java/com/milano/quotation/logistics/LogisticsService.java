@@ -49,17 +49,22 @@ public class LogisticsService{
         if(duplicate.isPresent() && ("draft".equals(duplicate.get().status) || duplicate.get().id.equals(channel.currentVersionId))
             &&(!body.has("parserVersion")||body.path("parserVersion").asText().equals(duplicate.get().payload.path("parserVersion").asText()))) return versionView(duplicate.get());
         if(duplicate.isPresent()) sourceHash=sourceHash+":"+UUID.randomUUID();
-        var activeDrafts=versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().filter(v->"draft".equals(v.status)).toList();
+        boolean parsedImport=body.hasNonNull("parserVersion");
+        if(parsedImport&&!replaceDrafts&&versions.existsByChannelIdAndStatus(channelId,"draft"))throw AppException.conflict("渠道已有不同的待审核版本，请先终止旧草稿或明确替换");
+        var activeDrafts=parsedImport?(replaceDrafts?versions.findByChannelIdAndStatus(channelId,"draft"):List.<LogisticsVersionEntity>of()):versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().filter(v->"draft".equals(v.status)).toList();
         if(!activeDrafts.isEmpty()&&!replaceDrafts)throw AppException.conflict("渠道已有不同的待审核版本，请先终止旧草稿或明确替换");
         if(replaceDrafts)activeDrafts.forEach(version->reject(version,reason,body.path("importedBy").asText("物流负责人")));
         var now=Instant.now();var row=new LogisticsVersionEntity();row.id=UUID.randomUUID();row.channelId=channelId;
-        row.versionNumber=versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().mapToInt(v->v.versionNumber).max().orElse(0)+1;
+        row.versionNumber=(parsedImport?versions.maxVersionNumber(channelId):versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().mapToInt(v->v.versionNumber).max().orElse(0))+1;
         row.status="draft";row.sourceHash=sourceHash;var payload=body.deepCopy();
         payload.put("id",row.id.toString()).put("channelId",channelId.toString()).put("versionNumber",row.versionNumber)
             .put("status","draft").put("importedAt",now.toString()).put("publishedAt","").put("sourceHash",sourceHash)
             .put("contentHash",contentHash).put("basePublishedVersionId",base);
         LogisticsReadiness.apply(payload);
-        var comparison=workbooks.compare((ArrayNode)payload.path("rows"),publishedRows(channelId));
+        ArrayNode previous;
+        if(parsedImport&&channel.currentVersionId!=null){var json=versions.findRowsJson(channel.currentVersionId);previous=json.isPresent()?(ArrayNode)new tools.jackson.databind.ObjectMapper().readTree(json.get()):publishedRows(channelId);}
+        else previous=publishedRows(channelId);
+        var comparison=workbooks.compare((ArrayNode)payload.path("rows"),previous);
         payload.set("summary",comparison.path("summary"));payload.set("diffRows",comparison.path("diffRows"));
         row.payload=payload;row.createdAt=now;versions.save(row);return versionView(row);
     }
