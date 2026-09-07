@@ -68,11 +68,6 @@ public class CompanyPriceRebuildService {
         if(imports!=null&&imports.hasRunningWorkers())throw AppException.conflict("旧解析任务仍在退出，请稍后重新备份");
         if(!Set.of("paused","backed-up").contains(job.path("phase").asText()))throw AppException.conflict("重建状态不允许备份");
         jdbc.sql("lock table quotation_record,quotation_draft,quotation_template,finance_setting in share row exclusive mode").update();
-        var snapshot=mapper.createObjectNode();
-        for(var table:List.of("logistics_dataset","logistics_provider","logistics_channel","logistics_version","logistics_rule","logistics_area","logistics_condition",
-                "logistics_billing_acceptance","logistics_required_revision","logistics_import_batch","logistics_import_file","logistics_upload_session","finance_setting","quotation_template","quotation_draft","quotation_record","logistics_company_binding")){
-            var rows=snapshot.putArray(table);jdbc.sql("select to_jsonb(t)::text from "+table+" t").query((rs,n)->mapper.readTree(rs.getString(1))).list().forEach(rows::add);
-        }
         // Preserve every original quotation byte-for-byte and the exact referenced prices independently of runtime prices.
         jdbc.sql("""
             insert into logistics_quotation_history(quotation_id,snapshot)
@@ -84,15 +79,43 @@ public class CompanyPriceRebuildService {
             from quotation_record q on conflict(quotation_id) do nothing
             """).update();
         if(count("logistics_quotation_history")<count("quotation_record"))throw AppException.conflict("历史报价快照未覆盖全部记录");
-        var bytes=mapper.writeValueAsBytes(snapshot);var key="logistics/backups/company-rebuild/"+id+".json";
-        storage.putRaw(key,new ByteArrayInputStream(bytes),bytes.length,"application/json");
-        var sha=AssetStorageService.sha256(bytes);try(var in=storage.openRaw(key)){if(!sha.equals(AssetStorageService.sha256(in.readAllBytes())))throw AppException.conflict("备份回读校验失败");}catch(IOException e){throw AppException.conflict("备份回读失败");}
-        var payload=(ObjectNode)job.path("payload").deepCopy();payload.putObject("backup").put("objectKey",key).put("sha256",sha);
+        var key="logistics/backups/company-rebuild/"+id+".ndjson";
+        var distinct=new TreeSet<String>();java.nio.file.Path temporary=null;
+        String sha;long size;
+        try {
+            temporary=java.nio.file.Files.createTempFile("company-backup-", ".ndjson");
+            try(var writer=java.nio.file.Files.newBufferedWriter(temporary,java.nio.charset.StandardCharsets.UTF_8)) {
+                for(var table:List.of("logistics_dataset","logistics_provider","logistics_channel","logistics_version","logistics_rule","logistics_area","logistics_condition",
+                        "logistics_billing_acceptance","logistics_required_revision","logistics_import_batch","logistics_import_file","logistics_upload_session","finance_setting","quotation_template","quotation_draft","quotation_record","logistics_company_binding")) {
+                    // Paging bounds the JDBC driver's retained results as well as the JSON writer.
+                    int pageSize=Set.of("logistics_version","logistics_import_batch","quotation_record").contains(table)?1:32;
+                    for(int offset=0;;offset+=pageSize) {
+                        var rows=jdbc.sql("select to_jsonb(t)::text from (select * from "+table+" order by ctid limit :limit offset :offset) t").param("limit",pageSize).param("offset",offset).query(String.class).list();
+                        for(var row:rows) {
+                            writer.write("{\"table\":\""+table+"\",\"row\":"+row+"}");writer.newLine();
+                            if(Set.of("logistics_import_batch","logistics_import_file","logistics_upload_session").contains(table)) {
+                                var value=mapper.readTree(row);
+                                if(table.equals("logistics_import_batch"))collectPriceObjects(value.path("payload"),distinct);
+                                if(table.equals("logistics_import_file")) {var sourceKey=value.path("object_key").asText();if(sourceKey.startsWith("logistics/imports/"))distinct.add(sourceKey);}
+                                if(table.equals("logistics_upload_session")) {
+                                    var received=value.path("received");if(received.isTextual())received=mapper.readTree(received.asText());
+                                    for(int file=0;file<received.size();file++)for(int chunk=0;chunk<received.get(file).size();chunk++)distinct.add("logistics/upload-chunks/"+value.path("id").asText()+"/"+file+"/"+chunk);
+                                }
+                            }
+                        }
+                        if(rows.size()<pageSize)break;
+                    }
+                }
+            }
+            size=java.nio.file.Files.size(temporary);
+            try(var in=java.nio.file.Files.newInputStream(temporary)){sha=streamSha256(in);}
+            try(var in=java.nio.file.Files.newInputStream(temporary)){storage.putRaw(key,in,size,"application/x-ndjson");}
+            try(var in=storage.openRaw(key)){if(!sha.equals(streamSha256(in)))throw AppException.conflict("备份回读校验失败");}
+        }catch(IOException e){throw AppException.conflict("备份写入或回读失败");}
+        finally{if(temporary!=null)try{java.nio.file.Files.deleteIfExists(temporary);}catch(IOException ignored){}}
+        var payload=(ObjectNode)job.path("payload").deepCopy();payload.putObject("backup").put("objectKey",key).put("sha256",sha).put("format","ndjson-v1").put("bytes",size);
         payload.put("historyFingerprint",historyFingerprint()).put("priceFingerprint",priceFingerprint());
-        var keys=payload.putArray("priceObjectKeys");var distinct=new TreeSet<String>();
-        for(var batch:snapshot.path("logistics_import_batch"))collectPriceObjects(batch.path("payload"),distinct);
-        for(var file:snapshot.path("logistics_import_file")){var sourceKey=file.path("object_key").asText();if(sourceKey.startsWith("logistics/imports/"))distinct.add(sourceKey);}
-        for(var session:snapshot.path("logistics_upload_session")){var received=mapper.readTree(session.path("received").asText("[]"));for(int file=0;file<received.size();file++)for(int chunk=0;chunk<received.get(file).size();chunk++)distinct.add("logistics/upload-chunks/"+session.path("id").asText()+"/"+file+"/"+chunk);}
+        var keys=payload.putArray("priceObjectKeys");
         distinct.forEach(keys::add);
         return save(id,"backed-up",payload);
     }
@@ -206,21 +229,27 @@ public class CompanyPriceRebuildService {
         requireNote(input);if(!input.path("restoreConfirmed").asBoolean())throw AppException.unprocessable("必须明确确认从校验备份恢复旧价格并恢复报价");
         if(imports!=null&&imports.hasRunningWorkers())throw AppException.conflict("请等待当前导入任务退出后恢复");
         var payload=(ObjectNode)job.path("payload").deepCopy();verifyBackup(payload);
-        final JsonNode snapshot;try(var in=storage.openRaw(payload.path("backup").path("objectKey").asText())){snapshot=mapper.readTree(in);}catch(IOException e){throw AppException.conflict("备份无法读取");}
         var sources=new ArrayList<UUID>();payload.path("sourceDatasets").forEach(v->sources.add(UUID.fromString(v.asText())));
         if(jdbc.sql("select count(*) from logistics_version v join logistics_channel c on c.id=v.channel_id where c.dataset_id in (:sources)").param("sources",sources).query(Long.class).single()>0)throw AppException.conflict("旧库已有价格，禁止覆盖恢复");
         save(id,"restoring",payload);jdbc.sql("select set_config('app.logistics_purge_job',:id,true)").param("id",id.toString()).query(String.class).single();
-        for(var table:List.of("logistics_version","logistics_rule","logistics_area","logistics_condition","logistics_billing_acceptance")){
-            // Generated read columns are recomputed by PostgreSQL, never supplied from the backup.
-            var columns=jdbc.sql("select quote_ident(column_name) from information_schema.columns where table_schema=current_schema() and table_name=:table and is_generated='NEVER' order by ordinal_position").param("table",table).query(String.class).list();
-            String names=String.join(",",columns);
-            jdbc.sql("insert into "+table+"("+names+") select "+names+" from jsonb_populate_recordset(null::"+table+",cast(:rows as jsonb))").param("rows",snapshot.path(table).toString()).update();
-        }
-        for(var c:snapshot.path("logistics_channel"))if(!c.path("current_version_id").isNull())jdbc.sql("update logistics_channel set current_version_id=:v where id=:c").param("v",UUID.fromString(c.path("current_version_id").asText())).param("c",UUID.fromString(c.path("id").asText())).update();
-        for(var v:snapshot.path("logistics_version")){
-            var actual=jdbc.sql("select payload::text from logistics_version where id=:id").param("id",UUID.fromString(v.path("id").asText())).query(String.class).single();
-            if(!mapper.readTree(actual).equals(v.path("payload")))throw AppException.conflict("恢复价格校验失败，恢复事务已回滚");
-        }
+        var restoreTables=Set.of("logistics_version","logistics_rule","logistics_area","logistics_condition","logistics_billing_acceptance");
+        var columnNames=new HashMap<String,String>();
+        for(var table:restoreTables)columnNames.put(table,String.join(",",jdbc.sql("select quote_ident(column_name) from information_schema.columns where table_schema=current_schema() and table_name=:table and is_generated='NEVER' order by ordinal_position").param("table",table).query(String.class).list()));
+        var currentVersions=new LinkedHashMap<UUID,UUID>();
+        try(var in=storage.openRaw(payload.path("backup").path("objectKey").asText());var reader=new BufferedReader(new InputStreamReader(in,java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;while((line=reader.readLine())!=null) {
+                var record=mapper.readTree(line);var table=record.path("table").asText();var row=record.path("row");
+                if(table.equals("logistics_channel")&&!row.path("current_version_id").isNull())currentVersions.put(UUID.fromString(row.path("id").asText()),UUID.fromString(row.path("current_version_id").asText()));
+                if(!restoreTables.contains(table))continue;
+                var names=columnNames.get(table);
+                jdbc.sql("insert into "+table+"("+names+") select "+names+" from jsonb_populate_record(null::"+table+",cast(:row as jsonb))").param("row",row.toString()).update();
+                if(table.equals("logistics_version")) {
+                    var actual=jdbc.sql("select payload::text from logistics_version where id=:id").param("id",UUID.fromString(row.path("id").asText())).query(String.class).single();
+                    if(!mapper.readTree(actual).equals(row.path("payload")))throw AppException.conflict("恢复价格校验失败，恢复事务已回滚");
+                }
+            }
+        }catch(IOException e){throw AppException.conflict("备份无法读取，恢复事务已回滚");}
+        for(var c:currentVersions.entrySet())jdbc.sql("update logistics_channel set current_version_id=:v where id=:c").param("v",c.getValue()).param("c",c.getKey()).update();
         jdbc.sql("update logistics_company_channel set enabled=false,payload=jsonb_set(payload,'{enabled}','false')").update();
         for(var entry:payload.path("previousDirectory").path("entries"))jdbc.sql("update logistics_company_channel set enabled=:enabled,payload=cast(:p as jsonb),updated_by=:actor,updated_at=now() where id=:id").param("enabled",entry.path("enabled").asBoolean()).param("p",entry.toString()).param("actor",actor).param("id",UUID.fromString(entry.path("id").asText())).update();
         jdbc.sql("update logistics_dataset set status='archived',revision=revision+1 where id=:id").param("id",UUID.fromString(payload.path("targetDatasetId").asText())).update();
@@ -248,10 +277,14 @@ public class CompanyPriceRebuildService {
     public ObjectNode job(UUID id){return jdbc.sql("select to_jsonb(j)::text from logistics_company_rebuild j where id=:id").param("id",id).query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).optional().orElseThrow(()->AppException.notFound("重建任务不存在"));}
     private ObjectNode locked(UUID id){var state=directory.state(true);if(!id.toString().equals(state.path("rebuild_id").asText()))throw AppException.conflict("重建任务已变化");return job(id);}
     private ObjectNode save(UUID id,String phase,ObjectNode payload){jdbc.sql("update logistics_company_rebuild set phase=:phase,payload=cast(:p as jsonb),updated_at=now() where id=:id").param("phase",phase).param("p",payload.toString()).param("id",id).update();return job(id);}
-    private void verifyBackup(JsonNode payload){try(var in=storage.openRaw(payload.path("backup").path("objectKey").asText())){if(!AssetStorageService.sha256(in.readAllBytes()).equals(payload.path("backup").path("sha256").asText()))throw AppException.conflict("备份内容校验失败");}catch(IOException e){throw AppException.conflict("备份无法读取");}}
+    private static String streamSha256(InputStream in)throws IOException {
+        try {var digest=java.security.MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[65536];int length;while((length=in.read(buffer))!=-1)digest.update(buffer,0,length);return HexFormat.of().formatHex(digest.digest());}
+        catch(java.security.NoSuchAlgorithmException e){throw new IllegalStateException(e);}
+    }
+    private void verifyBackup(JsonNode payload){try(var in=storage.openRaw(payload.path("backup").path("objectKey").asText())){if(!streamSha256(in).equals(payload.path("backup").path("sha256").asText()))throw AppException.conflict("备份内容校验失败");}catch(IOException e){throw AppException.conflict("备份无法读取");}}
     private long count(String table){return jdbc.sql("select count(*) from "+table).query(Long.class).single();}
-    private String historyFingerprint(){return jdbc.sql("select md5(coalesce(string_agg(id::text || payload::text,'|' order by id),'')) from quotation_record").query(String.class).single();}
-    private String priceFingerprint(){return jdbc.sql("select md5(coalesce(string_agg(id::text || payload::text,'|' order by id),'')) from logistics_version").query(String.class).single();}
+    private String historyFingerprint(){return jdbc.sql("select md5(coalesce(string_agg(id::text || md5(payload::text),'|' order by id),'')) from quotation_record").query(String.class).single();}
+    private String priceFingerprint(){return jdbc.sql("select md5(coalesce(string_agg(id::text || md5(payload::text),'|' order by id),'')) from logistics_version").query(String.class).single();}
     private List<JsonNode> oldChannels(){return jdbc.sql("select jsonb_build_object('oldChannelId',c.id,'providerName',p.payload->>'name','channelName',c.payload->>'name','channelKey',concat_ws('::',c.rule_id,p.payload->>'name',c.code))::text from logistics_channel c join logistics_provider p on p.id=c.provider_id order by c.id").query((rs,n)->mapper.readTree(rs.getString(1))).list();}
     private static void requireNote(JsonNode body){if(body.path("note").asText().isBlank())throw AppException.unprocessable("请填写操作核对备注");}
     private static void collectPriceObjects(JsonNode node,Set<String> keys){if(node.isObject())for(var f:node.properties()){
