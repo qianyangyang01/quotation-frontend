@@ -165,8 +165,21 @@ class LogisticsSourceParserTest {
             var prices=book.createSheet("服装专线");
             row(prices,0,"国家","重量段","运费/KG","挂号费/票");
             for(int index=1;index<=LogisticsSourceParser.MAX_PRICE_ROWS_PER_SHEET+1;index++)row(prices,index,"美国","0-1",55,20);
-            var error=assertThrows(com.milano.quotation.common.AppException.class,()->parser.parse(bytes(book),"顺丰.xlsx"));
-            assertTrue(error.getMessage().contains("500"));
+            var normal=book.createSheet("正常渠道");row(normal,0,"国家","重量段","运费/KG","挂号费/票");row(normal,1,"美国","0-1",60,20);
+            var result=parser.parse(bytes(book),"顺丰.xlsx");
+            assertEquals("filtered",result.path("sheets").get(0).path("status").asText());
+            assertEquals(501,result.path("sheets").get(0).path("filteredPriceRows").asInt());
+            assertEquals(1,result.path("channels").size());
+            assertEquals(60,result.path("channels").get(0).path("rows").get(0).path("pricePerKg").asInt());
+        }
+    }
+    @Test void keepsExactly500PriceRowsForBothExcelFormats()throws Exception {
+        for(boolean xlsx:List.of(false,true))try(Workbook book=xlsx?new XSSFWorkbook():new HSSFWorkbook()){
+            var prices=book.createSheet("价格表");row(prices,0,"国家","重量段","运费/KG","挂号费/票");
+            for(int index=1;index<=500;index++)row(prices,index,"美国",(index-1)+"-"+index,55,20);
+            var result=parser.parse(bytes(book),xlsx?"花海.xlsx":"花海.xls");
+            assertNotEquals("filtered",result.path("sheets").get(0).path("status").asText());
+            assertEquals(500,result.path("channels").get(0).path("rows").size());
         }
     }
     @Test void distinguishesDocumentationSheetsFromChannelsAndCoverageEvidence()throws Exception {

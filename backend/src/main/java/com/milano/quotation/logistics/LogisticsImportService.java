@@ -69,6 +69,15 @@ public class LogisticsImportService {
         jdbc.sql("select id from logistics_import_batch where status='queued' order by created_at limit 100").query(UUID.class).list().forEach(this::submit);
     }
     private void submit(UUID id){
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()){
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization(){
+                @Override public void afterCommit(){dispatch(id);}
+            });
+            return;
+        }
+        dispatch(id);
+    }
+    private void dispatch(UUID id){
         if(!submitted.add(id))return;
         try{worker.execute(()->{try{process(id);}finally{submitted.remove(id);}});}catch(RejectedExecutionException e){submitted.remove(id);log.info("Logistics import queue is full; batch {} remains queued",id);}
     }

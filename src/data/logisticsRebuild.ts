@@ -1,4 +1,5 @@
-import { api, downloadFile, idempotencyKey, uploadForm, type UploadProgress } from '@/services/http'
+import { api, downloadFile, idempotencyKey } from '@/services/http'
+import { resumableLogisticsUpload } from '@/services/logisticsResumableUpload'
 
 export type Dataset = { id: string; name: string; status: 'active' | 'preparing' | 'archived'; revision: number; created_at: string }
 export type SourceIssue = { row: number; sourceSheet?: string; sourceRows?: number[]; relatedSourceSheet?: string; relatedSourceRow?: number; rawValues?: Record<string, unknown>; sourceEvidence?: Array<{ row: number; rawValues: Record<string, unknown> }>; field: string; message: string; level: string; code?: string; rowKey?: string; relatedRowKey?: string; suggestedFields?: Partial<Price> }
@@ -71,10 +72,7 @@ export const logisticsRebuild = {
   batches: (id: string) => api.get<BatchSummary[]>(`${root}/datasets/${id}/imports`),
   batch: (id: string) => api.get<Batch>(`${root}/imports/${id}`),
   publishProgress: (id: string) => api.get<{ batchId: string; publishedVersionIds: string[] }>(`${root}/imports/${id}/publish-progress`),
-  upload: (id: string, files: File[], replaceDrafts: boolean, key: string, progress?: (value: UploadProgress) => void) => {
-    const form = new FormData(); files.forEach(file => form.append('files', file)); form.append('replaceDrafts', String(replaceDrafts))
-    return uploadForm<Batch>(`${root}/datasets/${id}/imports`, form, progress, { 'Idempotency-Key': key })
-  },
+  upload: resumableLogisticsUpload,
   retry: (id: string) => api.post<Batch>(`${root}/imports/${id}/retry`),
   version: (id: string) => api.get<Version>(`${root}/versions/${id}`),
   patchRows: (version: Version, changes: RowCorrection[], etaChanges: EtaCorrection[] = []) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes, etaChanges, revalidate: true }),

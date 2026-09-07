@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.07-v12";
+    public static final String VERSION="providers-2026.09.07-v13";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
@@ -78,7 +78,11 @@ public class LogisticsSourceParser {
                     else if(provider.equals("通邮") && (sheet.getSheetName().contains("美国专线小包")||sheet.getSheetName().contains("加拿大专线")||sheet.getSheetName().equals("ebay挂号保建品")||sheet.getSheetName().equals("通邮专线特货-澳大利亚"))) recognized=parseMatrix(source,provider,filename,parsed);
                     else recognized=parseTable(source,provider,filename,parsed);
                 }
-                if(source.parsedRows.size()>MAX_PRICE_ROWS_PER_SHEET)throw AppException.unprocessable("基础运费工作表实际价格行不能超过"+MAX_PRICE_ROWS_PER_SHEET+"行："+sheet.getSheetName());
+                if(source.parsedRows.size()>MAX_PRICE_ROWS_PER_SHEET) {
+                    report.put("status","filtered").put("priceRows",0).put("channels",0).put("errors",0)
+                            .put("filteredPriceRows",source.parsedRows.size()).put("message","工作表超过500条价格行，可能存在表格错误，已整张跳过");
+                    continue;
+                }
                 var filtered=report.putArray("filteredFirstNextRows");
                 source.filteredFirstNextRows.stream().sorted().forEach(r->filtered.add(r+1));
                 var excluded=report.putArray("filteredOtherRows");source.filteredOtherRows.forEach((r,reason)->excluded.addObject().put("row",r+1).put("reason",reason));
