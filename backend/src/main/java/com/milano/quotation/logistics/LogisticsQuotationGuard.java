@@ -16,6 +16,7 @@ public class LogisticsQuotationGuard {
     private final ObjectMapper mapper;
     public LogisticsQuotationGuard(JdbcClient jdbc,LogisticsQueryService queries,ObjectMapper mapper){this.jdbc=jdbc;this.queries=queries;this.mapper=mapper;}
     public void validate(ObjectNode quotation) {
+        if(jdbc.sql("select paused from logistics_company_state where singleton for share").query(Boolean.class).single())throw AppException.conflict("物流价格库正在重建，暂时不能提交新报价；历史记录仍可查看");
         var dataset=jdbc.sql("select id from logistics_dataset where status='active' for share").query(UUID.class).single();
         jdbc.sql("select id from logistics_channel where dataset_id=:id order by id for share").param("id",dataset).query(UUID.class).list();
         jdbc.sql("select id from logistics_provider where dataset_id=:id order by id for share").param("id",dataset).query(UUID.class).list();
@@ -27,7 +28,7 @@ public class LogisticsQuotationGuard {
                 'legacy',exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy' and a.rows_fingerprint=md5(coalesce(v.payload->'rows','[]'::jsonb)::text)))::text
             from logistics_channel c join logistics_provider p on p.id=c.provider_id
             join logistics_version v on v.id=c.current_version_id and v.status='published'
-            where c.dataset_id=:id and c.archived_at is null
+            where c.dataset_id=:id and c.archived_at is null and logistics_company_quote_allowed(c.id)
             and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)
             and logistics_version_quote_ready(v.id)
             """).param("id",dataset).query((rs,n)->mapper.readTree(rs.getString(1))).list();

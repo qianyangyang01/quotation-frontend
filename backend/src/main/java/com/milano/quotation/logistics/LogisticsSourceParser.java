@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.04-v5";
+    public static final String VERSION="company-channels-2026.09.07-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
@@ -29,15 +29,20 @@ public class LogisticsSourceParser {
     public LogisticsSourceParser(ObjectMapper mapper,LogisticsWorkbookService standard){this.mapper=mapper;this.standard=standard;}
 
     public ObjectNode parse(byte[] bytes,String filename) {
+        return parse(bytes,filename,new CompanyChannelScope(mapper.createObjectNode().put("enabled",false)));
+    }
+    public ObjectNode parse(byte[] bytes,String filename,CompanyChannelScope scope) {
         if(bytes.length==0 || bytes.length>MAX_FILE_BYTES || filename==null || !filename.toLowerCase(Locale.ROOT).matches(".*\\.xlsx?$"))
             throw AppException.unprocessable("单个物流文件必须是100MB以内的.xls或.xlsx");
         var result=mapper.createObjectNode().put("fileName",filename).put("parserVersion",VERSION);
+        result.put("scopeRevision",scope.revision());
         var sheets=result.putArray("sheets"); var channels=new LinkedHashMap<String,ObjectNode>();
-        String provider=provider(filename);
+        String provider=scope.unrestricted()?provider(filename):scope.providerFromFilename(filename);
         try(var book=WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
             if(book.getNumberOfSheets()>300) throw AppException.unprocessable("单个文件不能超过300张工作表");
             for(var sheet:book) {
-                var source=new Source(sheet); var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isSheetHidden(book.getSheetIndex(sheet)));
+                var source=new Source(sheet,scope); var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isSheetHidden(book.getSheetIndex(sheet)));
+                report.set("channelMatches",source.matches);
                 if(source.text(0,0).equals("MILANO_LOGISTICS_DIFF_V1"))throw AppException.unprocessable("价格变化表不能作为价格模板导入");
                 if(source.text(0,0).equals("MILANO_LOGISTICS_METADATA_V1")){report.put("status","metadata");continue;}
                 if(source.nonempty==0) { report.put("status","empty").put("message","空表，无价格数据"); continue; }
@@ -52,9 +57,13 @@ public class LogisticsSourceParser {
                     else recognized=parseTable(source,provider,filename,parsed);
                 }
                 if(!recognized || parsed.isEmpty()) {
-                    var pending=channel(provider.isBlank()?"未识别物流商":provider,sheet.getSheetName().trim(),parsed);
+                    if(!source.matches.isEmpty()&&parsed.isEmpty()) {
+                        report.put("status",source.ambiguous?"match-pending":"filtered");continue;
+                    }
+                    var pending=selected(source,provider.isBlank()?"未识别物流商":provider,sheet.getSheetName().trim(),"",0,parsed);
+                    if(pending==null){report.put("status",source.ambiguous?"match-pending":"filtered");continue;}
                     pending.put("templateStatus","adapter-required");
-                    issue(pending,0,"新模板待适配","非空表未匹配通用模板或已知物流商模板；原文件保留7天，新增解析器后可重试","error");
+                    issue(pending,0,"新模板待适配","命中公司渠道但未识别到完整价格区域；请核对原表布局","error");
                     pending.set("sourceCells",source.raw());
                 }
                 report.set("sourceCells",source.raw());
@@ -99,7 +108,27 @@ public class LogisticsSourceParser {
             LogisticsReadiness.apply(c,mapper);
             c.put("contentHash",businessHash((ArrayNode)c.path("rows")));items.add(c);
         }
+        int filtered=0,ambiguous=0,matched=0;
+        for(var sheet:sheets)for(var match:sheet.path("channelMatches"))switch(match.path("status").asText()){
+            case "filtered" -> filtered++;
+            case "ambiguous" -> ambiguous++;
+            case "matched" -> matched++;
+        }
+        result.put("filteredChannels",filtered).put("ambiguousChannels",ambiguous).put("matchedChannels",matched);
         return result;
+    }
+
+    private ObjectNode selected(Source source,String provider,String name,String code,int row,Map<String,ObjectNode> channels) {
+        var decision=source.scope.match(provider,name,code);
+        var key=CompanyChannelScope.normalize(provider)+"|"+CompanyChannelScope.normalize(name)+"|"+CompanyChannelScope.normalize(code);
+        if(source.matchKeys.add(key)){
+            var report=source.matches.addObject().put("providerName",provider).put("channelName",name).put("productCode",code)
+                    .put("sourceRow",row+1).put("status",decision.status()).put("reason",decision.reason());
+            if(decision.entry()!=null)report.put("companyChannelId",decision.entry().path("id").asText());
+        }
+        if(!decision.accepted()) {source.parsedRows.add(row);source.ambiguous|=decision.status().equals("ambiguous");return null;}
+        String canonical=decision.entry()==null?name:decision.entry().path("channelName").asText();
+        var target=channel(provider,canonical,channels);CompanyChannelScope.identify(target,decision);return target;
     }
 
     private void validateMergedSheets(ObjectNode channel) {
@@ -133,7 +162,8 @@ public class LogisticsSourceParser {
             var effectiveProvider=prov.isBlank()?fallback:prov;
             var sourceOrigin=value(source,r,headers,"发货区域");
             if(excludeSouthChinaPrice(effectiveProvider,sourceOrigin)){source.parsedRows.add(r);continue;}
-            var target=channel(effectiveProvider,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"货物属性"),"普货"),channels);
+            var target=selected(source,effectiveProvider,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")),r,channels);
+            if(target==null)continue;
             if(target.path("providerName").asText().isBlank())issue(target,r+1,"物流商","标准表需填写物流商","error");
             var row=mapper.createObjectNode();
             for(int c=0;c<LogisticsWorkbookService.KEYS.length;c++) {
@@ -153,7 +183,7 @@ public class LogisticsSourceParser {
             if(headers.containsKey("计费进位KG"))numeric(row,"billingStepKg",source,r,headers.get("计费进位KG"),target,true);
             row.put("pendingReason",value(source,r,headers,"待适配原因"));
             if(headers.containsKey("干线费每KG"))numeric(row,"linehaulPerKg",source,r,headers.get("干线费每KG"),target,true);
-            target.put("logisticsAttribute",defaultText(value(source,r,headers,"货物属性"),"普货"));
+            if(source.scope.unrestricted())target.put("logisticsAttribute",defaultText(value(source,r,headers,"货物属性"),"普货"));
             add(target,row,source,r,file);
         }
     }
@@ -192,7 +222,8 @@ public class LogisticsSourceParser {
             if(name.isBlank())name=section;
             var sourceOrigin=columns.origin>=0?source.text(r,columns.origin):"";
             if(excludeSouthChinaPrice(provider,sourceOrigin)){source.parsedRows.add(r);continue;}
-            var target=channel(provider,name,channels);
+            var target=selected(source,provider,name,columns.code>=0?source.text(r,columns.code):"",r,channels);
+            if(target==null)continue;
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",columns.firstPrice>=0?"first-next":"per-kg");
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
             String sourceContinent=columns.continent>=0?source.text(r,columns.continent):"";
@@ -289,9 +320,13 @@ public class LogisticsSourceParser {
         if(header<0)return false;
         for(int c=1;c<source.width(header);c+=2) {
             if(!source.text(header,c).contains("运费"))continue;
-            String name="";for(int h=header-1;h>=0;h--){var label=source.text(h,c);if(!label.isBlank()){name=label;break;}}
+            String name="";
+            // Channel headings precede cargo restrictions in the US matrix.
+            for(int h=header-1;h>=0;h--){var label=source.text(h,c);if(label.contains("专线")&&!label.contains("生效")){name=label;break;}}
+            if(name.isBlank())for(int h=header-1;h>=0;h--){var label=source.text(h,c);if(!label.isBlank()){name=label;break;}}
             if(name.isBlank())name=source.sheet.getSheetName()+"-"+CellReference.convertNumToColString(c);
-            var target=channel(provider,name,channels);
+            var target=selected(source,provider,name,"",header,channels);
+            if(target==null){for(int r=header+1;r<=source.sheet.getLastRowNum();r++)source.parsedRows.add(r);continue;}
             for(int r=header+1;r<=source.sheet.getLastRowNum();r++) {
                 var text=source.text(r,0);if(!looksRange(text))continue;
                 var row=mapper.createObjectNode().put("areaName",source.sheet.getSheetName().contains("加拿大")?"加拿大":"美国")
@@ -318,7 +353,8 @@ public class LogisticsSourceParser {
         if(weight<0||country<0||zones.size()<2)return -1;
         int end=source.mergeEndRow(header,country);
         if(end<=header+1)return -1;
-        var target=channel(provider,source.sheet.getSheetName().trim(),channels);
+        var target=selected(source,provider,source.sheet.getSheetName().trim(),"",header,channels);
+        if(target==null){for(int r=header;r<=end;r++)source.parsedRows.add(r);return end;}
         for(var zone:zones.entrySet()) {
             int rate=zone.getKey(),fee=rate+1;
             if(!source.text(header+1,rate).contains("运费")||!source.text(header+1,fee).contains("挂号费")) {
@@ -604,12 +640,14 @@ public class LogisticsSourceParser {
         double firstKg=0.5,nextKg=0.5;List<Integer> notes=new ArrayList<>();
     }
     private class Source {
+        final CompanyChannelScope scope;
+        final ArrayNode matches=mapper.createArrayNode();final Set<String> matchKeys=new HashSet<>();boolean ambiguous;
         final Sheet sheet;final int nonempty;final DataFormatter formatter=new DataFormatter(Locale.ROOT);
         final Set<Integer> parsedRows=new HashSet<>();
         final Set<Integer> exampleRows=new HashSet<>();
         final Map<Integer,Integer> auxiliaryRows=new HashMap<>();
         final Map<Integer,List<org.apache.poi.ss.util.CellRangeAddress>> merges=new HashMap<>();
-        Source(Sheet sheet){this.sheet=sheet;if(sheet.getLastRowNum()>100000)throw AppException.unprocessable("工作表超过100000行");formatter.setUseCachedValuesForFormulaCells(true);int count=0;for(var r:sheet)for(var c:r)if(!formatter.formatCellValue(c).isBlank())count++;nonempty=count;
+        Source(Sheet sheet,CompanyChannelScope scope){this.sheet=sheet;this.scope=scope;if(sheet.getLastRowNum()>100000)throw AppException.unprocessable("工作表超过100000行");formatter.setUseCachedValuesForFormulaCells(true);int count=0;for(var r:sheet)for(var c:r)if(!formatter.formatCellValue(c).isBlank())count++;nonempty=count;
             for(var range:sheet.getMergedRegions())for(int row=range.getFirstRow();row<=Math.min(range.getLastRow(),sheet.getLastRowNum());row++)merges.computeIfAbsent(row,k->new ArrayList<>()).add(range);
         }
         Cell cell(int r,int c){if(c<0)return null;for(var range:merges.getOrDefault(r,List.of()))if(range.isInRange(r,c)){r=range.getFirstRow();c=range.getFirstColumn();break;}var row=sheet.getRow(r);return row==null?null:row.getCell(c);}

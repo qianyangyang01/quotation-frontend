@@ -38,6 +38,8 @@ public class LogisticsImportService {
     private final LogisticsService logistics;
     private final LogisticsDatasetGuard guard;
     private final TransactionTemplate tx;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    CompanyChannelService companyChannels;
     private final ExecutorService worker=Executors.newSingleThreadExecutor(r->{var t=new Thread(r,"logistics-import-worker");t.setDaemon(true);return t;});
     public LogisticsImportService(JdbcClient jdbc,ObjectMapper mapper,AssetStorageService storage,LogisticsSourceParser parser,
                                   LogisticsService logistics,LogisticsDatasetGuard guard,PlatformTransactionManager manager){
@@ -56,9 +58,12 @@ public class LogisticsImportService {
         return result;
     }
     private ObjectNode uploadLocked(UUID dataset,List<MultipartFile> files,String actor,String key,boolean replaceDrafts){
+        if(companyChannels!=null)companyChannels.assertImport(dataset);
         if(key==null||key.isBlank()||key.length()>160)throw AppException.unprocessable("缺少有效导入请求标识");
         validateFiles(files);
         var id=UUID.randomUUID();var payload=mapper.createObjectNode().put("replaceDrafts",replaceDrafts);var sources=payload.putArray("files");
+        var scope=companyChannels==null?mapper.createObjectNode().put("enabled",false):companyChannels.snapshot();
+        payload.set("companyScope",scope);payload.put("scopeRevision",scope.path("revision").asLong());
         var signature=new StringBuilder(dataset.toString()).append(replaceDrafts);
         var hashes=new ArrayList<String>();
         for(var file:files)try(var input=file.getInputStream()) {var hash=sha256(input);hashes.add(hash);signature.append(file.getOriginalFilename()).append(file.getSize()).append(hash);}catch(IOException e){throw AppException.unprocessable("读取上传文件失败");}
@@ -108,6 +113,9 @@ public class LogisticsImportService {
         var lease=UUID.randomUUID();
         if(jdbc.sql("update logistics_import_batch set status='processing',phase='parsing',lease_id=:lease,updated_at=now() where id=:id and status='queued'").param("lease",lease).param("id",id).update()!=1)return;
         var batch=get(id);var payload=(ObjectNode)batch.path("payload").deepCopy();var dataset=UUID.fromString(batch.path("dataset_id").asText());
+        if(companyChannels!=null)try{companyChannels.assertImport(dataset);}catch(AppException unavailable){save(id,lease,"interrupted","paused",payload.put("error",unavailable.getMessage()));return;}
+        var scope=new CompanyChannelScope(payload.has("companyScope")?payload.path("companyScope"):
+                companyChannels==null?mapper.createObjectNode().put("enabled",false):companyChannels.snapshot());
         var actor=batch.path("requested_by").asText();long start=System.nanoTime();
         var priorReports=payload.path("fileReports").deepCopy();var priorResults=payload.path("results").deepCopy();
         var grouped=new LinkedHashMap<String,ObjectNode>();var fileReports=payload.putArray("fileReports");
@@ -121,9 +129,9 @@ public class LogisticsImportService {
                     byte[] bytes=input.readNBytes((int)LogisticsSourceParser.MAX_FILE_BYTES+1);
                     if(bytes.length>LogisticsSourceParser.MAX_FILE_BYTES)throw AppException.unprocessable("单个物流文件不能超过100MB");
                     if(!AssetStorageService.sha256(bytes).equals(file.path("sha256").asText()))throw AppException.conflict("源文件校验失败");
-                    var parsed=parser.parse(bytes,file.path("name").asText());
+                    var parsed=companyChannels==null?parser.parse(bytes,file.path("name").asText()):parser.parse(bytes,file.path("name").asText(),scope);
                     var templatePending=false;for(var channel:parsed.path("channels"))if("adapter-required".equals(channel.path("templateStatus").asText()))templatePending=true;
-                    var report=parsed.deepCopy();report.remove("channels");report.put("status",templatePending?"template-pending":"parsed").put("fileIndex",index);
+                    var report=parsed.deepCopy();report.remove("channels");report.put("status",parsed.path("ambiguousChannels").asInt()>0?"match-pending":templatePending?"template-pending":parsed.path("channels").isEmpty()?"filtered":"parsed").put("fileIndex",index);
                     report.put("originalFileName",file.path("originalName").asText(file.path("name").asText()));
                     // Persist cell-level evidence once. Rewriting it on every channel progress tick
                     // makes multi-provider standard workbooks needlessly expensive to import/poll.
@@ -162,7 +170,11 @@ public class LogisticsImportService {
                 results.add(outcome);completed++;payload.put("processedChannels",completed).put("progress",60+Math.round(completed*40.0/Math.max(1,grouped.size())));save(id,lease,"processing","staging",payload);
             }
             payload.remove("currentFileName");payload.remove("currentChannelName");payload.put("progress",100).put("elapsedMs",(System.nanoTime()-start)/1_000_000).put("stagingMs",(System.nanoTime()-stagingStart)/1_000_000);LogisticsReadiness.applyBatch(payload);
-            var finalStatus=grouped.isEmpty()?"failed":"completed";var finalPhase=grouped.isEmpty()?"failed":"review";
+            int filtered=0,ambiguous=0;boolean failures=false;
+            for(var report:fileReports){filtered+=report.path("filteredChannels").asInt();ambiguous+=report.path("ambiguousChannels").asInt();failures|="failed".equals(report.path("status").asText());}
+            payload.put("filteredChannels",filtered).put("ambiguousChannels",ambiguous);
+            var finalStatus=grouped.isEmpty()&&failures?"failed":"completed";var finalPhase=finalStatus.equals("failed")?"failed":grouped.isEmpty()?"filtered":"review";
+            if(grouped.isEmpty()&&!failures)payload.put("message",ambiguous>0?"处理完成，存在渠道匹配待确认项":"处理完成，未导入渠道");
             save(id,lease,finalStatus,finalPhase,payload);
             cleanupParsedFiles(id,payload);save(id,lease,finalStatus,finalPhase,payload);
         } catch(Exception e){payload.put("error",safe(e));save(id,lease,"failed","failed",payload);}
@@ -183,6 +195,7 @@ public class LogisticsImportService {
     }
     private ObjectNode importChannel(UUID dataset,ObjectNode input,String actor,boolean replaceDrafts){
         guard.writable(dataset);
+        if(companyChannels!=null)companyChannels.assertImport(dataset);
         // A dataset-scoped transaction lock makes provider/channel creation deterministic under concurrent uploads.
         jdbc.sql("select pg_advisory_xact_lock(hashtext(:scope))").param("scope",dataset.toString()).query(rs->true);
         var providerName=input.path("providerName").asText();if(providerName.isBlank()||providerName.equals("未识别物流商"))throw AppException.unprocessable("请先确认物流商，不能自动创建未识别物流商");
@@ -204,6 +217,7 @@ public class LogisticsImportService {
             jdbc.sql("insert into logistics_channel(id,dataset_id,provider_id,code,rule_id,payload,created_at,updated_at) values(:id,:dataset,:provider,:code,:rule,cast(:payload as jsonb),now(),now())")
                     .param("id",channelId).param("dataset",dataset).param("provider",providerId).param("code",channelCode).param("rule",rule).param("payload",c.toString()).update();
         }
+        if(companyChannels!=null){companyChannels.bind(dataset,channelId,input.path("companyChannelId").asText());companyChannels.assertChannel(channelId);}
         var current=jdbc.sql("select v.payload::text from logistics_channel c join logistics_version v on v.id=c.current_version_id where c.id=:id")
                 .param("id",channelId).query(String.class).optional();
         var pendingReasons=new TreeSet<String>();

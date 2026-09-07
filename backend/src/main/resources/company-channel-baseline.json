@@ -1,0 +1,1876 @@
+{
+  "revision": 0,
+  "enabled": true,
+  "baseline": "8.27渠道价格",
+  "entries": [
+    {
+      "id": "f72092ca-21dd-363a-990f-232bddc93c94",
+      "providerName": "递四方",
+      "channelName": "联邮通标准挂号-带电（OH）",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [
+        "4PX"
+      ],
+      "productCodes": [
+        "OH"
+      ],
+      "sources": [
+        {
+          "file": "4px价格.xlsx",
+          "sheet": "联邮通标准挂号-带电（OH）",
+          "firstRow": 32,
+          "lastRow": 51,
+          "priceRows": 38
+        },
+        {
+          "file": "8.24递四方价格.xlsx",
+          "sheet": "联邮通标准挂号-带电（OH）",
+          "firstRow": 32,
+          "lastRow": 51,
+          "priceRows": 38
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "1a9785b7-2107-354a-b326-2d232d2664eb",
+      "providerName": "递四方",
+      "channelName": "联邮通标准挂号-普货（QC）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [
+        "4PX"
+      ],
+      "productCodes": [
+        "QC"
+      ],
+      "sources": [
+        {
+          "file": "4px价格.xlsx",
+          "sheet": "联邮通标准挂号-普货（QC）",
+          "firstRow": 20,
+          "lastRow": 75,
+          "priceRows": 70
+        },
+        {
+          "file": "8.24递四方价格.xlsx",
+          "sheet": "联邮通标准挂号-普货（QC）",
+          "firstRow": 20,
+          "lastRow": 75,
+          "priceRows": 70
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "5959f481-b7b3-3da6-93ce-1cab44ff5072",
+      "providerName": "递四方",
+      "channelName": "联邮通服装专线（S1427）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [
+        "4PX"
+      ],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "4px价格.xlsx",
+          "sheet": "联邮通服装专线（S1427）",
+          "firstRow": 30,
+          "lastRow": 32,
+          "priceRows": 27
+        },
+        {
+          "file": "8.24递四方价格.xlsx",
+          "sheet": "联邮通服装专线（S1427）",
+          "firstRow": 30,
+          "lastRow": 32,
+          "priceRows": 27
+        }
+      ],
+      "sharedSourceCodes": [
+        "S1427"
+      ]
+    },
+    {
+      "id": "da080dcc-d19b-383d-9ff1-3a9aa0635f1e",
+      "providerName": "递四方",
+      "channelName": "联邮通经济挂号-带电（JW）",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [
+        "4PX"
+      ],
+      "productCodes": [
+        "JW"
+      ],
+      "sources": [
+        {
+          "file": "4px价格.xlsx",
+          "sheet": "联邮通经济挂号-带电（JW）",
+          "firstRow": 21,
+          "lastRow": 27,
+          "priceRows": 17
+        },
+        {
+          "file": "8.24递四方价格.xlsx",
+          "sheet": "联邮通经济挂号-带电（JW）",
+          "firstRow": 21,
+          "lastRow": 27,
+          "priceRows": 17
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "041cb532-fb63-3ef9-8b97-af0fd6a32c8f",
+      "providerName": "递四方",
+      "channelName": "联邮通经济挂号-普货（O5）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [
+        "4PX"
+      ],
+      "productCodes": [
+        "O5"
+      ],
+      "sources": [
+        {
+          "file": "4px价格.xlsx",
+          "sheet": "联邮通经济挂号-普货（O5）",
+          "firstRow": 14,
+          "lastRow": 33,
+          "priceRows": 28
+        },
+        {
+          "file": "8.24递四方价格.xlsx",
+          "sheet": "联邮通经济挂号-普货（O5）",
+          "firstRow": 14,
+          "lastRow": 33,
+          "priceRows": 28
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "71ee3184-00f2-378a-86f2-6bdd2eda9a32",
+      "providerName": "递四方",
+      "channelName": "联邮通标准商派专线-普货（S5246）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [
+        "4PX"
+      ],
+      "productCodes": [
+        "S5246"
+      ],
+      "sources": [
+        {
+          "file": "4px价格.xlsx",
+          "sheet": "联邮通标准商派专线-普货（S5246）",
+          "firstRow": 6,
+          "lastRow": 12,
+          "priceRows": 7
+        },
+        {
+          "file": "8.24递四方价格.xlsx",
+          "sheet": "联邮通标准商派专线-普货（S5246）",
+          "firstRow": 6,
+          "lastRow": 12,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "5387803a-316d-3a9a-a8c9-eb0c358082ef",
+      "providerName": "递四方",
+      "channelName": "联邮通婚纱专线（S5290）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [
+        "4PX"
+      ],
+      "productCodes": [
+        "S5290"
+      ],
+      "sources": [
+        {
+          "file": "4px价格.xlsx",
+          "sheet": "联邮通婚纱专线（S5290）",
+          "firstRow": 5,
+          "lastRow": 12,
+          "priceRows": 8
+        },
+        {
+          "file": "8.24递四方价格.xlsx",
+          "sheet": "联邮通婚纱专线（S5290）",
+          "firstRow": 5,
+          "lastRow": 12,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": [
+        "S1427"
+      ]
+    },
+    {
+      "id": "a0935106-f210-3a04-aa41-d0973fee8ce7",
+      "providerName": "花海",
+      "channelName": "美国精选商派专线-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "普货 ",
+          "firstRow": 4,
+          "lastRow": 10,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "9606976f-25ae-3a95-8d2f-4c7f73590177",
+      "providerName": "花海",
+      "channelName": "美国全量商派专线-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "普货 ",
+          "firstRow": 12,
+          "lastRow": 18,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "38466853-11c2-3154-8935-411951929765",
+      "providerName": "花海",
+      "channelName": "美国USPS标准小包专线-普货(包税)",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "普货 ",
+          "firstRow": 20,
+          "lastRow": 26,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "32e0e504-1d48-3d11-a1eb-9cf84cf493fd",
+      "providerName": "花海",
+      "channelName": "美国标准小包专线-普货(包税)",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "普货 ",
+          "firstRow": 28,
+          "lastRow": 34,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "e54dc2e2-2391-3724-b5e0-c908c465a7d4",
+      "providerName": "花海",
+      "channelName": "美国标准小包岛屿专线-普货(包税)",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "普货 ",
+          "firstRow": 36,
+          "lastRow": 41,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "3ee2f004-5a37-30af-b1b4-5f5607c99116",
+      "providerName": "花海",
+      "channelName": "HH全球专线-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "普货 ",
+          "firstRow": 76,
+          "lastRow": 90,
+          "priceRows": 39
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "d7b31c3a-ed32-3b1b-835e-df4dd0d4ff07",
+      "providerName": "花海",
+      "channelName": "美国精选商派专线-服装",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "服装",
+          "firstRow": 4,
+          "lastRow": 10,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "a62a8840-fa95-36e8-9eb5-96d06563cd73",
+      "providerName": "花海",
+      "channelName": "美国全量商派专线-服装",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "服装",
+          "firstRow": 12,
+          "lastRow": 18,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "624b7e0b-8612-3acd-ba83-6632411cf93b",
+      "providerName": "花海",
+      "channelName": "美国标准小包专线-服饰(包税)",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "服装",
+          "firstRow": 20,
+          "lastRow": 26,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "3da591ef-b2ec-3474-9422-1cf70f7aa3ab",
+      "providerName": "花海",
+      "channelName": "美国精选商派专线-特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特货",
+          "firstRow": 4,
+          "lastRow": 10,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "94b0bf24-f2e8-3880-977b-2a066b8a64d5",
+      "providerName": "花海",
+      "channelName": "美国全量商派专线-特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特货",
+          "firstRow": 12,
+          "lastRow": 18,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "a02bb522-0502-35fc-be0b-04921fcffe74",
+      "providerName": "花海",
+      "channelName": "美国USPS标准小包专线-特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特货",
+          "firstRow": 20,
+          "lastRow": 26,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "2df775ba-9262-31f0-87e7-866c6342192d",
+      "providerName": "花海",
+      "channelName": "美国标准小包专线-特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特货",
+          "firstRow": 28,
+          "lastRow": 34,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "d95f8c3b-5fb5-32ad-ba0c-da189f27929f",
+      "providerName": "花海",
+      "channelName": "美国标准小包岛屿专线-特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特货",
+          "firstRow": 36,
+          "lastRow": 41,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "284919f3-750d-38f4-984b-0f7b80daf702",
+      "providerName": "花海",
+      "channelName": "HH全球专线-特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特货",
+          "firstRow": 52,
+          "lastRow": 63,
+          "priceRows": 20
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "b1219f0b-27d6-3825-ab25-a34dedb37009",
+      "providerName": "花海",
+      "channelName": "美国精选商派专线-化妆品",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "化妆品",
+          "firstRow": 4,
+          "lastRow": 10,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "e324f482-6802-3d61-b550-d31d0926d27c",
+      "providerName": "花海",
+      "channelName": "美国全量商派专线-化妆品",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "化妆品",
+          "firstRow": 12,
+          "lastRow": 18,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "f3d3fb3b-4e4c-35bf-9463-827318630a72",
+      "providerName": "花海",
+      "channelName": "美国USPS标准小包专线-化妆品(包税)",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "化妆品",
+          "firstRow": 20,
+          "lastRow": 26,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "4dcd5996-6069-3240-9350-84992cbdcc33",
+      "providerName": "花海",
+      "channelName": "美国标准小包专线-化妆品",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "化妆品",
+          "firstRow": 28,
+          "lastRow": 34,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "dbf21fe0-6f95-3389-b990-52711f79e280",
+      "providerName": "花海",
+      "channelName": "美国标准小包岛屿专线-化妆品",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "化妆品",
+          "firstRow": 36,
+          "lastRow": 41,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "9f58231b-c706-3383-a602-82d74c48c49a",
+      "providerName": "花海",
+      "channelName": "HH全球专线-化妆品",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "化妆品",
+          "firstRow": 45,
+          "lastRow": 48,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "cf5c0f2a-5a87-32b3-a950-e5b6f5663396",
+      "providerName": "花海",
+      "channelName": "美国精选商派专线-敏感货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "敏货",
+          "firstRow": 4,
+          "lastRow": 10,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "f76b9382-f27e-3c24-ac83-fafb16d250ef",
+      "providerName": "花海",
+      "channelName": "美国全量商派专线-敏感货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "敏货",
+          "firstRow": 12,
+          "lastRow": 18,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "f0e27537-521a-3245-b631-b09402f059bc",
+      "providerName": "花海",
+      "channelName": "美国USPS标准小包专线-敏感货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "敏货",
+          "firstRow": 20,
+          "lastRow": 26,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "e505818b-142f-3d18-8201-815e8c513349",
+      "providerName": "花海",
+      "channelName": "美国标准小包专线-敏感货(包税)",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "敏货",
+          "firstRow": 28,
+          "lastRow": 34,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "5f875e7c-4a41-3aba-ae67-41c6d812f4b0",
+      "providerName": "花海",
+      "channelName": "美国标准小包岛屿专线-敏感货(包税)",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "敏货",
+          "firstRow": 36,
+          "lastRow": 41,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "e74fd23d-3606-3ae9-a3de-9bf74a5b22f1",
+      "providerName": "花海",
+      "channelName": "HH全球专线-敏感货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "敏货",
+          "firstRow": 52,
+          "lastRow": 56,
+          "priceRows": 13
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "e104966c-ab68-35d7-8e43-452a8dedb050",
+      "providerName": "花海",
+      "channelName": "美国标准商派专线-特敏货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特敏",
+          "firstRow": 4,
+          "lastRow": 10,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "83dc429b-1cf8-3e04-b4ef-af06f138ee87",
+      "providerName": "花海",
+      "channelName": "美国USPS标准小包专线-特敏货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特敏",
+          "firstRow": 12,
+          "lastRow": 18,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "27267f87-05b9-3e6a-9b09-4594bc08c47d",
+      "providerName": "花海",
+      "channelName": "美国标准小包专线-特敏货(包税)",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特敏",
+          "firstRow": 20,
+          "lastRow": 26,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "857defa7-43f4-3b3c-90a5-eab8821dfc02",
+      "providerName": "花海",
+      "channelName": "美国标准小包岛屿专线-特敏货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "7.30花海.xlsx",
+          "sheet": "特敏",
+          "firstRow": 28,
+          "lastRow": 33,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "991fc351-9cd9-3662-abf9-e622255fae0b",
+      "providerName": "容鼎",
+      "channelName": "美国纯商派DDP专线-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "PK00186"
+      ],
+      "sources": [
+        {
+          "file": "8.12容鼎.xlsx",
+          "sheet": "Sheet1",
+          "firstRow": 4,
+          "lastRow": 9,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "19d4fd14-7cc7-34f3-a5ff-b96d71ab8dc5",
+      "providerName": "容鼎",
+      "channelName": "美国纯商派DDP专线-带电带磁",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "PK00243"
+      ],
+      "sources": [
+        {
+          "file": "8.12容鼎.xlsx",
+          "sheet": "Sheet1",
+          "firstRow": 10,
+          "lastRow": 15,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "cfbc21dc-dacb-3f63-abed-06dd402bd5b2",
+      "providerName": "容鼎",
+      "channelName": "美国纯商派DDP专线-敏货",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "PK00187"
+      ],
+      "sources": [
+        {
+          "file": "8.12容鼎.xlsx",
+          "sheet": "Sheet1",
+          "firstRow": 16,
+          "lastRow": 21,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "852e63c9-979f-3e45-9478-89068124808e",
+      "providerName": "容鼎",
+      "channelName": "美国纯商派DDP专线-特敏专线",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "PK00251"
+      ],
+      "sources": [
+        {
+          "file": "8.12容鼎.xlsx",
+          "sheet": "Sheet1",
+          "firstRow": 22,
+          "lastRow": 27,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "7242c2e4-ac63-3bbf-8b12-f9ef5cb869f3",
+      "providerName": "容鼎",
+      "channelName": "美国纯商派化妆品专线",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "PK00270"
+      ],
+      "sources": [
+        {
+          "file": "8.12容鼎.xlsx",
+          "sheet": "Sheet1",
+          "firstRow": 28,
+          "lastRow": 33,
+          "priceRows": 6
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "dec8e339-c742-33ec-8ab0-997bdb525cb3",
+      "providerName": "万邦",
+      "channelName": "万邦化妆品专线",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "MUSLR"
+      ],
+      "sources": [
+        {
+          "file": "8.17万邦价格.xlsx",
+          "sheet": "万邦化妆品专线 ",
+          "firstRow": 34,
+          "lastRow": 39,
+          "priceRows": 33
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "a9136458-d5f3-33bc-b9f1-f1f566f235d6",
+      "providerName": "万邦",
+      "channelName": "专线挂号普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "EUSLPHR",
+        "USPHSLR"
+      ],
+      "sources": [
+        {
+          "file": "8.17万邦价格.xlsx",
+          "sheet": "万邦专线挂号普货",
+          "firstRow": 54,
+          "lastRow": 156,
+          "priceRows": 129
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "b0f14907-fcee-3497-9a87-0c0565fcaf9f",
+      "providerName": "万邦",
+      "channelName": "澳邮专线挂号普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "EUSLPHR-ZIP"
+      ],
+      "sources": [
+        {
+          "file": "8.17万邦价格.xlsx",
+          "sheet": "万邦专线挂号普货",
+          "firstRow": 126,
+          "lastRow": 145,
+          "priceRows": 20
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "563b3679-e01e-31d0-8de4-3c2315441482",
+      "providerName": "万邦",
+      "channelName": "万邦服装专线普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "USPHFZ",
+        "WBPHFZ"
+      ],
+      "sources": [
+        {
+          "file": "8.17万邦价格.xlsx",
+          "sheet": "万邦服装专线普货",
+          "firstRow": 18,
+          "lastRow": 35,
+          "priceRows": 30
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "1cf6c483-513f-3528-af0c-8dad34be8000",
+      "providerName": "万邦",
+      "channelName": "万邦特敏专线 B",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "WBSLHC"
+      ],
+      "sources": [
+        {
+          "file": "8.17万邦价格.xlsx",
+          "sheet": "万邦特敏专线 B",
+          "firstRow": 24,
+          "lastRow": 32,
+          "priceRows": 26
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "f53bc743-ca09-3489-bac4-872d365a8269",
+      "providerName": "万邦",
+      "channelName": "万邦大货专线普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "WBSLLPPH"
+      ],
+      "sources": [
+        {
+          "file": "8.17万邦价格.xlsx",
+          "sheet": "万邦大货专线挂号普货",
+          "firstRow": 11,
+          "lastRow": 16,
+          "priceRows": 11
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "8b0e7476-52b8-3246-97d4-4e5ed4e3ced8",
+      "providerName": "通邮",
+      "channelName": "通邮专线普货A",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "通邮专线普货A",
+          "firstRow": 13,
+          "lastRow": 63,
+          "priceRows": 60
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "99f529ec-c7a7-3883-b1be-61be0139acc0",
+      "providerName": "通邮",
+      "channelName": "通邮挂号特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": " 通邮挂号特货",
+          "firstRow": 99,
+          "lastRow": 183,
+          "priceRows": 180
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "0855b020-88b9-39be-a8ad-8410c2f7c5c4",
+      "providerName": "通邮",
+      "channelName": "纯电池线路",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "纯电池线路",
+          "firstRow": 56,
+          "lastRow": 97,
+          "priceRows": 92
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "1edbd222-3f9b-3f9f-a3f9-69c9d7ad3f35",
+      "providerName": "通邮",
+      "channelName": "美国专线特惠普",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "美国专线小包",
+          "firstRow": 6,
+          "lastRow": 13,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "296bd42f-7e95-3092-87e4-86eada7eef07",
+      "providerName": "通邮",
+      "channelName": "美国专线带电",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "美国专线小包",
+          "firstRow": 6,
+          "lastRow": 13,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "1ef491cd-5801-350b-be50-d4e0c2b540bd",
+      "providerName": "通邮",
+      "channelName": "美国专线特敏感",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "美国专线小包",
+          "firstRow": 6,
+          "lastRow": 13,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "a7adf854-2e23-35f1-bc4c-e7440e828f13",
+      "providerName": "通邮",
+      "channelName": "美国专线特敏感A",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "美国专线小包",
+          "firstRow": 6,
+          "lastRow": 13,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "a43de93f-b887-3dfa-b250-cca0f1932c69",
+      "providerName": "通邮",
+      "channelName": "美国专线特敏感B",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "美国专线小包",
+          "firstRow": 6,
+          "lastRow": 13,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "8ae61ce6-162b-3c5c-8661-21f101a378db",
+      "providerName": "通邮",
+      "channelName": "加拿大专线特货（带电/彩妆)",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "加拿大专线",
+          "firstRow": 5,
+          "lastRow": 12,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "02f053c4-2b24-3464-b602-7a7e9195f61e",
+      "providerName": "通邮",
+      "channelName": "加拿大专线特货A（保建品/F货，不接香水)",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.17通邮价格.xlsx",
+          "sheet": "加拿大专线",
+          "firstRow": 5,
+          "lastRow": 12,
+          "priceRows": 8
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "25f0561c-513a-3d35-a9ef-eeeb13210716",
+      "providerName": "云速递",
+      "channelName": "全球专线普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.1云速递价格.xlsx",
+          "sheet": "全球专线普货",
+          "firstRow": 76,
+          "lastRow": 84,
+          "priceRows": 80
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "29756ca1-f6ac-371f-8885-068fa958e377",
+      "providerName": "云速递",
+      "channelName": "全球专线带电",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.1云速递价格.xlsx",
+          "sheet": "全球专线带电",
+          "firstRow": 101,
+          "lastRow": 110,
+          "priceRows": 105
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "1be52ad0-f3c7-38eb-96a8-8dcccea1833b",
+      "providerName": "云速递",
+      "channelName": "全球专线服装",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.1云速递价格.xlsx",
+          "sheet": "全球专线服装",
+          "firstRow": 14,
+          "lastRow": 20,
+          "priceRows": 15
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "b2af803b-2e99-3ee8-be73-550e6fcb7b0b",
+      "providerName": "云速递",
+      "channelName": "全球专线敏感",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.1云速递价格.xlsx",
+          "sheet": "全球专线敏感",
+          "firstRow": 48,
+          "lastRow": 52,
+          "priceRows": 49
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "dcddf9ca-69ed-3649-a309-9342db0a646d",
+      "providerName": "云速递",
+      "channelName": "美国商派小包专线-美国（普货）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "SFYD-USJJR"
+      ],
+      "sources": [
+        {
+          "file": "8.1云速递价格.xlsx",
+          "sheet": "美国商派小包专线",
+          "firstRow": 3,
+          "lastRow": 7,
+          "priceRows": 5
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "6fb9fe27-0833-3b90-a522-a3351ec708d7",
+      "providerName": "云速递",
+      "channelName": "美国商派小包专线-美国（带电）",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "SFYD-USPSDD"
+      ],
+      "sources": [
+        {
+          "file": "8.1云速递价格.xlsx",
+          "sheet": "美国商派小包专线",
+          "firstRow": 8,
+          "lastRow": 12,
+          "priceRows": 5
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "6ee5780f-c812-3dbf-8031-54fb0d05f599",
+      "providerName": "云速递",
+      "channelName": "美国商派小包专线-美国（化妆品）",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [
+        "SFYD-USPSH"
+      ],
+      "sources": [
+        {
+          "file": "8.1云速递价格.xlsx",
+          "sheet": "美国商派小包专线",
+          "firstRow": 13,
+          "lastRow": 17,
+          "priceRows": 5
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "6e95589b-6e5a-3324-ac36-9d59156efa2a",
+      "providerName": "云途",
+      "channelName": "云途商派专线（特惠普货）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途商派专线（特惠普货）",
+          "firstRow": 5,
+          "lastRow": 11,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "38228f02-c805-34a7-aa9d-fbd172e04d08",
+      "providerName": "云途",
+      "channelName": "云途全球专线挂号（特惠带电）",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途全球专线挂号（特惠带电）",
+          "firstRow": 153,
+          "lastRow": 218,
+          "priceRows": 211
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "4ff8c897-ee79-3a5e-91ef-77e28dfeb04f",
+      "providerName": "云途",
+      "channelName": "云途全球专线挂号（特惠普货）",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途全球专线挂号（特惠普货）",
+          "firstRow": 131,
+          "lastRow": 186,
+          "priceRows": 179
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "7d3bc99c-6cff-3e3a-a801-c311b026f838",
+      "providerName": "云途",
+      "channelName": "云途全球化妆品类专线挂号",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途全球化妆品类专线挂号",
+          "firstRow": 60,
+          "lastRow": 111,
+          "priceRows": 107
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "da047771-332f-37d8-809b-f7aace642b65",
+      "providerName": "云途",
+      "channelName": "云途全球服装专线挂号",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途全球服装专线挂号",
+          "firstRow": 54,
+          "lastRow": 100,
+          "priceRows": 96
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "5e5a55f7-439c-3d40-a0c2-279ff4002285",
+      "providerName": "云途",
+      "channelName": "云途欧洲专线（特惠带电）-CHC",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途欧洲专线（特惠带电）-CHC",
+          "firstRow": 12,
+          "lastRow": 15,
+          "priceRows": 11
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "23891a1d-34ef-3aba-bcef-f2be1c1466e0",
+      "providerName": "云途",
+      "channelName": "云途欧洲专线（特惠普货）-CHC",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途欧洲专线（特惠普货）-CHC",
+          "firstRow": 12,
+          "lastRow": 15,
+          "priceRows": 11
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "56c4d8e7-9bc4-38d3-b2a3-5213155b1d8a",
+      "providerName": "云途",
+      "channelName": "云途欧洲化妆品专线-CHC",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24云途价格.xlsx",
+          "sheet": "云途欧洲化妆品专线-CHC",
+          "firstRow": 12,
+          "lastRow": 15,
+          "priceRows": 11
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "e2893bc2-fa50-3d33-9e36-0d90df38bcab",
+      "providerName": "极通环球",
+      "channelName": "极通环球专线-标准定制特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24极通环球价格.xls",
+          "sheet": "极通环球专线-标准定制特货",
+          "firstRow": 60,
+          "lastRow": 66,
+          "priceRows": 58
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "921c1662-cb92-38c0-bccc-d3e24d5b3d6a",
+      "providerName": "极通环球",
+      "channelName": "极通环球专线-标准定制敏感",
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.24极通环球价格.xls",
+          "sheet": "极通环球专线-标准定制敏感",
+          "firstRow": 44,
+          "lastRow": 100,
+          "priceRows": 93
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "94a1fea5-9699-337c-9158-514945b82446",
+      "providerName": "燕文",
+      "channelName": "燕文专线追踪-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.27燕文价格.xlsx",
+          "sheet": "燕文专线追踪-普货",
+          "firstRow": 130,
+          "lastRow": 196,
+          "priceRows": 190
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "225cb1a3-2200-3829-a22e-aa5a63f8b9ea",
+      "providerName": "燕文",
+      "channelName": "燕文专线追踪-特货",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.27燕文价格.xlsx",
+          "sheet": "燕文专线追踪-特货",
+          "firstRow": 138,
+          "lastRow": 204,
+          "priceRows": 198
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "3bf17ba8-6f9b-3e80-b6fe-33e421a67789",
+      "providerName": "燕文",
+      "channelName": "燕文专线惠选-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.27燕文价格.xlsx",
+          "sheet": "燕文专线惠选-普货",
+          "firstRow": 31,
+          "lastRow": 39,
+          "priceRows": 34
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "16c4800f-69d5-375f-9f14-0b5b66d305fd",
+      "providerName": "燕文",
+      "channelName": "燕文化妆品专线",
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.27燕文价格.xlsx",
+          "sheet": "燕文化妆品专线",
+          "firstRow": 82,
+          "lastRow": 116,
+          "priceRows": 111
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "f41bf57a-35e6-308e-b098-6ef9b1d0814b",
+      "providerName": "燕文",
+      "channelName": "燕文服装专线-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.27燕文价格.xlsx",
+          "sheet": "燕文服装专线-普货",
+          "firstRow": 23,
+          "lastRow": 56,
+          "priceRows": 51
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "5920363b-b5e4-3bd7-9852-d5c37090e054",
+      "providerName": "燕文",
+      "channelName": "燕文精品追踪-普货",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.27燕文价格.xlsx",
+          "sheet": "燕文精品追踪-普货",
+          "firstRow": 14,
+          "lastRow": 16,
+          "priceRows": 12
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "cb5f3fc2-02f7-3a5b-992c-93ccf3c33be5",
+      "providerName": "燕文",
+      "channelName": "中邮上海线下E邮宝",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.27燕文价格.xlsx",
+          "sheet": "中邮上海线下E邮宝",
+          "firstRow": 14,
+          "lastRow": 34,
+          "priceRows": 30
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "03de9ae0-1445-30ab-a2d0-a33a5d64af94",
+      "providerName": "顺丰",
+      "channelName": "国际电商专递-CD",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.7顺丰价格.xlsx",
+          "sheet": "国际电商专递-CD",
+          "firstRow": 98,
+          "lastRow": 149,
+          "priceRows": 137
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "03aeeb3c-638c-37e3-b70c-e9d356c0998b",
+      "providerName": "顺丰",
+      "channelName": "服装专线",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.7顺丰价格.xlsx",
+          "sheet": "服装专线",
+          "firstRow": 21,
+          "lastRow": 52,
+          "priceRows": 44
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "65364258-b4b4-3de5-8faa-70318547654c",
+      "providerName": "顺丰",
+      "channelName": "敏货电商专递",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.7顺丰价格.xlsx",
+          "sheet": "敏货电商专递",
+          "firstRow": 25,
+          "lastRow": 48,
+          "priceRows": 45
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "dd2fac5b-2f5f-3d0f-a623-760211cbba15",
+      "providerName": "顺丰",
+      "channelName": "国际电商专递-商派专线",
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.7顺丰价格.xlsx",
+          "sheet": "商派渠道公布价(US)",
+          "firstRow": 4,
+          "lastRow": 10,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    },
+    {
+      "id": "6ce3a092-e8b2-3586-90ed-cd3ec8562eb9",
+      "providerName": "顺丰",
+      "channelName": "商派服装专线",
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "aliases": [],
+      "providerAliases": [],
+      "productCodes": [],
+      "sources": [
+        {
+          "file": "8.7顺丰价格.xlsx",
+          "sheet": "商派渠道公布价(US)",
+          "firstRow": 16,
+          "lastRow": 22,
+          "priceRows": 7
+        }
+      ],
+      "sharedSourceCodes": []
+    }
+  ]
+}

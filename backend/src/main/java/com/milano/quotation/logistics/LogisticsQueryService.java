@@ -133,12 +133,13 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null
+                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
                   and c.dataset_id=logistics_active_dataset()
                   and logistics_version_quote_ready(v.id)
                 order by c.id
                 """).query(String.class).list();
-        return new ManifestRevision(sha256(String.join("\n", revisionParts)), revisionParts.size());
+        var scopeRevision = jdbc.sql("select concat_ws('|',revision,enabled,paused,rebuild_id) from logistics_company_state where singleton").query(String.class).single();
+        return new ManifestRevision(sha256(scopeRevision+"\n"+String.join("\n", revisionParts)), revisionParts.size());
     }
 
     @Transactional(readOnly = true)
@@ -156,7 +157,7 @@ public class LogisticsQueryService {
                 cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null
+                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
                   and c.dataset_id=logistics_active_dataset()
                   and logistics_version_quote_ready(v.id)
                   and coalesce(item->>'areaName','')<>''
@@ -169,7 +170,7 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null
+                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
                   and c.dataset_id=logistics_active_dataset()
                   and logistics_version_quote_ready(v.id)
                 order by attribute
@@ -192,7 +193,7 @@ public class LogisticsQueryService {
                   join logistics_version v on v.id=c.current_version_id and v.status='published'
                   where coalesce((p.payload->>'enabled')::boolean,true)=true
                     and coalesce((c.payload->>'enabled')::boolean,true)=true
-                    and c.archived_at is null
+                    and c.archived_at is null and logistics_company_quote_allowed(c.id)
                     and c.dataset_id=logistics_active_dataset()
                     and exists(select 1 from logistics_billing_acceptance accepted
                       where accepted.version_id=v.id
@@ -290,7 +291,7 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null
+                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
                   and c.dataset_id=logistics_active_dataset()
                   and exists(select 1 from logistics_billing_acceptance accepted
                     where accepted.version_id=v.id
@@ -312,7 +313,7 @@ public class LogisticsQueryService {
                   jsonb_build_object('countries',cast(:countries as jsonb))) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null
+                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
                   and c.dataset_id=logistics_active_dataset()
                   and exists(select 1 from logistics_billing_acceptance accepted
                     where accepted.version_id=v.id
