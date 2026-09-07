@@ -32,6 +32,14 @@ final class FinanceSettingValidation {
                     }
                 }
             }
+            case "surcharge-settings" -> {
+                object(body);
+                if (!body.path("countries").isArray() || !body.path("providers").isArray()) fail("附加费国家及物流商配置必须为列表");
+                var countries = new HashSet<String>();
+                for (var row : body.path("countries")) { object(row); unique(row,"country",countries); number(row.path("fixedFeeUsd"),"fixedFeeUsd",false); }
+                var providers = new HashSet<String>();
+                for (var row : body.path("providers")) { object(row); unique(row,"provider",providers); if (!Set.of("exempt","taxable").contains(row.path("mode").asText())) fail("物流商附加费属性不合法"); }
+            }
             case "tax-settings" -> {
                 object(body);
                 if (body.has("rules") && !body.has("countries") && !body.has("providers")) { if (!body.path("rules").isArray()) fail("税费规则必须为列表"); }

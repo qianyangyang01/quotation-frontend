@@ -16,7 +16,7 @@ import java.util.UUID;
 
 @RestController @RequestMapping("/api/v1/finance-settings")
 public class FinanceSettingController {
-    private static final List<String> KEYS=List.of("country-classification","channel-policies","customer-grades","exchange-rate","tax-settings");
+    private static final List<String> KEYS=List.of("country-classification","channel-policies","customer-grades","exchange-rate","tax-settings","surcharge-settings");
     private final FinanceSettingRepository settings; private final AuditService audit; private final LogisticsDatasetService logisticsDatasets;
     public FinanceSettingController(FinanceSettingRepository settings, AuditService audit, LogisticsDatasetService logisticsDatasets){this.settings=settings;this.audit=audit;this.logisticsDatasets=logisticsDatasets;}
     @GetMapping @PreAuthorize("isAuthenticated()") @Transactional(readOnly=true) ApiResponse<Map<String,JsonNode>> all(){

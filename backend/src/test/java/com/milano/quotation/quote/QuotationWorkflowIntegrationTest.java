@@ -38,6 +38,18 @@ class QuotationWorkflowIntegrationTest {
     @Test
     void keepsPersonalOutcomeEditingAndMakesCompanyRecordsReadOnly() throws Exception {
         var session = authenticatedSession();
+        var taxBefore = mvc.perform(get("/api/v1/finance-settings/tax-settings").session(session)).andExpect(status().isOk()).andReturn();
+        var surchargeBody = """
+            {"countries":[{"country":"美国","fixedFeeUsd":2,"selected":true,"enabled":true}],"providers":[{"provider":"递四方","mode":"taxable","selected":true}]}
+            """;
+        mvc.perform(put("/api/v1/finance-settings/surcharge-settings").session(session).with(csrf()).header("If-Match", "-1").contentType("application/json").content(surchargeBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.value.countries[0].fixedFeeUsd").value(2));
+        mvc.perform(put("/api/v1/finance-settings/surcharge-settings").session(session).with(csrf()).header("If-Match", "-1").contentType("application/json").content(surchargeBody))
+                .andExpect(status().isConflict());
+        mvc.perform(get("/api/v1/finance-settings").session(session)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data['surcharge-settings'].value.providers[0].mode").value("taxable"));
+        var taxAfter = mvc.perform(get("/api/v1/finance-settings/tax-settings").session(session)).andExpect(status().isOk()).andReturn();
+        org.junit.jupiter.api.Assertions.assertEquals(mapper.readTree(taxBefore.getResponse().getContentAsByteArray()).path("data"), mapper.readTree(taxAfter.getResponse().getContentAsByteArray()).path("data"));
         mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
                         .header("Idempotency-Key", "quote-invalid-1").contentType("application/json").content("{}"))
                 .andExpect(status().isUnprocessableEntity())

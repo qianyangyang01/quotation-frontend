@@ -76,3 +76,14 @@ it('distinguishes absent country duty, provider exemption and a missing provider
   Object.assign(state.row, { taxFeeMode: 'missing', taxIncluded: false, taxConfigured: false, taxLabel: '物流商税务属性待设置' }); await nextTick()
   expect(host.textContent).toBe('物流商税务属性待设置')
 })
+
+it('displays surcharge amount and provider exemption independently of tax', async () => {
+  const props = reactive({row: {...row('美国', 0), surchargeEnabled:true, surchargeConfigured:true, surchargeLabel:'附加费 $2.00/单'}})
+  mount(QuoteTaxMeta, props); await nextTick()
+  expect(document.body.textContent).toContain('无关税')
+  expect(document.body.textContent).toContain('附加费 $2.00/单')
+  props.row.surchargeLabel = '免附加费'; await nextTick()
+  expect(document.body.textContent).toContain('免附加费')
+  props.row.surchargeEnabled = false; await nextTick()
+  expect(document.body.textContent).not.toContain('附加费')
+})

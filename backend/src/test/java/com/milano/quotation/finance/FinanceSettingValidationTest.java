@@ -18,4 +18,15 @@ class FinanceSettingValidationTest {
         assertThrows(AppException.class, () -> FinanceSettingValidation.validate("country-classification", mapper.readTree("[{\"country\":\"美国\"},{\"country\":\"美国\"}]")));
         assertThrows(AppException.class, () -> FinanceSettingValidation.validate("tax-settings", mapper.readTree("{\"countries\":[{\"country\":\"美国\",\"ratePercent\":-1}],\"providers\":[]}")));
     }
+    @Test void surchargeValidatesIndependentProviderModes() {
+        assertDoesNotThrow(() -> FinanceSettingValidation.validate("surcharge-settings", mapper.readTree("""
+            {"countries":[{"country":"美国","fixedFeeUsd":2}],"providers":[{"provider":"递四方","mode":"exempt"}]}
+            """)));
+        for (var mode : new String[]{"channel", "", "included"}) {
+            assertThrows(AppException.class, () -> FinanceSettingValidation.validate("surcharge-settings", mapper.readTree("{\"countries\":[],\"providers\":[{\"provider\":\"递四方\",\"mode\":\"" + mode + "\"}]}")));
+        }
+        assertThrows(AppException.class, () -> FinanceSettingValidation.validate("surcharge-settings", mapper.readTree("""
+            {"countries":[{"country":"美国","fixedFeeUsd":-2}],"providers":[]}
+            """)));
+    }
 }

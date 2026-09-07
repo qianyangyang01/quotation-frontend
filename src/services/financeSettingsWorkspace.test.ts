@@ -7,6 +7,7 @@ const dependencies = vi.hoisted(() => ({
   loadCustomerGradeSettings: vi.fn(),
   loadFinanceExchangeRate: vi.fn(),
   loadFinanceTaxSettings: vi.fn(),
+  loadFinanceSurchargeSettings: vi.fn(() => ({ countries: [], providers: [], updatedAt: '尚未保存' })),
   apiGet: vi.fn(),
 }))
 
@@ -17,6 +18,7 @@ vi.mock('@/data/financeChannelPolicies', () => ({
   loadCustomerGradeSettings: dependencies.loadCustomerGradeSettings,
   loadFinanceExchangeRate: dependencies.loadFinanceExchangeRate,
 }))
+vi.mock('@/data/financeSurchargeSettings', () => ({ loadFinanceSurchargeSettings: dependencies.loadFinanceSurchargeSettings }))
 vi.mock('@/data/financeTaxSettings', () => ({ loadFinanceTaxSettings: dependencies.loadFinanceTaxSettings }))
 vi.mock('@/services/http', () => ({ api: { get: dependencies.apiGet } }))
 
