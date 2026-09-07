@@ -7,7 +7,7 @@ release_dir="${1:-}"
 }
 
 compose=(docker compose --project-name quotation-prod --env-file "$release_dir/.env" -f "$release_dir/docker-compose.yml")
-services=(quotation-postgres quotation-redis quotation-minio quotation-backend quotation-frontend)
+services=(quotation-postgres quotation-redis quotation-minio quotation-parser quotation-backend quotation-frontend)
 deadline=$((SECONDS + 300))
 while (( SECONDS < deadline )); do
   all_healthy=true
@@ -22,7 +22,7 @@ while (( SECONDS < deadline )); do
     [[ "$status" == "healthy" ]] || all_healthy=false
   done
   if [[ "$all_healthy" == "true" ]]; then
-    echo "All five quotation containers are healthy"
+    echo "All quotation containers are healthy"
     exit 0
   fi
   sleep 5

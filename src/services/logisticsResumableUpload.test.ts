@@ -18,6 +18,25 @@ beforeEach(() => {
   })
 })
 describe('durable logistics upload', () => {
+  it('uploads two files concurrently and cancels both requests', async () => {
+    vi.mocked(api.post).mockResolvedValue({ id: 'session', chunkBytes, received: [[], [], []] })
+    const cancellations: Array<ReturnType<typeof vi.fn>> = []
+    vi.mocked(uploadForm).mockImplementation(() => {
+      let reject!: (error: Error) => void
+      const promise = new Promise((_, fail) => { reject = fail })
+      const cancel = vi.fn(() => reject(new DOMException('paused', 'AbortError')))
+      cancellations.push(cancel)
+      return { promise, cancel }
+    })
+    const task = resumableLogisticsUpload('dataset', ['a', 'b', 'c'].map(name => new File(['x'], name + '.xlsx')), false, 'key')
+    const result = expect(task.promise).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(uploadForm).toHaveBeenCalledTimes(2))
+    task.cancel()
+    await result
+    expect(cancellations.every(cancel => cancel.mock.calls.length > 0)).toBe(true)
+    expect(uploadForm).toHaveBeenCalledTimes(2)
+    expect(storage.size).toBe(1)
+  })
   it('keeps identity across interrupted runs and sends only the missing chunk', async () => {
     const file = new File([new Uint8Array(chunkBytes + 3)], '花海.xlsx')
     const post = vi.mocked(api.post)
@@ -34,7 +53,7 @@ describe('durable logistics upload', () => {
     expect(uploadForm).toHaveBeenCalledTimes(1)
     expect(vi.mocked(uploadForm).mock.calls[0]![0]).toContain('/chunks/1')
     expect((vi.mocked(uploadForm).mock.calls[0]![1].get('chunk') as Blob).size).toBe(3)
-    expect(progress.mock.calls[0]![0].loaded).toBe(chunkBytes)
+    expect(progress.mock.calls.find(call => call[0].phase === 'uploading')![0].loaded).toBe(chunkBytes)
     expect(storage.size).toBe(0)
   })
   it('starts a new session when the server has expired an old resume key', async () => {

@@ -20,6 +20,39 @@ class LogisticsSourceParserTest {
     final ObjectMapper mapper=new ObjectMapper();
     final LogisticsWorkbookService standard=new LogisticsWorkbookService(mapper);
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,standard);
+    @Test void twoLevelUnitHeadersRecognizeNewProvider()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("Sheet1");
+            row(sheet,0,"国家/地区","重量","运费","处理费","重量尺寸要求及附加费");
+            row(sheet,1,"","(KG)","(RMB/KG)","(RMB/票)");
+            row(sheet,2,"美国","0-1",65,23);
+            var parsed=parser.parse(bytes(book),"巧捷新价格.xlsx");
+            assertEquals(1,parsed.path("channels").get(0).path("rows").size(),parsed.toString());
+        }
+    }
+
+    @Test void newerDatesReorderedHeadersAndNewChannelNamesKeepSamePrices()throws Exception {
+        for(String name:List.of("燕文2026-09-07.xlsx","燕文2027-01-01.xlsx"))try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("新增测试渠道");
+            row(sheet,0,"更新日期：2027-01-01");
+            row(sheet,2,"挂号费/票","重量范围","目的国","公斤单价(元/公斤)","渠道名称");
+            row(sheet,3,12,"0-1","美国",45,"新增测试渠道");
+            var parsed=parser.parse(bytes(book),name);var prices=parsed.path("channels").get(0).path("rows");
+            assertEquals(1,prices.size());assertEquals(45,prices.get(0).path("pricePerKg").asDouble());
+            assertEquals("US",prices.get(0).path("countryCode").asText());
+        }
+    }
+
+    @Test void unknownProviderStillFiltersOversizedPriceSheet()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("新渠道");row(sheet,0,"国家","重量段","运费(RMB/KG)","挂号费");
+            for(int r=1;r<=800;r++)row(sheet,r,"美国",(r-1)+"-"+r,12,3);
+            var parsed=parser.parse(bytes(book),"新物流商.xlsx");
+            assertEquals("filtered",parsed.path("sheets").get(0).path("status").asText());
+            assertEquals(501,parsed.path("sheets").get(0).path("filteredPriceRows").asInt());
+            assertTrue(parsed.path("channels").isEmpty());
+        }
+    }
 
     @Test void datesAreMetadataWhileGenuineWeightRangesRemainPrices() {
         for(var value:List.of("2026-9-7","2026/09/07","2026.9.7","2026年9月7日","生效时间：2026-9-7","生效日期: 2026-6-22")) {

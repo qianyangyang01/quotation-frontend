@@ -118,7 +118,7 @@ const activeUploadBatch = computed(() => batch.value?.id === activeUploadBatchId
 const uploadStatusVisible = computed(() => uploadInFlight.value || Boolean(activeUploadBatch.value))
 const uploadStatusPercent = computed(() => uploadInFlight.value ? uploadProgress.value.percent : Number(activeUploadBatch.value?.payload.progress || 0))
 const uploadStatusText = computed(() => {
-  if (uploadInFlight.value) return uploadProgress.value.percent >= 100 ? '文件已传完，服务器正在校验并保存' : '正在上传文件'
+  if (uploadInFlight.value) return uploadProgress.value.phase === 'hashing' ? '正在校验本地文件' : uploadProgress.value.percent >= 100 ? '文件已传完，服务器正在校验并保存' : '正在上传文件'
   const current = activeUploadBatch.value
   if (!current) return ''
   if (current.status === 'queued') return '文件已保存，等待后台解析'
@@ -266,9 +266,9 @@ function batchFileState(index: number) {
   const report = batch.value?.payload.fileReports?.[index]
   if (report?.status === 'filtered') return '已过滤'
   if (report?.status === 'failed') return '解析失败'
-  if (report?.status === 'template-pending') return '新模板待适配'
+  if (report?.status === 'template-pending') return report.sheets?.some(sheet => Number(sheet.priceRows) > 0) ? '部分工作表待适配' : '工作表待适配'
   if (report) return '已解析'
-  if (batch.value?.status === 'failed') return '未完成'
+  if (batch.value?.status === 'failed' || batch.value?.status === 'interrupted') return '未完成'
   if (batch.value?.status === 'processing' && batch.value.payload.currentFileIndex === index) return '正在解析'
   if (index < Number(batch.value?.payload.processedFiles || 0)) return '已解析'
   return '等待解析'
@@ -276,11 +276,16 @@ function batchFileState(index: number) {
 function batchFileHint(index: number) {
   const state = batchFileState(index), report = batch.value?.payload.fileReports?.[index]
   if (state === '解析失败') return report?.message || '解析失败，但服务器没有返回具体原因'
-  if (state === '新模板待适配') return '原表结构与通用模板及已知物流商模板不同，文件保留7天；新增解析器后可直接重试。'
+  if (state.includes('工作表待适配')) {
+    const pending = report?.sheets?.filter(sheet => sheet.templateStatus === 'adapter-required').map(sheet => `${sheet.name}：${sheet.message || '价格结构未识别'}`) || []
+    return `${pending.length ? pending.join('；') : '部分价格结构未识别，请查看解析证据'}。原文件保留7天，修复后可重试；已识别价格仍需通过审核。`
+  }
   if (state === '正在解析') return '文件仍在处理中，这不是解析失败；完成后会显示工作表、价格条数和异常原因。'
   if (state === '等待解析') return '尚未轮到这个文件解析。'
   if (state === '未完成') return batch.value?.payload.error || '批次提前结束，请重试后查看具体原因。'
   const filtered = report?.sheets?.filter(sheet => sheet.filteredFirstNextRows?.length) || []
+  const serviceReferences = report?.sheets?.filter(sheet => sheet.status === 'service-reference') || []
+  if (serviceReferences.length) return serviceReferences.map(sheet => `${sheet.name}：${sheet.message}`).join('；')
   if (filtered.length) return `首重续重已过滤，不解析、不进入发布前检查：${filtered.map(sheet => sheet.name).join('、')}`
   return ''
 }

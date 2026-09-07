@@ -30,6 +30,7 @@ class LogisticsDatasetPostgresIntegrationTest {
         var ds=new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());jdbc=JdbcClient.create(ds);transactions=new DataSourceTransactionManager(ds);tx=new TransactionTemplate(transactions);
         storage=mock(AssetStorageService.class);var objects=new HashMap<String,byte[]>();
         doAnswer(i->{objects.put(i.getArgument(0),((InputStream)i.getArgument(1)).readAllBytes());return null;}).when(storage).putRaw(anyString(),any(),anyLong(),anyString());
+        when(storage.putRawWithSha256(anyString(),any(),anyLong(),anyString())).thenAnswer(i->{var bytes=((InputStream)i.getArgument(1)).readAllBytes();objects.put(i.getArgument(0),bytes);return AssetStorageService.sha256(bytes);});
         when(storage.openRaw(anyString())).thenAnswer(i->new ByteArrayInputStream(objects.get(i.getArgument(0))));
         guard=new LogisticsDatasetGuard(jdbc);datasets=new LogisticsDatasetService(jdbc,mapper,guard,storage);queries=new LogisticsQueryService(jdbc,mapper);exports=new LogisticsExportService(jdbc,mapper);parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));
     }

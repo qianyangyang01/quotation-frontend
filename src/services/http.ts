@@ -46,7 +46,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return (await parseEnvelope<T>(response)).data
 }
 
-export interface UploadProgress { loaded:number;total:number;percent:number;bytesPerSecond:number }
+export interface UploadProgress { loaded:number;total:number;percent:number;bytesPerSecond:number;phase?:'hashing'|'uploading'|'confirming' }
 export function uploadForm<T>(path:string,form:FormData,onProgress?:(progress:UploadProgress)=>void,extraHeaders:HeadersInit={}){
   const xhr=new XMLHttpRequest();let cancelled=false;let startedAt=performance.now()
   const promise=(async()=>{const token=await ensureCsrf();if(cancelled)throw new DOMException('上传已取消','AbortError');return await new Promise<T>((resolve,reject)=>{

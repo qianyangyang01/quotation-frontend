@@ -33,12 +33,15 @@ public class LogisticsImportService {
     private static final Pattern LEADING_SOURCE_DATE=Pattern.compile("^(?:(?:19|20)\\d{2}\\s*(?:年|[./_-])\\s*)?\\d{1,2}\\s*(?:月\\s*\\d{1,2}\\s*日?|[./_-]\\s*\\d{1,2})[\\s._-]*");
     @org.springframework.beans.factory.annotation.Value("${app.logistics.resume-on-start:true}")
     private boolean resumeOnStart;
+    @org.springframework.beans.factory.annotation.Value("${app.logistics.reconcile-interrupted:false}")
+    private boolean reconcileEnabled;
     @org.springframework.beans.factory.annotation.Value("${app.logistics.file-cleanup-enabled:true}")
     private boolean fileCleanupEnabled;
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
     private final AssetStorageService storage;
     private final LogisticsSourceParser parser;
+    @Autowired(required=false) private LogisticsParserClient isolatedParser;
     private final LogisticsService logistics;
     private final LogisticsDatasetGuard guard;
     private final TransactionTemplate tx;
@@ -59,9 +62,29 @@ public class LogisticsImportService {
     @PreDestroy public void close(){if(ownsWorker&&worker instanceof ExecutorService service)service.shutdown();}
     @EventListener(ApplicationReadyEvent.class)
     public void resumeQueued(){
+        reconcileInterrupted();
         if(!resumeOnStart)return;
         int recovered=jdbc.sql("update logistics_import_batch set status='queued',phase='queued',lease_id=null,updated_at=now() where status='processing' and updated_at<now()-interval '15 minutes'").update();
         if(recovered>0)log.warn("Recovered {} stale logistics import batches",recovered);dispatchQueued();
+    }
+    @Scheduled(fixedDelay=30000)
+    public void reconcileInterrupted(){
+        if(!reconcileEnabled)return;
+        jdbc.sql("update logistics_import_batch set status='interrupted',phase='interrupted',lease_id=null,payload=jsonb_set(payload,'{error}',to_jsonb(cast('解析进程已中断，原文件及已完成结果保留，可重试未完成部分' as text))),updated_at=now() where status='processing' and updated_at<now()-interval '3 minutes'").update();
+    }
+    @Scheduled(fixedDelay=3600000)
+    public void cleanupParseCheckpoints(){
+        if(!fileCleanupEnabled||!reconcileEnabled)return;
+        var batches=jdbc.sql("select id from logistics_import_batch where status<>'processing' and created_at<now()-interval '7 days' and payload::text like '%checkpointKey%' limit 25").query(UUID.class).list();
+        for(var id:batches)tx.executeWithoutResult(status->{
+            var payload=jdbc.sql("select payload from logistics_import_batch where id=:id and status<>'processing' for update skip locked").param("id",id).query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).optional();
+            if(payload.isEmpty())return;
+            for(var file:payload.get().path("files")) {
+                var key=file.path("checkpointKey").asText();
+                if(key.startsWith("logistics/parse-checkpoints/"+id+"/")&&storage.removeRaw(key)){((ObjectNode)file).remove("checkpointKey");((ObjectNode)file).remove("checkpointVersion");}
+            }
+            jdbc.sql("update logistics_import_batch set payload=cast(:payload as jsonb) where id=:id").param("id",id).param("payload",payload.get().toString()).update();
+        });
     }
     @Scheduled(fixedDelayString="${app.logistics.dispatch-delay-ms:5000}")
     public void dispatchQueued(){
@@ -142,8 +165,8 @@ public class LogisticsImportService {
         var batch=get(id);var payload=(ObjectNode)batch.path("payload").deepCopy();var dataset=UUID.fromString(batch.path("dataset_id").asText());
         var actor=batch.path("requested_by").asText();long start=System.nanoTime();
         var priorReports=payload.path("fileReports").deepCopy();var priorResults=payload.path("results").deepCopy();
-        var grouped=new LinkedHashMap<String,ObjectNode>();var fileReports=payload.putArray("fileReports");
-        try {
+        var fileReports=payload.putArray("fileReports");
+        try(var grouped=new LogisticsDiskChannels(mapper)) {
             int index=0;
             for(var file:payload.path("files")) {
                 if("deleted".equals(file.path("lifecycleStatus").asText())){if(index<priorReports.size())fileReports.add(priorReports.get(index));index++;payload.put("processedFiles",index);continue;}
@@ -153,18 +176,35 @@ public class LogisticsImportService {
                     byte[] bytes=input.readNBytes((int)LogisticsSourceParser.MAX_FILE_BYTES+1);
                     if(bytes.length>LogisticsSourceParser.MAX_FILE_BYTES)throw AppException.unprocessable("单个物流文件不能超过100MB");
                     if(!AssetStorageService.sha256(bytes).equals(file.path("sha256").asText()))throw AppException.conflict("源文件校验失败");
-                    long fileStart=System.nanoTime();var parsed=parser.parse(bytes,file.path("name").asText());
+                    long fileStart=System.nanoTime();ObjectNode parsed;
+                    if(LogisticsSourceParser.VERSION.equals(file.path("checkpointVersion").asText())&&!file.path("checkpointKey").asText().isBlank()) {
+                        try(var checkpoint=storage.openRaw(file.path("checkpointKey").asText())){parsed=(ObjectNode)mapper.readTree(checkpoint);}
+                    } else {
+                        parsed=isolatedParser==null?parser.parse(bytes,file.path("name").asText()):isolatedParser.parse(bytes,file.path("name").asText());
+                        var checkpointKey="logistics/parse-checkpoints/"+id+"/"+lease+"/"+index+".json";
+                        var checkpoint=java.nio.file.Files.createTempFile("logistics-checkpoint-",".json");
+                        try {
+                            mapper.writeValue(checkpoint.toFile(),parsed);
+                            try(var saved=java.nio.file.Files.newInputStream(checkpoint)){storage.putRaw(checkpointKey,saved,java.nio.file.Files.size(checkpoint),"application/json");}
+                        } finally {java.nio.file.Files.deleteIfExists(checkpoint);}
+                        ((ObjectNode)file).put("checkpointKey",checkpointKey).put("checkpointVersion",LogisticsSourceParser.VERSION);
+                        save(id,lease,"processing","parsing",payload);
+                    }
                     int parsedRows=0;for(var parsedChannel:parsed.path("channels"))parsedRows+=parsedChannel.path("rows").size();
                     log.info("Parsed logistics workbook batch={} fileIndex={} bytes={} sheets={} channels={} rows={} elapsedMs={}",id,index,bytes.length,parsed.path("sheets").size(),parsed.path("channels").size(),parsedRows,(System.nanoTime()-fileStart)/1_000_000);
                     var templatePending=false;for(var channel:parsed.path("channels"))if("adapter-required".equals(channel.path("templateStatus").asText()))templatePending=true;
-                    var report=parsed.deepCopy();report.remove("channels");report.put("status",templatePending?"template-pending":parsed.path("channels").isEmpty()&&parsed.path("sheets").valueStream().anyMatch(sheet->sheet.path("status").asText().equals("filtered"))?"filtered":"parsed").put("fileIndex",index);
+                    var report=mapper.createObjectNode();report.setAll(parsed);report.remove("channels");report.put("status",templatePending?"template-pending":parsed.path("channels").isEmpty()&&parsed.path("sheets").valueStream().anyMatch(sheet->sheet.path("status").asText().equals("filtered"))?"filtered":"parsed").put("fileIndex",index);
                     report.put("originalFileName",file.path("originalName").asText(file.path("name").asText()));
                     // Persist cell-level evidence once. Rewriting it on every channel progress tick
                     // makes multi-provider standard workbooks needlessly expensive to import/poll.
-                    var evidence=mapper.writeValueAsBytes(report);var evidenceKey="logistics/evidence/"+id+"/"+lease+"/"+index+".json";
-                    storage.putRaw(evidenceKey,new ByteArrayInputStream(evidence),evidence.length,"application/json");
+                    var evidenceKey="logistics/evidence/"+id+"/"+lease+"/"+index+".json";
+                    var evidence=java.nio.file.Files.createTempFile("logistics-evidence-",".json");String evidenceHash;
+                    try {
+                        mapper.writeValue(evidence.toFile(),report);
+                        try(var saved=java.nio.file.Files.newInputStream(evidence)){evidenceHash=storage.putRawWithSha256(evidenceKey,saved,java.nio.file.Files.size(evidence),"application/json");}
+                    } finally {java.nio.file.Files.deleteIfExists(evidence);}
                     for(var sheet:report.path("sheets"))((ObjectNode)sheet).remove("sourceCells");
-                    report.putObject("sourceEvidence").put("objectKey",evidenceKey).put("sha256",AssetStorageService.sha256(evidence));
+                    report.putObject("sourceEvidence").put("objectKey",evidenceKey).put("sha256",evidenceHash);
                     fileReports.add(report);
                     for(var value:parsed.path("channels")) {
                         var channel=(ObjectNode)value;var identity=LogisticsSourceParser.identity(channel);
@@ -177,6 +217,7 @@ public class LogisticsImportService {
                                 prior.put("errors",prior.path("errors").asInt()+1);
                                 ((ArrayNode)prior.path("issues")).addObject().put("level","error").put("field","批内冲突").put("message","同一渠道在多个文件中存在不同价格/规则，禁止按上传顺序覆盖");
                             } else prior.withArray("duplicateFiles").add(file.path("name").asText());
+                            grouped.put(identity,prior);
                         }
                     }
                     if(templatePending){var until=java.time.Instant.now().plus(java.time.Duration.ofDays(7));report.put("retentionUntil",until.toString());((ObjectNode)file).put("lifecycleStatus","failed").put("retentionUntil",until.toString());markFailed(id,index,"新模板待适配",until);}
@@ -187,13 +228,14 @@ public class LogisticsImportService {
             payload.put("parsingMs",(System.nanoTime()-start)/1_000_000);long stagingStart=System.nanoTime();
             var results=payload.putArray("results");for(var prior:priorResults){var sourceIndex=prior.path("sourceFileIndex").asInt(-1);if(sourceIndex>=0&&sourceIndex<payload.path("files").size()&&"deleted".equals(payload.path("files").get(sourceIndex).path("lifecycleStatus").asText()))results.add(prior);};int completed=0;
             payload.put("processedChannels",0).put("totalChannels",grouped.size()).remove("currentFileName");
+            long lastProgress=0;
             for(var channel:grouped.values()) {
                 payload.put("currentChannelName",channel.path("providerName").asText()+" · "+channel.path("channelName").asText()).put("processedChannels",completed);
-                save(id,lease,"processing","staging",payload);
+                if(System.nanoTime()-lastProgress>1_000_000_000L){save(id,lease,"processing","staging",payload);lastProgress=System.nanoTime();}
                 ObjectNode outcome;
                 try {outcome=tx.execute(status->{guard.writable(dataset);var owner=jdbc.sql("select lease_id from logistics_import_batch where id=:id and status='processing' for update").param("id",id).query(UUID.class).optional();if(owner.isEmpty()||!owner.get().equals(lease))throw AppException.conflict("导入执行权已转移，请刷新批次");return importChannel(dataset,channel,actor,payload.path("replaceDrafts").asBoolean());});}
                 catch(Exception e){log.warn("Logistics import {} channel staging failed",id,e);outcome=mapper.createObjectNode().put("providerName",channel.path("providerName").asText()).put("channelName",channel.path("channelName").asText()).put("status","blocked").put("message",safe(e));outcome.set("parsed",channel);}
-                results.add(outcome);completed++;payload.put("processedChannels",completed).put("progress",60+Math.round(completed*40.0/Math.max(1,grouped.size())));save(id,lease,"processing","staging",payload);
+                results.add(outcome);completed++;payload.put("processedChannels",completed).put("progress",60+Math.round(completed*40.0/Math.max(1,grouped.size())));
             }
             payload.remove("currentFileName");payload.remove("currentChannelName");payload.put("progress",100).put("elapsedMs",(System.nanoTime()-start)/1_000_000).put("stagingMs",(System.nanoTime()-stagingStart)/1_000_000);LogisticsReadiness.applyBatch(payload);
             boolean filteredOnly=grouped.isEmpty()&&!fileReports.isEmpty()&&fileReports.valueStream().allMatch(report->report.path("status").asText().equals("filtered"));

@@ -82,6 +82,9 @@ public class LogisticsUploadService {
     }
     public ObjectNode chunk(UUID id,String actor,int file,int chunk,MultipartFile content,String sha){
         if(content==null||content.isEmpty()||content.getSize()>CHUNK_BYTES||sha==null||!sha.matches("[a-f0-9]{64}"))throw AppException.unprocessable("分片大小或校验值无效");
+        final byte[] bytes;
+        try {bytes=content.getBytes();}catch(IOException error){throw AppException.unprocessable("读取上传分片失败");}
+        if(!AssetStorageService.sha256(bytes).equals(sha))throw AppException.unprocessable("分片校验失败，请重试");
         return tx.execute(status->{
             var session=locked(id,actor);guard.writable(session.dataset());
             if(session.batch()!=null)return state(session);
@@ -90,15 +93,13 @@ public class LogisticsUploadService {
             if(chunk<0||chunk>hashes.size()||(long)chunk*CHUNK_BYTES>=spec.size())throw AppException.unprocessable("分片序号无效，请恢复上传进度");
             long expected=Math.min(CHUNK_BYTES,spec.size()-(long)chunk*CHUNK_BYTES);
             if(content.getSize()!=expected)throw AppException.unprocessable("分片长度不匹配");
-            try{
-                var bytes=content.getBytes();
-                if(!AssetStorageService.sha256(bytes).equals(sha))throw AppException.unprocessable("分片校验失败，请重试");
+            {
                 if(chunk<hashes.size()){
                     if(!hashes.get(chunk).asText().equals(sha))throw AppException.conflict("已上传分片内容不一致");
                     return state(session);
                 }
                 storage.putRaw(objectKey(id,file,chunk),new ByteArrayInputStream(bytes),bytes.length,"application/octet-stream");
-            }catch(IOException e){throw AppException.unprocessable("读取上传分片失败");}
+            }
             hashes.add(sha);
             jdbc.sql("update logistics_upload_session set received=:received,expires_at=now()+interval '7 days' where id=:id")
                 .param("received",session.received().toString()).param("id",id).update();
