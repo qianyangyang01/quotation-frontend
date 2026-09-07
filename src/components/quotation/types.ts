@@ -21,6 +21,7 @@ export type QuotationProduct = {
   netWeight: number
   country: string
   channel: string
+  selectedChannelKey?: string
   rule: string
   manualFreight: boolean
   freight: number
@@ -95,6 +96,10 @@ export type QuotationMatrixRow = {
   countryFixedTaxUsd: number
   taxFeeMode: 'exempt' | 'fixed-order' | 'missing'
   taxLabel: string
+  surchargeUsd?: number
+  countrySurchargeUsd?: number
+  surchargeExempt?: boolean
+  surchargeEnabled?: boolean
   tax1Usd: number | null
   tax2Usd: number | null
   tax3Usd: number | null
