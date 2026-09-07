@@ -1,7 +1,7 @@
 import { api, downloadFile, idempotencyKey, uploadForm, type UploadProgress } from '@/services/http'
 
 export type Dataset = { id: string; name: string; status: 'active' | 'preparing' | 'archived'; revision: number; created_at: string }
-export type SourceIssue = { row: number; sourceSheet?: string; field: string; message: string; level: string; code?: string; rowKey?: string; relatedRowKey?: string; suggestedFields?: Partial<Price> }
+export type SourceIssue = { row: number; sourceSheet?: string; sourceRows?: number[]; relatedSourceSheet?: string; relatedSourceRow?: number; rawValues?: Record<string, unknown>; sourceEvidence?: Array<{ row: number; rawValues: Record<string, unknown> }>; field: string; message: string; level: string; code?: string; rowKey?: string; relatedRowKey?: string; suggestedFields?: Partial<Price> }
 export type Price = {
   areaName: string; countryCode: string; weightFromKg: number; weightToKg: number
   weightFromInclusive?: boolean; weightToInclusive?: boolean; pricePerKg?: number; registrationFee?: number

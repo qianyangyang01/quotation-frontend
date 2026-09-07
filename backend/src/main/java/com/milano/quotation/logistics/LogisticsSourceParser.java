@@ -21,12 +21,14 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="providers-2026.09.05-v11";
+    public static final String VERSION="providers-2026.09.07-v12";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
+    private static final Pattern DATE_METADATA=Pattern.compile("(?i)^(?:(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?\\s*)?(?:19|20)\\d{2}\\s*[-/.年]\\s*\\d{1,2}\\s*[-/.月]\\s*\\d{1,2}\\s*日?(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?$");
+    private static final Pattern DATE_LABEL=Pattern.compile("(?i)^(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?$");
     private static final Pattern RANGE=Pattern.compile("^([0-9.]+)(<=|<)(?:W|重量)(<=|<)([0-9.]+)$",Pattern.CASE_INSENSITIVE);
     private static final Pattern ETA_RANGE=Pattern.compile("(?<![0-9])([0-9]{1,3})\\s*[-—–~～至]\\s*([0-9]{1,3})\\s*(?:个)?(?:工作日|天)(?![0-9])");
     private static final List<String> HEADER_FIELDS=List.of("country","countryCode","continent","channel","productCode","minimumWeight","billingStep","weightFrom","weightTo","weightRange","settlementRate","pricePerKg","firstWeightPrice","nextWeightPrice","registrationFee","linehaulPerKg","originRegion","zone","eta","notes");
@@ -101,7 +103,7 @@ public class LogisticsSourceParser {
                     if(source.parsedRows.contains(r)||source.exampleRows.contains(r)||source.filteredFirstNextRows.contains(r)||source.filteredOtherRows.containsKey(r)||source.referenceRows.contains(r))continue;
                     if(source.resolvedTexts(r).stream().anyMatch(t->t.matches("(?s).*(暂时关停|暂停服务|暂停收寄|停止收寄).*"))){source.filteredOtherRows.put(r,"暂停服务");continue;}
                     boolean range=false,number=false;
-                    for(var cell:rawRow){if(looksRange(source.text(r,cell.getColumnIndex())))range=true;if(cell.getCellType()==CellType.NUMERIC)number=true;}
+                    for(var cell:rawRow){if(looksRange(source.text(r,cell.getColumnIndex())))range=true;if(cell.getCellType()==CellType.NUMERIC&&!source.parsingText(cell).isBlank())number=true;}
                     if(range&&number) {
                         int auxiliary=source.auxiliaryRows.getOrDefault(r,source.auxiliaryHeader(r));
                         if(auxiliary>=0){conditional.add(r+1);conditionalEvidence.add(String.join(" | ",source.resolvedTexts(auxiliary))+" / "+String.join(" | ",source.resolvedTexts(r)));}
@@ -113,12 +115,23 @@ public class LogisticsSourceParser {
                     var row=(ObjectNode)value;pending(row,"附加或重派费用表需适配核对");
                     row.put("notes",row.path("notes").asText()+"\n[附加费用原表区域]\n"+String.join("\n",conditionalEvidence));
                 }
-                if(!uncovered.isEmpty())for(var c:parsed.values())issue(c,0,"未覆盖价格行","存在未完整识别的价格区域，禁止部分替换；原始行号："+uncovered,"error");
+                if(!uncovered.isEmpty())for(var c:parsed.values()) {
+                    issue(c,0,"未覆盖价格行","存在未完整识别的价格区域，禁止部分替换；原始行号："+uncovered,"error");
+                    var finding=(ObjectNode)c.path("issues").get(c.path("issues").size()-1);
+                    finding.set("sourceRows",uncovered.deepCopy());
+                    var evidence=finding.putArray("sourceEvidence");
+                    for(var n:uncovered)evidence.addObject().put("row",n.asInt()).set("rawValues",source.rawRow(n.asInt()-1));
+                }
                 applyFooterEta(source,parsed);
                 splitDistinctProducts(parsed,provider);
                 int rows=0; int errors=0;
                 for(var channel:parsed.values()) {
                     finish(channel,provider);
+                    for(var finding:channel.path("issues")) {
+                        var issue=(ObjectNode)finding;
+                        if(issue.path("sourceSheet").asText().isBlank())issue.put("sourceSheet",sheet.getSheetName());
+                        if(issue.path("row").asInt()>0&&!issue.has("rawValues"))issue.set("rawValues",source.rawRow(issue.path("row").asInt()-1));
+                    }
                     rows+=channel.path("rows").size(); errors+=channel.path("errors").asInt();
                     var key=identity(channel);
                     if(channels.containsKey(key)) {
@@ -216,6 +229,9 @@ public class LogisticsSourceParser {
             double to=Math.min(a.path("weightToKg").asDouble(),b.path("weightToKg").asDouble());
             if(from<to || (from==to && includes(a,from) && includes(b,from))) {
                 issue(channel,b.path("sourceRow").asInt(),"跨表重量段","同一渠道不同工作表的重量档位重叠，必须核对后才能覆盖价格","error");
+                var finding=(ObjectNode)channel.path("issues").get(channel.path("issues").size()-1);
+                finding.put("sourceSheet",b.path("sourceSheet").asText()).put("rowKey",b.path("rowKey").asText())
+                        .put("relatedSourceSheet",a.path("sourceSheet").asText()).put("relatedSourceRow",a.path("sourceRow").asInt()).put("relatedRowKey",a.path("rowKey").asText());
                 channel.put("errors",channel.path("errors").asInt()+1).put("quoteReady",false);
             }
         }
@@ -273,7 +289,7 @@ public class LogisticsSourceParser {
         int auxiliary=-1;boolean example=false,reference=false;
         var allNotes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
-            var rowText=String.join("|",source.rowTexts(r));
+            var rowText=String.join("|",source.rowTexts(r).stream().filter(value->!value.isBlank()).toList());
             if(rowText.isBlank()&&source.width(r)>0)rowText=String.join("|",source.resolvedTexts(r));
             if(rowText.isBlank())continue;
             if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
@@ -790,7 +806,11 @@ public class LogisticsSourceParser {
     static String defaultText(String value,String fallback){return value.isBlank()?fallback:value;}
     static List<Double> numbers(String text){var m=NUM.matcher(text);var values=new ArrayList<Double>();while(m.find())values.add(Double.parseDouble(m.group()));return values;}
     static double firstNumber(String text,double fallback){var nums=numbers(text);return nums.isEmpty()?fallback:nums.getFirst();}
-    static boolean looksRange(String value){return clean(normalizeWeightText(value)).matches("(?i)^(?:[1-9一二三四五六七八九]区\\(.*|[0-9.,]+(?:KG|K|G|克)?[-—–~～<>≤≥＜＞=]+(?:W|重量)?[<≤=]*[0-9.]+.*|(?:W|重量)?(?:<=|<|≤|＜)[0-9.]+(?:KG|K|G|克|公斤|千克)?(?:\\(.*)?)$");}
+    static boolean dateMetadata(String value) {
+        var text=java.text.Normalizer.normalize(value==null?"":value,java.text.Normalizer.Form.NFKC).trim();
+        return DATE_METADATA.matcher(text).matches()||DATE_LABEL.matcher(text).matches();
+    }
+    static boolean looksRange(String value){return !dateMetadata(value)&&clean(normalizeWeightText(value)).matches("(?i)^(?:[1-9一二三四五六七八九]区\\(.*|[0-9.,]+(?:KG|K|G|克)?[-—–~～<>≤≥＜＞=]+(?:W|重量)?[<≤=]*[0-9.]+.*|(?:W|重量)?(?:<=|<|≤|＜)[0-9.]+(?:KG|K|G|克|公斤|千克)?(?:\\(.*)?)$");}
     public record WeightRange(double from,double to,boolean includeFrom,boolean includeTo){}
     private static String normalizeWeightText(String value) {
         var text=java.text.Normalizer.normalize(value,java.text.Normalizer.Form.NFKC);
@@ -798,6 +818,7 @@ public class LogisticsSourceParser {
         return limit.matches()?"W<="+limit.group(1):text;
     }
     public static WeightRange parseRange(String raw) {
+        if(dateMetadata(raw))throw new IllegalArgumentException("日期说明不是重量区间");
         raw=normalizeWeightText(raw);
         var units=clean(raw).toUpperCase(Locale.ROOT).replace("千克","KG").replace("公斤","KG").replace("克","G");
         var endpoints=Pattern.compile("^([0-9.]+)(KG|G)?[-—–~～]([0-9.]+)(KG|G)?$").matcher(units);
@@ -845,14 +866,15 @@ public class LogisticsSourceParser {
             for(var range:sheet.getMergedRegions())for(int row=range.getFirstRow();row<=Math.min(range.getLastRow(),lastContentRow);row++)merges.computeIfAbsent(row,k->new ArrayList<>()).add(range);
         }
         Cell cell(int r,int c){if(c<0)return null;for(var range:merges.getOrDefault(r,List.of()))if(range.isInRange(r,c)){r=range.getFirstRow();c=range.getFirstColumn();break;}var row=sheet.getRow(r);return row==null?null:row.getCell(c);}
-        String numberText(int r,int c){var cell=cell(r,c);return cell!=null&&cell.getCellType()==CellType.NUMERIC?Double.toString(cell.getNumericCellValue()):text(r,c);}
-        String text(int r,int c){var cell=cell(r,c);return cell==null?"":formatter.formatCellValue(cell).trim();}
+        String numberText(int r,int c){var cell=cell(r,c);if(parsingText(cell).isBlank())return "";return cell!=null&&cell.getCellType()==CellType.NUMERIC?Double.toString(cell.getNumericCellValue()):text(r,c);}
+        String parsingText(Cell cell){if(cell==null)return "";var value=formatter.formatCellValue(cell).trim();boolean numeric=cell.getCellType()==CellType.NUMERIC||(cell.getCellType()==CellType.FORMULA&&cell.getCachedFormulaResultType()==CellType.NUMERIC);return dateMetadata(value)||(numeric&&DateUtil.isCellDateFormatted(cell))?"":value;}
+        String text(int r,int c){return parsingText(cell(r,c));}
         int width(int r){int width=sheet.getRow(r)==null?0:sheet.getRow(r).getLastCellNum();for(var range:merges.getOrDefault(r,List.of()))width=Math.max(width,range.getLastColumn()+1);return width;}
         String address(int r,int c){var cell=cell(r,c);return cell==null?new CellReference(r,c).formatAsString():cell.getAddress().formatAsString();}
         int mergeEndRow(int r,int c){for(var range:merges.getOrDefault(r,List.of()))if(range.isInRange(r,c))return range.getLastRow();return r;}
         List<String> resolvedTexts(int r){var values=new ArrayList<String>();for(int c=0;c<width(r);c++){var value=text(r,c);if(!value.isBlank())values.add(value);}return values;}
         boolean rowEmpty(int r){return rowTexts(r).stream().allMatch(String::isBlank);}
-        List<String> rowTexts(int r){var row=sheet.getRow(r);if(row==null)return List.of();var values=new ArrayList<String>();for(var c:row)values.add(formatter.formatCellValue(c).trim());return values;}
+        List<String> rowTexts(int r){var row=sheet.getRow(r);if(row==null)return List.of();var values=new ArrayList<String>();for(var c:row)values.add(parsingText(c));return values;}
         ObjectNode rawRow(int r){var result=mapper.createObjectNode();var row=sheet.getRow(r);if(row!=null)for(var c:row){var v=formatter.formatCellValue(c);if(!v.isBlank())result.put(c.getAddress().formatAsString(),v);}return result;}
         int auxiliaryHeader(int r){
             for(int h=r-1;h>=Math.max(0,r-15);h--){

@@ -21,6 +21,60 @@ class LogisticsSourceParserTest {
     final LogisticsWorkbookService standard=new LogisticsWorkbookService(mapper);
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,standard);
 
+    @Test void datesAreMetadataWhileGenuineWeightRangesRemainPrices() {
+        for(var value:List.of("2026-9-7","2026/09/07","2026.9.7","2026年9月7日","生效时间：2026-9-7","生效日期: 2026-6-22")) {
+            assertTrue(LogisticsSourceParser.dateMetadata(value),value);
+            assertFalse(LogisticsSourceParser.looksRange(value),value);
+            assertThrows(IllegalArgumentException.class,()->LogisticsSourceParser.parseRange(value));
+        }
+        for(var value:List.of("0-2.0 KG","0.101-0.3","1.001-20","0.7-1"))assertTrue(LogisticsSourceParser.looksRange(value),value);
+        assertFalse(LogisticsSourceParser.dateMetadata("2026-9-7起 每公斤价格88元"));
+    }
+
+    @Test void movedMergedAndNumericDatesDoNotChangeFixedWeightTablePrices()throws Exception {
+        for(int location:List.of(0,1,2,4,7,20))for(boolean numeric:List.of(false,true))try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("通邮经济小包");
+            row(s,2,"序号","国家","0-2.0 KG");
+            row(s,3,"","","运费（RMB/KG）","处理费（RMB/票）");
+            s.addMergedRegion(new CellRangeAddress(2,3,0,0));s.addMergedRegion(new CellRangeAddress(2,3,1,1));s.addMergedRegion(new CellRangeAddress(2,2,2,3));
+            row(s,4,1,"日本",180,1);row(s,5,2,"加拿大",206,2.5);
+            var dateRow=s.getRow(location);if(dateRow==null)dateRow=s.createRow(location);
+            dateRow.createCell(6).setCellValue("生效日期：");
+            var value=dateRow.createCell(7);
+            if(numeric){value.setCellValue(java.time.LocalDateTime.of(2026,9,7,0,0));var style=book.createCellStyle();style.setDataFormat(book.createDataFormat().getFormat("yyyy-m-d"));value.setCellStyle(style);}
+            else value.setCellValue("2026-9-7");
+            s.addMergedRegion(new CellRangeAddress(location,location,7,9));
+            var parsed=parser.parse(bytes(book),"通邮价格.xlsx");
+            assertEquals(1,parsed.path("channels").size(),parsed.toString());
+            var channel=parsed.path("channels").get(0);
+            assertEquals(0,channel.path("errors").asInt(),channel.path("issues").toString());
+            assertEquals(2,channel.path("rows").size(),channel.toString());
+            for(var price:channel.path("rows")) {
+                boolean japan=price.path("countryCode").asText().equals("JP");
+                assertTrue(japan||price.path("countryCode").asText().equals("CA"));
+                assertEquals(japan?180:206,price.path("pricePerKg").asDouble());
+                assertEquals(japan?1:2.5,price.path("registrationFee").asDouble());
+                assertEquals(0,price.path("weightFromKg").asDouble());
+                assertEquals(2,price.path("weightToKg").asDouble());
+            }
+            assertTrue(parsed.path("sheets").get(0).path("sourceCells").toString().contains("2026"));
+        }
+    }
+
+    @Test void malformedPricesRetainSheetLineAndOriginalCells()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("定位测试");
+            row(sheet,0,"国家","重量段","运费/KG","挂号费/票");
+            row(sheet,1,"美国","0-1","not-a-price",20);
+            var parsed=parser.parse(bytes(book),"花海.xlsx");
+            var findings=new ArrayList<JsonNode>();
+            parsed.path("channels").forEach(channel->channel.path("issues").forEach(findings::add));
+            assertFalse(findings.isEmpty());
+            assertTrue(findings.stream().allMatch(issue->issue.path("sourceSheet").asText().equals("定位测试")));
+            assertTrue(findings.stream().anyMatch(issue->issue.path("row").asInt()==2&&issue.path("rawValues").toString().contains("not-a-price")));
+        }
+    }
+
     @Test void footerEtaMustBeUnambiguousAndBelongToTheDestination()throws Exception {
         for(var note:List.of("参考时效：7-15天","加拿大参考时效：7-15天","参考时效：7-15天，特殊情况20-30天"))try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("普通渠道");row(s,0,"国家","重量段","运费/KG","挂号费/票");row(s,1,"美国","0-1",55,20);row(s,3,note);

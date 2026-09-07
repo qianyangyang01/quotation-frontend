@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Price, SourceIssue } from './logisticsRebuild'
-import { priceIssueCountries, priceRowsForIssueCountries, priceIssueRowIndexes, prioritizePriceIssueRows } from './logisticsPriceIssueScope'
+import { priceIssueCountries, priceRowsForIssueCountries, priceIssueRowIndexes, prioritizePriceIssueRows, rowsForPriceIssue, priceIssueLocationLabel } from './logisticsPriceIssueScope'
 
 const rows: Price[] = [
   { areaName: '澳大利亚', countryCode: 'AU', weightFromKg: 1, weightToKg: 2, rowKey: 'au', sourceSheet: '其他表', sourceRow: 19 },
@@ -26,8 +26,26 @@ describe('price correction country scope', () => {
   it('prefers an exact row key over an ambiguous source row number', () => {
     expect(priceIssueCountries(rows, [{ ...issue, sourceSheet: undefined, rowKey: 'fr19' }])).toEqual([{ key: 'FR', label: '法国' }])
   })
-  it('keeps every candidate country when old issues have no sheet or row key', () => {
-    expect(priceIssueCountries(rows, [{ ...issue, sourceSheet: undefined }]).map(country => country.key)).toEqual(['AU', 'FR'])
+  it('does not mark ambiguous same-number rows in different sheets as confirmed errors', () => {
+    expect(priceIssueCountries(rows, [{ ...issue, sourceSheet: undefined }])).toEqual([])
+  })
+  it('locates structured multi-row issues and retains source positions for rows omitted by parsing', () => {
+    const multi = { ...issue, row: 0, sourceRows: [17, 18, 999], message: '未完整识别价格' }
+    expect(rowsForPriceIssue(rows, multi).map(row => row.rowKey)).toEqual(['fr17', 'fr18'])
+    expect(priceIssueLocationLabel(rows, multi)).toContain('Sheet「敏货」· 第 999 行')
+    expect(priceIssueLocationLabel(rows, { ...issue, row: 0, message: '整表问题' })).toContain('工作表级问题')
+  })
+  it('recovers legacy raw row lists without mutating the draft or inventing a matching price row', () => {
+    const old = { ...issue, row: 0, message: '存在未完整识别的价格区域；原始行号：[18, 999]' }
+    expect(rowsForPriceIssue(rows, old).map(row => row.rowKey)).toEqual(['fr18'])
+    expect(old.row).toBe(0)
+    expect(priceIssueLocationLabel(rows, old)).toContain('999')
+  })
+  it('shows both sides of cross-sheet errors and avoids attaching unrelated blockers to them', () => {
+    const cross = { ...issue, relatedSourceSheet: '其他表', relatedSourceRow: 19, message: '跨表问题' }
+    expect(rowsForPriceIssue(rows, cross).map(row => row.rowKey)).toEqual(['au', 'fr19'])
+    const blocked = rows.map(row => ({ ...row, ...(row.rowKey === 'au' ? { blockingReason: '其他问题' } : {}) }))
+    expect([...priceIssueRowIndexes(blocked, [issue], false)]).toEqual([2, 3])
   })
   it('preserves edits when switching scope and keeps all rows when an issue cannot be located', () => {
     const full = rows.map(row => ({ ...row }))

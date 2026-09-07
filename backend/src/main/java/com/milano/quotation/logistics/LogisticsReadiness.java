@@ -106,6 +106,7 @@ final class LogisticsReadiness {
         }
         var blockingReasons=target.putArray("blockingReasons");blockers.forEach(blockingReasons::add);
         var reviewWarnings=target.putArray("reviewWarnings");warnings.forEach(reviewWarnings::add);
+        LogisticsIssueLocations.enrich(target);
         int errors=0;for(var issue:issues)if("error".equals(issue.path("level").asText()))errors++;
         errors=Math.max(errors,priorErrors);
         boolean etaReady=missing.isEmpty();
