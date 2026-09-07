@@ -39,4 +39,12 @@ describe('quotation logistics query flow contract', () => {
     expect(failure).not.toContain("p.sku = ''")
     expect(failure).toContain("p.status = '物流规则加载失败'")
   })
+
+  it('invalidates country summaries and current-country rows when rules reload at the same revision', () => {
+    const body = functionBody('ensureQuoteLogistics', 'changeLogisticsAttribute')
+    expect(source).toContain("const logisticsRulesGeneration = ref(0)")
+    expect(body).toContain('logisticsRulesGeneration.value += 1')
+    expect(source).toContain("`${quoteMode.value}|${bundleKey}|${p.logisticsAttribute}|${logisticsRevision.value}|${logisticsRulesGeneration.value}")
+    expect(source).toContain('void logisticsRulesGeneration.value')
+  })
 })

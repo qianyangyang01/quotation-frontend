@@ -60,10 +60,14 @@ services:
   quotation-backend:
     image: quotation-backend:${QUOTATION_RELEASE:?required}
     restart: unless-stopped
+    mem_limit: 1280m
+    memswap_limit: 1280m
+    cpus: 2
     depends_on:
       quotation-postgres: { condition: service_healthy }
       quotation-redis: { condition: service_healthy }
       quotation-minio: { condition: service_healthy }
+      quotation-parser: { condition: service_healthy }
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://quotation-postgres:5432/${QUOTATION_DB_NAME:-quotation_prod}
       SPRING_DATASOURCE_USERNAME: ${QUOTATION_DB_USER:-quotation_app}
@@ -74,13 +78,16 @@ services:
       APP_STORAGE_ACCESS_KEY: ${QUOTATION_MINIO_ACCESS_KEY}
       APP_STORAGE_SECRET_KEY: ${QUOTATION_MINIO_SECRET_KEY}
       APP_STORAGE_BUCKET: ${QUOTATION_STORAGE_BUCKET:-quotation-assets}
+      APP_LOGISTICS_PARSER_URL: http://quotation-parser:8090
+      APP_LOGISTICS_RECONCILE_INTERRUPTED: "true"
       APP_BOOTSTRAP_ADMIN_ACCOUNT: ${QUOTATION_BOOTSTRAP_ADMIN_ACCOUNT}
       APP_BOOTSTRAP_ADMIN_NAME: ${QUOTATION_BOOTSTRAP_ADMIN_NAME}
       APP_BOOTSTRAP_ADMIN_PASSWORD: ${QUOTATION_BOOTSTRAP_ADMIN_PASSWORD}
       APP_PUBLIC_BASE_URL: ${QUOTATION_PUBLIC_BASE_URL}
       APP_CORS_ALLOWED_ORIGIN: ${QUOTATION_PUBLIC_BASE_URL}
       APP_COOKIE_SECURE: ${QUOTATION_COOKIE_SECURE:-true}
-      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -Duser.timezone=UTC
+      APP_LOGISTICS_RESUME_ON_START: ${QUOTATION_LOGISTICS_RESUME_ON_START:-true}
+      JAVA_TOOL_OPTIONS: -Xmx768m -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC
     expose: ["8088"]
     networks: [quotation-internal, ahmln-edge]
     healthcheck:
@@ -88,6 +95,22 @@ services:
       interval: 15s
       timeout: 5s
       retries: 20
+    security_opt: ["no-new-privileges:true"]
+    logging: *quotation-logging
+
+  quotation-parser:
+    image: quotation-backend:${QUOTATION_RELEASE:?required}
+    restart: unless-stopped
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1
+    entrypoint: ["java", "-Xmx640m", "-XX:+ExitOnOutOfMemoryError", "-Dloader.main=com.milano.quotation.logistics.LogisticsParserMain", "-cp", "/app/app.jar", "org.springframework.boot.loader.launch.PropertiesLauncher"]
+    networks: [quotation-internal]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     security_opt: ["no-new-privileges:true"]
     logging: *quotation-logging
 

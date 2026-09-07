@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { nextQuotationImageCandidate, preferredQuotationImage, quotationImageCandidates } from './quotationImages'
 
 describe('quotation image fallback', () => {
+  it('prefers the saved quotation image before current purchase images', () => {
+    const candidates = quotationImageCandidates({ snapshotImage: '/quote.jpg', physicalImage: '/physical.jpg', productImage: '/product.jpg' })
+    expect(candidates.map(candidate => candidate.url)).toEqual(['/quote.jpg', '/physical.jpg', '/product.jpg'])
+  })
+
   it('prefers a physical image before the product image', () => {
     expect(preferredQuotationImage('/physical.jpg', '/product.jpg')).toBe('/physical.jpg')
   })

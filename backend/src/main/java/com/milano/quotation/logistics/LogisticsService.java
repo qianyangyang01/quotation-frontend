@@ -46,19 +46,25 @@ public class LogisticsService{
         var contentHash=body.path("contentHash").asText(required(body,"sourceHash",128));
         var sourceHash=LogisticsDatasetService.hash(contentHash+":"+base);
         var duplicate=versions.findByChannelIdAndSourceHash(channelId,sourceHash);
-        if(duplicate.isPresent() && ("draft".equals(duplicate.get().status) || duplicate.get().id.equals(channel.currentVersionId))) return versionView(duplicate.get());
+        if(duplicate.isPresent() && ("draft".equals(duplicate.get().status) || duplicate.get().id.equals(channel.currentVersionId))
+            &&(!body.has("parserVersion")||body.path("parserVersion").asText().equals(duplicate.get().payload.path("parserVersion").asText()))) return versionView(duplicate.get());
         if(duplicate.isPresent()) sourceHash=sourceHash+":"+UUID.randomUUID();
-        var activeDrafts=versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().filter(v->"draft".equals(v.status)).toList();
+        boolean parsedImport=body.hasNonNull("parserVersion");
+        if(parsedImport&&!replaceDrafts&&versions.existsByChannelIdAndStatus(channelId,"draft"))throw AppException.conflict("渠道已有不同的待审核版本，请先终止旧草稿或明确替换");
+        var activeDrafts=parsedImport?(replaceDrafts?versions.findByChannelIdAndStatus(channelId,"draft"):List.<LogisticsVersionEntity>of()):versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().filter(v->"draft".equals(v.status)).toList();
         if(!activeDrafts.isEmpty()&&!replaceDrafts)throw AppException.conflict("渠道已有不同的待审核版本，请先终止旧草稿或明确替换");
         if(replaceDrafts)activeDrafts.forEach(version->reject(version,reason,body.path("importedBy").asText("物流负责人")));
         var now=Instant.now();var row=new LogisticsVersionEntity();row.id=UUID.randomUUID();row.channelId=channelId;
-        row.versionNumber=versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().mapToInt(v->v.versionNumber).max().orElse(0)+1;
+        row.versionNumber=(parsedImport?versions.maxVersionNumber(channelId):versions.findByChannelIdOrderByVersionNumberDesc(channelId).stream().mapToInt(v->v.versionNumber).max().orElse(0))+1;
         row.status="draft";row.sourceHash=sourceHash;var payload=body.deepCopy();
         payload.put("id",row.id.toString()).put("channelId",channelId.toString()).put("versionNumber",row.versionNumber)
             .put("status","draft").put("importedAt",now.toString()).put("publishedAt","").put("sourceHash",sourceHash)
             .put("contentHash",contentHash).put("basePublishedVersionId",base);
         LogisticsReadiness.apply(payload);
-        var comparison=workbooks.compare((ArrayNode)payload.path("rows"),publishedRows(channelId));
+        ArrayNode previous;
+        if(parsedImport&&channel.currentVersionId!=null){var json=versions.findRowsJson(channel.currentVersionId);previous=json.isPresent()?(ArrayNode)new tools.jackson.databind.ObjectMapper().readTree(json.get()):publishedRows(channelId);}
+        else previous=publishedRows(channelId);
+        var comparison=workbooks.compare((ArrayNode)payload.path("rows"),previous);
         payload.set("summary",comparison.path("summary"));payload.set("diffRows",comparison.path("diffRows"));
         row.payload=payload;row.createdAt=now;versions.save(row);return versionView(row);
     }
@@ -134,7 +140,7 @@ public class LogisticsService{
         result.put("providerId",providerId.toString()).put("count",published.size());return result;
     }
     private void validatePublish(LogisticsChannelEntity channel,LogisticsVersionEntity target,boolean removalConfirmed){datasetGuard.channel(channel.id);validateBaseline(channel,target);if(target.payload.path("errors").asInt()>0)throw AppException.unprocessable("当前版本存在阻断错误，禁止发布");LogisticsReadiness.apply((ObjectNode)target.payload);if(!target.channelId.equals(channel.id))throw AppException.conflict("版本不属于该渠道");if(!"draft".equals(target.status))throw AppException.conflict("只有待审核草稿可以发布");validateReadiness(target.payload);if(hasCoverageRemoval(target.payload)&&!removalConfirmed)throw AppException.unprocessable("存在移除或重量覆盖缩小项时必须明确确认");}
-    private static void validateReadiness(JsonNode payload){if(payload.path("errors").asInt()>0)throw AppException.unprocessable("当前版本存在阻断错误，禁止发布");if(!payload.path("etaReady").asBoolean(false))throw AppException.unprocessable("当前版本存在未补齐或冲突时效，禁止发布");if(!payload.path("blockingReasons").isEmpty()||!payload.path("pricingReady").asBoolean(false))throw AppException.unprocessable("当前版本存在待适配计费条件，禁止发布");}
+    private static void validateReadiness(JsonNode payload){if(payload.path("errors").asInt()>0)throw AppException.unprocessable("当前版本存在阻断错误，禁止发布");if(!payload.path("blockingReasons").isEmpty()||!payload.path("pricingReady").asBoolean(false))throw AppException.unprocessable("当前版本存在待适配计费条件，禁止发布");}
     private static boolean hasCoverageRemoval(JsonNode payload){var summary=payload.path("summary");return summary.path("removed").asInt()>0||summary.path("coverageReduced").asInt()>0;}
     private void validateBaseline(LogisticsChannelEntity channel,LogisticsVersionEntity target){
         var current=channel.currentVersionId==null?"":channel.currentVersionId.toString();
@@ -148,24 +154,6 @@ public class LogisticsService{
     private static String normalize(String value){return value==null?"":value.toLowerCase(Locale.ROOT).replaceAll("[\\s_\\-—–·()（）]","");}
     static String providerMatchPrefix(String value){var normalized=normalize(value).replaceAll("[\\p{P}\\p{S}]","").toUpperCase(Locale.ROOT);return normalized.codePoints().limit(2).collect(StringBuilder::new,StringBuilder::appendCodePoint,StringBuilder::append).toString();}
     private static boolean codeMatches(String stem,String code){if(stem==null||code==null||code.isBlank())return false;return java.util.regex.Pattern.compile("(?i)(?<![A-Z0-9])"+java.util.regex.Pattern.quote(code)+"(?![A-Z0-9])").matcher(stem).find();}
-    @Transactional public ObjectNode importMigrationDrafts(ArrayNode entries,String actor){
-        var result=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();var createdProviders=result.putArray("createdProviders");var createdChannels=result.putArray("createdChannels");var createdVersions=result.putArray("createdVersions");int importedRows=0;
-        for(var entry:entries){var value=entry.path("value");var providerCode=required((ObjectNode)value,"providerCode",64).toUpperCase(Locale.ROOT);var provider=providers.findByCodeIgnoreCase(providerCode).orElse(null);
-            if(provider==null){var providerBody=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("name",value.path("providerName").asText()).put("code",providerCode).put("enabled",true);var view=addProvider(providerBody);provider=providers.findById(UUID.fromString(view.path("id").asText())).orElseThrow();createdProviders.add(provider.id.toString());}
-            var channelCode=required((ObjectNode)value,"channelCode",96).toUpperCase(Locale.ROOT);var channel=channels.findByCodeIgnoreCase(channelCode).orElse(null);
-            if(channel==null){var channelBody=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("providerId",provider.id.toString()).put("name",value.path("channelName").asText()).put("code",channelCode).put("type","专线").put("logisticsAttribute","普货").put("enabled",true);var view=addChannel(channelBody);channel=channels.findById(UUID.fromString(view.path("id").asText())).orElseThrow();createdChannels.add(channel.id.toString());}
-            var sourceHash=value.path("sourceHash").asText();var duplicate=versions.findByChannelIdAndSourceHash(channel.id,sourceHash);if(duplicate.isPresent())continue;
-            var rows=value.path("rows");if(!rows.isArray()||rows.isEmpty())throw AppException.unprocessable("物流迁移条目没有有效价格段："+value.path("fileName").asText());
-            var body=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("sourceHash",sourceHash).put("fileName",value.path("fileName").asText()).put("importedBy",actor).put("publishedBy","").put("auditNote","真实数据迁移产生的待审核草稿");
-            body.set("rows",rows.deepCopy());body.set("issues",value.path("issues").deepCopy());body.set("summary",value.path("summary").deepCopy());body.put("validRows",rows.size()).put("errors",value.path("errors").asInt()).put("warnings",value.path("warnings").asInt());
-            var draft=createDraft(channel.id,body);createdVersions.add(draft.path("id").asText());importedRows+=rows.size();}
-        result.put("providersCreated",createdProviders.size()).put("channelsCreated",createdChannels.size()).put("versionsCreated",createdVersions.size()).put("priceRowsImported",importedRows);return result;
-    }
-    @Transactional public ObjectNode rollbackMigration(JsonNode execution){var removedVersions=0;var removedChannels=0;var removedProviders=0;var logistics=execution.path("logistics");
-        for(var value:logistics.path("createdVersions")){try{var id=UUID.fromString(value.asText());var row=versions.findById(id).orElse(null);if(row!=null){if(!"draft".equals(row.status))throw AppException.conflict("已发布物流版本不能由迁移回滚删除");versions.delete(row);removedVersions++;}}catch(IllegalArgumentException ignored){}}
-        versions.flush();for(var value:logistics.path("createdChannels")){try{var id=UUID.fromString(value.asText());if(versions.findByChannelIdOrderByVersionNumberDesc(id).isEmpty()&&channels.existsById(id)){channels.deleteById(id);removedChannels++;}}catch(IllegalArgumentException ignored){}}
-        channels.flush();for(var value:logistics.path("createdProviders")){try{var id=UUID.fromString(value.asText());if(channels.countByProviderId(id)==0&&providers.existsById(id)){providers.deleteById(id);removedProviders++;}}catch(IllegalArgumentException ignored){}}
-        return tools.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("versionsRemoved",removedVersions).put("channelsRemoved",removedChannels).put("providersRemoved",removedProviders);}
     private JsonNode providerView(LogisticsProviderEntity row){var body=(ObjectNode)row.payload.deepCopy();body.put("_version",row.version);return body;}
     private boolean restore(LogisticsChannelEntity row,String actor){if(row.archivedAt==null)return false;row.archivedAt=null;row.archivedBy=null;row.archiveReason=null;row.updatedAt=Instant.now();((ObjectNode)row.payload).put("archived",false).put("archivedAt","").put("archivedBy","").put("archiveReason","").put("restoredBy",actor).put("updatedAt",row.updatedAt.toString());channels.save(row);return true;}
     private JsonNode channelView(LogisticsChannelEntity row){var body=(ObjectNode)row.payload.deepCopy();body.put("currentVersionId",row.currentVersionId==null?"":row.currentVersionId.toString());body.put("archived",row.archivedAt!=null);body.put("archivedAt",row.archivedAt==null?"":row.archivedAt.toString());body.put("archivedBy",row.archivedBy==null?"":row.archivedBy);body.put("archiveReason",row.archiveReason==null?"":row.archiveReason);body.put("_version",row.version);return body;}

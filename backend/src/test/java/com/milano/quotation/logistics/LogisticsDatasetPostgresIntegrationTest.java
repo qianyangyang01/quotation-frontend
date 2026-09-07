@@ -2,10 +2,13 @@ package com.milano.quotation.logistics;
 
 import com.milano.quotation.common.AppException;
 import com.milano.quotation.storage.AssetStorageService;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.*;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
@@ -27,6 +30,7 @@ class LogisticsDatasetPostgresIntegrationTest {
         var ds=new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());jdbc=JdbcClient.create(ds);transactions=new DataSourceTransactionManager(ds);tx=new TransactionTemplate(transactions);
         storage=mock(AssetStorageService.class);var objects=new HashMap<String,byte[]>();
         doAnswer(i->{objects.put(i.getArgument(0),((InputStream)i.getArgument(1)).readAllBytes());return null;}).when(storage).putRaw(anyString(),any(),anyLong(),anyString());
+        when(storage.putRawWithSha256(anyString(),any(),anyLong(),anyString())).thenAnswer(i->{var bytes=((InputStream)i.getArgument(1)).readAllBytes();objects.put(i.getArgument(0),bytes);return AssetStorageService.sha256(bytes);});
         when(storage.openRaw(anyString())).thenAnswer(i->new ByteArrayInputStream(objects.get(i.getArgument(0))));
         guard=new LogisticsDatasetGuard(jdbc);datasets=new LogisticsDatasetService(jdbc,mapper,guard,storage);queries=new LogisticsQueryService(jdbc,mapper);exports=new LogisticsExportService(jdbc,mapper);parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));
     }
@@ -100,6 +104,24 @@ class LogisticsDatasetPostgresIntegrationTest {
         assertThrows(AppException.class,()->exports.priceSnapshot(empty,null,"","",""));
         assertThrows(AppException.class,()->exports.priceSnapshot(empty,jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",c).query(UUID.class).single(),"","",""));
     }finally{s.setRollbackOnly();}});}
+    @Test void standardizedReviewExportIsTraceableNonImportableAndSnapshotProtected(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();var channel=seed(dataset,"关键字段物流",false);var version=jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",channel).query(UUID.class).single();
+        var payload=(ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:v").param("v",version).query(String.class).single());
+        var row=(ObjectNode)payload.path("rows").get(0);row.put("sourceProductCode","=HYPERLINK(\"https://invalid.example\")").put("sourceFeeLabel","操作费/票").put("sourceFile","原始报价.xlsx").put("sourceSheet","价格表").put("sourceRow",9);
+        jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where id=:v").param("p",payload.toString()).param("v",version).update();
+        var token=exports.standardizedSnapshot(null,version);var bytes=exports.standardized(null,version,token);
+        try(var report=new XSSFWorkbook(new ByteArrayInputStream(bytes))){
+            assertEquals(List.of("关键字段","待补时效","问题清单"),java.util.stream.IntStream.range(0,report.getNumberOfSheets()).mapToObj(i->report.getSheetAt(i).getSheetName()).toList());
+            assertEquals("MILANO_LOGISTICS_REVIEW_V1",report.getSheet("关键字段").getRow(0).getCell(0).getStringCellValue());
+            assertEquals("物流商",report.getSheet("关键字段").getRow(1).getCell(0).getStringCellValue());
+            assertEquals(CellType.STRING,report.getSheet("关键字段").getRow(2).getCell(2).getCellType());
+            assertTrue(report.getSheet("关键字段").getRow(2).getCell(2).getStringCellValue().startsWith("="));
+            assertEquals("缺失",report.getSheet("待补时效").getRow(2).getCell(2).getStringCellValue());
+        }
+        assertThrows(AppException.class,()->parser.parse(bytes,"审核导出.xlsx"));
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,pricePerKg}','99'::jsonb) where id=:v").param("v",version).update();
+        assertThrows(AppException.class,()->exports.standardized(null,version,token));
+    }catch(IOException e){throw new AssertionError(e);}finally{s.setRollbackOnly();}});}
     @Test void unchangedBatchDiffDoesNotReuseHistoricalVersionAdditions(){tx.executeWithoutResult(s->{try{
         var dataset=guard.activeId();var c=seed(dataset,"批次报表",false);
         var v=jdbc.sql("select current_version_id from logistics_channel where id=:c").param("c",c).query(UUID.class).single();
@@ -134,8 +156,80 @@ class LogisticsDatasetPostgresIntegrationTest {
             assertEquals("draft",batch.path("payload").path("results").get(0).path("status").asText(),batch.toString());
             assertEquals(1,datasets.workspace(dataset).path("channels").size());verify(logistics).createDraft(any(),any());
             worker.process(id);verifyNoMoreInteractions(logistics);
+            payload.put("error","prior interrupted attempt");
+            jdbc.sql("update logistics_import_batch set status='queued',payload=cast(:payload as jsonb) where id=:id").param("id",id).param("payload",payload.toString()).update();
+            reset(logistics);when(logistics.createDraft(any(),any())).thenThrow(com.milano.quotation.common.AppException.conflict("已有不同待审稿"));
+            worker.process(id);var conflicted=worker.get(id).path("payload");
+            assertFalse(conflicted.has("error"));
+            var outcome=conflicted.path("results").get(0);assertEquals("blocked",outcome.path("status").asText());
+            assertFalse(outcome.has("parsed"));assertTrue(outcome.path("priceRows").asInt()>0);
         }finally{worker.close();}
     }finally{s.setRollbackOnly();}});}
+    @Test void failedSourceRetentionUsesAPostgresCompatibleTimestamp(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();var batch=UUID.randomUUID();var requestKey=batch.toString();
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:dataset,'QA',:key,'processing','parsing','{}'::jsonb)")
+                .param("id",batch).param("dataset",dataset).param("key",requestKey).update();
+        jdbc.sql("insert into logistics_import_file(batch_id,file_index,original_name,object_key,sha256,size_bytes,status) values(:batch,0,'待适配.xlsx','qa/pending',:sha,1,'stored')")
+                .param("batch",batch).param("sha","0".repeat(64)).update();
+        var worker=new LogisticsImportService(jdbc,mapper,storage,parser,mock(LogisticsService.class),guard,transactions);
+        try {
+            var until=java.time.Instant.parse("2026-09-11T06:29:10Z");
+            assertDoesNotThrow(()->worker.markFailed(batch,0,"新模板待适配",until));
+            var state=jdbc.sql("select concat(status,'|',delete_error,'|',retention_until is not null) from logistics_import_file where batch_id=:batch and file_index=0")
+                    .param("batch",batch).query(String.class).single();
+            assertEquals("failed|新模板待适配|t",state);
+        }finally{worker.close();}
+    }finally{s.setRollbackOnly();}});}
+    @Test void oneUnsupportedFileDoesNotAbortTheRemainingBatch(){tx.executeWithoutResult(s->{try{
+        var active=guard.activeId();seed(active,"批次继续解析",true);var supported=exports.prices(active,null,"批次继续解析","","");
+        var unsupported="not-an-excel-workbook".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var dataset=UUID.fromString(datasets.create("混合文件导入准备区","QA").path("id").asText());var batch=UUID.randomUUID();
+        var firstKey="qa/"+batch+"/unsupported";var secondKey="qa/"+batch+"/supported";
+        storage.putRaw(firstKey,new ByteArrayInputStream(unsupported),unsupported.length,"application/octet-stream");
+        storage.putRaw(secondKey,new ByteArrayInputStream(supported),supported.length,"application/octet-stream");
+        var payload=mapper.createObjectNode();var files=payload.putArray("files");
+        files.addObject().put("name","待适配.xlsx").put("objectKey",firstKey).put("sha256",AssetStorageService.sha256(unsupported));
+        files.addObject().put("name","标准.xlsx").put("objectKey",secondKey).put("sha256",AssetStorageService.sha256(supported));
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:dataset,'QA',:key,'queued','queued',cast(:payload as jsonb))")
+                .param("id",batch).param("dataset",dataset).param("key",batch.toString()).param("payload",payload.toString()).update();
+        for(int index=0;index<2;index++){var file=files.get(index);jdbc.sql("insert into logistics_import_file(batch_id,file_index,original_name,object_key,sha256,size_bytes,status) values(:batch,:index,:name,:key,:sha,:size,'stored')")
+                .param("batch",batch).param("index",index).param("name",file.path("name").asText()).param("key",file.path("objectKey").asText()).param("sha",file.path("sha256").asText()).param("size",index==0?unsupported.length:supported.length).update();}
+        var logistics=mock(LogisticsService.class);when(logistics.createDraft(any(),any())).thenAnswer(i->((ObjectNode)i.getArgument(1)).deepCopy().put("id",UUID.randomUUID().toString()).put("versionNumber",1));
+        var worker=new LogisticsImportService(jdbc,mapper,storage,parser,logistics,guard,transactions);
+        try {
+            worker.process(batch);var result=worker.get(batch);assertEquals("completed",result.path("status").asText(),result.toString());
+            assertEquals("failed",result.path("payload").path("fileReports").get(0).path("status").asText());
+            assertEquals("parsed",result.path("payload").path("fileReports").get(1).path("status").asText());
+            assertEquals(1,result.path("payload").path("results").size());verify(logistics).createDraft(any(),any());
+        }finally{worker.close();}
+    }finally{s.setRollbackOnly();}});}
+    @Test void startupRecoveryRequeuesAStaleLeaseAndDuplicateDispatchCannotDoubleClaim()throws Exception{
+        var dataset=guard.activeId();var batch=UUID.randomUUID();var payload=mapper.createObjectNode();payload.putArray("files");payload.putArray("results");
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload,lease_id,updated_at) values(:id,:dataset,'QA',:key,'processing','parsing',cast(:payload as jsonb),:lease,now()-interval '16 minutes')")
+                .param("id",batch).param("dataset",dataset).param("key",batch.toString()).param("payload",payload.toString()).param("lease",UUID.randomUUID()).update();
+        var worker=new LogisticsImportService(jdbc,mapper,storage,parser,mock(LogisticsService.class),guard,transactions);ReflectionTestUtils.setField(worker,"resumeOnStart",true);
+        try{
+            worker.resumeQueued();worker.dispatchQueued();
+            var deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(3);String status;
+            do{status=worker.get(batch).path("status").asText();if(!Set.of("queued","processing").contains(status))break;Thread.sleep(20);}while(System.nanoTime()<deadline);
+            assertEquals("failed",status);assertTrue(jdbc.sql("select updated_at>now()-interval '1 minute' from logistics_import_batch where id=:id").param("id",batch).query(Boolean.class).single());
+        }finally{worker.close();jdbc.sql("delete from logistics_import_batch where id=:id").param("id",batch).update();}
+    }
+    @Test void allFirstNextImportCompletesWithoutDraftsOrPublicationChecks(){tx.executeWithoutResult(s->{try(var book=new XSSFWorkbook()){
+        var sheet=book.createSheet("首续重");LogisticsSourceParserTest.row(sheet,0,"国家","重量段","首重0.5kg","续重0.5kg");
+        LogisticsSourceParserTest.row(sheet,1,"美国","0-2","无效首重价","无效续重价");
+        var bytes=LogisticsSourceParserTest.bytes(book);var id=UUID.randomUUID();var key="qa/"+id;
+        storage.putRaw(key,new ByteArrayInputStream(bytes),bytes.length,"application/octet-stream");
+        var payload=mapper.createObjectNode();payload.putArray("files").addObject().put("name","花海.xlsx").put("objectKey",key).put("sha256",AssetStorageService.sha256(bytes));
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:d,'QA',:key,'queued','queued',cast(:p as jsonb))")
+            .param("id",id).param("d",guard.activeId()).param("key",id.toString()).param("p",payload.toString()).update();
+        var logistics=mock(LogisticsService.class);var worker=new LogisticsImportService(jdbc,mapper,storage,parser,logistics,guard,transactions);
+        try {worker.process(id);var result=worker.get(id);assertEquals("completed",result.path("status").asText());
+            assertTrue(result.path("payload").path("results").isEmpty());assertEquals("filtered",result.path("payload").path("fileReports").get(0).path("status").asText());
+            verifyNoInteractions(logistics);
+        }finally{worker.close();}
+    }catch(Exception e){throw new AssertionError(e);}finally{s.setRollbackOnly();}});}
+
     static UUID seed(UUID dataset,String name,boolean ready){
         var p=UUID.randomUUID();var c=UUID.randomUUID();var v=UUID.randomUUID();var code="SAME-"+name;int rule=guard.nextRuleId();
         var row=mapper.createObjectNode().put("areaName","美国").put("countryCode","US").put("weightFromKg",0).put("weightToKg",1).put("weightFromInclusive",false).put("weightToInclusive",true).put("pricePerKg",50).put("registrationFee",20).put("currency","CNY").put("pricingModel","per-kg").put("originRegion","").put("notes","").put("pendingReason","").put("quoteReady",ready).put("billingStepKg",0).put("linehaulPerKg",0);

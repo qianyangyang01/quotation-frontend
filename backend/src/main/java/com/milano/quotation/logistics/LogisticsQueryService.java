@@ -30,15 +30,22 @@ public class LogisticsQueryService {
     private static final int MAX_COUNTRIES = 100;
     private static final int MAX_CHANNEL_CODES = 100;
     private static final Set<String> QUOTE_PRICE_FIELDS = Set.of(
-            "areaName", "countryCode", "etaMinDays", "etaMaxDays",
+            "areaName", "countryCode", "etaMinDays", "etaMaxDays", "etaStatus",
             "prohibitedMarks", "allowedMarks", "maxPerimeterCm", "maxSideCm",
             "volumeDivisor", "weightFromKg", "weightToKg", "startWeightKg",
             "pricePerKg", "minChargeWeightKg", "firstWeightKg", "firstWeightPrice",
-            "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee",
+            "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee", "pricingModel",
             "surcharge", "fuelSurchargeRate", "prohibitGeneralCargo", "volumetric",
             "phoneRequired", "zoneName", "zoneExclude", "weightFromInclusive",
             "weightToInclusive"
     );
+    private record RuleCacheKey(String revision, String attribute, List<String> countries, List<String> channels) {}
+    private final RevisionQueryCache<PublishedRules> ruleCache = new RevisionQueryCache<>(16, 32L * 1024 * 1024,
+            value -> value.rules().stream().mapToLong(rule -> 4096L + rule.path("prices").size() * 4096L).sum());
+    private final RevisionQueryCache<PublishedManifest> manifestCache = new RevisionQueryCache<>(4, 1024 * 1024, value -> 65536);
+    private final RevisionQueryCache<PublishedRules> catalogCache = new RevisionQueryCache<>(4, 16L * 1024 * 1024,
+            value -> value.rules().stream().mapToLong(rule -> 2048L + rule.path("prices").size() * 512L).sum());
+    private final RevisionQueryCache<Long> publishedCountCache = new RevisionQueryCache<>(16, 128, value -> 8);
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
 
@@ -50,7 +57,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> providers(int page, int size, String query, Boolean enabled) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where dataset_id=logistics_active_dataset()");
+        var where = new StringBuilder(" where dataset_id=(select logistics_active_dataset())");
         if (query != null && !query.isBlank()) {
             where.append(" and (lower(payload->>'name') like :query or lower(code) like :query)");
             params.put("query", "%" + query.trim().toLowerCase(Locale.ROOT) + "%");
@@ -65,7 +72,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> channels(int page, int size, String query, UUID providerId, Boolean enabled, Boolean archived) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where dataset_id=logistics_active_dataset()");
+        var where = new StringBuilder(" where dataset_id=(select logistics_active_dataset())");
         if (query != null && !query.isBlank()) {
             where.append(" and (lower(payload->>'name') like :query or lower(code) like :query)");
             params.put("query", "%" + query.trim().toLowerCase(Locale.ROOT) + "%");
@@ -86,7 +93,7 @@ public class LogisticsQueryService {
     @Transactional(readOnly = true)
     public PageResponse<JsonNode> versions(int page, int size, UUID channelId, String status) {
         var params = new LinkedHashMap<String, Object>();
-        var where = new StringBuilder(" where channel_id in (select id from logistics_channel where dataset_id=logistics_active_dataset())");
+        var where = new StringBuilder(" where channel_id in (select id from logistics_channel where dataset_id=(select logistics_active_dataset()))");
         if (channelId != null) {
             where.append(" and channel_id = :channelId");
             params.put("channelId", channelId);
@@ -127,19 +134,33 @@ public class LogisticsQueryService {
                 select concat_ws('|', p.id::text, p.version::text, p.payload->>'enabled',
                   c.id::text, c.version::text, c.code, c.payload->>'enabled', c.payload->>'name', c.payload->>'type', c.payload->>'logisticsAttribute',
                   v.id::text, v.source_hash, coalesce(v.published_at::text,''),v.rows_fingerprint,
-                  (select max(a.reviewed_at)::text from logistics_billing_acceptance a where a.version_id=v.id)) as part
+                  (select md5(string_agg(concat_ws(':',a.id::text,a.kind,a.engine_version,a.rows_fingerprint,a.reviewed_at::text),',' order by a.id))
+                   from logistics_billing_acceptance a where a.version_id=v.id)) as part
                 from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null and logistics_company_quote_allowed(c.id)
-                  and c.dataset_id=logistics_active_dataset()
-                  and logistics_version_quote_ready(v.id)
+                  and c.dataset_id=(select logistics_active_dataset())
                 order by c.id
                 """).query(String.class).list();
-        var scopeRevision = jdbc.sql("select concat_ws('|',revision,enabled,paused,rebuild_id) from logistics_company_state where singleton").query(String.class).single();
-        return new ManifestRevision(sha256(scopeRevision+"\n"+String.join("\n", revisionParts)), revisionParts.size());
+        var dataset = jdbc.sql("select logistics_active_dataset()::text").query(String.class).single();
+        // Fingerprint all active published candidates, including currently unready ones.
+        // Eligibility is expensive and only needs reevaluation when these inputs change.
+        var companyRevision=jdbc.sql("select concat(revision,':',paused,':',enabled) from logistics_company_state where singleton=true").query(String.class).single();
+        var revision = sha256(companyRevision + dataset + "\n" + String.join("\n", revisionParts));
+        var publishedChannels = publishedCountCache.get(revision, () -> jdbc.sql("""
+                select count(*) from logistics_channel c
+                join logistics_provider p on p.id=c.provider_id
+                join logistics_version v on v.id=c.current_version_id and v.status='published'
+                where coalesce((p.payload->>'enabled')::boolean,true)=true
+                  and coalesce((c.payload->>'enabled')::boolean,true)=true
+                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                  and c.dataset_id=(select logistics_active_dataset())
+                  and logistics_version_quote_ready(v.id)
+                """).query(Long.class).single());
+        return new ManifestRevision(revision, publishedChannels);
     }
 
     @Transactional(readOnly = true)
@@ -149,18 +170,32 @@ public class LogisticsQueryService {
 
     @Transactional(readOnly = true)
     public PublishedManifest manifest(ManifestRevision revisionState) {
+        return manifestCache.get(revisionState.revision(), () -> {
+            var result = readManifest(revisionState);
+            requireCurrentRevision(revisionState.revision());
+            return result;
+        });
+    }
+
+    private void requireCurrentRevision(String revision) {
+        if (!revision.equals(manifestRevision().revision())) {
+            throw new AppException(HttpStatus.CONFLICT, "LOGISTICS_REVISION_CHANGED", "物流正式版本已更新，请重新加载规则");
+        }
+    }
+
+    private PublishedManifest readManifest(ManifestRevision revisionState) {
         var countries = jdbc.sql("""
                 select distinct coalesce(item->>'countryCode','') as code, coalesce(item->>'areaName','') as name
                 from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
-                cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
+                cross join lateral jsonb_array_elements(v.quote_rows) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null and logistics_company_quote_allowed(c.id)
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
-                  and coalesce(item->>'areaName','')<>''
+                  and coalesce(item->>'areaName','')<>'' and logistics_price_row_quote_supported(item)
                 order by name, code
                 """).query((rs, rowNum) -> new PublishedCountry(rs.getString("code"), rs.getString("name"))).list();
         var attributes = jdbc.sql("""
@@ -171,11 +206,11 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null and logistics_company_quote_allowed(c.id)
-                  and c.dataset_id=logistics_active_dataset()
+                  and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 order by attribute
                 """).query(String.class).list();
-        return new PublishedManifest(revisionState.revision(), Instant.now(), revisionState.publishedChannels(), countries, attributes);
+        return new PublishedManifest(revisionState.revision(), Instant.now(), revisionState.publishedChannels(), countries, attributes, jdbc.sql("select paused from logistics_company_state where singleton").query(Boolean.class).single());
     }
 
     @Transactional(readOnly = true)
@@ -184,6 +219,14 @@ public class LogisticsQueryService {
         if (expectedRevision != null && !expectedRevision.isBlank() && !expectedRevision.equals(revision)) {
             throw new AppException(HttpStatus.CONFLICT, "LOGISTICS_REVISION_CHANGED", "物流正式版本已更新，请重新加载规则");
         }
+        return catalogCache.get(revision, () -> {
+            var result = readPublishedCatalog(revision);
+            requireCurrentRevision(revision);
+            return result;
+        });
+    }
+
+    private PublishedRules readPublishedCatalog(String revision) {
         var sql = """
                 with ready_ids as materialized (
                   select c.id as channel_id, c.rule_id, c.code as channel_code,
@@ -194,12 +237,8 @@ public class LogisticsQueryService {
                   where coalesce((p.payload->>'enabled')::boolean,true)=true
                     and coalesce((c.payload->>'enabled')::boolean,true)=true
                     and c.archived_at is null and logistics_company_quote_allowed(c.id)
-                    and c.dataset_id=logistics_active_dataset()
-                    and exists(select 1 from logistics_billing_acceptance accepted
-                      where accepted.version_id=v.id
-                      and accepted.rows_fingerprint=v.rows_fingerprint
-                      and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
-                        or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                    and c.dataset_id=(select logistics_active_dataset())
+                    and logistics_version_quote_ready(v.id)
                 )
                 select distinct ready.channel_id::text as channel_id, ready.rule_id, ready.channel_code,
                   ready.channel_payload, ready.provider_payload,
@@ -207,8 +246,8 @@ public class LogisticsQueryService {
                   coalesce(item->>'zoneName','') as zone_name, coalesce((item->>'zoneExclude')::boolean,false) as zone_exclude
                 from ready_ids ready
                 join logistics_version v on v.id=ready.version_id
-                cross join lateral jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) item
-                where coalesce(item->>'countryCode','')<>'' or coalesce(item->>'areaName','')<>''
+                cross join lateral jsonb_array_elements(v.quote_rows) item
+                where (coalesce(item->>'countryCode','')<>'' or coalesce(item->>'areaName','')<>'') and logistics_price_row_quote_supported(item)
                 order by ready.rule_id, country_code, area_name, zone_name, zone_exclude
                 """;
         var grouped = new LinkedHashMap<String, ObjectNode>();
@@ -270,6 +309,16 @@ public class LogisticsQueryService {
         }
         var normalizedCountries = normalized(countries, MAX_COUNTRIES, "报价国家不能为空", "报价国家一次最多查询100个");
         var normalizedChannels = normalizedOptional(channelCodes, MAX_CHANNEL_CODES, "渠道一次最多查询100个");
+        var key = new RuleCacheKey(revision, attribute == null ? "" : attribute,
+                normalizedCountries.stream().sorted().toList(), normalizedChannels.stream().sorted().toList());
+        return ruleCache.get(key, () -> {
+            var result = readPublishedRules(revision, attribute, normalizedCountries, normalizedChannels);
+            requireCurrentRevision(revision);
+            return result;
+        });
+    }
+
+    private PublishedRules readPublishedRules(String revision, String attribute, List<String> normalizedCountries, List<String> normalizedChannels) {
         var params = new LinkedHashMap<String, Object>();
         var countryVariants = normalizedCountries.stream()
                 .flatMap(value -> java.util.stream.Stream.of(value, value.toLowerCase(Locale.ROOT), value.toUpperCase(Locale.ROOT)))
@@ -292,12 +341,8 @@ public class LogisticsQueryService {
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null and logistics_company_quote_allowed(c.id)
-                  and c.dataset_id=logistics_active_dataset()
-                  and exists(select 1 from logistics_billing_acceptance accepted
-                    where accepted.version_id=v.id
-                    and accepted.rows_fingerprint=v.rows_fingerprint
-                    and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
-                      or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                  and c.dataset_id=(select logistics_active_dataset())
+                  and logistics_version_quote_ready(v.id)
                 """);
         var rowSql = new StringBuilder("""
                 select c.id::text as channel_id,
@@ -308,18 +353,14 @@ public class LogisticsQueryService {
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 cross join lateral jsonb_path_query(
-                  coalesce(v.payload->'rows','[]'::jsonb),
+                  v.quote_rows,
                   '$[*] ? (@.countryCode == $countries[*] || @.areaName == $countries[*])',
                   jsonb_build_object('countries',cast(:countries as jsonb))) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
                   and c.archived_at is null and logistics_company_quote_allowed(c.id)
-                  and c.dataset_id=logistics_active_dataset()
-                  and exists(select 1 from logistics_billing_acceptance accepted
-                    where accepted.version_id=v.id
-                    and accepted.rows_fingerprint=v.rows_fingerprint
-                    and ((accepted.kind='verified' and accepted.engine_version='logistics-billing-v3')
-                      or (accepted.kind='legacy' and c.dataset_id='00000000-0000-0000-0000-000000000001')))
+                  and c.dataset_id=(select logistics_active_dataset())
+                  and logistics_version_quote_ready(v.id)
                 """);
         if (!normalizedChannels.isEmpty()) {
             params.put("channels", mapper.valueToTree(normalizedChannels.stream().map(value -> value.toLowerCase(Locale.ROOT)).toList()).toString());
@@ -327,6 +368,7 @@ public class LogisticsQueryService {
             metadataSql.append(channelFilter);
             rowSql.append(channelFilter);
         }
+        rowSql.append(" and logistics_price_row_quote_supported(item)");
         metadataSql.append(" order by c.rule_id");
         rowSql.append(" order by c.rule_id, coalesce(item->>'countryCode',''), coalesce((item->>'weightFromKg')::numeric,0)");
 
@@ -503,6 +545,8 @@ public class LogisticsQueryService {
 
     public record PublishedCountry(String code, String name) {}
     public record ManifestRevision(String revision, long publishedChannels) {}
-    public record PublishedManifest(String revision, Instant generatedAt, long publishedChannels, List<PublishedCountry> countries, List<String> attributes) {}
+    public record PublishedManifest(String revision, Instant generatedAt, long publishedChannels, List<PublishedCountry> countries, List<String> attributes, boolean rebuilding) {
+        public PublishedManifest(String revision,Instant generatedAt,long publishedChannels,List<PublishedCountry> countries,List<String> attributes){this(revision,generatedAt,publishedChannels,countries,attributes,false);}
+    }
     public record PublishedRules(String revision, List<ObjectNode> rules) {}
 }

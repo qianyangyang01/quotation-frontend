@@ -1,0 +1,350 @@
+{
+  "baseline": "63751225ddeef6a29c205ad866428f57ec018c9c",
+  "note": "Isolated short-duration tests; not production acceptance. CPU percent is per one core. Resource/connection observations are samples.",
+  "results": [
+    {
+      "name": "10人混合",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T11:32:14.897Z",
+      "finishedAt": "2026-09-05T11:33:30.122Z",
+      "users": 10,
+      "warmupSeconds": 15,
+      "durationSeconds": 60,
+      "readOnly": false,
+      "total": 2055,
+      "failures": 0,
+      "failureRate": 0,
+      "operations": {
+        "sku-query": {
+          "count": 819,
+          "p50Ms": 21.94,
+          "p95Ms": 32.32,
+          "p99Ms": 76.51,
+          "maxMs": 247.83
+        },
+        "quotation-list": {
+          "count": 350,
+          "p50Ms": 28.9,
+          "p95Ms": 40.33,
+          "p99Ms": 61.13,
+          "maxMs": 77.12
+        },
+        "logistics-query": {
+          "count": 305,
+          "p50Ms": 59.31,
+          "p95Ms": 114.61,
+          "p99Ms": 148.73,
+          "maxMs": 384.83
+        },
+        "purchase-list": {
+          "count": 376,
+          "p50Ms": 22.69,
+          "p95Ms": 31.23,
+          "p99Ms": 47.7,
+          "maxMs": 58.8
+        },
+        "quotation-save-single": {
+          "count": 105,
+          "p50Ms": 73.42,
+          "p95Ms": 163.21,
+          "p99Ms": 272.15,
+          "maxMs": 313.3
+        },
+        "quotation-save-bundle": {
+          "count": 100,
+          "p50Ms": 74.21,
+          "p95Ms": 171.91,
+          "p99Ms": 284.29,
+          "maxMs": 446.32
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": true,
+        "failed": []
+      },
+      "failureSamples": [],
+      "resources": {
+        "backend": {
+          "maxCpuOneCorePercent": 65.7,
+          "meanCpuOneCorePercent": 52.22,
+          "maxMemoryMiB": 435.5
+        },
+        "postgres": {
+          "maxCpuOneCorePercent": 40.8,
+          "meanCpuOneCorePercent": 24.23,
+          "maxMemoryMiB": 108.8
+        },
+        "redis": {
+          "maxCpuOneCorePercent": 6.51,
+          "meanCpuOneCorePercent": 3.3,
+          "maxMemoryMiB": 8.773
+        }
+      },
+      "dbSampleMaxConnections": 11,
+      "dbSampleMaxLockWaits": 0,
+      "poolSampleMaxActive": 1,
+      "poolSampleMaxWaiting": 0,
+      "slowStatementsOver1s": 0,
+      "slowPurchaseLockStatements": 0,
+      "slowStatementMaxMs": 0
+    },
+    {
+      "name": "30人混合",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T11:33:37.401Z",
+      "finishedAt": "2026-09-05T11:36:07.724Z",
+      "users": 30,
+      "warmupSeconds": 30,
+      "durationSeconds": 120,
+      "readOnly": false,
+      "total": 10941,
+      "failures": 0,
+      "failureRate": 0,
+      "operations": {
+        "sku-query": {
+          "count": 4368,
+          "p50Ms": 22.38,
+          "p95Ms": 111.39,
+          "p99Ms": 149.08,
+          "maxMs": 456.39
+        },
+        "quotation-save-single": {
+          "count": 573,
+          "p50Ms": 243.44,
+          "p95Ms": 712.7,
+          "p99Ms": 881.53,
+          "maxMs": 1051.25
+        },
+        "quotation-list": {
+          "count": 1881,
+          "p50Ms": 32.26,
+          "p95Ms": 126.52,
+          "p99Ms": 164.47,
+          "maxMs": 350.27
+        },
+        "logistics-query": {
+          "count": 1645,
+          "p50Ms": 81.48,
+          "p95Ms": 295.34,
+          "p99Ms": 453.7,
+          "maxMs": 657.76
+        },
+        "purchase-list": {
+          "count": 1964,
+          "p50Ms": 23.92,
+          "p95Ms": 77.74,
+          "p99Ms": 152.33,
+          "maxMs": 246.91
+        },
+        "quotation-save-bundle": {
+          "count": 510,
+          "p50Ms": 214.41,
+          "p95Ms": 735.14,
+          "p99Ms": 927.04,
+          "maxMs": 1052.61
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": true,
+        "failed": []
+      },
+      "failureSamples": [],
+      "resources": {
+        "backend": {
+          "maxCpuOneCorePercent": 88.72,
+          "meanCpuOneCorePercent": 71.8,
+          "maxMemoryMiB": 456.5
+        },
+        "postgres": {
+          "maxCpuOneCorePercent": 79.13,
+          "meanCpuOneCorePercent": 69.4,
+          "maxMemoryMiB": 120.7
+        },
+        "redis": {
+          "maxCpuOneCorePercent": 4.71,
+          "meanCpuOneCorePercent": 4.09,
+          "maxMemoryMiB": 4.238
+        }
+      },
+      "dbSampleMaxConnections": 11,
+      "dbSampleMaxLockWaits": 4,
+      "poolSampleMaxActive": 10,
+      "poolSampleMaxWaiting": 16,
+      "slowStatementsOver1s": 0,
+      "slowPurchaseLockStatements": 0,
+      "slowStatementMaxMs": 0
+    },
+    {
+      "name": "30人热读",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T11:36:15.123Z",
+      "finishedAt": "2026-09-05T11:38:45.401Z",
+      "users": 30,
+      "warmupSeconds": 30,
+      "durationSeconds": 120,
+      "readOnly": true,
+      "total": 12691,
+      "failures": 0,
+      "failureRate": 0,
+      "operations": {
+        "quotation-list": {
+          "count": 2157,
+          "p50Ms": 26.53,
+          "p95Ms": 42.72,
+          "p99Ms": 78.71,
+          "maxMs": 195.94
+        },
+        "purchase-list": {
+          "count": 2301,
+          "p50Ms": 16.75,
+          "p95Ms": 28.07,
+          "p99Ms": 51.05,
+          "maxMs": 88.01
+        },
+        "sku-query": {
+          "count": 6324,
+          "p50Ms": 15.67,
+          "p95Ms": 33.89,
+          "p99Ms": 62.82,
+          "maxMs": 187.96
+        },
+        "logistics-query": {
+          "count": 1909,
+          "p50Ms": 62.69,
+          "p95Ms": 157.58,
+          "p99Ms": 231.94,
+          "maxMs": 432.18
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": true,
+        "failed": []
+      },
+      "failureSamples": [],
+      "resources": {
+        "backend": {
+          "maxCpuOneCorePercent": 89.5,
+          "meanCpuOneCorePercent": 67.41,
+          "maxMemoryMiB": 457.8
+        },
+        "postgres": {
+          "maxCpuOneCorePercent": 50.49,
+          "meanCpuOneCorePercent": 33.45,
+          "maxMemoryMiB": 117.4
+        },
+        "redis": {
+          "maxCpuOneCorePercent": 6.1,
+          "meanCpuOneCorePercent": 4.31,
+          "maxMemoryMiB": 4.305
+        }
+      },
+      "dbSampleMaxConnections": 11,
+      "dbSampleMaxLockWaits": 0,
+      "poolSampleMaxActive": 10,
+      "poolSampleMaxWaiting": 10,
+      "slowStatementsOver1s": 0,
+      "slowPurchaseLockStatements": 0,
+      "slowStatementMaxMs": 0
+    },
+    {
+      "name": "50人混合",
+      "baseUrl": "http://127.0.0.1:18098",
+      "startedAt": "2026-09-05T11:38:54.229Z",
+      "finishedAt": "2026-09-05T11:40:10.241Z",
+      "users": 50,
+      "warmupSeconds": 15,
+      "durationSeconds": 60,
+      "readOnly": false,
+      "total": 5605,
+      "failures": 0,
+      "failureRate": 0,
+      "operations": {
+        "sku-query": {
+          "count": 2225,
+          "p50Ms": 127.26,
+          "p95Ms": 448.15,
+          "p99Ms": 642.01,
+          "maxMs": 932.07
+        },
+        "quotation-list": {
+          "count": 969,
+          "p50Ms": 74.64,
+          "p95Ms": 440.47,
+          "p99Ms": 739.73,
+          "maxMs": 837.45
+        },
+        "logistics-query": {
+          "count": 842,
+          "p50Ms": 494.84,
+          "p95Ms": 1138.13,
+          "p99Ms": 1424.85,
+          "maxMs": 2264.77
+        },
+        "quotation-save-single": {
+          "count": 339,
+          "p50Ms": 927.55,
+          "p95Ms": 1435.42,
+          "p99Ms": 1710.92,
+          "maxMs": 1922.95
+        },
+        "purchase-list": {
+          "count": 980,
+          "p50Ms": 68.71,
+          "p95Ms": 432.21,
+          "p99Ms": 554.25,
+          "maxMs": 744.22
+        },
+        "quotation-save-bundle": {
+          "count": 250,
+          "p50Ms": 929.87,
+          "p95Ms": 1367.94,
+          "p99Ms": 1526.28,
+          "maxMs": 1835.08
+        }
+      },
+      "thresholds": {
+        "queryP95Ms": 1000,
+        "saveP95Ms": 1500,
+        "maxErrorRate": 0.01,
+        "passed": false,
+        "failed": [
+          "logistics-query"
+        ]
+      },
+      "failureSamples": [],
+      "resources": {
+        "backend": {
+          "maxCpuOneCorePercent": 95.91,
+          "meanCpuOneCorePercent": 62.86,
+          "maxMemoryMiB": 486.4
+        },
+        "postgres": {
+          "maxCpuOneCorePercent": 79.27,
+          "meanCpuOneCorePercent": 74.89,
+          "maxMemoryMiB": 121.4
+        },
+        "redis": {
+          "maxCpuOneCorePercent": 4.4,
+          "meanCpuOneCorePercent": 3.56,
+          "maxMemoryMiB": 4.223
+        }
+      },
+      "dbSampleMaxConnections": 11,
+      "dbSampleMaxLockWaits": 7,
+      "poolSampleMaxActive": 10,
+      "poolSampleMaxWaiting": 39,
+      "slowStatementsOver1s": 0,
+      "slowPurchaseLockStatements": 0,
+      "slowStatementMaxMs": 0
+    }
+  ]
+}

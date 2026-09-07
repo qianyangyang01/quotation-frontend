@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-if [[ $# -ne 1 || ! "$1" =~ ^quotation-[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{2}$ ]]; then
-  echo "Usage: release-version.sh quotation-YYYY.MM.DD-NN" >&2; exit 2
+if [[ $# -lt 1 || $# -gt 2 || ! "$1" =~ ^quotation-[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{2}$ || ( $# -eq 2 && "$2" != "--use-prebuilt" ) ]]; then
+  echo "Usage: release-version.sh quotation-YYYY.MM.DD-NN [--use-prebuilt]" >&2; exit 2
 fi
 release="$1"
+use_prebuilt="${2:-}"
 deploy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository_dir="$(cd "$deploy_dir/.." && pwd)"
 source "$deploy_dir/.env"
@@ -11,6 +12,7 @@ root="${QUOTATION_DATA_ROOT:-/srv/ahmln-data/quotation-app}"
 release_dir="$root/releases/$release"
 release_deploy_dir="$release_dir/deploy"
 test ! -e "$release_dir" || { echo "ERROR: release already exists" >&2; exit 1; }
+git_sha="$(git -C "$repository_dir" rev-parse HEAD)"
 
 git -C "$repository_dir" diff --quiet
 git -C "$repository_dir" diff --cached --quiet
@@ -49,10 +51,17 @@ else
   supplier_export_path="not-applicable-initial-release"
   supplier_record_export_path="not-applicable-initial-release"
 fi
-docker build --pull --label "com.milano.quotation.release=$release" \
-  -t "quotation-backend:$release" "$repository_dir/backend"
-docker build --pull --label "com.milano.quotation.release=$release" \
-  -t "quotation-frontend:$release" "$repository_dir"
+if [[ "$use_prebuilt" == "--use-prebuilt" ]]; then
+  for image in "quotation-backend:$release" "quotation-frontend:$release"; do
+    test "$(docker image inspect --format '{{ index .Config.Labels "com.milano.quotation.release" }}' "$image" 2>/dev/null)" = "$release" || { echo "ERROR: prebuilt image release label mismatch: $image" >&2; exit 1; }
+    test "$(docker image inspect --format '{{ index .Config.Labels "com.milano.quotation.git-sha" }}' "$image" 2>/dev/null)" = "$git_sha" || { echo "ERROR: prebuilt image git SHA label mismatch: $image" >&2; exit 1; }
+  done
+else
+  docker build --pull --label "com.milano.quotation.release=$release" --label "com.milano.quotation.git-sha=$git_sha" \
+    -t "quotation-backend:$release" "$repository_dir/backend"
+  docker build --pull --label "com.milano.quotation.release=$release" --label "com.milano.quotation.git-sha=$git_sha" \
+    -t "quotation-frontend:$release" "$repository_dir"
+fi
 mkdir -p "$release_deploy_dir"
 cp "$deploy_dir/docker-compose.yml" "$release_deploy_dir/docker-compose.yml"
 cp "$deploy_dir/README.md" "$release_deploy_dir/README.md"
@@ -64,6 +73,13 @@ chmod 0600 "$release_deploy_dir/.env"
 sed -i "s/^QUOTATION_RELEASE=.*/QUOTATION_RELEASE=$release/" "$release_deploy_dir/.env"
 docker compose --project-name quotation-prod --env-file "$release_deploy_dir/.env" -f "$release_deploy_dir/docker-compose.yml" \
   pull quotation-postgres quotation-redis quotation-minio
+if [[ -n "$existing_containers" ]]; then
+  active_imports="$(docker exec quotation-prod-quotation-postgres-1 psql -U "${QUOTATION_DB_USER:-quotation_app}" -d "${QUOTATION_DB_NAME:-quotation_prod}" -Atc "select count(*) from logistics_import_batch where status in ('queued','processing')")"
+  if [[ "$active_imports" != "0" ]]; then
+    echo "ERROR: $active_imports logistics imports are active; finish them before switching containers" >&2
+    exit 1
+  fi
+fi
 docker compose --project-name quotation-prod --env-file "$release_deploy_dir/.env" -f "$release_deploy_dir/docker-compose.yml" up -d --remove-orphans
 bash "$release_deploy_dir/scripts/container-healthcheck.sh" "$release_deploy_dir"
 
@@ -71,7 +87,7 @@ if [[ "$current_before" == "$root/releases/"* ]]; then ln -sfn "$current_before"
 ln -sfn "$release_dir" "$root/current"
 printf '%s\n' \
   "release=$release" \
-  "git_sha=$(git -C "$repository_dir" rev-parse HEAD)" \
+  "git_sha=$git_sha" \
   "supplier_export=$supplier_export_path" \
   "supplier_record_export=$supplier_record_export_path" \
   "backup=$backup_path" \

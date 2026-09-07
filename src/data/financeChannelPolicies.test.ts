@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { COMMON_COUNTRY_LIMIT, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings, normalizePolicies } from './financeChannelPolicies'
+import { COMMON_COUNTRY_LIMIT, describeAustraliaQuoteRegions, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings, normalizePolicies, toggleFinanceChannelSelection } from './financeChannelPolicies'
+
+it('selects a whole provider without duplicating existing channels or removing another provider', () => {
+  const original = ['other-provider', 'sf-1']
+  expect(toggleFinanceChannelSelection(original, ['sf-1', 'sf-2', 'sf-3'])).toEqual(['other-provider', 'sf-1', 'sf-2', 'sf-3'])
+  expect(original).toEqual(['other-provider', 'sf-1'])
+  expect(toggleFinanceChannelSelection(['other-provider', 'sf-1', 'sf-2'], ['sf-1', 'sf-2'])).toEqual(['other-provider'])
+  expect(toggleFinanceChannelSelection(original, [])).toEqual(original)
+})
+
+describe('Australia channel region descriptions', () => {
+  const prices = (zones: string[]) => zones.map(zoneName => ({ zoneName, zoneExclude: false }))
+  it('recognizes the bare and combined region names present in provider prices', () => {
+    for (const zones of [['1区', '2区', '3区', '4区'], ['1区/2区', '3区/4区'], ['澳大利亚一区', '澳大利亚二区', '3区、4区']]) {
+      const result = describeAustraliaQuoteRegions(prices(zones))
+      expect(result.quoteRegions).toEqual(['澳大利亚1区', '澳大利亚2区', '澳大利亚3区', '澳大利亚4区'])
+      expect(result.missingQuoteRegions).toEqual([])
+    }
+  })
+  it('identifies only the missing fourth zone and excludes expressly excluded zones', () => {
+    const result = describeAustraliaQuoteRegions([...prices(['1区', '2区', '3区']), { zoneName: '4区', zoneExclude: true }])
+    expect(result.missingQuoteRegions).toEqual(['澳大利亚4区'])
+    expect(result.quoteRegionSummary).toContain('未提供澳大利亚4区价格')
+  })
+  it('does not invent missing numbered regions for unzoned or provider-defined pricing', () => {
+    expect(describeAustraliaQuoteRegions(prices(['']))).toMatchObject({ missingQuoteRegions: [], quoteRegionSummary: '原表未区分澳大利亚分区，按该渠道国家价格报价' })
+    expect(describeAustraliaQuoteRegions(prices(['Zone3亚太及南美主要国家']))).toMatchObject({ missingQuoteRegions: [], quoteRegionSummary: '原表分区：Zone3亚太及南美主要国家' })
+    expect(describeAustraliaQuoteRegions(prices(['1区', '']))).toMatchObject({ missingQuoteRegions: [], quoteRegionSummary: '已提供分区：澳大利亚1区；另有未分区价格' })
+  })
+})
 
 describe('common country settings', () => {
   it('allows finance to configure up to 40 common countries', () => {

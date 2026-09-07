@@ -25,6 +25,7 @@ public class CompanyChannelController {
     @PostMapping("/rebuild/{id}/purge") public ApiResponse<?> purge(@PathVariable UUID id,@RequestBody ObjectNode input,Authentication auth){var result=rebuild.purge(id,input);record("purge",result,auth);return ApiResponse.ok(result);}
     @PostMapping("/rebuild/{id}/cleanup") public ApiResponse<?> cleanup(@PathVariable UUID id,Authentication auth){var result=rebuild.cleanupObjects(id);record("cleanup",result,auth);return ApiResponse.ok(result);}
     @PostMapping("/rebuild/{id}/finish") public ApiResponse<?> finish(@PathVariable UUID id,@RequestBody ObjectNode input,Authentication auth){var result=rebuild.finish(id,input,actor(auth));record("finish",result,auth);return ApiResponse.ok(result);}
+    @PostMapping("/rebuild/{id}/restore") public ApiResponse<?> restore(@PathVariable UUID id,@RequestBody ObjectNode input,Authentication auth){var result=rebuild.restore(id,input,actor(auth));record("restore",result,auth);return ApiResponse.ok(result);}
     private void record(String action,ObjectNode result,Authentication auth){audit.record("logistics.company-rebuild-"+action,"logistics-company-rebuild",result.path("id").asText(),"success",Map.of("actor",actor(auth),"phase",result.path("phase").asText()));}
     private static String actor(Authentication auth){return ((QuotationPrincipal)auth.getPrincipal()).account();}
 }

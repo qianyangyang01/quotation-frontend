@@ -9,6 +9,64 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CompanyChannelCorpusTest {
+    @Test void readsBothTongyouCanadaChannelsDeliveryFromSharedNotes() throws Exception {
+        var folder=System.getProperty("company.corpus","");Assumptions.assumeFalse(folder.isBlank());
+        var mapper=JsonMapper.builder().build();var parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));
+        var file=Path.of(folder,"8.17通邮价格.xlsx");var result=parser.parse(Files.readAllBytes(file),file.getFileName().toString());
+        int count=0;
+        for(var channel:result.path("channels"))if(channel.path("channelName").asText().startsWith("加拿大专线特货")) {
+            count++;assertTrue(channel.path("etaReady").asBoolean(),channel.path("channelName").asText());
+            for(var row:channel.path("rows")) {
+                assertEquals(10,row.path("etaMinDays").asInt());assertEquals(12,row.path("etaMaxDays").asInt());
+                assertTrue(row.path("sourceEtaText").asText().contains("全程签收时效10-12天"));
+            }
+        }
+        assertEquals(2,count);
+        Files.writeString(Path.of("target/company-tongyou-eta-verification.json"),mapper.writerWithDefaultPrettyPrinter().writeValueAsString(result));
+    }
+    @Test void preservesExtremeCountryEtasAndReportsOnlyMissingDestinations() throws Exception {
+        var folder=System.getProperty("company.corpus","");Assumptions.assumeFalse(folder.isBlank());
+        var mapper=JsonMapper.builder().build();var parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));
+        var file=Path.of(folder,"8.24极通环球价格.xls");
+        var result=parser.parse(Files.readAllBytes(file),file.getFileName().toString());
+        assertEquals(2,result.path("channels").size());
+        for(var channel:result.path("channels")) {
+            boolean sensitive=channel.path("channelName").asText().contains("敏感");
+            var missing=new TreeSet<String>();int usRows=0;
+            for(var row:channel.path("rows")) {
+                if(row.path("etaMinDays").asInt()==0)missing.add(row.path("countryCode").asText().split("-")[0]);
+                if(row.path("countryCode").asText().equals("US")) {
+                    usRows++;assertEquals(sensitive?10:7,row.path("etaMinDays").asInt());
+                    assertEquals(sensitive?20:10,row.path("etaMaxDays").asInt());
+                }
+            }
+            assertTrue(usRows>0);assertEquals(sensitive?Set.of("AU","CL"):Set.of("AU"),missing);
+        }
+        Files.writeString(Path.of("target/company-extreme-eta-verification.json"),mapper.writerWithDefaultPrettyPrinter().writeValueAsString(result));
+    }
+    @Test void provesOutOfScopeWorkbooksNeverExecuteNumericPriceParsing() throws Exception {
+        var folder=System.getProperty("company.corpus","");Assumptions.assumeFalse(folder.isBlank());
+        var mapper=JsonMapper.builder().build();var parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));
+        var baseline=(ObjectNode)mapper.readTree(Objects.requireNonNull(getClass().getResourceAsStream("/company-channel-baseline.json")));
+        var only=baseline.path("entries").valueStream().filter(e->e.path("providerName").asText().equals("花海")).findFirst().orElseThrow();
+        var selected=mapper.createObjectNode().put("enabled",true).put("revision",17);selected.putArray("entries").add(only);
+        var scope=new CompanyChannelScope(selected);var metrics=mapper.createObjectNode();var files=metrics.putArray("files");
+        long fullMs=0,scopedMs=0;int fullCells=0,selectedCells=0;
+        try(var paths=Files.list(Path.of(folder))){for(var path:paths.filter(p->p.getFileName().toString().matches("(?i)^(?!~\\$).*\\.xlsx?$")).sorted().toList()){
+            var bytes=Files.readAllBytes(path);var name=path.getFileName().toString();
+            long start=System.nanoTime();var complete=parser.parse(bytes,name);long full=(System.nanoTime()-start)/1_000_000;
+            start=System.nanoTime();var limited=parser.parse(bytes,name,scope);long narrow=(System.nanoTime()-start)/1_000_000;
+            fullMs+=full;scopedMs+=narrow;fullCells+=complete.path("priceCellsParsed").asInt();selectedCells+=limited.path("priceCellsParsed").asInt();
+            for(var channel:limited.path("channels"))assertEquals(only.path("id"),channel.path("companyChannelId"));
+            if(!name.contains("花海")){assertEquals(0,limited.path("channels").size());assertEquals(0,limited.path("priceCellsParsed").asInt());}
+            files.addObject().put("file",name).put("bytes",bytes.length).put("fullMs",full).put("scopedMs",narrow).put("fullPriceCells",complete.path("priceCellsParsed").asInt()).put("scopedPriceCells",limited.path("priceCellsParsed").asInt());
+        }}
+        assertTrue(fullCells>selectedCells);assertTrue(selectedCells>0);
+        metrics.put("fullMs",fullMs).put("scopedMs",scopedMs).put("fullPriceCells",fullCells).put("scopedPriceCells",selectedCells)
+            .put("measurementNote","同一JVM逐文件全量后限定解析，含缓存预热影响；数值解析调用计数证明过滤，不作为P95结论")
+            .put("heapUsedBytes",java.lang.management.ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed());
+        Files.writeString(Path.of("target/company-channel-performance.json"),mapper.writerWithDefaultPrettyPrinter().writeValueAsString(metrics));
+    }
     @Test void buildsDirectoryFromRealBaselineAndReconcilesScopedPrices() throws Exception {
         var folder=System.getProperty("company.corpus","");Assumptions.assumeFalse(folder.isBlank());
         var mapper=JsonMapper.builder().build();var parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));

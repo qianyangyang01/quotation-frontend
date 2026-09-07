@@ -15,12 +15,34 @@ public class LogisticsBatchPublishService {
     private final JdbcClient jdbc;private final ObjectMapper mapper;private final LogisticsService logistics;private final LogisticsBillingAcceptanceService billing;private final TransactionTemplate tx;
     public LogisticsBatchPublishService(JdbcClient jdbc,ObjectMapper mapper,LogisticsService logistics,LogisticsBillingAcceptanceService billing,PlatformTransactionManager manager){this.jdbc=jdbc;this.mapper=mapper;this.logistics=logistics;this.billing=billing;this.tx=new TransactionTemplate(manager);}
 
+    public ObjectNode progress(UUID batchId){
+        if(!jdbc.sql("select exists(select 1 from logistics_import_batch where id=:id)").param("id",batchId).query(Boolean.class).single())throw AppException.notFound("导入批次不存在");
+        var ids=jdbc.sql("""
+            select distinct v.id::text from logistics_import_batch b
+            cross join lateral jsonb_array_elements(b.payload->'results') r
+            join logistics_version v on v.id::text=r->>'versionId'
+            join logistics_channel c on c.current_version_id=v.id
+            where b.id=:id and v.status='published'
+            """).param("id",batchId).query(String.class).list();
+        var result=mapper.createObjectNode().put("batchId",batchId.toString());
+        var published=result.putArray("publishedVersionIds");ids.forEach(published::add);return result;
+    }
+
     public ObjectNode publishReady(UUID batchId,ObjectNode input,String actor){
         var batch=jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",batchId).query(String.class).optional().orElseThrow(()->AppException.notFound("导入批次不存在"));
         ObjectNode payload;try{payload=(ObjectNode)mapper.readTree(batch);}catch(Exception e){throw new IllegalStateException(e);}
-        var requested=new LinkedHashMap<UUID,ObjectNode>();for(var item:input.withArray("selections"))if(!item.path("versionId").asText().isBlank())requested.put(uuid(item.path("versionId").asText()),(ObjectNode)item);
+        var selections=input.path("selections");
+        if(!selections.isArray()||selections.isEmpty()||selections.size()>5000)throw AppException.unprocessable("请选择1至5000个需要发布的渠道");
+        var requested=new LinkedHashMap<UUID,ObjectNode>();
+        for(var item:selections){
+            if(!item.isObject()||item.path("versionId").asText().isBlank())throw AppException.unprocessable("发布选择缺少有效的版本标识");
+            var id=uuid(item.path("versionId").asText());
+            if(requested.putIfAbsent(id,(ObjectNode)item)!=null)throw AppException.unprocessable("发布选择包含重复版本");
+        }
         var candidates=new LinkedHashMap<UUID,ObjectNode>();for(var item:payload.withArray("results"))if(!item.path("versionId").asText().isBlank()){
-            var id=uuid(item.path("versionId").asText());if(requested.isEmpty()||requested.containsKey(id))candidates.put(id,(ObjectNode)item);}
+            var id=uuid(item.path("versionId").asText());if(requested.containsKey(id))candidates.put(id,(ObjectNode)item);}
+        if(candidates.size()!=requested.size())throw AppException.unprocessable("发布选择包含不属于本批次的版本");
+        for(var entry:candidates.entrySet())if(!requested.get(entry.getKey()).path("channelId").asText().equals(entry.getValue().path("channelId").asText()))throw AppException.unprocessable("发布选择的渠道与版本不匹配");
         if(candidates.isEmpty())throw AppException.unprocessable("本批次没有可发布的渠道版本");
         var note=input.path("note").asText().trim();if(note.isBlank())throw AppException.unprocessable("一键发布审核备注不能为空");
         var result=mapper.createObjectNode();var published=result.putArray("published");var skipped=result.putArray("skipped");var failed=result.putArray("failed");

@@ -1,0 +1,83 @@
+{
+  "baseline-controlled-50": {
+    "samples": 30,
+    "total": 17407,
+    "failures": 0,
+    "operationsPerSecond": 58.02,
+    "maxPoolWaiting": 40,
+    "maxDbConnections": 11,
+    "maxLockWaits": 2,
+    "longestActiveSeconds": 0.797085,
+    "containers": {
+      "backend": {
+        "avgCpuPercent": 34.43,
+        "maxCpuPercent": 90.99,
+        "lastMemory": "469.2MiB / 1GiB"
+      },
+      "postgres": {
+        "avgCpuPercent": 147.21,
+        "maxCpuPercent": 156.46,
+        "lastMemory": "222.2MiB / 512MiB"
+      },
+      "redis": {
+        "avgCpuPercent": 2.25,
+        "maxCpuPercent": 4.11,
+        "lastMemory": "4.27MiB / 160MiB"
+      }
+    }
+  },
+  "candidate-50": {
+    "samples": 30,
+    "total": 52842,
+    "failures": 0,
+    "operationsPerSecond": 176.14,
+    "maxPoolWaiting": 0,
+    "maxDbConnections": 11,
+    "maxLockWaits": 1,
+    "longestActiveSeconds": 0.051418,
+    "containers": {
+      "backend": {
+        "avgCpuPercent": 93.12,
+        "maxCpuPercent": 203.01,
+        "lastMemory": "477.1MiB / 1GiB"
+      },
+      "postgres": {
+        "avgCpuPercent": 99.62,
+        "maxCpuPercent": 140.07,
+        "lastMemory": "220.7MiB / 512MiB"
+      },
+      "redis": {
+        "avgCpuPercent": 6.24,
+        "maxCpuPercent": 8.01,
+        "lastMemory": "3.895MiB / 160MiB"
+      }
+    }
+  },
+  "accepted-soak-50": {
+    "samples": 180,
+    "total": 319441,
+    "failures": 0,
+    "operationsPerSecond": 177.47,
+    "maxPoolWaiting": 9,
+    "maxDbConnections": 11,
+    "maxLockWaits": 2,
+    "longestActiveSeconds": 0.250197,
+    "containers": {
+      "backend": {
+        "avgCpuPercent": 82.23,
+        "maxCpuPercent": 151.46,
+        "lastMemory": "527.3MiB / 1GiB"
+      },
+      "postgres": {
+        "avgCpuPercent": 117.98,
+        "maxCpuPercent": 199.29,
+        "lastMemory": "201.7MiB / 512MiB"
+      },
+      "redis": {
+        "avgCpuPercent": 6.57,
+        "maxCpuPercent": 10.89,
+        "lastMemory": "4.102MiB / 160MiB"
+      }
+    }
+  }
+}

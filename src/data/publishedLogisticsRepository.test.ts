@@ -1,12 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { conditionalGet } = vi.hoisted(() => ({ conditionalGet: vi.fn() }))
-vi.mock('@/services/http', () => ({ conditionalGet }))
+vi.mock('@/services/http', () => ({ conditionalGet, ApiError: class extends Error {} }))
 
 const manifest = (revision: string) => ({ revision, generatedAt: '2026-08-24T00:00:00Z', publishedChannels: 1, countries: [{ code: 'US', name: '美国' }], attributes: ['普货'] })
 const rule = { id: 1, name: '云途普货', englishName: 'yt', type: '专线', currency: 'CNY', published: '发布', status: '启用', dates: '|', users: '|', relations: [{ carrier: '云途', channel: '云途普货', channelCode: 'YT', discounts: '-' }], phoneRequired: false, areaCount: 1, priceRowCount: 1, prices: [{ areaName: '美国', countryCode: 'US' }] }
 
 describe('published logistics version cache', () => {
+  it('keeps the displayed quote while an unrelated new catalog is fetched in the background', async () => {
+    const repository = await import('./publishedLogisticsRepository')
+    const logistics = await import('./logistics')
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('r1'), etag: 'r1' }
+      : { status: 200, data: { revision: 'r1', rules: [rule] }, etag: 'r1' }))
+    await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] })
+    const before = [...logistics.logisticsRules]
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('r2'), etag: 'r2' }
+      : { status: 200, data: { revision: 'r2', rules: [{ ...rule, name: 'new data' }] }, etag: 'r2' }))
+    const next = await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }, { apply: false })
+    expect(next.revision).toBe('r2')
+    expect(logistics.logisticsRules).toEqual(before)
+  })
   beforeEach(() => {
     vi.resetModules()
     vi.stubGlobal('indexedDB', undefined)
@@ -90,6 +105,51 @@ describe('published logistics version cache', () => {
     expect(result.rules[0]?.prices).toHaveLength(1)
   })
 
+  it('revalidates the manifest while reusing the unchanged finance catalog', async () => {
+    let revision = 'r1'
+    conditionalGet.mockImplementation((path: string) => Promise.resolve({ status: 200, etag: revision,
+      data: path.includes('/manifest') ? manifest(revision) : { revision, rules: [{ ...rule, id: revision === 'r1' ? 1 : 2 }] } }))
+    const repository = await import('./publishedLogisticsRepository')
+    await repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'])
+    await repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'])
+    expect(conditionalGet.mock.calls.filter(([path]) => String(path).includes('/manifest'))).toHaveLength(2)
+    expect(conditionalGet.mock.calls.filter(([path]) => String(path).includes('/catalog'))).toHaveLength(1)
+    revision = 'r2'
+    await expect(repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'])).resolves.toMatchObject({ revision: 'r2', rules: [{ id: 2 }] })
+    expect(conditionalGet.mock.calls.filter(([path]) => String(path).includes('/catalog'))).toHaveLength(2)
+    conditionalGet.mockRejectedValueOnce(new Error('网络不可用'))
+    await expect(repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'])).rejects.toThrow('网络不可用')
+  })
+
+  it('shares concurrent catalog requests when the caller already verified the manifest', async () => {
+    let resolve!: (value: unknown) => void
+    conditionalGet.mockReturnValue(new Promise(done => { resolve = done }))
+    const repository = await import('./publishedLogisticsRepository')
+    const options = { manifest: manifest('r1') }
+    const first = repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'], options)
+    const second = repository.loadPublishedLogisticsRuleCatalog(['带电'], ['US'], options)
+    expect(conditionalGet).toHaveBeenCalledTimes(1)
+    expect(conditionalGet.mock.calls[0]?.[0]).toContain('/catalog')
+    resolve({ status: 200, data: { revision: 'r1', rules: [rule] } })
+    await expect(first).resolves.toMatchObject({ revision: 'r1', verified: true })
+    await expect(second).resolves.toMatchObject({ revision: 'r1', verified: true })
+  })
+
+  it('does not let an invalidated in-flight catalog replace fresh channel data', async () => {
+    let resolveOld!: (value: unknown) => void
+    conditionalGet.mockReturnValueOnce(new Promise(done => { resolveOld = done }))
+    const repository = await import('./publishedLogisticsRepository')
+    const oldRequest = repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'], { manifest: manifest('r1') })
+    const rejected = expect(oldRequest).rejects.toThrow('物流目录已失效')
+    await repository.invalidatePublishedLogisticsCache(false)
+    conditionalGet.mockResolvedValue({ status: 200, data: { revision: 'r2', rules: [{ ...rule, id: 2 }] } })
+    await repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'], { manifest: manifest('r2') })
+    resolveOld({ status: 200, data: { revision: 'r1', rules: [rule] } })
+    await rejected
+    await expect(repository.loadPublishedLogisticsRuleCatalog(['普货'], ['US'], { manifest: manifest('r2') })).resolves.toMatchObject({ rules: [{ id: 2 }] })
+    expect(conditionalGet).toHaveBeenCalledTimes(2)
+  })
+
   it('invalidates cached rules when the published revision changes', async () => {
     const manifests = [manifest('r1'), manifest('r2')]
     conditionalGet.mockImplementation((path: string) => {
@@ -163,7 +223,7 @@ describe('published logistics version cache', () => {
     await expect(repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }))
       .resolves.toMatchObject({ revision: 'r2', source: 'network' })
 
-    expect(open).toHaveBeenCalledWith('milano-quotation-cache', 2)
+    expect(open).toHaveBeenCalledWith('milano-quotation-cache', 3)
     expect(cleared).toHaveBeenCalledTimes(1)
     expect(database.onversionchange).toBeTypeOf('function')
     database.onversionchange?.()

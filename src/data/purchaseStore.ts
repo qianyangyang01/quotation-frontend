@@ -9,7 +9,7 @@ export type PurchasePriceBasis = 'tax_included' | 'quoted' | ''
 export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageCount:number;quotationRecords:number;drafts:number;templates:number;importBatches:number }
 
 export type PurchaseProductRecord = {
-  sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number
+  sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number; _updatedAt?: string
   dataSource: PurchaseDataSource; purchasePriceBasis: PurchasePriceBasis; sourceQuotedPriceCny: number | null
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
   size: string; color: string; weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null
@@ -70,7 +70,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const taxPointExplicit = Object.prototype.hasOwnProperty.call(input, 'taxPoint') || input.taxPointExplicit === true
   const catalogState: PurchaseCatalogState = input.catalogState === 'pending_template' || input.catalogState === 'disabled' ? input.catalogState : 'ready'
   const base = {
-    sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version),
+    sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version), _updatedAt: input._updatedAt == null ? undefined : String(input._updatedAt),
     dataSource, purchasePriceBasis: input.purchasePriceBasis === 'tax_included' || input.purchasePriceBasis === 'quoted' ? input.purchasePriceBasis : '' as PurchasePriceBasis,
     sourceQuotedPriceCny: numberOrNull(input.sourceQuotedPriceCny),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
@@ -110,18 +110,19 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
 
 export type PurchasePage = { items: PurchaseProductRecord[]; page: number; size: number; total: number; totalPages: number }
 export type PurchaseStats = { total:number;ready:number;pending:number;generatedSku:number }
-export async function loadPurchaseProductPage(query='',page=0,size=50):Promise<PurchasePage>{
-  const result=await api.get<PurchasePage>(`/purchase-products?q=${encodeURIComponent(query)}&page=${page}&size=${size}`)
+export async function loadPurchaseProductPage(query='',page=0,size=50,signal?:AbortSignal):Promise<PurchasePage>{
+  const result=await api.get<PurchasePage>(`/purchase-products?q=${encodeURIComponent(query)}&page=${page}&size=${size}`,signal?{signal}:undefined)
   return {...result,items:result.items.map(normalizePurchaseRecord)}
 }
-export const loadPurchaseStats=()=>api.get<PurchaseStats>('/purchase-products/stats')
+export const loadPurchaseStats=(signal?:AbortSignal)=>api.get<PurchaseStats>('/purchase-products/stats',signal?{signal}:undefined)
 export async function loadPurchaseProducts(query = '', page = 0, size = 500): Promise<PurchaseProductRecord[]> {
   const result = await loadPurchaseProductPage(query,page,size)
   return result.items
 }
 
-export async function loadPurchaseProduct(sku: string): Promise<PurchaseProductRecord> {
-  return normalizePurchaseRecord(await api.get<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sku)}`))
+export async function loadPurchaseProduct(sku: string, signal?: AbortSignal): Promise<PurchaseProductRecord> {
+  const timeout = AbortSignal.timeout(20000)
+  return normalizePurchaseRecord(await api.get<PurchaseProductRecord>(`/purchase-products/${encodeURIComponent(sku)}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, cache: 'no-store' }))
 }
 
 export async function savePurchaseProducts(records: PurchaseProductRecord[]) {
@@ -129,8 +130,9 @@ export async function savePurchaseProducts(records: PurchaseProductRecord[]) {
 }
 
 export async function upsertPurchaseProducts(records: PurchaseProductRecord[]) {
-  if (!records.length) return
-  await api.put('/purchase-products/batch', records.map(normalizePurchaseRecord))
+  if (!records.length) return []
+  const saved=await api.put<PurchaseProductRecord[]>('/purchase-products/batch', records.map(normalizePurchaseRecord))
+  return saved.map(normalizePurchaseRecord)
 }
 
 export async function loadPurchaseDeletionCheck(sku: string) {

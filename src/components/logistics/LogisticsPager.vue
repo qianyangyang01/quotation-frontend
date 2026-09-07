@@ -4,7 +4,7 @@ import { clampLogisticsPage, logisticsPageNumbers, logisticsPageRange } from './
 
 const props = withDefaults(defineProps<{ page: number; size: number; total: number; totalPages: number; loading?: boolean; ariaLabel?: string; sizeOptions?: number[] }>(), {
   ariaLabel: '物流价格分页',
-  sizeOptions: () => [20, 50, 100],
+  sizeOptions: () => [10, 30, 50],
 })
 const emit = defineEmits<{ pageChange: [page: number]; sizeChange: [size: number] }>()
 const jumpPage = ref(props.page + 1)

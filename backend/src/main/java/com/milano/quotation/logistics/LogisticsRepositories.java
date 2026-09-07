@@ -27,6 +27,12 @@ interface LogisticsChannelRepository extends JpaRepository<LogisticsChannelEntit
     List<LogisticsChannelEntity> findByProviderIdOrderByUpdatedAtDesc(UUID providerId);
 }
 interface LogisticsVersionRepository extends JpaRepository<LogisticsVersionEntity, UUID> {
+    @Query(value="select cast(payload->'rows' as text) from logistics_version where id=:id",nativeQuery=true)
+    Optional<String> findRowsJson(UUID id);
+    boolean existsByChannelIdAndStatus(UUID channelId,String status);
+    List<LogisticsVersionEntity> findByChannelIdAndStatus(UUID channelId,String status);
+    @Query("select coalesce(max(v.versionNumber),0) from LogisticsVersionEntity v where v.channelId=:channelId")
+    int maxVersionNumber(UUID channelId);
     @Query(value="select v.* from logistics_version v join logistics_channel c on c.id=v.channel_id where c.dataset_id=logistics_active_dataset() order by v.created_at desc",nativeQuery=true)
     List<LogisticsVersionEntity> findAllByOrderByCreatedAtDesc();
     List<LogisticsVersionEntity> findByChannelIdOrderByVersionNumberDesc(UUID channelId);

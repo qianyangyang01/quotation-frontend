@@ -9,6 +9,10 @@ import { checkPurchaseImportRemoval, deletePurchaseImportTask, archivePurchaseIm
 import { preparePurchaseWorkbookTextOnly } from '@/services/purchaseWorkbookTextOnlyClient'
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
+import PurchasePasteDialog from './PurchasePasteDialog.vue'
+
+const showPasteDialog = ref(false)
+function pasteSaved(count: number) { toast(`已新增${count}条采购资料`); reload() }
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
 const records = ref<PurchaseProductRecord[]>([])
@@ -17,6 +21,7 @@ const search = ref('')
 const detail = ref<PurchaseProductRecord | null>(null)
 const editor = ref<PurchaseProductRecord | null>(null)
 const editingOriginalSku = ref('')
+const editorSaving = ref(false)
 const notice = ref('')
 const previewImage = ref<{ src: string; title: string } | null>(null)
 const showSupplierRecords = ref(false)
@@ -87,29 +92,60 @@ const visiblePages = computed<(number | 'ellipsis-start' | 'ellipsis-end')[]>(()
 })
 
 let searchTimer=0
-watch(search, () => { currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(reload,250) })
-watch(pageSize, () => { currentPage.value = 1;reload() })
+let pageRequest=0
+let pageAbort:AbortController|null=null
+let statsRequest=0
+let statsAbort:AbortController|null=null
+let statsTimer=0
+let pendingPage:{key:string;request:Promise<void>}|null=null
+function invalidatePage(){pageRequest++;pageAbort?.abort()}
+watch(search, () => { invalidatePage();loading.value=true;currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void reload(false),250) })
+watch(pageSize, () => { currentPage.value = 1;void reload(false) })
 watch(totalPages, total => {
   if (currentPage.value > total) currentPage.value = total
 })
 
 function goToPage(page: number) {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
-  reload()
+  void reload(false)
 }
 function resetFilters() {
   search.value = ''
   currentPage.value = 1
 }
 
-async function reload() {
-  loading.value = true
-  try { const [page,stats]=await Promise.all([loadPurchaseProductPage(search.value.trim(),currentPage.value-1,pageSize.value),loadPurchaseStats()]);records.value=page.items;totalRecords.value=page.total;serverTotalPages.value=page.totalPages;purchaseStats.value=stats }
-  catch (error) { toast(error instanceof Error ? error.message : '采购数据读取失败') }
-  finally { loading.value = false }
+async function refreshStats(){
+  const request=++statsRequest
+  statsAbort?.abort();const controller=new AbortController();statsAbort=controller
+  try{const stats=await loadPurchaseStats(controller.signal);if(request===statsRequest)purchaseStats.value=stats}
+  catch(error){if(!controller.signal.aborted&&request===statsRequest)toast(error instanceof Error?error.message:'采购统计读取失败')}
 }
-onMounted(() => { reload() })
-onUnmounted(() => { stopJobPolling();window.clearTimeout(searchTimer) })
+function reload(refreshStatistics=true):Promise<void>{
+  const key=JSON.stringify([search.value.trim(),currentPage.value,pageSize.value])
+  // Share only an active read in this component. Mutations always force a fresh read.
+  if(!refreshStatistics&&pendingPage?.key===key&&!pageAbort?.signal.aborted)return pendingPage.request
+  const request=readPage(refreshStatistics)
+  pendingPage={key,request}
+  void request.finally(()=>{if(pendingPage?.request===request)pendingPage=null})
+  return request
+}
+async function readPage(refreshStatistics:boolean) {
+  window.clearTimeout(searchTimer)
+  invalidatePage();const request=pageRequest
+  const controller=new AbortController();pageAbort=controller
+  loading.value = true
+  if(refreshStatistics)void refreshStats()
+  try {
+    const page=await loadPurchaseProductPage(search.value.trim(),currentPage.value-1,pageSize.value,controller.signal)
+    if(request!==pageRequest)return
+    if(currentPage.value>Math.max(1,page.totalPages)){currentPage.value=Math.max(1,page.totalPages);void reload(false);return}
+    records.value=page.items;totalRecords.value=page.total;serverTotalPages.value=page.totalPages
+  }
+  catch (error) { if(!controller.signal.aborted&&request===pageRequest)toast(error instanceof Error ? error.message : '采购数据读取失败') }
+  finally { if(request===pageRequest)loading.value = false }
+}
+onMounted(() => { void reload();statsTimer=window.setInterval(()=>{if(!document.hidden)void refreshStats()},60000) })
+onUnmounted(() => { stopJobPolling();window.clearTimeout(searchTimer);window.clearInterval(statsTimer);invalidatePage();statsRequest++;statsAbort?.abort() })
 
 watch(showTaskCenter, open => {
   if (open) {
@@ -261,7 +297,7 @@ async function executeDelete(){
 }
 async function disableBlockedDelete(){if(!deleteTarget.value||deleteTarget.value.catalogState==='disabled')return;const target=deleteTarget.value;closeDelete();requestCatalogState(target,'disabled')}
 async function saveEditor() {
-  if (!editor.value) return
+  if (!editor.value||editorSaving.value) return
   const sku = editor.value.sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!sku) { toast('请填写 SKU'); return }
   if (records.value.some(item => item.sku === sku && item.sku !== editingOriginalSku.value)) { toast(`SKU ${sku} 已存在`); return }
@@ -269,13 +305,24 @@ async function saveEditor() {
   const pendingTemplate = editor.value.catalogState === 'pending_template' && Boolean(editingOriginalSku.value)
   if (pendingTemplate && sku !== editingOriginalSku.value) { toast('模板SKU转正式请使用“确认转正式”按钮'); return }
   const record = normalizePurchaseRecord({ ...editor.value, sku, skuOrigin: wasGenerated && sku.startsWith('AUTO-') ? 'system' : 'manual' })
+  const isNew=!editingOriginalSku.value
+  const renamed=Boolean(editingOriginalSku.value&&editingOriginalSku.value!==sku)
+  editorSaving.value=true
   try {
     if (editingOriginalSku.value && editingOriginalSku.value !== sku) await deletePurchaseProduct(editingOriginalSku.value, editor.value._version ?? -1)
-    await upsertPurchaseProducts([record])
+    const [saved]=await upsertPurchaseProducts([record])
     editor.value = null
-    await reload()
+    if(saved&&!search.value.trim()&&currentPage.value===1&&!renamed){
+      // The server response contains the authoritative version, readiness and costs.
+      window.clearTimeout(searchTimer);invalidatePage();loading.value=false
+      records.value=[saved,...records.value.filter(item=>item.sku!==saved.sku)].slice(0,pageSize.value)
+      if(isNew)totalRecords.value++
+      serverTotalPages.value=Math.ceil(totalRecords.value/pageSize.value)
+      void refreshStats()
+    }else await reload()
     toast(`${sku} 已保存${record.skuOrigin === 'system' ? '，请尽快修改系统生成 SKU' : ''}`)
   } catch (error) { toast(error instanceof Error ? error.message : '采购资料保存失败') }
+  finally { editorSaving.value=false }
 }
 
 async function promoteEditor() {
@@ -333,11 +380,13 @@ const detailFields = computed(() => detail.value ? [
 </script>
 
 <template>
+  <PurchasePasteDialog v-if="showPasteDialog" @close="showPasteDialog=false" @saved="pasteSaved" />
   <section class="purchase-heading">
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
       <button class="outline" :class="{ active:showSupplierRecords }" @click="showSupplierRecords=true">供应商</button>
+      <button class="new-import" @click="showPasteDialog=true">粘贴新增</button>
       <button class="new-import" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='standard' ? `${uploadProgress.percent}%` : '新数据导入' }}</button>
       <button class="legacy-import" :disabled="asyncUploading" @click="legacyFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='legacy-2026' ? `${uploadProgress.percent}%` : '旧数据导入' }}</button>
       <button class="outline" @click="showTaskCenter=true">导入任务</button>
@@ -502,7 +551,7 @@ const detailFields = computed(() => detail.value ? [
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>
     </div>
-    <footer><button @click="editor=null">取消</button><button @click="saveEditor">保存资料</button><button v-if="editor.catalogState==='pending_template'" class="primary" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
+    <footer><button @click="editor=null">取消</button><button :disabled="editorSaving" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存资料' }}</button><button v-if="editor.catalogState==='pending_template'" class="primary" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
   </section></div>
 
   <div v-if="previewImage" class="image-preview" @click.self="previewImage=null"><button @click="previewImage=null">×</button><figure><img :src="previewImage.src"><figcaption>{{ previewImage.title }}</figcaption></figure></div>

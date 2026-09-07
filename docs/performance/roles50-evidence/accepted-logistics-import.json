@@ -1,0 +1,13 @@
+{
+  "base": "http://127.0.0.1:18098",
+  "channelId": "2b1d9b84-9d8b-4ce4-b712-ff3427d94e85",
+  "versionId": "73f444e1-7c33-4cc1-b945-0ececa5aca26",
+  "importMs": 670.3525,
+  "reviewMs": 32.12360000000001,
+  "errors": 0,
+  "validRows": 1,
+  "pricingReady": true,
+  "status": "published",
+  "passed": true,
+  "scope": "One additional logistics session during 50-user soak; disabled provider and channel; standard XLSX one row, no active prices changed"
+}

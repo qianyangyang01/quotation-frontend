@@ -28,7 +28,7 @@ class CompanyChannelScopeTest {
             var r=sheet.createRow(1);r.createCell(0).setCellValue("美国");r.createCell(1).setCellValue("0-1");r.createCell(2).setCellValue("错误的价格");r.createCell(3).setCellValue(-100);w.write(out);bytes=out.toByteArray();
         }
         var result=parser.parse(bytes,"花海.xlsx",new CompanyChannelScope(s));
-        assertEquals(0,result.path("channels").size());assertEquals(1,result.path("filteredChannels").asInt());
+        assertEquals(0,result.path("priceCellsParsed").asInt());assertEquals(0,result.path("channels").size());assertEquals(1,result.path("filteredChannels").asInt());
         assertEquals("filtered",result.path("sheets").get(0).path("status").asText());
         assertFalse(result.toString().contains("关键价格"));assertFalse(result.toString().contains("adapter-required"));
     }

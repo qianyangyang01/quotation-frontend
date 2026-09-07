@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, conditionalGet, downloadFile, idempotencyKey, resetCsrf, uploadForm } from './http'
+import { ApiError, api, request, conditionalGet, downloadFile, idempotencyKey, resetCsrf, uploadForm } from './http'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -8,6 +8,16 @@ afterEach(() => {
 })
 
 describe('quotation API client', () => {
+  it('passes cancellation through CSRF preparation before a mutation', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn().mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = request('/users', { method: 'POST', body: '{}', signal: controller.signal })
+    const assertion = expect(pending).rejects.toThrow('cancelled')
+    controller.abort(new Error('cancelled'))
+    await assertion
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
   it('prepares an authenticated native link and preserves snapshot parameters', async () => {
     const result = { url: '/api/v1/logistics/rebuild/datasets/one/prices.xlsx?snapshot=fixed', filename: '物流价格.xlsx' }
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: result })))

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { ref } from 'vue'
+import { clonePriceRows } from './logisticsRebuild'
 import { calculateLogisticsFee, findPriceRow, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
 import { aggregateChangeSummary, batchComparisonSummary, buildEtaCorrections, changeImpact, completedBatchStage, diffKinds, formatTransferBytes, logisticsAdjustmentStatus, logisticsUploadError, rangeImpact, weightLabel, type Batch, type Diff, type Price } from './logisticsRebuild'
@@ -9,6 +11,23 @@ const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): Log
 })
 const row = { areaName: '法国', countryCode: 'FR', registrationFee: 2 }
 describe('rebuild pricing safety', () => {
+  it('can snapshot reactive prices, edit across rows and cancel without changing the snapshot', () => {
+    const prices = ref<Price[]>([
+      { ...row, rowKey: 'fr-18', weightFromKg: 0.201, weightToKg: 4, pricePerKg: 97, registrationFee: 20, sourceRow: 18 },
+      { ...row, rowKey: 'fr-19', weightFromKg: 0.401, weightToKg: 30, pricePerKg: 95, registrationFee: 23, sourceRow: 19 },
+    ])
+    const snapshot = ref(clonePriceRows(prices.value))
+    prices.value[0]!.weightToKg = 0.4
+    prices.value[1]!.pricePerKg = 96
+    prices.value[1]!.registrationFee = 24
+    expect(snapshot.value[0]!.weightToKg).toBe(4)
+    expect(snapshot.value[1]!.pricePerKg).toBe(95)
+    prices.value = clonePriceRows(snapshot.value)
+    expect(prices.value).toEqual(snapshot.value)
+    prices.value[0]!.weightFromInclusive = false
+    expect(snapshot.value[0]!.weightFromInclusive).toBeUndefined()
+    expect(prices.value[0]!.sourceRow).toBe(18)
+  })
   it('does not label unchanged imports as awaiting review', () => {
     const batch = (statuses: string[]) => ({ status: 'completed', payload: { results: statuses.map(status => ({ status })) } }) as Batch
     expect(completedBatchStage(batch(['unchanged']))).toBe('无需审核')
@@ -17,6 +36,8 @@ describe('rebuild pricing safety', () => {
     expect(completedBatchStage(batch(['draft', 'blocked']))).toBe('存在阻断，请核对')
     const failedFile = batch(['unchanged']); failedFile.payload.fileReports = [{ fileName: '损坏.xlsx', status: 'failed' }]
     expect(completedBatchStage(failedFile)).toBe('存在文件解析失败或新模板待适配，请核对')
+    const filtered = batch([]); filtered.payload.fileReports = [{ fileName: '首重续重.xlsx', status: 'filtered' }]
+    expect(completedBatchStage(filtered)).toBe('首重续重已过滤，无需审核')
   })
   it('preserves the confirmed 200g/201g boundary through API normalization', () => {
     const rule = makeRule([{ ...row, weightFromKg: 0, weightToKg: 0.2, pricePerKg: 10 }, { ...row, weightFromKg: 0.201, weightToKg: 0.5, weightFromInclusive: true, pricePerKg: 20 }])
@@ -36,10 +57,12 @@ describe('rebuild pricing safety', () => {
     const actual = makeRule([{ ...row, weightFromKg: 0, weightToKg: 10, pricePerKg: 10, volumetric: false, volumeDivisor: 8000 }])
     expect(calculateLogisticsFee(actual, 'FR', 1, [], { lengthCm: 40, widthCm: 30, heightCm: 20, volumeMultiplier: 2 })?.total).toBe(12)
   })
-  it('does not add an extra continuation unit from floating point error', () => {
+  it('rejects historical first-next rules even with verified billing', () => {
     const firstNext = makeRule([{ ...row, registrationFee: 0, weightFromKg: 0, weightToKg: 2, firstWeightKg: 0.5, firstWeightPrice: 35, nextWeightKg: 0.1, nextWeightPrice: 5 }])
-    expect(calculateLogisticsFee(firstNext, 'FR', 0.8)?.total).toBe(50)
-    expect(calculateLogisticsFee(firstNext, 'FR', 0.801)?.total).toBe(55)
+    expect(calculateLogisticsFee(firstNext, 'FR', 0.8)).toBeNull()
+    firstNext.billingVerified = true
+    expect(calculateLogisticsFee(firstNext, 'FR', 0.801)).toBeNull()
+    expect(findPriceRow(firstNext, 'FR', 0.8)).toBeUndefined()
   })
   it('aggregates overlapping change categories and keeps legacy diff compatibility', () => {
     expect(aggregateChangeSummary([

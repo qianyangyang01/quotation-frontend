@@ -1,0 +1,62 @@
+{
+  "statuses": [
+    409,
+    200,
+    409
+  ],
+  "published": [
+    null,
+    2,
+    null
+  ],
+  "results": [
+    {
+      "status": 409,
+      "data": null,
+      "code": "CONFLICT",
+      "message": "该批次正在发布，请查看进度，完成后刷新重试",
+      "ms": 28
+    },
+    {
+      "status": 200,
+      "data": {
+        "published": [
+          {
+            "versionId": "87088673-a04e-4c69-992c-2da1df496811",
+            "channelId": "b8faed15-97f3-4ce9-b65d-79cfcd5d3602",
+            "providerName": "递四方",
+            "channelName": "联邮通优先挂号-普货（PX）",
+            "quoteReady": true,
+            "alreadyPublished": true,
+            "message": "该版本已发布，无需重复生成"
+          },
+          {
+            "versionId": "666defef-e895-4340-ba58-c5876333eefc",
+            "channelId": "1b108993-ccf4-4258-aea1-4fef3aeb93b9",
+            "providerName": "递四方",
+            "channelName": "联邮通轻小件-普货（S5058）",
+            "quoteReady": true,
+            "alreadyPublished": true,
+            "message": "该版本已发布，无需重复生成"
+          }
+        ],
+        "skipped": [],
+        "failed": [],
+        "batchId": "b481428f-5114-4e4b-8be1-5a14a07ad5ae",
+        "publishedCount": 2,
+        "skippedCount": 0,
+        "failedCount": 0
+      },
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 52
+    },
+    {
+      "status": 409,
+      "data": null,
+      "code": "CONFLICT",
+      "message": "该批次正在发布，请查看进度，完成后刷新重试",
+      "ms": 27
+    }
+  ]
+}

@@ -167,7 +167,7 @@ public class LogisticsDatasetService {
                 ), stats as (select count(*) total from filtered), page_rows as (
                   select (item || jsonb_build_object('providerName',provider_name,'channelName',channel_name,
                            'channelId',channel_id,'versionId',version_id,'versionNumber',version_number,
-                           'quoteReady',quote_ready,'logisticsAttribute',logistics_attribute)) payload,
+                           'quoteReady',quote_ready and logistics_price_row_quote_supported(item),'logisticsAttribute',logistics_attribute)) payload,
                          provider_name,channel_name,item->>'countryCode' country_code,(item->>'weightFromKg')::numeric weight_from
                   from filtered order by provider_name,channel_name,item->>'countryCode',(item->>'weightFromKg')::numeric
                   limit :limit offset :offset
@@ -252,6 +252,7 @@ public class LogisticsDatasetService {
     }
     @Transactional
     public ObjectNode activate(UUID target,ObjectNode input,String actor) {
+        if(jdbc.sql("select paused from logistics_company_state where singleton for share").query(Boolean.class).single())throw AppException.conflict("请通过公司渠道重建任务审核恢复报价");
         if(!input.path("reviewConfirmed").asBoolean() || input.path("note").asText().isBlank()) throw AppException.unprocessable("必须确认切换清单并填写审核备注");
         lockCutover();
         var mappings=input.path("mappings"); if(!mappings.isArray()) throw AppException.unprocessable("缺少核对后的映射清单");

@@ -18,22 +18,33 @@ class LogisticsReadinessTest {
         assertEquals(rows.get(0).path("routeKey"),rows.get(1).path("routeKey"));
     }
 
-    @Test void missingAndConflictingEtaAreRouteLevelPublishBlockers() {
+    @Test void missingAndConflictingEtaAreAdvisoryAndDoNotBlockBasePrices() {
         var missing=JsonNodeFactory.instance.objectNode().put("templateStatus","known");missing.putArray("issues");missing.putArray("rows").add(price("DE","",0,1));
         LogisticsReadiness.apply(missing);
-        assertFalse(missing.path("etaReady").asBoolean());assertFalse(missing.path("pricingReady").asBoolean());assertEquals(1,missing.path("missingEtaRoutes").size());assertTrue(missing.path("blockingReasons").toString().contains("缺少时效"));
+        assertFalse(missing.path("etaReady").asBoolean());assertTrue(missing.path("pricingReady").asBoolean());assertEquals(1,missing.path("missingEtaRoutes").size());assertTrue(missing.path("blockingReasons").isEmpty());
 
         var conflict=JsonNodeFactory.instance.objectNode().put("templateStatus","known");conflict.putArray("issues");var rows=conflict.putArray("rows");
         rows.add(price("GB","2区",0,1).put("etaMinDays",5).put("etaMaxDays",8));rows.add(price("GB","2区",1,2).put("etaMinDays",6).put("etaMaxDays",9));
         LogisticsReadiness.apply(conflict);
         assertFalse(conflict.path("etaReady").asBoolean());assertEquals("conflict",conflict.path("missingEtaRoutes").get(0).path("status").asText());assertTrue(conflict.path("issues").toString().contains("ETA_CONFLICT"));
+        assertTrue(conflict.path("quoteReady").asBoolean());assertEquals(0,conflict.path("errors").asInt());
     }
 
-    @Test void onlyPerKgAndFirstNextAreAutomaticallySupported() {
+    @Test void onlyPerKgIsAutomaticallySupported() {
         var channel=JsonNodeFactory.instance.objectNode().put("templateStatus","known");channel.putArray("issues");
         var row=price("FR","",0,1).put("pricingModel","interval").put("etaMinDays",5).put("etaMaxDays",8);channel.putArray("rows").add(row);
         LogisticsReadiness.apply(channel);
         assertFalse(channel.path("pricingReady").asBoolean());assertTrue(row.path("blockingReason").asText().contains("区间价计费方式暂不支持"));
+    }
+
+    @Test void carriesOnlyExplicitManualEtaForTheSameRouteWithoutOverwritingNewSourceEta() {
+        var previous=JsonNodeFactory.instance.objectNode();previous.putArray("rows").add(price("CA","1区",0,1).put("etaMinDays",7).put("etaMaxDays",15).put("etaSource","manual-review"));
+        var incoming=JsonNodeFactory.instance.objectNode();var rows=incoming.putArray("rows");
+        rows.add(price("CA","1区",0,2));rows.add(price("CA","2区",0,2));
+        rows.add(price("CA","1区",2,3).put("etaMinDays",5).put("etaMaxDays",8));
+        LogisticsImportService.inheritManualEta(incoming,previous);
+        assertEquals(7,rows.get(0).path("etaMinDays").asInt());assertEquals("manual-review-inherited",rows.get(0).path("etaSource").asText());
+        assertEquals(0,rows.get(1).path("etaMinDays").asInt());assertEquals(5,rows.get(2).path("etaMinDays").asInt());
     }
 
     @Test void blocksMultipleOriginPriceSetsForOneDestinationRoute() {

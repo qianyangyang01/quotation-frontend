@@ -14,10 +14,10 @@ class LogisticsBillingEngineTest {
     @Test void respectsGramBoundariesAndStrictInequality(){var rows=mapper.createArrayNode().add(row(0,.2,50)).add(row(.201,.5,60)).add(row(.501,1,70));
         assertEquals(20,engine.calculate(rows,input(.2)).path("total").asDouble());assertEquals(22.06,engine.calculate(rows,input(.201)).path("total").asDouble());assertEquals(40,engine.calculate(rows,input(.5)).path("total").asDouble());assertEquals(45.07,engine.calculate(rows,input(.501)).path("total").asDouble());
         ((ObjectNode)rows.get(0)).put("weightToInclusive",false);assertThrows(AppException.class,()->engine.calculate(rows,input(.2)));}
-    @Test void evaluatesActualWeightFirstNextAndFixedPricesWithoutSecondDiscount(){var r=row(0,5,50).put("minChargeWeightKg",.05);var rows=mapper.createArrayNode().add(r);assertEquals(10.05,engine.calculate(rows,input(.001)).path("total").asDouble());
-        r.put("pricingModel","first-next").put("pricePerKg",0).put("firstWeightKg",.1).put("firstWeightPrice",18.4).put("nextWeightKg",.1).put("nextWeightPrice",12);assertEquals(40.4,engine.calculate(rows,input(.101)).path("total").asDouble());
+    @Test void evaluatesWeightRangesAndRejectsOtherModels(){var r=row(0,5,50).put("minChargeWeightKg",.05);var rows=mapper.createArrayNode().add(r);assertEquals(10.05,engine.calculate(rows,input(.001)).path("total").asDouble());
+        r.put("pricingModel","first-next").put("pricePerKg",0).put("firstWeightKg",.1).put("firstWeightPrice",18.4).put("nextWeightKg",.1).put("nextWeightPrice",12);assertThrows(AppException.class,()->engine.calculate(rows,input(.101)));
         r.put("pricingModel","interval").put("intervalPrice",25);assertThrows(AppException.class,()->engine.calculate(rows,input(1)));
-        r.put("firstWeightPrice",0);assertEquals(35,engine.calculate(rows,input(1)).path("total").asDouble());}
+        r.put("firstWeightPrice",0);assertThrows(AppException.class,()->engine.calculate(rows,input(1)));}
     @Test void ignoresTraceabilityFieldsButRequiresAnExplicitRealZone(){var r=row(0,5,50).put("zoneName","1区").put("volumetric",true).put("notes","保留原文").put("pendingReason","不参与当前计费");var rows=mapper.createArrayNode().add(r);
         var in=input(.1);in.putObject("dimensions").put("lengthCm",200).put("widthCm",200).put("heightCm",150).put("volumeDivisor",1);assertEquals(15,engine.calculate(rows,in).path("total").asDouble());assertEquals(.1,engine.calculate(rows,in).path("chargeWeightKg").asDouble());
         rows.add(row(0,5,80).put("zoneName","2区"));assertThrows(AppException.class,()->engine.calculate(rows,input(1)));

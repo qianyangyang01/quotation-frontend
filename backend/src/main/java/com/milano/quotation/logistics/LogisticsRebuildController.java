@@ -54,6 +54,8 @@ public class LogisticsRebuildController {
                 params.put("snapshot",exports.priceSnapshot(id,versionId,query,country,attribute));}
             case "version-diff" -> {if(!versions.existsById(id))throw AppException.notFound("物流版本不存在");path="/versions/"+id+"/changes.xlsx";name="版本变化.xlsx";}
             case "batch-diff" -> {imports.get(id);path="/imports/"+id+"/changes.xlsx";name="批次价格变化.xlsx";}
+            case "version-standardized" -> {if(!versions.existsById(id))throw AppException.notFound("物流版本不存在");path="/versions/"+id+"/standardized.xlsx";name="物流关键字段-版本.xlsx";params.put("snapshot",exports.standardizedSnapshot(null,id));}
+            case "batch-standardized" -> {imports.get(id);path="/imports/"+id+"/standardized.xlsx";name="物流关键字段-批次.xlsx";params.put("snapshot",exports.standardizedSnapshot(id,null));}
             case "source", "evidence" -> {var payload=imports.get(id).path("payload");var files=payload.path("files");if(index<0||index>=files.size())throw AppException.notFound("原文件不存在");
                 path="/imports/"+id+"/files/"+index;name=files.get(index).path("originalName").asText(files.get(index).path("name").asText());
                 if(kind.equals("evidence")){if(payload.path("fileReports").path(index).path("sourceEvidence").path("objectKey").asText().isBlank())throw AppException.notFound("该批次没有独立解析证据");path+="/evidence";name="原表解析证据.json";}}
@@ -127,10 +129,12 @@ public class LogisticsRebuildController {
     public ApiResponse<?> patchRows(@PathVariable UUID id,@RequestBody ObjectNode input,Authentication auth){
         var result=draftReview.patch(id,input,actor(auth));audit.record("logistics.draft-correct","logistics-version",id.toString(),"success",Map.of("changeCount",input.path("changes").size()+input.path("etaChanges").size()));return ApiResponse.ok(result);
     }
+    @GetMapping("/imports/{id}/publish-progress")
+    public ApiResponse<?> publishProgress(@PathVariable UUID id){return ApiResponse.ok(batchPublish.progress(id));}
     @PostMapping("/imports/{id}/publish-ready")
     public ApiResponse<?> publishReady(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
-        var actor=actor(auth);input.put("batchId",id.toString());var prior=idempotency.existing(actor,"logistics-batch-publish-ready",key,input);if(prior.isPresent())return ApiResponse.ok(prior.get());
-        var result=batchPublish.publishReady(id,input,actor);idempotency.save(actor,"logistics-batch-publish-ready",key,input,result);
+        var actor=actor(auth);input.put("batchId",id.toString());
+        var result=idempotency.executeIndependent(actor,"logistics-batch-publish-ready",key,input,()->batchPublish.publishReady(id,input,actor));
         audit.record("logistics.batch-publish-ready","logistics-import",id.toString(),"success",Map.of("published",result.path("publishedCount").asInt(),"skipped",result.path("skippedCount").asInt(),"failed",result.path("failedCount").asInt()));return ApiResponse.ok(result);
     }
     @PostMapping("/channels/{channel}/versions/{version}/review") @Transactional
@@ -151,6 +155,8 @@ public class LogisticsRebuildController {
     }
     @GetMapping("/imports/{id}/changes.xlsx") public ResponseEntity<byte[]> changes(@PathVariable UUID id){var bytes=exports.changes(id,null);audit.record("logistics.diff-export","logistics-import",id.toString(),"success",Map.of());return excel(bytes,"批次价格变化.xlsx");}
     @GetMapping("/versions/{id}/changes.xlsx") public ResponseEntity<byte[]> versionChanges(@PathVariable UUID id){var bytes=exports.changes(null,id);audit.record("logistics.diff-export","logistics-version",id.toString(),"success",Map.of());return excel(bytes,"版本变化.xlsx");}
+    @GetMapping("/imports/{id}/standardized.xlsx") public ResponseEntity<byte[]> batchStandardized(@PathVariable UUID id,@RequestParam(required=false)String snapshot){var bytes=exports.standardized(id,null,snapshot);audit.record("logistics.standardized-export","logistics-import",id.toString(),"success",Map.of());return excel(bytes,"物流关键字段-批次.xlsx");}
+    @GetMapping("/versions/{id}/standardized.xlsx") public ResponseEntity<byte[]> versionStandardized(@PathVariable UUID id,@RequestParam(required=false)String snapshot){var bytes=exports.standardized(null,id,snapshot);audit.record("logistics.standardized-export","logistics-version",id.toString(),"success",Map.of());return excel(bytes,"物流关键字段-版本.xlsx");}
     static ResponseEntity<byte[]> excel(byte[] bytes,String name){return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).header(HttpHeaders.CONTENT_DISPOSITION,attachment(name)).body(bytes);}
     static String attachment(String name){return ContentDisposition.attachment().filename(name,StandardCharsets.UTF_8).build().toString();}
     private static String actor(Authentication auth){return ((QuotationPrincipal)auth.getPrincipal()).account();}

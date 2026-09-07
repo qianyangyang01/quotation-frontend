@@ -1,8 +1,8 @@
-export const LOGISTICS_PAGE_SIZES = [20, 50, 100] as const
+export const LOGISTICS_PAGE_SIZES = [10, 30, 50] as const
 
 export function logisticsPageSize(value: unknown) {
   const size = Number(value)
-  return LOGISTICS_PAGE_SIZES.includes(size as 20 | 50 | 100) ? size : 20
+  return LOGISTICS_PAGE_SIZES.includes(size as 10 | 30 | 50) ? size : 10
 }
 
 export function logisticsPageFromQuery(value: unknown) {

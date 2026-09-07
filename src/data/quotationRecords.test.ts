@@ -12,19 +12,6 @@ function baseRecord() {
 }
 
 describe('quotation record bundle snapshots', () => {
-  it('preserves the charged surcharge and final totals as immutable snapshot values', () => {
-    const option = {
-      id: 'q1', country: '美国', carrier: '物流商', channel: '渠道', rule: '规则', eta: '5–8 天',
-      quote1Usd: 27, quote2Usd: 47, quote3Usd: 67, quoteCustomUsd: 507,
-      tax1Usd: 5, tax2Usd: 5, tax3Usd: 5, taxCustomUsd: 5,
-      surchargeUsd: 2, countrySurchargeUsd: 2, surchargeExempt: false, surchargeEnabled: true,
-    }
-    const saved = normalizeQuotationRecord({ ...baseRecord(), quoteOptions: [option] })
-    expect(saved?.quoteOptions?.[0]).toMatchObject(option)
-    expect(normalizeQuotationRecord(saved!)?.quoteOptions?.[0]).toMatchObject(option)
-    const legacy = normalizeQuotationRecord({ ...baseRecord(), quoteOptions: [{ ...option, surchargeUsd: undefined, countrySurchargeUsd: undefined, surchargeExempt: undefined, surchargeEnabled: undefined }] })
-    expect(legacy?.quoteOptions?.[0]).toMatchObject({ quote1Usd: 27, surchargeUsd: undefined, surchargeEnabled: undefined })
-  })
   it('preserves logistics version and calculation inputs without rewriting saved freight', () => {
     const logisticsInput = { country: '美国', weightKg: .5, marks: ['普货'], dimensions: { lengthCm: 10, widthCm: 10, heightCm: 10 } }
     const record = normalizeQuotationRecord({ ...baseRecord(), quoteOptions: [{
@@ -51,4 +38,15 @@ describe('quotation record bundle snapshots', () => {
     expect(record?.productSummary).toBe('SKU-1 × 2 + SKU-2 × 1')
     expect(record?.bundleItems).toBeUndefined()
   })
+})
+
+it('preserves new no-tax snapshots and legacy tax snapshots without recomputing history', () => {
+  for (const taxFeeMode of ['no-tax','missing','exempt','fixed-order'] as const) {
+    const record = normalizeQuotationRecord({ ...baseRecord(), quoteOptions: [{
+      id:'q1',country:'澳大利亚',carrier:'物流商',channel:'渠道',rule:'规则',eta:'',
+      quote1Usd:12,quote2Usd:24,quote3Usd:36,quoteCustomUsd:60,
+      taxFeeMode,taxLabel:taxFeeMode === 'no-tax' ? '无关税' : '历史文案',taxConfigured:taxFeeMode !== 'missing',
+    }] })
+    expect(record?.quoteOptions?.[0]).toMatchObject({ taxFeeMode,quote1Usd:12,taxLabel:taxFeeMode === 'no-tax' ? '无关税' : '历史文案' })
+  }
 })

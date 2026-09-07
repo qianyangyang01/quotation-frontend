@@ -73,7 +73,7 @@ function normalizeLogisticsVersion(version: LogisticsChannelVersionRecord): Logi
 
 export function normalizeLogisticsPriceRow(row: Partial<LogisticsRateRow>): LogisticsPriceRow {
   return {
-    weightFromInclusive: row.weightFromInclusive, weightToInclusive: row.weightToInclusive, quoteReady: row.quoteReady,
+    pricingModel: row.pricingModel, weightFromInclusive: row.weightFromInclusive, weightToInclusive: row.weightToInclusive, quoteReady: row.quoteReady, etaStatus: row.etaStatus,
     areaName: String(row.areaName || ''), countryCode: String(row.countryCode || ''), etaMinDays: numberOrZero(row.etaMinDays), etaMaxDays: numberOrZero(row.etaMaxDays),
     prohibitedMarks: String(row.prohibitedMarks || ''), allowedMarks: String(row.allowedMarks || ''), maxPerimeterCm: numberOrZero(row.maxPerimeterCm), maxSideCm: numberOrZero(row.maxSideCm),
     volumeDivisor: numberOrZero(row.volumeDivisor), weightFromKg: numberOrZero(row.weightFromKg), weightToKg: numberOrZero(row.weightToKg), startWeightKg: numberOrZero(row.startWeightKg),
@@ -183,7 +183,9 @@ export async function saveLogisticsManualDraft(channelId: string, rows: Logistic
 export async function createLogisticsDraft(channelId: string, preview: LogisticsImportPreview, file: File, actor = '物流负责人', replaceDraft = false) {
   void preview; void actor
   const form = new FormData(); form.append('file', file)
-  return mutation(api.post<LogisticsChannelVersionRecord>(`/logistics/channels/${channelId}/imports?replaceDraft=${replaceDraft}`, form, idempotencyKey('logistics-import')))
+  const result = await mutation(api.post<LogisticsChannelVersionRecord & { filtered?: boolean; message?: string }>(`/logistics/channels/${channelId}/imports?replaceDraft=${replaceDraft}`, form, idempotencyKey('logistics-import')))
+  if (result.filtered) throw new Error(result.message || '处理完成，未匹配公司渠道')
+  return result
 }
 
 function providerFilesForm(files: File[]) { const form = new FormData(); files.forEach(file => form.append('files', file)); return form }

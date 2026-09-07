@@ -13,6 +13,8 @@ public class LogisticsDatasetGuard {
         return jdbc.sql("select id from logistics_dataset where status='active'").query(UUID.class).single();
     }
     public void writable(UUID datasetId) {
+        var scope=jdbc.sql("select paused, target_dataset_id from logistics_company_state where singleton for share").query((rs,n)->java.util.Map.entry(rs.getBoolean(1),rs.getString(2)==null?"":rs.getString(2))).single();
+        if(scope.getKey()&&!datasetId.toString().equals(scope.getValue()))throw AppException.conflict("物流重建中，旧价格暂停写入");
         var status = jdbc.sql("select status from logistics_dataset where id=:id for share")
                 .param("id", datasetId).query(String.class).optional().orElseThrow(() -> AppException.notFound("物流库不存在"));
         if (status.equals("archived")) throw AppException.conflict("旧物流库已归档，只能查阅，不能恢复或修改");

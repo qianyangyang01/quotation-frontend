@@ -22,6 +22,15 @@ public class CompanyChannelService {
     }
     public ObjectNode state(boolean lock){return jdbc.sql("select to_jsonb(s)::text from logistics_company_state s where singleton"+(lock?" for update":""))
             .query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).single();}
+    public UUID importDataset(){var s=state(false);return s.path("paused").asBoolean()?UUID.fromString(s.path("target_dataset_id").asText()):jdbc.sql("select id from logistics_dataset where status='active'").query(UUID.class).single();}
+    public ObjectNode scopeFor(UUID provider,UUID channel){
+        var result=snapshot();if(provider==null&&channel==null)return result;
+        var entries=result.path("entries").deepCopy();var selected=result.putArray("entries");
+        String name=provider==null?"":jdbc.sql("select payload->>'name' from logistics_provider where id=:id").param("id",provider).query(String.class).single();
+        String company=channel==null?"":jdbc.sql("select company_channel_id::text from logistics_company_binding where channel_id=:id").param("id",channel).query(String.class).optional().orElse("");
+        for(var e:entries)if((provider==null||CompanyChannelScope.normalize(name).equals(CompanyChannelScope.normalize(e.path("providerName").asText())))&&(channel==null||company.equals(e.path("id").asText())))selected.add(e);
+        return result;
+    }
     public ObjectNode list(){var result=snapshot();result.set("state",state(false));return result;}
     @Transactional
     public ObjectNode save(ObjectNode input,String actor){
@@ -35,6 +44,8 @@ public class CompanyChannelService {
         for(var entry:entries){
             var e=(ObjectNode)entry.deepCopy();var id=e.path("id").asText();if(id.isBlank())id=UUID.randomUUID().toString();
             UUID parsed;try{parsed=UUID.fromString(id);}catch(IllegalArgumentException bad){throw AppException.unprocessable("公司渠道标识无效");}
+            var priorProvider=jdbc.sql("select payload->>'providerName' from logistics_company_channel where id=:id").param("id",parsed).query(String.class).optional();
+            if(priorProvider.isPresent()&&!priorProvider.get().equals(e.path("providerName").asText()))throw AppException.unprocessable("已有公司渠道不能改绑其他物流商；物流商别称请登记别名");
             if(!ids.add(id))throw AppException.unprocessable("公司渠道标识重复");
             e.put("id",id);if(!e.has("enabled"))e.put("enabled",true);
             jdbc.sql("insert into logistics_company_channel(id,enabled,payload,updated_by) values(:id,:enabled,cast(:p as jsonb),:actor) on conflict(id) do update set enabled=excluded.enabled,payload=excluded.payload,updated_by=excluded.updated_by,updated_at=now()")
@@ -47,7 +58,7 @@ public class CompanyChannelService {
         return list();
     }
     static void validate(JsonNode entries){
-        var names=new HashMap<String,String>();var codes=new HashMap<String,String>();
+        var names=new HashMap<String,String>();var codes=new HashMap<String,String>();var providers=new HashMap<String,String>();
         int index=0;for(var e:entries){var owner="entry-"+(index++);
             for(var field:List.of("providerName","channelName","logisticsAttribute"))if(e.path(field).asText().isBlank()||e.path(field).asText().length()>180)throw AppException.unprocessable("物流商、渠道名称及货物属性不能为空或过长");
             var provider=CompanyChannelScope.normalize(e.path("providerName").asText());
@@ -56,6 +67,7 @@ public class CompanyChannelService {
                 if(e.has(field)&&!e.path(field).isArray())throw AppException.unprocessable("别名及产品代码必须是数组");
                 for(var v:e.path(field))if(!v.isTextual()||v.asText().isBlank()||v.asText().length()>180)throw AppException.unprocessable("别名及代码无效");
             }
+            claim(providers,provider,provider);for(var alias:e.path("providerAliases"))claim(providers,CompanyChannelScope.normalize(alias.asText()),provider);
             for(var a:e.path("aliases"))labels.add(a.asText());
             for(var name:labels)claim(names,provider+"|"+CompanyChannelScope.normalize(name),owner);
             for(var code:e.path("productCodes"))claim(codes,provider+"|"+CompanyChannelScope.normalize(code.asText()),owner);
@@ -68,7 +80,8 @@ public class CompanyChannelService {
                 .param("c",channel).param("id",UUID.fromString(companyId)).param("d",dataset).update();
     }
     public void assertImport(UUID dataset){
-        var s=state(false);if(s.path("paused").asBoolean()&&!dataset.toString().equals(s.path("target_dataset_id").asText()))throw AppException.conflict("物流重建中，旧价格暂停写入");
+        var s=jdbc.sql("select to_jsonb(s)::text from logistics_company_state s where singleton for share").query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).single();if(s.path("paused").asBoolean()&&!dataset.toString().equals(s.path("target_dataset_id").asText()))throw AppException.conflict("物流重建中，旧价格暂停写入");
+        if(s.path("paused").asBoolean()&&!jdbc.sql("select phase from logistics_company_rebuild where id=:id").param("id",UUID.fromString(s.path("rebuild_id").asText())).query(String.class).single().equals("deleted"))throw AppException.conflict("请先完成旧价格备份和物理清理，再导入基准");
     }
     public void assertChannel(UUID channel){if(!jdbc.sql("select logistics_company_allowed(:id)").param("id",channel).query(Boolean.class).single())throw AppException.conflict("该渠道不在公司允许范围或已停用");}
 }

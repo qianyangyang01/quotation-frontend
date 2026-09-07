@@ -22,6 +22,7 @@ public final class CompanyChannelScope {
         }
     }
     public boolean unrestricted(){return unrestricted;}
+    public JsonNode snapshot(){return snapshot.deepCopy();}
     public long revision(){return snapshot.path("revision").asLong();}
     public boolean containsProvider(String provider){return unrestricted||providers.containsKey(normalize(provider));}
     public String providerFromFilename(String filename) {

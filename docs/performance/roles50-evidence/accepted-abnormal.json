@@ -1,0 +1,333 @@
+{
+  "baseUrl": "http://127.0.0.1:18098",
+  "finishedAt": "2026-09-06T08:38:10.183Z",
+  "cases": [
+    {
+      "name": "unauthenticated-read",
+      "concurrency": 50,
+      "elapsedMs": 96,
+      "statuses": {
+        "401": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "missing-product",
+      "concurrency": 50,
+      "elapsedMs": 725,
+      "statuses": {
+        "404": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "employee-cannot-write-finance",
+      "concurrency": 50,
+      "elapsedMs": 503,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "employee-cannot-write-purchase",
+      "concurrency": 50,
+      "elapsedMs": 580,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "purchase-cannot-manage-logistics",
+      "concurrency": 50,
+      "elapsedMs": 507,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "missing-csrf-write",
+      "concurrency": 50,
+      "elapsedMs": 89,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "negative-purchase-cost",
+      "concurrency": 50,
+      "elapsedMs": 407,
+      "statuses": {
+        "422": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "invalid-quotation",
+      "concurrency": 50,
+      "elapsedMs": 394,
+      "statuses": {
+        "422": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "stale-logistics-revision",
+      "concurrency": 50,
+      "elapsedMs": 1338,
+      "statuses": {
+        "409": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "tampered-freight",
+      "concurrency": 50,
+      "elapsedMs": 1300,
+      "statuses": {
+        "409": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "purchase-optimistic-concurrent-edit",
+      "concurrency": 50,
+      "elapsedMs": 421,
+      "statuses": {
+        "200": 1,
+        "409": 49
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "finance-optimistic-concurrent-edit",
+      "concurrency": 50,
+      "elapsedMs": 309,
+      "statuses": {
+        "200": 1,
+        "409": 49
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "same-key-concurrent-quotation",
+      "concurrency": 50,
+      "elapsedMs": 475,
+      "statuses": {
+        "200": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "idempotent-replay-same-record",
+      "passed": true
+    },
+    {
+      "name": "same-key-different-body",
+      "concurrency": 50,
+      "elapsedMs": 395,
+      "statuses": {
+        "409": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "other-owner-cannot-edit-quotation",
+      "concurrency": 50,
+      "elapsedMs": 398,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "duplicate-logistics-provider-code",
+      "concurrency": 50,
+      "elapsedMs": 398,
+      "statuses": {
+        "200": 1,
+        "409": 49
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "draft-concurrent-edit",
+      "concurrency": 50,
+      "elapsedMs": 284,
+      "statuses": {
+        "200": 1,
+        "409": 49
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "peer-employee-cannot-edit-other-owner",
+      "concurrency": 50,
+      "elapsedMs": 355,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "company-scope-stays-own-records",
+      "concurrency": 50,
+      "elapsedMs": 1996,
+      "statuses": {
+        "200": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "employee-cannot-list-users",
+      "concurrency": 50,
+      "elapsedMs": 293,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "employee-cannot-create-admin",
+      "concurrency": 50,
+      "elapsedMs": 323,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "purchase-cannot-list-users",
+      "concurrency": 50,
+      "elapsedMs": 303,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "purchase-cannot-create-admin",
+      "concurrency": 50,
+      "elapsedMs": 365,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "logistics-cannot-list-users",
+      "concurrency": 50,
+      "elapsedMs": 233,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "logistics-cannot-create-admin",
+      "concurrency": 50,
+      "elapsedMs": 304,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "logistics-cannot-edit-purchase",
+      "concurrency": 50,
+      "elapsedMs": 289,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "logistics-cannot-read-quotes",
+      "concurrency": 50,
+      "elapsedMs": 294,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "purchase-cannot-read-quotes",
+      "concurrency": 50,
+      "elapsedMs": 299,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "employee-cannot-read-logistics-admin",
+      "concurrency": 50,
+      "elapsedMs": 306,
+      "statuses": {
+        "403": 50
+      },
+      "passed": true,
+      "unexpected": []
+    },
+    {
+      "name": "purchase-initial-password-gate",
+      "passed": true,
+      "permissions": [
+        "purchase"
+      ],
+      "blockedStatus": 428,
+      "afterStatus": 200
+    },
+    {
+      "name": "employee-initial-password-gate",
+      "passed": true,
+      "permissions": [
+        "myRecords",
+        "quote"
+      ],
+      "blockedStatus": 428,
+      "afterStatus": 200
+    },
+    {
+      "name": "logistics-initial-password-gate",
+      "passed": true,
+      "permissions": [
+        "logistics"
+      ],
+      "blockedStatus": 428,
+      "afterStatus": 200
+    }
+  ],
+  "passed": true
+}

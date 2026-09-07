@@ -20,6 +20,46 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void quotationVersionChecksOnlyReferencedProductsAndDetectsRecreatedSku() {
+        var row=PurchaseProduct.create("CURRENT",pasted("CURRENT"),"ready",true,null);
+        when(products.findAllLockedBySkuIn(anyCollection())).thenReturn(List.of(row));
+        var quote=JsonNodeFactory.instance.objectNode().put("primarySku","CURRENT");
+        quote.putObject("purchaseVersions").put("CURRENT",row.version+":"+row.updatedAt);
+        assertDoesNotThrow(()->service.assertQuotationVersions(quote));
+        verify(products).findAllLockedBySkuIn(java.util.Set.of("CURRENT"));
+        verify(products,never()).findAll();
+        row.updatedAt=row.updatedAt.plusSeconds(1);
+        assertEquals(409,assertThrows(AppException.class,()->service.assertQuotationVersions(quote)).status().value());
+        quote.remove("purchaseVersions");
+        assertDoesNotThrow(()->service.assertQuotationVersions(quote));
+    }
+    private tools.jackson.databind.node.ObjectNode pasted(String sku) {
+        return JsonNodeFactory.instance.objectNode().put("sku",sku).put("weightG",50).put("minOrderQty",1).put("purchasePriceCny",9.24).put("singleFreightCny",3.5).put("freight10Cny",3.5);
+    }
+    @Test void pastedRowsValidateBeforeWritingAndNeverOverwriteExistingSku() {
+        var invalid=pasted("P-2"); invalid.remove("freight10Cny");
+        assertThrows(AppException.class,()->service.createPasted(List.of(pasted("P-1"),invalid)));
+        verify(products,never()).saveAndFlush(any());
+        var result=service.createPasted(List.of(pasted("P-1")));
+        assertTrue(result.getFirst().path("quoteReady").asBoolean());
+        var overwrite=pasted("P-1").put("_version",0).put("purchasePriceCny",100);
+        assertThrows(AppException.class,()->service.createPasted(List.of(pasted("P-3"),overwrite)));
+        assertFalse(rows.containsKey("P-3")); assertEquals(9.24,rows.get("P-1").payload.path("purchasePriceCny").asDouble());
+    }
+    @Test void pastedRowsRejectDuplicatesUnsafeNumbersAndIncompleteGroups() {
+        assertThrows(AppException.class,()->service.createPasted(List.of(pasted("P-1"),pasted("p-1"))));
+        for (var invalid : List.of(pasted("P-1").put("minOrderQty",1.5),pasted("P-1").put("lengthCm",5),pasted("P-1").put("tier2MinQty",10),pasted("P-1").put("freight100Cny",-1),pasted("P-1").put("quotationDate","2026-02-30"))) {
+            assertThrows(AppException.class,()->service.createPasted(List.of(invalid)));
+        }
+        verify(products,never()).saveAndFlush(any());
+        var free=pasted("P-FREE").put("freeShipping","是").put("purchasePriceCny",0); free.remove(List.of("singleFreightCny","freight10Cny"));
+        assertTrue(service.createPasted(List.of(free)).getFirst().path("quoteReady").asBoolean());
+    }
+    @Test void negativePriceCannotBecomeAReadyProduct() {
+        var input=JsonNodeFactory.instance.objectNode().put("sku","QA-NEGATIVE").put("weightG",100).put("minOrderQty",1).put("purchasePriceCny",-1).put("tier2PriceCny",10);
+        assertThrows(AppException.class,()->service.upsert(input));
+        verify(products,never()).saveAndFlush(any());
+    }
     private PurchaseProductRepository products;
     private PurchaseProductImageRepository images;
     private AssetStorageService storage;
@@ -54,9 +94,13 @@ class PurchaseProductServiceTest {
         assertEquals("真实商品", service.get("ab 12").path("name").asText());
         assertTrue(service.exists("AB12"));
         assertEquals("AB12", service.page(" ab 12 ", PageRequest.of(0, 10)).getContent().getFirst().path("sku").asText());
-        verify(products, never()).search(eq("ab 12"), any());
-        when(products.search("AB", PageRequest.of(0, 10)))
-                .thenReturn(new PageImpl<>(List.of(rows.get("AB12"))));
+        verify(products, never()).searchPage(anyString(), anyInt(), anyLong());
+        var searchRow=mock(PurchaseProductRepository.SearchRow.class);
+        when(searchRow.getSku()).thenReturn("AB12");when(searchRow.getPayload()).thenReturn(rows.get("AB12").payload.toString());
+        when(searchRow.getVersion()).thenReturn(0L);when(searchRow.getCatalogState()).thenReturn("ready");
+        when(searchRow.getQuoteReady()).thenReturn(false);when(searchRow.getUpdatedAt()).thenReturn(rows.get("AB12").updatedAt);
+        when(searchRow.getTotal()).thenReturn(1L);
+        when(products.searchPage("AB",10,0)).thenReturn(List.of(searchRow));
         assertEquals(1, service.page(" AB ", PageRequest.of(0, 10)).getTotalElements());
         service.delete("AB12");
         assertFalse(rows.containsKey("AB12"));

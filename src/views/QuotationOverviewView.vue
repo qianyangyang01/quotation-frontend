@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import AppTopbar from '@/components/AppTopbar.vue'
 import DateFilter from '@/components/DateFilter.vue'
 import {
   buildCategoryPerformance,
@@ -127,7 +126,6 @@ onMounted(async () => {
 
 <template>
   <div class="overview-app">
-    <AppTopbar />
     <main>
       <header class="page-heading">
         <div><p>QUOTATION ANALYTICS</p><h1>报价情况预览</h1><span>基于现有采购资料和已保存报价，查看公司报价经营数据</span></div>

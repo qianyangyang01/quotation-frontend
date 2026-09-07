@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class PurchaseProductService {
+    private final tools.jackson.databind.ObjectMapper searchMapper = new tools.jackson.databind.ObjectMapper();
     public static final String CATALOG_PENDING_TEMPLATE = "pending_template";
     public static final String CATALOG_READY = "ready";
     public static final String CATALOG_DISABLED = "disabled";
@@ -29,12 +30,25 @@ public class PurchaseProductService {
             var content=pageable.getPageNumber()==0?List.of(view(exact.get())):List.<JsonNode>of();
             return new PageImpl<>(content,pageable,1);
         }
-        return products.search(cleaned,pageable).map(this::view);
+        if(cleaned.isEmpty()) return products.findAll(org.springframework.data.domain.PageRequest.of(
+                pageable.getPageNumber(),pageable.getPageSize(),org.springframework.data.domain.Sort.by(
+                        org.springframework.data.domain.Sort.Order.desc("updatedAt"),org.springframework.data.domain.Sort.Order.asc("id")))).map(this::view);
+        // Short/common words need a different plan from selective SKUs. Limit the setting
+        // to this read transaction; a cached generic GIN plan scans the entire index for them.
+        products.useCustomSearchPlan();
+        var rows=products.searchPage(cleaned,pageable.getPageSize(),pageable.getOffset());
+        var content=rows.stream().filter(row->row.getSku()!=null).map(row->{
+            var value=(ObjectNode)searchMapper.readTree(row.getPayload());
+            value.put("sku",row.getSku());value.put("_version",row.getVersion());
+            value.put("catalogState",row.getCatalogState());value.put("quoteReady",row.getQuoteReady());
+            value.put("_updatedAt",row.getUpdatedAt().toString());return (JsonNode)value;
+        }).toList();
+        return new PageImpl<>(content,pageable,rows.isEmpty()?0:rows.getFirst().getTotal());
     }
     @Transactional(readOnly=true) public JsonNode get(String sku) { return products.findBySku(normalizeSku(sku)).map(this::view).orElseThrow(()->AppException.notFound("商品不存在")); }
     @Transactional(readOnly=true) public boolean exists(String sku) { return products.findBySku(normalizeSku(sku)).isPresent(); }
     @Transactional(readOnly=true) public long readyCount() { return products.countByQuoteReadyTrue(); }
-    @Transactional(readOnly=true) public Stats stats() {var total=products.count();var ready=products.countByQuoteReadyTrue();return new Stats(total,ready,total-ready,products.countGeneratedSku());}
+    @Transactional(readOnly=true) public Stats stats() {var result=products.statistics();return new Stats(result.getTotal(),result.getReady(),result.getTotal()-result.getReady(),result.getGenerated());}
     @Transactional(readOnly=true) public boolean isQuoteReady(String sku) { return products.findBySku(normalizeSku(sku)).map(row -> row.quoteReady).orElse(false); }
 
     @Transactional
@@ -56,6 +70,23 @@ public class PurchaseProductService {
             var lockedIds=products.findAllLockedBySkuIn(skus).stream().map(row->row.id).collect(java.util.stream.Collectors.toSet());
             if(!lockedIds.containsAll(existingIds))throw AppException.conflict("引用商品已被删除或回滚，请刷新后重试");
         }
+    }
+
+    @Transactional
+    public void assertQuotationVersions(JsonNode payload) {
+        // Existing saved records and old API clients remain compatible. New clients supply
+        // every referenced SKU, and rows stay locked through the quotation transaction.
+        if(!payload.has("purchaseVersions")) return;
+        var expected=payload.path("purchaseVersions");
+        if(!expected.isObject()) throw AppException.unprocessable("采购版本格式错误");
+        var skus=new TreeSet<String>();
+        for(var sku:payload.path("primarySku").asText("").split("[,，、+\\s]+")) addReferencedSku(skus,sku);
+        payload.path("bundleItems").forEach(item->addReferencedSku(skus,item.path("sku").asText("")));
+        if(skus.isEmpty()||skus.size()>100||expected.size()!=skus.size()) throw AppException.conflict("采购资料版本不完整，请重新查询后保存");
+        var rows=products.findAllLockedBySkuIn(skus);
+        if(rows.size()!=skus.size()) throw AppException.conflict("采购商品已移除，请重新查询后保存");
+        for(var row:rows) if(!row.quoteReady||!expected.path(row.sku).asText().equals(row.version+":"+row.updatedAt))
+            throw AppException.conflict("采购资料已更新，请更新报价并确认后保存："+row.sku);
     }
 
     @Transactional
@@ -92,6 +123,23 @@ public class PurchaseProductService {
         return rows.stream().map(this::upsert).toList();
     }
 
+    @Transactional public List<JsonNode> createPasted(List<JsonNode> rows) {
+        if (rows == null || rows.isEmpty() || rows.size() > 100) throw AppException.unprocessable("粘贴新增每次须为1至100条");
+        var inputs = new ArrayList<JsonNode>(); var skus = new HashSet<String>();
+        for (int i = 0; i < rows.size(); i++) {
+            if (!(rows.get(i) instanceof ObjectNode node)) throw AppException.unprocessable("第"+(i+1)+"行商品格式错误");
+            var copy = node.deepCopy(); var sourceRow = copy.path("sourceRow").asInt(i + 1);
+            if (sourceRow < 1 || sourceRow > 100) sourceRow = i + 1;
+            PurchasePasteValidator.validate(copy, sourceRow); validatePayload(copy);
+            var sku = copy.path("sku").asText();
+            if (!skus.add(sku)) throw AppException.unprocessable("第"+sourceRow+"行SKU "+sku+" 在本次粘贴中重复");
+            if (products.findBySku(sku).isPresent()) throw AppException.conflict("第"+sourceRow+"行SKU "+sku+" 已存在，本次未保存；请删除该行或修改SKU后重试");
+            inputs.add(copy);
+        }
+        // All rows validated before writes. Missing version also prevents a concurrent SKU from being overwritten.
+        return inputs.stream().map(this::upsert).toList();
+    }
+
     @Transactional(readOnly=true) public PurchaseProductDeletionGuard.DeletionCheck deletionCheck(String sku) {
         var row=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
         return deletionGuard.inspect(row.id,row.sku,row.version);
@@ -124,14 +172,6 @@ public class PurchaseProductService {
         try{var asset=storage.storeImage(file.getBytes(),file.getOriginalFilename());link(product.id,asset.id,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+asset.id);if(type.equals("product"))payload.put("image","/api/v1/assets/"+asset.id);product.updatedAt=Instant.now();return view(product);}catch(java.io.IOException e){throw AppException.unprocessable("图片读取失败");}
     }
 
-    @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId){
-        // The parser already writes the staged asset URLs into the payload and
-        // upsert() materializes those links through linkFromUrl(). Linking the
-        // same assets again here leaves a delete/insert pair in one Hibernate
-        // batch and violates the unique product/asset/type constraint on real
-        // PostgreSQL.
-        return upsert(payload,false,null,null);
-    }
     @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId,String importMode,String sourceHash){
         var complete=payload instanceof ObjectNode object&&completeForQuotation(object);
         var catalogState="pending_template".equals(importMode)||!complete?CATALOG_PENDING_TEMPLATE:CATALOG_READY;
@@ -170,6 +210,10 @@ public class PurchaseProductService {
     private static Optional<String> referencedSku(String value){if(value==null)return Optional.empty();var sku=value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+","");return sku.isEmpty()||sku.length()>96||!sku.matches("[A-Z0-9._/-]+")?Optional.empty():Optional.of(sku);}
     private static void addReferencedSku(Collection<String> skus,String value){referencedSku(value).ifPresent(skus::add);}
     private static void validatePayload(ObjectNode object) {
+        for (var field : List.of("weightG", "minOrderQty", "purchasePriceCny", "tier2PriceCny", "tier3PriceCny", "taxIncludedPriceCny", "singleFreightCny")) {
+            var value=object.path(field);
+            if (object.hasNonNull(field) && (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble()<0)) throw AppException.unprocessable(field+"必须为有效非负数");
+        }
         for (String field : List.of("productImage", "physicalImage", "image")) {
             var value = object.path(field).asText("");
             if (value.startsWith("data:")) throw AppException.unprocessable("图片不能以Base64保存到数据库，请使用图片上传接口");

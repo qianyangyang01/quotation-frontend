@@ -22,10 +22,14 @@ public class PurchaseProductController {
     @GetMapping("/{sku}") @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<JsonNode> get(@PathVariable String sku){return ApiResponse.ok(products.get(sku));}
     @GetMapping("/{sku}/deletion-check") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<PurchaseProductDeletionGuard.DeletionCheck> deletionCheck(@PathVariable String sku){return ApiResponse.ok(products.deletionCheck(sku));}
     @PutMapping("/{sku}") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<JsonNode> upsert(@PathVariable String sku, @RequestBody JsonNode body) {
+        if (!(body instanceof tools.jackson.databind.node.ObjectNode)) throw com.milano.quotation.common.AppException.unprocessable("商品数据必须为对象");
         ((tools.jackson.databind.node.ObjectNode) body).put("sku", sku); var result=products.upsert(body); audit.record("purchase.upsert","purchase-product",sku,"success", Map.of()); return ApiResponse.ok(result);
     }
     @PutMapping("/batch") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<List<JsonNode>> batch(@RequestBody List<JsonNode> body) {
         var result=products.upsertAll(body); audit.record("purchase.batch-upsert","purchase-product","batch","success", Map.of("count",result.size())); return ApiResponse.ok(result);
+    }
+    @PostMapping("/paste") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<List<JsonNode>> paste(@RequestBody List<JsonNode> body) {
+        var result=products.createPasted(body); audit.record("purchase.paste-create","purchase-product","batch","success",Map.of("count",result.size())); return ApiResponse.ok(result);
     }
     @PostMapping("/{sku}/promote") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<JsonNode> promote(@PathVariable String sku,@RequestBody PromoteInput body){
         var result=products.promote(sku,body.targetSku(),body.expectedVersion());audit.record("purchase.promote","purchase-product",sku,"success",Map.of("targetSku",body.targetSku()));return ApiResponse.ok(result);

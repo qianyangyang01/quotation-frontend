@@ -4,7 +4,8 @@ import { parse } from 'yaml'
 const compose = parse(await readFile('deploy/docker-compose.yml', 'utf8'))
 if (compose.name !== 'quotation-prod') throw new Error('Compose project name must be quotation-prod')
 const services = Object.entries(compose.services || {})
-if (services.length !== 5) throw new Error(`Expected five isolated services, found ${services.length}`)
+const expectedServices = ['quotation-postgres', 'quotation-redis', 'quotation-minio', 'quotation-backend', 'quotation-parser', 'quotation-frontend']
+if (services.length !== expectedServices.length || expectedServices.some(name => !compose.services[name])) throw new Error('Expected the six quotation services including the isolated parser')
 for (const [name, service] of services) {
   if (!name.startsWith('quotation-')) throw new Error(`Unscoped service name: ${name}`)
   if ('ports' in service) throw new Error(`Published host ports are forbidden: ${name}`)

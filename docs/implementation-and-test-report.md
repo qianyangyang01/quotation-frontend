@@ -1,5 +1,7 @@
 # 报价系统生产故障整改实施总览
 
+> 历史报告：其中记录的数据迁移上传、审批、执行、回滚及浏览器导出能力已于2026-09-04由Flyway V34退役。当前系统不再提供相关页面或API，`business_migration_batch`表将在应用V34时删除；已形成的正式业务记录和审计日志不受影响。
+
 - 报告日期：2026-08-23
 - 分支：`codex/quotation-production-remediation`
 - 基线：`d6a07a8a8dcf7f3a8ba7f04533121a3734f9b2af`
@@ -45,4 +47,4 @@
 - 生产TLS、Cookie、安全头、公网8088、双向Session拒绝及培训回归验收。
 - 真实10万级图片分卷迁移仍属于后续业务数据搬迁，不在本次30条模板数据发布范围内。
 
-详细UAT证据见`docs/uat-acceptance-report.md`和`docs/migration-whitelist.md`。
+历史UAT证据见`docs/uat-acceptance-report.md`。

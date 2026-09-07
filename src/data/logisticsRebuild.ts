@@ -1,16 +1,19 @@
-import { api, downloadFile, idempotencyKey, uploadForm, type UploadProgress } from '@/services/http'
+import { api, downloadFile, idempotencyKey } from '@/services/http'
+import { resumableLogisticsUpload } from '@/services/logisticsResumableUpload'
 
 export type Dataset = { id: string; name: string; status: 'active' | 'preparing' | 'archived'; revision: number; created_at: string }
-export type SourceIssue = { row: number; sourceSheet?: string; field: string; message: string; level: string; code?: string; rowKey?: string; relatedRowKey?: string; suggestedFields?: Partial<Price> }
+export type SourceIssue = { row: number; sourceSheet?: string; sourceRows?: number[]; relatedSourceSheet?: string; relatedSourceRow?: number; rawValues?: Record<string, unknown>; sourceEvidence?: Array<{ row: number; rawValues: Record<string, unknown> }>; field: string; message: string; level: string; code?: string; rowKey?: string; relatedRowKey?: string; suggestedFields?: Partial<Price> }
 export type Price = {
   areaName: string; countryCode: string; weightFromKg: number; weightToKg: number
   weightFromInclusive?: boolean; weightToInclusive?: boolean; pricePerKg?: number; registrationFee?: number
   firstWeightPrice?: number; firstWeightKg?: number; nextWeightPrice?: number; nextWeightKg?: number; intervalPrice?: number
   sourceSheet?: string; sourceRow?: number; notes?: string; pendingReason?: string; blockingReason?: string; reviewWarning?: string; pricingModel?: string; currency?: string
   zoneName?: string; originRegion?: string; sourceOriginRegion?: string; rowKey?: string; routeKey?: string; sourceProductCode?: string; sourceFeeLabel?: string
-  etaMinDays?: number; etaMaxDays?: number; etaSource?: string
+  etaMinDays?: number; etaMaxDays?: number; etaSource?: string; etaStatus?: string
   providerName?: string; channelName?: string; versionId?: string; versionNumber?: number; quoteReady?: boolean
 }
+// Price rows contain scalar fields; copying each row also unwraps Vue proxies.
+export function clonePriceRows(rows: Price[]): Price[] { return rows.map(row => ({ ...row })) }
 export type Provider = { id: string; name: string; code?: string; enabled?: boolean; datasetId?: string; _version?: number }
 export type Channel = {
   id: string; providerId: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean
@@ -23,7 +26,7 @@ export type MissingEtaRoute = { routeKey: string; status: 'missing' | 'partial' 
 export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; fingerprint: string; pricingReady?: boolean; quoteReady?: boolean; etaReady?: boolean; etaMissingCount?: number; errors: number; rowCount?: number; countryCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; missingEtaRoutes?: MissingEtaRoute[]; blockingReasons?: string[]; reviewWarnings?: string[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; importedBy?: string; publishedAt?: string; publishedBy?: string; auditNote?: string }
 export type Workspace = { dataset: Dataset; providers: Provider[]; channels: Channel[]; versions: Version[] }
 export type BatchResult = { channelId?: string; channelName: string; providerName: string; versionId?: string; status: string; message?: string; errors?: number; pricingReady?: boolean; etaReady?: boolean; etaMissingCount?: number; priceRows?: number; pendingReasons?: string[]; missingEtaRoutes?: MissingEtaRoute[]; blockingReasons?: string[]; reviewWarnings?: string[]; basePublishedVersionId?: string; summary?: Record<string, number>; issues?: SourceIssue[] }
-export type Batch = { id: string; dataset_id: string; status: string; phase: string; created_at: string; payload: { progress: number; elapsedMs?: number; error?: string; etaReady?: boolean; etaMissingCount?: number; missingEtaRoutes?: Array<MissingEtaRoute & { providerName?: string; channelName?: string }>; blockingReasons?: string[]; reviewWarnings?: string[]; totalFiles?: number; processedFiles?: number; currentFileIndex?: number; currentFileName?: string; totalChannels?: number; processedChannels?: number; currentChannelName?: string; files: Array<{ name: string; size?: number; sha256?: string; lifecycleStatus?: string; deletedAt?: string; deleteError?: string }>; fileReports?: Array<{ fileName: string; status: string; message?: string; retentionUntil?: string; sourceEvidence?: { sha256: string }; sheets?: Array<{ name: string; status: string; priceRows?: number; errors?: number; message?: string }> }>; results: BatchResult[] } }
+export type Batch = { id: string; dataset_id: string; status: string; phase: string; created_at: string; payload: { scopeRevision?: number; matchedChannels?: number; filteredChannels?: number; ambiguousChannels?: number; progress: number; elapsedMs?: number; error?: string; etaReady?: boolean; etaMissingCount?: number; missingEtaRoutes?: Array<MissingEtaRoute & { providerName?: string; channelName?: string }>; blockingReasons?: string[]; reviewWarnings?: string[]; totalFiles?: number; processedFiles?: number; currentFileIndex?: number; currentFileName?: string; totalChannels?: number; processedChannels?: number; currentChannelName?: string; files: Array<{ name: string; size?: number; sha256?: string; lifecycleStatus?: string; deletedAt?: string; deleteError?: string }>; fileReports?: Array<{ fileName: string; status: string; message?: string; retentionUntil?: string; sourceEvidence?: { sha256: string }; sheets?: Array<{ name: string; status: string; channelMatches?: Array<{ providerName: string; channelName: string; sourceRow: number; status: string; reason: string }>; templateStatus?: string; priceRows?: number; errors?: number; message?: string; filteredFirstNextRows?: number[] }> }>; results: BatchResult[] } }
 export type BatchSummary = Pick<Batch, 'id' | 'status' | 'phase' | 'created_at'> & { progress: number; files: Array<{ name: string }> }
 export type Mapping = { oldChannelId: string; oldName: string; newChannelId: string; status: string; candidates: Channel[] }
 export type Cutover = { previewToken: string; sourceDatasetId: string; targetDatasetId: string; readyChannels: number; requiredReady: boolean; requiredConfirmed: boolean; requiredCount: number; requiredNotReady: Channel[]; unmappedChannels: number; mappings: Mapping[]; pendingChannels: Channel[]; draftsToReprice?: number; bindingChanges?: Array<{ kind: string; id: string; path: string; before: string; after: string; status: string }> }
@@ -68,13 +71,11 @@ export const logisticsRebuild = {
   prices: (id: string, filters: URLSearchParams) => api.get<PricePage>(`${root}/datasets/${id}/prices?${filters}`),
   batches: (id: string) => api.get<BatchSummary[]>(`${root}/datasets/${id}/imports`),
   batch: (id: string) => api.get<Batch>(`${root}/imports/${id}`),
-  upload: (id: string, files: File[], replaceDrafts: boolean, key: string, progress?: (value: UploadProgress) => void) => {
-    const form = new FormData(); files.forEach(file => form.append('files', file)); form.append('replaceDrafts', String(replaceDrafts))
-    return uploadForm<Batch>(`${root}/datasets/${id}/imports`, form, progress, { 'Idempotency-Key': key })
-  },
+  publishProgress: (id: string) => api.get<{ batchId: string; publishedVersionIds: string[] }>(`${root}/imports/${id}/publish-progress`),
+  upload: resumableLogisticsUpload,
   retry: (id: string) => api.post<Batch>(`${root}/imports/${id}/retry`),
   version: (id: string) => api.get<Version>(`${root}/versions/${id}`),
-  patchRows: (version: Version, changes: RowCorrection[], etaChanges: EtaCorrection[] = []) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes, etaChanges }),
+  patchRows: (version: Version, changes: RowCorrection[], etaChanges: EtaCorrection[] = []) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes, etaChanges, revalidate: true }),
   review: (version: Version, note: string, removalConfirmed: boolean, reviewConfirmed: boolean, key: string) => api.post<Version>(`${root}/channels/${version.channelId}/versions/${version.id}/review`, { note, removalConfirmed, reviewConfirmed }, key),
   publishProvider: (providerId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<BatchPublishResult>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, key),
   publishReady: (batchId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<ReadyPublishResult>(`${root}/imports/${batchId}/publish-ready`, { selections, note }, key),
@@ -86,6 +87,8 @@ export const logisticsRebuild = {
   exportPrices: (id: string, filters: URLSearchParams) => downloadFile(new URLSearchParams({ ...Object.fromEntries(filters), kind: 'prices', id })),
   exportDiff: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-diff', id: v.id })),
   exportBatchDiff: (id: string) => downloadFile(new URLSearchParams({ kind: 'batch-diff', id })),
+  exportVersionStandardized: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-standardized', id: v.id })),
+  exportBatchStandardized: (id: string) => downloadFile(new URLSearchParams({ kind: 'batch-standardized', id })),
   original: (id: string, index: number) => downloadFile(new URLSearchParams({ kind: 'source', id, index: String(index) })),
   evidence: (id: string, index: number) => downloadFile(new URLSearchParams({ kind: 'evidence', id, index: String(index) })),
 }
@@ -113,6 +116,7 @@ export function weightLabel(price: Price) {
 export function completedBatchStage(batch: Pick<Batch, 'status' | 'payload'>) {
   if (batch.status !== 'completed') return ''
   if (batch.payload.fileReports?.some(f => ['failed', 'template-pending'].includes(f.status))) return '存在文件解析失败或新模板待适配，请核对'
+  if (batch.payload.fileReports?.length && batch.payload.fileReports.every(f => f.status === 'filtered')) return '首重续重已过滤，无需审核'
   if (batch.payload.results.some(r => r.status === 'blocked')) return '存在阻断，请核对'
   if (batch.payload.results.some(r => r.status === 'draft')) return '待审核'
   return '无需审核'

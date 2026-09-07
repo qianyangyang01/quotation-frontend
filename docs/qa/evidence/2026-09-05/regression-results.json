@@ -1,0 +1,308 @@
+{
+  "run": 1788585225861,
+  "passed": 33,
+  "failed": [],
+  "results": [
+    {
+      "name": "create session revocation fixture",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 931
+    },
+    {
+      "name": "change initial password",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 1305
+    },
+    {
+      "name": "demote account",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 116
+    },
+    {
+      "name": "existing session immediately loses admin permission",
+      "expected": 403,
+      "status": 403,
+      "ok": true,
+      "code": "FORBIDDEN",
+      "message": "没有执行该操作的权限",
+      "ms": 117
+    },
+    {
+      "name": "disable account",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 89
+    },
+    {
+      "name": "disabled existing session revoked",
+      "expected": 401,
+      "status": 401,
+      "ok": true,
+      "code": "SESSION_REVOKED",
+      "message": "账号状态或密码已变更，请重新登录",
+      "ms": 82
+    },
+    {
+      "name": "negative exchange rate rejected",
+      "expected": 422,
+      "status": 422,
+      "ok": true,
+      "code": "VALIDATION_ERROR",
+      "message": "usdCny必须为有效正数",
+      "ms": 81
+    },
+    {
+      "name": "stale finance edit rejected",
+      "expected": 409,
+      "status": 409,
+      "ok": true,
+      "code": "CONFLICT",
+      "message": "财务设置已被其他用户修改，请刷新后重试",
+      "ms": 88
+    },
+    {
+      "name": "employee finance write denied",
+      "expected": 403,
+      "status": 403,
+      "ok": true,
+      "code": "FORBIDDEN",
+      "message": "没有执行该操作的权限",
+      "ms": 93
+    },
+    {
+      "name": "missing csrf rejected",
+      "expected": 403,
+      "status": 403,
+      "ok": true,
+      "code": "FORBIDDEN",
+      "message": "没有执行该操作的权限",
+      "ms": 22
+    },
+    {
+      "name": "logistics purchase denied",
+      "expected": 403,
+      "status": 403,
+      "ok": true,
+      "code": "FORBIDDEN",
+      "message": "没有执行该操作的权限",
+      "ms": 78
+    },
+    {
+      "name": "purchase logistics administration denied",
+      "expected": 403,
+      "status": 403,
+      "ok": true,
+      "code": "FORBIDDEN",
+      "message": "没有执行该操作的权限",
+      "ms": 42
+    },
+    {
+      "name": "employee user administration denied",
+      "expected": 403,
+      "status": 403,
+      "ok": true,
+      "code": "FORBIDDEN",
+      "message": "没有执行该操作的权限",
+      "ms": 77
+    },
+    {
+      "name": "malformed purchase rejected",
+      "expected": 422,
+      "status": 422,
+      "ok": true,
+      "code": "VALIDATION_ERROR",
+      "message": "商品数据必须为对象",
+      "ms": 87
+    },
+    {
+      "name": "negative purchase price rejected",
+      "expected": 422,
+      "status": 422,
+      "ok": true,
+      "code": "VALIDATION_ERROR",
+      "message": "purchasePriceCny必须为有效非负数",
+      "ms": 117
+    },
+    {
+      "name": "purchase create",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 99
+    },
+    {
+      "name": "duplicate sku without revision rejected",
+      "expected": 409,
+      "status": 409,
+      "ok": true,
+      "code": "CONFLICT",
+      "message": "商品 QA-PUR-1788585225861 已被其他用户修改，请刷新后重试",
+      "ms": 30
+    },
+    {
+      "name": "concurrent purchase first outcome",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 86
+    },
+    {
+      "name": "concurrent purchase stale outcome",
+      "expected": 409,
+      "status": 409,
+      "ok": true,
+      "code": "CONFLICT",
+      "message": "数据已变化或存在重复，请刷新后重试",
+      "ms": 92
+    },
+    {
+      "name": "delete unreferenced QA product",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 301
+    },
+    {
+      "name": "deleted product is absent",
+      "expected": 404,
+      "status": 404,
+      "ok": true,
+      "code": "NOT_FOUND",
+      "message": "商品不存在",
+      "ms": 87
+    },
+    {
+      "name": "8 simultaneous identical saves produce 1 record",
+      "ok": true,
+      "recordIds": [
+        "5e1f5984-f5d1-4cd8-898d-2101c46ca0ea"
+      ],
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ]
+    },
+    {
+      "name": "same key different request rejected",
+      "expected": 409,
+      "status": 409,
+      "ok": true,
+      "code": "CONFLICT",
+      "message": "同一幂等键不能用于不同请求",
+      "ms": 99
+    },
+    {
+      "name": "other employee cannot edit quote",
+      "expected": 403,
+      "status": 403,
+      "ok": true,
+      "code": "FORBIDDEN",
+      "message": "没有执行该操作的权限",
+      "ms": 99
+    },
+    {
+      "name": "negative outcome rejected",
+      "expected": 422,
+      "status": 422,
+      "ok": true,
+      "code": "VALIDATION_ERROR",
+      "message": "输入数据不符合要求",
+      "ms": 99
+    },
+    {
+      "name": "negative quote rejected",
+      "expected": 422,
+      "status": 422,
+      "ok": true,
+      "code": "VALIDATION_ERROR",
+      "message": "输入数据不符合要求",
+      "ms": 93
+    },
+    {
+      "name": "stale logistics revision rejected",
+      "expected": 409,
+      "status": 409,
+      "ok": true,
+      "code": "CONFLICT",
+      "message": "物流版本已更新或缺少版本信息，请重新加载并计价后提交",
+      "ms": 104
+    },
+    {
+      "name": "employee company scope remains own records",
+      "ok": true,
+      "count": 100
+    },
+    {
+      "name": "quotation referenced product cannot delete",
+      "expected": 409,
+      "status": 409,
+      "ok": true,
+      "code": "PURCHASE_DELETE_BLOCKED",
+      "message": "商品存在业务引用，不能彻底删除：报价记录 12 条",
+      "ms": 100
+    },
+    {
+      "name": "valid outcome update",
+      "expected": 200,
+      "status": 200,
+      "ok": true,
+      "code": "SUCCESS",
+      "message": "操作成功",
+      "ms": 103
+    },
+    {
+      "name": "stale quote edit rejected",
+      "expected": 409,
+      "status": 409,
+      "ok": true,
+      "code": "CONFLICT",
+      "message": "报价记录已被其他用户修改，请刷新后重试",
+      "ms": 33
+    },
+    {
+      "name": "publication rejects empty",
+      "expected": 422,
+      "status": 422,
+      "ok": true,
+      "code": "VALIDATION_ERROR",
+      "message": "请选择1至5000个需要发布的渠道",
+      "ms": 151
+    },
+    {
+      "name": "publication rejects wrong-batch",
+      "expected": 422,
+      "status": 422,
+      "ok": true,
+      "code": "VALIDATION_ERROR",
+      "message": "发布选择包含不属于本批次的版本",
+      "ms": 135
+    }
+  ]
+}

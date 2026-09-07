@@ -76,6 +76,78 @@ public class LogisticsExportService {
             finish(book);book.write(bytes);return bytes.toByteArray();
         }catch(Exception e){throw new IllegalStateException("价格Excel生成失败",e);}
     }
+    public String standardizedSnapshot(UUID batchId,UUID versionId){
+        if((batchId==null)==(versionId==null))throw AppException.unprocessable("必须且只能指定一个审核批次或版本");
+        var values=new ArrayList<String>();
+        if(batchId!=null){
+            var batch=jdbc.sql("select status||'|'||md5(payload::text) from logistics_import_batch where id=:id").param("id",batchId).query(String.class).optional().orElseThrow(()->AppException.notFound("导入批次不存在"));values.add(batch);
+            var payload=mapper.readTree(jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",batchId).query(String.class).single());
+            for(var result:payload.path("results"))if(!result.path("versionId").asText().isBlank())values.add(versionFingerprint(UUID.fromString(result.path("versionId").asText())));
+        }else values.add(versionFingerprint(versionId));
+        return LogisticsDatasetService.hash(mapper.valueToTree(values).toString());
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public byte[] standardized(UUID batchId,UUID versionId,String snapshot){
+        if(snapshot!=null&&!snapshot.equals(standardizedSnapshot(batchId,versionId)))throw AppException.conflict("审核数据已变化，请重新生成下载链接");
+        ObjectNode batch=null;var records=new ArrayList<ObjectNode>();
+        if(batchId!=null){
+            batch=(ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",batchId).query(String.class).optional().orElseThrow(()->AppException.notFound("导入批次不存在")));
+            var seen=new LinkedHashSet<UUID>();
+            for(var result:batch.path("results")){
+                var rawId=result.path("versionId").asText();
+                if(!rawId.isBlank()){var id=UUID.fromString(rawId);if(seen.add(id))records.add(versionRecord(id));}
+                else if(result.path("parsed").isObject())records.add(mapper.createObjectNode().put("provider",result.path("providerName").asText()).put("channel",result.path("channelName").asText()).put("status",result.path("status").asText()).set("version",result.path("parsed").deepCopy()));
+            }
+        }else records.add(versionRecord(versionId));
+        if(records.isEmpty()&&batch==null)throw AppException.unprocessable("没有可导出的审核数据");
+        try(var book=new XSSFWorkbook();var bytes=new ByteArrayOutputStream()){
+            var detail=book.createSheet("关键字段");textRow(detail,0,List.of("MILANO_LOGISTICS_REVIEW_V1","仅供审核，不作为导入模板",Instant.now().toString()));
+            var detailHeaders=List.of("物流商","渠道名称","原产品代码","国家地区","国家代码","目的分区","报价区域","重量段","起点包含","终点包含","计费模型","公斤价","每票费/挂号费","原费用列名","首重KG","首重价","续重KG","续重价","时效最早天","时效最晚天","时效来源","校验状态","阻断原因","提醒","路线键","原文件","工作表","行号");
+            header(book,detail,1,detailHeaders);var eta=book.createSheet("待补时效");textRow(eta,0,List.of("MILANO_LOGISTICS_REVIEW_V1","每条路线填写一次时效后在系统审核页批量应用"));
+            header(book,eta,1,List.of("物流商","渠道名称","路线状态","国家地区","国家代码","目的分区","报价区域","原产品代码","路线键","来源工作表","来源行"));
+            var issues=book.createSheet("问题清单");textRow(issues,0,List.of("MILANO_LOGISTICS_REVIEW_V1","阻断项禁止发布；提醒项需人工查看"));
+            header(book,issues,1,List.of("物流商","渠道名称","级别","字段","原因","工作表","行号","路线键"));
+            int dr=2,er=2,ir=2;var etaSeen=new LinkedHashSet<String>();
+            for(var record:records){
+                var version=(ObjectNode)record.path("version").deepCopy();LogisticsReadiness.apply(version,mapper);var provider=record.path("provider").asText();var channel=record.path("channel").asText();
+                for(var value:version.path("rows")){
+                    var row=(ObjectNode)value;var output=detail.createRow(dr++);int c=0;
+                    stringCell(output,c++,provider);stringCell(output,c++,channel);stringCell(output,c++,display(row.path("sourceProductCode").asText(),"原表未提供"));
+                    stringCell(output,c++,row.path("areaName").asText());stringCell(output,c++,row.path("countryCode").asText());stringCell(output,c++,row.path("zoneName").asText());stringCell(output,c++,display(row.path("originRegion").asText(),"原表未标注"));
+                    stringCell(output,c++,weight(row));stringCell(output,c++,row.path("weightFromInclusive").asBoolean()?"是":"否");stringCell(output,c++,row.path("weightToInclusive").asBoolean(true)?"是":"否");
+                    stringCell(output,c++,model(row.path("pricingModel").asText()));cell(output,c++,row.path("pricePerKg"));cell(output,c++,row.path("registrationFee"));stringCell(output,c++,row.path("sourceFeeLabel").asText());
+                    cell(output,c++,row.path("firstWeightKg"));cell(output,c++,row.path("firstWeightPrice"));cell(output,c++,row.path("nextWeightKg"));cell(output,c++,row.path("nextWeightPrice"));
+                    cell(output,c++,row.path("etaMinDays"));cell(output,c++,row.path("etaMaxDays"));stringCell(output,c++,row.path("etaSource").asText());
+                    var blocking=row.path("blockingReason").asText();var warning=row.path("reviewWarning").asText();stringCell(output,c++,blocking.isBlank()?(warning.isBlank()?"通过":"提醒"):"阻断");stringCell(output,c++,blocking);stringCell(output,c++,warning);
+                    stringCell(output,c++,row.path("routeKey").asText());stringCell(output,c++,row.path("sourceFile").asText(version.path("fileName").asText()));stringCell(output,c++,row.path("sourceSheet").asText());cell(output,c,row.path("sourceRow"));
+                }
+                for(var route:version.path("missingEtaRoutes")){
+                    var key=provider+"|"+channel+"|"+route.path("routeKey").asText();if(!etaSeen.add(key))continue;var output=eta.createRow(er++);int c=0;
+                    for(var text:List.of(provider,channel,etaStatus(route.path("status").asText()),route.path("areaName").asText(),route.path("countryCode").asText(),route.path("zoneName").asText(),display(route.path("originRegion").asText(),"原表未标注"),display(route.path("sourceProductCode").asText(),"原表未提供"),route.path("routeKey").asText(),route.path("sourceSheet").asText()))stringCell(output,c++,text);cell(output,c,route.path("sourceRow"));
+                }
+                for(var issue:version.path("issues")){var output=issues.createRow(ir++);issueRow(output,provider,channel,issue.path("level").asText().equals("error")?"阻断":"提醒",issue);}
+                for(var value:version.path("rows")){
+                    var row=(ObjectNode)value;
+                    if(!row.path("blockingReason").asText().isBlank()){var issue=mapper.createObjectNode().put("field","校验规则").put("message",row.path("blockingReason").asText()).put("sourceSheet",row.path("sourceSheet").asText()).put("row",row.path("sourceRow").asInt()).put("routeKey",row.path("routeKey").asText());issueRow(issues.createRow(ir++),provider,channel,"阻断",issue);}
+                    if(!row.path("reviewWarning").asText().isBlank()){var issue=mapper.createObjectNode().put("field","人工复核").put("message",row.path("reviewWarning").asText()).put("sourceSheet",row.path("sourceSheet").asText()).put("row",row.path("sourceRow").asInt()).put("routeKey",row.path("routeKey").asText());issueRow(issues.createRow(ir++),provider,channel,"提醒",issue);}
+                }
+            }
+            if(batch!=null){
+                for(var file:batch.path("fileReports"))if(Set.of("failed","template-pending").contains(file.path("status").asText())){var issue=mapper.createObjectNode().put("field","文件").put("message",file.path("message").asText()).put("sourceSheet",file.path("fileName").asText());issueRow(issues.createRow(ir++),"","", "阻断",issue);}
+                for(var result:batch.path("results"))if(result.path("status").asText().equals("blocked")&&result.path("versionId").asText().isBlank()&&!result.path("parsed").isObject()){var issue=mapper.createObjectNode().put("field","导入").put("message",result.path("message").asText());issueRow(issues.createRow(ir++),result.path("providerName").asText(),result.path("channelName").asText(),"阻断",issue);}
+            }
+            detail.createFreezePane(0,2);eta.createFreezePane(0,2);issues.createFreezePane(0,2);detail.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(1,Math.max(1,dr-1),0,detailHeaders.size()-1));
+            finishReview(book);book.write(bytes);return bytes.toByteArray();
+        }catch(AppException e){throw e;}catch(Exception e){throw new IllegalStateException("关键字段Excel生成失败",e);}
+    }
+    private String versionFingerprint(UUID id){return jdbc.sql("select id::text||'|'||status||'|'||md5(payload::text) from logistics_version where id=:id").param("id",id).query(String.class).optional().orElseThrow(()->AppException.notFound("版本不存在"));}
+    private ObjectNode versionRecord(UUID id){return jdbc.sql("select v.payload::text,p.payload->>'name',c.payload->>'name',v.status from logistics_version v join logistics_channel c on c.id=v.channel_id join logistics_provider p on p.id=c.provider_id where v.id=:id")
+            .param("id",id).query((rs,n)->mapper.createObjectNode().put("provider",rs.getString(2)).put("channel",rs.getString(3)).put("status",rs.getString(4)).set("version",mapper.readTree(rs.getString(1)))).optional().orElseThrow(()->AppException.notFound("版本不存在"));}
+    private static void issueRow(Row output,String provider,String channel,String level,JsonNode issue){int c=0;for(var text:List.of(provider,channel,level,issue.path("field").asText(),issue.path("message").asText(),issue.path("sourceSheet").asText()))stringCell(output,c++,text);cell(output,c++,issue.path("row"));stringCell(output,c,issue.path("routeKey").asText());}
+    private static String display(String value,String fallback){return value==null||value.isBlank()?fallback:value;}
+    private static String weight(JsonNode row){return (row.path("weightFromInclusive").asBoolean()?"[":"(")+row.path("weightFromKg").asText()+", "+row.path("weightToKg").asText()+(row.path("weightToInclusive").asBoolean(true)?"]":")")+" KG";}
+    private static String model(String value){return value.equals("per-kg")?"公斤价＋每票费":value.equals("first-next")?"首重价＋续重价":"暂不支持（"+value+"）";}
+    private static String etaStatus(String value){return switch(value){case "missing"->"缺失";case "partial"->"不完整";case "conflict"->"冲突";default->value;};}
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public byte[] changes(UUID batchId,UUID versionId) {
         var ids=new LinkedHashSet<UUID>(); JsonNode batchPayload=mapper.createObjectNode();
@@ -144,13 +216,16 @@ public class LogisticsExportService {
         if(from<=0&&to>=0&&(from<0||to>0))return "覆盖范围扩大";if(from>=0&&to<=0&&(from>0||to<0))return "覆盖范围缩小";
         if(from>0&&to>0)return "重量区间整体上移";if(from<0&&to<0)return "重量区间整体下移";return "重量区间边界调整";
     }
-    private static void header(Workbook book,Sheet sheet,List<String> labels){
+    private static void header(Workbook book,Sheet sheet,List<String> labels){header(book,sheet,0,labels);}
+    private static void header(Workbook book,Sheet sheet,int rowNumber,List<String> labels){
         var style=book.createCellStyle();style.setFillForegroundColor(IndexedColors.DARK_TEAL.getIndex());style.setFillPattern(FillPatternType.SOLID_FOREGROUND);style.setWrapText(true);
         var font=book.createFont();font.setColor(IndexedColors.WHITE.getIndex());font.setBold(true);style.setFont(font);
-        var row=sheet.createRow(0);row.setHeightInPoints(36);for(int i=0;i<labels.size();i++){row.createCell(i).setCellValue(labels.get(i));row.getCell(i).setCellStyle(style);}
+        var row=sheet.createRow(rowNumber);row.setHeightInPoints(36);for(int i=0;i<labels.size();i++){row.createCell(i).setCellValue(labels.get(i));row.getCell(i).setCellStyle(style);}
     }
     private static void textRow(Sheet s,int n,List<String> values){var r=s.createRow(n);for(int i=0;i<values.size();i++)r.createCell(i).setCellValue(truncate(values.get(i)));}
     private static void cell(Row r,int col,JsonNode value){var cell=r.createCell(col);if(value.isNumber())cell.setCellValue(value.asDouble());else if(value.isBoolean())cell.setCellValue(value.asBoolean()?"是":"否");else cell.setCellValue(truncate(value.isObject()||value.isArray()?value.toString():value.asText("")));}
+    private static void stringCell(Row r,int col,String value){r.createCell(col,CellType.STRING).setCellValue(truncate(value==null?"":value));}
     private static String truncate(String value){if(value.length()>32767)throw AppException.unprocessable("单元格内容超过Excel限制，无法无损导出，请按渠道筛选或查看原文件");return value;}
     private static void finish(Workbook book){for(var s:book){s.setDisplayGridlines(false);if(s.getRow(0)!=null)for(int c=0;c<s.getRow(0).getLastCellNum();c++)s.setColumnWidth(c,18*256);if(s.getSheetName().equals("规则说明"))s.setColumnWidth(2,80*256);s.createFreezePane(0,1);}}
+    private static void finishReview(Workbook book){for(var sheet:book){sheet.setDisplayGridlines(false);var header=sheet.getRow(1);if(header!=null)for(int c=0;c<header.getLastCellNum();c++)sheet.setColumnWidth(c,(c==22||c==23||c==24?28:18)*256);}}
 }

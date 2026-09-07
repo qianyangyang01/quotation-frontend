@@ -15,10 +15,10 @@ describe('logistics pagination', () => {
     expect(clampLogisticsPage(-1, 0)).toBe(0)
   })
 
-  it('accepts only the 20, 50 and 100 page sizes', () => {
-    expect([20, 50, 100].map(logisticsPageSize)).toEqual([20, 50, 100])
-    expect(logisticsPageSize(10)).toBe(20)
-    expect(logisticsPageSize('invalid')).toBe(20)
+  it('accepts only the 10, 30 and 50 page sizes', () => {
+    expect([10, 30, 50].map(logisticsPageSize)).toEqual([10, 30, 50])
+    expect(logisticsPageSize(20)).toBe(10)
+    expect(logisticsPageSize('invalid')).toBe(10)
   })
 
   it('round-trips the one-based URL page without changing the API page', () => {

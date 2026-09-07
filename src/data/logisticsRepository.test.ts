@@ -30,11 +30,13 @@ describe('published logistics row compatibility', () => {
     expect(findPriceRow(value, '美国', 1.0001)?.pricePerKg).toBe(20)
   })
 
-  it('charges by actual weight and includes fixed surcharges', () => {
-    const value = rule([{ areaName: '美国', countryCode: 'US', weightFromKg: 0, weightToKg: 10, pricePerKg: 10, registrationFee: 2, surcharge: 3, volumeDivisor: 8000 }])
+  it('charges only actual weight and registration fee and rejects separate surcharges', () => {
+    const value = rule([{ areaName: '美国', countryCode: 'US', weightFromKg: 0, weightToKg: 10, pricePerKg: 10, registrationFee: 2, surcharge: 0, volumeDivisor: 8000 }])
     const result = calculateLogisticsFee(value, '美国', 1, ['普货'], { lengthCm: 40, widthCm: 30, heightCm: 20, volumeMultiplier: 2 })
     expect(result?.chargeWeightKg).toBe(1)
-    expect(result?.total).toBe(15)
+    expect(result?.total).toBe(12)
+    value.prices[0]!.surcharge = 3
+    expect(calculateLogisticsFee(value, '美国', 1)).toBeNull()
   })
 
   it('requires the exact Australia quote region and never borrows another region', () => {

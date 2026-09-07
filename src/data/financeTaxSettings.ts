@@ -9,17 +9,6 @@ export type FinanceCountryTaxSetting = {
   selected: boolean
   enabled: boolean
   sortOrder: number
-  /** Explicitly configured in the combined editor; allows an intentional zero/disabled duty. */
-  taxConfigured?: boolean
-  surchargeFeeUsd?: number
-  surchargeEnabled?: boolean
-}
-
-export type FinanceChannelFeeSetting = {
-  country: string
-  channelKey: string
-  taxMode?: LogisticsTaxMode
-  surchargeMode?: LogisticsTaxMode
 }
 
 export type FinanceProviderChannelTax = {
@@ -39,7 +28,6 @@ export type FinanceTaxSettings = {
   countries: FinanceCountryTaxSetting[]
   providers: FinanceProviderTaxSetting[]
   updatedAt: string
-  channelFees?: FinanceChannelFeeSetting[]
 }
 
 export type FinanceQuoteTaxResult = {
@@ -47,14 +35,10 @@ export type FinanceQuoteTaxResult = {
   configured: boolean
   ratePercent: null
   fixedFeeUsd: number
-  feeMode: 'exempt' | 'fixed-order' | 'missing'
+  feeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'missing'
   taxUsd: number
   totalUsd: number
   label: string
-  surchargeUsd: number
-  surchargeExempt: boolean
-  surchargeEnabled: boolean
-  countrySurchargeUsd: number
 }
 
 export const FINANCE_TAX_SETTINGS_UPDATED_EVENT = 'milano:finance-tax-settings-updated'
@@ -115,10 +99,7 @@ export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | 
         country: fallback.country,
         fixedFeeUsd,
         selected: typeof stored?.selected === 'boolean' ? stored.selected : Boolean(stored && (stored.enabled === true || fixedFeeUsd > 0)),
-        enabled: stored?.taxConfigured === true ? stored.enabled === true : fixedFeeUsd > 0,
-        ...(stored?.taxConfigured === true ? { taxConfigured: true } : {}),
-        ...(stored?.surchargeFeeUsd !== undefined || stored?.surchargeEnabled !== undefined
-          ? { surchargeFeeUsd: finiteNonNegative(stored.surchargeFeeUsd), surchargeEnabled: stored.surchargeEnabled === true } : {}),
+        enabled: stored?.enabled !== false && fixedFeeUsd > 0,
         sortOrder: Number.isFinite(Number(stored?.sortOrder)) ? Math.max(1, Number(stored?.sortOrder)) : fallback.sortOrder,
       }
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
@@ -135,11 +116,6 @@ export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | 
       return { ...fallback, channels: stored?.channels || fallback.channels, mode, selected: typeof stored?.selected === 'boolean' ? stored.selected : fallback.selected }
     }).sort((a, b) => a.provider.localeCompare(b.provider, 'zh-CN')),
     updatedAt: String(raw?.updatedAt || '尚未保存'),
-    channelFees: (raw?.channelFees || []).filter(item => item.country && item.channelKey).map(item => ({
-      country: item.country, channelKey: item.channelKey,
-      ...(item.taxMode === 'exempt' || item.taxMode === 'taxable' ? { taxMode: item.taxMode } : {}),
-      ...(item.surchargeMode === 'exempt' || item.surchargeMode === 'taxable' ? { surchargeMode: item.surchargeMode } : {}),
-    })),
   }
 }
 
@@ -148,12 +124,6 @@ export function loadFinanceTaxSettings(): FinanceTaxSettings {
 }
 
 export async function saveFinanceTaxSettings(settings: FinanceTaxSettings): Promise<FinanceTaxSettings> {
-  for (const country of settings.countries.filter(item => item.selected)) {
-    for (const amount of [country.fixedFeeUsd, country.surchargeFeeUsd ?? 0]) {
-      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || amount > 1_000_000)
-        throw new Error('税费金额须为 0 至 1,000,000 之间的有效数字')
-    }
-  }
   const normalized = normalizeFinanceTaxSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
   await writeFinanceSetting('tax-settings', normalized)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_TAX_SETTINGS_UPDATED_EVENT))
@@ -165,31 +135,31 @@ export function calculateFinanceQuoteTax(
   country: string,
   provider: string,
   baseQuoteUsd: number,
-  channelKey = '',
 ): FinanceQuoteTaxResult {
   const normalizedBase = Number.isFinite(Number(baseQuoteUsd)) ? Math.max(0, Number(baseQuoteUsd)) : 0
-  const providerSetting = settings.providers.find(item => item.selected && item.provider.trim() === provider.trim())
   const countrySetting = settings.countries.find(item => item.selected && item.country === country)
-  const override = channelKey ? settings.channelFees?.find(item => item.country === country && item.channelKey === channelKey) : undefined
-  const mode = override?.taxMode ?? providerSetting?.mode
-  const included = mode === 'exempt'
-  const configured = included || Boolean(mode && (countrySetting?.enabled || countrySetting?.taxConfigured))
-  const fixedFeeUsd = included || !countrySetting?.enabled ? 0 : finiteNonNegative(countrySetting.fixedFeeUsd)
-  const taxUsd = configured ? Number(fixedFeeUsd.toFixed(2)) : 0
-  const surchargeEnabled = countrySetting?.surchargeEnabled === true
-  const surchargeExempt = override?.surchargeMode === 'exempt'
-  const countrySurchargeUsd = finiteNonNegative(countrySetting?.surchargeFeeUsd)
-  const surchargeUsd = surchargeEnabled && !surchargeExempt ? Number(countrySurchargeUsd.toFixed(2)) : 0
-  const totalUsd = Number((normalizedBase + taxUsd + surchargeUsd).toFixed(2))
+  if (!countrySetting?.enabled || finiteNonNegative(countrySetting.fixedFeeUsd) === 0) {
+    return { included: false, configured: true, ratePercent: null, fixedFeeUsd: 0, feeMode: 'no-tax', taxUsd: 0, totalUsd: normalizedBase, label: '无关税' }
+  }
+  const providerSetting = settings.providers.find(item => item.selected && item.provider.trim() === provider.trim())
+  if (!providerSetting) {
+    return { included: false, configured: false, ratePercent: null, fixedFeeUsd: 0, feeMode: 'missing', taxUsd: 0, totalUsd: normalizedBase, label: '物流商税务属性待设置' }
+  }
+  if (providerSetting.mode === 'exempt') {
+    return { included: true, configured: true, ratePercent: null, fixedFeeUsd: 0, feeMode: 'exempt', taxUsd: 0, totalUsd: normalizedBase, label: '免税' }
+  }
+
+  const fixedFeeUsd = finiteNonNegative(countrySetting.fixedFeeUsd)
+  const taxUsd = Number(fixedFeeUsd.toFixed(2))
+  const totalUsd = Number((normalizedBase + taxUsd).toFixed(2))
   return {
-    included,
-    configured,
+    included: false,
+    configured: true,
     ratePercent: null,
     fixedFeeUsd,
-    feeMode: !configured ? 'missing' : included ? 'exempt' : 'fixed-order',
+    feeMode: 'fixed-order',
     taxUsd,
     totalUsd,
-    label: !configured ? (!mode ? '渠道关税属性待设置' : `${country || '当前国家'}关税待设置`) : included ? '免税' : `关税 $${fixedFeeUsd.toFixed(2)}/单`,
-    surchargeUsd, surchargeExempt, surchargeEnabled, countrySurchargeUsd,
+    label: `关税 $${fixedFeeUsd.toFixed(2)}/单`,
   }
 }

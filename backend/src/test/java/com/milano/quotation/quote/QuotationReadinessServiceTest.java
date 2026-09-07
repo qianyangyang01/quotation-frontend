@@ -62,6 +62,18 @@ class QuotationReadinessServiceTest {
         assertDoesNotThrow(() -> service.assertCanCreate(JsonNodeFactory.instance.objectNode().put("primarySku", "BIZ-1")));
     }
 
+    @Test
+    void permitsExplicitlySavedNoDutySettingsButNotAnUnloadedSetting() {
+        acceptsCompletePurchaseLogisticsAndFinanceState();
+        setting("tax-settings", JsonNodeFactory.instance.objectNode()
+                .set("countries", JsonNodeFactory.instance.arrayNode())
+                .set("providers", JsonNodeFactory.instance.arrayNode())
+                .put("updatedAt", "2026-09-05T00:00:00Z"));
+        assertTrue(service.snapshot().path("ready").asBoolean());
+        when(finance.findById("tax-settings")).thenReturn(Optional.empty());
+        assertFalse(service.snapshot().path("ready").asBoolean());
+    }
+
     private void setting(String key, tools.jackson.databind.JsonNode payload) {
         var row = mock(FinanceSetting.class);
         row.payload = payload;
