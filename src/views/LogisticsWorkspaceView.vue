@@ -226,6 +226,18 @@ function versionFilters(id: string) { return new URLSearchParams({ versionId: id
 function activeBatchStorageKey(id = datasetId.value) { return `milano.logistics.active-batch.${id}` }
 function rememberActiveBatch(id: string) { sessionStorage.setItem(activeBatchStorageKey(), id) }
 function forgetActiveBatch(id = datasetId.value) { if (id) sessionStorage.removeItem(activeBatchStorageKey(id)) }
+async function openLatestImport() {
+  const dataset = datasetId.value
+  const imports = await service.batches(dataset)
+  if (dataset !== datasetId.value) return
+  const latest = imports[0]
+  if (!latest) { message.value = '当前物流库暂无导入记录'; return }
+  const result = await service.batch(latest.id)
+  if (dataset !== datasetId.value) return
+  batch.value = result
+  uploadScope.value = 'multi'; uploadProviderName.value = ''
+  rememberActiveBatch(result.id); resetBatchResultView(); schedulePoll()
+}
 async function restoreActiveBatch() {
   const id = sessionStorage.getItem(activeBatchStorageKey())
   if (!id || batch.value) return
@@ -497,6 +509,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
       </section>
 
       <section v-if="tab === 'imports' && !version" class="stack">
+        <div v-if="!batch" class="section-head"><p>刷新页面或重新登录后，可从这里找回最近一次上传及解析进度。</p><button :disabled="busy || workspaceLoading" @click="run(openLatestImport)">查看最近导入</button></div>
         <template v-if="batch">
           <div class="batch-review-workbench">
             <header class="review-workbench-head">
