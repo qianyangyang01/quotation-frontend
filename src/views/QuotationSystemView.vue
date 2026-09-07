@@ -250,10 +250,16 @@ function totalCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePur
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
 function salePrice(p: Product) { return totalCost(p) * selectedGradeCoefficient() }
 function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
-function taxResult(country: string, provider: string, baseQuoteCny: number) {
-  return calculateFinanceQuoteTax(financeTaxSettings.value, country, provider, usdPriceFromCny(baseQuoteCny))
+function taxResult(country: string, provider: string, baseQuoteCny: number, channelKey = '') {
+  return calculateFinanceQuoteTax(financeTaxSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), channelKey)
 }
-function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p)).totalUsd * exchange.value.usd }
+function selectedFeeChannelKey(p: Product) {
+  const rule = logisticsRules.find(item => item.name === p.rule)
+  const relations = rule?.relations.filter(item => item.carrier === p.channel) || []
+  if (p.selectedChannelKey) return rule && relations.some(item => financeChannelKey(rule.id, item) === p.selectedChannelKey) ? p.selectedChannelKey : ''
+  return rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : ''
+}
+function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p), selectedFeeChannelKey(p)).totalUsd * exchange.value.usd }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
@@ -648,6 +654,7 @@ function normalizeRule(p: Product, silent = false) {
     p.status = `财务策略无可用渠道：${p.logisticsAttribute}`
     return
   }
+  p.selectedChannelKey = best.channelKey
   p.channel = best.carrier
   p.rule = best.rule
   p.freight = best.freight
@@ -680,7 +687,7 @@ function selectionFromRows(rows: QuotationMatrixRow[]): DraftChannelSelection[] 
 function draftPayload(): QuotationDraftPayload {
   const p = products.value[0] || emptyQuotationProduct()
   const primary = [...commonQuoteRows.value, ...specifiedQuoteRows.value, ...templateQuoteRows.value, ...Object.values(modeSelections.value).flat()]
-    .find(row => row.country === p.country && row.rule === p.rule && row.carrier === p.channel)
+    .find(row => row.country === p.country && row.channelKey === selectedFeeChannelKey(p))
   return {
     schemaVersion: 2,
     customerName: customerName.value,
@@ -835,7 +842,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     const primaryRows = productState?.primaryCountry ? excelQuoteRows(p, productState.primaryCountry) : []
     const primary = primaryRows.find(row => productState.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
       || (!productState.primaryChannelKey ? primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier) : undefined)
-    if (primary) { p.country = primary.country; p.rule = primary.rule; p.channel = primary.carrier; p.freight = primary.freight; p.status = '已恢复草稿并按当前规则重新计算' }
+    if (primary) { p.selectedChannelKey = primary.channelKey; p.country = primary.country; p.rule = primary.rule; p.channel = primary.carrier; p.freight = primary.freight; p.status = '已恢复草稿并按当前规则重新计算' }
     else if (productState?.primaryChannelKey) { p.rule = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已失效，请重新选择物流并确认价格'; toast('草稿引用的渠道不在当前物流库，请重新选择，不会按同名渠道自动套价') }
   }
   restoredSelectionVersion.value += 1
@@ -1046,7 +1053,7 @@ function matchedLogistics(p: Product, country = p.country) {
     }))
   }).sort((a, b) => a.freight - b.freight)
 }
-function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, country = p.country, provider = '') {
+function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, country = p.country, provider = '', channelKey = '') {
   const rule = logisticsRuleByName(ruleName)
   if (!rule) return null
   const normalizedQuantity = normalizedBundleSets(quantity)
@@ -1065,7 +1072,7 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
     cost = (purchasePrice + p.purchaseFreightPerUnit) * normalizedQuantity + freight
   }
   const baseQuoteCny = cost * selectedGradeCoefficient()
-  const tax = taxResult(country, provider, baseQuoteCny)
+  const tax = taxResult(country, provider, baseQuoteCny, channelKey)
   const quoteCny = tax.totalUsd * exchange.value.usd
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }
@@ -1073,7 +1080,7 @@ function bestLogisticsOption(p: Product, country = p.country) {
   return matchedLogistics(p, country)
     .map(option => ({
       ...option,
-      finalQuoteCny: quantityCostBreakdown(p, option.rule, quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity), country, option.carrier)?.quoteCny ?? Number.POSITIVE_INFINITY,
+      finalQuoteCny: quantityCostBreakdown(p, option.rule, quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity), country, option.carrier, option.channelKey)?.quoteCny ?? Number.POSITIVE_INFINITY,
     }))
     .filter(option => Number.isFinite(option.finalQuoteCny))
     .sort((a, b) => a.finalQuoteCny - b.finalQuoteCny || a.freight - b.freight)[0]
@@ -1084,7 +1091,7 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
   return matchedLogistics(p, country).map(option => {
     const costs = new Map<number, ReturnType<typeof quantityCostBreakdown>>()
     const costFor = (count: number) => {
-      if (!costs.has(count)) costs.set(count, quantityCostBreakdown(p, option.rule, count, country, option.carrier))
+      if (!costs.has(count)) costs.set(count, quantityCostBreakdown(p, option.rule, count, country, option.carrier, option.channelKey))
       return costs.get(count)!
     }
     const quote1 = costFor(1)
@@ -1100,7 +1107,7 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
           : currentQuantity === quantity
             ? custom
             : costFor(currentQuantity)
-    const tax = custom?.tax || taxResult(country, option.carrier, 0)
+    const tax = custom?.tax || taxResult(country, option.carrier, 0, option.channelKey)
     const row: QuotationMatrixRow = {
         ...option,
         country,
@@ -1121,6 +1128,10 @@ function excelQuoteRows(p: Product, country = p.country): QuotationMatrixRow[] {
         countryFixedTaxUsd: tax.fixedFeeUsd,
         taxFeeMode: tax.feeMode,
         taxLabel: tax.label,
+        surchargeUsd: tax.surchargeUsd,
+        countrySurchargeUsd: tax.countrySurchargeUsd,
+        surchargeExempt: tax.surchargeExempt,
+        surchargeEnabled: tax.surchargeEnabled,
         tax1Usd: quote1?.tax.taxUsd ?? null,
         tax2Usd: quote2?.tax.taxUsd ?? null,
         tax3Usd: quote3?.tax.taxUsd ?? null,
@@ -1249,11 +1260,11 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
   const rule = logisticsRules.find(item => item.name === p.rule)
   const relation = rule?.relations.find(item => item.carrier === p.channel)
   const quantity = Math.max(1, customQuoteQuantity.value || 1)
-  const quote1 = quantityCostBreakdown(p, p.rule, 1, p.country, p.channel)
-  const quote2 = quantityCostBreakdown(p, p.rule, 2, p.country, p.channel)
-  const quote3 = quantityCostBreakdown(p, p.rule, 3, p.country, p.channel)
-  const custom = quantityCostBreakdown(p, p.rule, quantity, p.country, p.channel)
-  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p))
+  const quote1 = quantityCostBreakdown(p, p.rule, 1, p.country, p.channel, selectedFeeChannelKey(p))
+  const quote2 = quantityCostBreakdown(p, p.rule, 2, p.country, p.channel, selectedFeeChannelKey(p))
+  const quote3 = quantityCostBreakdown(p, p.rule, 3, p.country, p.channel, selectedFeeChannelKey(p))
+  const custom = quantityCostBreakdown(p, p.rule, quantity, p.country, p.channel, selectedFeeChannelKey(p))
+  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p), selectedFeeChannelKey(p))
   return {
     country: p.country,
     channelKey: rule && relation ? financeChannelKey(rule.id, relation) : `${p.rule}::${p.channel}`,
@@ -1277,6 +1288,10 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     countryFixedTaxUsd: tax.fixedFeeUsd,
     taxFeeMode: tax.feeMode,
     taxLabel: tax.label,
+    surchargeUsd: tax.surchargeUsd,
+    countrySurchargeUsd: tax.countrySurchargeUsd,
+    surchargeExempt: tax.surchargeExempt,
+    surchargeEnabled: tax.surchargeEnabled,
     tax1Usd: quote1?.tax.taxUsd ?? null,
     tax2Usd: quote2?.tax.taxUsd ?? null,
     tax3Usd: quote3?.tax.taxUsd ?? null,
@@ -1308,9 +1323,9 @@ const saveValidationIssues = computed(() => {
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
   const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
-  if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
+  if (hasSku && (!p.rule || !p.country || !selectedFeeChannelKey(p))) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条有效的首选报价渠道' })
   if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
-  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'应税国家的物流商税务属性待设置，请到财务设置补齐' })
+  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税务设置', message:'存在国家或渠道关税配置未完成，请到财务设置补齐' })
   if (readiness.value && !readiness.value.ready) issues.push({ key:'businessReadiness', label:'业务就绪条件', message:`报价业务尚未就绪：${readiness.value.missing.join('；')}` })
   if (p?.sku && logisticsLoadState.value === 'idle') issues.push({ key:'logisticsRules', label:'物流规则', message:'请加载当前商品的物流规则' })
   if (logisticsLoadState.value === 'loading') issues.push({ key:'logisticsRules', label:'物流规则', message:'物流规则正在加载，请稍候' })
@@ -1367,7 +1382,7 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   }
   const unit = quoteMode.value === 'bundle' ? '套' : '件'
   const values = [
-    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（USD）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（CNY）`],
+    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '渠道关税属性', '关税（USD/单）', '附加费状态', '国家附加费（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（USD）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（CNY）`],
     ...rows.map(row => [
       row.country,
       row.quoteRegion || '全国统一',
@@ -1376,6 +1391,8 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
       row.eta,
       row.taxFeeMode === 'no-tax' ? '无关税' : row.taxIncluded ? '免税' : row.taxConfigured ? '不免税' : '物流商税务属性待设置',
       row.taxFeeMode === 'fixed-order' ? row.countryFixedTaxUsd.toFixed(2) : '',
+      !row.surchargeEnabled ? '未启用' : row.surchargeExempt ? '免附加费' : '收取附加费',
+      Number(row.surchargeUsd || 0).toFixed(2),
       row.quote1 == null ? '' : row.quote1.toFixed(2),
       row.quote1 == null ? '' : (row.quote1 * exchange.value.usd).toFixed(2),
       row.quote2 == null ? '' : row.quote2.toFixed(2),
@@ -1404,9 +1421,10 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   const countryCount = new Set(rows.map(row => row.country)).size
   toast(`已复制 ${countryCount} 个国家、${rows.length} 条指定报价，打开 Excel 后按 Ctrl+V 粘贴`)
 }
-function useLogistics(p: Product, option: { country: string; quoteRegion?: string; rule: string; carrier: string; freight: number }) {
+function useLogistics(p: Product, option: { channelKey?: string; country: string; quoteRegion?: string; rule: string; carrier: string; freight: number }) {
   if (option.quoteRegion) selectedQuoteRegions.value[option.country] = option.quoteRegion
   p.country = option.country
+  p.selectedChannelKey = option.channelKey
   p.channel = option.carrier
   p.rule = option.rule
   p.freight = option.freight
@@ -1463,7 +1481,7 @@ function buildQuoteOptions() {
       totalCostCny: row.totalCostCny,
       profitCny: row.profitCny,
       quoteCny: row.quoteCny,
-      isPrimary: row.country === p.country && row.rule === p.rule && row.carrier === p.channel,
+      isPrimary: row.country === p.country && row.channelKey === selectedFeeChannelKey(p),
       quote1Usd: row.quote1,
       quote2Usd: row.quote2,
       quote3Usd: row.quote3,
@@ -1474,6 +1492,10 @@ function buildQuoteOptions() {
       countryFixedTaxUsd: row.countryFixedTaxUsd,
       taxFeeMode: row.taxFeeMode,
       taxLabel: row.taxLabel,
+      surchargeUsd: row.surchargeUsd,
+      countrySurchargeUsd: row.countrySurchargeUsd,
+      surchargeExempt: row.surchargeExempt,
+      surchargeEnabled: row.surchargeEnabled,
       tax1Usd: row.tax1Usd,
       tax2Usd: row.tax2Usd,
       tax3Usd: row.tax3Usd,
@@ -1490,6 +1512,7 @@ async function save() {
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
   if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
+  if (!selectedFeeChannelKey(p)) { toast('首选渠道已失效或无法唯一识别，请重新选择渠道后保存'); return }
   if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('应税国家的物流商税务属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const quoteOptions = buildQuoteOptions()

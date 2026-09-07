@@ -9,6 +9,19 @@ import type { QuotationCountrySummary, QuotationMatrixRow } from './types'
 
 let app: App
 afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
+it('shows the charged country surcharge and switches independently to exemption', async () => {
+  const state = reactive({ row: { ...row('美国', 1), surchargeEnabled: true, surchargeUsd: 2, surchargeExempt: false } })
+  mount(QuoteTaxMeta, state)
+  expect(document.body.textContent).toContain('国家附加费 $2.00/单')
+  expect(document.body.textContent).toContain('无关税')
+  state.row.surchargeExempt = true
+  await nextTick()
+  expect(document.body.textContent).toContain('免附加费')
+  expect(document.body.textContent).not.toContain('国家附加费 $2.00/单')
+  state.row.surchargeEnabled = false
+  await nextTick()
+  expect(document.body.textContent).not.toContain('附加费')
+})
 const countries = ['美国', '澳大利亚'].map((name, index) => ({
   name, code: index ? 'AU' : 'US', stage: 'common', sortOrder: index, channelCount: 12,
 })) as QuotationCountrySummary[]

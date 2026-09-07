@@ -47,6 +47,10 @@ export interface QuotationRecordQuoteOption {
   taxFeeMode?: 'no-tax' | 'exempt' | 'fixed-order' | 'per-item' | 'missing'
   taxPerItemFeeUsd?: number
   taxLabel?: string
+  surchargeUsd?: number
+  countrySurchargeUsd?: number
+  surchargeExempt?: boolean
+  surchargeEnabled?: boolean
   tax1Usd?: number | null
   tax2Usd?: number | null
   tax3Usd?: number | null
@@ -206,6 +210,10 @@ function normalizeQuoteOptions(value: unknown, recordId: string, rawRecord: Part
     option.taxFeeMode = raw?.taxFeeMode === 'no-tax' || raw?.taxFeeMode === 'exempt' || raw?.taxFeeMode === 'fixed-order' || raw?.taxFeeMode === 'per-item' || raw?.taxFeeMode === 'missing' ? raw.taxFeeMode : undefined
     option.taxPerItemFeeUsd = optionalNumber(raw?.taxPerItemFeeUsd)
     option.taxLabel = optionalText(raw?.taxLabel)
+    option.surchargeUsd = optionalNumber(raw?.surchargeUsd)
+    option.countrySurchargeUsd = optionalNumber(raw?.countrySurchargeUsd)
+    option.surchargeExempt = typeof raw?.surchargeExempt === 'boolean' ? raw.surchargeExempt : undefined
+    option.surchargeEnabled = typeof raw?.surchargeEnabled === 'boolean' ? raw.surchargeEnabled : undefined
     option.tax1Usd = raw?.tax1Usd == null ? null : optionalN(raw.tax1Usd)
     option.tax2Usd = raw?.tax2Usd == null ? null : optionalN(raw.tax2Usd)
     option.tax3Usd = raw?.tax3Usd == null ? null : optionalN(raw.tax3Usd)
