@@ -60,6 +60,9 @@ services:
   quotation-backend:
     image: quotation-backend:${QUOTATION_RELEASE:?required}
     restart: unless-stopped
+    mem_limit: 1536m
+    memswap_limit: 2g
+    cpus: 2
     depends_on:
       quotation-postgres: { condition: service_healthy }
       quotation-redis: { condition: service_healthy }
@@ -80,6 +83,7 @@ services:
       APP_PUBLIC_BASE_URL: ${QUOTATION_PUBLIC_BASE_URL}
       APP_CORS_ALLOWED_ORIGIN: ${QUOTATION_PUBLIC_BASE_URL}
       APP_COOKIE_SECURE: ${QUOTATION_COOKIE_SECURE:-true}
+      APP_LOGISTICS_RESUME_ON_START: ${QUOTATION_LOGISTICS_RESUME_ON_START:-true}
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC
     expose: ["8088"]
     networks: [quotation-internal, ahmln-edge]
