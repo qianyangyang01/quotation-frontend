@@ -39,17 +39,6 @@ final class FinanceSettingValidation {
                     if (!body.path("countries").isArray() || !body.path("providers").isArray()) fail("税费国家及物流商配置必须为列表");
                     var countries = new HashSet<String>(); for (var row : body.path("countries")) { object(row); unique(row,"country",countries); }
                     var providers = new HashSet<String>(); for (var row : body.path("providers")) { object(row); unique(row,"provider",providers); }
-                    if (body.has("channelFees")) {
-                        if (!body.path("channelFees").isArray()) fail("渠道税费配置必须为列表");
-                        var bindings = new HashSet<String>();
-                        for (var row : body.path("channelFees")) {
-                            object(row); unique(row,"country",new HashSet<>()); unique(row,"channelKey",new HashSet<>());
-                            if (!bindings.add(row.path("country").asText().trim() + "\u0000" + row.path("channelKey").asText().trim())) fail("国家渠道税费配置不能重复");
-                            for (var field : Set.of("taxMode","surchargeMode")) {
-                                if (row.has(field) && !Set.of("exempt","taxable").contains(row.path(field).asText())) fail("渠道税费模式不合法");
-                            }
-                        }
-                    }
                 }
             }
             default -> fail("财务设置不存在");
@@ -61,8 +50,8 @@ final class FinanceSettingValidation {
         if (!node.isObject()) return;
         for (var entry : node.properties()) {
             var key = entry.getKey(); var value = entry.getValue();
-            if (Set.of("fixedFeeUsd","surchargeFeeUsd","aFixedFeeUsd","bPerItemFeeUsd","ratePercent","sortOrder").contains(key)) number(value,key,false);
-            if (Set.of("enabled","selected","surchargeEnabled","taxConfigured").contains(key) && !value.isBoolean()) fail(key+"必须为布尔值");
+            if (Set.of("fixedFeeUsd","aFixedFeeUsd","bPerItemFeeUsd","ratePercent","sortOrder").contains(key)) number(value,key,false);
+            if (Set.of("enabled","selected").contains(key) && !value.isBoolean()) fail(key+"必须为布尔值");
             validateValues(value);
         }
     }
