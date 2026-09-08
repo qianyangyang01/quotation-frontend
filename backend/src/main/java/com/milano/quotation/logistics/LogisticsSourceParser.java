@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.08-v4";
+    public static final String VERSION="company-channels-2026.09.08-v5";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
@@ -54,9 +54,10 @@ public class LogisticsSourceParser {
                 var sheet=book.next();
                 if(provider.isBlank())provider=scope.unrestricted()?provider(sheet.getSheetName()):scope.providerFromFilename(sheet.getSheetName());
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
-                if(provider.equals("闪电猴") && !Set.of("全球专线普货","全球专线带电","全球专线敏感").contains(sheet.getSheetName().trim())
-                        && !new Source(sheet,scope).text(0,0).equals(LogisticsWorkbookService.HEADERS.getFirst())) {
-                    report.put("status","filtered").put("priceCellsParsed",0).put("message","闪电猴仅导入全球专线普货、带电、敏感的美国价格");continue;
+                var source=new Source(sheet,scope);
+                if(provider.isBlank())provider=providerFromTitles(source);
+                if(provider.equals("闪电猴")&&!shandianhouPriceSheet(source)) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","闪电猴仅导入登记的三类专线美国价格");continue;
                 }
                 boolean referenceOnly=referenceOnlySheet(sheet.getSheetName());
                 if(referenceOnly&&!systemMetadataCandidate(sheet.getSheetName())) {
@@ -66,7 +67,6 @@ public class LogisticsSourceParser {
                             .put("message",coverage?"区域、邮编或派送范围表不作为渠道；关联渠道发布前需人工适配核对":"目录、收寄说明或理赔说明不作为渠道和价格行");
                     continue;
                 }
-                var source=new Source(sheet,scope);
                 report.set("channelMatches",source.matches);
                 if(!referenceOnly&&source.referenceTable()) {
                     coverageSheets.add(sheet.getSheetName());
@@ -194,6 +194,34 @@ public class LogisticsSourceParser {
         result.put("priceCellsParsed",sheets.valueStream().mapToInt(sheet->sheet.path("priceCellsParsed").asInt()).sum());
         result.put("filteredChannels",filtered).put("ambiguousChannels",ambiguous).put("matchedChannels",matched);
         return result;
+    }
+
+    private String providerFromTitles(Source source) {
+        var candidates=new TreeSet<String>();
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(detect(source,r,"")!=null||(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码")))break;
+            for(var text:source.rowTexts(r)) {
+                var value=source.scope.unrestricted()?provider(text):source.scope.providerFromFilename(text);
+                if(!value.isBlank())candidates.add(value);
+            }
+        }
+        return candidates.size()==1?candidates.first():"";
+    }
+
+    // Discover header columns and approved product identities; worksheet names and row positions are not identifiers.
+    private boolean shandianhouPriceSheet(Source source) {
+        Columns columns=null;
+        var allowed=Set.of("美猴专线普货","美猴专线普货(偏远)","美猴带电专线","美猴带电专线(偏远)","美猴敏感专线","美猴敏感专线(偏远)");
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码"))return true;
+            var header=detect(source,r,"闪电猴");
+            if(header!=null&&header.country>=0&&header.channel>=0){columns=header;continue;}
+            if(columns==null||!countryCode(source.text(r,columns.country)).equals("US"))continue;
+            var name=source.text(r,columns.channel);var code=columns.code>=0?source.text(r,columns.code):"";
+            if(source.scope.unrestricted()) {if(allowed.contains(CompanyChannelScope.normalize(name)))return true;}
+            else if(!source.scope.match("闪电猴",name,code).status().equals("filtered"))return true;
+        }
+        return false;
     }
 
     private ObjectNode selected(Source source,String provider,String name,String code,int row,Map<String,ObjectNode> channels) {
@@ -464,11 +492,15 @@ public class LogisticsSourceParser {
             row.put("notes",String.join("\n",notes));
             if(provider.equals("闪电猴")) {
                 var billingNote=row.path("notes").asText();
-                if(billingNote.contains("50克起重")&&billingNote.contains("按克计费"))row.put("minChargeWeightKg",0.05).put("billingStepKg",0.001);
-                else pending(row,"闪电猴最低计费重量与计费进位需核对");
-                if(billingNote.contains("/8000"))row.put("volumeDivisor",8000).put("volumetric",true);
+                var minimum=Pattern.compile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*(KG|G|公斤|千克|克)\\s*起重").matcher(billingNote);
+                if(minimum.find()&&billingNote.contains("按克计费")) {
+                    double value=Double.parseDouble(minimum.group(1));
+                    row.put("minChargeWeightKg",minimum.group(2).matches("(?i)KG|公斤|千克")?value:value/1000).put("billingStepKg",0.001);
+                } else pending(row,"闪电猴最低计费重量与计费进位需核对");
+                var volume=Pattern.compile("(?i)(?:长[*×]宽[*×]高|L[*×]W[*×]H)/(\\d+)").matcher(billingNote.replaceAll("\\s+",""));
+                if(volume.find())row.put("volumeDivisor",Integer.parseInt(volume.group(1))).put("volumetric",true);
                 // Keep literal source boundaries until the carrier confirms the missing endpoints.
-                if(!row.path("weightFromInclusive").asBoolean())pending(row,"原表重量下限为严格大于，50g及201g等边界需物流商确认");
+                if(!row.path("weightFromInclusive").asBoolean())pending(row,"原表重量下限为严格大于，最低计重及各档起点需物流商确认");
             }
             for(int c=0;c<source.width(r);c++)if(source.text(r,c).matches("(?s).*(暂时关停|暂停服务|暂停收寄|停止收寄).*")) {
                 pending(row,"原表标记暂停服务，禁止自动报价");row.put("notes",row.path("notes").asText()+"\n[服务状态]"+source.text(r,c));
@@ -573,6 +605,12 @@ public class LogisticsSourceParser {
         return end;
     }
 
+    private static int weightColumnRank(String label) {
+        if(label.contains("重量段")||label.contains("重量区间")||label.contains("重量范围"))return 3;
+        if(label.contains("限制"))return 1;
+        return 2;
+    }
+
     private Columns detect(Source source,int r,String provider) {
         var c=new Columns();c.headerRow=r;c.feeHeaderRow=r;int last=source.width(r);
         for(int col=0;col<Math.min(last,80);col++) {
@@ -586,7 +624,7 @@ public class LogisticsSourceParser {
             switch(field){
                 case "country"->c.country=col;case "countryCode"->c.countryCode=col;case "continent"->c.continent=col;case "channel"->c.channel=col;case "productCode"->c.code=col;
                 case "weightFrom"->{c.from=col;if(t.contains("克"))c.boundsInGrams=true;}case "weightTo"->{c.to=col;if(t.contains("克"))c.boundsInGrams=true;}
-                case "minimumWeight"->c.minimum=col;case "billingStep"->c.step=col;case "weightRange"->c.weight=col;case "pricePerKg"->c.rate=col;
+                case "minimumWeight"->c.minimum=col;case "billingStep"->c.step=col;case "weightRange"->{if(c.weight<0||weightColumnRank(t)>weightColumnRank(source.text(r,c.weight)))c.weight=col;}case "pricePerKg"->c.rate=col;
                 case "settlementRate"->{if(c.settlement>=0)c.ambiguousSfPrice=true;c.settlement=col;}case "registrationFee"->c.fee=col;
                 case "firstWeightPrice"->{c.firstPrice=col;c.firstKg=firstNumber(t,0.5);}case "nextWeightPrice"->{c.nextPrice=col;c.nextKg=firstNumber(t,0.5);}
                 case "linehaulPerKg"->c.linehaul=col;case "originRegion"->c.origin=col;case "zone"->c.zone=col;case "eta"->c.eta=col;case "notes"->c.notes.add(col);default->{}
