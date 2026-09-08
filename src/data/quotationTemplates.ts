@@ -10,6 +10,7 @@ export interface QuotationTemplateOwner {
 
 export interface QuotationTemplateSelectionItem {
   country: string
+  quoteRegion?: string
   countryCode: string
   channelKey: string
   ruleId: number
@@ -130,7 +131,7 @@ function normalizeSelectionItem(value: unknown): QuotationTemplateSelectionItem 
   if (!country || (!storedChannelKey && !ruleId && !carrier && !transport && !channelCode)) return null
   const channelKey = storedChannelKey
     || `${ruleId}::${carrier}::${channelCode || transport}`
-  return { country, countryCode, channelKey, ruleId, rule, carrier, transport, channelCode }
+  return { country, quoteRegion: cleanText(raw.quoteRegion) || undefined, countryCode, channelKey, ruleId, rule, carrier, transport, channelCode }
 }
 
 function normalizeSelectionItems(value: unknown) {
@@ -139,7 +140,7 @@ function normalizeSelectionItems(value: unknown) {
   return value.reduce<QuotationTemplateSelectionItem[]>((items, candidate) => {
     const item = normalizeSelectionItem(candidate)
     if (!item) return items
-    const identity = `${item.country}\u0000${item.channelKey}`
+    const identity = `${item.country}\u0000${item.quoteRegion || ''}\u0000${item.channelKey}`
     if (!seen.has(identity)) {
       seen.add(identity)
       items.push(item)

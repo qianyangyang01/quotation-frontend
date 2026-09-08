@@ -96,6 +96,7 @@ async function refreshTemplates(preferredId = '') {
 function templateItems(rows: QuotationMatrixRow[]): QuotationTemplateSelectionItem[] {
   return rows.map(row => ({
     country: row.country,
+    quoteRegion: row.quoteRegion,
     countryCode: props.countries.find(country => country.name === row.country)?.code || '',
     channelKey: row.channelKey,
     ruleId: row.ruleId,
@@ -116,6 +117,7 @@ function applyTemplate(template = selectedTemplate.value) {
   cancelClearConfirmation()
   presetSelection.value = template.items.map(item => ({
     country: item.country,
+    quoteRegion: item.quoteRegion,
     channelKey: item.channelKey,
     rule: item.rule,
     carrier: item.carrier,

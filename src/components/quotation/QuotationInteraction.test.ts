@@ -25,6 +25,37 @@ function mount(component: Component, state: Record<string, unknown>) {
 function button(text: string) {
   return [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))!
 }
+
+it.each(['specified', 'template'])('keeps the same AU channel in independent regions in %s mode', async variant => {
+  const rows = [3, 4, 5].map(region => ({ ...row('澳大利亚', 1), quoteRegion: `澳大利亚${region}区`, quote1: region * 10 }))
+  const changed = vi.fn()
+  mount(Matrix, { active: true, variant, countries: [{ ...countries[1], quoteRegions: rows.map(r => r.quoteRegion) }],
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 7, quoteRowsForCountry: () => rows,
+    presetVersion: 1, presetSelection: rows.slice(0, 2), onSelectionChange: changed })
+  await nextTick()
+  expect(changed.mock.lastCall?.[0].map((r: QuotationMatrixRow) => [r.quoteRegion, r.quote1])).toEqual([['澳大利亚3区', 30], ['澳大利亚4区', 40]])
+  const select = document.querySelector('.selected-channels select') as HTMLSelectElement
+  select.value = '澳大利亚5区'; select.dispatchEvent(new Event('change', { bubbles: true })); await nextTick()
+  expect(changed.mock.lastCall?.[0].map((r: QuotationMatrixRow) => [r.quoteRegion, r.quote1])).toEqual([['澳大利亚4区', 40], ['澳大利亚5区', 50]])
+  const selections = document.querySelectorAll('.selected-channels select')
+  const first = selections[0] as HTMLSelectElement
+  first.value = '澳大利亚5区'; first.dispatchEvent(new Event('change', { bubbles: true })); await nextTick()
+  expect(document.body.textContent).toContain('报价方案已存在')
+  expect(changed.mock.lastCall?.[0]).toHaveLength(2)
+  button('移出报价单').click(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toHaveLength(1)
+  expect(changed.mock.lastCall?.[0][0].quoteRegion).toBe('澳大利亚5区')
+})
+
+it('does not silently assign a region to a legacy regional template', async () => {
+  const changed = vi.fn()
+  mount(Matrix, { variant: 'template', countries: [countries[1]], contextKey: 'v1', customQuantity: 5,
+    exchangeRate: 7, quoteRowsForCountry: () => [{ ...row('澳大利亚', 1), quoteRegion: '澳大利亚3区' }],
+    presetVersion: 1, presetSelection: [{ country: '澳大利亚', channelKey: '1' }], onSelectionChange: changed })
+  await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([])
+  expect(document.body.textContent).toContain('旧模板未保存区域')
+})
 it('searches, sorts and pages without re-running pricing and suspends hidden common mode', async () => {
   const calculate = vi.fn((country: string) => Array.from({ length: 12 }, (_, i) => row(country, i)))
   const props = reactive({ active: true, countries, contextKey: 'v1', quoteRowsForCountry: createCountryQuotationCache(calculate), exchangeRate: 7 })
