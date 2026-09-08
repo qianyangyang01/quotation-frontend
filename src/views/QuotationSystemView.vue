@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { calculateFinanceQuoteFees, FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
@@ -255,7 +256,7 @@ function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.val
 function taxResult(country: string, provider: string, baseQuoteCny: number) {
   return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny))
 }
-function finalSalePrice(p: Product) { return taxResult(p.country, p.channel, salePrice(p)).totalUsd * exchange.value.usd }
+function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p)).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
@@ -1074,7 +1075,7 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
   }
   const baseQuoteCny = cost * selectedGradeCoefficient()
   const tax = taxResult(country, provider, baseQuoteCny)
-  const quoteCny = tax.totalUsd * exchange.value.usd
+  const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }
 function bestLogisticsOption(p: Product, country = p.country) {
@@ -1296,7 +1297,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     quote1: quote1?.quoteUsd ?? null,
     quote2: quote2?.quoteUsd ?? null,
     quote3: quote3?.quoteUsd ?? null,
-    quoteCustom: custom?.quoteUsd ?? usdPriceFromCny(finalSalePrice(p)),
+    quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p)).totalUsd,
     taxIncluded: tax.included,
     taxConfigured: tax.configured,
     taxRatePercent: tax.ratePercent,
@@ -1410,13 +1411,13 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
       row.surchargeLabel || '无附加费',
       row.surchargeEnabled ? Number(row.surchargeUsd || 0).toFixed(2) : '',
       row.quote1 == null ? '' : row.quote1.toFixed(2),
-      row.quote1 == null ? '' : (row.quote1 * exchange.value.usd).toFixed(2),
+      row.quote1 == null ? '' : quoteCnyFromUsd(row.quote1, exchange.value.usd).toFixed(2),
       row.quote2 == null ? '' : row.quote2.toFixed(2),
-      row.quote2 == null ? '' : (row.quote2 * exchange.value.usd).toFixed(2),
+      row.quote2 == null ? '' : quoteCnyFromUsd(row.quote2, exchange.value.usd).toFixed(2),
       row.quote3 == null ? '' : row.quote3.toFixed(2),
-      row.quote3 == null ? '' : (row.quote3 * exchange.value.usd).toFixed(2),
+      row.quote3 == null ? '' : quoteCnyFromUsd(row.quote3, exchange.value.usd).toFixed(2),
       row.quoteCustom == null ? '' : row.quoteCustom.toFixed(2),
-      row.quoteCustom == null ? '' : (row.quoteCustom * exchange.value.usd).toFixed(2),
+      row.quoteCustom == null ? '' : quoteCnyFromUsd(row.quoteCustom, exchange.value.usd).toFixed(2),
     ]),
   ]
   const excelText = values
@@ -1571,7 +1572,7 @@ async function save() {
     defaultVolumeDivisor: quoteMode.value === 'single' ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
     logisticsAttribute: p.logisticsAttribute, country: p.country, carrier: p.channel,
     channel: logisticsRules.find(rule => rule.name === p.rule)?.relations.find(relation => relation.carrier === p.channel)?.channel || p.rule,
-    rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: usdPriceFromCny(finalSalePrice(p)), totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
+    rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: taxResult(p.country, p.channel, salePrice(p)).totalUsd, totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
     matrixMode: quoteMatrixMode.value,
     quotationTemplateId: templateSnapshot?.id,
     quotationTemplateName: templateSnapshot?.name,
@@ -1725,7 +1726,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
           :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
           :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
-          :primary-cny-price="finalSalePrice(p)" :primary-usd-price="usdPriceFromCny(finalSalePrice(p))"
+          :primary-cny-price="finalSalePrice(p)" :primary-usd-price="taxResult(p.country, p.channel, salePrice(p)).totalUsd"
           :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation" @copy="copySpecifiedQuotes" @locate-issue="locateValidationIssue" @save="attemptSave"
         />
       </template>

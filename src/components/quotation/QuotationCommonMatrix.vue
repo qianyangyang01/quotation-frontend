@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
@@ -137,7 +138,7 @@ function countryFlag(code: string) {
   return [...code.toUpperCase()].map(letter => String.fromCodePoint(127397 + letter.charCodeAt(0))).join('')
 }
 function formatUsd(value: number | null) { return value == null ? '—' : `$${value.toFixed(2)}` }
-function formatCny(value: number | null) { return value == null ? '—' : `¥${(value * props.exchangeRate).toFixed(2)}` }
+function formatCny(value: number | null) { return value == null ? '—' : `¥${quoteCnyFromUsd(value, props.exchangeRate).toFixed(2)}` }
 
 watch([() => props.active, commonCountries, () => props.contextKey, () => props.presetVersion], () => {
   if (props.active === false) return

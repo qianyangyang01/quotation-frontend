@@ -1,3 +1,4 @@
+import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +22,7 @@ describe('quotation view fee integration', () => {
     }
     let copied = ''
     const context = {
-      calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2 })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
+      quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2 })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,
       financeChannelKey: (id: number, relation: { carrier: string; channelCode: string }) => id + '::' + relation.carrier + '::' + relation.channelCode,
       salePrice: () => 55,

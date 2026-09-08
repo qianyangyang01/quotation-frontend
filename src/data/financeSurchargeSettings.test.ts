@@ -9,6 +9,13 @@ const settings = (amount: number, exempt = false): FinanceTaxSettings => ({
   providers: [{ provider: '递四方', mode: exempt ? 'exempt' : 'taxable', selected: true, channels: [] }], updatedAt: '',
 })
 describe('independent provider surcharge', () => {
+  it('rounds once after combining base price, tax and surcharge', () => {
+    const result = calculateFinanceQuoteFees(settings(0.02), settings(0.02), '美国', '递四方', 6.01)
+    expect(result.totalUsd).toBe(6.05)
+    expect(result.taxUsd).toBe(0.02)
+    expect(result.surchargeUsd).toBe(0.02)
+    expect(calculateFinanceQuoteFees(settings(0), settings(0), '美国', '递四方', 6.01).totalUsd).toBe(6.05)
+  })
   it.each([[false, false, 27], [true, false, 22], [false, true, 25], [true, true, 20]])('tax exempt %s, surcharge exempt %s gives %s', (taxExempt, surchargeExempt, total) => {
     expect(calculateFinanceQuoteFees(settings(5, taxExempt), settings(2, surchargeExempt), '美国', '递四方', 20).totalUsd).toBe(total)
   })

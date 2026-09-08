@@ -1,3 +1,4 @@
+import { roundQuoteUsd } from '@/services/quotationMoney'
 import { normalizeFinanceTaxSettings, calculateFinanceQuoteTax, type FinanceTaxSettings } from './financeTaxSettings'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
@@ -39,7 +40,7 @@ export function calculateFinanceQuoteFees(taxes: FinanceTaxSettings, surcharges:
   return {
     ...tax,
     configured: tax.configured && surcharge.configured,
-    totalUsd: Number((tax.totalUsd + surcharge.taxUsd).toFixed(2)),
+    totalUsd: roundQuoteUsd(tax.totalUsd + surcharge.taxUsd),
     surchargeConfigured: surcharge.configured,
     surchargeEnabled: surcharge.feeMode !== 'no-tax',
     surchargeExempt: surcharge.included,

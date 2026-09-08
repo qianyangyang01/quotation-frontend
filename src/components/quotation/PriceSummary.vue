@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, ref } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
@@ -65,7 +66,7 @@ const groupedOptions = computed(() => {
 function formatUsd(value: number | null | undefined) { return value == null ? '—' : `$${value.toFixed(2)}` }
 function formatCny(value: number | null | undefined) {
   if (value == null || !(props.exchangeRate > 0)) return '—'
-  return `¥${(value * props.exchangeRate).toFixed(2)}`
+  return `¥${quoteCnyFromUsd(value, props.exchangeRate).toFixed(2)}`
 }
 function range(values: Array<number | null | undefined>, currency: 'USD' | 'CNY') {
   const sorted = [...new Set(values.filter((value): value is number => value != null && Number.isFinite(value)))].sort((a, b) => a - b)

@@ -17,6 +17,36 @@ public class QuotationSubmissionValidator {
     private static final Set<String> GRADES = Set.of("S级客户", "A级客户", "B级客户", "C级客户", "D级客户", "E级客户");
     private static final Set<String> SALES = Set.of("10", "100", "100+");
 
+    // Called after idempotency lookup: old successful retries retain their original snapshot.
+    public void validateQuotePricing(ObjectNode input) {
+        var errors = new ArrayList<ApiResponse.FieldError>();
+        checkUsd(errors, input, "", "systemQuoteUsd");
+        checkConversion(errors, input, "", "systemQuoteUsd", "systemQuoteCny", input.path("exchangeRate"));
+        int index = 0;
+        for (var option : input.path("quoteOptions")) {
+            var prefix = "quoteOptions[" + index++ + "].";
+            checkUsd(errors, option, prefix, "quote1Usd", "quote2Usd", "quote3Usd", "quoteCustomUsd");
+            checkConversion(errors, option, prefix, "quoteCustomUsd", "quoteCny", input.path("exchangeRate"));
+        }
+        if (!errors.isEmpty()) throw new FieldValidationException(errors);
+    }
+
+    private static void checkUsd(ArrayList<ApiResponse.FieldError> errors, tools.jackson.databind.JsonNode node, String prefix, String... fields) {
+        for (var field : fields) if (node.hasNonNull(field)) {
+            var value = node.path(field);
+            if (!nonNegativeNumber(value) || new java.math.BigDecimal(value.asText()).remainder(new java.math.BigDecimal("0.05")).signum() != 0)
+                addOnce(errors, prefix + field, "美元报价必须按0.05向上取整，请刷新后重新计价");
+        }
+    }
+
+    private static void checkConversion(ArrayList<ApiResponse.FieldError> errors, tools.jackson.databind.JsonNode node, String prefix, String usd, String cny, tools.jackson.databind.JsonNode rate) {
+        if (!node.hasNonNull(usd) || !node.hasNonNull(cny) || !positiveNumber(rate)) return;
+        if (!nonNegativeNumber(node.path(usd)) || !nonNegativeNumber(node.path(cny))) return;
+        var expected = new java.math.BigDecimal(node.path(usd).asText()).multiply(new java.math.BigDecimal(rate.asText())).setScale(2, java.math.RoundingMode.HALF_UP);
+        if (expected.compareTo(new java.math.BigDecimal(node.path(cny).asText())) != 0)
+            addOnce(errors, prefix + cny, "人民币报价必须由最终美元报价换算，请重新计价");
+    }
+
     public void validate(ObjectNode input) {
         var errors = new ArrayList<ApiResponse.FieldError>();
         required(errors, input, "customerName", "客户名称不能为空", 120);

@@ -58,6 +58,7 @@ public class QuotationController {
         submissionValidator.validate(input);
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());
+        submissionValidator.validateQuotePricing(input);
         readiness.assertCanCreate(input);
         var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = input.deepCopy();
         logisticsGuard.validate(payload);

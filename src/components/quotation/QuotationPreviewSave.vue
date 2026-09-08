@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, ref, watch } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
@@ -77,7 +78,7 @@ function toggleAll() {
   expandedCountries.value = allExpanded.value ? new Set() : new Set(groups.value.map(group => group.country))
 }
 function formatUsd(value: number | null | undefined) { return value == null ? '—' : `$${value.toFixed(2)}` }
-function formatCny(value: number | null | undefined) { return value == null || props.exchangeRate <= 0 ? '—' : `¥${(value * props.exchangeRate).toFixed(2)}` }
+function formatCny(value: number | null | undefined) { return value == null || props.exchangeRate <= 0 ? '—' : `¥${quoteCnyFromUsd(value, props.exchangeRate).toFixed(2)}` }
 function rowKey(row: QuotationMatrixRow) { return `${row.country}|${row.quoteRegion || ''}|${row.channelKey || ''}|${row.rule}|${row.carrier}|${row.transport}` }
 function isPrimary(row: QuotationMatrixRow) { return row.country === props.primaryCountry && row.rule === props.primaryRule && row.carrier === props.primaryCarrier }
 </script>

@@ -23,6 +23,18 @@ class QuotationSubmissionValidatorTest {
         patch.put("status", "won").putArray("dealLines").addObject().put("quantity", 1.5).put("unitPriceUsd", 10);
         assertThrows(FieldValidationException.class, () -> validator.validateUpdate(patch));
     }
+    @Test void validatesFinalUsdAndConvertedCnyWithoutChangingHistoricalDeals() {
+        var input = valid().put("systemQuoteUsd", 6.05).put("systemQuoteCny", 40.54).put("exchangeRate", 6.7);
+        var option = (tools.jackson.databind.node.ObjectNode) input.path("quoteOptions").get(0);
+        option.put("quote1Usd", 6.05).put("quoteCustomUsd", 6.10).put("quoteCny", 40.87);
+        assertDoesNotThrow(() -> validator.validateQuotePricing(input));
+        option.put("quote1Usd", 6.01);
+        assertThrows(FieldValidationException.class, () -> validator.validateQuotePricing(input));
+        option.put("quote1Usd", 6.05).put("quoteCny", 40.85);
+        assertThrows(FieldValidationException.class, () -> validator.validateQuotePricing(input));
+        assertDoesNotThrow(() -> validator.validateUpdate(JsonNodeFactory.instance.objectNode().put("actualQuoteUsd", 6.01)));
+    }
+
     private final QuotationSubmissionValidator validator = new QuotationSubmissionValidator();
 
     @Test void acceptsCompleteQuotationConditions() {
