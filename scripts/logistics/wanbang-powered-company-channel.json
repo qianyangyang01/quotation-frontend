@@ -1,0 +1,27 @@
+{
+  "entries": [
+    {
+      "id": "47d41f05-9df6-57f8-bc87-44b5620d7112",
+      "providerName": "万邦",
+      "providerAliases": [],
+      "channelName": "万邦速达专线挂号含电",
+      "aliases": [
+        "专线挂号含电"
+      ],
+      "productCodes": [
+        "USECSLR",
+        "EUSLR"
+      ],
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "sources": [
+        {
+          "file": "万邦速达专线挂号含电.xlsx",
+          "sheet": "Sheet1",
+          "firstRow": 6,
+          "lastRow": 162
+        }
+      ]
+    }
+  ]
+}

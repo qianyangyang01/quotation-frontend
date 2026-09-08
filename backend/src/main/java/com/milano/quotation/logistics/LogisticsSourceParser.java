@@ -21,10 +21,10 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.07-v3";
+    public static final String VERSION="company-channels-2026.09.08-v4";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
-    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰");
+    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
     private static final Pattern DATE_METADATA=Pattern.compile("(?i)^(?:(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?\\s*)?(?:19|20)\\d{2}\\s*[-/.年]\\s*\\d{1,2}\\s*[-/.月]\\s*\\d{1,2}\\s*日?(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?$");
@@ -54,6 +54,10 @@ public class LogisticsSourceParser {
                 var sheet=book.next();
                 if(provider.isBlank())provider=scope.unrestricted()?provider(sheet.getSheetName()):scope.providerFromFilename(sheet.getSheetName());
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
+                if(provider.equals("闪电猴") && !Set.of("全球专线普货","全球专线带电","全球专线敏感").contains(sheet.getSheetName().trim())
+                        && !new Source(sheet,scope).text(0,0).equals(LogisticsWorkbookService.HEADERS.getFirst())) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","闪电猴仅导入全球专线普货、带电、敏感的美国价格");continue;
+                }
                 boolean referenceOnly=referenceOnlySheet(sheet.getSheetName());
                 if(referenceOnly&&!systemMetadataCandidate(sheet.getSheetName())) {
                     boolean coverage=coverageReferenceSheet(sheet.getSheetName());
@@ -316,6 +320,7 @@ public class LogisticsSourceParser {
             var effectiveProvider=prov.isBlank()?fallback:prov;
             var sourceOrigin=value(source,r,headers,"发货区域");
             if(excludeSouthChinaPrice(effectiveProvider,sourceOrigin)){source.parsedRows.add(r);continue;}
+            if(effectiveProvider.equals("闪电猴")&&!defaultText(value(source,r,headers,"国家简码"),countryCode(value(source,r,headers,"区域名称"))).equals("US")){source.filteredOtherRows.put(r,"闪电猴仅限美国");continue;}
             var target=selected(source,effectiveProvider,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")),r,channels);
             if(target==null)continue;
             if(target.path("providerName").asText().isBlank())issue(target,r+1,"物流商","标准表需填写物流商","error");
@@ -353,7 +358,7 @@ public class LogisticsSourceParser {
             if(rowText.isBlank())continue;
             if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
             if(reference){if(detect(source,r,provider)!=null)reference=false;else{source.referenceRows.add(r);continue;}}
-            if(rowText.matches("(?s).*(注意事项说明如下|客户须知).*")){columns=null;continue;}
+            if(rowText.matches("(?s).*(注意事项说明如下|客户须知).*")||rowText.matches("^注意事项[:：]?$")){columns=null;continue;}
             if(rowText.contains("试算重量")&&rowText.contains("试算运费")){example=true;columns=null;continue;}
             boolean auxiliaryTitle=source.rowTexts(r).stream().anyMatch(t->t.length()<80&&(t.contains("重派费用表")||t.contains("重派收费")));
             if((auxiliaryTitle||(rowText.length()<160&&rowText.contains("重量")&&rowText.matches("(?s).*(重派费|附加费).*")))&&detect(source,r,provider)==null) {
@@ -385,6 +390,7 @@ public class LogisticsSourceParser {
                 continue;
             }
             var countryRaw=columns.country>=0?source.text(r,columns.country):provider.equals("容鼎")?"美国":inferredCountry(source.sheet.getSheetName());
+            if(provider.equals("闪电猴")&&!countryCode(countryRaw).equals("US")){source.filteredOtherRows.put(r,"闪电猴仅限美国");continue;}
             var name=columns.channel>=0?source.text(r,columns.channel):section;
             if(provider.equals("云速递") && section.contains("美国商派"))name=section+"-"+countryRaw;
             if(name.isBlank())name=section;
@@ -456,6 +462,14 @@ public class LogisticsSourceParser {
             if(provider.equals("极通环球")){notes.add(columns.code>=0?source.text(r,columns.code):"");pending(row,"同表含多个下单产品及附加操作费，价格仅供管理，需人工确认适用产品");}
             for(int c:columns.notes) {var note=source.text(r,c);if(!note.isBlank()&&!note.equals("/"))notes.add(note);}
             row.put("notes",String.join("\n",notes));
+            if(provider.equals("闪电猴")) {
+                var billingNote=row.path("notes").asText();
+                if(billingNote.contains("50克起重")&&billingNote.contains("按克计费"))row.put("minChargeWeightKg",0.05).put("billingStepKg",0.001);
+                else pending(row,"闪电猴最低计费重量与计费进位需核对");
+                if(billingNote.contains("/8000"))row.put("volumeDivisor",8000).put("volumetric",true);
+                // Keep literal source boundaries until the carrier confirms the missing endpoints.
+                if(!row.path("weightFromInclusive").asBoolean())pending(row,"原表重量下限为严格大于，50g及201g等边界需物流商确认");
+            }
             for(int c=0;c<source.width(r);c++)if(source.text(r,c).matches("(?s).*(暂时关停|暂停服务|暂停收寄|停止收寄).*")) {
                 pending(row,"原表标记暂停服务，禁止自动报价");row.put("notes",row.path("notes").asText()+"\n[服务状态]"+source.text(r,c));
             }

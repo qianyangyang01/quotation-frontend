@@ -1,0 +1,220 @@
+{
+  "entries": [
+    {
+      "id": "f05b5e85-b52c-5571-a5b2-e0a8e957feaa",
+      "providerName": "闪电猴",
+      "providerAliases": [
+        "SDH闪电猴"
+      ],
+      "channelName": "全球专线普货-美国",
+      "aliases": [
+        "美猴专线普货"
+      ],
+      "productCodes": [
+        "19221"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "sourceFile": "20260604闪电猴价格表(1).xlsx",
+      "sourceSheet": "全球专线普货",
+      "sourceRows": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "countryCodes": [
+        "US"
+      ],
+      "sources": [
+        {
+          "file": "20260604闪电猴价格表(1).xlsx",
+          "sheet": "全球专线普货",
+          "firstRow": 3,
+          "lastRow": 6,
+          "priceRows": 4
+        }
+      ]
+    },
+    {
+      "id": "10f56ca6-4be8-5a8c-b0da-c86b79cb194c",
+      "providerName": "闪电猴",
+      "providerAliases": [
+        "SDH闪电猴"
+      ],
+      "channelName": "全球专线普货-美国（偏远）",
+      "aliases": [
+        "美猴专线普货（偏远）"
+      ],
+      "productCodes": [
+        "14421"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true,
+      "sourceFile": "20260604闪电猴价格表(1).xlsx",
+      "sourceSheet": "全球专线普货",
+      "sourceRows": [
+        7,
+        8,
+        9,
+        10
+      ],
+      "countryCodes": [
+        "US"
+      ],
+      "sources": [
+        {
+          "file": "20260604闪电猴价格表(1).xlsx",
+          "sheet": "全球专线普货",
+          "firstRow": 7,
+          "lastRow": 10,
+          "priceRows": 4
+        }
+      ]
+    },
+    {
+      "id": "0c2bb41b-b3fc-53de-a741-47843532aa17",
+      "providerName": "闪电猴",
+      "providerAliases": [
+        "SDH闪电猴"
+      ],
+      "channelName": "全球专线带电-美国",
+      "aliases": [
+        "美猴带电专线"
+      ],
+      "productCodes": [
+        "13601"
+      ],
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "sourceFile": "20260604闪电猴价格表(1).xlsx",
+      "sourceSheet": "全球专线带电",
+      "sourceRows": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "countryCodes": [
+        "US"
+      ],
+      "sources": [
+        {
+          "file": "20260604闪电猴价格表(1).xlsx",
+          "sheet": "全球专线带电",
+          "firstRow": 3,
+          "lastRow": 6,
+          "priceRows": 4
+        }
+      ]
+    },
+    {
+      "id": "fdb482bd-e6ba-5abe-bd88-ed303db5e8e6",
+      "providerName": "闪电猴",
+      "providerAliases": [
+        "SDH闪电猴"
+      ],
+      "channelName": "全球专线带电-美国（偏远）",
+      "aliases": [
+        "美猴带电专线（偏远）"
+      ],
+      "productCodes": [
+        "19241"
+      ],
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "sourceFile": "20260604闪电猴价格表(1).xlsx",
+      "sourceSheet": "全球专线带电",
+      "sourceRows": [
+        7,
+        8,
+        9,
+        10
+      ],
+      "countryCodes": [
+        "US"
+      ],
+      "sources": [
+        {
+          "file": "20260604闪电猴价格表(1).xlsx",
+          "sheet": "全球专线带电",
+          "firstRow": 7,
+          "lastRow": 10,
+          "priceRows": 4
+        }
+      ]
+    },
+    {
+      "id": "5d9a7c98-e837-56df-a988-d490e7c85757",
+      "providerName": "闪电猴",
+      "providerAliases": [
+        "SDH闪电猴"
+      ],
+      "channelName": "全球专线敏感-美国",
+      "aliases": [
+        "美猴敏感专线"
+      ],
+      "productCodes": [
+        "14021"
+      ],
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "sourceFile": "20260604闪电猴价格表(1).xlsx",
+      "sourceSheet": "全球专线敏感",
+      "sourceRows": [
+        3,
+        4,
+        5,
+        6
+      ],
+      "countryCodes": [
+        "US"
+      ],
+      "sources": [
+        {
+          "file": "20260604闪电猴价格表(1).xlsx",
+          "sheet": "全球专线敏感",
+          "firstRow": 3,
+          "lastRow": 6,
+          "priceRows": 4
+        }
+      ]
+    },
+    {
+      "id": "307742a8-7dee-5ead-882e-d3fbe569cf8a",
+      "providerName": "闪电猴",
+      "providerAliases": [
+        "SDH闪电猴"
+      ],
+      "channelName": "全球专线敏感-美国（偏远）",
+      "aliases": [
+        "美猴敏感专线(偏远)"
+      ],
+      "productCodes": [
+        "18821"
+      ],
+      "logisticsAttribute": "敏感货",
+      "enabled": true,
+      "sourceFile": "20260604闪电猴价格表(1).xlsx",
+      "sourceSheet": "全球专线敏感",
+      "sourceRows": [
+        7,
+        8,
+        9,
+        10
+      ],
+      "countryCodes": [
+        "US"
+      ],
+      "sources": [
+        {
+          "file": "20260604闪电猴价格表(1).xlsx",
+          "sheet": "全球专线敏感",
+          "firstRow": 7,
+          "lastRow": 10,
+          "priceRows": 4
+        }
+      ]
+    }
+  ]
+}
