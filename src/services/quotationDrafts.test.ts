@@ -15,6 +15,18 @@ const payload: QuotationDraftPayload = {
 describe('quotation draft repository', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it.each(['化妆品', '保健品', '非液体化妆品'])('preserves %s independently of product category and selected regions', async logisticsAttribute => {
+    const draft = { ...payload, productCategory: '服装', logisticsAttribute,
+      templateSelections: [{ country: '澳大利亚', channelKey: 'channel-1', quoteRegion: '澳大利亚3区' }, { country: '澳大利亚', channelKey: 'channel-1', quoteRegion: '澳大利亚4区' }] }
+    mockedApi.put.mockResolvedValue({ exists: true, payload: draft, version: 1 })
+    const saved = await saveQuotationDraft(draft, -1)
+    mockedApi.get.mockResolvedValue(JSON.parse(JSON.stringify(saved)))
+    const loaded = await loadQuotationDraft()
+    expect(loaded.payload?.logisticsAttribute).toBe(logisticsAttribute)
+    expect(loaded.payload?.productCategory).toBe('服装')
+    expect(loaded.payload?.templateSelections.map(row => row.quoteRegion)).toEqual(['澳大利亚3区', '澳大利亚4区'])
+  })
+
   it('normalizes absent and unsupported draft states', () => {
     expect(normalizeDraftState(null)).toEqual({ exists: false, payload: null, version: -1, updatedAt: null })
     expect(normalizeDraftState({ exists: true, payload: { ...payload, schemaVersion: 1 } as never, version: 2 })).toMatchObject({ exists: false, payload: null, version: 2 })

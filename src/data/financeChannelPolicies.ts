@@ -8,7 +8,7 @@ import {
 } from './countryClassification'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
-export const financeLogisticsAttributeOptions = ['普货', '带电', '纯电池', '液体', '粉末', '非液体化妆品', '带磁', '微敏感'] as const
+export const financeLogisticsAttributeOptions = ['普货', '化妆品', '保健品', '带电', '纯电池', '液体', '粉末', '非液体化妆品', '带磁', '微敏感'] as const
 export type FinanceLogisticsAttribute = string
 
 export type FinanceLogisticsChannelOption = {
@@ -64,7 +64,7 @@ export const FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT = 'milano:finance-country-se
 const DEFAULT_USD_CNY_RATE = 6.75
 export const COMMON_COUNTRY_LIMIT = 40
 
-// Kept for the purchase data category input. Finance logistics policies use the six attributes above.
+// Product categories and shipment attributes are separate business dimensions.
 export const financeCategoryOptions = ['未分类', '保健品', '美妆', '化妆品', '服装', '日用品', '个护健康', '家居百货', '数码配件', '宠物用品', '袜子']
 
 const defaultGradeSettings: CustomerGradeSetting[] = [
@@ -226,7 +226,8 @@ function defaultCountryRule(attribute: string, country: string): FinanceCountryC
   }
 }
 
-const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions.map(attribute => ({
+// New shipment attributes require an explicit finance policy; never inherit general cargo permissions.
+const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions.filter(attribute => attribute !== '化妆品' && attribute !== '保健品').map(attribute => ({
   id: attribute,
   category: attribute,
   countryRules: [defaultCountryRule(attribute, '美国')],

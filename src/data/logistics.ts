@@ -151,7 +151,8 @@ function splitMarks(value: unknown) {
   return String(value || '').split(/[,，、;；|]/).map(item => item.trim()).filter(Boolean)
 }
 function normalizeShippingMarks(marks: string[]) {
-  const normalized = marks.flatMap(mark => mark === '化妆品' ? ['非液体化妆品'] : [mark]).filter(Boolean)
+  // Cosmetics is an independent shipment attribute, not an alias for non-liquid cosmetics.
+  const normalized = marks.map(mark => mark.trim()).filter(Boolean)
   return [...new Set(normalized.length ? normalized : ['普货'])]
 }
 export function isWeightRangePrice(price: LogisticsPriceRow) {

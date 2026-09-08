@@ -488,9 +488,9 @@ public class LogisticsQueryService {
         return result;
     }
 
-    private static boolean eligible(JsonNode row, String attribute) {
+    static boolean eligible(JsonNode row, String attribute) {
         var mark = attribute == null || attribute.isBlank() ? "普货" : attribute.trim();
-        if ("化妆品".equals(mark)) mark = "非液体化妆品";
+        // Keep cosmetics, non-liquid cosmetics and supplements as distinct shipment attributes.
         var prohibited = splitMarks(row.path("prohibitedMarks").asText(""));
         if (prohibited.contains(mark)) return false;
         if (row.path("prohibitGeneralCargo").asBoolean(false) && "普货".equals(mark)) return false;
