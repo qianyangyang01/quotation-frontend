@@ -7,6 +7,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class FinanceSettingValidationTest {
     private final JsonMapper mapper = new JsonMapper();
+    @Test void validatesCountryTaxProviders() {
+        var payload = mapper.readTree("""
+            {"countries":[{"country":"US","fixedFeeUsd":0.3,"providers":[{"provider":"P","mode":"exempt","selected":true}]}],"providers":[]}
+            """);
+        assertDoesNotThrow(() -> FinanceSettingValidation.validate("tax-settings", payload));
+        ((tools.jackson.databind.node.ObjectNode)payload.path("countries").get(0).path("providers").get(0)).put("mode","invalid");
+        assertThrows(AppException.class, () -> FinanceSettingValidation.validate("tax-settings", payload));
+    }
     @Test void exchangeRateMustBePositiveAndNumeric() {
         for (var json : new String[]{"{}", "{\"usdCny\":-1}", "{\"usdCny\":0}", "{\"usdCny\":\"7\"}"})
             assertThrows(AppException.class, () -> FinanceSettingValidation.validate("exchange-rate", mapper.readTree(json)));

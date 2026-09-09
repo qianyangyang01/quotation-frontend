@@ -9,6 +9,7 @@ export type FinanceCountryTaxSetting = {
   selected: boolean
   enabled: boolean
   sortOrder: number
+  providers?: FinanceProviderTaxSetting[]
 }
 
 export type FinanceProviderChannelTax = {
@@ -96,6 +97,7 @@ export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | 
       const legacy = stored as (typeof stored & { aFixedFeeUsd?: unknown })
       const fixedFeeUsd = finiteNonNegative(stored?.fixedFeeUsd ?? legacy?.aFixedFeeUsd)
       return {
+        ...(Array.isArray(stored?.providers) ? { providers: stored.providers.map(row => ({ ...row, channels: (row.channels || []).map(channel => ({ ...channel })) })) } : {}),
         country: fallback.country,
         fixedFeeUsd,
         selected: typeof stored?.selected === 'boolean' ? stored.selected : Boolean(stored && (stored.enabled === true || fixedFeeUsd > 0)),
@@ -124,6 +126,9 @@ export function loadFinanceTaxSettings(): FinanceTaxSettings {
 }
 
 export async function saveFinanceTaxSettings(settings: FinanceTaxSettings): Promise<FinanceTaxSettings> {
+  for (const country of settings.countries) {
+    if (typeof country.fixedFeeUsd !== 'number' || !Number.isFinite(country.fixedFeeUsd) || country.fixedFeeUsd < 0) throw new Error(`${country.country}关税必须为有效非负金额`)
+  }
   const normalized = normalizeFinanceTaxSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
   await writeFinanceSetting('tax-settings', normalized)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_TAX_SETTINGS_UPDATED_EVENT))
@@ -141,7 +146,7 @@ export function calculateFinanceQuoteTax(
   if (!countrySetting?.enabled || finiteNonNegative(countrySetting.fixedFeeUsd) === 0) {
     return { included: false, configured: true, ratePercent: null, fixedFeeUsd: 0, feeMode: 'no-tax', taxUsd: 0, totalUsd: normalizedBase, label: '无关税' }
   }
-  const providerSetting = settings.providers.find(item => item.selected && item.provider.trim() === provider.trim())
+  const providerSetting = (countrySetting.providers ?? settings.providers).find(item => item.selected && item.provider.trim() === provider.trim())
   if (!providerSetting) {
     return { included: false, configured: false, ratePercent: null, fixedFeeUsd: 0, feeMode: 'missing', taxUsd: 0, totalUsd: normalizedBase, label: '物流商税务属性待设置' }
   }

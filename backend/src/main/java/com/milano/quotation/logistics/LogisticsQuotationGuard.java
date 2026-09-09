@@ -31,6 +31,7 @@ public class LogisticsQuotationGuard {
         var revision=queries.manifestRevision().revision();
         if(!scoped&&!revision.equals(quotation.path("logisticsRevision").asText()))throw AppException.conflict("物流版本已更新或缺少版本信息，请重新加载并计价后提交");
         var policies=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies' for share").query(String.class).optional().orElse("[]"));
+        var taxes=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='tax-settings' for share").query(String.class).optional().orElse("{}"));
         var surcharges=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='surcharge-settings' for share").query(String.class).optional().orElse("{}"));
         var channels=jdbc.sql("""
             select jsonb_build_object('key',concat(c.rule_id,'::',p.payload->>'name','::',c.code),
@@ -47,6 +48,7 @@ public class LogisticsQuotationGuard {
             var key=option.path("channelKey").asText();var country=option.path("country").asText();
             var channel=channels.stream().filter(c->c.path("key").asText().equals(key)).findFirst().orElseThrow(()->AppException.conflict("报价渠道已归档、未适配或不存在，请重新选择"));
             validateSurcharge(surcharges, option);
+            validateCountryTax(taxes, option);
             boolean countryAvailable=false;
             for(var row:channel.path("rows"))if(row.path("areaName").asText().equals(country)||row.path("countryCode").asText().equalsIgnoreCase(country))countryAvailable=true;
             if(!countryAvailable||!allowed(policies,quotation.path("logisticsAttribute").asText(),country,key))throw AppException.unprocessable("渠道不在该国家及货物属性的财务允许范围内");
@@ -67,6 +69,26 @@ public class LogisticsQuotationGuard {
         }
         quotation.put("logisticsDatasetId",dataset.toString());
         quotation.put("logisticsRevision",revision);
+    }
+    static void validateCountryTax(JsonNode settings, JsonNode option) {
+        for (var country : settings.path("countries")) {
+            if (!country.path("country").asText().equals(option.path("country").asText()) || !country.path("selected").asBoolean() || !country.path("providers").isArray()) continue;
+            boolean enabled = country.path("enabled").asBoolean() && country.path("fixedFeeUsd").asDouble() > 0;
+            boolean exempt = false, configured = !enabled;
+            var parts = option.path("channelKey").asText().split("::", 3);
+            if (enabled) for (var provider : country.path("providers")) {
+                if (parts.length == 3 && provider.path("selected").asBoolean() && provider.path("provider").asText().trim().equals(parts[1].trim())) {
+                    configured = true; exempt = "exempt".equals(provider.path("mode").asText()); break;
+                }
+            }
+            var mode = !enabled ? "no-tax" : exempt ? "exempt" : "fixed-order";
+            var expected = enabled && !exempt ? country.path("fixedFeeUsd").decimalValue() : java.math.BigDecimal.ZERO;
+            if (!configured || !option.path("taxConfigured").asBoolean() || option.path("taxIncluded").asBoolean() != exempt
+                || !mode.equals(option.path("taxFeeMode").asText()) || !option.path("countryFixedTaxUsd").isNumber()
+                || option.path("countryFixedTaxUsd").decimalValue().compareTo(expected) != 0)
+                throw AppException.conflict("国家物流商税务设置已变化，请重新计价后提交");
+            return;
+        }
     }
     static void validateSurcharge(JsonNode settings, JsonNode option) {
         if (!settings.path("countries").isArray()) return;

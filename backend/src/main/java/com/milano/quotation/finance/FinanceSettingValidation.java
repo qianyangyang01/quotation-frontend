@@ -58,7 +58,14 @@ final class FinanceSettingValidation {
                 if (body.has("rules") && !body.has("countries") && !body.has("providers")) { if (!body.path("rules").isArray()) fail("税费规则必须为列表"); }
                 else {
                     if (!body.path("countries").isArray() || !body.path("providers").isArray()) fail("税费国家及物流商配置必须为列表");
-                    var countries = new HashSet<String>(); for (var row : body.path("countries")) { object(row); unique(row,"country",countries); }
+                    var countries = new HashSet<String>(); for (var row : body.path("countries")) {
+                        object(row); unique(row,"country",countries);
+                        if (row.has("providers")) {
+                            if (!row.path("providers").isArray()) fail("国家物流商配置必须为列表");
+                            var names = new HashSet<String>();
+                            for (var provider : row.path("providers")) { object(provider); unique(provider,"provider",names); if (!Set.of("exempt","taxable").contains(provider.path("mode").asText())) fail("物流商税务属性不合法"); }
+                        }
+                    }
                     var providers = new HashSet<String>(); for (var row : body.path("providers")) { object(row); unique(row,"provider",providers); }
                 }
             }

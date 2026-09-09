@@ -253,14 +253,24 @@ const financeTaxCountries = computed(() => {
     .filter(setting => !query || setting.country.toLowerCase().includes(query))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN'))
 })
+const taxDetailCountry = ref('')
+const taxCountryProviders = computed<FinanceProviderTaxSetting[]>(() => {
+  const country = financeTaxSettings.value.countries.find(row => row.country === taxDetailCountry.value)
+  const groups = new Map<string, ReturnType<typeof channelsAvailableForCountry>>()
+  for (const option of channelsAvailableForCountry(taxDetailCountry.value)) groups.set(option.carrier, [...(groups.get(option.carrier) || []), option])
+  return [...groups].map(([provider, channels]) => {
+    const stored = (country?.providers || financeTaxSettings.value.providers).find(row => row.provider === provider)
+    return { provider, channels, selected: stored?.selected === true, mode: stored?.mode || 'taxable' }
+  })
+})
 const filteredTaxProviders = computed(() => {
   const query = financeTaxProviderSearch.value.trim().toLowerCase()
-  return financeTaxSettings.value.providers.filter(setting => setting.selected && (!query
+  return taxCountryProviders.value.filter(setting => setting.selected && (!query
     || `${setting.provider} ${setting.channels.map(channel => `${channel.channel} ${channel.ruleName}`).join(' ')}`.toLowerCase().includes(query))
   )
 })
 const availableTaxCountries = computed(() => financeTaxSettings.value.countries.filter(setting => !setting.selected).sort((a, b) => a.country.localeCompare(b.country, 'zh-CN')))
-const availableTaxProviders = computed(() => financeTaxSettings.value.providers.filter(setting => !setting.selected).sort((a, b) => a.provider.localeCompare(b.provider, 'zh-CN')))
+const availableTaxProviders = computed(() => taxCountryProviders.value.filter(setting => !setting.selected).sort((a, b) => a.provider.localeCompare(b.provider, 'zh-CN')))
 const filteredAvailableTaxCountries = computed(() => {
   const query = financeTaxCountryAddSearch.value.trim().toLowerCase()
   return availableTaxCountries.value.filter(setting => {
@@ -432,44 +442,42 @@ async function saveSurchargeSettings() {
     toast(error instanceof Error ? error.message : '附加费保存失败，请重试')
   } finally { surchargeSaving.value = false }
 }
-function changeProviderTaxMode(setting: FinanceProviderTaxSetting, mode: LogisticsTaxMode) {
-  setting.mode = mode
+function openTaxCountry(country: string) {
+  taxDetailCountry.value = country
+  financeTaxProviderSearch.value = ''
+  financeTaxProviderAddOpen.value = false
 }
+function updateTaxProvider(provider: string, mode: LogisticsTaxMode, selected: boolean) {
+  const country = financeTaxSettings.value.countries.find(row => row.country === taxDetailCountry.value)
+  if (!country) return
+  country.providers = taxCountryProviders.value.map(row => ({ ...row, ...(row.provider === provider ? { mode, selected } : {}) }))
+}
+function changeProviderTaxMode(setting: FinanceProviderTaxSetting, mode: LogisticsTaxMode) { updateTaxProvider(setting.provider, mode, true) }
 function addTaxCountry() {
   const setting = financeTaxSettings.value.countries.find(item => item.country === financeTaxCountryAdd.value)
   if (!setting) return
   setting.selected = true
-  financeTaxCountryAdd.value = ''
-  financeTaxCountryAddSearch.value = ''
+  setting.providers ??= []
+  openTaxCountry(setting.country)
   financeTaxCountryAddOpen.value = false
-  toast(`${setting.country} 已加入国家关税设置`)
 }
 function removeTaxCountry(setting: FinanceCountryTaxSetting) {
+  if (taxDetailCountry.value === setting.country) taxDetailCountry.value = ''
   setting.selected = false
   setting.enabled = false
   setting.fixedFeeUsd = 0
-  toast(`${setting.country} 已移出关税设置，保存后生效`)
 }
-function addTaxProvider() {
-  const setting = financeTaxSettings.value.providers.find(item => item.provider === financeTaxProviderAdd.value)
-  if (!setting) return
-  setting.selected = true
-  financeTaxProviderAdd.value = ''
-  financeTaxProviderAddSearch.value = ''
-  financeTaxProviderAddOpen.value = false
-  toast(`${setting.provider} 已加入物流商税务设置`)
-}
-function removeTaxProvider(setting: FinanceProviderTaxSetting) {
-  setting.selected = false
-  toast(`${setting.provider} 已移出税务设置，保存后将视为未配置`)
-}
+function addTaxProvider() { updateTaxProvider(financeTaxProviderAdd.value, 'taxable', true); financeTaxProviderAddOpen.value = false }
+function removeTaxProvider(setting: FinanceProviderTaxSetting) { updateTaxProvider(setting.provider, setting.mode, false) }
+const taxSaving = ref(false)
 async function saveTaxSettings() {
-  financeTaxSettings.value.countries.forEach(setting => {
-    setting.fixedFeeUsd = Math.max(0, Number(setting.fixedFeeUsd) || 0)
-    setting.enabled = setting.fixedFeeUsd > 0
-  })
-  financeTaxSettings.value = await saveFinanceTaxSettings(financeTaxSettings.value)
-  toast('国家关税与物流商全局税务属性已保存')
+  if (taxSaving.value) return
+  taxSaving.value = true
+  try {
+    financeTaxSettings.value = await saveFinanceTaxSettings({ ...financeTaxSettings.value, countries: financeTaxSettings.value.countries.map(setting => ({ ...setting, enabled: setting.fixedFeeUsd > 0 })) })
+    toast('国家关税与对应物流商税务属性已保存')
+  } catch (error) { toast(error instanceof Error ? error.message : '税务设置保存失败，请重试') }
+  finally { taxSaving.value = false }
 }
 function startFinanceTabDrag(tab: FinanceSettingsTab, event: DragEvent) {
   draggedFinanceTab.value = tab
@@ -1108,7 +1116,7 @@ function saveEditor() {
       </section>
       <section v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='taxes'" class="finance-tax-workspace">
         <header>
-          <div><small>FINANCE TAX POLICY</small><b>税率设置</b><span>国家关税与物流商税务属性独立维护，确保报价计算清晰可追溯。</span></div>
+          <div><small>FINANCE TAX POLICY</small><b>税率设置</b><span>点击国家名称，设置该国家物流商免税与不免税；关税按整单计入一次。</span></div>
           <aside><span>最近保存：{{ financeTaxSettings.updatedAt }}</span><button class="primary" type="button" @click="saveTaxSettings">保存并发布</button></aside>
         </header>
         <div class="finance-tax-content">
@@ -1118,7 +1126,7 @@ function saveEditor() {
             <div class="tax-country-head"><span>国家</span><span>关税（USD/单）</span><span>状态</span><span>操作</span></div>
             <div class="tax-country-rows">
               <article v-for="setting in financeTaxCountries" :key="setting.country">
-                <span><b>{{ setting.country }}</b><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }}</small></span>
+                <span><button type="button" class="tax-country-detail-button" :aria-label="`设置${setting.country}物流商税务`" @click="openTaxCountry(setting.country)">{{ setting.country }} ›</button><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }}</small></span>
                 <label><i>$</i><input v-model.number="setting.fixedFeeUsd" :aria-label="`${setting.country}关税`" type="number" min="0" step="0.01"><strong>/ 单</strong><small>≈ ¥{{ fixedFeeCny(setting.fixedFeeUsd) }}</small></label>
                 <em :class="{ active:setting.fixedFeeUsd>0 }">{{ setting.fixedFeeUsd>0 ? '已启用' : '待设置' }}</em>
                 <button class="tax-remove-button" type="button" :aria-label="`删除${setting.country}关税设置`" @click="removeTaxCountry(setting)">删除</button>
@@ -1127,8 +1135,8 @@ function saveEditor() {
             </div>
             <footer>{{ financeTaxPreview }}</footer>
           </section>
-          <section class="tax-provider-global">
-            <header><div><b>物流商税务属性 <em>全局</em></b><span>统一设置一次，适用于该物流商旗下全部渠道。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableTaxProviders.length" @click="financeTaxProviderAddOpen=true;financeTaxProviderAddSearch='';financeTaxProviderAdd=availableTaxProviders[0]?.provider || ''">＋ 添加物流商</button><label>⌕<input v-model="financeTaxProviderSearch" placeholder="搜索已添加物流商"></label></aside></header>
+          <section v-if="taxDetailCountry" class="tax-provider-global">
+            <header><div><b>物流商税务属性 <em>{{ taxDetailCountry }}</em></b><span>仅适用于当前国家，该物流商在此国家的全部渠道统一生效。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableTaxProviders.length" @click="financeTaxProviderAddOpen=true;financeTaxProviderAddSearch='';financeTaxProviderAdd=availableTaxProviders[0]?.provider || ''">＋ 添加物流商</button><label>⌕<input v-model="financeTaxProviderSearch" placeholder="搜索已添加物流商"></label></aside></header>
             <div v-if="financeTaxProviderAddOpen" class="tax-add-row"><label class="tax-add-search">⌕<input v-model="financeTaxProviderAddSearch" autofocus placeholder="输入物流商或渠道名称搜索"></label><select v-model="financeTaxProviderAdd"><option v-if="!filteredAvailableTaxProviders.length" value="" disabled>没有匹配的物流商</option><option v-for="setting in filteredAvailableTaxProviders" :key="setting.provider" :value="setting.provider">{{ setting.provider }} · {{ setting.channels.length }}个渠道</option></select><button class="primary" type="button" :disabled="!financeTaxProviderAdd" @click="addTaxProvider">确认添加</button><button type="button" @click="financeTaxProviderAddOpen=false;financeTaxProviderAdd='';financeTaxProviderAddSearch=''">取消</button></div>
             <div class="tax-provider-head"><span>物流商</span><span>覆盖渠道</span><span>税务属性</span><span>操作</span></div>
             <div class="tax-provider-list-compact">
