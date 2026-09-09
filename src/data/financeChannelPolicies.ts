@@ -1,3 +1,4 @@
+import { logisticsAttributeOptions, normalizeLogisticsAttribute } from './logisticsAttributes'
 import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation, type LogisticsPriceRow } from './logistics'
 import {
   defaultCountrySortOrder,
@@ -8,7 +9,7 @@ import {
 } from './countryClassification'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
-export const financeLogisticsAttributeOptions = ['普货', '化妆品', '保健品', '带电', '纯电池', '液体', '粉末', '非液体化妆品', '带磁', '微敏感'] as const
+export const financeLogisticsAttributeOptions = logisticsAttributeOptions
 export type FinanceLogisticsAttribute = string
 
 export type FinanceLogisticsChannelOption = {
@@ -227,7 +228,7 @@ function defaultCountryRule(attribute: string, country: string): FinanceCountryC
 }
 
 // New shipment attributes require an explicit finance policy; never inherit general cargo permissions.
-const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions.filter(attribute => attribute !== '化妆品' && attribute !== '保健品').map(attribute => ({
+const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions.filter(attribute => attribute !== '化妆品' && attribute !== '保健品' && attribute !== '服装').map(attribute => ({
   id: attribute,
   category: attribute,
   countryRules: [defaultCountryRule(attribute, '美国')],
@@ -237,6 +238,7 @@ const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions
 
 export function normalizePolicies(policies: FinanceChannelPolicy[]) {
   return policies.filter(policy => typeof policy.category === 'string' && policy.category.trim()).map(policy => {
+    policy = { ...policy, category: normalizeLogisticsAttribute(policy.category) }
     const countryMeta = new Map(countriesAvailableForCategory(policy.category).map(country => [country.name, country]))
     return {
       ...policy,
@@ -306,7 +308,8 @@ export function customerGradeCoefficient(settings: CustomerGradeSetting[], grade
 }
 
 export function financeCountriesForCategory(policies: FinanceChannelPolicy[], attribute: string) {
-  const policy = policies.find(item => item.enabled && item.category === attribute)
+  const matches = policies.filter(item => normalizeLogisticsAttribute(item.category) === normalizeLogisticsAttribute(attribute))
+  const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
   const available = new Set(countriesAvailableForCategory(attribute).map(country => country.name))
   return policy?.countryRules.filter(rule => rule.allowedChannels.length && available.has(rule.country)).map(rule => rule.country) ?? []
 }
@@ -329,7 +332,8 @@ export function financeAllowsLogisticsChannel(
   policies: FinanceChannelPolicy[], attribute: string, country: string, ruleId: number,
   relation: Pick<LogisticsRelation, 'carrier' | 'channel' | 'channelCode'>,
 ) {
-  const policy = policies.find(item => item.enabled && item.category === attribute)
+  const matches = policies.filter(item => normalizeLogisticsAttribute(item.category) === normalizeLogisticsAttribute(attribute))
+  const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
   const countryRule = policy?.countryRules.find(rule => rule.country === country)
   const key = financeChannelKey(ruleId, relation)
   return (countryRule?.allowedChannels.includes(key) ?? false)

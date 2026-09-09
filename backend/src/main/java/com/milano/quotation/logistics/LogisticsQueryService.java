@@ -489,7 +489,7 @@ public class LogisticsQueryService {
     }
 
     static boolean eligible(JsonNode row, String attribute) {
-        var mark = attribute == null || attribute.isBlank() ? "普货" : attribute.trim();
+        var mark = attribute == null || attribute.isBlank() ? "普货" : com.milano.quotation.common.LogisticsAttributes.normalize(attribute);
         // Keep cosmetics, non-liquid cosmetics and supplements as distinct shipment attributes.
         var prohibited = splitMarks(row.path("prohibitedMarks").asText(""));
         if (prohibited.contains(mark)) return false;
@@ -500,7 +500,7 @@ public class LogisticsQueryService {
 
     private static Set<String> splitMarks(String value) {
         var result = new java.util.HashSet<String>();
-        for (var item : value.split("[,，、;；|]")) if (!item.isBlank()) result.add(item.trim());
+        for (var item : value.split("[,，、;；|]")) if (!item.isBlank()) result.add(com.milano.quotation.common.LogisticsAttributes.normalize(item));
         return result;
     }
 

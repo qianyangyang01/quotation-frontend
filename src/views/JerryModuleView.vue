@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { normalizeLogisticsAttribute } from '@/data/logisticsAttributes'
 import { saveFinanceSurchargeSettings, type FinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { loadQuotationSync, startQuotationSync } from '@/services/quotationSync'
@@ -784,7 +785,7 @@ async function saveFinancePolicy() {
   if (!await hydrateFinanceLogisticsContext()) return
   if (!showEditor.value || editorRequestId !== financeEditorRequestId || props.mode !== 'members') return
   const form = financePolicyForm.value
-  const category = form.category.trim()
+  const category = normalizeLogisticsAttribute(form.category)
   form.countryRules.forEach(rule => { rule.country = rule.country.trim() })
   if (!category || !form.countryRules.length) { toast('请先填写财务品类并配置国家'); return }
   const financeCountryNameSet = new Set(financeLogisticsCountries.value.map(country => country.name))

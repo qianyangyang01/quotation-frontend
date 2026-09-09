@@ -82,7 +82,10 @@ public class LogisticsQuotationGuard {
         }
     }
     static boolean allowed(JsonNode policies,String attribute,String country,String key){
-        for(var policy:policies)if(policy.path("enabled").asBoolean()&&policy.path("category").asText().equals(attribute))
+        int matches=0;
+        for(var policy:policies)if(com.milano.quotation.common.LogisticsAttributes.normalize(policy.path("category").asText()).equals(com.milano.quotation.common.LogisticsAttributes.normalize(attribute)))matches++;
+        if(matches!=1)return false;
+        for(var policy:policies)if(policy.path("enabled").asBoolean()&&com.milano.quotation.common.LogisticsAttributes.normalize(policy.path("category").asText()).equals(com.milano.quotation.common.LogisticsAttributes.normalize(attribute)))
             for(var rule:policy.path("countryRules"))if(rule.path("country").asText().equals(country))
                 for(var allowed:rule.path("allowedChannels"))if(allowed.asText().equals(key))return true;
         return false;

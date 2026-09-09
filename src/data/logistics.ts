@@ -1,3 +1,4 @@
+import { normalizeLogisticsAttribute } from './logisticsAttributes'
 export interface LogisticsPriceRow {
   areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number; etaStatus?: string
   prohibitedMarks: string; allowedMarks: string; maxPerimeterCm: number; maxSideCm: number
@@ -160,12 +161,13 @@ export function isWeightRangePrice(price: LogisticsPriceRow) {
     && ![price.firstWeightKg, price.firstWeightPrice, price.nextWeightKg, price.nextWeightPrice, price.intervalPrice, price.surcharge].some(value => value > 0)
 }
 export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: string[] = ['普货']) {
+  productMarks = productMarks.map(normalizeLogisticsAttribute)
   if (price.quoteReady === false || !isWeightRangePrice(price)) return false
   const marks = normalizeShippingMarks(productMarks)
-  const prohibited = new Set(splitMarks(price.prohibitedMarks))
+  const prohibited = new Set(splitMarks(price.prohibitedMarks).map(normalizeLogisticsAttribute))
   if (marks.some(mark => prohibited.has(mark))) return false
   if (price.prohibitGeneralCargo && marks.includes('普货')) return false
-  const allowed = new Set(splitMarks(price.allowedMarks))
+  const allowed = new Set(splitMarks(price.allowedMarks).map(normalizeLogisticsAttribute))
   return !allowed.size || marks.every(mark => mark === '普货' || allowed.has(mark))
 }
 export function findPriceRow(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], quoteRegion = '') {

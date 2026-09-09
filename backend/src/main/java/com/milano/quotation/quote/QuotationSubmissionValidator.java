@@ -54,6 +54,7 @@ public class QuotationSubmissionValidator {
         required(errors, input, "primarySku", "请选择正式采购商品", 2000);
         required(errors, input, "productCategory", "请选择有效的产品品类", 120);
         required(errors, input, "logisticsAttribute", "物流属性不能为空", 60);
+        if("液体".equals(input.path("logisticsAttribute").asText().trim()))errors.add(new ApiResponse.FieldError("logisticsAttribute", "液体属性已停用，请重新选择物流属性并计价"));
         oneOf(errors, input, "customerGrade", GRADES, "客户等级不合法");
         oneOf(errors, input, "monthlySalesEstimate", SALES, "预估月销量不合法");
         validateBundle(errors, input);

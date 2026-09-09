@@ -24,7 +24,7 @@ final class FinanceSettingValidation {
             }
             case "channel-policies" -> {
                 var seen = new HashSet<String>(); for (var policy : array(body,"policies")) {
-                    object(policy); unique(policy,"category",seen); var countries = new HashSet<String>();
+                    object(policy); if(policy instanceof tools.jackson.databind.node.ObjectNode item) item.put("category",com.milano.quotation.common.LogisticsAttributes.normalize(policy.path("category").asText())); unique(policy,"category",seen); var countries = new HashSet<String>();
                     if (!policy.path("countryRules").isArray()) fail("国家渠道配置必须为列表");
                     for (var row : policy.path("countryRules")) { object(row); unique(row,"country",countries);
                         if (!row.path("allowedChannels").isArray()) fail("允许渠道必须为列表");

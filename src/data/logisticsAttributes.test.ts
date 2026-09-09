@@ -12,7 +12,7 @@ it('puts the four preferred attributes first for finance and quotation', () => {
   expect(financeLogisticsAttributeOptions.slice(0, 4)).toEqual(['普货', '化妆品', '保健品', '带电'])
 })
 
-it.each(['化妆品', '保健品'])('requires explicit finance authorization for %s and preserves it through saving', async attribute => {
+it.each(['化妆品', '保健品', '服装'])('requires explicit finance authorization for %s and preserves it through saving', async attribute => {
   replaceLogisticsRules([rule])
   expect(financeLogisticsAttributeOptions).toContain(attribute)
   expect(financeLogisticsAttributeOptions).toContain('非液体化妆品')
@@ -33,7 +33,7 @@ it.each(['化妆品', '保健品'])('requires explicit finance authorization for
   expect(calculateLogisticsFee(rule, '美国', .5, [attribute])?.total).toBe(35)
 })
 
-it.each(['化妆品', '保健品'])('matches explicit allowed and prohibited marks without aliases for %s', attribute => {
+it.each(['化妆品', '保健品', '服装'])('matches explicit allowed and prohibited marks without aliases for %s', attribute => {
   const row = rule.prices[0]!
   expect(isPriceRowEligible({ ...row, allowedMarks: '非液体化妆品' }, [attribute])).toBe(false)
   expect(isPriceRowEligible({ ...row, allowedMarks: attribute }, [attribute])).toBe(true)
