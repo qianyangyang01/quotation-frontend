@@ -55,3 +55,18 @@ it('isolates country and channel exemptions, including empty selection and missi
   expect(normalized.countries.find(row => row.country === '美国')?.exemptChannelKeys).toEqual([])
   expect(normalized.countries.find(row => row.country === '新西兰')?.exemptChannelKeys).toEqual(['1::递四方::A'])
 })
+
+it('uses country providers for every channel and preserves independent settings on reload', async () => {
+  const scoped = { ...settings(1.5), countries: [
+    { ...settings(1.5).countries[0]!, country: '新西兰', providers: settings(1.5, true).providers },
+    { ...settings(0.5).countries[0]!, country: '英国', providers: settings(0.5, false).providers },
+  ] }
+  for (const key of ['1::递四方::A', '2::递四方::B']) {
+    expect(calculateFinanceQuoteFees(settings(0), scoped, '新西兰', '递四方', 10, key).surchargeUsd).toBe(0)
+    expect(calculateFinanceQuoteFees(settings(0), scoped, '英国', '递四方', 10, key).surchargeUsd).toBe(0.5)
+  }
+  expect(calculateFinanceQuoteFees(settings(0), scoped, '英国', '未配置商', 10).configured).toBe(false)
+  const saved = await saveFinanceSurchargeSettings(scoped)
+  expect(saved.countries.find(c => c.country === '新西兰')?.providers?.[0]?.mode).toBe('exempt')
+  expect(saved.countries.find(c => c.country === '英国')?.providers?.[0]?.mode).toBe('taxable')
+})

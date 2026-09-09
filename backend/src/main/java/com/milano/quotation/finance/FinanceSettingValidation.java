@@ -38,6 +38,11 @@ final class FinanceSettingValidation {
                 var countries = new HashSet<String>();
                 for (var row : body.path("countries")) {
                     object(row); unique(row,"country",countries); number(row.path("fixedFeeUsd"),"fixedFeeUsd",false);
+                    if (row.has("providers")) {
+                        if (!row.path("providers").isArray()) fail("国家物流商配置必须为列表");
+                        var names = new HashSet<String>();
+                        for (var provider : row.path("providers")) { object(provider); unique(provider,"provider",names); if (!Set.of("exempt","taxable").contains(provider.path("mode").asText())) fail("物流商附加费属性不合法"); }
+                    }
                     if (row.has("exemptChannelKeys")) {
                         if (!row.path("exemptChannelKeys").isArray()) fail("免附加费渠道必须为列表");
                         var keys = new HashSet<String>();

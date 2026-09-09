@@ -76,14 +76,14 @@ public class LogisticsQuotationGuard {
             if (!country.path("country").asText().equals(option.path("country").asText()) || !country.path("selected").asBoolean()) continue;
             enabled = country.path("enabled").asBoolean() && country.path("fixedFeeUsd").asDouble() > 0;
             if (!enabled) break;
-            if (country.path("exemptChannelKeys").isArray()) {
+            if (!country.path("providers").isArray() && country.path("exemptChannelKeys").isArray()) {
                 for (var key : country.path("exemptChannelKeys")) if (key.asText().equals(option.path("channelKey").asText())) exempt = true;
             } else {
                 // Retain legacy behavior until this country is explicitly confirmed by finance.
                 configured = false;
                 var parts = option.path("channelKey").asText().split("::", 3);
                 var provider = parts.length == 3 ? parts[1] : "";
-                for (var row : settings.path("providers")) if (row.path("selected").asBoolean() && row.path("provider").asText().trim().equals(provider.trim())) {
+                for (var row : country.path("providers").isArray() ? country.path("providers") : settings.path("providers")) if (row.path("selected").asBoolean() && row.path("provider").asText().trim().equals(provider.trim())) {
                     configured = true; exempt = "exempt".equals(row.path("mode").asText()); break;
                 }
             }

@@ -21,4 +21,18 @@ class LogisticsSurchargeGuardTest {
     option.put("surchargeUsd",1.5);
     assertDoesNotThrow(() -> LogisticsQuotationGuard.validateSurcharge(settings, option));
   }
+  @Test void countryProvidersApplyToAllTheirChannelsOnlyInThatCountry() {
+    var settings = mapper.readTree("""
+      {"countries":[{"country":"NZ","selected":true,"enabled":true,"fixedFeeUsd":1.5,"providers":[{"provider":"P","selected":true,"mode":"exempt"}]},
+      {"country":"GB","selected":true,"enabled":true,"fixedFeeUsd":0.5,"providers":[{"provider":"P","selected":true,"mode":"taxable"}]}]}
+      """);
+    for (var key : new String[]{"1::P::A", "2::P::B"}) {
+      var option = mapper.createObjectNode().put("country","NZ").put("channelKey",key).put("surchargeUsd",0).put("surchargeConfigured",true).put("surchargeEnabled",true).put("surchargeExempt",true);
+      assertDoesNotThrow(() -> LogisticsQuotationGuard.validateSurcharge(settings, option));
+      option.put("country","GB");
+      assertThrows(AppException.class, () -> LogisticsQuotationGuard.validateSurcharge(settings, option));
+      option.put("surchargeUsd",0.5).put("surchargeExempt",false);
+      assertDoesNotThrow(() -> LogisticsQuotationGuard.validateSurcharge(settings, option));
+    }
+  }
 }

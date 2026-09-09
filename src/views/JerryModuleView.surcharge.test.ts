@@ -5,7 +5,7 @@ const fixture = vi.hoisted(() => ({
   policies: [{ id: 'policy', category: '普货', enabled: true, countryRules: [], note: '' }],
   countries: [], customerGrades: [], exchangeRate: { usdCny: 6.7, updatedAt: '' },
   taxSettings: { countries: [], providers: [], updatedAt: '' },
-  surchargeSettings: { countries: [{ country: '新西兰', selected: true, enabled: true, fixedFeeUsd: 1.5, sortOrder: 1, exemptChannelKeys: ['1::测试::A'] }, { country: '英国', selected: true, enabled: true, fixedFeeUsd: 0.5, sortOrder: 2, exemptChannelKeys: [] }], providers: [], updatedAt: '' },
+  surchargeSettings: { countries: [{ country: '新西兰', selected: true, enabled: true, fixedFeeUsd: 1.5, sortOrder: 1, providers: [{ provider: '测试', mode: 'exempt', selected: true, channels: [] }] }, { country: '英国', selected: true, enabled: true, fixedFeeUsd: 0.5, sortOrder: 2, providers: [{ provider: '测试', mode: 'taxable', selected: true, channels: [] }] }], providers: [], updatedAt: '' },
 }))
 vi.mock('@/services/financeSettingsWorkspace', () => ({ loadFinanceSettingsWorkspace: async () => fixture, readFinanceSettingsWorkspace: () => fixture }))
 vi.mock('@/data/publishedLogisticsRepository', async importOriginal => ({ ...await importOriginal<object>(),
@@ -32,20 +32,20 @@ it('renders only the surcharge workspace with existing logistics policies and em
   expect(document.querySelector('.finance-tax-workspace')?.textContent).toContain('点击国家名称')
   expect(document.querySelector('.table-card')).toBeNull()
   expect(document.querySelectorAll('.finance-stats>[role=button]')).toHaveLength(6)
-  const open = (country: string) => document.querySelector<HTMLButtonElement>(`[aria-label="设置${country}免附加费渠道"]`)!.click()
+  const open = (country: string) => document.querySelector<HTMLButtonElement>(`[aria-label="设置${country}物流商附加费"]`)!.click()
   open('新西兰'); await nextTick()
-  let checks = [...document.querySelectorAll<HTMLInputElement>('.surcharge-country-channels input')]
-  expect(checks.map(c => c.checked)).toEqual([true, false])
-  checks[1]!.click(); await nextTick()
-  document.querySelector<HTMLButtonElement>('[aria-label="新西兰附加费详情"] footer button')!.click(); await nextTick()
-  open('新西兰'); await nextTick()
-  checks = [...document.querySelectorAll<HTMLInputElement>('.surcharge-country-channels input')]
-  expect(checks.map(c => c.checked)).toEqual([true, false])
+  expect(document.querySelector('.tax-provider-global')?.textContent).toContain('物流商附加费属性')
+  expect(document.querySelector('.tax-provider-global button.active')?.textContent).toBe('免附加费')
+  expect(document.querySelector('.tax-provider-global input[type=checkbox]')).toBeNull()
   open('英国'); await nextTick()
-  checks = [...document.querySelectorAll<HTMLInputElement>('.surcharge-country-channels input')]
-  expect(checks.map(c => c.checked)).toEqual([false, false])
-  checks[1]!.click(); await nextTick()
-  document.querySelector<HTMLButtonElement>('[aria-label="英国附加费详情"] footer button.primary')!.click(); await nextTick()
-  expect(fixture.surchargeSettings.countries[0]!.exemptChannelKeys).toEqual(['1::测试::A'])
-  expect(fixture.surchargeSettings.countries[1]!.exemptChannelKeys).toEqual(['2::测试::B'])
+  expect(document.querySelector('.tax-provider-global button.active')?.textContent).toBe('不免附加费')
+  const free = [...document.querySelectorAll<HTMLButtonElement>('.tax-provider-global button')].find(b => b.textContent === '免附加费')!
+  free.click(); await nextTick()
+  expect(fixture.surchargeSettings.countries[0]!.providers[0]!.mode).toBe('exempt')
+  expect(fixture.surchargeSettings.countries[1]!.providers[0]!.mode).toBe('exempt')
+  open('新西兰'); await nextTick()
+  const paid = [...document.querySelectorAll<HTMLButtonElement>('.tax-provider-global button')].find(b => b.textContent === '不免附加费')!
+  paid.click(); await nextTick()
+  expect(fixture.surchargeSettings.countries[0]!.providers[0]!.mode).toBe('taxable')
+  expect(fixture.surchargeSettings.countries[1]!.providers[0]!.mode).toBe('exempt')
 })

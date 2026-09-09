@@ -218,7 +218,7 @@ const financeSummaryCards = computed(() => {
   const cards: Record<FinanceSettingsTab, { id: FinanceSettingsTab; icon: string; label: string; value: string | number; description: string }> = {
     countries: { id: 'countries', icon: '国', label: '常用国家设置', value: financeStageCountryCount('common'), description: `最多 ${COMMON_COUNTRY_LIMIT} 个 · 与业务报价同步` },
     logistics: { id: 'logistics', icon: '物', label: '物流属性与渠道', value: financePolicyCategoryCount.value, description: `覆盖 ${financePolicyCountryCount.value} 个已授权国家` },
-    surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 渠道独立豁免' },
+    surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 物流商独立豁免' },
     taxes: { id: 'taxes', icon: '税', label: '税率设置', value: configuredTaxCountryCount.value, description: `已配置 ${configuredTaxCountryCount.value} 个国家` },
     grades: { id: 'grades', icon: '级', label: 'S–E 客户等级系数', value: enabledCustomerGradeCount.value, description: `共 6 个等级，${enabledCustomerGradeCount.value} 个已启用` },
     exchange: { id: 'exchange', icon: '汇', label: '美元汇率设置', value: financeExchangeRate.value.usdCny.toFixed(4), description: `1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY` },
@@ -369,7 +369,7 @@ function addSurchargeCountry() {
   const setting = financeSurchargeSettings.value.countries.find(item => item.country === financeSurchargeCountryAdd.value)
   if (!setting) return
   setting.selected = true
-  setting.exemptChannelKeys ??= []
+  setting.providers ??= []
   financeSurchargeCountryAdd.value = ''
   financeSurchargeCountryAddSearch.value = ''
   financeSurchargeCountryAddOpen.value = false
@@ -383,37 +383,46 @@ function removeSurchargeCountry(setting: FinanceCountryTaxSetting) {
   toast(`${setting.country} 已移出附加费设置，保存后生效`)
 }
 const surchargeDetailCountry = ref('')
-const surchargeDetailKeys = ref<string[]>([])
-const surchargeDetailSearch = ref('')
-const surchargeDetailOptions = computed(() => channelsAvailableForCountry(surchargeDetailCountry.value))
-const surchargeDetailGroups = computed(() => {
-  const groups = new Map<string, typeof surchargeDetailOptions.value>()
-  const query = surchargeDetailSearch.value.trim().toLowerCase()
-  for (const option of surchargeDetailOptions.value) {
-    if (query && !`${option.carrier} ${option.channel}`.toLowerCase().includes(query)) continue
-    groups.set(option.carrier, [...(groups.get(option.carrier) || []), option])
-  }
-  return [...groups].map(([provider, channels]) => ({ provider, channels }))
+const financeSurchargeProviderSearch = ref('')
+const financeSurchargeProviderAdd = ref('')
+const financeSurchargeProviderAddOpen = ref(false)
+const financeSurchargeProviderAddSearch = ref('')
+const surchargeCountryProviders = computed<FinanceProviderTaxSetting[]>(() => {
+  const country = financeSurchargeSettings.value.countries.find(row => row.country === surchargeDetailCountry.value)
+  const groups = new Map<string, ReturnType<typeof channelsAvailableForCountry>>()
+  for (const option of channelsAvailableForCountry(surchargeDetailCountry.value)) groups.set(option.carrier, [...(groups.get(option.carrier) || []), option])
+  return [...groups].map(([provider, channels]) => {
+    const stored = (country?.providers || financeSurchargeSettings.value.providers).find(row => row.provider === provider)
+    if (!country?.providers && country?.exemptChannelKeys) {
+      const count = channels.filter(row => country.exemptChannelKeys!.includes(row.key)).length
+      return { provider, channels, selected: count === 0 || count === channels.length, mode: count === channels.length ? 'exempt' : 'taxable' }
+    }
+    return { provider, channels, selected: stored?.selected === true, mode: stored?.mode || 'taxable' }
+  })
 })
+const filteredSurchargeProviders = computed(() => surchargeCountryProviders.value.filter(row => row.selected && `${row.provider} ${row.channels.map(c => c.channel).join(' ')}`.includes(financeSurchargeProviderSearch.value.trim())))
+const availableSurchargeProviders = computed(() => surchargeCountryProviders.value.filter(row => !row.selected))
+const filteredAvailableSurchargeProviders = computed(() => availableSurchargeProviders.value.filter(row => row.provider.includes(financeSurchargeProviderAddSearch.value.trim())))
+function updateSurchargeProvider(provider: string, mode: LogisticsTaxMode, selected: boolean) {
+  const country = financeSurchargeSettings.value.countries.find(row => row.country === surchargeDetailCountry.value)
+  if (!country) return
+  country.providers = surchargeCountryProviders.value.map(row => ({ ...row, ...(row.provider === provider ? {mode, selected} : {}) }))
+  delete country.exemptChannelKeys
+}
+function changeProviderSurchargeMode(setting: FinanceProviderTaxSetting, mode: LogisticsTaxMode) { updateSurchargeProvider(setting.provider, mode, true) }
+function removeSurchargeProvider(setting: FinanceProviderTaxSetting) { updateSurchargeProvider(setting.provider, setting.mode, false) }
+function addSurchargeProvider() {
+  updateSurchargeProvider(financeSurchargeProviderAdd.value, 'taxable', true)
+  financeSurchargeProviderAddOpen.value = false
+}
 function openSurchargeCountry(country: string) {
   surchargeDetailCountry.value = country
-  surchargeDetailSearch.value = ''
-  surchargeDetailKeys.value = [...(financeSurchargeSettings.value.countries.find(row => row.country === country)?.exemptChannelKeys || [])]
-  void nextTick(() => document.querySelector('.surcharge-country-channels')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }))
-}
-function toggleSurchargeChannels(keys: string[]) {
-  const all = keys.every(key => surchargeDetailKeys.value.includes(key))
-  surchargeDetailKeys.value = all ? surchargeDetailKeys.value.filter(key => !keys.includes(key)) : [...new Set([...surchargeDetailKeys.value, ...keys])]
-}
-function confirmSurchargeCountry() {
-  const country = financeSurchargeSettings.value.countries.find(row => row.country === surchargeDetailCountry.value)
-  if (!country?.selected) return
-  country.exemptChannelKeys = [...surchargeDetailKeys.value]
-  surchargeDetailCountry.value = ''
+  financeSurchargeProviderSearch.value = ''
+  financeSurchargeProviderAddOpen.value = false
 }
 const surchargeSaving = ref(false)
 async function saveSurchargeSettings() {
-  if (surchargeSaving.value || surchargeDetailCountry.value) return
+  if (surchargeSaving.value) return
   surchargeSaving.value = true
   try {
     const draft = { ...financeSurchargeSettings.value, countries: financeSurchargeSettings.value.countries.map(setting => ({ ...setting, enabled: setting.fixedFeeUsd > 0 })) }
@@ -1061,8 +1070,8 @@ function saveEditor() {
       </section>
       <section v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='surcharges'" class="finance-tax-workspace">
         <header>
-          <div><small>FINANCE SURCHARGE POLICY</small><b>附加费设置</b><span>点击国家名称，设置该国家免附加费的渠道；未勾选渠道按国家金额收费。</span></div>
-          <aside><span>最近保存：{{ financeSurchargeSettings.updatedAt }}</span><button class="primary" type="button" :disabled="surchargeSaving || !!surchargeDetailCountry" @click="saveSurchargeSettings">{{ surchargeSaving ? '正在保存…' : '保存并发布' }}</button></aside>
+          <div><small>FINANCE SURCHARGE POLICY</small><b>附加费设置</b><span>点击国家名称，设置该国家各物流商是否免附加费。</span></div>
+          <aside><span>最近保存：{{ financeSurchargeSettings.updatedAt }}</span><button class="primary" type="button" :disabled="surchargeSaving" @click="saveSurchargeSettings">{{ surchargeSaving ? '正在保存…' : '保存并发布' }}</button></aside>
         </header>
         <div class="finance-tax-content">
           <section class="tax-country-matrix">
@@ -1071,7 +1080,7 @@ function saveEditor() {
             <div class="tax-country-head"><span>国家</span><span>附加费（USD/单）</span><span>状态</span><span>操作</span></div>
             <div class="tax-country-rows">
               <article v-for="setting in financeSurchargeCountries" :key="setting.country">
-                <span><button type="button" class="tax-country-detail-button" :aria-label="`设置${setting.country}免附加费渠道`" @click="openSurchargeCountry(setting.country)">{{ setting.country }} ›</button><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }} · {{ setting.exemptChannelKeys ? `免附加费 ${setting.exemptChannelKeys.length} 个渠道` : '渠道规则待确认（沿用旧规则）' }}</small></span>
+                <span><button type="button" class="tax-country-detail-button" :aria-label="`设置${setting.country}物流商附加费`" @click="openSurchargeCountry(setting.country)">{{ setting.country }} ›</button><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }} · {{ setting.providers ? '按国家设置物流商' : '沿用原规则' }}</small></span>
                 <label><i>$</i><input v-model.number="setting.fixedFeeUsd" :aria-label="`${setting.country}附加费`" type="number" min="0" step="0.01"><strong>/ 单</strong><small>≈ ¥{{ fixedFeeCny(setting.fixedFeeUsd) }}</small></label>
                 <em :class="{ active:setting.fixedFeeUsd>0 }">{{ setting.fixedFeeUsd>0 ? '已启用' : '待设置' }}</em>
                 <button class="tax-remove-button" type="button" :aria-label="`删除${setting.country}附加费设置`" @click="removeSurchargeCountry(setting)">删除</button>
@@ -1080,16 +1089,20 @@ function saveEditor() {
             </div>
             <footer>{{ financeSurchargePreview }}</footer>
           </section>
-          <section v-if="surchargeDetailCountry" class="tax-provider-global" role="region" :aria-label="`${surchargeDetailCountry}附加费详情`">
-            <header><div><b>{{ surchargeDetailCountry }} · 免附加费渠道</b><span>勾选表示免附加费；未勾选表示收取该国家附加费。仅影响当前国家。</span><span v-if="!financeSurchargeSettings.countries.find(row => row.country === surchargeDetailCountry)?.exemptChannelKeys">旧规则尚未转换，请核对后确认；取消不会改变原规则。</span></div><input v-model="surchargeDetailSearch" placeholder="搜索物流商或渠道"></header>
-            <div class="surcharge-country-channels">
-              <section v-for="group in surchargeDetailGroups" :key="group.provider">
-                <button type="button" @click="toggleSurchargeChannels(group.channels.map(row => row.key))">{{ group.provider }} · 全选／取消</button>
-                <label v-for="channel in group.channels" :key="channel.key"><input v-model="surchargeDetailKeys" type="checkbox" :value="channel.key">{{ channel.channel }}</label>
-              </section>
-              <p v-if="!surchargeDetailGroups.length">没有匹配的渠道</p>
+          <section v-if="surchargeDetailCountry" class="tax-provider-global" :aria-label="`${surchargeDetailCountry}附加费详情`">
+            <header><div><b>物流商附加费属性 <em>{{ surchargeDetailCountry }}</em></b><span>仅适用于当前国家，该物流商在此国家的全部渠道统一生效。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableSurchargeProviders.length" @click="financeSurchargeProviderAddOpen=true;financeSurchargeProviderAddSearch='';financeSurchargeProviderAdd=availableSurchargeProviders[0]?.provider || ''">＋ 添加物流商</button><label>⌕<input v-model="financeSurchargeProviderSearch" placeholder="搜索已添加物流商"></label></aside></header>
+            <div v-if="financeSurchargeProviderAddOpen" class="tax-add-row"><label class="tax-add-search">⌕<input v-model="financeSurchargeProviderAddSearch" autofocus placeholder="输入物流商或渠道名称搜索"></label><select v-model="financeSurchargeProviderAdd"><option v-if="!filteredAvailableSurchargeProviders.length" value="" disabled>没有匹配的物流商</option><option v-for="setting in filteredAvailableSurchargeProviders" :key="setting.provider" :value="setting.provider">{{ setting.provider }} · {{ setting.channels.length }}个渠道</option></select><button class="primary" type="button" :disabled="!financeSurchargeProviderAdd" @click="addSurchargeProvider">确认添加</button><button type="button" @click="financeSurchargeProviderAddOpen=false;financeSurchargeProviderAdd='';financeSurchargeProviderAddSearch=''">取消</button></div>
+            <div class="tax-provider-head"><span>物流商</span><span>覆盖渠道</span><span>附加费属性</span><span>操作</span></div>
+            <div class="tax-provider-list-compact">
+              <article v-for="setting in filteredSurchargeProviders" :key="setting.provider">
+                <span><b>{{ setting.provider }}</b><small>{{ setting.channels.slice(0,2).map(item=>item.channel).join('、') }}{{ setting.channels.length>2?'…':'' }}</small></span>
+                <span>{{ setting.channels.length }} 个渠道</span>
+                <div><button type="button" :class="{ active:setting.mode==='exempt' }" @click="changeProviderSurchargeMode(setting,'exempt')">免附加费</button><button type="button" :class="{ active:setting.mode==='taxable' }" @click="changeProviderSurchargeMode(setting,'taxable')">不免附加费</button></div>
+                <button class="tax-remove-button" type="button" :aria-label="`删除${setting.provider}附加费设置`" @click="removeSurchargeProvider(setting)">删除</button>
+              </article>
+              <p v-if="!filteredSurchargeProviders.length" class="tax-empty">还没有物流商附加费设置，点击“添加物流商”开始配置</p>
             </div>
-            <footer><button type="button" @click="surchargeDetailCountry=''">取消</button><button type="button" class="primary" @click="confirmSurchargeCountry">确认当前国家</button><span>确认后点击上方“保存并发布”生效。</span></footer>
+            <footer>ⓘ 免附加费物流商不叠加国家附加费；不免附加费物流商按上方国家固定金额计入整张报价单一次。</footer>
           </section>
         </div>
       </section>
