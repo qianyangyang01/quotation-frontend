@@ -36,7 +36,15 @@ final class FinanceSettingValidation {
                 object(body);
                 if (!body.path("countries").isArray() || !body.path("providers").isArray()) fail("附加费国家及物流商配置必须为列表");
                 var countries = new HashSet<String>();
-                for (var row : body.path("countries")) { object(row); unique(row,"country",countries); number(row.path("fixedFeeUsd"),"fixedFeeUsd",false); }
+                for (var row : body.path("countries")) {
+                    object(row); unique(row,"country",countries); number(row.path("fixedFeeUsd"),"fixedFeeUsd",false);
+                    if (row.has("exemptChannelKeys")) {
+                        if (!row.path("exemptChannelKeys").isArray()) fail("免附加费渠道必须为列表");
+                        var keys = new HashSet<String>();
+                        for (var channel : row.path("exemptChannelKeys"))
+                            if (!channel.isTextual() || !channel.asText().matches("[0-9]+::[^:]+::[^:]+") || !keys.add(channel.asText())) fail("免附加费渠道标识不合法或重复");
+                    }
+                }
                 var providers = new HashSet<String>();
                 for (var row : body.path("providers")) { object(row); unique(row,"provider",providers); if (!Set.of("exempt","taxable").contains(row.path("mode").asText())) fail("物流商附加费属性不合法"); }
             }

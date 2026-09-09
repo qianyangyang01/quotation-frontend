@@ -29,4 +29,13 @@ class FinanceSettingValidationTest {
             {"countries":[{"country":"美国","fixedFeeUsd":-2}],"providers":[]}
             """)));
     }
+    @Test void validatesScopedSurchargeKeys() {
+        for (var keys : new String[]{"null", "true", "[1]", "[\"bad\"]", "[\"1::P::A\",\"1::P::A\"]"}) {
+            var body = mapper.readTree("{\"countries\":[{\"country\":\"NZ\",\"fixedFeeUsd\":1.5,\"exemptChannelKeys\":"+keys+"}],\"providers\":[]}");
+            assertThrows(AppException.class, () -> FinanceSettingValidation.validate("surcharge-settings", body));
+        }
+        assertDoesNotThrow(() -> FinanceSettingValidation.validate("surcharge-settings", mapper.readTree("""
+            {"countries":[{"country":"NZ","fixedFeeUsd":1.5,"exemptChannelKeys":[]}],"providers":[]}
+            """)));
+    }
 }

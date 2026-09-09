@@ -99,13 +99,9 @@ const financeTabOrder = ref<FinanceSettingsTab[]>(loadFinanceTabOrder())
 const draggedFinanceTab = ref<FinanceSettingsTab | ''>('')
 const dragOverFinanceTab = ref<FinanceSettingsTab | ''>('')
 const financeSurchargeCountrySearch = ref('')
-const financeSurchargeProviderSearch = ref('')
 const financeSurchargeCountryAdd = ref('')
-const financeSurchargeProviderAdd = ref('')
 const financeSurchargeCountryAddOpen = ref(false)
-const financeSurchargeProviderAddOpen = ref(false)
 const financeSurchargeCountryAddSearch = ref('')
-const financeSurchargeProviderAddSearch = ref('')
 const financeTaxCountrySearch = ref('')
 const financeTaxProviderSearch = ref('')
 const financeTaxCountryAdd = ref('')
@@ -222,7 +218,7 @@ const financeSummaryCards = computed(() => {
   const cards: Record<FinanceSettingsTab, { id: FinanceSettingsTab; icon: string; label: string; value: string | number; description: string }> = {
     countries: { id: 'countries', icon: '国', label: '常用国家设置', value: financeStageCountryCount('common'), description: `最多 ${COMMON_COUNTRY_LIMIT} 个 · 与业务报价同步` },
     logistics: { id: 'logistics', icon: '物', label: '物流属性与渠道', value: financePolicyCategoryCount.value, description: `覆盖 ${financePolicyCountryCount.value} 个已授权国家` },
-    surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 物流商统一豁免' },
+    surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 渠道独立豁免' },
     taxes: { id: 'taxes', icon: '税', label: '税率设置', value: configuredTaxCountryCount.value, description: `已配置 ${configuredTaxCountryCount.value} 个国家` },
     grades: { id: 'grades', icon: '级', label: 'S–E 客户等级系数', value: enabledCustomerGradeCount.value, description: `共 6 个等级，${enabledCustomerGradeCount.value} 个已启用` },
     exchange: { id: 'exchange', icon: '汇', label: '美元汇率设置', value: financeExchangeRate.value.usdCny.toFixed(4), description: `1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY` },
@@ -236,14 +232,7 @@ const financeSurchargeCountries = computed(() => {
     .filter(setting => !query || setting.country.toLowerCase().includes(query))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN'))
 })
-const filteredSurchargeProviders = computed(() => {
-  const query = financeSurchargeProviderSearch.value.trim().toLowerCase()
-  return financeSurchargeSettings.value.providers.filter(setting => setting.selected && (!query
-    || `${setting.provider} ${setting.channels.map(channel => `${channel.channel} ${channel.ruleName}`).join(' ')}`.toLowerCase().includes(query))
-  )
-})
 const availableSurchargeCountries = computed(() => financeSurchargeSettings.value.countries.filter(setting => !setting.selected).sort((a, b) => a.country.localeCompare(b.country, 'zh-CN')))
-const availableSurchargeProviders = computed(() => financeSurchargeSettings.value.providers.filter(setting => !setting.selected).sort((a, b) => a.provider.localeCompare(b.provider, 'zh-CN')))
 const filteredAvailableSurchargeCountries = computed(() => {
   const query = financeSurchargeCountryAddSearch.value.trim().toLowerCase()
   return availableSurchargeCountries.value.filter(setting => {
@@ -251,13 +240,7 @@ const filteredAvailableSurchargeCountries = computed(() => {
     return !query || `${setting.country} ${meta?.code || ''}`.toLowerCase().includes(query)
   })
 })
-const filteredAvailableSurchargeProviders = computed(() => {
-  const query = financeSurchargeProviderAddSearch.value.trim().toLowerCase()
-  return availableSurchargeProviders.value.filter(setting => !query
-    || `${setting.provider} ${setting.channels.map(channel => `${channel.channel} ${channel.ruleName}`).join(' ')}`.toLowerCase().includes(query))
-})
 watch(financeSurchargeCountryAddSearch, () => { financeSurchargeCountryAdd.value = filteredAvailableSurchargeCountries.value[0]?.country || '' })
-watch(financeSurchargeProviderAddSearch, () => { financeSurchargeProviderAdd.value = filteredAvailableSurchargeProviders.value[0]?.provider || '' })
 const financeSurchargePreview = computed(() => {
   const setting = financeSurchargeCountries.value[0]
   if (!setting) return '请选择常用国家并设置附加费'
@@ -382,45 +365,60 @@ function fixedFeeCny(fixedFeeUsd: number) {
   const rate = Math.max(0, Number(financeExchangeRate.value.usdCny) || 0)
   return (usd * rate).toFixed(2)
 }
-function changeProviderSurchargeMode(setting: FinanceProviderTaxSetting, mode: LogisticsTaxMode) {
-  setting.mode = mode
-}
 function addSurchargeCountry() {
   const setting = financeSurchargeSettings.value.countries.find(item => item.country === financeSurchargeCountryAdd.value)
   if (!setting) return
   setting.selected = true
+  setting.exemptChannelKeys ??= []
   financeSurchargeCountryAdd.value = ''
   financeSurchargeCountryAddSearch.value = ''
   financeSurchargeCountryAddOpen.value = false
   toast(`${setting.country} 已加入国家附加费设置`)
 }
 function removeSurchargeCountry(setting: FinanceCountryTaxSetting) {
+  if (surchargeDetailCountry.value === setting.country) surchargeDetailCountry.value = ''
   setting.selected = false
   setting.enabled = false
   setting.fixedFeeUsd = 0
   toast(`${setting.country} 已移出附加费设置，保存后生效`)
 }
-function addSurchargeProvider() {
-  const setting = financeSurchargeSettings.value.providers.find(item => item.provider === financeSurchargeProviderAdd.value)
-  if (!setting) return
-  setting.selected = true
-  financeSurchargeProviderAdd.value = ''
-  financeSurchargeProviderAddSearch.value = ''
-  financeSurchargeProviderAddOpen.value = false
-  toast(`${setting.provider} 已加入物流商附加费设置`)
+const surchargeDetailCountry = ref('')
+const surchargeDetailKeys = ref<string[]>([])
+const surchargeDetailSearch = ref('')
+const surchargeDetailOptions = computed(() => channelsAvailableForCountry(surchargeDetailCountry.value))
+const surchargeDetailGroups = computed(() => {
+  const groups = new Map<string, typeof surchargeDetailOptions.value>()
+  const query = surchargeDetailSearch.value.trim().toLowerCase()
+  for (const option of surchargeDetailOptions.value) {
+    if (query && !`${option.carrier} ${option.channel}`.toLowerCase().includes(query)) continue
+    groups.set(option.carrier, [...(groups.get(option.carrier) || []), option])
+  }
+  return [...groups].map(([provider, channels]) => ({ provider, channels }))
+})
+function openSurchargeCountry(country: string) {
+  surchargeDetailCountry.value = country
+  surchargeDetailSearch.value = ''
+  surchargeDetailKeys.value = [...(financeSurchargeSettings.value.countries.find(row => row.country === country)?.exemptChannelKeys || [])]
+  void nextTick(() => document.querySelector('.surcharge-country-channels')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }))
 }
-function removeSurchargeProvider(setting: FinanceProviderTaxSetting) {
-  setting.selected = false
-  toast(`${setting.provider} 已移出附加费设置，保存后将视为未配置`)
+function toggleSurchargeChannels(keys: string[]) {
+  const all = keys.every(key => surchargeDetailKeys.value.includes(key))
+  surchargeDetailKeys.value = all ? surchargeDetailKeys.value.filter(key => !keys.includes(key)) : [...new Set([...surchargeDetailKeys.value, ...keys])]
+}
+function confirmSurchargeCountry() {
+  const country = financeSurchargeSettings.value.countries.find(row => row.country === surchargeDetailCountry.value)
+  if (!country?.selected) return
+  country.exemptChannelKeys = [...surchargeDetailKeys.value]
+  surchargeDetailCountry.value = ''
 }
 const surchargeSaving = ref(false)
 async function saveSurchargeSettings() {
-  if (surchargeSaving.value) return
+  if (surchargeSaving.value || surchargeDetailCountry.value) return
   surchargeSaving.value = true
   try {
     const draft = { ...financeSurchargeSettings.value, countries: financeSurchargeSettings.value.countries.map(setting => ({ ...setting, enabled: setting.fixedFeeUsd > 0 })) }
     financeSurchargeSettings.value = await saveFinanceSurchargeSettings(draft)
-    toast('国家附加费与物流商全局附加费属性已保存')
+    toast('国家附加费及对应渠道豁免规则已保存')
   } catch (error) {
     toast(error instanceof Error ? error.message : '附加费保存失败，请重试')
   } finally { surchargeSaving.value = false }
@@ -1063,8 +1061,8 @@ function saveEditor() {
       </section>
       <section v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='surcharges'" class="finance-tax-workspace">
         <header>
-          <div><small>FINANCE SURCHARGE POLICY</small><b>附加费设置</b><span>国家附加费与物流商附加费属性独立维护，确保报价计算清晰可追溯。</span></div>
-          <aside><span>最近保存：{{ financeSurchargeSettings.updatedAt }}</span><button class="primary" type="button" :disabled="surchargeSaving" @click="saveSurchargeSettings">{{ surchargeSaving ? '正在保存…' : '保存并发布' }}</button></aside>
+          <div><small>FINANCE SURCHARGE POLICY</small><b>附加费设置</b><span>点击国家名称，设置该国家免附加费的渠道；未勾选渠道按国家金额收费。</span></div>
+          <aside><span>最近保存：{{ financeSurchargeSettings.updatedAt }}</span><button class="primary" type="button" :disabled="surchargeSaving || !!surchargeDetailCountry" @click="saveSurchargeSettings">{{ surchargeSaving ? '正在保存…' : '保存并发布' }}</button></aside>
         </header>
         <div class="finance-tax-content">
           <section class="tax-country-matrix">
@@ -1073,7 +1071,7 @@ function saveEditor() {
             <div class="tax-country-head"><span>国家</span><span>附加费（USD/单）</span><span>状态</span><span>操作</span></div>
             <div class="tax-country-rows">
               <article v-for="setting in financeSurchargeCountries" :key="setting.country">
-                <span><b>{{ setting.country }}</b><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }}</small></span>
+                <span><button type="button" class="tax-country-detail-button" :aria-label="`设置${setting.country}免附加费渠道`" @click="openSurchargeCountry(setting.country)">{{ setting.country }} ›</button><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }} · {{ setting.exemptChannelKeys ? `免附加费 ${setting.exemptChannelKeys.length} 个渠道` : '渠道规则待确认（沿用旧规则）' }}</small></span>
                 <label><i>$</i><input v-model.number="setting.fixedFeeUsd" :aria-label="`${setting.country}附加费`" type="number" min="0" step="0.01"><strong>/ 单</strong><small>≈ ¥{{ fixedFeeCny(setting.fixedFeeUsd) }}</small></label>
                 <em :class="{ active:setting.fixedFeeUsd>0 }">{{ setting.fixedFeeUsd>0 ? '已启用' : '待设置' }}</em>
                 <button class="tax-remove-button" type="button" :aria-label="`删除${setting.country}附加费设置`" @click="removeSurchargeCountry(setting)">删除</button>
@@ -1082,20 +1080,16 @@ function saveEditor() {
             </div>
             <footer>{{ financeSurchargePreview }}</footer>
           </section>
-          <section class="tax-provider-global">
-            <header><div><b>物流商附加费属性 <em>全局</em></b><span>统一设置一次，适用于该物流商旗下全部渠道。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableSurchargeProviders.length" @click="financeSurchargeProviderAddOpen=true;financeSurchargeProviderAddSearch='';financeSurchargeProviderAdd=availableSurchargeProviders[0]?.provider || ''">＋ 添加物流商</button><label>⌕<input v-model="financeSurchargeProviderSearch" placeholder="搜索已添加物流商"></label></aside></header>
-            <div v-if="financeSurchargeProviderAddOpen" class="tax-add-row"><label class="tax-add-search">⌕<input v-model="financeSurchargeProviderAddSearch" autofocus placeholder="输入物流商或渠道名称搜索"></label><select v-model="financeSurchargeProviderAdd"><option v-if="!filteredAvailableSurchargeProviders.length" value="" disabled>没有匹配的物流商</option><option v-for="setting in filteredAvailableSurchargeProviders" :key="setting.provider" :value="setting.provider">{{ setting.provider }} · {{ setting.channels.length }}个渠道</option></select><button class="primary" type="button" :disabled="!financeSurchargeProviderAdd" @click="addSurchargeProvider">确认添加</button><button type="button" @click="financeSurchargeProviderAddOpen=false;financeSurchargeProviderAdd='';financeSurchargeProviderAddSearch=''">取消</button></div>
-            <div class="tax-provider-head"><span>物流商</span><span>覆盖渠道</span><span>附加费属性</span><span>操作</span></div>
-            <div class="tax-provider-list-compact">
-              <article v-for="setting in filteredSurchargeProviders" :key="setting.provider">
-                <span><b>{{ setting.provider }}</b><small>{{ setting.channels.slice(0,2).map(item=>item.channel).join('、') }}{{ setting.channels.length>2?'…':'' }}</small></span>
-                <span>{{ setting.channels.length }} 个渠道</span>
-                <div><button type="button" :class="{ active:setting.mode==='exempt' }" @click="changeProviderSurchargeMode(setting,'exempt')">免附加费</button><button type="button" :class="{ active:setting.mode==='taxable' }" @click="changeProviderSurchargeMode(setting,'taxable')">不免附加费</button></div>
-                <button class="tax-remove-button" type="button" :aria-label="`删除${setting.provider}附加费设置`" @click="removeSurchargeProvider(setting)">删除</button>
-              </article>
-              <p v-if="!filteredSurchargeProviders.length" class="tax-empty">还没有物流商附加费设置，点击“添加物流商”开始配置</p>
+          <section v-if="surchargeDetailCountry" class="tax-provider-global" role="region" :aria-label="`${surchargeDetailCountry}附加费详情`">
+            <header><div><b>{{ surchargeDetailCountry }} · 免附加费渠道</b><span>勾选表示免附加费；未勾选表示收取该国家附加费。仅影响当前国家。</span><span v-if="!financeSurchargeSettings.countries.find(row => row.country === surchargeDetailCountry)?.exemptChannelKeys">旧规则尚未转换，请核对后确认；取消不会改变原规则。</span></div><input v-model="surchargeDetailSearch" placeholder="搜索物流商或渠道"></header>
+            <div class="surcharge-country-channels">
+              <section v-for="group in surchargeDetailGroups" :key="group.provider">
+                <button type="button" @click="toggleSurchargeChannels(group.channels.map(row => row.key))">{{ group.provider }} · 全选／取消</button>
+                <label v-for="channel in group.channels" :key="channel.key"><input v-model="surchargeDetailKeys" type="checkbox" :value="channel.key">{{ channel.channel }}</label>
+              </section>
+              <p v-if="!surchargeDetailGroups.length">没有匹配的渠道</p>
             </div>
-            <footer>ⓘ 免附加费物流商不叠加国家附加费；不免附加费物流商按上方国家固定金额计入整张报价单一次。</footer>
+            <footer><button type="button" @click="surchargeDetailCountry=''">取消</button><button type="button" class="primary" @click="confirmSurchargeCountry">确认当前国家</button><span>确认后点击上方“保存并发布”生效。</span></footer>
           </section>
         </div>
       </section>
@@ -1355,4 +1349,11 @@ function saveEditor() {
 .finance-load-state{display:flex;align-items:center;gap:14px;min-height:78px;padding:18px 20px;border:1px solid #dfe6ea;border-left:4px solid var(--o);border-radius:10px;background:#fff;box-shadow:0 10px 28px rgba(24,38,50,.05)}.finance-load-state>i{width:24px;height:24px;flex:0 0 24px;border:3px solid #ffe2b8;border-top-color:var(--o);border-radius:50%;animation:finance-load-spin .8s linear infinite}.finance-load-state>span{display:grid;gap:5px}.finance-load-state b{font-size:14px}.finance-load-state small,.finance-load-state em{padding:0;background:transparent;color:#7e8a93;font-size:10px;font-style:normal}.finance-load-state.error{border-color:#efc9c4;border-left-color:#cc5143;background:#fff8f7}.finance-load-state.error>span{flex:1}.finance-load-state.error em{color:#a35b52}.finance-load-state>button{height:36px;margin-left:auto;padding:0 14px;border:1px solid #cf796f;border-radius:7px;background:#fff;color:#a13d31;font-size:10px;font-weight:850;cursor:pointer}@keyframes finance-load-spin{to{transform:rotate(360deg)}}
 .carrier-list .legacy-channel{background:#fff2dc;color:#9a5b08;border:1px dashed #dfa85c}.legacy-count{display:block;margin-top:4px;color:#a46617}.legacy-review-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:9px 11px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef;color:#91560b}.legacy-review-summary>span{display:grid;gap:2px}.legacy-review-summary small{color:#9a7b53}.legacy-review-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:8px;padding:10px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef;max-height:210px;overflow:auto}.legacy-review-list>b{grid-column:1/-1;color:#91560b}.legacy-review-list>span{display:grid;gap:3px;padding:7px 9px;border-radius:5px;background:#fff;color:#684d2a}.legacy-review-list small{color:#9a7b53}
 .finance-stats>div{height:88px;gap:10px;padding:12px 14px}.finance-stats>div>i{width:36px;height:36px;flex-basis:36px}.finance-stats b{font-size:23px}.finance-stats>div[role=button]:last-child b{font-size:23px}
+</style>
+
+<style scoped>
+.tax-country-detail-button { border: 0; background: transparent; color: #b36b00; cursor: pointer; font-weight: 700; text-align: left; padding: 4px 0; }
+.surcharge-country-channels { max-height: 480px; overflow: auto; padding: 16px; }
+.surcharge-country-channels section { border-bottom: 1px solid #e2e8f0; padding: 12px 0; display: flex; gap: 12px; flex-wrap: wrap; }
+.surcharge-country-channels label { display: flex; gap: 6px; align-items: center; }
 </style>

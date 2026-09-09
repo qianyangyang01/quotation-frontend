@@ -253,10 +253,13 @@ function totalCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePur
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
 function salePrice(p: Product) { return totalCost(p) * selectedGradeCoefficient() }
 function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
-function taxResult(country: string, provider: string, baseQuoteCny: number) {
-  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny))
+function taxResult(country: string, provider: string, baseQuoteCny: number, ruleName = '', channelKey = '') {
+  const rule = logisticsRuleByName(ruleName)
+  const relations = rule?.relations.filter(row => row.carrier === provider) || []
+  const key = channelKey || (rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : '')
+  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key)
 }
-function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p)).totalUsd, exchange.value.usd) }
+function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
@@ -1055,7 +1058,7 @@ function matchedLogistics(p: Product, country = p.country, region = quoteRegionF
     }))
   }).sort((a, b) => a.freight - b.freight)
 }
-function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, country = p.country, provider = '', region = quoteRegionForCountry(country)) {
+function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, country = p.country, provider = '', region = quoteRegionForCountry(country), channelKey = '') {
   const rule = logisticsRuleByName(ruleName)
   if (!rule) return null
   const normalizedQuantity = normalizedBundleSets(quantity)
@@ -1074,7 +1077,7 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
     cost = (purchasePrice + p.purchaseFreightPerUnit) * normalizedQuantity + freight
   }
   const baseQuoteCny = cost * selectedGradeCoefficient()
-  const tax = taxResult(country, provider, baseQuoteCny)
+  const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey)
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }
@@ -1082,7 +1085,7 @@ function bestLogisticsOption(p: Product, country = p.country) {
   return matchedLogistics(p, country)
     .map(option => ({
       ...option,
-      finalQuoteCny: quantityCostBreakdown(p, option.rule, quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity), country, option.carrier)?.quoteCny ?? Number.POSITIVE_INFINITY,
+      finalQuoteCny: quantityCostBreakdown(p, option.rule, quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity), country, option.carrier, quoteRegionForCountry(country), option.channelKey)?.quoteCny ?? Number.POSITIVE_INFINITY,
     }))
     .filter(option => Number.isFinite(option.finalQuoteCny))
     .sort((a, b) => a.finalQuoteCny - b.finalQuoteCny || a.freight - b.freight)[0]
@@ -1093,7 +1096,7 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
   return matchedLogistics(p, country, region).map(option => {
     const costs = new Map<number, ReturnType<typeof quantityCostBreakdown>>()
     const costFor = (count: number) => {
-      if (!costs.has(count)) costs.set(count, quantityCostBreakdown(p, option.rule, count, country, option.carrier, region))
+      if (!costs.has(count)) costs.set(count, quantityCostBreakdown(p, option.rule, count, country, option.carrier, region, option.channelKey))
       return costs.get(count)!
     }
     const quote1 = costFor(1)
@@ -1109,7 +1112,7 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
           : currentQuantity === quantity
             ? custom
             : costFor(currentQuantity)
-    const tax = custom?.tax || taxResult(country, option.carrier, 0)
+    const tax = custom?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey)
     const row: QuotationMatrixRow = {
         ...option,
         country,
@@ -1280,7 +1283,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
   const quote2 = quantityCostBreakdown(p, p.rule, 2, p.country, p.channel)
   const quote3 = quantityCostBreakdown(p, p.rule, 3, p.country, p.channel)
   const custom = quantityCostBreakdown(p, p.rule, quantity, p.country, p.channel)
-  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p))
+  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p), p.rule)
   return {
     country: p.country,
     channelKey: rule && relation ? financeChannelKey(rule.id, relation) : `${p.rule}::${p.channel}`,
@@ -1297,7 +1300,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     quote1: quote1?.quoteUsd ?? null,
     quote2: quote2?.quoteUsd ?? null,
     quote3: quote3?.quoteUsd ?? null,
-    quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p)).totalUsd,
+    quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd,
     taxIncluded: tax.included,
     taxConfigured: tax.configured,
     taxRatePercent: tax.ratePercent,
@@ -1572,7 +1575,7 @@ async function save() {
     defaultVolumeDivisor: quoteMode.value === 'single' ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
     logisticsAttribute: p.logisticsAttribute, country: p.country, carrier: p.channel,
     channel: logisticsRules.find(rule => rule.name === p.rule)?.relations.find(relation => relation.carrier === p.channel)?.channel || p.rule,
-    rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: taxResult(p.country, p.channel, salePrice(p)).totalUsd, totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
+    rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd, totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
     matrixMode: quoteMatrixMode.value,
     quotationTemplateId: templateSnapshot?.id,
     quotationTemplateName: templateSnapshot?.name,
@@ -1726,7 +1729,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
           :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
           :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
-          :primary-cny-price="finalSalePrice(p)" :primary-usd-price="taxResult(p.country, p.channel, salePrice(p)).totalUsd"
+          :primary-cny-price="finalSalePrice(p)" :primary-usd-price="taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd"
           :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation" @copy="copySpecifiedQuotes" @locate-issue="locateValidationIssue" @save="attemptSave"
         />
       </template>

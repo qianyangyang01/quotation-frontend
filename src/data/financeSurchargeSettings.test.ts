@@ -21,7 +21,7 @@ describe('independent provider surcharge', () => {
   })
   it('does not charge unconfigured countries and blocks missing provider attributes only when a fee applies', () => {
     expect(calculateFinanceQuoteFees(settings(5), settings(2), '英国', '未知商', 20)).toMatchObject({ configured: true, totalUsd: 20, surchargeEnabled: false })
-    expect(calculateFinanceQuoteFees(settings(0), settings(2), '美国', '未知商', 20)).toMatchObject({ configured: false, surchargeLabel: '物流商附加费属性待设置' })
+    expect(calculateFinanceQuoteFees(settings(0), settings(2), '美国', '未知商', 20)).toMatchObject({ configured: false, surchargeLabel: '附加费渠道配置待确认' })
     expect(calculateFinanceQuoteFees(settings(0), settings(2), '美国', '递四方', 20)).toMatchObject({ totalUsd: 22, feeMode: 'no-tax' })
   })
   it('starts independently without importing tax exemptions', () => {
@@ -35,4 +35,23 @@ describe('independent provider surcharge', () => {
     await expect(saveFinanceSurchargeSettings(settings(-1))).rejects.toThrow('非负')
     await expect(saveFinanceSurchargeSettings(settings(NaN))).rejects.toThrow('非负')
   })
+})
+
+it('isolates country and channel exemptions, including empty selection and missing channel', () => {
+  const scoped = { ...settings(1.5, true), countries: [
+    { ...settings(1.5).countries[0]!, country: '新西兰', exemptChannelKeys: ['1::递四方::A'] },
+    { ...settings(0.5).countries[0]!, country: '英国', exemptChannelKeys: ['1::递四方::B'] },
+    { ...settings(2).countries[0]!, country: '美国', exemptChannelKeys: [] },
+  ] }
+  const quote = (country: string, key: string) => calculateFinanceQuoteFees(settings(0), scoped, country, '递四方', 6.01, key)
+  expect(quote('新西兰', '1::递四方::A').surchargeUsd).toBe(0)
+  expect(quote('新西兰', '1::递四方::B').surchargeUsd).toBe(1.5)
+  expect(quote('英国', '1::递四方::A').surchargeUsd).toBe(0.5)
+  expect(quote('英国', '1::递四方::B').surchargeUsd).toBe(0)
+  expect(quote('美国', '1::递四方::A').surchargeUsd).toBe(2)
+  expect(quote('新西兰', '').configured).toBe(false)
+  expect(quote('英国', '1::递四方::A').totalUsd).toBe(6.55)
+  const normalized = normalizeFinanceSurchargeSettings(scoped)
+  expect(normalized.countries.find(row => row.country === '美国')?.exemptChannelKeys).toEqual([])
+  expect(normalized.countries.find(row => row.country === '新西兰')?.exemptChannelKeys).toEqual(['1::递四方::A'])
 })

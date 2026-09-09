@@ -14,7 +14,7 @@ const bodies = parsed.statements.filter(node => ts.isFunctionDeclaration(node) &
 const js = ts.transpileModule(bodies, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 
 describe('quotation view fee integration', () => {
-  it.each(['single', 'bundle'])('includes surcharge in all %s quantity totals with provider-wide exemptions', async mode => {
+  it.each([['single', false], ['bundle', false], ['single', true], ['bundle', true]] as const)('includes surcharge in %s quantity totals with country scope %s', async (mode, scoped) => {
     const settings: FinanceTaxSettings = {
       countries: [{ country: '美国', fixedFeeUsd: 5, selected: true, enabled: true, sortOrder: 1 }],
       providers: ['物流商', '豁免商'].map(provider => ({ provider, mode: 'taxable', selected: true, channels: [] })),
@@ -22,11 +22,11 @@ describe('quotation view fee integration', () => {
     }
     let copied = ''
     const context = {
-      quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2 })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
+      quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,
       financeChannelKey: (id: number, relation: { carrier: string; channelCode: string }) => id + '::' + relation.carrier + '::' + relation.channelCode,
       salePrice: () => 55,
-      logisticsRuleByName: () => ({ name: '同一规则' }),
+      logisticsRuleByName: () => ({ id: 1, name: '同一规则', relations: [{ carrier: '物流商', channelCode: 'PAY' }, { carrier: '豁免商', channelCode: 'FREE' }] }),
       navigator: { clipboard: { writeText: async (text: string) => { copied = text } } }, toast: () => {},
       quoteMode: { value: mode }, bundleGoodsWeight: (n: number) => n, singleActualWeight: (_p: unknown, n: number) => n,
       calculateLogisticsFee: () => ({ total: 10 }), quoteRegionForCountry: () => '',
