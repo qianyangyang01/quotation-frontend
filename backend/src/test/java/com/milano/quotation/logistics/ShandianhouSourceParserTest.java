@@ -58,6 +58,24 @@ class ShandianhouSourceParserTest {
             assertEquals(9,rows.get(0).path("sourceRow").asInt());assertEquals(10,rows.get(1).path("sourceRow").asInt());
         }
     }
+    @Test void draftCorrectionClearsOnlyConfirmedBoundaryBlocker() throws Exception {
+        var payload=mapper.createObjectNode().put("providerName","闪电猴");
+        var rows=payload.putArray("rows");
+        var reason="原表重量下限为严格大于，50g及201g等边界需物流商确认";
+        var first=rows.addObject().put("countryCode","US").put("sourceProductCode","19221").put("minChargeWeightKg",0.05)
+                .put("weightFromKg",0.05).put("weightToKg",0.2).put("weightFromInclusive",false).put("blockingReason",reason+"；暂停服务").put("pendingReason",reason);
+        LogisticsDraftReviewService.clearConfirmedShandianhouBoundaries(payload);
+        assertTrue(first.path("blockingReason").asText().contains(reason));
+        first.put("weightFromInclusive",true);
+        var next=rows.addObject().put("countryCode","US").put("sourceProductCode","19221").put("minChargeWeightKg",0.05)
+                .put("weightFromKg",0.201).put("weightToKg",0.45).put("weightFromInclusive",false).put("blockingReason",reason);
+        LogisticsDraftReviewService.clearConfirmedShandianhouBoundaries(payload);
+        assertEquals("暂停服务",first.path("blockingReason").asText());
+        assertEquals(reason,next.path("blockingReason").asText());
+        next.put("weightFromKg",0.2);
+        LogisticsDraftReviewService.clearConfirmedShandianhouBoundaries(payload);
+        assertEquals("",next.path("blockingReason").asText());
+    }
     @Test @EnabledIfSystemProperty(named="sdh.source", matches=".+")
     void reconcilesRealWorkbookSixUsProducts() throws Exception {
         var result=parser.parse(Files.readAllBytes(Path.of(System.getProperty("sdh.source"))),"20260604闪电猴价格表(1).xlsx");
@@ -87,8 +105,21 @@ class ShandianhouSourceParserTest {
                 assertEquals(0.001,row.path("billingStepKg").asDouble());
                 assertEquals(8000,row.path("volumeDivisor").asInt());
                 assertTrue(row.path("etaMinDays").asInt()>0);
-                assertFalse(row.path("quoteReady").asBoolean());
+                assertFalse(row.path("pendingReason").asText().contains("原表重量下限"));
                 assertTrue(row.path("notes").asText().contains("50RMB"));
+            }
+            var rows=channel.path("rows");
+            for(double grams:new double[]{1,49,49.9,49.999,5000.1}) {
+                for(var row:rows)assertFalse(LogisticsBillingEngine.includes(row,java.math.BigDecimal.valueOf(grams).movePointLeft(3)),"unexpected match: "+grams);
+            }
+            double[] weights={50,200,200.1,201,450,450.1,451,700,700.1,701,5000};
+            int[] tiers={0,0,1,1,1,2,2,2,3,3,3};
+            for(int i=0;i<weights.length;i++) {
+                int count=0;
+                for(int j=0;j<rows.size();j++)if(LogisticsBillingEngine.includes(rows.get(j),java.math.BigDecimal.valueOf(weights[i]).movePointLeft(3))) {
+                    count++;assertEquals(tiers[i],j,"weight: "+weights[i]);
+                }
+                assertEquals(1,count,"weight: "+weights[i]);
             }
         }
         assertEquals(java.util.Set.of("19221","14421","13601","19241","14021","18821"),codes);

@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.08-v5";
+    public static final String VERSION="company-channels-2026.09.09-v6";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
@@ -499,8 +499,7 @@ public class LogisticsSourceParser {
                 } else pending(row,"闪电猴最低计费重量与计费进位需核对");
                 var volume=Pattern.compile("(?i)(?:长[*×]宽[*×]高|L[*×]W[*×]H)/(\\d+)").matcher(billingNote.replaceAll("\\s+",""));
                 if(volume.find())row.put("volumeDivisor",Integer.parseInt(volume.group(1))).put("volumetric",true);
-                // Keep literal source boundaries until the carrier confirms the missing endpoints.
-                if(!row.path("weightFromInclusive").asBoolean())pending(row,"原表重量下限为严格大于，最低计重及各档起点需物流商确认");
+                normalizeShandianhouBoundary(row,target);
             }
             for(int c=0;c<source.width(r);c++)if(source.text(r,c).matches("(?s).*(暂时关停|暂停服务|暂停收寄|停止收寄).*")) {
                 pending(row,"原表标记暂停服务，禁止自动报价");row.put("notes",row.path("notes").asText()+"\n[服务状态]"+source.text(r,c));
@@ -655,6 +654,28 @@ public class LogisticsSourceParser {
         }
         if(c.country>=0&&c.rate>=0&&c.weight<0&&c.to<0&&c.fixedWeight.isBlank())c.fixedWeight=source.explicitWholeSheetWeight();
         return ((c.firstPrice>=0&&c.nextPrice>=0&&(c.country>=0||c.zone>=0))||(c.weight>=0 || c.to>=0||!c.fixedWeight.isBlank()) && (c.rate>=0 || c.firstPrice>=0 || (provider.equals("顺丰")&&c.settlement>=0)))?c:null;
+    }
+    private void normalizeShandianhouBoundary(ObjectNode row,ObjectNode target) {
+        // Confirmed company policy: the first endpoint is eligible; weights below it are not padded.
+        var lower=row.path("weightFromKg").decimalValue();
+        var minimum=row.path("minChargeWeightKg");
+        if(minimum.isNumber()&&minimum.asDouble()>0&&lower.compareTo(minimum.decimalValue())==0) {
+            row.put("weightFromInclusive",true);
+            return;
+        }
+        // Source tables express adjacent gram tiers as 200g / 201g. Retain rawValues for audit.
+        for(var previous:target.path("rows")) {
+            if(!previous.path("countryCode").asText().equals(row.path("countryCode").asText())
+                    ||!previous.path("sourceProductCode").asText().equals(row.path("sourceProductCode").asText())
+                    ||!previous.path("zoneName").asText().equals(row.path("zoneName").asText()))continue;
+            var upper=previous.path("weightToKg").decimalValue();
+            if(previous.path("weightToInclusive").asBoolean(true)
+                    &&lower.subtract(upper).compareTo(new java.math.BigDecimal("0.001"))==0) {
+                row.put("weightFromKg",upper).put("weightFromInclusive",false);
+                return;
+            }
+        }
+        if(!row.path("weightFromInclusive").asBoolean())pending(row,"原表重量下限为严格大于，最低计重及各档起点需物流商确认");
     }
     private void add(ObjectNode target,ObjectNode row,Source source,int r,String file) {
         source.parsedRows.add(r);

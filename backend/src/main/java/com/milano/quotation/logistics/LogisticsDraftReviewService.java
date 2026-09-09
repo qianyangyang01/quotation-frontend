@@ -51,6 +51,7 @@ public class LogisticsDraftReviewService {
             etaAudit.addObject().put("routeKey",routeKey).put("affectedRows",routeRows.size()).set("before",beforeValues);
             ((ObjectNode)etaAudit.get(etaAudit.size()-1)).set("after",mapper.createObjectNode().put("etaMinDays",min.asInt()).put("etaMaxDays",max.asInt()).put("etaSource","manual-review"));
         }
+        clearConfirmedShandianhouBoundaries(payload);
         var preserved=mapper.createArrayNode();for(var issue:payload.path("issues"))if(!isEditableIssue(issue,rows))preserved.add(issue.deepCopy());
         var generated=workbooks.validateEditableRows(rows);preserved.addAll(generated);payload.set("issues",preserved);
         payload.put("errors",count(preserved,"error"));
@@ -70,6 +71,23 @@ public class LogisticsDraftReviewService {
         var pricingReady=result.path("quoteReady").asBoolean(false);
         result.put("pricingReady",pricingReady);
         result.put("id",row.path("id").asText()).put("channelId",row.path("channelId").asText()).put("versionNumber",row.path("versionNumber").asInt()).put("status",row.path("status").asText()).put("fingerprint",row.path("fingerprint").asText()).put("quoteReady","published".equals(row.path("status").asText())&&pricingReady);return result;}
+    static void clearConfirmedShandianhouBoundaries(ObjectNode payload) {
+        if(!payload.path("providerName").asText().equals("闪电猴"))return;
+        var known=Set.of("原表重量下限为严格大于，最低计重及各档起点需物流商确认","原表重量下限为严格大于，50g及201g等边界需物流商确认");
+        for(var value:payload.path("rows")) {
+            var row=(ObjectNode)value;
+            if(!row.path("countryCode").asText().equals("US")||!Set.of("19221","14421","13601","19241","14021","18821").contains(row.path("sourceProductCode").asText()))continue;
+            var lower=row.path("weightFromKg");var minimum=row.path("minChargeWeightKg");
+            if(!lower.isNumber()||!minimum.isNumber()||minimum.asDouble()<=0)continue;
+            boolean confirmed=lower.decimalValue().compareTo(minimum.decimalValue())==0&&row.path("weightFromInclusive").asBoolean();
+            if(lower.decimalValue().compareTo(minimum.decimalValue())>0&&!row.path("weightFromInclusive").asBoolean())for(var prior:payload.path("rows")) {
+                if(prior.path("sourceProductCode").equals(row.path("sourceProductCode"))&&prior.path("countryCode").equals(row.path("countryCode"))
+                        &&prior.path("zoneName").equals(row.path("zoneName"))&&prior.path("weightToKg").isNumber()
+                        &&prior.path("weightToKg").decimalValue().compareTo(lower.decimalValue())==0&&prior.path("weightToInclusive").asBoolean(true))confirmed=true;
+            }
+            if(confirmed)for(var field:List.of("pendingReason","blockingReason"))row.put(field,Arrays.stream(row.path(field).asText().split("；")).filter(reason->!known.contains(reason)).collect(java.util.stream.Collectors.joining("；")));
+        }
+    }
     private static boolean isEditableIssue(JsonNode issue,ArrayNode rows){
         var code=issue.path("code").asText();if(code.startsWith("WEIGHT_")||code.startsWith("ETA_"))return true;
         var field=issue.path("field").asText();if(Set.of("重量区间","计费价格","区域/重量区间","重量连续性","时效","参考时效").contains(field))return true;
