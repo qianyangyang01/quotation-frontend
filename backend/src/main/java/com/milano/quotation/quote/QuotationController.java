@@ -23,6 +23,7 @@ public class QuotationController {
     private static final Set<String> PATCH_FIELDS = Set.of("status", "dealLines", "dealOptionId", "dealOptionLabel",
             "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerName");
     private final QuotationRecordRepository records;
+    private final QuotationRecordQuery recordQuery;
     private final AuditService audit;
     private final IdempotencyService idempotency;
     private final QuotationReadinessService readiness;
@@ -30,9 +31,9 @@ public class QuotationController {
     private final com.milano.quotation.logistics.LogisticsQuotationGuard logisticsGuard;
 
     public QuotationController(QuotationRecordRepository records, AuditService audit,
-                               IdempotencyService idempotency, QuotationReadinessService readiness,
+                               IdempotencyService idempotency, QuotationReadinessService readiness, QuotationRecordQuery recordQuery,
                                QuotationSubmissionValidator submissionValidator, com.milano.quotation.logistics.LogisticsQuotationGuard logisticsGuard) {
-        this.records = records; this.audit = audit; this.idempotency = idempotency; this.readiness = readiness;
+        this.recordQuery=recordQuery; this.records = records; this.audit = audit; this.idempotency = idempotency; this.readiness = readiness;
         this.submissionValidator = submissionValidator; this.logisticsGuard=logisticsGuard;
     }
 
@@ -47,6 +48,26 @@ public class QuotationController {
         var pageable = PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size)), Sort.by(Sort.Direction.DESC, "createdAt"));
         var rows = all && scope.equals("company") ? records.findAll(pageable) : records.findByOwnerAccount(principal.account(), pageable);
         return ApiResponse.ok(PageResponse.from(rows.map(this::view)));
+    }
+
+
+    @GetMapping("/search")
+    @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
+    ApiResponse<QuotationRecordQuery.Result> search(@RequestParam(defaultValue="mine") String scope,
+        @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="10") int size,
+        @RequestParam(defaultValue="") String q, @RequestParam(defaultValue="") String status,
+        @RequestParam(defaultValue="") String country, @RequestParam(defaultValue="") String category,
+        @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
+        @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate, Authentication auth) {
+        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate),page,size));
+    }
+    @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
+    @Transactional(readOnly=true)
+    ApiResponse<JsonNode> get(@PathVariable UUID id, Authentication auth) {
+        var row=records.findById(id).orElseThrow(()->AppException.notFound("报价记录不存在"));
+        if(!hasAll(auth)&&!row.ownerAccount.equals(principal(auth).account())) throw new org.springframework.security.access.AccessDeniedException("forbidden");
+        return ApiResponse.ok(view(row));
     }
 
     @PostMapping

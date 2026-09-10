@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { loadQuotationRecords, updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
+import { updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
 import { loadPurchaseProducts } from '@/data/purchaseStore'
 import { quotationProductCategories } from '@/components/quotation/types'
 import QuotationProductImage from '@/components/quotation/QuotationProductImage.vue'
 import PurchaseCategoryBadge from '@/components/purchase/PurchaseCategoryBadge.vue'
 import { quotationDealDifference, signedPercent, signedUsd } from '@/data/quotationDealDifference'
+
+import { loadRecordPage, loadFilteredRecords, loadRecord, recentRecordDates } from '@/data/quotationRecordQuery'
+import { quotationDetailsCsv } from '@/data/quotationAnalytics'
 
 const props = defineProps<{ scope: 'mine' | 'company' }>()
 const route = useRoute()
@@ -16,6 +19,38 @@ const search = ref('')
 const filterStatus = ref<'' | QuotationRecordStatus>('')
 const filterCountry = ref('')
 const filterCategory = ref('')
+const startDate=ref('');const endDate=ref('');const page=ref(0);const pageSize=ref(10)
+const total=ref(0);const totalPages=ref(0);const loading=ref(false);const loadError=ref('');const exporting=ref(false)
+const summary=ref({pending:0,won:0,lost:0,total:0});const countries=ref<string[]>([])
+const filters=computed(()=>({q:search.value.trim(),status:filterStatus.value,country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
+const dateError=computed(()=>startDate.value && endDate.value && startDate.value>endDate.value ? '开始日期不能晚于结束日期' : '')
+let requestId=0;let refreshTimer:ReturnType<typeof setTimeout>|undefined
+async function refresh() {
+  const id=++requestId
+  if(dateError.value) { loading.value=false;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};return }
+  loading.value=true;loadError.value=''
+  try {
+    const result=await loadRecordPage(props.scope,{...filters.value},page.value,pageSize.value)
+    if(id!==requestId)return
+    records.value=result.items;total.value=result.total;totalPages.value=result.totalPages;page.value=result.page;summary.value=result.summary;countries.value=result.countries
+  } catch(error) {if(id===requestId){records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};loadError.value=error instanceof Error?error.message:'加载失败，请重试'}}
+  finally {if(id===requestId)loading.value=false}
+}
+function resetFilters(){search.value='';filterStatus.value='';filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
+function recent(days:number){const dates=recentRecordDates(days);startDate.value=dates.startDate;endDate.value=dates.endDate}
+function changePage(next:number){if(loading.value)return;page.value=next;void refresh()}
+async function exportRecords(){
+  if(exporting.value || dateError.value)return
+  exporting.value=true
+  try {
+    const rows=await loadFilteredRecords(props.scope,{...filters.value})
+    const blob=new Blob([quotationDetailsCsv(rows,purchaseProducts.value)],{type:'text/csv;charset=utf-8'})
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=title.value+'-'+recentRecordDates(1).endDate+'.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+    toast('已导出当前筛选范围全部 '+rows.length+' 条记录')
+  }catch(error){toast(error instanceof Error?error.message:'导出失败，请重试')}finally{exporting.value=false}
+}
+watch([filters,pageSize,()=>props.scope],()=>{++requestId;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;differenceRecord.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
+onUnmounted(()=>{++requestId;clearTimeout(refreshTimer)})
 const selected = ref<QuotationRecord | null>(null)
 const differenceRecord = ref<QuotationRecord | null>(null)
 const editing = ref(false)
@@ -26,7 +61,7 @@ interface DealLineForm { id: string; optionId: string; unitPriceUsd: string; qua
 const form = reactive({ status: 'won' as 'won' | 'lost', dealLines: [] as DealLineForm[], date: new Date().toISOString().slice(0, 10), note: '' })
 const isMine = computed(() => props.scope === 'mine')
 const title = computed(() => isMine.value ? '我的报价记录' : '报价记录')
-const scoped = computed(() => records.value)
+const list = computed(() => records.value)
 function recordOptions(row: QuotationRecord) { return row.quoteOptions || [] }
 function optionLabel(option: QuotationRecordQuoteOption) { return `${option.country}${option.quoteRegion ? `（${option.quoteRegion}）` : ''} · ${option.channel}${option.carrier && option.carrier !== option.channel ? ` · ${option.carrier}` : ''}` }
 function recordCountries(row: QuotationRecord) { return [...new Set(recordOptions(row).map(option => option.country).filter(country => country && country !== '—'))] }
@@ -44,13 +79,6 @@ function optionPrice(value: number | null) { return value == null ? '—' : usd(
 function openDifference(row: QuotationRecord) { differenceRecord.value = row }
 function closeDifference() { differenceRecord.value = null }
 function openFullFromDifference() { const row = differenceRecord.value; if (!row) return; differenceRecord.value = null; open(row) }
-const countries = computed(() => [...new Set(scoped.value.flatMap(item => [item.country, ...recordCountries(item)]).filter(country => country && country !== '—'))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
-const list = computed(() => scoped.value.filter(item => {
-  const quoteKey = recordOptions(item).flatMap(quote => [quote.country, quote.carrier, quote.channel, quote.rule]).join(' ')
-  const key = [item.no, item.customerName, item.primarySku, item.productCategory, item.country, item.carrier, item.channel, item.salespersonName, quoteKey].join(' ').toLowerCase()
-  const matchesCountry = !filterCountry.value || item.country === filterCountry.value || recordOptions(item).some(quote => quote.country === filterCountry.value)
-  return (!search.value.trim() || key.includes(search.value.trim().toLowerCase())) && (!filterStatus.value || item.status === filterStatus.value) && matchesCountry && (!filterCategory.value || item.productCategory === filterCategory.value)
-}))
 const revisionGroups = computed(() => {
   const groups = new Map<string, { id: string; changedAt: string; editorName: string; editorAccount: string; changes: QuotationRecord['revisions'] }>()
   for (const revision of selected.value?.revisions || []) {
@@ -73,29 +101,28 @@ const selectedOptionGroups = computed(() => {
 const selectedDealOptionIds = computed(() => new Set((selected.value?.dealLines || []).map(line => line.optionId)))
 const formDealTotalQuantity = computed(() => form.dealLines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0))
 const formDealTotalUsd = computed(() => form.dealLines.reduce((sum, line) => sum + (Number(line.unitPriceUsd) || 0) * (Number(line.quantity) || 0), 0))
-const pending = computed(() => scoped.value.filter(item => item.status === 'pending').length)
-const won = computed(() => scoped.value.filter(item => item.status === 'won').length)
-const lost = computed(() => scoped.value.filter(item => item.status === 'lost').length)
+const pending = computed(() => summary.value.pending)
+const won = computed(() => summary.value.won)
+const lost = computed(() => summary.value.lost)
 const cny = (value: number) => `¥${value.toFixed(2)}`
 const usd = (value: number) => `$${value.toFixed(2)}`
 const statusText = (value: QuotationRecordStatus) => ({ pending: '待处理', won: '已成交', lost: '未成交' })[value]
 const dateTime = (value?: string) => {
   if (!value) return '—'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(date)
 }
 function recordPurchaseProduct(row: QuotationRecord) {
   const primarySku = row.primarySku.split(/[、,+\s]/).find(Boolean) || row.primarySku
   return purchaseProducts.value.find(item => item.sku === primarySku)
 }
 onMounted(async () => {
-  const [recordResult, purchaseResult] = await Promise.allSettled([
-    loadQuotationRecords(props.scope),
-    loadPurchaseProducts(),
-  ])
-  records.value = recordResult.status === 'fulfilled' ? recordResult.value : []
-  purchaseProducts.value = purchaseResult.status === 'fulfilled' ? purchaseResult.value : []
+  await Promise.allSettled([refresh(),loadPurchaseProducts().then(rows=>{purchaseProducts.value=rows})])
 })
+watch(()=>[route.query.record,props.scope],async()=>{
+  const id=route.query.record;if(props.scope!=='company' || typeof id!=='string')return
+  try{const record=await loadRecord(id);if(props.scope==='company' && route.query.record===id && record)open(record)}catch(error){toast(error instanceof Error?error.message:'报价记录加载失败')}
+},{immediate:true})
 function fillForm(row: QuotationRecord) {
   form.status = row.status === 'lost' ? 'lost' : 'won'
   form.dealLines = (row.dealLines || []).map(line => ({ id: line.id, optionId: line.optionId, unitPriceUsd: line.unitPriceUsd.toFixed(2), quantity: String(line.quantity) }))
@@ -157,25 +184,36 @@ async function submit() {
   const singleLine = savedLines.length === 1 ? savedLines[0] : undefined
   const updated = await updateQuotationRecord(selected.value.id, { status: form.status, dealLines: savedLines, dealOptionId: singleLine?.optionId, dealOptionLabel: singleLine?.optionLabel || (savedLines.length ? `${savedLines.length}条成交方案` : undefined), actualQuoteUsd: savedLines.length ? totalUsd : undefined, actualQuoteCny: savedLines.length ? totalUsd * selected.value.exchangeRate : undefined, dealQuantity: savedLines.length ? totalQuantity : undefined, closedAt: form.date, note: form.note.trim() || undefined }, selected.value._version)
   if (!updated) { toast('保存失败，请刷新页面后重试'); return }
-  records.value = await loadQuotationRecords(props.scope); selected.value = records.value.find(item => item.id === selected.value?.id) || null
+  await refresh(); selected.value = updated
   editing.value = false
   toast(updated.updatedAt === previousUpdatedAt ? '没有检测到内容变化' : '报价结果已保存，并记录本次修改时间')
 }
 function toast(text: string) { notice.value = text; window.setTimeout(() => notice.value === text && (notice.value = ''), 2400) }
-watch(list, rows => {
-  if (selected.value && !rows.some(row => row.id === selected.value?.id)) closeDrawer()
-})
-watch(() => records.value.find(item => item.id === route.query.record), record => {
-  if (!isMine.value && record && selected.value?.id !== record.id) open(record)
-}, { immediate: true })
+
 </script>
 
 <template>
   <div class="app">
     <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '跟进本人系统报价与客户实际成交结果' : '查看全体业务员的报价与成交回填记录' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
-      <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>需要回填成交结果</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>已完成真实报价回填</em></span></article><article><i>×</i><span><small>未成交</small><b>{{ lost }}</b><em>已确认但没有成交</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ scoped.length }}</b><em>保留系统报价快照</em></span></article></section>
-      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="won">已成交</option><option value="lost">未成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="search='';filterStatus='';filterCategory='';filterCountry=''">重置</button><b>共 {{ list.length }} 条记录</b></section>
-      <section class="records quote-record-table">
+      <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>当前筛选范围</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>当前筛选范围</em></span></article><article><i>×</i><span><small>未成交</small><b>{{ lost }}</b><em>当前筛选范围</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ summary.total }}</b><em>当前筛选范围</em></span></article></section>
+      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="won">已成交</option><option value="lost">未成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
+      <section class="record-date-filters" aria-label="报价时间筛选">
+        <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
+        <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
+        <button @click="recent(1)">今天</button><button @click="recent(7)">近 7 天</button><button @click="recent(30)">近 30 天</button><button @click="startDate='';endDate=''">全部时间</button>
+        <small>按北京时间的创建日期筛选，包含结束日期全天</small>
+      </section>
+      <p v-if="dateError" role="alert">{{ dateError }}</p>
+      <nav class="record-pagination" aria-label="报价记录分页">
+        <span>共 {{ total }} 条 · 第 {{ totalPages ? page+1 : 0 }} / {{ totalPages }} 页</span>
+        <label>每页<select v-model.number="pageSize" aria-label="每页记录数"><option :value="10">10 条</option><option :value="30">30 条</option><option :value="50">50 条</option></select></label>
+        <button :disabled="loading || page===0 || !!dateError" @click="changePage(page-1)">上一页</button>
+        <button :disabled="loading || page+1>=totalPages || !!dateError" @click="changePage(page+1)">下一页</button>
+        <button :disabled="loading || exporting || !!dateError || !!loadError || !total" @click="exportRecords">{{ exporting ? '正在导出…' : '导出筛选结果' }}</button>
+      </nav>
+      <p v-if="loadError" role="alert">{{ loadError }} <button @click="refresh">重试</button></p>
+      <p v-if="loading" role="status">正在加载报价记录…</p>
+      <section class="records quote-record-table" :aria-busy="loading">
         <header><span>报价单 / 商品</span><span>客户</span><span>报价规模</span><span>成交差异</span><span>状态 / 操作</span></header>
         <article v-for="row in list" :key="row.id">
           <div class="quote-info"><QuotationProductImage class="quote-record-image" :snapshot-image="row.productImage" :physical-image="recordPurchaseProduct(row)?.physicalImage" :product-image="recordPurchaseProduct(row)?.productImage" :alt="row.productSummary"><template #fallback><PurchaseCategoryBadge :category="recordPurchaseProduct(row)?.category || row.productCategory" /></template></QuotationProductImage><span class="quote-info-copy"><b>{{ row.no }}</b><strong>{{ row.productSummary }}</strong><small>{{ row.primarySku }} · {{ row.quoteMode==='bundle' ? '组合报价' : '单品SKU' }}<template v-if="!isMine"> · {{ row.salespersonName }}</template></small></span></div>
@@ -184,7 +222,7 @@ watch(() => records.value.find(item => item.id === route.query.record), record =
           <button class="difference-cell" :class="quotationDealDifference(row).kind" @click="openDifference(row)"><b>{{ quotationDealDifference(row).label }}</b><span v-if="quotationDealDifference(row).percent != null">{{ signedPercent(quotationDealDifference(row).percent) }}</span><span v-else>查看详情</span></button>
           <div class="record-row-actions"><em :class="row.status">{{ statusText(row.status) }}</em><button class="view-record" @click="open(row)">查看报价单</button></div>
         </article>
-        <div v-if="!list.length" class="empty"><b>暂无报价记录</b><span>{{ isMine ? '填写客户名称并保存报价后，记录会自动显示在这里。' : '暂时没有业务员保存报价记录。' }}</span><RouterLink v-if="isMine" to="/quotation">去新建报价</RouterLink></div>
+        <div v-if="!loading && !loadError && !dateError && !list.length" class="empty"><b>暂无报价记录</b><span>当前筛选范围内没有记录，可以调整日期或重置筛选。</span><RouterLink v-if="isMine" to="/quotation">去新建报价</RouterLink></div>
       </section>
     </main>
     <div v-if="differenceRecord" class="difference-mask" @click.self="closeDifference">
@@ -237,6 +275,8 @@ watch(() => records.value.find(item => item.id === route.query.record), record =
 </template>
 
 <style scoped>
+.record-date-filters,.record-pagination{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0;color:#53616c;font-size:12px}.record-date-filters label,.record-pagination label{display:flex;align-items:center;gap:7px}.record-date-filters input,.record-date-filters button,.record-pagination button,.record-pagination select{min-height:34px;padding:5px 10px;background:#fff;border:1px solid #dce3e8;border-radius:6px;color:#34434f}.record-date-filters small{color:#798690}.record-pagination{padding:12px;background:#f7f9fa;border-radius:8px}.record-pagination>span{margin-right:auto}.record-pagination button:disabled{opacity:.45;cursor:not-allowed}
+
 .app{--orange:#ff9900;--ink:#17212b;--line:#e4e9ee;min-height:100vh;background:#f5f7fa;color:var(--ink);font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif}.topbar{height:68px;display:flex;align-items:center;padding:0 4vw;background:#fff;border-bottom:1px solid var(--line)}.brand{display:flex;gap:11px;align-items:center;margin-right:48px;color:var(--ink);text-decoration:none}.brand>i{display:grid;place-items:center;width:39px;height:39px;border-radius:10px;background:var(--orange);font-size:20px;font-style:normal;font-weight:900}.brand b,.brand small,.user b,.user small{display:block}.brand b{font-size:17px}.brand small{color:#8a949d;font-size:8px;letter-spacing:.15em}.topbar nav{display:flex;height:100%;gap:26px}.topbar nav a{position:relative;display:flex;align-items:center;color:#65717c;text-decoration:none;font-size:13px}.topbar nav a.active{color:var(--ink);font-weight:800}.topbar nav a.active:after{position:absolute;right:0;bottom:0;left:0;height:3px;background:var(--orange);content:""}.user{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:12px}.user>i{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#17212b;color:#fff;font-size:10px;font-style:normal}.user small{color:#8b969f;font-size:10px}main{width:min(1440px,92vw);margin:auto;padding:32px 0 70px}.heading{display:flex;align-items:end;justify-content:space-between;margin-bottom:22px}.heading p,aside header small{margin:0 0 7px;color:#d87600;font-size:10px;font-weight:900;letter-spacing:.18em}.heading h1{margin:0 0 8px;font-size:29px}.heading span{color:#74808a;font-size:13px}.heading>a,.primary{padding:12px 18px;border:0;border-radius:8px;background:var(--orange);color:#17212b;font-size:12px;font-weight:800;text-decoration:none}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}.stats article{display:flex;align-items:center;gap:14px;min-height:82px;padding:14px 18px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 6px 17px rgba(23,33,43,.04)}.stats i{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#eef1f4;color:#68737d;font-size:19px;font-style:normal;font-weight:800}.stats .red i{background:#fff0ef;color:#da4941}.stats .green i{background:#eaf8ef;color:#19975a}.stats span{display:grid;gap:3px}.stats small{color:#7c8790;font-size:11px}.stats b{font-size:24px}.stats em{color:#9ca5ac;font-size:10px;font-style:normal}.filters{display:flex;align-items:end;gap:10px;margin-bottom:14px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:#fff}.filters label{display:grid;gap:5px;color:#7d8790;font-size:10px}.filters input,.filters select{height:36px;border:1px solid #dce3e8;border-radius:6px;background:#fff;padding:0 10px;color:#25313b;outline:0;font-size:12px}.filters .search{display:flex;align-items:center;width:310px;height:36px;box-sizing:border-box;gap:8px;border:1px solid #dce3e8;border-radius:6px;padding:0 10px;color:#7d8790}.filters .search input{width:100%;height:34px;border:0;padding:0}.filters button{height:36px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#64707a}.filters>b{margin-left:auto;color:#71808a;font-size:11px}.records{overflow:hidden;border:1px solid var(--line);border-radius:11px;background:#fff;box-shadow:0 12px 28px rgba(23,33,43,.045)}.records>header,.records>article{display:grid;grid-template-columns:1.3fr 1.35fr .8fr .85fr .55fr .75fr;gap:12px;align-items:center;padding:13px 18px}.records>header{background:#f8fafb;color:#74808a;font-size:11px}.records>article{min-height:76px;border-top:1px solid #edf0f2;font-size:12px}.records article>div{display:grid;gap:4px;min-width:0}.records article b,.records article strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.records article strong{color:#47545e;font-size:12px;font-weight:500}.records article small{overflow:hidden;color:#8b969f;font-size:10px;text-overflow:ellipsis;white-space:nowrap}.price b{font-size:14px;font-variant-numeric:tabular-nums}.actions{display:flex!important;align-items:center;justify-content:flex-end;gap:9px}.actions em{padding:5px 8px;border-radius:12px;font-size:10px;font-style:normal;white-space:nowrap}.actions em.pending{background:#fff0ef;color:#d94a42}.actions em.won{background:#e8f7ee;color:#178857}.actions em.lost{background:#f0f2f4;color:#78828a}.actions button{border:0;border-radius:6px;background:#17212b;color:#fff;padding:8px 11px;font-size:11px;font-weight:800}.actions em.pending+button{background:var(--orange);color:#17212b}.empty{display:grid;justify-items:center;gap:8px;padding:60px;color:#7e8992}.empty b{color:#35414b;font-size:15px}.empty span{font-size:12px}.empty a{color:#a96000;font-size:12px;font-weight:800}.mask{position:fixed;z-index:30;inset:0;background:rgba(17,24,39,.42);backdrop-filter:blur(3px)}aside{position:absolute;top:0;right:0;display:flex;flex-direction:column;width:min(470px,100vw);height:100%;box-sizing:border-box;overflow-y:auto;padding:25px;background:#fff;box-shadow:-15px 0 45px rgba(17,24,39,.2)}aside>header{display:flex;justify-content:space-between;padding-bottom:18px;border-bottom:1px solid var(--line)}aside h2{margin:6px 0 0;font-size:21px}aside header button{border:0;background:none;font-size:24px}.snapshot{display:grid;grid-template-columns:105px 1fr;gap:12px;margin:18px 0;padding:15px;border-radius:8px;background:#f7f9fa;font-size:12px}.snapshot span{color:#84909a}.result{display:grid;gap:8px;margin-top:12px}.result>span{display:flex;gap:17px}.result label{color:#26313b}.result input{width:auto}aside>label{display:grid;gap:7px;margin-top:13px;color:#4d5a64;font-size:12px}aside input,aside textarea{box-sizing:border-box;width:100%;border:1px solid #dce3e8;border-radius:7px;padding:10px;font:inherit;outline:0}aside textarea{height:92px;resize:none}aside footer{display:flex;justify-content:flex-end;gap:10px;margin-top:auto;padding-top:22px}aside footer button{height:40px;padding:0 18px;border:1px solid #dce3e8;border-radius:7px;background:#fff;font-weight:800}aside footer .primary{border:0}.edit-button{border-color:#ffb451!important;color:#a96000;background:#fffaf2!important}.detail{display:grid;gap:10px;margin-top:17px;padding:16px;border-radius:8px;background:#f7f9fa;font-size:12px}.detail b{font-size:16px}.detail b.won{color:#178857}.detail b.lost{color:#78828a}.detail span,.detail p{margin:0;color:#66727c}.revision-history{display:grid;gap:10px;margin-top:14px;padding:15px;border:1px solid #e1e7eb;border-radius:8px;background:#fff}.revision-history>header{display:flex;align-items:center;justify-content:space-between;font-size:12px}.revision-history>header span{color:#87939c;font-size:10px}.revision-history>div{display:grid}.revision-history article{display:grid;grid-template-columns:auto 1fr;gap:3px 9px;padding:10px 0;border-top:1px solid #edf0f2;font-size:10px}.revision-history time{color:#53616c;font-weight:800}.revision-history article>span{color:#8a959e;text-align:right}.revision-history article p{grid-column:1/-1;margin:2px 0 0;color:#62707a;line-height:1.5}.revision-history article p b{color:#303c46}.history-empty{margin:0;color:#8b969f;font-size:10px;line-height:1.6}.toast{position:fixed;right:24px;bottom:24px;z-index:40;padding:13px 18px;border-radius:8px;background:#17212b;color:#fff;font-size:12px}.toast-enter-active,.toast-leave-active{transition:.2s}.toast-enter-from,.toast-leave-to{opacity:0;transform:translateY(8px)}@media(max-width:1100px){.topbar nav{gap:14px}.records>header,.records>article{grid-template-columns:1.1fr 1.15fr .7fr .7fr .45fr .6fr;padding-inline:12px}}@media(max-width:860px){.topbar nav{display:none}.stats{grid-template-columns:1fr 1fr}.filters{flex-wrap:wrap}.filters>b{margin-left:0}.records{overflow:auto}.records>header,.records>article{width:940px}.heading{align-items:start;gap:12px;flex-direction:column}}@media(max-width:520px){.stats{grid-template-columns:1fr}.filters .search{width:100%}}
 .records>header,.records>article{grid-template-columns:1.55fr 1.3fr .72fr .9fr .48fr .82fr}
 .specified-snapshot{display:grid;gap:8px;margin-bottom:12px;padding:12px;border:1px solid #e0e6ea;border-radius:8px;background:#fff}.specified-snapshot>header{display:flex;justify-content:space-between;color:#4e5d67;font-size:10px}.specified-snapshot>header span{color:#818d96}.specified-snapshot>div{display:grid;max-height:190px;overflow:auto}.specified-snapshot article{display:grid;grid-template-columns:58px minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #edf0f2;font-size:9px}.specified-snapshot article>span{display:grid;min-width:0;gap:2px}.specified-snapshot article strong,.specified-snapshot article small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.specified-snapshot article small{color:#87939c}.specified-snapshot article em{color:#b76400;font-style:normal;font-weight:800;white-space:nowrap}
