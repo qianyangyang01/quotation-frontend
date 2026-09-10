@@ -142,6 +142,7 @@ const draftReady = ref(false)
 const draftInitializationFailed = ref(false)
 const showDraftLeaveDialog = ref(false)
 const showDraftConflictDialog = ref(false)
+const resolvingDraftConflict = ref(false)
 const restoredCommonSelections = ref<QuotationPresetSelection[]>([])
 const restoredSpecifiedSelections = ref<QuotationPresetSelection[]>([])
 const restoredTemplateSelections = ref<QuotationPresetSelection[]>([])
@@ -795,12 +796,14 @@ function draftSignature() { return JSON.stringify(draftPayload()) }
 function markDraftDirty(signature = draftSignature()) {
   if (!draftReady.value || signature === lastSavedDraftSignature) return
   draftDirty = true
+  if (draftStatus.value === 'conflict' || resolvingDraftConflict.value) return
   draftStatus.value = 'dirty'
   draftError.value = ''
   window.clearTimeout(draftTimer)
   draftTimer = window.setTimeout(() => { void flushDraft().catch(() => undefined) }, 800)
 }
 async function flushDraft() {
+  if (draftStatus.value === 'conflict' || resolvingDraftConflict.value) throw new Error('草稿版本冲突，请先处理冲突；当前输入已保留')
   if (!draftReady.value || (!draftDirty && draftSignature() === lastSavedDraftSignature)) return
   if (draftSavePromise) return draftSavePromise
   draftSavePromise = (async () => {
@@ -821,6 +824,7 @@ async function flushDraft() {
         draftDirty = true
         draftError.value = error instanceof Error ? error.message : '草稿保存失败'
         if (error instanceof ApiError && error.status === 409) {
+          window.clearTimeout(draftTimer)
           draftStatus.value = 'conflict'
           showDraftConflictDialog.value = true
         } else draftStatus.value = 'error'
@@ -1002,28 +1006,52 @@ async function clearDraft() {
   toast('已清空草稿，可以开始新的报价')
 }
 async function reloadServerDraftAfterConflict() {
-  showDraftConflictDialog.value = false
-  const state = await loadQuotationDraft()
-  draftVersion.value = state.version
-  draftUpdatedAt.value = state.updatedAt || ''
-  if (state.payload) await applyDraftPayload(state.payload)
-  else await resetLocalDraft()
-  await establishDraftBaseline(state.exists ? 'saved' : 'idle')
-  toast('已加载服务器上的最新草稿')
+  if (resolvingDraftConflict.value) return
+  resolvingDraftConflict.value = true
+  window.clearTimeout(draftTimer)
+  try {
+    await draftSavePromise?.catch(() => undefined)
+    const signature = draftSignature()
+    const state = await loadQuotationDraft()
+    if (signature !== draftSignature()) throw new Error('读取期间内容已修改，已保留当前输入，请重新选择')
+    draftReady.value = false
+    draftVersion.value = state.version
+    draftUpdatedAt.value = state.updatedAt || ''
+    if (state.payload) await applyDraftPayload(state.payload)
+    else await resetLocalDraft()
+    await establishDraftBaseline(state.exists ? 'saved' : 'idle')
+    showDraftConflictDialog.value = false
+    toast('已加载服务器上的最新草稿')
+  } catch (error) {
+    draftStatus.value = 'conflict'
+    toast(error instanceof Error ? error.message : '草稿读取失败，请重试')
+    throw error
+  } finally { resolvingDraftConflict.value = false; draftReady.value = true }
 }
 async function overwriteServerDraftAfterConflict() {
-  const payload = draftPayload()
-  const latest = await loadQuotationDraft()
-  const saved = await saveQuotationDraft(payload, latest.version)
-  draftVersion.value = saved.version
-  draftUpdatedAt.value = saved.updatedAt || ''
-  lastSavedDraftSignature = JSON.stringify(payload)
-  draftDirty = false
-  draftStatus.value = 'saved'
-  showDraftConflictDialog.value = false
-  toast('已用当前内容覆盖服务器草稿')
-}
-function beforeWindowUnload(event: BeforeUnloadEvent) {
+  if (resolvingDraftConflict.value) throw new Error('正在处理草稿，请稍候')
+  resolvingDraftConflict.value = true
+  window.clearTimeout(draftTimer)
+  try {
+    await draftSavePromise?.catch(() => undefined)
+    const payload = draftPayload()
+    const signature = JSON.stringify(payload)
+    const latest = await loadQuotationDraft()
+    const saved = await saveQuotationDraft(payload, latest.version)
+    draftVersion.value = saved.version
+    draftUpdatedAt.value = saved.updatedAt || ''
+    lastSavedDraftSignature = signature
+    draftDirty = draftSignature() !== signature
+    draftStatus.value = 'saved'
+    showDraftConflictDialog.value = false
+    toast('已用当前内容覆盖服务器草稿')
+  } catch (error) {
+    draftStatus.value = 'conflict'
+    toast(error instanceof Error ? error.message : '草稿保存失败，请重试')
+    throw error
+  } finally { resolvingDraftConflict.value = false }
+  if (draftDirty) await flushDraft()
+}function beforeWindowUnload(event: BeforeUnloadEvent) {
   if (!draftDirty && draftStatus.value !== 'error' && draftStatus.value !== 'conflict') return
   event.preventDefault()
   event.returnValue = ''
@@ -1745,7 +1773,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       <section class="draft-status-bar" :class="draftStatus" aria-live="polite">
         <i>{{ draftStatus === 'saved' ? '✓' : draftStatus === 'error' || draftStatus === 'conflict' ? '!' : '↻' }}</i>
         <span><b>{{ draftStatusText }}</b><small>切换模块后返回“我的报价”可继续录入；正式报价保存成功后自动清除草稿。</small></span>
-        <button v-if="draftStatus === 'error'" type="button" @click="draftInitializationFailed ? retryDraftInitialization() : flushDraft()">{{ draftInitializationFailed ? '重试读取' : '重试保存' }}</button>
+        <button v-if="draftStatus === 'conflict'" type="button" @click="showDraftConflictDialog=true">处理草稿冲突</button><button v-if="draftStatus === 'error'" type="button" @click="draftInitializationFailed ? retryDraftInitialization() : flushDraft()">{{ draftInitializationFailed ? '重试读取' : '重试保存' }}</button>
         <button v-if="draftVersion >= 0 || draftDirty" type="button" @click="clearDraft">清空重新开始</button>
       </section>
 
@@ -1860,9 +1888,9 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
     </div>
     <div v-if="showDraftConflictDialog" class="modal-mask draft-dialog-mask">
       <section class="modal draft-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-conflict-title">
-        <small>DRAFT CONFLICT</small><h2 id="draft-conflict-title">另一个页面已经更新草稿</h2>
-        <p>系统不会自动覆盖较新的草稿。可以加载服务器版本，或明确使用当前页面内容覆盖。</p>
-        <footer><button type="button" @click="showDraftConflictDialog=false">继续查看当前内容</button><button type="button" @click="reloadServerDraftAfterConflict">加载服务器草稿</button><button type="button" class="primary" @click="overwriteServerDraftAfterConflict">使用当前内容覆盖</button></footer>
+        <small>DRAFT CONFLICT</small><h2 id="draft-conflict-title">草稿版本发生变化</h2>
+        <p>自动保存已暂停，当前输入已保留。可继续编辑后处理冲突，或选择加载服务器草稿、使用当前内容覆盖。</p>
+        <footer><button type="button" @click="showDraftConflictDialog=false">继续查看当前内容</button><button type="button" :disabled="resolvingDraftConflict" @click="reloadServerDraftAfterConflict().catch(() => undefined)">加载服务器草稿</button><button type="button" class="primary" :disabled="resolvingDraftConflict" @click="overwriteServerDraftAfterConflict().catch(() => undefined)">使用当前内容覆盖</button></footer>
       </section>
     </div>
     <Transition name="toast"><div v-if="notice" class="toast">✓ {{ notice }}</div></Transition>
