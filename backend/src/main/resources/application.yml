@@ -12,6 +12,7 @@ server:
     mime-types: application/json
   servlet:
     session:
+      timeout: 8h
       cookie:
         name: QUOTATION_SESSION
         http-only: true
@@ -44,6 +45,7 @@ spring:
       repositories:
         enabled: false
   session:
+    timeout: 8h
     store-type: redis
     redis:
       namespace: quotation:session
