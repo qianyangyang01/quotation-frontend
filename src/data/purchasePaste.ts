@@ -63,9 +63,12 @@ export function applyPurchasePaste(grid: string[][], clipboard: string[][], star
 export type PurchasePasteIssue = { row: number; column: number; message: string }
 const numericFields = new Set(['weightG', 'lengthCm', 'widthCm', 'heightCm', 'minOrderQty', 'purchasePriceCny', 'tier2MinQty', 'tier2PriceCny', 'tier3MinQty', 'tier3PriceCny', 'singleFreightCny', 'freight10Cny', 'freight100Cny', 'taxIncludedPriceCny', 'taxPoint'])
 export function validatePurchasePaste(grid: string[][]) {
-  const issues: PurchasePasteIssue[] = []; const records: PurchaseProductRecord[] = []; const seen = new Map<string, number>()
+  const issues: PurchasePasteIssue[] = []; const records: PurchaseProductRecord[] = []; const seen = new Map<string, number>(); const skipped: string[] = []
   grid.forEach((cells, row) => {
     if (cells.every(cell => !cell.trim())) return
+    const key = (cells[3] || '').toUpperCase().replace(/\s+/g, '')
+    if (key && seen.has(key)) { skipped.push(key); return }
+    if (key) seen.set(key, row)
     const data: Record<string, unknown> = { skuOrigin: 'manual', dataSource: 'standard', sourceSheet: '采购粘贴新增', sourceRow: row + 1 }
     const issue = (field: string, message: string) => issues.push({ row, column: PURCHASE_PASTE_COLUMNS.findIndex(c => c[1] === field), message })
     PURCHASE_PASTE_COLUMNS.forEach(([, field], col) => {
@@ -81,9 +84,7 @@ export function validatePurchasePaste(grid: string[][]) {
     const sku = String(data.sku).toUpperCase().replace(/\s+/g, '')
     data.sku = sku
     if (!/^[A-Z0-9._/-]{1,96}$/.test(sku) || /^(TESTP|TEST|DEMO|MOCK|AUTO-)/i.test(sku)) issue('sku', '请填写有效的正式SKU')
-    if (sku) {
-      if (seen.has(sku)) { issue('sku', `与第${seen.get(sku)! + 1}行SKU重复`); issues.push({ row: seen.get(sku)!, column: 3, message: `与第${row + 1}行SKU重复` }) } else seen.set(sku, row)
-    }
+
     for (const field of ['weightG', 'minOrderQty']) {
       if (data[field] == null || Number(data[field]) <= 0) issue(field, '必填，须大于0')
     }
@@ -109,5 +110,5 @@ export function validatePurchasePaste(grid: string[][]) {
     }
     records.push(normalizePurchaseRecord(data as Partial<PurchaseProductRecord>))
   })
-  return { issues, records, canSave: records.length > 0 && records.length <= PURCHASE_PASTE_LIMIT && issues.length === 0 }
+  return { issues, records, skipped, canSave: records.length > 0 && records.length <= PURCHASE_PASTE_LIMIT && issues.length === 0 }
 }

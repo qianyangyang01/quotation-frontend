@@ -130,10 +130,9 @@ public class PurchaseProductService {
             if (!(rows.get(i) instanceof ObjectNode node)) throw AppException.unprocessable("第"+(i+1)+"行商品格式错误");
             var copy = node.deepCopy(); var sourceRow = copy.path("sourceRow").asInt(i + 1);
             if (sourceRow < 1 || sourceRow > 100) sourceRow = i + 1;
+            var sku = normalizeSku(copy.path("sku").asText());
+            if (!skus.add(sku) || products.findBySku(sku).isPresent()) continue;
             PurchasePasteValidator.validate(copy, sourceRow); validatePayload(copy);
-            var sku = copy.path("sku").asText();
-            if (!skus.add(sku)) throw AppException.unprocessable("第"+sourceRow+"行SKU "+sku+" 在本次粘贴中重复");
-            if (products.findBySku(sku).isPresent()) throw AppException.conflict("第"+sourceRow+"行SKU "+sku+" 已存在，本次未保存；请删除该行或修改SKU后重试");
             inputs.add(copy);
         }
         // All rows validated before writes. Missing version also prevents a concurrent SKU from being overwritten.

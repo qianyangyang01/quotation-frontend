@@ -51,14 +51,17 @@ async function save() {
   if (!check.value.canSave || busy.value) return
   busy.value = true; message.value = '正在校验并保存，请稍候…'
   const records = check.value.records
-  const count = records.length
+  const batchSkipped = [...check.value.skipped]
   try {
-    await request('/purchase-products/paste', { method: 'POST', body: JSON.stringify(records), signal: AbortSignal.timeout(60_000) })
-    savedShareText.value = records.map(record => [record.sku, record.category].map(value => String(value || '').replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n')
+    const added = await request<Array<{ sku: string; category?: string }>>('/purchase-products/paste', { method: 'POST', body: JSON.stringify(records), signal: AbortSignal.timeout(60_000) })
+    const addedSkus = new Set(added.map(record => record.sku))
+    const skipped = [...batchSkipped, ...records.filter(record => !addedSkus.has(record.sku)).map(record => record.sku)]
+    const count = added.length
+    savedShareText.value = added.map(record => [record.sku, record.category].map(value => String(value || '').replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n')
     savedCount.value = count
     showCopyFallback.value = false
     grid.value = Array.from({ length: 10 }, emptyPurchasePasteRow)
-    message.value = `已成功新增${count}条，可点击右下方“一键复制SKU和品类”发给业务员`
+    message.value = `已成功新增${count}条，自动跳过${skipped.length}条${skipped.length ? `（重复SKU：${[...new Set(skipped)].join("、")}）` : ""}${count ? "，可一键复制新增SKU和品类" : ""}`
     emit('saved', count)
   } catch (error) { message.value = error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError') ? '保存响应超时，数据已保留。请先在采购列表核对SKU是否已保存，再重试；已有SKU不会重复新增。' : error instanceof Error ? error.message : '保存失败，数据已保留，请重试' }
   finally { busy.value = false }
@@ -70,11 +73,12 @@ async function save() {
     <div class="paste-overlay" @keydown.esc.prevent="close">
       <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="paste-title">
         <header><div><h2 id="paste-title">采购粘贴新增</h2><p>支持整行复制，自动过滤原表前3列图片/空白列。无需表头，点击“报价日期”列后按 Ctrl + V；也可从原表报价日期开始复制。</p></div><button :disabled="busy" aria-label="关闭粘贴新增" @click="close">×</button></header>
-        <div class="paste-tools"><span>当前：第{{ selected.row + 1 }}行 · {{ PURCHASE_PASTE_COLUMNS[selected.col]?.[0] }}</span><button :disabled="busy || grid.length >= PURCHASE_PASTE_LIMIT" @click="grid.push(...Array.from({ length: Math.min(5, PURCHASE_PASTE_LIMIT-grid.length) }, emptyPurchasePasteRow))">增加5行</button><small>最多100行 · 向右滚动查看全部列</small></div>
+        <div class="paste-tools"><span>当前：第{{ selected.row + 1 }}行 · {{ PURCHASE_PASTE_COLUMNS[selected.col]?.[0] }}</span><button :disabled="busy || grid.length >= PURCHASE_PASTE_LIMIT" @click="grid.push(...Array.from({ length: Math.min(5, PURCHASE_PASTE_LIMIT-grid.length) }, emptyPurchasePasteRow))">增加5行</button><small>最多100行 · 重复SKU自动跳过，已有商品不覆盖 · 向右滚动查看全部列</small></div>
         <p class="paste-help">必填：正式SKU、克重、起订量、基准采购单价；未包邮时需1件及10件总运费。其他列可留空，长宽高、阶梯价填写时须完整。表头星号沿用原表，保存以本页校验为准。</p>
         <div ref="table" class="paste-grid"><table><thead><tr><th class="row-index">行</th><th v-for="([label, field], c) in PURCHASE_PASTE_COLUMNS" :key="field"><small>{{ String.fromCharCode(65 + Math.floor(c / 26) - 1).replace('@', '') }}{{ String.fromCharCode(65 + c % 26) }}</small>{{ label }}</th><th>操作</th></tr></thead><tbody>
           <tr v-for="(row, r) in grid" :key="r"><th class="row-index">{{ r + 1 }}</th><td v-for="([label, field], c) in PURCHASE_PASTE_COLUMNS" :key="field" :class="{ invalid: errors.has(`${r}:${c}`) }"><input v-model="row[c]" :data-cell="`${r}:${c}`" :aria-label="`第${r + 1}行 ${label}`" :aria-invalid="errors.has(`${r}:${c}`)" :title="errors.get(`${r}:${c}`) || row[c]" :disabled="busy" autocomplete="off" @focus="selected = { row:r, col:c }" @paste="paste($event, r, c)" @keydown="move($event, r, c)"><small v-if="errors.has(`${r}:${c}`)">{{ errors.get(`${r}:${c}`) }}</small></td><td><button :disabled="busy" :aria-label="`删除第${r + 1}行`" @click="grid.splice(r,1)">删除</button></td></tr>
         </tbody></table></div>
+        <p v-if="check.skipped.length" class="paste-help">同批重复 SKU 自动保留第一条，跳过 {{ check.skipped.length }} 条：{{ [...new Set(check.skipped)].join("、") }}</p>
         <div v-if="check.issues.length" class="paste-errors"><b>{{ check.issues.length }}处需要修正</b><button v-for="(issue,i) in check.issues.slice(0,5)" :key="i" @click="focusCell(issue.row,issue.column)">第{{ issue.row + 1 }}行 {{ PURCHASE_PASTE_COLUMNS[issue.column]?.[0] }}：{{ issue.message }}</button></div>
         <p v-if="message" class="paste-message" role="status">{{ message }}</p>
         <textarea v-if="showCopyFallback" class="copy-fallback" aria-label="已保存的SKU和品类" :value="savedShareText" readonly @focus="($event.target as HTMLTextAreaElement).select()" />

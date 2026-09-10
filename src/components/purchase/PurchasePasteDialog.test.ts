@@ -47,6 +47,7 @@ it('keeps successfully saved SKU/category available for copying and supports cli
   request.mockRejectedValueOnce(new Error('保存失败'))
   button('保存新增 1 条').click();await nextTick();await nextTick()
   expect(button('一键复制SKU和品类').disabled).toBe(true)
+  request.mockResolvedValueOnce([{sku:'QA-SHARE-1',category:'图书'}])
   button('保存新增 1 条').click();await nextTick();await nextTick()
   expect(document.querySelector('[role="dialog"]')).not.toBeNull()
   expect(button('一键复制SKU和品类').disabled).toBe(false)
@@ -57,4 +58,24 @@ it('keeps successfully saved SKU/category available for copying and supports cli
   button('一键复制SKU和品类').click();await nextTick();await nextTick()
   expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('QA-SHARE-1\t图书')
   expect(document.querySelector('[role="status"]')!.textContent).toContain('Ctrl + C')
+})
+
+
+it('counts batch and database duplicates and copies only returned additions', async()=>{
+  const writeText=vi.fn().mockResolvedValue(undefined);vi.stubGlobal('navigator',{clipboard:{writeText}})
+  const host=document.createElement('div');document.body.append(host);app=createApp(PurchasePasteDialog);app.mount(host)
+  const button=(name:string)=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===name)!
+  const paste=async()=>{
+    const rows=['P-NEW','P-OLD','p-new'].map(sku=>{const row=emptyPurchasePasteRow();Object.assign(row,{3:sku,4:'50',11:'1',12:'9',17:'0',18:'0'});return row.join('\t')})
+    const event=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(event,'clipboardData',{value:{getData:(type:string)=>type==='text/html'?'':rows.join('\r\n')}})
+    document.querySelector('[data-cell="0:0"]')!.dispatchEvent(event);await nextTick()
+  }
+  await paste();request.mockResolvedValueOnce([{sku:'P-NEW',category:'图书'}]);button('保存新增 2 条').click();await nextTick();await nextTick()
+  expect(JSON.parse(request.mock.calls[0]![1].body)).toHaveLength(2)
+  expect(document.querySelector('[role="status"]')!.textContent).toContain('已成功新增1条，自动跳过2条')
+  expect(document.querySelector('[role="status"]')!.textContent).toContain('P-OLD')
+  button('一键复制SKU和品类').click();await nextTick();await nextTick();expect(writeText).toHaveBeenCalledWith('P-NEW\t图书')
+  await paste();request.mockResolvedValueOnce([]);button('保存新增 2 条').click();await nextTick();await nextTick()
+  expect(document.querySelector('[role="status"]')!.textContent).toContain('已成功新增0条，自动跳过3条')
+  expect(button('一键复制SKU和品类').disabled).toBe(true)
 })

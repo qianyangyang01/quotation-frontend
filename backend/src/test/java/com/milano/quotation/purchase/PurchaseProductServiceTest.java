@@ -43,17 +43,23 @@ class PurchaseProductServiceTest {
         var result=service.createPasted(List.of(pasted("P-1")));
         assertTrue(result.getFirst().path("quoteReady").asBoolean());
         var overwrite=pasted("P-1").put("_version",0).put("purchasePriceCny",100);
-        assertThrows(AppException.class,()->service.createPasted(List.of(pasted("P-3"),overwrite)));
-        assertFalse(rows.containsKey("P-3")); assertEquals(9.24,rows.get("P-1").payload.path("purchasePriceCny").asDouble());
+        assertEquals(1,service.createPasted(List.of(pasted("P-3"),overwrite)).size());
+        assertTrue(service.createPasted(List.of(overwrite)).isEmpty());
+        assertTrue(rows.containsKey("P-3")); assertEquals(9.24,rows.get("P-1").payload.path("purchasePriceCny").asDouble());
     }
     @Test void pastedRowsRejectDuplicatesUnsafeNumbersAndIncompleteGroups() {
-        assertThrows(AppException.class,()->service.createPasted(List.of(pasted("P-1"),pasted("p-1"))));
+
         for (var invalid : List.of(pasted("P-1").put("minOrderQty",1.5),pasted("P-1").put("lengthCm",5),pasted("P-1").put("tier2MinQty",10),pasted("P-1").put("freight100Cny",-1),pasted("P-1").put("quotationDate","2026-02-30"))) {
             assertThrows(AppException.class,()->service.createPasted(List.of(invalid)));
         }
         verify(products,never()).saveAndFlush(any());
         var free=pasted("P-FREE").put("freeShipping","是").put("purchasePriceCny",0); free.remove(List.of("singleFreightCny","freight10Cny"));
         assertTrue(service.createPasted(List.of(free)).getFirst().path("quoteReady").asBoolean());
+    }
+    @Test void pastedDuplicatesKeepFirst() {
+        var result=service.createPasted(List.of(pasted("P-1"),pasted("p-1").put("purchasePriceCny",100)));
+        assertEquals(1,result.size());
+        assertEquals(9.24,result.getFirst().path("purchasePriceCny").asDouble());
     }
     @Test void negativePriceCannotBecomeAReadyProduct() {
         var input=JsonNodeFactory.instance.objectNode().put("sku","QA-NEGATIVE").put("weightG",100).put("minOrderQty",1).put("purchasePriceCny",-1).put("tier2PriceCny",10);

@@ -7,6 +7,12 @@ function valid() {
   return row
 }
 describe('purchase data-only paste', () => {
+  it('keeps first normalized SKU and skips invalid duplicate rows', () => {
+    const duplicate = emptyPurchasePasteRow(); duplicate[3] = ' p260905-1 ';
+    const result = validatePurchasePaste([valid(), duplicate]);
+    expect(result.canSave).toBe(true); expect(result.records).toHaveLength(1);
+    expect(result.skipped).toEqual(['P260905-1']);
+  })
   it('retains the supplied 32 column order including material and tax point', () => {
     expect(PURCHASE_PASTE_COLUMNS.map(c => c[0])).toEqual(['报价日期*','报价人*','备注','SKU','克重(g)*','尺码','颜色','材质','长(cm)*','宽(cm)*','高(cm)*','起订量(件)*','基准采购单价(CNY/件)*','阶梯价2起订量','阶梯价2(CNY/件)','阶梯价3起订量','阶梯价3(CNY/件)','1件总运费(CNY)','10件总运费(CNY)','100件总运费(CNY)','是否包邮','含票价(CNY/件)','票点','票类型','类别','是否有货*','工厂信息','审核备注','货源链接1','货源链接2','货源链接3','相似货源'])
   })
@@ -37,10 +43,10 @@ describe('purchase data-only paste', () => {
     row[4]='0'; row[11]='1.5'; row[12]=''
     expect(validatePurchasePaste([row]).canSave).toBe(false)
   })
-  it('rejects malformed numbers, partial dimensions, tiers, invalid dates and duplicate SKU', () => {
+  it('rejects malformed numbers, partial dimensions, tiers, invalid dates ', () => {
     const row=valid(); row[8]='5'; row[13]='1'; row[14]='8'; row[0]='2026.2.30'; row[19]='0x20'
     const result=validatePurchasePaste([row,valid()])
-    for (const col of [9,10,13,0,19,3]) expect(result.issues.some(i=>i.column===col)).toBe(true)
+    for (const col of [9,10,13,0,19]) expect(result.issues.some(i=>i.column===col)).toBe(true)
     expect(result.canSave).toBe(false)
   })
 })
