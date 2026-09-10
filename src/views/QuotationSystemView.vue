@@ -1523,6 +1523,16 @@ function buildQuoteOptions() {
     }
   })
 }
+function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>) {
+  const index = Math.max(0, quoteOptions.findIndex(option => option.isPrimary))
+  const option = quoteOptions[index]
+  if (!option) return null
+  const price = quantityCostBreakdown(products.value[0], option.rule, 1, option.country, option.carrier, option.quoteRegion || '', option.channelKey)
+  if (!price || !Number.isFinite(price.quoteUsd) || !Number.isFinite(price.cost)) return null
+  quoteOptions.forEach((item, i) => { item.isPrimary = i === index })
+  return { country: option.country, carrier: option.carrier, channel: option.channel, rule: option.rule,
+    systemQuoteUsd: price.quoteUsd, systemQuoteCny: price.quoteCny, totalCostCny: price.cost }
+}
 async function save() {
   if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
@@ -1535,6 +1545,8 @@ async function save() {
   if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const quoteOptions = buildQuoteOptions()
+  const summary = selectedQuoteSummary(quoteOptions)
+  if (!summary) { toast('首选渠道无法计算1件报价，请重新选择可计价渠道后保存'); return }
   const productSummary = quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
@@ -1573,9 +1585,8 @@ async function save() {
     packageWidthCm: quoteMode.value === 'single' ? p.packageWidthCm : undefined,
     packageHeightCm: quoteMode.value === 'single' ? p.packageHeightCm : undefined,
     defaultVolumeDivisor: quoteMode.value === 'single' ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
-    logisticsAttribute: p.logisticsAttribute, country: p.country, carrier: p.channel,
-    channel: logisticsRules.find(rule => rule.name === p.rule)?.relations.find(relation => relation.carrier === p.channel)?.channel || p.rule,
-    rule: p.rule, customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, systemQuoteCny: finalSalePrice(p), systemQuoteUsd: taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd, totalCostCny: totalCost(p), exchangeRate: exchange.value.usd,
+    logisticsAttribute: p.logisticsAttribute, ...summary,
+    customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, exchangeRate: exchange.value.usd,
     matrixMode: quoteMatrixMode.value,
     quotationTemplateId: templateSnapshot?.id,
     quotationTemplateName: templateSnapshot?.name,
