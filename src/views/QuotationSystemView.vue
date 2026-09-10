@@ -513,6 +513,7 @@ function ensureCountries(countries: string[]): Promise<boolean> {
       if (generation !== countryGeneration) return false
       if (!result.verified) throw new Error('无法确认最新物流版本，请重试')
       replaceLogisticsRules(result.rules)
+      financePolicies.value = loadFinanceChannelPolicies()
       loadedQuoteCountries.value = query
       logisticsRevision.value = result.revision
       logisticsRulesGeneration.value += 1
@@ -643,6 +644,7 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     }
     if (signal?.aborted || key !== draftSignature()) return false
     replaceLogisticsRules(latest.rules)
+    financePolicies.value = loadFinanceChannelPolicies()
     loadedQuoteCountries.value = countries
     logisticsRulesGeneration.value++
     logisticsRevision.value = latest.revision

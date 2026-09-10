@@ -12,6 +12,10 @@ function functionBody(name: string, nextName: string) {
 }
 
 describe('quotation logistics query flow contract', () => {
+  it('rebuilds finance channel availability after loading additional country prices', () => {
+    const body = functionBody('ensureCountries', 'cancelQuoteLogistics')
+    expect(body.indexOf('financePolicies.value = loadFinanceChannelPolicies()')).toBeGreaterThan(body.indexOf('replaceLogisticsRules(result.rules)'))
+  })
   it('shows a single product before starting logistics in the background', () => {
     const body = functionBody('queryProduct', 'queryBundleItem')
     expect(body).not.toContain('await ensureQuoteLogistics')
