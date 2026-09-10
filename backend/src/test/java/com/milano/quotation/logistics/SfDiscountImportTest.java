@@ -21,7 +21,7 @@ class SfDiscountImportTest {
             book.write(bytes);return bytes.toByteArray();
         }
     }
-    JsonNode channel(byte[] bytes,String provider){return parser.parse(bytes,provider+".xlsx").path("channels").get(0);}
+    JsonNode channel(byte[] bytes,String provider){var channels=parser.parse(bytes,provider+".xlsx").path("channels"); assertFalse(channels.isEmpty(),provider); return channels.get(0);}
     @Test void settlementAliasesOverrideOriginalAndDiscountWithoutDiscountingOperationFee() throws Exception {
         for(var header:new String[]{"折后运费","结算运费","SF折后"}) {
             var c=channel(workbook(header,1,97,51),"顺丰");var row=c.path("rows").get(0);
@@ -42,7 +42,17 @@ class SfDiscountImportTest {
         for(var bad:new Object[]{"",0,-0.1,7,70,1.1,"七折","#REF!"})assertFalse(channel(workbook(null,bad,100,0),"顺丰").path("rows").get(0).path("quoteReady").asBoolean());
     }
     @Test void otherProvidersIgnoreSfSettlementAndDiscountColumns() throws Exception {
-        for(var provider:LogisticsSourceParser.PROVIDERS)if(!provider.equals("顺丰"))assertEquals(97,channel(workbook("折后运费",0.7,97,51),provider).path("rows").get(0).path("pricePerKg").asDouble(),provider);
+        for(var provider:LogisticsSourceParser.PROVIDERS)if(!provider.equals("顺丰")) {
+            var input=workbook("折后运费",0.7,97,51);
+            // Shandianhou only accepts approved US channels; keep the same pricing assertion.
+            if(provider.equals("闪电猴"))try(var book=new XSSFWorkbook(new ByteArrayInputStream(input));var bytes=new ByteArrayOutputStream()) {
+                var sheet=book.getSheetAt(0);
+                sheet.getRow(1).getCell(0).setCellValue("美国");sheet.getRow(1).getCell(1).setCellValue("US");
+                sheet.getRow(0).createCell(7).setCellValue("渠道名称");sheet.getRow(1).createCell(7).setCellValue("美猴专线普货");
+                book.write(bytes);input=bytes.toByteArray();
+            }
+            assertEquals(97,channel(input,provider).path("rows").get(0).path("pricePerKg").asDouble(),provider);
+        }
     }
     @Test void handlesCachedFormulasPercentFormatsMergedDiscountsAndMissingBaseColumn() throws Exception {
         try(var book=new XSSFWorkbook(new ByteArrayInputStream(workbook(null,0.7,100,0)));var bytes=new ByteArrayOutputStream()) {
