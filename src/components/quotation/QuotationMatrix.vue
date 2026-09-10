@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
+import { sameQuotationRegion } from '@/data/logistics'
 
 const DEFAULT_COUNTRIES = ['美国', '英国', '加拿大', '澳大利亚']
 const props = withDefaults(defineProps<{
@@ -52,17 +53,16 @@ function rowKey(row: Pick<QuotationMatrixRow, 'channelKey' | 'rule' | 'carrier' 
   return JSON.stringify([row.quoteRegion || '', row.channelKey?.trim() || fallbackRowKey(row)])
 }
 function presetFallbackMatchesRow(preset: QuotationPresetSelection, row: QuotationMatrixRow) {
-  return (!preset.quoteRegion || preset.quoteRegion === row.quoteRegion)
+  return (preset.quoteRegion ? sameQuotationRegion(preset.quoteRegion, row.quoteRegion) : !row.quoteRegion || row.quoteRegion === '全国统一')
     && !!preset.rule && !!preset.carrier && !!preset.transport
     && preset.rule === row.rule
     && preset.carrier === row.carrier
     && preset.transport === row.transport
 }
 function findPresetRow(preset: QuotationPresetSelection, rows: QuotationMatrixRow[]) {
-  if (!preset.quoteRegion && rows.some(row => row.quoteRegion)) return undefined
   const presetChannelKey = preset.channelKey?.trim()
   if (presetChannelKey) {
-    const stableMatch = rows.find(row => row.channelKey?.trim() === presetChannelKey && (!preset.quoteRegion || preset.quoteRegion === row.quoteRegion))
+    const stableMatch = rows.find(row => row.channelKey?.trim() === presetChannelKey && (preset.quoteRegion ? sameQuotationRegion(preset.quoteRegion, row.quoteRegion) : !row.quoteRegion || row.quoteRegion === '全国统一'))
     if (stableMatch) return stableMatch
   }
   return rows.find(row => presetFallbackMatchesRow(preset, row))
@@ -90,7 +90,8 @@ function fastestRow(rows: QuotationMatrixRow[]) {
 function recommendedRows(country: string) {
   const rows = country === channelPickerCountry.value ? pickerRows.value : availableRows(country)
   const fastest = fastestRow(rows)
-  const result = [rows[0], fastest, rows[1]].filter((row): row is QuotationMatrixRow => !!row)
+  const byPrice = [...rows].sort((a, b) => (a.quote1 ?? Infinity) - (b.quote1 ?? Infinity))
+  const result = [byPrice[0], fastest, byPrice[1]].filter((row): row is QuotationMatrixRow => !!row)
   return [...new Map(result.map(row => [rowKey(row), row])).values()].slice(0, 3)
 }
 function resetDefaultSelection() {
@@ -98,7 +99,7 @@ function resetDefaultSelection() {
   selectedCountries.value = DEFAULT_COUNTRIES.filter(country => names.has(country))
   const next: Record<string, string[]> = {}
   selectedCountries.value.forEach(country => {
-    const first = availableRows(country)[0]
+    const first = recommendedRows(country)[0]
     next[country] = first ? [rowKey(first)] : []
   })
   selectedChannelKeys.value = next
@@ -206,7 +207,7 @@ const countryOptions = computed(() => {
 })
 const pickerRows = computed(() => availableRows(channelPickerCountry.value).filter(row => !pickerRegion.value || row.quoteRegion === pickerRegion.value))
 const recommendationKeys = computed(() => new Set(recommendedRows(channelPickerCountry.value).map(rowKey)))
-const lowestKey = computed(() => pickerRows.value[0] ? rowKey(pickerRows.value[0]) : '')
+const lowestKey = computed(() => { const cheapest = [...pickerRows.value].sort((a, b) => (a.quote1 ?? Infinity) - (b.quote1 ?? Infinity))[0]; return cheapest ? rowKey(cheapest) : '' })
 const fastestKey = computed(() => {
   const row = fastestRow(pickerRows.value)
   return row ? rowKey(row) : ''
@@ -250,7 +251,7 @@ async function openChannelPicker(country: string) {
   channelPickerCountry.value = country
   pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
   channelSearch.value = ''
-  channelFilter.value = '系统推荐'
+  channelFilter.value = countrySummary(country)?.quoteRegions?.length ? '系统推荐' : '全部'
   pendingChannelKeys.value = []
   channelPage.value = 1
   channelLoading.value = true
@@ -338,7 +339,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
           <div class="country-name"><i>{{ countryFlag(countrySummary(country)?.code || '') }}</i><b>{{ country }}</b><em>{{ countrySummary(country)?.code }}</em><span>{{ selectedRows(country).length }} 条已选 · {{ availableRows(country).length }} 条可用</span></div>
           <div class="country-actions"><button v-if="variant === 'template' || !DEFAULT_COUNTRIES.includes(country)" class="remove-country" @click="removeCountry(country)">移除国家</button><button @click="openChannelPicker(country)">＋ 添加渠道</button></div>
         </header>
-        <div v-if="availableRows(country).length" class="country-metrics"><span>最低 <b>{{ formatUsd(availableRows(country)[0]?.quote1 ?? null) }}</b> · {{ availableRows(country)[0]?.quoteRegion }} · {{ availableRows(country)[0]?.carrier }}｜{{ availableRows(country)[0]?.transport }}</span><span>最快 <b>{{ fastestRow(availableRows(country))?.eta }}</b> · {{ fastestRow(availableRows(country))?.quoteRegion }} · {{ fastestRow(availableRows(country))?.carrier }}｜{{ fastestRow(availableRows(country))?.transport }}</span></div>
+        <div v-if="availableRows(country).length" class="country-metrics"><span>最低 <b>{{ formatUsd(recommendedRows(country)[0]?.quote1 ?? null) }}</b> · {{ recommendedRows(country)[0]?.quoteRegion }} · {{ recommendedRows(country)[0]?.carrier }}｜{{ recommendedRows(country)[0]?.transport }}</span><span>最快 <b>{{ fastestRow(availableRows(country))?.eta }}</b> · {{ fastestRow(availableRows(country))?.quoteRegion }} · {{ fastestRow(availableRows(country))?.carrier }}｜{{ fastestRow(availableRows(country))?.transport }}</span></div>
         <div class="quote-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价</span><span>2{{ unitLabel || '件' }}报价</span><span>3{{ unitLabel || '件' }}报价</span><span class="custom-quote-head">{{ customQuantity }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
         <div v-if="selectedRows(country).length" class="selected-channels">
           <section v-for="row in selectedRows(country)" :key="rowKey(row)" :class="{ adopted:adoptedCountry===country && adoptedRule===row.rule && adoptedCarrier===row.carrier && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') }">

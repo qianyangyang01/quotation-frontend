@@ -63,6 +63,7 @@ public class QuotationReadinessService {
                 .forEach(sku -> reasons.add("商品 " + sku + " 尚未确认转正式"));
         if (!reasons.isEmpty()) throw AppException.unprocessable("报价业务尚未就绪：" + String.join("；", reasons.stream().distinct().toList()));
         products.assertQuotationVersions(quotation);
+        products.assertQuotationTaxPoints(quotation);
     }
 
     private static boolean completeFinance(String key, JsonNode payload) {

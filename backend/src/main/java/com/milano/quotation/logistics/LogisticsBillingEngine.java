@@ -64,7 +64,7 @@ public class LogisticsBillingEngine {
     }
     static boolean includes(JsonNode r,BigDecimal w){int lo=w.compareTo(n(r,"weightFromKg")),hi=w.compareTo(n(r,"weightToKg"));return (lo>0||lo==0&&r.path("weightFromInclusive").asBoolean())&&(hi<0||hi==0&&r.path("weightToInclusive").asBoolean(true));}
     static Set<String> zoneOptions(Collection<JsonNode> rows){var zones=new LinkedHashSet<String>();boolean unzoned=false;for(var row:rows){var value=row.path("zoneName").asText().trim();if(value.isBlank())unzoned=true;else zones.addAll(splitZones(value));}return zones.size()>1||unzoned&&!zones.isEmpty()?zones:Set.of();}
-    static boolean zoneMatches(String rowZone,String requested){var wanted=normalizeZone(requested);if(wanted.equals("全国统一"))return rowZone.isBlank();return splitZones(rowZone).stream().map(LogisticsBillingEngine::normalizeZone).anyMatch(wanted::equals);}
+    static boolean zoneMatches(String rowZone,String requested){var wanted=normalizeZone(requested);if(wanted.equals("全国统一"))return rowZone.isBlank()||normalizeZone(rowZone).equals(wanted);return splitZones(rowZone).stream().map(LogisticsBillingEngine::normalizeZone).anyMatch(wanted::equals);}
     static Set<String> splitZones(String value){var out=new LinkedHashSet<String>();for(var item:value.split("[/／、,，;；|]"))if(!item.isBlank())out.add(item.trim());return out;}
     static String normalizeZone(String value){return value.replaceAll("[（）()\\s]","").replaceFirst("^澳大利亚","").replace("一区","1区").replace("二区","2区").replace("三区","3区").replace("四区","4区");}
     static boolean available(JsonNode row){var reason=row.path("pendingReason").asText();return !reason.contains("暂停")&&!reason.contains("关停")&&!reason.contains("停收");}

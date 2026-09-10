@@ -123,11 +123,54 @@ export function normalizeAustraliaQuoteRegion(value: string) {
 export function logisticsQuoteRegions(country: string) {
   const cached = regionIndex.get(country)
   if (cached) return cached
+  if (!isAustraliaQuoteCountry(country)) {
+    const options = logisticsRules.flatMap(rule => {
+      const rows = countryRowsForRule(rule, country).filter(row => !row.zoneExclude)
+      const zones = [...new Set(rows.flatMap(row => row.zoneName ? splitZones(row.zoneName) : ['']))]
+      const ordinary = zones.filter(isOrdinaryQuoteRegion)
+      const shown = !isCanada(country) && ordinary.length ? ordinary : zones
+      return shown.map(zone => zone ? `${channelRegionPrefix(rule)}${isCanada(country) ? normalizeCanadaRegion(zone) : zone}` : '全国统一')
+    })
+    const hasZones = options.some(option => option !== '全国统一')
+    const result = hasZones ? [...new Set(options)].sort((a, b) =>
+      Number(b === '全国统一') - Number(a === '全国统一') || a.localeCompare(b, 'zh-CN', { numeric: true })) : []
+    regionIndex.set(country, result)
+    return result
+  }
   const regions = new Set<string>()
   for (const rule of logisticsRules) meaningfulZoneOptions(countryRowsForRule(rule, country)).forEach(region => regions.add(region))
   const result = [...regions].map(region => (country === '澳大利亚' || country.toUpperCase() === 'AU') && normalizeZone(region) !== '全国统一' ? `澳大利亚${normalizeZone(region)}` : region)
   regionIndex.set(country, result)
   return result
+}
+
+function isCanada(country: string) { return country === '加拿大' || country.toUpperCase() === 'CA' }
+export function isAustraliaQuoteCountry(country: string) { return country === '澳大利亚' || country.toUpperCase() === 'AU' }
+function isOrdinaryQuoteRegion(region: string) {
+  return ['', '全国统一', '普通区域', '普通地区', '普通区', '非偏远', '非偏远地区', '非偏远区域', '非偏远区'].includes(region.trim())
+}
+function normalizeCanadaRegion(region: string) {
+  return region.replace(/^加拿大/, '').replace(/[一二三四五六七八九]/g, digit => String('一二三四五六七八九'.indexOf(digit) + 1))
+}
+function channelRegionPrefix(rule: LogisticsRule) {
+  const providers = [...new Set(rule.relations.map(relation => relation.carrier))].join('、')
+  return `${providers}｜${rule.name}｜`
+}
+/** UI region labels are scoped to a channel; persisted billing uses that channel's original zone. */
+export function billingQuoteRegion(rule: LogisticsRule, country: string, region = ''): string | null {
+  if (isAustraliaQuoteCountry(country)) return region
+  const rows = countryRowsForRule(rule, country)
+  if (!region) return isCanada(country) && rows.some(row => row.zoneName) ? null : ''
+  if (region === '全国统一') return rows.some(row => !row.zoneName) ? '全国统一' : null
+  const prefix = channelRegionPrefix(rule)
+  if (!region.startsWith(prefix)) return region.includes('｜') || isCanada(country) ? null : region
+  const selected = region.slice(prefix.length)
+  return rows.flatMap(row => splitZones(row.zoneName)).find(zone => (isCanada(country) ? normalizeCanadaRegion(zone) : zone) === selected) ?? null
+}
+
+/** A legacy template is matched only after its channel identity has matched. */
+export function sameQuotationRegion(saved = '', current = '') {
+  return saved === current || (current.includes('｜') && !saved.includes('｜') && normalizeCanadaRegion(saved) === normalizeCanadaRegion(current.split('｜').at(-1) || ''))
 }
 
 function countryMatches(price: LogisticsPriceRow, country: string) {
@@ -144,7 +187,7 @@ function meaningfulZoneOptions(rows: LogisticsPriceRow[]) {
 function priceMatchesRegion(price: LogisticsPriceRow, quoteRegion: string, required: boolean) {
   if (!required) return true
   if (!quoteRegion) return false
-  if (normalizeZone(quoteRegion) === '全国统一') return !price.zoneName
+  if (normalizeZone(quoteRegion) === '全国统一') return !price.zoneName || price.zoneName === '全国统一'
   return !price.zoneExclude && splitZones(price.zoneName).some(zone => normalizeZone(zone) === normalizeZone(quoteRegion))
 }
 
@@ -171,6 +214,9 @@ export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: strin
   return !allowed.size || marks.every(mark => mark === '普货' || allowed.has(mark))
 }
 export function findPriceRow(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], quoteRegion = '') {
+  const resolved = billingQuoteRegion(rule, country, quoteRegion)
+  if (resolved === null) return undefined
+  quoteRegion = resolved
   const { rows: countryRows, zoneRequired } = eligibleCountryRows(rule, country, productMarks)
   return countryRows.find(price => priceMatchesRegion(price, quoteRegion, zoneRequired) && weightMatchesPrice(price, weightKg))
 }
@@ -179,6 +225,9 @@ export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg'
     && (price.weightToInclusive === false ? weightKg < price.weightToKg : weightKg <= price.weightToKg)
 }
 export function calculateLogisticsFee(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], dimensions?: ShipmentDimensions, quoteRegion = '') {
+  const resolved = billingQuoteRegion(rule, country, quoteRegion)
+  if (resolved === null) return null
+  quoteRegion = resolved
   void dimensions
   const actualWeightKg = Math.max(0, Number(weightKg) || 0)
   const { rows: countryRows, zoneRequired } = eligibleCountryRows(rule, country, productMarks)

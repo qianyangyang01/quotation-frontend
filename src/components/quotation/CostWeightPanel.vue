@@ -22,6 +22,7 @@ function updateDivisor(event: Event) {
 }
 function purchasePricingLabel() {
   const product = props.product
+  if (product.purchaseZeroTaxPointAdjustment) return `采购票点为0 · 原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = 计入成本 ¥${product.purchase.toFixed(2)}`
   if (product.purchaseDataSource === 'legacy_2026') return product.purchasePriceBasis === 'tax_included' ? `2026旧数据 · 优先采用含票价 ¥${product.purchase.toFixed(2)}，不重复叠加票点` : `2026旧数据 · 含票价为空，采用报价 ¥${product.purchase.toFixed(2)}`
   if (!product.purchaseInvoiceTaxApplied) return `${props.purchaseTierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} · 旧草稿沿用原规则`
   if (product.purchaseInvoiceRatePercent <= 0 && Math.abs(product.purchase - product.purchaseBaseUnitPrice) > 0.001) return `票点暂无数据 · 使用含票价 ¥${product.purchase.toFixed(2)}`

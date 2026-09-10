@@ -9,7 +9,7 @@ const js = ts.transpileModule(fn.getText(ast), { compilerOptions: { target: ts.S
 const option = (country = '爱尔兰', isPrimary = false) => ({ country, carrier: '燕文', channel: '追踪', rule: '规则', quoteRegion: '3区', channelKey: '595::燕文::IE', isPrimary, quoteCustomUsd: 82 })
 function execute(options: ReturnType<typeof option>[], price: unknown = { quoteUsd: 19.75, quoteCny: 132.33, cost: 108.74 }) {
   const calls: unknown[][] = []
-  const run = new Function('products', 'quantityCostBreakdown', js + ';return selectedQuoteSummary')({ value: [{ country: '美国' }] }, (...args: unknown[]) => { calls.push(args); return price })
+  const run = new Function('logisticsRuleByName', 'billingQuoteRegion', 'savedQuoteRows', 'products', 'quantityCostBreakdown', js + ';return selectedQuoteSummary')(() => ({}), (_rule: unknown, _country: string, region: string) => region, { value: options }, { value: [{ country: '美国' }] }, (...args: unknown[]) => { calls.push(args); return price })
   return { result: run(options), calls }
 }
 describe('formal quotation selected summary', () => {

@@ -175,3 +175,28 @@ it('displays surcharge amount and provider exemption independently of tax', asyn
   props.row.surchargeEnabled = false; await nextTick()
   expect(document.body.textContent).not.toContain('附加费')
 })
+
+it('lists Canadian regional prices independently without a region selector and restores the exact selected region', async () => {
+  const changed = vi.fn()
+  const caRows = [1, 2].map(zone => ({ ...row('加拿大', 1), quoteRegion: `燕文｜渠道1｜${zone}区`, quote1: zone * 10 }))
+  const state = reactive({ active: true, countries: [{ ...countries[0]!, name: '加拿大', code: 'CA', selectedQuoteRegion: caRows[1]!.quoteRegion }],
+    contextKey: 'ca', exchangeRate: 7, adoptedCountry: '加拿大', adoptedRule: '1', adoptedCarrier: '测试物流',
+    quoteRowsForCountry: () => caRows, onSelectionChange: changed,
+    presetVersion: 1, presetSelection: [{ country: '加拿大', channelKey: '1', quoteRegion: '加拿大2区' }] })
+  mount(CommonMatrix, state); await nextTick()
+  expect(document.querySelector('.quote-region-select')).toBeNull()
+  expect(document.querySelectorAll('article.adopted')).toHaveLength(1)
+  expect(document.querySelector('article.adopted')?.textContent).toContain('2区')
+  expect(document.querySelectorAll('.selection-actions')).toHaveLength(2)
+  expect(changed.mock.lastCall?.[0].map((r: QuotationMatrixRow) => r.quoteRegion)).toEqual([caRows[1]!.quoteRegion])
+})
+
+it('shows all Canadian regions in the channel picker with no hidden region filter', async () => {
+  const caRows = [1, 2, 3].map(zone => ({ ...row('加拿大', 1), quoteRegion: `燕文｜渠道1｜${zone}区`, quote1: zone * 10 }))
+  mount(Matrix, { active: true, customQuantity: 5, adoptedCountry: '', adoptedRule: '', adoptedCarrier: '', countries: [{ ...countries[0]!, name: '加拿大', code: 'CA' }], contextKey: 'ca', exchangeRate: 7,
+    quoteRowsForCountry: () => caRows, presetVersion: 1, presetSelection: [{ country: '加拿大', channelKey: '1', quoteRegion: '加拿大2区' }] })
+  await nextTick(); await nextTick()
+  button('添加渠道').click(); await nextTick()
+  expect(document.querySelector('.quote-region-select')).toBeNull()
+  expect(document.querySelectorAll('.picker-list>label')).toHaveLength(3)
+})

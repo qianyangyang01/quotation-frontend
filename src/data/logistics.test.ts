@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsQuoteRegions, replaceLogisticsRules, logisticsRuleByName, type LogisticsRule } from './logistics'
+import { billingQuoteRegion, sameQuotationRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsQuoteRegions, replaceLogisticsRules, logisticsRuleByName, type LogisticsRule } from './logistics'
 
 it('keeps a usable base quote when ETA is absent and displays an explicit explanation', () => {
   expect(formatLogisticsEta({ etaMinDays: 0, etaMaxDays: 0 })).toBe('该物流暂无时效说明')
@@ -34,6 +34,28 @@ const publishedRule: LogisticsRule = {
     phoneRequired: false, zoneName: '', zoneExclude: false,
   }],
 }
+
+it('keeps Canadian channel regions separate and sorts numbered regions within each channel', () => {
+  const make = (id: number, name: string, carrier: string, zones: string[]) => ({ ...publishedRule, id, name,
+    relations: [{ ...publishedRule.relations[0]!, carrier }],
+    prices: zones.map((zoneName, index) => ({ ...publishedRule.prices[0]!, areaName: '加拿大', countryCode: 'CA', zoneName, registrationFee: index + 10 })) })
+  const tongyou = make(21, '通邮普货A', '通邮', ['2区', '1区'])
+  const yanwen = make(22, 'E邮宝', '燕文', ['加拿大7区', '加拿大2区', '加拿大1区'])
+  const general = make(23, '未分区渠道', '物流商', [''])
+  replaceLogisticsRules([tongyou, yanwen, general])
+  const options = logisticsQuoteRegions('加拿大')
+  expect(options.filter(value => value.startsWith('通邮｜'))).toEqual(['通邮｜通邮普货A｜1区', '通邮｜通邮普货A｜2区'])
+  expect(options.filter(value => value.startsWith('燕文｜'))).toEqual(['燕文｜E邮宝｜1区', '燕文｜E邮宝｜2区', '燕文｜E邮宝｜7区'])
+  expect(calculateLogisticsFee(tongyou, '加拿大', .1, ['普货'], undefined, '通邮｜通邮普货A｜2区')?.total).toBe(17.8)
+  expect(calculateLogisticsFee(yanwen, '加拿大', .1, ['普货'], undefined, '通邮｜通邮普货A｜2区')).toBeNull()
+  expect(calculateLogisticsFee(general, '加拿大', .1, ['普货'], undefined, '通邮｜通邮普货A｜2区')).toBeNull()
+  expect(calculateLogisticsFee(tongyou, '加拿大', .1, ['普货'], undefined, '2区')).toBeNull()
+  expect(calculateLogisticsFee(general, '加拿大', .1, ['普货'], undefined, '全国统一')?.total).toBe(17.8)
+  expect(billingQuoteRegion(yanwen, '加拿大', '燕文｜E邮宝｜2区')).toBe('加拿大2区')
+  expect(sameQuotationRegion('加拿大二区', '燕文｜E邮宝｜2区')).toBe(true)
+  expect(sameQuotationRegion('通邮｜通邮普货A｜2区', '燕文｜E邮宝｜2区')).toBe(false)
+  replaceLogisticsRules([])
+})
 
 describe('logistics fee calculation', () => {
   it('uses actual weight and ignores retained volumetric fields for verified billing', () => {
@@ -92,5 +114,23 @@ it('indexes a published snapshot without changing zone, weight-boundary or eligi
   expect(logisticsQuoteRegions('AU')).toEqual([])
   expect(calculateLogisticsFee(replacement,'AU',.5)?.total).toBe(25)
   expect(logisticsRuleByName(rule.name)).toBe(replacement)
+  replaceLogisticsRules([])
+})
+
+it('shows ordinary zones only when explicit, otherwise preserves numbered zones and isolates channels', () => {
+  const make = (id: number, zones: string[]) => ({ ...publishedRule, id, name: `方案${id}`,
+    prices: zones.map((zoneName, index) => ({ ...publishedRule.prices[0]!, zoneName, pricePerKg: 10 + index * 10 })) })
+  const ordinary = make(901, ['', '附属岛屿', '偏远地区'])
+  const numbered = make(902, ['10区', '2区', '1区'])
+  const explicit = make(903, ['非偏远', '偏远'])
+  replaceLogisticsRules([ordinary, numbered, explicit])
+  const options = logisticsQuoteRegions('美国')
+  expect(options).toContain('全国统一')
+  expect(options.some(s => s.includes('附属岛屿') || s.endsWith('｜偏远'))).toBe(false)
+  expect(options.filter(s => s.includes('方案902')).map(s => s.split('｜').at(-1))).toEqual(['1区', '2区', '10区'])
+  const second = options.find(s => s.includes('方案902') && s.endsWith('｜2区'))!
+  expect(calculateLogisticsFee(numbered, '美国', .1, ['普货'], undefined, second)?.price.pricePerKg).toBe(20)
+  expect(calculateLogisticsFee(ordinary, '美国', .1, ['普货'], undefined, second)).toBeNull()
+  expect(calculateLogisticsFee(numbered, '美国', .1, ['普货'], undefined, '全国统一')).toBeNull()
   replaceLogisticsRules([])
 })

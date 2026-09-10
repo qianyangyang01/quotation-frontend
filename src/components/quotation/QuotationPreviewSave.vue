@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
   customQuantity: number
   unitLabel: string
   exchangeRate: number
+  primaryRegion?: string
   primaryCountry: string
   primaryCarrier: string
   primaryRule: string
@@ -80,7 +81,7 @@ function toggleAll() {
 function formatUsd(value: number | null | undefined) { return value == null ? '—' : `$${value.toFixed(2)}` }
 function formatCny(value: number | null | undefined) { return value == null || props.exchangeRate <= 0 ? '—' : `¥${quoteCnyFromUsd(value, props.exchangeRate).toFixed(2)}` }
 function rowKey(row: QuotationMatrixRow) { return `${row.country}|${row.quoteRegion || ''}|${row.channelKey || ''}|${row.rule}|${row.carrier}|${row.transport}` }
-function isPrimary(row: QuotationMatrixRow) { return row.country === props.primaryCountry && row.rule === props.primaryRule && row.carrier === props.primaryCarrier }
+function isPrimary(row: QuotationMatrixRow) { return row.country === props.primaryCountry && row.rule === props.primaryRule && row.carrier === props.primaryCarrier && (row.quoteRegion || '') === (props.primaryRegion || '') }
 </script>
 
 <template>

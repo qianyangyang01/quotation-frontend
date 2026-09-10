@@ -9,7 +9,7 @@ import { calculateFinanceQuoteFees } from '@/data/financeSurchargeSettings'
 // provider-wide surcharge exemptions and fees omitted from any quantity column.
 const source = readFileSync(new URL('./QuotationSystemView.vue', import.meta.url), 'utf8').split('<script setup lang="ts">')[1]!.split('</script>')[0]!
 const parsed = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
-const names = ['taxResult', 'finalSalePrice', 'quantityCostBreakdown', 'excelQuoteRows', 'copySpecifiedQuotes']
+const names = ['taxResult', 'finalSalePrice', 'quantityCostBreakdown', 'excelQuoteRows', 'copySpecifiedQuotes', 'attemptSave', 'save', 'useLogistics']
 const bodies = parsed.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text || '')).map(node => node.getText(parsed)).join('\n')
 const js = ts.transpileModule(bodies, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 
@@ -22,6 +22,7 @@ describe('quotation view fee integration', () => {
     }
     let copied = ''
     const context = {
+      purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,
       financeChannelKey: (id: number, relation: { carrier: string; channelCode: string }) => id + '::' + relation.carrier + '::' + relation.channelCode,
@@ -53,4 +54,17 @@ describe('quotation view fee integration', () => {
     expect(table[2]![surchargeColumn]).toBe('2.00')
     expect(table[2]!.slice(-2)).toEqual(['99.00', '495.00'])
   })
+})
+
+it('blocks calculation and copying immediately when purchase tax points are missing', async () => {
+  let blocked = 0
+  const run = new Function('purchaseTaxBlockReason', 'toast', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copySpecifiedQuotes, attemptSave, save, useLogistics}')(
+    { value: '该商品采购票点为空，请补齐后报价' }, () => { blocked++ })
+  expect(run.excelQuoteRows({ country: '加拿大' }, '加拿大', '2区')).toEqual([])
+  expect(run.quantityCostBreakdown({ country: '加拿大' }, '渠道', 1, '加拿大', '物流商', '2区')).toBeNull()
+  await run.copySpecifiedQuotes([{ country: '加拿大', quote1: 100 }])
+  await run.attemptSave()
+  await run.save()
+  run.useLogistics({}, {})
+  expect(blocked).toBe(4)
 })

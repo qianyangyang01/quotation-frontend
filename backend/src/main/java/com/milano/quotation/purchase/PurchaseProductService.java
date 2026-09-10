@@ -90,6 +90,18 @@ public class PurchaseProductService {
     }
 
     @Transactional
+    public void assertQuotationTaxPoints(JsonNode payload) {
+        var skus = new TreeSet<String>();
+        for (var sku : payload.path("primarySku").asText("").split("[,，、+\\s]+")) addReferencedSku(skus, sku);
+        payload.path("bundleItems").forEach(item -> addReferencedSku(skus, item.path("sku").asText("")));
+        var rows = products.findAllLockedBySkuIn(skus);
+        var valid = rows.stream().filter(row -> row.payload.path("taxPoint").isNumber())
+                .map(row -> row.sku).collect(java.util.stream.Collectors.toSet());
+        var missing = skus.stream().filter(sku -> !valid.contains(sku)).toList();
+        if (!missing.isEmpty()) throw AppException.unprocessable("商品采购票点为空，请补齐后报价：" + String.join("、", missing));
+    }
+
+    @Transactional
     public JsonNode upsert(JsonNode input) {
         return upsert(input, true, null, null);
     }

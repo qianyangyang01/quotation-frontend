@@ -34,6 +34,7 @@ function numberOrNull(value: unknown) {
 function taxPointOrNull(value: unknown) {
   if (value === '' || value == null) return null
   const raw = String(value).trim().replace('％', '%')
+  if (!raw) return null
   const percent = raw.endsWith('%')
   const numeric = Number(percent ? raw.slice(0, -1) : raw)
   if (!Number.isFinite(numeric) || numeric < 0) return null

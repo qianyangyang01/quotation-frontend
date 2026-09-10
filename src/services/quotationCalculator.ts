@@ -44,7 +44,7 @@ export type PurchasePriceBreakdown = {
   invoiceRatePercent: number
   invoiceMultiplier: number
   invoiceTaxApplied: boolean
-  priceSource: 'tier-tax-point' | 'tax-included-price' | 'untaxed-tier' | 'legacy-invoice-type' | 'legacy-final-price'
+  priceSource: 'zero-tax-point' | 'tier-tax-point' | 'tax-included-price' | 'untaxed-tier' | 'legacy-invoice-type' | 'legacy-final-price'
   effectiveUnitPriceCny: number
 }
 
@@ -59,8 +59,23 @@ export function purchaseInvoiceRatePercent(invoiceType: string) {
   return Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : 0
 }
 
+/** Missing is different from an explicit zero, including legacy and tax-included purchases. */
+export function missingPurchaseTaxPointSkus(skus: string[], records: PurchaseProductRecord[]) {
+  return [...new Set(skus.filter(sku => sku.trim()))].filter(sku => {
+    const record = findPurchaseProduct(records, sku)
+    return !record || record.taxPoint == null || !Number.isFinite(record.taxPoint)
+  })
+}
+
 export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true): PurchasePriceBreakdown {
   const baseUnitPriceCny = roundCny(purchaseUnitPrice(record, purchaseQuantityForMonthlySales(estimate)))
+  if (record.taxPoint === 0) {
+    return {
+      baseUnitPriceCny, invoiceType: record.invoiceType, taxPoint: 0,
+      invoiceRatePercent: 1, invoiceMultiplier: 1.01, invoiceTaxApplied: true,
+      priceSource: 'zero-tax-point', effectiveUnitPriceCny: roundCny(baseUnitPriceCny * 1.01),
+    }
+  }
   if (record.dataSource === 'legacy_2026') {
     return {
       baseUnitPriceCny,

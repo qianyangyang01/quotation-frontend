@@ -7,6 +7,12 @@ import tools.jackson.databind.node.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LogisticsBillingEngineTest {
+    @Test void nationwideLabelUsesOrdinaryRateInsteadOfRemoteRate() {
+        var rows = mapper.createArrayNode().add(row(0, 1, 50).put("zoneName", "全国统一"))
+                .add(row(0, 1, 90).put("zoneName", "偏远地区"));
+        assertEquals(35, engine.calculate(rows, input(.5).put("zoneName", "全国统一")).path("total").asDouble());
+        assertEquals(55, engine.calculate(rows, input(.5).put("zoneName", "偏远地区")).path("total").asDouble());
+    }
     static final ObjectMapper mapper=new ObjectMapper();
     final LogisticsBillingEngine engine=new LogisticsBillingEngine(mapper);
     static ObjectNode row(double from,double to,double price){return mapper.createObjectNode().put("countryCode","US").put("areaName","美国").put("weightFromKg",from).put("weightToKg",to).put("weightFromInclusive",from>0).put("weightToInclusive",true).put("pricePerKg",price).put("registrationFee",10).put("volumetric",false).put("pricingModel","per-kg").put("currency","CNY");}

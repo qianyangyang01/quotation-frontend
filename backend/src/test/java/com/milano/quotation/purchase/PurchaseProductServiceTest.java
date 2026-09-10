@@ -20,6 +20,19 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void taxPointIsRequiredEvenWithoutClientVersionsAndAcrossBundleItems() {
+        var zero = PurchaseProduct.create("ZERO", pasted("ZERO").put("taxPoint", 0), "ready", true, null);
+        var missing = PurchaseProduct.create("MISSING", pasted("MISSING").put("dataSource", "legacy_2026").put("taxIncludedPriceCny", 20), "ready", true, null);
+        when(products.findAllLockedBySkuIn(anyCollection())).thenReturn(List.of(zero, missing));
+        var quote = JsonNodeFactory.instance.objectNode().put("primarySku", "ZERO");
+        quote.putArray("bundleItems").addObject().put("sku", "MISSING");
+        assertTrue(assertThrows(AppException.class, () -> service.assertQuotationTaxPoints(quote)).getMessage().contains("MISSING"));
+        ((tools.jackson.databind.node.ObjectNode) missing.payload).put("taxPoint", .03);
+        assertDoesNotThrow(() -> service.assertQuotationTaxPoints(quote));
+        ((tools.jackson.databind.node.ObjectNode) missing.payload).putNull("taxPoint");
+        assertThrows(AppException.class, () -> service.assertQuotationTaxPoints(quote));
+        verify(products, times(3)).findAllLockedBySkuIn(java.util.Set.of("ZERO", "MISSING"));
+    }
     @Test void quotationVersionChecksOnlyReferencedProductsAndDetectsRecreatedSku() {
         var row=PurchaseProduct.create("CURRENT",pasted("CURRENT"),"ready",true,null);
         when(products.findAllLockedBySkuIn(anyCollection())).thenReturn(List.of(row));

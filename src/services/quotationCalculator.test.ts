@@ -7,6 +7,7 @@ import {
   bundlePackagingWeight,
   bundlePurchaseCost,
   hasQuotationProduct,
+  missingPurchaseTaxPointSkus,
   monthlySalesTierLabel,
   packagingWeightKg,
   purchaseInvoiceRatePercent,
@@ -186,4 +187,27 @@ describe('bundle SKU calculation', () => {
     expect(resolveBundleProductCategory('', '服装', ['服装'])).toBe('服装')
     expect(resolveBundleProductCategory('', '服装', ['护肤品'])).toBe('')
   })
+})
+
+it('requires an explicit purchase tax point for every referenced SKU, including legacy and tax-included records', () => {
+  expect(normalizePurchaseRecord(JSON.parse('{"taxPoint":"   "}')).taxPoint).toBeNull()
+  const records = [
+    normalizePurchaseRecord({ ...taxed, sku: 'EMPTY', taxPoint: null, taxIncludedPriceCny: 22 }),
+    normalizePurchaseRecord({ ...taxed, sku: 'OLD', dataSource: 'legacy_2026', invoiceType: '13%' }),
+    normalizePurchaseRecord({ ...taxed, sku: 'ZERO', taxPoint: 0 }),
+    normalizePurchaseRecord({ ...taxed, sku: 'TAX', taxPoint: .03 }),
+  ]
+  expect(missingPurchaseTaxPointSkus(['EMPTY', 'OLD', 'ZERO', 'TAX', 'ABSENT', 'EMPTY'], records)).toEqual(['EMPTY', 'OLD', 'ABSENT'])
+  records[0]!.taxPoint = 0
+  expect(missingPurchaseTaxPointSkus(['EMPTY', 'ZERO', 'TAX'], records)).toEqual([])
+})
+
+it.each([true, false])('uses the 1.01 multiplier for an explicit zero even when the old draft tax flag is %s', invoiceFlag => {
+  const zero = normalizePurchaseRecord({ ...first, taxPoint: 0, taxIncludedPriceCny: 999 })
+  expect(purchasePriceBreakdown(zero, '10', invoiceFlag)).toMatchObject({ taxPoint: 0, invoiceMultiplier: 1.01, effectiveUnitPriceCny: 20.2, priceSource: 'zero-tax-point', invoiceTaxApplied: true })
+  expect(purchasePriceForMonthlySales(zero, '100', invoiceFlag)).toBe(18.18)
+  expect(purchasePriceForMonthlySales(zero, '100+', invoiceFlag)).toBe(16.16)
+  const legacy = normalizePurchaseRecord({ ...zero, dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included' })
+  expect(purchasePriceForMonthlySales(legacy, '10', invoiceFlag)).toBe(20.2)
+  expect(bundlePurchaseCost([{ sku: zero.sku, quantityPerSet: 2, purchaseUnitPrice: 20, purchaseInvoiceTaxApplied: invoiceFlag, purchaseFreightPerUnit: 0, weightKg: .2, customWeightKg: null }], [zero], '10', 3)).toBeCloseTo(121.2)
 })

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sameQuotationRegion } from '@/data/logistics'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
@@ -53,7 +54,7 @@ function availableRows(country: string) {
 function rowKey(row: QuotationMatrixRow) { return `${row.country}|||${row.quoteRegion || ''}|||${row.channelKey || `${row.rule}|||${row.carrier}|||${row.transport}`}` }
 function presetMatchesRow(preset: QuotationPresetSelection, row: QuotationMatrixRow) {
   if (preset.country !== row.country) return false
-  if (preset.quoteRegion && preset.quoteRegion !== row.quoteRegion) return false
+  if (preset.quoteRegion ? !sameQuotationRegion(preset.quoteRegion, row.quoteRegion) : !!row.quoteRegion && row.quoteRegion !== '全国统一') return false
   if (preset.channelKey?.trim()) return preset.channelKey.trim() === row.channelKey?.trim()
   return !!preset.rule && !!preset.carrier && !!preset.transport
     && preset.rule === row.rule && preset.carrier === row.carrier && preset.transport === row.transport
@@ -82,14 +83,15 @@ function selectedQuoteRows() {
   const countries = new Set(selectedKeys.value.map(key => key.split('|||')[0]!))
   return [...countries].flatMap(availableRows).filter(isSelected)
 }
+function isAdopted(row: QuotationMatrixRow) { return props.adoptedCountry === row.country && props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier && (props.countries.find(country => country.name === row.country)?.selectedQuoteRegion || '') === (row.quoteRegion || '') }
 function toggleSelection(row: QuotationMatrixRow) {
   const key = rowKey(row)
   const removing = isSelected(row)
-  const removingPrimary = removing && props.adoptedCountry === row.country && props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier
+  const removingPrimary = removing && isAdopted(row)
   selectedKeys.value = removing ? selectedKeys.value.filter(item => item !== key) : [...selectedKeys.value, key]
   const selected = selectedQuoteRows()
   emit('selectionChange', selected)
-  const primaryStillSelected = selected.some(item => item.country === props.adoptedCountry && item.rule === props.adoptedRule && item.carrier === props.adoptedCarrier)
+  const primaryStillSelected = selected.some(isAdopted)
   if (!removing && !primaryStillSelected) emit('adopt', row)
   else if (removingPrimary && selected[0]) emit('adopt', selected[0])
 }
@@ -241,10 +243,10 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       <QuoteTaxLegend />
       <div class="table-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>2{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>3{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span class="custom-head">{{ customQuantity || 1 }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
       <div v-if="pagedRows.length" class="quote-rows">
-        <article v-for="row in pagedRows" :key="`${row.rule}|${row.carrier}|${row.transport}`" :class="{ adopted:adoptedCountry===activeCountry && adoptedRule===row.rule && adoptedCarrier===row.carrier, selected:isSelected(row) }">
+        <article v-for="row in pagedRows" :key="rowKey(row)" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
           <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></div><b>{{ row.eta }}</b>
           <span><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small></span>
-          <div class="selection-actions"><button @click="toggleSelection(row)">{{ isSelected(row) ? '已加入' : '加入报价单' }}</button><button v-if="isSelected(row)" class="primary-action" @click="$emit('adopt',row)">{{ adoptedCountry===activeCountry && adoptedRule===row.rule && adoptedCarrier===row.carrier ? '首选' : '设为首选' }}</button></div>
+          <div class="selection-actions"><button @click="toggleSelection(row)">{{ isSelected(row) ? '已加入' : '加入报价单' }}</button><button v-if="isSelected(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
         </article>
       </div>
       <div v-else-if="channelQuery && rows.length" class="empty-rows">当前国家没有匹配“{{ channelSearch.trim() }}”的物流渠道，请更换关键词或清空搜索。</div>
