@@ -26,6 +26,63 @@ function button(text: string) {
   return [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))!
 }
 
+it('loads a non-common country on demand, sorts available countries first and preserves existing selections', async () => {
+  let resolve!: (ok: boolean) => void
+  const ensure = vi.fn(() => new Promise<boolean>(done => { resolve = done }))
+  const changed = vi.fn()
+  const state = reactive({ active: true, countries: [countries[0],
+    { ...countries[1], name: '意大利', code: 'IT', channelCount: 0, channelsLoaded: false },
+    { ...countries[1], name: '德国', code: 'DE', channelCount: 2 }],
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 7, ensureCountries: ensure,
+    quoteRowsForCountry: (country: string) => country === '美国' || state.contextKey === 'v2' ? [row(country, 1)] : [],
+    onSelectionChange: changed })
+  mount(Matrix, state)
+  await nextTick()
+  button('添加国家').click(); await nextTick()
+  const options = [...document.querySelectorAll<HTMLButtonElement>('.country-option-list button')]
+  expect(options.map(b => b.textContent)).toEqual([expect.stringContaining('德国'), expect.stringContaining('选择后查询渠道')])
+  options[1]!.click(); await nextTick()
+  expect(ensure).toHaveBeenCalledWith(['意大利'])
+  expect(document.body.textContent).toContain('正在加载渠道')
+  expect(changed.mock.lastCall?.[0].map((r: QuotationMatrixRow) => r.country)).toEqual(['美国'])
+  state.contextKey = 'v2'
+  resolve(true); await nextTick(); await nextTick()
+  expect(document.querySelector('.picker-list')?.textContent).toContain('渠道1')
+  expect(document.body.textContent).not.toContain('正在加载渠道')
+  expect(changed.mock.lastCall?.[0].map((r: QuotationMatrixRow) => r.country)).toEqual(['美国'])
+})
+
+it('waits for template countries and ignores an older template completion', async () => {
+  const completions: Array<(ok: boolean) => void> = []
+  const ensure = vi.fn(() => new Promise<boolean>(done => completions.push(done)))
+  const changed = vi.fn()
+  const state = reactive({ active: true, variant: 'template', countries,
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 7, ensureCountries: ensure,
+    quoteRowsForCountry: (country: string) => [row(country, 1)],
+    presetVersion: 1, presetSelection: [{ country: '美国', channelKey: '1' }], onSelectionChange: changed })
+  mount(Matrix, state); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([])
+  state.presetVersion = 2
+  state.presetSelection = [{ country: '澳大利亚', channelKey: '1' }]
+  await nextTick()
+  completions[1]!(true); await nextTick(); await nextTick()
+  completions[0]!(true); await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0].map((r: QuotationMatrixRow) => r.country)).toEqual(['澳大利亚'])
+})
+
+it('offers retry after channel loading fails instead of reporting zero channels', async () => {
+  const ensure = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+  mount(Matrix, { active: true, countries, contextKey: 'v1', customQuantity: 5, exchangeRate: 7,
+    ensureCountries: ensure, quoteRowsForCountry: () => [] })
+  await nextTick()
+  button('添加渠道').click(); await nextTick(); await nextTick()
+  const retry = document.querySelector('.picker-list p') as HTMLElement
+  expect(retry.textContent).toContain('加载失败，点击重试')
+  retry.click(); await nextTick(); await nextTick()
+  expect(ensure).toHaveBeenCalledTimes(2)
+  expect(document.querySelector('.picker-list p')?.textContent).toContain('没有匹配的可用渠道')
+})
+
 it.each(['specified', 'template'])('keeps the same AU channel in independent regions in %s mode', async variant => {
   const rows = [3, 4, 5].map(region => ({ ...row('澳大利亚', 1), quoteRegion: `澳大利亚${region}区`, quote1: region * 10 }))
   const changed = vi.fn()

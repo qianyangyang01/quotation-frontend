@@ -120,6 +120,7 @@ export type QuotationPresetSelection = {
 }
 
 export type QuotationCountrySummary = {
+  channelsLoaded?: boolean
   name: string
   code: string
   channelCount: number

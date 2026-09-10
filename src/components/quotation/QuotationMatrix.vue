@@ -8,6 +8,7 @@ import QuoteTaxLegend from './QuoteTaxLegend.vue'
 const DEFAULT_COUNTRIES = ['美国', '英国', '加拿大', '澳大利亚']
 const props = withDefaults(defineProps<{
   active?: boolean
+  ensureCountries?: (countries: string[]) => Promise<boolean>
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
   contextKey: string
@@ -105,7 +106,22 @@ function resetDefaultSelection() {
   showCountryPicker.value = false
 }
 
-function applyPresetSelection() {
+let presetRequest = 0
+let pendingPresetVersion: number | undefined
+async function applyPresetSelection() {
+  const request = ++presetRequest
+  const version = props.presetVersion || 0
+  pendingPresetVersion = version
+  if (props.ensureCountries && !await props.ensureCountries((props.presetSelection || []).map(row => row.country))) {
+    if (request === presetRequest) {
+      regionFeedback.value = '模板渠道加载失败，请重新应用模板'
+      pendingPresetVersion = undefined
+    }
+    return
+  }
+  if (request !== presetRequest || version !== (props.presetVersion || 0)) return
+  pendingPresetVersion = undefined
+  appliedPresetVersion = version
   const presetSelection = props.presetSelection || []
   const knownCountries = new Set(props.countries.map(country => country.name))
   const nextCountries: string[] = []
@@ -153,8 +169,7 @@ watch(
     if (props.active === false) return
     const version = props.presetVersion || 0
     if (version !== appliedPresetVersion && (version > 0 || props.variant === 'template')) {
-      applyPresetSelection()
-      appliedPresetVersion = version
+      if (pendingPresetVersion !== version) void applyPresetSelection()
       initialized = true
     } else if (!initialized && props.countries.length) {
       resetSelectionForMode()
@@ -187,7 +202,7 @@ watch(selectedRowsSignature, () => { if (props.active !== false) emit('selection
 const countryOptions = computed(() => {
   const query = countrySearch.value.trim().toLowerCase()
   return props.countries.filter(country => !selectedCountries.value.includes(country.name)
-    && (!query || `${country.name} ${country.code} ${country.continent}`.toLowerCase().includes(query)))
+    && (!query || `${country.name} ${country.code} ${country.continent}`.toLowerCase().includes(query))).sort((a, b) => Number(b.channelCount > 0) - Number(a.channelCount > 0))
 })
 const pickerRows = computed(() => availableRows(channelPickerCountry.value).filter(row => !pickerRegion.value || row.quoteRegion === pickerRegion.value))
 const recommendationKeys = computed(() => new Set(recommendedRows(channelPickerCountry.value).map(rowKey)))
@@ -215,6 +230,7 @@ watch([channelSearch, channelFilter, pickerRegion], () => { channelPage.value = 
 
 function addCountry(country: string) {
   if (!country || selectedCountries.value.includes(country)) return
+  initialized = true
   selectedCountries.value = [...selectedCountries.value, country]
   selectedChannelKeys.value = { ...selectedChannelKeys.value, [country]: [] }
   showCountryPicker.value = false
@@ -228,13 +244,22 @@ function removeCountry(country: string) {
   delete next[country]
   selectedChannelKeys.value = next
 }
-function openChannelPicker(country: string) {
+const channelLoading = ref(false)
+const channelError = ref(false)
+async function openChannelPicker(country: string) {
   channelPickerCountry.value = country
   pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
   channelSearch.value = ''
   channelFilter.value = '系统推荐'
   pendingChannelKeys.value = []
   channelPage.value = 1
+  channelLoading.value = true
+  channelError.value = false
+  const ok = !props.ensureCountries || await props.ensureCountries([country])
+  if (channelPickerCountry.value !== country) return
+  channelLoading.value = false
+  channelError.value = !ok
+  pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
 }
 function closeChannelPicker() {
   channelPickerCountry.value = ''
@@ -322,7 +347,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
             <div class="row-actions"><button @click="$emit('adopt',row)">{{ adoptedCountry===country && adoptedRule===row.rule && adoptedCarrier===row.carrier && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') ? '首选' : '设为首选' }}</button><button @click="removeChannel(country,row)">移出报价单</button></div>
           </section>
         </div>
-        <button v-else class="empty-channel" @click="openChannelPicker(country)">{{ availableRows(country).length ? '＋ 添加该国家的指定渠道' : '当前条件暂无可用渠道' }}</button>
+        <button v-else class="empty-channel" @click="openChannelPicker(country)">{{ availableRows(country).length ? '＋ 添加该国家的指定渠道' : countrySummary(country)?.channelsLoaded === false ? '＋ 查询该国家的可用渠道' : '当前条件暂无可用渠道' }}</button>
       </article>
     </div>
 
@@ -331,7 +356,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
   </section>
 
   <div v-if="showCountryPicker" class="dialog-mask" @click.self="showCountryPicker=false">
-    <section class="country-dialog"><header><div><small>ADD COUNTRY</small><h2>添加报价国家</h2><p>搜索国家名称、代码或所属大洲。</p></div><button @click="showCountryPicker=false">×</button></header><label class="dialog-search">⌕<input v-model="countrySearch" placeholder="搜索国家、代码或大洲"></label><div class="country-option-list"><button v-for="country in countryOptions" :key="country.name" @click="addCountry(country.name)"><span><b>{{ countryFlag(country.code) }} {{ country.name }}</b><small>{{ country.code }} · {{ country.continent }}</small></span><em>{{ country.channelCount ? `${country.channelCount}条可用渠道` : '暂无渠道' }}</em></button><p v-if="!countryOptions.length">没有可添加的国家</p></div></section>
+    <section class="country-dialog"><header><div><small>ADD COUNTRY</small><h2>添加报价国家</h2><p>搜索国家名称、代码或所属大洲。</p></div><button @click="showCountryPicker=false">×</button></header><label class="dialog-search">⌕<input v-model="countrySearch" placeholder="搜索国家、代码或大洲"></label><div class="country-option-list"><button v-for="country in countryOptions" :key="country.name" @click="addCountry(country.name)"><span><b>{{ countryFlag(country.code) }} {{ country.name }}</b><small>{{ country.code }} · {{ country.continent }}</small></span><em>{{ country.channelCount ? `${country.channelCount}条可用渠道` : country.channelsLoaded === false ? '选择后查询渠道' : '无可用渠道' }}</em></button><p v-if="!countryOptions.length">没有可添加的国家</p></div></section>
   </div>
 
   <div v-if="channelPickerCountry" class="dialog-mask" @click.self="closeChannelPicker">
@@ -340,7 +365,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
       <label v-if="countrySummary(channelPickerCountry)?.quoteRegions?.length" class="quote-region-select">新增方案区域<select v-model="pickerRegion" aria-label="新增方案区域"><option v-for="region in countrySummary(channelPickerCountry)?.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label><label class="dialog-search">⌕<input v-model="channelSearch" placeholder="搜索渠道名称、物流商或渠道代码"></label>
       <div class="channel-tools"><nav><button v-for="filter in ['全部','系统推荐','最低价','最快','普货','带电']" :key="filter" :class="{ active:channelFilter===filter }" @click="channelFilter=filter">{{ filter }}</button></nav><button class="recommended-add" @click="selectRecommended">＋ 添加系统推荐3条</button></div>
       <div class="picker-head"><span></span><span>物流渠道</span><span>物流商</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价</span><span>2{{ unitLabel || '件' }}报价</span><span>3{{ unitLabel || '件' }}报价</span><span class="custom-quote-head">{{ customQuantity }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>推荐理由</span></div>
-      <div class="picker-list"><label v-for="row in pagedPickerRows" :key="rowKey(row)" :class="{ selected:pendingChannelKeys.includes(rowKey(row)), disabled:isAlreadyAdded(row) }"><input type="checkbox" :checked="pendingChannelKeys.includes(rowKey(row))" :disabled="isAlreadyAdded(row)" @change="togglePending(row)"><span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · {{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></span><b>{{ row.carrier }}</b><b>{{ row.eta }}</b><span><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small></span><em v-if="isAlreadyAdded(row)" class="added">已添加</em><em v-else-if="reason(row)">{{ reason(row) }}</em><i v-else>—</i></label><p v-if="!pagedPickerRows.length">没有匹配的可用渠道</p></div>
+      <div class="picker-list"><label v-for="row in pagedPickerRows" :key="rowKey(row)" :class="{ selected:pendingChannelKeys.includes(rowKey(row)), disabled:isAlreadyAdded(row) }"><input type="checkbox" :checked="pendingChannelKeys.includes(rowKey(row))" :disabled="isAlreadyAdded(row)" @change="togglePending(row)"><span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · {{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></span><b>{{ row.carrier }}</b><b>{{ row.eta }}</b><span><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small></span><em v-if="isAlreadyAdded(row)" class="added">已添加</em><em v-else-if="reason(row)">{{ reason(row) }}</em><i v-else>—</i></label><p v-if="channelLoading">正在加载渠道…</p><p v-else-if="channelError" @click="openChannelPicker(channelPickerCountry)">加载失败，点击重试</p><p v-else-if="!pagedPickerRows.length">当前物流属性、重量及授权条件下没有匹配的可用渠道</p></div>
       <div class="picker-pagination"><span>共 {{ filteredPickerRows.length }} 条</span><button :disabled="channelPage<=1" @click="channelPage--">上一页</button><b>{{ channelPage }} / {{ channelPageCount }}</b><button :disabled="channelPage>=channelPageCount" @click="channelPage++">下一页</button></div>
       <footer><b>已选择 <em>{{ pendingChannelKeys.length }}</em> 条渠道</b><span><button @click="closeChannelPicker">取消</button><button class="batch-add" :disabled="!pendingChannelKeys.length" @click="addPendingChannels">批量添加渠道（{{ pendingChannelKeys.length }}）</button></span></footer>
     </section>

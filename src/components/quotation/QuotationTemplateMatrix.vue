@@ -16,6 +16,7 @@ import {
 
 const props = withDefaults(defineProps<{
   active?: boolean
+  ensureCountries?: (countries: string[]) => Promise<boolean>
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
   contextKey: string
@@ -338,7 +339,7 @@ function formatTime(value: string) {
     <QuotationMatrix
       variant="template"
       :active="active"
-      :countries="countries"
+      :countries="countries" :ensure-countries="ensureCountries"
       :quote-rows-for-country="quoteRowsForCountry"
       :context-key="contextKey"
       :custom-quantity="customQuantity"

@@ -479,7 +479,55 @@ function changeMonthlySalesEstimate(p: Product, value: string) {
 function availableQuoteCountries(p: Product) {
   return countriesAvailableForCategory(p.logisticsAttribute).map(country => country.name)
 }
+const loadedQuoteCountries = ref<string[]>([])
+const countryLoads = ref(0)
+const countryLoadError = ref('')
+let countryGeneration = 0
+let countryQueue: Promise<boolean> = Promise.resolve(true)
+let initialLogisticsLoad: Promise<void> = Promise.resolve()
+let countryController = new AbortController()
+const requestedQuoteCountries = new Set<string>()
+function resetCountryLoads() {
+  countryGeneration += 1
+  countryController.abort()
+  countryController = new AbortController()
+  loadedQuoteCountries.value = []
+  countryLoadError.value = ''
+  countryLoads.value = 0
+  countryQueue = Promise.resolve(true)
+}
+function ensureCountries(countries: string[]): Promise<boolean> {
+  if (!countries.length) return Promise.resolve(true)
+  const generation = countryGeneration
+  countries.forEach(country => requestedQuoteCountries.add(country))
+  countryLoads.value += 1
+  const task = countryQueue.then(async () => {
+    await initialLogisticsLoad
+    if (generation !== countryGeneration) return false
+    if (!['ready', 'empty'].includes(logisticsLoadState.value)) return false
+    if (countries.every(country => loadedQuoteCountries.value.includes(country))) return true
+    countryLoadError.value = ''
+    const query = [...new Set([...loadedQuoteCountries.value, ...requestedQuoteCountries])]
+    try {
+      const result = await loadPublishedLogisticsRules({ attribute: products.value[0].logisticsAttribute, countries: query }, { apply: false, signal: countryController.signal })
+      if (generation !== countryGeneration) return false
+      if (!result.verified) throw new Error('无法确认最新物流版本，请重试')
+      replaceLogisticsRules(result.rules)
+      loadedQuoteCountries.value = query
+      logisticsRevision.value = result.revision
+      logisticsRulesGeneration.value += 1
+      logisticsLoadState.value = result.rules.length ? 'ready' : 'empty'
+      return true
+    } catch {
+      if (generation === countryGeneration) countryLoadError.value = '渠道加载失败，请点击添加渠道重试'
+      return false
+    }
+  }).finally(() => { if (generation === countryGeneration) countryLoads.value -= 1 })
+  countryQueue = task
+  return task
+}
 function cancelQuoteLogistics() {
+  resetCountryLoads()
   logisticsRequest?.abort()
   logisticsRequest = null
   replaceLogisticsRules([])
@@ -490,7 +538,12 @@ function cancelQuoteLogistics() {
 function startQuoteLogisticsInBackground(p: Product) {
   void ensureQuoteLogistics(p)
 }
-async function ensureQuoteLogistics(p: Product) {
+function ensureQuoteLogistics(p: Product) {
+  initialLogisticsLoad = runQuoteLogistics(p)
+  return initialLogisticsLoad
+}
+async function runQuoteLogistics(p: Product) {
+  resetCountryLoads()
   logisticsRequest?.abort()
   const controller = new AbortController()
   logisticsRequest = controller
@@ -506,11 +559,8 @@ async function ensureQuoteLogistics(p: Product) {
     await hydrateFinanceSettings({ force: true, signal: controller.signal })
     controller.signal.throwIfAborted()
     applyLiveFinance()
-    const selectedCountries = quoteMatrixMode.value === 'specified'
-      ? specifiedQuoteRows.value.map(row => row.country)
-      : quoteMatrixMode.value === 'template'
-        ? templateQuoteRows.value.map(row => row.country)
-        : []
+    const selectedCountries = [...new Set([...requestedQuoteCountries,
+      ...specifiedQuoteRows.value.map(row => row.country), ...templateQuoteRows.value.map(row => row.country)])]
     let countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country, selectedCountries)
     if (!countries.length) {
       await loadPublishedLogisticsManifest({ signal: controller.signal })
@@ -519,6 +569,7 @@ async function ensureQuoteLogistics(p: Product) {
     }
     const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal })
     if (controller.signal.aborted) return
+    loadedQuoteCountries.value = countries
     logisticsRulesGeneration.value += 1
     financePolicies.value = loadFinanceChannelPolicies()
     financeTaxSettings.value = loadFinanceTaxSettings()
@@ -577,7 +628,8 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     // Fetch in the background without clearing the working quote or disabling Save.
     const p = products.value[0]
     const countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country,
-      [...specifiedQuoteRows.value, ...templateQuoteRows.value].map(row => row.country))
+      [...loadedQuoteCountries.value, ...requestedQuoteCountries,
+        ...[...specifiedQuoteRows.value, ...templateQuoteRows.value].map(row => row.country)])
     const latest = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal, apply: false })
     if (!latest.verified || signal?.aborted || key !== draftSignature() || quoteLogisticsBusy()) return false
     if (savedQuoteRows.value.length) {
@@ -591,13 +643,14 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     }
     if (signal?.aborted || key !== draftSignature()) return false
     replaceLogisticsRules(latest.rules)
+    loadedQuoteCountries.value = countries
     logisticsRulesGeneration.value++
     logisticsRevision.value = latest.revision
     logisticsLoadState.value = latest.rules.length ? 'ready' : 'empty'
   }
   return changed.length === 0
 }
-function quoteLogisticsBusy() { return logisticsLoadState.value === 'loading' }
+function quoteLogisticsBusy() { return logisticsLoadState.value === 'loading' || countryLoads.value > 0 }
 function applyLiveFinance() {
   financePolicies.value = loadFinanceChannelPolicies()
   financeCountrySettings.value = loadFinanceCountrySettings()
@@ -993,6 +1046,7 @@ onBeforeUnmount(() => {
   productQueryGeneration++
   window.removeEventListener('beforeunload', beforeWindowUnload)
   window.clearTimeout(draftTimer)
+  resetCountryLoads()
   logisticsRequest?.abort()
 })
 onBeforeRouteLeave(async () => {
@@ -1151,7 +1205,10 @@ const countryChannelCount = createCountryQuotationCache(country => {
   void logisticsRevision.value
   void logisticsRulesGeneration.value
   const p = products.value[0]
-  return p ? matchedLogistics(p, country).length : 0
+  if (!p) return 0
+  const regions = logisticsQuoteRegions(country)
+  return new Set((regions.length ? regions : ['']).flatMap(region =>
+    matchedLogistics(p, country, region).map(row => row.channelKey))).size
 })
 const countryQuoteRows = createCountryQuotationCache(country => {
   void logisticsRevision.value
@@ -1184,6 +1241,7 @@ function quotationCountries(p: Product): QuotationCountrySummary[] {
       name,
       code: String(country.code || logisticsCountries.find(item => item.name === name)?.code || '').toUpperCase(),
       channelCount,
+      channelsLoaded: loadedQuoteCountries.value.includes(name),
       lowestQuote: null,
       grouped: true,
       stage: common ? 'common' as const : 'rare' as const,
@@ -1356,16 +1414,17 @@ const saveValidationIssues = computed(() => {
 })
 const displayedSaveValidationIssues = computed(() => showSaveValidation.value ? saveValidationIssues.value : [])
 const hasQueriedQuotationProduct = computed(() => hasQuotationProduct(quoteMode.value, products.value[0]?.sku || '', bundleItems.value.map(item => item.sku)))
-const logisticsSaveBlockReason = computed(() => logisticsLoadState.value === 'loading' ? '物流规则正在加载，请稍候'
+const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠道正在加载，请稍候' : countryLoadError.value || (logisticsLoadState.value === 'loading' ? '物流规则正在加载，请稍候'
   : hasQueriedQuotationProduct.value && logisticsLoadState.value === 'idle' ? '请先加载当前商品的物流规则'
   : logisticsLoadState.value === 'stale' ? '无法确认物流正式版本，暂不能保存'
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
-        : '')
+        : ''))
 const displayedSaveBlockReason = computed(() => syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || ''))
 const displayedInvalidFields = computed(() => [...new Set([...queryValidationFields.value, ...displayedSaveValidationIssues.value.map(issue => issue.key)])])
 async function attemptSave() {
   if (savingQuotation.value) return
+  if (countryLoads.value || countryLoadError.value) { toast(countryLoadError.value || '国家渠道正在加载，请稍候'); return }
   showSaveValidation.value = true
   if (saveValidationIssues.value.length) {
     toast(`暂时无法保存：还需完成 ${saveValidationIssues.value.length} 项必填内容`)
@@ -1374,6 +1433,7 @@ async function attemptSave() {
   savingQuotation.value = true
   try {
     if (!await checkLiveVersions(undefined, true)) { toast('当前报价资料有变化，请核对后再保存'); return }
+    if (countryLoads.value || countryLoadError.value) { toast(countryLoadError.value || '国家渠道正在加载，请稍候'); return }
     await flushDraft()
     logisticsLoadState.value = 'ready'
     await save()
@@ -1713,7 +1773,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='specified'" class="matrix-mode-panel">
           <QuotationMatrix :active="quoteMatrixMode==='specified'"
-            :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
+            :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'"
             :preset-selection="restoredSpecifiedSelections" :preset-version="restoredSelectionVersion"
@@ -1723,7 +1783,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel">
           <QuotationTemplateMatrix :active="quoteMatrixMode==='template'"
-            :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
+            :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'"
