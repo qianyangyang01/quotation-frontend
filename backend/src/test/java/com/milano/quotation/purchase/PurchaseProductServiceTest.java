@@ -20,6 +20,21 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void recomputesStandardReasonsOnSaveAndDoesNotMutateHistoricalPayloadOnRead() {
+        var input = pasted("YS-READY");
+        input.putArray("quotationBlockingReasons").add("正式SKU").add("重量").add("有效价格").add("起订量");
+        var saved = service.upsert(input);
+        assertTrue(saved.path("quoteReady").asBoolean());
+        assertTrue(saved.path("quotationBlockingReasons").isEmpty());
+        var row = rows.get("YS-READY");
+        ((tools.jackson.databind.node.ObjectNode) row.payload).putArray("quotationBlockingReasons").add("重量");
+        assertTrue(service.get(row.sku).path("quotationBlockingReasons").isEmpty());
+        assertEquals(1,row.payload.path("quotationBlockingReasons").size());
+        var changed = pasted("YS-READY").put("_version",row.version).putNull("weightG");
+        assertEquals("重量",service.upsert(changed).path("quotationBlockingReasons").get(0).asText());
+        assertFalse(service.get(row.sku).path("quoteReady").asBoolean());
+        assertTrue(service.upsert(pasted("YS-READY").put("_version",row.version)).path("quotationBlockingReasons").isEmpty());
+    }
     @Test void savedPurchaseRevisionUsesDatabasePrecision() {
         var nanos = java.time.Instant.parse("2026-09-11T03:33:38.610021719Z");
         try (var clock = mockStatic(java.time.Instant.class, CALLS_REAL_METHODS)) {

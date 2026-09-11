@@ -2,6 +2,26 @@ import { describe, expect, it } from 'vitest'
 import { findPurchaseProduct, normalizePurchaseRecord, purchaseQuoteFreightUnit, purchaseQuoteBlockingMessage, purchaseSourceLabel, purchaseUnitPrice } from './purchaseStore'
 
 describe('purchase catalog state', () => {
+  it('revalidates a completed new form instead of persisting its initial missing fields', () => {
+    const empty = normalizePurchaseRecord({})
+    const filled = normalizePurchaseRecord({ ...empty, sku: 'YS260911-NEW', skuOrigin: 'manual', weightG: 350, minOrderQty: 1, purchasePriceCny: 13.2, taxPoint: 0.01 })
+    expect(filled.quotationBlockingReasons).toEqual([])
+    expect(filled.quoteReady).toBe(true)
+    expect(normalizePurchaseRecord(filled)).toEqual(filled)
+    const missingAgain = normalizePurchaseRecord({ ...filled, weightG: null })
+    expect(missingAgain.quotationBlockingReasons).toEqual(['重量'])
+    expect(missingAgain.quoteReady).toBe(false)
+  })
+
+  it('repairs stale standard import reasons without unlocking pending or disabled records', () => {
+    const raw = { sku: 'YS260911-IMPORTED', weightG: 100, minOrderQty: 1, purchasePriceCny: 0, quotationBlockingReasons: ['克重', '采购价格', '正式SKU'] }
+    expect(normalizePurchaseRecord(raw).quoteReady).toBe(true)
+    for (const catalogState of ['pending_template', 'disabled'] as const) {
+      const result = normalizePurchaseRecord({ ...raw, catalogState })
+      expect(result.quotationBlockingReasons).toEqual([])
+      expect(result.quoteReady).toBe(false)
+    }
+  })
   const complete = {
     weightG: 100, lengthCm: 10, widthCm: 8, heightCm: 4,
     minOrderQty: 1, purchasePriceCny: 12.5,

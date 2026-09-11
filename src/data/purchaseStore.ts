@@ -93,8 +93,9 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     ? purchasePriceCny != null && purchasePriceCny > 0
     : [purchasePriceCny, numberOrNull(input.tier2PriceCny), numberOrNull(input.tier3PriceCny), base.taxIncludedPriceCny].some(value => value != null && value >= 0)
   const derivedMissing = [reservedSku || skuOrigin === 'system' || !sku ? '正式SKU' : '', weightG == null || weightG <= 0 ? (dataSource === 'legacy_2026' ? '克重' : '重量') : '', !hasPrice ? '有效价格' : '', dataSource === 'legacy_2026' && (base.singleFreightCny == null || base.singleFreightCny < 0) ? '1件运费' : '', dataSource !== 'legacy_2026' && (minOrderQty == null || minOrderQty <= 0) ? '起订量' : ''].filter(Boolean)
-  const suppliedBlockingReasons = Array.isArray(input.quotationBlockingReasons) ? input.quotationBlockingReasons.map(item => String(item).trim()).filter(Boolean) : []
-  const quotationBlockingReasons = [...new Set(dataSource === 'legacy_2026' ? derivedMissing : [...derivedMissing, ...suppliedBlockingReasons])]
+  // These reasons describe the current fields, not permanent validation errors.
+  // Reusing a normalized empty form or an old API payload must not retain them.
+  const quotationBlockingReasons = derivedMissing
   const quoteReady = catalogState === 'ready' && quotationBlockingReasons.length === 0
   const missing = quotationBlockingReasons
   const status = catalogState === 'pending_template' ? (dataSource === 'legacy_2026' ? `关键信息待补全（不可报价）${missing.length ? `：${missing.join('、')}` : ''}` : '模板待补全（不可报价）') : catalogState === 'disabled' ? '已停用' : skuOrigin === 'system' ? '系统生成SKU，待修改' : quoteReady ? '资料完整' : dataSource === 'legacy_2026' ? `关键信息待补全（不可报价）${missing.length ? `：${missing.join('、')}` : ''}` : `待补充${missing.length ? `：${missing.join('、')}` : ''}`

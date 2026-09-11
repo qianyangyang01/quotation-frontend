@@ -39,7 +39,7 @@ public class PurchaseProductService {
         var content=rows.stream().filter(row->row.getSku()!=null).map(row->{
             var value=(ObjectNode)searchMapper.readTree(row.getPayload());
             value.put("sku",row.getSku());value.put("_version",row.getVersion());
-            value.put("catalogState",row.getCatalogState());value.put("quoteReady",row.getQuoteReady());
+            applyDerivedState(value,row.getCatalogState(),row.getQuoteReady());
             value.put("_updatedAt",row.getUpdatedAt().toString());return (JsonNode)value;
         }).toList();
         return new PageImpl<>(content,pageable,rows.isEmpty()?0:rows.getFirst().getTotal());
@@ -209,7 +209,7 @@ public class PurchaseProductService {
 
     private JsonNode view(PurchaseProduct row) {
         var object = (ObjectNode) row.payload.deepCopy(); object.put("sku", row.sku); object.put("_version", row.version);
-        object.put("catalogState", row.catalogState);object.put("quoteReady",row.quoteReady);object.put("_updatedAt", row.updatedAt.toString()); return object;
+        applyDerivedState(object,row.catalogState,row.quoteReady);object.put("_updatedAt", row.updatedAt.toString()); return object;
     }
     private static String normalizeSku(String sku) {
         var value = sku == null ? "" : sku.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", "");
@@ -239,10 +239,19 @@ public class PurchaseProductService {
     private static boolean isReservedSku(String sku){return sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK)[A-Z0-9._/-]*$")||sku.startsWith("AUTO-");}
     private static void applyDerivedState(ObjectNode object,String state,boolean quoteReady){
         object.put("catalogState",state);object.put("quoteReady",quoteReady);
+        var reasons=quotationBlockingReasons(object);var array=object.putArray("quotationBlockingReasons");reasons.forEach(array::add);
         if("legacy_2026".equals(object.path("dataSource").asText())){
-            var reasons=legacyBlockingReasons(object);var array=object.putArray("quotationBlockingReasons");reasons.forEach(array::add);
             object.put("status",CATALOG_DISABLED.equals(state)?"已停用":quoteReady?"资料完整":"关键信息待补全（不可报价）");
         }else object.put("status",CATALOG_PENDING_TEMPLATE.equals(state)?"模板待补全（不可报价）":CATALOG_DISABLED.equals(state)?"已停用":quoteReady?"资料完整":"待补充资料");
+    }
+    private static List<String> quotationBlockingReasons(ObjectNode object){
+        if("legacy_2026".equals(object.path("dataSource").asText()))return legacyBlockingReasons(object);
+        var reasons=new ArrayList<String>();var sku=object.path("sku").asText();
+        if(sku.isBlank()||isReservedSku(sku)||"system".equals(object.path("skuOrigin").asText()))reasons.add("正式SKU");
+        if(!positive(object,"weightG"))reasons.add("重量");
+        if(!positive(object,"minOrderQty"))reasons.add("起订量");
+        if(!(nonNegative(object,"purchasePriceCny")||nonNegative(object,"tier2PriceCny")||nonNegative(object,"tier3PriceCny")||nonNegative(object,"taxIncludedPriceCny")))reasons.add("有效价格");
+        return reasons;
     }
     private static List<String> legacyBlockingReasons(ObjectNode object){
         var reasons=new ArrayList<String>();var sku=object.path("sku").asText();
