@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quotationRowsSignature } from '@/services/quotationRowsSignature'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
@@ -217,20 +218,7 @@ const allSelectedRows = computed(() => {
   void props.contextKey
   return selectedCountries.value.flatMap(country => selectedRows(country))
 })
-const selectedRowsSignature = computed(() => allSelectedRows.value.map(row => [
-  row.country,
-  row.quoteRegion,
-  row.rule,
-  row.carrier,
-  row.transport,
-  row.quote1,
-  row.quote2,
-  row.quote3,
-  row.quoteCustom,
-  row.taxConfigured,
-  row.taxFeeMode,
-  row.taxLabel,
-].join('|')).join('||'))
+const selectedRowsSignature = computed(() => quotationRowsSignature(allSelectedRows.value))
 watch(selectedRowsSignature, () => { if (props.active !== false) emit('selectionChange', allSelectedRows.value) }, { immediate: true })
 
 const countryOptions = computed(() => {

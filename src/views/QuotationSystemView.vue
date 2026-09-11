@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotationRowsSignature'
 import { normalizeLogisticsAttribute, selectableLogisticsAttributes } from '@/data/logisticsAttributes'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { calculateFinanceQuoteFees, FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
@@ -1343,26 +1344,6 @@ const activeQuoteMatrixContextKey = computed(() => {
 const activeCommonCountryCount = computed(() => activeQuotationCountries.value.filter(country => country.stage === 'common').length)
 function activeQuoteRowsForCountry(country: string) {
   return countryQuoteRows(country)
-}
-function matrixRowsSignature(items: QuotationMatrixRow[]) {
-  return items.map(row => [
-    row.country,
-    row.quoteRegion,
-    row.channelKey,
-    row.rule,
-    row.carrier,
-    row.transport,
-    row.quote1,
-    row.quote2,
-    row.quote3,
-    row.quoteCustom,
-    row.taxLabel,
-    row.surchargeLabel,
-    row.tax1Usd,
-    row.tax2Usd,
-    row.tax3Usd,
-    row.taxCustomUsd,
-  ].join('|')).join('||')
 }
 function updateSpecifiedQuotes(rows: QuotationMatrixRow[]) {
   modeSelections.value.specified = selectionFromRows(rows)
