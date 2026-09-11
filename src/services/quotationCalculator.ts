@@ -1,3 +1,4 @@
+import { decimal, sumDecimal, productDecimal } from './quotationDecimal'
 import type { ShipmentDimensions } from '@/data/logistics'
 import { findPurchaseProduct, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
 
@@ -49,7 +50,7 @@ export type PurchasePriceBreakdown = {
 }
 
 export function roundCny(value: number) {
-  return Math.round((Math.max(0, Number(value) || 0) + Number.EPSILON) * 100) / 100
+  return decimal(Math.max(0, Number(value) || 0)).toDecimalPlaces(2).toNumber()
 }
 
 export function purchaseInvoiceRatePercent(invoiceType: string) {
@@ -73,7 +74,7 @@ export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: 
     return {
       baseUnitPriceCny, invoiceType: record.invoiceType, taxPoint: 0,
       invoiceRatePercent: 1, invoiceMultiplier: 1.01, invoiceTaxApplied: true,
-      priceSource: 'zero-tax-point', effectiveUnitPriceCny: roundCny(baseUnitPriceCny * 1.01),
+      priceSource: 'zero-tax-point', effectiveUnitPriceCny: roundCny(productDecimal(baseUnitPriceCny, 1.01)),
     }
   }
   if (record.dataSource === 'legacy_2026') {
@@ -91,7 +92,7 @@ export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: 
   const explicitTaxPoint = record.taxPointExplicit
   const taxPoint = record.taxPoint
   const legacyRatePercent = explicitTaxPoint ? 0 : purchaseInvoiceRatePercent(record.invoiceType)
-  const invoiceRatePercent = taxPoint == null ? legacyRatePercent : taxPoint * 100
+  const invoiceRatePercent = taxPoint == null ? legacyRatePercent : productDecimal(taxPoint, 100)
   const appliedRatePercent = invoiceTaxApplied ? invoiceRatePercent : 0
   const useTaxIncludedPrice = invoiceTaxApplied && explicitTaxPoint && taxPoint == null && record.taxIncludedPriceCny != null
   const priceSource: PurchasePriceBreakdown['priceSource'] = !invoiceTaxApplied
@@ -104,10 +105,10 @@ export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: 
     invoiceType: record.invoiceType,
     taxPoint,
     invoiceRatePercent,
-    invoiceMultiplier: 1 + appliedRatePercent / 100,
+    invoiceMultiplier: decimal(appliedRatePercent).div(100).plus(1).toNumber(),
     invoiceTaxApplied,
     priceSource,
-    effectiveUnitPriceCny: useTaxIncludedPrice ? roundCny(record.taxIncludedPriceCny ?? 0) : roundCny(baseUnitPriceCny * (1 + appliedRatePercent / 100)),
+    effectiveUnitPriceCny: useTaxIncludedPrice ? roundCny(record.taxIncludedPriceCny ?? 0) : roundCny(decimal(baseUnitPriceCny).times(decimal(appliedRatePercent).div(100).plus(1)).toNumber()),
   }
 }
 
@@ -125,32 +126,32 @@ export function bundlePurchaseCost(
   return items.reduce((sum, item) => {
     const record = findPurchaseProduct(records, item.sku)
     const purchasePrice = record ? purchasePriceForMonthlySales(record, estimate, item.purchaseInvoiceTaxApplied !== false) : item.purchaseUnitPrice
-    return sum + purchasePrice * normalizedQuoteQuantity(item.quantityPerSet) * setCount
+    return sumDecimal(sum, productDecimal(purchasePrice, normalizedQuoteQuantity(item.quantityPerSet), setCount))
   }, 0)
 }
 
 export function bundleDomesticFreight(items: BundleCalculationItem[], sets = 1) {
   const setCount = normalizedQuoteQuantity(sets)
-  return items.reduce((sum, item) => sum + item.purchaseFreightPerUnit * normalizedQuoteQuantity(item.quantityPerSet) * setCount, 0)
+  return items.reduce((sum, item) => sumDecimal(sum, productDecimal(item.purchaseFreightPerUnit, normalizedQuoteQuantity(item.quantityPerSet), setCount)), 0)
 }
 
 export function bundleGoodsWeight(items: BundleCalculationItem[], sets = 1) {
   const setCount = normalizedQuoteQuantity(sets)
   return items.reduce((sum, item) => {
     const baseWeightKg = bundleItemBaseWeight(item)
-    return sum + packagedUnitWeightKg(baseWeightKg) * normalizedQuoteQuantity(item.quantityPerSet) * setCount
+    return sumDecimal(sum, productDecimal(packagedUnitWeightKg(baseWeightKg), normalizedQuoteQuantity(item.quantityPerSet), setCount))
   }, 0)
 }
 
 export function packagingWeightKg(baseWeightKg: number) {
-  const baseGrams = Math.max(0, Number(baseWeightKg) || 0) * 1000
+  const baseGrams = decimal(Math.max(0, Number(baseWeightKg) || 0)).times(1000).toNumber()
   if (baseGrams <= 0) return 0
-  return Math.ceil((baseGrams - 1e-9) / 50) * 2 / 1000
+  return decimal(baseGrams).div(50).ceil().times(2).div(1000).toNumber()
 }
 
 export function packagedUnitWeightKg(baseWeightKg: number) {
   const normalizedBase = Math.max(0, Number(baseWeightKg) || 0)
-  return normalizedBase + packagingWeightKg(normalizedBase)
+  return sumDecimal(normalizedBase, packagingWeightKg(normalizedBase))
 }
 
 function bundleItemBaseWeight(item: BundleCalculationItem) {
@@ -161,12 +162,12 @@ function bundleItemBaseWeight(item: BundleCalculationItem) {
 
 export function bundleBaseWeight(items: BundleCalculationItem[], sets = 1) {
   const setCount = normalizedQuoteQuantity(sets)
-  return items.reduce((sum, item) => sum + bundleItemBaseWeight(item) * normalizedQuoteQuantity(item.quantityPerSet) * setCount, 0)
+  return items.reduce((sum, item) => sumDecimal(sum, productDecimal(bundleItemBaseWeight(item), normalizedQuoteQuantity(item.quantityPerSet), setCount)), 0)
 }
 
 export function bundlePackagingWeight(items: BundleCalculationItem[], sets = 1) {
   const setCount = normalizedQuoteQuantity(sets)
-  return items.reduce((sum, item) => sum + packagingWeightKg(bundleItemBaseWeight(item)) * normalizedQuoteQuantity(item.quantityPerSet) * setCount, 0)
+  return items.reduce((sum, item) => sumDecimal(sum, productDecimal(packagingWeightKg(bundleItemBaseWeight(item)), normalizedQuoteQuantity(item.quantityPerSet), setCount)), 0)
 }
 
 export function resolveBundleProductCategory(selectedCategory: string, recordCategory: string, existingCategories: string[]) {
@@ -180,20 +181,20 @@ function singleUnitBaseWeight(input: SingleWeightInput) {
 }
 
 export function singleBaseWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
-  return singleUnitBaseWeight(input) * normalizedQuoteQuantity(quantity)
+  return productDecimal(singleUnitBaseWeight(input), normalizedQuoteQuantity(quantity))
 }
 
 export function singlePackagingWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
-  return packagingWeightKg(singleUnitBaseWeight(input)) * normalizedQuoteQuantity(quantity)
+  return productDecimal(packagingWeightKg(singleUnitBaseWeight(input)), normalizedQuoteQuantity(quantity))
 }
 
 export function singleActualWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
-  return packagedUnitWeightKg(singleUnitBaseWeight(input)) * normalizedQuoteQuantity(quantity)
+  return productDecimal(packagedUnitWeightKg(singleUnitBaseWeight(input)), normalizedQuoteQuantity(quantity))
 }
 
 export function singleVolumeWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity), divisor = input.volumeDivisor) {
   if (!input.volumetricEnabled || input.packageLengthCm <= 0 || input.packageWidthCm <= 0 || input.packageHeightCm <= 0) return 0
-  return input.packageLengthCm * input.packageWidthCm * input.packageHeightCm * normalizedQuoteQuantity(quantity) / Math.max(1, Number(divisor) || 8000)
+  return decimal(input.packageLengthCm).times(input.packageWidthCm).times(input.packageHeightCm).times(normalizedQuoteQuantity(quantity)).div(Math.max(1, Number(divisor) || 8000)).toNumber()
 }
 
 export function singleChargeWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
@@ -208,7 +209,7 @@ export function singleShipmentDimensions(input: SingleWeightInput, quantity = no
 
 export function usdPriceFromCny(cny: number, usdCny: number) {
   const rate = Math.max(0.0001, Number(usdCny) || 0)
-  return Math.round(Math.max(0, Number(cny) || 0) * 100) / 100 / rate
+  return decimal(Math.max(0, Number(cny) || 0)).toDecimalPlaces(2).div(rate).toNumber()
 }
 
 export function hasQuotationProduct(mode: 'single' | 'bundle', primarySku: string, bundleSkus: string[]) {

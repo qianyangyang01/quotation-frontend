@@ -1,12 +1,13 @@
 <script setup lang="ts">
+import { displayWeightGrams, gramsToKg, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import type { BundleQuoteItem } from './types'
 import QuotationProductImage from './QuotationProductImage.vue'
 import { packagingWeightKg } from '@/services/quotationCalculator'
 
-const grams = (weightKg: number) => Math.ceil((Number.isFinite(Number(weightKg)) ? Number(weightKg) : 0) * 1000)
+const grams = displayWeightGrams
 const effectiveWeightKg = (item: BundleQuoteItem) => item.customWeightKg == null ? item.weightKg : item.customWeightKg
-const packagedWeightKg = (item: BundleQuoteItem) => effectiveWeightKg(item) + packagingWeightKg(effectiveWeightKg(item))
-const rowDomesticFreight = (item: BundleQuoteItem) => item.purchaseFreightPerUnit * Math.max(1, Math.floor(Number(item.quantityPerSet) || 1))
+const packagedWeightKg = (item: BundleQuoteItem) => sumDecimal(effectiveWeightKg(item), packagingWeightKg(effectiveWeightKg(item)))
+const rowDomesticFreight = (item: BundleQuoteItem) => productDecimal(item.purchaseFreightPerUnit, Math.max(1, Math.floor(Number(item.quantityPerSet) || 1)))
 const purchasePricingLabel = (item: BundleQuoteItem) => {
   if (item.purchaseZeroTaxPointAdjustment) return `采购票点为0 · 原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = ¥${item.purchaseUnitPrice.toFixed(2)}`
   if (item.purchaseDataSource === 'legacy_2026') return item.purchasePriceBasis === 'tax_included' ? `2026旧数据 · 优先采用含票价 ¥${item.purchaseUnitPrice.toFixed(2)}` : `2026旧数据 · 含票价为空，采用报价 ¥${item.purchaseUnitPrice.toFixed(2)}`
@@ -49,7 +50,7 @@ defineEmits<{
         </div>
         <label class="qty"><input v-model.number="item.quantityPerSet" type="number" min="1" step="1" @change="$emit('quantityChange',item)"><span>件/套</span></label>
         <div class="purchase-price"><b>¥{{ item.purchaseUnitPrice.toFixed(2) }}</b><small>{{ purchasePricingLabel(item) }}</small></div>
-        <label class="custom-weight"><input :value="grams(effectiveWeightKg(item))" type="number" min="0" step="1" @input="item.customWeightKg=Math.max(0,Number(($event.target as HTMLInputElement).value)||0)/1000;$emit('weightChange',item)"><span>g</span><small>{{ item.customWeightKg == null ? '采购' : '自定义' }} {{ grams(effectiveWeightKg(item)) }}g + 包材 {{ grams(packagingWeightKg(effectiveWeightKg(item))) }}g = {{ grams(packagedWeightKg(item)) }}g</small><button v-if="item.customWeightKg != null" type="button" @click="item.customWeightKg=null;$emit('weightChange',item)">恢复</button></label>
+        <label class="custom-weight"><input :value="grams(effectiveWeightKg(item))" type="number" min="0" step="1" @input="item.customWeightKg=gramsToKg(Number(($event.target as HTMLInputElement).value)||0);$emit('weightChange',item)"><span>g</span><small>{{ item.customWeightKg == null ? '采购' : '自定义' }} {{ grams(effectiveWeightKg(item)) }}g + 包材 {{ grams(packagingWeightKg(effectiveWeightKg(item))) }}g = {{ grams(packagedWeightKg(item)) }}g</small><button v-if="item.customWeightKg != null" type="button" @click="item.customWeightKg=null;$emit('weightChange',item)">恢复</button></label>
         <div class="row-domestic-freight"><b>¥{{ rowDomesticFreight(item).toFixed(2) }}</b><small>¥{{ item.purchaseFreightPerUnit.toFixed(2) }}/件 × {{ Math.max(1, Math.floor(Number(item.quantityPerSet) || 1)) }}</small></div>
         <button class="remove" type="button" :disabled="items.length <= 1" @click="$emit('remove',item.id)">删除</button>
       </article>

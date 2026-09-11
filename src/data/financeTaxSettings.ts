@@ -1,3 +1,4 @@
+import { decimal } from '@/services/quotationDecimal'
 import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
@@ -155,8 +156,8 @@ export function calculateFinanceQuoteTax(
   }
 
   const fixedFeeUsd = finiteNonNegative(countrySetting.fixedFeeUsd)
-  const taxUsd = Number(fixedFeeUsd.toFixed(2))
-  const totalUsd = Number((normalizedBase + taxUsd).toFixed(2))
+  const taxUsd = decimal(fixedFeeUsd).toDecimalPlaces(2).toNumber()
+  const totalUsd = decimal(normalizedBase).plus(taxUsd).toDecimalPlaces(2).toNumber()
   return {
     included: false,
     configured: true,

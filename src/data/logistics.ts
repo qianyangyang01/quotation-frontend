@@ -1,3 +1,4 @@
+import { decimal } from '@/services/quotationDecimal'
 import { normalizeLogisticsAttribute } from './logisticsAttributes'
 export interface LogisticsPriceRow {
   areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number; etaStatus?: string
@@ -237,8 +238,8 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   const volumeDivisor = 0
   const price = countryRows.find(candidate => priceMatchesRegion(candidate, quoteRegion, zoneRequired) && weightMatchesPrice(candidate, chargeWeightKg))
   if (!price) return null
-  const base = chargeWeightKg * price.pricePerKg
+  const base = decimal(chargeWeightKg).times(price.pricePerKg).toNumber()
   const surcharge = 0
-  const total = base + (price.registrationFee || 0)
+  const total = decimal(base).plus(price.registrationFee || 0).toDecimalPlaces(2).toNumber()
   return { total: Number(total.toFixed(2)), base, surcharge, price, actualWeightKg, volumeWeightKg, chargeWeightKg, volumeDivisor }
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { displayWeightGrams, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotationRowsSignature'
 import { normalizeLogisticsAttribute, selectableLogisticsAttributes } from '@/data/logisticsAttributes'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
@@ -64,7 +65,7 @@ import {
   usdPriceFromCny as convertCnyToUsd,
 } from '@/services/quotationCalculator'
 
-const displayGrams = (weightKg: number) => Math.ceil((Number.isFinite(weightKg) ? weightKg : 0) * 1000)
+const displayGrams = displayWeightGrams
 function ruleSupportsShipment(rule: (typeof logisticsRules)[number], country: string, weightKg: number, logisticsAttribute: string) {
   return rule.status === '启用' && Boolean(findPriceRow(rule, country, weightKg, [logisticsAttribute], quoteRegionForCountry(country)))
 }
@@ -257,10 +258,10 @@ function chargeWeight(p: Product) {
   return singleActualWeight(p)
 }
 
-function domesticFreight(p: Product) { return quoteMode.value === 'bundle' ? bundleDomesticFreight(1) : p.purchaseFreightPerUnit * p.quantity }
-function totalCost(p: Product) { return quoteMode.value === 'bundle' ? bundlePurchaseCost(1) + bundleDomesticFreight(1) + p.freight : p.purchase + p.purchaseFreightPerUnit + p.freight }
+function domesticFreight(p: Product) { return quoteMode.value === 'bundle' ? bundleDomesticFreight(1) : productDecimal(p.purchaseFreightPerUnit, p.quantity) }
+function totalCost(p: Product) { return quoteMode.value === 'bundle' ? sumDecimal(bundlePurchaseCost(1), bundleDomesticFreight(1), p.freight) : sumDecimal(p.purchase, p.purchaseFreightPerUnit, p.freight) }
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
-function salePrice(p: Product) { return totalCost(p) * selectedGradeCoefficient() }
+function salePrice(p: Product) { return productDecimal(totalCost(p), selectedGradeCoefficient()) }
 function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
 function taxResult(country: string, provider: string, baseQuoteCny: number, ruleName = '', channelKey = '') {
   const rule = logisticsRuleByName(ruleName)
@@ -1176,13 +1177,13 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
   const freight = Number(result.total.toFixed(2))
   let cost: number
   if (quoteMode.value === 'bundle') {
-    cost = bundlePurchaseCost(normalizedQuantity) + bundleDomesticFreight(normalizedQuantity) + freight
+    cost = sumDecimal(bundlePurchaseCost(normalizedQuantity), bundleDomesticFreight(normalizedQuantity), freight)
   } else {
     const record = findPurchaseProduct(purchaseRecords.value, p.sku)
     const purchasePrice = record ? purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied) : p.purchase
-    cost = (purchasePrice + p.purchaseFreightPerUnit) * normalizedQuantity + freight
+    cost = sumDecimal(productDecimal(sumDecimal(purchasePrice, p.purchaseFreightPerUnit), normalizedQuantity), freight)
   }
-  const baseQuoteCny = cost * selectedGradeCoefficient()
+  const baseQuoteCny = productDecimal(cost, selectedGradeCoefficient())
   const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey)
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }

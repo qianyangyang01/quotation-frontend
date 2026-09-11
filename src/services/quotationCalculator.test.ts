@@ -164,7 +164,7 @@ describe('bundle SKU calculation', () => {
       { sku: taxed.sku, quantityPerSet: 2, purchaseUnitPrice: 0, purchaseInvoiceTaxApplied: true, purchaseFreightPerUnit: 1.5, weightKg: 0.1, customWeightKg: null },
       { sku: second.sku, quantityPerSet: 1, purchaseUnitPrice: 0, purchaseInvoiceTaxApplied: true, purchaseFreightPerUnit: 2, weightKg: 0.35, customWeightKg: null },
     ]
-    expect(bundlePurchaseCost(taxedItems, [taxed, second], '10')).toBe(1.06 * 2 + 12)
+    expect(bundlePurchaseCost(taxedItems, [taxed, second], '10')).toBe(14.12)
     expect(bundleDomesticFreight(taxedItems)).toBe(1.5 * 2 + 2)
     expect(bundlePurchaseCost([{ ...taxedItems[0], purchaseInvoiceTaxApplied: false }], [taxed], '10')).toBe(2)
   })

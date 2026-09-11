@@ -1,3 +1,4 @@
+import { sumDecimal, productDecimal } from '@/services/quotationDecimal'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
@@ -21,7 +22,7 @@ describe('quotation view fee integration', () => {
       updatedAt: 'test',
     }
     let copied = ''
-    const context = {
+    const context = { sumDecimal, productDecimal,
       purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,

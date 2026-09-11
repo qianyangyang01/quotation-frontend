@@ -1,18 +1,19 @@
 <script setup lang="ts">
+import { displayWeightGrams, gramsToKg, sumDecimal, decimal } from "@/services/quotationDecimal"
 import type { QuotationProduct } from './types'
 const props = defineProps<{ product: QuotationProduct; baseWeight: number; packagingWeight: number; chargeWeight: number; domesticFreight: number; purchaseTierLabel: string }>()
 const emit = defineEmits<{ weightChange: [] }>()
 
-const grams = (weightKg: number) => Math.ceil((Number.isFinite(weightKg) ? weightKg : 0) * 1000)
-const actualWeight = () => props.baseWeight + props.packagingWeight
+const grams = displayWeightGrams
+const actualWeight = () => sumDecimal(props.baseWeight, props.packagingWeight)
 const volumeWeight = () => props.product.volumetricEnabled
-  ? props.product.packageLengthCm * props.product.packageWidthCm * props.product.packageHeightCm * Math.max(1, props.product.quantity) / Math.max(1, props.product.volumeDivisor || 8000)
+  ? decimal(props.product.packageLengthCm).times(props.product.packageWidthCm).times(props.product.packageHeightCm).times(Math.max(1, props.product.quantity)).div(Math.max(1, props.product.volumeDivisor || 8000)).toNumber()
   : 0
 
 function updateManualWeight(event: Event) {
   const input = event.target as HTMLInputElement
   const inputGrams = Number(input.value)
-  props.product.manualWeight = Number.isFinite(inputGrams) ? Math.max(0, Math.ceil(inputGrams)) / 1000 : 0
+  props.product.manualWeight = Number.isFinite(inputGrams) ? gramsToKg(Math.max(0, Math.ceil(inputGrams))) : 0
   emit('weightChange')
 }
 function updateDivisor(event: Event) {
