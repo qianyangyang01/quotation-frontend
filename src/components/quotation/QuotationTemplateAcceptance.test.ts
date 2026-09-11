@@ -2,6 +2,7 @@
 import {afterEach, expect, it, vi} from 'vitest'
 import {createApp,h,nextTick,reactive,type App} from 'vue'
 import Matrix from './QuotationMatrix.vue'
+import CommonMatrix from './QuotationCommonMatrix.vue'
 import type {QuotationMatrixRow} from './types'
 let app:App
 const country={name:'美国',code:'US',lowestQuote:10,grouped:false,continent:'北美洲' as const,stage:'common' as const,sortOrder:1,channelCount:2}
@@ -10,6 +11,13 @@ const tick=async()=>{await nextTick();await nextTick();await nextTick()}
 function button(text:string){return [...document.querySelectorAll('button')].find(b=>b.textContent?.includes(text))!}
 function setup(){const changed=vi.fn();const state=reactive({active:true,adoptedCountry:'',adoptedRule:'',adoptedCarrier:'',variant:'template' as const,countries:[country],contextKey:'a',customQuantity:5,exchangeRate:7,presetVersion:1,presetSelection:[{...row('missing')}],quoteRowsForCountry:()=>[row('ok')],unavailableReason:():string=> '超过重量上限',onSelectionChange:changed});const host=document.createElement('div');document.body.append(host);app=createApp({render:()=>h(Matrix,state)});app.mount(host);return{state,changed}}
 afterEach(()=>{app?.unmount();document.body.innerHTML=''})
+it.each([true,false])('common mode synchronizes its current selection on return, eligible=%s',async eligible=>{
+  const changed=vi.fn();const state=reactive({active:true,countries:[country],contextKey:'a',adoptedCountry:'',adoptedRule:'',adoptedCarrier:'',exchangeRate:7,customQuantity:5,presetSelection:[row('ok')],presetVersion:1,quoteRowsForCountry:()=>[row('ok')],onSelectionChange:changed});
+  const host=document.createElement('div');document.body.append(host);app=createApp({render:()=>h(CommonMatrix,state)});app.mount(host);await tick();
+  expect(changed.mock.lastCall?.[0][0].quote1).toBe(10);
+  state.active=false;await tick();state.quoteRowsForCountry=()=>eligible?[{...row('ok'),quote1:23}]:[];state.contextKey='b';await tick();state.active=true;await tick();
+  expect(changed.mock.lastCall?.[0]).toEqual(eligible?[expect.objectContaining({quote1:23})]:[])
+})
 it('keeps unavailable identity, null amounts and disabled primary',async()=>{const{changed}=setup();await tick();expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({channelKey:'missing',quote1:null,quote2:null,quote3:null,quoteCustom:null})]);expect(button('设为首选').disabled).toBe(true)})
 it('cancel replacement keeps original template selection',async()=>{const{state,changed}=setup();await tick();button('替换渠道').click();await tick();button('取消').click();await tick();expect(changed.mock.lastCall?.[0][0].channelKey).toBe('missing');expect(state.presetSelection[0]?.channelKey).toBe('missing')})
 it('confirmed replacement preserves template and adds a current eligible channel',async()=>{const{state,changed}=setup();await tick();button('替换渠道').click();await tick();(document.querySelector('.picker-list input') as HTMLInputElement).click();await tick();button('批量添加渠道').click();await tick();expect(changed.mock.lastCall?.[0].map((r:QuotationMatrixRow)=>r.channelKey)).toEqual(['ok']);expect(state.presetSelection[0]?.channelKey).toBe('missing')})
@@ -112,4 +120,59 @@ it('does not emit duplicate selections for equivalent recalculated rows',async()
   const count=changed.mock.calls.length
   for(let i=0;i<5;i++) {state.quoteRowsForCountry=()=>[Object.fromEntries(Object.entries(row('ok')).reverse()) as QuotationMatrixRow];state.contextKey=String(i);await tick()}
   expect(changed).toHaveBeenCalledTimes(count)
+})
+
+it('resynchronizes changed prices after returning from an inactive mode',async()=>{
+  const {state,changed}=setup();state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  state.active=false;await tick();state.quoteRowsForCountry=()=>[{...row('ok'),quote1:99}];state.contextKey='new-sku';await tick();
+  state.active=true;await tick();expect(changed.mock.lastCall?.[0][0].quote1).toBe(99)
+})
+
+it.each(['template','specified'])('resynchronizes an updated missing reason after returning to %s mode',async variant=>{
+  const {state,changed}=setup();Object.assign(state,{variant});await tick();state.active=false;await tick();
+  state.unavailableReason=()=> '不支持带电商品';state.contextKey='battery';await tick();
+  state.active=true;await tick();expect(changed.mock.lastCall?.[0][0].availabilityMessage).toBe('不支持带电商品')
+})
+
+it('keeps the newest template when requests complete in reverse order',async()=>{
+  const {state,changed}=setup();await tick();let first!:(ok:boolean)=>void;let second!:(ok:boolean)=>void;
+  Object.assign(state,{ensureCountries:vi.fn().mockImplementationOnce(()=>new Promise<boolean>(done=>{first=done})).mockImplementationOnce(()=>new Promise<boolean>(done=>{second=done}))});
+  state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  state.presetSelection=[row('new')];state.presetVersion++;await tick();
+  second(true);await tick();first(true);await tick();
+  expect(changed.mock.lastCall?.[0].map((r:QuotationMatrixRow)=>r.channelKey)).toEqual(['new'])
+})
+
+it('can reapply a template after a failed load without losing the prior selection',async()=>{
+  const {state,changed}=setup();await tick();
+  Object.assign(state,{ensureCountries:vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)});
+  state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  expect(changed.mock.lastCall?.[0][0].channelKey).toBe('missing');
+  state.presetVersion++;await tick();expect(changed.mock.lastCall?.[0][0].channelKey).toBe('ok')
+})
+
+it('copies the latest cost snapshot and partial quantity prices after recalculation',async()=>{
+  const {state}=setup();const copied=vi.fn();Object.assign(state,{onCopy:copied});
+  state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  state.quoteRowsForCountry=()=>[{...row('ok'),freight:7.02,totalCostCny:61.02,quantityMessages:{'3':'超过重量'}}];state.contextKey='recalculated';await tick();
+  button('复制表格数据').click();await tick();
+  expect(copied.mock.lastCall?.[0][0]).toMatchObject({freight:7.02,totalCostCny:61.02,quote3:null,quantityMessages:{'3':'超过重量'}})
+})
+
+it.each(['template','specified'])('clears previously valid amounts when a channel fails while %s mode is inactive',async variant=>{
+  const {state,changed}=setup();Object.assign(state,{variant});state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  expect(changed.mock.lastCall?.[0][0].quote1).toBe(10);
+  state.active=false;await tick();state.quoteRowsForCountry=()=>[];state.contextKey='overweight';await tick();
+  state.active=true;await tick();
+  expect(document.querySelector('.selected-channels')?.textContent).toContain('超过重量上限');
+  expect(changed.mock.lastCall?.[0][0]).toMatchObject({available:false,quote1:null,quote2:null})
+})
+
+it('preserves the latest state through 40 alternating eligible and overweight recalculations',async()=>{
+  const {state,changed}=setup();state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  for(let i=0;i<40;i++) {
+    state.quoteRowsForCountry=()=>i%2 ? [] : [{...row('ok'),quote1:10+i}];state.contextKey=`sku-${i}`;await tick();
+    expect(changed.mock.lastCall?.[0]).toHaveLength(1);
+    expect(changed.mock.lastCall?.[0][0].quote1).toBe(i%2 ? null : 10+i)
+  }
 })

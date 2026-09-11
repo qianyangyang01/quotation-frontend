@@ -219,7 +219,11 @@ const allSelectedRows = computed(() => {
   return selectedCountries.value.flatMap(country => selectedRows(country))
 })
 const selectedRowsSignature = computed(() => quotationRowsSignature(allSelectedRows.value))
-watch(selectedRowsSignature, () => { if (props.active !== false) emit('selectionChange', allSelectedRows.value) }, { immediate: true })
+// Hidden modes may consume signature changes without publishing them. Republish
+// the current snapshot on activation even when the unavailable rows are unchanged.
+watch([() => props.active, selectedRowsSignature], () => {
+  if (props.active !== false) emit('selectionChange', allSelectedRows.value)
+}, { immediate: true })
 
 const countryOptions = computed(() => {
   const query = countrySearch.value.trim().toLowerCase()
