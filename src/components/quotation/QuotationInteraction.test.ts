@@ -34,7 +34,7 @@ it.each([
     presetSelection: [{ country, channelKey: '1', quoteRegion: '旧区域' }],
     quoteRowsForCountry: () => options.map(option => ({ ...row(country, 1), ...option })), onSelectionChange: changed })
   await nextTick(); await nextTick()
-  expect(changed.mock.lastCall?.[0]).toEqual([])
+  expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ available: false, quote1: null })])
 })
 
 afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
@@ -139,7 +139,7 @@ it('does not silently assign a region to a legacy regional template', async () =
     exchangeRate: 7, quoteRowsForCountry: () => [{ ...row('澳大利亚', 1), quoteRegion: '澳大利亚3区' }],
     presetVersion: 1, presetSelection: [{ country: '澳大利亚', channelKey: '1' }], onSelectionChange: changed })
   await nextTick()
-  expect(changed.mock.lastCall?.[0]).toEqual([])
+  expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ available: false, quote1: null })])
   expect(document.body.textContent).toContain('旧模板未保存区域')
 })
 it('searches, sorts and pages without re-running pricing and suspends hidden common mode', async () => {
@@ -228,4 +228,19 @@ it('shows all Canadian regions in the channel picker with no hidden region filte
   button('添加渠道').click(); await nextTick()
   expect(document.querySelector('.quote-region-select')).toBeNull()
   expect(document.querySelectorAll('.picker-list>label')).toHaveLength(3)
+})
+
+it('retains an unavailable template row across SKU changes and restores its current price', async () => {
+  const changed = vi.fn()
+  const state = reactive({ active: true, variant: 'template', countries, contextKey: 'light', customQuantity: 5,
+    exchangeRate: 7, presetVersion: 1, presetSelection: [{ country: '美国', channelKey: '1' }],
+    unavailableReason: () => '超过渠道重量上限',
+    quoteRowsForCountry: () => state.contextKey === 'heavy' ? [] : [{ ...row('美国', 1), quote1: 12 }], onSelectionChange: changed })
+  mount(Matrix, state); await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0][0].quote1).toBe(12)
+  state.contextKey = 'heavy'; await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ available: false, quote1: null, quote2: null, availabilityMessage: '超过渠道重量上限' })])
+  expect(document.body.textContent).toContain('替换渠道')
+  state.contextKey = 'light'; await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0][0].quote1).toBe(12)
 })

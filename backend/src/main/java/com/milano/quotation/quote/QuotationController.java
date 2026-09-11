@@ -103,6 +103,14 @@ public class QuotationController {
         var row = mine(id, auth); assertVersion(row, patch.path("_version").asLong(-1));
         submissionValidator.validateUpdate(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
+        for (var option : current.path("quoteOptions")) {
+            if (patch.hasNonNull("dealOptionId") && option.path("id").asText().equals(patch.path("dealOptionId").asText()) && option.path("available").isBoolean() && !option.path("available").asBoolean())
+                throw AppException.unprocessable("不可用报价方案不能回填成交");
+        }
+        for (var line : patch.path("dealLines")) for (var option : current.path("quoteOptions")) {
+            if (option.path("id").asText().equals(line.path("optionId").asText()) && option.path("available").isBoolean() && !option.path("available").asBoolean())
+                throw AppException.unprocessable("不可用报价方案不能回填成交");
+        }
         patch.properties().forEach(entry -> {
             if (PATCH_FIELDS.contains(entry.getKey())) {
                 var old = current.get(entry.getKey());

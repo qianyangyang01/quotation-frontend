@@ -1208,6 +1208,12 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
     const tax = custom?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey)
     const row: QuotationMatrixRow = {
         ...option,
+        quantityMessages: Object.fromEntries([1,2,3,quantity].filter(count => !costFor(count)).map(count => {
+          const weight = quoteMode.value === 'bundle' ? bundleGoodsWeight(count) : singleActualWeight(p,count)
+          const rule = logisticsRuleByName(option.rule)
+          const max = Math.max(0,...(rule?.prices.filter(r => r.areaName === country).map(r => r.weightToKg) || []))
+          return [String(count), max > 0 && weight > max ? `${count}${quoteMode.value === 'bundle' ? '套' : '件'}实际重${weight.toFixed(3)}kg，超过${max}kg上限` : `${count}${quoteMode.value === 'bundle' ? '套' : '件'}当前重量或区域无可用运价`]
+        })),
         country,
         quoteRegion: region || undefined,
         transport: option.channel || option.rule,
@@ -1449,8 +1455,8 @@ const saveValidationIssues = computed(() => {
   const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
-  if (!savedQuoteRows.value.length) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
-  if (savedQuoteRows.value.some(row => !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message:'物流商税务或附加费属性待设置，请到对应财务模块补齐' })
+  if (!savedQuoteRows.value.some(row => row.available !== false && row.quote1 != null)) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
+  if (savedQuoteRows.value.some(row => row.available !== false && !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message:'物流商税务或附加费属性待设置，请到对应财务模块补齐' })
   if (readiness.value && !readiness.value.ready) issues.push({ key:'businessReadiness', label:'业务就绪条件', message:`报价业务尚未就绪：${readiness.value.missing.join('；')}` })
   if (p?.sku && logisticsLoadState.value === 'idle') issues.push({ key:'logisticsRules', label:'物流规则', message:'请加载当前商品的物流规则' })
   if (logisticsLoadState.value === 'loading') issues.push({ key:'logisticsRules', label:'物流规则', message:'物流规则正在加载，请稍候' })
@@ -1516,7 +1522,7 @@ async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
       row.country,
       row.quoteRegion || '全国统一',
       row.carrier,
-      row.transport,
+      row.transport + (row.availabilityMessage ? '（' + row.availabilityMessage + '）' : '') + (row.quantityMessages ? ' ' + Object.values(row.quantityMessages).join('；') : ''),
       row.eta,
       row.taxFeeMode === 'no-tax' ? '无关税' : row.taxIncluded ? '免税' : row.taxFeeMode !== 'missing' ? '不免税' : '物流商税务属性待设置',
       row.taxFeeMode === 'fixed-order' ? row.countryFixedTaxUsd.toFixed(2) : '',
@@ -1572,6 +1578,19 @@ function logisticsSamplesFor(row: QuotationMatrixRow, p: Product) {
       etaMinDays: result?.price.etaMinDays || 0, etaMaxDays: result?.price.etaMaxDays || 0 }
   })
 }
+function unavailableTemplateReason(preset: {country:string;channelKey?:string;quoteRegion?:string}) {
+  if (quoteLogisticsBusy()) return '渠道正在加载，请稍候'
+  if (logisticsLoadState.value === 'error' || countryLoadError.value) return '渠道加载失败，请重试'
+  if (purchaseTaxBlockReason.value) return purchaseTaxBlockReason.value
+  const rule = logisticsRules.find(r => String(r.id) === preset.channelKey?.split('::')[0])
+  if (!rule) return '当前资料中未找到该渠道，请核对渠道是否停用或不支持当前商品属性'
+  const prices = rule.prices.filter(r => r.areaName === preset.country || r.countryCode === preset.country)
+  const weight = quoteMode.value === 'bundle' ? bundleGoodsWeight(1) : singleActualWeight(products.value[0], 1)
+  const max = Math.max(0,...prices.map(r => r.weightToKg))
+  if (max > 0 && weight > max) return `${quoteMode.value === 'bundle' ? '单套' : '单件'}实际重 ${weight.toFixed(3)}kg，超过该国家渠道上限 ${max}kg`
+  if (billingQuoteRegion(rule,preset.country,preset.quoteRegion) === null) return '原分区无法匹配，请重新选择区域或替换渠道'
+  return '当前重量、区域或商品属性不符合可用报价条件，请核对后替换渠道'
+}
 function buildQuoteOptions() {
   const p = products.value[0]
   const selectedMatrixRows = savedQuoteRows.value
@@ -1581,7 +1600,7 @@ function buildQuoteOptions() {
   const snapshotWeightKg = snapshotBaseWeightKg + snapshotPackagingWeightKg
   return selectedMatrixRows.map((row) => {
     const billingRule = logisticsRules.find(rule => rule.id === row.ruleId)
-    const billingRegion = billingRule ? billingQuoteRegion(billingRule, row.country, row.quoteRegion) : null
+    const billingRegion = row.available === false ? (row.quoteRegion || '') : billingRule ? billingQuoteRegion(billingRule, row.country, row.quoteRegion) : null
     if (billingRegion === null) throw new Error('报价分区已失效，请重新选择渠道后报价')
     const countryCode = quotationCountries(p).find(country => country.name === row.country)?.code
       || logisticsCountries.find(country => country.name === row.country)?.code
@@ -1598,10 +1617,13 @@ function buildQuoteOptions() {
       channelKey: row.channelKey,
       ruleId: String(row.ruleId || ''),
       channelCode: row.channelCode,
+      available: row.available,
+      availabilityMessage: row.availabilityMessage,
+      quantityMessages: row.quantityMessages,
       freightCny: row.freight,
       logisticsChannelId: logisticsRules.find(rule => rule.id === row.ruleId)?.logisticsChannelId,
       logisticsVersionId: logisticsRules.find(rule => rule.id === row.ruleId)?.logisticsVersionId,
-      logisticsSamples: logisticsSamplesFor(row, p),
+      logisticsSamples: row.available === false ? [] : logisticsSamplesFor(row, p),
       logisticsInput: {
         country: row.country,
         baseWeightKg: snapshotBaseWeightKg,
@@ -1613,7 +1635,7 @@ function buildQuoteOptions() {
       totalCostCny: row.totalCostCny,
       profitCny: row.profitCny,
       quoteCny: row.quoteCny,
-      isPrimary: row.country === p.country && row.rule === p.rule && row.carrier === p.channel && (row.quoteRegion || '') === quoteRegionForCountry(p.country),
+      isPrimary: row.available !== false && row.country === p.country && row.rule === p.rule && row.carrier === p.channel && (row.quoteRegion || '') === quoteRegionForCountry(p.country),
       quote1Usd: row.quote1,
       quote2Usd: row.quote2,
       quote3Usd: row.quote3,
@@ -1637,7 +1659,8 @@ function buildQuoteOptions() {
   })
 }
 function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>) {
-  const index = Math.max(0, quoteOptions.findIndex(option => option.isPrimary))
+  const primaryIndex = quoteOptions.findIndex(option => option.isPrimary && option.available !== false && option.quote1Usd != null)
+  const index = primaryIndex >= 0 ? primaryIndex : quoteOptions.findIndex(option => option.available !== false && option.quote1Usd != null)
   const option = quoteOptions[index]
   if (!option) return null
   const rule = logisticsRuleByName(option.rule)
@@ -1660,7 +1683,7 @@ async function save() {
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
   if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
-  if (selectedMatrixRows.some(row => !row.taxConfigured)) { toast('物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
+  if (selectedMatrixRows.some(row => row.available !== false && !row.taxConfigured)) { toast('物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const quoteOptions = buildQuoteOptions()
   const summary = selectedQuoteSummary(quoteOptions)
@@ -1844,7 +1867,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           <QuotationTemplateMatrix :active="quoteMatrixMode==='template'"
             :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
-            :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"
+            :unavailable-reason="unavailableTemplateReason" :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'"
             :draft-selection="restoredTemplateSelections" :draft-template="activeTemplateSnapshot" :draft-version="restoredSelectionVersion"
             @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateTemplateQuotes" @template-change="updateActiveTemplate"

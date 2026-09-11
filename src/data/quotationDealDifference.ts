@@ -27,7 +27,7 @@ function primaryOption(row: QuotationRecord) { return recordOptions(row).find(op
 function optionLabel(option: QuotationRecordQuoteOption) { return `${option.country}${option.quoteRegion ? `（${option.quoteRegion}）` : ''} · ${option.channel}${option.carrier && option.carrier !== option.channel ? ` · ${option.carrier}` : ''}` }
 
 function quoteTierForQuantity(row: QuotationRecord, option: QuotationRecordQuoteOption | undefined, quantity: number) {
-  if (!option) return null
+  if (!option || option.available === false) return null
   if (quantity === 1) return option.quote1Usd ?? (option.isPrimary ? row.systemQuoteUsd : null)
   if (quantity === 2) return option.quote2Usd
   if (quantity === 3) return option.quote3Usd
@@ -47,7 +47,7 @@ export function quotationDealDifferenceLines(row: QuotationRecord): QuotationDea
   if (!lines.length && row.status === 'won' && row.actualQuoteUsd != null) {
     const quantity = Math.max(1, Math.floor(row.dealQuantity || 1))
     const option = recordOptions(row).find(item => item.id === row.dealOptionId) || primaryOption(row)
-    const systemUsd = quoteTierForQuantity(row, option, quantity) ?? (quantity === 1 ? row.systemQuoteUsd : null)
+    const systemUsd = quoteTierForQuantity(row, option, quantity) ?? (quantity === 1 && !option ? row.systemQuoteUsd : null)
     const differenceUsd = systemUsd == null ? null : Number((row.actualQuoteUsd - systemUsd).toFixed(2))
     const percent = systemUsd && differenceUsd != null ? Number((differenceUsd / systemUsd * 100).toFixed(1)) : null
     lines.push({ id: 'legacy', label: row.dealOptionLabel || (option ? optionLabel(option) : `${row.country} · ${row.channel}`), quantity, unitPriceUsd: row.actualQuoteUsd / quantity, systemUsd, actualUsd: row.actualQuoteUsd, differenceUsd, percent })

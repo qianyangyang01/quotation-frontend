@@ -16,6 +16,9 @@ export interface QuotationRecordSpecifiedQuote {
 }
 
 export interface QuotationRecordQuoteOption {
+  available?: boolean
+  availabilityMessage?: string
+  quantityMessages?: Record<string,string>
   id: string
   country: string
   countryCode?: string
@@ -185,6 +188,9 @@ function normalizeQuoteOptions(value: unknown, recordId: string, rawRecord: Part
       channel: String(raw?.channel || '—'),
       rule: String(raw?.rule || '—'),
       eta: String(raw?.eta || '—'),
+      available: raw?.available === false ? false : undefined,
+      availabilityMessage: optionalText(raw?.availabilityMessage),
+      quantityMessages: raw?.quantityMessages,
       quote1Usd: optionalN(raw?.quote1Usd),
       quote2Usd: optionalN(raw?.quote2Usd),
       quote3Usd: optionalN(raw?.quote3Usd),

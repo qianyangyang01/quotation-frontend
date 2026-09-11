@@ -78,6 +78,7 @@ export type QuotationMatrixRow = {
   channelCode: string
   available?: boolean
   availabilityMessage?: string
+  quantityMessages?: Record<string, string>
   rule: string
   carrier: string
   transport: string

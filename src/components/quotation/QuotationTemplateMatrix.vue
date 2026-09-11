@@ -15,6 +15,7 @@ import {
 } from '@/data/quotationTemplates'
 
 const props = withDefaults(defineProps<{
+  unavailableReason?: (preset: QuotationPresetSelection) => string
   active?: boolean
   ensureCountries?: (countries: string[]) => Promise<boolean>
   countries: QuotationCountrySummary[]
@@ -321,7 +322,7 @@ function formatTime(value: string) {
           <span><small>当前已应用</small><b>{{ activeTemplate.name }}</b></span>
           <em>模板已保存：{{ activeTemplateCountryCount }} 个国家 · {{ activeTemplate.items.length }} 条渠道</em>
         </div>
-        <p v-if="appliedMissingCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ appliedMissingCount }} 条模板渠道不可用，已自动跳过；其余 {{ appliedValidCount }} 条已正常匹配。</p>
+        <p v-if="appliedMissingCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ appliedMissingCount }} 条模板渠道不可用，已保留并标注原因；其余 {{ appliedValidCount }} 条已正常匹配。</p>
         <p v-else-if="!currentRows.length" class="cleared-note">本次应用清单为 0 个国家 · 0 条渠道；已保存模板未修改，可随时恢复。</p>
         <p v-else class="matched-note">✓ {{ appliedValidCount || currentRows.length }} 条模板渠道可用；下方增删仅对本次报价生效。</p>
         <div class="status-actions">
@@ -340,7 +341,7 @@ function formatTime(value: string) {
       variant="template"
       :active="active"
       :countries="countries" :ensure-countries="ensureCountries"
-      :quote-rows-for-country="quoteRowsForCountry"
+      :quote-rows-for-country="quoteRowsForCountry" :unavailable-reason="unavailableReason"
       :context-key="contextKey"
       :custom-quantity="customQuantity"
       :adopted-country="adoptedCountry"

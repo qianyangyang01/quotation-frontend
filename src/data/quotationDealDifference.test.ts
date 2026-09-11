@@ -11,6 +11,11 @@ function record(input: Partial<QuotationRecord> = {}): QuotationRecord {
 }
 
 describe('quotation deal difference', () => {
+  it('never falls back to a headline price for unavailable legacy options', () => {
+    const result = quotationDealDifference(record({ status: 'won', actualQuoteUsd: 9, dealQuantity: 1, dealOptionId: 'a', quoteOptions: [{ ...option('a', 10), available: false, quote1Usd: null }] }))
+    expect(result.kind).toBe('missing')
+    expect(result.lines[0]?.systemUsd).toBeNull()
+  })
   it('keeps pending and lost records out of price comparison', () => {
     expect(quotationDealDifference(record()).kind).toBe('pending')
     expect(quotationDealDifference(record({ status: 'lost' })).kind).toBe('lost')

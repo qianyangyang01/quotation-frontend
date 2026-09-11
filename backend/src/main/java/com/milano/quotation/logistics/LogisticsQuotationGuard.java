@@ -15,6 +15,17 @@ public class LogisticsQuotationGuard {
     private final LogisticsQueryService queries;
     private final ObjectMapper mapper;
     public LogisticsQuotationGuard(JdbcClient jdbc,LogisticsQueryService queries,ObjectMapper mapper){this.jdbc=jdbc;this.queries=queries;this.mapper=mapper;}
+    static void validateUnavailableOptions(ObjectNode quotation) {
+        boolean validOption = false;
+        for (var option : quotation.path("quoteOptions")) {
+            if (option.path("available").isBoolean() && !option.path("available").asBoolean()) {
+                for (var field : List.of("quote1Usd","quote2Usd","quote3Usd","quoteCustomUsd"))
+                    if (!option.has(field) || !option.path(field).isNull()) throw AppException.unprocessable("不可用渠道不能包含报价金额");
+                if (option.path("isPrimary").asBoolean()) throw AppException.unprocessable("不可用渠道不能设为首选");
+            } else validOption = true;
+        }
+        if (!validOption) throw AppException.unprocessable("至少需要一条有效报价渠道");
+    }
     public void validate(ObjectNode quotation) {
         if(jdbc.sql("select paused from logistics_company_state where singleton=true for share").query(Boolean.class).single())throw AppException.conflict("物流价格正在重建，暂时不能提交新报价");
         boolean scoped="selected".equals(quotation.path("logisticsSyncScope").asText());
@@ -22,6 +33,7 @@ public class LogisticsQuotationGuard {
         var requestedKeys = new ArrayList<String>();
         quotation.path("quoteOptions").forEach(option -> requestedKeys.add(option.path("channelKey").asText()));
         if (requestedKeys.isEmpty()) throw AppException.unprocessable("请至少选择一条报价渠道");
+        validateUnavailableOptions(quotation);
         var dataset=jdbc.sql("select id from logistics_dataset where status='active' for share").query(UUID.class).single();
         jdbc.sql("""
             select c.id from logistics_channel c join logistics_provider p on p.id=c.provider_id
@@ -45,6 +57,7 @@ public class LogisticsQuotationGuard {
             and concat(c.rule_id,'::',p.payload->>'name','::',c.code) in (:keys)
             """).param("id",dataset).param("keys",requestedKeys).query((rs,n)->mapper.readTree(rs.getString(1))).list();
         for(var option:quotation.path("quoteOptions")) {
+            if (option.path("available").isBoolean() && !option.path("available").asBoolean()) continue;
             var key=option.path("channelKey").asText();var country=option.path("country").asText();
             var channel=channels.stream().filter(c->c.path("key").asText().equals(key)).findFirst().orElseThrow(()->AppException.conflict("报价渠道已归档、未适配或不存在，请重新选择"));
             validateSurcharge(surcharges, option);
