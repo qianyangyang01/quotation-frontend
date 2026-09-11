@@ -7,7 +7,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
+import com.milano.quotation.purchase.PurchaseProduct;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -27,7 +27,7 @@ public class PurchaseImportJdbcService {
     @Transactional
     public ApplyResult apply(UUID jobId, Collection<UUID> rowIds, String sourceHash) {
         if (rowIds.isEmpty()) return new ApplyResult(0, 0);
-        var now = Instant.now();
+        var now = PurchaseProduct.databaseNow();
         var parameters = new MapSqlParameterSource()
                 .addValue("ids", rowIds)
                 .addValue("jobId", jobId)
@@ -264,7 +264,7 @@ public class PurchaseImportJdbcService {
     @Transactional
     public int rollback(UUID jobId, Collection<UUID> rowIds) {
         if (rowIds.isEmpty()) return 0;
-        var parameters = new MapSqlParameterSource().addValue("ids", rowIds).addValue("jobId", jobId).addValue("now", OffsetDateTime.now(ZoneOffset.UTC));
+        var parameters = new MapSqlParameterSource().addValue("ids", rowIds).addValue("jobId", jobId).addValue("now", OffsetDateTime.ofInstant(PurchaseProduct.databaseNow(), ZoneOffset.UTC));
         // SKU backfill never changes image relations and must not use the full
         // product-update rollback's delete/recreate image path.
         named.update("""

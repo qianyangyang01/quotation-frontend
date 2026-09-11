@@ -21,8 +21,13 @@ public class PurchaseProduct {
     @Column(name="created_at", nullable=false) public Instant createdAt;
     @Column(name="updated_at", nullable=false) public Instant updatedAt;
     protected PurchaseProduct() {}
+
+    /** PostgreSQL timestamps retain microseconds; return the exact precision we persist. */
+    public static Instant databaseNow() {
+        return Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    }
     static PurchaseProduct create(String sku, JsonNode payload, String catalogState, boolean quoteReady, String sourceHash) {
-        var now = Instant.now(); var row = new PurchaseProduct(); row.id=UUID.randomUUID(); row.sku=sku;
+        var now = databaseNow(); var row = new PurchaseProduct(); row.id=UUID.randomUUID(); row.sku=sku;
         row.payload=payload; row.catalogState=catalogState; row.quoteReady=quoteReady; row.sourceHash=sourceHash;
         row.createdAt=now; row.updatedAt=now; return row;
     }

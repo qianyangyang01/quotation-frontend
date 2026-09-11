@@ -6,7 +6,6 @@ import com.milano.quotation.common.AppException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -127,7 +126,7 @@ public class PurchaseProductService {
         var row = existing.orElseGet(() -> PurchaseProduct.create(sku, object.deepCopy(), finalCatalogState, finalQuoteReady, normalizeSourceHash(sourceHash)));
         row.payload = object.deepCopy(); row.catalogState=catalogState; row.quoteReady=quoteReady;
         if(sourceHash!=null)row.sourceHash=normalizeSourceHash(sourceHash);
-        row.updatedAt = Instant.now(); products.saveAndFlush(row); linkFromUrl(row.id,object.path("productImage").asText(""),"product");linkFromUrl(row.id,object.path("physicalImage").asText(""),"physical");return view(row);
+        row.updatedAt = PurchaseProduct.databaseNow(); products.saveAndFlush(row); linkFromUrl(row.id,object.path("productImage").asText(""),"product");linkFromUrl(row.id,object.path("physicalImage").asText(""),"physical");return view(row);
     }
 
     @Transactional public List<JsonNode> upsertAll(List<JsonNode> rows) {
@@ -161,7 +160,7 @@ public class PurchaseProductService {
         var row=locked(sku);assertVersion(row,expectedVersion);
         if(CATALOG_READY.equals(state)&&isReservedSku(row.sku))throw AppException.unprocessable("测试或系统生成SKU不能启用为正式商品");
         row.catalogState=state;row.quoteReady=CATALOG_READY.equals(state)&&completeForQuotation((ObjectNode)row.payload);
-        var payload=(ObjectNode)row.payload;applyDerivedState(payload,state,row.quoteReady);row.updatedAt=Instant.now();
+        var payload=(ObjectNode)row.payload;applyDerivedState(payload,state,row.quoteReady);row.updatedAt=PurchaseProduct.databaseNow();
         return view(products.saveAndFlush(row));
     }
 
@@ -180,7 +179,7 @@ public class PurchaseProductService {
 
     @Transactional public JsonNode uploadImage(String sku,String type,MultipartFile file){
         if(!List.of("product","physical").contains(type))throw AppException.unprocessable("图片类型不合法");var product=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("商品不存在"));
-        try{var asset=storage.storeImage(file.getBytes(),file.getOriginalFilename());link(product.id,asset.id,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+asset.id);if(type.equals("product"))payload.put("image","/api/v1/assets/"+asset.id);product.updatedAt=Instant.now();return view(product);}catch(java.io.IOException e){throw AppException.unprocessable("图片读取失败");}
+        try{var asset=storage.storeImage(file.getBytes(),file.getOriginalFilename());link(product.id,asset.id,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+asset.id);if(type.equals("product"))payload.put("image","/api/v1/assets/"+asset.id);product.updatedAt=PurchaseProduct.databaseNow();return view(products.saveAndFlush(product));}catch(java.io.IOException e){throw AppException.unprocessable("图片读取失败");}
     }
 
     @Transactional public JsonNode upsertImported(JsonNode payload,UUID productAssetId,UUID physicalAssetId,String importMode,String sourceHash){
@@ -197,10 +196,10 @@ public class PurchaseProductService {
         if(!source.equals(target)&&products.findBySku(target).isPresent())throw AppException.conflict("目标SKU已存在："+target);
         var payload=(ObjectNode)row.payload.deepCopy();payload.put("sku",target);validatePayload(payload);
         if(!completeForQuotation(payload))throw AppException.unprocessable("legacy_2026".equals(payload.path("dataSource").asText())?"克重、有效价格或1件运费尚未补齐，请采购补全":"重量、起订量或采购价尚未补齐，不能转正式");
-        row.sku=target;row.catalogState=CATALOG_READY;row.quoteReady=true;row.updatedAt=Instant.now();applyDerivedState(payload,CATALOG_READY,true);row.payload=payload;
+        row.sku=target;row.catalogState=CATALOG_READY;row.quoteReady=true;row.updatedAt=PurchaseProduct.databaseNow();applyDerivedState(payload,CATALOG_READY,true);row.payload=payload;
         products.saveAndFlush(row);return view(row);
     }
-    @Transactional public void linkAsset(String sku,UUID assetId,String type){if(!List.of("product","physical").contains(type))throw AppException.unprocessable("图片类型不合法");var product=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("SKU "+sku+" 不存在"));link(product.id,assetId,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+assetId);if(type.equals("product"))payload.put("image","/api/v1/assets/"+assetId);product.updatedAt=Instant.now();}
+    @Transactional public void linkAsset(String sku,UUID assetId,String type){if(!List.of("product","physical").contains(type))throw AppException.unprocessable("图片类型不合法");var product=products.findBySku(normalizeSku(sku)).orElseThrow(()->AppException.notFound("SKU "+sku+" 不存在"));link(product.id,assetId,type);var payload=(ObjectNode)product.payload;payload.put(type.equals("product")?"productImage":"physicalImage","/api/v1/assets/"+assetId);if(type.equals("product"))payload.put("image","/api/v1/assets/"+assetId);product.updatedAt=PurchaseProduct.databaseNow();}
     private void link(UUID productId,UUID assetId,String type){
         var current=images.findFirstByProductIdAndImageTypeOrderBySortOrderAsc(productId,type);
         if(current.isPresent()&&current.get().assetId.equals(assetId))return;

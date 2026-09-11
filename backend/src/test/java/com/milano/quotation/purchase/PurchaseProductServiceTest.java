@@ -20,6 +20,22 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void savedPurchaseRevisionUsesDatabasePrecision() {
+        var nanos = java.time.Instant.parse("2026-09-11T03:33:38.610021719Z");
+        try (var clock = mockStatic(java.time.Instant.class, CALLS_REAL_METHODS)) {
+            clock.when(java.time.Instant::now).thenReturn(nanos);
+            var saved = service.upsert(pasted("PRECISION-1"));
+            assertEquals("2026-09-11T03:33:38.610021Z", saved.path("_updatedAt").asText());
+            var row = rows.get("PRECISION-1");
+            assertEquals(0, row.createdAt.getNano() % 1000);
+            var quote = JsonNodeFactory.instance.objectNode().put("primarySku", row.sku);
+            quote.putObject("purchaseVersions").put(row.sku, saved.path("_version").asLong() + ":" + saved.path("_updatedAt").asText());
+            when(products.findAllLockedBySkuIn(anyCollection())).thenReturn(List.of(row));
+            assertDoesNotThrow(() -> service.assertQuotationVersions(quote));
+            row.version++;
+            assertThrows(AppException.class, () -> service.assertQuotationVersions(quote));
+        }
+    }
     @Test void taxPointIsRequiredEvenWithoutClientVersionsAndAcrossBundleItems() {
         var zero = PurchaseProduct.create("ZERO", pasted("ZERO").put("taxPoint", 0), "ready", true, null);
         var missing = PurchaseProduct.create("MISSING", pasted("MISSING").put("dataSource", "legacy_2026").put("taxIncludedPriceCny", 20), "ready", true, null);
@@ -166,6 +182,7 @@ class PurchaseProductServiceTest {
         when(storage.storeImage(any(byte[].class), anyString())).thenReturn(asset);
         var file = new MockMultipartFile("file", "photo.png", "image/png", new byte[]{1, 2});
         assertEquals("/api/v1/assets/" + asset.id, service.uploadImage("SKU-2", "product", file).path("productImage").asText());
+        verify(products).saveAndFlush(product);
         service.linkAsset("SKU-2", asset.id, "physical");
         assertEquals("/api/v1/assets/" + asset.id, product.payload.path("physicalImage").asText());
         assertThrows(AppException.class, () -> service.uploadImage("SKU-2", "other", file));
