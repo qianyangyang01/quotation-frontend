@@ -616,51 +616,60 @@ function rememberPurchase(record: PurchaseProductRecord) {
 function activePurchaseSkus() {
   return [...new Set((quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || '']).filter(Boolean))].sort()
 }
+let liveVersionCheckSequence = 0
 async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
-  const skus = activePurchaseSkus()
-  const key = draftSignature()
-  const result = await loadQuotationSync(skus, signal)
-  if (signal?.aborted || key !== draftSignature() || logisticsLoadState.value === 'loading' || productQueryBusy.value) return false
-  const changed: string[] = []
-  if (skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
-  const newerLogistics = Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
-  // A library revision is only a signal to check. It is never itself a save blocker.
-  if ((newerLogistics || beforeSave) && savedQuoteRows.value.length) {
-    try { await checkSelectedLogistics({ logisticsAttribute: products.value[0].logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal) }
-    catch (error) {
-      if (error instanceof ApiError && [409, 422].includes(error.status)) changed.push('已选渠道的适用价格或可用性')
-      else throw error
-    }
-  }
-  if (signal?.aborted || key !== draftSignature()) return false
-  syncPending.value = changed.join('、')
-  syncError.value = ''
-  if (newerLogistics && !changed.length && !beforeSave) {
-    // Fetch in the background without clearing the working quote or disabling Save.
-    const p = products.value[0]
-    const countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country,
-      [...loadedQuoteCountries.value, ...requestedQuoteCountries,
-        ...[...specifiedQuoteRows.value, ...templateQuoteRows.value].map(row => row.country)])
-    const latest = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal, apply: false })
-    if (!latest.verified || signal?.aborted || key !== draftSignature() || quoteLogisticsBusy()) return false
-    if (savedQuoteRows.value.length) {
-      try {
-        const checked = await checkSelectedLogistics({ logisticsAttribute: p.logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal)
-        if (checked.revision !== latest.revision) return true
-      } catch (error) {
-        if (error instanceof ApiError && [409,422].includes(error.status)) { syncPending.value = '已选渠道的适用价格或可用性'; return false }
-        throw error
+  const request = ++liveVersionCheckSequence
+  try {
+    const skus = activePurchaseSkus()
+    const key = draftSignature()
+    const result = await loadQuotationSync(skus, signal)
+    if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature() || logisticsLoadState.value === 'loading' || productQueryBusy.value) return false
+    const changed: string[] = []
+    if (skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
+    const newerLogistics = Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
+    // A library revision is only a signal to check. It is never itself a save blocker.
+    if ((newerLogistics || beforeSave) && savedQuoteRows.value.length) {
+      try { await checkSelectedLogistics({ logisticsAttribute: products.value[0].logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal) }
+      catch (error) {
+        if (error instanceof ApiError && [409, 422].includes(error.status)) changed.push('已选渠道的适用价格或可用性')
+        else throw error
       }
     }
-    if (signal?.aborted || key !== draftSignature()) return false
-    replaceLogisticsRules(latest.rules)
-    financePolicies.value = loadFinanceChannelPolicies()
-    loadedQuoteCountries.value = countries
-    logisticsRulesGeneration.value++
-    logisticsRevision.value = latest.revision
-    logisticsLoadState.value = latest.rules.length ? 'ready' : 'empty'
+    if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature()) return false
+    syncPending.value = changed.join('、')
+    syncError.value = ''
+    if (newerLogistics && !changed.length && !beforeSave) {
+      // Fetch in the background without clearing the working quote or disabling Save.
+      const p = products.value[0]
+      const countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country,
+        [...loadedQuoteCountries.value, ...requestedQuoteCountries,
+          ...[...specifiedQuoteRows.value, ...templateQuoteRows.value].map(row => row.country)])
+      const latest = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal, apply: false })
+      if (!latest.verified || signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature() || quoteLogisticsBusy()) return false
+      if (savedQuoteRows.value.length) {
+        try {
+          const checked = await checkSelectedLogistics({ logisticsAttribute: p.logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal)
+          if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature()) return false
+          if (checked.revision !== latest.revision) return true
+        } catch (error) {
+          if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature()) return false
+          if (error instanceof ApiError && [409,422].includes(error.status)) { syncPending.value = '已选渠道的适用价格或可用性'; return false }
+          throw error
+        }
+      }
+      if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature()) return false
+      replaceLogisticsRules(latest.rules)
+      financePolicies.value = loadFinanceChannelPolicies()
+      loadedQuoteCountries.value = countries
+      logisticsRulesGeneration.value++
+      logisticsRevision.value = latest.revision
+      logisticsLoadState.value = latest.rules.length ? 'ready' : 'empty'
+    }
+    return changed.length === 0
+  } catch (error) {
+    if (signal?.aborted || request !== liveVersionCheckSequence) return false
+    throw error
   }
-  return changed.length === 0
 }
 function quoteLogisticsBusy() { return logisticsLoadState.value === 'loading' || countryLoads.value > 0 }
 function applyLiveFinance() {

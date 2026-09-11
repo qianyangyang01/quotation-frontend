@@ -50,3 +50,12 @@ it('preserves new no-tax snapshots and legacy tax snapshots without recomputing 
     expect(record?.quoteOptions?.[0]).toMatchObject({ taxFeeMode,quote1Usd:12,taxLabel:taxFeeMode === 'no-tax' ? '无关税' : '历史文案' })
   }
 })
+
+it('round trips unavailable and partial quantity rows without converting null to zero',()=>{
+  const record=normalizeQuotationRecord(JSON.parse(JSON.stringify({...baseRecord(),quoteOptions:[
+    {id:'unavailable',country:'美国',carrier:'B',channel:'失效渠道',rule:'r',eta:'—',available:false,availabilityMessage:'超过5kg上限',quote1Usd:null,quote2Usd:null,quote3Usd:null,quoteCustomUsd:null},
+    {id:'partial',country:'美国',carrier:'A',channel:'可用渠道',rule:'r',eta:'5天',quote1Usd:10,quote2Usd:20,quote3Usd:null,quoteCustomUsd:null,quantityMessages:{'3':'超重'}}
+  ]})))
+  expect(record?.quoteOptions?.[0]).toMatchObject({available:false,availabilityMessage:'超过5kg上限',quote1Usd:null,quote2Usd:null,quote3Usd:null,quoteCustomUsd:null})
+  expect(record?.quoteOptions?.[1]).toMatchObject({quote1Usd:10,quote2Usd:20,quote3Usd:null,quantityMessages:{'3':'超重'}})
+})

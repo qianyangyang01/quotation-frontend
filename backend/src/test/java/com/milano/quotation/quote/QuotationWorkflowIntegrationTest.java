@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 
 @SpringBootTest
 @ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class QuotationWorkflowIntegrationTest {
     @org.springframework.test.context.bean.override.mockito.MockitoBean com.milano.quotation.logistics.LogisticsQuotationGuard logisticsGuard;
     @Autowired WebApplicationContext context;
@@ -175,6 +175,24 @@ class QuotationWorkflowIntegrationTest {
                 .andExpect(status().isNotFound());
     }
 
+    @Test void retainsUnavailableSnapshotAndRejectsBothDealWritePaths() throws Exception {
+        var session = authenticatedSession();
+        var payload = mapper.createObjectNode().put("customerName","验收混合报价").put("quoteMode","single").put("primarySku","SKU-1").put("productCategory","日用品").put("logisticsAttribute","普货").put("customerGrade","A级客户").put("monthlySalesEstimate","10");
+        var options = payload.putArray("quoteOptions");
+        options.addObject().put("id","good").put("country","美国").put("carrier","A").put("channel","可用").put("quote1Usd",10);
+        var missing=options.addObject().put("id","missing").put("country","美国").put("carrier","B").put("channel","超重").put("available",false).put("availabilityMessage","超过5kg上限");
+        for(var field:java.util.List.of("quote1Usd","quote2Usd","quote3Usd","quoteCustomUsd"))missing.putNull(field);
+        var response=mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","acceptance-"+UUID.randomUUID()).contentType("application/json").content(mapper.writeValueAsString(payload))).andExpect(status().isOk()).andReturn();
+        var saved=mapper.readTree(response.getResponse().getContentAsByteArray()).path("data");
+        var id=saved.path("id").asText();var version=saved.path("_version").asLong();
+        org.junit.jupiter.api.Assertions.assertTrue(saved.path("quoteOptions").get(1).path("quote1Usd").isNull());
+        org.junit.jupiter.api.Assertions.assertEquals("超过5kg上限",saved.path("quoteOptions").get(1).path("availabilityMessage").asText());
+        var patchBody=mapper.createObjectNode().put("_version",version).put("status","won").put("dealOptionId","missing").put("actualQuoteUsd",10).put("dealQuantity",1);
+        mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody))).andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.message").value("不可用报价方案不能回填成交"));
+        patchBody.remove("dealOptionId");
+        patchBody.putArray("dealLines").addObject().put("id","d").put("optionId","missing").put("unitPriceUsd",10).put("quantity",1).put("amountUsd",10);
+        mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody))).andExpect(status().isUnprocessableEntity());
+    }
     private MockHttpSession authenticatedSession() throws Exception {
         var login = mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json")
                         .content("{\"account\":\"ADMIN\",\"password\":\"TestAdmin123\"}"))
