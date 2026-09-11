@@ -51,10 +51,10 @@ const templates = ref<QuotationPersonalTemplate[]>([])
 const selectedTemplateId = ref('')
 const activeTemplateId = ref('')
 const currentRows = ref<QuotationMatrixRow[]>([])
+const currentAvailableCount = computed(() => currentRows.value.filter(row => row.available !== false && [row.quote1, row.quote2, row.quote3, row.quoteCustom].some(value => typeof value === 'number' && Number.isFinite(value))).length)
+const currentUnavailableCount = computed(() => currentRows.value.length - currentAvailableCount.value)
 const presetSelection = ref<QuotationPresetSelection[]>([])
 const presetVersion = ref(0)
-const appliedValidCount = ref(0)
-const appliedMissingCount = ref(0)
 const showManager = ref(false)
 const createName = ref('')
 const createDescription = ref('')
@@ -125,8 +125,6 @@ function applyTemplate(template = selectedTemplate.value) {
     carrier: item.carrier,
     transport: item.transport,
   }))
-  appliedValidCount.value = 0
-  appliedMissingCount.value = 0
   presetVersion.value += 1
   emit('templateChange', { id: template.id, name: template.name })
   notify(`已应用模板“${template.name}”，可在下方临时增删国家和渠道`)
@@ -139,10 +137,6 @@ function handleSelectionChange(rows: QuotationMatrixRow[]) {
   emit('selectionChange', rows)
 }
 
-function handlePresetApplied(valid: number, missing: number) {
-  appliedValidCount.value = valid
-  appliedMissingCount.value = missing
-}
 
 async function createFromCurrent() {
   const name = createName.value.trim()
@@ -200,8 +194,6 @@ function clearCurrentSelection() {
 
   cancelClearConfirmation()
   presetSelection.value = []
-  appliedValidCount.value = 0
-  appliedMissingCount.value = 0
   presetVersion.value += 1
   notify(`已清空本次报价应用清单；模板“${activeTemplate.value?.name || ''}”未修改，可随时恢复`)
 }
@@ -322,9 +314,9 @@ function formatTime(value: string) {
           <span><small>当前已应用</small><b>{{ activeTemplate.name }}</b></span>
           <em>模板已保存：{{ activeTemplateCountryCount }} 个国家 · {{ activeTemplate.items.length }} 条渠道</em>
         </div>
-        <p v-if="appliedMissingCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ appliedMissingCount }} 条模板渠道不可用，已保留并标注原因；其余 {{ appliedValidCount }} 条已正常匹配。</p>
+        <p v-if="currentUnavailableCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ currentUnavailableCount }} 条模板渠道不可用，已保留并标注原因；其余 {{ currentAvailableCount }} 条已正常匹配。</p>
         <p v-else-if="!currentRows.length" class="cleared-note">本次应用清单为 0 个国家 · 0 条渠道；已保存模板未修改，可随时恢复。</p>
-        <p v-else class="matched-note">✓ {{ appliedValidCount || currentRows.length }} 条模板渠道可用；下方增删仅对本次报价生效。</p>
+        <p v-else class="matched-note">✓ {{ currentAvailableCount }} 条模板渠道可用；下方增删仅对本次报价生效。</p>
         <div class="status-actions">
           <button @click="applyTemplate(activeTemplate)">恢复模板已保存清单</button>
           <button class="clear" :class="{ confirming: pendingClear }" @click="clearCurrentSelection">{{ pendingClear ? '确认清空清单' : '清空本次清单' }}</button>
@@ -353,7 +345,7 @@ function formatTime(value: string) {
       :preset-version="presetVersion"
       @update:custom-quantity="$emit('update:customQuantity', $event)"
       @selection-change="handleSelectionChange"
-      @preset-applied="handlePresetApplied"
+
       @quote-region-change="$emit('quoteRegionChange', $event)"
       @adopt="$emit('adopt', $event)"
       @copy="$emit('copy', $event)"
