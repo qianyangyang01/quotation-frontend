@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
@@ -35,11 +35,14 @@ const emit = defineEmits<{
 }>()
 
 const retainedRows = ref<Record<string, QuotationMatrixRow>>({})
-const replacement = ref<{country:string; key:string} | null>(null)
+const replacement = ref<{country:string; keys:string[]} | null>(null)
 const selectedCountries = ref<string[]>([])
 const selectedChannelKeys = ref<Record<string, string[]>>({})
 const showCountryPicker = ref(false)
 const countrySearch = ref('')
+const channelLoading = ref(false)
+const channelError = ref(false)
+let channelPickerRequest = 0
 const channelPickerCountry = ref('')
 const channelSearch = ref('')
 const pickerRegion = ref('')
@@ -83,23 +86,23 @@ function availableRows(country: string) {
 function selectedRows(country: string) {
   const keys = new Set(selectedChannelKeys.value[country] || [])
   const available = availableRows(country)
+  const seen = new Set<string>()
   return [...keys].map(key => {
     const old = retainedRows.value[country + key]
     const match = available.find(row => rowKey(row) === key) || (old ? findPresetRow(old, available) : undefined)
     if (match) return match
     if (!old) return undefined
     return { ...old, available: false, availabilityMessage: props.unavailableReason?.(old) || '当前渠道或区域无法匹配，请选择替换渠道', quote1: null, quote2: null, quote3: null, quoteCustom: null }
-  }).filter((row): row is QuotationMatrixRow => !!row).sort((a,b) => { const ai=available.findIndex(r=>rowKey(r)===rowKey(a)); const bi=available.findIndex(r=>rowKey(r)===rowKey(b)); return (ai<0?Infinity:ai)-(bi<0?Infinity:bi) })
+  }).filter((row): row is QuotationMatrixRow => !!row).filter(row => { const key = rowKey(row); if (seen.has(key)) return false; seen.add(key); return true }).sort((a,b) => { const ai=available.findIndex(r=>rowKey(r)===rowKey(a)); const bi=available.findIndex(r=>rowKey(r)===rowKey(b)); return (ai<0?Infinity:ai)-(bi<0?Infinity:bi) })
 }
-function selectionKey(country: string, row: QuotationMatrixRow) {
-  const keys = selectedChannelKeys.value[country] || []
-  if (keys.includes(rowKey(row))) return rowKey(row)
+function selectionKeys(country: string, row: QuotationMatrixRow) {
   const available = availableRows(country)
-  return keys.find(key => {
+  return (selectedChannelKeys.value[country] || []).filter(key => {
+    if (key === rowKey(row)) return true
     const original = retainedRows.value[country + key]
     const resolved = original && findPresetRow(original, available)
     return resolved && rowKey(resolved) === rowKey(row)
-  }) || rowKey(row)
+  })
 }
 function etaRange(eta: string) {
   const values = eta.match(/\d+/g)?.map(Number) || []
@@ -275,9 +278,8 @@ function removeCountry(country: string) {
   delete next[country]
   selectedChannelKeys.value = next
 }
-const channelLoading = ref(false)
-const channelError = ref(false)
 async function openChannelPicker(country: string) {
+  const request = ++channelPickerRequest
   channelPickerCountry.value = country
   pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
   channelSearch.value = ''
@@ -286,19 +288,25 @@ async function openChannelPicker(country: string) {
   channelPage.value = 1
   channelLoading.value = true
   channelError.value = false
-  const ok = !props.ensureCountries || await props.ensureCountries([country])
-  if (channelPickerCountry.value !== country) return
+  let ok: boolean
+  try { ok = !props.ensureCountries || await props.ensureCountries([country]) }
+  catch { ok = false }
+  if (request !== channelPickerRequest || channelPickerCountry.value !== country) return
   channelLoading.value = false
   channelError.value = !ok
   pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
 }
+onBeforeUnmount(() => { channelPickerRequest++ })
 function closeChannelPicker() {
+  channelPickerRequest++
+  channelLoading.value = false
+  channelError.value = false
   replacement.value = null
   channelPickerCountry.value = ''
   pendingChannelKeys.value = []
 }
 function isAlreadyAdded(row: QuotationMatrixRow) {
-  return (selectedChannelKeys.value[channelPickerCountry.value] || []).includes(rowKey(row))
+  return selectedRows(channelPickerCountry.value).some(selected => rowKey(selected) === rowKey(row))
 }
 function togglePending(row: QuotationMatrixRow) {
   if (isAlreadyAdded(row)) return
@@ -322,32 +330,38 @@ function addPendingChannels() {
     closeChannelPicker()
     return
   }
+  const additions = picked.filter((row): row is QuotationMatrixRow => !!row && !isAlreadyAdded(row))
+  if (!additions.length) {
+    regionFeedback.value = '所选渠道已在报价清单中，原方案已保留'
+    closeChannelPicker()
+    return
+  }
   const current = (selectedChannelKeys.value[country] || []).filter(key =>
-    !replacement.value || replacement.value.country !== country || key !== replacement.value.key)
-  for (const row of picked) if (row) retainedRows.value[country + rowKey(row)] = row
-  selectedChannelKeys.value = { ...selectedChannelKeys.value, [country]: [...new Set([...current, ...pendingChannelKeys.value])] }
+    !replacement.value || replacement.value.country !== country || !replacement.value.keys.includes(key))
+  for (const row of additions) retainedRows.value[country + rowKey(row)] = row
+  selectedChannelKeys.value = { ...selectedChannelKeys.value, [country]: [...new Set([...current, ...additions.map(rowKey)])] }
   regionFeedback.value = ''
   closeChannelPicker()
 }
 async function replaceChannel(country: string, row: QuotationMatrixRow) {
-  const key = selectionKey(country, row)
+  const keys = selectionKeys(country, row)
   // Set replacement before loading: cancelling the picker must not restore it later.
-  replacement.value = { country, key }
+  replacement.value = { country, keys }
   await openChannelPicker(country)
 }
 function removeChannel(country: string, row: QuotationMatrixRow) {
   selectedChannelKeys.value = {
     ...selectedChannelKeys.value,
-    [country]: (selectedChannelKeys.value[country] || []).filter(key => key !== selectionKey(country, row)),
+    [country]: (selectedChannelKeys.value[country] || []).filter(key => !selectionKeys(country, row).includes(key)),
   }
 }
 function changeRowRegion(country: string, row: QuotationMatrixRow, region: string) {
   const next = availableRows(country).find(candidate => candidate.quoteRegion === region && candidate.channelKey === row.channelKey)
   if (!next) { regionFeedback.value = '该渠道在所选区域暂无可用报价，原方案已保留'; return false }
   const keys = selectedChannelKeys.value[country] || []
-  if (keys.includes(rowKey(next))) { regionFeedback.value = '该区域和渠道的报价方案已存在，原方案已保留'; return false }
+  if (selectedRows(country).some(selected => rowKey(selected) === rowKey(next))) { regionFeedback.value = '该区域和渠道的报价方案已存在，原方案已保留'; return false }
   retainedRows.value[country + rowKey(next)] = next
-  selectedChannelKeys.value = { ...selectedChannelKeys.value, [country]: keys.map(key => key === selectionKey(country, row) ? rowKey(next) : key) }
+  selectedChannelKeys.value = { ...selectedChannelKeys.value, [country]: [...new Set(keys.map(key => selectionKeys(country, row).includes(key) ? rowKey(next) : key))] }
   if (props.adoptedCountry === country && props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier
     && (countrySummary(country)?.selectedQuoteRegion || '') === (row.quoteRegion || '')) emit('adopt', next)
   regionFeedback.value = ''

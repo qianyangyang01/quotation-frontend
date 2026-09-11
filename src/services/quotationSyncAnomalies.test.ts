@@ -63,3 +63,27 @@ it('ignores obsolete network failures but surfaces the current failure',async()=
   state.loadQuotationSync.mockRejectedValueOnce(new Error('current network failure'))
   await expect(run(undefined,true)).rejects.toThrow('current network failure')
 })
+function backgroundSetup(){
+  const {state,run}=setup()
+  const background=Object.assign(state,{
+    buildQuoteLogisticsCountryQuery:()=>['美国'],financeCountrySettings:{value:[]},loadedQuoteCountries:{value:[]},requestedQuoteCountries:new Set(),specifiedQuoteRows:{value:[]},templateQuoteRows:{value:[]},
+    loadPublishedLogisticsRules:vi.fn(async()=>({verified:true,revision:'r2',rules:[{}]})),quoteLogisticsBusy:()=>false,replaceLogisticsRules:vi.fn(),financePolicies:{value:[]},loadFinanceChannelPolicies:()=>[],logisticsRulesGeneration:{value:0}
+  })
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r2'})
+  state.checkSelectedLogistics.mockResolvedValue({revision:'r2'})
+  return {state:background,run}
+}
+it('does not apply an obsolete background rules response after a newer save check',async()=>{
+  const {state,run}=backgroundSetup();let done!:(value:{verified:boolean;revision:string;rules:object[]})=>void
+  state.loadPublishedLogisticsRules.mockImplementationOnce(()=>new Promise(resolve=>{done=resolve}))
+  const old=run();await vi.waitFor(()=>expect(state.loadPublishedLogisticsRules).toHaveBeenCalledOnce())
+  await run(undefined,true);done({verified:true,revision:'r2',rules:[{}]});expect(await old).toBe(false)
+  expect(state.replaceLogisticsRules).not.toHaveBeenCalled();expect(state.syncPending.value).toBe('')
+})
+it('ignores a stale background channel rejection after a newer save check succeeds',async()=>{
+  const {state,run}=backgroundSetup();let reject!:(error:Error)=>void
+  state.checkSelectedLogistics.mockResolvedValueOnce({revision:'r2'}).mockImplementationOnce(()=>new Promise((_,no)=>{reject=no}))
+  const old=run();await vi.waitFor(()=>expect(state.checkSelectedLogistics).toHaveBeenCalledTimes(2))
+  await run(undefined,true);reject(new ApiError('stale background',409,'ERROR','test'));expect(await old).toBe(false)
+  expect(state.syncPending.value).toBe('');expect(state.replaceLogisticsRules).not.toHaveBeenCalled()
+})

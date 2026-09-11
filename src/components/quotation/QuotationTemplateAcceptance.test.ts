@@ -26,3 +26,49 @@ it('preserves independent countries and partial quantity prices in a mixed templ
   expect(changed.mock.lastCall?.[0][1]).toMatchObject({country:'加拿大',available:false,quote1:null});
   state.active=false;await tick();state.active=true;await tick();expect(changed.mock.lastCall?.[0]).toHaveLength(2)
 })
+it('rejects a partially invalid batch replacement without removing the original',async()=>{
+  const {state,changed}=setup();state.quoteRowsForCountry=()=>[row('ok'),row('second')];await tick();button('替换渠道').click();await tick();
+  document.querySelectorAll<HTMLInputElement>('.picker-list input').forEach(input=>input.click());await tick();
+  state.quoteRowsForCountry=()=>[row('ok')];state.contextKey='changed';await tick();button('批量添加渠道').click();await tick();
+  expect(changed.mock.lastCall?.[0].map((r:QuotationMatrixRow)=>r.channelKey)).toEqual(['missing'])
+})
+it('cancelling a loading replacement does not turn the next ordinary add into a replacement',async()=>{
+  const {state,changed}=setup();await tick();let resolve!:(ok:boolean)=>void;
+  Object.assign(state,{ensureCountries:vi.fn().mockImplementationOnce(()=>new Promise<boolean>(done=>{resolve=done})).mockResolvedValue(true)});await tick();
+  button('替换渠道').click();await tick();button('取消').click();await tick();resolve(true);await tick();
+  button('添加渠道').click();await tick();(document.querySelector('.picker-list input') as HTMLInputElement).click();await tick();button('批量添加渠道').click();await tick();
+  expect(changed.mock.lastCall?.[0].map((r:QuotationMatrixRow)=>r.channelKey).sort()).toEqual(['missing','ok'])
+})
+it('an old picker failure must not overwrite a reopened same-country picker success',async()=>{
+  const {state}=setup();await tick();let resolve!:(ok:boolean)=>void;
+  Object.assign(state,{ensureCountries:vi.fn().mockImplementationOnce(()=>new Promise<boolean>(done=>{resolve=done})).mockResolvedValue(true)});await tick();
+  button('替换渠道').click();await tick();button('取消').click();await tick();button('添加渠道').click();await tick();
+  expect(document.body.textContent).not.toContain('加载失败，点击重试');resolve(false);await tick();
+  expect(document.body.textContent).not.toContain('加载失败，点击重试')
+  ;(document.querySelector('.picker-list input') as HTMLInputElement).click();await tick();button('批量添加渠道').click();await tick();
+  expect(document.querySelector('.picker-list')).toBeNull()
+})
+it('does not duplicate a restored channel when adding the already displayed national row',async()=>{
+  const{state,changed}=setup();state.presetSelection=[{...row('ok'),quoteRegion:'非偏远'}];state.quoteRowsForCountry=()=>[];state.presetVersion++;await tick();
+  state.quoteRowsForCountry=()=>[row('ok')];state.contextKey='loaded';await tick();button('添加渠道').click();await tick();
+  const input=document.querySelector('.picker-list input') as HTMLInputElement
+  if (!input.disabled) {input.click();await tick();button('批量添加渠道').click();await tick()}
+  expect(changed.mock.lastCall?.[0]).toHaveLength(1)
+})
+it('deduplicates previously saved aliases after recovery and removes every alias together',async()=>{
+  const {state,changed}=setup();state.presetSelection=[row('ok'),{...row('ok'),quoteRegion:'非偏远'}];state.quoteRowsForCountry=()=>[];state.presetVersion++;await tick();
+  expect(changed.mock.lastCall?.[0]).toHaveLength(2);state.quoteRowsForCountry=()=>[row('ok')];state.contextKey='recovered';await tick();
+  expect(changed.mock.lastCall?.[0]).toHaveLength(1);button('移出报价单').click();await tick();expect(changed.mock.lastCall?.[0]).toEqual([])
+})
+it('rechecks duplicates when a pending replacement becomes the recovered original row',async()=>{
+  const {state,changed}=setup();state.presetSelection=[{...row('ok'),quoteRegion:'非偏远'}];state.quoteRowsForCountry=()=>[row('ok'),{...row('ok'),quoteRegion:'2区'}];state.presetVersion++;await tick();
+  button('替换渠道').click();await tick();(document.querySelector('.picker-list input') as HTMLInputElement).click();await tick();
+  state.quoteRowsForCountry=()=>[row('ok')];state.contextKey='recovered';await tick();button('批量添加渠道').click();await tick();
+  expect(changed.mock.lastCall?.[0]).toHaveLength(1);expect(changed.mock.lastCall?.[0][0].quote1).toBe(10)
+})
+it('keeps a newer picker failure when an older successful request arrives',async()=>{
+  const {state}=setup();await tick();let resolve!:(ok:boolean)=>void;
+  Object.assign(state,{ensureCountries:vi.fn().mockImplementationOnce(()=>new Promise<boolean>(done=>{resolve=done})).mockResolvedValue(false)});await tick();
+  button('替换渠道').click();await tick();button('取消').click();await tick();button('添加渠道').click();await tick();resolve(true);await tick();
+  expect(document.body.textContent).toContain('加载失败，点击重试')
+})
