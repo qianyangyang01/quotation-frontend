@@ -4,7 +4,7 @@ import { computed, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
-import { sameQuotationRegion } from '@/data/logistics'
+import { isAustraliaQuoteCountry, sameQuotationRegion } from '@/data/logistics'
 
 const DEFAULT_COUNTRIES = ['美国', '英国', '加拿大', '澳大利亚']
 const props = withDefaults(defineProps<{
@@ -64,6 +64,11 @@ function findPresetRow(preset: QuotationPresetSelection, rows: QuotationMatrixRo
   if (presetChannelKey) {
     const stableMatch = rows.find(row => row.channelKey?.trim() === presetChannelKey && (preset.quoteRegion ? sameQuotationRegion(preset.quoteRegion, row.quoteRegion) : !row.quoteRegion || row.quoteRegion === '全国统一'))
     if (stableMatch) return stableMatch
+    // Older templates retain retired region labels. Only an explicitly national,
+    // unambiguous row of the same channel may replace one; never guess a zone.
+    const sameChannel = rows.filter(row => row.channelKey?.trim() === presetChannelKey)
+    if (!isAustraliaQuoteCountry(preset.country)
+      && sameChannel.length === 1 && sameChannel[0]?.quoteRegion === '全国统一') return sameChannel[0]
   }
   return rows.find(row => presetFallbackMatchesRow(preset, row))
 }

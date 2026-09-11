@@ -8,6 +8,35 @@ import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import type { QuotationCountrySummary, QuotationMatrixRow } from './types'
 
 let app: App
+
+it.each([['英国', '非偏远'], ['加拿大', '1区']])('restores old %s template regions to the same explicitly national channel', async (country, oldRegion) => {
+  const changed = vi.fn()
+  const current = { ...row(country, 1), quoteRegion: '全国统一' }
+  const state = reactive({ active: true, variant: 'template', countries: [{ ...countries[0], name: country }],
+    contextKey: 'light', customQuantity: 5, exchangeRate: 6.7, presetVersion: 1,
+    presetSelection: [{ country, channelKey: '1', quoteRegion: oldRegion }],
+    quoteRowsForCountry: () => [{ ...current, quote1: state.contextKey === 'light' ? 5 : 25 }], onSelectionChange: changed })
+  mount(Matrix, state); await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ channelKey: '1', quoteRegion: '全国统一', quote1: 5 })])
+  state.contextKey = 'heavy'; await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ quoteRegion: '全国统一', quote1: 25 })])
+})
+
+it.each([
+  ['澳大利亚', [{ quoteRegion: '全国统一', channelKey: '1' }]],
+  ['加拿大', [{ quoteRegion: '2区', channelKey: '1' }]],
+  ['加拿大', [{ quoteRegion: '全国统一', channelKey: '1' }, { quoteRegion: '2区', channelKey: '1' }]],
+  ['加拿大', [{ quoteRegion: '全国统一', channelKey: '2' }]],
+])('does not guess a replacement region or channel for %s', async (country, options) => {
+  const changed = vi.fn()
+  mount(Matrix, { active: true, variant: 'template', countries: [{ ...countries[0], name: country }],
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 6.7, presetVersion: 1,
+    presetSelection: [{ country, channelKey: '1', quoteRegion: '旧区域' }],
+    quoteRowsForCountry: () => options.map(option => ({ ...row(country, 1), ...option })), onSelectionChange: changed })
+  await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([])
+})
+
 afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
 const countries = ['美国', '澳大利亚'].map((name, index) => ({
   name, code: index ? 'AU' : 'US', stage: 'common', sortOrder: index, channelCount: 12,
