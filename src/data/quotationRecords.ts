@@ -1,3 +1,4 @@
+import { normalizeCustomerPrices, type CustomerPriceSnapshot } from './customerQuotePrices'
 import { api, idempotencyKey } from '@/services/http'
 
 export type QuotationRecordStatus = 'pending' | 'won' | 'lost'
@@ -86,7 +87,7 @@ export interface QuotationRecordBundleItem {
   domesticFreightPerUnitCny: number
 }
 
-export type QuotationRecordEditableField = 'status' | 'actualQuoteUsd' | 'actualQuoteCny' | 'dealQuantity' | 'closedAt' | 'note' | 'dealOptionLabel' | 'dealLines'
+export type QuotationRecordEditableField = 'status' | 'actualQuoteUsd' | 'actualQuoteCny' | 'dealQuantity' | 'closedAt' | 'note' | 'dealOptionLabel' | 'dealLines' | 'customerQuote' | 'quoteConfirmed'
 
 export interface QuotationRecordRevision {
   id: string
@@ -105,6 +106,8 @@ export interface QuotationRecordEditor {
 }
 
 export interface QuotationRecord {
+  quoteConfirmed?: boolean; quoteConfirmedAt?: string; quoteConfirmedBy?: string
+  systemQuantityQuotes?: CustomerPriceSnapshot; sheetQuote?: CustomerPriceSnapshot; customerQuote?: CustomerPriceSnapshot
   purchaseVersions?: Record<string, string>
   logisticsSyncScope?: 'selected'
   id: string; no: string; _version?: number; salespersonName: string; salespersonAccount: string; customerName: string
@@ -124,8 +127,9 @@ export type QuotationRecordUpdate = Partial<Pick<QuotationRecord, QuotationRecor
 
 const n = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0
 const optionalN = (value: unknown) => value == null || value === '' ? null : n(value)
-const editableFields: QuotationRecordEditableField[] = ['status', 'actualQuoteUsd', 'actualQuoteCny', 'dealQuantity', 'closedAt', 'note', 'dealOptionLabel']
+const editableFields: QuotationRecordEditableField[] = ['status', 'actualQuoteUsd', 'actualQuoteCny', 'dealQuantity', 'closedAt', 'note', 'dealOptionLabel', 'dealLines', 'customerQuote', 'quoteConfirmed']
 const fieldLabels: Record<QuotationRecordEditableField, string> = {
+  customerQuote: '客户报价', quoteConfirmed: '报价确认',
   status: '处理状态',
   actualQuoteUsd: '客户最终报价（USD）',
   actualQuoteCny: '客户最终报价（CNY）',
@@ -139,6 +143,7 @@ function isEditableField(value: unknown): value is QuotationRecordEditableField 
   return typeof value === 'string' && editableFields.includes(value as QuotationRecordEditableField)
 }
 
+function revisionText(value: unknown) { return value == null ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value) }
 function normalizeRevisions(value: unknown): QuotationRecordRevision[] {
   if (!Array.isArray(value)) return []
   return value.map((raw, index) => {
@@ -152,8 +157,8 @@ function normalizeRevisions(value: unknown): QuotationRecordRevision[] {
       editorAccount: String(raw?.editorAccount || '—'),
       field,
       fieldLabel: String(raw?.fieldLabel || fieldLabels[field]),
-      before: String(raw?.before ?? '—'),
-      after: String(raw?.after ?? '—'),
+      before: revisionText(raw?.before),
+      after: revisionText(raw?.after),
     }
   }).filter((revision): revision is QuotationRecordRevision => revision !== null)
 }
@@ -324,7 +329,7 @@ export function normalizeQuotationRecord(raw: Partial<QuotationRecord>): Quotati
   const specifiedQuotes = Array.isArray(raw.quoteOptions) ? specifiedQuotesFromOptions(quoteOptions) : legacyQuotes
   const dealLines = normalizeDealLines(raw.dealLines, quoteOptions, raw)
   const bundleItems = normalizeBundleItems(raw.bundleItems)
-  return { id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), bundleItems: bundleItems.length ? bundleItems : undefined, productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), purchaseBaseUnitPriceCny: optionalNumber(raw.purchaseBaseUnitPriceCny), purchaseInvoiceType: optionalText(raw.purchaseInvoiceType), purchaseInvoiceRatePercent: optionalNumber(raw.purchaseInvoiceRatePercent), purchaseInvoiceTaxApplied: typeof raw.purchaseInvoiceTaxApplied === 'boolean' ? raw.purchaseInvoiceTaxApplied : undefined, purchaseUnitPriceCny: optionalNumber(raw.purchaseUnitPriceCny), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
+  return { quoteConfirmed: raw.quoteConfirmed === true, quoteConfirmedAt: optionalText(raw.quoteConfirmedAt), quoteConfirmedBy: optionalText(raw.quoteConfirmedBy), systemQuantityQuotes: normalizeCustomerPrices(raw.systemQuantityQuotes), sheetQuote: normalizeCustomerPrices(raw.sheetQuote), customerQuote: normalizeCustomerPrices(raw.customerQuote), id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), bundleItems: bundleItems.length ? bundleItems : undefined, productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), purchaseBaseUnitPriceCny: optionalNumber(raw.purchaseBaseUnitPriceCny), purchaseInvoiceType: optionalText(raw.purchaseInvoiceType), purchaseInvoiceRatePercent: optionalNumber(raw.purchaseInvoiceRatePercent), purchaseInvoiceTaxApplied: typeof raw.purchaseInvoiceTaxApplied === 'boolean' ? raw.purchaseInvoiceTaxApplied : undefined, purchaseUnitPriceCny: optionalNumber(raw.purchaseUnitPriceCny), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
 }
 export async function loadQuotationRecords(scope: 'mine' | 'company' = 'company') {
   const result = await api.get<{ items: QuotationRecord[] }>(`/quotations?scope=${scope}&size=100`)

@@ -30,5 +30,19 @@ class QuotationRecordQueryPostgresIntegrationTest {
         assertEquals(0,query.search("ME",new QuotationRecordQuery.Filters("","won","","",date,date),0,50).total());
         assertThrows(RuntimeException.class,()->query.search("ME",new QuotationRecordQuery.Filters("","","","",date.plusDays(1),date),0,10));
         assertEquals(107,query.search("ME",new QuotationRecordQuery.Filters("","","","",null,null),0,100).total());
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"quoteConfirmed\":true}'::jsonb where quote_no in ('Q-1','Q-2','OTHER')");
+        var confirmed=query.search("ME",new QuotationRecordQuery.Filters("","processed","","",date,date),0,10);
+        assertEquals(2,confirmed.total());assertEquals(2,confirmed.summary().processed());assertEquals(0,confirmed.summary().won());
+        assertEquals(103,query.search("ME",new QuotationRecordQuery.Filters("","pending","","",date,date),0,10).total());
+        var all=query.search(null,filters,0,10);
+        assertEquals(1,all.summary().won());assertEquals(106,all.total());
+        assertEquals(all.total(),all.summary().pending()+all.summary().processed()+all.summary().won()+all.summary().lost());
+        var everyDate=new QuotationRecordQuery.Filters("","","","",null,null);
+        var historical=query.search("ME",everyDate,0,100);
+        assertEquals(105,historical.summary().pending()); // 103 pending + 2 legacy lost
+        assertEquals(historical.total(),historical.summary().pending()+historical.summary().processed()+historical.summary().won());
+        assertEquals(105,query.search("ME",new QuotationRecordQuery.Filters("","pending","","",null,null),0,100).total());
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"quoteConfirmed\":true}'::jsonb where quote_no='NEXT'");
+        assertEquals(3,query.search("ME",new QuotationRecordQuery.Filters("","processed","","",null,null),0,100).total());
     }
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { displayWeightGrams, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotationRowsSignature'
 import { normalizeLogisticsAttribute, selectableLogisticsAttributes } from '@/data/logisticsAttributes'
@@ -1598,6 +1599,7 @@ function buildQuoteOptions() {
       || ''
     return {
       id: `${row.country}::${row.quoteRegion || '全国统一'}::${row.channelKey || `${row.ruleId}::${row.carrier}::${row.channelCode || row.transport}`}`,
+      quoteSheetKey: quoteSheetRowKey(row),
       country: row.country,
       quoteRegion: billingRegion,
       countryCode,
@@ -1664,7 +1666,9 @@ function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>
   return { country: option.country, carrier: option.carrier, channel: option.channel, rule: option.rule,
     systemQuoteUsd: price.quoteUsd, systemQuoteCny: price.quoteCny, totalCostCny: price.cost }
 }
+const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave>>()
 async function save() {
+  await nextTick() // Capture the editor only after recalculated parent props reach it.
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
@@ -1696,7 +1700,21 @@ async function save() {
       domesticFreightPerUnitCny: Math.max(0, item.purchaseFreightPerUnit),
     }
   }) : undefined
+  let captured: ReturnType<NonNullable<typeof quotationPreview.value>['capturePrices']>
+  try {
+    captured = quotationPreview.value?.capturePrices()
+    if (!captured || captured.rows.length!==quoteOptions.length || quoteOptions.some(option=>!captured!.rows.some(row=>row.key===option.quoteSheetKey))) {
+      throw new Error('客户报价渠道与保存渠道不一致，请重新预览')
+    }
+  }
+  catch (error) { toast(error instanceof Error ? error.message : '客户报价无法保存'); return }
+  const snapshot = captured ? { quantities: captured.quantities, rows: quoteOptions.map(option => {
+    const row = captured!.rows.find(row => row.key === option.quoteSheetKey)
+    return { optionId: option.id, prices: row!.prices }
+  }) } : undefined
+  const systemQuantityQuotes = captured ? { quantities:captured.quantities, rows:quoteOptions.map(option=>({ optionId:option.id, prices:captured!.rows.find(row=>row.key===option.quoteSheetKey)!.systemPrices })) } : undefined
   const record = await createQuotationRecord({
+    customerQuote:snapshot, systemQuantityQuotes,
     purchaseVersions: Object.fromEntries(activePurchaseSkus().map(sku => [sku, purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)) || ''])),
     logisticsRevision: logisticsRevision.value,
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
@@ -1866,7 +1884,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           />
         </div>
 
-        <QuotationPreviewSave
+        <QuotationPreviewSave ref="quotationPreview"
           :reset-key="JSON.stringify([currentAuthUser.id, quoteMode, quoteMatrixMode, p.sku, bundleItems.map(item => [item.sku, item.quantityPerSet])])"
           :calculate-price="(row, quantity) => quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"

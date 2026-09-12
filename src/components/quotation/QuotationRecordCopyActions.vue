@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { QuotationRecord } from '@/data/quotationRecords'
+import { updateQuotationRecord, type QuotationRecord } from '@/data/quotationRecords'
+import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 
-const props = defineProps<{ record: QuotationRecord }>()
+const props = defineProps<{ record: QuotationRecord; canEdit?:boolean }>()
+const emit=defineEmits<{saved:[record:QuotationRecord]}>()
+const saving=ref(false)
 const source = computed(() => quotationRecordQuoteSheetSource(props.record))
 const contextKey = computed(() => `record:${props.record.id}:${props.record._version ?? ''}:${props.record.updatedAt}`)
 const sheet = ref<InstanceType<typeof CustomerQuoteSheet> | null>(null)
@@ -27,11 +30,32 @@ async function openImage() {
   await sheet.value?.preview()
 }
 function closeImage() {
-  if (sheet.value?.copying) return
+  if (sheet.value?.copying || saving.value) return
   opening++
   sheet.value?.invalidate() // Release PNGs on close; retain only in-page text edits.
   dialog.value?.close()
   imageButton.value?.focus()
+}
+async function savePrices() {
+  if (!props.canEdit || saving.value || sheet.value?.copying) return
+  const id=props.record.id, version=props.record._version
+  saving.value=true; status.value=undefined
+  try {
+    const captured=sheet.value?.capturePrices()
+    if (!captured) throw new Error('报价单尚未就绪')
+    const customerQuote={ quantities:captured.quantities, rows:captured.rows.map(row=>{
+      const sourceRow=source.value.rows.find(source=>quoteSheetRowKey(source)===row.key)
+      if (!sourceRow) throw new Error('客户报价渠道不匹配')
+      return {optionId:sourceRow.channelKey!,prices:row.prices}
+    }) }
+    const record=await updateQuotationRecord(id,{customerQuote},version)
+    if (props.record.id!==id) return
+    if (!record) throw new Error('保存失败，请重试')
+    if ((record._version ?? -1)<(props.record._version ?? -1)) return
+    emit('saved',record)
+    status.value={message:'客户报价已保存',failed:false}
+  } catch(error) {if (props.record.id===id) status.value={message:error instanceof Error?error.message:'保存失败',failed:true}}
+  finally {saving.value=false}
 }
 async function copyData() {
   if (copyingData.value) return
@@ -57,7 +81,9 @@ async function copyData() {
     <Teleport to="body">
       <dialog ref="dialog" class="record-quote-dialog" aria-label="报价记录客户报价单" @cancel.prevent="closeImage">
         <header><div><strong>客户报价单</strong><p>使用本条记录保存的渠道与报价；预览后复制图片，或直接复制表格数据。</p></div><button type="button" :disabled="sheet?.copying" aria-label="关闭客户报价单" @click="closeImage">×</button></header>
-        <CustomerQuoteSheet ref="sheet" v-bind="source" :context-key="contextKey" :source-pending="false" />
+        <p v-if="status?.failed" role="alert">{{ status.message }}</p>
+        <fieldset :disabled="saving" style="border:0;padding:0;margin:0"><CustomerQuoteSheet ref="sheet" v-bind="source" :context-key="contextKey" :source-pending="false" /></fieldset>
+        <footer v-if="canEdit" style="padding:16px 22px;text-align:right"><button type="button" :disabled="saving || sheet?.copying" @click="savePrices">{{ saving?'正在保存…':'保存客户报价' }}</button></footer>
       </dialog>
     </Teleport>
   </div>

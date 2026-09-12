@@ -4,12 +4,14 @@ import { createApp, h, nextTick, reactive, type App } from 'vue'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import { renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import type { QuoteSheetPriceCalculator, QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
+import type { CustomerPriceSnapshot } from '@/data/customerQuotePrices'
 
 vi.mock('@/services/customerQuoteSheetRenderer', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/customerQuoteSheetRenderer')>(),
   renderCustomerQuoteSheet: vi.fn(),
 }))
 let app: App
+let exposed: InstanceType<typeof CustomerQuoteSheet>
 const render = vi.mocked(renderCustomerQuoteSheet)
 const writeText = vi.fn(), write = vi.fn(), revoke = vi.fn()
 function row(key = 'one', carrier = '花海'): QuoteSheetSourceRow {
@@ -18,10 +20,10 @@ function row(key = 'one', carrier = '花海'): QuoteSheetSourceRow {
 function png(firstRow = 1, lastRow = 1): QuoteSheetImage {
   return { blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow, lastRow }
 }
-function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator) {
-  const state = reactive({ rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, resetKey: undefined as string | undefined })
+function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot) {
+  const state = reactive({ rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, resetKey: undefined as string | undefined })
   const host = document.createElement('div'); document.body.append(host)
-  app = createApp({ render: () => h(CustomerQuoteSheet, state) }); app.mount(host)
+  app = createApp({ render: () => h(CustomerQuoteSheet, { ...state, ref:(instance:unknown)=>{exposed=instance as typeof exposed} }) }); app.mount(host)
   return state
 }
 function button(label: string) { return [...document.querySelectorAll('button')].find(button => button.textContent === label)! }
@@ -366,4 +368,39 @@ it.each([17, 43, 101])('checks every copied cell through 40 interleaved edits, m
     })
     expect(JSON.stringify(state.rows)).toBe(sourceBeforeCopy)
   }
+})
+
+it('captures immutable original and edited customer prices including added quantities for record creation',async()=>{
+  mount([row()],(_row,q)=>q+1)
+  await click('＋ 新增列');await input('第 5 个价格列数量','8');await input('第 1 行第 5 列美元价格','8.80')
+  await input('第 1 行第 2 列美元价格','15.50')
+  const captured=exposed.capturePrices()
+  expect(captured.quantities).toEqual([1,2,3,5,8])
+  expect(captured.rows[0].systemPrices).toEqual([10.8,16.35,21.9,30.85,9])
+  expect(captured.rows[0].prices).toEqual([10.8,15.5,21.9,30.85,8.8])
+})
+
+it('keeps record amount capture independent of display translations but rejects invalid price columns',async()=>{
+  mount([{...row(),carrier:'未配置英文的物流商'}])
+  expect(exposed.capturePrices().rows[0].prices[0]).toBe(10.8)
+  await input('第 1 行第 1 列美元价格','1.234')
+  expect(()=>exposed.capturePrices()).toThrow('两位小数')
+  await input('第 1 行第 1 列美元价格','1.20')
+  await click('＋ 新增列')
+  expect(()=>exposed.capturePrices()).toThrow('正整数')
+})
+
+it('does not save a manual new-quantity price with a silently failed system baseline',async()=>{
+  mount([row()],()=>{throw new Error('calculation failed')})
+  await click('＋ 新增列');await input('第 5 个价格列数量','8');await input('第 1 行第 5 列美元价格','8.80')
+  expect(()=>exposed.capturePrices()).toThrow('计算失败')
+})
+
+it('loads persisted customer quantity order and prices into preview and clipboard, then reloads after a record revision',async()=>{
+  const state=mount([row()],undefined,{quantities:[4,2,1],rows:[{optionId:'one',prices:[4.6,2.7,1.8]}]})
+  await click('预览报价单');expect(render.mock.lastCall![0].quantityLabels).toEqual(['4 pcs','2 pcs','1 pc'])
+  expect(render.mock.lastCall![0].rows[0].prices).toEqual([4.6,2.7,1.8])
+  await click('复制报价数据');expect(writeText.mock.lastCall![0]).toContain('$4.60\t$2.70\t$1.80')
+  state.initialQuote={quantities:[4,2,1],rows:[{optionId:'one',prices:[4.6,2.6,1.8]}]};state.contextKey='record-v2';await settle()
+  await click('复制报价数据');expect(writeText.mock.lastCall![0]).toContain('$4.60\t$2.60\t$1.80')
 })

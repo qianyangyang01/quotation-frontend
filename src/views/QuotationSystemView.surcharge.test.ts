@@ -4,6 +4,7 @@ import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import { type FinanceTaxSettings } from '@/data/financeTaxSettings'
 import { calculateFinanceQuoteFees } from '@/data/financeSurchargeSettings'
 
@@ -71,8 +72,8 @@ describe('quotation view fee integration', () => {
 
 it('blocks calculation and copying immediately when purchase tax points are missing', async () => {
   let blocked = 0
-  const run = new Function('purchaseTaxBlockReason', 'toast', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copySpecifiedQuotes, attemptSave, save, useLogistics}')(
-    { value: '该商品采购票点为空，请补齐后报价' }, () => { blocked++ })
+  const run = new Function('purchaseTaxBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copySpecifiedQuotes, attemptSave, save, useLogistics}')(
+    { value: '该商品采购票点为空，请补齐后报价' }, () => { blocked++ }, nextTick)
   expect(run.excelQuoteRows({ country: '加拿大' }, '加拿大', '2区')).toEqual([])
   expect(run.quantityCostBreakdown({ country: '加拿大' }, '渠道', 1, '加拿大', '物流商', '2区')).toBeNull()
   await run.copySpecifiedQuotes([{ country: '加拿大', quote1: 100 }])

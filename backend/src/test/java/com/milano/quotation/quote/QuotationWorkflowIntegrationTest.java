@@ -193,6 +193,103 @@ class QuotationWorkflowIntegrationTest {
         patchBody.putArray("dealLines").addObject().put("id","d").put("optionId","missing").put("unitPriceUsd",10).put("quantity",1).put("amountUsd",10);
         mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody))).andExpect(status().isUnprocessableEntity());
     }
+    @Test void customerPriceSnapshotsSurviveReadbackRejectStaleWritesAndPreserveOwnerPermissions() throws Exception {
+        var session=authenticatedSession();
+        var body="""
+          {"customerName":"客户改价验收","quoteMode":"single","primarySku":"SKU-1","productCategory":"日用品","logisticsAttribute":"普货","customerGrade":"A级客户","monthlySalesEstimate":"10","customQuoteQuantity":4,
+           "quoteOptions":[{"id":"yanwen-a","country":"US","carrier":"Yanwen","channel":"A","quote1Usd":2,"quote2Usd":3,"quoteCustomUsd":5}],
+           "customerQuote":{"quantities":[1,2,4],"rows":[{"optionId":"yanwen-a","prices":[1.8,2.7,4.6]}]}}
+          """;
+        var result=mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","customer-prices")
+          .contentType("application/json").content(body)).andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.customerQuote.rows[0].prices[1]").value(2.7))
+          .andExpect(jsonPath("$.data.systemQuantityQuotes.rows[0].prices[1]").value(3)).andReturn();
+        var created=mapper.readTree(result.getResponse().getContentAsByteArray()).path("data");var id=created.path("id").asText();var version=created.path("_version").asLong();
+        var patchBody=mapper.createObjectNode().put("_version",version);
+        patchBody.set("customerQuote",mapper.readTree("{\"quantities\":[1,2,4],\"rows\":[{\"optionId\":\"yanwen-a\",\"prices\":[1.8,2.6,4.6]}]}"));
+        var updated=mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody)))
+          .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("pending"))
+          .andExpect(jsonPath("$.data.sheetQuote.rows[0].prices[1]").value(2.7))
+          .andExpect(jsonPath("$.data.customerQuote.rows[0].prices[1]").value(2.6))
+          .andExpect(jsonPath("$.data.revisions[0].field").value("customerQuote")).andReturn();
+        mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody))).andExpect(status().isConflict());
+        var latest=mapper.readTree(updated.getResponse().getContentAsByteArray()).path("data");
+        org.junit.jupiter.api.Assertions.assertEquals(latest.path("_version").asLong(),records.findById(UUID.fromString(id)).orElseThrow().version,"returned version must match the committed row");
+        patchBody.put("_version",latest.path("_version").asLong());patchBody.put("systemQuoteUsd",1);
+        mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody))).andExpect(status().isUnprocessableEntity());
+        mvc.perform(get("/api/v1/quotations/{id}",id).session(session)).andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.systemQuantityQuotes.rows[0].prices[1]").value(3))
+          .andExpect(jsonPath("$.data.customerQuote.rows[0].prices[1]").value(2.6));
+        patchBody.remove("systemQuoteUsd");
+        patchBody.set("customerQuote",mapper.readTree("{\"quantities\":[1,2,4],\"rows\":[{\"optionId\":\"yanwen-a\",\"prices\":[2,2.6,4.6]}]}"));
+        var resaved=mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody)))
+          .andExpect(status().isOk()).andExpect(jsonPath("$.data.customerQuote.rows[0].prices[0]").value(2))
+          .andExpect(jsonPath("$.data.sheetQuote.rows[0].prices[0]").value(1.8)).andReturn();
+        var resavedPayload=mapper.readTree(resaved.getResponse().getContentAsByteArray()).path("data");
+        org.junit.jupiter.api.Assertions.assertEquals(resavedPayload.path("_version").asLong(),records.findById(UUID.fromString(id)).orElseThrow().version);
+        var barrier=new java.util.concurrent.CyclicBarrier(2);
+        var concurrentVersion=resavedPayload.path("_version").asLong();
+        var concurrentWrites=java.util.stream.IntStream.range(0,2).mapToObj(index->java.util.concurrent.CompletableFuture.supplyAsync(()->{
+            try {
+                var competing=patchBody.deepCopy();competing.put("_version",concurrentVersion);
+                var prices=(tools.jackson.databind.node.ArrayNode)competing.path("customerQuote").path("rows").get(0).path("prices");
+                prices.set(1,mapper.valueToTree(index==0?2.5:2.4));
+                barrier.await(10,java.util.concurrent.TimeUnit.SECONDS);
+                return mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(competing))).andReturn().getResponse().getStatus();
+            } catch(Exception failure){throw new java.util.concurrent.CompletionException(failure);}
+        })).toList();
+        var statuses=new java.util.ArrayList<Integer>();
+        for(var write:concurrentWrites)statuses.add(write.get(20,java.util.concurrent.TimeUnit.SECONDS));
+        java.util.Collections.sort(statuses);
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(200,409),statuses,"exactly one concurrent customer-price update must commit");
+        var concurrentPayload=records.findById(UUID.fromString(id)).orElseThrow().payload;
+        org.junit.jupiter.api.Assertions.assertEquals(3,concurrentPayload.path("systemQuantityQuotes").path("rows").get(0).path("prices").get(1).asInt());
+        var entity=records.findById(UUID.fromString(id)).orElseThrow();entity.ownerAccount="ANOTHER-OWNER";records.saveAndFlush(entity);
+        patchBody.remove("systemQuoteUsd");
+        mvc.perform(patch("/api/v1/quotations/{id}",id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(patchBody))).andExpect(status().isForbidden());
+    }
+    @Test void confirmsPricesAndInvalidatesOnEditWithoutChangingDealStatus() throws Exception {
+        var session=authenticatedSession();
+        var row=new QuotationRecordEntity();row.id=UUID.randomUUID();row.quoteNo="CONFIRM-TEST";row.ownerAccount="ADMIN";row.status="won";
+        row.createdAt=Instant.now();row.updatedAt=row.createdAt;
+        row.payload=mapper.readTree("""
+          {"id":"confirm-test","status":"won","actualQuoteUsd":12,"quoteOptions":[{"id":"a","quote1Usd":2}],"customerQuote":{"quantities":[1],"rows":[{"optionId":"a","prices":[1.8]}]}}
+          """);records.saveAndFlush(row);
+        var confirm=mapper.createObjectNode().put("_version",row.version).put("quoteConfirmed",true);
+        var response=mvc.perform(patch("/api/v1/quotations/{id}",row.id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(confirm)))
+          .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("won"))
+          .andExpect(jsonPath("$.data.quoteConfirmed").value(true)).andExpect(jsonPath("$.data.quoteConfirmedAt").isNotEmpty())
+          .andExpect(jsonPath("$.data.quoteConfirmedBy").isNotEmpty()).andReturn();
+        var payload=mapper.readTree(response.getResponse().getContentAsByteArray()).path("data");
+        mvc.perform(patch("/api/v1/quotations/{id}",row.id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(confirm))).andExpect(status().isConflict());
+        var edit=mapper.createObjectNode().put("_version",payload.path("_version").asLong());
+        edit.set("customerQuote",mapper.readTree("""
+          {"quantities":[1],"rows":[{"optionId":"a","prices":[1.7]}]}
+          """));
+        mvc.perform(patch("/api/v1/quotations/{id}",row.id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(edit)))
+          .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("won"))
+          .andExpect(jsonPath("$.data.actualQuoteUsd").value(12)).andExpect(jsonPath("$.data.quoteConfirmed").value(false))
+          .andExpect(jsonPath("$.data.quoteConfirmedAt").doesNotExist()).andExpect(jsonPath("$.data.revisions[0].field").value("quoteConfirmed"));
+        mvc.perform(get("/api/v1/quotations/{id}",row.id).session(session)).andExpect(status().isOk()).andExpect(jsonPath("$.data.quoteConfirmed").value(false));
+        var currentVersion=records.findById(row.id).orElseThrow().version;
+        var barrier=new java.util.concurrent.CyclicBarrier(12);
+        try (var executor=java.util.concurrent.Executors.newFixedThreadPool(12)) {
+        var calls=java.util.stream.IntStream.range(0,12).mapToObj(index->java.util.concurrent.CompletableFuture.supplyAsync(()->{
+            try {
+                var competing=index==0 ? confirm.deepCopy() : edit.deepCopy();competing.put("_version",currentVersion);
+                if(index!=0) ((tools.jackson.databind.node.ArrayNode)competing.path("customerQuote").path("rows").get(0).path("prices")).set(0,mapper.valueToTree(1.6));
+                barrier.await(10,java.util.concurrent.TimeUnit.SECONDS);
+                return mvc.perform(patch("/api/v1/quotations/{id}",row.id).session(session).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(competing))).andReturn().getResponse().getStatus();
+            } catch(Exception e) { throw new java.util.concurrent.CompletionException(e); }
+        },executor)).toList();
+        var statuses=new java.util.ArrayList<Integer>();for(var call:calls)statuses.add(call.get(20,java.util.concurrent.TimeUnit.SECONDS));
+        org.junit.jupiter.api.Assertions.assertEquals(1,java.util.Collections.frequency(statuses,200));
+        org.junit.jupiter.api.Assertions.assertEquals(11,java.util.Collections.frequency(statuses,409));
+        var finalPayload=records.findById(row.id).orElseThrow().payload;
+        org.junit.jupiter.api.Assertions.assertEquals("won",finalPayload.path("status").asText());
+        org.junit.jupiter.api.Assertions.assertEquals(finalPayload.path("quoteConfirmed").asBoolean()?1.7:1.6,finalPayload.path("customerQuote").path("rows").get(0).path("prices").get(0).asDouble());
+        }
+    }
     private MockHttpSession authenticatedSession() throws Exception {
         var login = mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json")
                         .content("{\"account\":\"ADMIN\",\"password\":\"TestAdmin123\"}"))

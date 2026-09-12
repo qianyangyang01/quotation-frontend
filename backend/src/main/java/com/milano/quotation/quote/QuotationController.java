@@ -21,7 +21,7 @@ import java.util.*;
 @RequestMapping("/api/v1/quotations")
 public class QuotationController {
     private static final Set<String> PATCH_FIELDS = Set.of("status", "dealLines", "dealOptionId", "dealOptionLabel",
-            "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerName");
+            "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerName", "customerQuote", "quoteConfirmed");
     private final QuotationRecordRepository records;
     private final QuotationRecordQuery recordQuery;
     private final AuditService audit;
@@ -87,6 +87,8 @@ public class QuotationController {
         payload.put("id", id.toString()); payload.put("no", no); payload.put("salespersonName", principal.displayName());
         payload.put("salespersonAccount", principal.account()); payload.put("status", "pending");
         payload.put("createdAt", now.toString()); payload.put("updatedAt", now.toString());
+        CustomerQuotePrices.initialize(payload);
+        payload.put("quoteConfirmed", false); payload.remove("quoteConfirmedAt"); payload.remove("quoteConfirmedBy");
         if (!payload.has("revisions")) payload.putArray("revisions");
         var row = new QuotationRecordEntity(); row.id = id; row.quoteNo = no; row.ownerAccount = principal.account();
         row.status = "pending";
@@ -103,6 +105,9 @@ public class QuotationController {
         var row = mine(id, auth); assertVersion(row, patch.path("_version").asLong(-1));
         submissionValidator.validateUpdate(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
+        CustomerQuotePrices.preparePatch(current, patch);
+        QuotationConfirmation.prepare(current, patch);
+        var wasConfirmed = current.path("quoteConfirmed").asBoolean(false);
         for (var option : current.path("quoteOptions")) {
             if (patch.hasNonNull("dealOptionId") && option.path("id").asText().equals(patch.path("dealOptionId").asText()) && option.path("available").isBoolean() && !option.path("available").asBoolean())
                 throw AppException.unprocessable("不可用报价方案不能回填成交");
@@ -120,6 +125,11 @@ public class QuotationController {
                 }
             }
         });
+        if (current.path("quoteConfirmed").asBoolean(false) && !wasConfirmed) {
+            current.put("quoteConfirmedAt", now.toString()); current.put("quoteConfirmedBy", principal(auth).displayName());
+        } else if (!current.path("quoteConfirmed").asBoolean(false)) {
+            current.remove("quoteConfirmedAt"); current.remove("quoteConfirmedBy");
+        }
         current.put("updatedAt", now.toString()); row.status = current.path("status").asText(row.status);
         row.payload = current; row.updatedAt = now;
         records.saveAndFlush(row); audit.record("quotation.update", "quotation", id.toString(), "success", Map.of("status", row.status));

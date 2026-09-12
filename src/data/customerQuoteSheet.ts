@@ -1,6 +1,6 @@
 import type { QuotationMatrixRow } from '@/components/quotation/types'
 
-/** Customer-facing presentation only. Never included in quotation/draft API payloads. */
+/** Customer-facing source model. Only explicit numeric snapshots are captured for record saving. */
 export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |
   'quote1' | 'quote2' | 'quote3' | 'quoteCustom'>
@@ -17,6 +17,7 @@ export type CustomerQuoteSheetRow = {
 export type CustomerQuoteSheet = {
   agent: string; date: string; quantityLabels: string[]; rows: CustomerQuoteSheetRow[]; issues: string[]
   tableIssues?: string[]
+  priceIssues?: string[]
   title?: string; notes?: string[]
 }
 
@@ -118,6 +119,7 @@ export function buildCustomerQuoteSheet(input: {
 }): CustomerQuoteSheet {
   const issues: string[] = []
   const tableIssues: string[] = []
+  const priceIssues: string[] = []
   const agent = input.edits.agent.trim()
   const date = formatQuoteDate(input.edits.date)
   if (!agent) issues.push('请填写报价单署名')
@@ -125,8 +127,8 @@ export function buildCustomerQuoteSheet(input: {
   const quantities = input.quantities ?? [1, 2, 3, Math.max(1, Math.floor(input.customQuantity || 1))]
   const isLegacyCustom = (quantity: number, index: number) => !input.customQuantity && quantity === 0 && index === input.legacyCustomIndex
   const validQuantities = quantities.length > 0 && quantities.length <= MAX_QUOTE_SHEET_COLUMNS && quantities.every((quantity, index) => validQuoteSheetQuantity(quantity) || isLegacyCustom(quantity, index))
-  if (!validQuantities) tableIssues.push('请填写有效的正整数数量，价格列最多 10 列')
-  if (input.quantities && new Set(quantities).size !== quantities.length) tableIssues.push('数量列不能重复')
+  if (!validQuantities) priceIssues.push('请填写有效的正整数数量，价格列最多 10 列')
+  if (input.quantities && new Set(quantities).size !== quantities.length) priceIssues.push('数量列不能重复')
   const rows = input.rows.map((row, index) => {
     const key = quoteSheetRowKey(row)
     const fields = input.edits.fields?.[key] || {}
@@ -149,7 +151,7 @@ export function buildCustomerQuoteSheet(input: {
       if (manual !== undefined) {
         if (!manual.trim() || manual.trim() === '—') return null
         if (!/^\d+(?:\.\d{1,2})?$/.test(manual.trim()) || !Number.isFinite(Number(manual)) || Number(manual) > 999999999.99) {
-          tableIssues.push(`第 ${index + 1} 行 ${quantity} 数量的价格须为非负美元金额，最多两位小数`)
+          priceIssues.push(`第 ${index + 1} 行 ${quantity} 数量的价格须为非负美元金额，最多两位小数`)
           return null
         }
         return Number(manual)
@@ -159,7 +161,7 @@ export function buildCustomerQuoteSheet(input: {
       const sourceIndex = isLegacyCustom(quantity, column) ? 3 : input.quantities ? sourceQuantities.indexOf(quantity) : column
       let value: number | null | undefined
       try { value = sourceIndex >= 0 ? sourcePrices[sourceIndex] : input.calculatePrice?.(row, quantity) }
-      catch { tableIssues.push(`第 ${index + 1} 行 ${quantity} 数量计算失败，请重试`); return null }
+      catch { priceIssues.push(`第 ${index + 1} 行 ${quantity} 数量计算失败，请重试`); return null }
       return value != null && Number.isFinite(value) && value >= 0 ? value : null
     })
     return {
@@ -167,9 +169,10 @@ export function buildCustomerQuoteSheet(input: {
       sourceDescription: [row.country, row.quoteRegion, row.carrier, row.transport, row.channelCode].filter(Boolean).join(' · '),
     }
   })
+  tableIssues.push(...priceIssues)
   return {
     title: input.edits.title ?? 'JerryFulfillment Quote Sheet', notes: input.edits.notes ?? [...CUSTOMER_QUOTE_NOTES],
-    agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)],
+    agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)], priceIssues: [...new Set(priceIssues)],
     quantityLabels: quantities.map((quantity, index) => isLegacyCustom(quantity, index) || (!input.quantities && index === 3 && !input.customQuantity) ? 'Custom' : `${validQuoteSheetQuantity(quantity) ? quantity : '—'} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
   }
 }

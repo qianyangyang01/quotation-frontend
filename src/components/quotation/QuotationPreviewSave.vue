@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import type { QuoteSheetCountry, QuoteSheetPriceCalculator } from '@/data/customerQuoteSheet'
@@ -33,6 +33,8 @@ const props = withDefaults(defineProps<{
 }>(), { blockReason: '', saving: false, validationIssues: () => [] })
 
 const emit = defineEmits<{ save: []; locateIssue: [key: string] }>()
+const customerSheet = ref<InstanceType<typeof CustomerQuoteSheet>>()
+defineExpose({ capturePrices: () => customerSheet.value?.capturePrices() })
 const countryCount = computed(() => new Set(props.rows.map(row => row.country)).size)
 const hasQuoteRows = computed(() => props.rows.length > 0)
 const previewStatus = computed(() => {
@@ -80,7 +82,7 @@ const quoteRange = computed(() => {
       </section>
     </div>
 
-    <CustomerQuoteSheet :rows="rows" :countries="countries" :salesperson="salesperson"
+    <CustomerQuoteSheet ref="customerSheet" :rows="rows" :countries="countries" :salesperson="salesperson"
       :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
 
     <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">

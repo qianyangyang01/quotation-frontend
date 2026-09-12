@@ -9,21 +9,33 @@ import {
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import QuoteBackToTop from './QuoteBackToTop.vue'
+import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
 
 const props = defineProps<{
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; salesperson: string
   contextKey: string; customQuantity: number; bundle: boolean; sourcePending: boolean
   calculatePrice?: QuoteSheetPriceCalculator
   resetKey?: string
+  initialQuote?: CustomerPriceSnapshot
 }>()
 const edits = ref(newQuoteSheetEdits(props.salesperson))
 let columnId = 0
 function initialColumns() {
+  if (props.initialQuote) return props.initialQuote.quantities.map(quantity=>({ id:++columnId, quantity:quantity===0?'':String(quantity), legacyCustom:quantity===0 }))
   const result = [...new Set([1, 2, 3, props.customQuantity || 1])].map(quantity => ({ id: ++columnId, quantity: String(quantity), legacyCustom: false }))
   if (!props.customQuantity && props.rows.some(row => row.quoteCustom != null)) result.push({ id: ++columnId, quantity: '', legacyCustom: true })
   return result
 }
 const columns = ref(initialColumns())
+function loadSavedPrices() {
+  for (const saved of props.initialQuote?.rows || []) {
+    const source = props.rows.find(row=>row.channelKey===saved.optionId)
+    if (!source) continue
+    edits.value.fields ||= {}
+    edits.value.fields[quoteSheetRowKey(source)] = { prices:Object.fromEntries(props.initialQuote!.quantities.map((q,index)=>[String(q), saved.prices[index]==null ? '' : saved.prices[index]!.toFixed(2)])) }
+  }
+}
+loadSavedPrices()
 const editorScroll = ref<HTMLElement>()
 const draggedColumn = ref<number | null>(null)
 const dropTarget = ref<number | null>(null)
@@ -74,6 +86,7 @@ watch(() => [props.contextKey, props.resetKey], () => {
   if (resetKey !== previousResetKey) {
     edits.value = newQuoteSheetEdits(props.salesperson)
     columns.value = initialColumns()
+    loadSavedPrices()
     previousResetKey = resetKey
   } else if (props.contextKey !== previousContext) {
     clearPriceEdits()
@@ -119,7 +132,7 @@ function updatePrice(key: string, quantity: number, event: Event) {
 function clearPriceEdits() {
   Object.values(edits.value.fields || {}).forEach(fields => { delete fields.prices })
 }
-watch(() => props.rows.map(row => [quoteSheetRowKey(row), row.quote1, row.quote2, row.quote3, row.quoteCustom]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(row => JSON.stringify(row)).join('|'), clearPriceEdits)
+watch(() => props.rows.map(row => [quoteSheetRowKey(row), row.quote1, row.quote2, row.quote3, row.quoteCustom]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(row => JSON.stringify(row)).join('|'), () => { clearPriceEdits(); loadSavedPrices() })
 watch(() => props.sourcePending, value => { if (value) clearPriceEdits() })
 async function addColumn() {
   if (copying.value || columns.value.length >= MAX_QUOTE_SHEET_COLUMNS) return
@@ -242,7 +255,16 @@ async function copyData() {
   return { message: message.value, failed: failed.value }
 }
 // Record drawers reuse this same model, edits and clipboard flow.
-defineExpose({ preview, copyData, invalidate, copying })
+function capturePrices(): CapturedSheetPrices {
+  if (props.sourcePending || copying.value) throw new Error('报价仍在计算或复制，请稍后保存')
+  if (sheet.value.priceIssues?.length) throw new Error(sheet.value.priceIssues.join('；'))
+  const system = buildCustomerQuoteSheet({ rows:props.rows, countries:props.countries, edits:newQuoteSheetEdits(props.salesperson),
+    customQuantity:props.customQuantity, bundle:props.bundle, quantities:quantities.value, calculatePrice:props.calculatePrice,
+    legacyCustomIndex:columns.value.findIndex(column=>column.legacyCustom) })
+  if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
+  return { quantities:[...quantities.value], rows:sheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
+}
+defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
   disposed = true
   generation++
@@ -263,7 +285,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
-    <p class="sheet-local-note">图片仅在当前页面临时生成，不上传、不存储；手动修改不影响系统原始报价和物流资料。</p>
+    <p class="sheet-local-note">图片仅在当前页面临时生成，不上传、不存储；保存报价记录时带入客户价格，系统原价与物流资料不变。</p>
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
     <div v-else-if="editing" class="sheet-editor">
