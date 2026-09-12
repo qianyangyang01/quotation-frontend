@@ -2,6 +2,7 @@ import brandUrl from '@/assets/quote-sheet/brand.png'
 import headerUrl from '@/assets/quote-sheet/table-header.png'
 import notesUrl from '@/assets/quote-sheet/notes.png'
 import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
 
 export const QUOTE_SHEET_WIDTH = 1536
 export const QUOTE_SHEET_ROWS_PER_IMAGE = 24
@@ -64,10 +65,16 @@ function centered(context: CanvasRenderingContext2D, text: string, left: number,
     top + height / 2 + (index - (wrapped.length - 1) / 2) * 26))
 }
 function exportBlob(canvas: HTMLCanvasElement) {
-  return new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => {
-    if (blob) resolve(blob)
-    else reject(new Error('报价图片生成失败，请重试'))
-  }, 'image/png'))
+  return new Promise<Blob>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('报价图片生成超时，请重试')), 15000)
+    try {
+      canvas.toBlob(blob => {
+        clearTimeout(timeout)
+        if (blob) resolve(blob)
+        else reject(new Error('报价图片生成失败，请重试'))
+      }, 'image/png')
+    } catch (error) { clearTimeout(timeout); reject(error) }
+  })
 }
 
 /** No uploads, storage, downloads, or business writes: results live only in browser memory. */
@@ -85,6 +92,7 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     const rows = sheet.rows.slice(offset, offset + QUOTE_SHEET_ROWS_PER_IMAGE)
     const finalPage = offset + rows.length === sheet.rows.length
     const canvas = document.createElement('canvas')
+    try {
     const context = canvas.getContext('2d')
     if (!context) throw new Error('当前浏览器无法生成报价图片')
     font(context, true)
@@ -104,6 +112,8 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     const noteHeights = noteLines.map(note => Math.max(52, note.length * 25 + 24))
     const notesHeight = useNotesAsset ? 400 : 14 + 56 + noteHeights.reduce((sum, height) => sum + height, 0) + 40
     const imageHeight = tableBottom + (finalPage ? notesHeight : 40)
+    // Reject pathological pasted line breaks before allocating hundreds of MB of pixels.
+    if (imageHeight > 16384 || width * imageHeight > 24_000_000) throw new Error('报价单内容过长，请减少说明中的换行或缩短字段后重试')
     canvas.width = width
     canvas.height = imageHeight
     context.fillStyle = '#ffffff'
@@ -196,10 +206,12 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       })
     }
     const blob = await exportBlob(canvas)
-    // Release backing pixels immediately; the preview/clipboard share the same immutable PNG Blob.
-    canvas.width = 0; canvas.height = 0
     if (isCancelled()) return []
     images.push({ blob, width, height: imageHeight, firstRow: offset + 1, lastRow: offset + rows.length })
+    } finally {
+      // Include failed/cancelled renders, not just successful PNG encoding.
+      canvas.width = 0; canvas.height = 0
+    }
   }
   return images
 }
@@ -208,9 +220,11 @@ export async function copyQuoteSheetImage(blob: Blob) {
   if (!globalThis.isSecureContext || typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
     throw new Error('当前浏览器不支持复制图片，请使用新版 Chrome 或 Edge；也可右键预览图片选择“复制图片”')
   }
-  try {
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-  } catch {
-    throw new Error('图片未复制成功，请允许剪贴板权限后重试，或右键预览图片选择“复制图片”')
-  }
+  await withQuoteSheetCopyLock(async () => {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    } catch {
+      throw new Error('图片未复制成功，请允许剪贴板权限后重试，或右键预览图片选择“复制图片”')
+    }
+  })
 }

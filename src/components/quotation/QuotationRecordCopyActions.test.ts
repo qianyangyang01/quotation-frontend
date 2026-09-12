@@ -64,3 +64,21 @@ it('does not display old clipboard completion on another record', async () => {
   footerButton('复制报价数据').click(); await settle()
   expect(document.querySelector('.record-copy-actions>p')?.textContent).toContain('已复制')
 })
+
+it('does not start a hidden render when the dialog closes before the opening tick completes', async () => {
+  mount()
+  footerButton('复制报价图片').click()
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭客户报价单"]')!.click()
+  await settle()
+  expect(document.querySelector('dialog')!.open).toBe(false)
+  expect(render).not.toHaveBeenCalled()
+})
+
+it('does not render another record after an in-flight opening switches context', async () => {
+  const state = mount()
+  footerButton('复制报价图片').click()
+  state.record = record('two')
+  await settle()
+  expect(document.querySelector('dialog')!.open).toBe(false)
+  expect(render).not.toHaveBeenCalled()
+})

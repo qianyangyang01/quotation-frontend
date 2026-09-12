@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { QuotationRecord } from '@/data/quotationRecords'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
@@ -12,21 +12,29 @@ const dialog = ref<HTMLDialogElement | null>(null)
 const imageButton = ref<HTMLButtonElement | null>(null)
 const status = ref<{ message: string; failed: boolean }>()
 const copyingData = ref(false)
+let opening = 0
 
-watch(contextKey, () => { status.value = undefined; dialog.value?.close() })
+watch(contextKey, () => { opening++; status.value = undefined; dialog.value?.close() })
+onBeforeUnmount(() => { opening++ })
 async function openImage() {
+  if (copyingData.value || sheet.value?.copying) return
+  const token = ++opening
+  const context = contextKey.value
   status.value = undefined
   dialog.value?.showModal()
   await nextTick()
+  if (token !== opening || context !== contextKey.value || !dialog.value?.open) return
   await sheet.value?.preview()
 }
 function closeImage() {
   if (sheet.value?.copying) return
+  opening++
   sheet.value?.invalidate() // Release PNGs on close; retain only in-page text edits.
   dialog.value?.close()
   imageButton.value?.focus()
 }
 async function copyData() {
+  if (copyingData.value) return
   const context = contextKey.value
   copyingData.value = true
   status.value = undefined

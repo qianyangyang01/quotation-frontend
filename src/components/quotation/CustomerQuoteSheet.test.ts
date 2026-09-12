@@ -277,3 +277,93 @@ it('keyboard ordering supports boundaries and preserves focus, then editing stil
   expect(writeText.mock.lastCall![0].split('\r\n')[0].split('\t').slice(5)).toEqual(['2 pcs (USD)','1 pc (USD)','3 pcs (USD)','5 pcs (USD)'])
   expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t').slice(5)).toEqual(['$16.35','$66.66','$21.90','$30.85'])
 })
+
+it.each(['edit-away', 'remove'])('preserves the original manual price when a duplicate quantity is corrected by %s', async action => {
+  mount()
+  await input('第 1 行第 2 列美元价格', '88.88')
+  await click('＋ 新增列'); await input('第 5 个价格列数量', '2')
+  await click('复制报价数据'); expect(writeText).not.toHaveBeenCalled()
+  if (action === 'edit-away') await input('第 5 个价格列数量', '8')
+  else { document.querySelector<HTMLButtonElement>('[aria-label="删除第 5 个价格列"]')!.click(); await settle() }
+  await click('复制报价数据')
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[6]).toBe('$88.88')
+})
+
+it('keeps duplicate quantity price inputs disabled so temporary duplicates cannot edit another column', async () => {
+  mount(); await click('＋ 新增列'); await input('第 5 个价格列数量', '2')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行第 5 列美元价格"]')!.disabled).toBe(true)
+})
+
+it('rejects a burst of repeated previews and only accepts the newest of reversed render completions', async () => {
+  const jobs: Array<{ finish: (value: QuoteSheetImage[]) => void; reject: (error: Error) => void }> = []
+  render.mockImplementation(() => new Promise((finish, reject) => jobs.push({ finish, reject })))
+  mount()
+  for (let i = 0; i < 20; i++) button('预览报价单').click()
+  await settle(); expect(jobs).toHaveLength(1)
+  await input('第 1 行运输时效', '10-20 days'); await click('预览报价单')
+  await input('第 1 行运输时效', '2-3 days'); await click('预览报价单')
+  jobs[2].finish([png()]); await settle()
+  jobs[1].reject(new Error('old failure')); jobs[0].finish([png()]); await settle()
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+  expect(document.querySelector('[role="alert"]')).toBeNull()
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('2-3 days')
+})
+
+it('does not allocate image URLs when an unmounted render finishes', async () => {
+  let finish!: (images: QuoteSheetImage[]) => void
+  render.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  mount(); await click('预览报价单'); app.unmount()
+  finish([png()]); await settle(); expect(URL.createObjectURL).not.toHaveBeenCalled()
+})
+
+it('revokes partially allocated pages if object URL creation fails and allows a clean retry', async () => {
+  render.mockResolvedValueOnce([png(1,24), png(25,48)])
+  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:first').mockImplementationOnce(() => { throw new Error('allocation failed') })
+  mount(); await click('预览报价单')
+  expect(revoke).toHaveBeenCalledWith('blob:first')
+  expect(document.querySelector('img')).toBeNull()
+  await click('预览报价单'); expect(document.querySelector('img')).not.toBeNull()
+})
+
+it.each([17, 43, 101])('checks every copied cell through 40 interleaved edits, moves, row reversals and recalculations (seed %i)', async seed => {
+  const state = mount([row('one'), row('two')], (route, q) => q + (route.channelKey === 'one' ? 0.25 : 0.75))
+  state.resetKey = 'same-product'; await settle()
+  await click('＋ 新增列'); await input('第 5 个价格列数量', '8')
+  const order = [1,2,3,5,8]
+  const manual = new Map<string, number>()
+  let random = seed
+  for (let step = 0; step < 40; step++) {
+    random = (random * 1664525 + 1013904223) >>> 0
+    const column = random % order.length
+    switch (step % 5) {
+      case 0: {
+        const price = 50 + step / 10
+        manual.set(`${state.rows[0].channelKey}:${order[column]}`, price)
+        await input(`第 1 行第 ${column + 1} 列美元价格`, price.toFixed(2)); break
+      }
+      case 1: {
+        const to = (column + 1) % order.length
+        document.querySelectorAll('.sheet-drag')[column].dispatchEvent(new Event('dragstart', { bubbles: true }))
+        document.querySelectorAll('.sheet-quantity')[to].dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }))
+        const [value] = order.splice(column, 1); order.splice(to, 0, value); await settle(); break
+      }
+      case 2: state.rows.reverse(); await settle(); break
+      case 3: {
+        const old = order[column], quantity = 20 + step
+        order[column] = quantity
+        for (const source of state.rows) manual.delete(`${source.channelKey}:${old}`)
+        await input(`第 ${column + 1} 个价格列数量`, String(quantity)); break
+      }
+      case 4: state.contextKey = `recalculation-${step}`; manual.clear(); await settle(); break
+    }
+    const sourceBeforeCopy = JSON.stringify(state.rows)
+    await click('复制报价数据')
+    const cells = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
+    expect(cells[0].slice(5)).toEqual(order.map(q=>`${q} ${q===1?'pc':'pcs'} (USD)`))
+    state.rows.forEach((source, index) => {
+      const saved = new Map([[1,source.quote1],[2,source.quote2],[3,source.quote3],[5,source.quoteCustom]])
+      expect(cells[index+1].slice(5)).toEqual(order.map(q=>`$${(manual.get(`${source.channelKey}:${q}`) ?? saved.get(q) ?? q+(source.channelKey==='one'?0.25:0.75)).toFixed(2)}`))
+    })
+    expect(JSON.stringify(state.rows)).toBe(sourceBeforeCopy)
+  }
+})

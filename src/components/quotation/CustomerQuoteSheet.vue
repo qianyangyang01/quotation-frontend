@@ -111,6 +111,7 @@ function updateField(key: string, field: Exclude<keyof QuoteSheetRowEdits, 'pric
   rowEdits(key)[field] = (event.target as HTMLInputElement).value
 }
 function updatePrice(key: string, quantity: number, event: Event) {
+  if (quantities.value.filter(value => value === quantity).length !== 1) return
   const fields = rowEdits(key)
   fields.prices ||= {}
   fields.prices[String(quantity)] = (event.target as HTMLInputElement).value
@@ -132,13 +133,17 @@ function removeColumn(index: number) {
   if (copying.value || columns.value.length <= 1) return
   const quantity = String(Number(columns.value[index].quantity))
   columns.value.splice(index, 1)
+  clearUnusedQuantityPrice(quantity)
+}
+function clearUnusedQuantityPrice(quantity: string) {
+  if (columns.value.some(column => String(Number(column.quantity)) === quantity)) return
   Object.values(edits.value.fields || {}).forEach(fields => { if (fields.prices) delete fields.prices[quantity] })
 }
 function updateQuantity(index: number, event: Event) {
   const old = String(Number(columns.value[index].quantity))
-  Object.values(edits.value.fields || {}).forEach(fields => { if (fields.prices) delete fields.prices[old] })
   columns.value[index].quantity = (event.target as HTMLInputElement).value
   columns.value[index].legacyCustom = false
+  clearUnusedQuantityPrice(old)
 }
 function updateNote(index: number, event: Event) {
   edits.value.notes ||= [...CUSTOMER_QUOTE_NOTES]
@@ -163,7 +168,7 @@ function dropColumn(index: number) {
   endColumnDrag()
 }
 async function preview() {
-  if (props.sourcePending || rendering.value || !props.rows.length) return
+  if (disposed || copying.value || props.sourcePending || rendering.value || !props.rows.length) return
   invalidate()
   if (sheet.value.issues.length) {
     failed.value = true
@@ -176,7 +181,14 @@ async function preview() {
   try {
     const result = await renderCustomerQuoteSheet(snapshot, () => disposed || generation !== token)
     if (disposed || token !== generation) return
-    images.value = result.map(image => ({ ...image, url: URL.createObjectURL(image.blob) }))
+    const allocated: typeof images.value = []
+    try {
+      for (const image of result) allocated.push({ ...image, url: URL.createObjectURL(image.blob) })
+    } catch (error) {
+      allocated.forEach(image => URL.revokeObjectURL(image.url))
+      throw error
+    }
+    images.value = allocated
     editing.value = false
     if (images.value.length > 1) message.value = `共 ${images.value.length} 张图片，请切换后逐张复制；完整说明位于最后一张。`
   } catch (error) {
@@ -212,7 +224,7 @@ async function copyCurrent() {
   } finally { copying.value = false }
 }
 async function copyData() {
-  if (props.sourcePending || copying.value || rendering.value) return
+  if (disposed || props.sourcePending || copying.value || rendering.value) return
   const token = generation
   copying.value = true
   failed.value = false
@@ -284,7 +296,7 @@ onBeforeUnmount(() => {
               <td><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source">{{ row.sourceDescription }}</small></td>
               <td class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(rows[index].eta) === '—' ? '' : formatShippingTime(rows[index].eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 days" maxlength="80" :disabled="copying" @input="updateShippingTime(rows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(rows[index])">恢复渠道时效</button></td>
               <td><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
-              <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" inputmode="decimal" placeholder="—" maxlength="15" :disabled="copying || sourcePending || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)"></td>
+              <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" inputmode="decimal" placeholder="—" maxlength="15" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)"></td>
               <td class="sheet-add"></td>
             </tr>
           </tbody>
