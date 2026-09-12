@@ -16,6 +16,14 @@ import { loadPurchaseProducts, type PurchaseProductRecord } from '@/data/purchas
 import { loadQuotationRecords, type QuotationRecord } from '@/data/quotationRecords'
 
 const records = ref<QuotationRecord[]>([])
+const recordsReady = ref(false)
+const recordLoadError = ref('')
+async function reloadRecords() {
+  recordsReady.value = false
+  recordLoadError.value = ''
+  try { records.value = await loadQuotationRecords('company'); recordsReady.value = true }
+  catch (error) { recordLoadError.value = error instanceof Error ? error.message : '报价记录读取失败' }
+}
 const purchases = ref<PurchaseProductRecord[]>([])
 const purchaseLoadFailed = ref(false)
 const globalSearch = ref('')
@@ -114,11 +122,10 @@ watch(categoryPageCount, count => { if (categoryPage.value > count) categoryPage
 watch(detailPageCount, count => { if (detailPage.value > count) detailPage.value = count })
 
 onMounted(async () => {
-  const [recordResult, purchaseResult] = await Promise.allSettled([
-    loadQuotationRecords('company'),
+  const [, purchaseResult] = await Promise.allSettled([
+    reloadRecords(),
     loadPurchaseProducts(),
   ])
-  records.value = recordResult.status === 'fulfilled' ? recordResult.value : []
   if (purchaseResult.status === 'fulfilled') purchases.value = purchaseResult.value
   else { purchaseLoadFailed.value = true; purchases.value = [] }
 })
@@ -129,9 +136,12 @@ onMounted(async () => {
     <main>
       <header class="page-heading">
         <div><p>QUOTATION ANALYTICS</p><h1>报价情况预览</h1><span>基于现有采购资料和已保存报价，查看公司报价经营数据</span></div>
-        <button class="export" type="button" @click="exportDetails">⇩ 导出报表</button>
+        <button class="export" type="button" :disabled="!recordsReady" @click="exportDetails">⇩ 导出报表</button>
       </header>
 
+      <p v-if="recordLoadError" class="data-warning" role="alert">完整报价统计暂不可用：{{ recordLoadError }}。<button type="button" @click="reloadRecords">重新读取</button></p>
+      <p v-else-if="!recordsReady" role="status">正在读取完整报价统计…</p>
+      <template v-if="recordsReady">
       <section class="global-filters">
         <label class="global-search">⌕<input v-model="globalSearch" placeholder="搜索报价、客户、SKU、业务员"></label>
         <DateFilter v-model="startDate" label="开始日期" :max="endDate || undefined" />
@@ -182,6 +192,7 @@ onMounted(async () => {
         </tbody></table></div>
         <footer class="pagination"><span>共 {{ detailRows.length }} 条</span><label>每页 <select v-model.number="detailPageSize"><option :value="20">20</option><option :value="50">50</option><option :value="100">100</option></select> 条</label><button :disabled="detailPage===1" @click="detailPage--">‹</button><b>{{ detailPage }} / {{ detailPageCount }} 页</b><button :disabled="detailPage===detailPageCount" @click="detailPage++">›</button></footer>
       </section>
+      </template>
     </main>
     <Transition><div v-if="notice" class="toast">{{ notice }}</div></Transition>
   </div>
