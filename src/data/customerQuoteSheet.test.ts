@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { formatLogisticsEta } from './logistics'
 import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatQuoteDate, formatShippingTime,
   localQuoteDate, newQuoteSheetEdits, quoteSheetCountryCode, quoteSheetProviderName,
@@ -15,6 +16,17 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it('treats the real logistics missing/conflicting ETA placeholder as absent without altering source data', () => {
+    const eta = formatLogisticsEta({ etaMinDays: 0, etaMaxDays: 0 })
+    const row = Object.freeze(source({ carrier: '极通环球', eta }))
+    const sheet = buildCustomerQuoteSheet({ rows: [row], countries: [], edits: edits(), customQuantity: 5, bundle: false })
+    expect(sheet.issues).toEqual([])
+    expect(sheet.rows[0].shippingTime).toBe('—')
+    expect(customerQuoteSheetTsv(sheet)).toContain('JITO\t—\t1-2 days')
+    expect(row.eta).toBe('该物流暂无时效说明')
+    expect(formatShippingTime(formatLogisticsEta({ etaMinDays: 7, etaMaxDays: 15, etaStatus: 'conflict' }))).toBe('—')
+    expect(formatShippingTime('旺季可能延误')).toBe('旺季可能延误')
+  })
   it('covers all 14 production provider names, including the failing screenshot routes', () => {
     const names = ['万邦', '云途', '云速递', '容鼎', '捷易通达', '极通环球', '燕文', '百洲', '花海', '递四方', '通邮', '闪电猴', '顺丰', '顺友']
     const expected = ['Wanb Express', 'YunExpress', 'SFYD Express', 'Rongding', 'JYTD', 'JITO', 'Yanwen', 'Baizhou', 'Hua Hai', '4PX', 'TopYou', 'SDH Express', 'SF Express', 'SunYou']

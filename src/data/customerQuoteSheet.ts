@@ -80,6 +80,9 @@ export function reconcileQuoteSheetEdits(edits: QuoteSheetEdits, rows: QuoteShee
 }
 export function formatShippingTime(value: string) {
   const text = String(value || '').trim()
+  // formatLogisticsEta emits this placeholder, and historical records preserve it.
+  // It represents missing data, not customer-facing prose or a delivery promise.
+  if (text === '该物流暂无时效说明') return '—'
   if (!text || /^[\s—–\-~～/天]*$/.test(text) || /(?:^|\D)0\s*[-~～]\s*0(?:\D|$)/.test(text)) return '—'
   // An incomplete source interval must not turn into a made-up delivery promise.
   if (/^(?:[-—]\s*[-~～]|\d+\s*[-~～]\s*[-—])/.test(text)) return '—'

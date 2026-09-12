@@ -58,6 +58,18 @@ it('previews the formerly blocked carriers and copies the exact preview blob and
   expect(JSON.stringify(state.rows)).toBe(original)
 })
 
+it('previews and copies a saved missing-ETA route, supports a local supplement and restores the unknown value', async () => {
+  const state = mount([{ ...row('legacy', '极通环球'), eta: '该物流暂无时效说明' }])
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('')
+  await click('预览报价单'); expect(render.mock.lastCall![0].rows[0]!.shippingTime).toBe('—')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 days')
+  await click('编辑报价单'); await input('第 1 行运输时效', '10-15 days')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t10-15 days')
+  await click('恢复渠道时效'); await click('复制报价数据')
+  expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 days')
+  expect(state.rows[0]!.eta).toBe('该物流暂无时效说明')
+})
+
 it('shows errors above a long table and allows one English-name supplement for all matching routes', async () => {
   mount([row('one', '新物流'), row('two', '新物流')])
   await click('预览报价单')
