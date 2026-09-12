@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { copyQuoteSheetImage } from './customerQuoteSheetRenderer'
+import { copyQuoteSheetImage, quoteSheetLayout } from './customerQuoteSheetRenderer'
 
 afterEach(() => vi.unstubAllGlobals())
 describe('customer quote image clipboard', () => {
@@ -24,4 +24,17 @@ describe('customer quote image clipboard', () => {
     vi.stubGlobal('ClipboardItem', class {})
     await expect(copyQuoteSheetImage(new Blob())).rejects.toThrow('图片未复制成功')
   })
+})
+
+
+describe('dynamic quote sheet image geometry',()=>{
+  it.each(Array.from({length:10},(_,i)=>i+1))('fits every one of %i price columns without shrinking the base columns',count=>{
+    const {width,right,columns}=quoteSheetLayout(count)
+    expect(columns.slice(0,6)).toEqual([22,107,322,567,762,938])
+    expect(columns).toHaveLength(count+6)
+    expect(columns.at(-1)).toBe(right);expect(right).toBe(width-21)
+    for(let i=5;i<columns.length-1;i++)expect(columns[i+1]-columns[i]).toBeGreaterThanOrEqual(143)
+    expect(width).toBe(1536+Math.max(0,count-4)*144)
+  })
+  it.each([0,11,1.5,Infinity])('rejects unsupported column counts %s',count=>expect(()=>quoteSheetLayout(count)).toThrow())
 })

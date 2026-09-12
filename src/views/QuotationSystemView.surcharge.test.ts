@@ -1,3 +1,4 @@
+import { buildCustomerQuoteSheet, newQuoteSheetEdits, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import { sumDecimal, productDecimal } from '@/services/quotationDecimal'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { readFileSync } from 'node:fs'
@@ -37,7 +38,7 @@ describe('quotation view fee integration', () => {
       selectedGradeCoefficient: () => 1, exchange: { value: { usd: 5 } }, customQuoteQuantity: { value: 10 },
       matchedLogistics: () => ['PAY', 'PAY2', 'FREE'].map(code => ({ rule: '同一规则', carrier: code === 'FREE' ? '豁免商' : '物流商', channel: '同名渠道', channelKey: '1::物流商::' + code })),
     }
-    const run = new Function(...Object.keys(context), js + '\nreturn {excelQuoteRows, finalSalePrice, copySpecifiedQuotes}')(...Object.values(context))
+    const run = new Function(...Object.keys(context), js + '\nreturn {excelQuoteRows, finalSalePrice, copySpecifiedQuotes, quantityCostBreakdown}')(...Object.values(context))
     const product = { country: '美国', quantity: 1, purchase: 40, purchaseFreightPerUnit: 5, sku: 'sku', rule: '同一规则', channel: '物流商' }
     const rows = run.excelQuoteRows(product)
     const paid = rows.find((row: { channelKey: string }) => row.channelKey.endsWith('PAY'))
@@ -54,6 +55,17 @@ describe('quotation view fee integration', () => {
     expect(table[1]![surchargeColumn]).toBe('0.00')
     expect(table[2]![surchargeColumn]).toBe('2.00')
     expect(table[2]!.slice(-2)).toEqual(['99.00', '495.00'])
+    // Added sheet columns execute the same live quantity function, including per-order fees.
+    const original = JSON.stringify(rows)
+    const quantities = [1,2,3,4,5,6,7,8,9,10]
+    const sheet = buildCustomerQuoteSheet({ rows, countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 10, bundle: mode === 'bundle', quantities,
+      calculatePrice: (row: QuoteSheetSourceRow, quantity: number) => run.quantityCostBreakdown(product, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null })
+    const paidSheet = sheet.rows.find(row => row.key.includes('::PAY"'))!
+    const freeSheet = sheet.rows.find(row => row.key.includes('::FREE"'))!
+    expect(paidSheet.prices).toEqual(quantities.map(quantity => 9 * quantity + 9))
+    expect(freeSheet.prices).toEqual(quantities.map(quantity => 9 * quantity + 7))
+    expect(JSON.stringify(rows)).toBe(original)
+
   })
 })
 

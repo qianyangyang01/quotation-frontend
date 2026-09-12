@@ -134,3 +134,39 @@ describe('customer quotation presentation', () => {
     expect(CUSTOMER_QUOTE_NOTES[3]).toContain('every single orders cannot be 100% guaranteed.')
   })
 })
+
+
+describe('editable quantity quote sheet boundaries', () => {
+  it('supports ten arbitrary quantities, zero/missing USD and the bundle unit without mutating business rows', () => {
+    const row = Object.freeze(source({ quote2: 0, quote3: null }))
+    const quantities = [1,2,3,4,5,6,7,8,20,50]
+    const sheet = buildCustomerQuoteSheet({rows:[row],countries:[],edits:edits(),customQuantity:5,bundle:true,quantities,calculatePrice:(_row,q)=>q+0.25})
+    expect(sheet.issues).toEqual([])
+    expect(sheet.quantityLabels).toEqual(quantities.map(q=>`${q} ${q===1?'set':'sets'}`))
+    expect(sheet.rows[0].prices).toEqual([12.8,0,null,4.25,43.6,6.25,7.25,8.25,20.25,50.25])
+    expect(customerQuoteSheetTsv(sheet).split('\r\n')[1].split('\t')).toHaveLength(15)
+    expect(row.quoteCustom).toBe(43.6)
+  })
+  it.each([[],[0],[-1],[1.1],[NaN],[Infinity],[Number.MAX_SAFE_INTEGER+1],Array.from({length:11},(_,i)=>i+1),[1,1]].map(quantities => ({ quantities })))('blocks invalid columns $quantities before export', ({ quantities }) => {
+    const sheet = buildCustomerQuoteSheet({rows:[source()],countries:[],edits:edits(),customQuantity:5,bundle:false,quantities})
+    expect(sheet.issues.length).toBeGreaterThan(0)
+    expect(()=>customerQuoteSheetTsv(sheet)).toThrow()
+  })
+  it('reports calculator failures instead of exporting stale prices or breaking the editor', () => {
+    const sheet = buildCustomerQuoteSheet({rows:[source()],countries:[],edits:edits(),customQuantity:5,bundle:false,quantities:[8],calculatePrice:()=>{throw new Error('unavailable')}})
+    expect(sheet.rows[0].prices).toEqual([null]); expect(sheet.issues[0]).toContain('计算失败')
+  })
+  it.each(['-1','1.001','1e4','=SUM(A1:A2)','Infinity','999999999999'])('rejects unsafe/invalid manual USD %s', price => {
+    const row = source(); const draft=edits(); draft.fields={[quoteSheetRowKey(row)]:{prices:{'1':price}}}
+    const sheet=buildCustomerQuoteSheet({rows:[row],countries:[],edits:draft,customQuantity:5,bundle:false})
+    expect(()=>customerQuoteSheetTsv(sheet)).toThrow('美元金额')
+  })
+  it('keeps all four notes and uses local title/processing edits with formula-safe TSV', () => {
+    const row=source();const draft=edits();draft.title='Custom Quote';draft.notes=[...CUSTOMER_QUOTE_NOTES];draft.notes[1]='Payment by bank transfer.'
+    draft.fields={[quoteSheetRowKey(row)]:{provider:'=Custom',processingTime:'3-4 days',number:'8',prices:{'2':''}}}
+    const sheet=buildCustomerQuoteSheet({rows:[row],countries:[],edits:draft,customQuantity:5,bundle:false})
+    expect(sheet.title).toBe('Custom Quote');expect(sheet.notes).toHaveLength(4)
+    expect(customerQuoteSheetTsv(sheet)).toContain("8\tUS\t'=Custom\t6-12 days\t3-4 days\t$12.80\t—")
+    expect(CUSTOMER_QUOTE_NOTES[1]).toContain('PayPal')
+  })
+})

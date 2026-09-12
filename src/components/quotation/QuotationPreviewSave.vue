@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
-import type { QuoteSheetCountry } from '@/data/customerQuoteSheet'
+import type { QuoteSheetCountry, QuoteSheetPriceCalculator } from '@/data/customerQuoteSheet'
 
 const props = withDefaults(defineProps<{
   rows: QuotationMatrixRow[]
@@ -10,6 +10,8 @@ const props = withDefaults(defineProps<{
   salesperson: string
   contextKey: string
   sourcePending: boolean
+  calculatePrice?: QuoteSheetPriceCalculator
+  resetKey?: string
   matrixModeLabel: string
   customerName: string
   productName: string
@@ -79,7 +81,7 @@ const quoteRange = computed(() => {
     </div>
 
     <CustomerQuoteSheet :rows="rows" :countries="countries" :salesperson="salesperson"
-      :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" />
+      :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
 
     <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">
       <header><span><i>!</i><b>暂时无法保存报价</b></span><em>请完成以下 {{ validationIssues.length }} 项必填内容</em></header>

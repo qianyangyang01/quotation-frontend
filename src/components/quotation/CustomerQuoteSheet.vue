@@ -1,18 +1,33 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
   quoteSheetRowKey, quoteSheetUsd, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
-  type QuoteSheetCountry, type QuoteSheetSourceRow,
+  MAX_QUOTE_SHEET_COLUMNS, validQuoteSheetQuantity,
+  type QuoteSheetCountry, type QuoteSheetSourceRow, type QuoteSheetPriceCalculator, type QuoteSheetRowEdits,
 } from '@/data/customerQuoteSheet'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
+import QuoteBackToTop from './QuoteBackToTop.vue'
 
 const props = defineProps<{
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; salesperson: string
   contextKey: string; customQuantity: number; bundle: boolean; sourcePending: boolean
+  calculatePrice?: QuoteSheetPriceCalculator
+  resetKey?: string
 }>()
 const edits = ref(newQuoteSheetEdits(props.salesperson))
+let columnId = 0
+function initialColumns() {
+  const result = [...new Set([1, 2, 3, props.customQuantity || 1])].map(quantity => ({ id: ++columnId, quantity: String(quantity), legacyCustom: false }))
+  if (!props.customQuantity && props.rows.some(row => row.quoteCustom != null)) result.push({ id: ++columnId, quantity: '', legacyCustom: true })
+  return result
+}
+const columns = ref(initialColumns())
+const editorScroll = ref<HTMLElement>()
+const draggedColumn = ref<number | null>(null)
+const dropTarget = ref<number | null>(null)
+const quantities = computed(() => columns.value.map(column => Number(column.quantity)))
 const editing = ref(true)
 const rendering = ref(false)
 const copying = ref(false)
@@ -22,12 +37,17 @@ const images = shallowRef<Array<QuoteSheetImage & { url: string }>>([])
 const activeImage = ref(0)
 let generation = 0
 let previousContext = props.contextKey
+let previousResetKey = props.resetKey ?? props.contextKey
 let disposed = false
 
 const sheet = computed(() => buildCustomerQuoteSheet({
   rows: props.rows, countries: props.countries, edits: edits.value,
   customQuantity: props.customQuantity, bundle: props.bundle,
+  quantities: quantities.value, calculatePrice: props.sourcePending ? undefined : props.calculatePrice,
+  legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom),
 }))
+// Tracks calculator dependencies too (tax, weight, exchange rate), even if the original four prices are unchanged.
+watch(sheet, invalidate, { flush: 'sync' })
 const currentImage = computed(() => images.value[activeImage.value])
 const missingProviders = computed(() => [...new Map(props.rows
   .filter(row => !quoteSheetProviderName(row.carrier))
@@ -47,19 +67,27 @@ function invalidate() {
   message.value = ''
   failed.value = false
 }
-watch(() => [props.contextKey, props.rows, props.countries, props.customQuantity, props.bundle, props.sourcePending], () => {
-  if (props.contextKey !== previousContext) {
+watch(() => [props.contextKey, props.resetKey, props.rows, props.countries, props.customQuantity, props.bundle, props.sourcePending], invalidate, { deep: true, flush: 'sync' })
+// Reset after the parent finishes updating all props, so new quantities never use the old product's custom quantity.
+watch(() => [props.contextKey, props.resetKey], () => {
+  const resetKey = props.resetKey ?? props.contextKey
+  if (resetKey !== previousResetKey) {
     edits.value = newQuoteSheetEdits(props.salesperson)
-    previousContext = props.contextKey
+    columns.value = initialColumns()
+    previousResetKey = resetKey
+  } else if (props.contextKey !== previousContext) {
+    clearPriceEdits()
   }
+  previousContext = props.contextKey
   invalidate()
-}, { deep: true, flush: 'sync' })
+})
 // Invalidate synchronously, but prune only after Vue batches array mutations.
 // reverse/sort/splice temporarily contain duplicate or missing rows mid-operation.
 watch(() => props.rows, () => {
   edits.value = reconcileQuoteSheetEdits(edits.value, props.rows)
 }, { deep: true })
 watch(edits, invalidate, { deep: true, flush: 'sync' })
+watch(columns, invalidate, { deep: true, flush: 'sync' })
 watch(() => props.salesperson, (value, previous) => {
   if (edits.value.agent === previous) edits.value.agent = value
 })
@@ -73,6 +101,66 @@ function updateProviderName(key: string, event: Event) {
 }
 function restoreShippingTime(row: QuoteSheetSourceRow) {
   delete edits.value.shippingTimes[quoteSheetRowKey(row)]
+}
+function rowEdits(key: string) {
+  edits.value.fields ||= {}
+  edits.value.fields[key] ||= {}
+  return edits.value.fields[key]
+}
+function updateField(key: string, field: Exclude<keyof QuoteSheetRowEdits, 'prices'>, event: Event) {
+  rowEdits(key)[field] = (event.target as HTMLInputElement).value
+}
+function updatePrice(key: string, quantity: number, event: Event) {
+  const fields = rowEdits(key)
+  fields.prices ||= {}
+  fields.prices[String(quantity)] = (event.target as HTMLInputElement).value
+}
+function clearPriceEdits() {
+  Object.values(edits.value.fields || {}).forEach(fields => { delete fields.prices })
+}
+watch(() => props.rows.map(row => [quoteSheetRowKey(row), row.quote1, row.quote2, row.quote3, row.quoteCustom]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(row => JSON.stringify(row)).join('|'), clearPriceEdits)
+watch(() => props.sourcePending, value => { if (value) clearPriceEdits() })
+async function addColumn() {
+  if (copying.value || columns.value.length >= MAX_QUOTE_SHEET_COLUMNS) return
+  columns.value.push({ id: ++columnId, quantity: '', legacyCustom: false })
+  await nextTick()
+  const inputs = editorScroll.value?.querySelectorAll<HTMLInputElement>('.sheet-quantity input')
+  inputs?.[inputs.length - 1]?.focus()
+  if (editorScroll.value) editorScroll.value.scrollLeft = editorScroll.value.scrollWidth
+}
+function removeColumn(index: number) {
+  if (copying.value || columns.value.length <= 1) return
+  const quantity = String(Number(columns.value[index].quantity))
+  columns.value.splice(index, 1)
+  Object.values(edits.value.fields || {}).forEach(fields => { if (fields.prices) delete fields.prices[quantity] })
+}
+function updateQuantity(index: number, event: Event) {
+  const old = String(Number(columns.value[index].quantity))
+  Object.values(edits.value.fields || {}).forEach(fields => { if (fields.prices) delete fields.prices[old] })
+  columns.value[index].quantity = (event.target as HTMLInputElement).value
+  columns.value[index].legacyCustom = false
+}
+function updateNote(index: number, event: Event) {
+  edits.value.notes ||= [...CUSTOMER_QUOTE_NOTES]
+  edits.value.notes[index] = (event.target as HTMLTextAreaElement).value
+}
+function moveColumn(from: number, to: number) {
+  if (copying.value || from < 0 || to < 0 || from >= columns.value.length || to >= columns.value.length || from === to) return
+  const reordered = [...columns.value]
+  const [column] = reordered.splice(from, 1)
+  reordered.splice(to, 0, column)
+  columns.value = reordered
+  nextTick(() => editorScroll.value?.querySelector<HTMLButtonElement>(`[data-column-handle="${column.id}"]`)?.focus())
+}
+function startColumnDrag(id: number, event: DragEvent) {
+  if (copying.value) { event.preventDefault(); return }
+  draggedColumn.value = id
+  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(id)) }
+}
+function endColumnDrag() { draggedColumn.value = null; dropTarget.value = null }
+function dropColumn(index: number) {
+  if (draggedColumn.value != null) moveColumn(columns.value.findIndex(column => column.id === draggedColumn.value), index)
+  endColumnDrag()
 }
 async function preview() {
   if (props.sourcePending || rendering.value || !props.rows.length) return
@@ -152,8 +240,9 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="customer-sheet" aria-labelledby="customer-sheet-title">
+    <QuoteBackToTop />
     <div class="sheet-toolbar">
-      <div><h3 id="customer-sheet-title">客户报价单</h3><p>编辑署名、日期和运输时效后预览，再复制图片发给客户</p></div>
+      <div><h3 id="customer-sheet-title">客户报价单</h3><p>点击内容可修改；右侧新增列，填写数量后自动带出对应价格</p></div>
       <div class="sheet-actions">
         <button v-if="!editing" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
         <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
@@ -167,6 +256,7 @@ onBeforeUnmount(() => {
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
     <div v-else-if="editing" class="sheet-editor">
       <div class="sheet-metadata">
+        <label>报价单标题<input :value="edits.title ?? 'JerryFulfillment Quote Sheet'" aria-label="报价单标题" maxlength="80" :disabled="copying" @input="edits.title = ($event.target as HTMLInputElement).value"></label>
         <label>By Agent · 署名<input v-model="edits.agent" aria-label="报价单署名" autocomplete="off" maxlength="40" :disabled="copying"></label>
         <label>Date · 日期<input v-model="edits.date" aria-label="报价单日期" type="date" min="1000-01-01" max="9999-12-31" :disabled="copying"></label>
       </div>
@@ -174,20 +264,34 @@ onBeforeUnmount(() => {
         <p class="sheet-edit-help">英文名补填：以下物流商尚无英文显示名，请填写后预览或复制。同一物流商的全部渠道共用此名称，仅当前页面有效。</p>
         <div class="sheet-metadata"><label v-for="provider in missingProviders" :key="provider.key">{{ provider.name }} · English name<input :value="edits.providerNames?.[provider.key] || ''" :aria-label="`${provider.name}英文名`" autocomplete="off" placeholder="Enter English name" maxlength="80" :disabled="copying" @input="updateProviderName(provider.key, $event)"></label></div>
       </div>
-      <p class="sheet-edit-help">仅署名、日期和 Shipping Time 可编辑，美元价格直接使用系统结果。缺失时效可填写 6-12 days；留空显示 —。</p>
-      <div class="sheet-editor-scroll">
+      <p class="sheet-edit-help">数量填写正整数，最多 10 个价格列；拖动列头手柄可排序，内容可直接修改，空价格显示 —。</p>
+      <p v-if="!calculatePrice" class="sheet-edit-help">历史记录仅带出已保存数量的价格；新增数量没有历史价格时，请手动填写。</p>
+      <span class="sheet-column-count">价格列 {{ columns.length }} / 10</span>
+      <div ref="editorScroll" class="sheet-editor-scroll">
         <table>
-          <thead><tr><th>No.</th><th>Country</th><th>Logistics Provider</th><th>Shipping Time</th><th>Processing Time</th><th v-for="(label, index) in sheet.quantityLabels" :key="index">{{ label }}<small>USD</small></th></tr></thead>
+          <thead><tr><th>No.</th><th>Country</th><th>Logistics Provider</th><th>Shipping Time</th><th>Processing Time</th>
+            <th v-for="(column, index) in columns" :key="column.id" class="sheet-quantity" :class="{ 'sheet-drop-target': dropTarget === column.id && draggedColumn !== column.id }" @dragover.prevent="dropTarget = draggedColumn == null ? null : column.id" @drop.prevent="dropColumn(index)">
+              <button type="button" class="sheet-drag" :draggable="!copying" :data-column-handle="column.id" :aria-label="`第 ${index + 1} 个价格列排序，左右键移动`" title="拖动排序，或聚焦后按左右方向键" :disabled="copying" @dragstart="startColumnDrag(column.id, $event)" @dragend="endColumnDrag" @keydown.left.prevent="moveColumn(index, index - 1)" @keydown.right.prevent="moveColumn(index, index + 1)">⠿</button>
+              <button v-if="columns.length > 1" type="button" class="sheet-remove" :aria-label="`删除第 ${index + 1} 个价格列`" :disabled="copying" @click="removeColumn(index)">×</button>
+              <label><input :value="column.quantity" type="number" min="1" step="1" :aria-label="`第 ${index + 1} 个价格列数量`" :placeholder="column.legacyCustom ? 'Custom' : '数量'" :disabled="copying" @input="updateQuantity(index, $event)"> {{ bundle ? (Number(column.quantity) === 1 ? 'set' : 'sets') : (Number(column.quantity) === 1 ? 'pc' : 'pcs') }}</label><small>USD</small>
+            </th>
+            <th class="sheet-add"><button type="button" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button></th>
+          </tr></thead>
           <tbody>
             <tr v-for="(row, index) in sheet.rows" :key="row.key">
-              <td>{{ row.number }}</td><td>{{ row.country }}</td>
-              <td><b>{{ row.provider === '—' ? '待补英文名' : row.provider }}</b><small class="sheet-source">{{ row.sourceDescription }}</small></td>
-              <td class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(rows[index].eta) === '—' ? '' : formatShippingTime(rows[index].eta))" :aria-label="`第 ${row.number} 行运输时效`" placeholder="例如 6-12 days" maxlength="80" :disabled="copying" @input="updateShippingTime(rows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(rows[index])">恢复渠道时效</button></td>
-              <td>1-2 days</td><td v-for="(price, priceIndex) in row.prices" :key="priceIndex">{{ quoteSheetUsd(price) }}</td>
+              <td><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
+              <td><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="2" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
+              <td><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source">{{ row.sourceDescription }}</small></td>
+              <td class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(rows[index].eta) === '—' ? '' : formatShippingTime(rows[index].eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 days" maxlength="80" :disabled="copying" @input="updateShippingTime(rows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(rows[index])">恢复渠道时效</button></td>
+              <td><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
+              <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" inputmode="decimal" placeholder="—" maxlength="15" :disabled="copying || sourcePending || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)"></td>
+              <td class="sheet-add"></td>
             </tr>
           </tbody>
         </table>
       </div>
+      <p v-if="sheet.tableIssues?.length" class="sheet-pending" role="status">{{ sheet.tableIssues.join('；') }}</p>
+      <details class="sheet-notes-editor"><summary>报价说明 · 点击编辑</summary><label v-for="(note, index) in (edits.notes ?? CUSTOMER_QUOTE_NOTES)" :key="index">{{ index + 1 }}<textarea :value="note" :aria-label="`第 ${index + 1} 条报价说明`" maxlength="3000" :disabled="copying" @input="updateNote(index, $event)"></textarea></label></details>
     </div>
     <div v-if="!editing && currentImage" class="sheet-image-area">
       <div v-if="images.length > 1" class="sheet-pages">
@@ -197,14 +301,17 @@ onBeforeUnmount(() => {
       </div>
       <div class="sheet-image-scroll"><img :src="currentImage.url" :width="currentImage.width" :height="currentImage.height" alt="JerryFulfillment Quote Sheet 客户报价图片预览" draggable="false"></div>
       <details class="sheet-accessible"><summary>查看报价单文字内容</summary>
-        <p>JerryFulfillment Quote Sheet — By Agent: {{ sheet.agent }} — Date: {{ sheet.date }}</p>
-        <table><thead><tr><th>No.</th><th>Country</th><th>Logistics Provider</th><th>Shipping Time</th><th>Processing Time</th><th v-for="(label, index) in sheet.quantityLabels" :key="index">{{ label }} (USD)</th></tr></thead><tbody><tr v-for="row in sheet.rows" :key="row.key"><td>{{ row.number }}</td><td>{{ row.country }}</td><td>{{ row.provider }}</td><td>{{ row.shippingTime }}</td><td>1-2 days</td><td v-for="(price, index) in row.prices" :key="index">{{ quoteSheetUsd(price) }}</td></tr></tbody></table>
-        <h4>IMPORTANT NOTES</h4><ol><li v-for="note in CUSTOMER_QUOTE_NOTES" :key="note">{{ note }}</li></ol>
+        <p>{{ sheet.title }} — By Agent: {{ sheet.agent }} — Date: {{ sheet.date }}</p>
+        <table><thead><tr><th>No.</th><th>Country</th><th>Logistics Provider</th><th>Shipping Time</th><th>Processing Time</th><th v-for="(label, index) in sheet.quantityLabels" :key="index">{{ label }} (USD)</th></tr></thead><tbody><tr v-for="row in sheet.rows" :key="row.key"><td>{{ row.number }}</td><td>{{ row.country }}</td><td>{{ row.provider }}</td><td>{{ row.shippingTime }}</td><td>{{ row.processingTime }}</td><td v-for="(price, index) in row.prices" :key="index">{{ quoteSheetUsd(price) }}</td></tr></tbody></table>
+        <h4>IMPORTANT NOTES</h4><ol><li v-for="note in sheet.notes" :key="note">{{ note }}</li></ol>
       </details>
     </div>
   </section>
 </template>
 
 <style scoped>
-.customer-sheet{margin:0 22px 18px;color:#202532}.sheet-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px}.sheet-toolbar h3{margin:0;font-size:15px}.sheet-toolbar p,.sheet-local-note,.sheet-edit-help{color:#72808a;font-size:12px;line-height:1.6}.sheet-toolbar p{margin:5px 0}.sheet-local-note{margin:8px 0 14px}.sheet-actions{display:flex;gap:8px;flex-wrap:wrap}.customer-sheet button{padding:9px 13px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font-size:12px;font-weight:650;cursor:pointer}.customer-sheet button.sheet-primary{background:#f58220;border-color:#f58220;color:#fff}.customer-sheet button:disabled{background:#edf0f2;border-color:#e0e4e8;color:#919aa3;cursor:not-allowed}.sheet-editor{padding:16px;background:#fafbfc;border:1px solid #dfe5e9;border-radius:8px}.sheet-metadata{display:flex;gap:18px;flex-wrap:wrap}.sheet-metadata label{display:grid;gap:6px;font-size:12px;font-weight:650}.customer-sheet input{height:36px;padding:0 9px;box-sizing:border-box;border:1px solid #ccd4db;border-radius:4px;background:#fff;color:#202532;font:inherit}.sheet-metadata input{min-width:205px}.sheet-editor-scroll,.sheet-image-scroll,.sheet-accessible{overflow-x:auto}.customer-sheet table{width:100%;border-collapse:collapse;font-size:12px}.sheet-editor table{min-width:1000px}.customer-sheet th,.customer-sheet td{padding:10px 9px;border:1px solid #e0e3e6;text-align:center;vertical-align:middle}.customer-sheet th{background:#fff0e3;color:#924e10;font-weight:650}.customer-sheet td{background:#fff}.customer-sheet small{display:block;margin-top:4px;font-weight:400}.sheet-source{max-width:230px;color:#76828c;font-size:10px;line-height:1.5}.sheet-time input{width:170px;font-size:12px}.sheet-time button{display:block;margin:5px auto 0;padding:2px 4px;border:0;color:#a85d16;background:transparent;font-size:10px}.sheet-empty{padding:35px;text-align:center;border:1px dashed #d9e1e6;color:#87939d;font-size:12px}.sheet-image-area{border:1px solid #e0e4e8;background:#f6f7f9}.sheet-image-scroll img{display:block;width:100%;height:auto;min-width:768px}.sheet-pages{display:flex;justify-content:center;align-items:center;gap:15px;padding:10px;font-size:12px}.sheet-message,.sheet-pending{padding:10px 12px;border-radius:5px;background:#f0f7f1;color:#287a4d;font-size:12px;line-height:1.6}.sheet-message.failed,.sheet-pending{background:#fff4e6;color:#a65410}.sheet-accessible{padding:10px;background:#fff;font-size:12px;line-height:1.6}.sheet-accessible summary{cursor:pointer;color:#64727e}.sheet-accessible li{margin:8px 0}@media(max-width:850px){.sheet-toolbar{align-items:flex-start;flex-direction:column}.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:12px}.sheet-pages{gap:8px}.sheet-metadata{width:100%}.sheet-metadata label{flex:1}}
+.customer-sheet{margin:0 22px 18px;color:#202532}.sheet-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px}.sheet-toolbar h3{margin:0;font-size:15px}.sheet-toolbar p,.sheet-local-note,.sheet-edit-help{color:#72808a;font-size:12px;line-height:1.6}.sheet-toolbar p{margin:5px 0}.sheet-local-note{margin:8px 0 14px}.sheet-actions{display:flex;gap:8px;flex-wrap:wrap}.customer-sheet button{padding:9px 13px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font-size:12px;font-weight:650;cursor:pointer}.customer-sheet button.sheet-primary{background:#f58220;border-color:#f58220;color:#fff}.customer-sheet button:disabled{background:#edf0f2;border-color:#e0e4e8;color:#919aa3;cursor:not-allowed}.sheet-editor{padding:16px;background:#fafbfc;border:1px solid #dfe5e9;border-radius:8px}.sheet-metadata{display:flex;gap:18px;flex-wrap:wrap}.sheet-metadata label{display:grid;gap:6px;font-size:12px;font-weight:650}.customer-sheet input{height:36px;padding:0 9px;box-sizing:border-box;border:1px solid #ccd4db;border-radius:4px;background:#fff;color:#202532;font:inherit}.sheet-metadata input{min-width:205px}.sheet-editor-scroll,.sheet-image-scroll,.sheet-accessible{overflow-x:auto}.customer-sheet table{width:100%;border-collapse:collapse;font-size:12px}.sheet-editor table{width:max-content;min-width:0}.customer-sheet th,.customer-sheet td{padding:10px 9px;border:1px solid #e0e3e6;text-align:center;vertical-align:middle}.customer-sheet th{background:#fff0e3;color:#924e10;font-weight:650}.customer-sheet td{background:#fff}.customer-sheet small{display:block;margin-top:4px;font-weight:400}.sheet-source{max-width:230px;color:#76828c;font-size:10px;line-height:1.5}.sheet-time input{width:170px;font-size:12px}.sheet-time button{display:block;margin:5px auto 0;padding:2px 4px;border:0;color:#a85d16;background:transparent;font-size:10px}.sheet-empty{padding:35px;text-align:center;border:1px dashed #d9e1e6;color:#87939d;font-size:12px}.sheet-image-area{border:1px solid #e0e4e8;background:#f6f7f9}.sheet-image-scroll img{display:block;width:100%;height:auto;min-width:768px}.sheet-pages{display:flex;justify-content:center;align-items:center;gap:15px;padding:10px;font-size:12px}.sheet-message,.sheet-pending{padding:10px 12px;border-radius:5px;background:#f0f7f1;color:#287a4d;font-size:12px;line-height:1.6}.sheet-message.failed,.sheet-pending{background:#fff4e6;color:#a65410}.sheet-accessible{padding:10px;background:#fff;font-size:12px;line-height:1.6}.sheet-accessible summary{cursor:pointer;color:#64727e}.sheet-accessible li{margin:8px 0}@media(max-width:850px){.sheet-toolbar{align-items:flex-start;flex-direction:column}.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:12px}.sheet-pages{gap:8px}.sheet-metadata{width:100%}.sheet-metadata label{flex:1}}
+.sheet-column-count{display:block;text-align:right;font-size:12px;color:#72808a;margin:8px 0}.sheet-quantity{position:relative;min-width:112px;padding-top:22px!important}.sheet-quantity input{width:66px}.sheet-remove{position:absolute;right:2px;top:0;padding:0 5px!important;border:0!important;background:transparent!important}.sheet-add{position:sticky;right:0;z-index:3;min-width:105px;background:#fafbfc!important;border-left:1px dashed #d7dce1!important}.sheet-add button{white-space:nowrap;color:#ee791a;border-color:#ee791a}.sheet-price{white-space:nowrap}.sheet-price input{width:90px;text-align:center}.sheet-number{width:45px}.sheet-country{width:55px}.sheet-provider{width:160px}.sheet-processing{width:130px}.sheet-editor td input:not(:focus){border-color:transparent}.sheet-editor td input:hover{border-color:#ccd4db}.customer-sheet input:focus{outline:1px solid #f58220;border-color:#f58220}.sheet-notes-editor{margin-top:14px;font-size:12px}.sheet-notes-editor summary{cursor:pointer;color:#925013}.sheet-notes-editor label{display:flex;gap:12px;margin:10px 0}.sheet-notes-editor textarea{width:100%;min-height:70px;resize:vertical;border:1px solid #ccd4db;padding:8px;font:inherit;line-height:1.6}
+.sheet-editor table th:nth-child(-n+3),.sheet-editor table td:nth-child(-n+3){position:sticky;z-index:1}.sheet-editor table th:nth-child(-n+3){z-index:2}.sheet-editor table th:nth-child(1),.sheet-editor table td:nth-child(1){left:0;min-width:45px}.sheet-editor table th:nth-child(2),.sheet-editor table td:nth-child(2){left:64px;min-width:55px}.sheet-editor table th:nth-child(3),.sheet-editor table td:nth-child(3){left:138px;min-width:160px;box-shadow:2px 0 3px #20253212}
+.sheet-drag{position:absolute;left:3px;top:0;padding:0 5px!important;border:0!important;background:transparent!important;color:#b46726!important;cursor:grab!important;font-size:17px!important;line-height:20px}.sheet-drag:active{cursor:grabbing!important}.sheet-drag:focus-visible{outline:2px solid #f58220;outline-offset:1px}.sheet-quantity.sheet-drop-target{box-shadow:inset 3px 0 #f58220;background:#ffe1c6}
 </style>

@@ -5,14 +5,19 @@ export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |
   'quote1' | 'quote2' | 'quote3' | 'quoteCustom'>
 export type QuoteSheetCountry = { name: string; code: string }
-export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string> }
+export type QuoteSheetRowEdits = { number?: string; country?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
+export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[] }
+export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: number) => number | null
+export const MAX_QUOTE_SHEET_COLUMNS = 10
+export function validQuoteSheetQuantity(value: number) { return Number.isSafeInteger(value) && value > 0 }
 export type CustomerQuoteSheetRow = {
-  key: string; number: number; country: string; provider: string; shippingTime: string
+  key: string; number: number; country: string; provider: string; shippingTime: string; processingTime?: string
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {
   agent: string; date: string; quantityLabels: string[]; rows: CustomerQuoteSheetRow[]; issues: string[]
   tableIssues?: string[]
+  title?: string; notes?: string[]
 }
 
 // The rendered, immutable notes asset contains this exact approved copy.
@@ -75,6 +80,7 @@ export function reconcileQuoteSheetEdits(edits: QuoteSheetEdits, rows: QuoteShee
   return {
     ...edits,
     shippingTimes: Object.fromEntries(Object.entries(edits.shippingTimes).filter(([key]) => keys.has(key))),
+    fields: Object.fromEntries(Object.entries(edits.fields || {}).filter(([key]) => keys.has(key))),
     providerNames: Object.fromEntries(Object.entries(edits.providerNames || {}).filter(([key]) => providers.has(key))),
   }
 }
@@ -108,6 +114,7 @@ export function quoteSheetUsd(value: number | null) {
 export function buildCustomerQuoteSheet(input: {
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; edits: QuoteSheetEdits
   customQuantity: number; bundle: boolean
+  quantities?: number[]; calculatePrice?: QuoteSheetPriceCalculator; legacyCustomIndex?: number
 }): CustomerQuoteSheet {
   const issues: string[] = []
   const tableIssues: string[] = []
@@ -115,26 +122,55 @@ export function buildCustomerQuoteSheet(input: {
   const date = formatQuoteDate(input.edits.date)
   if (!agent) issues.push('请填写报价单署名')
   if (!date) issues.push('请选择有效的报价日期')
-  const quantities = [1, 2, 3, Math.max(1, Math.floor(input.customQuantity || 1))]
+  const quantities = input.quantities ?? [1, 2, 3, Math.max(1, Math.floor(input.customQuantity || 1))]
+  const isLegacyCustom = (quantity: number, index: number) => !input.customQuantity && quantity === 0 && index === input.legacyCustomIndex
+  const validQuantities = quantities.length > 0 && quantities.length <= MAX_QUOTE_SHEET_COLUMNS && quantities.every((quantity, index) => validQuoteSheetQuantity(quantity) || isLegacyCustom(quantity, index))
+  if (!validQuantities) tableIssues.push('请填写有效的正整数数量，价格列最多 10 列')
+  if (input.quantities && new Set(quantities).size !== quantities.length) tableIssues.push('数量列不能重复')
   const rows = input.rows.map((row, index) => {
     const key = quoteSheetRowKey(row)
-    const country = quoteSheetCountryCode(row.country, input.countries)
+    const fields = input.edits.fields?.[key] || {}
+    const country = fields.country === undefined ? quoteSheetCountryCode(row.country, input.countries) : quoteSheetCountryCode(fields.country.trim(), [])
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
-    const provider = quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '')
+    const provider = fields.provider === undefined ? quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '') : fields.provider.trim()
     if (!country) tableIssues.push(`第 ${index + 1} 行缺少国家简称：${row.country}`)
     if (!provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
+    if (/[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)
     const shippingTime = formatShippingTime(input.edits.shippingTimes[key] ?? row.eta)
     if (/[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 days`)
+    const processingTime = formatShippingTime(fields.processingTime ?? '1-2 days')
+    if (/[^\x20-\x7e—]/.test(processingTime)) tableIssues.push(`第 ${index + 1} 行处理时间请填写英文`)
+    const number = fields.number === undefined ? index + 1 : Number(fields.number)
+    if (!validQuoteSheetQuantity(number)) tableIssues.push(`第 ${index + 1} 行序号须为正整数`)
+    const sourcePrices = [row.quote1, row.quote2, row.quote3, row.quoteCustom]
+    const sourceQuantities = [1, 2, 3, input.customQuantity]
+    const prices = quantities.map((quantity, column) => {
+      const manual = fields.prices?.[String(quantity)]
+      if (manual !== undefined) {
+        if (!manual.trim() || manual.trim() === '—') return null
+        if (!/^\d+(?:\.\d{1,2})?$/.test(manual.trim()) || !Number.isFinite(Number(manual)) || Number(manual) > 999999999.99) {
+          tableIssues.push(`第 ${index + 1} 行 ${quantity} 数量的价格须为非负美元金额，最多两位小数`)
+          return null
+        }
+        return Number(manual)
+      }
+      if (!validQuantities) return null
+      // Existing snapshot prices remain authoritative. Only additional quantities use the live calculator.
+      const sourceIndex = isLegacyCustom(quantity, column) ? 3 : input.quantities ? sourceQuantities.indexOf(quantity) : column
+      let value: number | null | undefined
+      try { value = sourceIndex >= 0 ? sourcePrices[sourceIndex] : input.calculatePrice?.(row, quantity) }
+      catch { tableIssues.push(`第 ${index + 1} 行 ${quantity} 数量计算失败，请重试`); return null }
+      return value != null && Number.isFinite(value) && value >= 0 ? value : null
+    })
     return {
-      key, number: index + 1, country: country || '—', provider: provider || '—', shippingTime,
-      prices: [row.quote1, row.quote2, row.quote3, row.quoteCustom].map(value =>
-        value != null && Number.isFinite(value) ? value : null),
+      key, number, country: country || '—', provider: provider || '—', shippingTime, processingTime, prices,
       sourceDescription: [row.country, row.quoteRegion, row.carrier, row.transport, row.channelCode].filter(Boolean).join(' · '),
     }
   })
   return {
+    title: input.edits.title ?? 'JerryFulfillment Quote Sheet', notes: input.edits.notes ?? [...CUSTOMER_QUOTE_NOTES],
     agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)],
-    quantityLabels: quantities.map((quantity, index) => index === 3 && !input.customQuantity ? 'Custom' : `${quantity} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
+    quantityLabels: quantities.map((quantity, index) => isLegacyCustom(quantity, index) || (!input.quantities && index === 3 && !input.customQuantity) ? 'Custom' : `${validQuoteSheetQuantity(quantity) ? quantity : '—'} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
   }
 }
 
@@ -150,6 +186,6 @@ export function customerQuoteSheetTsv(sheet: CustomerQuoteSheet) {
   }
   return [
     ['No.', 'Country', 'Logistics Provider', 'Shipping Time', 'Processing Time', ...sheet.quantityLabels.map(label => `${label} (USD)`)],
-    ...sheet.rows.map(row => [row.number, row.country, row.provider, row.shippingTime, '1-2 days', ...row.prices.map(quoteSheetUsd)]),
+    ...sheet.rows.map(row => [row.number, row.country, row.provider, row.shippingTime, row.processingTime ?? '1-2 days', ...row.prices.map(quoteSheetUsd)]),
   ].map(row => row.map(cell).join('\t')).join('\r\n')
 }

@@ -1867,6 +1867,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </div>
 
         <QuotationPreviewSave
+          :reset-key="JSON.stringify([currentAuthUser.id, quoteMode, quoteMatrixMode, p.sku, bundleItems.map(item => [item.sku, item.quantityPerSet])])"
+          :calculate-price="(row, quantity) => quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="logisticsLoadState !== 'ready'" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
