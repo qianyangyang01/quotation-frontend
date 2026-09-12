@@ -51,6 +51,13 @@ const ruleIdIndex = new Map<number, LogisticsRule>()
 export function logisticsRuleByName(name: string) { return ruleNameIndex.get(name) }
 export function logisticsRuleById(id: number) { return ruleIdIndex.get(id) }
 
+/** Stable channel identity is authoritative; never substitute a same-name route. */
+export function logisticsRuleForChannel(name: string, channelKey = '') {
+  if (!channelKey) return logisticsRuleByName(name)
+  const rule = logisticsRuleById(Number(channelKey.split('::')[0]))
+  return rule?.relations.some(relation => `${rule.id}::${relation.carrier}::${relation.channelCode}` === channelKey) ? rule : undefined
+}
+
 function countryRowsForRule(rule: LogisticsRule, country: string) {
   const index = indexedRules.get(rule)
   return index ? (index.get(country.toLowerCase()) || []).filter(row => countryMatches(row, country))

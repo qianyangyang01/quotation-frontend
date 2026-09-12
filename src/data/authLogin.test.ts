@@ -8,7 +8,7 @@ const dependencies = vi.hoisted(() => ({
   clearPublishedLogisticsCache: vi.fn(),
 }))
 
-vi.mock('@/services/http', () => ({ api: { post: dependencies.post }, resetCsrf: dependencies.resetCsrf }))
+vi.mock('@/services/http', () => ({ api: { post: dependencies.post }, setRequestAccount: vi.fn(), resetCsrf: dependencies.resetCsrf }))
 vi.mock('@/services/financeSettings', () => ({
   hydrateFinanceSettings: dependencies.hydrateFinanceSettings,
   clearFinanceSettingsCache: dependencies.clearFinanceSettingsCache,

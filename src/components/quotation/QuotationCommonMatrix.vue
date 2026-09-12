@@ -9,9 +9,10 @@ import QuoteTaxLegend from './QuoteTaxLegend.vue'
 const props = withDefaults(defineProps<{
   active?: boolean
   countries: QuotationCountrySummary[]
-  quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
+  quoteRowsForCountry: (country: string, region?: string) => QuotationMatrixRow[]
   contextKey: string
   adoptedCountry: string
+  adoptedChannelKey?: string
   adoptedRule: string
   adoptedCarrier: string
   exchangeRate: number
@@ -46,10 +47,10 @@ const commonCountries = computed(() => props.countries
   .filter(country => country.stage === 'common')
   .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-CN')))
 
-function availableRows(country: string) {
+function availableRows(country: string, region?: string) {
   if (props.active === false) return []
   void props.contextKey
-  return props.quoteRowsForCountry(country).filter(row => row.available !== false)
+  return props.quoteRowsForCountry(country, region).filter(row => row.available !== false)
 }
 function rowKey(row: QuotationMatrixRow) { return `${row.country}|||${row.quoteRegion || ''}|||${row.channelKey || `${row.rule}|||${row.carrier}|||${row.transport}`}` }
 function presetMatchesRow(preset: QuotationPresetSelection, row: QuotationMatrixRow) {
@@ -61,7 +62,7 @@ function presetMatchesRow(preset: QuotationPresetSelection, row: QuotationMatrix
 }
 function applyPresetSelection() {
   const presets = props.presetSelection || []
-  const allRows = [...new Set(presets.map(preset => preset.country))].flatMap(availableRows)
+  const allRows = presets.flatMap(preset => availableRows(preset.country, preset.quoteRegion || ''))
   if (!presets.length) {
     selectedKeys.value = []
     emit('selectionChange', [])
@@ -80,10 +81,10 @@ function applyPresetSelection() {
 }
 function isSelected(row: QuotationMatrixRow) { return selectedKeys.value.includes(rowKey(row)) }
 function selectedQuoteRows() {
-  const countries = new Set(selectedKeys.value.map(key => key.split('|||')[0]!))
-  return [...countries].flatMap(availableRows).filter(isSelected)
+  const scopes = [...new Set(selectedKeys.value.map(key => JSON.stringify(key.split('|||').slice(0, 2))))]
+  return scopes.flatMap(scope => { const [country, region] = JSON.parse(scope) as [string, string]; return availableRows(country, region) }).filter(isSelected)
 }
-function isAdopted(row: QuotationMatrixRow) { return props.adoptedCountry === row.country && props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier && (props.countries.find(country => country.name === row.country)?.selectedQuoteRegion || '') === (row.quoteRegion || '') }
+function isAdopted(row: QuotationMatrixRow) { return props.adoptedCountry === row.country && (props.adoptedChannelKey ? props.adoptedChannelKey === row.channelKey : props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier) && (props.countries.find(country => country.name === row.country)?.selectedQuoteRegion || '') === (row.quoteRegion || '') }
 function toggleSelection(row: QuotationMatrixRow) {
   const key = rowKey(row)
   const removing = isSelected(row)

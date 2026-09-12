@@ -1,13 +1,43 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, request, conditionalGet, downloadFile, idempotencyKey, resetCsrf, uploadForm } from './http'
+import { ApiError, api, request, conditionalGet, downloadFile, idempotencyKey, resetCsrf, uploadForm, setRequestAccount } from './http'
 
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   resetCsrf()
+  setRequestAccount('')
 })
 
 describe('quotation API client', () => {
+  it('binds business requests to the account displayed when they started and latches a server mismatch', async () => {
+    setRequestAccount('employee-a')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'ACCOUNT_CHANGED', message: '账号已切换' }), { status: 409 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(api.get('/quotations')).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' })
+    expect(new Headers(fetchMock.mock.calls[0]![1].headers).get('X-Expected-Account')).toBe('EMPLOYEE-A')
+    await expect(api.post('/quotations', {})).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+  it('discards an old account response arriving after a new login', async () => {
+    let respond!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { respond = resolve })))
+    setRequestAccount('A')
+    const pending = api.get('/quotations')
+    setRequestAccount('B')
+    respond(new Response(JSON.stringify({ data: { owner: 'A' } })))
+    await expect(pending).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' })
+  })
+  it('does not send a mutation if the account changes during CSRF preparation', async () => {
+    let respond!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { respond = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    setRequestAccount('A')
+    const pending = api.post('/quotation-drafts/mine/state', {})
+    setRequestAccount('B')
+    respond(new Response(JSON.stringify({ data: { headerName: 'X-XSRF-TOKEN', token: 'csrf' } })))
+    await expect(pending).rejects.toMatchObject({ code: 'ACCOUNT_CHANGED' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
   it('passes cancellation through CSRF preparation before a mutation', async () => {
     const controller = new AbortController()
     const fetchMock = vi.fn().mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))))

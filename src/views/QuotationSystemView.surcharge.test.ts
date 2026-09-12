@@ -30,7 +30,7 @@ describe('quotation view fee integration', () => {
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,
       financeChannelKey: (id: number, relation: { carrier: string; channelCode: string }) => id + '::' + relation.carrier + '::' + relation.channelCode,
       salePrice: () => 55,
-      logisticsRuleByName: () => ({ id: 1, name: '同一规则', relations: [{ carrier: '物流商', channelCode: 'PAY' }, { carrier: '豁免商', channelCode: 'FREE' }] }),
+      logisticsRuleForChannel: () => ({ id: 1, name: '同一规则', relations: [{ carrier: '物流商', channelCode: 'PAY' }, { carrier: '豁免商', channelCode: 'FREE' }] }),
       navigator: { clipboard: { writeText: async (text: string) => { copied = text } } }, toast: () => {},
       quoteMode: { value: mode }, bundleGoodsWeight: (n: number) => n, singleActualWeight: (_p: unknown, n: number) => n,
       calculateLogisticsFee: () => ({ total: 10 }), quoteRegionForCountry: () => '',

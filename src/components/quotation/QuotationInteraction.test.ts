@@ -55,6 +55,25 @@ function button(text: string) {
   return [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))!
 }
 
+it('preserves selected channels from both Australian regions when browsing another region and recalculates each scope', async () => {
+  const changed = vi.fn()
+  const state = reactive({ active: true, countries: [{ ...countries[1]!, quoteRegions: ['澳大利亚1区', '澳大利亚2区'], selectedQuoteRegion: '澳大利亚1区' }],
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 7, adoptedCountry: '', adoptedRule: '', adoptedCarrier: '',
+    quoteRowsForCountry: (country: string, region?: string) => [{ ...row(country, 1), quoteRegion: region ?? state.countries[0]!.selectedQuoteRegion,
+      quote1: (region ?? state.countries[0]!.selectedQuoteRegion).includes('1区') ? (state.contextKey === 'v1' ? 10 : 11) : 20 }],
+    onSelectionChange: changed,
+  })
+  mount(CommonMatrix, state); await nextTick(); await nextTick()
+  button('加入报价单').click(); await nextTick()
+  state.countries[0]!.selectedQuoteRegion = '澳大利亚2区'; state.contextKey = 'v2'; await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ quoteRegion: '澳大利亚1区', quote1: 11 })])
+  button('加入报价单').click(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([
+    expect.objectContaining({ quoteRegion: '澳大利亚1区', quote1: 11 }),
+    expect.objectContaining({ quoteRegion: '澳大利亚2区', quote1: 20 }),
+  ])
+})
+
 it('loads a non-common country on demand, sorts available countries first and preserves existing selections', async () => {
   let resolve!: (ok: boolean) => void
   const ensure = vi.fn(() => new Promise<boolean>(done => { resolve = done }))

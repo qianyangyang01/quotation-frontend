@@ -23,6 +23,7 @@ const props = withDefaults(defineProps<{
   contextKey: string
   customQuantity: number
   adoptedCountry: string
+  adoptedChannelKey?: string
   adoptedRule: string
   adoptedCarrier: string
   exchangeRate: number
@@ -337,7 +338,7 @@ function formatTime(value: string) {
       :context-key="contextKey"
       :custom-quantity="customQuantity"
       :adopted-country="adoptedCountry"
-      :adopted-rule="adoptedRule"
+      :adopted-rule="adoptedRule" :adopted-channel-key="adoptedChannelKey"
       :adopted-carrier="adoptedCarrier"
       :exchange-rate="exchangeRate"
       :unit-label="unitLabel"

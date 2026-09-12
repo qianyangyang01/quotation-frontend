@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   contextKey: string
   customQuantity: number
   adoptedCountry: string
+  adoptedChannelKey?: string
   adoptedRule: string
   adoptedCarrier: string
   exchangeRate: number
@@ -354,7 +355,7 @@ function changeRowRegion(country: string, row: QuotationMatrixRow, region: strin
   if (selectedRows(country).some(selected => rowKey(selected) === rowKey(next))) { regionFeedback.value = '该区域和渠道的报价方案已存在，原方案已保留'; return false }
   retainedRows.value[country + rowKey(next)] = next
   selectedChannelKeys.value = { ...selectedChannelKeys.value, [country]: [...new Set(keys.map(key => selectionKeys(country, row).includes(key) ? rowKey(next) : key))] }
-  if (props.adoptedCountry === country && props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier
+  if (props.adoptedCountry === country && (props.adoptedChannelKey ? props.adoptedChannelKey === row.channelKey : props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier)
     && (countrySummary(country)?.selectedQuoteRegion || '') === (row.quoteRegion || '')) emit('adopt', next)
   regionFeedback.value = ''
   return true
@@ -397,10 +398,10 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
         <div v-if="availableRows(country).length" class="country-metrics"><span>最低 <b>{{ formatUsd(recommendedRows(country)[0]?.quote1 ?? null) }}</b> · {{ recommendedRows(country)[0]?.quoteRegion }} · {{ recommendedRows(country)[0]?.carrier }}｜{{ recommendedRows(country)[0]?.transport }}</span><span>最快 <b>{{ fastestRow(availableRows(country))?.eta }}</b> · {{ fastestRow(availableRows(country))?.quoteRegion }} · {{ fastestRow(availableRows(country))?.carrier }}｜{{ fastestRow(availableRows(country))?.transport }}</span></div>
         <div class="quote-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价</span><span>2{{ unitLabel || '件' }}报价</span><span>3{{ unitLabel || '件' }}报价</span><span class="custom-quote-head">{{ customQuantity }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
         <div v-if="selectedRows(country).length" class="selected-channels">
-          <section v-for="row in selectedRows(country)" :key="rowKey(row)" :class="{ adopted:adoptedCountry===country && adoptedRule===row.rule && adoptedCarrier===row.carrier && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') }">
+          <section v-for="row in selectedRows(country)" :key="rowKey(row)" :class="{ adopted:adoptedCountry===country && (adoptedChannelKey ? adoptedChannelKey===row.channelKey : adoptedRule===row.rule && adoptedCarrier===row.carrier) && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') }">
             <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta v-if="row.available !== false" :row="row" /></span><label v-if="countrySummary(country)?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="row.quoteRegion" :aria-label="country+' '+row.transport+' 报价区域'" @change="handleRowRegion(country,row,$event)"><option v-for="region in countrySummary(country)?.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></div><b>{{ row.eta }}</b>
             <span><small v-if="row.available === false">{{ row.availabilityMessage }}</small><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small><small v-if="row.quantityMessages?.['1']">{{ row.quantityMessages['1'] }}</small></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small><small v-if="row.quantityMessages?.['2']">{{ row.quantityMessages['2'] }}</small></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small><small v-if="row.quantityMessages?.['3']">{{ row.quantityMessages['3'] }}</small></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small><small v-if="row.quantityMessages?.[String(customQuantity)]">{{ row.quantityMessages[String(customQuantity)] }}</small></span>
-            <div class="row-actions"><button v-if="row.available === false" @click="replaceChannel(country,row)">替换渠道</button><button :disabled="row.available === false || row.quote1 == null" @click="$emit('adopt',row)">{{ adoptedCountry===country && adoptedRule===row.rule && adoptedCarrier===row.carrier && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') ? '首选' : '设为首选' }}</button><button @click="removeChannel(country,row)">移出报价单</button></div>
+            <div class="row-actions"><button v-if="row.available === false" @click="replaceChannel(country,row)">替换渠道</button><button :disabled="row.available === false || row.quote1 == null" @click="$emit('adopt',row)">{{ adoptedCountry===country && (adoptedChannelKey ? adoptedChannelKey===row.channelKey : adoptedRule===row.rule && adoptedCarrier===row.carrier) && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') ? '首选' : '设为首选' }}</button><button @click="removeChannel(country,row)">移出报价单</button></div>
           </section>
         </div>
         <button v-else class="empty-channel" @click="openChannelPicker(country)">{{ availableRows(country).length ? '＋ 添加该国家的指定渠道' : countrySummary(country)?.channelsLoaded === false ? '＋ 查询该国家的可用渠道' : '当前条件暂无可用渠道' }}</button>

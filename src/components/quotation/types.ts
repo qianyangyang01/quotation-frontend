@@ -23,6 +23,7 @@ export type QuotationProduct = {
   country: string
   channel: string
   rule: string
+  selectedChannelKey?: string
   manualFreight: boolean
   freight: number
   margin: number

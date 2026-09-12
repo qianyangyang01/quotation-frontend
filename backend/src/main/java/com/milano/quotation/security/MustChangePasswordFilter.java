@@ -32,6 +32,14 @@ public class MustChangePasswordFilter extends OncePerRequestFilter {
             catch (UsernameNotFoundException absent) { expire(request, response); return; }
             // Recheck server state on each request: a saved session must not retain revoked permissions.
             if (!current.enabled() || !current.passwordHash().equals(previous.passwordHash())) { expire(request, response); return; }
+            // A different tab can replace the shared session cookie while this page
+            // still displays the previous operator. Reject before reading or writing data.
+            var expected = request.getHeader("X-Expected-Account");
+            var path = request.getRequestURI();
+            var sessionDiscovery = List.of("/api/v1/auth/login", "/api/v1/auth/me", "/api/v1/auth/csrf").contains(path);
+            if (!sessionDiscovery && expected != null && !expected.isBlank() && !current.account().equalsIgnoreCase(expected.trim())) {
+                error(response, 409, "ACCOUNT_CHANGED", "登录账号已在其他页面切换，当前操作未提交，请刷新页面后确认账号"); return;
+            }
             if (!current.equals(previous)) {
                 var context = SecurityContextHolder.createEmptyContext();
                 context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(current, null, current.getAuthorities()));

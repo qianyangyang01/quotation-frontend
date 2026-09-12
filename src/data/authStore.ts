@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue'
-import { api, request, resetCsrf } from '@/services/http'
+import { api, request, resetCsrf, setRequestAccount } from '@/services/http'
 import { clearPublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
 import { clearFinanceSettingsCache, hydrateFinanceSettings } from '@/services/financeSettings'
 
@@ -27,6 +27,7 @@ export const authState = reactive<{ users: AuthUser[]; current: AuthUser | null;
 let initialization: Promise<void> | null = null
 
 function applySession(session: SessionUser) {
+  setRequestAccount(session.account)
   authState.current = { id: session.id, name: session.name, account: session.account, role: session.role, status: 'enabled', mustChangePassword: session.mustChangePassword, passwordUpdatedAt: '' }
   authState.permissions = [...session.permissions]
 }
@@ -36,7 +37,7 @@ export async function initializeAuth(force = false) {
   if (initialization && !force) return initialization
   initialization = (async () => {
     try { applySession(await api.get<SessionUser>('/auth/me')) }
-    catch { authState.current = null; authState.permissions = [] }
+    catch { setRequestAccount(''); authState.current = null; authState.permissions = [] }
     finally { authState.initialized = true; initialization = null }
   })()
   return initialization
@@ -79,7 +80,7 @@ export async function login(account: string, password: string) {
   }
   catch (error) { return { ok: false as const, message: error instanceof Error ? error.message : '登录失败' } }
 }
-export async function logout() { try { await api.post('/auth/logout') } finally { clearFinanceSettingsCache(); await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; resetCsrf() } }
+export async function logout() { try { await api.post('/auth/logout') } finally { clearFinanceSettingsCache(); await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; setRequestAccount(''); resetCsrf() } }
 export function hasPermission(permission: PermissionKey) { return isAuthenticated.value && authState.permissions.includes(permission) }
 export function hasAnyPermission(...permissions: PermissionKey[]) { return permissions.some(permission => hasPermission(permission)) }
 export function canAccessMyRecords(permissions: readonly PermissionKey[]) { return permissions.includes('myRecords') || permissions.includes('allRecords') }
