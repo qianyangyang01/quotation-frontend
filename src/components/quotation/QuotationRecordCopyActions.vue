@@ -27,9 +27,13 @@ function closeImage() {
   imageButton.value?.focus()
 }
 async function copyData() {
+  const context = contextKey.value
   copyingData.value = true
   status.value = undefined
-  try { status.value = await sheet.value?.copyData() }
+  try {
+    const result = await sheet.value?.copyData()
+    if (context === contextKey.value) status.value = result
+  }
   finally { copyingData.value = false }
 }
 </script>
@@ -41,6 +45,7 @@ async function copyData() {
       <button type="button" :disabled="copyingData" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
     </div>
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>
+    <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="openImage">打开报价单检查并重试</button>
     <Teleport to="body">
       <dialog ref="dialog" class="record-quote-dialog" aria-label="报价记录客户报价单" @cancel.prevent="closeImage">
         <header><div><strong>客户报价单</strong><p>使用本条记录保存的渠道与报价；预览后复制图片，或直接复制表格数据。</p></div><button type="button" :disabled="sheet?.copying" aria-label="关闭客户报价单" @click="closeImage">×</button></header>

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatQuoteDate, formatShippingTime,
   localQuoteDate, newQuoteSheetEdits, quoteSheetCountryCode, quoteSheetProviderName,
-  quoteSheetRowKey, reconcileQuoteSheetEdits, type QuoteSheetSourceRow,
+  quoteSheetRowKey, quoteSheetProviderKey, customerQuoteSheetTsv, reconcileQuoteSheetEdits, type QuoteSheetSourceRow,
 } from './customerQuoteSheet'
 
 function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceRow {
@@ -15,6 +15,43 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it('covers all 14 production provider names, including the failing screenshot routes', () => {
+    const names = ['万邦', '云途', '云速递', '容鼎', '捷易通达', '极通环球', '燕文', '百洲', '花海', '递四方', '通邮', '闪电猴', '顺丰', '顺友']
+    const expected = ['Wanb Express', 'YunExpress', 'SFYD Express', 'Rongding', 'JYTD', 'JITO', 'Yanwen', 'Baizhou', 'Hua Hai', '4PX', 'TopYou', 'SDH Express', 'SF Express', 'SunYou']
+    const sheet = buildCustomerQuoteSheet({ rows: names.map((carrier, i) => source({ carrier, channelKey: String(i) })), countries: [], edits: edits(), customQuantity: 5, bundle: false })
+    expect(sheet.issues).toEqual([])
+    expect(sheet.rows.map(row => row.provider)).toEqual(expected)
+    expect(customerQuoteSheetTsv(sheet).split('\r\n')).toHaveLength(15)
+    expect(quoteSheetProviderName(' ４ＰＸ ')).toBe('4PX')
+  })
+
+  it('shares temporary English names across a provider while retaining every route and pruning removed names', () => {
+    const one = source({ carrier: '新物流', channelKey: 'one' })
+    const two = source({ carrier: '新物流', channelKey: 'two' })
+    const draft = edits()
+    const input = { rows: [one, two], countries: [], edits: draft, customQuantity: 5, bundle: false }
+    expect(buildCustomerQuoteSheet(input).issues).toHaveLength(1)
+    draft.providerNames![quoteSheetProviderKey(one.carrier)] = 'New Logistics'
+    Object.freeze(one); Object.freeze(two)
+    expect(buildCustomerQuoteSheet(input).rows.map(row => row.provider)).toEqual(['New Logistics', 'New Logistics'])
+    expect(buildCustomerQuoteSheet(input).issues).toEqual([])
+    expect(reconcileQuoteSheetEdits(draft, [two]).providerNames).toEqual(draft.providerNames)
+    expect(reconcileQuoteSheetEdits(draft, [source()]).providerNames).toEqual({})
+    expect(newQuoteSheetEdits('Alex').providerNames).toEqual({})
+    draft.providerNames![quoteSheetProviderKey(one.carrier)] = '仍然中文'
+    expect(() => customerQuoteSheetTsv(buildCustomerQuoteSheet(input))).toThrow('英文名称')
+    expect(one.carrier).toBe('新物流')
+  })
+
+  it('requires agent/date for the image but not for the table-only clipboard', () => {
+    const draft = edits(); draft.agent = ''; draft.date = '2026-02-30'
+    const sheet = buildCustomerQuoteSheet({ rows: [source()], countries: [], edits: draft, customQuantity: 5, bundle: false })
+    expect(sheet.issues).toHaveLength(2)
+    expect(sheet.tableIssues).toEqual([])
+    expect(customerQuoteSheetTsv(sheet)).toContain('US\tYanwen')
+    const legacy = { ...sheet, tableIssues: undefined }
+    expect(() => customerQuoteSheetTsv(legacy)).toThrow('署名')
+  })
   it('maps countries without changing the backend GB code or merging routes', () => {
     const countries = [{ name: '英国', code: 'GB' }, { name: '意大利', code: 'IT' }]
     expect(quoteSheetCountryCode('英国', countries)).toBe('UK')

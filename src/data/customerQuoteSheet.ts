@@ -5,13 +5,14 @@ export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |
   'quote1' | 'quote2' | 'quote3' | 'quoteCustom'>
 export type QuoteSheetCountry = { name: string; code: string }
-export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string> }
+export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string> }
 export type CustomerQuoteSheetRow = {
   key: string; number: number; country: string; provider: string; shippingTime: string
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {
   agent: string; date: string; quantityLabels: string[]; rows: CustomerQuoteSheetRow[]; issues: string[]
+  tableIssues?: string[]
 }
 
 // The rendered, immutable notes asset contains this exact approved copy.
@@ -30,6 +31,15 @@ const providerNames: Record<string, string> = {
   '云速递': 'SFYD Express', '义乌市思方云递物流有限公司简称：云速递': 'SFYD Express', sfydexpress: 'SFYD Express',
   '顺丰': 'SF Express', '顺丰国际': 'SF Express', '顺丰国际快递': 'SF Express', '顺丰速运': 'SF Express', 'sfexpress': 'SF Express',
   '万邦': 'Wanb Express', '万邦速达': 'Wanb Express', '万邦物流': 'Wanb Express', 'wanbexpress': 'Wanb Express',
+  '闪电猴': 'SDH Express', '闪电猴物流': 'SDH Express', sdhexpress: 'SDH Express',
+  '顺友': 'SunYou', '顺友物流': 'SunYou', sunyou: 'SunYou',
+  '通邮': 'TopYou', '通邮物流': 'TopYou', topyou: 'TopYou',
+  '捷易通达': 'JYTD', jytd: 'JYTD',
+  '极通环球': 'JITO', jito: 'JITO',
+  // Readable romanized display names; these do not rename the provider's business record.
+  '花海': 'Hua Hai', '花海供应链': 'Hua Hai', huahai: 'Hua Hai',
+  '容鼎': 'Rongding', '容鼎供应链': 'Rongding', rongding: 'Rongding',
+  '百洲': 'Baizhou', '百洲货运': 'Baizhou', baizhou: 'Baizhou',
   '中国邮政': 'China Post', '邮政': 'China Post', '中邮': 'China Post',
   '菜鸟': 'Cainiao', '菜鸟物流': 'Cainiao', '菜鸟国际': 'Cainiao',
   '联邦快递': 'FedEx', fedex: 'FedEx', '敦豪': 'DHL', dhl: 'DHL', ups: 'UPS', '联合包裹': 'UPS',
@@ -57,11 +67,16 @@ export function formatQuoteDate(value: string) {
     ? `${day} ${months[month - 1]} ${year}` : ''
 }
 export function newQuoteSheetEdits(agent: string, now = new Date()): QuoteSheetEdits {
-  return { agent, date: localQuoteDate(now), shippingTimes: {} }
+  return { agent, date: localQuoteDate(now), shippingTimes: {}, providerNames: {} }
 }
 export function reconcileQuoteSheetEdits(edits: QuoteSheetEdits, rows: QuoteSheetSourceRow[]) {
   const keys = new Set(rows.map(quoteSheetRowKey))
-  return { ...edits, shippingTimes: Object.fromEntries(Object.entries(edits.shippingTimes).filter(([key]) => keys.has(key))) }
+  const providers = new Set(rows.map(row => quoteSheetProviderKey(row.carrier)))
+  return {
+    ...edits,
+    shippingTimes: Object.fromEntries(Object.entries(edits.shippingTimes).filter(([key]) => keys.has(key))),
+    providerNames: Object.fromEntries(Object.entries(edits.providerNames || {}).filter(([key]) => providers.has(key))),
+  }
 }
 export function formatShippingTime(value: string) {
   const text = String(value || '').trim()
@@ -77,10 +92,12 @@ export function quoteSheetCountryCode(country: string, catalog: QuoteSheetCountr
     || fallbackCountries[country] || (/^[a-z]{2}$/i.test(country) ? country : '')).toUpperCase()
   return code === 'GB' ? 'UK' : /^[A-Z]{2}$/.test(code) ? code : ''
 }
+export function quoteSheetProviderKey(provider: string) {
+  return provider.normalize('NFKC').toLowerCase().replace(/[\s._-]/g, '')
+}
 export function quoteSheetProviderName(provider: string) {
-  const name = provider.trim()
-  const key = name.toLowerCase().replace(/[\s._-]/g, '')
-  return providerNames[key] || (/^[\x20-\x7e]+$/.test(name) ? name : '')
+  const name = provider.normalize('NFKC').trim()
+  return providerNames[quoteSheetProviderKey(name)] || (/^[\x20-\x7e]+$/.test(name) ? name : '')
 }
 export function quoteSheetUsd(value: number | null) {
   return value == null || !Number.isFinite(value) ? '—' : `$${value.toFixed(2)}`
@@ -90,6 +107,7 @@ export function buildCustomerQuoteSheet(input: {
   customQuantity: number; bundle: boolean
 }): CustomerQuoteSheet {
   const issues: string[] = []
+  const tableIssues: string[] = []
   const agent = input.edits.agent.trim()
   const date = formatQuoteDate(input.edits.date)
   if (!agent) issues.push('请填写报价单署名')
@@ -98,11 +116,12 @@ export function buildCustomerQuoteSheet(input: {
   const rows = input.rows.map((row, index) => {
     const key = quoteSheetRowKey(row)
     const country = quoteSheetCountryCode(row.country, input.countries)
-    const provider = quoteSheetProviderName(row.carrier)
-    if (!country) issues.push(`第 ${index + 1} 行缺少国家简称：${row.country}`)
-    if (!provider) issues.push(`第 ${index + 1} 行物流商尚未配置英文名称：${row.carrier}`)
+    const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
+    const provider = quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '')
+    if (!country) tableIssues.push(`第 ${index + 1} 行缺少国家简称：${row.country}`)
+    if (!provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
     const shippingTime = formatShippingTime(input.edits.shippingTimes[key] ?? row.eta)
-    if (/[^\x20-\x7e—]/.test(shippingTime)) issues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 days`)
+    if (/[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 days`)
     return {
       key, number: index + 1, country: country || '—', provider: provider || '—', shippingTime,
       prices: [row.quote1, row.quote2, row.quote3, row.quoteCustom].map(value =>
@@ -111,14 +130,15 @@ export function buildCustomerQuoteSheet(input: {
     }
   })
   return {
-    agent, date, rows, issues,
+    agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)],
     quantityLabels: quantities.map((quantity, index) => index === 3 && !input.customQuantity ? 'Custom' : `${quantity} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
   }
 }
 
 /** Tab-separated cells for Excel/WPS; only the customer table, including every route. */
 export function customerQuoteSheetTsv(sheet: CustomerQuoteSheet) {
-  if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
+  const issues = sheet.tableIssues ?? sheet.issues
+  if (issues.length) throw new Error(issues.join('；'))
   if (!sheet.rows.length) throw new Error('没有可复制的报价数据')
   const cell = (value: string | number) => {
     const text = String(value).replace(/[\t\r\n]+/g, ' ').trim()

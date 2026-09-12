@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
-  quoteSheetRowKey, quoteSheetUsd, reconcileQuoteSheetEdits,
+  quoteSheetRowKey, quoteSheetUsd, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
   type QuoteSheetCountry, type QuoteSheetSourceRow,
 } from '@/data/customerQuoteSheet'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
@@ -29,6 +29,9 @@ const sheet = computed(() => buildCustomerQuoteSheet({
   customQuantity: props.customQuantity, bundle: props.bundle,
 }))
 const currentImage = computed(() => images.value[activeImage.value])
+const missingProviders = computed(() => [...new Map(props.rows
+  .filter(row => !quoteSheetProviderName(row.carrier))
+  .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
 const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
 
 function releaseImages() {
@@ -48,11 +51,14 @@ watch(() => [props.contextKey, props.rows, props.countries, props.customQuantity
   if (props.contextKey !== previousContext) {
     edits.value = newQuoteSheetEdits(props.salesperson)
     previousContext = props.contextKey
-  } else {
-    edits.value = reconcileQuoteSheetEdits(edits.value, props.rows)
   }
   invalidate()
 }, { deep: true, flush: 'sync' })
+// Invalidate synchronously, but prune only after Vue batches array mutations.
+// reverse/sort/splice temporarily contain duplicate or missing rows mid-operation.
+watch(() => props.rows, () => {
+  edits.value = reconcileQuoteSheetEdits(edits.value, props.rows)
+}, { deep: true })
 watch(edits, invalidate, { deep: true, flush: 'sync' })
 watch(() => props.salesperson, (value, previous) => {
   if (edits.value.agent === previous) edits.value.agent = value
@@ -60,6 +66,10 @@ watch(() => props.salesperson, (value, previous) => {
 
 function updateShippingTime(row: QuoteSheetSourceRow, event: Event) {
   edits.value.shippingTimes[quoteSheetRowKey(row)] = (event.target as HTMLInputElement).value
+}
+function updateProviderName(key: string, event: Event) {
+  edits.value.providerNames ||= {}
+  edits.value.providerNames[key] = (event.target as HTMLInputElement).value
 }
 function restoreShippingTime(row: QuoteSheetSourceRow) {
   delete edits.value.shippingTimes[quoteSheetRowKey(row)]
@@ -151,6 +161,7 @@ onBeforeUnmount(() => {
         <button type="button" :disabled="sourcePending || !rows.length || rendering || copying" @click="copyData">复制报价数据</button>
       </div>
     </div>
+    <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     <p class="sheet-local-note">图片仅在当前页面临时生成，不上传、不存储；手动修改不影响系统原始报价和物流资料。</p>
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
@@ -159,6 +170,10 @@ onBeforeUnmount(() => {
         <label>By Agent · 署名<input v-model="edits.agent" aria-label="报价单署名" autocomplete="off" maxlength="40" :disabled="copying"></label>
         <label>Date · 日期<input v-model="edits.date" aria-label="报价单日期" type="date" min="1000-01-01" max="9999-12-31" :disabled="copying"></label>
       </div>
+      <div v-if="missingProviders.length" class="sheet-provider-editor">
+        <p class="sheet-edit-help">英文名补填：以下物流商尚无英文显示名，请填写后预览或复制。同一物流商的全部渠道共用此名称，仅当前页面有效。</p>
+        <div class="sheet-metadata"><label v-for="provider in missingProviders" :key="provider.key">{{ provider.name }} · English name<input :value="edits.providerNames?.[provider.key] || ''" :aria-label="`${provider.name}英文名`" autocomplete="off" placeholder="Enter English name" maxlength="80" :disabled="copying" @input="updateProviderName(provider.key, $event)"></label></div>
+      </div>
       <p class="sheet-edit-help">仅署名、日期和 Shipping Time 可编辑，美元价格直接使用系统结果。缺失时效可填写 6-12 days；留空显示 —。</p>
       <div class="sheet-editor-scroll">
         <table>
@@ -166,7 +181,7 @@ onBeforeUnmount(() => {
           <tbody>
             <tr v-for="(row, index) in sheet.rows" :key="row.key">
               <td>{{ row.number }}</td><td>{{ row.country }}</td>
-              <td><b>{{ row.provider }}</b><small class="sheet-source">{{ row.sourceDescription }}</small></td>
+              <td><b>{{ row.provider === '—' ? '待补英文名' : row.provider }}</b><small class="sheet-source">{{ row.sourceDescription }}</small></td>
               <td class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(rows[index].eta) === '—' ? '' : formatShippingTime(rows[index].eta))" :aria-label="`第 ${row.number} 行运输时效`" placeholder="例如 6-12 days" maxlength="80" :disabled="copying" @input="updateShippingTime(rows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(rows[index])">恢复渠道时效</button></td>
               <td>1-2 days</td><td v-for="(price, priceIndex) in row.prices" :key="priceIndex">{{ quoteSheetUsd(price) }}</td>
             </tr>
@@ -187,7 +202,6 @@ onBeforeUnmount(() => {
         <h4>IMPORTANT NOTES</h4><ol><li v-for="note in CUSTOMER_QUOTE_NOTES" :key="note">{{ note }}</li></ol>
       </details>
     </div>
-    <p v-if="message" class="sheet-message" :class="{ failed }" role="status">{{ message }}</p>
   </section>
 </template>
 

@@ -13,8 +13,16 @@ let assets: Promise<HTMLImageElement[]> | undefined
 function loadImage(url: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('报价单样式素材加载失败，请重试'))
+    const finish = (error?: Error) => {
+      clearTimeout(timeout)
+      image.onload = null
+      image.onerror = null
+      if (error) reject(error)
+      else resolve(image)
+    }
+    const timeout = setTimeout(() => finish(new Error('报价单样式素材加载超时，请检查网络后重试')), 15000)
+    image.onload = () => finish()
+    image.onerror = () => finish(new Error('报价单样式素材加载失败，请重试'))
     image.src = url
   })
 }

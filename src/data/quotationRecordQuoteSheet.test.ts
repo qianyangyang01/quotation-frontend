@@ -54,7 +54,7 @@ describe('saved record customer table copying', () => {
     const sheet = buildCustomerQuoteSheet({ ...source, edits })
     expect(customerQuoteSheetTsv(sheet).split('\r\n')[1].split('\t')).toHaveLength(9)
     expect(customerQuoteSheetTsv(sheet)).toContain("'=1+1")
-    sheet.issues.push('invalid source')
+    sheet.tableIssues!.push('invalid source')
     expect(() => customerQuoteSheetTsv(sheet)).toThrow('invalid source')
   })
 })
