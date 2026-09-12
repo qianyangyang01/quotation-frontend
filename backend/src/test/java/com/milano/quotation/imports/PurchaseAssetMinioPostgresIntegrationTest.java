@@ -30,7 +30,7 @@ class PurchaseAssetMinioPostgresIntegrationTest {
 
     @Container static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16.4-alpine")
             .withDatabaseName("quotation_prod").withUsername("quotation_app").withPassword("quotation_test_password");
-    @Container static final GenericContainer<?> minio = new GenericContainer<>("minio/minio:RELEASE.2025-07-23T15-54-02Z")
+    @Container static final GenericContainer<?> minio = new GenericContainer<>("quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z")
             .withEnv("MINIO_ROOT_USER", ACCESS_KEY).withEnv("MINIO_ROOT_PASSWORD", SECRET_KEY)
             .withCommand("server", "/data").withExposedPorts(9000);
 
