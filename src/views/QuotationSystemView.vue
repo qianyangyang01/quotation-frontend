@@ -1666,7 +1666,7 @@ function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>
   return { country: option.country, carrier: option.carrier, channel: option.channel, rule: option.rule,
     systemQuoteUsd: price.quoteUsd, systemQuoteCny: price.quoteCny, totalCostCny: price.cost }
 }
-const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave>>()
+const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave> | null>(null)
 async function save() {
   await nextTick() // Capture the editor only after recalculated parent props reach it.
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
@@ -1884,7 +1884,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           />
         </div>
 
-        <QuotationPreviewSave ref="quotationPreview"
+        <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"
           :reset-key="JSON.stringify([currentAuthUser.id, quoteMode, quoteMatrixMode, p.sku, bundleItems.map(item => [item.sku, item.quantityPerSet])])"
           :calculate-price="(row, quantity) => quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"

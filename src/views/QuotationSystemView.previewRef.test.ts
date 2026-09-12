@@ -1,0 +1,95 @@
+// @vitest-environment happy-dom
+import { readFileSync } from 'node:fs'
+import { compileTemplate } from 'vue/compiler-sfc'
+import ts from 'typescript'
+import * as Vue from 'vue'
+import { afterEach, expect, it, vi } from 'vitest'
+import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vue'
+import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
+
+// Compile the production loop and ref binding, and mount BOTH real child components.
+// A mocked capturePrices object hides Vue's ref-in-v-for array behavior.
+const source = readFileSync('src/views/QuotationSystemView.vue', 'utf8')
+const loop = source.match(/<template v-for="p in products\.slice\(0,1\)" :key="p\.id">/)![0]
+const binding = source.match(/<QuotationPreviewSave\s+((?::)?ref="[^"]+")/)![1]
+const compiled = compileTemplate({ source: `${loop}<QuotationPreviewSave ${binding} v-bind="previewProps" :context-key="p.sku" @save="attemptSave" /></template>`, filename:'preview-ref.vue', id:'preview-ref', compilerOptions:{expressionPlugins:['typescript']} })
+const render = new Function('require', 'exports', ts.transpileModule(compiled.code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module:ts.ModuleKind.CommonJS } }).outputText+'\nreturn exports.render')(()=>Vue,{})
+let app: Vue.App | undefined
+afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
+async function settle() { for (let i=0;i<6;i++) await Vue.nextTick() }
+function button(text:string) { return Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.includes(text))! }
+async function input(label:string,value:string) {
+  const field=document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+  field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));await settle()
+}
+function mount(mode:string) {
+  const quotationPreview=Vue.ref<InstanceType<typeof QuotationPreviewSave>|null>(null)
+  const products=Vue.ref([{id:1,sku:'SKU-A'}])
+  const persisted=vi.fn(),errors:string[]=[]
+  const previewProps=Vue.reactive({
+    rows:[{country:'美国',carrier:'燕文',rule:'rule',ruleId:1,channelKey:'route-a',channelCode:'A',transport:'channel',eta:'6-12 days',quote1:2,quote2:3,quote3:4,quoteCustom:5}],
+    countries:[],salesperson:'QA',sourcePending:false,matrixModeLabel:mode,customerName:'QA',productName:'Test',sku:'SKU-A',customerGrade:'A',coefficient:1,customQuantity:4,unitLabel:'件',exchangeRate:6.7,
+    primaryCountry:'美国',primaryCarrier:'燕文',primaryRule:'rule',primaryCnyPrice:13.4,primaryUsdPrice:2,
+    calculatePrice:(_row:unknown,quantity:number)=>quantity+1,
+  })
+  app=Vue.createApp({components:{QuotationPreviewSave},setup:()=>({quotationPreview,products,previewProps,attemptSave:()=>{
+    try { persisted(quotationPreview.value!.capturePrices()) }
+    catch(error) { errors.push((error as Error).message) }
+  }}),render})
+  const host=document.createElement('div');document.body.append(host);app.mount(host)
+  return {quotationPreview,products,persisted,errors,previewProps}
+}
+it.each(['common','specified','template'])('captures original and edited prices through the real %s preview save button',async mode=>{
+  const state=mount(mode);await settle()
+  await input('第 1 行第 2 列美元价格','2.70')
+  button('新增列').click();await settle();await input('第 5 个价格列数量','8')
+  await input('第 1 行第 5 列美元价格','8.80')
+  button('保存 1 张报价单').click();await settle()
+  expect(state.errors).toEqual([])
+  expect(state.persisted).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({quantities:[1,2,3,4,8],rows:[expect.objectContaining({prices:[2,2.7,4,5,8.8],systemPrices:[2,3,4,5,9]})]}))
+  expect(state.previewProps.rows[0].quote2).toBe(3)
+})
+it('uses the current mounted preview after product replacement, and blocks invalid edits',async()=>{
+  const state=mount('common');await settle()
+  const first=state.quotationPreview.value
+  await input('第 1 行第 1 列美元价格','1.234')
+  button('保存 1 张报价单').click();await settle()
+  expect(state.persisted).not.toHaveBeenCalled();expect(state.errors[0]).toContain('两位小数')
+  state.products.value=[{id:2,sku:'SKU-B'}];await settle()
+  expect(state.quotationPreview.value).not.toBe(first)
+  button('保存 1 张报价单').click();await settle()
+  expect(state.persisted).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({rows:[expect.objectContaining({prices:[2,3,4,5]})]}))
+})
+
+it('passes the mounted sheet prices through the actual save function into the create API payload',async()=>{
+  const state=mount('template');await settle()
+  await input('第 1 行第 2 列美元价格','2.70')
+  button('新增列').click();await settle();await input('第 5 个价格列数量','8')
+  await input('第 1 行第 5 列美元价格','8.80')
+  const script=source.split('<script setup lang="ts">')[1]!.split('</script>')[0]!
+  const ast=ts.createSourceFile('view.ts',script,ts.ScriptTarget.Latest,true)
+  const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
+  const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
+  const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
+  const context={
+    nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,resetLocalDraft,toast,
+    purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
+    products:{value:[{sku:'SKU-A',name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:0}]},
+    customerName:{value:'QA'},productCategory:{value:'日用品'},savedQuoteRows:{value:state.previewProps.rows.map(row=>({...row,taxConfigured:true}))},
+    hasQuotationProduct:()=>true,quoteMode:{value:'single'},bundleItems:{value:[]},quoteMatrixMode:{value:'template'},activeTemplateSnapshot:{value:{id:'template-a',name:'QA'}},
+    buildQuoteOptions:()=>[{id:'option-a',quoteSheetKey:quoteSheetRowKey(state.previewProps.rows[0]!)}],
+    selectedQuoteSummary:()=>({systemQuoteUsd:2,systemQuoteCny:13.4,totalCostCny:10}),
+    activePurchaseSkus:()=>[],logisticsRevision:{value:'revision-a'},currentSalespersonName:{value:'QA'},currentSalespersonAccount:{value:'QA'},
+    preferredQuotationImage:()=>'',selectedCustomerGrade:{value:'A'},monthlySalesEstimate:{value:10},exchange:{value:{usd:6.7}},customQuoteQuantity:{value:4},
+    draftVersion:{value:-1},draftUpdatedAt:{value:''},
+  }
+  const run=new Function(...Object.keys(context),ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn save')(...Object.values(context))
+  await run()
+  expect(createQuotationRecord).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    systemQuoteUsd:2,
+    customerQuote:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
+    systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
+  }))
+  expect(resetLocalDraft).toHaveBeenCalledOnce()
+  expect(toast).toHaveBeenCalledWith(expect.stringContaining('报价已保存：QA-SAVE-REF'))
+})
