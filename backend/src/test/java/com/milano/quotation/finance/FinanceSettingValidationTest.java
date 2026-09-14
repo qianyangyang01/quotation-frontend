@@ -7,6 +7,20 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class FinanceSettingValidationTest {
     private final JsonMapper mapper = new JsonMapper();
+    @Test void acceptsIndependentNewCustomerCoefficientAndRejectsInvalidValues() {
+        var valid = mapper.readTree("""
+            [{"grade":"S","coefficient":1.21605,"enabled":true},{"grade":"NEW","coefficient":1.45678,"enabled":true}]
+            """);
+        assertDoesNotThrow(() -> FinanceSettingValidation.validate("customer-grades", valid));
+        for (var coefficient : new String[]{"0", "-1", "null", "\"1.4\""}) {
+            var row = mapper.readTree("[{\"grade\":\"NEW\",\"coefficient\":" + coefficient + ",\"enabled\":true}]");
+            assertThrows(AppException.class, () -> FinanceSettingValidation.validate("customer-grades", row));
+        }
+        var duplicate = mapper.readTree("""
+            [{"grade":"NEW","coefficient":1.3},{"grade":"NEW","coefficient":1.4}]
+            """);
+        assertThrows(AppException.class, () -> FinanceSettingValidation.validate("customer-grades", duplicate));
+    }
     @Test void validatesCountryTaxProviders() {
         var payload = mapper.readTree("""
             {"countries":[{"country":"US","fixedFeeUsd":0.3,"providers":[{"provider":"P","mode":"exempt","selected":true}]}],"providers":[]}

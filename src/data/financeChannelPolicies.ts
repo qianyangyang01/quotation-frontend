@@ -57,7 +57,8 @@ export type FinanceChannelPolicy = {
   updatedAt: string
 }
 
-export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E'
+export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'NEW'
+export function customerGradeLabel(grade: string) { return grade === 'NEW' ? '新客户' : `${grade}级客户` }
 export type CustomerGradeSetting = { grade: CustomerGrade; coefficient: number; enabled: boolean }
 export type FinanceExchangeRateSetting = { usdCny: number; updatedAt: string }
 
@@ -75,6 +76,7 @@ const defaultGradeSettings: CustomerGradeSetting[] = [
   { grade: 'C', coefficient: 1.21, enabled: true },
   { grade: 'D', coefficient: 1.25, enabled: true },
   { grade: 'E', coefficient: 1.30, enabled: true },
+  { grade: 'NEW', coefficient: 1.30, enabled: false },
 ]
 
 export function normalizeCustomerGradeSettings(settings: Partial<CustomerGradeSetting>[] | undefined): CustomerGradeSetting[] {
@@ -87,9 +89,12 @@ export function normalizeCustomerGradeSettings(settings: Partial<CustomerGradeSe
   return defaultGradeSettings.map(fallback => {
     const setting = configured.get(fallback.grade)
     const coefficient = Number(setting?.coefficient)
+    const existingECoefficient = Number(configured.get('E')?.coefficient)
+    const fallbackCoefficient = fallback.grade === 'NEW' && Number.isFinite(existingECoefficient) && existingECoefficient > 0
+      ? existingECoefficient : fallback.coefficient
     return {
       grade: fallback.grade,
-      coefficient: Number.isFinite(coefficient) && coefficient >= 0 ? coefficient : fallback.coefficient,
+      coefficient: Number.isFinite(coefficient) && coefficient > 0 ? coefficient : fallbackCoefficient,
       enabled: typeof setting?.enabled === 'boolean' ? setting.enabled : fallback.enabled,
     }
   })

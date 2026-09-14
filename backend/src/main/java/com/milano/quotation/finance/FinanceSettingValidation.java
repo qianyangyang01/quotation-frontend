@@ -17,7 +17,7 @@ final class FinanceSettingValidation {
             }
             case "customer-grades" -> {
                 var rows = array(body, "grades"); var seen = new HashSet<String>();
-                for (var row : rows) { object(row); unique(row, "grade", seen); if (!Set.of("S","A","B","C","D","E").contains(row.path("grade").asText())) fail("客户等级不合法"); number(row.path("coefficient"), "coefficient", true); }
+                for (var row : rows) { object(row); unique(row, "grade", seen); if (!Set.of("S","A","B","C","D","E","NEW").contains(row.path("grade").asText())) fail("客户等级不合法"); number(row.path("coefficient"), "coefficient", true); }
             }
             case "country-classification" -> {
                 var seen = new HashSet<String>(); for (var row : array(body,"countries")) { object(row); unique(row,"country",seen); }

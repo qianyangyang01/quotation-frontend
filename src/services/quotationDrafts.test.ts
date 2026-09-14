@@ -15,6 +15,14 @@ const payload: QuotationDraftPayload = {
 describe('quotation draft repository', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it.each(['single', 'bundle'] as const)('preserves NEW grade in a %s draft round trip', async quoteMode => {
+    const draft = { ...payload, quoteMode, selectedCustomerGrade: 'NEW' }
+    mockedApi.put.mockResolvedValue({ exists: true, payload: draft, version: 1 })
+    const saved = await saveQuotationDraft(draft, -1)
+    mockedApi.get.mockResolvedValue(JSON.parse(JSON.stringify(saved)))
+    expect((await loadQuotationDraft()).payload?.selectedCustomerGrade).toBe('NEW')
+  })
+
   it.each(['化妆品', '保健品', '非液体化妆品'])('preserves %s independently of product category and selected regions', async logisticsAttribute => {
     const draft = { ...payload, productCategory: '服装', logisticsAttribute,
       templateSelections: [{ country: '澳大利亚', channelKey: 'channel-1', quoteRegion: '澳大利亚3区' }, { country: '澳大利亚', channelKey: 'channel-1', quoteRegion: '澳大利亚4区' }] }

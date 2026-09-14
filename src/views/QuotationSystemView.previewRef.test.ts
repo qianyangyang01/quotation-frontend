@@ -5,6 +5,7 @@ import ts from 'typescript'
 import * as Vue from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vue'
+import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 
 // Compile the production loop and ref binding, and mount BOTH real child components.
@@ -61,7 +62,7 @@ it('uses the current mounted preview after product replacement, and blocks inval
   expect(state.persisted).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({rows:[expect.objectContaining({prices:[2,3,4,5]})]}))
 })
 
-it('passes the mounted sheet prices through the actual save function into the create API payload',async()=>{
+it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the save function into the API payload',async(grade)=>{
   const state=mount('template');await settle()
   await input('第 1 行第 2 列美元价格','2.70')
   button('新增列').click();await settle();await input('第 5 个价格列数量','8')
@@ -72,7 +73,7 @@ it('passes the mounted sheet prices through the actual save function into the cr
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
   const context={
-    nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,resetLocalDraft,toast,
+    customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
     products:{value:[{sku:'SKU-A',name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:0}]},
     customerName:{value:'QA'},productCategory:{value:'日用品'},savedQuoteRows:{value:state.previewProps.rows.map(row=>({...row,taxConfigured:true}))},
@@ -80,7 +81,7 @@ it('passes the mounted sheet prices through the actual save function into the cr
     buildQuoteOptions:()=>[{id:'option-a',quoteSheetKey:quoteSheetRowKey(state.previewProps.rows[0]!)}],
     selectedQuoteSummary:()=>({systemQuoteUsd:2,systemQuoteCny:13.4,totalCostCny:10}),
     activePurchaseSkus:()=>[],logisticsRevision:{value:'revision-a'},currentSalespersonName:{value:'QA'},currentSalespersonAccount:{value:'QA'},
-    preferredQuotationImage:()=>'',selectedCustomerGrade:{value:'A'},monthlySalesEstimate:{value:10},exchange:{value:{usd:6.7}},customQuoteQuantity:{value:4},
+    preferredQuotationImage:()=>'',selectedCustomerGrade:{value:grade},monthlySalesEstimate:{value:10},exchange:{value:{usd:6.7}},customQuoteQuantity:{value:4},
     draftVersion:{value:-1},draftUpdatedAt:{value:''},
   }
   const run=new Function(...Object.keys(context),ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn save')(...Object.values(context))

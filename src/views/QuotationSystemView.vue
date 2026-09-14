@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { displayWeightGrams, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotationRowsSignature'
@@ -1738,7 +1739,7 @@ async function save() {
     packageHeightCm: quoteMode.value === 'single' ? p.packageHeightCm : undefined,
     defaultVolumeDivisor: quoteMode.value === 'single' ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
     logisticsAttribute: p.logisticsAttribute, ...summary,
-    customerGrade: `${selectedCustomerGrade.value}级客户`, monthlySalesEstimate: monthlySalesEstimate.value, exchangeRate: exchange.value.usd,
+    customerGrade: customerGradeLabel(selectedCustomerGrade.value), monthlySalesEstimate: monthlySalesEstimate.value, exchangeRate: exchange.value.usd,
     matrixMode: quoteMatrixMode.value,
     quotationTemplateId: templateSnapshot?.id,
     quotationTemplateName: templateSnapshot?.name,
@@ -1908,7 +1909,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button class="modal-close" @click="showRule = showHistory = false">×</button>
         <template v-if="showRule">
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
-          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每满 50g 增加 2g 包材重量</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 财务维护的 S–E 客户等级计算系数</span></li></ol>
+          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每满 50g 增加 2g 包材重量</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 财务维护的 客户等级计算系数</span></li></ol>
           <p class="modal-tip">美元价格按保存报价时的汇率快照换算，历史报价不会随新汇率自动改变。</p>
         </template>
         <template v-else>

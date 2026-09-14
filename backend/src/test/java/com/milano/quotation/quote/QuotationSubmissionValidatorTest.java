@@ -7,6 +7,17 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuotationSubmissionValidatorTest {
+    @Test void acceptsNewCustomerForSingleAndBundleAcrossMatrixModes() {
+        for (var mode : new String[]{"common", "specified", "template"}) {
+            var single = valid().put("customerGrade", "新客户").put("matrixMode", mode);
+            assertDoesNotThrow(() -> validator.validate(single));
+            var bundle = single.deepCopy().put("quoteMode", "bundle").put("primarySku", "SKU-1、SKU-2");
+            addBundleItem(bundle, "SKU-1", 2, 0.2, 12, 1.5);
+            addBundleItem(bundle, "SKU-2", 1, 0.35, 20, 0);
+            assertDoesNotThrow(() -> validator.validate(bundle));
+        }
+        assertThrows(FieldValidationException.class, () -> validator.validate(valid().put("customerGrade", "NEW级客户")));
+    }
     @Test void rejectsNegativeQuoteAmountsButAllowsMissingOptionalAmountsAndLosses() {
         var input = valid();
         ((tools.jackson.databind.node.ObjectNode) input.path("quoteOptions").get(0)).put("quoteCustomUsd", -10);

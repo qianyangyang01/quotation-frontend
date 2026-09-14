@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COMMON_COUNTRY_LIMIT, describeAustraliaQuoteRegions, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings, normalizePolicies, toggleFinanceChannelSelection } from './financeChannelPolicies'
+import { customerGradeLabel, customerGradeCoefficient, COMMON_COUNTRY_LIMIT, describeAustraliaQuoteRegions, normalizeCustomerGradeSettings, normalizeFinanceCountrySettings, normalizePolicies, toggleFinanceChannelSelection } from './financeChannelPolicies'
 
 it('selects a whole provider without duplicating existing channels or removing another provider', () => {
   const original = ['other-provider', 'sf-1']
@@ -43,11 +43,36 @@ describe('common country settings', () => {
 })
 
 describe('customer grade settings', () => {
+  it('adds new customers without changing existing coefficients or enabling an unconfirmed price', () => {
+    const legacy = [{ grade: 'E' as const, coefficient: 1.27635, enabled: true }]
+    const settings = normalizeCustomerGradeSettings(legacy)
+    expect(settings.find(item => item.grade === 'NEW')).toEqual({ grade: 'NEW', coefficient: 1.27635, enabled: false })
+    expect(legacy).toEqual([{ grade: 'E', coefficient: 1.27635, enabled: true }])
+    expect(customerGradeLabel('NEW')).toBe('新客户')
+    expect(customerGradeLabel('S')).toBe('S级客户')
+  })
+
+  it('preserves the independent new-customer coefficient after finance enables it', () => {
+    const settings = normalizeCustomerGradeSettings([
+      { grade: 'NEW', coefficient: 1.45678, enabled: true },
+      { grade: 'E', coefficient: 1.27635, enabled: true },
+    ])
+    expect(customerGradeCoefficient(settings, 'NEW')).toBe(1.45678)
+    expect(customerGradeCoefficient(settings, 'E')).toBe(1.27635)
+    expect(normalizeCustomerGradeSettings(settings)).toEqual(settings)
+  })
+
+  it('does not load invalid new-customer coefficients as zero-cost quotes', () => {
+    for (const coefficient of [0, -1, NaN, Infinity]) {
+      const settings = normalizeCustomerGradeSettings([{ grade: 'NEW', coefficient, enabled: false }])
+      expect(settings.find(item => item.grade === 'NEW')).toEqual({ grade: 'NEW', coefficient: 1.3, enabled: false })
+    }
+  })
   it('restores all S-E rows when the persisted setting is empty', () => {
     const settings = normalizeCustomerGradeSettings([])
 
-    expect(settings.map(setting => setting.grade)).toEqual(['S', 'A', 'B', 'C', 'D', 'E'])
-    expect(settings.every(setting => setting.enabled)).toBe(true)
+    expect(settings.map(setting => setting.grade)).toEqual(['S', 'A', 'B', 'C', 'D', 'E', 'NEW'])
+    expect(settings.filter(setting => setting.grade !== 'NEW').every(setting => setting.enabled)).toBe(true)
   })
 
   it('preserves configured values and fills missing grades', () => {
@@ -56,7 +81,7 @@ describe('customer grade settings', () => {
       { grade: 'C', coefficient: 1.35, enabled: true },
     ])
 
-    expect(settings).toHaveLength(6)
+    expect(settings).toHaveLength(7)
     expect(settings.find(setting => setting.grade === 'S')).toEqual({ grade: 'S', coefficient: 1.08, enabled: false })
     expect(settings.find(setting => setting.grade === 'C')).toEqual({ grade: 'C', coefficient: 1.35, enabled: true })
     expect(settings.find(setting => setting.grade === 'E')).toEqual({ grade: 'E', coefficient: 1.3, enabled: true })
