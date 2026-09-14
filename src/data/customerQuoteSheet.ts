@@ -52,7 +52,7 @@ const providerNames: Record<string, string> = {
 }
 const fallbackCountries: Record<string, string> = {
   '美国': 'US', '英国': 'UK', '德国': 'DE', '法国': 'FR', '加拿大': 'CA', '澳大利亚': 'AU',
-  '新西兰': 'NZ',
+  '新西兰': 'NZ', '爱尔兰': 'IE',
 }
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -102,6 +102,14 @@ export function quoteSheetCountryCode(country: string, catalog: QuoteSheetCountr
     || fallbackCountries[country] || (/^[a-z]{2}$/i.test(country) ? country : '')).toUpperCase()
   return code === 'GB' ? 'UK' : /^[A-Z]{2}$/.test(code) ? code : ''
 }
+const englishCountryNames = new Intl.DisplayNames(['en'], { type: 'region', style: 'long', fallback: 'none' })
+export function quoteSheetCountryName(country: string, catalog: QuoteSheetCountry[]) {
+  const value = country.trim()
+  const code = quoteSheetCountryCode(value, catalog)
+  if (code) return englishCountryNames.of(code === 'UK' ? 'GB' : code) || ''
+  // Preserve an explicitly entered English name; unknown Chinese names still need a catalog mapping.
+  return /^[A-Za-z][A-Za-z .,'’()&-]{2,79}$/.test(value) ? value : ''
+}
 export function quoteSheetProviderKey(provider: string) {
   return provider.normalize('NFKC').toLowerCase().replace(/[\s._-]/g, '')
 }
@@ -132,10 +140,10 @@ export function buildCustomerQuoteSheet(input: {
   const rows = input.rows.map((row, index) => {
     const key = quoteSheetRowKey(row)
     const fields = input.edits.fields?.[key] || {}
-    const country = fields.country === undefined ? quoteSheetCountryCode(row.country, input.countries) : quoteSheetCountryCode(fields.country.trim(), [])
+    const country = quoteSheetCountryName(fields.country ?? row.country, input.countries)
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
     const provider = fields.provider === undefined ? quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '') : fields.provider.trim()
-    if (!country) tableIssues.push(`第 ${index + 1} 行缺少国家简称：${row.country}`)
+    if (!country) tableIssues.push(`第 ${index + 1} 行缺少国家英文全称：${row.country}`)
     if (!provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
     if (/[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)
     const shippingTime = formatShippingTime(input.edits.shippingTimes[key] ?? row.eta)

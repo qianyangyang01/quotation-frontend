@@ -55,7 +55,7 @@ it('previews the formerly blocked carriers and copies the exact preview blob and
   await click('复制报价数据')
   const cells = writeText.mock.calls[0][0].split('\r\n').map((line: string) => line.split('\t'))
   expect(cells).toHaveLength(3); expect(cells.every((line: string[]) => line.length === 9)).toBe(true)
-  expect(cells[2]).toEqual(['2', 'US', 'SDH Express', '8-12 days', '1-2 days', '$10.80', '$16.35', '$21.90', '$30.85'])
+  expect(cells[2]).toEqual(['2', 'United States', 'SDH Express', '8-12 days', '1-2 days', '$10.80', '$16.35', '$21.90', '$30.85'])
   expect(writeText.mock.calls[0][0]).not.toMatch(/内部|全国统一/)
   expect(JSON.stringify(state.rows)).toBe(original)
 })
@@ -168,7 +168,7 @@ it('adds inline quantity columns, calculates by original route identity and copi
   await click('预览报价单'); await click('复制报价数据')
   const snapshot = render.mock.lastCall![0]
   expect(snapshot.quantityLabels).toEqual(['1 pc', '2 pcs', '3 pcs', '5 pcs', '8 pcs'])
-  expect(snapshot.rows[0]).toMatchObject({ country: 'CA', provider: 'Custom Carrier', processingTime: '3-4 days', prices: [10.8,16.35,21.9,30.85,27.5] })
+  expect(snapshot.rows[0]).toMatchObject({ country: 'Canada', provider: 'Custom Carrier', processingTime: '3-4 days', prices: [10.8,16.35,21.9,30.85,27.5] })
   expect(snapshot.rows[1].prices[4]).toBeNull()
   const cells = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
   expect(cells.every((cells: string[]) => cells.length === 10)).toBe(true)

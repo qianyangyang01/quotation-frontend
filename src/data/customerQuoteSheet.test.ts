@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { formatLogisticsEta } from './logistics'
 import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatQuoteDate, formatShippingTime,
-  localQuoteDate, newQuoteSheetEdits, quoteSheetCountryCode, quoteSheetProviderName,
+  localQuoteDate, newQuoteSheetEdits, quoteSheetCountryCode, quoteSheetCountryName, quoteSheetProviderName,
   quoteSheetRowKey, quoteSheetProviderKey, customerQuoteSheetTsv, reconcileQuoteSheetEdits, type QuoteSheetSourceRow,
 } from './customerQuoteSheet'
 
@@ -16,6 +16,24 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it('uses full English country names for live rows, saved country codes and manual edits', () => {
+    const countries = [{ name: '阿联酋', code: 'AE' }]
+    expect(['US','UK','GB','AU','NZ','IE','DE','FR','CA','阿联酋'].map(value => quoteSheetCountryName(value, countries)))
+      .toEqual(['United States','United Kingdom','United Kingdom','Australia','New Zealand','Ireland','Germany','France','Canada','United Arab Emirates'])
+    expect(quoteSheetCountryName('United Kingdom', [])).toBe('United Kingdom')
+    expect(quoteSheetCountryName('ZZ', [])).toBe('Unknown Region')
+    const row = source({ country: 'IE' })
+    const draft = edits()
+    const original = JSON.stringify(row)
+    let sheet = buildCustomerQuoteSheet({rows:[row],countries,edits:draft,customQuantity:5,bundle:false})
+    expect(sheet.rows[0].country).toBe('Ireland')
+    expect(customerQuoteSheetTsv(sheet)).toContain('\tIreland\t')
+    draft.fields = {[quoteSheetRowKey(row)]:{country:'United Arab Emirates'}}
+    sheet = buildCustomerQuoteSheet({rows:[row],countries,edits:draft,customQuantity:5,bundle:false})
+    expect(sheet.rows[0].country).toBe('United Arab Emirates')
+    expect(sheet.issues).toEqual([])
+    expect(JSON.stringify(row)).toBe(original)
+  })
   it('treats the real logistics missing/conflicting ETA placeholder as absent without altering source data', () => {
     const eta = formatLogisticsEta({ etaMinDays: 0, etaMaxDays: 0 })
     const row = Object.freeze(source({ carrier: '极通环球', eta }))
@@ -60,7 +78,7 @@ describe('customer quotation presentation', () => {
     const sheet = buildCustomerQuoteSheet({ rows: [source()], countries: [], edits: draft, customQuantity: 5, bundle: false })
     expect(sheet.issues).toHaveLength(2)
     expect(sheet.tableIssues).toEqual([])
-    expect(customerQuoteSheetTsv(sheet)).toContain('US\tYanwen')
+    expect(customerQuoteSheetTsv(sheet)).toContain('United States\tYanwen')
     const legacy = { ...sheet, tableIssues: undefined }
     expect(() => customerQuoteSheetTsv(legacy)).toThrow('署名')
   })
@@ -166,7 +184,7 @@ describe('editable quantity quote sheet boundaries', () => {
     draft.fields={[quoteSheetRowKey(row)]:{provider:'=Custom',processingTime:'3-4 days',number:'8',prices:{'2':''}}}
     const sheet=buildCustomerQuoteSheet({rows:[row],countries:[],edits:draft,customQuantity:5,bundle:false})
     expect(sheet.title).toBe('Custom Quote');expect(sheet.notes).toHaveLength(4)
-    expect(customerQuoteSheetTsv(sheet)).toContain("8\tUS\t'=Custom\t6-12 days\t3-4 days\t$12.80\t—")
+    expect(customerQuoteSheetTsv(sheet)).toContain("8\tUnited States\t'=Custom\t6-12 days\t3-4 days\t$12.80\t—")
     expect(CUSTOMER_QUOTE_NOTES[1]).toContain('PayPal')
   })
 })
