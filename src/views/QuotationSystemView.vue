@@ -28,7 +28,7 @@ import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
-import { isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
+import { logisticsUnavailableReason, isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
 import { preferredQuotationImage } from '@/data/quotationImages'
@@ -1222,11 +1222,11 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
     const tax = custom?.tax || quote1?.tax || quote2?.tax || quote3?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey)
     const row: QuotationMatrixRow = {
         ...option,
-        quantityMessages: Object.fromEntries([1,2,3,quantity].filter(count => !costFor(count)).map(count => {
-          const weight = quoteMode.value === 'bundle' ? bundleGoodsWeight(count) : singleActualWeight(p,count)
-          const rule = logisticsRuleForChannel(option.rule, option.channelKey)
-          const max = Math.max(0,...(rule?.prices.filter(r => r.areaName === country).map(r => r.weightToKg) || []))
-          return [String(count), max > 0 && weight > max ? `${count}${quoteMode.value === 'bundle' ? '套' : '件'}实际重${weight.toFixed(3)}kg，超过${max}kg上限` : `${count}${quoteMode.value === 'bundle' ? '套' : '件'}当前重量或区域无可用运价`]
+        quantityMessages: Object.fromEntries([...new Set([1,2,3,quantity])].flatMap(count => {
+          const result = costFor(count)
+          if (result?.tax.configured) return []
+          return [[String(count), result ? result.tax.label || '税费与附加费配置待补齐'
+            : missingQuantityReason(p, option.rule, option.channelKey, country, region, count)]]
         })),
         country,
         quoteRegion: region || undefined,
@@ -1574,18 +1574,17 @@ function logisticsSamplesFor(row: QuotationMatrixRow, p: Product) {
       etaMinDays: result?.price.etaMinDays || 0, etaMaxDays: result?.price.etaMaxDays || 0 }
   })
 }
-function unavailableTemplateReason(preset: {country:string;channelKey?:string;quoteRegion?:string}) {
+function missingQuantityReason(p: Product, name: string, channelKey: string, country: string, region: string, quantity: number) {
   if (quoteLogisticsBusy()) return '渠道正在加载，请稍候'
   if (logisticsLoadState.value === 'error' || countryLoadError.value) return '渠道加载失败，请重试'
   if (purchaseTaxBlockReason.value) return purchaseTaxBlockReason.value
-  const rule = logisticsRules.find(r => String(r.id) === preset.channelKey?.split('::')[0])
-  if (!rule) return '当前资料中未找到该渠道，请核对渠道是否停用或不支持当前商品属性'
-  const prices = rule.prices.filter(r => r.areaName === preset.country || r.countryCode === preset.country)
-  const weight = quoteMode.value === 'bundle' ? bundleGoodsWeight(1) : singleActualWeight(products.value[0], 1)
-  const max = Math.max(0,...prices.map(r => r.weightToKg))
-  if (max > 0 && weight > max) return `${quoteMode.value === 'bundle' ? '单套' : '单件'}实际重 ${weight.toFixed(3)}kg，超过该国家渠道上限 ${max}kg`
-  if (billingQuoteRegion(rule,preset.country,preset.quoteRegion) === null) return '原分区无法匹配，请重新选择区域或替换渠道'
-  return '当前重量、区域或商品属性不符合可用报价条件，请核对后替换渠道'
+  const rule = logisticsRuleForChannel(name, channelKey)
+  const weight = quoteMode.value === 'bundle' ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity)
+  return logisticsUnavailableReason(rule, country, weight, [p.logisticsAttribute], region, quantity,
+    quoteMode.value === 'bundle' ? '套' : '件') || '当前条件暂无可用运价'
+}
+function unavailableTemplateReason(preset: {country:string;channelKey?:string;quoteRegion?:string;rule?:string}, quantity = 1) {
+  return missingQuantityReason(products.value[0], preset.rule || '', preset.channelKey || '', preset.country, preset.quoteRegion || '', quantity)
 }
 function buildQuoteOptions() {
   const p = products.value[0]
@@ -1858,7 +1857,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
-          <QuotationCommonMatrix :active="quoteMatrixMode==='common'"
+          <QuotationCommonMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
@@ -1868,7 +1867,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </div>
 
         <div v-show="quoteMatrixMode==='specified'" class="matrix-mode-panel">
-          <QuotationMatrix :active="quoteMatrixMode==='specified'"
+          <QuotationMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='specified'"
             :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'"

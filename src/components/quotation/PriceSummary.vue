@@ -2,6 +2,7 @@
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, ref } from 'vue'
 import type { QuotationMatrixRow } from './types'
+import QuoteUnavailableReason from './QuoteUnavailableReason.vue'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
 
 const props = withDefaults(defineProps<{
@@ -134,10 +135,10 @@ function isPrimary(row: QuotationMatrixRow) {
             <article v-for="row in group.rows" :key="rowKey(row)" :class="{ primary:isPrimary(row) }">
               <span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">首选</em></span>
               <strong>{{ row.eta }}</strong>
-              <span class="quote"><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small></span>
-              <span class="quote"><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small></span>
-              <span class="quote"><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small></span>
-              <span class="quote custom"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small></span>
+              <span class="quote"><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span>
+              <span class="quote"><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span>
+              <span class="quote"><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span>
+              <span class="quote custom"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(normalizedCustomQuantity)] || row.availabilityMessage" /></span>
             </article>
           </details>
         </section>

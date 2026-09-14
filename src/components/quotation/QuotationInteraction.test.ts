@@ -4,6 +4,7 @@ import { createApp, h, nextTick, reactive, type App, type Component } from 'vue'
 import CommonMatrix from './QuotationCommonMatrix.vue'
 import Matrix from './QuotationMatrix.vue'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
+import PriceSummary from './PriceSummary.vue'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import type { QuotationCountrySummary, QuotationMatrixRow } from './types'
 
@@ -262,4 +263,79 @@ it('retains an unavailable template row across SKU changes and restores its curr
   expect(document.body.textContent).toContain('替换渠道')
   state.contextKey = 'light'; await nextTick(); await nextTick()
   expect(changed.mock.lastCall?.[0][0].quote1).toBe(12)
+})
+
+
+it.each(['common', 'specified', 'template'].flatMap(mode => ['件', '套'].map(unit => [mode, unit])))('shows quantity reasons and clears stale messages in %s / %s', async (mode, unit) => {
+  const changed = vi.fn()
+  const state = reactive({ active: true, variant: mode === 'common' ? undefined : mode, countries: [countries[0]!],
+    contextKey: 'v1', customQuantity: 5, unitLabel: unit, exchangeRate: 7, adoptedCountry: '', adoptedRule: '', adoptedCarrier: '',
+    presetVersion: 1, presetSelection: [{ country: '美国', channelKey: '1' }],
+    quoteRowsForCountry: () => [{ ...row('美国', 1), quote3: state.contextKey === 'v1' ? null : 35, quoteCustom: null,
+      quantityMessages: { '1': '不应显示的旧原因', '3': '3'+unit+'含包材重量3.600kg，超过上限3kg', [String(state.customQuantity)]: state.customQuantity+unit+'该重量段暂无运价' } }], onSelectionChange: changed })
+  mount(mode === 'common' ? CommonMatrix : Matrix, state); await nextTick(); await nextTick()
+  expect(document.body.textContent).toContain('3'+unit+'含包材重量3.600kg，超过上限3kg')
+  expect(document.body.textContent).not.toContain('不应显示的旧原因')
+  state.contextKey = 'v2'; state.customQuantity = 8; await nextTick(); await nextTick()
+  expect(document.body.textContent).not.toContain('超过上限3kg')
+  expect(document.body.textContent).toContain('8'+unit+'该重量段暂无运价')
+  expect(document.body.textContent).not.toContain('5'+unit+'该重量段暂无运价')
+  expect(changed.mock.lastCall?.[0][0].quote3).toBe(35)
+})
+
+it('blocks adding entirely unpriced rows in common mode but permits a partially priced row', async () => {
+  const changed = vi.fn()
+  const state = reactive({active: true, countries: [countries[0]!], contextKey: 'v1', customQuantity: 5, exchangeRate: 7,
+    adoptedCountry: '', adoptedRule: '', adoptedCarrier: '', quoteRowsForCountry: () => [
+      { ...row('美国', 1), quote1: null, quote2: null, quote3: null, quoteCustom: null },
+      { ...row('美国', 2), quote3: null, quoteCustom: null }], onSelectionChange: changed })
+  mount(CommonMatrix, state); await nextTick(); await nextTick()
+  const buttons = [...document.querySelectorAll('button')].filter(b => b.textContent === '加入报价单')
+  expect(buttons.filter(b => b.disabled)).toHaveLength(1)
+  buttons.find(b => !b.disabled)!.click(); await nextTick()
+  expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({channelKey:'2'})])
+})
+
+it('picker refuses a row that loses every price before confirmation', async () => {
+  const changed = vi.fn()
+  const state = reactive({ active: true, variant: 'template', countries: [countries[0]!], contextKey:'v1', customQuantity:5,
+    exchangeRate:7, presetVersion:1, presetSelection:[{country:'美国',channelKey:'1'}],
+    quoteRowsForCountry:()=>[row('美国',1), {...row('美国',2), quote1: state.contextKey==='v1'?10:null, quote2:null,quote3:null,quoteCustom:null}],
+    onSelectionChange:changed })
+  mount(Matrix,state);await nextTick();await nextTick()
+  button('添加渠道').click();await nextTick();await nextTick()
+  const input=[...document.querySelectorAll<HTMLInputElement>('.picker-list input')].find(el=>!el.disabled)!
+  input.click();await nextTick()
+  state.contextKey='v2';await nextTick();await nextTick()
+  button('批量添加渠道').click();await nextTick();await nextTick()
+  expect(changed.mock.lastCall?.[0].map((r:QuotationMatrixRow)=>r.channelKey)).toEqual(['1'])
+  expect(document.body.textContent).toContain('原方案已保留')
+})
+
+
+it.each(['common','specified','template'])('preserves selected %s rows through loading, errors and recovery without stale quantity reasons', async mode => {
+  const changed=vi.fn()
+  const state=reactive({active:true,variant:mode==='common'?undefined:mode,countries:[countries[0]!],contextKey:'ready',customQuantity:8,
+    exchangeRate:7,adoptedCountry:'',adoptedRule:'',adoptedCarrier:'',presetVersion:1,presetSelection:[{country:'美国',channelKey:'1'}],
+    unavailableReason:(_preset:unknown,q=1)=>state.contextKey==='loading'?'渠道正在加载，请稍候':state.contextKey==='error'?'渠道加载失败，请重试':q+'套含包材重量'+q+'.000kg，超过上限0.5kg',
+    quoteRowsForCountry:()=>state.contextKey==='ready'?[row('美国',1)]:[],onSelectionChange:changed})
+  mount(mode==='common'?CommonMatrix:Matrix,state);await nextTick();await nextTick()
+  for(const status of ['overweight','loading','error','ready']){
+    state.contextKey=status;await nextTick();await nextTick()
+    const saved=changed.mock.lastCall?.[0][0]
+    expect(saved.channelKey).toBe('1')
+    if(status==='ready') {expect(saved.quote1).toBe(10);expect(document.body.textContent).not.toContain('超过上限')}
+    else {expect(saved.quote1).toBeNull();expect(saved.quantityMessages['8']).toBe(state.unavailableReason({},8))}
+    if(status==='overweight') expect(document.body.textContent).toContain('8套含包材重量8.000kg')
+    if(status==='loading'||status==='error') expect(document.body.textContent).not.toContain('超过上限')
+  }
+})
+
+it('internal preview displays a missing-price reason and hides it once a price is supplied', async () => {
+  const state=reactive({cnyPrice:70,usdPrice:10,productCost:1,logisticsCost:1,domesticFreightCost:0,profit:1,coefficient:1.2,grade:'A',status:'就绪',
+    quoteOptions:[{...row('美国',1),quote3:null as number|null,quantityMessages:{'3':'3件含包材重量3.600kg，超过上限3kg'}}],exchangeRate:7})
+  mount(PriceSummary,state);await nextTick();button('查看').click();await nextTick()
+  expect(document.body.textContent).toContain('3件含包材重量3.600kg')
+  state.quoteOptions[0]!.quote3=30;await nextTick()
+  expect(document.body.textContent).not.toContain('超过上限3kg')
 })

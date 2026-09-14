@@ -3,10 +3,13 @@ import { sameQuotationRegion } from '@/data/logistics'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
+import { hasAnyQuotationPrice } from '@/services/quotationAvailability'
+import QuoteUnavailableReason from './QuoteUnavailableReason.vue'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
 
 const props = withDefaults(defineProps<{
+  unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string, region?: string) => QuotationMatrixRow[]
@@ -38,6 +41,7 @@ const page = ref(1)
 const pageSize = ref(5)
 const sortMode = ref<'recommended' | 'price' | 'speed'>('recommended')
 const selectedKeys = ref<string[]>([])
+const retainedRows = new Map<string, QuotationMatrixRow>()
 const draggedCountry = ref('')
 const dragOverCountry = ref('')
 let observedPresetVersion = -1
@@ -74,6 +78,7 @@ function applyPresetSelection() {
     return row ? [row] : []
   })
   if (!allRows.length) return
+  for (const row of matched) retainedRows.set(rowKey(row), row)
   selectedKeys.value = [...new Set(matched.map(rowKey))]
   emit('selectionChange', selectedQuoteRows())
   activeCountry.value = matched[0]?.country || activeCountry.value
@@ -82,11 +87,19 @@ function applyPresetSelection() {
 function isSelected(row: QuotationMatrixRow) { return selectedKeys.value.includes(rowKey(row)) }
 function selectedQuoteRows() {
   const scopes = [...new Set(selectedKeys.value.map(key => JSON.stringify(key.split('|||').slice(0, 2))))]
-  return scopes.flatMap(scope => { const [country, region] = JSON.parse(scope) as [string, string]; return availableRows(country, region) }).filter(isSelected)
+  const current = scopes.flatMap(scope => { const [country, region] = JSON.parse(scope) as [string, string]; return availableRows(country, region) })
+  return selectedKeys.value.flatMap(key => {
+    const row = current.find(candidate => rowKey(candidate) === key)
+    if (row) { retainedRows.set(key, row); return [row] }
+    const old = retainedRows.get(key)
+    return old ? [{ ...old, available: false, quote1: null, quote2: null, quote3: null, quoteCustom: null,
+      quantityMessages: Object.fromEntries([...new Set([1,2,3,props.customQuantity || 5])].map(count => [String(count), props.unavailableReason?.(old, count) || '当前条件暂无可用运价'])), availabilityMessage: props.unavailableReason?.(old) || '当前渠道或区域无法匹配，请移除后重新添加渠道' }] : []
+  })
 }
 function isAdopted(row: QuotationMatrixRow) { return props.adoptedCountry === row.country && (props.adoptedChannelKey ? props.adoptedChannelKey === row.channelKey : props.adoptedRule === row.rule && props.adoptedCarrier === row.carrier) && (props.countries.find(country => country.name === row.country)?.selectedQuoteRegion || '') === (row.quoteRegion || '') }
 function toggleSelection(row: QuotationMatrixRow) {
   const key = rowKey(row)
+  retainedRows.set(key, row)
   const removing = isSelected(row)
   const removingPrimary = removing && isAdopted(row)
   selectedKeys.value = removing ? selectedKeys.value.filter(item => item !== key) : [...selectedKeys.value, key]
@@ -169,7 +182,10 @@ const filteredCountries = computed(() => {
   const query = search.value.trim().toLowerCase()
   return commonCountries.value.filter(country => !query || `${country.name} ${country.code}`.toLowerCase().includes(query))
 })
-const rows = computed(() => availableRows(activeCountry.value))
+const rows = computed(() => {
+  const current = availableRows(activeCountry.value)
+  return [...current, ...selectedQuoteRows().filter(row => row.available === false && row.country === activeCountry.value)]
+})
 const sortedRows = computed(() => {
   const result = rows.value.slice()
   if (sortMode.value === 'price') {
@@ -246,8 +262,8 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       <div v-if="pagedRows.length" class="quote-rows">
         <article v-for="row in pagedRows" :key="rowKey(row)" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
           <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></div><b>{{ row.eta }}</b>
-          <span><b>{{ formatUsd(row.quote1) }}</b><small>{{ formatCny(row.quote1) }}</small></span><span><b>{{ formatUsd(row.quote2) }}</b><small>{{ formatCny(row.quote2) }}</small></span><span><b>{{ formatUsd(row.quote3) }}</b><small>{{ formatCny(row.quote3) }}</small></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small>{{ formatCny(row.quoteCustom) }}</small></span>
-          <div class="selection-actions"><button @click="toggleSelection(row)">{{ isSelected(row) ? '已加入' : '加入报价单' }}</button><button v-if="isSelected(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
+          <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span>
+          <div class="selection-actions"><button :disabled="!isSelected(row) && !hasAnyQuotationPrice(row)" @click="toggleSelection(row)">{{ isSelected(row) ? (row.available === false ? '移除渠道' : '已加入') : '加入报价单' }}</button><button v-if="isSelected(row) && hasAnyQuotationPrice(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
         </article>
       </div>
       <div v-else-if="channelQuery && rows.length" class="empty-rows">当前国家没有匹配“{{ channelSearch.trim() }}”的物流渠道，请更换关键词或清空搜索。</div>

@@ -15,7 +15,7 @@ import {
 } from '@/data/quotationTemplates'
 
 const props = withDefaults(defineProps<{
-  unavailableReason?: (preset: QuotationPresetSelection) => string
+  unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
   ensureCountries?: (countries: string[]) => Promise<boolean>
   countries: QuotationCountrySummary[]

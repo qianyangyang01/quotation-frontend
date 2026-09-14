@@ -232,6 +232,31 @@ export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg'
   return (price.weightFromInclusive ? weightKg >= price.weightFromKg : weightKg > price.weightFromKg)
     && (price.weightToInclusive === false ? weightKg < price.weightToKg : weightKg <= price.weightToKg)
 }
+/** Explain a missing quote using the same eligible rows and boundaries as billing. */
+export function logisticsUnavailableReason(rule: LogisticsRule | undefined, country: string, weightKg: number,
+  productMarks: string[] = ['普货'], quoteRegion = '', quantity = 1, unit = '件'): string {
+  if (!rule || rule.status !== '启用') return '渠道停用或资料不存在'
+  if (!Number.isFinite(weightKg) || weightKg <= 0) return '当前条件暂无可用运价'
+  const raw = countryRowsForRule(rule, country)
+  if (!raw.length) return '该国家暂无可用运价'
+  const resolved = billingQuoteRegion(rule, country, quoteRegion)
+  if (resolved === null) return quoteRegion ? '该区域不支持' : '请先选择报价区域'
+  const { rows, zoneRequired } = eligibleCountryRows(rule, country, productMarks)
+  if (zoneRequired && !resolved) return '请先选择报价区域'
+  const scoped = rows.filter(row => priceMatchesRegion(row, resolved, zoneRequired))
+  if (!scoped.length) {
+    const rawScoped = raw.filter(row => priceMatchesRegion(row, resolved, meaningfulZoneOptions(raw).length > 0))
+    if (!rawScoped.length) return '该区域不支持'
+    const supported = rawScoped.filter(row => isWeightRangePrice(row) && row.quoteReady !== false)
+    if (!supported.length) return '计费规则暂不支持'
+    if (!rule.billingVerified && !supported.some(row => isPriceRowEligible(row, productMarks))) return '该商品属性不支持'
+    return '当前条件暂无可用运价'
+  }
+  if (scoped.some(row => weightMatchesPrice(row, weightKg))) return ''
+  const max = Math.max(...scoped.map(row => row.weightToKg))
+  if (weightKg > max) return `${quantity}${unit}含包材重量${weightKg.toFixed(3)}kg，超过上限${max}kg`
+  return '该重量段暂无运价'
+}
 export function calculateLogisticsFee(rule: LogisticsRule, country: string, weightKg: number, productMarks: string[] = ['普货'], dimensions?: ShipmentDimensions, quoteRegion = '') {
   const resolved = billingQuoteRegion(rule, country, quoteRegion)
   if (resolved === null) return null

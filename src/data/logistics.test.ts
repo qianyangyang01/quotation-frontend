@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { billingQuoteRegion, sameQuotationRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsQuoteRegions, replaceLogisticsRules, logisticsRuleByName, type LogisticsRule } from './logistics'
+import { logisticsUnavailableReason, billingQuoteRegion, sameQuotationRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsQuoteRegions, replaceLogisticsRules, logisticsRuleByName, type LogisticsRule } from './logistics'
 
 it('keeps a usable base quote when ETA is absent and displays an explicit explanation', () => {
   expect(formatLogisticsEta({ etaMinDays: 0, etaMaxDays: 0 })).toBe('该物流暂无时效说明')
@@ -133,4 +133,51 @@ it('shows ordinary zones only when explicit, otherwise preserves numbered zones 
   expect(calculateLogisticsFee(ordinary, '美国', .1, ['普货'], undefined, second)).toBeNull()
   expect(calculateLogisticsFee(numbered, '美国', .1, ['普货'], undefined, '全国统一')).toBeNull()
   replaceLogisticsRules([])
+})
+
+
+describe('missing price diagnostics share billing eligibility', () => {
+  it.each(['件', '套'])('reports scoped package weight in %s and keeps valid quotes unchanged', unit => {
+    const rule = { ...publishedRule, prices: [
+      { ...publishedRule.prices[0]!, zoneName: '近区', weightToKg: 3 },
+      { ...publishedRule.prices[0]!, zoneName: '远区', weightToKg: 20 },
+      { ...publishedRule.prices[0]!, zoneName: '近区', weightToKg: 30, prohibitedMarks: '带电' },
+    ] }
+    expect(calculateLogisticsFee(rule, 'US', 3.6, ['带电'], undefined, '近区')).toBeNull()
+    expect(logisticsUnavailableReason(rule, 'US', 3.6, ['带电'], '近区', 3, unit))
+      .toBe('3'+unit+'含包材重量3.600kg，超过上限3kg')
+    expect(logisticsUnavailableReason(rule, 'US', 3.6, ['带电'], '远区')).toBe('')
+    expect(calculateLogisticsFee(rule, 'US', 3.6, ['带电'], undefined, '远区')?.total).toBe(300.8)
+  })
+  it('respects open and closed boundaries, gaps, aliases and missing countries', () => {
+    const rule = { ...publishedRule, prices: [
+      { ...publishedRule.prices[0]!, weightFromKg: 1, weightToKg: 2, weightFromInclusive: true, weightToInclusive: false },
+      { ...publishedRule.prices[0]!, weightFromKg: 3, weightToKg: 5 },
+    ] }
+    for (const weight of [0.5, 1, 2, 2.5, 3, 5, 5.001]) {
+      const diagnosis = logisticsUnavailableReason(rule, 'US', weight)
+      expect(diagnosis === '').toBe(calculateLogisticsFee(rule, 'US', weight) !== null)
+    }
+    expect(logisticsUnavailableReason(rule, '美国', 2.5)).toBe('该重量段暂无运价')
+    expect(logisticsUnavailableReason(rule, 'GB', 99)).toBe('该国家暂无可用运价')
+  })
+  it('does not confuse unsupported rules or attributes with overweight', () => {
+    const rule = (patch: Partial<LogisticsRule['prices'][number]>) => ({ ...publishedRule, prices: [{ ...publishedRule.prices[0]!, ...patch }] })
+    expect(logisticsUnavailableReason(rule({ prohibitedMarks: '带电' }), '美国', 99, ['带电'])).toBe('该商品属性不支持')
+    expect(logisticsUnavailableReason(rule({ quoteReady: false }), '美国', 99)).toBe('计费规则暂不支持')
+    expect(logisticsUnavailableReason(rule({ pricingModel: 'first-next' }), '美国', 99)).toBe('计费规则暂不支持')
+    expect(logisticsUnavailableReason(undefined, '美国', 99)).toBe('渠道停用或资料不存在')
+    expect(logisticsUnavailableReason({ ...publishedRule, status: '停用' }, '美国', 99)).toBe('渠道停用或资料不存在')
+    expect(logisticsUnavailableReason(publishedRule, '美国', NaN)).toBe('当前条件暂无可用运价')
+    const verified = { ...rule({ prohibitedMarks: '带电' }), billingVerified: true }
+    expect(logisticsUnavailableReason(verified, '美国', 0.5, ['带电'])).toBe('')
+    expect(calculateLogisticsFee(verified, '美国', 0.5, ['带电'])).not.toBeNull()
+  })
+  it('rejects mismatched or unselected regions before comparing weight', () => {
+    const rule = { ...publishedRule, prices: [
+      { ...publishedRule.prices[0]!, zoneName: '近区' }, { ...publishedRule.prices[0]!, zoneName: '远区' },
+    ] }
+    expect(logisticsUnavailableReason(rule, 'US', 99)).toBe('请先选择报价区域')
+    expect(logisticsUnavailableReason(rule, 'US', 99, ['普货'], '不存在')).toBe('该区域不支持')
+  })
 })

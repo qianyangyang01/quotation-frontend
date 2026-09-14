@@ -16,7 +16,7 @@ it.each([true,false])('common mode synchronizes its current selection on return,
   const host=document.createElement('div');document.body.append(host);app=createApp({render:()=>h(CommonMatrix,state)});app.mount(host);await tick();
   expect(changed.mock.lastCall?.[0][0].quote1).toBe(10);
   state.active=false;await tick();state.quoteRowsForCountry=()=>eligible?[{...row('ok'),quote1:23}]:[];state.contextKey='b';await tick();state.active=true;await tick();
-  expect(changed.mock.lastCall?.[0]).toEqual(eligible?[expect.objectContaining({quote1:23})]:[])
+  expect(changed.mock.lastCall?.[0]).toEqual(eligible?[expect.objectContaining({quote1:23})]:[expect.objectContaining({available:false,quote1:null})])
 })
 it('keeps unavailable identity, null amounts and disabled primary',async()=>{const{changed}=setup();await tick();expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({channelKey:'missing',quote1:null,quote2:null,quote3:null,quoteCustom:null})]);expect(button('设为首选').disabled).toBe(true)})
 it('cancel replacement keeps original template selection',async()=>{const{state,changed}=setup();await tick();button('替换渠道').click();await tick();button('取消').click();await tick();expect(changed.mock.lastCall?.[0][0].channelKey).toBe('missing');expect(state.presetSelection[0]?.channelKey).toBe('missing')})

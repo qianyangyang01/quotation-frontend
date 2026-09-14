@@ -188,3 +188,15 @@ describe('editable quantity quote sheet boundaries', () => {
     expect(CUSTOMER_QUOTE_NOTES[1]).toContain('PayPal')
   })
 })
+
+
+it('keeps internal missing-price reasons out of the customer image model and table clipboard', () => {
+  const row = { ...source({quote3:null,quoteCustom:null}), quantityMessages:{'3':'3件含包材重量3.600kg，超过上限3kg','5':'渠道加载失败，请重试'} }
+  const original = JSON.stringify(row)
+  const sheet = buildCustomerQuoteSheet({rows:[row],countries:[],edits:edits(),customQuantity:5,bundle:false})
+  expect(sheet.rows[0]!.prices).toEqual([12.8,20.5,null,null])
+  expect(customerQuoteSheetTsv(sheet)).toContain('—')
+  expect(JSON.stringify(sheet)).not.toContain('超过上限')
+  expect(customerQuoteSheetTsv(sheet)).not.toContain('加载失败')
+  expect(JSON.stringify(row)).toBe(original)
+})
