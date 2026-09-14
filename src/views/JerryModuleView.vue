@@ -17,6 +17,7 @@ import {
 } from '@/data/purchaseStore'
 import {
   COMMON_COUNTRY_LIMIT,
+  retainedFinanceCountryRule,
   channelsAvailableForCountry,
   countriesAvailableForCategory,
   financeLogisticsAttributeOptions,
@@ -308,7 +309,13 @@ const financePolicyCards = computed(() => financePolicies.value.map(policy => ({
     const grouped = new Map<string, ProviderGroup>()
     rule.allowedChannels.forEach(channelKey => {
       const channel = financeChannelForKey(rule.country, channelKey, policy.category)
-      if (!channel) return
+      if (!channel) {
+        const parts = channelKey.split('::'), provider = parts[1] || '原授权渠道'
+        const group = grouped.get(provider) || { provider, channels: [] }
+        group.channels.push({ key: channelKey, name: (parts.slice(2).join('::') || channelKey) + '（暂不可用，授权保留）', ruleName: '' })
+        grouped.set(provider, group)
+        return
+      }
       const group = grouped.get(channel.carrier) || { provider: channel.carrier, channels: [] }
       group.channels.push({ key: channel.key, name: channel.channel, ruleName: channel.ruleName })
       grouped.set(channel.carrier, group)
@@ -714,13 +721,19 @@ function selectedFinanceCarrierChannelCount(index: number, carrier: string) {
 function financeChannelForKey(country: string, key: string, attribute = financePolicyForm.value.category) {
   return cachedFinanceChannels(country, attribute).find(option => option.key === key)
 }
+function retainedFinanceCountry(country: string) {
+  return retainedFinanceCountryRule(financePolicies.value.find(policy => policy.id === editingFinancePolicyId.value), financePolicyForm.value.category, country)
+}
+function financeUnavailableSelections(rule: FinanceCountryChannelRule) {
+  return rule.allowedChannels.filter(key => !financeChannelsForCountry(rule.country).some(option => option.key === key))
+}
 function normalizeFinanceCarriers(index: number) {
   const rule = financePolicyForm.value.countryRules[index]
   const available = new Set(financeChannelsForCountry(rule.country).map(option => option.key))
-  rule.allowedChannels = rule.allowedChannels.filter(channel => available.has(channel))
+  rule.allowedChannels = rule.allowedChannels.filter(channel => available.has(channel) || retainedFinanceCountry(rule.country)?.allowedChannels.includes(channel))
 }
 function financeCountryCode(country: string) {
-  return financeLogisticsCountries.value.find(item => item.name === country)?.code || ''
+  return financeLogisticsCountries.value.find(item => item.name === country)?.code || financeCountrySettingMap.value.get(country)?.code || ''
 }
 function applyFinanceCountryDefaults(index: number, country: string) {
   const rule = financePolicyForm.value.countryRules[index]
@@ -802,8 +815,8 @@ function removeFinanceCountryRule(index: number) {
 function handleFinanceCategoryChange() {
   const availableCountries = new Set(financeLogisticsCountries.value.map(country => country.name))
   financePolicyForm.value.countryRules = financePolicyForm.value.countryRules
-    .filter(rule => availableCountries.has(rule.country))
-    .map(rule => ({ ...rule, allowedChannels: rule.allowedChannels.filter(channel => financeChannelsForCountry(rule.country).some(option => option.key === channel)) }))
+    .filter(rule => availableCountries.has(rule.country) || retainedFinanceCountry(rule.country))
+    .map(rule => ({ ...rule, allowedChannels: rule.allowedChannels.filter(channel => financeChannelsForCountry(rule.country).some(option => option.key === channel) || retainedFinanceCountry(rule.country)?.allowedChannels.includes(channel)) }))
   financeCountrySearches.value = financePolicyForm.value.countryRules.map(rule => rule.country)
   financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
   openFinanceCountryPicker.value = null
@@ -822,10 +835,10 @@ async function saveFinancePolicy() {
   form.countryRules.forEach(rule => { rule.country = rule.country.trim() })
   if (!category || !form.countryRules.length) { toast('请先填写财务品类并配置国家'); return }
   const financeCountryNameSet = new Set(financeLogisticsCountries.value.map(country => country.name))
-  if (form.countryRules.some(rule => !financeCountryNameSet.has(rule.country))) { toast('所选国家与当前品类的物流规则不匹配'); return }
+  if (form.countryRules.some(rule => !financeCountryNameSet.has(rule.country) && !retainedFinanceCountry(rule.country))) { toast('所选国家与当前品类的物流规则不匹配'); return }
   if (new Set(form.countryRules.map(rule => rule.country)).size !== form.countryRules.length) { toast('同一品类不能重复配置同一个国家'); return }
   if (form.countryRules.some(rule => !rule.country || (!rule.allowedChannels.length && !rule.unavailableChannels?.length))) { toast('每个国家都必须至少选择一个允许渠道，或保留待审旧渠道'); return }
-  if (form.countryRules.some(rule => rule.allowedChannels.some(key => !financeChannelsForCountry(rule.country).some(option => option.key === key)))) { toast('部分已选渠道已停用或更新，请重新核对渠道后保存'); return }
+  if (form.countryRules.some(rule => rule.allowedChannels.some(key => !financeChannelsForCountry(rule.country).some(option => option.key === key) && !retainedFinanceCountry(rule.country)?.allowedChannels.includes(key)))) { toast('部分已选渠道已停用或更新，请重新核对渠道后保存'); return }
   const duplicate = financePolicies.value.find(policy => policy.category === category && policy.id !== editingFinancePolicyId.value)
   if (duplicate) { toast(`${category} 已存在策略，请直接编辑该品类`); return }
   const policy: FinanceChannelPolicy = {
@@ -833,7 +846,7 @@ async function saveFinancePolicy() {
     category: category as FinanceLogisticsAttribute,
     countryRules: form.countryRules.map(rule => ({
       ...rule,
-      continent: inferCountryContinent(financeCountryCode(rule.country)),
+      continent: financeCountryCode(rule.country) ? inferCountryContinent(financeCountryCode(rule.country)) : rule.continent,
       sortOrder: Math.max(1, Number(rule.sortOrder) || 1),
       allowedChannels: [...rule.allowedChannels],
       unavailableChannels: [...(rule.unavailableChannels || [])],
@@ -1323,7 +1336,8 @@ function saveEditor() {
           <header><div><b>支持国家与渠道</b><small>这里只维护当前物流属性允许的国家和渠道；业务报价仅展示“常用国家设置”中的国家。</small></div><button type="button" @click="addFinanceCountryRule">＋ 添加匹配国家</button></header>
           <section v-for="(rule,index) in financePolicyForm.countryRules" :key="index" class="country-rule-card">
             <div class="country-rule-head"><label class="country-search-label">支持国家（可输入搜索）<div class="country-picker"><span><b>⌕</b><input :value="financeCountrySearches[index] ?? rule.country" autocomplete="off" placeholder="输入国家名称搜索" role="combobox" :aria-expanded="openFinanceCountryPicker===index" @focus="openFinanceCountrySearch(index)" @input="updateFinanceCountrySearch(index,$event)" @blur="closeFinanceCountrySearch(index)" @keydown.esc="openFinanceCountryPicker=null"></span><div v-if="openFinanceCountryPicker===index" class="country-picker-menu" role="listbox"><button v-for="country in filteredFinanceCountries(index)" :key="country.code || country.name" type="button" :class="{ active:country.name===rule.country }" @mousedown.prevent="selectFinanceCountry(index,country.name)"><strong>{{ country.name }}</strong><small>{{ country.code }}</small></button><p v-if="!filteredFinanceCountries(index).length">没有匹配的国家</p></div></div></label><button type="button" @click="removeFinanceCountryRule(index)">移除国家</button></div>
-            <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选 {{ rule.allowedChannels.length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道<span v-if="rule.unavailableChannels?.length"> · 待审旧渠道 {{ rule.unavailableChannels.length }} 个</span></span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
+            <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选可用 {{ rule.allowedChannels.length - financeUnavailableSelections(rule).length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道<span v-if="rule.unavailableChannels?.length"> · 待审旧渠道 {{ rule.unavailableChannels.length }} 个</span></span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
+            <div v-if="financeUnavailableSelections(rule).length" class="legacy-review-list"><b>暂不可用，原授权保留（{{ financeUnavailableSelections(rule).length }} 个）</b><small>这些渠道不参与报价；重新启用且价格可用后恢复。保存其他配置不会删除原授权。</small><label v-for="key in financeUnavailableSelections(rule)" :key="key"><input v-model="rule.allowedChannels" type="checkbox" :value="key">{{ key.split('::').slice(1).join('｜') }}</label></div>
             <div v-if="financeCountryRuleExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-summary"><span><b>待审旧渠道 {{ rule.unavailableChannels.length }} 个</b><small>这些旧渠道不参与当前报价，可按需核对。</small></span><button type="button" :aria-expanded="financeLegacyReviewExpanded(index)" @click="toggleFinanceLegacyReview(index)">{{ financeLegacyReviewExpanded(index) ? '收起旧渠道 ↑' : '查看旧渠道 ↓' }}</button></div>
             <div v-if="financeCountryRuleExpanded(index) && financeLegacyReviewExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-list"><b>停用待审旧渠道</b><span v-for="legacy in rule.unavailableChannels" :key="legacy.legacyKey">{{ legacy.providerName }}｜{{ legacy.channelName }}<small>{{ legacy.status === 'ambiguous' ? '存在多个候选，未自动迁移' : '当前库没有可靠等价渠道' }}</small></span></div>
             <div v-if="financeCountryRuleExpanded(index) && financeChannelsForCountry(rule.country).length" class="finance-channel-cascade">

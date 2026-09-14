@@ -241,23 +241,28 @@ const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions
   updatedAt: '2026-08-08 10:00',
 }))
 
+export function retainedFinanceCountryRule(policy: FinanceChannelPolicy | undefined, attribute: string, country: string) {
+  return policy && normalizeLogisticsAttribute(policy.category) === normalizeLogisticsAttribute(attribute)
+    ? policy.countryRules.find(rule => rule.country === country) : undefined
+}
+
 export function normalizePolicies(policies: FinanceChannelPolicy[]) {
   return policies.filter(policy => typeof policy.category === 'string' && policy.category.trim()).map(policy => {
     policy = { ...policy, category: normalizeLogisticsAttribute(policy.category) }
     const countryMeta = new Map(countriesAvailableForCategory(policy.category).map(country => [country.name, country]))
     return {
       ...policy,
-      countryRules: policy.countryRules.filter(rule => countryMeta.has(rule.country) || (Array.isArray(rule.unavailableChannels) && rule.unavailableChannels.length > 0)).map(rule => {
-        const available = logisticsRules.length ? new Set(channelsAvailableForCountry(rule.country, policy.category).map(option => option.key)) : null
+      countryRules: policy.countryRules.filter(rule => rule.country.trim()).map(rule => {
         const stage = rule.stage === 'common' || rule.stage === 'standard' || rule.stage === 'rare'
           ? rule.stage
           : defaultCountryStage(rule.country)
         return {
           ...rule,
           stage,
-          continent: inferCountryContinent(countryMeta.get(rule.country)?.code),
+          continent: countryMeta.has(rule.country) ? inferCountryContinent(countryMeta.get(rule.country)?.code) : rule.continent,
           sortOrder: Number.isFinite(Number(rule.sortOrder)) ? Number(rule.sortOrder) : defaultCountrySortOrder(rule.country, stage),
-          allowedChannels: available ? rule.allowedChannels.filter(channel => available.has(channel)) : [...rule.allowedChannels],
+          // Stored authorization survives temporary logistics unavailability. Quotation eligibility is checked separately.
+          allowedChannels: [...new Set(rule.allowedChannels)],
           unavailableChannels: [...new Map((Array.isArray(rule.unavailableChannels) ? rule.unavailableChannels : [])
             .filter(item => item && typeof item.legacyKey === 'string' && item.legacyKey.trim())
             .map(item => [item.legacyKey, {

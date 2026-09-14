@@ -159,7 +159,7 @@ export async function updateLogisticsChannel(channel: LogisticsChannelRecord, in
   return result
 }
 
-export async function setLogisticsChannelStatus(channel: LogisticsChannelRecord, enabled: boolean) {
+export async function setLogisticsChannelStatus(channel: { id: string; _version: number; currentVersionId: string | null }, enabled: boolean) {
   const result = await mutation(api.patch<LogisticsChannelRecord>(`/logistics/channels/${channel.id}/status`, { enabled }, { 'If-Match': String(channel._version) }))
   if (channel.currentVersionId) await invalidatePublishedLogisticsCache()
   return result

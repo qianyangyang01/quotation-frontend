@@ -40,4 +40,8 @@ class LogisticsRebuildPermissionTest {
         mvc.perform(post(root+"/versions/"+id+"/billing-acceptance").with(csrf()).header("Idempotency-Key","qa-billing-permission").contentType("application/json").content("{}")).andExpect(status().isForbidden());
     }
     @Test void rejectsAnonymousExports()throws Exception {mvc.perform(get(root+"/datasets/"+id+"/prices.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/versions/"+id+"/standardized.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/downloads/prepare?kind=prices&id="+id)).andExpect(status().isUnauthorized());}
+
+    @Test @WithMockUser(authorities={"PERM_quotation","PERM_finance"}) void nonLogisticsRolesCannotToggleChannels()throws Exception {
+        mvc.perform(patch("/api/v1/logistics/channels/"+id+"/status").with(csrf()).header("If-Match","0").contentType("application/json").content("{\"enabled\":false}")).andExpect(status().isForbidden());
+    }
 }

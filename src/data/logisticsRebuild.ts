@@ -17,7 +17,7 @@ export function clonePriceRows(rows: Price[]): Price[] { return rows.map(row => 
 export type Provider = { id: string; name: string; code?: string; enabled?: boolean; datasetId?: string; _version?: number }
 export type Channel = {
   id: string; providerId: string; name: string; providerName: string; code: string; channelKey: string; currentVersionId: string | null; quoteReady: boolean
-  type?: string; logisticsAttribute?: string; enabled?: boolean; archived?: boolean; updatedAt?: string
+  type?: string; logisticsAttribute?: string; enabled?: boolean; archived?: boolean; updatedAt?: string; _version?: number
 }
 export type DiffKind = 'added' | 'price' | 'rule' | 'range' | 'removed' | 'unchanged'
 export type DiffChange = { field: string; kind?: 'price' | 'rule' | 'range'; price?: boolean; before: unknown; after: unknown; delta?: number; percentChange?: number | null }

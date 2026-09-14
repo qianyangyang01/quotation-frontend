@@ -227,6 +227,15 @@ class LogisticsQueryPostgresIntegrationTest {
         jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false'::jsonb), version=version+1, updated_at=now() where id=:id").param("id", channelId).update();
         assertNotEquals(first.revision(), service.manifest().revision());
         assertThrows(AppException.class, () -> service.publishedRules(first.revision(), "普货", List.of("美国"), List.of()));
+        var disabled = service.manifest();
+        assertTrue(service.publishedRules(disabled.revision(), "普货", List.of("美国"), List.of()).rules().isEmpty());
+        jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','true'::jsonb), version=version+1, updated_at=now() where id=:id").param("id", channelId).update();
+        var enabledAgain = service.manifest();
+        assertNotEquals(disabled.revision(), enabledAgain.revision());
+        var restored = service.publishedRules(enabledAgain.revision(), "普货", List.of("美国"), List.of("YT-PH"));
+        assertEquals(rules.rules().getFirst().path("prices"), restored.rules().getFirst().path("prices"));
+        assertEquals(versionId, jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channelId).query(UUID.class).single());
+
     }
 
     @Test

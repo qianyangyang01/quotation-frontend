@@ -94,4 +94,11 @@ class LogisticsControllerTest {
     private static MockMultipartFile file(String name,byte[] content){return new MockMultipartFile("files",name,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",content);}
     private static org.springframework.web.multipart.MultipartFile sizedFile(String name,long size){var file=mock(org.springframework.web.multipart.MultipartFile.class);when(file.getOriginalFilename()).thenReturn(name);when(file.getSize()).thenReturn(size);return file;}
     private static ObjectNode parsed(String name,String hash){var value=JsonNodeFactory.instance.objectNode().put("fileName",name).put("sourceHash",hash).put("validRows",1).put("errors",0).put("warnings",0);value.putArray("rows");value.putArray("issues");value.putArray("diffRows");value.putObject("summary").put("added",1).put("price",0).put("rule",0).put("removed",0).put("unchanged",0).put("highRisk",0);return value;}
+
+    @Test void statusRequiresExplicitBooleanBeforeCallingService(){
+        for(var body:List.of(JsonNodeFactory.instance.objectNode(),JsonNodeFactory.instance.objectNode().put("enabled","false"),JsonNodeFactory.instance.objectNode().put("enabled",0))){
+            assertThrows(AppException.class,()->controller.channelStatus(UUID.randomUUID(),body,0,null));
+        }
+        verify(logistics,never()).setChannelEnabled(any(),anyBoolean(),anyLong());
+    }
 }
