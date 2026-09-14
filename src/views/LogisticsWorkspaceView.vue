@@ -91,10 +91,11 @@ const uploadInFlight = ref(false), activeUploadBatchId = ref('')
 const uploadFileSnapshot = ref<Array<{ name: string; size: number }>>([])
 let cancelActiveUpload: (() => void) | null = null
 const preparedDownload = ref<PreparedDownload | null>(null)
+const exportingAllChannels = ref(false)
 const providerSearch = ref(''), selectedProviderId = ref(''), providerChannelPage = ref(0), historyChannelId = ref('')
 const uploadScope = ref<'provider' | 'multi'>('multi'), uploadProviderName = ref('')
 function clearDownload() { preparedDownload.value = null }
-watch([query, country, tab], clearDownload)
+watch([query, country, tab, datasetId], clearDownload)
 onUnmounted(clearDownload)
 async function acceptanceUpdated() { await invalidatePublishedLogisticsCache(); await refresh(); if (version.value) { const id = version.value.id; const latest = await service.version(id); if (version.value?.id === id) version.value = latest } }
 const diffType = ref('all'), detailTab = ref<'diff' | 'rows' | 'issues'>('diff'), detailPage = ref(0), detailPageSize = ref(10)
@@ -223,6 +224,19 @@ async function run(action: () => Promise<void | PreparedDownload>) {
   if (busy.value) return
   busy.value = true; error.value = ''; message.value = ''
   try { const result = await action(); if (result && !disposed) preparedDownload.value = result } catch (e) { error.value = e instanceof Error ? e.message : '操作失败，请重试' } finally { busy.value = false }
+}
+async function exportAllChannels() {
+  if (busy.value || workspaceLoading.value || !datasetId.value) return
+  const id = datasetId.value, epoch = selectionEpoch
+  clearDownload()
+  exportingAllChannels.value = true
+  try {
+    await run(async () => {
+      const result = await service.exportAllChannels(id)
+      if (disposed || id !== datasetId.value || epoch !== selectionEpoch) return
+      return result
+    })
+  } finally { exportingAllChannels.value = false }
 }
 function filters() { return new URLSearchParams({ query: query.value.trim(), country: country.value.trim(), page: String(page.value), size: String(pageSize.value) }) }
 function versionFilters(id: string) { return new URLSearchParams({ versionId: id }) }
@@ -518,7 +532,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
       </section>
 
       <section v-if="tab === 'imports' && !version" class="stack">
-        <div v-if="!batch" class="section-head"><p>刷新页面或重新登录后，可从这里找回最近一次上传及解析进度。</p><button :disabled="busy || workspaceLoading" @click="run(openLatestImport)">查看最近导入</button></div>
+        <div v-if="!batch" class="section-head"><p>刷新页面或重新登录后，可从这里找回最近一次上传及解析进度。</p><div class="channel-export-actions"><button class="outline-orange" :disabled="busy || workspaceLoading || !datasetId" title="导出当前物流库所有渠道的现行完整价格，包含全部国家、重量段、版本信息和规则说明，不受搜索或分页影响" @click="exportAllChannels">{{ exportingAllChannels ? '正在准备导出…' : '导出所有物流渠道' }}</button><button :disabled="busy || workspaceLoading" @click="run(openLatestImport)">查看最近导入</button></div></div>
         <template v-if="batch">
           <p v-if="batch.payload.scopeRevision !== undefined" class="notice">清单版本 {{ batch.payload.scopeRevision }} · 已匹配 {{ batch.payload.matchedChannels || 0 }} · 已过滤 {{ batch.payload.filteredChannels || 0 }} · 匹配待确认 {{ batch.payload.ambiguousChannels || 0 }}</p>
           <details v-if="batch.payload.fileReports?.some(report => report.sheets?.some(sheet => sheet.channelMatches?.length))"><summary>渠道匹配与过滤报告</summary><div v-for="report in batch.payload.fileReports" :key="report.fileName"><h3>{{ report.fileName }}</h3><template v-for="sheet in report.sheets" :key="sheet.name"><p v-for="(match, i) in sheet.channelMatches" :key="i">{{ sheet.name }} · 第 {{ match.sourceRow }} 行 · {{ match.providerName }} / {{ match.channelName }}：{{ match.status === 'matched' ? '已匹配' : match.status === 'ambiguous' ? '待确认' : '已过滤' }}，{{ match.reason }}</p></template></div></details>
@@ -622,6 +636,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 </template>
 
 <style scoped>
+.channel-export-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
 .batch-status-overview{padding:20px 24px 14px;border-bottom:1px solid #e5eaee;background:#fff}
 .batch-status-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
 .batch-status-tabs button{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 18px;background:#fafcfe;border:1px solid #dce5ec;border-radius:8px;color:#4a6073;text-align:left}

@@ -85,6 +85,7 @@ export const logisticsRebuild = {
   preview: (id: string, mappings: Mapping[] = []) => api.post<Cutover>(`${root}/datasets/${id}/preview`, { mappings: mappings.map(({ oldChannelId, newChannelId }) => ({ oldChannelId, newChannelId })) }),
   activate: (id: string, preview: Cutover, note: string, unavailableConfirmed: boolean, key: string) => api.post<Cutover>(`${root}/datasets/${id}/activate`, { previewToken: preview.previewToken, mappings: preview.mappings.map(({ oldChannelId, newChannelId }) => ({ oldChannelId, newChannelId })), note, reviewConfirmed: true, unavailableConfirmed }, key),
   exportPrices: (id: string, filters: URLSearchParams) => downloadFile(new URLSearchParams({ ...Object.fromEntries(filters), kind: 'prices', id })),
+  exportAllChannels: (id: string) => downloadFile(new URLSearchParams({ kind: 'prices', id })),
   exportDiff: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-diff', id: v.id })),
   exportBatchDiff: (id: string) => downloadFile(new URLSearchParams({ kind: 'batch-diff', id })),
   exportVersionStandardized: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-standardized', id: v.id })),
