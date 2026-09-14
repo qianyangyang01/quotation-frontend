@@ -33,6 +33,10 @@ public class LogisticsExportService {
     }
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public byte[] prices(UUID dataset,UUID versionId,String query,String country,String attribute,String snapshot) {
+        return prices(dataset,versionId,query,country,attribute,snapshot,true);
+    }
+    @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
+    public byte[] prices(UUID dataset,UUID versionId,String query,String country,String attribute,String snapshot,boolean includeSourceNotes) {
         if(snapshot!=null&&!snapshot.equals(priceSnapshot(dataset,versionId,query,country,attribute)))throw AppException.conflict("价格版本已变化，请重新生成下载链接");
         var versions=jdbc.sql("""
                 select (v.payload || jsonb_build_object('quoteReady',logistics_version_quote_ready(v.id)))::text as payload,p.payload->>'name' as provider,c.payload->>'name' as channel,
@@ -48,8 +52,9 @@ public class LogisticsExportService {
             var sheet=book.createSheet("价格明细");var headers=new ArrayList<>(LogisticsWorkbookService.HEADERS);headers.addAll(LogisticsSourceParser.EXTRA_HEADERS);header(book,sheet,headers);
             var metadata=book.createSheet("版本信息");textRow(metadata,0,List.of("MILANO_LOGISTICS_METADATA_V1","导出时间",Instant.now().toString(),"数据集",dataset.toString()));
             textRow(metadata,1,List.of("物流商","渠道","版本ID","版本号","状态","原文件","导入时间","生效时间","可自动报价"));
-            var rules=book.createSheet("规则说明");textRow(rules,0,List.of("MILANO_LOGISTICS_METADATA_V1","规则仅用于审阅，不会作为导入指令执行"));
-            textRow(rules,1,List.of("物流商","渠道","原表规则说明"));int rowNumber=1,metadataRow=2,rulesRow=2;
+            var rules=includeSourceNotes?book.createSheet("规则说明"):null;
+            if(rules!=null){textRow(rules,0,List.of("MILANO_LOGISTICS_METADATA_V1","规则仅用于审阅，不会作为导入指令执行"));textRow(rules,1,List.of("物流商","渠道","原表规则说明","说明分段（按序拼接为完整原文）"));}
+            int rowNumber=1,metadataRow=2,rulesRow=2;
             for(var v:versions) {
                 if(!query.isBlank() && !(v.path("provider").asText()+v.path("channel").asText()).toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT)))continue;
                 if(!attribute.isBlank()&&!attribute.equals(v.path("attribute").asText()))continue;
@@ -69,12 +74,12 @@ public class LogisticsExportService {
                 }
                 if(included) {
                     var version=v.path("version");textRow(metadata,metadataRow++,List.of(v.path("provider").asText(),v.path("channel").asText(),v.path("id").asText(),version.path("versionNumber").asText(),v.path("status").asText(),version.path("fileName").asText(),version.path("importedAt").asText(),version.path("publishedAt").asText(),version.path("quoteReady").asBoolean(true)?"是":"待适配"));
-                    textRow(rules,rulesRow++,List.of(v.path("provider").asText(),v.path("channel").asText(),version.path("sourceNotes").asText()));
+                    if(rules!=null)rulesRow=sourceNotesRows(rules,rulesRow,v.path("provider").asText(),v.path("channel").asText(),version.path("sourceNotes").asText());
                 }
             }
             sheet.createFreezePane(2,1);sheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(0,Math.max(0,rowNumber-1),0,headers.size()-1));
             finish(book);book.write(bytes);return bytes.toByteArray();
-        }catch(Exception e){throw new IllegalStateException("价格Excel生成失败",e);}
+        }catch(AppException e){throw e;}catch(Exception e){throw new IllegalStateException("价格Excel生成失败",e);}
     }
     public String standardizedSnapshot(UUID batchId,UUID versionId){
         if((batchId==null)==(versionId==null))throw AppException.unprocessable("必须且只能指定一个审核批次或版本");
@@ -221,6 +226,17 @@ public class LogisticsExportService {
         var style=book.createCellStyle();style.setFillForegroundColor(IndexedColors.DARK_TEAL.getIndex());style.setFillPattern(FillPatternType.SOLID_FOREGROUND);style.setWrapText(true);
         var font=book.createFont();font.setColor(IndexedColors.WHITE.getIndex());font.setBold(true);style.setFont(font);
         var row=sheet.createRow(rowNumber);row.setHeightInPoints(36);for(int i=0;i<labels.size();i++){row.createCell(i).setCellValue(labels.get(i));row.getCell(i).setCellStyle(style);}
+    }
+    static int sourceNotesRows(Sheet sheet,int rowNumber,String provider,String channel,String notes){
+        var chunks=new ArrayList<String>();
+        for(int start=0;start<notes.length();){
+            int end=Math.min(start+32767,notes.length());
+            if(end<notes.length()&&Character.isHighSurrogate(notes.charAt(end-1))&&Character.isLowSurrogate(notes.charAt(end)))end--;
+            chunks.add(notes.substring(start,end));start=end;
+        }
+        if(chunks.isEmpty())chunks.add("");
+        for(int i=0;i<chunks.size();i++)textRow(sheet,rowNumber++,List.of(provider,channel,chunks.get(i),(i+1)+" / "+chunks.size()));
+        return rowNumber;
     }
     private static void textRow(Sheet s,int n,List<String> values){var r=s.createRow(n);for(int i=0;i<values.size();i++)r.createCell(i).setCellValue(truncate(values.get(i)));}
     private static void cell(Row r,int col,JsonNode value){var cell=r.createCell(col);if(value.isNumber())cell.setCellValue(value.asDouble());else if(value.isBoolean())cell.setCellValue(value.asBoolean()?"是":"否");else cell.setCellValue(truncate(value.isObject()||value.isArray()?value.toString():value.asText("")));}

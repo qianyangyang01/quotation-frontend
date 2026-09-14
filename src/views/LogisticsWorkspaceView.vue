@@ -517,7 +517,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
     <main>
       <header class="milano-heading"><div><p>LOGISTICS CONFIGURATION</p><h1>物流规则</h1><span>维护物流渠道、国家区域、重量限制与分段运费，供米莱诺报价计算直接调用。</span></div></header>
       <p v-if="error" role="alert" class="notice error">{{ error }}</p><p v-if="message" role="status" class="notice success">{{ message }}</p>
-      <p v-if="preparedDownload" role="status" class="notice success">下载已就绪，请点击保存：<a :href="preparedDownload.url" :download="preparedDownload.filename">下载 {{ preparedDownload.filename }}</a>。下载仍需登录和物流权限；价格版本若发生变化，请重新生成链接。</p>
+      <p v-if="preparedDownload" role="status" class="notice success">下载链接已生成，请点击下载：<a :href="preparedDownload.url" :download="preparedDownload.filename">下载 {{ preparedDownload.filename }}</a>。下载仍需登录和物流权限；价格版本若发生变化，请重新生成链接。</p>
       <p v-if="archived" class="notice">这里是归档旧库，只能查阅和导出；不参与当前报价，不会被新导入自动恢复。</p>
       <CompanyChannelDirectory @changed="companyDirectory = $event" @select-dataset="openCompanyDataset" />
       <p v-if="selected?.status === 'preparing' && !companyDirectory?.state?.paused" class="notice">新库准备期间不影响当前报价。确认整体切换后，当前物流商和渠道列表才会全部换新。</p>
@@ -532,7 +532,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
       </section>
 
       <section v-if="tab === 'imports' && !version" class="stack">
-        <div v-if="!batch" class="section-head"><p>刷新页面或重新登录后，可从这里找回最近一次上传及解析进度。</p><div class="channel-export-actions"><button class="outline-orange" :disabled="busy || workspaceLoading || !datasetId" title="导出当前物流库所有渠道的现行完整价格，包含全部国家、重量段、版本信息和规则说明，不受搜索或分页影响" @click="exportAllChannels">{{ exportingAllChannels ? '正在准备导出…' : '导出所有物流渠道' }}</button><button :disabled="busy || workspaceLoading" @click="run(openLatestImport)">查看最近导入</button></div></div>
+        <div v-if="!batch" class="section-head"><p>刷新页面或重新登录后，可从这里找回最近一次上传及解析进度。</p><div class="channel-export-actions"><button class="outline-orange" :disabled="busy || workspaceLoading || !datasetId" title="导出当前物流库所有渠道的现行完整价格，包含全部国家、重量段和时效；默认过滤原表长篇说明，不受搜索或分页影响" @click="exportAllChannels">{{ exportingAllChannels ? '正在准备导出…' : '导出所有物流渠道' }}</button><button :disabled="busy || workspaceLoading" @click="run(openLatestImport)">查看最近导入</button></div></div>
         <template v-if="batch">
           <p v-if="batch.payload.scopeRevision !== undefined" class="notice">清单版本 {{ batch.payload.scopeRevision }} · 已匹配 {{ batch.payload.matchedChannels || 0 }} · 已过滤 {{ batch.payload.filteredChannels || 0 }} · 匹配待确认 {{ batch.payload.ambiguousChannels || 0 }}</p>
           <details v-if="batch.payload.fileReports?.some(report => report.sheets?.some(sheet => sheet.channelMatches?.length))"><summary>渠道匹配与过滤报告</summary><div v-for="report in batch.payload.fileReports" :key="report.fileName"><h3>{{ report.fileName }}</h3><template v-for="sheet in report.sheets" :key="sheet.name"><p v-for="(match, i) in sheet.channelMatches" :key="i">{{ sheet.name }} · 第 {{ match.sourceRow }} 行 · {{ match.providerName }} / {{ match.channelName }}：{{ match.status === 'matched' ? '已匹配' : match.status === 'ambiguous' ? '待确认' : '已过滤' }}，{{ match.reason }}</p></template></div></details>

@@ -49,7 +49,8 @@ public class LogisticsRebuildController {
             @RequestParam(defaultValue="0")int index,@RequestParam(defaultValue="")String query,@RequestParam(defaultValue="")String country,@RequestParam(defaultValue="")String attribute){
         String path,name;var params=new LinkedHashMap<String,String>();
         switch(kind){
-            case "prices" -> {datasets.dataset(id);path="/datasets/"+id+"/prices.xlsx";name="物流价格.xlsx";
+            case "prices", "all-channel-prices" -> {datasets.dataset(id);path="/datasets/"+id+"/prices.xlsx";name="物流价格.xlsx";
+                if(kind.equals("all-channel-prices")){versionId=null;query="";country="";attribute="";params.put("includeSourceNotes","false");}
                 params.put("query",query);params.put("country",country);params.put("attribute",attribute);if(versionId!=null)params.put("versionId",versionId.toString());
                 params.put("snapshot",exports.priceSnapshot(id,versionId,query,country,attribute));}
             case "version-diff" -> {if(!versions.existsById(id))throw AppException.notFound("物流版本不存在");path="/versions/"+id+"/changes.xlsx";name="版本变化.xlsx";}
@@ -150,8 +151,8 @@ public class LogisticsRebuildController {
         var result=logistics.recompare(channel,version);audit.record("logistics.recompare","logistics-version",version.toString(),"success",Map.of());return ApiResponse.ok(result);
     }
     @GetMapping("/datasets/{id}/prices.xlsx") public ResponseEntity<byte[]> prices(@PathVariable UUID id,@RequestParam(required=false)UUID versionId,
-            @RequestParam(defaultValue="")String query,@RequestParam(defaultValue="")String country,@RequestParam(defaultValue="")String attribute,@RequestParam(required=false)String snapshot){
-        var bytes=exports.prices(id,versionId,query,country,attribute,snapshot);audit.record("logistics.price-export","logistics-dataset",id.toString(),"success",Map.of("rowsScope","all-filtered"));return excel(bytes,"物流价格.xlsx");
+            @RequestParam(defaultValue="")String query,@RequestParam(defaultValue="")String country,@RequestParam(defaultValue="")String attribute,@RequestParam(required=false)String snapshot,@RequestParam(defaultValue="true")boolean includeSourceNotes){
+        var bytes=exports.prices(id,versionId,query,country,attribute,snapshot,includeSourceNotes);audit.record("logistics.price-export","logistics-dataset",id.toString(),"success",Map.of("rowsScope","all-filtered","includeSourceNotes",includeSourceNotes));return excel(bytes,"物流价格.xlsx");
     }
     @GetMapping("/imports/{id}/changes.xlsx") public ResponseEntity<byte[]> changes(@PathVariable UUID id){var bytes=exports.changes(id,null);audit.record("logistics.diff-export","logistics-import",id.toString(),"success",Map.of());return excel(bytes,"批次价格变化.xlsx");}
     @GetMapping("/versions/{id}/changes.xlsx") public ResponseEntity<byte[]> versionChanges(@PathVariable UUID id){var bytes=exports.changes(null,id);audit.record("logistics.diff-export","logistics-version",id.toString(),"success",Map.of());return excel(bytes,"版本变化.xlsx");}

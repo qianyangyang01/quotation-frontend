@@ -10,7 +10,7 @@ describe('all logistics channels export', () => {
     vi.stubGlobal('fetch', fetch)
     await expect(logisticsRebuild.exportAllChannels('library-a')).resolves.toEqual(download)
     const params = new URL(fetch.mock.calls[0]![0], 'https://example.test').searchParams
-    expect(Object.fromEntries(params)).toEqual({ kind: 'prices', id: 'library-a' })
+    expect(Object.fromEntries(params)).toEqual({ kind: 'all-channel-prices', id: 'library-a' })
     expect(fetch.mock.calls[0]![1].credentials).toBe('include')
   })
 
