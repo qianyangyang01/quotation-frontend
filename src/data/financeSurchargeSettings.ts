@@ -1,4 +1,5 @@
 import { sumDecimal } from '@/services/quotationDecimal'
+import type { EuYunExpressTaxContext } from './euYunExpressTax'
 import { roundQuoteUsd } from '@/services/quotationMoney'
 import { normalizeFinanceTaxSettings, calculateFinanceQuoteTax, type FinanceTaxSettings } from './financeTaxSettings'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
@@ -37,8 +38,8 @@ export async function saveFinanceSurchargeSettings(settings: FinanceSurchargeSet
   return normalized
 }
 
-export function calculateFinanceQuoteFees(taxes: FinanceTaxSettings, surcharges: FinanceSurchargeSettings, country: string, provider: string, baseUsd: number, channelKey = '') {
-  const tax = calculateFinanceQuoteTax(taxes, country, provider, baseUsd)
+export function calculateFinanceQuoteFees(taxes: FinanceTaxSettings, surcharges: FinanceSurchargeSettings, country: string, provider: string, baseUsd: number, channelKey = '', context?: Omit<EuYunExpressTaxContext, 'channelKey'>) {
+  const tax = calculateFinanceQuoteTax(taxes, country, provider, baseUsd, { ...context, channelKey })
   const countrySetting = surcharges.countries.find(row => row.selected && row.country === country)
   const scoped = Array.isArray(countrySetting?.exemptChannelKeys)
   const surcharge = calculateFinanceQuoteTax(Array.isArray(countrySetting?.providers) ? { ...surcharges, providers: countrySetting.providers } : scoped ? { ...surcharges, providers: channelKey ? [{ provider, selected: true, channels: [], mode: countrySetting!.exemptChannelKeys!.includes(channelKey) ? 'exempt' : 'taxable' }] : [] } : surcharges, country, provider, 0)

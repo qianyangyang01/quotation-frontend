@@ -21,7 +21,7 @@ export function normalizeFinanceSettingValue(key: FinanceSettingKey, value: unkn
   if (key === 'channel-policies' && Array.isArray(value.policies)) return value.policies
   if (key === 'customer-grades' && Array.isArray(value.grades)) return value.grades
   if (key === 'exchange-rate' && !('usdCny' in value) && 'usdToCny' in value) {
-    return { usdCny: value.usdToCny, updatedAt: String(value.effectiveAt || '财务维护') }
+    return { usdCny: value.usdToCny, ...('eurUsd' in value ? { eurUsd: value.eurUsd } : {}), updatedAt: String(value.effectiveAt || '财务维护') }
   }
   if (key === 'tax-settings' && Array.isArray(value.rules) && !('countries' in value) && !('providers' in value)) {
     return { countries: [], providers: [], updatedAt: '尚未保存' }

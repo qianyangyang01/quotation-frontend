@@ -14,6 +14,7 @@ final class FinanceSettingValidation {
                 object(body); var field = body.has("usdCny") ? "usdCny" : "usdToCny";
                 number(body.path(field), field, true);
                 if (body.has("usdCny") && body.has("usdToCny")) number(body.path("usdToCny"), "usdToCny", true);
+                if (body.has("eurUsd")) number(body.path("eurUsd"), "eurUsd", true);
             }
             case "customer-grades" -> {
                 var rows = array(body, "grades"); var seen = new HashSet<String>();

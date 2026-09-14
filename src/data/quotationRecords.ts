@@ -1,3 +1,4 @@
+import type { EuYunExpressTaxSnapshot } from './euYunExpressTax'
 import { normalizeCustomerPrices, type CustomerPriceSnapshot } from './customerQuotePrices'
 import { api, idempotencyKey } from '@/services/http'
 
@@ -48,7 +49,8 @@ export interface QuotationRecordQuoteOption {
   taxRatePercent?: number | null
   countryFixedTaxUsd?: number
   taxCustomerType?: 'A' | 'B'
-  taxFeeMode?: 'no-tax' | 'exempt' | 'fixed-order' | 'per-item' | 'missing'
+  taxFeeMode?: 'no-tax' | 'exempt' | 'fixed-order' | 'per-item' | 'weight-eur' | 'missing'
+  taxCalculations?: Record<string, EuYunExpressTaxSnapshot>
   taxPerItemFeeUsd?: number
   surchargeEnabled?: boolean
   surchargeConfigured?: boolean
@@ -219,7 +221,8 @@ function normalizeQuoteOptions(value: unknown, recordId: string, rawRecord: Part
     option.taxRatePercent = raw?.taxRatePercent == null ? null : optionalN(raw.taxRatePercent)
     option.countryFixedTaxUsd = optionalNumber(raw?.countryFixedTaxUsd)
     option.taxCustomerType = raw?.taxCustomerType === 'B' ? 'B' : raw?.taxCustomerType === 'A' ? 'A' : undefined
-    option.taxFeeMode = raw?.taxFeeMode === 'no-tax' || raw?.taxFeeMode === 'exempt' || raw?.taxFeeMode === 'fixed-order' || raw?.taxFeeMode === 'per-item' || raw?.taxFeeMode === 'missing' ? raw.taxFeeMode : undefined
+    option.taxFeeMode = raw?.taxFeeMode === 'no-tax' || raw?.taxFeeMode === 'exempt' || raw?.taxFeeMode === 'fixed-order' || raw?.taxFeeMode === 'per-item' || raw?.taxFeeMode === 'weight-eur' || raw?.taxFeeMode === 'missing' ? raw.taxFeeMode : undefined
+    option.taxCalculations = raw?.taxCalculations
     option.taxPerItemFeeUsd = optionalNumber(raw?.taxPerItemFeeUsd)
     option.surchargeEnabled = typeof raw?.surchargeEnabled === 'boolean' ? raw.surchargeEnabled : undefined
     option.surchargeConfigured = typeof raw?.surchargeConfigured === 'boolean' ? raw.surchargeConfigured : undefined

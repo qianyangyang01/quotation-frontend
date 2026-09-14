@@ -25,6 +25,7 @@ describe('quotation view fee integration', () => {
     }
     let copied = ''
     const context = { sumDecimal, productDecimal,
+      products: { value: [] }, chargeWeight: () => 1,
       purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,
@@ -33,7 +34,7 @@ describe('quotation view fee integration', () => {
       logisticsRuleForChannel: () => ({ id: 1, name: '同一规则', relations: [{ carrier: '物流商', channelCode: 'PAY' }, { carrier: '豁免商', channelCode: 'FREE' }] }),
       navigator: { clipboard: { writeText: async (text: string) => { copied = text } } }, toast: () => {},
       quoteMode: { value: mode }, bundleGoodsWeight: (n: number) => n, singleActualWeight: (_p: unknown, n: number) => n,
-      calculateLogisticsFee: () => ({ total: 10 }), quoteRegionForCountry: () => '',
+      calculateLogisticsFee: (_rule: unknown, _country: string, weightKg: number) => ({ total: 10, chargeWeightKg: weightKg }), quoteRegionForCountry: () => '',
       bundlePurchaseCost: (n: number) => n * 40, bundleDomesticFreight: (n: number) => n * 5,
       findPurchaseProduct: () => null, purchaseRecords: { value: [] }, purchasePriceForMonthlySales: () => 40,
       selectedGradeCoefficient: () => 1, exchange: { value: { usd: 5 } }, customQuoteQuantity: { value: 10 },

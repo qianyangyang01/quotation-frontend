@@ -30,6 +30,10 @@ class FinanceSettingValidationTest {
         assertThrows(AppException.class, () -> FinanceSettingValidation.validate("tax-settings", payload));
     }
     @Test void exchangeRateMustBePositiveAndNumeric() {
+        assertDoesNotThrow(() -> FinanceSettingValidation.validate("exchange-rate", mapper.readTree("{\"usdCny\":6.7,\"eurUsd\":1.23456}")));
+        for (var euro : new String[]{"0", "-1", "null", "\"1.2\"", "true"}) {
+            assertThrows(AppException.class, () -> FinanceSettingValidation.validate("exchange-rate", mapper.readTree("{\"usdCny\":6.7,\"eurUsd\":" + euro + "}")));
+        }
         for (var json : new String[]{"{}", "{\"usdCny\":-1}", "{\"usdCny\":0}", "{\"usdCny\":\"7\"}"})
             assertThrows(AppException.class, () -> FinanceSettingValidation.validate("exchange-rate", mapper.readTree(json)));
         assertDoesNotThrow(() -> FinanceSettingValidation.validate("exchange-rate", mapper.readTree("{\"usdCny\":7.2}")));

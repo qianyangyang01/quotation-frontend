@@ -92,7 +92,7 @@ const selectedSalesperson = computed(() => currentSalespersonAccount.value === '
 const customerGradeSettings = reactive(loadCustomerGradeSettings())
 const selectedCustomerGrade = ref<CustomerGrade>('S')
 const financeExchangeRate = loadFinanceExchangeRate()
-const exchange = ref({ usd: financeExchangeRate.usdCny, eur: 7.86, updatedAt: financeExchangeRate.updatedAt })
+const exchange = ref({ usd: financeExchangeRate.usdCny, eurUsd: financeExchangeRate.eurUsd, updatedAt: financeExchangeRate.updatedAt })
 const notice = ref('')
 const readiness = ref<QuotationReadiness | null>(null)
 const logisticsLoadState = ref<'idle' | 'loading' | 'ready' | 'stale' | 'empty' | 'error'>('idle')
@@ -265,11 +265,11 @@ function totalCost(p: Product) { return quoteMode.value === 'bundle' ? sumDecima
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
 function salePrice(p: Product) { return productDecimal(totalCost(p), selectedGradeCoefficient()) }
 function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
-function taxResult(country: string, provider: string, baseQuoteCny: number, ruleName = '', channelKey = '') {
+function taxResult(country: string, provider: string, baseQuoteCny: number, ruleName = '', channelKey = '', weightKg = products.value[0] ? chargeWeight(products.value[0]) : undefined) {
   const rule = logisticsRuleForChannel(ruleName, channelKey)
   const relations = rule?.relations.filter(row => row.carrier === provider) || []
   const key = channelKey || (rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : '')
-  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key)
+  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd })
 }
 function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
@@ -683,7 +683,7 @@ function applyLiveFinance() {
   financeSurchargeSettings.value = loadFinanceSurchargeSettings()
   customerGradeSettings.splice(0, customerGradeSettings.length, ...loadCustomerGradeSettings())
   const rate = loadFinanceExchangeRate()
-  exchange.value = { ...exchange.value, usd: rate.usdCny, updatedAt: rate.updatedAt }
+  exchange.value = { ...exchange.value, usd: rate.usdCny, eurUsd: rate.eurUsd, updatedAt: rate.updatedAt }
 }
 async function reloadLiveConfiguration() {
   await hydrateFinanceSettings({ force: true })
@@ -1187,7 +1187,7 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
     cost = sumDecimal(productDecimal(sumDecimal(purchasePrice, p.purchaseFreightPerUnit), normalizedQuantity), freight)
   }
   const baseQuoteCny = productDecimal(cost, selectedGradeCoefficient())
-  const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey)
+  const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey, result.chargeWeightKg)
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }
@@ -1219,7 +1219,7 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
           : currentQuantity === quantity
             ? custom
             : costFor(currentQuantity)
-    const tax = custom?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey)
+    const tax = custom?.tax || quote1?.tax || quote2?.tax || quote3?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey)
     const row: QuotationMatrixRow = {
         ...option,
         quantityMessages: Object.fromEntries([1,2,3,quantity].filter(count => !costFor(count)).map(count => {
@@ -1236,15 +1236,16 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
         totalCostCny: custom?.cost ?? 0,
         profitCny: custom?.profit ?? 0,
         quoteCny: custom?.quoteCny ?? 0,
-        quote1: quote1?.quoteUsd ?? null,
-        quote2: quote2?.quoteUsd ?? null,
-        quote3: quote3?.quoteUsd ?? null,
-        quoteCustom: custom?.quoteUsd ?? null,
+        quote1: quote1?.tax.configured ? quote1.quoteUsd : null,
+        quote2: quote2?.tax.configured ? quote2.quoteUsd : null,
+        quote3: quote3?.tax.configured ? quote3.quoteUsd : null,
+        quoteCustom: custom?.tax.configured ? custom.quoteUsd : null,
         taxIncluded: tax.included,
         taxConfigured: tax.configured,
         taxRatePercent: tax.ratePercent,
         countryFixedTaxUsd: tax.fixedFeeUsd,
         taxFeeMode: tax.feeMode,
+        taxCalculations: Object.fromEntries([...new Set([1, 2, 3, quantity])].flatMap(count => { const calculation = costFor(count)?.tax.calculation; return calculation ? [[String(count), calculation]] : [] })),
         taxLabel: tax.label,
         surchargeEnabled: tax.surchargeEnabled,
         surchargeConfigured: tax.surchargeConfigured,
@@ -1326,7 +1327,7 @@ function quoteMatrixContextKey(p: Product) {
     tax: financeTaxSettings.value, surcharge: financeSurchargeSettings.value, policies: financePolicies.value,
     quantity: p.quantity, customQuantity: customQuoteQuantity.value,
     purchase: p.purchase, freight: p.purchaseFreightPerUnit, invoiceTax: p.purchaseInvoiceTaxApplied,
-    monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd,
+    monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd, eurUsd: exchange.value.eurUsd,
     purchaseCost: quoteMode.value === 'bundle' ? bundlePurchaseCost(1)
       : purchaseRecords.value.map(record => purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied)),
     bundleFreight: bundleDomesticFreight(1),
@@ -1401,9 +1402,9 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     totalCostCny: custom?.cost ?? totalCost(p),
     profitCny: custom?.profit ?? estimatedProfit(p),
     quoteCny: custom?.quoteCny ?? finalSalePrice(p),
-    quote1: quote1?.quoteUsd ?? null,
-    quote2: quote2?.quoteUsd ?? null,
-    quote3: quote3?.quoteUsd ?? null,
+    quote1: quote1?.tax.configured ? quote1.quoteUsd : null,
+    quote2: quote2?.tax.configured ? quote2.quoteUsd : null,
+    quote3: quote3?.tax.configured ? quote3.quoteUsd : null,
     quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd,
     taxIncluded: tax.included,
     taxConfigured: tax.configured,
@@ -1450,7 +1451,7 @@ const saveValidationIssues = computed(() => {
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.some(row => row.available !== false && row.quote1 != null)) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
-  if (savedQuoteRows.value.some(row => row.available !== false && !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message:'物流商税务或附加费属性待设置，请到对应财务模块补齐' })
+  if (savedQuoteRows.value.some(row => row.available !== false && !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message: savedQuoteRows.value.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请到对应财务模块补齐' })
   if (readiness.value && !readiness.value.ready) issues.push({ key:'businessReadiness', label:'业务就绪条件', message:`报价业务尚未就绪：${readiness.value.missing.join('；')}` })
   if (p?.sku && logisticsLoadState.value === 'idle') issues.push({ key:'logisticsRules', label:'物流规则', message:'请加载当前商品的物流规则' })
   if (logisticsLoadState.value === 'loading') issues.push({ key:'logisticsRules', label:'物流规则', message:'物流规则正在加载，请稍候' })
@@ -1641,6 +1642,7 @@ function buildQuoteOptions() {
       taxRatePercent: row.taxRatePercent,
       countryFixedTaxUsd: row.countryFixedTaxUsd,
       taxFeeMode: row.taxFeeMode,
+      taxCalculations: row.taxCalculations,
       taxLabel: row.taxLabel,
       surchargeEnabled: row.surchargeEnabled,
       surchargeConfigured: row.surchargeConfigured,
@@ -1681,7 +1683,7 @@ async function save() {
   if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
   if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
-  if (selectedMatrixRows.some(row => row.available !== false && !row.taxConfigured)) { toast('物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
+  if (selectedMatrixRows.some(row => row.available !== false && !row.taxConfigured)) { toast(selectedMatrixRows.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null
   const quoteOptions = buildQuoteOptions()
   const summary = selectedQuoteSummary(quoteOptions)
@@ -1890,9 +1892,9 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
         <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"
           :reset-key="JSON.stringify([currentAuthUser.id, quoteMode, quoteMatrixMode, p.sku, bundleItems.map(item => [item.sku, item.quantityPerSet])])"
-          :calculate-price="(row, quantity) => quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null"
+          :calculate-price="(row, quantity) => { const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey); return result?.tax.configured ? result.quoteUsd : null }"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
-          :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="logisticsLoadState !== 'ready'" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
+          :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
           :sku="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
           :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"

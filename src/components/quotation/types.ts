@@ -1,3 +1,4 @@
+import type { EuYunExpressTaxSnapshot } from '@/data/euYunExpressTax'
 export type QuotationProduct = {
   id: number
   selected: boolean
@@ -97,7 +98,8 @@ export type QuotationMatrixRow = {
   taxConfigured: boolean
   taxRatePercent: number | null
   countryFixedTaxUsd: number
-  taxFeeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'missing'
+  taxFeeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'weight-eur' | 'missing'
+  taxCalculations?: Record<string, EuYunExpressTaxSnapshot>
   surchargeEnabled?: boolean
   surchargeConfigured?: boolean
   surchargeExempt?: boolean

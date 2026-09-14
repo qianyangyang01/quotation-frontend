@@ -1,4 +1,5 @@
 import { decimal } from '@/services/quotationDecimal'
+import { calculateEuYunExpressTax, type EuYunExpressTaxContext, type EuYunExpressTaxSnapshot } from './euYunExpressTax'
 import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
@@ -37,7 +38,8 @@ export type FinanceQuoteTaxResult = {
   configured: boolean
   ratePercent: null
   fixedFeeUsd: number
-  feeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'missing'
+  feeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'weight-eur' | 'missing'
+  calculation?: EuYunExpressTaxSnapshot
   taxUsd: number
   totalUsd: number
   label: string
@@ -141,8 +143,11 @@ export function calculateFinanceQuoteTax(
   country: string,
   provider: string,
   baseQuoteUsd: number,
+  context?: EuYunExpressTaxContext,
 ): FinanceQuoteTaxResult {
   const normalizedBase = Number.isFinite(Number(baseQuoteUsd)) ? Math.max(0, Number(baseQuoteUsd)) : 0
+  const channelTax = calculateEuYunExpressTax(country, provider, normalizedBase, context)
+  if (channelTax) return channelTax
   const countrySetting = settings.countries.find(item => item.selected && item.country === country)
   if (!countrySetting?.enabled || finiteNonNegative(countrySetting.fixedFeeUsd) === 0) {
     return { included: false, configured: true, ratePercent: null, fixedFeeUsd: 0, feeMode: 'no-tax', taxUsd: 0, totalUsd: normalizedBase, label: '无关税' }

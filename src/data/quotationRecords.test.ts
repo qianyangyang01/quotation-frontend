@@ -41,7 +41,7 @@ describe('quotation record bundle snapshots', () => {
 })
 
 it('preserves new no-tax snapshots and legacy tax snapshots without recomputing history', () => {
-  for (const taxFeeMode of ['no-tax','missing','exempt','fixed-order'] as const) {
+  for (const taxFeeMode of ['no-tax','missing','exempt','fixed-order','weight-eur'] as const) {
     const record = normalizeQuotationRecord({ ...baseRecord(), quoteOptions: [{
       id:'q1',country:'澳大利亚',carrier:'物流商',channel:'渠道',rule:'规则',eta:'',
       quote1Usd:12,quote2Usd:24,quote3Usd:36,quoteCustomUsd:60,

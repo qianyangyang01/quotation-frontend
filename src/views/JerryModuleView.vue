@@ -22,6 +22,7 @@ import {
   financeLogisticsAttributeOptions,
   saveCustomerGradeSettings,
   saveFinanceExchangeRate,
+  saveFinanceEurUsdRate,
   saveFinanceChannelPolicies,
   saveFinanceCountrySettings,
   type CustomerGradeSetting,
@@ -222,7 +223,7 @@ const financeSummaryCards = computed(() => {
     surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 物流商独立豁免' },
     taxes: { id: 'taxes', icon: '税', label: '税率设置', value: configuredTaxCountryCount.value, description: `已配置 ${configuredTaxCountryCount.value} 个国家` },
     grades: { id: 'grades', icon: '级', label: '客户等级系数', value: enabledCustomerGradeCount.value, description: `共 ${customerGradeSettings.value.length} 个等级，${enabledCustomerGradeCount.value} 个已启用` },
-    exchange: { id: 'exchange', icon: '汇', label: '美元汇率设置', value: financeExchangeRate.value.usdCny.toFixed(4), description: `1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY` },
+    exchange: { id: 'exchange', icon: '汇', label: '汇率设置', value: financeExchangeRate.value.usdCny.toFixed(4), description: `1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY` },
   }
   return financeTabOrder.value.map(id => cards[id])
 })
@@ -364,13 +365,28 @@ async function saveGradeSettings() {
   await saveCustomerGradeSettings(customerGradeSettings.value)
   toast('客户等级计算系数已保存')
 }
+const savingExchangeRate = ref(false)
 async function saveExchangeRateSetting() {
+  if (savingExchangeRate.value) return
   if (!Number.isFinite(financeExchangeRate.value.usdCny) || financeExchangeRate.value.usdCny <= 0) {
     toast('美元汇率必须大于 0')
     return
   }
-  financeExchangeRate.value = await saveFinanceExchangeRate(financeExchangeRate.value.usdCny)
-  toast(`美元汇率已保存：1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY`)
+  savingExchangeRate.value = true
+  try {
+    financeExchangeRate.value = await saveFinanceExchangeRate(financeExchangeRate.value.usdCny)
+    toast(`美元汇率已保存：1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY`)
+  } catch (error) { toast(error instanceof Error ? error.message : '美元汇率保存失败') }
+  finally { savingExchangeRate.value = false }
+}
+async function saveEuroRateSetting() {
+  if (savingExchangeRate.value) return
+  savingExchangeRate.value = true
+  try {
+    financeExchangeRate.value = await saveFinanceEurUsdRate(Number(financeExchangeRate.value.eurUsd))
+    toast('欧元兑美元汇率已保存')
+  } catch (error) { toast(error instanceof Error ? error.message : '欧元汇率保存失败') }
+  finally { savingExchangeRate.value = false }
 }
 function fixedFeeCny(fixedFeeUsd: number) {
   const usd = Math.max(0, Number(fixedFeeUsd) || 0)
@@ -1200,7 +1216,7 @@ function saveEditor() {
         <table v-else-if="mode === 'logistics'"><thead><tr><th>规则名称</th><th>物流商</th><th>类型</th><th>适用国家 / 区域</th><th>重量限制</th><th>计费方式</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="r in filteredRows" :key="r.name"><td><b>{{ r.name }}</b></td><td>{{ r.carrier }}</td><td><span class="tag">{{ r.type }}</span></td><td>{{ r.countries }}</td><td>{{ r.weight }}</td><td>{{ r.price }}</td><td><em :class="{ warn:r.status !== '启用' }">{{ r.status }}</em></td><td><button class="link" @click="showEditor=true">编辑</button><button class="link" @click="toast('已打开区域及条件限制')">区域/限制</button></td></tr></tbody></table>
         <table v-else-if="mode === 'members' && financeSettingsTab==='logistics'"><thead><tr><th>物流属性</th><th>支持国家及具体物流渠道</th><th>国家数量</th><th>渠道配置数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="policy in filteredRows" :key="policy.id"><td><span class="finance-tag">{{ policy.category }}</span></td><td><div class="country-policy-list"><div v-for="rule in policy.countryRules" :key="rule.country"><b>{{ rule.country }}</b><div class="carrier-list"><span v-for="channelKey in rule.allowedChannels" :key="channelKey"><template v-if="financeChannelForKey(rule.country,channelKey,policy.category)">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.carrier }}｜{{ financeChannelForKey(rule.country,channelKey,policy.category)?.channel }}<em v-if="rule.country==='澳大利亚'" :class="{ warn:financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length }">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length ? `缺${financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.join('、')}` : '覆盖1～4区' }}</em></template></span><span v-for="legacy in rule.unavailableChannels || []" :key="legacy.legacyKey" class="legacy-channel" :title="legacy.reason">待审｜{{ legacy.providerName }}｜{{ legacy.channelName }}</span></div></div></div></td><td>{{ policy.countryRules.length }} 个</td><td>{{ financePolicyCarrierCount(policy) }} 个<small v-if="financePolicyUnavailableCount(policy)" class="legacy-count">待审 {{ financePolicyUnavailableCount(policy) }} 个</small></td><td><em :class="{ warn:!policy.enabled }">{{ policy.enabled ? '启用' : '停用' }}</em></td><td>{{ policy.updatedAt }}</td><td><button class="link" @click="openFinancePolicyEditor(policy)">统一维护</button><button class="link danger" @click="removeFinancePolicy(policy)">删除</button></td></tr></tbody></table>
         <div v-else-if="mode === 'members' && financeSettingsTab==='grades'" class="grade-settings"><header><div><b>客户等级计算系数</b><small>最终报价 = 综合成本 × 客户等级系数；美元报价按财务维护的汇率换算。</small></div><button class="primary" @click="saveGradeSettings">保存等级系数</button></header><div class="grade-grid"><label v-for="setting in customerGradeSettings" :key="setting.grade"><strong>{{ customerGradeLabel(setting.grade) }}</strong><span>计算系数</span><input v-model.number="setting.coefficient" type="number" min="0.00001" step="0.01"><small>成本 ¥100 → 报价 ¥{{ (100 * setting.coefficient).toFixed(2) }}<template v-if="setting.grade === 'NEW' && !setting.enabled"><br>确认系数后启用，即可用于报价</template></small><em><input v-model="setting.enabled" type="checkbox"> 启用</em></label></div></div>
-        <div v-else-if="mode === 'members' && financeSettingsTab==='exchange'" class="exchange-settings"><header><div><b>美元兑人民币汇率</b><small>业务报价、国际运费美元展示、多国家报价矩阵及 Excel 导出统一使用此汇率。</small></div><span>最近更新：{{ financeExchangeRate.updatedAt }}</span></header><section><label><span>1 美元（USD）兑换人民币（CNY）</span><div><b>1 USD =</b><input v-model.number="financeExchangeRate.usdCny" type="number" min="0.0001" step="0.0001"><strong>CNY</strong></div><small>当前示例：人民币 ¥100.00 = 美元 ${{ (100 / Math.max(0.0001, financeExchangeRate.usdCny || 0.0001)).toFixed(2) }}</small></label><aside><b>汇率使用说明</b><p>保存后新打开的业务报价立即采用新汇率；已保存的历史报价应保留当时的汇率快照。</p></aside></section><footer><button class="primary" @click="saveExchangeRateSetting">保存美元汇率</button></footer></div>
+        <div v-else-if="mode === 'members' && financeSettingsTab==='exchange'" class="exchange-settings"><header><div><b>美元兑人民币汇率</b><small>业务报价、国际运费美元展示、多国家报价矩阵及 Excel 导出统一使用此汇率。</small></div><span>最近更新：{{ financeExchangeRate.updatedAt }}</span></header><section><label><span>1 美元（USD）兑换人民币（CNY）</span><div><b>1 USD =</b><input v-model.number="financeExchangeRate.usdCny" type="number" min="0.0001" step="0.0001"><strong>CNY</strong></div><small>当前示例：人民币 ¥100.00 = 美元 ${{ (100 / Math.max(0.0001, financeExchangeRate.usdCny || 0.0001)).toFixed(2) }}</small></label><aside><b>汇率使用说明</b><p>保存后新打开的业务报价立即采用新汇率；已保存的历史报价应保留当时的汇率快照。</p></aside></section><footer><button class="primary" :disabled="savingExchangeRate" @click="saveExchangeRateSetting">保存美元汇率</button></footer><section aria-label="欧元兑美元汇率"><label><span>1 欧元（EUR）兑换美元（USD）</span><div><b>1 EUR =</b><input v-model.number="financeExchangeRate.eurUsd" aria-label="欧元兑美元汇率" placeholder="请输入汇率" type="number" min="0.000001" step="0.0001"><strong>USD</strong></div><small>用于欧盟国家的三条云途欧洲 CHC 渠道关税换算。</small></label><aside><b>欧盟 CHC 渠道关税</b><p>含包材的整单计费重量（kg）× 1.5 + 0.6 欧元，再按此汇率换成美元。每单仅加一次 0.6 欧元；每个数量列分别计税。</p><p>未设置有效汇率时，这三条渠道的欧盟报价将提示补充汇率。历史报价保持原汇率和税额。</p></aside></section><footer><button class="primary" :disabled="savingExchangeRate" @click="saveEuroRateSetting">保存欧元汇率</button></footer></div>
         <table v-else><thead><tr><th>报价单号 / SKU</th><th>国家</th><th>报价对象</th><th>物流规则</th><th>成本</th><th>报价</th><th>汇率快照</th><th>操作人 / 时间</th><th>状态</th></tr></thead><tbody><tr v-for="h in filteredRows" :key="h.no"><td><b>{{ h.no }}</b><small>{{ h.sku }}</small></td><td>{{ h.country }}</td><td>{{ h.member }}</td><td>{{ h.rule }}</td><td>¥ {{ h.cost.toFixed(2) }}</td><td><b class="orange">¥ {{ h.quote.toFixed(2) }}</b></td><td>{{ h.rate }}</td><td><b>{{ h.operator }}</b><small>{{ h.time }}</small></td><td><em>{{ h.status }}</em></td></tr></tbody></table>
         <div v-if="mode==='products' && filteredRows.length" class="pagination"><span>每页 <select v-model.number="productPageSize"><option :value="20">20</option><option :value="50">50</option></select> 条</span><button :disabled="productPage===1" @click="productPage--">上一页</button><b>第 {{ productPage }} / {{ productPageCount }} 页</b><button :disabled="productPage===productPageCount" @click="productPage++">下一页</button></div>
         <div v-if="!filteredRows.length" class="empty">没有找到符合条件的数据</div>

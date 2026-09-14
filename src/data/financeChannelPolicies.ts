@@ -60,7 +60,7 @@ export type FinanceChannelPolicy = {
 export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'NEW'
 export function customerGradeLabel(grade: string) { return grade === 'NEW' ? '新客户' : `${grade}级客户` }
 export type CustomerGradeSetting = { grade: CustomerGrade; coefficient: number; enabled: boolean }
-export type FinanceExchangeRateSetting = { usdCny: number; updatedAt: string }
+export type FinanceExchangeRateSetting = { usdCny: number; eurUsd?: number; updatedAt: string }
 
 export const FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT = 'milano:finance-country-settings-updated'
 const DEFAULT_USD_CNY_RATE = 6.75
@@ -295,15 +295,25 @@ export async function saveCustomerGradeSettings(settings: CustomerGradeSetting[]
 export function loadFinanceExchangeRate(): FinanceExchangeRateSetting {
   const parsed = readFinanceSetting<Partial<FinanceExchangeRateSetting>>('exchange-rate')
   const usdCny = Number(parsed?.usdCny)
-  if (Number.isFinite(usdCny) && usdCny > 0) return { usdCny, updatedAt: parsed?.updatedAt || '财务维护' }
+  const eurUsd = Number(parsed?.eurUsd)
+  const euro = Number.isFinite(eurUsd) && eurUsd > 0 ? { eurUsd } : {}
+  if (Number.isFinite(usdCny) && usdCny > 0) return { usdCny, ...euro, updatedAt: parsed?.updatedAt || '财务维护' }
   return { usdCny: DEFAULT_USD_CNY_RATE, updatedAt: '系统默认' }
 }
 
 export async function saveFinanceExchangeRate(usdCny: number): Promise<FinanceExchangeRateSetting> {
   const setting = {
+    ...loadFinanceExchangeRate(),
     usdCny: Math.max(0.0001, Number(usdCny) || DEFAULT_USD_CNY_RATE),
     updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
   }
+  await writeFinanceSetting('exchange-rate', setting)
+  return setting
+}
+
+export async function saveFinanceEurUsdRate(eurUsd: number): Promise<FinanceExchangeRateSetting> {
+  if (!Number.isFinite(eurUsd) || eurUsd <= 0) throw new Error('欧元兑美元汇率必须大于 0')
+  const setting = { ...loadFinanceExchangeRate(), eurUsd, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) }
   await writeFinanceSetting('exchange-rate', setting)
   return setting
 }
