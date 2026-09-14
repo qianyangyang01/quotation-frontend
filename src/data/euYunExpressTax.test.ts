@@ -24,6 +24,12 @@ describe('EU YunExpress CHC weight tax', () => {
     expect(tax(1)).toMatchObject({ taxUsd: 2.52, calculation: { taxEur: 2.1 } })
     expect(tax(0.1, 1.1).taxUsd).toBe(0.83)
     expect(tax(0.1, 1.2).taxUsd).toBe(0.9)
+    expect(calculateEuYunExpressTax('DE', '云途', 10, { channelKey: key, weightKg: 0.755, eurUsd: 1.16, quantity: 5 })).toMatchObject({
+      taxUsd: 2.01, label: '关税 $2.01/单（5件 · 计费重 755g）',
+    })
+    expect(calculateEuYunExpressTax('DE', '云途', 10, { channelKey: key, weightKg: 0.916, eurUsd: 1.16, quantity: 2, unit: '套' })).toMatchObject({
+      taxUsd: 2.29, label: '关税 $2.29/单（2套 · 计费重 916g）',
+    })
   })
   it('blocks invalid weight and exchange rates without assigning a guessed rate', () => {
     for (const value of [undefined, 0, -1, NaN, Infinity]) {

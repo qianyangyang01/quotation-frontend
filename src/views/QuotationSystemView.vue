@@ -265,11 +265,11 @@ function totalCost(p: Product) { return quoteMode.value === 'bundle' ? sumDecima
 function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
 function salePrice(p: Product) { return productDecimal(totalCost(p), selectedGradeCoefficient()) }
 function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
-function taxResult(country: string, provider: string, baseQuoteCny: number, ruleName = '', channelKey = '', weightKg = products.value[0] ? chargeWeight(products.value[0]) : undefined) {
+function taxResult(country: string, provider: string, baseQuoteCny: number, ruleName = '', channelKey = '', weightKg = products.value[0] ? chargeWeight(products.value[0]) : undefined, quantity?: number) {
   const rule = logisticsRuleForChannel(ruleName, channelKey)
   const relations = rule?.relations.filter(row => row.carrier === provider) || []
   const key = channelKey || (rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : '')
-  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd })
+  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd, quantity, unit: quoteMode.value === 'bundle' ? '套' : '件' })
 }
 function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
@@ -1187,7 +1187,7 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
     cost = sumDecimal(productDecimal(sumDecimal(purchasePrice, p.purchaseFreightPerUnit), normalizedQuantity), freight)
   }
   const baseQuoteCny = productDecimal(cost, selectedGradeCoefficient())
-  const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey, result.chargeWeightKg)
+  const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey, result.chargeWeightKg, normalizedQuantity)
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }
