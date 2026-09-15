@@ -59,7 +59,12 @@ class YanwenZhengzhouEpacketTest {
             var input=mapper.createObjectNode().put("country","AU").put("weightKg",weight);
             assertEquals(BigDecimal.valueOf(weight).multiply(BigDecimal.valueOf(65)).add(BigDecimal.valueOf(25)).setScale(2,java.math.RoundingMode.HALF_UP),engine.calculate(channel.path("rows"),input).path("total").decimalValue().setScale(2));
         }
-        for(double weight:new double[]{.0005,2.001})assertThrows(com.milano.quotation.common.AppException.class,()->engine.calculate(channel.path("rows"),mapper.createObjectNode().put("country","AU").put("weightKg",weight)));
+        assertEquals(.001,au.path("minChargeWeightKg").asDouble());
+        var belowMinimum=engine.calculate(channel.path("rows"),mapper.createObjectNode().put("country","AU").put("weightKg",.0005));
+        assertEquals(.0005,belowMinimum.path("actualWeightKg").asDouble());
+        assertEquals(.001,belowMinimum.path("chargeWeightKg").asDouble());
+        assertEquals(new BigDecimal("25.07"),belowMinimum.path("total").decimalValue().setScale(2));
+        assertThrows(com.milano.quotation.common.AppException.class,()->engine.calculate(channel.path("rows"),mapper.createObjectNode().put("country","AU").put("weightKg",2.001)));
         assertThrows(com.milano.quotation.common.AppException.class,()->engine.calculate(channel.path("rows"),mapper.createObjectNode().put("country","CA").put("weightKg",1)));
         for(var row:channel.path("rows"))if(row.path("countryCode").asText().equals("CA"))assertEquals(row.path("pricePerKg").asDouble()+row.path("registrationFee").asDouble(),engine.calculate(channel.path("rows"),mapper.createObjectNode().put("country","CA").put("weightKg",1).put("zoneName",row.path("zoneName").asText())).path("total").asDouble());
     }
