@@ -1,6 +1,7 @@
+import { calculateChannelTax, validateCountryChannelTax, type ChannelTaxRule, type FinanceTaxCalculation } from './channelTaxRules'
 import { decimal } from '@/services/quotationDecimal'
 import { EU_TAX_GROUP, isEuCountry, sameTaxCountry } from './europeanUnion'
-import { calculateEuYunExpressTax, type EuYunExpressTaxContext, type EuYunExpressTaxSnapshot } from './euYunExpressTax'
+import { calculateEuYunExpressTax, type EuYunExpressTaxContext } from './euYunExpressTax'
 import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
 
@@ -13,6 +14,7 @@ export type FinanceCountryTaxSetting = {
   enabled: boolean
   sortOrder: number
   providers?: FinanceProviderTaxSetting[]
+  channelRules?: ChannelTaxRule[]
 }
 
 export type FinanceProviderChannelTax = {
@@ -39,8 +41,8 @@ export type FinanceQuoteTaxResult = {
   configured: boolean
   ratePercent: null
   fixedFeeUsd: number
-  feeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'weight-eur' | 'missing'
-  calculation?: EuYunExpressTaxSnapshot
+  feeMode: 'no-tax' | 'exempt' | 'fixed-order' | 'weight-eur' | 'weight-order' | 'missing'
+  calculation?: FinanceTaxCalculation
   taxUsd: number
   totalUsd: number
   label: string
@@ -103,10 +105,11 @@ export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | 
       const fixedFeeUsd = finiteNonNegative(stored?.fixedFeeUsd ?? legacy?.aFixedFeeUsd)
       return {
         ...(Array.isArray(stored?.providers) ? { providers: stored.providers.map(row => ({ ...row, channels: (row.channels || []).map(channel => ({ ...channel })) })) } : {}),
+        ...(stored?.channelRules ? { channelRules: stored.channelRules.map(rule => ({ ...rule })) } : {}),
         country: fallback.country,
         fixedFeeUsd,
         selected: typeof stored?.selected === 'boolean' ? stored.selected : Boolean(stored && (stored.enabled === true || fixedFeeUsd > 0)),
-        enabled: stored?.enabled !== false && fixedFeeUsd > 0,
+        enabled: stored?.enabled !== false && (fixedFeeUsd > 0 || Boolean(stored?.channelRules?.length)),
         sortOrder: Number.isFinite(Number(stored?.sortOrder)) ? Math.max(1, Number(stored?.sortOrder)) : fallback.sortOrder,
       }
     }).sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN')),
@@ -132,6 +135,8 @@ export function loadFinanceTaxSettings(): FinanceTaxSettings {
 
 export async function saveFinanceTaxSettings(settings: FinanceTaxSettings): Promise<FinanceTaxSettings> {
   for (const country of settings.countries) {
+    const keys = new Set<string>()
+    for (const rule of country.channelRules || []) { validateCountryChannelTax(country.country, rule); if (keys.has(rule.key)) throw new Error("渠道税费重复"); keys.add(rule.key) }
     if (typeof country.fixedFeeUsd !== 'number' || !Number.isFinite(country.fixedFeeUsd) || country.fixedFeeUsd < 0) throw new Error(`${country.country}关税必须为有效非负金额`)
   }
   const normalized = normalizeFinanceTaxSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
@@ -148,6 +153,8 @@ export function calculateFinanceQuoteTax(
   context?: EuYunExpressTaxContext,
 ): FinanceQuoteTaxResult {
   const normalizedBase = Number.isFinite(Number(baseQuoteUsd)) ? Math.max(0, Number(baseQuoteUsd)) : 0
+  const configuredChannel = calculateChannelTax(settings, country, normalizedBase, context)
+  if (configuredChannel) return configuredChannel
   const channelTax = calculateEuYunExpressTax(country, provider, normalizedBase, context)
   if (channelTax) return channelTax
   const countrySetting = settings.countries.find(item => item.selected && sameTaxCountry(item.country, country))

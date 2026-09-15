@@ -1,3 +1,4 @@
+import { addCustomerOperationFee } from '@/data/customerOperationFees'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import { sumDecimal, productDecimal } from '@/services/quotationDecimal'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
@@ -24,7 +25,7 @@ describe('quotation view fee integration', () => {
       updatedAt: 'test',
     }
     let copied = ''
-    const context = { sumDecimal, productDecimal,
+    const context = { sumDecimal, productDecimal, addCustomerOperationFee, customerOperation: { value: { configured: true, feeUsd: 0, message: '' } },
       products: { value: [] }, chargeWeight: () => 1,
       purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
@@ -48,6 +49,15 @@ describe('quotation view fee integration', () => {
     expect(paid).toMatchObject({ quote1: 18, quote2: 27, quote3: 36, quoteCustom: 99, surchargeUsd: 2, quoteCny: 495 })
     expect(free).toMatchObject({ quote1: 16, quote2: 25, quote3: 34, quoteCustom: 97, surchargeUsd: 0, surchargeExempt: true })
     expect(rows[0].channelKey).toBe('1::物流商::FREE')
+    context.customerOperation.value.feeUsd = 1.25
+    const adjusted = run.excelQuoteRows(product)
+    for (const before of rows) {
+      const after = adjusted.find((row: { channelKey: string }) => row.channelKey === before.channelKey)
+      for (const key of ['quote1', 'quote2', 'quote3', 'quoteCustom']) expect(after[key]).toBe(before[key] + 1.25)
+      expect(after.totalCostCny).toBe(before.totalCostCny)
+    }
+    context.customerOperation.value.feeUsd = 0
+    expect(run.excelQuoteRows(product)).toEqual(rows)
     expect(run.finalSalePrice({ ...product, selectedChannelKey: '1::物流商::PAY' })).toBe(90)
     expect(run.finalSalePrice({ ...product, channel: '豁免商' })).toBe(80)
     expect(rows.find((r: {channelKey: string}) => r.channelKey.endsWith('PAY2')).quoteCustom).toBe(99)
@@ -67,6 +77,24 @@ describe('quotation view fee integration', () => {
     expect(paidSheet.prices).toEqual(quantities.map(quantity => 9 * quantity + 9))
     expect(freeSheet.prices).toEqual(quantities.map(quantity => 9 * quantity + 7))
     expect(JSON.stringify(rows)).toBe(original)
+    context.customerOperation.value.feeUsd = 1.25
+    const adjustedSheet = buildCustomerQuoteSheet({ rows: adjusted, countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 10, bundle: mode === 'bundle', quantities,
+      calculatePrice: (row: QuoteSheetSourceRow, quantity: number) => run.quantityCostBreakdown(product, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null })
+    expect(adjustedSheet.rows.find(row => row.key.includes('::PAY"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 10.25))
+    expect(adjustedSheet.rows.find(row => row.key.includes('::FREE"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 8.25))
+    await run.copySpecifiedQuotes(adjusted)
+    expect(copied.split('\r\n')[2]!.split('\t').slice(-2)).toEqual(['100.25', '501.25'])
+
+    // Channel duty replaces the country default, while surcharge and customer labor remain separate.
+    context.customerOperation.value.feeUsd = 0
+    settings.countries[0]!.channelRules = [{key:'1::物流商::PAY',mode:'fixed-order',amount:0.3,perKg:0,currency:'USD'}]
+    const channelPriced = run.excelQuoteRows(product).find((row: {channelKey:string}) => row.channelKey === '1::物流商::PAY')
+    expect(channelPriced).toMatchObject({quote1:13.3,quote2:22.3,quote3:31.3,quoteCustom:94.3,taxFeeMode:'fixed-order',surchargeUsd:2})
+    expect(channelPriced.taxCalculations['10']).toMatchObject({rule:'channel-tax-v1',taxUsd:0.3})
+    settings.countries[0]!.channelRules[0]!.mode = 'unavailable'
+    const unavailable = run.excelQuoteRows(product).find((row: {channelKey:string}) => row.channelKey === '1::物流商::PAY')
+    expect(unavailable).toMatchObject({quote1:null,quote2:null,quote3:null,quoteCustom:null,taxConfigured:false})
+    expect(JSON.stringify(unavailable.quantityMessages)).toContain('该渠道不支持当前国家')
 
   })
 })

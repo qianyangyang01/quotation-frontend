@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.09-v6";
+    public static final String VERSION="company-channels-2026.09.15-zhengzhou-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
@@ -56,6 +56,7 @@ public class LogisticsSourceParser {
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
                 var source=new Source(sheet,scope);
                 if(provider.isBlank())provider=providerFromTitles(source);
+                if(provider.isBlank()&&zhengzhouEpacket(source)&&scope.containsProvider("燕文"))provider="燕文";
                 if(provider.equals("闪电猴")&&!shandianhouPriceSheet(source)) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","闪电猴仅导入登记的三类专线美国价格");continue;
                 }
@@ -377,6 +378,8 @@ public class LogisticsSourceParser {
 
     private boolean parseTable(Source source,String provider,String file,Map<String,ObjectNode> channels) {
         Columns columns=null; boolean recognized=false; String section=source.sheet.getSheetName().trim();
+        boolean zhengzhou=provider.equals("燕文")&&zhengzhouEpacket(source);
+        if(zhengzhou)section="中邮郑州线下E邮宝";
         var yanwenEta=provider.equals("燕文")?yanwenEtaExtractor(source):null;
         int auxiliary=-1;boolean example=false,reference=false;
         var allNotes=new LinkedHashSet<String>();
@@ -435,6 +438,7 @@ public class LogisticsSourceParser {
             row.put("areaName",countryName(countryRaw)); row.put("countryCode",normalizedCode).put("sourceCountryCode",rawCode);
             row.put("sourceCountry",countryRaw).put("sourceCode",columns.code>=0?source.text(r,columns.code):"");
             row.put("sourceProductCode",row.path("sourceCode").asText());
+            if(zhengzhou&&row.path("sourceProductCode").asText().isBlank())row.put("sourceProductCode",zhengzhouProductCode(source));
             applyOriginPolicy(row,provider,sourceOrigin);
             String zoneName=columns.zone>=0?defaultText(source.text(r,columns.zone),zone(countryRaw)):zone(countryRaw);
             if(rawCode.matches("[A-Z]{2}-[1-9][0-9]*"))zoneName=rawCode.substring(3)+"区";
@@ -469,8 +473,20 @@ public class LogisticsSourceParser {
             if(source.wholeSheetMinimum>0)row.put("minChargeWeightKg",Math.max(row.path("minChargeWeightKg").asDouble(),source.wholeSheetMinimum));
             if(columns.step>=0)numeric(row,"billingStepKg",source,r,columns.step,target,true);
             if(columns.linehaul>=0) {
-                numeric(row,"linehaulPerKg",source,r,columns.linehaul,target,true);
-                if(row.path("linehaulPerKg").asDouble()>0)pending(row,"干线费需要明确计费叠加规则");
+                numeric(row,"linehaulPerKg",source,r,columns.linehaul,target,!zhengzhou);
+                if(zhengzhou) {
+                    if(!source.text(columns.headerRow,columns.linehaul).toUpperCase(Locale.ROOT).matches(".*(?:KG|公斤|千克).*")
+                            || !row.path("linehaulPerKg").isNumber() || !row.path("pricePerKg").isNumber()) {
+                        issue(target,r+1,"干线费","郑州干线费须为有效的人民币每KG金额，不能按每票费叠加","error");
+                        continue;
+                    }
+                    row.set("sourcePricePerKg",row.path("pricePerKg").deepCopy());
+                    row.set("sourceLinehaulPerKg",row.path("linehaulPerKg").deepCopy());
+                    row.put("pricePerKg",row.path("pricePerKg").decimalValue().add(row.path("linehaulPerKg").decimalValue()));
+                    row.put("linehaulPerKg",0).put("normalizationNote","用户确认：郑州线下E邮宝公斤费包含干线费（元/KG），处理费单独计入");
+                } else if(row.path("linehaulPerKg").asDouble()>0)pending(row,"干线费需要明确计费叠加规则");
+            } else if(zhengzhou) {
+                issue(target,r+1,"干线费","郑州线下E邮宝缺少干线费每KG列，不能默认为零","error");
             }
             if(columns.eta>=0) {
                 var rawEta=source.text(r,columns.eta);
@@ -729,6 +745,21 @@ public class LogisticsSourceParser {
             applyEta(row,first,"footer");
         }
     }
+    private boolean zhengzhouEpacket(Source source) {
+        if(CompanyChannelScope.normalize(source.sheet.getSheetName()).equals(CompanyChannelScope.normalize("中邮郑州线下E邮宝")))return true;
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(isPriceHeader(source,r))break;
+            for(var text:source.rowTexts(r))if(CompanyChannelScope.normalize(text).equals(CompanyChannelScope.normalize("中邮郑州线下E邮宝")))return true;
+        }
+        return false;
+    }
+    private String zhengzhouProductCode(Source source) {
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(isPriceHeader(source,r))break;
+            for(int c=0;c<source.width(r)-1;c++)if(clean(source.text(r,c)).equals("产品号"))return source.text(r,c+1).trim();
+        }
+        return "";
+    }
     private YanwenEtaExtractor yanwenEtaExtractor(Source source) {
         var index=new YanwenEtaExtractor();
         for(int header=0;header<=source.lastContentRow;header++) {
@@ -748,7 +779,7 @@ public class LogisticsSourceParser {
                 if(parsed==null)index.invalidCountries.add(rawCode);else index.put(index.countries,index.conflictingCountries,rawCode,parsed);
             }
         }
-        if(source.sheet.getSheetName().trim().equals("中邮上海线下E邮宝"))for(int r=0;r<=source.lastContentRow;r++)for(int c=0;c<source.width(r);c++) {
+        if(source.sheet.getSheetName().trim().equals("中邮上海线下E邮宝")||zhengzhouEpacket(source))for(int r=0;r<=source.lastContentRow;r++)for(int c=0;c<source.width(r);c++) {
             var text=source.text(r,c);
             for(var continent:List.of("亚洲","欧洲","南美洲","北美洲","大洋洲","非洲"))if(clean(text).startsWith(continent+"：")||clean(text).startsWith(continent+":")) {
                 var parsed=parseEta(text,source.address(r,c));

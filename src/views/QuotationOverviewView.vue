@@ -12,7 +12,8 @@ import {
   resolveRecordCategory,
   type DashboardFilters,
 } from '@/data/quotationAnalytics'
-import { loadPurchaseProducts, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { type PurchaseProductRecord } from '@/data/purchaseStore'
+import { loadAnalyticsPurchases } from '@/services/quotationAnalyticsPurchases'
 import { loadQuotationRecords, type QuotationRecord } from '@/data/quotationRecords'
 
 const records = ref<QuotationRecord[]>([])
@@ -26,6 +27,7 @@ async function reloadRecords() {
 }
 const purchases = ref<PurchaseProductRecord[]>([])
 const purchaseLoadFailed = ref(false)
+const purchasesReady = ref(false)
 const globalSearch = ref('')
 const startDate = ref('')
 const endDate = ref('')
@@ -47,7 +49,7 @@ const purchaseBySku = computed(() => new Map(purchases.value.map(item => [item.s
 const allCountries = computed(() => [...new Set(records.value.flatMap(recordCountries))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
 const allSalespeople = computed(() => [...new Set(records.value.map(record => record.salespersonName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
 const allCategories = computed(() => [...new Set([
-  ...purchases.value.map(item => item.category.trim() || '未分类'),
+  ...purchases.value.map(item => item.category?.trim() || '其他'),
   ...records.value.map(record => resolveRecordCategory(record, purchaseBySku.value)),
 ])].sort((a, b) => a.localeCompare(b, 'zh-CN')))
 const filters = computed<DashboardFilters>(() => ({
@@ -64,6 +66,7 @@ const ranking = computed(() => buildSalespersonRanking(filteredRecords.value))
 const visibleRanking = computed(() => rankingExpanded.value ? ranking.value : ranking.value.slice(0, 5))
 
 const categoryRows = computed(() => {
+  if (!purchasesReady.value) return []
   const keyword = categorySearch.value.trim().toLowerCase()
   let rows = buildCategoryPerformance(filteredRecords.value, purchases.value).filter(row => !keyword || row.category.toLowerCase().includes(keyword) || row.skus.some(sku => sku.toLowerCase().includes(keyword)))
   if (categoryMode.value === 'volume') rows = rows.filter(row => row.quotationCount > 0).sort((a, b) => b.quotationCount - a.quotationCount)
@@ -93,13 +96,14 @@ const dateTime = (value: string) => {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
 }
 const initials = (name: string) => name.trim().slice(0, 2) || '—'
-const categoryFor = (record: QuotationRecord) => resolveRecordCategory(record, purchaseBySku.value)
+const categoryFor = (record: QuotationRecord) => purchasesReady.value ? resolveRecordCategory(record, purchaseBySku.value) : '—'
 
 function resetFilters() {
   globalSearch.value = ''; startDate.value = ''; endDate.value = ''; countryFilter.value = ''; salespersonFilter.value = ''; categoryFilter.value = ''
 }
 
 function exportDetails() {
+  if (!recordsReady.value || !purchasesReady.value) { toast('报价与采购类别尚未完整加载，请稍后重试'); return }
   if (!detailRows.value.length) { toast('当前筛选条件下没有可导出的报价明细'); return }
   const blob = new Blob([quotationDetailsCsv(detailRows.value, purchases.value)], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -124,9 +128,9 @@ watch(detailPageCount, count => { if (detailPage.value > count) detailPage.value
 onMounted(async () => {
   const [, purchaseResult] = await Promise.allSettled([
     reloadRecords(),
-    loadPurchaseProducts(),
+    loadAnalyticsPurchases(),
   ])
-  if (purchaseResult.status === 'fulfilled') purchases.value = purchaseResult.value
+  if (purchaseResult.status === 'fulfilled') { purchases.value = purchaseResult.value; purchasesReady.value = true }
   else { purchaseLoadFailed.value = true; purchases.value = [] }
 })
 </script>
@@ -136,7 +140,7 @@ onMounted(async () => {
     <main>
       <header class="page-heading">
         <div><p>QUOTATION ANALYTICS</p><h1>报价情况预览</h1><span>基于现有采购资料和已保存报价，查看公司报价经营数据</span></div>
-        <button class="export" type="button" :disabled="!recordsReady" @click="exportDetails">⇩ 导出报表</button>
+        <button class="export" type="button" :disabled="!recordsReady || !purchasesReady" @click="exportDetails">⇩ 导出报表</button>
       </header>
 
       <p v-if="recordLoadError" class="data-warning" role="alert">完整报价统计暂不可用：{{ recordLoadError }}。<button type="button" @click="reloadRecords">重新读取</button></p>
@@ -148,7 +152,7 @@ onMounted(async () => {
         <DateFilter v-model="endDate" label="结束日期" :min="startDate || undefined" />
         <label>国家<select v-model="countryFilter"><option value="">全部</option><option v-for="country in allCountries" :key="country">{{ country }}</option></select></label>
         <label>业务员<select v-model="salespersonFilter"><option value="">全部</option><option v-for="name in allSalespeople" :key="name">{{ name }}</option></select></label>
-        <label>品类<select v-model="categoryFilter"><option value="">全部</option><option v-for="category in allCategories" :key="category">{{ category }}</option></select></label>
+        <label>品类<select v-model="categoryFilter" :disabled="!purchasesReady"><option value="">全部</option><option v-for="category in allCategories" :key="category">{{ category }}</option></select></label>
         <button type="button" @click="resetFilters">重置</button>
       </section>
 
@@ -170,7 +174,7 @@ onMounted(async () => {
 
       <section class="card category-card">
         <header><div><h2>产品品类表现</h2><span>采购 SKU 总量与当前筛选范围内的报价表现</span></div><strong>共 {{ categoryRows.length }} 个品类</strong></header>
-        <div v-if="purchaseLoadFailed" class="data-warning">采购数据暂时无法读取，品类仍按报价记录统计；SKU 总数和采购均价可能不完整。</div>
+        <div v-if="!purchasesReady" class="data-warning">{{ purchaseLoadFailed ? '采购类别读取失败，请刷新重试；暂不展示品类统计，避免误归入其他。' : '正在读取采购类别…' }}</div>
         <div class="category-toolbar">
           <label>⌕<input v-model="categorySearch" placeholder="输入品类名称或 SKU"></label>
           <div><button :class="{active:categoryMode==='all'}" @click="categoryMode='all'">全部</button><button :class="{active:categoryMode==='volume'}" @click="categoryMode='volume'">高报价量</button></div>

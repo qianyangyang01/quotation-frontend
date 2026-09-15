@@ -31,7 +31,7 @@ it('renders only the surcharge workspace with existing logistics policies and em
   expect(document.querySelector('.finance-tax-workspace')?.textContent).toContain('国家附加费')
   expect(document.querySelector('.finance-tax-workspace')?.textContent).toContain('点击国家名称')
   expect(document.querySelector('.table-card')).toBeNull()
-  expect(document.querySelectorAll('.finance-stats>[role=button]')).toHaveLength(6)
+  expect(document.querySelectorAll('.finance-stats>[role=button]')).toHaveLength(7)
   const open = (country: string) => document.querySelector<HTMLButtonElement>(`[aria-label="设置${country}物流商附加费"]`)!.click()
   open('新西兰'); await nextTick()
   expect(document.querySelector('.tax-provider-global')?.textContent).toContain('物流商附加费属性')

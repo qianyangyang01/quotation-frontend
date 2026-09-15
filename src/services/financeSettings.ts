@@ -1,8 +1,8 @@
 import { api } from '@/services/http'
 
-export type FinanceSettingKey = 'country-classification' | 'channel-policies' | 'customer-grades' | 'exchange-rate' | 'tax-settings' | 'surcharge-settings'
+export type FinanceSettingKey = 'country-classification' | 'channel-policies' | 'customer-grades' | 'exchange-rate' | 'tax-settings' | 'surcharge-settings' | 'customer-operation-fees'
 
-const financeSettingKeys: FinanceSettingKey[] = ['country-classification', 'channel-policies', 'customer-grades', 'exchange-rate', 'tax-settings', 'surcharge-settings']
+const financeSettingKeys: FinanceSettingKey[] = ['country-classification', 'channel-policies', 'customer-grades', 'exchange-rate', 'tax-settings', 'surcharge-settings', 'customer-operation-fees']
 const cache = new Map<FinanceSettingKey, unknown>()
 const versions = new Map<FinanceSettingKey, number>()
 let hydrationRequest: Promise<void> | null = null
@@ -51,11 +51,11 @@ export function hydrateFinanceSettings(options: { force?: boolean; signal?: Abor
     const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings', { signal: options.signal })
     const nextCache = new Map<FinanceSettingKey, unknown>()
     const nextVersions = new Map<FinanceSettingKey, number>()
-    const missing = financeSettingKeys.filter(key => !values[key] && key !== 'surcharge-settings')
+    const missing = financeSettingKeys.filter(key => !values[key] && key !== 'surcharge-settings' && key !== 'customer-operation-fees')
     if (missing.length) throw new Error(`财务设置返回不完整：${missing.join('、')}`)
 
     financeSettingKeys.forEach(key => {
-      const wrapped = values[key] ?? { value: { countries: [], providers: [], updatedAt: '尚未保存' }, _version: -1 }
+      const wrapped = values[key] ?? { value: key === 'customer-operation-fees' ? { customers: [] } : { countries: [], providers: [], updatedAt: '尚未保存' }, _version: -1 }
       if (!Object.prototype.hasOwnProperty.call(wrapped, 'value')) throw new Error(`财务设置内容无效：${key}`)
       if (!Number.isFinite(Number(wrapped._version))) throw new Error(`财务设置版本无效：${key}`)
       const normalized = normalizeFinanceSettingValue(key, wrapped.value)

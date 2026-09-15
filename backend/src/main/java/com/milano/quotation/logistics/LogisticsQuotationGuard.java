@@ -28,6 +28,10 @@ public class LogisticsQuotationGuard {
         if (!validOption) throw AppException.unprocessable("至少需要一条有效报价渠道");
     }
     public void validate(ObjectNode quotation) {
+        if (quotation.hasNonNull("customerOperation")) {
+            var customerFees = mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='customer-operation-fees' for share").query(String.class).optional().orElse("{}"));
+            com.milano.quotation.finance.CustomerOperationFees.validate(customerFees, quotation);
+        }
         if(jdbc.sql("select paused from logistics_company_state where singleton=true for share").query(Boolean.class).single())throw AppException.conflict("物流价格正在重建，暂时不能提交新报价");
         boolean scoped="selected".equals(quotation.path("logisticsSyncScope").asText());
         if(!quotation.path("quoteOptions").isArray()||quotation.path("quoteOptions").size()>100)throw AppException.unprocessable("报价渠道数量不合法");
@@ -45,6 +49,7 @@ public class LogisticsQuotationGuard {
         if(!scoped&&!revision.equals(quotation.path("logisticsRevision").asText()))throw AppException.conflict("物流版本已更新或缺少版本信息，请重新加载并计价后提交");
         var policies=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies' for share").query(String.class).optional().orElse("[]"));
         var taxes=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='tax-settings' for share").query(String.class).optional().orElse("{}"));
+        var taxExchange=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='exchange-rate' for share").query(String.class).optional().orElse("{}"));
         var surcharges=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='surcharge-settings' for share").query(String.class).optional().orElse("{}"));
         var channels=jdbc.sql("""
             select jsonb_build_object('key',concat(c.rule_id,'::',p.payload->>'name','::',c.code),
@@ -62,7 +67,7 @@ public class LogisticsQuotationGuard {
             var key=option.path("channelKey").asText();var country=option.path("country").asText();
             var channel=channels.stream().filter(c->c.path("key").asText().equals(key)).findFirst().orElseThrow(()->AppException.conflict("报价渠道已归档、未适配或不存在，请重新选择"));
             validateSurcharge(surcharges, option);
-            validateCountryTax(taxes, option);
+            if (!com.milano.quotation.finance.ChannelTaxRules.validateQuote(taxes, option, taxExchange, quotation.path("customQuoteQuantity").asInt(1))) validateCountryTax(taxes, option);
             boolean countryAvailable=false;
             for(var row:channel.path("rows"))if(row.path("areaName").asText().equals(country)||row.path("countryCode").asText().equalsIgnoreCase(country))countryAvailable=true;
             if(!countryAvailable||!allowed(policies,quotation.path("logisticsAttribute").asText(),country,key))throw AppException.unprocessable("渠道不在该国家及货物属性的财务允许范围内");

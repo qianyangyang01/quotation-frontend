@@ -6,6 +6,8 @@ const source=readFileSync(new URL('../views/QuotationSystemView.vue',import.meta
 const ast=ts.createSourceFile('view.ts',source,ts.ScriptTarget.Latest,true)
 function setup(){
   const state={liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
+    selectedCustomerId:{value:''},customerName:{value:'甲'},customerOperation:{value:{snapshot:{id:'a',name:'甲',feeUsd:1}}},
+    hydrateFinanceSettings:vi.fn(async()=>{}),loadCustomerOperationSettings:()=>({}),resolveCustomerOperation:vi.fn(()=>({configured:true,snapshot:{id:'a',name:'甲',feeUsd:1}})),
     loadQuotationSync:vi.fn(async()=>({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1'})),
     logisticsLoadState:{value:'ready'}, productQueryBusy:{value:false},purchaseRecords:{value:[]},
     findPurchaseProduct:()=>({}),purchaseRevision:()=> 'v1',logisticsRevision:{value:'r1'},
@@ -86,4 +88,11 @@ it('ignores a stale background channel rejection after a newer save check succee
   const old=run();await vi.waitFor(()=>expect(state.checkSelectedLogistics).toHaveBeenCalledTimes(2))
   await run(undefined,true);reject(new ApiError('stale background',409,'ERROR','test'));expect(await old).toBe(false)
   expect(state.syncPending.value).toBe('');expect(state.replaceLogisticsRules).not.toHaveBeenCalled()
+})
+it('blocks stale finance customer fees before save and keeps manual clients independent',async()=>{
+  const {state,run}=setup();state.selectedCustomerId.value='a'
+  state.resolveCustomerOperation.mockReturnValue({configured:true,snapshot:{id:'a',name:'甲',feeUsd:2}})
+  await run(undefined,true);expect(state.syncPending.value).toBe('客户操作费')
+  expect(state.hydrateFinanceSettings).toHaveBeenCalledOnce()
+  state.selectedCustomerId.value='';await run(undefined,true);expect(state.syncPending.value).toBe('')
 })

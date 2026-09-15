@@ -35,6 +35,52 @@ class QuotationWorkflowIntegrationTest {
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
+    @Test void customerOperationSettingsRequireFinanceAndProtectConcurrentVersions() throws Exception {
+        var session = authenticatedSession();
+        mvc.perform(get("/api/v1/finance-settings/tax-channels")
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("sales").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_quote"))))
+                .andExpect(status().isForbidden());
+        var body = """
+            {"customers":[{"id":"client-a","name":"客户甲","feeUsd":1.25,"enabled":true}]}
+            """;
+        var saved = mvc.perform(put("/api/v1/finance-settings/customer-operation-fees").session(session).with(csrf())
+                .header("If-Match","-1").contentType("application/json").content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.value.customers[0].feeUsd").value(1.25)).andReturn();
+        var version = mapper.readTree(saved.getResponse().getContentAsByteArray()).path("data").path("_version").asLong();
+        var draft = """
+            {"schemaVersion":2,"customerName":"客户甲","selectedCustomerId":"client-a"}
+            """;
+        mvc.perform(put("/api/v1/quotation-drafts/mine/state").session(session).with(csrf()).header("If-Match","-1")
+                .contentType("application/json").content(draft)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.payload.selectedCustomerId").value("client-a"));
+        for (var invalid : new String[]{draft.replace("\"client-a\"", "{}"), draft.replace("\"client-a\"", "\"data:secret\""),
+                draft.replace("\"selectedCustomerId\":\"client-a\"", "\"product\":{\"customerId\":\"legacy\"}")}) {
+            mvc.perform(put("/api/v1/quotation-drafts/mine/state").session(session).with(csrf()).header("If-Match","0")
+                    .contentType("application/json").content(invalid)).andExpect(status().isUnprocessableEntity());
+        }
+        var quoteBody = """
+            {"customerName":"客户甲","quoteMode":"single","primarySku":"SKU-1","productCategory":"其他","logisticsAttribute":"普货","customerGrade":"A级客户","monthlySalesEstimate":"10",
+             "customerOperation":{"id":"client-a","name":"客户甲","feeUsd":1.25},"quoteOptions":[{"id":"us","country":"美国","carrier":"承运商A","channel":"渠道A"}]}
+            """;
+        var quotation = mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","customer-operation-snapshot")
+                .contentType("application/json").content(quoteBody)).andExpect(status().isOk()).andReturn();
+        var quotationId = mapper.readTree(quotation.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+        mvc.perform(get("/api/v1/finance-settings/customer-operation-fees")
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("sales").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_quote"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.value.customers[0].name").value("客户甲"));
+        mvc.perform(put("/api/v1/finance-settings/customer-operation-fees").with(csrf())
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("sales").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_quote")))
+                .header("If-Match",version).contentType("application/json").content(body)).andExpect(status().isForbidden());
+        mvc.perform(put("/api/v1/finance-settings/customer-operation-fees").session(session).with(csrf())
+                .header("If-Match",version).contentType("application/json").content(body.replace("1.25","2.50"))).andExpect(status().isOk());
+        mvc.perform(put("/api/v1/finance-settings/customer-operation-fees").session(session).with(csrf())
+                .header("If-Match",version).contentType("application/json").content(body)).andExpect(status().isConflict());
+        mvc.perform(get("/api/v1/finance-settings/customer-operation-fees").session(session)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.value.customers[0].feeUsd").value(2.5));
+        mvc.perform(get("/api/v1/quotations/"+quotationId).session(session)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.customerOperation.feeUsd").value(1.25));
+    }
+
     @Test
     void keepsPersonalOutcomeEditingAndMakesCompanyRecordsReadOnly() throws Exception {
         var session = authenticatedSession();

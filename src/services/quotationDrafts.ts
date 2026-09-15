@@ -15,6 +15,7 @@ export interface DraftChannelSelection {
 export interface QuotationDraftPayload {
   schemaVersion: 2
   customerName: string
+  selectedCustomerId?: string
   quoteMode: DraftQuoteMode
   skuSearch: string
   productCategory: string

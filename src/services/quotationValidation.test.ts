@@ -7,9 +7,9 @@ const valid: QuotationConditionInput = {
 }
 
 describe('quotation staged required validation', () => {
-  it('allows product category to be filled by a successful SKU query', () => {
+  it('does not block a quotation on the removed manual category field', () => {
     expect(validateQuotationConditions({ ...valid, productCategory: '' }, { includeSku: true, includeCategory: false })).toEqual([])
-    expect(validateQuotationConditions({ ...valid, productCategory: '' }, { includeSku: true, includeCategory: true })).toContainEqual({ key: 'productCategory', message: '请选择产品品类' })
+    expect(validateQuotationConditions({ ...valid, productCategory: '' }, { includeSku: true, includeCategory: true })).toEqual([])
   })
 
   it('requires every pre-query condition and trims customer names', () => {

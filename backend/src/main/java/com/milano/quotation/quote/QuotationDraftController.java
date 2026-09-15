@@ -20,7 +20,7 @@ import java.util.Set;
 public class QuotationDraftController {
     private static final int MAX_DRAFT_BYTES = 1_000_000;
     private static final Set<String> DRAFT_FIELDS = Set.of(
-            "schemaVersion", "customerName", "quoteMode", "skuSearch", "productCategory",
+            "schemaVersion", "customerName", "selectedCustomerId", "quoteMode", "skuSearch", "productCategory",
             "logisticsAttribute", "selectedCustomerGrade", "selectedTaxCustomerType",
             "monthlySalesEstimate", "customQuoteQuantity", "quoteMatrixMode",
             "selectedQuoteRegions", "product", "bundleItems", "commonSelections",
@@ -61,7 +61,15 @@ public class QuotationDraftController {
         if(!(body instanceof ObjectNode input)||body.toString().length()>MAX_DRAFT_BYTES)throw AppException.unprocessable("草稿格式错误或内容过大");
         if(input.path("schemaVersion").asInt()!=2)throw AppException.unprocessable("草稿版本不受支持");
         input.propertyNames().forEach(key->{if(!DRAFT_FIELDS.contains(key))throw AppException.unprocessable("草稿包含不支持的字段："+key);});
-        rejectSensitive(input);
+        var sensitiveFields = input.deepCopy();
+        // Only this top-level identifier refers to the finance fee template, not legacy customer master data.
+        var selectedCustomer = sensitiveFields.remove("selectedCustomerId");
+        if(selectedCustomer != null) {
+            if(!selectedCustomer.isTextual() || selectedCustomer.asText().length()>120)
+                throw AppException.unprocessable("客户操作费模板标识格式错误");
+            rejectSensitive(selectedCustomer);
+        }
+        rejectSensitive(sensitiveFields);
         return input.deepCopy();
     }
     private void rejectSensitive(JsonNode node){

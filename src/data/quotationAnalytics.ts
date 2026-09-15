@@ -52,14 +52,13 @@ export function recordCountries(record: QuotationRecord) {
   return [...new Set([record.country, ...(record.quoteOptions || []).map(option => option.country)].map(value => value?.trim()).filter((value): value is string => Boolean(value && value !== '—')))]
 }
 
+export function purchaseCategoryForSkus(skus: string[], purchaseBySku: Map<string, PurchaseProductRecord>) {
+  const categories = new Set(skus.map(sku => purchaseBySku.get(sku.trim().toUpperCase())?.category?.trim() || '其他'))
+  return categories.size === 1 ? [...categories][0]! : '其他'
+}
+
 export function resolveRecordCategory(record: QuotationRecord, purchaseBySku: Map<string, PurchaseProductRecord>) {
-  const explicit = record.productCategory?.trim()
-  if (explicit) return explicit
-  for (const sku of quotationSkus(record)) {
-    const category = purchaseBySku.get(sku)?.category.trim()
-    if (category) return category
-  }
-  return '未分类'
+  return purchaseCategoryForSkus(quotationSkus(record), purchaseBySku)
 }
 
 export function filterQuotationRecords(records: QuotationRecord[], filters: DashboardFilters, purchases: PurchaseProductRecord[]) {
@@ -124,7 +123,7 @@ export function buildCategoryPerformance(records: QuotationRecord[], purchases: 
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
   const catalog = new Map<string, PurchaseProductRecord[]>()
   for (const product of purchases) {
-    const category = product.category.trim() || '未分类'
+    const category = product.category?.trim() || '其他'
     const rows = catalog.get(category)
     if (rows) rows.push(product)
     else catalog.set(category, [product])

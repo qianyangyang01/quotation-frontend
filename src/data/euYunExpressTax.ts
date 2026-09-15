@@ -9,7 +9,7 @@ export const EU_YUNEXPRESS_CHC_CHANNEL_CODES = [
   'C-12d8524ab88e7866389a', // 云途欧洲化妆品专线-CHC
 ] as const
 
-export type EuYunExpressTaxContext = { channelKey: string; weightKg?: number; eurUsd?: number; quantity?: number; unit?: '件' | '套' }
+export type EuYunExpressTaxContext = { channelKey: string; weightKg?: number; eurUsd?: number; usdCny?: number; quantity?: number; unit?: '件' | '套' }
 export type EuYunExpressTaxSnapshot = { rule: 'eu-yunexpress-chc-v1'; weightKg: number; eurUsd: number; taxEur: number; taxUsd: number }
 
 export function matchesEuYunExpressTax(country: string, provider: string, key: string) {
@@ -19,7 +19,7 @@ export function matchesEuYunExpressTax(country: string, provider: string, key: s
     && EU_YUNEXPRESS_CHC_CHANNEL_CODES.some(code => code === parts.at(-1))
 }
 
-export function calculateEuYunExpressTax(country: string, provider: string, baseUsd: number, context?: EuYunExpressTaxContext): FinanceQuoteTaxResult | null {
+export function calculateEuYunExpressTax(country: string, provider: string, baseUsd: number, context?: EuYunExpressTaxContext): (Omit<FinanceQuoteTaxResult, 'calculation'> & { calculation?: EuYunExpressTaxSnapshot }) | null {
   if (!context || !matchesEuYunExpressTax(country, provider, context.channelKey)) return null
   const { weightKg, eurUsd } = context
   const invalid = !Number.isFinite(eurUsd) || (eurUsd ?? 0) <= 0 ? '请财务设置欧元兑美元汇率'

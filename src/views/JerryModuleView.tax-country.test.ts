@@ -17,7 +17,7 @@ vi.mock('@/data/financeChannelPolicies', async importOriginal => ({ ...await imp
 import Jerry from './JerryModuleView.vue'
 let app: App
 afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
-it('renders only the surcharge workspace with existing logistics policies and empty surcharge settings', async () => {
+it('renders channel tax workspace and preserves legacy country provider defaults', async () => {
   const errors = vi.fn()
   const host = document.createElement('div'); document.body.append(host)
   app = createApp({render: () => h(Jerry, {mode:'members'})})
@@ -28,24 +28,14 @@ it('renders only the surcharge workspace with existing logistics policies and em
   expect(card).toBeTruthy()
   card.click(); await nextTick()
   expect(errors).not.toHaveBeenCalled()
-  expect(document.querySelector('.finance-tax-workspace')?.textContent).toContain('国家关税')
-  expect(document.querySelector('.finance-tax-workspace')?.textContent).toContain('点击国家名称')
+  expect(document.querySelector('.channel-tax-workspace')?.textContent).toContain('渠道税费设置')
   expect(document.querySelector('.table-card')).toBeNull()
-  expect(document.querySelectorAll('.finance-stats>[role=button]')).toHaveLength(6)
-  const open = (country: string) => document.querySelector<HTMLButtonElement>(`[aria-label="设置${country}物流商税务"]`)!.click()
-  open('新西兰'); await nextTick()
-  expect(document.querySelector('.tax-provider-global')?.textContent).toContain('物流商税务属性')
-  expect(document.querySelector('.tax-provider-global button.active')?.textContent).toBe('免税')
-  expect(document.querySelector('.tax-provider-global input[type=checkbox]')).toBeNull()
-  open('英国'); await nextTick()
-  expect(document.querySelector('.tax-provider-global button.active')?.textContent).toBe('不免税')
-  const free = [...document.querySelectorAll<HTMLButtonElement>('.tax-provider-global button')].find(b => b.textContent === '免税')!
-  free.click(); await nextTick()
-  expect(fixture.taxSettings.countries[0]!.providers[0]!.mode).toBe('exempt')
-  expect(fixture.taxSettings.countries[1]!.providers[0]!.mode).toBe('exempt')
-  open('新西兰'); await nextTick()
-  const paid = [...document.querySelectorAll<HTMLButtonElement>('.tax-provider-global button')].find(b => b.textContent === '不免税')!
-  paid.click(); await nextTick()
-  expect(fixture.taxSettings.countries[0]!.providers[0]!.mode).toBe('taxable')
-  expect(fixture.taxSettings.countries[1]!.providers[0]!.mode).toBe('exempt')
+  expect(document.querySelectorAll('.finance-stats>[role=button]')).toHaveLength(7)
+  const open = async (country: string) => { [...document.querySelectorAll<HTMLButtonElement>('.countries nav button')].find(b=>b.textContent===country)!.click(); await nextTick() }
+  await open('新西兰')
+  expect(document.querySelector('.matrix tbody')?.textContent).toContain('已含税')
+  await open('英国')
+  expect(document.querySelector('.matrix tbody')?.textContent).toContain('$0.50')
+  expect(document.querySelector('.matrix tbody')?.textContent).toContain('固定金额')
+  expect(errors).not.toHaveBeenCalled()
 })

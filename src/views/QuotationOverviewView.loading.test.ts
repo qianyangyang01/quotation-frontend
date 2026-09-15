@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import View from './QuotationOverviewView.vue'
 const mocks=vi.hoisted(()=>({load:vi.fn()}))
 vi.mock('@/data/quotationRecords',async original=>({...await original<object>(),loadQuotationRecords:mocks.load}))
-vi.mock('@/data/purchaseStore',async original=>({...await original<object>(),loadPurchaseProducts:vi.fn().mockResolvedValue([])}))
+vi.mock('@/services/quotationAnalyticsPurchases',()=>({loadAnalyticsPurchases:vi.fn().mockResolvedValue([])}))
 let app:App,root:HTMLDivElement
 afterEach(()=>{app?.unmount();root?.remove();vi.clearAllMocks()})
 it('shows a recoverable error instead of zero or partial statistics and disables export',async()=>{

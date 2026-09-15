@@ -10,6 +10,20 @@ final class FinanceSettingValidation {
     static void validate(String key, JsonNode body) {
         if (body == null || body.isNull()) fail("财务设置不能为空");
         switch (key) {
+            case "customer-operation-fees" -> {
+                object(body);
+                var rows = body.path("customers");
+                if (!rows.isArray() || rows.size() > 1000) fail("客户操作费须为列表，最多1000个客户");
+                var ids = new HashSet<String>(); var names = new HashSet<String>();
+                for (var row : rows) {
+                    object(row); unique(row, "id", ids);
+                    var name = row.path("name").asText().trim();
+                    if (!row.path("name").isTextual() || name.isEmpty() || name.length() > 120 || !names.add(name.toUpperCase(java.util.Locale.ROOT))) fail("客户名称不能为空、超过120字或重复");
+                    number(row.path("feeUsd"), "操作费", false);
+                    if (row.path("feeUsd").decimalValue().compareTo(new java.math.BigDecimal("1000000")) > 0 || row.path("feeUsd").decimalValue().stripTrailingZeros().scale() > 2) fail("操作费最多1000000美元，保留两位小数");
+                    if (!row.path("enabled").isBoolean()) fail("客户启用状态必须为布尔值");
+                }
+            }
             case "exchange-rate" -> {
                 object(body); var field = body.has("usdCny") ? "usdCny" : "usdToCny";
                 number(body.path(field), field, true);
@@ -61,6 +75,7 @@ final class FinanceSettingValidation {
                     if (!body.path("countries").isArray() || !body.path("providers").isArray()) fail("税费国家及物流商配置必须为列表");
                     var countries = new HashSet<String>(); for (var row : body.path("countries")) {
                         object(row); unique(row,"country",countries);
+                        ChannelTaxRules.validateSettings(row);
                         if (row.has("providers")) {
                             if (!row.path("providers").isArray()) fail("国家物流商配置必须为列表");
                             var names = new HashSet<String>();

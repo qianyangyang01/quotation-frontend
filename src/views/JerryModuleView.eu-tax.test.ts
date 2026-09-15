@@ -37,42 +37,35 @@ async function mount() {
   tab.click(); await settle()
 }
 
-it('adds one EU row, unions and deduplicates member channels, saves and reloads independent provider settings', async () => {
+it('adds an EU group, deduplicates member channels, saves and preserves drafts after save conflicts', async () => {
   dependencies.save.mockImplementation(async (value: FinanceTaxSettings) => {
     fixture.taxSettings = normalizeFinanceTaxSettings(JSON.parse(JSON.stringify(value)))
     return fixture.taxSettings
   })
   await mount()
-  button('＋ 添加欧盟（27国）').click(); await settle()
-  expect(document.querySelectorAll('[aria-label="欧盟关税"]')).toHaveLength(1)
-  const fee=document.querySelector<HTMLInputElement>('[aria-label="欧盟关税"]')!
-  fee.value='3.52'; fee.dispatchEvent(new Event('input',{bubbles:true})); await settle()
-  expect(document.querySelector('.tax-eu-scope')?.textContent).toContain('马耳他（MT）')
-  expect(document.querySelector('.tax-eu-scope')?.textContent).toContain('单独国家设置优先')
-  const hidden={provider:'暂时停用物流商',selected:true,mode:'exempt' as const,channels:[]}
-  fixture.taxSettings.countries.find(row=>row.country==='欧盟')!.providers!.push(hidden)
-  const panel=document.querySelector('.tax-provider-global')!
-  button('＋ 添加物流商',panel).click(); await settle()
-  const select=panel.querySelector<HTMLSelectElement>('select')!
-  expect([...select.options].map(row=>row.textContent)).toEqual(expect.arrayContaining(['云途 · 1个渠道','燕文 · 1个渠道']))
-  select.value='云途'; select.dispatchEvent(new Event('change',{bubbles:true})); await settle()
-  button('确认添加',panel).click(); await settle()
+  const add=document.querySelector<HTMLSelectElement>('[aria-label="添加税费国家"]')!
+  add.value='欧盟'; add.dispatchEvent(new Event('change')); await settle()
+  button('＋ 添加国家').click(); await settle()
+  button('全选全部渠道（2）').click(); await settle()
+  button('批量设置').click(); await settle()
+  const fee=document.querySelector<HTMLInputElement>('[aria-label="原币金额"]')!
+  fee.value='3.52'; fee.dispatchEvent(new Event('input')); await settle()
+  button('应用到所选渠道').click(); await settle()
   button('保存并发布').click(); await settle()
   expect(dependencies.save).toHaveBeenCalledTimes(1)
   const eu=fixture.taxSettings.countries.find(row=>row.country==='欧盟')!
-  expect(eu).toMatchObject({selected:true,enabled:true,fixedFeeUsd:3.52})
-  expect(eu.providers).toContainEqual(hidden)
-  expect(calculateFinanceQuoteTax(fixture.taxSettings,'德国','云途',10).taxUsd).toBe(3.52)
-  expect(calculateFinanceQuoteTax(fixture.taxSettings,'法国','云途',10).taxUsd).toBe(3.52)
+  expect(eu.channelRules).toHaveLength(2)
+  for(const country of ['德国','法国']) expect(calculateFinanceQuoteTax(fixture.taxSettings,country,'云途',10,{channelKey:'1::云途::A'}).taxUsd).toBe(3.52)
   expect(fixture.taxSettings.countries.find(row=>row.country==='美国')!.fixedFeeUsd).toBe(0.3)
   app.unmount(); document.body.innerHTML=''; await mount()
-  button('欧盟（27国） ›').click(); await settle()
-  expect(document.querySelector<HTMLInputElement>('[aria-label="欧盟关税"]')!.value).toBe('3.52')
-  expect(document.querySelector('.tax-provider-global button.active')?.textContent).toBe('不免税')
-  button('免税',document.querySelector('.tax-provider-global')!).click(); await settle()
+  button('欧盟（27国）').click(); await settle()
+  expect(document.querySelector('.matrix')?.textContent).toContain('$3.52')
+  dependencies.save.mockRejectedValueOnce(new Error('财务设置已被其他用户修改，请刷新后重试'))
+  button('全选全部渠道（2）').click(); await settle(); button('批量设置').click(); await settle()
+  const updated=document.querySelector<HTMLInputElement>('[aria-label="原币金额"]')!
+  updated.value='4'; updated.dispatchEvent(new Event('input')); await settle(); button('应用到所选渠道').click(); await settle()
   button('保存并发布').click(); await settle()
-  expect(calculateFinanceQuoteTax(fixture.taxSettings,'德国','云途',10).feeMode).toBe('exempt')
-  document.querySelector<HTMLButtonElement>('[aria-label="删除欧盟关税设置"]')!.click(); await settle()
-  button('保存并发布').click(); await settle()
-  expect(calculateFinanceQuoteTax(fixture.taxSettings,'德国','云途',10).feeMode).toBe('no-tax')
+  expect(document.querySelector('.matrix')?.textContent).toContain('$4.00')
+  expect(document.body.textContent).toContain('其他用户修改')
+  expect(calculateFinanceQuoteTax(fixture.taxSettings,'德国','云途',10,{channelKey:'1::云途::A'}).taxUsd).toBe(3.52)
 })

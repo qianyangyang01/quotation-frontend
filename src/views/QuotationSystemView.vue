@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { loadCustomerOperationSettings, resolveCustomerOperation, addCustomerOperationFee, CUSTOMER_OPERATION_FEES_UPDATED } from '@/data/customerOperationFees'
+import { purchaseCategoryForSkus } from '@/data/quotationAnalytics'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { displayWeightGrams, sumDecimal, productDecimal } from "@/services/quotationDecimal"
@@ -27,7 +29,7 @@ import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vu
 import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
-import { quotationProductCategories, type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
+import { type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
 import { logisticsUnavailableReason, isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
@@ -60,7 +62,6 @@ import {
   normalizedQuoteQuantity,
   purchasePriceBreakdown as calculatePurchasePriceBreakdown,
   purchasePriceForMonthlySales as calculatePurchasePriceForMonthlySales,
-  resolveBundleProductCategory,
   singleActualWeight as calculateSingleActualWeight,
   singleBaseWeight as calculateSingleBaseWeight,
   singlePackagingWeight as calculateSinglePackagingWeight,
@@ -135,7 +136,15 @@ const financeTaxSettings = ref(loadFinanceTaxSettings())
 const quotationAttributeOptions = selectableLogisticsAttributes(financePolicies.value.map(policy => policy.category))
 const skuSearch = ref('')
 const customerName = ref('')
-const productCategory = ref('')
+const selectedCustomerId = ref('')
+const customerOperationSettings = ref(loadCustomerOperationSettings())
+const customerOperation = computed(() => resolveCustomerOperation(customerOperationSettings.value, selectedCustomerId.value, customerName.value))
+function typeCustomerName(value: string) { selectedCustomerId.value = ''; customerName.value = value }
+function selectFinanceCustomer(id: string) {
+  const customer = customerOperationSettings.value.customers.find(row => row.id === id && row.enabled)
+  if (customer) { selectedCustomerId.value = customer.id; customerName.value = customer.name }
+}
+const productCategory = computed(() => purchaseCategoryForSkus(quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => item.sku) : [products.value[0]?.sku || ''], new Map(purchaseRecords.value.map(item => [item.sku.toUpperCase(), item]))))
 const monthlySalesEstimate = ref('10')
 const draftVersion = ref(-1)
 const draftUpdatedAt = ref('')
@@ -269,7 +278,8 @@ function taxResult(country: string, provider: string, baseQuoteCny: number, rule
   const rule = logisticsRuleForChannel(ruleName, channelKey)
   const relations = rule?.relations.filter(row => row.carrier === provider) || []
   const key = channelKey || (rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : '')
-  return calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd, quantity, unit: quoteMode.value === 'bundle' ? '套' : '件' })
+  const fees = calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd, usdCny: exchange.value.usd, quantity, unit: quoteMode.value === 'bundle' ? '套' : '件' })
+  return { ...fees, configured: fees.configured && customerOperation.value.configured, totalUsd: addCustomerOperationFee(fees.totalUsd, customerOperation.value.feeUsd), label: customerOperation.value.configured ? fees.label : customerOperation.value.message }
 }
 function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
@@ -333,13 +343,6 @@ function blockConditionProgress(issues: Array<{ key: string; message: string }>)
   locateValidationIssue(issues[0].key)
   return true
 }
-function clearQueryValidationField(key: string) {
-  queryValidationFields.value = queryValidationFields.value.filter(field => field !== key)
-}
-function changeProductCategory(value: string) {
-  productCategory.value = value
-  clearQueryValidationField('productCategory')
-}
 async function queryProduct() {
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: false }))) return
   cancelQuoteLogistics()
@@ -365,7 +368,6 @@ async function queryProduct() {
   if (!matches.length) { toast(`未找到可报价 SKU：${skuSearch.value}，请确认采购资料已完整保存`); return }
   const p = products.value[0]
   applyPurchaseRecord(p, matches[0])
-  if (!productCategory.value) productCategory.value = quotationProductCategories.find(category => category === matches[0].category) || ''
   skuSearch.value = matches[0].sku
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: true }))) {
     p.channel = ''; p.rule = ''; p.selectedChannelKey = ''; p.freight = 0; p.status = '产品品类待补充'
@@ -420,9 +422,6 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   applyBundlePurchasePricing(item, record, true)
   item.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record)
   item.status = record.status === '资料完整' ? '采购资料已加载' : record.status
-  const recordCategory = quotationProductCategories.find(category => category === record?.category) || ''
-  const existingCategories = bundleItems.value.filter(other => other.id !== item.id && other.sku).map(other => findPurchaseProduct(purchaseRecords.value, other.sku)?.category).filter(Boolean)
-  productCategory.value = resolveBundleProductCategory(productCategory.value, recordCategory, existingCategories as string[])
   if (blockConditionProgress(conditionIssues({ includeSku: false, includeCategory: true }))) {
     item.status = '产品品类待补充'
     return false
@@ -629,6 +628,11 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     const result = await loadQuotationSync(skus, signal)
     if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature() || logisticsLoadState.value === 'loading' || productQueryBusy.value) return false
     const changed: string[] = []
+    if (beforeSave && selectedCustomerId.value) {
+      await hydrateFinanceSettings({ force: true, signal })
+      const current = resolveCustomerOperation(loadCustomerOperationSettings(), selectedCustomerId.value, customerName.value)
+      if (!current.configured || JSON.stringify(current.snapshot) !== JSON.stringify(customerOperation.value.snapshot)) changed.push('客户操作费')
+    }
     if (skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
     const newerLogistics = Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
     // A library revision is only a signal to check. It is never itself a save blocker.
@@ -677,6 +681,7 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
 }
 function quoteLogisticsBusy() { return logisticsLoadState.value === 'loading' || countryLoads.value > 0 }
 function applyLiveFinance() {
+  customerOperationSettings.value = loadCustomerOperationSettings()
   financePolicies.value = loadFinanceChannelPolicies()
   financeCountrySettings.value = loadFinanceCountrySettings()
   financeTaxSettings.value = loadFinanceTaxSettings()
@@ -753,6 +758,7 @@ function refreshFinanceTaxSettings(event?: Event) {
   if (event instanceof StorageEvent && event.key && event.key !== 'milano.finance-tax-settings.v1') return
   financeTaxSettings.value = loadFinanceTaxSettings()
   financeSurchargeSettings.value = loadFinanceSurchargeSettings()
+  customerOperationSettings.value = loadCustomerOperationSettings()
   products.value.forEach(product => normalizeRule(product, true))
 }
 async function reorderCommonCountries(countries: string[]) {
@@ -774,6 +780,7 @@ function draftPayload(): QuotationDraftPayload {
   return {
     schemaVersion: 2,
     customerName: customerName.value,
+    selectedCustomerId: selectedCustomerId.value,
     quoteMode: quoteMode.value,
     skuSearch: skuSearch.value,
     productCategory: productCategory.value,
@@ -865,8 +872,8 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   draftReady.value = false
   quoteMode.value = payload.quoteMode === 'bundle' ? 'bundle' : 'single'
   customerName.value = String(payload.customerName || '').slice(0, 120)
+  selectedCustomerId.value = String(payload.selectedCustomerId || '')
   skuSearch.value = String(payload.skuSearch || '').trim().toUpperCase()
-  productCategory.value = quotationProductCategories.includes(payload.productCategory as (typeof quotationProductCategories)[number]) ? payload.productCategory : ''
   selectedCustomerGrade.value = customerGradeSettings.some(item => item.enabled && item.grade === payload.selectedCustomerGrade) ? payload.selectedCustomerGrade as CustomerGrade : (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   monthlySalesEstimate.value = ['10', '100', '100+'].includes(payload.monthlySalesEstimate) ? payload.monthlySalesEstimate : '10'
   customQuoteQuantity.value = Math.max(1, Math.floor(Number(payload.customQuoteQuantity) || 1))
@@ -963,8 +970,8 @@ async function resetLocalDraft() {
   draftError.value = ''
   showDraftConflictDialog.value = false
   customerName.value = ''
+  selectedCustomerId.value = ''
   skuSearch.value = ''
-  productCategory.value = ''
   monthlySalesEstimate.value = '10'
   selectedCustomerGrade.value = (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   quoteMode.value = 'single'
@@ -1075,6 +1082,7 @@ onMounted(async () => {
   window.addEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.addEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.addEventListener(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
+  window.addEventListener(CUSTOMER_OPERATION_FEES_UPDATED, refreshFinanceTaxSettings)
   window.addEventListener('storage', refreshFinanceCountrySettings)
   window.addEventListener('storage', refreshFinanceTaxSettings)
   window.addEventListener('beforeunload', beforeWindowUnload)
@@ -1094,6 +1102,7 @@ onBeforeUnmount(() => {
   window.removeEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.removeEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.removeEventListener(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
+  window.removeEventListener(CUSTOMER_OPERATION_FEES_UPDATED, refreshFinanceTaxSettings)
   window.removeEventListener('storage', refreshFinanceCountrySettings)
   window.removeEventListener('storage', refreshFinanceTaxSettings)
   stopLiveSync?.()
@@ -1323,6 +1332,7 @@ function quoteMatrixContextKey(p: Product) {
     ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
   const priceInputs = {
+    customerOperation: customerOperation.value,
     missingTaxPoints: missingTaxPointSkus.value,
     tax: financeTaxSettings.value, surcharge: financeSurchargeSettings.value, policies: financePolicies.value,
     quantity: p.quantity, customQuantity: customQuoteQuantity.value,
@@ -1569,7 +1579,7 @@ function logisticsSamplesFor(row: QuotationMatrixRow, p: Product) {
   return quantities.map(quantity => {
     const weightKg = quoteMode.value === 'bundle' ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity)
     const result = rule ? calculateLogisticsFee(rule, row.country, weightKg, [p.logisticsAttribute], undefined, row.quoteRegion) : null
-    return { input: { country: row.country, zoneName: rule ? billingQuoteRegion(rule, row.country, row.quoteRegion) ?? '' : '', weightKg, marks: [p.logisticsAttribute] },
+    return { quantity, input: { country: row.country, zoneName: rule ? billingQuoteRegion(rule, row.country, row.quoteRegion) ?? '' : '', weightKg, marks: [p.logisticsAttribute] },
       total: result ? Number(result.total.toFixed(2)) : null,
       etaMinDays: result?.price.etaMinDays || 0, etaMaxDays: result?.price.etaMaxDays || 0 }
   })
@@ -1676,10 +1686,10 @@ async function save() {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
+  if (!customerOperation.value.configured) { toast(customerOperation.value.message); return }
   const customer = customerName.value.trim()
   const selectedMatrixRows = savedQuoteRows.value
   if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
-  if (!productCategory.value) { toast('请选择产品品类，再保存报价记录'); return }
   if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
   if (selectedMatrixRows.some(row => row.available !== false && !row.taxConfigured)) { toast(selectedMatrixRows.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
@@ -1722,6 +1732,7 @@ async function save() {
     purchaseVersions: Object.fromEntries(activePurchaseSkus().map(sku => [sku, purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)) || ''])),
     logisticsRevision: logisticsRevision.value,
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
+    customerOperation: customerOperation.value.snapshot,
     customerName: customer, quoteMode: quoteMode.value, productSummary,
     productImage: quoteMode.value === 'bundle'
       ? (bundleItems.value.map(item => preferredQuotationImage(item.physicalImage, item.image)).find(Boolean) || '')
@@ -1815,11 +1826,11 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
-          :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :product-category="productCategory" :product-categories="quotationProductCategories" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
+          :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode"
-          @update:sku-search="skuSearch=$event" @update:customer-name="customerName=$event" @update:product-category="changeProductCategory" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade"
+          @update:sku-search="skuSearch=$event" @update:customer-name="typeCustomerName" @select-customer="selectFinanceCustomer" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade"
           @query="queryProduct" @query-bundle="queryBundleItems" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
@@ -1910,7 +1921,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button class="modal-close" @click="showRule = showHistory = false">×</button>
         <template v-if="showRule">
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
-          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每满 50g 增加 2g 包材重量</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 财务维护的 客户等级计算系数</span></li></ol>
+          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每满 50g 增加 2g 包材重量</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 客户等级系数，换算美元并加税费；从财务列表选择客户时再加公司操作费，每单一次，最后按0.05美元向上取整</span></li></ol>
           <p class="modal-tip">美元价格按保存报价时的汇率快照换算，历史报价不会随新汇率自动改变。</p>
         </template>
         <template v-else>

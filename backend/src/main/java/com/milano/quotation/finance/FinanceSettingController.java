@@ -16,9 +16,19 @@ import java.util.UUID;
 
 @RestController @RequestMapping("/api/v1/finance-settings")
 public class FinanceSettingController {
-    private static final List<String> KEYS=List.of("country-classification","channel-policies","customer-grades","exchange-rate","tax-settings","surcharge-settings");
-    private final FinanceSettingRepository settings; private final AuditService audit; private final LogisticsDatasetService logisticsDatasets;
-    public FinanceSettingController(FinanceSettingRepository settings, AuditService audit, LogisticsDatasetService logisticsDatasets){this.settings=settings;this.audit=audit;this.logisticsDatasets=logisticsDatasets;}
+    private static final List<String> KEYS=List.of("country-classification","channel-policies","customer-grades","exchange-rate","tax-settings","surcharge-settings","customer-operation-fees");
+    private final FinanceSettingRepository settings; private final AuditService audit; private final LogisticsDatasetService logisticsDatasets; private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
+    public FinanceSettingController(FinanceSettingRepository settings, AuditService audit, LogisticsDatasetService logisticsDatasets, org.springframework.jdbc.core.simple.JdbcClient jdbc){this.settings=settings;this.audit=audit;this.logisticsDatasets=logisticsDatasets;this.jdbc=jdbc;}
+    @GetMapping("/tax-channels") @PreAuthorize("hasAuthority('PERM_finance')") @Transactional(readOnly=true)
+    ApiResponse<?> taxChannels() {
+        return ApiResponse.ok(jdbc.sql("""
+            select c.rule_id as "ruleId", p.payload->>'name' as carrier, c.payload->>'name' as channel,
+              c.code as "channelCode", c.payload->>'name' as "ruleName", '' as discounts
+            from logistics_channel c join logistics_provider p on p.id=c.provider_id
+            where c.dataset_id=logistics_active_dataset() and c.archived_at is null
+            order by c.rule_id
+            """).query().listOfRows());
+    }
     @GetMapping @PreAuthorize("isAuthenticated()") @Transactional(readOnly=true) ApiResponse<Map<String,JsonNode>> all(){
         return ApiResponse.ok(settings.findAll().stream().collect(java.util.stream.Collectors.toMap(row->row.key,row->view(row))));
     }

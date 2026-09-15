@@ -64,7 +64,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const weightG = numberOrNull(input.weightG)
   const minOrderQty = numberOrNull(input.minOrderQty) ?? (dataSource === 'legacy_2026' ? 1 : null)
   const purchasePriceCny = numberOrNull(input.purchasePriceCny)
-  const category = String(input.category || (dataSource === 'legacy_2026' ? '' : input.name) || '').trim()
+  const category = String(input.category || '').trim()
   const productImage = String(input.productImage || input.image || '')
   const color = String(input.color || input.colorSku || '').trim()
   const sourceLinks = input.sourceLinks || []
