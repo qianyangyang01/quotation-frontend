@@ -130,7 +130,6 @@ const openFinanceCountryPicker = ref<number | null>(null)
 const financeCountryPickerTyping = ref(false)
 const financeCountrySearches = ref<string[]>([])
 const expandedFinanceCountryRules = ref<number[]>([])
-const reviewingLegacyCountryRules = ref<number[]>([])
 const financeSelectedCarriers = ref<string[]>([])
 const priorityFinanceCountryNames = ['美国', '英国', '法国', '澳大利亚']
 const emptyFinancePolicyForm = () => ({ category: '普货' as FinanceLogisticsAttribute, countryRules: [] as FinanceCountryChannelRule[], enabled: true })
@@ -297,10 +296,7 @@ function financeStageCountryCount(stage: CountryStage) {
   return financeCountrySettings.value.filter(setting => setting.enabled && setting.stage === stage).length
 }
 function financePolicyCarrierCount(policy: FinanceChannelPolicy) {
-  return policy.countryRules.reduce((total, rule) => total + rule.allowedChannels.length, 0)
-}
-function financePolicyUnavailableCount(policy: FinanceChannelPolicy) {
-  return policy.countryRules.reduce((total, rule) => total + (rule.unavailableChannels?.length || 0), 0)
+  return policy.countryRules.reduce((total, rule) => total + rule.allowedChannels.filter(key => financeChannelForKey(rule.country, key, policy.category)).length, 0)
 }
 const financePolicyCards = computed(() => financePolicies.value.map(policy => ({
   key: policy.id,
@@ -309,13 +305,7 @@ const financePolicyCards = computed(() => financePolicies.value.map(policy => ({
     const grouped = new Map<string, ProviderGroup>()
     rule.allowedChannels.forEach(channelKey => {
       const channel = financeChannelForKey(rule.country, channelKey, policy.category)
-      if (!channel) {
-        const parts = channelKey.split('::'), provider = parts[1] || '原授权渠道'
-        const group = grouped.get(provider) || { provider, channels: [] }
-        group.channels.push({ key: channelKey, name: (parts.slice(2).join('::') || channelKey) + '（暂不可用，授权保留）', ruleName: '' })
-        grouped.set(provider, group)
-        return
-      }
+      if (!channel) return
       const group = grouped.get(channel.carrier) || { provider: channel.carrier, channels: [] }
       group.channels.push({ key: channel.key, name: channel.channel, ruleName: channel.ruleName })
       grouped.set(channel.carrier, group)
@@ -620,7 +610,6 @@ async function openFinancePolicyEditor(policy?: FinanceChannelPolicy) {
   financeAttributePickerTyping.value = false
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
-  reviewingLegacyCountryRules.value = []
   showEditor.value = true
   if (!await hydrateFinanceLogisticsContext()) return
   if (requestId === financeEditorRequestId && showEditor.value) financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
@@ -635,14 +624,6 @@ function toggleFinanceCountryRule(index: number) {
 }
 function expandFinanceCountryRule(index: number) {
   if (!financeCountryRuleExpanded(index)) expandedFinanceCountryRules.value = [...expandedFinanceCountryRules.value, index]
-}
-function financeLegacyReviewExpanded(index: number) {
-  return reviewingLegacyCountryRules.value.includes(index)
-}
-function toggleFinanceLegacyReview(index: number) {
-  reviewingLegacyCountryRules.value = financeLegacyReviewExpanded(index)
-    ? reviewingLegacyCountryRules.value.filter(item => item !== index)
-    : [...reviewingLegacyCountryRules.value, index]
 }
 function openFinanceAttributePicker() {
   financeAttributePickerOpen.value = true
@@ -808,9 +789,6 @@ function removeFinanceCountryRule(index: number) {
   expandedFinanceCountryRules.value = expandedFinanceCountryRules.value
     .filter(item => item !== index)
     .map(item => item > index ? item - 1 : item)
-  reviewingLegacyCountryRules.value = reviewingLegacyCountryRules.value
-    .filter(item => item !== index)
-    .map(item => item > index ? item - 1 : item)
 }
 function handleFinanceCategoryChange() {
   const availableCountries = new Set(financeLogisticsCountries.value.map(country => country.name))
@@ -821,7 +799,6 @@ function handleFinanceCategoryChange() {
   financeSelectedCarriers.value = financePolicyForm.value.countryRules.map(rule => preferredFinanceCarrier(rule))
   openFinanceCountryPicker.value = null
   expandedFinanceCountryRules.value = []
-  reviewingLegacyCountryRules.value = []
 }
 async function saveFinancePolicy() {
   if (financePolicySaving.value) return
@@ -1227,7 +1204,7 @@ function saveEditor() {
           </tbody>
         </table>
         <table v-else-if="mode === 'logistics'"><thead><tr><th>规则名称</th><th>物流商</th><th>类型</th><th>适用国家 / 区域</th><th>重量限制</th><th>计费方式</th><th>状态</th><th>操作</th></tr></thead><tbody><tr v-for="r in filteredRows" :key="r.name"><td><b>{{ r.name }}</b></td><td>{{ r.carrier }}</td><td><span class="tag">{{ r.type }}</span></td><td>{{ r.countries }}</td><td>{{ r.weight }}</td><td>{{ r.price }}</td><td><em :class="{ warn:r.status !== '启用' }">{{ r.status }}</em></td><td><button class="link" @click="showEditor=true">编辑</button><button class="link" @click="toast('已打开区域及条件限制')">区域/限制</button></td></tr></tbody></table>
-        <table v-else-if="mode === 'members' && financeSettingsTab==='logistics'"><thead><tr><th>物流属性</th><th>支持国家及具体物流渠道</th><th>国家数量</th><th>渠道配置数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="policy in filteredRows" :key="policy.id"><td><span class="finance-tag">{{ policy.category }}</span></td><td><div class="country-policy-list"><div v-for="rule in policy.countryRules" :key="rule.country"><b>{{ rule.country }}</b><div class="carrier-list"><span v-for="channelKey in rule.allowedChannels" :key="channelKey"><template v-if="financeChannelForKey(rule.country,channelKey,policy.category)">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.carrier }}｜{{ financeChannelForKey(rule.country,channelKey,policy.category)?.channel }}<em v-if="rule.country==='澳大利亚'" :class="{ warn:financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length }">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length ? `缺${financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.join('、')}` : '覆盖1～4区' }}</em></template></span><span v-for="legacy in rule.unavailableChannels || []" :key="legacy.legacyKey" class="legacy-channel" :title="legacy.reason">待审｜{{ legacy.providerName }}｜{{ legacy.channelName }}</span></div></div></div></td><td>{{ policy.countryRules.length }} 个</td><td>{{ financePolicyCarrierCount(policy) }} 个<small v-if="financePolicyUnavailableCount(policy)" class="legacy-count">待审 {{ financePolicyUnavailableCount(policy) }} 个</small></td><td><em :class="{ warn:!policy.enabled }">{{ policy.enabled ? '启用' : '停用' }}</em></td><td>{{ policy.updatedAt }}</td><td><button class="link" @click="openFinancePolicyEditor(policy)">统一维护</button><button class="link danger" @click="removeFinancePolicy(policy)">删除</button></td></tr></tbody></table>
+        <table v-else-if="mode === 'members' && financeSettingsTab==='logistics'"><thead><tr><th>物流属性</th><th>支持国家及具体物流渠道</th><th>国家数量</th><th>渠道配置数</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="policy in filteredRows" :key="policy.id"><td><span class="finance-tag">{{ policy.category }}</span></td><td><div class="country-policy-list"><div v-for="rule in policy.countryRules" :key="rule.country"><b>{{ rule.country }}</b><div class="carrier-list"><span v-for="channelKey in rule.allowedChannels" :key="channelKey"><template v-if="financeChannelForKey(rule.country,channelKey,policy.category)">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.carrier }}｜{{ financeChannelForKey(rule.country,channelKey,policy.category)?.channel }}<em v-if="rule.country==='澳大利亚'" :class="{ warn:financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length }">{{ financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.length ? `缺${financeChannelForKey(rule.country,channelKey,policy.category)?.missingQuoteRegions.join('、')}` : '覆盖1～4区' }}</em></template></span></div></div></div></td><td>{{ policy.countryRules.length }} 个</td><td>{{ financePolicyCarrierCount(policy) }} 个</td><td><em :class="{ warn:!policy.enabled }">{{ policy.enabled ? '启用' : '停用' }}</em></td><td>{{ policy.updatedAt }}</td><td><button class="link" @click="openFinancePolicyEditor(policy)">统一维护</button><button class="link danger" @click="removeFinancePolicy(policy)">删除</button></td></tr></tbody></table>
         <div v-else-if="mode === 'members' && financeSettingsTab==='grades'" class="grade-settings"><header><div><b>客户等级计算系数</b><small>最终报价 = 综合成本 × 客户等级系数；美元报价按财务维护的汇率换算。</small></div><button class="primary" @click="saveGradeSettings">保存等级系数</button></header><div class="grade-grid"><label v-for="setting in customerGradeSettings" :key="setting.grade"><strong>{{ customerGradeLabel(setting.grade) }}</strong><span>计算系数</span><input v-model.number="setting.coefficient" type="number" min="0.00001" step="0.01"><small>成本 ¥100 → 报价 ¥{{ (100 * setting.coefficient).toFixed(2) }}<template v-if="setting.grade === 'NEW' && !setting.enabled"><br>确认系数后启用，即可用于报价</template></small><em><input v-model="setting.enabled" type="checkbox"> 启用</em></label></div></div>
         <div v-else-if="mode === 'members' && financeSettingsTab==='exchange'" class="exchange-settings"><header><div><b>美元兑人民币汇率</b><small>业务报价、国际运费美元展示、多国家报价矩阵及 Excel 导出统一使用此汇率。</small></div><span>最近更新：{{ financeExchangeRate.updatedAt }}</span></header><section><label><span>1 美元（USD）兑换人民币（CNY）</span><div><b>1 USD =</b><input v-model.number="financeExchangeRate.usdCny" type="number" min="0.0001" step="0.0001"><strong>CNY</strong></div><small>当前示例：人民币 ¥100.00 = 美元 ${{ (100 / Math.max(0.0001, financeExchangeRate.usdCny || 0.0001)).toFixed(2) }}</small></label><aside><b>汇率使用说明</b><p>保存后新打开的业务报价立即采用新汇率；已保存的历史报价应保留当时的汇率快照。</p></aside></section><footer><button class="primary" :disabled="savingExchangeRate" @click="saveExchangeRateSetting">保存美元汇率</button></footer><section aria-label="欧元兑美元汇率"><label><span>1 欧元（EUR）兑换美元（USD）</span><div><b>1 EUR =</b><input v-model.number="financeExchangeRate.eurUsd" aria-label="欧元兑美元汇率" placeholder="请输入汇率" type="number" min="0.000001" step="0.0001"><strong>USD</strong></div><small>用于欧盟国家的三条云途欧洲 CHC 渠道关税换算。</small></label><aside><b>欧盟 CHC 渠道关税</b><p>含包材的整单计费重量（kg）× 1.5 + 0.6 欧元，再按此汇率换成美元。每单仅加一次 0.6 欧元；每个数量列分别计税。</p><p>未设置有效汇率时，这三条渠道的欧盟报价将提示补充汇率。历史报价保持原汇率和税额。</p></aside></section><footer><button class="primary" :disabled="savingExchangeRate" @click="saveEuroRateSetting">保存欧元汇率</button></footer></div>
         <table v-else><thead><tr><th>报价单号 / SKU</th><th>国家</th><th>报价对象</th><th>物流规则</th><th>成本</th><th>报价</th><th>汇率快照</th><th>操作人 / 时间</th><th>状态</th></tr></thead><tbody><tr v-for="h in filteredRows" :key="h.no"><td><b>{{ h.no }}</b><small>{{ h.sku }}</small></td><td>{{ h.country }}</td><td>{{ h.member }}</td><td>{{ h.rule }}</td><td>¥ {{ h.cost.toFixed(2) }}</td><td><b class="orange">¥ {{ h.quote.toFixed(2) }}</b></td><td>{{ h.rate }}</td><td><b>{{ h.operator }}</b><small>{{ h.time }}</small></td><td><em>{{ h.status }}</em></td></tr></tbody></table>
@@ -1336,10 +1313,7 @@ function saveEditor() {
           <header><div><b>支持国家与渠道</b><small>这里只维护当前物流属性允许的国家和渠道；业务报价仅展示“常用国家设置”中的国家。</small></div><button type="button" @click="addFinanceCountryRule">＋ 添加匹配国家</button></header>
           <section v-for="(rule,index) in financePolicyForm.countryRules" :key="index" class="country-rule-card">
             <div class="country-rule-head"><label class="country-search-label">支持国家（可输入搜索）<div class="country-picker"><span><b>⌕</b><input :value="financeCountrySearches[index] ?? rule.country" autocomplete="off" placeholder="输入国家名称搜索" role="combobox" :aria-expanded="openFinanceCountryPicker===index" @focus="openFinanceCountrySearch(index)" @input="updateFinanceCountrySearch(index,$event)" @blur="closeFinanceCountrySearch(index)" @keydown.esc="openFinanceCountryPicker=null"></span><div v-if="openFinanceCountryPicker===index" class="country-picker-menu" role="listbox"><button v-for="country in filteredFinanceCountries(index)" :key="country.code || country.name" type="button" :class="{ active:country.name===rule.country }" @mousedown.prevent="selectFinanceCountry(index,country.name)"><strong>{{ country.name }}</strong><small>{{ country.code }}</small></button><p v-if="!filteredFinanceCountries(index).length">没有匹配的国家</p></div></div></label><button type="button" @click="removeFinanceCountryRule(index)">移除国家</button></div>
-            <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选可用 {{ rule.allowedChannels.length - financeUnavailableSelections(rule).length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道<span v-if="rule.unavailableChannels?.length"> · 待审旧渠道 {{ rule.unavailableChannels.length }} 个</span></span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
-            <div v-if="financeUnavailableSelections(rule).length" class="legacy-review-list"><b>暂不可用，原授权保留（{{ financeUnavailableSelections(rule).length }} 个）</b><small>这些渠道不参与报价；重新启用且价格可用后恢复。保存其他配置不会删除原授权。</small><label v-for="key in financeUnavailableSelections(rule)" :key="key"><input v-model="rule.allowedChannels" type="checkbox" :value="key">{{ key.split('::').slice(1).join('｜') }}</label></div>
-            <div v-if="financeCountryRuleExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-summary"><span><b>待审旧渠道 {{ rule.unavailableChannels.length }} 个</b><small>这些旧渠道不参与当前报价，可按需核对。</small></span><button type="button" :aria-expanded="financeLegacyReviewExpanded(index)" @click="toggleFinanceLegacyReview(index)">{{ financeLegacyReviewExpanded(index) ? '收起旧渠道 ↑' : '查看旧渠道 ↓' }}</button></div>
-            <div v-if="financeCountryRuleExpanded(index) && financeLegacyReviewExpanded(index) && rule.unavailableChannels?.length" class="legacy-review-list"><b>停用待审旧渠道</b><span v-for="legacy in rule.unavailableChannels" :key="legacy.legacyKey">{{ legacy.providerName }}｜{{ legacy.channelName }}<small>{{ legacy.status === 'ambiguous' ? '存在多个候选，未自动迁移' : '当前库没有可靠等价渠道' }}</small></span></div>
+            <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选可用 {{ rule.allowedChannels.length - financeUnavailableSelections(rule).length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道</span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
             <div v-if="financeCountryRuleExpanded(index) && financeChannelsForCountry(rule.country).length" class="finance-channel-cascade">
               <nav aria-label="物流商选择"><header><b>1</b><span>选择物流商</span></header><button v-for="group in financeCarrierGroupsForCountry(rule.country)" :key="group.carrier" type="button" :class="{ active:selectedFinanceCarrier(index)===group.carrier }" @click="selectFinanceCarrier(index,group.carrier)"><span>{{ group.carrier }}</span><em>{{ selectedFinanceCarrierChannelCount(index,group.carrier) }}/{{ group.channels.length }}</em></button></nav>
               <section><header><div><b>2</b><span>选择“{{ selectedFinanceCarrier(index) }}”下的渠道</span></div><div class="carrier-bulk-actions"><small>该物流商共 {{ financeChannelsForSelectedCarrier(index).length }} 个可用渠道</small><button type="button" :disabled="!financeChannelsForSelectedCarrier(index).length" :aria-pressed="financeCarrierFullySelected(index)" @click="toggleFinanceCarrierChannels(index)">{{ financeCarrierFullySelected(index) ? '取消该物流商全选' : `全选该物流商（${financeChannelsForSelectedCarrier(index).length}）` }}</button></div></header><div class="country-carrier-grid"><label v-for="option in financeChannelsForSelectedCarrier(index)" :key="option.key"><input v-model="rule.allowedChannels" type="checkbox" :value="option.key"><span><b>{{ option.channel }}</b><small>渠道编码：{{ option.channelCode || '—' }} · 计费规则：{{ option.ruleName }}</small><em v-if="rule.country==='澳大利亚'" :class="{ warn:option.missingQuoteRegions.length }">{{ option.quoteRegionSummary }}</em><em v-else>适用国家：{{ rule.country }}</em></span></label></div></section>
@@ -1400,7 +1374,6 @@ function saveEditor() {
 @media(max-width:760px){.tax-country-matrix>header>aside,.tax-provider-global>header>aside{align-items:stretch;flex-direction:column}.tax-country-matrix>header>aside label,.tax-provider-global>header>aside label,.tax-add-button{width:100%}.tax-add-row{align-items:stretch;flex-direction:column}.tax-add-search,.tax-add-row select,.tax-add-row button{width:100%}.tax-country-head,.tax-country-rows>article{min-width:650px}.tax-provider-global{overflow-x:auto}.tax-provider-head,.tax-provider-list-compact>article{min-width:680px}}
 .tax-country-head,.tax-country-rows>article{grid-template-columns:minmax(180px,1fr) minmax(260px,1.2fr) 70px 52px}
 .finance-load-state{display:flex;align-items:center;gap:14px;min-height:78px;padding:18px 20px;border:1px solid #dfe6ea;border-left:4px solid var(--o);border-radius:10px;background:#fff;box-shadow:0 10px 28px rgba(24,38,50,.05)}.finance-load-state>i{width:24px;height:24px;flex:0 0 24px;border:3px solid #ffe2b8;border-top-color:var(--o);border-radius:50%;animation:finance-load-spin .8s linear infinite}.finance-load-state>span{display:grid;gap:5px}.finance-load-state b{font-size:14px}.finance-load-state small,.finance-load-state em{padding:0;background:transparent;color:#7e8a93;font-size:10px;font-style:normal}.finance-load-state.error{border-color:#efc9c4;border-left-color:#cc5143;background:#fff8f7}.finance-load-state.error>span{flex:1}.finance-load-state.error em{color:#a35b52}.finance-load-state>button{height:36px;margin-left:auto;padding:0 14px;border:1px solid #cf796f;border-radius:7px;background:#fff;color:#a13d31;font-size:10px;font-weight:850;cursor:pointer}@keyframes finance-load-spin{to{transform:rotate(360deg)}}
-.carrier-list .legacy-channel{background:#fff2dc;color:#9a5b08;border:1px dashed #dfa85c}.legacy-count{display:block;margin-top:4px;color:#a46617}.legacy-review-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:9px 11px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef;color:#91560b}.legacy-review-summary>span{display:grid;gap:2px}.legacy-review-summary small{color:#9a7b53}.legacy-review-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:8px;padding:10px;border:1px dashed #e0ad61;border-radius:7px;background:#fff9ef;max-height:210px;overflow:auto}.legacy-review-list>b{grid-column:1/-1;color:#91560b}.legacy-review-list>span{display:grid;gap:3px;padding:7px 9px;border-radius:5px;background:#fff;color:#684d2a}.legacy-review-list small{color:#9a7b53}
 .finance-stats>div{height:88px;gap:10px;padding:12px 14px}.finance-stats>div>i{width:36px;height:36px;flex-basis:36px}.finance-stats b{font-size:23px}.finance-stats>div[role=button]:last-child b{font-size:23px}
 </style>
 
