@@ -73,10 +73,10 @@ class LogisticsWorkbookServiceTest {
         var mapper = JsonMapper.builder().build();
         var previous = mapper.createArrayNode();
         previous.addObject().put("areaName", "美国").put("countryCode", "US").put("weightFromKg", 0).put("weightToKg", 1)
-                .put("pricePerKg", 50).put("startWeightKg", 0.05);
+                .put("pricePerKg", 50).put("startWeightKg", 0.05).put("phoneRequired",false);
         var next = mapper.createArrayNode();
         next.addObject().put("areaName", "美国").put("countryCode", "US").put("weightFromKg", 0).put("weightToKg", 2)
-                .put("pricePerKg", 60).put("startWeightKg", 0.1);
+                .put("pricePerKg", 60).put("startWeightKg", 0.1).put("phoneRequired",true);
 
         var result = service.compare(next, previous); var diff = result.path("diffRows").get(0);
 

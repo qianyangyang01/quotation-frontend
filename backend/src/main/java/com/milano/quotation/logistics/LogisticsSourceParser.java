@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.15-zhengzhou-v1";
+    public static final String VERSION="company-channels-2026.09.15-minimum-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
@@ -151,6 +151,7 @@ public class LogisticsSourceParser {
                     for(var n:uncovered)evidence.addObject().put("row",n.asInt()).set("rawValues",source.rawRow(n.asInt()-1));
                 }
                 if(source.ambiguous)for(var channel:parsed.values())issue(channel,0,"渠道匹配待确认","同一工作表存在冲突匹配，先确认渠道归属再导入，防止部分价格覆盖","error");
+                applyMinimumWeights(source,parsed);
                 applyFooterEta(source,parsed);
                 if(scope.unrestricted())splitDistinctProducts(parsed,provider);
                 int rows=0; int errors=0;
@@ -469,7 +470,22 @@ public class LogisticsSourceParser {
             else numeric(row,"pricePerKg",source,r,columns.rate,target,false);
             numeric(row,"registrationFee",source,r,columns.fee,target,false);
             row.put("sourceFeeLabel",columns.fee>=0?source.text(columns.feeHeaderRow,columns.fee):"");
-            if(columns.minimum>=0)numeric(row,"minChargeWeightKg",source,r,columns.minimum,target,true);
+            if(columns.minimum>=0) {
+                var raw=source.text(r,columns.minimum);
+                var headerText=source.text(columns.headerRow,columns.minimum);
+                if(raw.isBlank())row.put("sourceMinimumWeightKind","blank-column").put("sourceMinimumWeightCell",source.address(r,columns.minimum));
+                else try {
+                    var minimumMatch=Pattern.compile("(?i)^([0-9]+(?:\\.[0-9]+)?)\\s*(KG|G|公斤|千克|克)?$").matcher(raw.trim());
+                    if(!minimumMatch.matches())throw new IllegalArgumentException();
+                    var unit=minimumMatch.group(2);
+                    if(unit==null)unit=headerText.matches("(?i).*(?:KG|公斤|千克).*")?"KG":headerText.matches("(?i).*(?:[（(]G[)）]|克).*")?"G":"KG";
+                    row.put("minChargeWeightKg",LogisticsMinimumWeight.kilograms(minimumMatch.group(1),unit))
+                            .put("sourceMinimumWeightKind","column").put("sourceMinimumWeightCell",source.address(r,columns.minimum)).put("sourceMinimumWeightText",headerText+"="+raw);
+                } catch(Exception invalid) {
+                    issue(target,r+1,"minChargeWeightKg","最低计费重量列包含无效重量："+raw,"error");
+                    pending(row,"最低计费重量列无效，需核对");
+                }
+            }
             if(source.wholeSheetMinimum>0)row.put("minChargeWeightKg",Math.max(row.path("minChargeWeightKg").asDouble(),source.wholeSheetMinimum));
             if(columns.step>=0)numeric(row,"billingStepKg",source,r,columns.step,target,true);
             if(columns.linehaul>=0) {
@@ -672,7 +688,7 @@ public class LogisticsSourceParser {
         return ((c.firstPrice>=0&&c.nextPrice>=0&&(c.country>=0||c.zone>=0))||(c.weight>=0 || c.to>=0||!c.fixedWeight.isBlank()) && (c.rate>=0 || c.firstPrice>=0 || (provider.equals("顺丰")&&c.settlement>=0)))?c:null;
     }
     private void normalizeShandianhouBoundary(ObjectNode row,ObjectNode target) {
-        // Confirmed company policy: the first endpoint is eligible; weights below it are not padded.
+        // The first endpoint is eligible; billing applies the explicitly stated minimum before matching.
         var lower=row.path("weightFromKg").decimalValue();
         var minimum=row.path("minChargeWeightKg");
         if(minimum.isNumber()&&minimum.asDouble()>0&&lower.compareTo(minimum.decimalValue())==0) {
@@ -838,6 +854,42 @@ public class LogisticsSourceParser {
         }
         void report(ObjectNode channel,int row,String key,String message){if(reported.add(key))issue(channel,row,"参考时效",message,"error");}
     }
+    private void applyMinimumWeights(Source source,Map<String,ObjectNode> channels) {
+        var notes=new StringBuilder();var cells=new LinkedHashSet<String>();
+        for(var sheetRow:source.sheet) {
+            if(source.parsedRows.contains(sheetRow.getRowNum())||source.auxiliaryRows.containsKey(sheetRow.getRowNum())||source.exampleRows.contains(sheetRow.getRowNum()))continue;
+            for(var cell:sheetRow) {
+                var text=source.parsingText(cell);
+                if(text.matches("(?s).*(起重|最[小低]计费重|起收|不足.{0,15}按|首重.{0,10}[gG克]).*")) {
+                    notes.append(text).append('\n');cells.add(cell.getAddress().formatAsString());
+                }
+            }
+        }
+        for(var channel:channels.values())for(var value:channel.path("rows")) {
+            var row=(ObjectNode)value;
+            if(row.path("sourceMinimumWeightKind").asText().equals("blank-column")) {
+                ObjectNode preceding=null;
+                for(var candidate:channel.path("rows"))if(candidate.path("sourceMinimumWeightKind").asText().equals("column")&&scope(candidate).equals(scope(row))
+                        &&candidate.path("sourceRow").asInt()<row.path("sourceRow").asInt()&&candidate.path("weightFromKg").asDouble()<row.path("weightFromKg").asDouble()
+                        &&candidate.path("minChargeWeightKg").asDouble()<=row.path("weightFromKg").asDouble()
+                        &&(preceding==null||candidate.path("sourceRow").asInt()>preceding.path("sourceRow").asInt()))preceding=(ObjectNode)candidate;
+                if(preceding!=null) {
+                    row.set("minChargeWeightKg",preceding.path("minChargeWeightKg").deepCopy());
+                    row.put("sourceMinimumWeightKind","column-inherited").put("sourceMinimumWeightCell",preceding.path("sourceMinimumWeightCell").asText()).put("sourceMinimumWeightText",preceding.path("sourceMinimumWeightText").asText());
+                }
+            }
+            LogisticsMinimumWeight.applyNotes(row,row.path("notes").asText(),"");
+            if(row.path("minChargeWeightKg").asDouble()==0&&(!row.has("sourceMinimumWeightKind")||row.path("sourceMinimumWeightKind").asText().equals("blank-column")))
+                LogisticsMinimumWeight.applyNotes(row,notes.toString(),String.join(",",cells));
+            if(row.path("sourceMinimumWeightKind").asText().equals("note")&&row.path("sourceMinimumWeightCell").asText().isBlank()) {
+                var footer=LogisticsMinimumWeight.fromNotes(notes.toString(),row.path("countryCode").asText());
+                if(!footer.conflict()&&footer.kg()!=null&&footer.kg().compareTo(row.path("minChargeWeightKg").decimalValue())==0)row.put("sourceMinimumWeightCell",String.join(",",cells));
+            }
+        }
+    }
+
+    static Map<String,String> minimumWeightCountries(){return COUNTRIES;}
+
     private void finish(ObjectNode channel,String provider) {
         if(channel.path("providerName").asText().isBlank())issue(channel,0,"物流商","价格结构已识别，但物流商名称未识别，请确认来源后再导入","error");
         if(!channel.has("templateStatus"))channel.put("templateStatus","known");

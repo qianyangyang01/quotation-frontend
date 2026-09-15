@@ -1171,6 +1171,7 @@ function matchedLogistics(p: Product, country = p.country, region = quoteRegionF
       freight: Number(result.total.toFixed(2)),
       baseFee: Number(result.base.toFixed(2)),
       registrationFee: result.price.registrationFee,
+      minChargeWeightKg: result.minChargeWeightKg,
       eta: formatLogisticsEta(result.price),
       weightRange: `${displayGrams(result.price.weightFromKg)}～${displayGrams(result.price.weightToKg)} g`,
     }))
@@ -1196,7 +1197,8 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
     cost = sumDecimal(productDecimal(sumDecimal(purchasePrice, p.purchaseFreightPerUnit), normalizedQuantity), freight)
   }
   const baseQuoteCny = productDecimal(cost, selectedGradeCoefficient())
-  const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey, result.chargeWeightKg, normalizedQuantity)
+  // Freight minimums do not increase the actual parcel weight used by customs rules.
+  const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey, weightKg, normalizedQuantity)
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }

@@ -71,6 +71,8 @@ export type BundleQuoteItem = {
 }
 
 export type QuotationMatrixRow = {
+  /** Published minimum for the parcel, applied once after combining all items. */
+  minChargeWeightKg?: number
   country: string
   /** 报价行的区域身份；非澳大利亚可包含物流商和渠道范围，保存时转换为原始分区。 */
   quoteRegion?: string

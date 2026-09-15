@@ -20,6 +20,46 @@ class LogisticsSourceParserTest {
     final ObjectMapper mapper=new ObjectMapper();
     final LogisticsWorkbookService standard=new LogisticsWorkbookService(mapper);
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,standard);
+    @Test void preservesYanwenMinimumWeightAndBillsSmallParcelsAtThirtyGrams()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("燕文化妆品专线");
+            row(sheet,0,"国家","CountryCode","公斤运费(元/KG)","处理费(元/件)","重量段(KG)","最小计费重量(KG)");
+            row(sheet,1,"美国","US",63,20,"0.001-0.1",.03);
+            row(sheet,2,"美国","US",67,19,"0.101-0.2",.03);
+            var parsed=parser.parse(bytes(book),"燕文价格.xlsx");
+            var channel=parsed.path("channels").get(0);
+            assertEquals(2,channel.path("rows").size(),parsed.toString());
+            for(var price:channel.path("rows"))assertEquals(.03,price.path("minChargeWeightKg").asDouble());
+            var engine=new LogisticsBillingEngine(mapper);
+            for(double actual:new double[]{.012,.024,.03}) {
+                var input=mapper.createObjectNode().put("country","US").put("weightKg",actual);
+                assertEquals(21.89,engine.calculate(channel.path("rows"),input).path("total").asDouble());
+            }
+        }
+    }
+    @Test void inheritsMinimumWithinCountryAndConvertsGrams()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("全球专线普货");
+            row(sheet,0,"国家","重量段(KG)","公斤运费(元/KG)","处理费(元/件)","最低计费重量(G)");
+            row(sheet,1,"美国","0-0.1",63,20,50);
+            row(sheet,2,"美国","0.101-0.2",67,19,"");
+            row(sheet,3,"英国","0-0.1",63,20,"");
+            var rows=parser.parse(bytes(book),"云速递价格.xlsx").path("channels").get(0).path("rows");
+            for(var price:rows)if(price.path("countryCode").asText().equals("US"))assertEquals(.05,price.path("minChargeWeightKg").asDouble());
+                else assertEquals(0,price.path("minChargeWeightKg").asDouble());
+        }
+    }
+    @Test void appliesFooterMinimumToEveryMatrixChannelWithoutChangingRates()throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("联邮通服装专线（S1427）");
+            row(sheet,0,"国家","重量段(KG)","公斤运费(元/KG)","处理费(元/件)");
+            row(sheet,1,"美国","0-0.1",63,20);
+            row(sheet,2,"英国","0-0.1",67,19);
+            row(sheet,4,"以G为单位进位；不足50G按50G计费；");
+            var rows=parser.parse(bytes(book),"递四方价格.xlsx").path("channels").get(0).path("rows");
+            assertEquals(2,rows.size());for(var price:rows){assertEquals(.05,price.path("minChargeWeightKg").asDouble());assertEquals("A5",price.path("sourceMinimumWeightCell").asText());}
+        }
+    }
     @Test void twoLevelUnitHeadersRecognizeNewProvider()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var sheet=book.createSheet("Sheet1");

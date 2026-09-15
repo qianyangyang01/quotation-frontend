@@ -5,6 +5,7 @@ export type Dataset = { id: string; name: string; status: 'active' | 'preparing'
 export type SourceIssue = { row: number; sourceSheet?: string; sourceRows?: number[]; relatedSourceSheet?: string; relatedSourceRow?: number; rawValues?: Record<string, unknown>; sourceEvidence?: Array<{ row: number; rawValues: Record<string, unknown> }>; field: string; message: string; level: string; code?: string; rowKey?: string; relatedRowKey?: string; suggestedFields?: Partial<Price> }
 export type Price = {
   areaName: string; countryCode: string; weightFromKg: number; weightToKg: number
+  minChargeWeightKg?: number
   weightFromInclusive?: boolean; weightToInclusive?: boolean; pricePerKg?: number; registrationFee?: number
   firstWeightPrice?: number; firstWeightKg?: number; nextWeightPrice?: number; nextWeightKg?: number; intervalPrice?: number
   sourceSheet?: string; sourceRow?: number; notes?: string; pendingReason?: string; blockingReason?: string; reviewWarning?: string; pricingModel?: string; currency?: string

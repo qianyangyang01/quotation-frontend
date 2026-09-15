@@ -38,12 +38,13 @@ export type LogisticsImportPreview = {
 const PRICE_FIELDS: Array<[keyof LogisticsRateRow, string]> = [
   ['pricePerKg', '运费单价'], ['firstWeightPrice', '首重价'], ['nextWeightPrice', '续重单价'], ['intervalPrice', '区间运费'],
   ['registrationFee', '挂号费'], ['surcharge', '附加费'], ['fuelSurchargeRate', '燃油附加费率'],
+  ['startWeightKg', '起重'], ['minChargeWeightKg', '最小计重'],
 ]
 const RULE_FIELDS: Array<[keyof LogisticsRateRow, string]> = [
   ['etaMinDays', '时效最早天数'], ['etaMaxDays', '时效最晚天数'], ['prohibitedMarks', '禁运商品'], ['allowedMarks', '允许商品标记'],
   ['maxPerimeterCm', '三边之和'], ['maxSideCm', '三边最大长度'], ['volumeDivisor', '计泡系数'], ['minLengthCm', '最小长度'],
   ['maxLengthCm', '最大长度'], ['minWidthCm', '最小宽度'], ['maxWidthCm', '最大宽度'], ['minSideAreaCm2', '最小侧面积'],
-  ['maxSideAreaCm2', '最大侧面积'], ['startWeightKg', '起重'], ['minChargeWeightKg', '最小计重'], ['firstWeightKg', '首重'],
+  ['maxSideAreaCm2', '最大侧面积'], ['firstWeightKg', '首重'],
   ['nextWeightKg', '续重'], ['specialGoodsContent', '特殊品含量'], ['volumetric', '是否计抛'], ['prohibitGeneralCargo', '是否禁止普货'],
   ['phoneRequired', '电话是否必需'], ['zoneExclude', '排除'],
 ]

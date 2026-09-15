@@ -7,6 +7,40 @@ import tools.jackson.databind.node.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LogisticsBillingEngineTest {
+    @Test void padsEachYanwenParcelToThirtyGramsAfterCombiningItems() {
+        var rows=mapper.createArrayNode().add(row(.001,.1,63).put("minChargeWeightKg",.03).put("registrationFee",20));
+        double[][] cases={{.012,.03,21.89},{.024,.03,21.89},{.029999,.03,21.89},{.03,.03,21.89},{.036,.036,22.27},{.06,.06,23.78},{.1,.1,26.3}};
+        for(var sample:cases) {
+            var result=engine.calculate(rows,input(sample[0]));
+            assertEquals(sample[0],result.path("actualWeightKg").asDouble());
+            assertEquals(sample[1],result.path("chargeWeightKg").asDouble());
+            assertEquals(sample[2],result.path("total").asDouble());
+        }
+        assertEquals(21.89,engine.calculate(rows,input(.0005)).path("total").asDouble());
+        assertThrows(AppException.class,()->engine.calculate(rows,input(.100001)));
+    }
+    @Test void keepsMinimumsScopedAndPadsBeforeMatchingTheFirstTier() {
+        var us=row(.001,.1,63).put("minChargeWeightKg",.03).put("registrationFee",20);
+        var gb=us.deepCopy().put("countryCode","GB").put("areaName","英国").put("minChargeWeightKg",.05);
+        var rows=mapper.createArrayNode().add(us).add(gb);
+        assertEquals(21.89,engine.calculate(rows,input(.012)).path("total").asDouble());
+        assertEquals(23.15,engine.calculate(rows,input(.012).put("country","GB")).path("total").asDouble());
+        us.remove("minChargeWeightKg");
+        assertEquals(20.76,engine.calculate(rows,input(.012)).path("total").asDouble());
+        us.put("weightFromKg",.05).put("minChargeWeightKg",.05);
+        assertEquals(23.15,engine.calculate(rows,input(.049)).path("total").asDouble());
+        assertEquals(23.15,engine.calculate(rows,input(.05)).path("total").asDouble());
+    }
+    @Test void rejectsInvalidOrConflictingMinimums() {
+        var r=row(.001,.1,63).put("minChargeWeightKg",.03);
+        var rows=mapper.createArrayNode().add(r).add(r.deepCopy().put("minChargeWeightKg",.05));
+        assertThrows(AppException.class,()->engine.calculate(rows,input(.012)));
+        rows.remove(1);
+        for(double minimum:new double[]{-.01,.101}) {
+            r.put("minChargeWeightKg",minimum);
+            assertThrows(AppException.class,()->engine.calculate(rows,input(.012)));
+        }
+    }
     @Test void nationwideLabelUsesOrdinaryRateInsteadOfRemoteRate() {
         var rows = mapper.createArrayNode().add(row(0, 1, 50).put("zoneName", "全国统一"))
                 .add(row(0, 1, 90).put("zoneName", "偏远地区"));
@@ -20,7 +54,7 @@ class LogisticsBillingEngineTest {
     @Test void respectsGramBoundariesAndStrictInequality(){var rows=mapper.createArrayNode().add(row(0,.2,50)).add(row(.201,.5,60)).add(row(.501,1,70));
         assertEquals(20,engine.calculate(rows,input(.2)).path("total").asDouble());assertEquals(22.06,engine.calculate(rows,input(.201)).path("total").asDouble());assertEquals(40,engine.calculate(rows,input(.5)).path("total").asDouble());assertEquals(45.07,engine.calculate(rows,input(.501)).path("total").asDouble());
         ((ObjectNode)rows.get(0)).put("weightToInclusive",false);assertThrows(AppException.class,()->engine.calculate(rows,input(.2)));}
-    @Test void evaluatesWeightRangesAndRejectsOtherModels(){var r=row(0,5,50).put("minChargeWeightKg",.05);var rows=mapper.createArrayNode().add(r);assertEquals(10.05,engine.calculate(rows,input(.001)).path("total").asDouble());
+    @Test void evaluatesWeightRangesAndRejectsOtherModels(){var r=row(0,5,50).put("minChargeWeightKg",.05);var rows=mapper.createArrayNode().add(r);assertEquals(12.5,engine.calculate(rows,input(.001)).path("total").asDouble());
         r.put("pricingModel","first-next").put("pricePerKg",0).put("firstWeightKg",.1).put("firstWeightPrice",18.4).put("nextWeightKg",.1).put("nextWeightPrice",12);assertThrows(AppException.class,()->engine.calculate(rows,input(.101)));
         r.put("pricingModel","interval").put("intervalPrice",25);assertThrows(AppException.class,()->engine.calculate(rows,input(1)));
         r.put("firstWeightPrice",0);assertThrows(AppException.class,()->engine.calculate(rows,input(1)));}

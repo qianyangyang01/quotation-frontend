@@ -34,7 +34,8 @@ public class LogisticsWorkbookService {
     private static final Map<String, String> PRICE_FIELDS = Map.of(
             "pricePerKg", "运费单价", "firstWeightPrice", "首重价", "nextWeightPrice", "续重单价",
             "intervalPrice", "区间运费", "registrationFee", "挂号费", "surcharge", "附加费",
-            "fuelSurchargeRate", "燃油附加费率", "linehaulPerKg", "干线费每KG");
+            "fuelSurchargeRate", "燃油附加费率", "linehaulPerKg", "干线费每KG",
+            "startWeightKg", "起重", "minChargeWeightKg", "最小计重");
     private static final Map<String, String> RANGE_FIELDS = Map.of(
             "weightFromKg", "起始重量", "weightToKg", "截止重量",
             "weightFromInclusive", "下界包含", "weightToInclusive", "上界包含");
@@ -45,8 +46,7 @@ public class LogisticsWorkbookService {
             Map.entry("volumeDivisor", "计泡系数"), Map.entry("minLengthCm", "最小长度"),
             Map.entry("maxLengthCm", "最大长度"), Map.entry("minWidthCm", "最小宽度"),
             Map.entry("maxWidthCm", "最大宽度"), Map.entry("minSideAreaCm2", "最小侧面积"),
-            Map.entry("maxSideAreaCm2", "最大侧面积"), Map.entry("startWeightKg", "起重"),
-            Map.entry("minChargeWeightKg", "最小计重"), Map.entry("firstWeightKg", "首重"),
+            Map.entry("maxSideAreaCm2", "最大侧面积"), Map.entry("firstWeightKg", "首重"),
             Map.entry("nextWeightKg", "续重"), Map.entry("specialGoodsContent", "特殊品含量"),
             Map.entry("volumetric", "是否计抛"), Map.entry("currency", "币种"), Map.entry("pricingModel", "计费方式"), Map.entry("prohibitGeneralCargo", "是否禁止普货"),
             Map.entry("phoneRequired", "电话是否必需"), Map.entry("zoneExclude", "排除"),

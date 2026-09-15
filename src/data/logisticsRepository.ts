@@ -33,6 +33,12 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+// Missing legacy values mean no configured floor; malformed values must remain unquotable.
+function minimumWeightNumber(value: unknown) {
+  if (value === undefined || value === null || value === '') return 0
+  return typeof value === 'number' ? value : Number.NaN
+}
+
 function countOrFallback(value: unknown, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? Math.max(0, parsed) : fallback
@@ -76,8 +82,8 @@ export function normalizeLogisticsPriceRow(row: Partial<LogisticsRateRow>): Logi
     pricingModel: row.pricingModel, weightFromInclusive: row.weightFromInclusive, weightToInclusive: row.weightToInclusive, quoteReady: row.quoteReady, etaStatus: row.etaStatus,
     areaName: String(row.areaName || ''), countryCode: String(row.countryCode || ''), etaMinDays: numberOrZero(row.etaMinDays), etaMaxDays: numberOrZero(row.etaMaxDays),
     prohibitedMarks: String(row.prohibitedMarks || ''), allowedMarks: String(row.allowedMarks || ''), maxPerimeterCm: numberOrZero(row.maxPerimeterCm), maxSideCm: numberOrZero(row.maxSideCm),
-    volumeDivisor: numberOrZero(row.volumeDivisor), weightFromKg: numberOrZero(row.weightFromKg), weightToKg: numberOrZero(row.weightToKg), startWeightKg: numberOrZero(row.startWeightKg),
-    pricePerKg: numberOrZero(row.pricePerKg), minChargeWeightKg: numberOrZero(row.minChargeWeightKg), firstWeightKg: numberOrZero(row.firstWeightKg), firstWeightPrice: numberOrZero(row.firstWeightPrice),
+    volumeDivisor: numberOrZero(row.volumeDivisor), weightFromKg: numberOrZero(row.weightFromKg), weightToKg: numberOrZero(row.weightToKg), startWeightKg: minimumWeightNumber(row.startWeightKg),
+    pricePerKg: numberOrZero(row.pricePerKg), minChargeWeightKg: minimumWeightNumber(row.minChargeWeightKg), firstWeightKg: numberOrZero(row.firstWeightKg), firstWeightPrice: numberOrZero(row.firstWeightPrice),
     nextWeightKg: numberOrZero(row.nextWeightKg), nextWeightPrice: numberOrZero(row.nextWeightPrice), intervalPrice: numberOrZero(row.intervalPrice), registrationFee: numberOrZero(row.registrationFee),
     surcharge: numberOrZero(row.surcharge), fuelSurchargeRate: numberOrZero(row.fuelSurchargeRate), prohibitGeneralCargo: row.prohibitGeneralCargo === true, volumetric: row.volumetric !== false,
     phoneRequired: row.phoneRequired === true, zoneName: String(row.zoneName || ''), zoneExclude: row.zoneExclude === true,

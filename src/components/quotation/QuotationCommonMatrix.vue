@@ -6,6 +6,7 @@ import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelect
 import { hasAnyQuotationPrice } from '@/services/quotationAvailability'
 import QuoteUnavailableReason from './QuoteUnavailableReason.vue'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
+import QuoteMinimumWeight from './QuoteMinimumWeight.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
 
 const props = withDefaults(defineProps<{
@@ -261,7 +262,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       <div class="table-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>2{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>3{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span class="custom-head">{{ customQuantity || 1 }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
       <div v-if="pagedRows.length" class="quote-rows">
         <article v-for="row in pagedRows" :key="rowKey(row)" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
-          <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></div><b>{{ row.eta }}</b>
+          <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><QuoteMinimumWeight :weight-kg="row.minChargeWeightKg" /></div><b>{{ row.eta }}</b>
           <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span>
           <div class="selection-actions"><button :disabled="!isSelected(row) && !hasAnyQuotationPrice(row)" @click="toggleSelection(row)">{{ isSelected(row) ? (row.available === false ? '移除渠道' : '已加入') : '加入报价单' }}</button><button v-if="isSelected(row) && hasAnyQuotationPrice(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
         </article>

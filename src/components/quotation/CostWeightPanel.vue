@@ -62,7 +62,7 @@ function purchasePricingLabel() {
         <p class="charge-result"><span>最终计费重量</span><b>{{ grams(chargeWeight) }} g</b><small>实重与体积重取最大值</small></p>
       </div>
     </div>
-    <div class="highlights"><p><span>计费重量</span><b>{{ grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 包材 {{ grams(packagingWeight) }}g</small></p><p><span>国内运费成本</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>{{ product.purchaseDataSource==='legacy_2026' ? '采用旧数据唯一单档运费' : '10件运费平摊，不计采购票点' }}</small></p></div>
+    <div class="highlights"><p><span>含包材重量</span><b>{{ grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 包材 {{ grams(packagingWeight) }}g</small></p><p><span>国内运费成本</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>{{ product.purchaseDataSource==='legacy_2026' ? '采用旧数据唯一单档运费' : '10件运费平摊，不计采购票点' }}</small></p></div>
   </section>
 </template>
 

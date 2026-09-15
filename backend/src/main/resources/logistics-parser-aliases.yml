@@ -21,7 +21,7 @@ common:
     contains: ["重量段", "重量区间", "重量范围", "计费重量"]
     excludeContains: ["重量段始", "重量段终", "重派费", "最小计费", "最低计费", "最小重量", "最大重量", "限重", "起重"]
   minimumWeight:
-    contains: ["最小计费", "最低计费"]
+    contains: ["最小计费", "最低计费", "最小计重", "最低计重", "计费起重"]
   billingStep:
     contains: ["进位"]
   pricePerKg:
