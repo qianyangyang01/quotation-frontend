@@ -1,0 +1,702 @@
+{
+  "repairId": "documented-minimum-20260915",
+  "datasetId": "bd07399a-1e05-4886-b3f6-699ee9c64919",
+  "channels": [
+    {
+      "channelId": "26b809e0-dd60-421c-994c-b8d67fa90141",
+      "provider": "递四方",
+      "channel": "联邮通标准挂号-带电（OH）",
+      "versionId": "ac38b14a-5d2d-472b-bba7-266439702a9b",
+      "rowsFingerprint": "9571bdde08419837b5aa8dc885fad9b6",
+      "rowCount": 43,
+      "patches": [
+        {
+          "index": 35,
+          "rowKey": "e7d58aee18889442a2268a063a11d06e183ef75a0a5c365033c8f8183e1a449a",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 14,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 36,
+          "rowKey": "e4b808ddc6cc5dbafde591323b72b7a714f76a94e525946c3b9adf348ea622f4",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 15,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 37,
+          "rowKey": "5d30b0f567058ee5bedd11f3b84cb80fa1c133af8639337069cf89a5c73230c1",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 16,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 38,
+          "rowKey": "112efd7e74a0d1b5a8418fab375676797efdea5be71155c4321d78ce652c18fa",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 17,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 39,
+          "rowKey": "e88f3e92a5c06b871631b2e72344028411a2ced97ae46b35d191b1615ee63a16",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 18,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 40,
+          "rowKey": "64e79ec0c773ae7e46409ed6120fa1103189b4e9a9926b40674a51f334abd645",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 19,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 41,
+          "rowKey": "e9827ba565b253d0c7222e3b8f0b89da025ef1b48f3bff93a833d5e3110573b6",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 20,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 42,
+          "rowKey": "c5b9834eadbc0f069756b851061636345049de58a4dcdc42d2a7dec2f92731c4",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-带电（OH）",
+          "sourceRow": 21,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        }
+      ]
+    },
+    {
+      "channelId": "3e1d46ee-06ed-4b44-a348-382ae0598586",
+      "provider": "花海",
+      "channel": "HH全球专线-普货",
+      "versionId": "bc47ce6f-c5a1-437c-8020-85262fcff154",
+      "rowsFingerprint": "647b4fba3c7bf6e95f36d1a4c0b164b2",
+      "rowCount": 39,
+      "patches": [
+        {
+          "index": 17,
+          "rowKey": "95e811d2a71f417eb9c8f3f158f3fb955414189e12ed900a76edeb13181a52b6",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 57,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 18,
+          "rowKey": "e135cd1f3bffb992033416210634809ca81a87676d2d3cf773b116f020cc1a5a",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 58,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 19,
+          "rowKey": "f7e10acf7cca95e521ef235b3be90ee6ac6f4c10018a3d26bbc9027021827a9d",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 59,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 20,
+          "rowKey": "632d04bc79af14b4e8e5bc51b324b7b7ac7b7fa75a6db1258efbd086471e3f38",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 60,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 21,
+          "rowKey": "1e1a35d57fb182136b2387bbfeb31aaa75ea694f38e8de0ea60f5f0bbe0ae41c",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 61,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 22,
+          "rowKey": "b5cc3e98f8d862e6ca362701909066b59bd626418c4de28e90bdd7db2c5dbb52",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 62,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 23,
+          "rowKey": "eec6be701ea4518ff78a2fdaba3d06e195d5a433534a3cedb3f36f9290af53e7",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 63,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 24,
+          "rowKey": "e5da967b576b0c79ac943b6fbe47003cbe02ebafd1d360f5e1e9aac63e6bd757",
+          "countryCode": "CA",
+          "sourceSheet": "普货 ",
+          "sourceRow": 64,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 25,
+          "rowKey": "3270a9c6ebcb8159b8f1c1723b93ff79724ba43298f9d5cdf24aa40c7207da75",
+          "countryCode": "DE",
+          "sourceSheet": "普货 ",
+          "sourceRow": 47,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 28,
+          "rowKey": "c7b0c9dd5f1d678cc1d16cae021d2285787034c221e3bd6f6322e091d567ea86",
+          "countryCode": "ES",
+          "sourceSheet": "普货 ",
+          "sourceRow": 51,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 30,
+          "rowKey": "5310478346c405dfb04ad6a3e36a30ed639af3c9b0386fdac8974b6749e51a4b",
+          "countryCode": "FR",
+          "sourceSheet": "普货 ",
+          "sourceRow": 45,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 31,
+          "rowKey": "b162685ba02a0267d34ef9c39742a24eadf3f106ade157d648a55679c2fbb3be",
+          "countryCode": "GB",
+          "sourceSheet": "普货 ",
+          "sourceRow": 43,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        },
+        {
+          "index": 32,
+          "rowKey": "7fc3fc4560d05b073c32454b1c2cad66f3656125be9d5373298c1815fdc8d63c",
+          "countryCode": "IT",
+          "sourceSheet": "普货 ",
+          "sourceRow": 49,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "， 英国，法国，德国，意大利，西班牙，加拿大首重50g"
+          }
+        }
+      ]
+    },
+    {
+      "channelId": "937066f5-e247-4f43-949a-69b6f7b3f8f9",
+      "provider": "花海",
+      "channel": "HH全球专线-特货",
+      "versionId": "c11e2bd0-b8d0-4c6b-b73a-fb4aebcb650a",
+      "rowsFingerprint": "d49c81109e2bf65952261c527fff8857",
+      "rowCount": 20,
+      "patches": [
+        {
+          "index": 0,
+          "rowKey": "2ec9d54932df01883eaaac5bf6c73ad149909742594c48a653e112f061c123a9",
+          "countryCode": "CA",
+          "sourceSheet": "特货",
+          "sourceRow": 52,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 1,
+          "rowKey": "cfd63459640db12e9042e881fc9729fe867321b6435c0049b597da25c61fee6a",
+          "countryCode": "CA",
+          "sourceSheet": "特货",
+          "sourceRow": 53,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 2,
+          "rowKey": "b5cc3e98f8d862e6ca362701909066b59bd626418c4de28e90bdd7db2c5dbb52",
+          "countryCode": "CA",
+          "sourceSheet": "特货",
+          "sourceRow": 54,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 3,
+          "rowKey": "74e672c52da5beb056d75d8b2cd0f0d6e9e0ad54524d2515f0dd91e011999bc8",
+          "countryCode": "CA",
+          "sourceSheet": "特货",
+          "sourceRow": 55,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 4,
+          "rowKey": "3270a9c6ebcb8159b8f1c1723b93ff79724ba43298f9d5cdf24aa40c7207da75",
+          "countryCode": "DE",
+          "sourceSheet": "特货",
+          "sourceRow": 49,
+          "fields": {
+            "minChargeWeightKg": 0.03,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，法国，德国，意大利，西班牙首重30g"
+          }
+        },
+        {
+          "index": 5,
+          "rowKey": "9ac11873ac514dce4e457942982977bbdb5a34cfde50052400ba47ccaaa61d79",
+          "countryCode": "DK",
+          "sourceSheet": "特货",
+          "sourceRow": 59,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 6,
+          "rowKey": "f6741affa5bcb40686765e05a768f972df06d8aa6558d72ba83e24f0445fc1ac",
+          "countryCode": "DK",
+          "sourceSheet": "特货",
+          "sourceRow": 60,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 7,
+          "rowKey": "c7b0c9dd5f1d678cc1d16cae021d2285787034c221e3bd6f6322e091d567ea86",
+          "countryCode": "ES",
+          "sourceSheet": "特货",
+          "sourceRow": 51,
+          "fields": {
+            "minChargeWeightKg": 0.03,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，法国，德国，意大利，西班牙首重30g"
+          }
+        },
+        {
+          "index": 8,
+          "rowKey": "8676f976793c600fb6add70b6824a2e32c0d0055f737c1ba6a154a1333ae241b",
+          "countryCode": "FI",
+          "sourceSheet": "特货",
+          "sourceRow": 61,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 9,
+          "rowKey": "5310478346c405dfb04ad6a3e36a30ed639af3c9b0386fdac8974b6749e51a4b",
+          "countryCode": "FR",
+          "sourceSheet": "特货",
+          "sourceRow": 48,
+          "fields": {
+            "minChargeWeightKg": 0.03,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，法国，德国，意大利，西班牙首重30g"
+          }
+        },
+        {
+          "index": 10,
+          "rowKey": "c7e53cefd4432923f52ea63d77dde458f474e1b6b82e84dc58841745bbefbb00",
+          "countryCode": "GB",
+          "sourceSheet": "特货",
+          "sourceRow": 44,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 11,
+          "rowKey": "ea0369796afc28a2d5b47983efe47e3d520419625a99e816869450a8f6ce3827",
+          "countryCode": "GB",
+          "sourceSheet": "特货",
+          "sourceRow": 45,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 12,
+          "rowKey": "2c43710e6af75d6a0e624a5a8662aa0e1a24d73a401d7ec2487654e19bfd6bab",
+          "countryCode": "GB",
+          "sourceSheet": "特货",
+          "sourceRow": 46,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 13,
+          "rowKey": "730b00569db38f9d1ad2f7f4f7609059286e40ef05481249d43c57c17449cbb4",
+          "countryCode": "GB",
+          "sourceSheet": "特货",
+          "sourceRow": 47,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 14,
+          "rowKey": "7fc3fc4560d05b073c32454b1c2cad66f3656125be9d5373298c1815fdc8d63c",
+          "countryCode": "IT",
+          "sourceSheet": "特货",
+          "sourceRow": 50,
+          "fields": {
+            "minChargeWeightKg": 0.03,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，法国，德国，意大利，西班牙首重30g"
+          }
+        },
+        {
+          "index": 15,
+          "rowKey": "9f66062dce79fb050fddec18ff5a43d783c615ba22f70f181f62cab48a8e6596",
+          "countryCode": "NO",
+          "sourceSheet": "特货",
+          "sourceRow": 56,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 16,
+          "rowKey": "a6d756515d1f54188710b8685b1f022772d182d99a0fdffdb1358cd0965c2cfc",
+          "countryCode": "NO",
+          "sourceSheet": "特货",
+          "sourceRow": 57,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        },
+        {
+          "index": 17,
+          "rowKey": "51fcc781bd27153475b5c65c4b14f337a3f6581d8cf64c816dc76efa6f177657",
+          "countryCode": "NO",
+          "sourceSheet": "特货",
+          "sourceRow": 58,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国，加拿大，挪威、芬兰、丹麦首重50g"
+          }
+        }
+      ]
+    },
+    {
+      "channelId": "ceaa2c90-1174-4164-9748-8c9c659da878",
+      "provider": "花海",
+      "channel": "HH全球专线-敏感货",
+      "versionId": "2a085074-8fcd-4880-a034-245228afa793",
+      "rowsFingerprint": "6c3eb9a79b3c3f785b0f5328e380df5b",
+      "rowCount": 13,
+      "patches": [
+        {
+          "index": 6,
+          "rowKey": "247806571943eff2af3a889f6e9f4af4c049cc49f60b9a0de3e988936f70da4c",
+          "countryCode": "FI",
+          "sourceSheet": "敏货",
+          "sourceRow": 47,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国、芬兰首重50g"
+          }
+        },
+        {
+          "index": 7,
+          "rowKey": "c7e53cefd4432923f52ea63d77dde458f474e1b6b82e84dc58841745bbefbb00",
+          "countryCode": "GB",
+          "sourceSheet": "敏货",
+          "sourceRow": 44,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国、芬兰首重50g"
+          }
+        },
+        {
+          "index": 8,
+          "rowKey": "a1f42f6b5961499da8d9c4c1df5e9fb74425207aefe69b152aa6fba602e4b7b5",
+          "countryCode": "GB",
+          "sourceSheet": "敏货",
+          "sourceRow": 45,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国、芬兰首重50g"
+          }
+        },
+        {
+          "index": 9,
+          "rowKey": "f72dfc6938c1d4e9e881cc9adaae465eb4a97d1824bcea17304bd6959259bcc9",
+          "countryCode": "GB",
+          "sourceSheet": "敏货",
+          "sourceRow": 46,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "，英国、芬兰首重50g"
+          }
+        }
+      ]
+    },
+    {
+      "channelId": "3e9a3290-1adc-45c4-b7ea-265718836c29",
+      "provider": "通邮",
+      "channel": "通邮挂号特货",
+      "versionId": "d849ef6a-ae1d-4570-84f2-a3a0dd990f12",
+      "rowsFingerprint": "a3d7c09ef94d83e761f6daa8c6e7c344",
+      "rowCount": 180,
+      "patches": [
+        {
+          "index": 32,
+          "rowKey": "22ee0d543b72c13294a7b15de753d0fa5a7280b0c10556aea8cc5967e7124b15",
+          "countryCode": "CL",
+          "sourceSheet": " 通邮挂号特货",
+          "sourceRow": 96,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "关税DDU，50克起重"
+          }
+        },
+        {
+          "index": 33,
+          "rowKey": "f9eb8ed2238ab734122c2cc84e4e1a0fa51936ef165fd9c80f1042a4ae0db986",
+          "countryCode": "CL",
+          "sourceSheet": " 通邮挂号特货",
+          "sourceRow": 97,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "关税DDU，50克起重"
+          }
+        }
+      ]
+    },
+    {
+      "channelId": "133ff87a-730e-42b1-a3d5-6c5814863811",
+      "provider": "递四方",
+      "channel": "联邮通标准挂号-普货（QC）",
+      "versionId": "4e216972-a857-4fdb-8a67-c142380877cd",
+      "rowsFingerprint": "71feccf669957649ca9a96fc80e7c6da",
+      "rowCount": 72,
+      "patches": [
+        {
+          "index": 64,
+          "rowKey": "e7d58aee18889442a2268a063a11d06e183ef75a0a5c365033c8f8183e1a449a",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 6,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 65,
+          "rowKey": "e4b808ddc6cc5dbafde591323b72b7a714f76a94e525946c3b9adf348ea622f4",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 7,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 66,
+          "rowKey": "5d30b0f567058ee5bedd11f3b84cb80fa1c133af8639337069cf89a5c73230c1",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 8,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 67,
+          "rowKey": "112efd7e74a0d1b5a8418fab375676797efdea5be71155c4321d78ce652c18fa",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 9,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 68,
+          "rowKey": "e88f3e92a5c06b871631b2e72344028411a2ced97ae46b35d191b1615ee63a16",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 10,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 69,
+          "rowKey": "64e79ec0c773ae7e46409ed6120fa1103189b4e9a9926b40674a51f334abd645",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 11,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 70,
+          "rowKey": "e9827ba565b253d0c7222e3b8f0b89da025ef1b48f3bff93a833d5e3110573b6",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 12,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        },
+        {
+          "index": 71,
+          "rowKey": "c5b9834eadbc0f069756b851061636345049de58a4dcdc42d2a7dec2f92731c4",
+          "countryCode": "US",
+          "sourceSheet": "联邮通标准挂号-普货（QC）",
+          "sourceRow": 13,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "note",
+            "sourceMinimumWeightText": "美国、加拿大、巴西、秘鲁、土耳其、厄瓜多尔：最低重量为50G，不足50G按50G计费"
+          }
+        }
+      ]
+    }
+  ]
+}
