@@ -1,6 +1,7 @@
 package com.milano.quotation.logistics;
 
 import com.milano.quotation.common.AppException;
+import com.milano.quotation.common.EuropeanUnion;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
@@ -84,24 +85,42 @@ public class LogisticsQuotationGuard {
         quotation.put("logisticsRevision",revision);
     }
     static void validateCountryTax(JsonNode settings, JsonNode option) {
+        JsonNode matched = null;
         for (var country : settings.path("countries")) {
-            if (!country.path("country").asText().equals(option.path("country").asText()) || !country.path("selected").asBoolean() || !country.path("providers").isArray()) continue;
-            boolean enabled = country.path("enabled").asBoolean() && country.path("fixedFeeUsd").asDouble() > 0;
-            boolean exempt = false, configured = !enabled;
-            var parts = option.path("channelKey").asText().split("::", 3);
-            if (enabled) for (var provider : country.path("providers")) {
-                if (parts.length == 3 && provider.path("selected").asBoolean() && provider.path("provider").asText().trim().equals(parts[1].trim())) {
-                    configured = true; exempt = "exempt".equals(provider.path("mode").asText()); break;
-                }
-            }
-            var mode = !enabled ? "no-tax" : exempt ? "exempt" : "fixed-order";
-            var expected = enabled && !exempt ? country.path("fixedFeeUsd").decimalValue() : java.math.BigDecimal.ZERO;
-            if (!configured || !option.path("taxConfigured").asBoolean() || option.path("taxIncluded").asBoolean() != exempt
-                || !mode.equals(option.path("taxFeeMode").asText()) || !option.path("countryFixedTaxUsd").isNumber()
-                || option.path("countryFixedTaxUsd").decimalValue().compareTo(expected) != 0)
-                throw AppException.conflict("国家物流商税务设置已变化，请重新计价后提交");
+            if (country.path("selected").asBoolean() && EuropeanUnion.sameCountry(country.path("country").asText(), option.path("country").asText())) { matched = country; break; }
+        }
+        if (matched == null && EuropeanUnion.contains(option.path("country").asText())) {
+            for (var country : settings.path("countries"))
+                if (EuropeanUnion.TAX_GROUP.equals(country.path("country").asText())) { matched = country; break; }
+        }
+        if (matched == null || (!matched.path("providers").isArray()
+                && !EuropeanUnion.TAX_GROUP.equals(matched.path("country").asText()))) return;
+        var country = matched;
+        var providerRows = country.path("providers").isArray() ? country.path("providers") : settings.path("providers");
+        var parts = option.path("channelKey").asText().split("::", 3);
+        // A matched fixed-duty country/group must not override the existing CHC weight rule.
+        if (EuropeanUnion.contains(option.path("country").asText()) && parts.length == 3
+                && ("云途".equals(parts[1].trim()) || "YunExpress".equalsIgnoreCase(parts[1].trim()))
+                && Set.of("C-600c364a09421e97a32f", "C-f79790fa71c225481346", "C-12d8524ab88e7866389a").contains(parts[2])) {
+            if (!option.path("taxConfigured").asBoolean() || option.path("taxIncluded").asBoolean()
+                    || !"weight-eur".equals(option.path("taxFeeMode").asText())
+                    || !option.path("countryFixedTaxUsd").isNumber() || option.path("countryFixedTaxUsd").decimalValue().signum() != 0)
+                throw AppException.conflict("云途欧盟渠道应按重量计税，请重新计价后提交");
             return;
         }
+        boolean enabled = country.path("selected").asBoolean() && country.path("enabled").asBoolean() && country.path("fixedFeeUsd").asDouble() > 0;
+        boolean exempt = false, configured = !enabled;
+        if (enabled) for (var provider : providerRows) {
+            if (parts.length == 3 && provider.path("selected").asBoolean() && provider.path("provider").asText().trim().equals(parts[1].trim())) {
+                configured = true; exempt = "exempt".equals(provider.path("mode").asText()); break;
+            }
+        }
+        var mode = !enabled ? "no-tax" : exempt ? "exempt" : "fixed-order";
+        var expected = enabled && !exempt ? country.path("fixedFeeUsd").decimalValue().setScale(2, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO;
+        if (!configured || !option.path("taxConfigured").asBoolean() || option.path("taxIncluded").asBoolean() != exempt
+            || !mode.equals(option.path("taxFeeMode").asText()) || !option.path("countryFixedTaxUsd").isNumber()
+            || option.path("countryFixedTaxUsd").decimalValue().compareTo(expected) != 0)
+            throw AppException.conflict("国家物流商税务设置已变化，请重新计价后提交");
     }
     static void validateSurcharge(JsonNode settings, JsonNode option) {
         if (!settings.path("countries").isArray()) return;

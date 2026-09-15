@@ -10,7 +10,7 @@ export type FinanceSurchargeSettings = Omit<FinanceTaxSettings, 'countries'> & {
 export const FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT = 'milano:finance-surcharge-settings-updated'
 
 export function normalizeFinanceSurchargeSettings(raw?: Partial<FinanceSurchargeSettings> | null): FinanceSurchargeSettings {
-  const normalized = normalizeFinanceTaxSettings(raw)
+  const normalized = normalizeFinanceTaxSettings(raw, false)
   normalized.providers = normalized.providers.map(provider => {
     const stored = raw?.providers?.find(row => row.provider === provider.provider)
     // Surcharge exemptions are independent of the existing tax defaults.
@@ -41,8 +41,10 @@ export async function saveFinanceSurchargeSettings(settings: FinanceSurchargeSet
 export function calculateFinanceQuoteFees(taxes: FinanceTaxSettings, surcharges: FinanceSurchargeSettings, country: string, provider: string, baseUsd: number, channelKey = '', context?: Omit<EuYunExpressTaxContext, 'channelKey'>) {
   const tax = calculateFinanceQuoteTax(taxes, country, provider, baseUsd, { ...context, channelKey })
   const countrySetting = surcharges.countries.find(row => row.selected && row.country === country)
+  // Country groups belong to customs duty only. Keep surcharge matching exact and independent.
+  const countrySurcharges = { ...surcharges, countries: countrySetting ? [countrySetting] : [] }
   const scoped = Array.isArray(countrySetting?.exemptChannelKeys)
-  const surcharge = calculateFinanceQuoteTax(Array.isArray(countrySetting?.providers) ? { ...surcharges, providers: countrySetting.providers } : scoped ? { ...surcharges, providers: channelKey ? [{ provider, selected: true, channels: [], mode: countrySetting!.exemptChannelKeys!.includes(channelKey) ? 'exempt' : 'taxable' }] : [] } : surcharges, country, provider, 0)
+  const surcharge = calculateFinanceQuoteTax(Array.isArray(countrySetting?.providers) ? { ...countrySurcharges, providers: countrySetting.providers } : scoped ? { ...countrySurcharges, providers: channelKey ? [{ provider, selected: true, channels: [], mode: countrySetting!.exemptChannelKeys!.includes(channelKey) ? 'exempt' : 'taxable' }] : [] } : countrySurcharges, country, provider, 0)
   const surchargeLabel = surcharge.feeMode === 'no-tax' ? '无附加费'
     : surcharge.feeMode === 'missing' ? '附加费渠道配置待确认'
       : surcharge.included ? '免附加费' : `附加费 $${surcharge.taxUsd.toFixed(2)}/单`

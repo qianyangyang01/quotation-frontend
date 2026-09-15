@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
+import { EU_MEMBER_STATES, EU_TAX_GROUP } from '@/data/europeanUnion'
 import { normalizeLogisticsAttribute } from '@/data/logisticsAttributes'
 import { saveFinanceSurchargeSettings, type FinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -221,7 +222,7 @@ const financeSummaryCards = computed(() => {
     countries: { id: 'countries', icon: '国', label: '常用国家设置', value: financeStageCountryCount('common'), description: `最多 ${COMMON_COUNTRY_LIMIT} 个 · 与业务报价同步` },
     logistics: { id: 'logistics', icon: '物', label: '物流属性与渠道', value: financePolicyCategoryCount.value, description: `覆盖 ${financePolicyCountryCount.value} 个已授权国家` },
     surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 物流商独立豁免' },
-    taxes: { id: 'taxes', icon: '税', label: '税率设置', value: configuredTaxCountryCount.value, description: `已配置 ${configuredTaxCountryCount.value} 个国家` },
+    taxes: { id: 'taxes', icon: '税', label: '税率设置', value: configuredTaxCountryCount.value, description: `已配置 ${configuredTaxCountryCount.value} 项关税设置` },
     grades: { id: 'grades', icon: '级', label: '客户等级系数', value: enabledCustomerGradeCount.value, description: `共 ${customerGradeSettings.value.length} 个等级，${enabledCustomerGradeCount.value} 个已启用` },
     exchange: { id: 'exchange', icon: '汇', label: '汇率设置', value: financeExchangeRate.value.usdCny.toFixed(4), description: `1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY` },
   }
@@ -248,18 +249,26 @@ const financeSurchargePreview = computed(() => {
   if (!setting) return '请选择常用国家并设置附加费'
   return `${setting.country}：附加费 $${Number(setting.fixedFeeUsd || 0).toFixed(2)}/单`
 })
+function taxCountryLabel(country: string) { return country === EU_TAX_GROUP ? '欧盟（27国）' : country }
+function taxCountrySearchText(country: string) {
+  return country === EU_TAX_GROUP ? `欧盟 EU European Union ${EU_MEMBER_STATES.flat().join(' ')}`
+    : `${country} ${financeCountrySettingMap.value.get(country)?.code || ''}`
+}
 const financeTaxCountries = computed(() => {
   const query = financeTaxCountrySearch.value.trim().toLowerCase()
   return financeTaxSettings.value.countries
     .filter(setting => setting.selected)
-    .filter(setting => !query || setting.country.toLowerCase().includes(query))
+    .filter(setting => !query || taxCountrySearchText(setting.country).toLowerCase().includes(query))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.country.localeCompare(b.country, 'zh-CN'))
 })
 const taxDetailCountry = ref('')
+const euTaxSelected = computed(() => financeTaxSettings.value.countries.some(row => row.country === EU_TAX_GROUP && row.selected))
 const taxCountryProviders = computed<FinanceProviderTaxSetting[]>(() => {
   const country = financeTaxSettings.value.countries.find(row => row.country === taxDetailCountry.value)
   const groups = new Map<string, ReturnType<typeof channelsAvailableForCountry>>()
-  for (const option of channelsAvailableForCountry(taxDetailCountry.value)) groups.set(option.carrier, [...(groups.get(option.carrier) || []), option])
+  const countries = taxDetailCountry.value === EU_TAX_GROUP ? EU_MEMBER_STATES.map(row => row[1]) : [taxDetailCountry.value]
+  const options = new Map(countries.flatMap(name => channelsAvailableForCountry(name)).map(option => [option.key, option]))
+  for (const option of options.values()) groups.set(option.carrier, [...(groups.get(option.carrier) || []), option])
   return [...groups].map(([provider, channels]) => {
     const stored = (country?.providers || financeTaxSettings.value.providers).find(row => row.provider === provider)
     return { provider, channels, selected: stored?.selected === true, mode: stored?.mode || 'taxable' }
@@ -276,8 +285,7 @@ const availableTaxProviders = computed(() => taxCountryProviders.value.filter(se
 const filteredAvailableTaxCountries = computed(() => {
   const query = financeTaxCountryAddSearch.value.trim().toLowerCase()
   return availableTaxCountries.value.filter(setting => {
-    const meta = financeCountrySettingMap.value.get(setting.country)
-    return !query || `${setting.country} ${meta?.code || ''}`.toLowerCase().includes(query)
+    return !query || taxCountrySearchText(setting.country).toLowerCase().includes(query)
   })
 })
 const filteredAvailableTaxProviders = computed(() => {
@@ -465,8 +473,11 @@ function openTaxCountry(country: string) {
 function updateTaxProvider(provider: string, mode: LogisticsTaxMode, selected: boolean) {
   const country = financeTaxSettings.value.countries.find(row => row.country === taxDetailCountry.value)
   if (!country) return
-  country.providers = taxCountryProviders.value.map(row => ({ ...row, ...(row.provider === provider ? { mode, selected } : {}) }))
+  const stored = new Map((country.providers ?? financeTaxSettings.value.providers).map(row => [row.provider, row]))
+  for (const row of taxCountryProviders.value) stored.set(row.provider, { ...row, ...(row.provider === provider ? { mode, selected } : {}) })
+  country.providers = [...stored.values()]
 }
+function addEuTaxCountry() { financeTaxCountryAdd.value = EU_TAX_GROUP; addTaxCountry() }
 function changeProviderTaxMode(setting: FinanceProviderTaxSetting, mode: LogisticsTaxMode) { updateTaxProvider(setting.provider, mode, true) }
 function addTaxCountry() {
   const setting = financeTaxSettings.value.countries.find(item => item.country === financeTaxCountryAdd.value)
@@ -1129,12 +1140,12 @@ function saveEditor() {
         </header>
         <div class="finance-tax-content">
           <section class="tax-country-matrix">
-            <header><div><b>国家关税</b><span>只维护实际报价国家；关税固定按整张报价单计入一次。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableTaxCountries.length" @click="financeTaxCountryAddOpen=true;financeTaxCountryAddSearch='';financeTaxCountryAdd=availableTaxCountries[0]?.country || ''">＋ 添加国家</button><label>⌕<input v-model="financeTaxCountrySearch" placeholder="搜索已添加国家"></label></aside></header>
-            <div v-if="financeTaxCountryAddOpen" class="tax-add-row"><label class="tax-add-search">⌕<input v-model="financeTaxCountryAddSearch" autofocus placeholder="输入国家或代码搜索"></label><select v-model="financeTaxCountryAdd"><option v-if="!filteredAvailableTaxCountries.length" value="" disabled>没有匹配的国家</option><option v-for="setting in filteredAvailableTaxCountries" :key="setting.country" :value="setting.country">{{ setting.country }} · {{ financeCountrySettingMap.get(setting.country)?.code || '—' }}</option></select><button class="primary" type="button" :disabled="!financeTaxCountryAdd" @click="addTaxCountry">确认添加</button><button type="button" @click="financeTaxCountryAddOpen=false;financeTaxCountryAdd='';financeTaxCountryAddSearch=''">取消</button></div>
+            <header><div><b>国家关税</b><span>欧盟可统一设置27国；关税固定按整张报价单计入一次。</span></div><aside><button v-if="!euTaxSelected" class="tax-add-button" type="button" @click="addEuTaxCountry">＋ 添加欧盟（27国）</button><button class="tax-add-button" type="button" :disabled="!availableTaxCountries.length" @click="financeTaxCountryAddOpen=true;financeTaxCountryAddSearch='';financeTaxCountryAdd=availableTaxCountries[0]?.country || ''">＋ 添加国家</button><label>⌕<input v-model="financeTaxCountrySearch" placeholder="搜索已添加国家"></label></aside></header>
+            <div v-if="financeTaxCountryAddOpen" class="tax-add-row"><label class="tax-add-search">⌕<input v-model="financeTaxCountryAddSearch" autofocus placeholder="输入国家或代码搜索"></label><select v-model="financeTaxCountryAdd"><option v-if="!filteredAvailableTaxCountries.length" value="" disabled>没有匹配的国家</option><option v-for="setting in filteredAvailableTaxCountries" :key="setting.country" :value="setting.country">{{ taxCountryLabel(setting.country) }} · {{ setting.country === EU_TAX_GROUP ? 'EU' : financeCountrySettingMap.get(setting.country)?.code || '—' }}</option></select><button class="primary" type="button" :disabled="!financeTaxCountryAdd" @click="addTaxCountry">确认添加</button><button type="button" @click="financeTaxCountryAddOpen=false;financeTaxCountryAdd='';financeTaxCountryAddSearch=''">取消</button></div>
             <div class="tax-country-head"><span>国家</span><span>关税（USD/单）</span><span>状态</span><span>操作</span></div>
             <div class="tax-country-rows">
               <article v-for="setting in financeTaxCountries" :key="setting.country">
-                <span><button type="button" class="tax-country-detail-button" :aria-label="`设置${setting.country}物流商税务`" @click="openTaxCountry(setting.country)">{{ setting.country }} ›</button><small>{{ financeCountrySettingMap.get(setting.country)?.code || '—' }}</small></span>
+                <span><button type="button" class="tax-country-detail-button" :aria-label="`设置${setting.country}物流商税务`" @click="openTaxCountry(setting.country)">{{ taxCountryLabel(setting.country) }} ›</button><small>{{ setting.country === EU_TAX_GROUP ? 'EU · 统一维护' : financeCountrySettingMap.get(setting.country)?.code || '—' }}</small></span>
                 <label><i>$</i><input v-model.number="setting.fixedFeeUsd" :aria-label="`${setting.country}关税`" type="number" min="0" step="0.01"><strong>/ 单</strong><small>≈ ¥{{ fixedFeeCny(setting.fixedFeeUsd) }}</small></label>
                 <em :class="{ active:setting.fixedFeeUsd>0 }">{{ setting.fixedFeeUsd>0 ? '已启用' : '待设置' }}</em>
                 <button class="tax-remove-button" type="button" :aria-label="`删除${setting.country}关税设置`" @click="removeTaxCountry(setting)">删除</button>
@@ -1142,9 +1153,10 @@ function saveEditor() {
               <p v-if="!financeTaxCountries.length" class="tax-empty">还没有国家关税设置，点击“添加国家”开始配置</p>
             </div>
             <footer>{{ financeTaxPreview }}</footer>
+            <details v-if="euTaxSelected" class="tax-eu-scope"><summary>欧盟覆盖27国 · 查看适用范围</summary><p>{{ EU_MEMBER_STATES.map(row => `${row[1]}（${row[0]}）`).join('、') }}</p><p>单独国家设置优先；其余成员国使用欧盟设置，不重复加税。云途三条 CHC 渠道仍按含包材整单重量计算欧元关税。</p></details>
           </section>
           <section v-if="taxDetailCountry" class="tax-provider-global">
-            <header><div><b>物流商税务属性 <em>{{ taxDetailCountry }}</em></b><span>仅适用于当前国家，该物流商在此国家的全部渠道统一生效。</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableTaxProviders.length" @click="financeTaxProviderAddOpen=true;financeTaxProviderAddSearch='';financeTaxProviderAdd=availableTaxProviders[0]?.provider || ''">＋ 添加物流商</button><label>⌕<input v-model="financeTaxProviderSearch" placeholder="搜索已添加物流商"></label></aside></header>
+            <header><div><b>物流商税务属性 <em>{{ taxCountryLabel(taxDetailCountry) }}</em></b><span>{{ taxDetailCountry === EU_TAX_GROUP ? '统一适用于欧盟成员国的可用渠道；单独国家设置及云途 CHC 重量规则优先。' : '仅适用于当前国家，该物流商在此国家的全部渠道统一生效。' }}</span></div><aside><button class="tax-add-button" type="button" :disabled="!availableTaxProviders.length" @click="financeTaxProviderAddOpen=true;financeTaxProviderAddSearch='';financeTaxProviderAdd=availableTaxProviders[0]?.provider || ''">＋ 添加物流商</button><label>⌕<input v-model="financeTaxProviderSearch" placeholder="搜索已添加物流商"></label></aside></header>
             <div v-if="financeTaxProviderAddOpen" class="tax-add-row"><label class="tax-add-search">⌕<input v-model="financeTaxProviderAddSearch" autofocus placeholder="输入物流商或渠道名称搜索"></label><select v-model="financeTaxProviderAdd"><option v-if="!filteredAvailableTaxProviders.length" value="" disabled>没有匹配的物流商</option><option v-for="setting in filteredAvailableTaxProviders" :key="setting.provider" :value="setting.provider">{{ setting.provider }} · {{ setting.channels.length }}个渠道</option></select><button class="primary" type="button" :disabled="!financeTaxProviderAdd" @click="addTaxProvider">确认添加</button><button type="button" @click="financeTaxProviderAddOpen=false;financeTaxProviderAdd='';financeTaxProviderAddSearch=''">取消</button></div>
             <div class="tax-provider-head"><span>物流商</span><span>覆盖渠道</span><span>税务属性</span><span>操作</span></div>
             <div class="tax-provider-list-compact">
@@ -1334,6 +1346,7 @@ function saveEditor() {
 </template>
 
 <style scoped>
+.tax-eu-scope{padding:12px 18px;border-top:1px solid #e5eaed;font-size:12px;line-height:1.8;color:#64748b}.tax-eu-scope summary{cursor:pointer;color:#a45d00;font-weight:600}.tax-eu-scope p{margin:8px 0 0}.tax-country-matrix>header{flex-wrap:wrap}.tax-country-matrix>header>aside{flex-wrap:wrap}
 .finance-channel-cascade>section>header{flex-wrap:wrap}.carrier-bulk-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}.carrier-bulk-actions button{border-color:#ffbd63;background:#fff8eb;white-space:nowrap}
 .finance-context-status{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;margin-bottom:12px;background:#eef6ff;border:1px solid #bad8ff;border-radius:8px;color:#235886}.finance-policy-form[inert]{opacity:.55}.editor .primary:disabled{opacity:.5;cursor:wait}
 

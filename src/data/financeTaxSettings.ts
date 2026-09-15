@@ -1,4 +1,5 @@
 import { decimal } from '@/services/quotationDecimal'
+import { EU_TAX_GROUP, isEuCountry, sameTaxCountry } from './europeanUnion'
 import { calculateEuYunExpressTax, type EuYunExpressTaxContext, type EuYunExpressTaxSnapshot } from './euYunExpressTax'
 import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
@@ -85,10 +86,11 @@ function finiteNonNegative(value: unknown) {
   return Number.isFinite(number) && number >= 0 ? number : 0
 }
 
-export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | null): FinanceTaxSettings {
+export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | null, includeEuGroup = true): FinanceTaxSettings {
   const countryMap = new Map((raw?.countries || []).map(item => [item.country, item]))
   const providerMap = new Map((raw?.providers || []).map(item => [item.provider, item]))
   const countryFallbacks = countryDefaults()
+  if (includeEuGroup) countryFallbacks.unshift({ country: EU_TAX_GROUP, fixedFeeUsd: 0, selected: false, enabled: false, sortOrder: 1 })
   const providerFallbacks = providerDefaults()
   const countries = [...new Set([...countryFallbacks.map(item => item.country), ...countryMap.keys()])]
   const providers = [...new Set([...providerFallbacks.map(item => item.provider), ...providerMap.keys()])]
@@ -148,7 +150,8 @@ export function calculateFinanceQuoteTax(
   const normalizedBase = Number.isFinite(Number(baseQuoteUsd)) ? Math.max(0, Number(baseQuoteUsd)) : 0
   const channelTax = calculateEuYunExpressTax(country, provider, normalizedBase, context)
   if (channelTax) return channelTax
-  const countrySetting = settings.countries.find(item => item.selected && item.country === country)
+  const countrySetting = settings.countries.find(item => item.selected && sameTaxCountry(item.country, country))
+    ?? (isEuCountry(country) ? settings.countries.find(item => item.selected && item.country === EU_TAX_GROUP) : undefined)
   if (!countrySetting?.enabled || finiteNonNegative(countrySetting.fixedFeeUsd) === 0) {
     return { included: false, configured: true, ratePercent: null, fixedFeeUsd: 0, feeMode: 'no-tax', taxUsd: 0, totalUsd: normalizedBase, label: '无关税' }
   }

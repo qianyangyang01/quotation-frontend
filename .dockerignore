@@ -5,6 +5,7 @@
 node_modules
 dist
 backend
+!backend/src/main/resources/eu-member-states.json
 deploy/.env
 outputs
 *.log
