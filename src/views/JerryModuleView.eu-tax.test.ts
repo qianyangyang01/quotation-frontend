@@ -43,9 +43,9 @@ it('adds an EU group, deduplicates member channels, saves and preserves drafts a
     return fixture.taxSettings
   })
   await mount()
-  const add=document.querySelector<HTMLSelectElement>('[aria-label="添加税费国家"]')!
-  add.value='欧盟'; add.dispatchEvent(new Event('change')); await settle()
-  button('＋ 添加国家').click(); await settle()
+  const search=document.querySelector<HTMLInputElement>('[aria-label="搜索税费国家"]')!
+  search.value='欧盟'; search.dispatchEvent(new Event('input')); await settle()
+  document.querySelector<HTMLButtonElement>('[aria-label="添加欧盟（27国）税费设置"]')!.click(); await settle()
   button('全选全部渠道（2）').click(); await settle()
   button('批量设置').click(); await settle()
   const fee=document.querySelector<HTMLInputElement>('[aria-label="原币金额"]')!

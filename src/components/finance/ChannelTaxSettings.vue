@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { channelsAvailableForCountry } from '@/data/financeChannelPolicies'
-import { EU_MEMBER_STATES, EU_TAX_GROUP } from '@/data/europeanUnion'
+import { EU_MEMBER_STATES, EU_TAX_GROUP, isEuCountry } from '@/data/europeanUnion'
+import { financeCountryIdentity, matchesFinanceCountry } from '@/data/financeCountrySearch'
 import { calculateFinanceQuoteTax, type FinanceTaxSettings } from '@/data/financeTaxSettings'
 import { channelTaxAmount, taxCountryKey, validateChannelTaxRule, type ChannelTaxRule } from '@/data/channelTaxRules'
 import { matchesEuYunExpressTax } from '@/data/euYunExpressTax'
@@ -27,19 +28,29 @@ function finishAmount() {
     amountInput.value = draft.value.amount.toFixed(2)
   }
 }
-const addCountry = ref(''), importInput = ref<HTMLInputElement>()
+const importInput = ref<HTMLInputElement>(), countrySearchInput = ref<HTMLInputElement>()
+const browsingCountries = ref(false), countryResultLimit = ref(10)
 const label = (value: string) => value === EU_TAX_GROUP ? '欧盟（27国）' : value
-const countries = computed(() => props.modelValue.countries.filter(row => row.selected).filter(row => label(row.country).includes(countrySearch.value)))
+const countries = computed(() => props.modelValue.countries.filter(row => row.selected).filter(row => matchesFinanceCountry(row.country, countrySearch.value)))
 const available = computed(() => {
-  const selectedKeys = new Set(props.modelValue.countries.filter(row => row.selected).map(row => taxCountryKey(row.country)))
+  const selectedKeys = new Set(props.modelValue.countries.filter(row => row.selected).map(row => financeCountryIdentity(row.country)))
   const seen = new Set<string>()
   return props.modelValue.countries.filter(row => {
-    const key = taxCountryKey(row.country)
+    const key = financeCountryIdentity(row.country)
     if (row.selected || selectedKeys.has(key) || seen.has(key)) return false
     seen.add(key)
     return true
   })
 })
+const availableMatches = computed(() => available.value.filter(row => matchesFinanceCountry(row.country, countrySearch.value)))
+const showAvailable = computed(() => browsingCountries.value || !!countrySearch.value.trim())
+const euConfigured = computed(() => props.modelValue.countries.some(row => row.country === EU_TAX_GROUP && row.selected))
+watch(countrySearch, () => { countryResultLimit.value = 10 })
+function browseCountries() {
+  browsingCountries.value = !browsingCountries.value
+  countryResultLimit.value = 10
+  if (browsingCountries.value) countrySearchInput.value?.focus()
+}
 watch(() => props.modelValue.countries, rows => { if (!rows.some(row => row.country === country.value && row.selected)) country.value = rows.find(row => row.selected)?.country || '' }, { immediate: true })
 const allRows = computed(() => {
   const names = country.value === EU_TAX_GROUP ? EU_MEMBER_STATES.flatMap(row => [row[0], row[1]]) : [...new Set([country.value, taxCountryKey(country.value)])]
@@ -67,11 +78,10 @@ watch([country, query, provider, () => providers.value.join('\0')], () => {
 }, { immediate: true })
 watch(size, () => { providerPages.value = {} })
 function update(value: FinanceTaxSettings) { emit('update:modelValue', value) }
-function add() {
-  if (!addCountry.value) return
-  const name = addCountry.value
+function add(name: string) {
+  if (props.saving || !available.value.some(row => row.country === name)) return
   update({ ...props.modelValue, countries: props.modelValue.countries.map(row => row.country === name ? { ...row, selected: true } : row) })
-  country.value = name; addCountry.value = ''
+  country.value = name; countrySearch.value = ''; browsingCountries.value = false
 }
 function ruleFor(key: string) { return props.modelValue.countries.find(row => row.country === country.value)?.channelRules?.find(row => row.key === key) }
 function isChc(key: string, carrier: string) { return matchesEuYunExpressTax(country.value === EU_TAX_GROUP ? 'DE' : country.value, carrier, key) }
@@ -130,7 +140,28 @@ async function importFile(event: Event) {
     <header class="workspace-title"><div><h2>渠道税费设置</h2><p>按国家、物流商分组维护，支持整组勾选与单独调整</p></div><div class="actions"><input ref="importInput" hidden type="file" accept=".xlsx" @change="importFile"><button :disabled="saving || importing" @click="importInput?.click()">{{ importing ? '正在读取…' : '导入表格' }}</button><button class="primary" :disabled="saving || importing" @click="emit('save')">{{ saving ? '保存中…' : '保存并发布' }}</button></div></header>
     <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="message" role="status" class="notice">{{ message }}</p>
     <div class="layout" :class="{ editing }">
-      <aside class="countries"><h3>国家 / 地区</h3><input v-model="countrySearch" placeholder="搜索国家" aria-label="搜索税费国家"><nav><button v-for="row in countries" :key="row.country" :class="{ active: country === row.country }" @click="country = row.country">{{ label(row.country) }}</button></nav><div class="add-country"><select v-model="addCountry" aria-label="添加税费国家"><option value="">选择国家 / 欧盟</option><option v-for="row in available" :key="row.country" :value="row.country">{{ label(row.country) }}</option></select><button :disabled="!addCountry || saving" @click="add">＋ 添加国家</button></div></aside>
+      <aside class="countries">
+        <h3>国家 / 地区</h3>
+        <div class="country-search"><input ref="countrySearchInput" v-model="countrySearch" placeholder="中文 / 英文 / 国家代码" aria-label="搜索税费国家" aria-describedby="country-search-hint"><button v-if="countrySearch" aria-label="清空国家搜索" @click="countrySearch = ''; countrySearchInput?.focus()">×</button></div>
+        <p id="country-search-hint" class="country-hint">搜索全部国家，支持直接添加</p>
+        <p v-if="countries.length || !countrySearch.trim()" class="country-section-label">已添加<span>{{ countries.length }}</span></p>
+        <nav v-if="countries.length" aria-label="已添加税费国家"><button v-for="row in countries" :key="row.country" :class="{ active: country === row.country }" :aria-current="country === row.country ? 'true' : undefined" @click="country = row.country">{{ label(row.country) }}</button></nav>
+        <p v-if="!countries.length && !countrySearch.trim()" class="country-hint">尚未添加国家</p>
+        <button v-if="!countrySearch.trim()" class="browse-countries" :aria-expanded="showAvailable" aria-controls="available-tax-countries" @click="browseCountries">{{ browsingCountries ? '收起可添加国家' : '＋ 添加国家' }}</button>
+        <section v-if="showAvailable" id="available-tax-countries" aria-label="可添加税费国家">
+          <p class="country-section-label">可添加<span>{{ availableMatches.length }}</span></p>
+          <ul class="country-results">
+            <li v-for="row in availableMatches.slice(0, countryResultLimit)" :key="row.country">
+              <div><strong>{{ label(row.country) }}</strong><small v-if="financeCountryIdentity(row.country) !== row.country">{{ financeCountryIdentity(row.country) }}</small></div>
+              <button :disabled="saving" :aria-label="`添加${label(row.country)}税费设置`" @click="add(row.country)">＋ 添加</button>
+              <p v-if="euConfigured && isEuCountry(row.country)" class="eu-country-hint">当前沿用欧盟；单独添加后需核对该国全部渠道。</p>
+            </li>
+          </ul>
+          <p v-if="!availableMatches.length" class="country-hint" role="status">{{ countries.length ? '匹配国家已添加，可在上方选择' : '未找到匹配国家，请尝试中文、英文或国家代码' }}</p>
+          <button v-if="availableMatches.length > countryResultLimit" class="more-countries" @click="countryResultLimit += 10">再显示10个（剩余{{ availableMatches.length - countryResultLimit }}个）</button>
+        </section>
+        <p v-if="euConfigured && isEuCountry(country)" class="eu-country-hint">当前为独立国家设置，优先于欧盟配置。发布前请核对该国全部渠道。</p>
+      </aside>
       <main class="matrix"><header><h3>{{ label(country) || '请选择国家' }}</h3><p>同一项关税只计入一次；历史报价保持原金额</p></header><div v-if="country" class="filters"><input v-model="query" placeholder="搜索物流商或渠道" aria-label="搜索税费渠道"><select v-model="provider" aria-label="筛选税费物流商"><option value="">全部物流商</option><option v-for="name in providers" :key="name">{{ name }}</option></select><button :disabled="!selected.length || saving" @click="edit()">批量设置</button></div>
         <div v-if="country" class="selection"><span>共 {{ groups.length }} 家物流商 · 已选 {{ selected.length }} 个渠道</span><button v-if="selected.length" @click="selected = []; editing = false">取消选择</button><button class="select-all" :disabled="!allRows.length || saving" @click="selected = allRows.map(row => row.key)">全选全部渠道（{{ allRows.length }}）</button></div>
         <div class="provider-groups">
@@ -155,6 +186,7 @@ async function importFile(event: Event) {
 </template>
 
 <style scoped>
+.country-search{position:relative}.country-search input{padding-right:32px}.country-search button{position:absolute;right:4px;top:3px;border:0;padding:5px 7px;font-size:18px}.countries .country-hint{font-size:12px;line-height:1.6;margin:8px 0 12px}.countries .country-section-label{display:flex;justify-content:space-between;font-size:12px;color:#617285;margin:16px 0 8px}.country-section-label span{font-variant-numeric:tabular-nums}.countries nav[aria-label]{margin:0 -12px 12px}.browse-countries,.more-countries{width:100%;white-space:normal}.browse-countries{color:#c46a00;border-color:#f1c187}.country-results{list-style:none;padding:0;margin:0}.country-results li{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 0;border-bottom:1px solid #edf0f4}.country-results li>div{flex:1;min-width:0}.country-results strong{font-size:13px;font-weight:500;overflow-wrap:anywhere}.country-results small{display:block;color:#7c8b9c;font-size:11px;margin-top:3px}.country-results button{padding:6px;font-size:12px;color:#b66300;flex-shrink:0}.countries .eu-country-hint{flex-basis:100%;font-size:11px;color:#886127;background:#fff7e9;border-radius:5px;padding:8px;margin:4px 0;line-height:1.6}.more-countries{font-size:12px;margin-top:10px}
 .provider-groups{display:grid;gap:14px;padding:0 20px 20px}.provider-group{border:1px solid #dfe5eb;border-radius:9px;overflow:hidden}.provider-group.has-selection{border-color:#f0b65c}.provider-heading{display:flex;align-items:center;gap:14px;padding:0 16px;background:#f7f9fb}.provider-group.has-selection .provider-heading{background:#fff6e9}.provider-toggle{display:flex;align-items:center;gap:12px;flex:1;min-width:0;padding:16px 0;border:0;border-radius:0;background:transparent;text-align:left}.provider-toggle strong{font-size:15px}.provider-toggle>span{font-size:12px;color:#7a8998}.provider-toggle .selected-count{color:#c87912}.provider-toggle .expand-label{margin-left:auto;white-space:nowrap}.provider-heading input{flex-shrink:0}.group-hint{margin:0;padding:12px 20px 10px;font-size:12px;color:#7d8b99}.group-pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 20px;font-size:12px;color:#7a8998}.group-pagination button{padding:5px 10px}.group-pagination>span:first-child{margin-right:auto}.selection .select-all{margin-left:auto;border-color:#d9e1e9;color:#647485;background:#fff}.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}@media(max-width:750px){.provider-groups{padding:0 12px 12px}.provider-toggle{gap:8px;flex-wrap:wrap}.provider-toggle strong{font-size:14px}.provider-toggle .expand-label{margin-left:auto}.selection .select-all{margin-left:0}}
 .channel-tax-workspace{color:#172632;font-size:14px}.workspace-title,.matrix header,.editor header{display:flex;align-items:center;justify-content:space-between}.workspace-title{background:#fff;border:1px solid #dfe5eb;border-radius:12px;padding:22px;margin-bottom:16px}.workspace-title h2{font-size:23px;margin:0}h3{margin:0;font-size:18px}p{color:#7c8b9c;line-height:1.65;margin:8px 0}.actions{display:flex;gap:10px}button,input,select{font:inherit;border:1px solid #d9e1e9;border-radius:6px;background:white;padding:10px 12px;color:inherit}button{cursor:pointer;white-space:nowrap}button:hover{border-color:#ff9200;color:#e57b00}button:disabled{opacity:.45;cursor:not-allowed}.primary{background:#ff9200;border-color:#ff9200;color:#fff;font-weight:700}.primary:hover{background:#f18700;color:#fff}.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:14px;align-items:start}.layout.editing{grid-template-columns:200px minmax(520px,1fr) 300px}.countries,.matrix,.editor{background:#fff;border:1px solid #dfe5eb;border-radius:10px;overflow:hidden}.countries{padding:20px 12px}.countries h3{margin-bottom:16px}.countries input,.countries select{width:100%;box-sizing:border-box}.countries nav{display:flex;flex-direction:column;margin:16px -12px;max-height:600px;overflow:auto}.countries nav button{border:0;border-left:3px solid transparent;border-radius:0;text-align:left;padding:15px 18px}.countries nav button.active{background:#fff3e4;color:#ea8200;border-left-color:#ff9200;font-weight:700}.add-country{display:grid;gap:10px}.matrix header{display:block;padding:22px}.filters,.selection{display:flex;gap:10px;align-items:center;padding:0 20px 14px;flex-wrap:wrap}.filters input{min-width:180px;flex:1}.filters button,.selection button{color:#e77c00;border-color:#ffb350}.selection{font-size:12px;color:#8290a1}.selection button{padding:7px 9px}.table-scroll{overflow:auto;padding:0 20px}table{border-collapse:collapse;width:100%;min-width:650px;text-align:left}th{background:#f5f7f9;font-weight:600;font-size:12px;color:#5f6e7d}td,th{border-bottom:1px solid #e5eaf0;padding:16px 10px}td:first-child,th:first-child{width:25px}td:nth-child(2){width:29%}td:nth-child(4){min-width:125px;line-height:1.5}td small{display:block;color:#6e7e8f;margin-top:5px;font-size:12px;line-height:1.5}input[type=checkbox]{accent-color:#ff9200;width:17px;height:17px}.badge{display:inline-block;padding:6px 8px;background:#f0f4f8;border-radius:5px;font-size:12px;white-space:nowrap}.badge.weight{background:#fff0dc;color:#e48100}.badge.exempt{background:#e8f8ed;color:#19844a}.badge.unavailable{background:#fff0ee;color:#c54d38}.text-button{border:0;color:#f18a00;padding:2px}.matrix footer{padding:20px;display:flex;gap:12px;justify-content:space-between;align-items:center;border-top:1px solid #edf0f4}.matrix footer small{font-size:11px;color:#8a98a9}.matrix footer div{display:flex;gap:10px;align-items:center}.matrix footer button{padding:5px 10px}.matrix footer select{padding:6px}.empty{text-align:center;color:#8491a1;padding:50px}.editor{padding:20px;position:sticky;top:20px}.editor header button{border:0;font-size:23px;padding:0}.editor label{display:grid;gap:10px;margin-top:22px;font-weight:600}.amount{display:flex;gap:8px}.amount input{width:0;flex:1}.amount select{width:83px}.calculation{background:#fff2e1;border-radius:9px;padding:20px;margin:20px 0;display:grid;gap:10px}.calculation strong{font-size:25px;color:#f58200}.calculation small{color:#7a8b9b}.notice{padding:12px;background:#edf5fb;border-radius:6px;font-size:12px}.error{padding:12px;background:#fff0ee;color:#bd3d2c;border-radius:6px}.editor .actions{margin-top:25px}.editor .actions button{flex:1;padding:12px 6px}@media(max-width:1350px){.layout.editing{grid-template-columns:190px minmax(0,1fr)}.editor{position:fixed;top:0;right:0;bottom:0;width:340px;max-width:90vw;overflow:auto;z-index:100;box-shadow:-12px 0 36px #17263226;border-radius:10px 0 0 10px;background:#fff}.matrix footer{flex-wrap:wrap}}@media(max-width:750px){.layout,.layout.editing{grid-template-columns:1fr}.editor{grid-column:1}.workspace-title{align-items:flex-start;gap:15px;flex-direction:column}.countries nav{max-height:200px}.matrix footer{flex-direction:column;align-items:flex-start}}
 </style>
