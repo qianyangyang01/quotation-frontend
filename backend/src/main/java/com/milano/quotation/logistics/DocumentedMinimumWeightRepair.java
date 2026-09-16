@@ -14,7 +14,14 @@ import java.util.*;
 
 /** One-time, source-backed correction. Caller owns the transaction; no HTTP entry point. */
 public final class DocumentedMinimumWeightRepair {
-    private static final String ACTOR = "migration-v40";
+    private final String actor;
+    private final String confirmedNote;
+    public DocumentedMinimumWeightRepair() { this("migration-v40", null); }
+    /** Explicit business confirmation for a guarded, one-time migration whose stored notes are missing. */
+    public DocumentedMinimumWeightRepair(String actor, String confirmedNote) {
+        this.actor = Objects.requireNonNull(actor);
+        this.confirmedNote = confirmedNote;
+    }
     private static final Set<String> FIELDS = Set.of("minChargeWeightKg", "sourceMinimumWeightKind", "sourceMinimumWeightText", "sourceMinimumWeightCell");
     private final ObjectMapper mapper = new ObjectMapper();
     private final LogisticsBillingEngine engine = new LogisticsBillingEngine(mapper);
@@ -79,7 +86,14 @@ public final class DocumentedMinimumWeightRepair {
             require(minimum.isNumber() && minimum.decimalValue().signum() > 0, "Repair requires a documented positive minimum");
             var text = fields.path("sourceMinimumWeightText").asText();
             var notes = row.path("notes").asText() + row.path("sourceNotes").asText() + payload.path("sourceNotes").asText();
-            require(!text.isBlank() && notes.contains(text), "Minimum evidence is absent from original notes");
+            boolean confirmed = confirmedNote != null && confirmedNote.equals(text)
+                    && fields.path("sourceMinimumWeightKind").asText().equals("user-confirmed");
+            if (confirmed) {
+                var resolution = LogisticsMinimumWeight.fromNotes(text, row.path("countryCode").asText());
+                require(!resolution.conflict() && resolution.kg() != null
+                        && resolution.kg().compareTo(minimum.decimalValue()) == 0, "Confirmation does not match the minimum");
+            }
+            require(confirmed || !text.isBlank() && notes.contains(text), "Minimum evidence is absent from original notes or explicit confirmation");
             fields.properties().forEach(field -> row.set(field.getKey(), field.getValue()));
         }
     }
@@ -137,22 +151,24 @@ public final class DocumentedMinimumWeightRepair {
         var id = UUID.randomUUID(); var now = Instant.now().toString();
         int number = Integer.parseInt(scalar(db, "select coalesce(max(version_number),0)+1 from logistics_version where channel_id=?", channel));
         var hash = LogisticsDatasetService.hash(repairId + ":" + old + ":" + payload.path("rows"));
-        var note = "原表明确最低计重补录；保留0起点、原单价、每票费和重量段；未推算正数首档或冲突备注";
+        var note = confirmedNote == null ? "原表明确最低计重补录；保留0起点、原单价、每票费和重量段；未推算正数首档或冲突备注"
+                : confirmedNote + "；保留原单价、每票费、重量段及历史版本";
         payload.put("id", id.toString()).put("channelId", channel.toString()).put("versionNumber", number).put("status", "published")
-                .put("importedAt", now).put("publishedAt", now).put("importedBy", ACTOR).put("publishedBy", ACTOR)
+                .put("importedAt", now).put("publishedAt", now).put("importedBy", actor).put("publishedBy", actor)
                 .put("sourceHash", hash).put("contentHash", hash).put("basePublishedVersionId", old.toString())
                 .put("derivedFromVersionId", old.toString()).put("repairId", repairId).put("auditNote", note);
         update(db, "insert into logistics_version(id,channel_id,version_number,status,source_hash,payload,created_at,published_at) values(?,?,?,'published',?,?::jsonb,now(),now())", id, channel, number, hash, payload.toString());
         update(db, "update logistics_version set status='superseded',payload=jsonb_set(payload,'{status}','\"superseded\"') where id=? and status='published'", old);
         update(db, "update logistics_channel set current_version_id=?,version=version+1,updated_at=now(),payload=payload||jsonb_build_object('currentVersionId',?::text,'updatedAt',?::text) where id=? and current_version_id=?", id, id.toString(), now, channel, old);
-        var proof = mapper.createObjectNode().put("note", note).put("repairId", repairId).put("sourceReference", "Original stored source notes, exact version and source row guards").set("evidence", item.path("evidence"));
-        update(db, "insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select ?,id,rows_fingerprint,?,'verified',?::jsonb,? from logistics_version where id=?", UUID.randomUUID(), LogisticsBillingEngine.VERSION, proof.toString(), ACTOR, id);
+        var proof = mapper.createObjectNode().put("note", note).put("repairId", repairId).put("sourceReference", confirmedNote == null
+                ? "Original stored source notes, exact version and source row guards" : "Explicit user confirmation on 2026-09-16; exact version, fingerprint and source row guards").set("evidence", item.path("evidence"));
+        update(db, "insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select ?,id,rows_fingerprint,?,'verified',?::jsonb,? from logistics_version where id=?", UUID.randomUUID(), LogisticsBillingEngine.VERSION, proof.toString(), actor, id);
         require(scalar(db, "select logistics_version_quote_ready(?)::text", id).equals("true"), "Corrected version is not quote ready");
         var detail = mapper.createObjectNode().put("repairId", repairId).put("beforeVersionId", old.toString()).put("afterVersionId", id.toString())
                 .put("beforeRowsFingerprint", plan.path("rowsFingerprint").asText())
                 .put("afterRowsFingerprint", scalar(db, "select rows_fingerprint from logistics_version where id=?", id))
                 .put("changedRows", plan.path("patches").size()).put("note", note);
-        update(db, "insert into audit_log(id,request_id,actor_account,action,resource_type,resource_id,outcome,detail,created_at) values(?,?,?,'logistics.minimum-weight.complete','logistics-channel',?,'success',?::jsonb,now())", UUID.randomUUID(), repairId, ACTOR, channel.toString(), detail.toString());
+        update(db, "insert into audit_log(id,request_id,actor_account,action,resource_type,resource_id,outcome,detail,created_at) values(?,?,?,'logistics.minimum-weight.complete','logistics-channel',?,'success',?::jsonb,now())", UUID.randomUUID(), repairId, actor, channel.toString(), detail.toString());
         require(scalar(db, "select rows_fingerprint from logistics_version where id=?", old).equals(plan.path("rowsFingerprint").asText()), "Historical rows changed");
     }
 

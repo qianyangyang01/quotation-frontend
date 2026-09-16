@@ -1,0 +1,112 @@
+{
+  "repairId": "tongyou-sensitive-b-minimum-20260916",
+  "datasetId": "bd07399a-1e05-4886-b3f6-699ee9c64919",
+  "channels": [
+    {
+      "channelId": "e8aac69d-e3ba-49a4-84b2-b6279bd99771",
+      "provider": "通邮",
+      "channel": "美国专线特敏感B",
+      "versionId": "7268d43b-556d-49ca-ab7e-21e410243021",
+      "rowsFingerprint": "114b2a21066d87e2bde0ce07362fa758",
+      "rowCount": 8,
+      "patches": [
+        {
+          "index": 0,
+          "rowKey": "e7d58aee18889442a2268a063a11d06e183ef75a0a5c365033c8f8183e1a449a",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 6,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        },
+        {
+          "index": 1,
+          "rowKey": "ca80ebc97eb1a417dc57e6859d2a236939795c58b09673220df33461e08161fb",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 7,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        },
+        {
+          "index": 2,
+          "rowKey": "c276a870cbb48dafa3317b07db06cc2e3e66ed4f9aa13ed9b45d5a9cdb6fe8c7",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 8,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        },
+        {
+          "index": 3,
+          "rowKey": "a9ac5fcac2082b9da5abf05a59cfc233189fbe7e689fafed8ea6292dcb4a0e8d",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 9,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        },
+        {
+          "index": 4,
+          "rowKey": "3385da7ae318c487e8f9f42ecf0870351a474cf0b42d382149824dff7cf09623",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 10,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        },
+        {
+          "index": 5,
+          "rowKey": "d82d4421e3a54a3645ae225a34f5886bda30fc176635627c3586365a3d3c34ce",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 11,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        },
+        {
+          "index": 6,
+          "rowKey": "7a35689bd038dde54c0b6f037029c04a718198c672e6eaca804565ecc430da3f",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 12,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        },
+        {
+          "index": 7,
+          "rowKey": "3be5c2e5f8e36fff0c56e1e7f262a7c5b9775baf55e90583907139e0c310eed8",
+          "countryCode": "US",
+          "sourceSheet": "美国专线小包",
+          "sourceRow": 13,
+          "fields": {
+            "minChargeWeightKg": 0.05,
+            "sourceMinimumWeightKind": "user-confirmed",
+            "sourceMinimumWeightText": "2026-09-16用户确认：通邮美国专线特敏感B，美国50g起重"
+          }
+        }
+      ]
+    }
+  ]
+}
