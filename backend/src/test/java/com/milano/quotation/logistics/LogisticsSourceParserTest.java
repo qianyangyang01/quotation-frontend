@@ -20,6 +20,20 @@ class LogisticsSourceParserTest {
     final ObjectMapper mapper=new ObjectMapper();
     final LogisticsWorkbookService standard=new LogisticsWorkbookService(mapper);
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,standard);
+    @Test void sfFooterMinimumIsScopedToAdjacentCountryInsteadOfWholeSheet() throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("服装专线");
+            row(sheet,0,"国家","重量段(KG)","公斤运费(元/KG)","处理费(元/件)");
+            row(sheet,1,"美国","0-1",60,20);
+            row(sheet,2,"日本","0-1",60,20);
+            row(sheet,3,"西班牙","0-1",60,20);
+            row(sheet,7,"计费标准","美国","单票单件计费;首重50g，续重按1g计算计费重量");
+            row(sheet,8,"计费标准","日本","单票单件计费：首重500克，续重500克计算计费重量");
+            var prices=parser.parse(bytes(book),"顺丰价格.xlsx").path("channels").get(0).path("rows");
+            assertEquals(3,prices.size());
+            for(var price:prices)assertEquals(switch(price.path("countryCode").asText()){case "US"->.05;case "JP"->.5;default->0.;},price.path("minChargeWeightKg").asDouble());
+        }
+    }
     @Test void readsTongyouMatrixFiftyGramFooter() throws Exception {
         try (var book=new XSSFWorkbook()) {
             var sheet=book.createSheet("美国专线小包");

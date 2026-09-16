@@ -11,7 +11,7 @@ final class LogisticsMinimumWeight {
     private static final String NUMBER="([0-9]+(?:\\.[0-9]+)?)";
     private static final String UNIT="(KG|G|公斤|千克|克)";
     private static final Pattern WEIGHT=Pattern.compile("(?i)"+NUMBER+"\\s*"+UNIT);
-    private static final Pattern MINIMUM=Pattern.compile("(?i)(?:(?:最[小低]计费重(?:量)?|计费起重|起重|首重)(?:为|[:：])?\\s*"+NUMBER+"\\s*"+UNIT+"|"+NUMBER+"\\s*"+UNIT+"\\s*(?:起重|起计费|起计|起收)|(?:不足|不满|低于)\\s*"+NUMBER+"\\s*"+UNIT+"(?:的部分|均)?\\s*(?:按|按照)\\s*"+NUMBER+"\\s*"+UNIT+"\\s*(?:计费|计价|计算))");
+    private static final Pattern MINIMUM=Pattern.compile("(?i)(?:(?:最[小低](?:计费)?重(?:量)?|计费起重|起重|首重)(?:为|[=:：])?\\s*"+NUMBER+"\\s*"+UNIT+"|(?:单票计费|最低)\\s*"+NUMBER+"\\s*"+UNIT+"\\s*(?:起|计费)|"+NUMBER+"\\s*"+UNIT+"\\s*(?:起重|起计费|起计|起收)|(?:不足|不满|低于)\\s*"+NUMBER+"\\s*"+UNIT+"(?:的部分|均)?\\s*(?:按|按照)\\s*"+NUMBER+"\\s*"+UNIT+"\\s*(?:计费|计价|计算))");
     private static final Map<String,String> COUNTRIES=LogisticsSourceParser.minimumWeightCountries();
     private static final Pattern COUNTRY=Pattern.compile(COUNTRIES.keySet().stream().sorted(Comparator.comparingInt(String::length).reversed()).map(Pattern::quote).reduce((a,b)->a+"|"+b).orElseThrow());
     record Rule(BigDecimal kg,Set<String> countries,boolean other,String text) {}
@@ -19,17 +19,20 @@ final class LogisticsMinimumWeight {
 
     static Resolution fromNotes(String notes,String country) {
         var rules=new ArrayList<Rule>();
-        for(var paragraph:notes.replaceAll("\\r", "").split("[\\n；;。]")) {
-            if(paragraph.matches("(?s).*(重派|退件|退回|销毁|退运|仓储|续重|进位).*")) {
-                // A minimum followed by rounding is valid; a rounding increment alone is not a minimum.
-                if(paragraph.matches("(?s).*(重派|退件|退回|销毁|退运|仓储|续重).*")||!paragraph.matches("(?s).*(起重|最[小低]计费|首重|不足.{0,15}按).*") )continue;
-            }
-            var matcher=MINIMUM.matcher(paragraph);int previous=0;Set<String> context=Set.of();boolean other=false;
+        for(var line:notes.replaceAll("\\r", "").split("\\n")) {
+          Set<String> context=Set.of();boolean other=false;
+          for(var paragraph:line.split("[；;。]")) {
+            // A minimum followed by rounding is valid; increments alone do not match MINIMUM.
+            if(paragraph.matches("(?s).*(重派|退件|退回|销毁|退运|仓储).*"))continue;
+            // Retain a country scope across semicolons, including a clause without a minimum.
+            var clauseNames=names(paragraph);
+            if(!clauseNames.isEmpty()&&!MINIMUM.matcher(paragraph).find()){context=clauseNames;other=false;}
+            var matcher=MINIMUM.matcher(paragraph);int previous=0;
             while(matcher.find()) {
                 var prefix=paragraph.substring(previous,matcher.start());
-                var names=new LinkedHashSet<String>();var cm=COUNTRY.matcher(prefix);while(cm.find())names.add(COUNTRIES.get(cm.group()));
-                boolean isOther=prefix.matches("(?s).*(其他|其余)国家.*");
-                if(!names.isEmpty()||isOther){context=names;other=isOther;}
+                var names=names(prefix);
+                boolean isOther=prefix.matches("(?s).*(其他|其它|其余)国家.*");
+                if(!names.isEmpty()||isOther){context=names;other=isOther&&names.isEmpty();}
                 var matched=matcher.group();var weights=WEIGHT.matcher(matched);BigDecimal kg=null;boolean unequal=false;
                 while(weights.find()){var value=kilograms(weights.group(1),weights.group(2));if(kg!=null&&kg.compareTo(value)!=0)unequal=true;kg=value;}
                 // “无50g起重” explicitly removes that floor for the named countries.
@@ -37,12 +40,22 @@ final class LogisticsMinimumWeight {
                 if(kg!=null&&!unequal)rules.add(new Rule(kg,Set.copyOf(context),other,prefix+matched));
                 previous=matcher.end();
             }
+          }
         }
         var named=new HashSet<String>();rules.forEach(r->named.addAll(r.countries));
         int priority=0;var values=new TreeSet<BigDecimal>();var evidence=new LinkedHashSet<String>();
         for(var rule:rules){int p=rule.countries.contains(country)?3:rule.other&&!named.contains(country)?2:rule.countries.isEmpty()&&!rule.other?1:0;
             if(p==0||p<priority)continue;if(p>priority){priority=p;values.clear();evidence.clear();}values.add(rule.kg);evidence.add(rule.text.trim());}
         return new Resolution(values.isEmpty()?null:values.first(),String.join("；",evidence),values.size()>1);
+    }
+
+    private static Set<String> names(String prefix) {
+        // A restriction after a colon can narrow an earlier country list:
+        // “墨西哥、美国、加拿大：0<W≤30KG，美国最低计费重50g”.
+        int colon=Math.max(prefix.lastIndexOf('：'),prefix.lastIndexOf(':'));
+        if(colon>=0&&COUNTRY.matcher(prefix.substring(colon+1)).find())prefix=prefix.substring(colon+1);
+        var names=new LinkedHashSet<String>();var matcher=COUNTRY.matcher(prefix);
+        while(matcher.find())names.add(COUNTRIES.get(matcher.group()));return names;
     }
 
     static BigDecimal kilograms(String number,String unit) {

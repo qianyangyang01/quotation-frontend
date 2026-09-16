@@ -16,6 +16,10 @@ import java.util.*;
 public final class DocumentedMinimumWeightRepair {
     private final String actor;
     private final String confirmedNote;
+    private boolean reviewedSources;
+    public static DocumentedMinimumWeightRepair reviewedSources(String actor) {
+        var repair=new DocumentedMinimumWeightRepair(actor,null);repair.reviewedSources=true;return repair;
+    }
     public DocumentedMinimumWeightRepair() { this("migration-v40", null); }
     /** Explicit business confirmation for a guarded, one-time migration whose stored notes are missing. */
     public DocumentedMinimumWeightRepair(String actor, String confirmedNote) {
@@ -58,8 +62,11 @@ public final class DocumentedMinimumWeightRepair {
                             && payload.path("blockingReasons").isEmpty(), "Correction is not publication ready");
                     var evidence = verify((ArrayNode) payload.path("rows"), before);
                     var comparison = new LogisticsWorkbookService(mapper).compare((ArrayNode) payload.path("rows"), before);
-                    for (var field : List.of("added", "removed", "range", "coverageReduced", "highRisk"))
+                    for (var field : List.of("added", "removed", "range", "coverageReduced"))
                         require(comparison.path("summary").path(field).asInt() == 0, "Unexpected change: " + field);
+                    long reviewedRisks=reviewedSources?item.path("patches").valueStream().filter(p->p.has("sourceEvidence")&&p.path("beforeMinimumKg").asDouble()>0
+                            &&Math.abs(p.path("fields").path("minChargeWeightKg").asDouble()/p.path("beforeMinimumKg").asDouble()-1)>.1).count():0;
+                    require(comparison.path("summary").path("highRisk").asInt()==reviewedRisks,"Unexpected high-risk changes outside reviewed minimum corrections");
                     payload.set("summary", comparison.path("summary")); payload.set("diffRows", comparison.path("diffRows"));
                     prepared.add(mapper.createObjectNode().set("plan", item).set("payload", payload).set("evidence", evidence));
                 }
@@ -79,7 +86,10 @@ public final class DocumentedMinimumWeightRepair {
             var row = (ObjectNode) rows.get(index);
             for (var key : List.of("rowKey", "countryCode", "sourceSheet", "sourceRow"))
                 require(row.path(key).equals(patch.path(key)), "Source row changed: " + key);
-            require(LogisticsBillingEngine.minimum(row).signum() == 0, "Explicit existing minimum must be preserved");
+            if(reviewedSources) {
+                require(patch.path("beforeMinimumKg").isNumber()&&LogisticsBillingEngine.minimum(row).compareTo(patch.path("beforeMinimumKg").decimalValue())==0,"Reviewed baseline minimum changed");
+                require(!Set.of("column","column-inherited").contains(row.path("sourceMinimumWeightKind").asText()),"Explicit country minimum column must be preserved");
+            } else require(LogisticsBillingEngine.minimum(row).signum() == 0, "Explicit existing minimum must be preserved");
             var fields = patch.path("fields");
             require(FIELDS.containsAll(fields.propertyNames()), "Repair attempted an unrelated field");
             var minimum = fields.path("minChargeWeightKg");
@@ -88,12 +98,26 @@ public final class DocumentedMinimumWeightRepair {
             var notes = row.path("notes").asText() + row.path("sourceNotes").asText() + payload.path("sourceNotes").asText();
             boolean confirmed = confirmedNote != null && confirmedNote.equals(text)
                     && fields.path("sourceMinimumWeightKind").asText().equals("user-confirmed");
+            boolean reviewed=false;
+            if(reviewedSources) {
+                var resolution=LogisticsMinimumWeight.fromNotes(text,row.path("countryCode").asText());
+                require(!resolution.conflict()&&resolution.kg()!=null&&resolution.kg().compareTo(minimum.decimalValue())==0,"Reviewed evidence does not resolve to minimum");
+                if(patch.has("sourceEvidence")) {
+                    var source=patch.path("sourceEvidence");
+                    require(source.path("file").asText().equals(row.path("sourceFile").asText()),"Reviewed source file differs");
+                    require(source.path("sheet").asText().equals(row.path("sourceSheet").asText()),"Reviewed source sheet differs");
+                    require(source.path("sha256").asText().matches("[a-f0-9]{64}")&&!source.path("cell").asText().isBlank(),"Missing reviewed source hash/cell");
+                    require(source.path("countries").valueStream().anyMatch(c->c.asText().equals(row.path("countryCode").asText())),"Source rule does not cover country");
+                    require(fields.path("sourceMinimumWeightKind").asText().equals("reviewed-source")&&fields.path("sourceMinimumWeightCell").equals(source.path("cell")),"Reviewed provenance differs");
+                    reviewed=true;
+                }
+            }
             if (confirmed) {
                 var resolution = LogisticsMinimumWeight.fromNotes(text, row.path("countryCode").asText());
                 require(!resolution.conflict() && resolution.kg() != null
                         && resolution.kg().compareTo(minimum.decimalValue()) == 0, "Confirmation does not match the minimum");
             }
-            require(confirmed || !text.isBlank() && notes.contains(text), "Minimum evidence is absent from original notes or explicit confirmation");
+            require(confirmed || reviewed || !text.isBlank() && notes.contains(text), "Minimum evidence is absent from original notes or explicit confirmation");
             fields.properties().forEach(field -> row.set(field.getKey(), field.getValue()));
         }
     }
@@ -153,6 +177,7 @@ public final class DocumentedMinimumWeightRepair {
         var hash = LogisticsDatasetService.hash(repairId + ":" + old + ":" + payload.path("rows"));
         var note = confirmedNote == null ? "原表明确最低计重补录；保留0起点、原单价、每票费和重量段；未推算正数首档或冲突备注"
                 : confirmedNote + "；保留原单价、每票费、重量段及历史版本";
+        if(reviewedSources)note="全渠道起重核对：依据留存备注或同版原表单元格修复最低计费重；保留原单价、每票费、重量段及历史版本；不推断未注明的起重";
         payload.put("id", id.toString()).put("channelId", channel.toString()).put("versionNumber", number).put("status", "published")
                 .put("importedAt", now).put("publishedAt", now).put("importedBy", actor).put("publishedBy", actor)
                 .put("sourceHash", hash).put("contentHash", hash).put("basePublishedVersionId", old.toString())
@@ -162,6 +187,7 @@ public final class DocumentedMinimumWeightRepair {
         update(db, "update logistics_channel set current_version_id=?,version=version+1,updated_at=now(),payload=payload||jsonb_build_object('currentVersionId',?::text,'updatedAt',?::text) where id=? and current_version_id=?", id, id.toString(), now, channel, old);
         var proof = mapper.createObjectNode().put("note", note).put("repairId", repairId).put("sourceReference", confirmedNote == null
                 ? "Original stored source notes, exact version and source row guards" : "Explicit user confirmation on 2026-09-16; exact version, fingerprint and source row guards").set("evidence", item.path("evidence"));
+        if(reviewedSources)proof.put("sourceReference","Reviewed same-edition source cells or original stored notes; exact version/fingerprint/row/country guards").set("sourcePatches",plan.path("patches"));
         update(db, "insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select ?,id,rows_fingerprint,?,'verified',?::jsonb,? from logistics_version where id=?", UUID.randomUUID(), LogisticsBillingEngine.VERSION, proof.toString(), actor, id);
         require(scalar(db, "select logistics_version_quote_ready(?)::text", id).equals("true"), "Corrected version is not quote ready");
         var detail = mapper.createObjectNode().put("repairId", repairId).put("beforeVersionId", old.toString()).put("afterVersionId", id.toString())

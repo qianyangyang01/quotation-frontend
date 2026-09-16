@@ -4,6 +4,22 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LogisticsMinimumWeightTest {
+    @Test void readsShortBillingPhrasesAndFirstWeightWithRounding() {
+        weight("美国单票计费50克起，其他国家单票计费10克起；","US",.05);
+        weight("美国单票计费50克起，其他国家单票计费10克起；","GB",.01);
+        weight("美国最低50G计费；加拿大最低100G计费","CA",.1);
+        weight("美国单票计费50克起，超过按1g进位","US",.05);
+        weight("单票单件计费;首重50g，续重按1g计算重量, 实重材积取其大者计费","US",.05);
+        weight("单票单件计费，首重0.5KG，续重0.5KG，实重和体积重取大者计费","JP",.5);
+        assertNull(LogisticsMinimumWeight.fromNotes("重派费首重1KG，续重1KG；按1KG进位","US").kg());
+    }
+    @Test void countryScopeSurvivesSemicolonButDoesNotLeakToOtherCountries() {
+        var note="6. 加拿大：体积重低于实际重量2倍的，按照实际重量收费;达到或超过实际重量2倍的，按照体积重量收取。最低计费重0.05KG";
+        weight(note,"CA",.05);assertNull(LogisticsMinimumWeight.fromNotes(note,"DE").kg());
+        note="4.墨西哥、美国、加拿大：0<W≤30KG，美国最低计费重50g";
+        weight(note,"US",.05);assertNull(LogisticsMinimumWeight.fromNotes(note,"CA").kg());
+        assertNull(LogisticsMinimumWeight.fromNotes(note,"MX").kg());
+    }
     private void weight(String note,String country,double expected) {
         var result=LogisticsMinimumWeight.fromNotes(note,country);
         assertFalse(result.conflict(),result.evidence());assertNotNull(result.kg(),note);assertEquals(expected,result.kg().doubleValue());

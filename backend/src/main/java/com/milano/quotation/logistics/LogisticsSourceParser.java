@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.16-sf-no-discount-v1";
+    public static final String VERSION="company-channels-2026.09.16-country-minimum-v2";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
@@ -856,11 +856,21 @@ public class LogisticsSourceParser {
     }
     private void applyMinimumWeights(Source source,Map<String,ObjectNode> channels) {
         var notes=new StringBuilder();var cells=new LinkedHashSet<String>();
+        boolean sf=channels.values().stream().anyMatch(c->c.path("providerName").asText().equals("顺丰"));
+        var scopedNotes=new HashMap<String,StringBuilder>();var scopedCells=new HashMap<String,Set<String>>();
         for(var sheetRow:source.sheet) {
             if(source.parsedRows.contains(sheetRow.getRowNum())||source.auxiliaryRows.containsKey(sheetRow.getRowNum())||source.exampleRows.contains(sheetRow.getRowNum()))continue;
             for(var cell:sheetRow) {
                 var text=source.parsingText(cell);
-                if(text.matches("(?s).*(起重|最[小低]计费重|起收|不足.{0,15}按|首重.{0,10}[gG克]).*")) {
+                if(text.matches("(?s).*(起重|最[小低](?:计费)?重|起收|单票计费.{0,10}[gG克].?起|最低.{0,10}[gG克].?计费|不足.{0,15}按|首重.{0,10}[gG克]).*")) {
+                    // SF's footer is a country/rule table, not a sheet-wide minimum.
+                    if(sf&&cell.getColumnIndex()==2) {
+                        var countryText=source.text(sheetRow.getRowNum(),1);
+                        for(var country:COUNTRIES.entrySet())if(countryText.contains(country.getKey())) {
+                            scopedNotes.computeIfAbsent(country.getValue(),k->new StringBuilder()).append(text.replace('\n',' ')).append('\n');
+                            scopedCells.computeIfAbsent(country.getValue(),k->new LinkedHashSet<>()).add(cell.getAddress().formatAsString());
+                        }
+                    }
                     notes.append(text).append('\n');cells.add(cell.getAddress().formatAsString());
                 }
             }
@@ -877,6 +887,13 @@ public class LogisticsSourceParser {
                     row.set("minChargeWeightKg",preceding.path("minChargeWeightKg").deepCopy());
                     row.put("sourceMinimumWeightKind","column-inherited").put("sourceMinimumWeightCell",preceding.path("sourceMinimumWeightCell").asText()).put("sourceMinimumWeightText",preceding.path("sourceMinimumWeightText").asText());
                 }
+            }
+            if(sf) {
+                // Generic notes contain a flattened copy of all countries' footer rules.
+                LogisticsMinimumWeight.applyNotes(row,row.path("notes").asText().split("\\[表级规则\\]",2)[0],"");
+                var country=row.path("countryCode").asText();
+                LogisticsMinimumWeight.applyNotes(row,scopedNotes.getOrDefault(country,new StringBuilder()).toString(),String.join(",",scopedCells.getOrDefault(country,Set.of())));
+                continue;
             }
             LogisticsMinimumWeight.applyNotes(row,row.path("notes").asText(),"");
             if(row.path("minChargeWeightKg").asDouble()==0&&(!row.has("sourceMinimumWeightKind")||row.path("sourceMinimumWeightKind").asText().equals("blank-column")))
