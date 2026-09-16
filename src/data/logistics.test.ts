@@ -35,6 +35,25 @@ const publishedRule: LogisticsRule = {
   }],
 }
 
+it('retains untouched country regions on incremental installation but invalidates aliases and full reloads', () => {
+  const us = { ...publishedRule, prices: [{ ...publishedRule.prices[0]!, zoneName: '普通区域' }] }
+  replaceLogisticsRules([us])
+  const before = logisticsQuoteRegions('美国')
+  const nlBefore = logisticsQuoteRegions('NL')
+  const nlRow = { ...us.prices[0]!, areaName: '荷兰', countryCode: 'NL', zoneName: '普通区域' }
+  const combined = { ...us, prices: [...us.prices, nlRow] }
+  replaceLogisticsRules([combined], ['荷兰'])
+  expect(logisticsQuoteRegions('美国')).toBe(before)
+  expect(logisticsQuoteRegions('NL')).not.toBe(nlBefore)
+  expect(calculateLogisticsFee(combined, '荷兰', 0.5, ['普货'], undefined, logisticsQuoteRegions('荷兰')[0])).not.toBeNull()
+  expect(findPriceRow(combined, '美国', 0.5)).toBe(us.prices[0])
+  replaceLogisticsRules([combined])
+  expect(logisticsQuoteRegions('美国')).not.toBe(before)
+  replaceLogisticsRules([])
+  expect(logisticsRuleByName(us.name)).toBeUndefined()
+  expect(logisticsQuoteRegions('荷兰')).toEqual([])
+})
+
 it('keeps Canadian channel regions separate and sorts numbered regions within each channel', () => {
   const make = (id: number, name: string, carrier: string, zones: string[]) => ({ ...publishedRule, id, name,
     relations: [{ ...publishedRule.relations[0]!, carrier }],

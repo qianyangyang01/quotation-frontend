@@ -46,11 +46,12 @@ export async function loadAdditionalCountryRules(snapshot: CountryRulesSnapshot,
   const sameRevision = snapshot.revision === manifestResult.manifest.revision
   const loaded = new Set(snapshot.countries.map(countryIdentity))
   const query = sameRevision ? countries.filter(country => !loaded.has(countryIdentity(country))) : countries
-  if (!query.length) return { ...snapshot, countries, verified: true }
+  if (!query.length) return { ...snapshot, countries, verified: true, changedCountries: [], replacedSnapshot: false }
   const result = await loadPublishedLogisticsRules({ attribute: snapshot.attribute, countries: query },
     { apply: false, signal, manifestResult })
   signal.throwIfAborted()
   if (!result.verified || result.revision !== manifestResult.manifest.revision) throw new Error('物流版本已变化，请重试')
   return { ...snapshot, countries, revision: result.revision, verified: true,
+    changedCountries: query, replacedSnapshot: !sameRevision,
     rules: sameRevision ? mergeCountryRules(snapshot.rules, result.rules, query) : result.rules }
 }

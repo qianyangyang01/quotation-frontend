@@ -12,6 +12,7 @@ import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, r
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
+import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
 import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountryLoader'
 import { financeSettingsAreHydrated, hydrateFinanceSettings } from '@/services/financeSettings'
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
@@ -105,6 +106,7 @@ const logisticsRevision = ref('')
 // stay unchanged across reloads, so keep a local generation to invalidate matrices
 // whenever that array is cleared or repopulated.
 const logisticsRulesGeneration = ref(0)
+const countryRulesGeneration = createCountryQuotationGeneration(logisticsRulesGeneration)
 const savingQuotation = ref(false)
 const syncPending = ref('')
 const syncError = ref('')
@@ -528,11 +530,15 @@ function ensureCountries(countries: string[]): Promise<boolean> {
       [...requestedQuoteCountries], countryController.signal)
       if (generation !== countryGeneration) return false
       if (!result.verified) throw new Error('无法确认最新物流版本，请重试')
-      replaceLogisticsRules(result.rules)
-      financePolicies.value = loadFinanceChannelPolicies()
+      replaceLogisticsRules(result.rules, result.replacedSnapshot ? undefined : result.changedCountries)
+      if (result.replacedSnapshot) {
+        financePolicies.value = loadFinanceChannelPolicies()
+        logisticsRulesGeneration.value += 1
+      } else {
+        countryRulesGeneration.invalidate(result.changedCountries)
+      }
       loadedQuoteCountries.value = result.countries
       logisticsRevision.value = result.revision
-      logisticsRulesGeneration.value += 1
       logisticsLoadState.value = result.rules.length ? 'ready' : 'empty'
       return true
     } catch {
@@ -1283,7 +1289,7 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
 }
 const countryChannelCount = createCountryQuotationCache(country => {
   void logisticsRevision.value
-  void logisticsRulesGeneration.value
+  countryRulesGeneration.read(country)
   const p = products.value[0]
   if (!p) return 0
   const regions = logisticsQuoteRegions(country)
@@ -1292,14 +1298,14 @@ const countryChannelCount = createCountryQuotationCache(country => {
 })
 const countryQuoteRows = createCountryQuotationCache(country => {
   void logisticsRevision.value
-  void logisticsRulesGeneration.value
+  countryRulesGeneration.read(country)
   const p = products.value[0]
-  return p ? (isAustraliaQuoteCountry(country) ? excelQuoteRows(p, country) : expandedCountryQuoteRows(p, country)) : []
+  return p ? (isAustraliaQuoteCountry(country) ? excelQuoteRows(p, country) : allRegionalQuoteRows(country)) : []
 })
 const regionalQuoteRows = createCountryQuotationCache(key => {
   void logisticsRevision.value
-  void logisticsRulesGeneration.value
   const [country, region] = JSON.parse(key) as [string, string]
+  countryRulesGeneration.read(country)
   const p = products.value[0]
   return p ? excelQuoteRows(p, country, region) : []
 })
@@ -1310,9 +1316,14 @@ function expandedCountryQuoteRows(p: Product, country: string) {
   return rows.sort((a, b) => a.carrier.localeCompare(b.carrier, 'zh-CN') || a.transport.localeCompare(b.transport, 'zh-CN')
     || (a.quoteRegion || '').localeCompare(b.quoteRegion || '', 'zh-CN', { numeric: true }))
 }
-function activeRegionalQuoteRows(country: string) {
+const allRegionalQuoteRows = createCountryQuotationCache(country => {
+  void logisticsRevision.value
+  countryRulesGeneration.read(country)
   const p = products.value[0]
   return p ? expandedCountryQuoteRows(p, country) : []
+})
+function activeRegionalQuoteRows(country: string) {
+  return allRegionalQuoteRows(country)
 }
 function quotationCountries(p: Product): QuotationCountrySummary[] {
   const settingMap = new Map(financeCountrySettings.value.map(option => [option.country, option]))

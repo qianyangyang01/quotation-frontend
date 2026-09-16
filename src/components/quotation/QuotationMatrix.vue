@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { quotationRowsSignature } from '@/services/quotationRowsSignature'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
 import { hasAnyQuotationPrice } from '@/services/quotationAvailability'
 import QuoteUnavailableReason from './QuoteUnavailableReason.vue'
@@ -47,6 +47,9 @@ const showCountryPicker = ref(false)
 const countrySearch = ref('')
 const channelLoading = ref(false)
 const channelError = ref(false)
+// Local, non-persistent diagnostics: ensureCountries and Vue DOM completion.
+// These exclude browser automation overhead and do not claim paint timing.
+const channelLoadTiming = ref<{ ensureMs: number; domMs: number } | null>(null)
 let channelPickerRequest = 0
 const channelPickerCountry = ref('')
 const channelSearch = ref('')
@@ -276,7 +279,9 @@ function removeCountry(country: string) {
   selectedChannelKeys.value = next
 }
 async function openChannelPicker(country: string) {
+  const started = performance.now()
   const request = ++channelPickerRequest
+  channelLoadTiming.value = null
   channelPickerCountry.value = country
   pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
   channelSearch.value = ''
@@ -289,9 +294,14 @@ async function openChannelPicker(country: string) {
   try { ok = !props.ensureCountries || await props.ensureCountries([country]) }
   catch { ok = false }
   if (request !== channelPickerRequest || channelPickerCountry.value !== country) return
+  const ensureMs = Math.round(performance.now() - started)
   channelLoading.value = false
   channelError.value = !ok
   pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
+  await nextTick()
+  if (ok && request === channelPickerRequest && channelPickerCountry.value === country) {
+    channelLoadTiming.value = { ensureMs, domMs: Math.round(performance.now() - started) }
+  }
 }
 onBeforeUnmount(() => { channelPickerRequest++ })
 function closeChannelPicker() {
@@ -421,7 +431,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
   </div>
 
   <div v-if="channelPickerCountry" class="dialog-mask" @click.self="closeChannelPicker">
-    <section class="channel-dialog">
+    <section class="channel-dialog" :data-load-ensure-ms="channelLoadTiming?.ensureMs" :data-load-dom-ms="channelLoadTiming?.domMs">
       <header><div><h2>为{{ channelPickerCountry }}添加物流渠道</h2><p>可搜索并批量选择渠道，价格按当前商品与重量自动试算。</p></div><button @click="closeChannelPicker">×</button></header>
       <label v-if="countrySummary(channelPickerCountry)?.quoteRegions?.length" class="quote-region-select">新增方案区域<select v-model="pickerRegion" aria-label="新增方案区域"><option v-for="region in countrySummary(channelPickerCountry)?.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label><label class="dialog-search">⌕<input v-model="channelSearch" placeholder="搜索渠道名称、物流商或渠道代码"></label>
       <div class="channel-tools"><nav><button v-for="filter in ['全部','系统推荐','最低价','最快','普货','带电']" :key="filter" :class="{ active:channelFilter===filter }" @click="channelFilter=filter">{{ filter }}</button></nav><button class="recommended-add" @click="selectRecommended">＋ 添加系统推荐3条</button></div>

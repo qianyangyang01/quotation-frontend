@@ -6,9 +6,35 @@ import Matrix from './QuotationMatrix.vue'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import PriceSummary from './PriceSummary.vue'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
+import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
+import { ref } from 'vue'
 import type { QuotationCountrySummary, QuotationMatrixRow } from './types'
 
 let app: App
+
+it.each(['specified', 'template'])('reuses country calculations while searching and opening channels in %s mode', async variant => {
+  const generation = createCountryQuotationGeneration(ref(0))
+  const pricing = reactive({ weight: 1 })
+  const calculate = vi.fn((country: string) => {
+    generation.read(country)
+    return Array.from({ length: 12 }, (_, i) => ({ ...row(country, i), quote1: pricing.weight * 10 }))
+  })
+  const state = reactive({ active: true, variant, countries: [countries[0]!], contextKey: 'v1', customQuantity: 5,
+    presetVersion: 1, presetSelection: [{ country: '美国', channelKey: '1' }], exchangeRate: 7,
+    quoteRowsForCountry: createCountryQuotationCache(calculate), ensureCountries: async () => true })
+  mount(Matrix, state); await nextTick(); await nextTick()
+  const count = calculate.mock.calls.length
+  button('添加渠道').click(); await nextTick(); await nextTick(); await nextTick()
+  const input = document.querySelector('.channel-dialog input[placeholder]') as HTMLInputElement
+  input.value = '渠道'; input.dispatchEvent(new Event('input', { bubbles: true })); await nextTick()
+  expect(calculate).toHaveBeenCalledTimes(count)
+  expect(document.querySelector('.channel-dialog')?.hasAttribute('data-load-dom-ms')).toBe(true)
+  generation.invalidate(['荷兰']); await nextTick()
+  expect(calculate).toHaveBeenCalledTimes(count)
+  pricing.weight = 2; await nextTick(); await nextTick()
+  expect(calculate).toHaveBeenCalledTimes(count + 1)
+  expect(document.querySelector('.picker-list')?.textContent).toContain('$20.00')
+})
 
 it.each([['英国', '非偏远'], ['加拿大', '1区']])('restores old %s template regions to the same explicitly national channel', async (country, oldRegion) => {
   const changed = vi.fn()
