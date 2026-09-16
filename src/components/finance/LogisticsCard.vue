@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import FinanceCountrySelect from './FinanceCountrySelect.vue'
 import ChannelGroup, { type ChannelTag } from './ChannelGroup.vue'
 
 export type ProviderGroup = { provider: string; channels: ChannelTag[] }
-export type CountryChannelOption = { country: string; stageLabel?: string; continent?: string; groups: ProviderGroup[] }
+export type CountryChannelOption = { country: string; code?: string; stageLabel?: string; continent?: string; groups: ProviderGroup[] }
 
 const props = defineProps<{
   attribute: string
@@ -30,12 +31,12 @@ const channelCount = computed(() => groups.value.reduce((total, group) => total 
 <template>
   <article class="logistics-card">
     <section class="attribute-cell"><span>物流属性</span><strong>{{ attribute }}</strong></section>
-    <section class="country-cell"><span>国家</span><select v-model="selectedCountry" aria-label="选择国家"><option v-for="item in countries" :key="item.country" :value="item.country">{{ item.stageLabel }}｜{{ item.country }}{{ item.stageLabel === '冷门国家' && item.continent ? `（${item.continent}）` : '' }}</option></select><small>{{ activeCountry.stageLabel || '一般国家' }}{{ activeCountry.stageLabel === '冷门国家' && activeCountry.continent ? ` · ${activeCountry.continent}` : '' }} · 共 {{ countries.length }} 个国家</small></section>
+    <section class="country-cell"><span>国家</span><FinanceCountrySelect v-model="selectedCountry" :countries="countries" /><small>{{ activeCountry.stageLabel || '一般国家' }}{{ activeCountry.stageLabel === '冷门国家' && activeCountry.continent ? ` · ${activeCountry.continent}` : '' }} · 共 {{ countries.length }} 个国家</small></section>
     <section class="channels-cell">
       <ChannelGroup v-for="group in visibleGroups" :key="group.provider" :provider="group.provider" :channels="group.channels" />
       <button v-if="groups.length > 3" class="provider-toggle" type="button" @click="expandedProviders=!expandedProviders">{{ expandedProviders ? '收起服务商 ↑' : `查看其余 ${groups.length - 3} 个服务商 ↓` }}</button>
     </section>
-    <section class="match-cell"><span>匹配系数</span><strong>1个</strong><small>渠道 {{ channelCount }} ↑</small></section>
+    <section class="match-cell"><span>已选渠道</span><strong>{{ channelCount }}个</strong><small>当前国家</small></section>
     <section class="status-cell"><span :class="{ disabled:status!=='启用' }">{{ status }}</span></section>
     <section class="updated-cell"><strong>{{ updatedAt.split(' ')[0] }}</strong><small>{{ updatedAt.split(' ')[1] || '' }}</small></section>
     <section class="actions-cell"><button class="maintain" type="button" @click="emit('maintain')">统一维护</button><button class="delete" type="button" @click="emit('remove')">删除</button><div class="more"><button type="button" aria-label="更多操作" @click="moreOpen=!moreOpen">•••</button><div v-if="moreOpen"><button type="button" @click="expandedProviders=true;moreOpen=false">展开全部服务商</button><button type="button" @click="expandedProviders=false;moreOpen=false">收起全部服务商</button></div></div></section>

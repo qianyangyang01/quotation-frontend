@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FinanceCountryRuleList from '@/components/finance/FinanceCountryRuleList.vue'
 import ChannelTaxSettings from '@/components/finance/ChannelTaxSettings.vue'
 import CustomerOperationSettings from '@/components/finance/CustomerOperationSettings.vue'
 import { loadCustomerOperationSettings } from '@/data/customerOperationFees'
@@ -124,6 +125,7 @@ const financeAttributePickerTyping = ref(false)
 const openFinanceCountryPicker = ref<number | null>(null)
 const financeCountryPickerTyping = ref(false)
 const financeCountrySearches = ref<string[]>([])
+const financeCountryRuleList = ref<InstanceType<typeof FinanceCountryRuleList>>()
 const expandedFinanceCountryRules = ref<number[]>([])
 const financeSelectedCarriers = ref<string[]>([])
 const priorityFinanceCountryNames = ['美国', '英国', '法国', '澳大利亚']
@@ -265,7 +267,7 @@ const financePolicyCards = computed(() => financePolicies.value.map(policy => ({
       grouped.set(channel.carrier, group)
     })
     const classification = financeCountrySettingMap.value.get(rule.country)
-    return { country: rule.country, stageLabel: financeCountryStageDisplay(rule.country), continent: classification?.continent || rule.continent, groups: [...grouped.values()] }
+    return { country: rule.country, code: classification?.code || '', stageLabel: financeCountryStageDisplay(rule.country), continent: classification?.continent || rule.continent, groups: [...grouped.values()] }
   }),
 })))
 const financeFilterCountryOptions = computed(() => [...new Set(financePolicyCards.value.flatMap(card => card.countries.map(item => item.country)))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
@@ -704,6 +706,7 @@ async function addFinanceCountryRule() {
   financeCountrySearches.value.push(country)
   financeSelectedCarriers.value.push(preferredFinanceCarrier(financePolicyForm.value.countryRules[financePolicyForm.value.countryRules.length - 1]))
   expandedFinanceCountryRules.value = [...expandedFinanceCountryRules.value, financePolicyForm.value.countryRules.length - 1]
+  await financeCountryRuleList.value?.reveal(financePolicyForm.value.countryRules.length - 1)
   await nextTick()
   const cards = document.querySelectorAll('.finance-editor .country-rule-card')
   cards[cards.length - 1]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1202,8 +1205,8 @@ function saveEditor() {
         <label>物流属性<div class="finance-attribute-combobox"><input ref="financeAttributeInput" :value="financePolicyForm.category" autocomplete="off" placeholder="选择或输入物流属性" role="combobox" :aria-expanded="financeAttributePickerOpen" @focus="openFinanceAttributePicker" @click="openFinanceAttributePicker" @input="updateFinanceAttribute" @blur="closeFinanceAttributePicker" @keydown.esc="financeAttributePickerOpen=false"><button type="button" aria-label="展开物流属性" @mousedown.prevent="toggleFinanceAttributePicker">⌄</button><div v-if="financeAttributePickerOpen" class="finance-attribute-menu" role="listbox"><button v-for="attribute in filteredFinanceAttributeOptions" :key="attribute" type="button" :class="{ active:attribute===financePolicyForm.category }" @mousedown.prevent="selectFinanceAttribute(attribute)">{{ attribute }}</button><p v-if="!filteredFinanceAttributeOptions.length && financePolicyForm.category.trim()">按当前输入创建“{{ financePolicyForm.category.trim() }}”</p></div></div><small>点击显示已有属性，也可以直接输入新的物流属性</small></label>
         <label>状态<select v-model="financePolicyForm.enabled"><option :value="true">启用</option><option :value="false">停用</option></select></label>
         <div class="wide country-rule-editor">
-          <header><div><b>支持国家与渠道</b><small>这里只维护当前物流属性允许的国家和渠道；业务报价仅展示“常用国家设置”中的国家。</small></div><button type="button" @click="addFinanceCountryRule">＋ 添加匹配国家</button></header>
-          <section v-for="(rule,index) in financePolicyForm.countryRules" :key="index" class="country-rule-card">
+          <header><div><b>支持国家与渠道</b><small>这里只维护当前物流属性允许的国家和渠道；常用国家优先展示，其他已授权国家可在报价页的全部国家中选择。</small></div><button type="button" @click="addFinanceCountryRule">＋ 添加匹配国家</button></header>
+          <FinanceCountryRuleList ref="financeCountryRuleList" :rules="financePolicyForm.countryRules" :codes="financeCountrySettingMap" @page-change="openFinanceCountryPicker=null"><template #default="{rule,index}"><section class="country-rule-card">
             <div class="country-rule-head"><label class="country-search-label">支持国家（可输入搜索）<div class="country-picker"><span><b>⌕</b><input :value="financeCountrySearches[index] ?? rule.country" autocomplete="off" placeholder="输入国家名称搜索" role="combobox" :aria-expanded="openFinanceCountryPicker===index" @focus="openFinanceCountrySearch(index)" @input="updateFinanceCountrySearch(index,$event)" @blur="closeFinanceCountrySearch(index)" @keydown.esc="openFinanceCountryPicker=null"></span><div v-if="openFinanceCountryPicker===index" class="country-picker-menu" role="listbox"><button v-for="country in filteredFinanceCountries(index)" :key="country.code || country.name" type="button" :class="{ active:country.name===rule.country }" @mousedown.prevent="selectFinanceCountry(index,country.name)"><strong>{{ country.name }}</strong><small>{{ country.code }}</small></button><p v-if="!filteredFinanceCountries(index).length">没有匹配的国家</p></div></div></label><button type="button" @click="removeFinanceCountryRule(index)">移除国家</button></div>
             <div class="country-policy-classification"><b>{{ financeCountryStageDisplay(rule.country) }}</b><span>{{ financeCountrySettingMap.get(rule.country)?.continent || rule.continent }} · 已选可用 {{ rule.allowedChannels.length - financeUnavailableSelections(rule).length }}/{{ financeChannelsForCountry(rule.country).length }} 个渠道</span><button type="button" :aria-expanded="financeCountryRuleExpanded(index)" @click="toggleFinanceCountryRule(index)">{{ financeCountryRuleExpanded(index) ? '收起渠道 ↑' : '展开渠道 ↓' }}</button></div>
             <div v-if="financeCountryRuleExpanded(index) && financeChannelsForCountry(rule.country).length" class="finance-channel-cascade">
@@ -1212,6 +1215,7 @@ function saveEditor() {
             </div>
             <small v-if="financeCountryRuleExpanded(index) && !financeChannelsForCountry(rule.country).length">当前国家在启用的物流规则中暂无可配置渠道。</small>
           </section>
+          </template></FinanceCountryRuleList>
           <div class="add-country-bottom"><span>物流规则匹配 {{ financeLogisticsCountries.length }} 个可发国家，已选择 {{ financePolicyForm.countryRules.length }} 个</span><button type="button" @click="addFinanceCountryRule">＋ 继续添加匹配国家</button></div>
         </div>
       </div>
