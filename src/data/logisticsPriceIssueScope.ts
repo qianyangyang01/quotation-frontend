@@ -28,6 +28,21 @@ export function rowsForPriceIssue(rows: Price[], issue: SourceIssue) {
   }))
 }
 
+export function collectPriceReviewIssues(rows: Price[], sourceIssues: SourceIssue[], blockingReasons: string[]) {
+  const issues = [...sourceIssues]
+  for (const row of rows) {
+    for (const reason of (row.blockingReason || '').split('；').map(value => value.trim()).filter(Boolean)) {
+      if (!issues.some(issue => issue.level === 'error' && rowsForPriceIssue(rows, issue).includes(row) && issue.message.includes(reason))) {
+        issues.push({ row: row.sourceRow || 0, sourceSheet: row.sourceSheet, rowKey: row.rowKey, field: '计费规则', message: reason, level: 'error' })
+      }
+    }
+  }
+  for (const reason of blockingReasons) if (reason && !issues.some(issue => issue.level === 'error' && issue.message.includes(reason))) {
+    issues.push({ row: 0, field: '渠道规则', message: reason, level: 'error' })
+  }
+  return issues
+}
+
 export function priceIssueLocationLabel(rows: Price[], issue: SourceIssue) {
   const locations = issueLocations(rows, issue)
   if (!locations.length) return issue.sourceSheet ? `Sheet「${issue.sourceSheet}」· 工作表级问题，未提供具体行号` : '渠道级或来源未定位问题：未提供 Sheet / 行号'

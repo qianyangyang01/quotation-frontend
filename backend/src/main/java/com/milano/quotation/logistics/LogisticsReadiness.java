@@ -11,7 +11,7 @@ import java.util.*;
 final class LogisticsReadiness {
     private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg");
     private static final Set<String> GENERATED_ETA_CODES=Set.of("ETA_MISSING","ETA_PARTIAL","ETA_CONFLICT");
-    private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式");
+    private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式","公斤价计费结构不完整");
 
     private LogisticsReadiness() {}
 

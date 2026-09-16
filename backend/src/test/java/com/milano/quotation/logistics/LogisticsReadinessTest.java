@@ -7,6 +7,33 @@ import tools.jackson.databind.node.ObjectNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LogisticsReadinessTest {
+    @Test void recomputesPerKgBlockersAfterCorrectionAndRejectsANewInvalidPrice() {
+        var channel=JsonNodeFactory.instance.objectNode().put("templateStatus","known");channel.putArray("issues");
+        var row=price("GB","",0,1).put("pricePerKg",0);channel.putArray("rows").add(row);
+        LogisticsReadiness.apply(channel);
+        assertFalse(channel.path("pricingReady").asBoolean());
+        assertEquals("公斤价计费结构不完整",row.path("blockingReason").asText());
+        row.put("pricePerKg",33);
+        LogisticsReadiness.apply(channel);LogisticsReadiness.apply(channel);
+        assertTrue(channel.path("pricingReady").asBoolean());
+        assertTrue(row.path("blockingReason").asText().isBlank());assertTrue(row.path("pendingReason").asText().isBlank());
+        row.put("pricePerKg",0);
+        LogisticsReadiness.apply(channel);
+        assertFalse(channel.path("pricingReady").asBoolean());
+        assertEquals("公斤价计费结构不完整",row.path("blockingReason").asText());
+    }
+
+    @Test void clearingAnObsoletePriceBlockerPreservesOtherSourceAndWeightProblems() {
+        var channel=JsonNodeFactory.instance.objectNode().put("templateStatus","known");
+        channel.putArray("issues").addObject().put("field","重量段").put("level","error").put("message","重量段重叠");
+        var row=price("GB","",0,1).put("blockingReason","顺丰折扣值无效；公斤价计费结构不完整").put("pendingReason","公斤价计费结构不完整");
+        channel.putArray("rows").add(row);
+        LogisticsReadiness.apply(channel);
+        assertEquals("顺丰折扣值无效",row.path("blockingReason").asText());
+        assertEquals("顺丰折扣值无效",row.path("pendingReason").asText());
+        assertEquals(1,channel.path("errors").asInt());assertFalse(channel.path("pricingReady").asBoolean());
+    }
+
     @Test void inheritsOneSourceEtaAcrossEveryWeightTierInTheSameRoute() {
         var channel=JsonNodeFactory.instance.objectNode().put("templateStatus","known");channel.putArray("issues");
         var rows=channel.putArray("rows");var first=price("US","1区",0,1);first.put("etaMinDays",7).put("etaMaxDays",15).put("etaSource","source-row");rows.add(first);rows.add(price("US","1区",1,2));

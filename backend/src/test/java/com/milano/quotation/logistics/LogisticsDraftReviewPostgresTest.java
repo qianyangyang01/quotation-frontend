@@ -106,6 +106,29 @@ class LogisticsDraftReviewPostgresTest {
     }
 
     private static ObjectNode revalidation(ObjectNode version){var input=mapper.createObjectNode().put("fingerprint",version.path("fingerprint").asText()).put("revalidate",true);input.putArray("changes");input.putArray("etaChanges");return input;}
+    @Test void priceCorrectionAndRevalidationClearStoredBlockersButKeepRealOverlap() {
+        for(int originalPrice:new int[]{0,33}) {
+            var id=legacyDraft(false,false);
+            var stored=(ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",id).query(String.class).single());
+            stored.withArray("rows").add(row("uk10",0,.3,10).put("areaName","英国").put("countryCode","GB").put("pricePerKg",originalPrice)
+                    .put("blockingReason","公斤价计费结构不完整").put("pendingReason","公斤价计费结构不完整"));
+            jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where id=:id").param("p",stored.toString()).param("id",id).update();
+            var before=review.load(id,false);var input=revalidation(before);
+            if(originalPrice==0)input.withArray("changes").addObject().put("rowKey","uk10").putObject("fields").put("pricePerKg",33);
+            var after=review.patch(id,input,"PRICE-REVALIDATE");
+            assertEquals(1,after.path("errors").asInt());assertTrue(after.path("issues").toString().contains("WEIGHT_OVERLAP"));
+            assertFalse(after.path("pricingReady").asBoolean());
+            var reloaded=review.load(id,false);
+            assertEquals(33,reloaded.path("rows").get(3).path("pricePerKg").asInt());
+            assertTrue(reloaded.path("rows").get(3).path("blockingReason").asText().isBlank());
+            assertTrue(reloaded.path("rows").get(3).path("pendingReason").asText().isBlank());
+            var persisted=jdbc.sql("select payload::text from logistics_version where id=:id").param("id",id).query(String.class).single();
+            assertFalse(persisted.contains("公斤价计费结构不完整"),persisted);
+            var batch=jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",UUID.fromString(after.path("batchId").asText())).query(String.class).single();
+            assertFalse(batch.contains("公斤价计费结构不完整"),batch);assertTrue(batch.contains("重叠"),batch);
+        }
+    }
+
     private static UUID legacyDraft(boolean corrected,boolean unparsed){
         var dataset=guard.activeId();var provider=UUID.randomUUID();var channel=UUID.randomUUID();var version=UUID.randomUUID();var batch=UUID.randomUUID();
         jdbc.sql("insert into logistics_provider(id,dataset_id,code,payload,created_at,updated_at) values(:id,:d,:code,'{\"name\":\"测试商\",\"enabled\":true}',now(),now())").param("id",provider).param("d",dataset).param("code",provider.toString()).update();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Price, SourceIssue } from './logisticsRebuild'
-import { priceIssueCountries, priceRowsForIssueCountries, priceIssueRowIndexes, prioritizePriceIssueRows, rowsForPriceIssue, priceIssueLocationLabel } from './logisticsPriceIssueScope'
+import { collectPriceReviewIssues, priceIssueCountries, priceRowsForIssueCountries, priceIssueRowIndexes, prioritizePriceIssueRows, rowsForPriceIssue, priceIssueLocationLabel } from './logisticsPriceIssueScope'
 
 const rows: Price[] = [
   { areaName: '澳大利亚', countryCode: 'AU', weightFromKg: 1, weightToKg: 2, rowKey: 'au', sourceSheet: '其他表', sourceRow: 19 },
@@ -10,6 +10,22 @@ const rows: Price[] = [
 ]
 const issue: SourceIssue = { row: 19, sourceSheet: '敏货', field: '重量段', level: 'error', message: '重叠档位' }
 describe('price correction country scope', () => {
+  it('counts row and source issues together without counting their channel summaries again', () => {
+    const uk = [10, 11, 12].map(n => ({ areaName: '英国', countryCode: 'GB', rowKey: 'uk' + n, sourceSheet: '敏货', sourceRow: n, weightFromKg: 0, weightToKg: 1, blockingReason: '公斤价计费结构不完整' }))
+    const combined = collectPriceReviewIssues([...rows, ...uk], [issue], ['公斤价计费结构不完整'])
+    expect(combined).toHaveLength(4)
+    expect(combined.filter(item => item.field === '渠道规则')).toEqual([])
+    expect(combined.flatMap(item => rowsForPriceIssue([...rows, ...uk], item)).map(row => row.rowKey)).toEqual(['fr19', 'uk10', 'uk11', 'uk12'])
+    expect(collectPriceReviewIssues(rows, [issue], [])).toEqual([issue])
+    expect(uk.every(row => row.blockingReason === '公斤价计费结构不完整')).toBe(true)
+  })
+  it('deduplicates each row blocker independently while retaining unlocated channel blockers and warnings', () => {
+    const row = { ...rows[3]!, blockingReason: '重叠档位；计价错误' }
+    const warning: SourceIssue = { ...issue, field: '时效', level: 'warning', message: '时效提醒' }
+    const combined = collectPriceReviewIssues([row], [issue, warning], ['重叠档位', '计价错误', '整表需核对'])
+    expect(combined.map(item => item.message)).toEqual(['重叠档位', '时效提醒', '计价错误', '整表需核对'])
+    expect(combined.filter(item => item.level === 'error')).toHaveLength(3)
+  })
   it('puts both overlapping French tiers first, then French context and other countries', () => {
     const countries = priceIssueCountries(rows, [issue]), indexes = priceIssueRowIndexes(rows, [issue])
     expect([...indexes]).toEqual([2, 3])
