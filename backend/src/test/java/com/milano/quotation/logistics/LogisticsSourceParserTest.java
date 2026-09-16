@@ -230,6 +230,44 @@ class LogisticsSourceParserTest {
             parsed=parser.parse(bytes(book),"顺丰.xlsx");assertTrue(parsed.path("channels").get(0).path("errors").asInt()>0);
         }
     }
+    @Test void sfUsesRowLevelSettlementDiscountOrOriginalWithoutDoubleDiscounting()throws Exception {
+        for(boolean xlsx:List.of(false,true))try(Workbook book=xlsx?new XSSFWorkbook():new HSSFWorkbook()) {
+            var s=book.createSheet("服装专线");
+            row(s,0,"国家名称","Code","运费/kg","折扣率","折扣后运费","专递操作费/票","计费重量限制（kg）");
+            row(s,1,"西班牙","ES",72,"","",18,"0.001-1KG");
+            row(s,2,"西班牙","ES",76," ","\u00a0",18,"1.001-30KG");
+            row(s,3,"德国","DE",71,.6,45.4,22,"0.001-0.1KG");
+            row(s,4,"美国","US",145,.8,"",20,"0.001-0.1KG");
+            row(s,5,"英国","GB",82,"-",33,16,"0<W<=0.3");
+            row(s,6,"英国","GB",83,"",38,16,"0.3<W<=1");
+            row(s,7,"英国","GB",85,"-",40,16,"1<W<=20");
+            var channel=parser.parse(bytes(book),xlsx?"顺丰.xlsx":"顺丰.xls").path("channels").get(0);
+            assertEquals(0,channel.path("errors").asInt(),channel.toString());
+            var expected=Map.of(2,72d,3,76d,4,45.4d,5,116d,6,33d,7,38d,8,40d);
+            for(var price:channel.path("rows")) {
+                int source=price.path("sourceRow").asInt();
+                assertEquals(expected.get(source),price.path("pricePerKg").asDouble());
+                assertEquals(source<=3?"original":source==5?"original-times-discount":"settlement",price.path("sourcePricingBasis").asText());
+                if(source<=3){assertTrue(price.path("sourceDiscountEmpty").asBoolean());assertTrue(price.path("sourceSettlementEmpty").asBoolean());}
+            }
+        }
+    }
+    @Test void sfDoesNotTreatZeroInvalidTextOrEmptyResultFormulasAsNoDiscount()throws Exception {
+        for(String target:List.of("discount","settlement"))for(Object bad:List.of(0,-.8,1.2,"待定","FORMULA_EMPTY","FORMULA_ERROR"))try(var book=new XSSFWorkbook()) {
+            if(target.equals("settlement")&&bad.equals(1.2))continue;
+            var s=book.createSheet("服装专线");
+            row(s,0,"国家名称","Code","运费/kg","折扣率","折扣后运费","专递操作费/票","计费重量限制（kg）");
+            row(s,1,"西班牙","ES",72,"","",18,"0.001-1KG");
+            var cell=s.getRow(1).getCell(target.equals("discount")?3:4);
+            if(bad instanceof Number number)cell.setCellValue(number.doubleValue());
+            else if(bad.toString().startsWith("FORMULA")){cell.setCellFormula(bad.equals("FORMULA_EMPTY")?"\"\"":"1/0");book.getCreationHelper().createFormulaEvaluator().evaluateAll();}
+            else cell.setCellValue(bad.toString());
+            var channel=parser.parse(bytes(book),"顺丰.xlsx").path("channels").get(0);
+            assertTrue(channel.path("errors").asInt()>0,target+":"+bad+channel);
+            assertFalse(channel.path("quoteReady").asBoolean());
+            assertEquals(0,channel.path("rows").get(0).path("pricePerKg").asDouble());
+        }
+    }
     @Test void skipsLargePostalReferenceSheetsWithoutWeakeningThePriceRowLimit()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var prices=book.createSheet("服装专线");

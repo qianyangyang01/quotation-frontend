@@ -23,7 +23,7 @@ class SfDiscountImportTest {
     }
     JsonNode channel(byte[] bytes,String provider){var channels=parser.parse(bytes,provider+".xlsx").path("channels"); assertFalse(channels.isEmpty(),provider); return channels.get(0);}
     @Test void settlementAliasesOverrideOriginalAndDiscountWithoutDiscountingOperationFee() throws Exception {
-        for(var header:new String[]{"折后运费","结算运费","SF折后"}) {
+        for(var header:new String[]{"折后运费","结算运费","SF折后","折扣后运费"}) {
             var c=channel(workbook(header,1,97,51),"顺丰");var row=c.path("rows").get(0);
             assertEquals(51,row.path("pricePerKg").asDouble());assertEquals(20,row.path("registrationFee").asDouble());
             assertEquals("E2",row.path("sourceSettlementRateCell").asText());assertEquals("97",row.path("sourceOriginalRate").asText());
@@ -32,14 +32,20 @@ class SfDiscountImportTest {
         assertEquals(70.6,channel(workbook("折后运费",0.7,98,70.6),"顺丰").path("rows").get(0).path("pricePerKg").asDouble());
     }
     @Test void explicitInvalidSettlementNeverFallsBackToOriginalOrDiscount() throws Exception {
-        for(var bad:new Object[]{"",0,-1,"#VALUE!","待定"}) {
+        for(var bad:new Object[]{0,-1,"#VALUE!","待定"}) {
             var c=channel(workbook("折后运费",0.7,100,bad),"顺丰");assertTrue(c.path("errors").asInt()>0);assertFalse(c.path("rows").get(0).path("quoteReady").asBoolean());
         }
     }
     @Test void discountOnlySupportsUnambiguousCoefficientsPercentagesAndChineseNotation() throws Exception {
         for(var discount:new Object[]{0.7,"70%","70％","7折"})assertEquals(70,channel(workbook(null,discount,100,0),"顺丰").path("rows").get(0).path("pricePerKg").asDouble());
         assertEquals(100,channel(workbook(null,1,100,0),"顺丰").path("rows").get(0).path("pricePerKg").asDouble());
-        for(var bad:new Object[]{"",0,-0.1,7,70,1.1,"七折","#REF!"})assertFalse(channel(workbook(null,bad,100,0),"顺丰").path("rows").get(0).path("quoteReady").asBoolean());
+        for(var bad:new Object[]{0,-0.1,7,70,1.1,"七折","#REF!"})assertFalse(channel(workbook(null,bad,100,0),"顺丰").path("rows").get(0).path("quoteReady").asBoolean());
+    }
+    @Test void emptyCellsFollowConfirmedRowPricingPrecedence()throws Exception {
+        assertEquals(100,channel(workbook(null,"",100,0),"顺丰").path("rows").get(0).path("pricePerKg").asDouble());
+        assertEquals(100,channel(workbook("折后运费","",100,""),"顺丰").path("rows").get(0).path("pricePerKg").asDouble());
+        assertEquals(70,channel(workbook("折后运费",.7,100,""),"顺丰").path("rows").get(0).path("pricePerKg").asDouble());
+        assertEquals(33,channel(workbook("折扣后运费","-",82,33),"顺丰").path("rows").get(0).path("pricePerKg").asDouble());
     }
     @Test void otherProvidersIgnoreSfSettlementAndDiscountColumns() throws Exception {
         for(var provider:LogisticsSourceParser.PROVIDERS)if(!provider.equals("顺丰")) {

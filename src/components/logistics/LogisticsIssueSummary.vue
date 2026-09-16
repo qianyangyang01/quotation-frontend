@@ -7,6 +7,7 @@ defineEmits<{ locate: [issue: SourceIssue]; suggest: [issue: SourceIssue] }>()
 const entries = computed(() => props.issues.map(issue => ({ issue, label: priceIssueLocationLabel(props.rows, issue),
   matched: rowsForPriceIssue(props.rows, issue).length, locations: issueLocations(props.rows, issue),
   evidence: issue.sourceEvidence?.length ? issue.sourceEvidence : issue.rawValues ? [{ row: issue.row, rawValues: issue.rawValues }] : [] })))
+const affectedRowCount = computed(() => new Set(props.issues.flatMap(issue => rowsForPriceIssue(props.rows, issue))).size)
 function rawText(values: Record<string, unknown>) {
   return Object.entries(values).filter(([, value]) => value != null && value !== '').map(([key, value]) => `${key}：${String(value)}`).join('；')
 }
@@ -15,6 +16,7 @@ function rawText(values: Record<string, unknown>) {
 <template>
   <section v-if="entries.length" class="issue-summary" aria-label="问题原因与原表位置">
     <h3>问题原因与原表位置</h3>
+    <p>共 {{ entries.length }} 个问题，涉及 {{ affectedRowCount }} 条已定位价格；同一条价格可能有多个问题。</p>
     <article v-for="(entry, index) in entries" :key="index" :class="{ warning: entry.issue.level !== 'error' }">
       <strong>{{ entry.issue.level === 'error' ? '阻断' : '提醒' }} · {{ entry.issue.field || '渠道规则' }}</strong>
       <p>{{ entry.issue.message }}</p>

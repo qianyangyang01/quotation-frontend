@@ -1,6 +1,10 @@
 package com.milano.quotation.logistics;
 
 import com.milano.quotation.common.AppException;
+import com.milano.quotation.storage.AssetStorageService;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -15,16 +19,18 @@ import tools.jackson.databind.node.ObjectNode;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @Testcontainers(disabledWithoutDocker=true)
 class LogisticsDraftReviewPostgresTest {
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
     static final ObjectMapper mapper=new ObjectMapper();static JdbcClient jdbc;static LogisticsDatasetGuard guard;static LogisticsDraftReviewService review;
+    static final AssetStorageService storage=mock(AssetStorageService.class);
 
     @BeforeAll static void setup() {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).locations("classpath:db/migration").load().migrate();
         var dataSource=new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());jdbc=JdbcClient.create(dataSource);guard=new LogisticsDatasetGuard(jdbc);
-        review=new LogisticsDraftReviewService(jdbc,mapper,new LogisticsWorkbookService(mapper),guard);
+        review=new LogisticsDraftReviewService(jdbc,mapper,new LogisticsWorkbookService(mapper),guard,new LogisticsSfDraftRepair(jdbc,mapper,storage,new LogisticsParserAliases()));
     }
 
     @Test void updatesEveryWeightTierForOneRouteAuditsItAndRejectsAStaleFingerprint() {
@@ -64,6 +70,31 @@ class LogisticsDraftReviewPostgresTest {
         for(int i=0;i<3;i++)for(var field:new String[]{"weightFromKg","weightToKg","pricePerKg","registrationFee"})assertEquals(before.path("rows").get(i).path(field),after.path("rows").get(i).path(field));
         assertEquals("revalidation",after.path("correctionHistory").get(0).path("kind").asText());
         assertTrue(after.path("correctionHistory").get(0).path("changes").isEmpty());
+    }
+
+    @Test void revalidatesSavedSfNoDiscountPricesFromOriginalWorkbookAndAuditsTheRepair()throws Exception {
+        var id=legacyDraft(true,false);var before=review.load(id,false);
+        var payload=LogisticsSfDraftRepairTest.draft();payload.put("batchId",before.path("batchId").asText()).put("sourceFileIndex",0);
+        jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where id=:id").param("p",payload.toString()).param("id",id).update();
+        var files=mapper.createArrayNode();files.addObject().put("objectKey","sf-original-test").put("lifecycleStatus","retained").putNull("deletedAt");
+        jdbc.sql("update logistics_import_batch set payload=jsonb_set(payload,'{files}',cast(:files as jsonb)) where id=:id")
+                .param("files",files.toString()).param("id",UUID.fromString(before.path("batchId").asText())).update();
+        try(var book=LogisticsSfDraftRepairTest.workbook();var bytes=new ByteArrayOutputStream()) {
+            book.write(bytes);var original=bytes.toByteArray();when(storage.openRaw("sf-original-test")).thenAnswer(call->new ByteArrayInputStream(original));
+            before=review.load(id,false);
+            var after=review.patch(id,revalidation(before),"SF-REVIEWER");
+            assertEquals(0,after.path("errors").asInt(),after.toString());assertTrue(after.path("pricingReady").asBoolean());
+            assertEquals("draft",after.path("status").asText());assertFalse(after.path("quoteReady").asBoolean());
+            assertEquals(72,after.path("rows").get(0).path("pricePerKg").asInt());assertEquals(76,after.path("rows").get(1).path("pricePerKg").asInt());
+            assertEquals(.5,after.path("rows").get(0).path("minChargeWeightKg").asDouble());
+            assertEquals(2,after.path("correctionHistory").get(0).path("pricingRuleCorrections").size());
+            var again=review.patch(id,revalidation(after),"SF-REVIEWER");assertEquals(0,again.path("errors").asInt());
+            assertFalse(again.path("correctionHistory").get(1).has("pricingRuleCorrections"));
+            verify(storage,times(1)).openRaw("sf-original-test");
+            var stale=revalidation(before);assertThrows(AppException.class,()->review.patch(id,stale,"STALE"));
+            var batch=jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",UUID.fromString(after.path("batchId").asText())).query(String.class).single();
+            assertTrue(batch.contains("\"errors\": 0"),batch);assertFalse(batch.contains("顺丰折扣不是"),batch);
+        }
     }
 
     @Test void revalidationStillBlocksRealOverlapsAndUnparsedSourceRows() {

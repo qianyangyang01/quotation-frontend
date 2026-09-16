@@ -59,4 +59,4 @@ providers:
       exact: ["地区"]
   顺丰:
     settlementRate:
-      exact: ["结算运费", "SF折后", "折后运费"]
+      exact: ["结算运费", "SF折后", "折后运费", "折扣后运费"]

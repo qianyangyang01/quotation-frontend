@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.15-minimum-v1";
+    public static final String VERSION="company-channels-2026.09.16-sf-no-discount-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
@@ -984,10 +984,15 @@ public class LogisticsSourceParser {
             issue(channel,r+1,"pricePerKg","顺丰折扣/折后运费列重复，需明确使用哪一列","error");
             pending(out,"顺丰计价列存在歧义");return;
         }
-        int priceColumn=columns.settlement>=0?columns.settlement:columns.rate;
+        // A present column is not necessarily populated for every country. Blank discount
+        // AND settlement cells explicitly mean no discount; formula/error cells do not.
+        boolean settlementPresent=!sfPriceCellBlank(source.cell(r,columns.settlement));
+        boolean discountPresent=!sfPriceCellBlank(source.cell(r,columns.discount));
+        out.put("sourceDiscountEmpty",!discountPresent).put("sourceSettlementEmpty",!settlementPresent);
+        int priceColumn=settlementPresent?columns.settlement:columns.rate;
         numeric(out,"pricePerKg",source,r,priceColumn,channel,false);
-        out.put("sourcePricingBasis",columns.settlement>=0?"settlement":columns.discount>=0?"original-times-discount":"original");
-        if(columns.settlement<0 && columns.discount>=0) {
+        out.put("sourcePricingBasis",settlementPresent?"settlement":discountPresent?"original-times-discount":"original");
+        if(!settlementPresent && discountPresent) {
             try {
                 var cell=source.cell(r,columns.discount);
                 if(cell!=null&&cell.getCellType()==CellType.FORMULA && (cell.getCellFormula().contains("[")||cell.getCachedFormulaResultType()!=CellType.NUMERIC))throw new NumberFormatException();
@@ -1009,6 +1014,10 @@ public class LogisticsSourceParser {
             out.remove("pricePerKg");pending(out,"顺丰有效运费缺失或无效，禁止回退原价或按零计价");
             issue(channel,r+1,"pricePerKg","顺丰有效运费必须大于0","error");
         }
+    }
+    private static boolean sfPriceCellBlank(Cell cell) {
+        return cell==null || cell.getCellType()==CellType.BLANK
+                || (cell.getCellType()==CellType.STRING && clean(cell.getStringCellValue()).isBlank());
     }
     private void numeric(ObjectNode out,String key,Source source,int r,int c,ObjectNode channel,boolean blankZero) {
         source.priceCellsParsed++;

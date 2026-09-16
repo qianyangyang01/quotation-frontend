@@ -15,7 +15,8 @@ public class LogisticsDraftReviewService {
     private static final Set<String> EDITABLE=Set.of("weightFromKg","weightToKg","weightFromInclusive","weightToInclusive",
             "pricePerKg","registrationFee","firstWeightKg","firstWeightPrice","nextWeightKg","nextWeightPrice","intervalPrice","surcharge");
     private final JdbcClient jdbc;private final ObjectMapper mapper;private final LogisticsWorkbookService workbooks;private final LogisticsDatasetGuard guard;
-    public LogisticsDraftReviewService(JdbcClient jdbc,ObjectMapper mapper,LogisticsWorkbookService workbooks,LogisticsDatasetGuard guard){this.jdbc=jdbc;this.mapper=mapper;this.workbooks=workbooks;this.guard=guard;}
+    private final LogisticsSfDraftRepair sfRepair;
+    public LogisticsDraftReviewService(JdbcClient jdbc,ObjectMapper mapper,LogisticsWorkbookService workbooks,LogisticsDatasetGuard guard,LogisticsSfDraftRepair sfRepair){this.jdbc=jdbc;this.mapper=mapper;this.workbooks=workbooks;this.guard=guard;this.sfRepair=sfRepair;}
 
     @Transactional public ObjectNode patch(UUID versionId,ObjectNode input,String actor){
         var stored=load(versionId,true);guard.channel(UUID.fromString(stored.path("channelId").asText()));
@@ -52,6 +53,7 @@ public class LogisticsDraftReviewService {
             ((ObjectNode)etaAudit.get(etaAudit.size()-1)).set("after",mapper.createObjectNode().put("etaMinDays",min.asInt()).put("etaMaxDays",max.asInt()).put("etaSource","manual-review"));
         }
         clearConfirmedShandianhouBoundaries(payload);
+        var pricingRuleCorrections=sfRepair.repair(payload);
         var preserved=mapper.createArrayNode();for(var issue:payload.path("issues"))if(!isEditableIssue(issue,rows))preserved.add(issue.deepCopy());
         var generated=workbooks.validateEditableRows(rows);preserved.addAll(generated);payload.set("issues",preserved);
         payload.put("errors",count(preserved,"error"));
@@ -61,6 +63,7 @@ public class LogisticsDraftReviewService {
         var comparison=workbooks.compare(rows,previous);payload.set("diffRows",comparison.path("diffRows"));payload.set("summary",comparison.path("summary"));
         var editedAt=java.time.Instant.now().toString();payload.put("lastEditedBy",actor).put("lastEditedAt",editedAt);
         var history=payload.withArray("correctionHistory");var event=history.addObject().put("editedBy",actor).put("editedAt",editedAt).put("kind",changeCount==0?"revalidation":"correction");event.set("changes",audit);event.set("etaChanges",etaAudit);
+        if(!pricingRuleCorrections.isEmpty())event.set("pricingRuleCorrections",pricingRuleCorrections);
         var updated=jdbc.sql("update logistics_version set payload=cast(:payload as jsonb) where id=:id and status='draft' and rows_fingerprint=:fingerprint")
                 .param("payload",payload.toString()).param("id",versionId).param("fingerprint",fingerprint).update();
         if(updated!=1)throw AppException.conflict("价格已被其他人修改，请刷新后重试");var result=load(versionId,false);syncBatch(result);return result;
