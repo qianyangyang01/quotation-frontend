@@ -48,6 +48,14 @@ let eligibleRows = new WeakMap<LogisticsRule, Map<string, { rows: LogisticsPrice
 const regionIndex = new Map<string, string[]>()
 const ruleNameIndex = new Map<string, LogisticsRule>()
 const ruleIdIndex = new Map<number, LogisticsRule>()
+const countryCodeIndex = new Map<string, string>()
+
+/** Publication catalog supplies code/name pairs; the alias table alone only
+ * contains exceptional historical names, not every ISO country. */
+export function logisticsCountryIdentity(country: string) {
+  const identity = countryIdentity(country)
+  return countryCodeIndex.get(identity) || identity
+}
 
 export function logisticsRuleByName(name: string) { return ruleNameIndex.get(name) }
 export function logisticsRuleById(id: number) { return ruleIdIndex.get(id) }
@@ -87,30 +95,47 @@ function rebuildLogisticsIndexes() {
   logisticsCarriers.splice(0, logisticsCarriers.length, ...carriers)
   logisticsChannels.splice(0, logisticsChannels.length, ...channels)
   logisticsCountries.splice(0, logisticsCountries.length, ...countries)
+  countryCodeIndex.clear()
+  for (const country of countries) {
+    const identity = countryIdentity(country.code || country.name)
+    countryCodeIndex.set(countryIdentity(country.name), identity)
+    countryCodeIndex.set(identity, identity)
+  }
 }
 
-export function replaceLogisticsRules(rules: LogisticsRule[]) {
+// changedCountries may only be supplied for additions within one verified
+// publication. All other callers retain full-reset semantics.
+export function replaceLogisticsRules(rules: LogisticsRule[], changedCountries?: string[]) {
   logisticsRules.splice(0, logisticsRules.length, ...rules)
-  indexedRules = new WeakMap()
-  eligibleRows = new WeakMap()
-  regionIndex.clear()
+  rebuildLogisticsIndexes()
+  if (changedCountries) {
+    const changed = new Set(changedCountries.map(logisticsCountryIdentity))
+    for (const country of regionIndex.keys()) {
+      if (changed.has(logisticsCountryIdentity(country))) regionIndex.delete(country)
+    }
+  } else {
+    indexedRules = new WeakMap()
+    eligibleRows = new WeakMap()
+    regionIndex.clear()
+  }
   ruleNameIndex.clear()
   ruleIdIndex.clear()
   for (const rule of rules) {
-    const rowsByCountry = new Map<string, LogisticsPriceRow[]>()
-    for (const row of rule.prices) {
-      for (const key of new Set([row.areaName.toLowerCase(), row.countryCode.toLowerCase(), countryIdentity(row.areaName).toLowerCase()])) {
-        const bucket = rowsByCountry.get(key) || []
-        bucket.push(row)
-        rowsByCountry.set(key, bucket)
+    if (!indexedRules.has(rule)) {
+      const rowsByCountry = new Map<string, LogisticsPriceRow[]>()
+      for (const row of rule.prices) {
+        for (const key of new Set([row.areaName.toLowerCase(), row.countryCode.toLowerCase(), countryIdentity(row.areaName).toLowerCase()])) {
+          const bucket = rowsByCountry.get(key) || []
+          bucket.push(row)
+          rowsByCountry.set(key, bucket)
+        }
       }
+      indexedRules.set(rule, rowsByCountry)
+      eligibleRows.set(rule, new Map())
     }
-    indexedRules.set(rule, rowsByCountry)
-    eligibleRows.set(rule, new Map())
     if (!ruleNameIndex.has(rule.name)) ruleNameIndex.set(rule.name, rule)
     ruleIdIndex.set(rule.id, rule)
   }
-  rebuildLogisticsIndexes()
 }
 
 export function replaceLogisticsCountryCatalog(countries: Array<{ code: string; name: string }>) {

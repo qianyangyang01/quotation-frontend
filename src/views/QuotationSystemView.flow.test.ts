@@ -21,9 +21,12 @@ describe('quotation logistics query flow contract', () => {
     expect(calculation).toContain('financeAllowedChannelKeys(')
     expect(calculation).not.toContain('financeAllowsLogisticsChannel(')
   })
-  it('rebuilds finance channel availability after loading additional country prices', () => {
+  it('invalidates only additional countries within the same verified snapshot', () => {
     const body = functionBody('ensureCountries', 'cancelQuoteLogistics')
-    expect(body.indexOf('financePolicies.value = loadFinanceChannelPolicies()')).toBeGreaterThan(body.indexOf('replaceLogisticsRules(result.rules)'))
+    expect(body).toContain('replaceLogisticsRules(result.rules, result.replacedSnapshot ? undefined : result.changedCountries)')
+    expect(body).toContain('if (result.replacedSnapshot)')
+    expect(body).toContain('countryRulesGeneration.invalidate(result.changedCountries)')
+    expect(functionBody('activeRegionalQuoteRows', 'quotationCountries')).toContain('return allRegionalQuoteRows(country)')
   })
   it('shows a single product before starting logistics in the background', () => {
     const body = functionBody('queryProduct', 'queryBundleItem')

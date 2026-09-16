@@ -27,6 +27,7 @@ describe('incremental country logistics', () => {
     expect(result.rules[0]!.prices.map(row => row.countryCode)).toEqual(['US', 'GB', 'NL'])
     expect(result.rules[0]).toMatchObject({ areaCount: 3, priceRowCount: 3, phoneRequired: true })
     expect(snapshot.rules[0]!.prices).toHaveLength(2)
+    expect(result).toMatchObject({ changedCountries: ['荷兰'], replacedSnapshot: false })
   })
 
   it('replaces the complete snapshot when a publication revision changes', async () => {
@@ -36,6 +37,7 @@ describe('incremental country logistics', () => {
     expect(rules.mock.calls[0]![0].countries).toEqual(['美国', '英国', '荷兰'])
     expect(result.rules.map(rule => rule.id)).toEqual([2])
     expect(result.revision).toBe('r2')
+    expect(result).toMatchObject({ changedCountries: ['美国', '英国', '荷兰'], replacedSnapshot: true })
   })
 
   it('treats an empty country as loaded without dropping the previous countries', async () => {
