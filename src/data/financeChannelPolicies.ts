@@ -1,3 +1,4 @@
+import { countryIdentityMatches, sameCountryIdentity } from './countryIdentity'
 import { logisticsAttributeOptions, normalizeLogisticsAttribute } from './logisticsAttributes'
 import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation, type LogisticsPriceRow } from './logistics'
 import {
@@ -204,7 +205,7 @@ export function channelsAvailableForCountry(country: string, attribute = '普货
   void attribute
   const options = logisticsRules
     .filter(rule => rule.status === '启用' && rule.prices.some(price =>
-      price.areaName === country || price.countryCode.toLowerCase() === country.toLowerCase()))
+      countryIdentityMatches(price.countryCode, price.areaName, country)))
     .flatMap(rule => rule.relations
       .filter(relation => relation.carrier && relation.channel)
       .map(relation => {
@@ -354,7 +355,7 @@ export function financeAllowsLogisticsChannel(
 ) {
   const matches = policies.filter(item => normalizeLogisticsAttribute(item.category) === normalizeLogisticsAttribute(attribute))
   const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
-  const countryRule = policy?.countryRules.find(rule => rule.country === country)
+  const countryRule = policy?.countryRules.find(rule => sameCountryIdentity(rule.country,country))
   const key = financeChannelKey(ruleId, relation)
   return (countryRule?.allowedChannels.includes(key) ?? false)
     && channelsAvailableForCountry(country, attribute).some(option => option.key === key)

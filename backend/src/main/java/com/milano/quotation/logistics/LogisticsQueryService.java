@@ -1,6 +1,7 @@
 package com.milano.quotation.logistics;
 
 import com.milano.quotation.common.AppException;
+import com.milano.quotation.common.CountryIdentity;
 import com.milano.quotation.common.PageResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -149,7 +150,7 @@ public class LogisticsQueryService {
         // Fingerprint all active published candidates, including currently unready ones.
         // Eligibility is expensive and only needs reevaluation when these inputs change.
         var companyRevision=jdbc.sql("select concat(revision,':',paused,':',enabled) from logistics_company_state where singleton=true").query(String.class).single();
-        var revision = sha256(companyRevision + dataset + "\n" + String.join("\n", revisionParts));
+        var revision = sha256("country-aliases-v1\n" + companyRevision + dataset + "\n" + String.join("\n", revisionParts));
         var publishedChannels = publishedCountCache.get(revision, () -> jdbc.sql("""
                 select count(*) from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
@@ -197,7 +198,7 @@ public class LogisticsQueryService {
                   and logistics_version_quote_ready(v.id)
                   and coalesce(item->>'areaName','')<>'' and logistics_price_row_quote_supported(item)
                 order by name, code
-                """).query((rs, rowNum) -> new PublishedCountry(rs.getString("code"), rs.getString("name"))).list();
+                """).query((rs, rowNum) -> new PublishedCountry(rs.getString("code"), CountryIdentity.name(rs.getString("code"), rs.getString("name")))).list().stream().distinct().toList();
         var attributes = jdbc.sql("""
                 select distinct coalesce(nullif(c.payload->>'logisticsAttribute',''),'普货') as attribute
                 from logistics_channel c
@@ -280,7 +281,7 @@ public class LogisticsQueryService {
                 return value;
             });
             var countryCode = rs.getString("country_code");
-            var areaName = rs.getString("area_name");
+            var areaName = CountryIdentity.name(countryCode, rs.getString("area_name"));
             var zoneName = rs.getString("zone_name");
             var zoneExclude = rs.getBoolean("zone_exclude");
             var key = countryCode + "|" + areaName + "|" + zoneName + "|" + zoneExclude;
@@ -320,7 +321,7 @@ public class LogisticsQueryService {
 
     private PublishedRules readPublishedRules(String revision, String attribute, List<String> normalizedCountries, List<String> normalizedChannels) {
         var params = new LinkedHashMap<String, Object>();
-        var countryVariants = normalizedCountries.stream()
+        var countryVariants = normalizedCountries.stream().flatMap(value -> CountryIdentity.variants(value).stream())
                 .flatMap(value -> java.util.stream.Stream.of(value, value.toLowerCase(Locale.ROOT), value.toUpperCase(Locale.ROOT)))
                 .distinct()
                 .toList();
@@ -484,6 +485,7 @@ public class LogisticsQueryService {
         QUOTE_PRICE_FIELDS.forEach(field -> {
             if (source.has(field)) result.set(field, source.path(field).deepCopy());
         });
+        result.put("areaName",CountryIdentity.name(source.path("countryCode").asText(),source.path("areaName").asText()));
         result.put("quoteReady", true);
         return result;
     }

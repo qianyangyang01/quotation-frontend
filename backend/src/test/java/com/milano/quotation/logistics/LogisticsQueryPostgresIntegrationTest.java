@@ -84,6 +84,41 @@ class LogisticsQueryPostgresIntegrationTest {
         }
     }
 
+    @Test
+    void countryAliasesLinkCatalogFinanceBillingAndSaveWithoutChangingSourceRows() throws Exception {
+        var mapper=new ObjectMapper(); var query=new LogisticsQueryService(jdbc,mapper);
+        var original=(tools.jackson.databind.node.ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
+        var policies=jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies'").query(String.class).single();
+        try {
+            var source=original.deepCopy();
+            ((tools.jackson.databind.node.ObjectNode)source.path("rows").get(0)).put("countryCode","AE").put("areaName","阿拉伯联合酋长国");
+            updateFixtureRows(source);
+            jdbc.sql("update finance_setting set payload=cast(:p as jsonb) where setting_key='channel-policies'").param("p",policies.replace("美国","阿联酋")).update();
+            var revision=query.manifestRevision().revision();
+            assertTrue(query.manifest().countries().stream().anyMatch(c->c.code().equals("AE")&&c.name().equals("阿联酋")));
+            assertTrue(query.publishedCatalog(revision).rules().getFirst().path("prices").toString().contains("阿联酋"));
+            for(var country:List.of("AE","阿联酋","阿拉伯联合酋长国")) {
+                var rules=query.publishedRules(revision,"普货",List.of(country),List.of());
+                assertEquals(1,rules.rules().size());
+                assertEquals("阿联酋",rules.rules().getFirst().path("prices").get(0).path("areaName").asText());
+                var quote=selectedQuotation(); var option=(tools.jackson.databind.node.ObjectNode)quote.path("quoteOptions").get(0);
+                option.put("country",country); ((tools.jackson.databind.node.ObjectNode)option.path("logisticsInput")).put("country",country);
+                for(var sample:option.path("logisticsSamples")) ((tools.jackson.databind.node.ObjectNode)sample.path("input")).put("country",country);
+                new LogisticsQuotationGuard(jdbc,query,mapper).validate(quote);
+                quote.put("logisticsAttribute","服装");
+                assertThrows(AppException.class,()->new LogisticsQuotationGuard(jdbc,query,mapper).validate(quote));
+            }
+            assertEquals("阿拉伯联合酋长国",mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single()).path("rows").get(0).path("areaName").asText());
+            assertTrue(com.milano.quotation.common.EuropeanUnion.contains("拉托维亚"));
+            assertFalse(com.milano.quotation.common.EuropeanUnion.contains("阿联酋"));
+            for(var row:mapper.readTree(getClass().getResourceAsStream("/country-aliases.json")))
+                for(var alias:row) assertEquals(row.get(0).asText(),com.milano.quotation.common.CountryIdentity.key(alias.asText()));
+        } finally {
+            updateFixtureRows(original);
+            jdbc.sql("update finance_setting set payload=cast(:p as jsonb) where setting_key='channel-policies'").param("p",policies).update();
+        }
+    }
+
     private tools.jackson.databind.node.ObjectNode selectedQuotation() {
         var mapper=new ObjectMapper();
         var input=mapper.createObjectNode().put("logisticsSyncScope","selected").put("logisticsAttribute","普货").put("logisticsRevision","older-library");

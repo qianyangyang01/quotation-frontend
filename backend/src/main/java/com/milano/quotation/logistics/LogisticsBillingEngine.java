@@ -1,6 +1,7 @@
 package com.milano.quotation.logistics;
 
 import com.milano.quotation.common.AppException;
+import com.milano.quotation.common.CountryIdentity;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -49,12 +50,12 @@ public class LogisticsBillingEngine {
         var weight=positive(input,"weightKg");var country=input.path("country").asText();
         if(country.isBlank())throw AppException.unprocessable("缺少报价国家");
         var countryRows=new ArrayList<JsonNode>();
-        for(var row:rows)if(row.path("countryCode").asText().equalsIgnoreCase(country)||row.path("areaName").asText().equals(country))countryRows.add(row);
+        for(var row:rows)if(CountryIdentity.matches(row.path("countryCode").asText(),row.path("areaName").asText(),country))countryRows.add(row);
         var zones=zoneOptions(countryRows);var requestedZone=input.path("zoneName").asText(input.path("quoteRegion").asText());
         if(!zones.isEmpty()&&requestedZone.isBlank())throw AppException.unprocessable("该国家存在分区价格，请明确选择分区");
         var matches=new ArrayList<ObjectNode>();int index=0;
         for(var row:rows){int current=index++;
-            if(!row.path("countryCode").asText().equalsIgnoreCase(country)&&!row.path("areaName").asText().equals(country))continue;
+            if(!CountryIdentity.matches(row.path("countryCode").asText(),row.path("areaName").asText(),country))continue;
             if(!available(row))continue;
             if(!zones.isEmpty()&&!zoneMatches(row.path("zoneName").asText(),requestedZone))continue;
             BigDecimal minimum=minimum(row),charge=weight.max(minimum),volume=BigDecimal.ZERO;

@@ -1,3 +1,4 @@
+import { countryIdentity, countryIdentityMatches } from './countryIdentity'
 import { decimal } from '@/services/quotationDecimal'
 import { normalizeLogisticsAttribute } from './logisticsAttributes'
 export interface LogisticsPriceRow {
@@ -60,7 +61,7 @@ export function logisticsRuleForChannel(name: string, channelKey = '') {
 
 function countryRowsForRule(rule: LogisticsRule, country: string) {
   const index = indexedRules.get(rule)
-  return index ? (index.get(country.toLowerCase()) || []).filter(row => countryMatches(row, country))
+  return index ? (index.get(countryIdentity(country).toLowerCase()) || []).filter(row => countryMatches(row, country))
     : rule.prices.filter(row => countryMatches(row, country))
 }
 
@@ -98,7 +99,7 @@ export function replaceLogisticsRules(rules: LogisticsRule[]) {
   for (const rule of rules) {
     const rowsByCountry = new Map<string, LogisticsPriceRow[]>()
     for (const row of rule.prices) {
-      for (const key of new Set([row.areaName.toLowerCase(), row.countryCode.toLowerCase()])) {
+      for (const key of new Set([row.areaName.toLowerCase(), row.countryCode.toLowerCase(), countryIdentity(row.areaName).toLowerCase()])) {
         const bucket = rowsByCountry.get(key) || []
         bucket.push(row)
         rowsByCountry.set(key, bucket)
@@ -182,7 +183,7 @@ export function sameQuotationRegion(saved = '', current = '') {
 }
 
 function countryMatches(price: LogisticsPriceRow, country: string) {
-  return price.areaName === country || price.countryCode.toLowerCase() === country.toLowerCase()
+  return countryIdentityMatches(price.countryCode,price.areaName,country)
 }
 function splitZones(value: string) { return String(value || '').split(/[/／、,，;；|]/).map(item => item.trim()).filter(Boolean) }
 function normalizeZone(value: string) { return String(value || '').replace(/[（）()\s]/g, '').replace(/^澳大利亚/, '').replace('一区', '1区').replace('二区', '2区').replace('三区', '3区').replace('四区', '4区') }

@@ -1,6 +1,7 @@
 package com.milano.quotation.logistics;
 
 import com.milano.quotation.common.AppException;
+import com.milano.quotation.common.CountryIdentity;
 import com.milano.quotation.common.EuropeanUnion;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -69,7 +70,7 @@ public class LogisticsQuotationGuard {
             validateSurcharge(surcharges, option);
             if (!com.milano.quotation.finance.ChannelTaxRules.validateQuote(taxes, option, taxExchange, quotation.path("customQuoteQuantity").asInt(1))) validateCountryTax(taxes, option);
             boolean countryAvailable=false;
-            for(var row:channel.path("rows"))if(row.path("areaName").asText().equals(country)||row.path("countryCode").asText().equalsIgnoreCase(country))countryAvailable=true;
+            for(var row:channel.path("rows"))if(CountryIdentity.matches(row.path("countryCode").asText(),row.path("areaName").asText(),country))countryAvailable=true;
             if(!countryAvailable||!allowed(policies,quotation.path("logisticsAttribute").asText(),country,key))throw AppException.unprocessable("渠道不在该国家及货物属性的财务允许范围内");
             if(scoped||!channel.path("legacy").asBoolean()){
                 if((!scoped&&!option.path("logisticsVersionId").asText().equals(channel.path("versionId").asText()))||!option.path("logisticsChannelId").asText().equals(channel.path("channelId").asText()))throw AppException.conflict("缺少当前渠道版本，请重新计价确认");
@@ -174,7 +175,7 @@ public class LogisticsQuotationGuard {
         for(var policy:policies)if(com.milano.quotation.common.LogisticsAttributes.normalize(policy.path("category").asText()).equals(com.milano.quotation.common.LogisticsAttributes.normalize(attribute)))matches++;
         if(matches!=1)return false;
         for(var policy:policies)if(policy.path("enabled").asBoolean()&&com.milano.quotation.common.LogisticsAttributes.normalize(policy.path("category").asText()).equals(com.milano.quotation.common.LogisticsAttributes.normalize(attribute)))
-            for(var rule:policy.path("countryRules"))if(rule.path("country").asText().equals(country))
+            for(var rule:policy.path("countryRules"))if(CountryIdentity.same(rule.path("country").asText(),country))
                 for(var allowed:rule.path("allowedChannels"))if(allowed.asText().equals(key))return true;
         return false;
     }

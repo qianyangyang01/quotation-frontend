@@ -24,9 +24,9 @@ public final class EuropeanUnion {
         } catch (IOException error) { throw new IllegalStateException("Cannot load EU member list", error); }
     }
 
-    public static boolean contains(String country) { return CODES.containsKey(country.trim().toUpperCase(Locale.ROOT)); }
+    public static boolean contains(String country) { return CODES.containsKey(CountryIdentity.key(country)); }
     public static boolean sameCountry(String left, String right) {
-        return left.trim().equalsIgnoreCase(right.trim()) || (contains(left)
-                && CODES.get(left.trim().toUpperCase(Locale.ROOT)).equals(CODES.get(right.trim().toUpperCase(Locale.ROOT))));
+        return CountryIdentity.same(left,right) || (contains(left)
+                && CODES.get(CountryIdentity.key(left)).equals(CODES.get(CountryIdentity.key(right))));
     }
 }

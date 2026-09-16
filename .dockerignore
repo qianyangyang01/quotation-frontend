@@ -6,6 +6,7 @@ node_modules
 dist
 backend
 !backend/src/main/resources/eu-member-states.json
+!backend/src/main/resources/country-aliases.json
 deploy/.env
 outputs
 *.log
