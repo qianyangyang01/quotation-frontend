@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ref } from 'vue'
-import { clonePriceRows } from './logisticsRebuild'
+import { buildPriceCorrections, clonePriceRows } from './logisticsRebuild'
 import { calculateLogisticsFee, findPriceRow, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
 import { aggregateChangeSummary, batchComparisonSummary, buildEtaCorrections, changeImpact, completedBatchStage, diffKinds, formatTransferBytes, logisticsAdjustmentStatus, logisticsUploadError, rangeImpact, weightLabel, type Batch, type Diff, type Price } from './logisticsRebuild'
@@ -11,6 +11,22 @@ const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): Log
 })
 const row = { areaName: '法国', countryCode: 'FR', registrationFee: 2 }
 describe('rebuild pricing safety', () => {
+  it('does not invent price or ETA edits when two records share a business key or source row', () => {
+    const snapshot: Price[] = [
+      { ...row, rowKey: 'shared', sourceSheet: '敏货', sourceRow: 17, weightFromKg: .001, weightToKg: .4, pricePerKg: 54.32, registrationFee: 19, routeKey: 'fr', etaMinDays: 8, etaMaxDays: 10 },
+      { ...row, rowKey: 'shared', sourceSheet: '敏货', sourceRow: 17, weightFromKg: .001, weightToKg: .4, pricePerKg: 55.29, registrationFee: 20, routeKey: 'fr', etaMinDays: 9, etaMaxDays: 12 },
+    ]
+    const edited = clonePriceRows(snapshot)
+    expect(buildPriceCorrections(edited, snapshot)).toEqual([])
+    expect(buildEtaCorrections(edited, snapshot)).toEqual([])
+    edited[0]!.pricePerKg = 60
+    edited[1]!.registrationFee = 21
+    expect(buildPriceCorrections(edited, snapshot)).toEqual([
+      { rowKey: 'shared', rowIndex: 0, fields: { pricePerKg: 60 } },
+      { rowKey: 'shared', rowIndex: 1, fields: { registrationFee: 21 } },
+    ])
+    expect(snapshot.map(price => [price.pricePerKg, price.registrationFee])).toEqual([[54.32, 19], [55.29, 20]])
+  })
   it('can snapshot reactive prices, edit across rows and cancel without changing the snapshot', () => {
     const prices = ref<Price[]>([
       { ...row, rowKey: 'fr-18', weightFromKg: 0.201, weightToKg: 4, pricePerKg: 97, registrationFee: 20, sourceRow: 18 },

@@ -27,10 +27,20 @@ public class LogisticsDraftReviewService {
         if(changeCount>5000||(changeCount<1&&!input.path("revalidate").asBoolean(false)))throw AppException.unprocessable("请选择1至5000条价格或时效修正，或明确重新校验");
         if(!changes.isMissingNode()&&!changes.isArray())throw AppException.unprocessable("价格修正格式不正确");
         if(!etaChanges.isMissingNode()&&!etaChanges.isArray())throw AppException.unprocessable("时效修正格式不正确");
-        var payload=(ObjectNode)stored.deepCopy();payload.remove("fingerprint");LogisticsReadiness.apply(payload,mapper);var rows=(ArrayNode)payload.withArray("rows");var byKey=new LinkedHashMap<String,ObjectNode>();
-        rows.forEach(row->byKey.put(row.path("rowKey").asText(),(ObjectNode)row));var audit=mapper.createArrayNode();
+        var payload=(ObjectNode)stored.deepCopy();payload.remove("fingerprint");LogisticsReadiness.apply(payload,mapper);var rows=(ArrayNode)payload.withArray("rows");var byKey=new LinkedHashMap<String,List<ObjectNode>>();
+        rows.forEach(row->byKey.computeIfAbsent(row.path("rowKey").asText(),ignored->new ArrayList<>()).add((ObjectNode)row));var audit=mapper.createArrayNode();
         for(var change:changes){
-            var row=byKey.get(change.path("rowKey").asText());if(row==null)throw AppException.conflict("待修改价格行已变化，请刷新后重试");
+            ObjectNode row;
+            if(change.has("rowIndex")) {
+                var index=change.path("rowIndex");
+                if(!index.isIntegralNumber()||!index.canConvertToInt()||index.asInt()<0||index.asInt()>=rows.size())throw AppException.conflict("待修改价格行已变化，请刷新后重试");
+                row=(ObjectNode)rows.get(index.asInt());
+                if(!row.path("rowKey").asText().equals(change.path("rowKey").asText()))throw AppException.conflict("待修改价格行已变化，请刷新后重试");
+            } else {
+                var matches=byKey.get(change.path("rowKey").asText());
+                if(matches==null||matches.size()!=1)throw AppException.conflict("待修改价格行无法唯一定位，请刷新后重试");
+                row=matches.getFirst();
+            }
             var fields=change.path("fields");if(!fields.isObject()||fields.isEmpty())throw AppException.unprocessable("修正字段不能为空");
             var before=mapper.createObjectNode();var after=mapper.createObjectNode();
             var names=new ArrayList<String>();fields.propertyNames().forEach(names::add);

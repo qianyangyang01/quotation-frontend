@@ -37,15 +37,26 @@ export type BillingAcceptance = { versionId: string; fingerprint: string; engine
 export type BatchPublishSelection = { channelId: string; versionId: string; removalConfirmed: boolean; reviewConfirmed: boolean }
 export type BatchPublishResult = { providerId: string; count: number; published: Array<{ id: string; channelId: string; versionNumber: number; status: string; quoteReady: boolean }> }
 export type ReadyPublishResult = { batchId: string; publishedCount: number; skippedCount: number; failedCount: number; published: Array<{ versionId: string; channelId: string; providerName: string; channelName: string; message: string }>; skipped: Array<{ versionId: string; channelName: string; reason: string }>; failed: Array<{ versionId: string; channelName: string; reason: string }> }
-export type RowCorrection = { rowKey: string; fields: Partial<Pick<Price, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive' | 'pricePerKg' | 'registrationFee' | 'firstWeightKg' | 'firstWeightPrice' | 'nextWeightKg' | 'nextWeightPrice' | 'intervalPrice'>> }
+export type RowCorrection = { rowKey: string; rowIndex?: number; fields: Partial<Pick<Price, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive' | 'pricePerKg' | 'registrationFee' | 'firstWeightKg' | 'firstWeightPrice' | 'nextWeightKg' | 'nextWeightPrice' | 'intervalPrice'>> }
 export type EtaCorrection = { routeKey: string; etaMinDays: number; etaMaxDays: number }
 export type LogisticsAdjustmentStatus = 'published' | 'pending'
 
+export function buildPriceCorrections(rows: Price[], snapshot: Price[]): RowCorrection[] {
+  const keys = ['weightFromKg', 'weightToKg', 'weightFromInclusive', 'weightToInclusive', 'pricePerKg', 'registrationFee'] as const
+  if (rows.length !== snapshot.length) throw new Error('价格行已变化，请刷新后重试')
+  return rows.flatMap((row, rowIndex) => {
+    const before = snapshot[rowIndex]
+    if (!before || !row.rowKey || row.rowKey !== before.rowKey) throw new Error('价格行已变化，请刷新后重试')
+    const fields: RowCorrection['fields'] = {}
+    for (const key of keys) if (row[key] !== before[key] && (typeof row[key] === 'number' || typeof row[key] === 'boolean')) Object.assign(fields, { [key]: row[key] })
+    return Object.keys(fields).length ? [{ rowKey: row.rowKey, rowIndex, fields }] : []
+  })
+}
+
 export function buildEtaCorrections(rows: Price[], snapshot: Price[]): EtaCorrection[] {
-  const original = new Map(snapshot.map(row => [row.rowKey, row]))
   const changes = new Map<string, EtaCorrection>()
-  for (const row of rows) {
-    const before = original.get(row.rowKey)
+  for (const [index, row] of rows.entries()) {
+    const before = snapshot[index]
     if (!before || !row.routeKey || (row.etaMinDays === before.etaMinDays && row.etaMaxDays === before.etaMaxDays)) continue
     if (!Number.isInteger(row.etaMinDays) || !Number.isInteger(row.etaMaxDays) || Number(row.etaMinDays) <= 0 || Number(row.etaMaxDays) < Number(row.etaMinDays) || Number(row.etaMaxDays) > 365) throw new Error('时效必须填写有效的最早和最晚天数')
     changes.set(row.routeKey, { routeKey: row.routeKey, etaMinDays: Number(row.etaMinDays), etaMaxDays: Number(row.etaMaxDays) })

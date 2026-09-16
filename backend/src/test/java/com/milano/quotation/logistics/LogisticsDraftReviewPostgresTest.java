@@ -105,6 +105,32 @@ class LogisticsDraftReviewPostgresTest {
         assertFalse(after.path("pricingReady").asBoolean());
     }
 
+    @Test void duplicateBusinessKeysRemainSeparateAndCorrectionsRequireAnExactRecord() {
+        var id=legacyDraft(true,false);
+        var payload=(ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",id).query(String.class).single());
+        var first=(ObjectNode)payload.path("rows").get(0);var second=(ObjectNode)payload.path("rows").get(1);
+        first.put("rowKey","shared").put("weightToKg",.4).put("pricePerKg",54.32).put("registrationFee",19);
+        second.put("rowKey","shared").put("weightFromKg",.001).put("pricePerKg",55.29).put("registrationFee",20);
+        jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where id=:id").param("p",payload.toString()).param("id",id).update();
+        var before=review.load(id,false);
+        var ambiguous=revalidation(before);ambiguous.withArray("changes").addObject().put("rowKey","shared").putObject("fields").put("pricePerKg",60);
+        assertThrows(AppException.class,()->review.patch(id,ambiguous,"AMBIGUOUS"));
+        var exact=revalidation(before);exact.withArray("changes").addObject().put("rowKey","shared").put("rowIndex",0).putObject("fields").put("pricePerKg",60);
+        var after=review.patch(id,exact,"EXACT-RECORD");
+        assertEquals(60,after.path("rows").get(0).path("pricePerKg").asDouble());
+        assertEquals(55.29,after.path("rows").get(1).path("pricePerKg").asDouble());assertEquals(20,after.path("rows").get(1).path("registrationFee").asInt());
+        assertEquals(3,after.path("rows").size());assertEquals(1,after.path("errors").asInt());assertFalse(after.path("pricingReady").asBoolean());
+        var again=review.patch(id,revalidation(after),"NO-EDIT");
+        assertEquals(after.path("rows"),again.path("rows"));
+        assertTrue(again.path("correctionHistory").get(1).path("changes").isEmpty());
+        var invalid=revalidation(again);invalid.withArray("changes").addObject().put("rowKey","wrong").put("rowIndex",0).putObject("fields").put("pricePerKg",1);
+        assertThrows(AppException.class,()->review.patch(id,invalid,"WRONG-RECORD"));
+        invalid.withArray("changes").removeAll();invalid.withArray("changes").addObject().put("rowKey",again.path("rows").get(1).path("rowKey").asText()).put("rowIndex",1).putObject("fields").put("registrationFee",21);
+        var secondEdited=review.patch(id,invalid,"EXACT-SECOND");
+        assertEquals(19,secondEdited.path("rows").get(0).path("registrationFee").asInt());assertEquals(21,secondEdited.path("rows").get(1).path("registrationFee").asInt());
+        assertThrows(AppException.class,()->review.patch(id,invalid,"STALE"));
+    }
+
     private static ObjectNode revalidation(ObjectNode version){var input=mapper.createObjectNode().put("fingerprint",version.path("fingerprint").asText()).put("revalidate",true);input.putArray("changes");input.putArray("etaChanges");return input;}
     @Test void priceCorrectionAndRevalidationClearStoredBlockersButKeepRealOverlap() {
         for(int originalPrice:new int[]{0,33}) {
