@@ -20,6 +20,26 @@ class LogisticsSourceParserTest {
     final ObjectMapper mapper=new ObjectMapper();
     final LogisticsWorkbookService standard=new LogisticsWorkbookService(mapper);
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,standard);
+    @Test void readsTongyouMatrixFiftyGramFooter() throws Exception {
+        try (var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("美国专线小包");
+            row(sheet,0,"重量","美国专线特敏感B","");
+            row(sheet,1,"重量(KG)","运费(RMB/KG)","处理费(RMB/票)");
+            row(sheet,2,"0-0.1",91,24);
+            row(sheet,3,"0.101-0.2",91,24);
+            row(sheet,15,"计费标准","单票计费起重50克；");
+            var result=parser.parse(bytes(book),"通邮价格.xlsx");
+            var channel=result.path("channels").get(0);
+            assertEquals("美国专线特敏感B",channel.path("channelName").asText());
+            assertEquals(2,channel.path("rows").size());
+            for (var price:channel.path("rows")) {
+                assertEquals(.05,price.path("minChargeWeightKg").asDouble());
+                assertEquals("B16",price.path("sourceMinimumWeightCell").asText());
+                assertEquals(91,price.path("pricePerKg").asDouble());
+                assertEquals(24,price.path("registrationFee").asDouble());
+            }
+        }
+    }
     @Test void preservesYanwenMinimumWeightAndBillsSmallParcelsAtThirtyGrams()throws Exception {
         try(var book=new XSSFWorkbook()) {
             var sheet=book.createSheet("燕文化妆品专线");
