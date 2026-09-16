@@ -12,6 +12,7 @@ import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, r
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { currentAuthUser } from '@/data/authStore'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
+import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountryLoader'
 import { financeSettingsAreHydrated, hydrateFinanceSettings } from '@/services/financeSettings'
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
@@ -41,6 +42,7 @@ import {
   countriesAvailableForCategory,
   FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT,
   financeAllowsLogisticsChannel,
+  financeAllowedChannelKeys,
   financeChannelKey,
   financeCountryOptionsForCategory,
   loadFinanceExchangeRate,
@@ -520,14 +522,15 @@ function ensureCountries(countries: string[]): Promise<boolean> {
     if (!['ready', 'empty'].includes(logisticsLoadState.value)) return false
     if (countries.every(country => loadedQuoteCountries.value.includes(country))) return true
     countryLoadError.value = ''
-    const query = [...new Set([...loadedQuoteCountries.value, ...requestedQuoteCountries])]
     try {
-      const result = await loadPublishedLogisticsRules({ attribute: products.value[0].logisticsAttribute, countries: query }, { apply: false, signal: countryController.signal })
+      const result = await loadAdditionalCountryRules({ attribute: products.value[0].logisticsAttribute,
+        revision: logisticsRevision.value, countries: [...loadedQuoteCountries.value], rules: [...logisticsRules] },
+      [...requestedQuoteCountries], countryController.signal)
       if (generation !== countryGeneration) return false
       if (!result.verified) throw new Error('无法确认最新物流版本，请重试')
       replaceLogisticsRules(result.rules)
       financePolicies.value = loadFinanceChannelPolicies()
-      loadedQuoteCountries.value = query
+      loadedQuoteCountries.value = result.countries
       logisticsRevision.value = result.revision
       logisticsRulesGeneration.value += 1
       logisticsLoadState.value = result.rules.length ? 'ready' : 'empty'
@@ -1154,8 +1157,9 @@ function cancelLeave() {
   if (draftStatus.value === 'conflict') showDraftConflictDialog.value = true
 }
 function matchedLogistics(p: Product, country = p.country, region = quoteRegionForCountry(country)) {
+  const allowed = financeAllowedChannelKeys(financePolicies.value, p.logisticsAttribute, country)
   return logisticsRules.flatMap(rule => {
-    const relations = rule.relations.filter(relation => financeAllowsLogisticsChannel(financePolicies.value, p.logisticsAttribute, country, rule.id, relation))
+    const relations = rule.relations.filter(relation => allowed.has(financeChannelKey(rule.id, relation)))
     if (!relations.length || rule.status !== '启用') return []
     const result = calculateLogisticsFee(
       rule,
@@ -1318,12 +1322,13 @@ function quotationCountries(p: Product): QuotationCountrySummary[] {
     const common = option?.enabled && option.stage === 'common'
     // 国家选择器只需要显示可用渠道数量，不应为全球每个国家预先计算四档完整报价。
     // 用户真正选择/打开某个国家时，再由矩阵按需调用 excelQuoteRows。
-    const channelCount = countryChannelCount(name)
+    const channelsLoaded = loadedQuoteCountries.value.includes(name)
+    const channelCount = channelsLoaded ? countryChannelCount(name) : 0
     return {
       name,
       code: String(country.code || logisticsCountries.find(item => item.name === name)?.code || '').toUpperCase(),
       channelCount,
-      channelsLoaded: loadedQuoteCountries.value.includes(name),
+      channelsLoaded,
       lowestQuote: null,
       grouped: true,
       stage: common ? 'common' as const : 'rare' as const,

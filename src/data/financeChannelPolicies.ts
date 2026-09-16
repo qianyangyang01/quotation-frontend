@@ -360,3 +360,14 @@ export function financeAllowsLogisticsChannel(
   return (countryRule?.allowedChannels.includes(key) ?? false)
     && channelsAvailableForCountry(country, attribute).some(option => option.key === key)
 }
+
+/** One availability scan for a whole country's calculation, not one scan per channel. */
+export function financeAllowedChannelKeys(policies: FinanceChannelPolicy[], attribute: string, country: string) {
+  const normalizedAttribute = normalizeLogisticsAttribute(attribute)
+  const matches = policies.filter(item => normalizeLogisticsAttribute(item.category) === normalizedAttribute)
+  const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
+  const rule = policy?.countryRules.find(item => sameCountryIdentity(item.country, country))
+  if (!rule?.allowedChannels.length) return new Set<string>()
+  const allowed = new Set(rule.allowedChannels)
+  return new Set(channelsAvailableForCountry(country, attribute).map(option => option.key).filter(key => allowed.has(key)))
+}

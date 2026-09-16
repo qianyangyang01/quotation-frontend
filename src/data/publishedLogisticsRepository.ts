@@ -213,6 +213,7 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: {
     .then(response => {
       options.signal?.throwIfAborted()
       if (response.status === 304) throw new Error('物流规则缓存不存在，请重新加载')
+      if (response.data.revision !== manifest.revision) throw new Error('物流版本已变化，请重新加载')
       const value: StoredRules = { key, revision: response.data.revision, rules: response.data.rules, storedAt: Date.now() }
       rulesMemory.set(key, value)
       void writeStore(RULE_STORE, value)

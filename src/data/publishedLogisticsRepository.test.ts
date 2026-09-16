@@ -84,6 +84,15 @@ describe('published logistics version cache', () => {
     expect(result.verified).toBe(false)
   })
 
+  it('rejects a rules payload from a different revision before caching or applying it', async () => {
+    conditionalGet.mockResolvedValue({ status: 200, data: { revision: 'changed', rules: [rule] }, etag: 'rules' })
+    const repository = await import('./publishedLogisticsRepository')
+    const logistics = await import('./logistics')
+    await expect(repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] },
+      { manifestResult: { manifest: manifest('expected'), verified: true } })).rejects.toThrow('物流版本已变化')
+    expect(logistics.logisticsRules).toHaveLength(0)
+  })
+
   it('queries only common and currently selected quote countries', async () => {
     const repository = await import('./publishedLogisticsRepository')
     const rareCountries = Array.from({ length: 140 }, (_, index) => ({ country: `国家${index}`, enabled: true, stage: 'rare' }))

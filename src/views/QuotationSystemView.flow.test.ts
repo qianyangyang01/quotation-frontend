@@ -12,6 +12,15 @@ function functionBody(name: string, nextName: string) {
 }
 
 describe('quotation logistics query flow contract', () => {
+  it('loads only missing countries and does not calculate unloaded country summaries', () => {
+    const body = functionBody('ensureCountries', 'cancelQuoteLogistics')
+    expect(body).toContain('loadAdditionalCountryRules(')
+    expect(body).toContain('loadedQuoteCountries.value = result.countries')
+    expect(source).toContain('const channelCount = channelsLoaded ? countryChannelCount(name) : 0')
+    const calculation = functionBody('matchedLogistics', 'quantityCostBreakdown')
+    expect(calculation).toContain('financeAllowedChannelKeys(')
+    expect(calculation).not.toContain('financeAllowsLogisticsChannel(')
+  })
   it('rebuilds finance channel availability after loading additional country prices', () => {
     const body = functionBody('ensureCountries', 'cancelQuoteLogistics')
     expect(body.indexOf('financePolicies.value = loadFinanceChannelPolicies()')).toBeGreaterThan(body.indexOf('replaceLogisticsRules(result.rules)'))
