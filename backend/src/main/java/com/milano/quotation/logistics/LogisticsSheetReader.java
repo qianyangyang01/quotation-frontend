@@ -23,6 +23,7 @@ final class LogisticsSheetReader implements AutoCloseable {
     private int index;
     private final Map<String,Boolean> hidden = new HashMap<>();
     private final Predicate<String> skip;
+    private final boolean rejectFormulaCells;
     private static XMLInputFactory xml() {
         var factory=XMLInputFactory.newFactory();
         factory.setProperty(XMLInputFactory.SUPPORT_DTD,false);
@@ -30,7 +31,10 @@ final class LogisticsSheetReader implements AutoCloseable {
         return factory;
     }
     LogisticsSheetReader(byte[] bytes,String filename,Predicate<String> skip)throws Exception {
-        this.skip=skip;
+        this(bytes,filename,skip,false);
+    }
+    LogisticsSheetReader(byte[] bytes,String filename,Predicate<String> skip,boolean rejectFormulaCells)throws Exception {
+        this.skip=skip;this.rejectFormulaCells=rejectFormulaCells;
         try {
             if(!filename.toLowerCase(Locale.ROOT).endsWith(".xlsx")){legacy=WorkbookFactory.create(new ByteArrayInputStream(bytes));if(legacy.getNumberOfSheets()>300)throw new IOException("单个文件不能超过300张工作表");return;}
             path=Files.createTempFile("logistics-sheet-",".xlsx");Files.write(path,bytes);
@@ -75,7 +79,7 @@ final class LogisticsSheetReader implements AutoCloseable {
                     if(!formula&&value.isBlank())continue;
                     if(++cells>250_000)throw new IOException("工作表有效单元格超过安全读取上限："+sheet.getSheetName());
                     var ref=new CellReference(address);var row=sheet.getRow(ref.getRow());if(row==null)row=sheet.createRow(ref.getRow());var cell=row.createCell(ref.getCol());
-                    if(formula&&value.isEmpty())cell.setCellErrorValue(FormulaError.NA.getCode());
+                    if(formula&&(rejectFormulaCells||value.isEmpty()))cell.setCellErrorValue(FormulaError.NA.getCode());
                     else switch(type) {
                         case "s" -> cell.setCellValue(strings.getItemAt(Integer.parseInt(value)).getString());
                         case "inlineStr","str","d" -> cell.setCellValue(value);

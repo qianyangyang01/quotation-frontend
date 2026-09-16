@@ -45,6 +45,19 @@ class LogisticsSfDraftRepairTest {
         }
     }
 
+    @Test void readsOnlyRelevantSheetsAndPreservesFormulaBlocks()throws Exception {
+        for(boolean formula:new boolean[]{false,true})try(var book=workbook();var output=new java.io.ByteArrayOutputStream()) {
+            var payload=draft();
+            var reference=book.createSheet("邮编参考");
+            reference.createRow(0).createCell(0).setCellValue("unrelated source evidence");
+            if(formula)for(int row:new int[]{20,21})book.getSheetAt(0).getRow(row).getCell(7).setCellFormula("\"\"");
+            book.write(output);
+            var audit=repair.repair(payload,output.toByteArray(),"source.xlsx");
+            assertEquals(formula?0:2,audit.size());
+            assertEquals(formula?6:0,payload.path("issues").size());
+        }
+    }
+
     static XSSFWorkbook workbook() {
         var book=new XSSFWorkbook();var s=book.createSheet("服装专线");var header=s.createRow(2);
         header.createCell(6).setCellValue("运费/kg");header.createCell(7).setCellValue("折扣率");header.createCell(8).setCellValue("折扣后运费");

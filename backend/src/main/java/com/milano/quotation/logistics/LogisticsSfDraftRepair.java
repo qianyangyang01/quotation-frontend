@@ -46,10 +46,26 @@ public class LogisticsSfDraftRepair {
         var file=files.get(index);
         if(file.path("lifecycleStatus").asText().equals("deleted")||(!file.path("deletedAt").isNull()&&!file.path("deletedAt").asText().isBlank())||file.path("objectKey").asText().isBlank())
             throw AppException.unprocessable("顺丰原表已清理，无法自动确认空折扣；请核对原表后重新导入");
-        try(var input=storage.openRaw(file.path("objectKey").asText());var book=WorkbookFactory.create(input)) {
-            return repair(payload,book);
+        try(var input=storage.openRaw(file.path("objectKey").asText())) {
+            return repair(payload,input.readAllBytes(),file.path("originalName").asText(file.path("name").asText("source.xlsx")));
         } catch(AppException e){throw e;}
         catch(Exception e){throw AppException.unprocessable("无法读取顺丰原表核对空折扣，请稍后重试；原有阻断问题已保留");}
+    }
+
+    ArrayNode repair(ObjectNode payload,byte[] bytes,String filename)throws Exception {
+        var audit=mapper.createArrayNode();
+        var names=new HashSet<String>();
+        for(var row:payload.path("rows"))if(candidate(payload,row))names.add(row.path("sourceSheet").asText());
+        if(names.isEmpty())return audit;
+        // Reuse the bounded sheet reader: source workbooks contain very large reference
+        // sheets. Formula cells must remain nonblank evidence even with empty caches.
+        try(var reader=new LogisticsSheetReader(bytes,filename,name->!names.contains(name),true)) {
+            while(reader.hasNext()) {
+                var sheet=reader.next();
+                if(names.contains(sheet.getSheetName()))audit.addAll(repair(payload,sheet.getWorkbook()));
+            }
+        }
+        return audit;
     }
 
     ArrayNode repair(ObjectNode payload,Workbook book) {
