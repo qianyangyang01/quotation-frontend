@@ -62,6 +62,28 @@ describe('published logistics version cache', () => {
     expect(conditionalGet.mock.calls[0]?.[0]).toContain('/manifest')
   })
 
+  it('reuses the manifest of the current load without revalidating it a second time', async () => {
+    conditionalGet.mockResolvedValue({ status: 200, data: { revision: 'parallel', rules: [rule] }, etag: 'rules' })
+    const repository = await import('./publishedLogisticsRepository')
+    const result = await repository.loadPublishedLogisticsRules(
+      { attribute: '普货', countries: ['美国'] },
+      { manifestResult: { manifest: manifest('parallel'), verified: true } },
+    )
+    expect(result).toMatchObject({ revision: 'parallel', verified: true, rules: [rule] })
+    expect(conditionalGet).toHaveBeenCalledOnce()
+    expect(conditionalGet.mock.calls[0]?.[0]).toContain('/rules?revision=parallel')
+  })
+
+  it('never promotes a stale supplied manifest to a verified quote', async () => {
+    conditionalGet.mockResolvedValue({ status: 200, data: { revision: 'stale', rules: [rule] }, etag: 'rules' })
+    const repository = await import('./publishedLogisticsRepository')
+    const result = await repository.loadPublishedLogisticsRules(
+      { attribute: '普货', countries: ['美国'] },
+      { manifestResult: { manifest: manifest('stale'), verified: false } },
+    )
+    expect(result.verified).toBe(false)
+  })
+
   it('queries only common and currently selected quote countries', async () => {
     const repository = await import('./publishedLogisticsRepository')
     const rareCountries = Array.from({ length: 140 }, (_, index) => ({ country: `国家${index}`, enabled: true, stage: 'rare' }))

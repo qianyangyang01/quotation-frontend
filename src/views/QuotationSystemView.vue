@@ -570,18 +570,22 @@ async function runQuoteLogistics(p: Product) {
   p.freight = 0
   p.status = '正在加载当前商品所需物流规则'
   try {
-    await hydrateFinanceSettings({ force: true, signal: controller.signal })
+    // Refresh both independently, then use this operation's verified manifest.
+    // Promise.all also observes both failures if a SKU change aborts the load.
+    const [, manifestResult] = await Promise.all([
+      hydrateFinanceSettings({ force: true, signal: controller.signal }),
+      loadPublishedLogisticsManifest({ signal: controller.signal }),
+    ])
     controller.signal.throwIfAborted()
     applyLiveFinance()
     const selectedCountries = [...new Set([...requestedQuoteCountries,
       ...specifiedQuoteRows.value.map(row => row.country), ...templateQuoteRows.value.map(row => row.country)])]
     let countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country, selectedCountries)
     if (!countries.length) {
-      await loadPublishedLogisticsManifest({ signal: controller.signal })
       financeCountrySettings.value = loadFinanceCountrySettings()
       countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country, selectedCountries)
     }
-    const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal })
+    const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal, manifestResult })
     if (controller.signal.aborted) return
     loadedQuoteCountries.value = countries
     logisticsRulesGeneration.value += 1

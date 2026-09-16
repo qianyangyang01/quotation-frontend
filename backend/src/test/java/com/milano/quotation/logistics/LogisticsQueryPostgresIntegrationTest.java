@@ -85,6 +85,38 @@ class LogisticsQueryPostgresIntegrationTest {
     }
 
     @Test
+    void setBasedCompanyScopePreservesBindingsDisablePauseAndUnrestrictedMode() {
+        var companyId = UUID.randomUUID();
+        var query = new LogisticsQueryService(jdbc, new ObjectMapper());
+        try {
+            jdbc.sql("insert into logistics_company_channel(id,enabled,payload,updated_by) values(:id,true,'{}','QA')")
+                    .param("id", companyId).update();
+            jdbc.sql("update logistics_company_state set enabled=true where singleton").update();
+            assertEquals(0, query.manifest().publishedChannels(), "unbound channels must be excluded");
+            jdbc.sql("insert into logistics_company_binding(channel_id,company_channel_id,dataset_id) select id,:company,dataset_id from logistics_channel where id=:id")
+                    .param("company", companyId).param("id", channelId).update();
+            var enabled = query.manifestRevision().revision();
+            assertEquals(1, query.manifest().publishedChannels());
+            assertEquals(1, query.publishedRules(enabled, "普货", List.of("US"), List.of()).rules().size());
+            assertEquals(1, query.publishedCatalog(enabled).rules().size());
+            jdbc.sql("update logistics_company_channel set enabled=false where id=:id").param("id", companyId).update();
+            assertThrows(AppException.class, () -> query.publishedRules(enabled, "普货", List.of("US"), List.of()));
+            assertEquals(0, query.manifest().publishedChannels());
+            assertTrue(query.publishedCatalog(null).rules().isEmpty());
+            jdbc.sql("update logistics_company_state set enabled=false where singleton").update();
+            assertEquals(1, query.manifest().publishedChannels(), "unrestricted mode ignores disabled bindings");
+            jdbc.sql("update logistics_company_state set paused=true where singleton").update();
+            assertEquals(0, query.manifest().publishedChannels());
+            assertTrue(query.publishedRules(null, "普货", List.of("US"), List.of()).rules().isEmpty());
+            assertTrue(query.publishedCatalog(null).rules().isEmpty());
+        } finally {
+            jdbc.sql("update logistics_company_state set enabled=false,paused=false where singleton").update();
+            jdbc.sql("delete from logistics_company_binding where company_channel_id=:id").param("id", companyId).update();
+            jdbc.sql("delete from logistics_company_channel where id=:id").param("id", companyId).update();
+        }
+    }
+
+    @Test
     void countryAliasesLinkCatalogFinanceBillingAndSaveWithoutChangingSourceRows() throws Exception {
         var mapper=new ObjectMapper(); var query=new LogisticsQueryService(jdbc,mapper);
         var original=(tools.jackson.databind.node.ObjectNode)mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());

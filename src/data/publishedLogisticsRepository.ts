@@ -181,9 +181,13 @@ export async function loadPublishedLogisticsManifest(options: { signal?: AbortSi
   finally { if (!options.signal && allowStale) manifestRequest = null }
 }
 
-export async function loadPublishedLogisticsRules(query: RuleQuery, options: { signal?: AbortSignal; apply?: boolean } = {}) {
+export async function loadPublishedLogisticsRules(query: RuleQuery, options: {
+  signal?: AbortSignal
+  apply?: boolean
+  manifestResult?: { manifest: PublishedLogisticsManifest; verified: boolean }
+} = {}) {
   const countries = normalized(query.countries)
-  const { manifest, verified } = await loadPublishedLogisticsManifest({ signal: options.signal })
+  const { manifest, verified } = options.manifestResult || await loadPublishedLogisticsManifest({ signal: options.signal })
   options.signal?.throwIfAborted()
   if (!countries.length) {
     if (options.apply !== false) replaceLogisticsRules([])

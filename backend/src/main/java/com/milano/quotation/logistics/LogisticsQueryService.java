@@ -142,7 +142,11 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                  and c.archived_at is null
+                  and not (select paused from logistics_company_state where singleton)
+                  and (not (select enabled from logistics_company_state where singleton)
+                    or c.id in (select b.channel_id from logistics_company_binding b
+                      join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))
                   and c.dataset_id=(select logistics_active_dataset())
                 order by c.id
                 """).query(String.class).list();
@@ -157,7 +161,11 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                  and c.archived_at is null
+                  and not (select paused from logistics_company_state where singleton)
+                  and (not (select enabled from logistics_company_state where singleton)
+                    or c.id in (select b.channel_id from logistics_company_binding b
+                      join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))
                   and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 """).query(Long.class).single());
@@ -193,7 +201,11 @@ public class LogisticsQueryService {
                 cross join lateral jsonb_array_elements(v.quote_rows) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                  and c.archived_at is null
+                  and not (select paused from logistics_company_state where singleton)
+                  and (not (select enabled from logistics_company_state where singleton)
+                    or c.id in (select b.channel_id from logistics_company_binding b
+                      join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))
                   and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                   and coalesce(item->>'areaName','')<>'' and logistics_price_row_quote_supported(item)
@@ -206,7 +218,11 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                  and c.archived_at is null
+                  and not (select paused from logistics_company_state where singleton)
+                  and (not (select enabled from logistics_company_state where singleton)
+                    or c.id in (select b.channel_id from logistics_company_binding b
+                      join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))
                   and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 order by attribute
@@ -237,7 +253,11 @@ public class LogisticsQueryService {
                   join logistics_version v on v.id=c.current_version_id and v.status='published'
                   where coalesce((p.payload->>'enabled')::boolean,true)=true
                     and coalesce((c.payload->>'enabled')::boolean,true)=true
-                    and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                    and c.archived_at is null
+                    and not (select paused from logistics_company_state where singleton)
+                    and (not (select enabled from logistics_company_state where singleton)
+                      or c.id in (select b.channel_id from logistics_company_binding b
+                        join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))
                     and c.dataset_id=(select logistics_active_dataset())
                     and logistics_version_quote_ready(v.id)
                 )
@@ -341,7 +361,11 @@ public class LogisticsQueryService {
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                  and c.archived_at is null
+                  and not (select paused from logistics_company_state where singleton)
+                  and (not (select enabled from logistics_company_state where singleton)
+                    or c.id in (select b.channel_id from logistics_company_binding b
+                      join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))
                   and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 """);
@@ -359,7 +383,11 @@ public class LogisticsQueryService {
                   jsonb_build_object('countries',cast(:countries as jsonb))) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
                   and coalesce((c.payload->>'enabled')::boolean,true)=true
-                  and c.archived_at is null and logistics_company_quote_allowed(c.id)
+                  and c.archived_at is null
+                  and not (select paused from logistics_company_state where singleton)
+                  and (not (select enabled from logistics_company_state where singleton)
+                    or c.id in (select b.channel_id from logistics_company_binding b
+                      join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))
                   and c.dataset_id=(select logistics_active_dataset())
                   and logistics_version_quote_ready(v.id)
                 """);
