@@ -6,6 +6,7 @@ const dependencies = vi.hoisted(() => ({
   loadFinanceCountrySettings: vi.fn(),
   loadFinanceTaxSettings: vi.fn(),
   loadFinanceSurchargeSettings: vi.fn(() => ({ countries: [], providers: [], updatedAt: '尚未保存' })),
+  loadCustomerOperationSettings: vi.fn(() => ({ customers: [{ id: 'bk', name: 'BK', feeUsd: 0.3, enabled: true }] })),
   loadFinanceChannelPolicies: vi.fn(),
 }))
 
@@ -17,6 +18,7 @@ vi.mock('@/data/financeChannelPolicies', () => ({
 }))
 vi.mock('@/data/financeSurchargeSettings', () => ({ loadFinanceSurchargeSettings: dependencies.loadFinanceSurchargeSettings }))
 vi.mock('@/data/financeTaxSettings', () => ({ loadFinanceTaxSettings: dependencies.loadFinanceTaxSettings }))
+vi.mock('@/data/customerOperationFees', () => ({ loadCustomerOperationSettings: dependencies.loadCustomerOperationSettings }))
 
 describe('quotation workspace configuration bootstrap', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -34,6 +36,7 @@ describe('quotation workspace configuration bootstrap', () => {
     const loading = loadQuotationWorkspaceConfiguration()
     await Promise.resolve()
     expect(dependencies.loadFinanceCountrySettings).not.toHaveBeenCalled()
+    expect(dependencies.loadCustomerOperationSettings).not.toHaveBeenCalled()
 
     resolveFinance()
     await Promise.resolve()
@@ -45,5 +48,6 @@ describe('quotation workspace configuration bootstrap', () => {
     expect(configuration.countrySettings.map(setting => setting.country)).toEqual(['美国', '英国', '法国', '澳大利亚'])
     expect(dependencies.loadFinanceCountrySettings).toHaveBeenCalledOnce()
     expect(dependencies.loadFinanceChannelPolicies).toHaveBeenCalledOnce()
+    expect(configuration.customerOperationSettings.customers).toEqual([{ id: 'bk', name: 'BK', feeUsd: 0.3, enabled: true }])
   })
 })

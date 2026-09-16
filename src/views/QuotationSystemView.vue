@@ -1002,6 +1002,7 @@ async function initializeQuotationWorkspace() {
     financeCountrySettings.value = configuration.countrySettings
     financeTaxSettings.value = configuration.taxSettings
     financeSurchargeSettings.value = configuration.surchargeSettings
+    customerOperationSettings.value = configuration.customerOperationSettings
     financePolicies.value = configuration.channelPolicies
     readiness.value = await loadQuotationReadiness()
     const restored = await loadAndRestoreDraft()
