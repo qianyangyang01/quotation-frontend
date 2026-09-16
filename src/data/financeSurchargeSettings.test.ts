@@ -8,6 +8,17 @@ const settings = (amount: number, exempt = false): FinanceTaxSettings => ({
   countries: [{ country: '美国', fixedFeeUsd: amount, selected: true, enabled: true, sortOrder: 1 }],
   providers: [{ provider: '递四方', mode: exempt ? 'exempt' : 'taxable', selected: true, channels: [] }], updatedAt: '',
 })
+it.each(['AE', '阿联酋', '阿拉伯联合酋长国'])('keeps surcharge and channel exemptions for country alias %s', country => {
+  const surcharges = { ...settings(1.5), countries: [{ ...settings(1.5).countries[0]!, country: '阿联酋', exemptChannelKeys: ['1::递四方::A'] }] }
+  expect(calculateFinanceQuoteFees(settings(0), surcharges, country, '递四方', 10, '1::递四方::B')).toMatchObject({ surchargeUsd: 1.5, surchargeEnabled: true, surchargeConfigured: true })
+  expect(calculateFinanceQuoteFees(settings(0), surcharges, country, '递四方', 10, '1::递四方::A')).toMatchObject({ surchargeUsd: 0, surchargeExempt: true })
+})
+it('does not inherit EU surcharge groups while matching Latvia aliases', () => {
+  const surcharge = { ...settings(1.5), countries: [{ ...settings(1.5).countries[0]!, country: '欧盟', exemptChannelKeys: [] }] }
+  expect(calculateFinanceQuoteFees(settings(0), surcharge, '拉托维亚', '递四方', 10, '1::递四方::A').surchargeUsd).toBe(0)
+  surcharge.countries.push({ ...surcharge.countries[0]!, country: '拉脱维亚' })
+  expect(calculateFinanceQuoteFees(settings(0), surcharge, '拉托维亚', '递四方', 10, '1::递四方::A').surchargeUsd).toBe(1.5)
+})
 describe('independent provider surcharge', () => {
   it('rounds once after combining base price, tax and surcharge', () => {
     const result = calculateFinanceQuoteFees(settings(0.02), settings(0.02), '美国', '递四方', 6.01)

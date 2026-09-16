@@ -35,6 +35,24 @@ class QuotationWorkflowIntegrationTest {
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
+    @Test void channelPolicyUpdatesRequireFinanceCsrfAndFreshVersionAndRejectMalformedReplacement() throws Exception {
+        var session=authenticatedSession();
+        var body="""
+            [{"category":"普货","enabled":true,"countryRules":[{"country":"美国","allowedChannels":["1::云途::YT-PH"]}]}]
+            """;
+        var url="/api/v1/finance-settings/channel-policies";
+        mvc.perform(put(url).session(session).header("If-Match","-1").contentType("application/json").content(body)).andExpect(status().isForbidden());
+        mvc.perform(put(url).with(csrf()).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("sales").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_quote")))
+                .header("If-Match","-1").contentType("application/json").content(body)).andExpect(status().isForbidden());
+        var saved=mvc.perform(put(url).session(session).with(csrf()).header("If-Match","-1").contentType("application/json").content(body)).andExpect(status().isOk()).andReturn();
+        var version=mapper.readTree(saved.getResponse().getContentAsByteArray()).path("data").path("_version").asLong();
+        mvc.perform(put(url).session(session).with(csrf()).header("If-Match",version).contentType("application/json").content(body.replace("true","false"))).andExpect(status().isOk());
+        mvc.perform(put(url).session(session).with(csrf()).header("If-Match",version).contentType("application/json").content(body)).andExpect(status().isConflict());
+        mvc.perform(put(url).session(session).with(csrf()).header("If-Match",version+1).contentType("application/json").content(body.replace("[\"1::云途::YT-PH\"]","null"))).andExpect(status().isUnprocessableEntity());
+        mvc.perform(get(url).session(session)).andExpect(status().isOk()).andExpect(jsonPath("$.data.value[0].enabled").value(false))
+                .andExpect(jsonPath("$.data.value[0].countryRules[0].allowedChannels[0]").value("1::云途::YT-PH"));
+    }
+
     @Test void customerOperationSettingsRequireFinanceAndProtectConcurrentVersions() throws Exception {
         var session = authenticatedSession();
         mvc.perform(get("/api/v1/finance-settings/tax-channels")

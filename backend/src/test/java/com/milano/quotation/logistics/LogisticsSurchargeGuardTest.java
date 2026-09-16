@@ -5,6 +5,19 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.junit.jupiter.api.Assertions.*;
 class LogisticsSurchargeGuardTest {
   private final JsonMapper mapper = new JsonMapper();
+  @Test void aliasesMustNotBypassSurchargeOrBreakExemptions() {
+    var settings = mapper.readTree("""
+      {"countries":[{"country":"阿联酋","selected":true,"enabled":true,"fixedFeeUsd":1.5,"exemptChannelKeys":["1::P::A"]}]}
+      """);
+    for (var country : new String[]{"AE", "阿联酋", "阿拉伯联合酋长国"}) {
+      var option = mapper.createObjectNode().put("country",country).put("channelKey","1::P::B").put("surchargeUsd",1.5).put("surchargeConfigured",true).put("surchargeEnabled",true).put("surchargeExempt",false);
+      assertDoesNotThrow(() -> LogisticsQuotationGuard.validateSurcharge(settings, option));
+      option.put("surchargeUsd",0).put("surchargeEnabled",false);
+      assertThrows(AppException.class, () -> LogisticsQuotationGuard.validateSurcharge(settings, option));
+      option.put("channelKey","1::P::A").put("surchargeEnabled",true).put("surchargeExempt",true);
+      assertDoesNotThrow(() -> LogisticsQuotationGuard.validateSurcharge(settings, option));
+    }
+  }
   @Test void verifiesCountryChannelAndRejectsStaleOrForgedExemption() {
     var settings = mapper.readTree("""
       {"countries":[{"country":"NZ","selected":true,"enabled":true,"fixedFeeUsd":1.5,"exemptChannelKeys":["1::P::A"]},

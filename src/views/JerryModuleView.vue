@@ -219,7 +219,7 @@ const financeSummaryCards = computed(() => {
   const cards: Record<FinanceSettingsTab, { id: FinanceSettingsTab; icon: string; label: string; value: string | number; description: string }> = {
     customers: { id: 'customers', icon: '客', label: '客户操作费', value: customerOperationCount.value, description: '公司人工费用 · USD／单' },
     countries: { id: 'countries', icon: '国', label: '常用国家设置', value: financeStageCountryCount('common'), description: `最多 ${COMMON_COUNTRY_LIMIT} 个 · 与业务报价同步` },
-    logistics: { id: 'logistics', icon: '物', label: '物流属性与渠道', value: financePolicyCategoryCount.value, description: `覆盖 ${financePolicyCountryCount.value} 个已授权国家` },
+    logistics: { id: 'logistics', icon: '物', label: '物流属性与渠道', value: `${financePolicyCategoryCount.value} 类属性`, description: `${financePolicyCountryCount.value} 个国家 · ${financePolicyChannelCount.value} 项授权` },
     surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 物流商独立豁免' },
     taxes: { id: 'taxes', icon: '税', label: '税率设置', value: configuredTaxCountryCount.value, description: `已配置 ${configuredTaxCountryCount.value} 项关税设置` },
     grades: { id: 'grades', icon: '级', label: '客户等级系数', value: enabledCustomerGradeCount.value, description: `共 ${customerGradeSettings.value.length} 个等级，${enabledCustomerGradeCount.value} 个已启用` },

@@ -1,4 +1,5 @@
 import { sumDecimal } from '@/services/quotationDecimal'
+import { sameCountryIdentity } from './countryIdentity'
 import type { EuYunExpressTaxContext } from './euYunExpressTax'
 import { roundQuoteUsd } from '@/services/quotationMoney'
 import { normalizeFinanceTaxSettings, calculateFinanceQuoteTax, type FinanceTaxSettings } from './financeTaxSettings'
@@ -40,8 +41,8 @@ export async function saveFinanceSurchargeSettings(settings: FinanceSurchargeSet
 
 export function calculateFinanceQuoteFees(taxes: FinanceTaxSettings, surcharges: FinanceSurchargeSettings, country: string, provider: string, baseUsd: number, channelKey = '', context?: Omit<EuYunExpressTaxContext, 'channelKey'>) {
   const tax = calculateFinanceQuoteTax(taxes, country, provider, baseUsd, { ...context, channelKey })
-  const countrySetting = surcharges.countries.find(row => row.selected && row.country === country)
-  // Country groups belong to customs duty only. Keep surcharge matching exact and independent.
+  const countrySetting = surcharges.countries.find(row => row.selected && sameCountryIdentity(row.country, country))
+  // Recognize aliases of one country without inheriting customs-duty country groups.
   const countrySurcharges = { ...surcharges, countries: countrySetting ? [countrySetting] : [] }
   const scoped = Array.isArray(countrySetting?.exemptChannelKeys)
   const surcharge = calculateFinanceQuoteTax(Array.isArray(countrySetting?.providers) ? { ...countrySurcharges, providers: countrySetting.providers } : scoped ? { ...countrySurcharges, providers: channelKey ? [{ provider, selected: true, channels: [], mode: countrySetting!.exemptChannelKeys!.includes(channelKey) ? 'exempt' : 'taxable' }] : [] } : countrySurcharges, country, provider, 0)

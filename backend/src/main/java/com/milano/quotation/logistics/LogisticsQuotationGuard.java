@@ -133,7 +133,7 @@ public class LogisticsQuotationGuard {
         boolean enabled = false, exempt = false, configured = true;
         var expected = java.math.BigDecimal.ZERO;
         for (var country : settings.path("countries")) {
-            if (!country.path("country").asText().equals(option.path("country").asText()) || !country.path("selected").asBoolean()) continue;
+            if (!CountryIdentity.same(country.path("country").asText(),option.path("country").asText()) || !country.path("selected").asBoolean()) continue;
             enabled = country.path("enabled").asBoolean() && country.path("fixedFeeUsd").asDouble() > 0;
             if (!enabled) break;
             if (!country.path("providers").isArray() && country.path("exemptChannelKeys").isArray()) {

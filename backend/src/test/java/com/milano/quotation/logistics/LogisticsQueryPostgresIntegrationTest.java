@@ -133,6 +133,63 @@ class LogisticsQueryPostgresIntegrationTest {
         }
         return input;
     }
+    @Test
+    void financeRevocationRejectsPreviouslyCalculatedQuoteEvenWhenLogisticsRevisionIsUnchanged() {
+        var mapper=new ObjectMapper(); var query=new LogisticsQueryService(jdbc,mapper);
+        var guard=new LogisticsQuotationGuard(jdbc,query,mapper);
+        var saved=jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies'").query(String.class).single();
+        var revision=query.manifestRevision().revision();
+        guard.validate(selectedQuotation());
+        try {
+            for(var policy:List.of("[]",saved.replace("\"enabled\": true","\"enabled\": false"),saved.replace("1::云途::YT-PH","999::云途::UNKNOWN"),saved.replace("美国","德国"),saved.replace("普货","服装"))) {
+                jdbc.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1 where setting_key='channel-policies'").param("p",policy).update();
+                assertEquals(revision,query.manifestRevision().revision());
+                assertThrows(AppException.class,()->guard.validate(selectedQuotation()),policy);
+            }
+        } finally {
+            jdbc.sql("update finance_setting set payload=cast(:p as jsonb) where setting_key='channel-policies'").param("p",saved).update();
+        }
+        guard.validate(selectedQuotation());
+    }
+    @Test
+    void providerDisableInvalidatesCachedRulesAndRejectsAlreadyCalculatedQuote() {
+        var mapper=new ObjectMapper(); var query=new LogisticsQueryService(jdbc,mapper);
+        var original=jdbc.sql("select payload::text from logistics_provider where id=:id").param("id",providerId).query(String.class).single();
+        var revision=query.manifestRevision().revision();
+        assertEquals(1,query.publishedRules(revision,"普货",List.of("US"),List.of()).rules().size());
+        try {
+            jdbc.sql("update logistics_provider set payload=jsonb_set(payload,'{enabled}','false'::jsonb) where id=:id").param("id",providerId).update();
+            assertThrows(AppException.class,()->query.publishedRules(revision,"普货",List.of("US"),List.of()));
+            assertTrue(query.publishedRules("","普货",List.of("US"),List.of()).rules().isEmpty());
+            assertThrows(AppException.class,()->new LogisticsQuotationGuard(jdbc,query,mapper).validate(selectedQuotation()));
+        } finally {
+            jdbc.sql("update logistics_provider set payload=cast(:p as jsonb) where id=:id").param("p",original).param("id",providerId).update();
+        }
+    }
+    @Test
+    void quotationTransactionLocksAuthorizationUntilCommitThenRejectsRevocation() {
+        var dataSource=new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());
+        var transactionalJdbc=JdbcClient.create(dataSource); var mapper=new ObjectMapper();
+        var guard=new LogisticsQuotationGuard(transactionalJdbc,new LogisticsQueryService(transactionalJdbc,mapper),mapper);
+        var transaction=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        var original=jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies'").query(String.class).single();
+        transaction.executeWithoutResult(status -> {
+            guard.validate(selectedQuotation());
+            try(var competing=dataSource.getConnection(); var statement=competing.createStatement()) {
+                competing.setAutoCommit(false);
+                statement.execute("set local lock_timeout='200ms'");
+                var failure=assertThrows(java.sql.SQLException.class,()->statement.executeUpdate("update finance_setting set payload='[]'::jsonb where setting_key='channel-policies'"));
+                assertEquals("55P03",failure.getSQLState());
+                competing.rollback();
+            } catch(java.sql.SQLException failure) { throw new AssertionError(failure); }
+        });
+        try {
+            jdbc.sql("update finance_setting set payload='[]'::jsonb where setting_key='channel-policies'").update();
+            assertThrows(AppException.class,()->guard.validate(selectedQuotation()));
+        } finally {
+            jdbc.sql("update finance_setting set payload=cast(:p as jsonb) where setting_key='channel-policies'").param("p",original).update();
+        }
+    }
     private void updateFixtureRows(tools.jackson.databind.node.ObjectNode payload) {
         jdbc.sql("update logistics_version set payload=cast(:payload as jsonb) where id=:id").param("payload",payload.toString()).param("id",versionId).update();
         jdbc.sql("update logistics_billing_acceptance set rows_fingerprint=(select rows_fingerprint from logistics_version where id=:id) where version_id=:id").param("id",versionId).update();
