@@ -14,7 +14,7 @@ import { currentAuthUser } from '@/data/authStore'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
 import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountryLoader'
-import { financeSettingsAreHydrated, hydrateFinanceSettings } from '@/services/financeSettings'
+import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydrated, hydrateFinanceSettings, type FinanceSettingVersions } from '@/services/financeSettings'
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
@@ -137,7 +137,8 @@ const financePolicies = shallowRef(loadFinanceChannelPolicies())
 const financeCountrySettings = ref(loadFinanceCountrySettings())
 const financeSurchargeSettings = ref(loadFinanceSurchargeSettings())
 const financeTaxSettings = ref(loadFinanceTaxSettings())
-const quotationAttributeOptions = selectableLogisticsAttributes(financePolicies.value.map(policy => policy.category))
+const quotationAttributeOptions = computed(() => selectableLogisticsAttributes(financePolicies.value.map(policy => policy.category)))
+let appliedFinanceVersions: FinanceSettingVersions = {}
 const skuSearch = ref('')
 const customerName = ref('')
 const selectedCustomerId = ref('')
@@ -178,7 +179,7 @@ function purchasePricingForMonthlySales(record: PurchaseProductRecord, invoiceTa
 function purchasePriceForMonthlySales(record: PurchaseProductRecord, invoiceTaxApplied = true) {
   return calculatePurchasePriceForMonthlySales(record, monthlySalesEstimate.value, invoiceTaxApplied)
 }
-const initialLogisticsAttribute = quotationAttributeOptions[0] || '普货'
+const initialLogisticsAttribute = quotationAttributeOptions.value[0] || '普货'
 const initialCountry = financeCountryOptionsForCategory(financePolicies.value, initialLogisticsAttribute, financeCountrySettings.value)[0]?.name || ''
 const initialWeight = 0.001
 const initialChannel = channelsForShipment(initialLogisticsAttribute, initialCountry, initialWeight)[0] || ''
@@ -335,7 +336,7 @@ function conditionIssues(options: { includeSku: boolean; includeCategory: boolea
   const p = products.value[0]
   return validateQuotationConditions({
     customerName: customerName.value, quoteMode: quoteMode.value, sku: skuSearch.value, productCategory: productCategory.value,
-    logisticsAttribute: p?.logisticsAttribute || '', allowedLogisticsAttributes: quotationAttributeOptions,
+    logisticsAttribute: p?.logisticsAttribute || '', allowedLogisticsAttributes: quotationAttributeOptions.value,
     customerGrade: selectedCustomerGrade.value, enabledCustomerGrades: customerGradeSettings.filter(item => item.enabled).map(item => item.grade),
     monthlySalesEstimate: monthlySalesEstimate.value,
   }, options)
@@ -641,11 +642,17 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     const result = await loadQuotationSync(skus, signal)
     if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature() || logisticsLoadState.value === 'loading' || productQueryBusy.value) return false
     const changed: string[] = []
-    if (beforeSave && selectedCustomerId.value) {
+    // Validate every finance setting against the values actually applied to this page.
+    // Older servers lack financeVersions; use a full refresh as a compatibility fallback.
+    let latestFinanceVersions = result.financeVersions
+    if (beforeSave || !latestFinanceVersions) {
       await hydrateFinanceSettings({ force: true, signal })
-      const current = resolveCustomerOperation(loadCustomerOperationSettings(), selectedCustomerId.value, customerName.value)
-      if (!current.configured || JSON.stringify(current.snapshot) !== JSON.stringify(customerOperation.value.snapshot)) changed.push('客户操作费')
+      latestFinanceVersions = financeSettingVersions()
     }
+    changed.push(...new Set([
+      ...(result.financeVersions ? changedFinanceSettings(appliedFinanceVersions, result.financeVersions) : []),
+      ...changedFinanceSettings(appliedFinanceVersions, latestFinanceVersions),
+    ]))
     if (skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
     const newerLogistics = Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
     // A library revision is only a signal to check. It is never itself a save blocker.
@@ -700,8 +707,12 @@ function applyLiveFinance() {
   financeTaxSettings.value = loadFinanceTaxSettings()
   financeSurchargeSettings.value = loadFinanceSurchargeSettings()
   customerGradeSettings.splice(0, customerGradeSettings.length, ...loadCustomerGradeSettings())
+  if (!customerGradeSettings.some(item => item.enabled && item.grade === selectedCustomerGrade.value)) {
+    selectedCustomerGrade.value = customerGradeSettings.find(item => item.enabled)?.grade || 'S'
+  }
   const rate = loadFinanceExchangeRate()
   exchange.value = { ...exchange.value, usd: rate.usdCny, eurUsd: rate.eurUsd, updatedAt: rate.updatedAt }
+  appliedFinanceVersions = financeSettingVersions()
 }
 async function reloadLiveConfiguration() {
   await hydrateFinanceSettings({ force: true })

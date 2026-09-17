@@ -7,7 +7,7 @@ import { hydrateFinanceSettings } from '@/services/financeSettings'
 
 export async function loadQuotationWorkspaceConfiguration() {
   await Promise.all([
-    hydrateFinanceSettings(),
+    hydrateFinanceSettings({ force: true }),
     loadPublishedLogisticsManifest(),
   ])
 

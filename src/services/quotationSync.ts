@@ -1,8 +1,10 @@
 import { api } from './http'
+import type { FinanceSettingVersions } from './financeSettings'
 
 export interface QuotationSyncSnapshot {
   purchaseVersions: Record<string, string | null>
   logisticsRevision: string
+  financeVersions?: FinanceSettingVersions
 }
 export function checkSelectedLogistics(body: unknown, signal?: AbortSignal) {
   return api.get<{ revision: string }>('/quotation-sync/logistics', {

@@ -2,13 +2,15 @@ import {readFileSync} from 'node:fs'
 import ts from 'typescript'
 import {expect,it,vi} from 'vitest'
 import {ApiError} from './http'
+import { changedFinanceSettings, type FinanceSettingVersions } from './financeSettings'
 const source=readFileSync(new URL('../views/QuotationSystemView.vue',import.meta.url),'utf8').split('<script setup lang="ts">')[1]!.split('</script>')[0]!
 const ast=ts.createSourceFile('view.ts',source,ts.ScriptTarget.Latest,true)
 function setup(){
   const state={liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
     selectedCustomerId:{value:''},customerName:{value:'甲'},customerOperation:{value:{snapshot:{id:'a',name:'甲',feeUsd:1}}},
     hydrateFinanceSettings:vi.fn(async()=>{}),loadCustomerOperationSettings:()=>({}),resolveCustomerOperation:vi.fn(()=>({configured:true,snapshot:{id:'a',name:'甲',feeUsd:1}})),
-    loadQuotationSync:vi.fn(async()=>({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1'})),
+    appliedFinanceVersions:{} as FinanceSettingVersions,financeSettingVersions:vi.fn<()=>FinanceSettingVersions>(()=>({})),changedFinanceSettings,
+    loadQuotationSync:vi.fn(async():Promise<{purchaseVersions:Record<string,string>;logisticsRevision:string;financeVersions?:FinanceSettingVersions}>=>({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:{}})),
     logisticsLoadState:{value:'ready'}, productQueryBusy:{value:false},purchaseRecords:{value:[]},
     findPurchaseProduct:()=>({}),purchaseRevision:()=> 'v1',logisticsRevision:{value:'r1'},
     savedQuoteRows:{value:[{}]},products:{value:[{logisticsAttribute:'普货'}]},buildQuoteOptions:()=>({}),
@@ -89,10 +91,45 @@ it('ignores a stale background channel rejection after a newer save check succee
   await run(undefined,true);reject(new ApiError('stale background',409,'ERROR','test'));expect(await old).toBe(false)
   expect(state.syncPending.value).toBe('');expect(state.replaceLogisticsRules).not.toHaveBeenCalled()
 })
-it('blocks stale finance customer fees before save and keeps manual clients independent',async()=>{
-  const {state,run}=setup();state.selectedCustomerId.value='a'
-  state.resolveCustomerOperation.mockReturnValue({configured:true,snapshot:{id:'a',name:'甲',feeUsd:2}})
-  await run(undefined,true);expect(state.syncPending.value).toBe('客户操作费')
+it.each([
+  ['country-classification','国家分类'],['channel-policies','物流渠道权限'],['customer-grades','客户等级系数'],
+  ['exchange-rate','汇率'],['tax-settings','税费'],['surcharge-settings','附加费'],['customer-operation-fees','客户操作费'],
+])('detects changed %s in the background and before saving',async(key,label)=>{
+  const {state,run}=setup()
+  state.appliedFinanceVersions = {[key!]:1}
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:{[key!]:2}})
+  expect(await run()).toBe(false)
+  expect(state.syncPending.value).toBe(label)
+  expect(state.hydrateFinanceSettings).not.toHaveBeenCalled()
+  state.financeSettingVersions.mockReturnValue({[key!]:2})
+  expect(await run(undefined,true)).toBe(false)
+  expect(state.syncPending.value).toBe(label)
   expect(state.hydrateFinanceSettings).toHaveBeenCalledOnce()
-  state.selectedCustomerId.value='';await run(undefined,true);expect(state.syncPending.value).toBe('')
+  // Only applying the refreshed configuration makes the current quote up to date.
+  state.appliedFinanceVersions = {[key!]:2}
+  expect(await run(undefined,true)).toBe(true)
+  expect(state.syncPending.value).toBe('')
+})
+it('refreshes finance before saving even if the lightweight snapshot is unchanged',async()=>{
+  const {state,run}=setup()
+  state.financeSettingVersions.mockReturnValue({'exchange-rate':2})
+  expect(await run(undefined,true)).toBe(false)
+  expect(state.syncPending.value).toBe('汇率')
+})
+it('does not accept an older in-flight finance response over a newer server version',async()=>{
+  const {state,run}=setup()
+  state.appliedFinanceVersions={'customer-grades':1}
+  state.financeSettingVersions.mockReturnValue({'customer-grades':1})
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:{'customer-grades':2}})
+  expect(await run(undefined,true)).toBe(false)
+  expect(state.syncPending.value).toBe('客户等级系数')
+})
+it('checks finance on older servers without version metadata and fails closed when offline',async()=>{
+  const {state,run}=setup()
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1'})
+  state.financeSettingVersions.mockReturnValue({'tax-settings':1})
+  expect(await run()).toBe(false)
+  expect(state.syncPending.value).toBe('税费')
+  state.hydrateFinanceSettings.mockRejectedValueOnce(new Error('offline'))
+  await expect(run(undefined,true)).rejects.toThrow('offline')
 })

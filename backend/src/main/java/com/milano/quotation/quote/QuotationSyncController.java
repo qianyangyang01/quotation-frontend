@@ -35,8 +35,11 @@ public class QuotationSyncController {
                     products.put(rs.getString("sku"),rs.getLong("version")+":"+rs.getTimestamp("updated_at").toInstant());
                     return true;
                 }).list();
+        var financeVersions=new LinkedHashMap<String,Long>();
+        jdbc.sql("select setting_key,version from finance_setting order by setting_key")
+                .query((rs,n)->{financeVersions.put(rs.getString("setting_key"),rs.getLong("version"));return true;}).list();
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                .body(ApiResponse.ok(new Snapshot(products,logistics.manifestRevision().revision())));
+                .body(ApiResponse.ok(new Snapshot(products,logistics.manifestRevision().revision(),financeVersions)));
     }
     @PostMapping("/logistics")
     @PreAuthorize("hasAuthority('PERM_quote')")
@@ -47,5 +50,5 @@ public class QuotationSyncController {
         guard.validate(body);
         return ApiResponse.ok(Map.of("revision",body.path("logisticsRevision").asText()));
     }
-    public record Snapshot(Map<String,String> purchaseVersions,String logisticsRevision) {}
+    public record Snapshot(Map<String,String> purchaseVersions,String logisticsRevision,Map<String,Long> financeVersions) {}
 }

@@ -3,6 +3,11 @@ import { api } from '@/services/http'
 export type FinanceSettingKey = 'country-classification' | 'channel-policies' | 'customer-grades' | 'exchange-rate' | 'tax-settings' | 'surcharge-settings' | 'customer-operation-fees'
 
 const financeSettingKeys: FinanceSettingKey[] = ['country-classification', 'channel-policies', 'customer-grades', 'exchange-rate', 'tax-settings', 'surcharge-settings', 'customer-operation-fees']
+export type FinanceSettingVersions = Partial<Record<FinanceSettingKey, number>>
+const financeSettingLabels: Record<FinanceSettingKey, string> = {
+  'country-classification': '国家分类', 'channel-policies': '物流渠道权限', 'customer-grades': '客户等级系数',
+  'exchange-rate': '汇率', 'tax-settings': '税费', 'surcharge-settings': '附加费', 'customer-operation-fees': '客户操作费',
+}
 const cache = new Map<FinanceSettingKey, unknown>()
 const versions = new Map<FinanceSettingKey, number>()
 let hydrationRequest: Promise<void> | null = null
@@ -33,6 +38,14 @@ export function financeSettingsAreHydrated() {
   return hydrated
 }
 
+export function financeSettingVersions(): FinanceSettingVersions {
+  return Object.fromEntries(versions)
+}
+
+export function changedFinanceSettings(applied: FinanceSettingVersions, latest: FinanceSettingVersions): string[] {
+  return financeSettingKeys.filter(key => (applied[key] ?? -1) !== (latest[key] ?? -1)).map(key => financeSettingLabels[key])
+}
+
 export function clearFinanceSettingsCache() {
   hydrationGeneration += 1
   hydrationRequest = null
@@ -48,7 +61,7 @@ export function hydrateFinanceSettings(options: { force?: boolean; signal?: Abor
 
   const generation = hydrationGeneration
   const request = (async () => {
-    const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings', { signal: options.signal })
+    const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings', { signal: options.signal, cache: 'no-store' })
     const nextCache = new Map<FinanceSettingKey, unknown>()
     const nextVersions = new Map<FinanceSettingKey, number>()
     const missing = financeSettingKeys.filter(key => !values[key] && key !== 'surcharge-settings' && key !== 'customer-operation-fees')
