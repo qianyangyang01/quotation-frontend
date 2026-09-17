@@ -430,3 +430,19 @@ it('hides each descriptive column in the editor, PNG model and clipboard and res
   state.resetKey = 'another-product'; await settle()
   expect([...document.querySelectorAll<HTMLInputElement>('.sheet-visibility input')].every(input => input.checked)).toBe(true)
 })
+
+it('unlocks the quote editor and shows a truthful timeout when the native clipboard never returns', async () => {
+  mount(); vi.useFakeTimers()
+  let reject!: (error: Error) => void
+  writeText.mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail }))
+  try {
+    button('复制报价数据').click(); await settle()
+    expect(button('复制报价数据').disabled).toBe(true)
+    await vi.advanceTimersByTimeAsync(8000); await settle()
+    expect(button('复制报价数据').disabled).toBe(false)
+    expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行国家"]')!.disabled).toBe(false)
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('复制超时')
+    reject(new Error('late denial')); await settle()
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('复制超时')
+  } finally { vi.useRealTimers() }
+})
