@@ -62,3 +62,8 @@ it('keeps previous photos after a failed replacement and releases them on leavin
   expect(document.querySelectorAll('.sheet-photo-cell img')).toHaveLength(2)
   app.unmount();expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local')
 })
+it('clears photos when leaving the browser page, including back/forward cache navigation',async()=>{
+  mount();await select();window.dispatchEvent(new Event('pagehide'));await settle()
+  expect(document.querySelector('.sheet-photo-cell')).toBeNull()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local')
+})

@@ -94,6 +94,8 @@ async function choosePhotos(event: Event) {
 // Keep local photos out of sheet edits and all persisted snapshots. Product/account/record resets clear them.
 watch(() => JSON.stringify([props.skus, props.resetKey ?? props.contextKey, props.bundle]), clearPhotos, { flush: 'sync' })
 watch(showPhotos, invalidate, { flush: 'sync' })
+// Also clear before an external navigation is placed in the browser back/forward cache.
+window.addEventListener('pagehide', clearPhotos)
 
 const sheet = computed(() => buildCustomerQuoteSheet({
   rows: props.rows, countries: props.countries, edits: edits.value, skus: props.skus,
@@ -315,6 +317,7 @@ function capturePrices(): CapturedSheetPrices {
 }
 defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', clearPhotos)
   disposed = true
   photoGeneration++
   releaseQuotePhotos(photos.value)
