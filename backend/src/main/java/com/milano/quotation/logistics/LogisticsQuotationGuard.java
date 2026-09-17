@@ -29,6 +29,7 @@ public class LogisticsQuotationGuard {
         if (!validOption) throw AppException.unprocessable("至少需要一条有效报价渠道");
     }
     public void validate(ObjectNode quotation) {
+        com.milano.quotation.finance.FinanceQuotationVersions.validate(jdbc, quotation);
         if (quotation.hasNonNull("customerOperation")) {
             var customerFees = mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='customer-operation-fees' for share").query(String.class).optional().orElse("{}"));
             com.milano.quotation.finance.CustomerOperationFees.validate(customerFees, quotation);

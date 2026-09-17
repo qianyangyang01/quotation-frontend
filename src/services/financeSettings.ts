@@ -79,6 +79,14 @@ export function hydrateFinanceSettings(options: { force?: boolean; signal?: Abor
     })
 
     if (generation !== hydrationGeneration) return
+    // A save can complete while this read is in flight. Versions are monotonic
+    // within a session; an older response must not undo a confirmed setting.
+    financeSettingKeys.forEach(key => {
+      if ((versions.get(key) ?? -1) > (nextVersions.get(key) ?? -1)) {
+        nextCache.set(key, cache.get(key))
+        nextVersions.set(key, versions.get(key)!)
+      }
+    })
     cache.clear()
     versions.clear()
     nextCache.forEach((value, key) => cache.set(key, value))
@@ -97,7 +105,10 @@ export function readFinanceSetting<T>(key: FinanceSettingKey): T | undefined {
 }
 
 export async function writeFinanceSetting<T>(key: FinanceSettingKey, value: T) {
+  const generation = hydrationGeneration
   const saved = await api.put<VersionedSetting<T>>(`/finance-settings/${key}`, value, { 'If-Match': String(versions.get(key) ?? -1) })
+  if (generation !== hydrationGeneration) return saved.value
+  if ((versions.get(key) ?? -1) > saved._version) return cache.get(key) as T
   cache.set(key, saved.value)
   versions.set(key, saved._version)
   return saved.value

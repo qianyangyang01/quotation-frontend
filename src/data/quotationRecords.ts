@@ -1,4 +1,5 @@
 import type { CustomerOperationSnapshot } from './customerOperationFees'
+import type { FinanceSettingVersions } from '@/services/financeSettings'
 import type { FinanceTaxCalculation } from './channelTaxRules'
 import { normalizeCustomerPrices, type CustomerPriceSnapshot } from './customerQuotePrices'
 import { api, idempotencyKey } from '@/services/http'
@@ -109,6 +110,7 @@ export interface QuotationRecordEditor {
 }
 
 export interface QuotationRecord {
+  financeVersions?: FinanceSettingVersions
   commissionThreshold?: number | null
   customerOperation?: CustomerOperationSnapshot
   quoteConfirmed?: boolean; quoteConfirmedAt?: string; quoteConfirmedBy?: string

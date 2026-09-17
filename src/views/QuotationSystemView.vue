@@ -913,7 +913,6 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     .filter(([, region]) => typeof region === 'string')) as Record<string, string>
   const p = emptyQuotationProduct()
   p.logisticsAttribute = normalizeLogisticsAttribute(payload.logisticsAttribute || '')
-  products.value = [p]
   const singleSku = payload.product?.sku || payload.skuSearch
   let restoredFromPurchase = false
   if (quoteMode.value === 'single' && singleSku) {
@@ -958,6 +957,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   restoredSpecifiedSelections.value = draftSelection(payload.specifiedSelections || [])
   restoredTemplateSelections.value = draftSelection(payload.templateSelections || [])
   activeTemplateSnapshot.value = payload.activeTemplate?.id ? { id: String(payload.activeTemplate.id), name: String(payload.activeTemplate.name || '个人报价模板') } : null
+  products.value = [p]
   const hasRestoredProduct = quoteMode.value === 'bundle'
     ? bundleItems.value.some(item => Boolean(item.sku))
     : Boolean(p.sku)
@@ -1395,6 +1395,8 @@ const activeQuoteMatrixContextKey = computed(() => {
   const p = products.value[0]
   return p ? quoteMatrixContextKey(p) : ''
 })
+// Repricing invalidates prices, but local photos belong to the current account/product selection.
+const quoteSheetResetKey = computed(() => JSON.stringify([currentAuthUser.value.id, quoteMode.value, activePurchaseSkus()]))
 const activeCommonCountryCount = computed(() => activeQuotationCountries.value.filter(country => country.stage === 'common').length)
 function activeQuoteRowsForCountry(country: string, region?: string) {
   return region === undefined ? countryQuoteRows(country) : regionalQuoteRows(JSON.stringify([country, region]))
@@ -1518,6 +1520,17 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : ''))
 const displayedSaveBlockReason = computed(() => commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
+const retryingSavePreparation = ref(false)
+const canRetrySavePreparation = computed(() => Boolean(syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
+async function retrySavePreparation() {
+  if (retryingSavePreparation.value || savingQuotation.value || syncRefreshing.value || quoteLogisticsBusy()) return
+  retryingSavePreparation.value = true
+  try {
+    if (syncPending.value || syncError.value) await updateLiveQuotation()
+    else await retryQuoteLogistics()
+  } catch (error) { toast(error instanceof Error ? error.message : '重新检查失败，请重试') }
+  finally { retryingSavePreparation.value = false }
+}
 const displayedInvalidFields = computed(() => [...new Set([...queryValidationFields.value, ...displayedSaveValidationIssues.value.map(issue => issue.key)])])
 async function attemptSave() {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
@@ -1769,6 +1782,7 @@ async function save() {
   }) } : undefined
   const systemQuantityQuotes = captured ? { quantities:captured.quantities, rows:quoteOptions.map(option=>({ optionId:option.id, prices:captured!.rows.find(row=>row.key===option.quoteSheetKey)!.systemPrices })) } : undefined
   const record = await createQuotationRecord({
+    financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
     purchaseVersions: Object.fromEntries(activePurchaseSkus().map(sku => [sku, purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)) || ''])),
     logisticsRevision: logisticsRevision.value,
@@ -1943,9 +1957,9 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
         <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"
-          :reset-key="JSON.stringify([currentAuthUser.id, quoteMode, quoteMatrixMode, p.sku, bundleItems.map(item => [item.sku, item.quantityPerSet])])"
           :calculate-price="(row, quantity) => { const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey); return result?.tax.configured ? result.quoteUsd : null }"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
+          :reset-key="quoteSheetResetKey"
           :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
           :skus="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku) : [p.sku]"
@@ -1954,7 +1968,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
           :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
           :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd"
-          :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation" @locate-issue="locateValidationIssue" @save="attemptSave"
+          :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
+          :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave"
         />
       </template>
     </main>

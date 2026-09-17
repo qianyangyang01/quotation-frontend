@@ -31,20 +31,28 @@ const props = withDefaults(defineProps<{
   primaryUsdPrice: number
   blockReason?: string
   saving?: boolean
+  retrying?: boolean
+  canRetry?: boolean
   validationIssues?: Array<{ key: string; label: string; message: string }>
-}>(), { blockReason: '', saving: false, validationIssues: () => [] })
+}>(), { blockReason: '', saving: false, retrying: false, canRetry: false, validationIssues: () => [] })
 
-const emit = defineEmits<{ save: []; locateIssue: [key: string] }>()
+const emit = defineEmits<{ save: []; retry: []; locateIssue: [key: string] }>()
 const customerSheet = ref<InstanceType<typeof CustomerQuoteSheet>>()
 defineExpose({ capturePrices: () => customerSheet.value?.capturePrices() })
 const countryCount = computed(() => new Set(props.rows.map(row => row.country)).size)
 const hasQuoteRows = computed(() => props.rows.length > 0)
 const previewStatus = computed(() => {
+  if (props.saving) return '正在校验并保存报价…'
+  if (props.retrying) return '正在重新检查报价…'
+  if (props.blockReason) return props.blockReason
   if (props.validationIssues.length) return `暂时无法保存，还需完成 ${props.validationIssues.length} 项`
   if (!hasQuoteRows.value) return '请先选择报价渠道'
   return '报价方案已准备完成'
 })
 const footerStatus = computed(() => {
+  if (props.saving) return '正在校验并保存报价，请稍候'
+  if (props.retrying) return '正在重新检查报价，请稍候'
+  if (props.blockReason) return props.blockReason
   if (props.validationIssues.length) return `缺少 ${props.validationIssues.length} 项必填内容，请按上方提示补充`
   if (!hasQuoteRows.value) return '请先在上方报价矩阵中加入至少一条渠道'
   return '所有已选渠道均已完成报价计算，可以保存'
@@ -96,7 +104,7 @@ const quoteRange = computed(() => {
       </div>
     </section>
 
-    <footer><span :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving" @click="emit('save')">{{ saving ? '正在校验物流版本…' : `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
+    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? '正在校验并保存…' : `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
   </section>
 </template>
 
