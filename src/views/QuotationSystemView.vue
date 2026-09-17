@@ -1011,12 +1011,8 @@ async function initializeQuotationWorkspace() {
   draftStatus.value = 'loading'
   draftError.value = ''
   try {
-    const configuration = await loadQuotationWorkspaceConfiguration()
-    financeCountrySettings.value = configuration.countrySettings
-    financeTaxSettings.value = configuration.taxSettings
-    financeSurchargeSettings.value = configuration.surchargeSettings
-    customerOperationSettings.value = configuration.customerOperationSettings
-    financePolicies.value = configuration.channelPolicies
+    await loadQuotationWorkspaceConfiguration()
+    applyLiveFinance()
     readiness.value = await loadQuotationReadiness()
     const restored = await loadAndRestoreDraft()
     const requestedSku = String(route.query.sku || '').trim()
