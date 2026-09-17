@@ -1,3 +1,4 @@
+import { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { addCustomerOperationFee } from '@/data/customerOperationFees'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import { sumDecimal, productDecimal } from '@/services/quotationDecimal'
@@ -25,7 +26,7 @@ describe('quotation view fee integration', () => {
       updatedAt: 'test',
     }
     let copied = ''
-    const context = { sumDecimal, productDecimal, addCustomerOperationFee, customerOperation: { value: { configured: true, feeUsd: 0, message: '' } },
+    const context = { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperation: { value: { configured: true, feeUsd: 0, message: '' } },
       products: { value: [] }, chargeWeight: () => 1,
       purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
@@ -56,6 +57,23 @@ describe('quotation view fee integration', () => {
       for (const key of ['quote1', 'quote2', 'quote3', 'quoteCustom']) expect(after[key]).toBe(before[key] + 1.25)
       expect(after.totalCostCny).toBe(before.totalCostCny)
     }
+    context.commissionThreshold.value = '0.95'
+    const commissioned = run.excelQuoteRows(product)
+    for (const before of adjusted) {
+      const after = commissioned.find((row: { channelKey: string }) => row.channelKey === before.channelKey)
+      for (const key of ['quote1', 'quote2', 'quote3', 'quoteCustom']) expect(after[key]).toBe(applyCommissionThreshold(before[key], .95))
+      expect(after.totalCostCny).toBe(before.totalCostCny)
+      expect(after.quoteCny).toBe(quoteCnyFromUsd(after.quoteCustom, 5))
+    }
+    expect(run.excelQuoteRows(product)).toEqual(commissioned)
+    context.commissionThreshold.value = ''
+    const invalid = run.excelQuoteRows(product)
+    expect(invalid.every((row: {quote1: number|null; taxConfigured: boolean}) => row.quote1 === null && !row.taxConfigured)).toBe(true)
+    context.commissionError.value = COMMISSION_THRESHOLD_ERROR
+    await run.copySpecifiedQuotes(commissioned)
+    expect(copied).toBe('')
+    context.commissionError.value = ''
+    context.commissionThreshold.value = '1'
     context.customerOperation.value.feeUsd = 0
     expect(run.excelQuoteRows(product)).toEqual(rows)
     expect(run.finalSalePrice({ ...product, selectedChannelKey: '1::物流商::PAY' })).toBe(90)
@@ -123,4 +141,13 @@ it('blocks calculation and copying immediately when purchase tax points are miss
   await run.save()
   run.useLogistics({}, {})
   expect(blocked).toBe(4)
+})
+
+it('blocks direct save and copy for an invalid commission before touching a record', async () => {
+  let blocked = 0
+  const run = new Function('purchaseTaxBlockReason', 'commissionError', 'toast', 'nextTick', js + '\nreturn {save, copySpecifiedQuotes}')(
+    { value: '' }, { value: COMMISSION_THRESHOLD_ERROR }, () => { blocked++ }, nextTick)
+  await run.save()
+  await run.copySpecifiedQuotes([{quote1:6}])
+  expect(blocked).toBe(2)
 })

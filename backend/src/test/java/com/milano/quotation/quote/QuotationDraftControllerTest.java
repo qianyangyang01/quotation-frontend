@@ -42,6 +42,21 @@ class QuotationDraftControllerTest {
         assertTrue(saved.path("payload").path("product").path("purchaseInvoiceTaxApplied").asBoolean());
     }
 
+    @Test void roundTripsCommissionForEmployeeAndAdminAndRejectsInvalidInput() {
+        for (var role : new String[]{"employee", "super_admin"}) {
+            var principal = new QuotationPrincipal(UUID.randomUUID(), role, role, "hash", role, true, false, List.of("quote"));
+            var login = new UsernamePasswordAuthenticationToken(principal, "", principal.getAuthorities());
+            when(drafts.findById(role)).thenReturn(Optional.empty());
+            when(drafts.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+            var saved = controller.saveState(validDraft().put("commissionThreshold", .95), -1, login).data();
+            assertEquals(.95, saved.path("payload").path("commissionThreshold").asDouble());
+            var old = controller.saveState(validDraft(), -1, login).data();
+            assertEquals(1, old.path("payload").path("commissionThreshold").asInt());
+            for (double bad : new double[]{0, -1, 1.01}) assertThrows(com.milano.quotation.common.FieldValidationException.class, () -> controller.saveState(validDraft().put("commissionThreshold", bad), -1, login));
+            assertThrows(com.milano.quotation.common.FieldValidationException.class, () -> controller.saveState(validDraft().putNull("commissionThreshold"), -1, login));
+        }
+    }
+
     @Test void rejectsStaleVersionAndProtectsNewerDraftFromDelete() {
         var row = row(3);
         when(drafts.findById("ADMIN")).thenReturn(Optional.of(row));

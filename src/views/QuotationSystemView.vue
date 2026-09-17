@@ -18,6 +18,7 @@ import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydra
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
+import { applyCommissionThreshold, parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { validateQuotationConditions } from '@/services/quotationValidation'
 import { logisticsRebuilding, buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import { loadQuotationWorkspaceConfiguration } from '@/services/quotationWorkspaceBootstrap'
@@ -151,6 +152,8 @@ function selectFinanceCustomer(id: string) {
 }
 const productCategory = computed(() => purchaseCategoryForSkus(quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => item.sku) : [products.value[0]?.sku || ''], new Map(purchaseRecords.value.map(item => [item.sku.toUpperCase(), item]))))
 const monthlySalesEstimate = ref('10')
+const commissionThreshold = ref('1')
+const commissionError = computed(() => parseCommissionThreshold(commissionThreshold.value) == null ? COMMISSION_THRESHOLD_ERROR : '')
 const draftVersion = ref(-1)
 const draftUpdatedAt = ref('')
 const draftStatus = ref<'loading' | 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict'>('loading')
@@ -284,7 +287,8 @@ function taxResult(country: string, provider: string, baseQuoteCny: number, rule
   const relations = rule?.relations.filter(row => row.carrier === provider) || []
   const key = channelKey || (rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : '')
   const fees = calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd, usdCny: exchange.value.usd, quantity, unit: quoteMode.value === 'bundle' ? '套' : '件' })
-  return { ...fees, configured: fees.configured && customerOperation.value.configured, totalUsd: addCustomerOperationFee(fees.totalUsd, customerOperation.value.feeUsd), label: customerOperation.value.configured ? fees.label : customerOperation.value.message }
+  const totalUsd = applyCommissionThreshold(addCustomerOperationFee(fees.totalUsd, customerOperation.value.feeUsd), commissionThreshold.value)
+  return { ...fees, configured: totalUsd != null && fees.configured && customerOperation.value.configured, totalUsd: totalUsd ?? 0, label: totalUsd == null ? COMMISSION_THRESHOLD_ERROR : customerOperation.value.configured ? fees.label : customerOperation.value.message }
 }
 function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
@@ -338,7 +342,7 @@ function conditionIssues(options: { includeSku: boolean; includeCategory: boolea
     customerName: customerName.value, quoteMode: quoteMode.value, sku: skuSearch.value, productCategory: productCategory.value,
     logisticsAttribute: p?.logisticsAttribute || '', allowedLogisticsAttributes: quotationAttributeOptions.value,
     customerGrade: selectedCustomerGrade.value, enabledCustomerGrades: customerGradeSettings.filter(item => item.enabled).map(item => item.grade),
-    monthlySalesEstimate: monthlySalesEstimate.value,
+    monthlySalesEstimate: monthlySalesEstimate.value, commissionThreshold: parseCommissionThreshold(commissionThreshold.value),
   }, options)
 }
 function blockConditionProgress(issues: Array<{ key: string; message: string }>) {
@@ -810,7 +814,7 @@ function draftPayload(): QuotationDraftPayload {
     productCategory: productCategory.value,
     logisticsAttribute: p.logisticsAttribute,
     selectedCustomerGrade: selectedCustomerGrade.value,
-    monthlySalesEstimate: monthlySalesEstimate.value,
+    monthlySalesEstimate: monthlySalesEstimate.value, commissionThreshold: parseCommissionThreshold(commissionThreshold.value),
     customQuoteQuantity: Math.max(1, Math.floor(customQuoteQuantity.value || 1)),
     quoteMatrixMode: quoteMatrixMode.value,
     selectedQuoteRegions: { ...selectedQuoteRegions.value },
@@ -859,6 +863,7 @@ async function flushDraft() {
       draftStatus.value = 'saving'
       draftError.value = ''
       try {
+        if (commissionError.value) throw new Error(commissionError.value)
         const saved = await saveQuotationDraft(payload, draftVersion.value)
         draftVersion.value = saved.version
         draftUpdatedAt.value = saved.updatedAt || new Date().toISOString()
@@ -899,6 +904,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   selectedCustomerId.value = String(payload.selectedCustomerId || '')
   skuSearch.value = String(payload.skuSearch || '').trim().toUpperCase()
   selectedCustomerGrade.value = customerGradeSettings.some(item => item.enabled && item.grade === payload.selectedCustomerGrade) ? payload.selectedCustomerGrade as CustomerGrade : (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
+  commissionThreshold.value = payload.commissionThreshold === undefined ? '1' : String(payload.commissionThreshold ?? '')
   monthlySalesEstimate.value = ['10', '100', '100+'].includes(payload.monthlySalesEstimate) ? payload.monthlySalesEstimate : '10'
   customQuoteQuantity.value = Math.max(1, Math.floor(Number(payload.customQuoteQuantity) || 1))
   quoteMatrixMode.value = ['specified', 'template'].includes(payload.quoteMatrixMode) ? payload.quoteMatrixMode : 'common'
@@ -997,6 +1003,7 @@ async function resetLocalDraft() {
   selectedCustomerId.value = ''
   skuSearch.value = ''
   monthlySalesEstimate.value = '10'
+  commissionThreshold.value = '1'
   selectedCustomerGrade.value = (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   quoteMode.value = 'single'
   quoteMatrixMode.value = 'common'
@@ -1367,6 +1374,7 @@ function quoteMatrixContextKey(p: Product) {
     tax: financeTaxSettings.value, surcharge: financeSurchargeSettings.value, policies: financePolicies.value,
     quantity: p.quantity, customQuantity: customQuoteQuantity.value,
     purchase: p.purchase, freight: p.purchaseFreightPerUnit, invoiceTax: p.purchaseInvoiceTaxApplied,
+    commissionThreshold: commissionThreshold.value,
     monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd, eurUsd: exchange.value.eurUsd,
     purchaseCost: quoteMode.value === 'bundle' ? bundlePurchaseCost(1)
       : purchaseRecords.value.map(record => purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied)),
@@ -1485,7 +1493,7 @@ const saveValidationIssues = computed(() => {
   if (quoteMode.value === 'single' && (purchaseQueryError.value || (p?.sku && skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== p.sku))) issues.push({ key: 'sku', label: '商品 SKU', message: purchaseQueryError.value || 'SKU 已改变，请重新查询商品后保存' })
   if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || '最新资料正在读取，请稍候' })
   if (draftInitializationFailed.value || !financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: '财务设置尚未完整加载，请重试读取后保存' })
-  const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'预估月销量' }
+  const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'预估月销量', commissionThreshold:'佣金阈值' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
   const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
@@ -1508,7 +1516,7 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : ''))
-const displayedSaveBlockReason = computed(() => purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
+const displayedSaveBlockReason = computed(() => commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
 const displayedInvalidFields = computed(() => [...new Set([...queryValidationFields.value, ...displayedSaveValidationIssues.value.map(issue => issue.key)])])
 async function attemptSave() {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
@@ -1535,7 +1543,7 @@ async function attemptSave() {
   } finally { savingQuotation.value = false }
 }
 function locateValidationIssue(key: string) {
-  const selector = ['customerName','quoteMode','productCategory','sku','logisticsAttribute','customerGrade','monthlySalesEstimate'].includes(key)
+  const selector = ['customerName','quoteMode','productCategory','sku','logisticsAttribute','customerGrade','monthlySalesEstimate','commissionThreshold'].includes(key)
     ? `[data-validation-field="${key}"]`
     : key === 'taxPolicy' || key === 'businessReadiness'
       ? '.quote-preview'
@@ -1546,6 +1554,7 @@ function locateValidationIssue(key: string) {
 }
 async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
+  if (commissionError.value) { toast(commissionError.value); return }
   if (!rows.length) {
     toast('请先添加需要复制的指定报价渠道')
     return
@@ -1714,6 +1723,7 @@ const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave> | null>(n
 async function save() {
   await nextTick() // Capture the editor only after recalculated parent props reach it.
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
+  if (commissionError.value) { toast(commissionError.value); return }
   if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
   if (!customerOperation.value.configured) { toast(customerOperation.value.message); return }
@@ -1781,7 +1791,7 @@ async function save() {
     packageHeightCm: quoteMode.value === 'single' ? p.packageHeightCm : undefined,
     defaultVolumeDivisor: quoteMode.value === 'single' ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
     logisticsAttribute: p.logisticsAttribute, ...summary,
-    customerGrade: customerGradeLabel(selectedCustomerGrade.value), monthlySalesEstimate: monthlySalesEstimate.value, exchangeRate: exchange.value.usd,
+    customerGrade: customerGradeLabel(selectedCustomerGrade.value), monthlySalesEstimate: monthlySalesEstimate.value, commissionThreshold: parseCommissionThreshold(commissionThreshold.value), exchangeRate: exchange.value.usd,
     matrixMode: quoteMatrixMode.value,
     quotationTemplateId: templateSnapshot?.id,
     quotationTemplateName: templateSnapshot?.name,
@@ -1856,6 +1866,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
+          :commission-threshold="commissionThreshold" :commission-error="commissionError" @update:commission-threshold="commissionThreshold=$event"
           :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
@@ -1934,7 +1945,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :reset-key="JSON.stringify([currentAuthUser.id, quoteMode, quoteMatrixMode, p.sku, bundleItems.map(item => [item.sku, item.quantityPerSet])])"
           :calculate-price="(row, quantity) => { const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey); return result?.tax.configured ? result.quoteUsd : null }"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
-          :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
+          :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
           :sku="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
           :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
@@ -1951,6 +1962,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button class="modal-close" @click="showRule = showHistory = false">×</button>
         <template v-if="showRule">
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
+          <p>当前佣金阈值：{{ commissionThreshold || '未填写' }}。最终报价＝原最终美元报价 ÷ 佣金阈值，再按0.05美元向上取整；阈值1不调整报价。</p>
           <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每满 50g 增加 2g 包材重量</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 客户等级系数，换算美元并加税费；从财务列表选择客户时再加公司操作费，每单一次，最后按0.05美元向上取整</span></li></ol>
           <p class="modal-tip">美元价格按保存报价时的汇率快照换算，历史报价不会随新汇率自动改变。</p>
         </template>

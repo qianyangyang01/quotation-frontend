@@ -13,6 +13,7 @@ export interface DraftChannelSelection {
 }
 
 export interface QuotationDraftPayload {
+  commissionThreshold?: number | null
   schemaVersion: 2
   customerName: string
   selectedCustomerId?: string

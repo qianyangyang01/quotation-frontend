@@ -69,7 +69,7 @@ it('distinguishes choosing a configured client from typing an identical name and
 it('shows no manual product category control for either single or bundle conditions', () => {
   for (const mode of ['single', 'bundle'] as const) {
     const host = document.createElement('div')
-    const app = createApp({ render: () => h(Conditions, { mode, skuSearch: '', customerName: '', monthlySalesEstimate: '10', attributes: ['普货'], logisticsAttribute: '普货', grades: [{ grade: 'S' }], grade: 'S', coefficient: 1.2, salesperson: '测试' }) }); app.mount(host)
+    const app = createApp({ render: () => h(Conditions, { commissionThreshold: '1', mode, skuSearch: '', customerName: '', monthlySalesEstimate: '10', attributes: ['普货'], logisticsAttribute: '普货', grades: [{ grade: 'S' }], grade: 'S', coefficient: 1.2, salesperson: '测试' }) }); app.mount(host)
     expect(host.querySelector('[data-validation-field=productCategory]')).toBeNull()
     expect(host.querySelector('[role=combobox]')).not.toBeNull()
     app.unmount()

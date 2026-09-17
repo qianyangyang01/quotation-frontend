@@ -7,6 +7,16 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import static org.junit.jupiter.api.Assertions.*;
 
 class QuotationSubmissionValidatorTest {
+    @Test void validatesCommissionAndPreservesAdjustedSnapshots() {
+        var old = valid(); validator.validate(old); assertEquals(1, old.path("commissionThreshold").asInt());
+        var input = valid().put("commissionThreshold", .95).put("systemQuoteUsd", 6.35).put("systemQuoteCny", 42.55).put("exchangeRate", 6.7);
+        validator.validate(input); validator.validateQuotePricing(input);
+        assertEquals(6.35, input.path("systemQuoteUsd").asDouble());
+        for (double bad : new double[]{0, -1, 1.01}) assertThrows(FieldValidationException.class, () -> validator.validate(valid().put("commissionThreshold", bad)));
+        assertThrows(FieldValidationException.class, () -> validator.validate(valid().putNull("commissionThreshold")));
+        assertThrows(FieldValidationException.class, () -> validator.validate(valid().put("commissionThreshold", "0.95")));
+    }
+
     @Test void acceptsNewCustomerForSingleAndBundleAcrossMatrixModes() {
         for (var mode : new String[]{"common", "specified", "template"}) {
             var single = valid().put("customerGrade", "新客户").put("matrixMode", mode);

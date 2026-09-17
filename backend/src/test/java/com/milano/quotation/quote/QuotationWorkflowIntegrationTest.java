@@ -78,11 +78,14 @@ class QuotationWorkflowIntegrationTest {
         }
         var quoteBody = """
             {"customerName":"客户甲","quoteMode":"single","primarySku":"SKU-1","productCategory":"其他","logisticsAttribute":"普货","customerGrade":"A级客户","monthlySalesEstimate":"10",
-             "customerOperation":{"id":"client-a","name":"客户甲","feeUsd":1.25},"quoteOptions":[{"id":"us","country":"美国","carrier":"承运商A","channel":"渠道A"}]}
+             "commissionThreshold":0.95,"systemQuoteUsd":6.35,"systemQuoteCny":42.55,"exchangeRate":6.7,"customerOperation":{"id":"client-a","name":"客户甲","feeUsd":1.25},"quoteOptions":[{"id":"us","country":"美国","carrier":"承运商A","channel":"渠道A"}]}
             """;
         var quotation = mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","customer-operation-snapshot")
                 .contentType("application/json").content(quoteBody)).andExpect(status().isOk()).andReturn();
         var quotationId = mapper.readTree(quotation.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+        mvc.perform(get("/api/v1/quotations/{id}", quotationId).session(session))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.commissionThreshold").value(.95))
+                .andExpect(jsonPath("$.data.systemQuoteUsd").value(6.35)).andExpect(jsonPath("$.data.systemQuoteCny").value(42.55));
         mvc.perform(get("/api/v1/finance-settings/customer-operation-fees")
                 .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("sales").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_quote"))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.value.customers[0].name").value("客户甲"));

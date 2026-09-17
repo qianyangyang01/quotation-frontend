@@ -48,6 +48,7 @@ public class QuotationSubmissionValidator {
     }
 
     public void validate(ObjectNode input) {
+        CommissionThreshold.normalize(input);
         var errors = new ArrayList<ApiResponse.FieldError>();
         required(errors, input, "customerName", "客户名称不能为空", 120);
         oneOf(errors, input, "quoteMode", MODES, "报价模式不合法");

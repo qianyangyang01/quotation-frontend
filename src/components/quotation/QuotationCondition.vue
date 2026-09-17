@@ -4,8 +4,8 @@ import type { CustomerOperationFee } from '@/data/customerOperationFees'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import type { QuotationMode } from './types'
 
-withDefaults(defineProps<{ mode: QuotationMode; skuSearch: string; customerName: string; selectedCustomerId?: string; customers?: CustomerOperationFee[]; operationMessage?: string; monthlySalesEstimate: string; attributes: string[]; logisticsAttribute: string; grades: Array<{ grade: string }>; grade: string; coefficient: number; salesperson: string; invalidFields?: string[] }>(), { invalidFields: () => [], customers: () => [], selectedCustomerId: '', operationMessage: '' })
-defineEmits<{ 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value: string]; 'update:customerName': [value: string]; 'selectCustomer': [id: string]; 'update:monthlySalesEstimate': [value: string]; query: []; queryBundle: []; 'update:logisticsAttribute': [value: string]; 'update:grade': [value: string] }>()
+withDefaults(defineProps<{ commissionThreshold: string; commissionError?: string; mode: QuotationMode; skuSearch: string; customerName: string; selectedCustomerId?: string; customers?: CustomerOperationFee[]; operationMessage?: string; monthlySalesEstimate: string; attributes: string[]; logisticsAttribute: string; grades: Array<{ grade: string }>; grade: string; coefficient: number; salesperson: string; invalidFields?: string[] }>(), { invalidFields: () => [], customers: () => [], selectedCustomerId: '', operationMessage: '' })
+defineEmits<{ 'update:commissionThreshold': [value: string]; 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value: string]; 'update:customerName': [value: string]; 'selectCustomer': [id: string]; 'update:monthlySalesEstimate': [value: string]; query: []; queryBundle: []; 'update:logisticsAttribute': [value: string]; 'update:grade': [value: string] }>()
 </script>
 
 <template>
@@ -20,6 +20,11 @@ defineEmits<{ 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value:
 
       <label class="sales-field" data-validation-field="monthlySalesEstimate" :class="{ invalid:invalidFields.includes('monthlySalesEstimate') }"><span>预估月销量 <em>必填</em></span><select required :value="monthlySalesEstimate" @change="$emit('update:monthlySalesEstimate', ($event.target as HTMLSelectElement).value)"><option value="10">起订量</option><option value="100">阶梯价2</option><option value="100+">阶梯价3</option></select><small v-if="invalidFields.includes('monthlySalesEstimate')" class="field-error">请选择预估月销量</small></label>
     </div>
+    <label class="commission-field" data-validation-field="commissionThreshold" :class="{ invalid: commissionError }">
+      <span>佣金阈值</span>
+      <input aria-label="佣金阈值" inputmode="decimal" type="text" :value="commissionThreshold" :aria-invalid="!!commissionError" aria-describedby="commission-help" @input="$emit('update:commissionThreshold', ($event.target as HTMLInputElement).value)">
+      <small id="commission-help" :class="{ 'field-error': commissionError }">{{ commissionError || '最终报价 ÷ 此值，默认1不调整；例如0.95' }}</small>
+    </label>
     <footer><span>{{ mode === 'bundle' ? '可一次查询全部组合 SKU，也可在组合明细中逐行查询。' : '查询后将刷新商品成本、重量及下方渠道报价矩阵。' }}</span><button v-if="mode === 'single'" type="button" @click="$emit('query')">查询商品</button><button v-else type="button" @click="$emit('queryBundle')">查询全部 SKU</button></footer>
   </section>
 </template>
@@ -31,4 +36,5 @@ defineEmits<{ 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value:
 .condition-grid,.condition-grid.bundle{grid-template-columns:repeat(4,minmax(0,1fr));column-gap:14px;row-gap:12px}.customer-field{grid-column:1}.mode-field{grid-column:2}.sku-field{grid-column:3}.category-field{grid-column:4}.logistics-field{grid-column:1;grid-row:2}.grade-field{grid-column:2;grid-row:2}.sales-field{grid-column:3;grid-row:2}.condition-grid.bundle .category-field{grid-column:3}.condition-grid.bundle .logistics-field{grid-column:1;grid-row:2}.condition-grid.bundle .grade-field{grid-column:2;grid-row:2}.condition-grid.bundle .sales-field{grid-column:3;grid-row:2}@media(max-width:1100px){.condition-grid,.condition-grid.bundle{grid-template-columns:repeat(3,minmax(0,1fr))}.condition-grid label,.condition-grid.bundle label{grid-column:auto;grid-row:auto}.category-field{grid-column:1!important;grid-row:2!important}}@media(max-width:900px){.condition-grid,.condition-grid.bundle{grid-template-columns:1fr 1fr}.condition-grid label,.condition-grid.bundle label,.category-field{grid-column:auto!important;grid-row:auto!important}}@media(max-width:500px){.condition-grid,.condition-grid.bundle{grid-template-columns:1fr}}
 .condition-grid,.condition-grid.bundle{grid-template-columns:repeat(3,minmax(0,1fr))}.condition-grid label,.condition-grid.bundle label{grid-column:auto;grid-row:auto}@media(max-width:900px){.condition-grid,.condition-grid.bundle{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:500px){.condition-grid,.condition-grid.bundle{grid-template-columns:1fr}}
 .condition-grid label.invalid input,.condition-grid label.invalid select{border-color:#e2523f;background:#fff8f6;box-shadow:0 0 0 3px rgba(226,82,63,.09)}.condition-grid .field-error{color:#c43f31;font-size:9px;font-weight:750}
+.commission-field{display:grid;gap:6px;margin-top:14px;max-width:440px;color:#66737e;font-size:11px}.commission-field input{width:160px;height:36px;box-sizing:border-box;border:1px solid #d9e0e6;border-radius:7px;padding:0 10px}.commission-field small{font-size:10px;color:#8c97a1}.commission-field.invalid input{border-color:#e2523f;background:#fff8f6}.commission-field .field-error{color:#c43f31}
 </style>
