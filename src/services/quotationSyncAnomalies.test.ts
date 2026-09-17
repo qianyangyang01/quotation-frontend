@@ -23,6 +23,16 @@ function setup(){
 it('accepts unchanged purchases and selected channel validation',async()=>{
   const {state,run}=setup();await run(undefined,true);expect(state.syncPending.value).toBe('')
 })
+it('requires refreshing a repaired purchase before an employee can save the old quote',async()=>{
+  const {state,run}=setup()
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v2'},logisticsRevision:'r1',financeVersions:{}})
+  expect(await run()).toBe(false)
+  expect(state.syncPending.value).toBe('采购资料')
+  expect(await run(undefined,true)).toBe(false)
+  state.purchaseRevision=()=> 'v2'
+  expect(await run(undefined,true)).toBe(true)
+  expect(state.syncPending.value).toBe('')
+})
 it.each([
   [422,'当前重量没有可用运价'],[422,'渠道不在该国家及货物属性的财务允许范围内'],
   [409,'物流费用与服务器核算不一致，请重新计价'],[409,'当前渠道时效已变化，请更新报价'],
