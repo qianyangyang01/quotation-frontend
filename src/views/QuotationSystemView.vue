@@ -843,7 +843,8 @@ function draftPayload(): QuotationDraftPayload {
 }
 function draftSignature() { return JSON.stringify(draftPayload()) }
 function markDraftDirty(signature = draftSignature()) {
-  if (!draftReady.value || signature === lastSavedDraftSignature) return
+  if (!draftReady.value) return
+  if (signature === lastSavedDraftSignature && !draftDirty && draftStatus.value !== 'error') return
   draftDirty = true
   if (draftStatus.value === 'conflict' || resolvingDraftConflict.value) return
   draftStatus.value = 'dirty'
