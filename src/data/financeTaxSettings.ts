@@ -4,6 +4,7 @@ import { EU_TAX_GROUP, isEuCountry, sameTaxCountry } from './europeanUnion'
 import { calculateEuYunExpressTax, type EuYunExpressTaxContext } from './euYunExpressTax'
 import { legacyLogisticsProviderNames, logisticsChannels, logisticsCountries } from './logistics'
 import { readFinanceSetting, writeFinanceSetting } from '@/services/financeSettings'
+import { calculateEuHandlingTax } from './euHandlingTax'
 
 export type LogisticsTaxMode = 'exempt' | 'taxable'
 
@@ -15,6 +16,8 @@ export type FinanceCountryTaxSetting = {
   sortOrder: number
   providers?: FinanceProviderTaxSetting[]
   channelRules?: ChannelTaxRule[]
+  euTaxMode?: 'override' | 'add-handling'
+  handlingRules?: ChannelTaxRule[]
 }
 
 export type FinanceProviderChannelTax = {
@@ -106,6 +109,8 @@ export function normalizeFinanceTaxSettings(raw?: Partial<FinanceTaxSettings> | 
       return {
         ...(Array.isArray(stored?.providers) ? { providers: stored.providers.map(row => ({ ...row, channels: (row.channels || []).map(channel => ({ ...channel })) })) } : {}),
         ...(stored?.channelRules ? { channelRules: stored.channelRules.map(rule => ({ ...rule })) } : {}),
+        ...(includeEuGroup && stored?.euTaxMode ? { euTaxMode: stored.euTaxMode } : {}),
+        ...(includeEuGroup && stored?.handlingRules ? { handlingRules: stored.handlingRules.map(rule => ({ ...rule })) } : {}),
         country: fallback.country,
         fixedFeeUsd,
         selected: typeof stored?.selected === 'boolean' ? stored.selected : Boolean(stored && (stored.enabled === true || fixedFeeUsd > 0)),
@@ -135,6 +140,14 @@ export function loadFinanceTaxSettings(): FinanceTaxSettings {
 
 export async function saveFinanceTaxSettings(settings: FinanceTaxSettings): Promise<FinanceTaxSettings> {
   for (const country of settings.countries) {
+    if (country.euTaxMode && (!isEuCountry(country.country) || !['override', 'add-handling'].includes(country.euTaxMode))) throw new Error('仅欧盟成员国支持欧盟关税加处理费')
+    const handlingKeys = new Set<string>()
+    for (const rule of country.handlingRules || []) {
+      if (!isEuCountry(country.country)) throw new Error('仅欧盟成员国支持额外处理费')
+      validateCountryChannelTax('', rule)
+      if (handlingKeys.has(rule.key)) throw new Error('处理费渠道重复')
+      handlingKeys.add(rule.key)
+    }
     const keys = new Set<string>()
     for (const rule of country.channelRules || []) { validateCountryChannelTax(country.country, rule); if (keys.has(rule.key)) throw new Error("渠道税费重复"); keys.add(rule.key) }
     if (typeof country.fixedFeeUsd !== 'number' || !Number.isFinite(country.fixedFeeUsd) || country.fixedFeeUsd < 0) throw new Error(`${country.country}关税必须为有效非负金额`)
@@ -153,6 +166,8 @@ export function calculateFinanceQuoteTax(
   context?: EuYunExpressTaxContext,
 ): FinanceQuoteTaxResult {
   const normalizedBase = Number.isFinite(Number(baseQuoteUsd)) ? Math.max(0, Number(baseQuoteUsd)) : 0
+  const euHandling = calculateEuHandlingTax(settings, country, provider, normalizedBase, context)
+  if (euHandling) return euHandling
   const configuredChannel = calculateChannelTax(settings, country, normalizedBase, context)
   if (configuredChannel) return configuredChannel
   const channelTax = calculateEuYunExpressTax(country, provider, normalizedBase, context)

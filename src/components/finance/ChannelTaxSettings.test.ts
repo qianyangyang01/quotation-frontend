@@ -4,6 +4,43 @@ import { expect, it, vi } from 'vitest'
 vi.mock('@/data/financeChannelPolicies',()=>({channelsAvailableForCountry:(country:string)=>Array.from({length:25},(_,i)=>({key:`${i+1}::燕文::C-${i}`,carrier:'燕文',channel:`${country}渠道${i+1}`,ruleName:'渠道'}))}))
 import Component from './ChannelTaxSettings.vue'
 import { normalizeFinanceTaxSettings } from '@/data/financeTaxSettings'
+import { calculateFinanceQuoteTax } from '@/data/financeTaxSettings'
+
+it('switches Romania to EU plus processing and preserves old duties through save and remount', async () => {
+  const key = '1::燕文::C-0'
+  const fee = (amount: number) => ({ key, mode: 'fixed-order' as const, currency: 'USD' as const, amount, perKg: 0 })
+  const value = ref(normalizeFinanceTaxSettings({ countries: [
+    { country: '欧盟', selected: true, enabled: true, sortOrder: 1, fixedFeeUsd: 0, channelRules: [fee(3)] },
+    { country: '罗马尼亚', selected: true, enabled: true, sortOrder: 2, fixedFeeUsd: 0, channelRules: [fee(7)] },
+  ] }))
+  const host = document.createElement('div'); document.body.append(host)
+  let saved = ''
+  const mount = () => createApp({ render: () => h(Component, { modelValue: value.value, 'onUpdate:modelValue': v => value.value = v, exchange: { usdCny: 6.7 }, saving: false, onSave: () => { saved = JSON.stringify(value.value) } }) })
+  let app = mount(); app.mount(host)
+  const click = async (text: string) => { [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.trim() === text)!.click(); await nextTick() }
+  const mode = async (value: string) => { const select = host.querySelector<HTMLSelectElement>('[aria-label=本国计费方式]')!; select.value = value; select.dispatchEvent(new Event('change')); await nextTick() }
+  const result = () => calculateFinanceQuoteTax(value.value, '罗马尼亚', '燕文', 10, { channelKey: key })
+  try {
+    await click('罗马尼亚'); await mode('add-handling')
+    expect(result().taxUsd).toBe(3)
+    host.querySelector<HTMLButtonElement>('.text-button')!.click(); await nextTick()
+    const input = host.querySelector<HTMLInputElement>('[aria-label=原币金额]')!
+    expect(input.value).toBe('')
+    await click('应用到所选渠道')
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('有效数字')
+    input.value = '1'; input.dispatchEvent(new Event('input')); await nextTick()
+    await click('应用到所选渠道')
+    expect(host.textContent).toContain('欧盟 $3.00 + 处理费 $1.00 = $4.00/单')
+    expect(result().taxUsd).toBe(4)
+    expect(value.value.countries.find(c => c.country === '罗马尼亚')!.channelRules![0]!.amount).toBe(7)
+    await click('保存并发布')
+    app.unmount(); value.value = normalizeFinanceTaxSettings(JSON.parse(saved)); app = mount(); app.mount(host)
+    await click('罗马尼亚')
+    expect(host.textContent).toContain('欧盟 $3.00 + 处理费 $1.00 = $4.00/单')
+    await mode('override'); expect(result().taxUsd).toBe(7)
+    await mode('add-handling'); expect(result().taxUsd).toBe(4)
+  } finally { app.unmount(); host.remove() }
+})
 it('shows imported money to two decimals without changing untouched values, and saves edited cents', async()=>{
   const original = 3.58208955223881
   const value=ref(normalizeFinanceTaxSettings({countries:[{country:'美国',selected:true,enabled:true,fixedFeeUsd:0,sortOrder:1,channelRules:[{key:'1::燕文::C-0',mode:'fixed-order',amount:original,perKg:0,currency:'USD'}]}]}))

@@ -11,6 +11,15 @@ import java.util.Set;
 public final class ChannelTaxRules {
     private ChannelTaxRules() {}
     public static void validateSettings(JsonNode country) {
+        if (country.has("euTaxMode") && (!EuropeanUnion.contains(country.path("country").asText())
+            || !Set.of("override", "add-handling").contains(country.path("euTaxMode").asText()))) throw AppException.unprocessable("仅欧盟成员国支持欧盟关税加处理费");
+        if (country.has("handlingRules")) {
+            if (!EuropeanUnion.contains(country.path("country").asText())) throw AppException.unprocessable("仅欧盟成员国支持额外处理费");
+            var handling = (tools.jackson.databind.node.ObjectNode) country.deepCopy();
+            handling.remove("handlingRules"); handling.remove("euTaxMode");
+            handling.put("country", ""); handling.set("channelRules", country.path("handlingRules"));
+            validateSettings(handling);
+        }
         if (!country.has("channelRules")) return;
         if (!country.path("channelRules").isArray() || country.path("channelRules").size() > 2000) throw AppException.unprocessable("渠道税费须为列表，最多2000个渠道");
         var keys = new HashSet<String>();
@@ -37,6 +46,8 @@ public final class ChannelTaxRules {
         return null;
     }
     public static boolean validateQuote(JsonNode settings, JsonNode option, JsonNode exchange, int customQuantity) {
+        if (EuHandlingTax.validateQuote(settings, option, exchange, customQuantity)) return true;
+        for (var snapshot : option.path("taxCalculations")) if ("eu-handling-v1".equals(snapshot.path("rule").asText())) changed();
         var rule = matching(settings, option.path("country").asText(), option.path("channelKey").asText());
         if (rule == null) return false;
         var mode=rule.path("mode").asText();

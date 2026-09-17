@@ -96,6 +96,19 @@ describe('quotation view fee integration', () => {
     expect(unavailable).toMatchObject({quote1:null,quote2:null,quote3:null,quoteCustom:null,taxConfigured:false})
     expect(JSON.stringify(unavailable.quantityMessages)).toContain('该渠道不支持当前国家')
 
+    // Romania adds its own processing fee to EU duty in both single and bundle quantity paths.
+    settings.countries.push(
+      { country: '欧盟', selected: true, enabled: true, fixedFeeUsd: 3, sortOrder: 2 },
+      { country: '罗马尼亚', selected: true, enabled: true, fixedFeeUsd: 7, sortOrder: 3, euTaxMode: 'add-handling', handlingRules: [{ key: '1::物流商::PAY', mode: 'fixed-order', amount: 1, perKg: 0, currency: 'USD' }] },
+    )
+    const romaniaRows = run.excelQuoteRows({ ...product, country: '罗马尼亚' })
+    const romania = romaniaRows.find((row: { channelKey: string }) => row.channelKey === '1::物流商::PAY')
+    expect(romania).toMatchObject({ quote1: 15, quote2: 24, quote3: 33, quoteCustom: 96, surchargeUsd: 0 })
+    expect(romania.taxCalculations['10']).toMatchObject({ rule: 'eu-handling-v1', euTaxUsd: 3, handlingFeeUsd: 1, taxUsd: 4 })
+    const romaniaSheet = buildCustomerQuoteSheet({ rows: romaniaRows, countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 10, bundle: mode === 'bundle', quantities,
+      calculatePrice: (row: QuoteSheetSourceRow, quantity: number) => run.quantityCostBreakdown({ ...product, country: '罗马尼亚' }, row.rule, quantity, row.country, row.carrier, '', row.channelKey)?.quoteUsd ?? null })
+    expect(romaniaSheet.rows.find(row => row.key.includes('::PAY"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 6))
+
   })
 })
 

@@ -2,10 +2,11 @@ import { decimal } from '@/services/quotationDecimal'
 import type { FinanceQuoteTaxResult, FinanceTaxSettings } from './financeTaxSettings'
 import { matchesEuYunExpressTax, type EuYunExpressTaxContext, type EuYunExpressTaxSnapshot } from './euYunExpressTax'
 import { EU_TAX_GROUP, isEuCountry, sameTaxCountry } from './europeanUnion'
+import type { EuHandlingTaxSnapshot } from './euHandlingTax'
 
 export type ChannelTaxRule = { key: string; mode: 'fixed-order' | 'weight' | 'exempt' | 'no-tax' | 'unavailable'; amount: number; currency: 'USD' | 'CNY' | 'EUR'; perKg: number; source?: string }
 export type ChannelTaxSnapshot = { rule: 'channel-tax-v1'; setting: ChannelTaxRule; country: string; weightKg: number; usdCny: number; eurUsd: number; taxUsd: number }
-export type FinanceTaxCalculation = EuYunExpressTaxSnapshot | ChannelTaxSnapshot
+export type FinanceTaxCalculation = EuYunExpressTaxSnapshot | ChannelTaxSnapshot | EuHandlingTaxSnapshot
 
 export function taxCountryKey(value: string) {
   const aliases: Record<string, string> = { 美国: 'US', 新西兰: 'NZ', 墨西哥: 'MX', 阿联酋: 'AE', 阿拉伯联合酋长国: 'AE', 沙特阿拉伯: 'SA', 哥伦比亚: 'CO', 约旦: 'JO', 摩洛哥: 'MA', 阿曼: 'OM' }
