@@ -1,19 +1,22 @@
 import brandUrl from '@/assets/quote-sheet/brand.png'
 import headerUrl from '@/assets/quote-sheet/table-header.png'
 import notesUrl from '@/assets/quote-sheet/notes.png'
-import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, quoteSheetColumns, quoteSheetCell, type QuoteSheetOptionalColumn, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
 
 export const QUOTE_SHEET_WIDTH = 1536
 export const QUOTE_SHEET_ROWS_PER_IMAGE = 24
 export type QuoteSheetImage = { blob: Blob; width: number; height: number; firstRow: number; lastRow: number }
-export function quoteSheetLayout(priceColumns: number) {
+export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = []) {
   if (!Number.isInteger(priceColumns) || priceColumns < 1 || priceColumns > MAX_QUOTE_SHEET_COLUMNS) throw new Error('价格列须为 1–10 列')
-  const width = QUOTE_SHEET_WIDTH + Math.max(0, priceColumns - 4) * 144
+  const fixedColumns = quoteSheetColumns(hiddenColumns)
+  const columns = [22]
+  fixedColumns.forEach(column => columns.push(columns[columns.length - 1] + column.width))
+  const priceStart = columns[columns.length - 1]
+  const width = Math.max(QUOTE_SHEET_WIDTH, priceStart + priceColumns * 144 + 21)
   const right = width - 21
-  const columns = priceColumns === 4 ? [22, 107, 322, 567, 762, 938, 1081, 1226, 1370, 1515]
-    : [22, 107, 322, 567, 762, 938, ...Array.from({ length: priceColumns }, (_, index) => 938 + (right - 938) * (index + 1) / priceColumns)]
-  return { width, right, columns }
+  columns.push(...Array.from({ length: priceColumns }, (_, index) => priceStart + (right - priceStart) * (index + 1) / priceColumns))
+  return { width, right, columns, fixedColumns }
 }
 const referenceRowHeights = [57, 59, 59, 60, 60, 60]
 
@@ -81,7 +84,9 @@ function exportBlob(canvas: HTMLCanvasElement) {
 export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCancelled: () => boolean = () => false): Promise<QuoteSheetImage[]> {
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
-  const { width, right, columns } = quoteSheetLayout(sheet.quantityLabels.length)
+  const { width, right, columns, fixedColumns } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns)
+  const fixedCount = fixedColumns.length
+  const priceStart = columns[fixedCount]
   if (sheet.rows.some(row => row.prices.length !== sheet.quantityLabels.length)) throw new Error('价格数量与表头不一致，请重新预览')
   const noteTexts = sheet.notes ?? [...CUSTOMER_QUOTE_NOTES]
   const useNotesAsset = width === QUOTE_SHEET_WIDTH && JSON.stringify(noteTexts) === JSON.stringify(CUSTOMER_QUOTE_NOTES)
@@ -96,12 +101,12 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     const context = canvas.getContext('2d')
     if (!context) throw new Error('当前浏览器无法生成报价图片')
     font(context, true)
-    const quantityHeaderHeight = Math.max(44, ...sheet.quantityLabels.map((label, index) => lines(context, label, columns[index + 6] - columns[index + 5] - 20).length * 26 + 8))
+    const quantityHeaderHeight = Math.max(44, ...sheet.quantityLabels.map((label, index) => lines(context, label, columns[index + fixedCount + 1] - columns[index + fixedCount] - 20).length * 26 + 8))
     const tableTop = 225 + quantityHeaderHeight
     const heights = rows.map((row, index) => {
-      const values = [String(row.number), row.country, row.provider, row.shippingTime, row.processingTime ?? '1-2 days', ...row.prices.map(quoteSheetUsd)]
+      const values = [...fixedColumns.map(column => quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
       const lineCount = Math.max(...values.map((value, column) => {
-        font(context, column === 0 || column >= 5)
+        font(context, column === 0 || column >= fixedCount)
         return lines(context, value, columns[column + 1] - columns[column] - 20).length
       }))
       return Math.max(referenceRowHeights[index % 6], lineCount * 26 + 8)
@@ -144,40 +149,27 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     context.fillText(`Date: ${sheet.date}`, 1266 + metadataOffset, agentLines.length === 1 ? 116 : 127)
     context.fillStyle = '#ff8120'
     context.fillRect(22, 164, right - 22, 4)
-    if (sheet.quantityLabels.length === 4) context.drawImage(header, 22, 179)
-    else {
-      context.drawImage(header, 0, 0, 916, 90, 22, 179, 916, 90)
-      context.fillStyle = '#fa8020'; context.fillRect(938, 179, right - 938, tableTop - 179)
-      context.fillStyle = '#fff'
-      centered(context, 'Quote by Quantity (USD)', 938, right, 179, 46, true)
-      context.strokeStyle = '#fff'; context.lineWidth = 1
-      context.beginPath(); context.moveTo(938, 225); context.lineTo(right, 225); context.stroke()
-      columns.slice(5).forEach(x => { context.beginPath(); context.moveTo(x, 225); context.lineTo(x, tableTop); context.stroke() })
-    }
-    if (tableTop > 269) {
-      context.fillStyle = '#fa8020'; context.fillRect(22, 269, 916, tableTop - 269)
-      context.strokeStyle = '#fff'
-      columns.slice(0, 6).forEach(x => { context.beginPath(); context.moveTo(x, 269); context.lineTo(x, tableTop); context.stroke() })
-    }
-    // Replace ONLY the approved dynamic header cells. No Valid Until or hard-coded quantity survives.
-    // Reuse blank orange strips from each original cell, including its exact shading.
-    context.drawImage(header, 548, 0, 1, 90, 568, 179, 193, 90)
+    // Reuse the approved orange shading while laying out only visible columns.
+    context.drawImage(header, 548, 0, 1, 90, 22, 179, right - 22, tableTop - 179)
     context.fillStyle = '#ffffff'
-    centered(context, 'Shipping Time', 567, 762, 179, 90, true)
+    fixedColumns.forEach((column, index) => centered(context, column.key === 'processingTime' ? 'Processing\nTime' : column.label, columns[index], columns[index + 1], 179, tableTop - 179, true))
+    centered(context, 'Quote by Quantity (USD)', priceStart, right, 179, 46, true)
     sheet.quantityLabels.forEach((label, index) => {
-      const left = columns[index + 5], right = columns[index + 6]
-      context.drawImage(header, 930, 46, 1, 44, left + 1, 226, right - left - 2, quantityHeaderHeight - 1)
-      context.fillStyle = '#ffffff'
-      centered(context, label, left, right, 225, quantityHeaderHeight, true)
+      centered(context, label, columns[index + fixedCount], columns[index + fixedCount + 1], 225, quantityHeaderHeight, true)
+    })
+    context.strokeStyle = '#fff'; context.lineWidth = 1
+    context.beginPath(); context.moveTo(priceStart, 225); context.lineTo(right, 225); context.stroke()
+    columns.forEach((x, index) => {
+      context.beginPath(); context.moveTo(x, index <= fixedCount ? 179 : 225); context.lineTo(x, tableTop); context.stroke()
     })
     let y = tableTop
     rows.forEach((row, index) => {
       const height = heights[index]
       context.fillStyle = (offset + index) % 2 ? '#fff2e9' : '#ffffff'
       context.fillRect(22, y, right - 22, height)
-      const values = [String(row.number), row.country, row.provider, row.shippingTime, row.processingTime ?? '1-2 days', ...row.prices.map(quoteSheetUsd)]
+      const values = [...fixedColumns.map(column => quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
       context.fillStyle = '#111111'
-      values.forEach((value, column) => centered(context, value, columns[column], columns[column + 1], y, height, column === 0 || column >= 5))
+      values.forEach((value, column) => centered(context, value, columns[column], columns[column + 1], y, height, column === 0 || column >= fixedCount))
       y += height
       context.strokeStyle = '#d7d7d7'
       context.lineWidth = 1

@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue
 import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
   quoteSheetRowKey, quoteSheetUsd, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
-  MAX_QUOTE_SHEET_COLUMNS, validQuoteSheetQuantity,
+  MAX_QUOTE_SHEET_COLUMNS, validQuoteSheetQuantity, QUOTE_SHEET_OPTIONAL_COLUMNS, quoteSheetColumns, quoteSheetCell,
+  type QuoteSheetOptionalColumn,
   type QuoteSheetCountry, type QuoteSheetSourceRow, type QuoteSheetPriceCalculator, type QuoteSheetRowEdits,
 } from '@/data/customerQuoteSheet'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
@@ -17,6 +18,7 @@ const props = defineProps<{
   calculatePrice?: QuoteSheetPriceCalculator
   resetKey?: string
   initialQuote?: CustomerPriceSnapshot
+  skus?: string[]
 }>()
 const edits = ref(newQuoteSheetEdits(props.salesperson))
 let columnId = 0
@@ -53,7 +55,7 @@ let previousResetKey = props.resetKey ?? props.contextKey
 let disposed = false
 
 const sheet = computed(() => buildCustomerQuoteSheet({
-  rows: props.rows, countries: props.countries, edits: edits.value,
+  rows: props.rows, countries: props.countries, edits: edits.value, skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle,
   quantities: quantities.value, calculatePrice: props.sourcePending ? undefined : props.calculatePrice,
   legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom),
@@ -61,10 +63,16 @@ const sheet = computed(() => buildCustomerQuoteSheet({
 // Tracks calculator dependencies too (tax, weight, exchange rate), even if the original four prices are unchanged.
 watch(sheet, invalidate, { flush: 'sync' })
 const currentImage = computed(() => images.value[activeImage.value])
-const missingProviders = computed(() => [...new Map(props.rows
+const missingProviders = computed(() => !columnVisible('provider') ? [] : [...new Map(props.rows
   .filter(row => !quoteSheetProviderName(row.carrier))
   .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
 const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
+
+const visibleColumns = computed(() => quoteSheetColumns(sheet.value.hiddenColumns))
+function columnVisible(key: QuoteSheetOptionalColumn) { return !edits.value.hiddenColumns?.includes(key) }
+function toggleColumn(key: QuoteSheetOptionalColumn) {
+  edits.value.hiddenColumns = columnVisible(key) ? [...(edits.value.hiddenColumns ?? []), key] : edits.value.hiddenColumns?.filter(column => column !== key)
+}
 
 function releaseImages() {
   images.value.forEach(image => URL.revokeObjectURL(image.url))
@@ -286,6 +294,10 @@ onBeforeUnmount(() => {
     </div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     <p class="sheet-local-note">图片仅在当前页面临时生成，不上传、不存储；保存报价记录时带入客户价格，系统原价与物流资料不变。</p>
+    <fieldset v-if="rows.length" class="sheet-visibility" :disabled="copying"><legend>显示列</legend>
+      <label v-for="column in QUOTE_SHEET_OPTIONAL_COLUMNS" :key="column.key"><input type="checkbox" :checked="columnVisible(column.key)" :aria-label="`显示${column.name}列`" @change="toggleColumn(column.key)">{{ column.name }}</label>
+      <span>取消勾选后，报价图片和复制数据中将隐藏该列；仅当前报价单有效。</span>
+    </fieldset>
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
     <div v-else-if="editing" class="sheet-editor">
@@ -303,7 +315,7 @@ onBeforeUnmount(() => {
       <span class="sheet-column-count">价格列 {{ columns.length }} / 10</span>
       <div ref="editorScroll" class="sheet-editor-scroll">
         <table>
-          <thead><tr><th>No.</th><th>Country</th><th>Logistics Provider</th><th>Shipping Time</th><th>Processing Time</th>
+          <thead><tr><th>No.</th><th>SKU</th><th v-if="columnVisible('country')">Country</th><th v-if="columnVisible('provider')">Logistics Provider</th><th v-if="columnVisible('shippingTime')">Shipping Time</th><th v-if="columnVisible('processingTime')">Processing Time</th>
             <th v-for="(column, index) in columns" :key="column.id" class="sheet-quantity" :class="{ 'sheet-drop-target': dropTarget === column.id && draggedColumn !== column.id }" @dragover.prevent="dropTarget = draggedColumn == null ? null : column.id" @drop.prevent="dropColumn(index)">
               <button type="button" class="sheet-drag" :draggable="!copying" :data-column-handle="column.id" :aria-label="`第 ${index + 1} 个价格列排序，左右键移动`" title="拖动排序，或聚焦后按左右方向键" :disabled="copying" @dragstart="startColumnDrag(column.id, $event)" @dragend="endColumnDrag" @keydown.left.prevent="moveColumn(index, index - 1)" @keydown.right.prevent="moveColumn(index, index + 1)">⠿</button>
               <button v-if="columns.length > 1" type="button" class="sheet-remove" :aria-label="`删除第 ${index + 1} 个价格列`" :disabled="copying" @click="removeColumn(index)">×</button>
@@ -314,10 +326,11 @@ onBeforeUnmount(() => {
           <tbody>
             <tr v-for="(row, index) in sheet.rows" :key="row.key">
               <td><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
-              <td><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
-              <td><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source">{{ row.sourceDescription }}</small></td>
-              <td class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(rows[index].eta) === '—' ? '' : formatShippingTime(rows[index].eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 days" maxlength="80" :disabled="copying" @input="updateShippingTime(rows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(rows[index])">恢复渠道时效</button></td>
-              <td><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
+              <td class="sheet-sku">{{ row.sku }}</td>
+              <td v-if="columnVisible('country')"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
+              <td v-if="columnVisible('provider')"><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source">{{ row.sourceDescription }}</small></td>
+              <td v-if="columnVisible('shippingTime')" class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(rows[index].eta) === '—' ? '' : formatShippingTime(rows[index].eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 days" maxlength="80" :disabled="copying" @input="updateShippingTime(rows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(rows[index])">恢复渠道时效</button></td>
+              <td v-if="columnVisible('processingTime')"><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
               <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" inputmode="decimal" placeholder="—" maxlength="15" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)"></td>
               <td class="sheet-add"></td>
             </tr>
@@ -336,7 +349,7 @@ onBeforeUnmount(() => {
       <div class="sheet-image-scroll"><img :src="currentImage.url" :width="currentImage.width" :height="currentImage.height" alt="JerryFulfillment Quote Sheet 客户报价图片预览" draggable="false"></div>
       <details class="sheet-accessible"><summary>查看报价单文字内容</summary>
         <p>{{ sheet.title }} — By Agent: {{ sheet.agent }} — Date: {{ sheet.date }}</p>
-        <table><thead><tr><th>No.</th><th>Country</th><th>Logistics Provider</th><th>Shipping Time</th><th>Processing Time</th><th v-for="(label, index) in sheet.quantityLabels" :key="index">{{ label }} (USD)</th></tr></thead><tbody><tr v-for="row in sheet.rows" :key="row.key"><td>{{ row.number }}</td><td>{{ row.country }}</td><td>{{ row.provider }}</td><td>{{ row.shippingTime }}</td><td>{{ row.processingTime }}</td><td v-for="(price, index) in row.prices" :key="index">{{ quoteSheetUsd(price) }}</td></tr></tbody></table>
+        <table><thead><tr><th v-for="column in visibleColumns" :key="column.key">{{ column.label }}</th><th v-for="(label, index) in sheet.quantityLabels" :key="index">{{ label }} (USD)</th></tr></thead><tbody><tr v-for="row in sheet.rows" :key="row.key"><td v-for="column in visibleColumns" :key="column.key">{{ quoteSheetCell(row, column.key) }}</td><td v-for="(price, index) in row.prices" :key="index">{{ quoteSheetUsd(price) }}</td></tr></tbody></table>
         <h4>IMPORTANT NOTES</h4><ol><li v-for="note in sheet.notes" :key="note">{{ note }}</li></ol>
       </details>
     </div>
@@ -346,6 +359,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .customer-sheet{margin:0 22px 18px;color:#202532}.sheet-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px}.sheet-toolbar h3{margin:0;font-size:15px}.sheet-toolbar p,.sheet-local-note,.sheet-edit-help{color:#72808a;font-size:12px;line-height:1.6}.sheet-toolbar p{margin:5px 0}.sheet-local-note{margin:8px 0 14px}.sheet-actions{display:flex;gap:8px;flex-wrap:wrap}.customer-sheet button{padding:9px 13px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font-size:12px;font-weight:650;cursor:pointer}.customer-sheet button.sheet-primary{background:#f58220;border-color:#f58220;color:#fff}.customer-sheet button:disabled{background:#edf0f2;border-color:#e0e4e8;color:#919aa3;cursor:not-allowed}.sheet-editor{padding:16px;background:#fafbfc;border:1px solid #dfe5e9;border-radius:8px}.sheet-metadata{display:flex;gap:18px;flex-wrap:wrap}.sheet-metadata label{display:grid;gap:6px;font-size:12px;font-weight:650}.customer-sheet input{height:36px;padding:0 9px;box-sizing:border-box;border:1px solid #ccd4db;border-radius:4px;background:#fff;color:#202532;font:inherit}.sheet-metadata input{min-width:205px}.sheet-editor-scroll,.sheet-image-scroll,.sheet-accessible{overflow-x:auto}.customer-sheet table{width:100%;border-collapse:collapse;font-size:12px}.sheet-editor table{width:max-content;min-width:0}.customer-sheet th,.customer-sheet td{padding:10px 9px;border:1px solid #e0e3e6;text-align:center;vertical-align:middle}.customer-sheet th{background:#fff0e3;color:#924e10;font-weight:650}.customer-sheet td{background:#fff}.customer-sheet small{display:block;margin-top:4px;font-weight:400}.sheet-source{max-width:230px;color:#76828c;font-size:10px;line-height:1.5}.sheet-time input{width:170px;font-size:12px}.sheet-time button{display:block;margin:5px auto 0;padding:2px 4px;border:0;color:#a85d16;background:transparent;font-size:10px}.sheet-empty{padding:35px;text-align:center;border:1px dashed #d9e1e6;color:#87939d;font-size:12px}.sheet-image-area{border:1px solid #e0e4e8;background:#f6f7f9}.sheet-image-scroll img{display:block;width:100%;height:auto;min-width:768px}.sheet-pages{display:flex;justify-content:center;align-items:center;gap:15px;padding:10px;font-size:12px}.sheet-message,.sheet-pending{padding:10px 12px;border-radius:5px;background:#f0f7f1;color:#287a4d;font-size:12px;line-height:1.6}.sheet-message.failed,.sheet-pending{background:#fff4e6;color:#a65410}.sheet-accessible{padding:10px;background:#fff;font-size:12px;line-height:1.6}.sheet-accessible summary{cursor:pointer;color:#64727e}.sheet-accessible li{margin:8px 0}@media(max-width:850px){.sheet-toolbar{align-items:flex-start;flex-direction:column}.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:12px}.sheet-pages{gap:8px}.sheet-metadata{width:100%}.sheet-metadata label{flex:1}}
 .sheet-column-count{display:block;text-align:right;font-size:12px;color:#72808a;margin:8px 0}.sheet-quantity{position:relative;min-width:112px;padding-top:22px!important}.sheet-quantity input{width:66px}.sheet-remove{position:absolute;right:2px;top:0;padding:0 5px!important;border:0!important;background:transparent!important}.sheet-add{position:sticky;right:0;z-index:3;min-width:105px;background:#fafbfc!important;border-left:1px dashed #d7dce1!important}.sheet-add button{white-space:nowrap;color:#ee791a;border-color:#ee791a}.sheet-price{white-space:nowrap}.sheet-price input{width:90px;text-align:center}.sheet-number{width:45px}.sheet-country{width:190px}.sheet-provider{width:160px}.sheet-processing{width:130px}.sheet-editor td input:not(:focus){border-color:transparent}.sheet-editor td input:hover{border-color:#ccd4db}.customer-sheet input:focus{outline:1px solid #f58220;border-color:#f58220}.sheet-notes-editor{margin-top:14px;font-size:12px}.sheet-notes-editor summary{cursor:pointer;color:#925013}.sheet-notes-editor label{display:flex;gap:12px;margin:10px 0}.sheet-notes-editor textarea{width:100%;min-height:70px;resize:vertical;border:1px solid #ccd4db;padding:8px;font:inherit;line-height:1.6}
-.sheet-editor table th:nth-child(-n+3),.sheet-editor table td:nth-child(-n+3){position:sticky;z-index:1}.sheet-editor table th:nth-child(-n+3){z-index:2}.sheet-editor table th:nth-child(1),.sheet-editor table td:nth-child(1){left:0;min-width:45px}.sheet-editor table th:nth-child(2),.sheet-editor table td:nth-child(2){left:64px;min-width:55px}.sheet-editor table th:nth-child(3),.sheet-editor table td:nth-child(3){left:138px;min-width:160px;box-shadow:2px 0 3px #20253212}
+.sheet-visibility{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:12px 0;padding:12px 14px;border:1px solid #e0e4e8;border-radius:6px;font-size:12px}.sheet-visibility legend{padding:0 5px;font-weight:650}.sheet-visibility label{display:flex;align-items:center;gap:6px;cursor:pointer}.sheet-visibility input{width:16px;height:16px;padding:0;accent-color:#f58220}.sheet-visibility span{color:#72808a}.sheet-sku{min-width:160px;max-width:240px;overflow-wrap:anywhere}
+.sheet-editor table th:nth-child(-n+2),.sheet-editor table td:nth-child(-n+2){position:sticky;z-index:1}.sheet-editor table th:nth-child(-n+2){z-index:2}.sheet-editor table th:nth-child(1),.sheet-editor table td:nth-child(1){left:0;min-width:45px}.sheet-editor table th:nth-child(2),.sheet-editor table td:nth-child(2){left:64px;min-width:160px;box-shadow:2px 0 3px #20253212}
+
 .sheet-drag{position:absolute;left:3px;top:0;padding:0 5px!important;border:0!important;background:transparent!important;color:#b46726!important;cursor:grab!important;font-size:17px!important;line-height:20px}.sheet-drag:active{cursor:grabbing!important}.sheet-drag:focus-visible{outline:2px solid #f58220;outline-offset:1px}.sheet-quantity.sheet-drop-target{box-shadow:inset 3px 0 #f58220;background:#ffe1c6}
 </style>

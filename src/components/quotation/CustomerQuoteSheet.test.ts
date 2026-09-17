@@ -21,7 +21,7 @@ function png(firstRow = 1, lastRow = 1): QuoteSheetImage {
   return { blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow, lastRow }
 }
 function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot) {
-  const state = reactive({ rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, resetKey: undefined as string | undefined })
+  const state = reactive({ skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, resetKey: undefined as string | undefined })
   const host = document.createElement('div'); document.body.append(host)
   app = createApp({ render: () => h(CustomerQuoteSheet, { ...state, ref:(instance:unknown)=>{exposed=instance as typeof exposed} }) }); app.mount(host)
   return state
@@ -45,7 +45,7 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('previews the formerly blocked carriers and copies the exact preview blob and all 9 table columns', async () => {
+it('previews the formerly blocked carriers and copies the exact preview blob and all 10 table columns', async () => {
   const state = mount([row(), row('two', '闪电猴')]); const original = JSON.stringify(state.rows)
   await click('预览报价单')
   expect(document.querySelector('img')?.src).toBe('blob:quote')
@@ -54,8 +54,8 @@ it('previews the formerly blocked carriers and copies the exact preview blob and
   expect(write.mock.calls[0][0][0].items['image/png']).toBe((await render.mock.results[0].value)[0].blob)
   await click('复制报价数据')
   const cells = writeText.mock.calls[0][0].split('\r\n').map((line: string) => line.split('\t'))
-  expect(cells).toHaveLength(3); expect(cells.every((line: string[]) => line.length === 9)).toBe(true)
-  expect(cells[2]).toEqual(['2', 'United States', 'SDH Express', '8-12 days', '1-2 days', '$10.80', '$16.35', '$21.90', '$30.85'])
+  expect(cells).toHaveLength(3); expect(cells.every((line: string[]) => line.length === 10)).toBe(true)
+  expect(cells[2]).toEqual(['2', 'SKU-001', 'United States', 'SDH Express', '8-12 days', '1-2 days', '$10.80', '$16.35', '$21.90', '$30.85'])
   expect(writeText.mock.calls[0][0]).not.toMatch(/内部|全国统一/)
   expect(JSON.stringify(state.rows)).toBe(original)
 })
@@ -171,8 +171,8 @@ it('adds inline quantity columns, calculates by original route identity and copi
   expect(snapshot.rows[0]).toMatchObject({ country: 'Canada', provider: 'Custom Carrier', processingTime: '3-4 days', prices: [10.8,16.35,21.9,30.85,27.5] })
   expect(snapshot.rows[1].prices[4]).toBeNull()
   const cells = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
-  expect(cells.every((cells: string[]) => cells.length === 10)).toBe(true)
-  expect(cells[1][9]).toBe('$27.50'); expect(cells[2][9]).toBe('—')
+  expect(cells.every((cells: string[]) => cells.length === 11)).toBe(true)
+  expect(cells[1][10]).toBe('$27.50'); expect(cells[2][10]).toBe('—')
   expect(JSON.stringify(state.rows)).toBe(original)
 })
 
@@ -184,7 +184,7 @@ it('enforces ten columns and invalid quantities; deleted/reused quantities canno
     await input(`第 ${count} 个价格列数量`, String(quantity))
   }
   expect(button('＋ 新增列').disabled).toBe(true)
-  await click('复制报价数据'); expect(writeText.mock.lastCall![0].split('\r\n')[0].split('\t')).toHaveLength(15)
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0].split('\r\n')[0].split('\t')).toHaveLength(16)
   for (const invalid of ['', '0', '-1', '1.5', '9007199254740992', '3']) {
     await input('第 10 个价格列数量', invalid)
     await click('预览报价单'); expect(render).not.toHaveBeenCalled()
@@ -264,7 +264,7 @@ it('drag sorting moves the complete quantity column with manual prices into both
   expect(render.mock.lastCall![0].quantityLabels).toEqual(['8 pcs','1 pc','2 pcs','3 pcs','5 pcs'])
   expect(render.mock.lastCall![0].rows[0].prices).toEqual([77.75,10.8,16.35,21.9,30.85])
   expect(render.mock.lastCall![0].rows[1].prices[0]).toBe(8.5)
-  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[5]).toBe('$77.75')
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[6]).toBe('$77.75')
   expect(JSON.stringify(state.rows)).toBe(original)
 })
 
@@ -276,8 +276,8 @@ it('keyboard ordering supports boundaries and preserves focus, then editing stil
   handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await settle()
   expect(document.activeElement?.getAttribute('aria-label')).toBe('第 2 个价格列排序，左右键移动')
   await input('第 1 行第 2 列美元价格','66.66');await click('复制报价数据')
-  expect(writeText.mock.lastCall![0].split('\r\n')[0].split('\t').slice(5)).toEqual(['2 pcs (USD)','1 pc (USD)','3 pcs (USD)','5 pcs (USD)'])
-  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t').slice(5)).toEqual(['$16.35','$66.66','$21.90','$30.85'])
+  expect(writeText.mock.lastCall![0].split('\r\n')[0].split('\t').slice(6)).toEqual(['2 pcs (USD)','1 pc (USD)','3 pcs (USD)','5 pcs (USD)'])
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t').slice(6)).toEqual(['$16.35','$66.66','$21.90','$30.85'])
 })
 
 it.each(['edit-away', 'remove'])('preserves the original manual price when a duplicate quantity is corrected by %s', async action => {
@@ -288,7 +288,7 @@ it.each(['edit-away', 'remove'])('preserves the original manual price when a dup
   if (action === 'edit-away') await input('第 5 个价格列数量', '8')
   else { document.querySelector<HTMLButtonElement>('[aria-label="删除第 5 个价格列"]')!.click(); await settle() }
   await click('复制报价数据')
-  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[6]).toBe('$88.88')
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[7]).toBe('$88.88')
 })
 
 it('keeps duplicate quantity price inputs disabled so temporary duplicates cannot edit another column', async () => {
@@ -361,10 +361,10 @@ it.each([17, 43, 101])('checks every copied cell through 40 interleaved edits, m
     const sourceBeforeCopy = JSON.stringify(state.rows)
     await click('复制报价数据')
     const cells = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
-    expect(cells[0].slice(5)).toEqual(order.map(q=>`${q} ${q===1?'pc':'pcs'} (USD)`))
+    expect(cells[0].slice(6)).toEqual(order.map(q=>`${q} ${q===1?'pc':'pcs'} (USD)`))
     state.rows.forEach((source, index) => {
       const saved = new Map([[1,source.quote1],[2,source.quote2],[3,source.quote3],[5,source.quoteCustom]])
-      expect(cells[index+1].slice(5)).toEqual(order.map(q=>`$${(manual.get(`${source.channelKey}:${q}`) ?? saved.get(q) ?? q+(source.channelKey==='one'?0.25:0.75)).toFixed(2)}`))
+      expect(cells[index+1].slice(6)).toEqual(order.map(q=>`$${(manual.get(`${source.channelKey}:${q}`) ?? saved.get(q) ?? q+(source.channelKey==='one'?0.25:0.75)).toFixed(2)}`))
     })
     expect(JSON.stringify(state.rows)).toBe(sourceBeforeCopy)
   }
@@ -403,4 +403,30 @@ it('loads persisted customer quantity order and prices into preview and clipboar
   await click('复制报价数据');expect(writeText.mock.lastCall![0]).toContain('$4.60\t$2.70\t$1.80')
   state.initialQuote={quantities:[4,2,1],rows:[{optionId:'one',prices:[4.6,2.6,1.8]}]};state.contextKey='record-v2';await settle()
   await click('复制报价数据');expect(writeText.mock.lastCall![0]).toContain('$4.60\t$2.60\t$1.80')
+})
+
+
+it('hides each descriptive column in the editor, PNG model and clipboard and restores local edits without changing prices', async () => {
+  const state = mount(); state.bundle = true; state.skus = ['SKU-A', 'SKU-B']; await settle()
+  await input('第 1 行国家', 'Canada')
+  await input('第 1 行第 1 列美元价格', '66.66')
+  const before = exposed.capturePrices()
+  for (const name of ['国家', '物流商', '运输时效', '处理时间']) {
+    document.querySelector<HTMLInputElement>(`[aria-label="显示${name}列"]`)!.click(); await settle()
+  }
+  expect(document.querySelector('[aria-label="第 1 行国家"]')).toBeNull()
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].hiddenColumns).toEqual(['country', 'provider', 'shippingTime', 'processingTime'])
+  expect(render.mock.lastCall![0].rows[0].sku).toBe('SKU-A+SKU-B')
+  expect([...document.querySelectorAll('.sheet-accessible th')].map(cell => cell.textContent)).toEqual(['No.', 'SKU', '1 set (USD)', '2 sets (USD)', '3 sets (USD)', '5 sets (USD)'])
+  await click('复制报价数据')
+  expect(writeText.mock.lastCall![0].split('\r\n')[1]).toBe('1\tSKU-A+SKU-B\t$66.66\t$16.35\t$21.90\t$30.85')
+  expect(writeText.mock.lastCall![0]).not.toMatch(/Country|Canada|Hua Hai|days/)
+  expect(exposed.capturePrices()).toEqual(before)
+  document.querySelector<HTMLInputElement>('[aria-label="显示国家列"]')!.click(); await settle()
+  expect(document.querySelector('img')).toBeNull()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行国家"]')!.value).toBe('Canada')
+  state.skus = ['SKU-C']; await settle(); expect(document.querySelector('.sheet-sku')!.textContent).toBe('SKU-C')
+  state.resetKey = 'another-product'; await settle()
+  expect([...document.querySelectorAll<HTMLInputElement>('.sheet-visibility input')].every(input => input.checked)).toBe(true)
 })

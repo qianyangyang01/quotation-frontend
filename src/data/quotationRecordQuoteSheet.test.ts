@@ -24,9 +24,9 @@ describe('saved record customer table copying', () => {
     const sheet = buildCustomerQuoteSheet({ ...source, edits })
     const lines = customerQuoteSheetTsv(sheet).split('\r\n').map(row => row.split('\t'))
     expect(lines).toEqual([
-      ['No.', 'Country', 'Logistics Provider', 'Shipping Time', 'Processing Time', '1 set (USD)', '2 sets (USD)', '3 sets (USD)', '7 sets (USD)'],
-      ['1', 'New Zealand', 'SFYD Express', '7-12 days', '1-2 days', '$13.00', '—', '$0.00', '$55.68'],
-      ['2', 'New Zealand', 'SFYD Express', '9-15 days', '1-2 days', '$13.00', '—', '$0.00', '$55.68'],
+      ['No.', 'SKU', 'Country', 'Logistics Provider', 'Shipping Time', 'Processing Time', '1 set (USD)', '2 sets (USD)', '3 sets (USD)', '7 sets (USD)'],
+      ['1', '—', 'New Zealand', 'SFYD Express', '7-12 days', '1-2 days', '$13.00', '—', '$0.00', '$55.68'],
+      ['2', '—', 'New Zealand', 'SFYD Express', '9-15 days', '1-2 days', '$13.00', '—', '$0.00', '$55.68'],
     ])
     expect(source.rows[0].channelKey).not.toBe(source.rows[1].channelKey)
     expect(JSON.stringify(saved)).toBe(before)
@@ -52,9 +52,20 @@ describe('saved record customer table copying', () => {
     const edits = newQuoteSheetEdits('Alex')
     edits.shippingTimes[quoteSheetRowKey(source.rows[0])] = '=1+1\t\n'
     const sheet = buildCustomerQuoteSheet({ ...source, edits })
-    expect(customerQuoteSheetTsv(sheet).split('\r\n')[1].split('\t')).toHaveLength(9)
+    expect(customerQuoteSheetTsv(sheet).split('\r\n')[1].split('\t')).toHaveLength(10)
     expect(customerQuoteSheetTsv(sheet)).toContain("'=1+1")
     sheet.tableIssues!.push('invalid source')
     expect(() => customerQuoteSheetTsv(sheet)).toThrow('invalid source')
   })
+})
+
+
+it('uses actual bundle SKU snapshots without quantities or price recalculation', () => {
+  const saved = normalizeQuotationRecord({ ...record(), primarySku: 'OLD × 2', bundleItems: [{ sku: 'SKU-A', name: 'A', quantityPerSet: 2, effectiveWeightKg: 0.1, purchaseUnitPriceCny: 10, domesticFreightPerUnitCny: 1 }, { sku: 'SKU-B', name: 'B', quantityPerSet: 1, effectiveWeightKg: 0.2, purchaseUnitPriceCny: 20, domesticFreightPerUnitCny: 2 }] })!
+  const source = quotationRecordQuoteSheetSource(saved)
+  const sheet = buildCustomerQuoteSheet({ ...source, edits: newQuoteSheetEdits('Alex') })
+  expect(sheet.rows.map(row => row.sku)).toEqual(['SKU-A+SKU-B', 'SKU-A+SKU-B'])
+  expect(sheet.rows[0].prices).toEqual([13, null, 0, 55.678])
+  saved.quoteMode = 'single'; saved.primarySku = 'SINGLE-001'
+  expect(quotationRecordQuoteSheetSource(saved).skus).toEqual(['SINGLE-001'])
 })

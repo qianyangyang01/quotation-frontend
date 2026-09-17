@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   customerName: string
   productName: string
   sku: string
+  skus?: string[]
   customerGrade: string
   coefficient: number
   customQuantity: number
@@ -83,7 +84,7 @@ const quoteRange = computed(() => {
       </section>
     </div>
 
-    <CustomerQuoteSheet ref="customerSheet" :rows="rows" :countries="countries" :salesperson="salesperson"
+    <CustomerQuoteSheet ref="customerSheet" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
       :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
 
     <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">

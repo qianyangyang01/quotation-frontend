@@ -6,18 +6,36 @@ export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'quote1' | 'quote2' | 'quote3' | 'quoteCustom'>
 export type QuoteSheetCountry = { name: string; code: string }
 export type QuoteSheetRowEdits = { number?: string; country?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
-export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[] }
+export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
+  { key: 'country', label: 'Country', name: '国家', width: 215 },
+  { key: 'provider', label: 'Logistics Provider', name: '物流商', width: 245 },
+  { key: 'shippingTime', label: 'Shipping Time', name: '运输时效', width: 195 },
+  { key: 'processingTime', label: 'Processing Time', name: '处理时间', width: 176 },
+] as const
+export type QuoteSheetOptionalColumn = typeof QUOTE_SHEET_OPTIONAL_COLUMNS[number]['key']
+export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[] }
+export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColumn[] = []) {
+  return [
+    { key: 'number' as const, label: 'No.', width: 85 },
+    { key: 'sku' as const, label: 'SKU', width: 220 },
+    ...QUOTE_SHEET_OPTIONAL_COLUMNS.filter(column => !hiddenColumns.includes(column.key)),
+  ]
+}
+export function quoteSheetCell(row: CustomerQuoteSheetRow, key: ReturnType<typeof quoteSheetColumns>[number]['key']) {
+  return String(row[key] ?? (key === 'processingTime' ? '1-2 days' : '—'))
+}
 export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: number) => number | null
 export const MAX_QUOTE_SHEET_COLUMNS = 10
 export function validQuoteSheetQuantity(value: number) { return Number.isSafeInteger(value) && value > 0 }
 export type CustomerQuoteSheetRow = {
-  key: string; number: number; country: string; provider: string; shippingTime: string; processingTime?: string
+  key: string; number: number; sku?: string; country: string; provider: string; shippingTime: string; processingTime?: string
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {
   agent: string; date: string; quantityLabels: string[]; rows: CustomerQuoteSheetRow[]; issues: string[]
   tableIssues?: string[]
   priceIssues?: string[]
+  hiddenColumns?: QuoteSheetOptionalColumn[]
   title?: string; notes?: string[]
 }
 
@@ -122,12 +140,15 @@ export function quoteSheetUsd(value: number | null) {
 }
 export function buildCustomerQuoteSheet(input: {
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; edits: QuoteSheetEdits
-  customQuantity: number; bundle: boolean
+  customQuantity: number; bundle: boolean; skus?: string[]
   quantities?: number[]; calculatePrice?: QuoteSheetPriceCalculator; legacyCustomIndex?: number
 }): CustomerQuoteSheet {
   const issues: string[] = []
   const tableIssues: string[] = []
   const priceIssues: string[] = []
+  const hiddenColumns = [...(input.edits.hiddenColumns ?? [])]
+  const visible = (column: QuoteSheetOptionalColumn) => !hiddenColumns.includes(column)
+  const sku = (input.skus ?? []).map(value => value.trim()).filter(Boolean).join('+') || '—'
   const agent = input.edits.agent.trim()
   const date = formatQuoteDate(input.edits.date)
   if (!agent) issues.push('请填写报价单署名')
@@ -143,13 +164,13 @@ export function buildCustomerQuoteSheet(input: {
     const country = quoteSheetCountryName(fields.country ?? row.country, input.countries)
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
     const provider = fields.provider === undefined ? quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '') : fields.provider.trim()
-    if (!country) tableIssues.push(`第 ${index + 1} 行缺少国家英文全称：${row.country}`)
-    if (!provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
-    if (/[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)
+    if (visible('country') && !country) tableIssues.push(`第 ${index + 1} 行缺少国家英文全称：${row.country}`)
+    if (visible('provider') && !provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
+    if (visible('provider') && /[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)
     const shippingTime = formatShippingTime(input.edits.shippingTimes[key] ?? row.eta)
-    if (/[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 days`)
+    if (visible('shippingTime') && /[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 days`)
     const processingTime = formatShippingTime(fields.processingTime ?? '1-2 days')
-    if (/[^\x20-\x7e—]/.test(processingTime)) tableIssues.push(`第 ${index + 1} 行处理时间请填写英文`)
+    if (visible('processingTime') && /[^\x20-\x7e—]/.test(processingTime)) tableIssues.push(`第 ${index + 1} 行处理时间请填写英文`)
     const number = fields.number === undefined ? index + 1 : Number(fields.number)
     if (!validQuoteSheetQuantity(number)) tableIssues.push(`第 ${index + 1} 行序号须为正整数`)
     const sourcePrices = [row.quote1, row.quote2, row.quote3, row.quoteCustom]
@@ -173,12 +194,13 @@ export function buildCustomerQuoteSheet(input: {
       return value != null && Number.isFinite(value) && value >= 0 ? value : null
     })
     return {
-      key, number, country: country || '—', provider: provider || '—', shippingTime, processingTime, prices,
+      key, number, sku, country: country || '—', provider: provider || '—', shippingTime, processingTime, prices,
       sourceDescription: [row.country, row.quoteRegion, row.carrier, row.transport, row.channelCode].filter(Boolean).join(' · '),
     }
   })
   tableIssues.push(...priceIssues)
   return {
+    hiddenColumns,
     title: input.edits.title ?? 'JerryFulfillment Quote Sheet', notes: input.edits.notes ?? [...CUSTOMER_QUOTE_NOTES],
     agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)], priceIssues: [...new Set(priceIssues)],
     quantityLabels: quantities.map((quantity, index) => isLegacyCustom(quantity, index) || (!input.quantities && index === 3 && !input.customQuantity) ? 'Custom' : `${validQuoteSheetQuantity(quantity) ? quantity : '—'} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
@@ -195,8 +217,9 @@ export function customerQuoteSheetTsv(sheet: CustomerQuoteSheet) {
     // Keep manually entered text from becoming a spreadsheet formula.
     return /^[=+@-]/.test(text) ? `'${text}` : text
   }
+  const columns = quoteSheetColumns(sheet.hiddenColumns)
   return [
-    ['No.', 'Country', 'Logistics Provider', 'Shipping Time', 'Processing Time', ...sheet.quantityLabels.map(label => `${label} (USD)`)],
-    ...sheet.rows.map(row => [row.number, row.country, row.provider, row.shippingTime, row.processingTime ?? '1-2 days', ...row.prices.map(quoteSheetUsd)]),
+    [...columns.map(column => column.label), ...sheet.quantityLabels.map(label => `${label} (USD)`)],
+    ...sheet.rows.map(row => [...columns.map(column => quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]),
   ].map(row => row.map(cell).join('\t')).join('\r\n')
 }

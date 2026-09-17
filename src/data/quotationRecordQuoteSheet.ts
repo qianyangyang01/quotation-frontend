@@ -14,5 +14,5 @@ export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
     rule: option.rule, carrier: option.carrier, transport: option.channel, eta: option.eta,
     quote1: option.quote1Usd, quote2: option.quote2Usd, quote3: option.quote3Usd, quoteCustom: option.quoteCustomUsd,
   }))
-  return { rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: record.quoteMode === 'bundle', initialQuote:record.customerQuote ?? record.sheetQuote }
+  return { skus: record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => item.sku) : [record.primarySku], rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: record.quoteMode === 'bundle', initialQuote:record.customerQuote ?? record.sheetQuote }
 }

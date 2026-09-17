@@ -162,7 +162,7 @@ describe('editable quantity quote sheet boundaries', () => {
     expect(sheet.issues).toEqual([])
     expect(sheet.quantityLabels).toEqual(quantities.map(q=>`${q} ${q===1?'set':'sets'}`))
     expect(sheet.rows[0].prices).toEqual([12.8,0,null,4.25,43.6,6.25,7.25,8.25,20.25,50.25])
-    expect(customerQuoteSheetTsv(sheet).split('\r\n')[1].split('\t')).toHaveLength(15)
+    expect(customerQuoteSheetTsv(sheet).split('\r\n')[1].split('\t')).toHaveLength(16)
     expect(row.quoteCustom).toBe(43.6)
   })
   it.each([[],[0],[-1],[1.1],[NaN],[Infinity],[Number.MAX_SAFE_INTEGER+1],Array.from({length:11},(_,i)=>i+1),[1,1]].map(quantities => ({ quantities })))('blocks invalid columns $quantities before export', ({ quantities }) => {
@@ -184,7 +184,7 @@ describe('editable quantity quote sheet boundaries', () => {
     draft.fields={[quoteSheetRowKey(row)]:{provider:'=Custom',processingTime:'3-4 days',number:'8',prices:{'2':''}}}
     const sheet=buildCustomerQuoteSheet({rows:[row],countries:[],edits:draft,customQuantity:5,bundle:false})
     expect(sheet.title).toBe('Custom Quote');expect(sheet.notes).toHaveLength(4)
-    expect(customerQuoteSheetTsv(sheet)).toContain("8\tUnited States\t'=Custom\t6-12 days\t3-4 days\t$12.80\t—")
+    expect(customerQuoteSheetTsv(sheet)).toContain("8\t—\tUnited States\t'=Custom\t6-12 days\t3-4 days\t$12.80\t—")
     expect(CUSTOMER_QUOTE_NOTES[1]).toContain('PayPal')
   })
 })
@@ -199,4 +199,26 @@ it('keeps internal missing-price reasons out of the customer image model and tab
   expect(JSON.stringify(sheet)).not.toContain('超过上限')
   expect(customerQuoteSheetTsv(sheet)).not.toContain('加载失败')
   expect(JSON.stringify(row)).toBe(original)
+})
+
+
+it('omits hidden metadata validation, preserves manual prices and restores visible validation', () => {
+  const row = source({ country: '未知国家', carrier: '未知物流', eta: '旺季延误' })
+  const draft = edits()
+  draft.fields = { [quoteSheetRowKey(row)]: { processingTime: '等待处理', prices: { '1': '6.35' } } }
+  draft.hiddenColumns = ['country', 'provider', 'shippingTime', 'processingTime']
+  const input = { rows: [row], countries: [], edits: draft, customQuantity: 5, bundle: true, skus: [' A ', 'B-C'] }
+  const sheet = buildCustomerQuoteSheet(input)
+  expect(sheet.issues).toEqual([])
+  expect(customerQuoteSheetTsv(sheet).split('\r\n')).toEqual([
+    'No.\tSKU\t1 set (USD)\t2 sets (USD)\t3 sets (USD)\t5 sets (USD)',
+    '1\tA+B-C\t$6.35\t$20.50\t$28.20\t$43.60',
+  ])
+  expect(row.quote1).toBe(12.8)
+  draft.fields![quoteSheetRowKey(row)].prices = { '1': '-1' }
+  expect(buildCustomerQuoteSheet(input).priceIssues).toHaveLength(1)
+  draft.fields![quoteSheetRowKey(row)].prices = { '1': '6.35' }
+  draft.hiddenColumns = []
+  expect(buildCustomerQuoteSheet(input).issues).toHaveLength(4)
+  expect(sheet.hiddenColumns).toHaveLength(4)
 })
