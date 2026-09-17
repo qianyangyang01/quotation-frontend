@@ -3,21 +3,36 @@ import { buildCustomerQuoteSheet, newQuoteSheetEdits } from '@/data/customerQuot
 
 const canvases: Array<{ width: number; height: number; getContext: () => unknown; toBlob: (done: (blob: Blob | null) => void) => void }> = []
 const drawnText: string[] = []
+const drawnImages: unknown[][] = []
 const pending: Array<(blob: Blob | null) => void> = []
 function sheet(count = 1) {
   return buildCustomerQuoteSheet({ rows: Array.from({ length: count }, (_, i) => ({ country: 'US', carrier: '4PX', channelKey: String(i), ruleId: i, rule: '', channelCode: '', transport: '', eta: '5-8 days', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 5 })), countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 5, bundle: false })
 }
 async function settle() { for (let i = 0; i < 15; i++) await Promise.resolve() }
 beforeEach(() => {
-  vi.resetModules(); canvases.length = 0; pending.length = 0; drawnText.length = 0
+  vi.resetModules(); canvases.length = 0; pending.length = 0; drawnText.length = 0; drawnImages.length = 0
   vi.stubGlobal('Image', class { onload?: () => void; set src(_value: string) { queueMicrotask(() => this.onload?.()) } })
   vi.stubGlobal('document', { createElement: () => {
-    const context = new Proxy({ fillText: (value: string) => drawnText.push(value), measureText: (text: string) => ({ width: text.length * 11 }) }, { get: (target, key) => target[key as keyof typeof target] ?? (() => {}) })
+    const context = new Proxy({ drawImage: (...args: unknown[]) => drawnImages.push(args), fillText: (value: string) => drawnText.push(value), measureText: (text: string) => ({ width: text.length * 11 }) }, { get: (target, key) => target[key as keyof typeof target] ?? (() => {}) })
     const canvas = { width: 300, height: 150, getContext: () => context, toBlob: (done: (blob: Blob | null) => void) => { pending.push(done) } }
     canvases.push(canvas); return canvas
   } })
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+it('draws each local photo once per page, preserves aspect ratio and expands a single-row page', async () => {
+  const { renderCustomerQuoteSheet } = await import('./customerQuoteSheetRenderer')
+  const photo = {url:'blob:local',name:'local.png',image:{naturalWidth:800,naturalHeight:400} as HTMLImageElement}
+  const data=sheet(25);data.hiddenColumns=['shippingTime','processingTime']
+  const result=renderCustomerQuoteSheet(data,()=>false,[photo,photo]);await settle()
+  pending[0](new Blob(['first']));await settle()
+  expect(drawnText.filter(text=>text==='Product')).toHaveLength(2)
+  const draws=drawnImages.filter(args=>args[0]===photo.image)
+  expect(draws).toHaveLength(4)
+  draws.forEach(args=>{expect(args[3]).toBe(160);expect(args[4]).toBe(80)})
+  expect(canvases[1].height).toBeGreaterThan(269+350)
+  pending[1](new Blob(['second']));expect(await result).toHaveLength(2)
+})
 
 it('cancels a 50-route render at the first encoded page without generating remaining pages', async () => {
   const { renderCustomerQuoteSheet } = await import('./customerQuoteSheetRenderer')

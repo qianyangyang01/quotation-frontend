@@ -3,13 +3,15 @@ import headerUrl from '@/assets/quote-sheet/table-header.png'
 import notesUrl from '@/assets/quote-sheet/notes.png'
 import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, quoteSheetColumns, quoteSheetCell, type QuoteSheetOptionalColumn, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
+import type { QuoteLocalPhoto } from './quoteLocalPhotos'
 
 export const QUOTE_SHEET_WIDTH = 1536
 export const QUOTE_SHEET_ROWS_PER_IMAGE = 24
 export type QuoteSheetImage = { blob: Blob; width: number; height: number; firstRow: number; lastRow: number }
-export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = []) {
+export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], withPhotos = false) {
   if (!Number.isInteger(priceColumns) || priceColumns < 1 || priceColumns > MAX_QUOTE_SHEET_COLUMNS) throw new Error('价格列须为 1–10 列')
-  const fixedColumns = quoteSheetColumns(hiddenColumns)
+  const base = quoteSheetColumns(hiddenColumns)
+  const fixedColumns = withPhotos ? [base[0], { key: 'product' as const, label: 'Product', width: 240 }, ...base.slice(1)] : base
   const columns = [22]
   fixedColumns.forEach(column => columns.push(columns[columns.length - 1] + column.width))
   const priceStart = columns[columns.length - 1]
@@ -81,10 +83,10 @@ function exportBlob(canvas: HTMLCanvasElement) {
 }
 
 /** No uploads, storage, downloads, or business writes: results live only in browser memory. */
-export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCancelled: () => boolean = () => false): Promise<QuoteSheetImage[]> {
+export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCancelled: () => boolean = () => false, photos: readonly QuoteLocalPhoto[] = []): Promise<QuoteSheetImage[]> {
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
-  const { width, right, columns, fixedColumns } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns)
+  const { width, right, columns, fixedColumns } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0)
   const fixedCount = fixedColumns.length
   const priceStart = columns[fixedCount]
   if (sheet.rows.some(row => row.prices.length !== sheet.quantityLabels.length)) throw new Error('价格数量与表头不一致，请重新预览')
@@ -104,13 +106,20 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     const quantityHeaderHeight = Math.max(44, ...sheet.quantityLabels.map((label, index) => lines(context, label, columns[index + fixedCount + 1] - columns[index + fixedCount] - 20).length * 26 + 8))
     const tableTop = 225 + quantityHeaderHeight
     const heights = rows.map((row, index) => {
-      const values = [...fixedColumns.map(column => quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
+      const values = [...fixedColumns.map(column => column.key === 'product' ? '' : quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
       const lineCount = Math.max(...values.map((value, column) => {
         font(context, column === 0 || column >= fixedCount)
         return lines(context, value, columns[column + 1] - columns[column] - 20).length
       }))
       return Math.max(referenceRowHeights[index % 6], lineCount * 26 + 8)
     })
+    // One merged product cell per page; preserve readable photos even with only one route.
+    const photoColumns = photos.length > 2 ? 2 : 1
+    const photoSize = photoColumns === 2 ? 104 : 160
+    const photoRows = Math.ceil(photos.length / photoColumns)
+    const photoHeight = photos.length ? photoRows * (photoSize + 12) + 12 : 0
+    const extraHeight = Math.max(0, photoHeight - heights.reduce((sum, height) => sum + height, 0))
+    heights.forEach((height, index) => { heights[index] = height + extraHeight / heights.length })
     const tableBottom = tableTop + heights.reduce((sum, height) => sum + height, 0)
     font(context, false, 20)
     const noteLines = noteTexts.map(note => lines(context, note, right - 149))
@@ -167,7 +176,7 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       const height = heights[index]
       context.fillStyle = (offset + index) % 2 ? '#fff2e9' : '#ffffff'
       context.fillRect(22, y, right - 22, height)
-      const values = [...fixedColumns.map(column => quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
+      const values = [...fixedColumns.map(column => column.key === 'product' ? '' : quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
       context.fillStyle = '#111111'
       values.forEach((value, column) => centered(context, value, columns[column], columns[column + 1], y, height, column === 0 || column >= fixedCount))
       y += height
@@ -175,6 +184,21 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       context.lineWidth = 1
       context.beginPath(); context.moveTo(22, y - 0.5); context.lineTo(right, y - 0.5); context.stroke()
     })
+    if (photos.length) {
+      const left = columns[1], photoRight = columns[2]
+      // Paint over interior row lines so all routes share the same photos.
+      context.fillStyle = '#fff'
+      context.fillRect(left, tableTop, photoRight - left, tableBottom - tableTop - 1)
+      const top = tableTop + (tableBottom - tableTop - photoHeight) / 2 + 12
+      photos.forEach((photo, index) => {
+        const slotWidth = (photoRight - left) / photoColumns
+        const centerX = left + slotWidth * (index % photoColumns + 0.5)
+        const centerY = top + Math.floor(index / photoColumns) * (photoSize + 12) + photoSize / 2
+        const scale = Math.min(photoSize / photo.image.naturalWidth, photoSize / photo.image.naturalHeight)
+        const w = photo.image.naturalWidth * scale, h = photo.image.naturalHeight * scale
+        context.drawImage(photo.image, centerX - w / 2, centerY - h / 2, w, h)
+      })
+    }
     context.strokeStyle = '#d7d7d7'
     columns.forEach(x => {
       context.beginPath(); context.moveTo(x + 0.5, tableTop); context.lineTo(x + 0.5, tableBottom); context.stroke()
