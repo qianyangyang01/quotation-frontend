@@ -55,7 +55,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['首选系统价（USD）', money(record.systemQuoteUsd), '首选系统价（CNY快照）', money(record.systemQuoteCny), '首选综合成本（CNY）', money(record.totalCostCny)]),
     line(['成交价（USD）', money(record.actualQuoteUsd), '成交价（CNY快照）', money(record.actualQuoteCny), '成交数量', record.dealQuantity, '成交方案', record.dealOptionLabel]),
     '',
-    line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量（kg）', '物流运费（CNY）', '综合成本（CNY）',
+    line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
       ...quantities.flatMap(q => {
         const label = q ? `${q}${unit}` : '自定义（数量未保存）'
         return [`${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`]
