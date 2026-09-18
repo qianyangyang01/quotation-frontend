@@ -37,6 +37,15 @@ class PackagingWeightTest {
         var wrongParcel=valid();((ObjectNode)wrongParcel.path("quoteOptions").get(0).path("logisticsInput")).put("packagingWeightKg",.003);
         assertThrows(AppException.class,()->PackagingWeight.record(wrongParcel));
     }
+    @Test void refusesNewCalculatedQuotesFromStaleTabsButDoesNotReinterpretHistory() {
+        var input=valid();input.remove("weightSnapshot");
+        assertDoesNotThrow(()->PackagingWeight.record(input));
+        var error=assertThrows(AppException.class,()->new QuotationSubmissionValidator().validateQuotePricing(input));
+        assertEquals(409,error.status().value());
+        assertTrue(error.getMessage().contains("刷新报价页面"));
+        assertEquals(.153,input.path("quoteOptions").get(0).path("logisticsInput").path("weightKg").asDouble());
+        assertDoesNotThrow(()->new QuotationSubmissionValidator().validateQuotePricing(valid()));
+    }
     @Test void validatesPhysicalItemsBeforeMultiplyingBundleSetsAtFractionalBoundary() {
         var input=valid();input.put("quoteMode","bundle");input.remove("quoteOptions");
         var w=(ObjectNode)input.path("weightSnapshot");

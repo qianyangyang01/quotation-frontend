@@ -19,6 +19,7 @@ public class QuotationSubmissionValidator {
 
     // Called after idempotency lookup: old successful retries retain their original snapshot.
     public void validateQuotePricing(ObjectNode input) {
+        PackagingWeight.requireCurrentCalculatedQuote(input);
         var errors = new ArrayList<ApiResponse.FieldError>();
         checkUsd(errors, input, "", "systemQuoteUsd");
         checkConversion(errors, input, "", "systemQuoteUsd", "systemQuoteCny", input.path("exchangeRate"));

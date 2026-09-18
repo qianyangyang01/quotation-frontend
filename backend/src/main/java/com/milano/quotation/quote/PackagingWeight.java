@@ -10,6 +10,15 @@ import java.util.HashMap;
 /** Validate the new snapshot without reinterpreting historical records that lack it. */
 final class PackagingWeight {
     private PackagingWeight() {}
+    /** Called only for a new submission, after successful idempotent retries are returned. */
+    static void requireCurrentCalculatedQuote(ObjectNode input) {
+        if (input.has("weightSnapshot")) return;
+        for (var option : input.path("quoteOptions")) {
+            var parcel = option.path("logisticsInput");
+            if (parcel.has("baseWeightKg") || parcel.has("packagingWeightKg"))
+                throw AppException.conflict("包材规则已更新，请刷新报价页面后重新计价并保存；历史报价不会改动");
+        }
+    }
     static void draft(ObjectNode input) {
         if (!input.has("specialPackagingGrams")) return;
         special(input.path("specialPackagingGrams"));
