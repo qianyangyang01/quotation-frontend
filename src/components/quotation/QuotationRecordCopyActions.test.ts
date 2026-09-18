@@ -32,7 +32,9 @@ afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMoc
 it('both record scopes share working footer copying, with the saved USD snapshot and no business writes', async () => {
   const state = mount(); const before = JSON.stringify(state.record)
   footerButton('复制报价数据').click(); await settle()
-  expect(writeText.mock.calls[0][0]).toContain('SDH Express\t5-12 days\t1-2 days\t$6.20')
+  expect(writeText.mock.calls[0][0]).toContain('闪电猴\t内部渠道\t内部规则')
+  expect(writeText.mock.calls[0][0]).toContain('1件系统价（USD）')
+  expect(writeText.mock.calls[0][0]).toContain('6.20')
   expect(document.querySelector('dialog')!.open).toBe(false)
   footerButton('复制报价图片').click(); await settle()
   expect(document.querySelector('dialog')!.open).toBe(true)
@@ -43,16 +45,21 @@ it('both record scopes share working footer copying, with the saved USD snapshot
   expect(JSON.stringify(state.record)).toBe(before)
 })
 
-it('opens a repairable editor from failed record copying and reuses the local supplement', async () => {
+it('copies internal details without needing an English provider name or rendering a customer image', async () => {
   const state = mount('新物流')
-  footerButton('复制报价数据').click(); await settle(); expect(writeText).not.toHaveBeenCalled()
-  footerButton('打开报价单检查并重试').click(); await settle()
-  const field = document.querySelector<HTMLInputElement>('[aria-label="新物流英文名"]')!
-  expect(field).not.toBeNull(); field.value = 'New Logistics'; field.dispatchEvent(new Event('input')); await settle()
-  document.querySelector<HTMLButtonElement>('[aria-label="关闭客户报价单"]')!.click(); await settle()
   footerButton('复制报价数据').click(); await settle()
-  expect(writeText.mock.lastCall![0]).toContain('New Logistics')
+  expect(writeText.mock.lastCall![0]).toContain('新物流\t内部渠道')
+  expect(render).not.toHaveBeenCalled()
   expect(state.record.quoteOptions![0]!.carrier).toBe('新物流')
+})
+
+it('reports clipboard rejection and retries the full saved data without an editor', async () => {
+  writeText.mockRejectedValueOnce(new Error('denied'))
+  mount(); footerButton('复制报价数据').click(); await settle()
+  expect(document.querySelector('.record-copy-actions>p')?.textContent).toContain('未复制成功')
+  footerButton('重新复制对账明细').click(); await settle()
+  expect(writeText).toHaveBeenCalledTimes(2)
+  expect(document.querySelector('.record-copy-actions>p')?.textContent).toContain('已复制完整对账明细')
 })
 
 it('does not display old clipboard completion on another record', async () => {

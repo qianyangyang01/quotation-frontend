@@ -30,7 +30,10 @@ function copyTextDuringClick(text: string) {
 }
 
 export async function copyQuoteSheetData(sheet: CustomerQuoteSheet) {
-  const text = customerQuoteSheetTsv(sheet)
+  return copyQuotationText(customerQuoteSheetTsv(sheet))
+}
+
+export async function copyQuotationText(text: string) {
   if (!globalThis.isSecureContext) {
     throw new Error('当前浏览器不支持复制数据，请使用 Chrome 或 Edge 打开安全页面后重试')
   }
