@@ -35,7 +35,7 @@ final class QuotationConfirmation {
             if (!cells(old).equals(cells(patch.path("customerQuote")))) patch.put("quoteConfirmed", false);
         }
     }
-    private static Map<String, Map<Long, String>> cells(JsonNode snapshot) {
+    static Map<String, Map<Long, String>> cells(JsonNode snapshot) {
         var result = new TreeMap<String, Map<Long, String>>();
         for (var row : snapshot.path("rows")) {
             var prices = new TreeMap<Long, String>();

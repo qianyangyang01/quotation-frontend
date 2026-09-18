@@ -37,6 +37,11 @@ class QuotationRecordQueryPostgresIntegrationTest {
         var all=query.search(null,filters,0,10);
         assertEquals(1,all.summary().won());assertEquals(106,all.total());
         assertEquals(all.total(),all.summary().pending()+all.summary().processed()+all.summary().won()+all.summary().lost());
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":\"approved\"}'::jsonb where quote_no in ('Q-1','OTHER')");
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":\"rejected\"}'::jsonb where quote_no='Q-2'");
+        assertEquals(1,query.search("ME",new QuotationRecordQuery.Filters("","finance-approved","","",date,date),0,10).total());
+        assertEquals(2,query.search(null,new QuotationRecordQuery.Filters("","finance-approved","","",date,date),0,10).total());
+        assertEquals(1,query.search("ME",new QuotationRecordQuery.Filters("","finance-rejected","","",date,date),0,10).total());
         var everyDate=new QuotationRecordQuery.Filters("","","","",null,null);
         var historical=query.search("ME",everyDate,0,100);
         assertEquals(105,historical.summary().pending()); // 103 pending + 2 legacy lost

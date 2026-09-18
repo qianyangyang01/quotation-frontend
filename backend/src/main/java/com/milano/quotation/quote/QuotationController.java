@@ -61,6 +61,49 @@ public class QuotationController {
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate, Authentication auth) {
         return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate),page,size));
     }
+    /** Poll only visible records; enforce owner scope on the server. */
+    @GetMapping("/review-status")
+    @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
+    @Transactional(readOnly=true)
+    ApiResponse<List<JsonNode>> reviewStatus(@RequestParam List<UUID> ids, Authentication auth) {
+        if (ids.size() > 100) throw AppException.unprocessable("一次最多查询100条记录");
+        var owner = principal(auth).account();
+        var result = new ArrayList<JsonNode>();
+        for (var row : records.findAllById(ids)) {
+            if (!hasAll(auth) && !row.ownerAccount.equals(owner)) continue;
+            var value = JsonNodeFactory.instance.objectNode().put("id", row.id.toString()).put("_version", row.version);
+            value.put("financeReviewStatus", row.payload.path("financeReviewStatus").asText("pending"));
+            for (var field : QuotationFinanceReview.FIELDS) if (row.payload.has(field)) value.set(field, row.payload.get(field));
+            result.add(value);
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @PatchMapping("/{id}/finance-review")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','FINANCE') and hasAuthority('PERM_allRecords')")
+    @Transactional
+    ApiResponse<JsonNode> review(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
+        var fields = new HashSet<String>(); patch.properties().forEach(entry -> fields.add(entry.getKey()));
+        if (!Set.of("_version", "financeReviewStatus").containsAll(fields)
+                || !patch.path("_version").isIntegralNumber()
+                || !patch.path("financeReviewStatus").isTextual()
+                || !QuotationFinanceReview.STATUSES.contains(patch.path("financeReviewStatus").asText()))
+            throw AppException.unprocessable("审核状态或记录版本不合法");
+        var row = records.findById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
+        assertVersion(row, patch.path("_version").asLong(-1));
+        var current = (ObjectNode) row.payload.deepCopy();
+        var target = patch.path("financeReviewStatus").asText();
+        if (current.path("financeReviewStatus").asText("pending").equals(target)) return ApiResponse.ok(view(row));
+        var now = Instant.now(); var reviewer = principal(auth);
+        revision(current.withArray("revisions"), reviewer, "financeReviewStatus", JsonNodeFactory.instance.textNode(current.path("financeReviewStatus").asText("pending")), JsonNodeFactory.instance.textNode(target), now);
+        current.put("financeReviewStatus", target);
+        current.put("financeReviewedAt", now.toString()); current.put("financeReviewedBy", reviewer.displayName());
+        current.put("financeReviewedAccount", reviewer.account()); current.put("updatedAt", now.toString());
+        row.payload = current; row.updatedAt = now; records.saveAndFlush(row);
+        audit.record("quotation.finance-review", "quotation", id.toString(), "success", Map.of("status", target));
+        return ApiResponse.ok(view(row));
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
     @Transactional(readOnly=true)
@@ -88,6 +131,7 @@ public class QuotationController {
         payload.put("salespersonAccount", principal.account()); payload.put("status", "pending");
         payload.put("createdAt", now.toString()); payload.put("updatedAt", now.toString());
         CustomerQuotePrices.initialize(payload);
+        QuotationFinanceReview.initialize(payload);
         payload.put("quoteConfirmed", false); payload.remove("quoteConfirmedAt"); payload.remove("quoteConfirmedBy");
         if (!payload.has("revisions")) payload.putArray("revisions");
         var row = new QuotationRecordEntity(); row.id = id; row.quoteNo = no; row.ownerAccount = principal.account();
@@ -104,9 +148,14 @@ public class QuotationController {
     ApiResponse<JsonNode> update(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
         var row = mine(id, auth); assertVersion(row, patch.path("_version").asLong(-1));
         submissionValidator.validateUpdate(patch);
+        QuotationFinanceReview.rejectDirectPatch(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
         CustomerQuotePrices.preparePatch(current, patch);
         QuotationConfirmation.prepare(current, patch);
+        if (QuotationFinanceReview.pricesChanged(current, patch) && !current.path("financeReviewStatus").asText("pending").equals("pending")) {
+            revision(revisions, principal(auth), "financeReviewStatus", current.get("financeReviewStatus"), JsonNodeFactory.instance.textNode("pending"), now);
+            QuotationFinanceReview.initialize(current);
+        }
         var wasConfirmed = current.path("quoteConfirmed").asBoolean(false);
         for (var option : current.path("quoteOptions")) {
             if (patch.hasNonNull("dealOptionId") && option.path("id").asText().equals(patch.path("dealOptionId").asText()) && option.path("available").isBoolean() && !option.path("available").asBoolean())

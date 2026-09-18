@@ -1,3 +1,4 @@
+import { buildQuotationWeightSnapshot } from './quotationWeightSnapshot'
 import { expect, it } from 'vitest'
 import { normalizeQuotationRecord, type QuotationRecordQuoteOption } from './quotationRecords'
 import { quotationRecordReconciliationTsv } from './quotationRecordReconciliation'
@@ -61,4 +62,39 @@ it('uses saved per-quantity taxes, keeps all 49 routes, and sanitizes pasted cel
   expect(rows[0]?.['1套关税（USD）']).toBe('2.31')
   expect(rows[0]?.['渠道']).toBe("'@example ")
   expect(text).toContain("客户\t'=1+1 ")
+})
+
+
+it('recovers historical quantity weights through normalization without recalculation or quantity guessing', () => {
+  const saved = record()
+  const route = saved.quoteOptions![0]!
+  route.logisticsInput = {country:'US', weightKg:.292, marks:[]}
+  route.logisticsSamples = [{quantity:1,input:{weightKg:.292}},{quantity:2,input:{weightKg:.584}},{quantity:5,input:{weightKg:1.46}}]
+  const normalized = normalizeQuotationRecord(saved)!
+  const before = JSON.stringify(normalized)
+  const row = table(quotationRecordReconciliationTsv(normalized))[0]!
+  expect(row['1套最终含包材重量（g）']).toBe('292')
+  expect(row['2套最终含包材重量（g）']).toBe('584')
+  expect(row['3套最终含包材重量（g）']).toBe('未保存')
+  expect(row['5套最终含包材重量（g）']).toBe('1460')
+  expect(row['最终含包材重量快照（g）']).toBe('292')
+  expect(row['重量快照对应数量']).toContain('未保存数量')
+  expect(JSON.stringify(normalized)).toBe(before)
+})
+it('copies final single-item weights from an explicit quantity and does not multiply a once-per-ticket package', () => {
+  const saved = normalizeQuotationRecord({id:'r',no:'Q',quoteMode:'single',customQuoteQuantity:5,quoteOptions:[{...option('a'),logisticsInput:{country:'US',quantity:5,weightKg:.565,marks:[]}}]})!
+  const row = table(quotationRecordReconciliationTsv(saved))[0]!
+  expect(row['5件最终含包材重量（g）']).toBe('565')
+  expect(row['1件最终含包材重量（g）']).toBe('未保存')
+})
+
+
+it.each(['single','bundle'] as const)('copies final %s weight alongside prices including special packaging once per shipment', mode => {
+  const saved=record();saved.quoteMode=mode
+  saved.weightSnapshot=buildQuotationWeightSnapshot([{sku:'A',quantityPerSet:mode==='bundle'?2:1,baseWeightKg:.1}],10,[1,2,3,5])
+  const lines=quotationRecordReconciliationTsv(saved).split('\n').map(row=>row.split('\t'))
+  const start=lines.findIndex(row=>row[0]==='序号'), header=lines[start]!, row=lines[start+1]!
+  const unit=mode==='bundle'?'套':'件'
+  expect(row[header.indexOf('1'+unit+'最终含包材重量（g）')]).toBe(mode==='bundle'?'214':'112')
+  expect(row[header.indexOf('5'+unit+'最终含包材重量（g）')]).toBe(mode==='bundle'?'1030':'520')
 })

@@ -5,6 +5,9 @@ import type { FinanceTaxCalculation } from './channelTaxRules'
 import { normalizeCustomerPrices, type CustomerPriceSnapshot } from './customerQuotePrices'
 import { api, idempotencyKey } from '@/services/http'
 
+export type FinanceReviewStatus = 'pending' | 'approved' | 'rejected'
+export const financeReviewLabel = (value?: string) => value === 'approved' ? '财务已审核-可报价' : value === 'rejected' ? '财务已审核-价格有误不可报价' : '待财务审核'
+
 export type QuotationRecordStatus = 'pending' | 'won' | 'lost'
 
 export interface QuotationRecordSpecifiedQuote {
@@ -38,6 +41,7 @@ export interface QuotationRecordQuoteOption {
   freightCny?: number
   logisticsChannelId?: string
   logisticsVersionId?: string
+  logisticsSamples?: { quantity: number; input: { weightKg: number }; total?: number | null }[]
   logisticsInput?: { country: string; baseWeightKg?: number; packagingWeightKg?: number; standardPackagingWeightKg?: number; specialPackagingWeightKg?: number; quantity?: number; weightKg: number; marks: string[]; dimensions?: { lengthCm: number; widthCm: number; heightCm: number; volumeMultiplier?: number } }
   totalCostCny?: number
   profitCny?: number
@@ -92,7 +96,7 @@ export interface QuotationRecordBundleItem {
   domesticFreightPerUnitCny: number
 }
 
-export type QuotationRecordEditableField = 'status' | 'actualQuoteUsd' | 'actualQuoteCny' | 'dealQuantity' | 'closedAt' | 'note' | 'dealOptionLabel' | 'dealLines' | 'customerQuote' | 'quoteConfirmed'
+export type QuotationRecordEditableField = 'financeReviewStatus' | 'status' | 'actualQuoteUsd' | 'actualQuoteCny' | 'dealQuantity' | 'closedAt' | 'note' | 'dealOptionLabel' | 'dealLines' | 'customerQuote' | 'quoteConfirmed'
 
 export interface QuotationRecordRevision {
   id: string
@@ -111,6 +115,8 @@ export interface QuotationRecordEditor {
 }
 
 export interface QuotationRecord {
+  financeReviewStatus?: FinanceReviewStatus
+  financeReviewedAt?: string; financeReviewedBy?: string; financeReviewedAccount?: string
   financeVersions?: FinanceSettingVersions
   weightSnapshot?: QuotationWeightSnapshot
   commissionThreshold?: number | null
@@ -132,12 +138,13 @@ export interface QuotationRecord {
   closedAt?: string; note?: string; createdAt: string; updatedAt: string; revisions: QuotationRecordRevision[]
 }
 
-export type QuotationRecordUpdate = Partial<Pick<QuotationRecord, QuotationRecordEditableField | 'dealOptionId'>>
+export type QuotationRecordUpdate = Partial<Pick<QuotationRecord, Exclude<QuotationRecordEditableField, 'financeReviewStatus'> | 'dealOptionId'>>
 
 const n = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0
 const optionalN = (value: unknown) => value == null || value === '' ? null : n(value)
-const editableFields: QuotationRecordEditableField[] = ['status', 'actualQuoteUsd', 'actualQuoteCny', 'dealQuantity', 'closedAt', 'note', 'dealOptionLabel', 'dealLines', 'customerQuote', 'quoteConfirmed']
+const editableFields: QuotationRecordEditableField[] = ['financeReviewStatus', 'status', 'actualQuoteUsd', 'actualQuoteCny', 'dealQuantity', 'closedAt', 'note', 'dealOptionLabel', 'dealLines', 'customerQuote', 'quoteConfirmed']
 const fieldLabels: Record<QuotationRecordEditableField, string> = {
+  financeReviewStatus: '财务审核',
   customerQuote: '客户报价', quoteConfirmed: '报价确认',
   status: '处理状态',
   actualQuoteUsd: '客户最终报价（USD）',
@@ -219,6 +226,7 @@ function normalizeQuoteOptions(value: unknown, recordId: string, rawRecord: Part
     option.logisticsChannelId = optionalText(raw?.logisticsChannelId)
     option.logisticsVersionId = optionalText(raw?.logisticsVersionId)
     option.logisticsInput = raw?.logisticsInput
+    option.logisticsSamples = Array.isArray(raw?.logisticsSamples) ? raw.logisticsSamples : undefined
     option.totalCostCny = optionalNumber(raw?.totalCostCny)
     option.profitCny = optionalNumber(raw?.profitCny)
     option.quoteCny = optionalNumber(raw?.quoteCny)
@@ -339,7 +347,7 @@ export function normalizeQuotationRecord(raw: Partial<QuotationRecord>): Quotati
   const specifiedQuotes = Array.isArray(raw.quoteOptions) ? specifiedQuotesFromOptions(quoteOptions) : legacyQuotes
   const dealLines = normalizeDealLines(raw.dealLines, quoteOptions, raw)
   const bundleItems = normalizeBundleItems(raw.bundleItems)
-  return { weightSnapshot: normalizeQuotationWeightSnapshot(raw.weightSnapshot), customerOperation: raw.customerOperation ? { id: String(raw.customerOperation.id), name: String(raw.customerOperation.name), feeUsd: n(raw.customerOperation.feeUsd) } : undefined, quoteConfirmed: raw.quoteConfirmed === true, quoteConfirmedAt: optionalText(raw.quoteConfirmedAt), quoteConfirmedBy: optionalText(raw.quoteConfirmedBy), systemQuantityQuotes: normalizeCustomerPrices(raw.systemQuantityQuotes), sheetQuote: normalizeCustomerPrices(raw.sheetQuote), customerQuote: normalizeCustomerPrices(raw.customerQuote), id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), bundleItems: bundleItems.length ? bundleItems : undefined, productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), purchaseBaseUnitPriceCny: optionalNumber(raw.purchaseBaseUnitPriceCny), purchaseInvoiceType: optionalText(raw.purchaseInvoiceType), purchaseInvoiceRatePercent: optionalNumber(raw.purchaseInvoiceRatePercent), purchaseInvoiceTaxApplied: typeof raw.purchaseInvoiceTaxApplied === 'boolean' ? raw.purchaseInvoiceTaxApplied : undefined, purchaseUnitPriceCny: optionalNumber(raw.purchaseUnitPriceCny), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, commissionThreshold: raw.commissionThreshold === undefined ? 1 : Number(raw.commissionThreshold), monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
+  return { financeReviewStatus: raw.financeReviewStatus === 'approved' || raw.financeReviewStatus === 'rejected' ? raw.financeReviewStatus : 'pending', financeReviewedAt: optionalText(raw.financeReviewedAt), financeReviewedBy: optionalText(raw.financeReviewedBy), financeReviewedAccount: optionalText(raw.financeReviewedAccount), weightSnapshot: normalizeQuotationWeightSnapshot(raw.weightSnapshot), customerOperation: raw.customerOperation ? { id: String(raw.customerOperation.id), name: String(raw.customerOperation.name), feeUsd: n(raw.customerOperation.feeUsd) } : undefined, quoteConfirmed: raw.quoteConfirmed === true, quoteConfirmedAt: optionalText(raw.quoteConfirmedAt), quoteConfirmedBy: optionalText(raw.quoteConfirmedBy), systemQuantityQuotes: normalizeCustomerPrices(raw.systemQuantityQuotes), sheetQuote: normalizeCustomerPrices(raw.sheetQuote), customerQuote: normalizeCustomerPrices(raw.customerQuote), id: recordId, no: String(raw.no), _version: raw._version == null ? undefined : n(raw._version), salespersonName: String(raw.salespersonName || '报价专员'), salespersonAccount: String(raw.salespersonAccount || '—'), customerName: String(raw.customerName || '未填写客户'), quoteMode: raw.quoteMode === 'bundle' ? 'bundle' : 'single', productSummary: String(raw.productSummary || '—'), productImage: raw.productImage ? String(raw.productImage) : undefined, primarySku: String(raw.primarySku || '—'), bundleItems: bundleItems.length ? bundleItems : undefined, productCategory: raw.productCategory ? String(raw.productCategory) : undefined, logisticsAttribute: String(raw.logisticsAttribute || '—'), purchaseBaseUnitPriceCny: optionalNumber(raw.purchaseBaseUnitPriceCny), purchaseInvoiceType: optionalText(raw.purchaseInvoiceType), purchaseInvoiceRatePercent: optionalNumber(raw.purchaseInvoiceRatePercent), purchaseInvoiceTaxApplied: typeof raw.purchaseInvoiceTaxApplied === 'boolean' ? raw.purchaseInvoiceTaxApplied : undefined, purchaseUnitPriceCny: optionalNumber(raw.purchaseUnitPriceCny), volumetricEnabled: raw.volumetricEnabled === true, packageLengthCm: optionalNumber(raw.packageLengthCm), packageWidthCm: optionalNumber(raw.packageWidthCm), packageHeightCm: optionalNumber(raw.packageHeightCm), defaultVolumeDivisor: raw.defaultVolumeDivisor == null ? undefined : Math.max(1, n(raw.defaultVolumeDivisor)), country: String(raw.country || '—'), carrier: String(raw.carrier || '—'), channel: String(raw.channel || '—'), rule: String(raw.rule || '—'), customerGrade: String(raw.customerGrade || '—'), taxCustomerType: raw.taxCustomerType === 'B' ? 'B' : raw.taxCustomerType === 'A' ? 'A' : undefined, commissionThreshold: raw.commissionThreshold === undefined ? 1 : Number(raw.commissionThreshold), monthlySalesEstimate: raw.monthlySalesEstimate ? String(raw.monthlySalesEstimate) : undefined, matrixMode: raw.matrixMode === 'specified' || raw.matrixMode === 'template' ? raw.matrixMode : 'common', quotationTemplateId: raw.quotationTemplateId ? String(raw.quotationTemplateId) : undefined, quotationTemplateName: raw.quotationTemplateName ? String(raw.quotationTemplateName) : undefined, specifiedQuotes, quoteOptions, customQuoteQuantity: raw.customQuoteQuantity == null ? undefined : Math.max(1, Math.floor(n(raw.customQuoteQuantity))), dealOptionId: optionalText(raw.dealOptionId), dealOptionLabel: optionalText(raw.dealOptionLabel), dealLines, systemQuoteCny: n(raw.systemQuoteCny), systemQuoteUsd: n(raw.systemQuoteUsd), totalCostCny: n(raw.totalCostCny), exchangeRate: n(raw.exchangeRate), status: raw.status === 'won' || raw.status === 'lost' ? raw.status : 'pending', actualQuoteUsd: raw.actualQuoteUsd == null ? undefined : n(raw.actualQuoteUsd), actualQuoteCny: raw.actualQuoteCny == null ? undefined : n(raw.actualQuoteCny), dealQuantity: raw.dealQuantity == null ? undefined : n(raw.dealQuantity), closedAt: raw.closedAt, note: raw.note, createdAt: String(raw.createdAt || new Date().toISOString()), updatedAt: String(raw.updatedAt || raw.createdAt || new Date().toISOString()), revisions: normalizeRevisions(raw.revisions) }
 }
 export async function loadQuotationRecords(scope: 'mine' | 'company' = 'company') {
   type Page = { items: QuotationRecord[]; total: number; totalPages: number }
@@ -368,4 +376,13 @@ export async function createQuotationRecord(input: Omit<QuotationRecord, 'id' | 
 export async function updateQuotationRecord(id: string, patch: QuotationRecordUpdate, expectedVersion?: number) {
   const raw = await api.patch<QuotationRecord>(`/quotations/${id}`, { ...patch, _version: expectedVersion })
   return normalizeQuotationRecord(raw)
+}
+
+export async function reviewQuotationRecord(id: string, status: FinanceReviewStatus, version?: number) {
+  return normalizeQuotationRecord(await api.patch<QuotationRecord>('/quotations/'+encodeURIComponent(id)+'/finance-review', { financeReviewStatus: status, _version: version }))!
+}
+export type QuotationReviewState = Pick<QuotationRecord, 'id' | '_version' | 'financeReviewStatus' | 'financeReviewedAt' | 'financeReviewedBy' | 'financeReviewedAccount'>
+export async function loadQuotationReviewStates(ids: string[], signal?: AbortSignal): Promise<QuotationReviewState[]> {
+  if (!ids.length) return []
+  return api.get('/quotations/review-status?'+new URLSearchParams({ ids: ids.join(',') }), { signal, cache: 'no-store' })
 }

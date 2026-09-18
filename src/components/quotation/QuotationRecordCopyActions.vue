@@ -7,7 +7,7 @@ import { quotationRecordReconciliationTsv } from '@/data/quotationRecordReconcil
 import { copyQuotationText } from '@/services/customerQuoteSheetClipboard'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 
-const props = defineProps<{ record: QuotationRecord; canEdit?:boolean }>()
+const props = defineProps<{ record: QuotationRecord; canEdit?:boolean; refreshRecord?: (id: string) => Promise<QuotationRecord | null> }>()
 const emit=defineEmits<{saved:[record:QuotationRecord]}>()
 const saving=ref(false)
 const source = computed(() => quotationRecordQuoteSheetSource(props.record))
@@ -65,7 +65,10 @@ async function copyData() {
   copyingData.value = true
   status.value = undefined
   try {
-    await copyQuotationText(quotationRecordReconciliationTsv(props.record))
+    const latest = props.refreshRecord ? await props.refreshRecord(props.record.id) : props.record
+    if (context !== contextKey.value) return
+    if (!latest) throw new Error('报价记录已不可用，请刷新后重试')
+    await copyQuotationText(quotationRecordReconciliationTsv(latest))
     if (context === contextKey.value) status.value = { message: '已复制完整对账明细，可直接粘贴到 Excel', failed: false }
   }
   catch (error) { if (context === contextKey.value) status.value = { message: error instanceof Error ? error.message : '复制失败，请重试', failed: true } }
@@ -77,7 +80,7 @@ async function copyData() {
   <div class="record-copy-actions">
     <div class="record-copy-buttons">
       <button ref="imageButton" type="button" :disabled="copyingData" @click="openImage">复制报价图片</button>
-      <button type="button" :disabled="copyingData" title="复制完整对账明细：具体渠道、税费、附加费及各数量系统价和客户价（USD/CNY）" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
+      <button type="button" :disabled="copyingData" title="复制完整对账明细：具体渠道、最终含包材重量、税费、附加费及各数量系统价和客户价（USD/CNY）" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
     </div>
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>
     <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="copyData">重新复制对账明细</button>

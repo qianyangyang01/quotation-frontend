@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js'
+import { financeReviewLabel } from './quotationRecords'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 import { savedSystemPrice } from './customerQuotePrices'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
@@ -35,6 +37,15 @@ function surchargeDescription(option: QuotationRecordQuoteOption) {
   return option.surchargeConfigured === false ? '附加费未配置' : missing
 }
 
+// Read historical snapshots only. Never apply today's packaging rules to old quotes.
+export function savedFinalWeightKg(record: QuotationRecord, option: QuotationRecordQuoteOption, quantity: number): number | undefined {
+  const value = record.weightSnapshot?.quantities.find(row => row.quantity === quantity)?.weightKg
+    ?? option.logisticsSamples?.find(sample => sample.quantity === quantity)?.input?.weightKg
+    ?? (option.logisticsInput?.quantity === quantity ? option.logisticsInput.weightKg : undefined)
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+const grams = (value?: number) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? new Decimal(value).mul(1000).toFixed() : missing
+
 /** Internal reconciliation export: saved fields only, independent of the customer-facing sheet. */
 export function quotationRecordReconciliationTsv(record: QuotationRecord): string {
   const snapshot = record.customerQuote ?? record.sheetQuote
@@ -50,26 +61,27 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['SKU', sku, '商品', record.productSummary, '报价类型', record.quoteMode === 'bundle' ? '组合报价' : '单品报价', '物流属性', record.logisticsAttribute]),
     line(['客户等级', record.customerGrade, '汇率（CNY/USD）', record.exchangeRate > 0 ? record.exchangeRate : missing, '佣金阈值', record.commissionThreshold ?? 1, '公司操作费（USD/单）', money(record.customerOperation?.feeUsd)]),
     line(['报价模式', record.matrixMode === 'template' ? '模板报价' : record.matrixMode === 'specified' ? '指定国家与渠道' : '常用国家', '模板', record.quotationTemplateName, '创建时间', record.createdAt, '修改时间', record.updatedAt]),
+    line(['财务审核', financeReviewLabel(record.financeReviewStatus), '审核人', record.financeReviewedBy, '审核时间', record.financeReviewedAt]),
     line(['处理状态', record.status === 'won' ? '已成交' : record.status === 'lost' ? '未成交' : record.quoteConfirmed ? '已处理' : '待处理', '备注', record.note || '', '成交日期', record.closedAt]),
     line(['采购原价（CNY/件）', money(record.purchaseBaseUnitPriceCny), '计入采购价（CNY/件）', money(record.purchaseUnitPriceCny), '采购发票', record.purchaseInvoiceType, '采购票点（%）', record.purchaseInvoiceRatePercent]),
     line(['首选系统价（USD）', money(record.systemQuoteUsd), '首选系统价（CNY快照）', money(record.systemQuoteCny), '首选综合成本（CNY）', money(record.totalCostCny)]),
     line(['成交价（USD）', money(record.actualQuoteUsd), '成交价（CNY快照）', money(record.actualQuoteCny), '成交数量', record.dealQuantity, '成交方案', record.dealOptionLabel]),
     '',
-    line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
+    line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', '最终含包材重量快照（g）', '重量快照对应数量', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
       ...quantities.flatMap(q => {
         const label = q ? `${q}${unit}` : '自定义（数量未保存）'
-        return [`${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`]
+        return [`${label}最终含包材重量（g）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`]
       })]),
   ]
   for (const [index, option] of (record.quoteOptions ?? []).entries()) {
     const customerRow = snapshot?.rows.find(row => row.optionId === option.id)
     lines.push(line([index + 1, record.no, sku, option.country, option.countryCode, option.quoteRegion, option.carrier, option.channel, option.rule, option.channelCode, option.eta, option.isPrimary ? '是' : '否', option.available === false ? option.availabilityMessage || '不可用' : '已保存报价',
-      taxDescription(option), option.taxRatePercent, surchargeDescription(option), money(option.surchargeUsd), option.logisticsInput?.weightKg, money(option.freightCny), money(option.totalCostCny),
+      taxDescription(option), option.taxRatePercent, surchargeDescription(option), money(option.surchargeUsd), option.logisticsInput?.weightKg, grams(option.logisticsInput?.weightKg), option.logisticsInput?.quantity ?? '未保存数量（不可推算）', money(option.freightCny), money(option.totalCostCny),
       ...quantities.flatMap(q => {
         const system = savedSystemPrice(record, option, q)
         const customerIndex = snapshot?.quantities.indexOf(q) ?? -1
         const customer = snapshot ? customerRow && customerIndex >= 0 ? customerRow.prices[customerIndex] : null : system
-        return [money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity)]
+        return [grams(savedFinalWeightKg(record, option, q)), money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity)]
       }),
     ]))
   }

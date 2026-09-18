@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useQuotationReviewSync } from '@/composables/useQuotationReviewSync'
+import { reviewQuotationRecord, financeReviewLabel, type FinanceReviewStatus } from '@/data/quotationRecords'
 import QuotationWeightTrace from '@/components/quotation/QuotationWeightTrace.vue'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -11,7 +13,7 @@ import QuotationRecordCopyActions from '@/components/quotation/QuotationRecordCo
 import { representativePriceDifference } from '@/data/customerQuotePrices'
 import CustomerPriceComparison from '@/components/quotation/CustomerPriceComparison.vue'
 import CustomerPriceRevision from '@/components/quotation/CustomerPriceRevision.vue'
-import { currentAuthUser } from '@/data/authStore'
+import { currentAuthUser, hasPermission } from '@/data/authStore'
 
 import { loadRecordPage, loadFilteredRecords, loadRecord, recentRecordDates } from '@/data/quotationRecordQuery'
 import { quotationDetailsCsv } from '@/data/quotationAnalytics'
@@ -21,7 +23,7 @@ const route = useRoute()
 const records = ref<QuotationRecord[]>([])
 const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
 const search = ref('')
-const filterStatus = ref<'' | 'pending' | 'won' | 'processed'>('')
+const filterStatus = ref<'' | 'pending' | 'won' | 'processed' | 'finance-approved' | 'finance-rejected'>('')
 const filterCountry = ref('')
 const filterCategory = ref('')
 const startDate=ref('');const endDate=ref('');const page=ref(0);const pageSize=ref(10)
@@ -30,10 +32,10 @@ const summary=ref<{pending:number;won:number;lost:number;total:number;processed?
 const filters=computed(()=>({q:search.value.trim(),status:filterStatus.value,country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
 const dateError=computed(()=>startDate.value && endDate.value && startDate.value>endDate.value ? '开始日期不能晚于结束日期' : '')
 let requestId=0;let refreshTimer:ReturnType<typeof setTimeout>|undefined
-async function refresh() {
+async function refresh(silent = false) {
   const id=++requestId
   if(dateError.value) { loading.value=false;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};return }
-  loading.value=true;loadError.value=''
+  if (!silent) loading.value=true;loadError.value=''
   try {
     const result=await loadRecordPage(props.scope,{...filters.value},page.value,pageSize.value)
     if(id!==requestId)return
@@ -54,9 +56,33 @@ async function exportRecords(){
     toast('已导出当前筛选范围全部 '+rows.length+' 条记录')
   }catch(error){toast(error instanceof Error?error.message:'导出失败，请重试')}finally{exporting.value=false}
 }
-watch([filters,pageSize,()=>props.scope],()=>{++requestId;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
+watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{++requestId;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
 onUnmounted(()=>{++requestId;clearTimeout(refreshTimer)})
 const selected = ref<QuotationRecord | null>(null)
+const reviewSync = useQuotationReviewSync(records, selected, computed(() => currentAuthUser.value.account))
+const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
+const reviewing = ref(new Set<string>())
+async function changeReview(row: QuotationRecord, event: Event) {
+  const target = event.target as HTMLSelectElement
+  const status = target.value as FinanceReviewStatus
+  target.value = reviewSync.stateFor(row).financeReviewStatus || 'pending'
+  if (!canReview.value || reviewing.value.has(row.id)) return
+  const account = currentAuthUser.value.account
+  reviewing.value.add(row.id)
+  try {
+    const saved = await reviewQuotationRecord(row.id, status, row._version)
+    if (account !== currentAuthUser.value.account) return
+    reviewSync.accept(saved)
+    records.value = records.value.map(item => item.id === saved.id ? saved : item)
+    if (selected.value?.id === saved.id && !editing.value) selected.value = saved
+    toast('审核状态已保存，员工端会自动同步')
+  } catch (error) {
+    if (account !== currentAuthUser.value.account) return
+    toast(error instanceof Error ? error.message : '审核保存失败，请重试')
+    await refresh()
+    void reviewSync.poll()
+  } finally { reviewing.value.delete(row.id) }
+}
 const editing = ref(false)
 const detailTab = ref<'overview' | 'options' | 'history'>('overview')
 const notice = ref('')
@@ -125,7 +151,15 @@ function recordPurchaseProduct(row: QuotationRecord) {
   const primarySku = row.primarySku.split(/[、,+\s]/).find(Boolean) || row.primarySku
   return purchaseProducts.value.find(item => item.sku === primarySku)
 }
+let filteredSyncTimer: ReturnType<typeof setInterval> | undefined
+let filteredSyncBusy = false
+onUnmounted(() => clearInterval(filteredSyncTimer))
 onMounted(async () => {
+  filteredSyncTimer = setInterval(async () => {
+    if (!filterStatus.value.startsWith('finance-') || loading.value || filteredSyncBusy || document.visibilityState === 'hidden') return
+    filteredSyncBusy = true
+    try { await refresh(true) } finally { filteredSyncBusy = false }
+  }, 3000)
   await Promise.allSettled([refresh(),loadPurchaseProducts().then(rows=>{purchaseProducts.value=rows})])
 })
 watch(()=>[route.query.record,props.scope],async()=>{
@@ -200,7 +234,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
   <div class="app">
     <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '核对客户报价、处理状态与成交结果' : '查看全体业务员的报价、处理状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>当前筛选范围</em></span></article><article><i>✓</i><span><small>已处理</small><b>{{ summary.processed || 0 }}</b><em>当前筛选范围</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>当前筛选范围</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ summary.total }}</b><em>当前筛选范围</em></span></article></section>
-      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="won">已成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
+      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="finance-approved">财务已审核-可报价</option><option value="finance-rejected">财务已审核-价格有误不可报价</option><option value="won">已成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
@@ -215,8 +249,9 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <button :disabled="loading || page+1>=totalPages || !!dateError" @click="changePage(page+1)">下一页</button>
         <button :disabled="loading || exporting || !!dateError || !!loadError || !total" @click="exportRecords">{{ exporting ? '正在导出…' : '导出筛选结果' }}</button>
       </nav>
-      <p v-if="loadError" role="alert">{{ loadError }} <button @click="refresh">重试</button></p>
+      <p v-if="loadError" role="alert">{{ loadError }} <button @click="refresh()">重试</button></p>
       <p v-if="loading" role="status">正在加载报价记录…</p>
+      <p v-if="reviewSync.error.value" role="alert">{{ reviewSync.error.value }}</p>
       <section class="records quote-record-table" :aria-busy="loading">
         <header><span>报价单 / 商品</span><span>客户</span><span>报价规模</span><span>报价差异</span><span>处理状态</span></header>
         <article v-for="row in list" :key="row.id">
@@ -224,7 +259,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div><b>{{ row.customerName }}</b><small>创建于 {{ dateTime(row.createdAt) }}</small></div>
           <div class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
           <button class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="openDifference(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
-          <div class="record-row-actions"><em :class="row.status==='won' ? 'won' : row.quoteConfirmed ? 'processed' : 'pending'">{{ displayStatus(row) }}</em><small v-if="row.status==='won'">{{ row.quoteConfirmed ? '报价已确认' : '报价待确认' }}</small></div>
+          <div class="record-row-actions"><select v-if="canReview" class="finance-review" :class="reviewSync.stateFor(row).financeReviewStatus" :aria-label="row.no + ' 财务审核状态'" :value="reviewSync.stateFor(row).financeReviewStatus || 'pending'" :disabled="reviewing.has(row.id)" @change="changeReview(row,$event)"><option value="pending">待财务审核</option><option value="approved">财务已审核-可报价</option><option value="rejected">财务已审核-价格有误不可报价</option></select><strong v-else class="finance-review" :class="reviewSync.stateFor(row).financeReviewStatus">{{ financeReviewLabel(reviewSync.stateFor(row).financeReviewStatus) }}</strong><small v-if="reviewSync.stateFor(row).financeReviewedBy">{{ reviewSync.stateFor(row).financeReviewedBy }} · {{ dateTime(reviewSync.stateFor(row).financeReviewedAt) }}</small><em :class="row.status==='won' ? 'won' : row.quoteConfirmed ? 'processed' : 'pending'">{{ displayStatus(row) }}</em><small v-if="row.status==='won'">{{ row.quoteConfirmed ? '报价已确认' : '报价待确认' }}</small></div>
         </article>
         <div v-if="!loading && !loadError && !dateError && !list.length" class="empty"><b>暂无报价记录</b><span>当前筛选范围内没有记录，可以调整日期或重置筛选。</span><RouterLink v-if="isMine" to="/quotation">去新建报价</RouterLink></div>
       </section>
@@ -233,6 +268,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
       <aside class="record-drawer">
         <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.productSummary }} · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
 
+        <p class="finance-review detail-review" :class="reviewSync.stateFor(selected).financeReviewStatus" role="status">{{ financeReviewLabel(reviewSync.stateFor(selected).financeReviewStatus) }}<small v-if="reviewSync.stateFor(selected).financeReviewedBy"> · {{ reviewSync.stateFor(selected).financeReviewedBy }} · {{ dateTime(reviewSync.stateFor(selected).financeReviewedAt) }}</small></p>
         <template v-if="!editing">
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
@@ -246,7 +282,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <section v-else-if="detailTab==='options'" class="option-detail-panel">
             <CustomerPriceComparison :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" />
           </section>
-          <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>报价处理</b>：{{ revision.after === 'true' ? '已确认报价，标记为已处理' : '客户报价已变化，需重新确认' }}</p><p v-else-if="revision.field==='status'"><b>处理状态</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
+          <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>报价处理</b>：{{ revision.after === 'true' ? '已确认报价，标记为已处理' : '客户报价已变化，需重新确认' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>处理状态</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
           <footer v-if="detailTab==='overview'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" /></footer>
         </template>
 
@@ -263,6 +299,8 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
+.finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.detail-review{margin:12px 24px}.record-row-actions{min-width:0;gap:8px}
+
 .stats{grid-template-columns:repeat(4,1fr)}.record-row-actions{flex-wrap:wrap}.record-row-actions>em.processed{background:#e8f3ff;border-color:#b4d3f0;color:#256da6}.record-row-actions>small{font-size:10px;color:#71808c}
 .revision-history article>.customer-price-revision{grid-column:1/-1;min-width:0}
 .record-date-filters,.record-pagination{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0;color:#53616c;font-size:12px}.record-date-filters label,.record-pagination label{display:flex;align-items:center;gap:7px}.record-date-filters input,.record-date-filters button,.record-pagination button,.record-pagination select{min-height:34px;padding:5px 10px;background:#fff;border:1px solid #dce3e8;border-radius:6px;color:#34434f}.record-date-filters small{color:#798690}.record-pagination{padding:12px;background:#f7f9fa;border-radius:8px}.record-pagination>span{margin-right:auto}.record-pagination button:disabled{opacity:.45;cursor:not-allowed}
@@ -280,4 +318,5 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 .bundle-snapshot{margin-top:12px;overflow:hidden;border:1px solid #e3e8ec;border-radius:9px;background:#fff}.bundle-snapshot>header{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;border-bottom:1px solid #e8ecef}.bundle-snapshot>header b{font-size:11px}.bundle-snapshot>header span{color:#7e8a93;font-size:9px}.bundle-snapshot>div{display:grid}.bundle-snapshot article{display:grid;grid-template-columns:minmax(180px,1fr) repeat(3,auto);gap:12px;align-items:center;padding:10px 13px;border-top:1px solid #eef1f3;font-size:9px}.bundle-snapshot article:first-child{border-top:0}.bundle-snapshot article span{display:grid;gap:3px;min-width:0}.bundle-snapshot article b,.bundle-snapshot article small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bundle-snapshot article small{color:#82909a}.bundle-snapshot article em{color:#586671;font-style:normal;white-space:nowrap}.bundle-snapshot.legacy p{margin:0;padding:12px 13px;color:#65727c;font-size:10px}@media(max-width:720px){.bundle-snapshot article{grid-template-columns:1fr 1fr}.bundle-snapshot article span{grid-column:1/-1}}
 .quote-record-table>header,.quote-record-table>article{grid-template-columns:minmax(300px,1.45fr) minmax(180px,1fr) minmax(210px,.9fr) minmax(110px,.55fr) minmax(230px,.85fr)}.difference-cell{display:grid!important;min-width:104px;justify-items:start!important;gap:3px;border:0!important;border-radius:8px!important;background:#f2f5f7!important;padding:9px 11px!important;color:#60707b!important;text-align:left;cursor:pointer}.difference-cell b{font-size:11px}.difference-cell span{font-size:9px}.difference-cell.lower{background:#fff0ef!important;color:#c8352e!important}.difference-cell.higher{background:#fff3df!important;color:#b96700!important}.difference-cell.equal{background:#e9f7ef!important;color:#0c7f49!important}.difference-cell.missing{background:#f1f3f5!important;color:#697680!important}.difference-cell:hover{box-shadow:0 4px 12px rgba(24,36,46,.1);transform:translateY(-1px)}
 .difference-mask{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:24px;background:rgba(20,30,39,.45);backdrop-filter:blur(3px)}.difference-dialog{display:flex;width:min(720px,calc(100vw - 32px));max-height:min(820px,calc(100vh - 32px));flex-direction:column;overflow:hidden;border-radius:14px;background:#fff;box-shadow:0 24px 70px rgba(15,27,37,.28)}.difference-dialog>header{display:flex;align-items:center;justify-content:space-between;padding:19px 22px;border-bottom:1px solid #e5eaee}.difference-dialog>header>div{display:grid;gap:3px}.difference-dialog>header small{color:#d87500;font-size:8px;font-weight:900;letter-spacing:.15em}.difference-dialog>header h2{margin:0;font-size:18px}.difference-dialog>header span{color:#7d8992;font-size:10px}.difference-dialog>header>button{width:32px;height:32px;border:0;border-radius:50%;background:#f0f3f5;color:#65737d;font-size:18px}.difference-dialog-body{display:grid;gap:13px;padding:18px 22px;overflow:auto}.difference-hero{overflow:hidden;border:1px solid #e1e7eb;border-radius:10px;background:#fbfcfd}.difference-hero>div{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;padding:17px}.difference-hero span{display:grid;justify-items:center;gap:4px}.difference-hero small{color:#81909a;font-size:9px}.difference-hero span b{font-size:23px}.difference-hero i{color:#a8b1b8;font-size:24px;font-style:normal}.difference-hero>strong{display:block;padding:11px;background:#f2f5f7;color:#566570;font-size:14px;text-align:center}.difference-hero.lower>strong{background:#fff0ef;color:#cc3932}.difference-hero.higher>strong{background:#fff2df;color:#bd6900}.difference-hero.equal>strong{background:#e8f7ee;color:#0c8250}.difference-breakdown{overflow:hidden;border:1px solid #e1e7eb;border-radius:10px}.difference-breakdown>header{display:flex;justify-content:space-between;padding:11px 13px;background:#f7f9fa}.difference-breakdown>header b{font-size:11px}.difference-breakdown>header span{color:#82909a;font-size:9px}.difference-breakdown>article{display:grid;grid-template-columns:minmax(180px,1.4fr) 1fr 1fr .7fr;gap:10px;align-items:center;padding:12px 13px;border-top:1px solid #edf0f2}.difference-breakdown article>span{display:grid;gap:3px}.difference-breakdown article small{color:#84919a;font-size:8px}.difference-breakdown article b{font-size:10px}.difference-channel b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.difference-value{justify-items:end}.difference-value>b{font-size:12px!important}.difference-value.lower{color:#cc3932}.difference-value.higher{color:#bd6900}.difference-value.equal{color:#0c8250}.difference-value.missing{color:#7b8790}.difference-empty{padding:30px;color:#7e8b94;font-size:10px;text-align:center}.difference-tip{margin:0;padding:10px 12px;border-radius:8px;background:#fff8e9;color:#79613a;font-size:9px;line-height:1.6}.difference-dialog>footer{display:flex;justify-content:flex-end;gap:9px;padding:13px 22px;border-top:1px solid #e6ebee}.difference-dialog>footer button{height:38px;border:1px solid #dbe2e7;border-radius:7px;background:#fff;padding:0 15px;font-size:10px;font-weight:900}.difference-dialog>footer .primary{border-color:#ff9500;background:#ff9500;color:#17212b}@media(max-width:1180px){.quote-record-table>header,.quote-record-table>article{min-width:1120px}}@media(max-width:620px){.difference-mask{padding:0}.difference-dialog{width:100vw;max-height:100vh;height:100vh;border-radius:0}.difference-breakdown{overflow-x:auto}.difference-breakdown>article{min-width:620px}.difference-hero>div{gap:8px}.difference-hero span b{font-size:18px}}
+.quote-record-table .record-row-actions{display:flex;flex-direction:column;align-items:stretch}.record-row-actions>small{white-space:normal}.record-row-actions>em{align-self:center}
 </style>
