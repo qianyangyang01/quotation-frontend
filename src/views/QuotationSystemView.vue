@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { loadCustomerOperationSettings, resolveCustomerOperation, addCustomerOperationFee, CUSTOMER_OPERATION_FEES_UPDATED } from '@/data/customerOperationFees'
+import { loadCustomerOperationSettings, resolveCustomerOperation, customerOperationFeeForQuantity, addCustomerOperationFee, CUSTOMER_OPERATION_FEES_UPDATED } from '@/data/customerOperationFees'
 import { purchaseCategoryForSkus } from '@/data/quotationAnalytics'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
@@ -292,10 +292,11 @@ function taxResult(country: string, provider: string, baseQuoteCny: number, rule
   const relations = rule?.relations.filter(row => row.carrier === provider) || []
   const key = channelKey || (rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : '')
   const fees = calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd, usdCny: exchange.value.usd, quantity, unit: quoteMode.value === 'bundle' ? '套' : '件' })
-  const totalUsd = applyCommissionThreshold(addCustomerOperationFee(fees.totalUsd, customerOperation.value.feeUsd), commissionThreshold.value)
-  return { ...fees, configured: totalUsd != null && fees.configured && customerOperation.value.configured, totalUsd: totalUsd ?? 0, label: totalUsd == null ? COMMISSION_THRESHOLD_ERROR : customerOperation.value.configured ? fees.label : customerOperation.value.message }
+  const operationFeeUsd = customerOperationFeeForQuantity(customerOperation.value.snapshot, quantity ?? 0)
+  const totalUsd = operationFeeUsd === undefined ? null : applyCommissionThreshold(addCustomerOperationFee(fees.totalUsd, operationFeeUsd), commissionThreshold.value)
+  return { ...fees, configured: totalUsd != null && fees.configured && customerOperation.value.configured, totalUsd: totalUsd ?? 0, label: operationFeeUsd === undefined ? '报价数量或客户操作费无效，请重新计算' : totalUsd == null ? COMMISSION_THRESHOLD_ERROR : customerOperation.value.configured ? fees.label : customerOperation.value.message }
 }
-function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey).totalUsd, exchange.value.usd) }
+function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
@@ -1269,7 +1270,7 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
           : currentQuantity === quantity
             ? custom
             : costFor(currentQuantity)
-    const tax = custom?.tax || quote1?.tax || quote2?.tax || quote3?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey)
+    const tax = custom?.tax || quote1?.tax || quote2?.tax || quote3?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey, undefined, customQuoteQuantity.value)
     const row: QuotationMatrixRow = {
         ...option,
         quantityMessages: Object.fromEntries([...new Set([1,2,3,quantity])].flatMap(count => {
@@ -1448,7 +1449,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
   const quote2 = quantityCostBreakdown(p, p.rule, 2, p.country, p.channel)
   const quote3 = quantityCostBreakdown(p, p.rule, 3, p.country, p.channel)
   const custom = quantityCostBreakdown(p, p.rule, quantity, p.country, p.channel)
-  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p), p.rule)
+  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity))
   return {
     country: p.country,
     channelKey: rule && relation ? financeChannelKey(rule.id, relation) : `${p.rule}::${p.channel}`,
@@ -1465,7 +1466,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     quote1: quote1?.tax.configured ? quote1.quoteUsd : null,
     quote2: quote2?.tax.configured ? quote2.quoteUsd : null,
     quote3: quote3?.tax.configured ? quote3.quoteUsd : null,
-    quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd,
+    quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd,
     taxIncluded: tax.included,
     taxConfigured: tax.configured,
     taxRatePercent: tax.ratePercent,
@@ -1985,7 +1986,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
           :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
           :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
-          :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule).totalUsd"
+          :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd"
           :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
           :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave"
         />
@@ -1999,7 +2000,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
           <p>当前特殊包装：{{ specialPackagingGrams || 0 }}g／票，仅增加一次。</p>
           <p>当前佣金阈值：{{ commissionThreshold || '未填写' }}。最终报价＝原最终美元报价 ÷ 佣金阈值，再按0.05美元向上取整；阈值1不调整报价。</p>
-          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每 50g（不足向上取整）增加 1g 普通包材；特殊包装按整票额外增加一次，不随件数或套数增加</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 客户等级系数，换算美元并加税费；从财务列表选择客户时再加公司操作费，每单一次，最后按0.05美元向上取整</span></li></ol>
+          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每 50g（不足向上取整）增加 1g 普通包材；特殊包装按整票额外增加一次，不随件数或套数增加</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 客户等级系数，换算美元并加税费；从财务列表选择客户时再加公司操作费，按1、2、3、3以上件／套选择对应档位，每单一次、不乘数量，再按0.05美元向上取整；随后除以佣金阈值并再次向上取整到0.05美元</span></li></ol>
           <p class="modal-tip">美元价格按保存报价时的汇率快照换算，历史报价不会随新汇率自动改变。</p>
         </template>
         <template v-else>

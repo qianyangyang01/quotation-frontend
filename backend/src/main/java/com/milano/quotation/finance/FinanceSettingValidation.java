@@ -19,8 +19,7 @@ final class FinanceSettingValidation {
                     object(row); unique(row, "id", ids);
                     var name = row.path("name").asText().trim();
                     if (!row.path("name").isTextual() || name.isEmpty() || name.length() > 120 || !names.add(name.toUpperCase(java.util.Locale.ROOT))) fail("客户名称不能为空、超过120字或重复");
-                    number(row.path("feeUsd"), "操作费", false);
-                    if (row.path("feeUsd").decimalValue().compareTo(new java.math.BigDecimal("1000000")) > 0 || row.path("feeUsd").decimalValue().stripTrailingZeros().scale() > 2) fail("操作费最多1000000美元，保留两位小数");
+                    CustomerOperationFees.amounts(row);
                     if (!row.path("enabled").isBoolean()) fail("客户启用状态必须为布尔值");
                 }
             }

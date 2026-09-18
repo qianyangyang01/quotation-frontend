@@ -37,4 +37,38 @@ class CustomerOperationFeesTest {
         var invalid=quote();invalid.put("customerOperation","bad");
         assertThrows(AppException.class,()->CustomerOperationFees.validate(settings(),invalid));
     }
+
+    ObjectNode tierCustomer() { return (ObjectNode) mapper.readTree("""
+        {"id":"one","name":"客户甲","enabled":true,"feeUsd":0.3,"feesByQuantityUsd":{"1":0.3,"2":0.5,"3":0.7,"above3":0.8}}
+        """); }
+    ObjectNode tierSettings() { var result=settings(); ((tools.jackson.databind.node.ArrayNode)result.path("customers")).set(0,tierCustomer()); return result; }
+    ObjectNode tierQuote() { var result=quote(); result.set("customerOperation",tierCustomer()); return result; }
+    @Test void validatesEveryTierAndRejectsPartialSnapshots() {
+        assertDoesNotThrow(()->FinanceSettingValidation.validate("customer-operation-fees",tierSettings()));
+        assertDoesNotThrow(()->CustomerOperationFees.validate(tierSettings(),tierQuote()));
+        for(var key: new String[]{"1","2","3","above3"}) {
+            for(var value: new String[]{"-1","0.001","1000001","null","\"\"","\"0.5\""}) {
+                var settings=tierSettings();
+                ((ObjectNode)settings.path("customers").get(0).path("feesByQuantityUsd")).set(key,mapper.readTree(value));
+                assertThrows(AppException.class,()->FinanceSettingValidation.validate("customer-operation-fees",settings));
+            }
+            var partial=tierQuote(); ((ObjectNode)partial.path("customerOperation").path("feesByQuantityUsd")).remove(key);
+            assertThrows(AppException.class,()->CustomerOperationFees.validate(tierSettings(),partial));
+            var changed=tierSettings(); ((ObjectNode)changed.path("customers").get(0).path("feesByQuantityUsd")).put(key,9);
+            assertThrows(AppException.class,()->CustomerOperationFees.validate(changed,tierQuote()));
+        }
+    }
+    @Test void legacyClientCannotSaveUnequalTiersOrFlattenFinanceConfiguration() {
+        var legacy=quote(); ((ObjectNode)legacy.path("customerOperation")).put("feeUsd",0.3);
+        assertThrows(AppException.class,()->CustomerOperationFees.validate(tierSettings(),legacy));
+        assertThrows(AppException.class,()->CustomerOperationFees.preventLegacyOverwrite(tierSettings(),settings()));
+        assertDoesNotThrow(()->CustomerOperationFees.preventLegacyOverwrite(tierSettings(),tierSettings()));
+        var uniform=tierSettings(); var row=(ObjectNode)uniform.path("customers").get(0); row.put("feeUsd",1.25);
+        for(var key: new String[]{"1","2","3","above3"}) ((ObjectNode)row.path("feesByQuantityUsd")).put(key,1.25);
+        assertDoesNotThrow(()->CustomerOperationFees.validate(uniform,quote()));
+        assertDoesNotThrow(()->CustomerOperationFees.preventLegacyOverwrite(uniform,settings()));
+        var snapshot=quote(); ((ObjectNode)snapshot.path("customerOperation")).set("feesByQuantityUsd",row.path("feesByQuantityUsd").deepCopy());
+        assertDoesNotThrow(()->CustomerOperationFees.validate(settings(),snapshot));
+        var before=snapshot.deepCopy(); CustomerOperationFees.validate(uniform,snapshot); assertEquals(before,snapshot);
+    }
 }

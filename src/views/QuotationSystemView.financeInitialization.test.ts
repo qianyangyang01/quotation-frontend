@@ -48,7 +48,7 @@ type PricingState = {
   financeSurchargeSettings: FinanceSurchargeSettings
   quotationAttributeOptions: string[]
   selectFinanceCustomer: (id: string) => void
-  taxResult: (country: string, provider: string, cny: number) => { configured: boolean; taxUsd: number; surchargeUsd: number; totalUsd: number }
+  taxResult: (country: string, provider: string, cny: number, rule: string, channel: string, weight: number, quantity: number) => { configured: boolean; taxUsd: number; surchargeUsd: number; totalUsd: number }
 }
 
 describe('quotation finance initialization for an employee', () => {
@@ -145,7 +145,7 @@ describe('quotation finance initialization for an employee', () => {
     expect(state.financeSurchargeSettings.countries).toContainEqual(expect.objectContaining({ country: '美国', fixedFeeUsd: 3 }))
     state.selectFinanceCustomer('bk')
     const product = { purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct
-    expect(state.taxResult('美国', '物流商', state.salePrice(product))).toMatchObject({ configured: true, taxUsd: 2, surchargeUsd: 3, totalUsd: 23.55 })
+    expect(state.taxResult('美国', '物流商', state.salePrice(product), '', '', 1, 1)).toMatchObject({ configured: true, taxUsd: 2, surchargeUsd: 3, totalUsd: 23.55 })
   })
 
   it('automatically applies a later finance revision to an empty quotation', async () => {

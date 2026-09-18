@@ -2,6 +2,7 @@
 import { createApp, nextTick, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import QuotationSystemView from './QuotationSystemView.vue'
+import { operationFeesLabel } from '@/data/customerOperationFees'
 import { api } from '@/services/http'
 import { clearFinanceSettingsCache, readFinanceSetting } from '@/services/financeSettings'
 
@@ -16,7 +17,7 @@ vi.mock('@/data/publishedLogisticsRepository', async importOriginal => ({
 }))
 
 const customers = [
-  { id: 'bk', name: 'BK', feeUsd: 0.3, enabled: true },
+  { id: 'bk', name: 'BK', feeUsd: 0.3, feesByQuantityUsd: {'1':.3,'2':.5,'3':.7,above3:.8}, enabled: true },
   { id: 'ck', name: 'CK', feeUsd: 0.4, enabled: true },
   { id: 'dk', name: 'DK', feeUsd: 1, enabled: true },
   { id: 'off', name: '已停用客户', feeUsd: 2, enabled: false },
@@ -85,22 +86,23 @@ describe('customer operation settings on the actual quotation page', () => {
     host.querySelector<HTMLButtonElement>('[aria-label="展开客户列表"]')!.click()
     await nextTick()
     const options = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="option"]'))
-    expect(options.map(option => option.textContent)).toEqual(['BK$0.30/单', 'CK$0.40/单', 'DK$1.00/单'])
+    expect(options.map(option => option.textContent)).toEqual(customers.filter(c => c.enabled).map(c => c.name + operationFeesLabel(c)))
     options[0]!.click()
     await nextTick()
     expect(input.value).toBe('BK')
-    expect(host.textContent).toContain('公司操作费 $0.30/单')
+    expect(host.textContent).toContain('公司操作费：' + operationFeesLabel(customers[0]!))
 
     input.dispatchEvent(new Event('input'))
     await nextTick()
     expect(host.textContent).toContain('手动填写，不加公司操作费')
-    expect(host.textContent).not.toContain('公司操作费 $0.30/单')
+    expect(host.textContent).not.toContain('公司操作费：' + operationFeesLabel(customers[0]!))
     expect(vi.mocked(api.get).mock.calls.some(([path]) => path.includes('/purchase'))).toBe(false)
   })
 
-  it('restores the fee for an explicitly selected finance customer without requiring a product query', async () => {
-    await mountWithDraft('CK', 'ck')
-    expect(host.textContent).toContain('公司操作费 $0.40/单')
+  it.each([0,1])('restores legacy or tiered customer fees from an account draft before querying products: %s', async index => {
+    const customer=customers[index]!
+    await mountWithDraft(customer.name, customer.id)
+    expect(host.textContent).toContain('公司操作费：' + operationFeesLabel(customer))
     expect(host.textContent).not.toContain('所选客户设置已变化')
   })
 })

@@ -1,3 +1,4 @@
+import { operationFeesLabel } from '@/data/customerOperationFees'
 // @vitest-environment happy-dom
 import { createApp, h, nextTick, reactive } from 'vue'
 import { expect, it } from 'vitest'
@@ -11,15 +12,15 @@ it('browses all enabled zero-fee customers without filtering by a restored free-
   try {
     const toggle = host.querySelector<HTMLButtonElement>('[aria-label="展开客户列表"]')!
     toggle.click(); await nextTick()
-    expect(options()).toEqual(['BK$0.00/单', 'CK$0.00/单'])
+    expect(options()).toEqual(['BK','CK'].map(name => name + operationFeesLabel({feeUsd:0})))
     expect(state.modelValue).toBe('测试1'); expect(state.selectedId).toBe('')
     const input = host.querySelector('input')!
     input.value = ' c '; input.dispatchEvent(new Event('input')); await nextTick()
-    expect(options()).toEqual(['CK$0.00/单'])
+    expect(options()).toEqual(['CK' + operationFeesLabel({feeUsd:0})])
     input.value = '没有匹配'; input.dispatchEvent(new Event('input')); await nextTick()
     expect(options()).toEqual([])
     toggle.click(); await nextTick()
-    expect(options()).toEqual(['BK$0.00/单', 'CK$0.00/单'])
+    expect(options()).toEqual(['BK','CK'].map(name => name + operationFeesLabel({feeUsd:0})))
     expect(state.modelValue).toBe('没有匹配'); expect(state.selectedId).toBe('')
     host.querySelector<HTMLButtonElement>('[role=option]')!.click(); await nextTick()
     expect(state.modelValue).toBe('BK'); expect(state.selectedId).toBe('bk')

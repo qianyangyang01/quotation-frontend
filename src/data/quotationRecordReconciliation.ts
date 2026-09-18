@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js'
+import { customerOperationFeeForQuantity, operationFeesLabel } from './customerOperationFees'
 import { financeReviewLabel } from './quotationRecords'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 import { savedSystemPrice } from './customerQuotePrices'
@@ -59,7 +60,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['报价记录对账明细', '使用本条记录已保存的数据；人民币按该记录汇率换算；未保存的字段不补算']),
     line(['报价编号', record.no, '客户', record.customerName, '业务员', record.salespersonName, '账号', record.salespersonAccount]),
     line(['SKU', sku, '商品', record.productSummary, '报价类型', record.quoteMode === 'bundle' ? '组合报价' : '单品报价', '物流属性', record.logisticsAttribute]),
-    line(['客户等级', record.customerGrade, '汇率（CNY/USD）', record.exchangeRate > 0 ? record.exchangeRate : missing, '佣金阈值', record.commissionThreshold ?? 1, '公司操作费（USD/单）', money(record.customerOperation?.feeUsd)]),
+    line(['客户等级', record.customerGrade, '汇率（CNY/USD）', record.exchangeRate > 0 ? record.exchangeRate : missing, '佣金阈值', record.commissionThreshold ?? 1, '公司操作费（USD/单）', record.customerOperation?.feesByQuantityUsd ? operationFeesLabel(record.customerOperation, unit) : money(record.customerOperation?.feeUsd)]),
     line(['报价模式', record.matrixMode === 'template' ? '模板报价' : record.matrixMode === 'specified' ? '指定国家与渠道' : '常用国家', '模板', record.quotationTemplateName, '创建时间', record.createdAt, '修改时间', record.updatedAt]),
     line(['财务审核', financeReviewLabel(record.financeReviewStatus), '审核人', record.financeReviewedBy, '审核时间', record.financeReviewedAt]),
     line(['处理状态', record.status === 'won' ? '已成交' : record.status === 'lost' ? '未成交' : record.quoteConfirmed ? '已处理' : '待处理', '备注', record.note || '', '成交日期', record.closedAt]),
@@ -70,7 +71,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', '最终含包材重量快照（g）', '重量快照对应数量', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
       ...quantities.flatMap(q => {
         const label = q ? `${q}${unit}` : '自定义（数量未保存）'
-        return [`${label}最终含包材重量（g）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`]
+        return [`${label}最终含包材重量（g）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`, `${label}操作费（USD/单）`]
       })]),
   ]
   for (const [index, option] of (record.quoteOptions ?? []).entries()) {
@@ -81,7 +82,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
         const system = savedSystemPrice(record, option, q)
         const customerIndex = snapshot?.quantities.indexOf(q) ?? -1
         const customer = snapshot ? customerRow && customerIndex >= 0 ? customerRow.prices[customerIndex] : null : system
-        return [grams(savedFinalWeightKg(record, option, q)), money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity)]
+        return [grams(savedFinalWeightKg(record, option, q)), money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity), money(record.customerOperation ? customerOperationFeeForQuantity(record.customerOperation, q) : undefined)]
       }),
     ]))
   }

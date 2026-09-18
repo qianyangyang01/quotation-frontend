@@ -1,5 +1,5 @@
 import { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
-import { addCustomerOperationFee } from '@/data/customerOperationFees'
+import { addCustomerOperationFee, customerOperationFeeForQuantity, type OperationFeesByQuantity } from '@/data/customerOperationFees'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import { sumDecimal, productDecimal } from '@/services/quotationDecimal'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
@@ -26,7 +26,7 @@ describe('quotation view fee integration', () => {
       updatedAt: 'test',
     }
     let copied = ''
-    const context = { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperation: { value: { configured: true, feeUsd: 0, message: '' } },
+    const context = { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperationFeeForQuantity, customerOperation: { value: { configured: true, feeUsd: 0, feesByQuantityUsd: undefined as OperationFeesByQuantity | undefined, get snapshot() { return { id: 'client', name: 'Client', feeUsd: this.feeUsd, feesByQuantityUsd: this.feesByQuantityUsd } }, message: '' } },
       products: { value: [] }, chargeWeight: () => 1,
       specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
@@ -102,6 +102,24 @@ describe('quotation view fee integration', () => {
     expect(adjustedSheet.rows.find(row => row.key.includes('::FREE"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 8.25))
     await run.copySpecifiedQuotes(adjusted)
     expect(copied.split('\r\n')[2]!.split('\t').slice(-2)).toEqual(['100.25', '501.25'])
+
+    // All modes and arbitrary sheet columns select by quoted pieces/sets, once per order.
+    context.customerOperation.value.feesByQuantityUsd = { '1': .3, '2': .5, '3': .7, above3: .8 }
+    for (const threshold of ['1', '0.95']) {
+      context.commissionThreshold.value = threshold
+      const tierRows = run.excelQuoteRows(product)
+      const paidTier = tierRows.find((row: { channelKey: string }) => row.channelKey.endsWith('PAY'))
+      for (const [key, quantity, fee] of [['quote1', 1, .3], ['quote2', 2, .5], ['quote3', 3, .7], ['quoteCustom', 10, .8]] as const)
+        expect(paidTier[key]).toBe(applyCommissionThreshold(9 * quantity + 9 + fee, threshold))
+      const tierSheet = buildCustomerQuoteSheet({ rows: tierRows, countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 10, bundle: mode === 'bundle', quantities,
+        calculatePrice: (row: QuoteSheetSourceRow, quantity: number) => run.quantityCostBreakdown(product, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null })
+      expect(tierSheet.rows.find(row => row.key.includes('::PAY"'))!.prices).toEqual(quantities.map(q => applyCommissionThreshold(9*q+9+(q===1?.3:q===2?.5:q===3?.7:.8), threshold)))
+      expect(run.excelQuoteRows(product)).toEqual(tierRows)
+      await run.copySpecifiedQuotes(tierRows)
+      expect(copied).toContain(paidTier.quoteCustom.toFixed(2))
+    }
+    context.customerOperation.value.feesByQuantityUsd = undefined
+    context.commissionThreshold.value = '1'
 
     // Channel duty replaces the country default, while surcharge and customer labor remain separate.
     context.customerOperation.value.feeUsd = 0
