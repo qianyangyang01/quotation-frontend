@@ -1,4 +1,5 @@
 import type { QuotationMatrixRow } from '@/components/quotation/types'
+import { parseQuotePriceInput } from './quotePriceExpression'
 
 /** Customer-facing source model. Only explicit numeric snapshots are captured for record saving. */
 export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
@@ -178,12 +179,9 @@ export function buildCustomerQuoteSheet(input: {
     const prices = quantities.map((quantity, column) => {
       const manual = fields.prices?.[String(quantity)]
       if (manual !== undefined) {
-        if (!manual.trim() || manual.trim() === '—') return null
-        if (!/^\d+(?:\.\d{1,2})?$/.test(manual.trim()) || !Number.isFinite(Number(manual)) || Number(manual) > 999999999.99) {
-          priceIssues.push(`第 ${index + 1} 行 ${quantity} 数量的价格须为非负美元金额，最多两位小数`)
-          return null
-        }
-        return Number(manual)
+        const parsed = parseQuotePriceInput(manual)
+        if (parsed.error) priceIssues.push(`第 ${index + 1} 行 ${quantity} 数量的美元金额：${parsed.error}`)
+        return parsed.value
       }
       if (!validQuantities) return null
       // Existing snapshot prices remain authoritative. Only additional quantities use the live calculator.

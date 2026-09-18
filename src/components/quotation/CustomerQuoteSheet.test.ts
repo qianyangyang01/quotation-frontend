@@ -45,6 +45,55 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it.each([false, true])('keeps arithmetic preview, clipboard and saved prices consistent (bundle=%s)', async bundle => {
+  const state = mount([row('one'), row('two')]); state.bundle = bundle; await settle()
+  const original = JSON.stringify(state.rows)
+  await input('第 1 行第 1 列美元价格', '42.6/0.95')
+  // Saving or copying before blur must still capture the computed number, never the expression or old price.
+  expect(exposed.capturePrices().rows[0]!.prices[0]).toBe(44.84)
+  expect(exposed.capturePrices().rows[0]!.systemPrices[0]).toBe(10.8)
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('$44.84')
+  expect(writeText.mock.lastCall![0]).not.toContain('42.6/0.95')
+  const field = document.querySelector<HTMLInputElement>('[aria-label="第 1 行第 1 列美元价格"]')!
+  field.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',bubbles:true})); await settle()
+  expect(field.value).toBe('44.84')
+  field.dispatchEvent(new FocusEvent('blur')); await settle()
+  expect(field.value).toBe('44.84')
+  state.rows.reverse(); await settle()
+  expect(exposed.capturePrices().rows[1]!.prices[0]).toBe(44.84)
+  await input('第 2 行第 2 列美元价格', '(40+2)*2')
+  document.querySelector<HTMLInputElement>('[aria-label="第 2 行第 2 列美元价格"]')!.dispatchEvent(new FocusEvent('blur')); await settle()
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows[1]!.prices.slice(0,2)).toEqual([44.84,84])
+  expect(JSON.stringify([...state.rows].reverse())).toBe(original)
+})
+
+it.each(['42.6/0','42.6+','(42.6+2','2-3','999999999.99*2'])('blocks invalid arithmetic %s in preview, copy and capture', async expression => {
+  mount(); await input('第 1 行第 1 列美元价格',expression)
+  const field = document.querySelector<HTMLInputElement>('[aria-label="第 1 行第 1 列美元价格"]')!
+  field.dispatchEvent(new FocusEvent('blur')); await settle()
+  expect(field.value).toBe(expression)
+  expect(field.getAttribute('aria-invalid')).toBe('true')
+  expect(()=>exposed.capturePrices()).toThrow()
+  await click('预览报价单'); expect(render).not.toHaveBeenCalled()
+  await click('复制报价数据'); expect(writeText).not.toHaveBeenCalled()
+  await input('第 1 行第 1 列美元价格','42.6+2')
+  expect(exposed.capturePrices().rows[0]!.prices[0]).toBe(44.6)
+  expect(field.getAttribute('aria-invalid')).toBe('false')
+})
+
+it('restores numeric snapshots and clears arithmetic on product reset without carrying stale edits to new quantity columns', async()=>{
+  const state=mount([row()], undefined, {quantities:[1,2],rows:[{optionId:'one',prices:[44.84,84]}]})
+  expect(exposed.capturePrices().rows[0]!.prices).toEqual([44.84,84])
+  await input('第 1 行第 1 列美元价格','44.84+1')
+  await input('第 1 个价格列数量','8')
+  await input('第 1 个价格列数量','1')
+  expect(exposed.capturePrices().rows[0]!.prices[0]).toBe(10.8)
+  await input('第 1 行第 1 列美元价格','42.6+2')
+  state.initialQuote=undefined;state.contextKey='new';await settle()
+  expect(exposed.capturePrices().rows[0]!.prices[0]).toBe(10.8)
+})
+
 it('previews the formerly blocked carriers and copies the exact preview blob and all 10 table columns', async () => {
   const state = mount([row(), row('two', '闪电猴')]); const original = JSON.stringify(state.rows)
   await click('预览报价单')
