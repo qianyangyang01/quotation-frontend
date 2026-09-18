@@ -30,6 +30,8 @@ class QuotationWorkflowIntegrationTest {
     @Autowired WebApplicationContext context;
     @Autowired ObjectMapper mapper;
     @Autowired QuotationRecordRepository records;
+    @Autowired com.milano.quotation.security.UserAccountRepository users;
+    @Autowired com.milano.quotation.security.UserAccountService userService;
     @MockitoBean QuotationReadinessService readiness;
     MockMvc mvc;
 
@@ -357,6 +359,36 @@ class QuotationWorkflowIntegrationTest {
         org.junit.jupiter.api.Assertions.assertEquals(finalPayload.path("quoteConfirmed").asBoolean()?1.7:1.6,finalPayload.path("customerQuote").path("rows").get(0).path("prices").get(0).asDouble());
         }
     }
+    @Test void packagingSnapshotsPersistForBothRolesDraftsRemainIsolatedAndForbiddenRolesCannotWrite() throws Exception {
+        var auths=new java.util.ArrayList<org.springframework.test.web.servlet.request.RequestPostProcessor>();
+        for(var role:new String[]{"employee","super_admin"}) {
+            var account="PACK_"+role.toUpperCase();
+            users.saveAndFlush(com.milano.quotation.security.UserAccount.create(account,role,"hash",role,false));
+            var principal=userService.loadUserByUsername(account);
+            auths.add(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user(principal));
+        }
+        for(int i=0;i<auths.size();i++) {
+            var login=auths.get(i);
+            var draft=mapper.createObjectNode().put("schemaVersion",2).put("specialPackagingGrams",10+i);
+            var saved=mvc.perform(put("/api/v1/quotation-drafts/mine/state").with(login).with(csrf()).header("If-Match",-1).contentType("application/json").content(mapper.writeValueAsString(draft)))
+                .andExpect(status().isOk()).andReturn();
+            var version=mapper.readTree(saved.getResponse().getContentAsByteArray()).path("data").path("version").asLong();
+            var changed=draft.deepCopy().put("specialPackagingGrams",20+i);
+            mvc.perform(put("/api/v1/quotation-drafts/mine/state").with(login).with(csrf()).header("If-Match",version).contentType("application/json").content(mapper.writeValueAsString(changed))).andExpect(status().isOk());
+            mvc.perform(put("/api/v1/quotation-drafts/mine/state").with(login).with(csrf()).header("If-Match",version).contentType("application/json").content(mapper.writeValueAsString(draft))).andExpect(status().isConflict());
+            var created=mvc.perform(post("/api/v1/quotations").with(login).with(csrf()).header("Idempotency-Key","packaging-"+i).contentType("application/json").content(mapper.writeValueAsString(PackagingWeightTest.valid())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.weightSnapshot.quantities[1].weightKg").value(.296)).andReturn();
+            var record=mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
+            mvc.perform(get("/api/v1/quotations/{id}",record.path("id").asText()).with(login))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.weightSnapshot.specialPackagingGrams").value(10)).andExpect(jsonPath("$.data.systemQuoteUsd").value(6.35));
+            var forged=mapper.createObjectNode().put("_version",record.path("_version").asLong());forged.set("weightSnapshot",PackagingWeightTest.valid().path("weightSnapshot"));
+            mvc.perform(patch("/api/v1/quotations/{id}",record.path("id").asText()).with(login).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(forged))).andExpect(status().isUnprocessableEntity());
+        }
+        for(int i=0;i<auths.size();i++) mvc.perform(get("/api/v1/quotation-drafts/mine/state").with(auths.get(i))).andExpect(status().isOk()).andExpect(jsonPath("$.data.payload.specialPackagingGrams").value(20+i));
+        users.saveAndFlush(com.milano.quotation.security.UserAccount.create("PACK_DENIED","无报价权限","hash","purchase",false));
+        mvc.perform(post("/api/v1/quotations").with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user(userService.loadUserByUsername("PACK_DENIED"))).with(csrf()).header("Idempotency-Key","denied").contentType("application/json").content(mapper.writeValueAsString(PackagingWeightTest.valid()))).andExpect(status().isForbidden());
+    }
+
     private MockHttpSession authenticatedSession() throws Exception {
         var login = mvc.perform(post("/api/v1/auth/login").with(csrf()).contentType("application/json")
                         .content("{\"account\":\"ADMIN\",\"password\":\"TestAdmin123\"}"))

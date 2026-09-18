@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SpecialPackagingInput from './SpecialPackagingInput.vue'
 import { displayWeightGrams, gramsToKg, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import type { BundleQuoteItem } from './types'
 import QuotationProductImage from './QuotationProductImage.vue'
@@ -18,6 +19,9 @@ const purchasePricingLabel = (item: BundleQuoteItem) => {
 }
 
 defineProps<{
+  specialPackagingGrams?: string
+  specialPackagingWeight?: number
+  specialPackagingError?: string
   items: BundleQuoteItem[]
   purchaseCost: number
   baseWeight: number
@@ -26,6 +30,7 @@ defineProps<{
   domesticFreight: number
 }>()
 defineEmits<{
+  'update:specialPackagingGrams': [value: string]
   add: []
   remove: [id: number]
   query: [item: BundleQuoteItem]
@@ -56,9 +61,10 @@ defineEmits<{
       </article>
     </div>
 
+    <SpecialPackagingInput :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
     <div class="summary-grid">
       <div><span>单套采购成本</span><b>¥{{ purchaseCost.toFixed(2) }}</b><small>各 SKU 按阶梯价及采购票点计算</small></div>
-      <div><span>单套含包材重量（g）</span><b>{{ grams(totalWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 包材 {{ grams(packagingWeight) }}g</small></div>
+      <div><span>单套含包材重量（g）</span><b>{{ specialPackagingError ? '—' : grams(totalWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></div>
       <div><span>单套国内运费</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>标准数据采用10件运费平摊；2026旧数据采用唯一单档运费</small></div>
     </div>
   </section>

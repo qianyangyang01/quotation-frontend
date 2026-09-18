@@ -21,8 +21,9 @@ it.each(['single', 'bundle'])('uses the parcel minimum in the live %s quote whil
   const item = { sku: 'A', quantityPerSet: 1, weightKg: .005, customWeightKg: null, purchaseUnitPrice: 50.22, purchaseFreightPerUnit: .25 }
   const items = [item, { ...item, sku: 'B' }]
   const taxResult = vi.fn((_country: string, _provider: string, cny: number, _rule: string, _channel: string, _weightKg: number) => ({ totalUsd: roundQuoteUsd(usdPriceFromCny(cny, 6.7) + .3) }))
-  const context = { purchaseTaxBlockReason: { value: '' }, logisticsRuleForChannel: () => rule, normalizedBundleSets: (n: number) => n,
-    quoteMode: { value: mode }, bundleGoodsWeight: (n: number) => bundleGoodsWeight(items, n), singleActualWeight, calculateLogisticsFee,
+  let special = 0
+  const context = { specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' }, logisticsRuleForChannel: () => rule, normalizedBundleSets: (n: number) => n,
+    quoteMode: { value: mode }, bundleGoodsWeight: (n: number) => bundleGoodsWeight(items, n, special), singleActualWeight: (p:typeof product,n:number)=>singleActualWeight(p,n,special), calculateLogisticsFee,
     bundlePurchaseCost: (n: number) => productDecimal(100.44, n), bundleDomesticFreight: (n: number) => productDecimal(.5, n),
     findPurchaseProduct: () => null, purchaseRecords: { value: [] }, purchasePriceForMonthlySales: () => 100.44,
     sumDecimal, productDecimal, selectedGradeCoefficient: () => 1.27635, taxResult, quoteCnyFromUsd, exchange: { value: { usd: 6.7 } }, quoteRegionForCountry: () => '' }
@@ -31,6 +32,12 @@ it.each(['single', 'bundle'])('uses the parcel minimum in the live %s quote whil
   const two = calculate(product, '燕文', 2)
   expect(one).toMatchObject({ freight: 21.89, cost: 122.83, quoteUsd: 23.7, quoteCny: 158.79 })
   expect(two).toMatchObject({ freight: 21.89, cost: 223.77, quoteUsd: 42.95, quoteCny: 287.77 })
-  expect(taxResult.mock.calls[0]?.[5]).toBe(mode === 'single' ? .012 : .014)
-  expect(taxResult.mock.calls[1]?.[5]).toBe(mode === 'single' ? .024 : .028)
+  expect(taxResult.mock.calls[0]?.[5]).toBe(mode === 'single' ? .011 : .012)
+  expect(taxResult.mock.calls[1]?.[5]).toBe(mode === 'single' ? .022 : .024)
+  special=.01
+  expect(calculate(product,'燕文',1).freight).toBe(21.89)
+  expect(calculate(product,'燕文',2).freight).toBe(mode==='single'?22.02:22.14)
+  expect(taxResult.mock.calls.at(-1)?.[5]).toBe(mode==='single'?.032:.034)
+  context.specialPackagingError.value='输入无效'
+  expect(calculate(product,'燕文',2)).toBeNull()
 })

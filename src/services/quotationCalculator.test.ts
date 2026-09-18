@@ -125,17 +125,17 @@ describe('single SKU weight calculation', () => {
 
   it('adds packaging to every physical item for purchase and manual weights', () => {
     expect(singleBaseWeight(input)).toBe(0.8)
-    expect(singlePackagingWeight(input)).toBe(0.032)
-    expect(singleActualWeight(input)).toBeCloseTo(0.832)
+    expect(singlePackagingWeight(input)).toBe(0.016)
+    expect(singleActualWeight(input)).toBeCloseTo(0.816)
     expect(singleVolumeWeight(input)).toBe(6)
-    expect(singleChargeWeight(input)).toBeCloseTo(0.832)
-    expect(singleActualWeight({ ...input, weightSource: 'manual' })).toBeCloseTo(1.456)
+    expect(singleChargeWeight(input)).toBeCloseTo(0.816)
+    expect(singleActualWeight({ ...input, weightSource: 'manual' })).toBeCloseTo(1.428)
   })
 
   it.each([
-    [0, 0], [1, 2], [49, 2], [50, 2], [51, 4], [100, 4], [270, 12],
+    [0, 0], [1, 1], [49, 1], [50, 1], [51, 2], [100, 2], [270, 6],
   ])('adds %sg base weight as %sg packaging', (baseGrams, packagingGrams) => {
-    expect(packagingWeightKg(baseGrams / 1000)).toBeCloseTo(packagingGrams / 1000)
+    expect(packagingWeightKg(baseGrams / 1000)).toBeCloseTo(packagingGrams / 1000, 10)
   })
 
   it('disables volumetric calculation when dimensions are missing', () => {
@@ -155,8 +155,8 @@ describe('bundle SKU calculation', () => {
     expect(bundlePurchaseCost(items, [first, second], '100', 3)).toBe((18 * 2 + 12) * 3)
     expect(bundleDomesticFreight(items, 3)).toBe((1.5 * 2 + 2) * 3)
     expect(bundleBaseWeight(items, 3)).toBeCloseTo((0.2 * 2 + 0.5) * 3)
-    expect(bundlePackagingWeight(items, 3)).toBeCloseTo((0.008 * 2 + 0.02) * 3)
-    expect(bundleGoodsWeight(items, 3)).toBeCloseTo(((0.2 + 0.008) * 2 + 0.5 + 0.02) * 3)
+    expect(bundlePackagingWeight(items, 3)).toBeCloseTo((0.004 * 2 + 0.01) * 3)
+    expect(bundleGoodsWeight(items, 3)).toBeCloseTo(((0.2 + 0.004) * 2 + 0.5 + 0.01) * 3)
   })
 
   it('applies each bundle SKU invoice rate independently without changing domestic freight', () => {

@@ -28,7 +28,7 @@ describe('quotation view fee integration', () => {
     let copied = ''
     const context = { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperation: { value: { configured: true, feeUsd: 0, message: '' } },
       products: { value: [] }, chargeWeight: () => 1,
-      purchaseTaxBlockReason: { value: '' },
+      specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,
       financeChannelKey: (id: number, relation: { carrier: string; channelCode: string }) => id + '::' + relation.carrier + '::' + relation.channelCode,
@@ -132,8 +132,8 @@ describe('quotation view fee integration', () => {
 
 it('blocks calculation and copying immediately when purchase tax points are missing', async () => {
   let blocked = 0
-  const run = new Function('purchaseTaxBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copySpecifiedQuotes, attemptSave, save, useLogistics}')(
-    { value: '该商品采购票点为空，请补齐后报价' }, () => { blocked++ }, nextTick)
+  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copySpecifiedQuotes, attemptSave, save, useLogistics}')(
+    { value: '' }, { value: '该商品采购票点为空，请补齐后报价' }, () => { blocked++ }, nextTick)
   expect(run.excelQuoteRows({ country: '加拿大' }, '加拿大', '2区')).toEqual([])
   expect(run.quantityCostBreakdown({ country: '加拿大' }, '渠道', 1, '加拿大', '物流商', '2区')).toBeNull()
   await run.copySpecifiedQuotes([{ country: '加拿大', quote1: 100 }])
@@ -145,9 +145,19 @@ it('blocks calculation and copying immediately when purchase tax points are miss
 
 it('blocks direct save and copy for an invalid commission before touching a record', async () => {
   let blocked = 0
-  const run = new Function('purchaseTaxBlockReason', 'commissionError', 'toast', 'nextTick', js + '\nreturn {save, copySpecifiedQuotes}')(
-    { value: '' }, { value: COMMISSION_THRESHOLD_ERROR }, () => { blocked++ }, nextTick)
+  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'commissionError', 'toast', 'nextTick', js + '\nreturn {save, copySpecifiedQuotes}')(
+    { value: '' }, { value: '' }, { value: COMMISSION_THRESHOLD_ERROR }, () => { blocked++ }, nextTick)
   await run.save()
   await run.copySpecifiedQuotes([{quote1:6}])
+  expect(blocked).toBe(2)
+})
+
+it('blocks direct save, copy and recalculation for invalid special packaging', async () => {
+  let blocked = 0
+  const run = new Function('purchaseTaxBlockReason', 'specialPackagingError', 'toast', 'nextTick', js + '\nreturn {save, copySpecifiedQuotes, quantityCostBreakdown}')(
+    {value:''}, {value:'特殊包装克重无效'}, () => { blocked++ }, nextTick)
+  await run.save()
+  await run.copySpecifiedQuotes([{quote1:6}])
+  expect(run.quantityCostBreakdown({country:'美国'},'QC',1,'美国','4PX','')).toBeNull()
   expect(blocked).toBe(2)
 })

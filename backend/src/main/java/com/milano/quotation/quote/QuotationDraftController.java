@@ -22,12 +22,12 @@ public class QuotationDraftController {
     private static final Set<String> DRAFT_FIELDS = Set.of(
             "schemaVersion", "customerName", "selectedCustomerId", "quoteMode", "skuSearch", "productCategory",
             "logisticsAttribute", "selectedCustomerGrade", "selectedTaxCustomerType",
-            "monthlySalesEstimate", "commissionThreshold", "customQuoteQuantity", "quoteMatrixMode",
+            "monthlySalesEstimate", "commissionThreshold", "specialPackagingGrams", "customQuoteQuantity", "quoteMatrixMode",
             "selectedQuoteRegions", "product", "bundleItems", "commonSelections",
             "specifiedSelections", "templateSelections", "activeTemplate");
     private final QuotationDraftRepository drafts;private final PurchaseProductService products; public QuotationDraftController(QuotationDraftRepository drafts,PurchaseProductService products){this.drafts=drafts;this.products=products;}
     @GetMapping("/mine") @Transactional(readOnly=true) ApiResponse<JsonNode> get(Authentication auth){return ApiResponse.ok(drafts.findById(account(auth)).map(row->row.payload).orElse(null));}
-    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){if(body instanceof ObjectNode object)CommissionThreshold.normalize(object);products.lockStructuredReferences(body);var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
+    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){if(body instanceof ObjectNode object){CommissionThreshold.normalize(object);PackagingWeight.draft(object);}products.lockStructuredReferences(body);var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
     @DeleteMapping("/mine") @Transactional ApiResponse<Void> delete(Authentication auth){drafts.deleteById(account(auth));return ApiResponse.ok(null);}
 
     @GetMapping("/mine/state") @Transactional(readOnly=true)
@@ -73,6 +73,7 @@ public class QuotationDraftController {
         }
         rejectSensitive(sensitiveFields);
         CommissionThreshold.normalize(input);
+        PackagingWeight.draft(input);
         return input.deepCopy();
     }
     private void rejectSensitive(JsonNode node){

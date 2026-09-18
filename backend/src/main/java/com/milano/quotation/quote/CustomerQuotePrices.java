@@ -84,7 +84,7 @@ final class CustomerQuotePrices {
         payload.set("systemQuantityQuotes",system); payload.set("sheetQuote",customer.deepCopy()); payload.set("customerQuote",customer);
     }
     static void preparePatch(ObjectNode current, ObjectNode patch) {
-        for (var field : List.of("systemQuantityQuotes","sheetQuote","quoteOptions","systemQuoteUsd","systemQuoteCny"))
+        for (var field : List.of("systemQuantityQuotes","sheetQuote","quoteOptions","systemQuoteUsd","systemQuoteCny","weightSnapshot"))
             if (patch.has(field)) throw AppException.unprocessable("系统报价及首次报价单价格不可覆盖");
         if (patch.has("customerQuote")) patch.set("customerQuote", validate(current, patch.path("customerQuote")));
     }

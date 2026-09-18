@@ -22,15 +22,15 @@ function rule(rate1: number, fee1: number, rate2: number, fee2: number): Logisti
 }
 
 describe('quotation decimal precision acceptance', () => {
-  it('displays 140 + 6 as 146g, and two units as 292g', () => {
-    expect(singleActualWeight(product)).toBe(0.146)
-    expect(displayWeightGrams(singleActualWeight(product))).toBe(146)
-    expect(displayWeightGrams(singleActualWeight(product, 2))).toBe(292)
-    expect(displayWeightGrams(singleActualWeight({ ...product, weightSource: 'manual', manualWeight: 0.14 }))).toBe(146)
+  it('displays 140 + 3 as 143g, and two units as 286g', () => {
+    expect(singleActualWeight(product)).toBe(0.143)
+    expect(displayWeightGrams(singleActualWeight(product))).toBe(143)
+    expect(displayWeightGrams(singleActualWeight(product, 2))).toBe(286)
+    expect(displayWeightGrams(singleActualWeight({ ...product, weightSource: 'manual', manualWeight: 0.14 }))).toBe(143)
     const item = { sku: 'A', quantityPerSet: 1, purchaseUnitPrice: 0, purchaseFreightPerUnit: 0, weightKg: 0.14, customWeightKg: null }
-    expect(bundleGoodsWeight([item, { ...item, sku: 'B' }])).toBe(0.292)
+    expect(bundleGoodsWeight([item, { ...item, sku: 'B' }])).toBe(0.286)
   })
-  it.each([[0.049999, 0.002], [0.05, 0.002], [0.050001, 0.004], [0.15, 0.006], [0.150001, 0.008]])('preserves the real packaging boundary at %s kg', (weight, expected) => {
+  it.each([[0.049999, 0.001], [0.05, 0.001], [0.050001, 0.002], [0.15, 0.003], [0.150001, 0.004]])('preserves the real packaging boundary at %s kg', (weight, expected) => {
     expect(packagingWeightKg(weight)).toBe(expected)
   })
   it('keeps an exact upper weight boundary eligible after summing units', () => {
@@ -42,9 +42,9 @@ describe('quotation decimal precision acceptance', () => {
     expect(calculateLogisticsFee(channel, '美国', 0.300001)?.price.pricePerKg).toBe(20)
   })
   it.each([
-    ['O5', 87, 18, 87, 16, 23.80, 43.65, 159.46, 292.46],
-    ['cosmetics', 67, 19, 63, 19, 23.45, 42.95, 157.12, 287.77],
-    ['tracked', 55, 18, 55, 16, 22.95, 41.95, 153.77, 281.07],
+    ['O5', 87, 18, 87, 16, 23.75, 43.55, 159.13, 291.79],
+    ['cosmetics', 67, 19, 63, 19, 23.40, 42.85, 156.78, 287.10],
+    ['tracked', 55, 18, 55, 16, 22.95, 41.90, 153.77, 280.73],
   ] as const)('reproduces both KJ2601048 quotes for %s', (_, rate1, fee1, rate2, fee2, one, two, cny1, cny2) => {
     const record = normalizePurchaseRecord({ sku: 'KJ2601048', purchasePriceCny: 90, taxPoint: 0.08, minOrderQty: 1, weightG: 140, catalogState: 'ready' })
     const purchase = purchasePriceForMonthlySales(record, '10')

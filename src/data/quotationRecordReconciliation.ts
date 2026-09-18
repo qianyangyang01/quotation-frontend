@@ -73,6 +73,15 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
       }),
     ]))
   }
+  lines.push('', '包材与重量快照')
+  if (record.weightSnapshot) {
+    const w = record.weightSnapshot
+    lines.push(line(['普通包材规则','每件每50g加1g，不足向上取整','特殊包装（g/票）',w.specialPackagingGrams,'增加方式','整票一次']))
+    lines.push(line(['数量','商品重量（kg）','普通包材（kg）','特殊包装（kg）','整票含包材重量（kg）']))
+    for (const q of w.quantities) lines.push(line([q.quantity,q.baseWeightKg,q.standardPackagingWeightKg,q.specialPackagingWeightKg,q.weightKg]))
+    lines.push(line(['SKU','单套件数','单件基础重量（kg）','单件普通包材（kg）']))
+    for (const item of w.items) lines.push(line([item.sku,item.quantityPerSet,item.baseWeightKg,item.standardPackagingWeightKg]))
+  } else lines.push('旧记录未保存完整包材规则及特殊包装快照；原重量及报价不回算')
   if (record.bundleItems?.length) {
     lines.push('', '组合商品快照', line(['SKU', '商品', '每套件数', '单件重量（kg）', '采购原价（CNY）', '计入采购价（CNY）', '单件国内运费（CNY）', '采购发票', '采购票点（%）']))
     for (const item of record.bundleItems) lines.push(line([item.sku, item.name, item.quantityPerSet, item.effectiveWeightKg, money(item.purchaseBaseUnitPriceCny), money(item.purchaseUnitPriceCny), money(item.domesticFreightPerUnitCny), item.purchaseInvoiceType, item.purchaseInvoiceRatePercent]))

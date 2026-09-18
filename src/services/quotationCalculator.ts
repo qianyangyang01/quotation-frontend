@@ -135,18 +135,18 @@ export function bundleDomesticFreight(items: BundleCalculationItem[], sets = 1) 
   return items.reduce((sum, item) => sumDecimal(sum, productDecimal(item.purchaseFreightPerUnit, normalizedQuoteQuantity(item.quantityPerSet), setCount)), 0)
 }
 
-export function bundleGoodsWeight(items: BundleCalculationItem[], sets = 1) {
+export function bundleGoodsWeight(items: BundleCalculationItem[], sets = 1, specialPackagingWeightKg = 0) {
   const setCount = normalizedQuoteQuantity(sets)
-  return items.reduce((sum, item) => {
+  return sumDecimal(specialPackagingWeightKg, items.reduce((sum, item) => {
     const baseWeightKg = bundleItemBaseWeight(item)
     return sumDecimal(sum, productDecimal(packagedUnitWeightKg(baseWeightKg), normalizedQuoteQuantity(item.quantityPerSet), setCount))
-  }, 0)
+  }, 0))
 }
 
 export function packagingWeightKg(baseWeightKg: number) {
   const baseGrams = decimal(Math.max(0, Number(baseWeightKg) || 0)).times(1000).toNumber()
   if (baseGrams <= 0) return 0
-  return decimal(baseGrams).div(50).ceil().times(2).div(1000).toNumber()
+  return decimal(baseGrams).div(50).ceil().div(1000).toNumber()
 }
 
 export function packagedUnitWeightKg(baseWeightKg: number) {
@@ -188,8 +188,8 @@ export function singlePackagingWeight(input: SingleWeightInput, quantity = norma
   return productDecimal(packagingWeightKg(singleUnitBaseWeight(input)), normalizedQuoteQuantity(quantity))
 }
 
-export function singleActualWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity)) {
-  return productDecimal(packagedUnitWeightKg(singleUnitBaseWeight(input)), normalizedQuoteQuantity(quantity))
+export function singleActualWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity), specialPackagingWeightKg = 0) {
+  return sumDecimal(productDecimal(packagedUnitWeightKg(singleUnitBaseWeight(input)), normalizedQuoteQuantity(quantity)), specialPackagingWeightKg)
 }
 
 export function singleVolumeWeight(input: SingleWeightInput, quantity = normalizedQuoteQuantity(input.quantity), divisor = input.volumeDivisor) {

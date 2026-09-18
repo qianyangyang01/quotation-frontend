@@ -24,10 +24,10 @@ const bundle = [
 ]
 const empty = { countries:[],providers:[],updatedAt:'' }
 
-it.each(['single','bundle'])('uses the actual %s order including packaging for every quantity, without scaling the fixed duty or grade', mode => {
+it.each([['single',0],['bundle',0],['single',.01],['bundle',.01]] as const)('uses the actual %s order including packaging for every quantity, without scaling the fixed duty or grade', (mode, special) => {
   const context = {
-    purchaseTaxBlockReason:{value:''},logisticsRuleForChannel:()=>rule,normalizedBundleSets:normalizedQuoteQuantity,
-    quoteMode:{value:mode},bundleGoodsWeight:(q:number)=>bundleGoodsWeight(bundle,q),singleActualWeight,calculateLogisticsFee,
+    specialPackagingError: { value: '' }, purchaseTaxBlockReason:{value:''},logisticsRuleForChannel:()=>rule,normalizedBundleSets:normalizedQuoteQuantity,
+    quoteMode:{value:mode},bundleGoodsWeight:(q:number)=>bundleGoodsWeight(bundle,q,special),singleActualWeight:(p:typeof product,q:number)=>singleActualWeight(p,q,special),calculateLogisticsFee,
     bundlePurchaseCost:(q:number)=>30*q,bundleDomesticFreight:()=>0,sumDecimal,productDecimal,
     findPurchaseProduct:()=>undefined,purchaseRecords:{value:[]},selectedGradeCoefficient:()=>2,
     taxResult:(country:string,provider:string,cost:number,_name:string,channelKey:string,weightKg:number)=>calculateFinanceQuoteFees(empty,empty,country,provider,cost/6.7,channelKey,{weightKg,eurUsd:1.2}),
@@ -36,7 +36,7 @@ it.each(['single','bundle'])('uses the actual %s order including packaging for e
   const calculate = new Function(...Object.keys(context), ts.transpileModule(fn,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn quantityCostBreakdown')(...Object.values(context))
   for (const quantity of [1,2,3,5,8,10,25]) {
     const result = calculate(product,'CHC',quantity,'德国','云途','',key)
-    const expectedGrams = (mode === 'single' ? 104 : 416)*quantity
+    const expectedGrams = (mode === 'single' ? 102 : 408)*quantity+special*1000
     expect(result.tax.calculation.weightKg).toBe(expectedGrams/1000)
     expect(result.tax.calculation.taxEur).toBeCloseTo(expectedGrams/1000*1.5+0.6,12)
     expect(result.tax.taxUsd).toBe(Number(((expectedGrams/1000*1.5+0.6)*1.2).toFixed(2)))

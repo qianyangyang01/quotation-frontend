@@ -5,6 +5,7 @@ import ts from 'typescript'
 import * as Vue from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vue'
+import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams } from '@/data/quotationWeightSnapshot'
 import { parseCommissionThreshold } from '@/services/quotationCommission'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
@@ -97,9 +98,10 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
   const context={
+    buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
-    products:{value:[{sku:'SKU-A',name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:0}]},
+    products:{value:[{sku:'SKU-A',quantity:1,name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:0}]},
     customerOperation:{value:{configured:true,snapshot:undefined}},customerName:{value:'QA'},productCategory:{value:'日用品'},savedQuoteRows:{value:state.previewProps.rows.map(row=>({...row,taxConfigured:true}))},
     hasQuotationProduct:()=>true,quoteMode:{value:'single'},bundleItems:{value:[]},quoteMatrixMode:{value:'template'},activeTemplateSnapshot:{value:{id:'template-a',name:'QA'}},
     buildQuoteOptions:()=>[{id:'option-a',quoteSheetKey:quoteSheetRowKey(state.previewProps.rows[0]!)}],
@@ -113,6 +115,7 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
   await run()
   expect(createQuotationRecord).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
+    weightSnapshot: buildQuotationWeightSnapshot([{sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14}],10,[1,2,3,4,8]),
     customerQuote:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))

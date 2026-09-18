@@ -57,6 +57,21 @@ class QuotationDraftControllerTest {
         }
     }
 
+    @Test void specialPackagingUsesTheSameValidationForBothRolesAndEachAccountsDraft() {
+        for(var role:new String[]{"employee","superadmin"}) {
+            var principal=new QuotationPrincipal(UUID.randomUUID(),role,role,"hash",role,true,false,List.of("quote"));
+            var login=new UsernamePasswordAuthenticationToken(principal,"",principal.getAuthorities());
+            when(drafts.findById(role)).thenReturn(Optional.empty());
+            when(drafts.saveAndFlush(any())).thenAnswer(call->call.getArgument(0));
+            var saved=controller.saveState(validDraft().put("specialPackagingGrams",10),-1,login).data();
+            assertEquals(10,saved.path("payload").path("specialPackagingGrams").asInt());
+            verify(drafts).saveAndFlush(argThat(row->row.ownerAccount.equals(role)&&row.payload.path("specialPackagingGrams").asInt()==10));
+            for(double bad:new double[]{-1,.5,100001}) assertThrows(AppException.class,()->controller.saveState(validDraft().put("specialPackagingGrams",bad),-1,login));
+            assertThrows(AppException.class,()->controller.saveState(validDraft().putNull("specialPackagingGrams"),-1,login));
+            assertThrows(AppException.class,()->controller.saveState(validDraft().put("specialPackagingGrams","10"),-1,login));
+        }
+    }
+
     @Test void rejectsStaleVersionAndProtectsNewerDraftFromDelete() {
         var row = row(3);
         when(drafts.findById("ADMIN")).thenReturn(Optional.of(row));

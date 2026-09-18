@@ -48,7 +48,7 @@ describe('customer operation settings on the actual quotation page', () => {
     clearFinanceSettingsCache()
   })
 
-  async function mountWithDraft(customerName: string, selectedCustomerId = '') {
+  async function mountWithDraft(customerName: string, selectedCustomerId = '', specialPackagingGrams?: number) {
     const finance = new Promise<typeof financeResponse>(resolve => { resolveFinance = resolve })
     vi.spyOn(api, 'get').mockImplementation(async path => {
       if (path === '/finance-settings') return finance
@@ -56,7 +56,7 @@ describe('customer operation settings on the actual quotation page', () => {
       if (path === '/quotation-readiness') return { ready: true, missing: [] }
       if (path === '/quotation-drafts/mine/state') return {
         exists: true, version: 1, updatedAt: '2026-09-16T00:44:59Z',
-        payload: { schemaVersion: 2, customerName, selectedCustomerId, quoteMode: 'single', skuSearch: '', logisticsAttribute: '普货' },
+        payload: { schemaVersion: 2, customerName, selectedCustomerId, specialPackagingGrams, quoteMode: 'single', skuSearch: '', logisticsAttribute: '普货' },
       }
       throw new Error(`Unexpected request: ${path}`)
     })
@@ -66,6 +66,17 @@ describe('customer operation settings on the actual quotation page', () => {
     resolveFinance(financeResponse)
     await vi.waitFor(() => expect(host.textContent).toContain('已恢复并保存草稿'))
   }
+
+  it.each([undefined,10])('restores packaging from the account draft and retains it when autosaving: %s', async grams => {
+    await mountWithDraft('包材草稿','',grams)
+    const put=vi.spyOn(api,'put').mockResolvedValue({exists:true,version:2,updatedAt:'2026-09-18T04:00:00Z'})
+    const ruleButton=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('计算规则'))!
+    ruleButton.click();await nextTick()
+    expect(host.textContent).toContain(`当前特殊包装：${grams??0}g／票，仅增加一次`)
+    const field=host.querySelector<HTMLInputElement>('[aria-label="客户名称"]')!
+    field.value='包材草稿更新';field.dispatchEvent(new Event('input'));await nextTick()
+    await vi.waitFor(()=>expect(put).toHaveBeenCalledWith('/quotation-drafts/mine/state',expect.objectContaining({specialPackagingGrams:grams??0}),expect.anything()),{timeout:2500})
+  })
 
   it.each(['', '测试客户1'])('loads saved finance customers after a cold refresh with draft name %j, before any SKU query', async name => {
     await mountWithDraft(name)

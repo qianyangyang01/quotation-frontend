@@ -44,10 +44,10 @@ describe('minimum parcel billing weight', () => {
     expect(logisticsUnavailableReason(channel, 'US', .012)).toContain('多个计费标准')
   })
   it.each([
-    [1, .012, .03, 21.89, 23.70, 158.79],
-    [2, .024, .03, 21.89, 42.95, 287.77],
-    [3, .036, .036, 22.27, 62.25, 417.08],
-    [5, .060, .060, 23.78, 101.00, 676.70],
+    [1, .011, .03, 21.89, 23.70, 158.79],
+    [2, .022, .03, 21.89, 42.95, 287.77],
+    [3, .033, .033, 22.08, 62.20, 416.74],
+    [5, .055, .055, 23.47, 100.95, 676.37],
   ])('recalculates BK2601848 at quantity %s using the source minimum', (quantity, actual, charged, freight, usd, cny) => {
     const weight = singleActualWeight(product, quantity)
     expect(weight).toBe(actual)
@@ -66,13 +66,13 @@ describe('minimum parcel billing weight', () => {
   it('pads once after combining bundle items, and leaves purchase/manual weights unchanged', () => {
     const item = { sku: 'A', quantityPerSet: 1, purchaseUnitPrice: 0, purchaseFreightPerUnit: 0, weightKg: .005, customWeightKg: null }
     const items = [item, { ...item, sku: 'B' }]
-    for (const [sets, actual, charged] of [[1,.014,.03],[2,.028,.03],[3,.042,.042]]) {
+    for (const [sets, actual, charged] of [[1,.012,.03],[2,.024,.03],[3,.036,.036]]) {
       const weight = bundleGoodsWeight(items, sets)
       expect(weight).toBe(actual)
       expect(calculateLogisticsFee(rule, 'US', weight)?.chargeWeightKg).toBe(charged)
     }
     const manual = { ...product, weightSource: 'manual' as const, manualWeight: .02 }
-    expect(singleActualWeight(manual)).toBe(.022)
+    expect(singleActualWeight(manual)).toBe(.021)
     expect(calculateLogisticsFee(rule, 'US', singleActualWeight(manual))?.chargeWeightKg).toBe(.03)
     expect(manual.manualWeight).toBe(.02)
     expect(product.netWeight).toBe(.01)

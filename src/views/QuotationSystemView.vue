@@ -17,6 +17,7 @@ import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountry
 import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydrated, hydrateFinanceSettings, type FinanceSettingVersions } from '@/services/financeSettings'
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
+import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKAGING_ERROR } from '@/data/quotationWeightSnapshot'
 import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { applyCommissionThreshold, parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { validateQuotationConditions } from '@/services/quotationValidation'
@@ -152,6 +153,10 @@ function selectFinanceCustomer(id: string) {
 }
 const productCategory = computed(() => purchaseCategoryForSkus(quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => item.sku) : [products.value[0]?.sku || ''], new Map(purchaseRecords.value.map(item => [item.sku.toUpperCase(), item]))))
 const monthlySalesEstimate = ref('10')
+const specialPackagingGrams = ref('')
+const specialPackagingError = computed(() => parseSpecialPackagingGrams(specialPackagingGrams.value) === null ? SPECIAL_PACKAGING_ERROR : '')
+watch(specialPackagingGrams, () => { if (draftReady.value && !specialPackagingError.value) products.value.forEach(p => normalizeRule(p, true)) })
+const specialPackagingWeightKg = computed(() => { const grams = parseSpecialPackagingGrams(specialPackagingGrams.value); return grams === null ? NaN : productDecimal(grams, 0.001) })
 const commissionThreshold = ref('1')
 const commissionError = computed(() => parseCommissionThreshold(commissionThreshold.value) == null ? COMMISSION_THRESHOLD_ERROR : '')
 const draftVersion = ref(-1)
@@ -255,7 +260,7 @@ function bundleDomesticFreight(sets = 1) {
   return calculateBundleDomesticFreight(bundleItems.value, sets)
 }
 function bundleGoodsWeight(sets = 1) {
-  return calculateBundleGoodsWeight(bundleItems.value, sets)
+  return calculateBundleGoodsWeight(bundleItems.value, sets, specialPackagingWeightKg.value)
 }
 function bundleBaseWeight(sets = 1) {
   return calculateBundleBaseWeight(bundleItems.value, sets)
@@ -270,7 +275,7 @@ function singlePackagingWeight(p: Product, quantity = Math.max(1, p.quantity)) {
   return calculateSinglePackagingWeight(p, quantity)
 }
 function singleActualWeight(p: Product, quantity = Math.max(1, p.quantity)) {
-  return calculateSingleActualWeight(p, quantity)
+  return calculateSingleActualWeight(p, quantity, specialPackagingWeightKg.value)
 }
 function chargeWeight(p: Product) {
   if (quoteMode.value === 'bundle') return bundleGoodsWeight(1)
@@ -815,6 +820,7 @@ function draftPayload(): QuotationDraftPayload {
     logisticsAttribute: p.logisticsAttribute,
     selectedCustomerGrade: selectedCustomerGrade.value,
     monthlySalesEstimate: monthlySalesEstimate.value, commissionThreshold: parseCommissionThreshold(commissionThreshold.value),
+    specialPackagingGrams: parseSpecialPackagingGrams(specialPackagingGrams.value),
     customQuoteQuantity: Math.max(1, Math.floor(customQuoteQuantity.value || 1)),
     quoteMatrixMode: quoteMatrixMode.value,
     selectedQuoteRegions: { ...selectedQuoteRegions.value },
@@ -864,6 +870,7 @@ async function flushDraft() {
       draftStatus.value = 'saving'
       draftError.value = ''
       try {
+        if (specialPackagingError.value) throw new Error(specialPackagingError.value)
         if (commissionError.value) throw new Error(commissionError.value)
         const saved = await saveQuotationDraft(payload, draftVersion.value)
         draftVersion.value = saved.version
@@ -905,6 +912,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   selectedCustomerId.value = String(payload.selectedCustomerId || '')
   skuSearch.value = String(payload.skuSearch || '').trim().toUpperCase()
   selectedCustomerGrade.value = customerGradeSettings.some(item => item.enabled && item.grade === payload.selectedCustomerGrade) ? payload.selectedCustomerGrade as CustomerGrade : (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
+  specialPackagingGrams.value = payload.specialPackagingGrams === undefined ? '' : String(payload.specialPackagingGrams)
   commissionThreshold.value = payload.commissionThreshold === undefined ? '1' : String(payload.commissionThreshold ?? '')
   monthlySalesEstimate.value = ['10', '100', '100+'].includes(payload.monthlySalesEstimate) ? payload.monthlySalesEstimate : '10'
   customQuoteQuantity.value = Math.max(1, Math.floor(Number(payload.customQuoteQuantity) || 1))
@@ -1004,6 +1012,7 @@ async function resetLocalDraft() {
   selectedCustomerId.value = ''
   skuSearch.value = ''
   monthlySalesEstimate.value = '10'
+  specialPackagingGrams.value = ''
   commissionThreshold.value = '1'
   selectedCustomerGrade.value = (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   quoteMode.value = 'single'
@@ -1208,7 +1217,7 @@ function matchedLogistics(p: Product, country = p.country, region = quoteRegionF
   }).sort((a, b) => a.freight - b.freight)
 }
 function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, country = p.country, provider = '', region = quoteRegionForCountry(country), channelKey = '') {
-  if (purchaseTaxBlockReason.value) return null
+  if (specialPackagingError.value || purchaseTaxBlockReason.value) return null
   const rule = logisticsRuleForChannel(ruleName, channelKey)
   if (!rule) return null
   const normalizedQuantity = normalizedBundleSets(quantity)
@@ -1375,7 +1384,7 @@ function quoteMatrixContextKey(p: Product) {
     tax: financeTaxSettings.value, surcharge: financeSurchargeSettings.value, policies: financePolicies.value,
     quantity: p.quantity, customQuantity: customQuoteQuantity.value,
     purchase: p.purchase, freight: p.purchaseFreightPerUnit, invoiceTax: p.purchaseInvoiceTaxApplied,
-    commissionThreshold: commissionThreshold.value,
+    commissionThreshold: commissionThreshold.value, specialPackagingGrams: specialPackagingGrams.value,
     monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd, eurUsd: exchange.value.eurUsd,
     purchaseCost: quoteMode.value === 'bundle' ? bundlePurchaseCost(1)
       : purchaseRecords.value.map(record => purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied)),
@@ -1519,7 +1528,7 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : ''))
-const displayedSaveBlockReason = computed(() => commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
+const displayedSaveBlockReason = computed(() => specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
 const retryingSavePreparation = ref(false)
 const canRetrySavePreparation = computed(() => Boolean(syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
 async function retrySavePreparation() {
@@ -1568,6 +1577,7 @@ function locateValidationIssue(key: string) {
 }
 async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
+  if (specialPackagingError.value) { toast(specialPackagingError.value); return }
   if (commissionError.value) { toast(commissionError.value); return }
   if (!rows.length) {
     toast('请先添加需要复制的指定报价渠道')
@@ -1655,7 +1665,7 @@ function buildQuoteOptions() {
   const snapshotQuantity = quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)
   const snapshotBaseWeightKg = quoteMode.value === 'bundle' ? bundleBaseWeight(1) : singleBaseWeight(p, snapshotQuantity)
   const snapshotPackagingWeightKg = quoteMode.value === 'bundle' ? bundlePackagingWeight(1) : singlePackagingWeight(p, snapshotQuantity)
-  const snapshotWeightKg = snapshotBaseWeightKg + snapshotPackagingWeightKg
+  const snapshotWeightKg = sumDecimal(snapshotBaseWeightKg, snapshotPackagingWeightKg, specialPackagingWeightKg.value)
   return selectedMatrixRows.map((row) => {
     const billingRule = logisticsRules.find(rule => rule.id === row.ruleId)
     const billingRegion = row.available === false ? (row.quoteRegion || '') : billingRule ? billingQuoteRegion(billingRule, row.country, row.quoteRegion) : null
@@ -1686,7 +1696,10 @@ function buildQuoteOptions() {
       logisticsInput: {
         country: row.country,
         baseWeightKg: snapshotBaseWeightKg,
-        packagingWeightKg: snapshotPackagingWeightKg,
+        packagingWeightKg: sumDecimal(snapshotPackagingWeightKg, specialPackagingWeightKg.value),
+        standardPackagingWeightKg: snapshotPackagingWeightKg,
+        specialPackagingWeightKg: specialPackagingWeightKg.value,
+        quantity: snapshotQuantity,
         weightKg: snapshotWeightKg,
         zoneName: billingRegion,
         marks: [p.logisticsAttribute],
@@ -1737,6 +1750,7 @@ const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave> | null>(n
 async function save() {
   await nextTick() // Capture the editor only after recalculated parent props reach it.
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
+  if (specialPackagingError.value) { toast(specialPackagingError.value); return }
   if (commissionError.value) { toast(commissionError.value); return }
   if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
@@ -1784,6 +1798,10 @@ async function save() {
   const record = await createQuotationRecord({
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
+    weightSnapshot: buildQuotationWeightSnapshot(quoteMode.value === 'bundle'
+      ? bundleItems.value.filter(item => item.sku).map(item => ({sku:item.sku, quantityPerSet:normalizedBundleSets(item.quantityPerSet), baseWeightKg:item.customWeightKg ?? item.weightKg}))
+      : [{sku:p.sku, quantityPerSet:1, baseWeightKg:singleBaseWeight(p,1)}],
+      parseSpecialPackagingGrams(specialPackagingGrams.value)!, [...new Set([1,2,3,customQuoteQuantity.value,quoteMode.value==='bundle'?1:p.quantity,...captured.quantities])]),
     purchaseVersions: Object.fromEntries(activePurchaseSkus().map(sku => [sku, purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)) || ''])),
     logisticsRevision: logisticsRevision.value,
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
@@ -1896,12 +1914,12 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <section v-if="quoteMode === 'single'" class="cost-workbench">
           <ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" />
-          <CostWeightPanel :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" @weight-change="normalizeRule(p)" />
+          <CostWeightPanel :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)" />
         </section>
         <section v-else class="cost-workbench">
           <BundleProductCard
             :items="bundleItems" :purchase-cost="bundlePurchaseCost(1)"
-            :base-weight="bundleBaseWeight(1)" :packaging-weight="bundlePackagingWeight(1)" :total-weight="bundleGoodsWeight(1)" :domestic-freight="bundleDomesticFreight(1)"
+            :base-weight="bundleBaseWeight(1)" :packaging-weight="bundlePackagingWeight(1)" :total-weight="bundleGoodsWeight(1)" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" :domestic-freight="bundleDomesticFreight(1)"
             @add="addBundleItem" @remove="removeBundleItem" @query="queryBundleItem"
             @quantity-change="updateBundleItemQuantity" @weight-change="updateBundleItemWeight"
           />
@@ -1960,7 +1978,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :calculate-price="(row, quantity) => { const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey); return result?.tax.configured ? result.quoteUsd : null }"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"
-          :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
+          :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
           :skus="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku) : [p.sku]"
           :sku="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
@@ -1979,8 +1997,9 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button class="modal-close" @click="showRule = showHistory = false">×</button>
         <template v-if="showRule">
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
+          <p>当前特殊包装：{{ specialPackagingGrams || 0 }}g／票，仅增加一次。</p>
           <p>当前佣金阈值：{{ commissionThreshold || '未填写' }}。最终报价＝原最终美元报价 ÷ 佣金阈值，再按0.05美元向上取整；阈值1不调整报价。</p>
-          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每满 50g 增加 2g 包材重量</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 客户等级系数，换算美元并加税费；从财务列表选择客户时再加公司操作费，每单一次，最后按0.05美元向上取整</span></li></ol>
+          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每 50g（不足向上取整）增加 1g 普通包材；特殊包装按整票额外增加一次，不随件数或套数增加</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件运费的单件分摊金额</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>综合成本 × 客户等级系数，换算美元并加税费；从财务列表选择客户时再加公司操作费，每单一次，最后按0.05美元向上取整</span></li></ol>
           <p class="modal-tip">美元价格按保存报价时的汇率快照换算，历史报价不会随新汇率自动改变。</p>
         </template>
         <template v-else>

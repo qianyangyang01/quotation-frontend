@@ -21,7 +21,7 @@ afterEach(() => replaceLogisticsRules([]))
 it.each(['single', 'bundle'])('prices same-name routes independently in %s, including weight rejection and adopted identity', mode => {
   replaceLogisticsRules(rules)
   const context = { logisticsRuleForChannel, calculateLogisticsFee, productDecimal, sumDecimal, quoteCnyFromUsd,
-    purchaseTaxBlockReason: { value: '' }, normalizedBundleSets: (n: number) => n, quoteMode: { value: mode },
+    specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' }, normalizedBundleSets: (n: number) => n, quoteMode: { value: mode },
     singleActualWeight: (_p: unknown, n: number) => .208 * n, bundleGoodsWeight: (n: number) => .208 * n,
     bundlePurchaseCost: (n: number) => 10.1 * n, bundleDomesticFreight: (n: number) => n,
     findPurchaseProduct: () => null, purchaseRecords: { value: [] }, selectedGradeCoefficient: () => 1.15,
