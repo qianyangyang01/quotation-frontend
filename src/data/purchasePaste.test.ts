@@ -3,10 +3,22 @@ import { applyPurchasePaste, emptyPurchasePasteRow, parsePurchaseClipboard, PURC
 
 function valid() {
   const row = emptyPurchasePasteRow()
-  row[3] = 'P260905-1'; row[4] = '50'; row[11] = '1'; row[12] = '9.24'; row[17] = '3.5'; row[18] = '3.5'
+  row[3] = 'P260905-1'; row[4] = '50'; row[11] = '1'; row[12] = '9.24'; row[17] = '3.5'; row[18] = '3.5'; row[22] = '8%'
   return row
 }
 describe('purchase data-only paste', () => {
+  it.each(['', '   ', 'abc', '-1%', '101%'])('blocks the whole batch for invalid tax point %j', (value) => {
+    const row = valid(); row[3] = 'P-OTHER'; row[22] = value
+    const result = validatePurchasePaste([valid(), row])
+    expect(result.canSave).toBe(false)
+    expect(result.issues.some(i => i.column === 22)).toBe(true)
+  })
+  it.each([['0', 0], ['0%', 0], ['8%', .08], ['8', .08], ['0.08', .08], ['8％', .08]])('accepts explicit tax point %s', (value, rate) => {
+    const row = valid(); row[22] = String(value)
+    const result = validatePurchasePaste([row])
+    expect(result.canSave).toBe(true)
+    expect(result.records[0]?.taxPoint).toBe(rate)
+  })
   it('keeps first normalized SKU and skips invalid duplicate rows', () => {
     const duplicate = emptyPurchasePasteRow(); duplicate[3] = ' p260905-1 ';
     const result = validatePurchasePaste([valid(), duplicate]);
@@ -14,7 +26,7 @@ describe('purchase data-only paste', () => {
     expect(result.skipped).toEqual(['P260905-1']);
   })
   it('retains the supplied 32 column order including material and tax point', () => {
-    expect(PURCHASE_PASTE_COLUMNS.map(c => c[0])).toEqual(['报价日期*','报价人*','备注','SKU','克重(g)*','尺码','颜色','材质','长(cm)*','宽(cm)*','高(cm)*','起订量(件)*','基准采购单价(CNY/件)*','阶梯价2起订量','阶梯价2(CNY/件)','阶梯价3起订量','阶梯价3(CNY/件)','1件总运费(CNY)','10件总运费(CNY)','100件总运费(CNY)','是否包邮','含票价(CNY/件)','票点','票类型','类别','是否有货*','工厂信息','审核备注','货源链接1','货源链接2','货源链接3','相似货源'])
+    expect(PURCHASE_PASTE_COLUMNS.map(c => c[0])).toEqual(['报价日期*','报价人*','备注','SKU','克重(g)*','尺码','颜色','材质','长(cm)*','宽(cm)*','高(cm)*','起订量(件)*','基准采购单价(CNY/件)*','阶梯价2起订量','阶梯价2(CNY/件)','阶梯价3起订量','阶梯价3(CNY/件)','1件总运费(CNY)','10件总运费(CNY)','100件总运费(CNY)','是否包邮','含票价(CNY/件)','票点*','票类型','类别','是否有货*','工厂信息','审核备注','货源链接1','货源链接2','货源链接3','相似货源'])
   })
   it('parses Excel quoted multiline cells, tabs, escaped quotes and empty columns', () => {
     expect(parsePurchaseClipboard('2026.9.3\t\t"备注\r\n含""引号""\t内容"\tP-1\t\r\n')).toEqual([['2026.9.3','','备注\n含"引号"\t内容','P-1','']])

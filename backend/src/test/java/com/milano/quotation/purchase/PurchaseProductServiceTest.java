@@ -20,6 +20,20 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void pastedTaxPointMustBeExplicitAndInvalidBatchNeverWrites() {
+        var absent = pasted("P-MISSING"); absent.remove("taxPoint");
+        for (var invalid : List.of(absent, pasted("P-NULL").putNull("taxPoint"),
+                pasted("P-BLANK").put("taxPoint", ""), pasted("P-TEXT").put("taxPoint", "abc"),
+                pasted("P-NEG").put("taxPoint", -.01), pasted("P-HIGH").put("taxPoint", 1.01))) {
+            assertThrows(AppException.class, () -> service.createPasted(List.of(pasted("P-GOOD"), invalid)));
+            verify(products, never()).saveAndFlush(any());
+        }
+        var result = service.createPasted(List.of(pasted("P-ZERO").put("taxPoint", 0), pasted("P-EIGHT")));
+        assertEquals(0, result.get(0).path("taxPoint").asDouble());
+        assertEquals(.08, result.get(1).path("taxPoint").asDouble());
+        assertEquals("采购粘贴新增", result.get(0).path("sourceSheet").asText());
+        assertTrue(service.createPasted(List.of(pasted("P-ZERO").putNull("taxPoint"))).isEmpty());
+    }
     @Test void recomputesStandardReasonsOnSaveAndDoesNotMutateHistoricalPayloadOnRead() {
         var input = pasted("YS-READY");
         input.putArray("quotationBlockingReasons").add("正式SKU").add("重量").add("有效价格").add("起订量");
@@ -53,7 +67,7 @@ class PurchaseProductServiceTest {
     }
     @Test void taxPointIsRequiredEvenWithoutClientVersionsAndAcrossBundleItems() {
         var zero = PurchaseProduct.create("ZERO", pasted("ZERO").put("taxPoint", 0), "ready", true, null);
-        var missing = PurchaseProduct.create("MISSING", pasted("MISSING").put("dataSource", "legacy_2026").put("taxIncludedPriceCny", 20), "ready", true, null);
+        var missing = PurchaseProduct.create("MISSING", pasted("MISSING").putNull("taxPoint").put("dataSource", "legacy_2026").put("taxIncludedPriceCny", 20), "ready", true, null);
         when(products.findAllLockedBySkuIn(anyCollection())).thenReturn(List.of(zero, missing));
         var quote = JsonNodeFactory.instance.objectNode().put("primarySku", "ZERO");
         quote.putArray("bundleItems").addObject().put("sku", "MISSING");
@@ -78,7 +92,7 @@ class PurchaseProductServiceTest {
         assertDoesNotThrow(()->service.assertQuotationVersions(quote));
     }
     private tools.jackson.databind.node.ObjectNode pasted(String sku) {
-        return JsonNodeFactory.instance.objectNode().put("sku",sku).put("weightG",50).put("minOrderQty",1).put("purchasePriceCny",9.24).put("singleFreightCny",3.5).put("freight10Cny",3.5);
+        return JsonNodeFactory.instance.objectNode().put("sku",sku).put("weightG",50).put("minOrderQty",1).put("purchasePriceCny",9.24).put("singleFreightCny",3.5).put("freight10Cny",3.5).put("taxPoint",0.08);
     }
     @Test void pastedRowsValidateBeforeWritingAndNeverOverwriteExistingSku() {
         var invalid=pasted("P-2"); invalid.remove("freight10Cny");

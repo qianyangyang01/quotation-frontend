@@ -8,7 +8,7 @@ export const PURCHASE_PASTE_COLUMNS = [
   ['基准采购单价(CNY/件)*', 'purchasePriceCny'], ['阶梯价2起订量', 'tier2MinQty'], ['阶梯价2(CNY/件)', 'tier2PriceCny'],
   ['阶梯价3起订量', 'tier3MinQty'], ['阶梯价3(CNY/件)', 'tier3PriceCny'], ['1件总运费(CNY)', 'singleFreightCny'],
   ['10件总运费(CNY)', 'freight10Cny'], ['100件总运费(CNY)', 'freight100Cny'], ['是否包邮', 'freeShipping'],
-  ['含票价(CNY/件)', 'taxIncludedPriceCny'], ['票点', 'taxPoint'], ['票类型', 'invoiceType'], ['类别', 'category'],
+  ['含票价(CNY/件)', 'taxIncludedPriceCny'], ['票点*', 'taxPoint'], ['票类型', 'invoiceType'], ['类别', 'category'],
   ['是否有货*', 'stockStatus'], ['工厂信息', 'factoryInfo'], ['审核备注', 'auditNotes'],
   ['货源链接1', 'sourceLink1'], ['货源链接2', 'sourceLink2'], ['货源链接3', 'sourceLink3'], ['相似货源', 'similarSource'],
 ] as const
@@ -89,6 +89,7 @@ export function validatePurchasePaste(grid: string[][]) {
       if (data[field] == null || Number(data[field]) <= 0) issue(field, '必填，须大于0')
     }
     if (data.purchasePriceCny == null) issue('purchasePriceCny', '请填写基准采购单价')
+    if (data.taxPoint == null) issue('taxPoint', '请填写票点；无票点请明确填0%')
     for (const field of ['minOrderQty', 'tier2MinQty', 'tier3MinQty']) if (data[field] != null && (!Number.isSafeInteger(data[field]) || Number(data[field]) <= 0)) issue(field, '起订量须为正整数')
     for (const [qty, price, previous] of [['tier2MinQty', 'tier2PriceCny', 'minOrderQty'], ['tier3MinQty', 'tier3PriceCny', 'tier2MinQty']]) {
       if ((data[qty!] == null) !== (data[price!] == null)) issue(data[qty!] == null ? qty! : price!, '阶梯起订量与价格须一起填写')

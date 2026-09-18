@@ -7,11 +7,26 @@ import { emptyPurchasePasteRow } from '@/data/purchasePaste'
 const request=vi.hoisted(()=>vi.fn().mockResolvedValue([]))
 vi.mock('@/services/http',()=>({request}))
 let app: App | undefined
+it('blocks a missing tax point until the user explicitly enters zero', async()=>{
+  const host=document.createElement('div');document.body.append(host);app=createApp(PurchasePasteDialog);app.mount(host)
+  const row=emptyPurchasePasteRow();Object.assign(row,{3:'P-TAX',4:'50',11:'1',12:'9',17:'0',18:'0'})
+  const event=new Event('paste',{bubbles:true,cancelable:true})
+  Object.defineProperty(event,'clipboardData',{value:{getData:(type:string)=>type==='text/html'?'':row.join('\t')}})
+  document.querySelector('[data-cell="0:0"]')!.dispatchEvent(event);await nextTick()
+  const save=Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.startsWith('保存新增'))!
+  expect(save.disabled).toBe(true)
+  save.click();expect(request).not.toHaveBeenCalled()
+  const tax=document.querySelector('[data-cell="0:22"]') as HTMLInputElement
+  tax.value='0%';tax.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()
+  expect(save.disabled).toBe(false)
+  save.click();await nextTick();await nextTick()
+  expect(JSON.parse(request.mock.calls[0]![1].body)[0].taxPoint).toBe(0)
+})
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.unstubAllGlobals()})
 it('pastes multiline HTML as two products, rejects jagged fallback atomically and submits correct prices', async()=>{
   const host=document.createElement('div');document.body.append(host);app=createApp(PurchasePasteDialog);app.mount(host)
   const rows=[emptyPurchasePasteRow(),emptyPurchasePasteRow()]
-  rows.forEach((r,i)=>Object.assign(r,{3:`QA-PASTE-${i+1}`,4:'850',5:'页数118\n尺寸253*250',6:'小熊\n小兔',11:'1',12:i?'27.5':'41.1',17:'6',18:'30'}))
+  rows.forEach((r,i)=>Object.assign(r,{3:`QA-PASTE-${i+1}`,4:'850',5:'页数118\n尺寸253*250',6:'小熊\n小兔',11:'1',12:i?'27.5':'41.1',17:'6',18:'30',22:'8%'}))
   function paste(text: string,html='') {
     const event=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(event,'clipboardData',{value:{getData:(type:string)=>type==='text/html'?html:text}})
     document.querySelector('[data-cell="0:0"]')!.dispatchEvent(event)
@@ -39,7 +54,7 @@ it('keeps successfully saved SKU/category available for copying and supports cli
   const host=document.createElement('div');document.body.append(host);app=createApp(PurchasePasteDialog);app.mount(host)
   const button=(name:string)=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===name)!
   expect(button('一键复制SKU和品类').disabled).toBe(true)
-  const row=emptyPurchasePasteRow();Object.assign(row,{0:'2026.9.5',3:'QA-SHARE-1',4:'850',11:'1',12:'41.1',17:'6',18:'30',24:'图书'})
+  const row=emptyPurchasePasteRow();Object.assign(row,{0:'2026.9.5',3:'QA-SHARE-1',4:'850',11:'1',12:'41.1',17:'6',18:'30',22:'8%',24:'图书'})
   const event=new Event('paste',{bubbles:true,cancelable:true})
   Object.defineProperty(event,'clipboardData',{value:{getData:(type:string)=>type==='text/html'?`<table><tr><td><img src="x"></td><td></td><td></td>${row.map(c=>`<td>${c}</td>`).join('')}</tr></table>`:''}})
   document.querySelector('[data-cell="0:0"]')!.dispatchEvent(event);await nextTick()
@@ -66,7 +81,7 @@ it('counts batch and database duplicates and copies only returned additions', as
   const host=document.createElement('div');document.body.append(host);app=createApp(PurchasePasteDialog);app.mount(host)
   const button=(name:string)=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===name)!
   const paste=async()=>{
-    const rows=['P-NEW','P-OLD','p-new'].map(sku=>{const row=emptyPurchasePasteRow();Object.assign(row,{3:sku,4:'50',11:'1',12:'9',17:'0',18:'0'});return row.join('\t')})
+    const rows=['P-NEW','P-OLD','p-new'].map(sku=>{const row=emptyPurchasePasteRow();Object.assign(row,{3:sku,4:'50',11:'1',12:'9',17:'0',18:'0',22:'0%'});return row.join('\t')})
     const event=new Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(event,'clipboardData',{value:{getData:(type:string)=>type==='text/html'?'':rows.join('\r\n')}})
     document.querySelector('[data-cell="0:0"]')!.dispatchEvent(event);await nextTick()
   }
