@@ -11,6 +11,47 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers(disabledWithoutDocker=true)
 class LogisticsAcceptanceMigrationTest {
+    @Test void halfKilogramParcelProjectionRequiresValidMinimumAndNewAcceptance() {
+        resetDatabase();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
+        var jdbc=JdbcClient.create(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
+        var mapper=new tools.jackson.databind.ObjectMapper();
+        var row=mapper.createObjectNode().put("countryCode","US").put("areaName","美国").put("pricingModel","per-piece-500g")
+            .put("weightFromKg",0).put("weightToKg",.5).put("weightFromInclusive",false).put("weightToInclusive",true)
+            .put("minChargeWeightKg",.5).put("intervalPrice",91).put("pricePerKg",0).put("registrationFee",0);
+        assertTrue(jdbc.sql("select logistics_price_row_quote_supported(cast(:row as jsonb))").param("row",row.toString()).query(Boolean.class).single());
+        for(var invalid:java.util.List.of(row.deepCopy().put("minChargeWeightKg",.05),row.deepCopy().put("weightToKg",.6),
+            row.deepCopy().put("intervalPrice",-91),row.deepCopy().put("intervalPrice","91"),row.deepCopy().put("pricingModel","interval"),
+            row.deepCopy().put("pricePerKg",91),row.deepCopy().put("minChargeWeightKg","wrong"),row.deepCopy().put("weightFromInclusive",true)))
+            assertFalse(jdbc.sql("select logistics_price_row_quote_supported(cast(:row as jsonb))").param("row",invalid.toString()).query(Boolean.class).single(),invalid.toString());
+        var dataset=UUID.fromString("00000000-0000-0000-0000-000000000001");
+        var version=seed(jdbc,dataset,"published",true,1);
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',cast(:rows as jsonb)) where id=:id")
+            .param("id",version).param("rows",mapper.createArrayNode().add(row).toString()).update();
+        assertEquals(91,jdbc.sql("select (quote_rows->0->>'intervalPrice')::int from logistics_version where id=:id").param("id",version).query(Integer.class).single());
+        jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select :id,id,rows_fingerprint,'logistics-billing-v5','validated-import','{}','QA' from logistics_version where id=:version")
+            .param("id",UUID.randomUUID()).param("version",version).update();
+        assertFalse(ready(jdbc,version));
+        jdbc.sql("update logistics_billing_acceptance set engine_version='logistics-billing-v6' where version_id=:id").param("id",version).update();
+        assertTrue(ready(jdbc,version));
+        var queries=new LogisticsQueryService(jdbc,mapper);
+        var projected=queries.publishedRules(null,"普货",java.util.List.of("US"),java.util.List.of()).rules().getFirst().path("prices").get(0);
+        assertEquals("per-piece-500g",projected.path("pricingModel").asText());assertEquals(.5,projected.path("minChargeWeightKg").asDouble());assertEquals(91,projected.path("intervalPrice").asInt());
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows,0,intervalPrice}','92'::jsonb) where id=:id").param("id",version).update();
+        assertFalse(ready(jdbc,version),"Updated parcel prices require fresh acceptance");
+        var gramVersion=seed(jdbc,dataset,"published",true,2);
+        var gram=row.deepCopy().put("pricingModel","per-kg-1g").put("intervalPrice",0).put("pricePerKg",100).put("minChargeWeightKg",.05);
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',cast(:rows as jsonb)) where id=:id")
+            .param("id",gramVersion).param("rows",mapper.createArrayNode().add(gram).toString()).update();
+        jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select :id,id,rows_fingerprint,'logistics-billing-v6','validated-import','{}','QA' from logistics_version where id=:version")
+            .param("id",UUID.randomUUID()).param("version",gramVersion).update();
+        assertFalse(ready(jdbc,gramVersion));
+        jdbc.sql("update logistics_billing_acceptance set engine_version='logistics-billing-v7' where version_id=:id").param("id",gramVersion).update();
+        assertTrue(ready(jdbc,gramVersion));
+        var projectedGram=queries.publishedRules(null,"普货",java.util.List.of("US"),java.util.List.of()).rules().getFirst().path("prices").get(0);
+        assertEquals("per-kg-1g",projectedGram.path("pricingModel").asText());
+        assertEquals(.051,new LogisticsBillingEngine(mapper).calculate(mapper.createArrayNode().add(projectedGram),mapper.createObjectNode().put("country","US").put("weightKg",.050001)).path("chargeWeightKg").asDouble());
+    }
     @Test void minimumProjectionRejectsInvalidFloorsAndKeepsValidZero() {
         resetDatabase();
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
@@ -66,7 +107,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("42",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("45",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_provider where id=:id").param("id",provider).query(UUID.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
         assertEquals(version,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());

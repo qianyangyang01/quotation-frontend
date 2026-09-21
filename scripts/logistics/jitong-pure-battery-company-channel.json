@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "id": "0796f351-c479-45dc-9a66-2e923d921ae5",
+      "providerName": "极通环球", "providerAliases": [],
+      "channelName": "极通环球专线 - 定制纯电", "aliases": ["极通环球专线-定制纯电"],
+      "productCodes": ["JT-HQ-MDCD"], "logisticsAttribute": "纯电", "enabled": true
+    }
+  ]
+}

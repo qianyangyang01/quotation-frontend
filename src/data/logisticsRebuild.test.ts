@@ -11,6 +11,12 @@ const makeRule = (rows: Parameters<typeof normalizeLogisticsPriceRow>[0][]): Log
 })
 const row = { areaName: '法国', countryCode: 'FR', registrationFee: 2 }
 describe('rebuild pricing safety', () => {
+  it('saves the parcel tier amount without converting it into a kilogram rate', () => {
+    const snapshot: Price[] = [{ ...row, rowKey: 'piece', pricingModel: 'per-piece-500g', intervalPrice: 91, pricePerKg: 0, weightFromKg: 0, weightToKg: .5 }]
+    const edited = clonePriceRows(snapshot)
+    edited[0]!.intervalPrice = 96
+    expect(buildPriceCorrections(edited, snapshot)).toEqual([{ rowKey: 'piece', rowIndex: 0, fields: { intervalPrice: 96 } }])
+  })
   it('does not invent price or ETA edits when two records share a business key or source row', () => {
     const snapshot: Price[] = [
       { ...row, rowKey: 'shared', sourceSheet: '敏货', sourceRow: 17, weightFromKg: .001, weightToKg: .4, pricePerKg: 54.32, registrationFee: 19, routeKey: 'fr', etaMinDays: 8, etaMaxDays: 10 },

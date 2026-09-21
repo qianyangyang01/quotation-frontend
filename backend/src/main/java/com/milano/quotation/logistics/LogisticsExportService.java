@@ -107,7 +107,7 @@ public class LogisticsExportService {
         if(records.isEmpty()&&batch==null)throw AppException.unprocessable("没有可导出的审核数据");
         try(var book=new XSSFWorkbook();var bytes=new ByteArrayOutputStream()){
             var detail=book.createSheet("关键字段");textRow(detail,0,List.of("MILANO_LOGISTICS_REVIEW_V1","仅供审核，不作为导入模板",Instant.now().toString()));
-            var detailHeaders=List.of("物流商","渠道名称","原产品代码","国家地区","国家代码","目的分区","报价区域","重量段","起点包含","终点包含","计费模型","公斤价","每票费/挂号费","原费用列名","首重KG","首重价","续重KG","续重价","时效最早天","时效最晚天","时效来源","校验状态","阻断原因","提醒","路线键","原文件","工作表","行号");
+            var detailHeaders=List.of("物流商","渠道名称","原产品代码","国家地区","国家代码","目的分区","报价区域","重量段","起点包含","终点包含","计费模型","公斤价","每票费/挂号费","原费用列名","首重KG","首重价","续重KG","续重价","时效最早天","时效最晚天","时效来源","校验状态","阻断原因","提醒","路线键","原文件","工作表","行号","整票档位价","最低计费重KG");
             header(book,detail,1,detailHeaders);var eta=book.createSheet("待补时效");textRow(eta,0,List.of("MILANO_LOGISTICS_REVIEW_V1","每条路线填写一次时效后在系统审核页批量应用"));
             header(book,eta,1,List.of("物流商","渠道名称","路线状态","国家地区","国家代码","目的分区","报价区域","原产品代码","路线键","来源工作表","来源行"));
             var issues=book.createSheet("问题清单");textRow(issues,0,List.of("MILANO_LOGISTICS_REVIEW_V1","阻断项禁止发布；提醒项需人工查看"));
@@ -124,7 +124,7 @@ public class LogisticsExportService {
                     cell(output,c++,row.path("firstWeightKg"));cell(output,c++,row.path("firstWeightPrice"));cell(output,c++,row.path("nextWeightKg"));cell(output,c++,row.path("nextWeightPrice"));
                     cell(output,c++,row.path("etaMinDays"));cell(output,c++,row.path("etaMaxDays"));stringCell(output,c++,row.path("etaSource").asText());
                     var blocking=row.path("blockingReason").asText();var warning=row.path("reviewWarning").asText();stringCell(output,c++,blocking.isBlank()?(warning.isBlank()?"通过":"提醒"):"阻断");stringCell(output,c++,blocking);stringCell(output,c++,warning);
-                    stringCell(output,c++,row.path("routeKey").asText());stringCell(output,c++,row.path("sourceFile").asText(version.path("fileName").asText()));stringCell(output,c++,row.path("sourceSheet").asText());cell(output,c,row.path("sourceRow"));
+                    stringCell(output,c++,row.path("routeKey").asText());stringCell(output,c++,row.path("sourceFile").asText(version.path("fileName").asText()));stringCell(output,c++,row.path("sourceSheet").asText());cell(output,c++,row.path("sourceRow"));cell(output,c++,row.path("intervalPrice"));cell(output,c,row.path("minChargeWeightKg"));
                 }
                 for(var route:version.path("missingEtaRoutes")){
                     var key=provider+"|"+channel+"|"+route.path("routeKey").asText();if(!etaSeen.add(key))continue;var output=eta.createRow(er++);int c=0;
@@ -151,7 +151,7 @@ public class LogisticsExportService {
     private static void issueRow(Row output,String provider,String channel,String level,JsonNode issue){int c=0;for(var text:List.of(provider,channel,level,issue.path("field").asText(),issue.path("message").asText(),issue.path("sourceSheet").asText()))stringCell(output,c++,text);cell(output,c++,issue.path("row"));stringCell(output,c,issue.path("routeKey").asText());}
     private static String display(String value,String fallback){return value==null||value.isBlank()?fallback:value;}
     private static String weight(JsonNode row){return (row.path("weightFromInclusive").asBoolean()?"[":"(")+row.path("weightFromKg").asText()+", "+row.path("weightToKg").asText()+(row.path("weightToInclusive").asBoolean(true)?"]":")")+" KG";}
-    private static String model(String value){return value.equals("per-kg")?"公斤价＋每票费":value.equals("first-next")?"首重价＋续重价":"暂不支持（"+value+"）";}
+    private static String model(String value){return value.equals(LogisticsGramPricing.MODEL)?"公斤价＋每票费（1g进位）":value.equals(LogisticsPiecePricing.MODEL)?"整票价（0.5kg进位）":value.equals("per-kg")?"公斤价＋每票费":value.equals("first-next")?"首重价＋续重价":"暂不支持（"+value+"）";}
     private static String etaStatus(String value){return switch(value){case "missing"->"缺失";case "partial"->"不完整";case "conflict"->"冲突";default->value;};}
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public byte[] changes(UUID batchId,UUID versionId) {

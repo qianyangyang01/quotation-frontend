@@ -9,9 +9,9 @@ import java.util.*;
 
 /** Derives route-level ETA readiness and review flags without changing billing identity. */
 final class LogisticsReadiness {
-    private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg");
+    private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL);
     private static final Set<String> GENERATED_ETA_CODES=Set.of("ETA_MISSING","ETA_PARTIAL","ETA_CONFLICT");
-    private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式","公斤价计费结构不完整");
+    private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式","公斤价计费结构不完整","0.5kg进位整票价的档位、起重或金额无效");
 
     private LogisticsReadiness() {}
 
@@ -48,8 +48,9 @@ final class LogisticsReadiness {
             if(row.path("sourceFeeLabel").asText().isBlank()&&row.path("registrationFee").asDouble()>0)row.put("sourceFeeLabel","挂号费");
             if(row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt()&&row.path("etaSource").asText().isBlank())row.put("etaSource","source-row");
             if(model.equals("interval"))block(row,"区间价计费方式暂不支持");
+            else if(LogisticsPiecePricing.applies(row)&&!LogisticsPiecePricing.valid(row))block(row,"0.5kg进位整票价的档位、起重或金额无效");
             else if(!SUPPORTED_MODELS.contains(model))block(row,"未知计费方式");
-            else if(model.equals("per-kg")&&row.path("pricePerKg").asDouble()<=0)block(row,"公斤价计费结构不完整");
+            else if((model.equals("per-kg")||LogisticsGramPricing.applies(row))&&row.path("pricePerKg").asDouble()<=0)block(row,"公斤价计费结构不完整");
             else if(model.equals("first-next")&&(row.path("firstWeightKg").asDouble()<=0||row.path("firstWeightPrice").asDouble()<=0
                     ||(row.path("weightToKg").asDouble()>row.path("firstWeightKg").asDouble()&&(row.path("nextWeightKg").asDouble()<=0||row.path("nextWeightPrice").asDouble()<=0))))block(row,"首续重计费结构不完整");
             if(row.path("surcharge").asDouble()>0)block(row,"附加费需要明确计费适用规则");

@@ -1,0 +1,15 @@
+{
+  "entries": [
+    {
+      "id": "7e229353-8765-4fd8-a3bb-36b5792cc56c",
+      "providerName": "急速国际",
+      "providerAliases": ["急速化妆品专线"],
+      "channelName": "急速-美国化妆品专线（商派）",
+      "aliases": ["JS02-邮编敏感货-2"],
+      "productCodes": ["JS02-邮编敏感货-2"],
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "sources": [{"file": "JS-合肥米莱诺0825-新(1).xlsx", "sheet": "美国", "firstRow": 3, "lastRow": 11}]
+    }
+  ]
+}

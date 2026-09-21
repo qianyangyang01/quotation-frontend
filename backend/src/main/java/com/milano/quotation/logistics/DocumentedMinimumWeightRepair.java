@@ -14,6 +14,9 @@ import java.util.*;
 
 /** One-time, source-backed correction. Caller owns the transaction; no HTTP entry point. */
 public final class DocumentedMinimumWeightRepair {
+    // V40-V42 run before newer billing SQL migrations. Their immutable per-kg repairs
+    // use the v5 contract, independently checked below, rather than a future engine label.
+    private static final String REPAIR_ENGINE_VERSION="logistics-billing-v5";
     private final String actor;
     private final String confirmedNote;
     private boolean reviewedSources;
@@ -124,6 +127,7 @@ public final class DocumentedMinimumWeightRepair {
 
     ArrayNode verify(ArrayNode rows, ArrayNode before) throws SQLException {
         require(rows.size() == before.size() && engine.unsupported(rows).isEmpty(), "Unsupported correction");
+        for(var row:rows)require(row.path("pricingModel").asText("per-kg").equals("per-kg"),"Historical repair only supports the v5 kilogram model");
         var evidence = mapper.createArrayNode();
         var covered = new HashMap<String, Set<String>>();
         BigDecimal maximum = BigDecimal.ZERO;
@@ -158,6 +162,7 @@ public final class DocumentedMinimumWeightRepair {
                 .add(LogisticsBillingEngine.n(row, "registrationFee")).setScale(2, RoundingMode.HALF_UP);
         var actual = engine.calculate(rows, input);
         require(actual.path("total").decimalValue().compareTo(expected) == 0, "Independent freight calculation differs");
+        actual.put("engineVersion",REPAIR_ENGINE_VERSION);
         var source = row.path("sourceFile").asText() + " / " + row.path("sourceSheet").asText() + " / " + row.path("sourceRow").asText();
         evidence.addObject().set("sample", mapper.createObjectNode().set("input", input).put("expectedTotal", expected).put("sourceReference", source)).set("result", actual);
         return actual;
@@ -188,7 +193,7 @@ public final class DocumentedMinimumWeightRepair {
         var proof = mapper.createObjectNode().put("note", note).put("repairId", repairId).put("sourceReference", confirmedNote == null
                 ? "Original stored source notes, exact version and source row guards" : "Explicit user confirmation on 2026-09-16; exact version, fingerprint and source row guards").set("evidence", item.path("evidence"));
         if(reviewedSources)proof.put("sourceReference","Reviewed same-edition source cells or original stored notes; exact version/fingerprint/row/country guards").set("sourcePatches",plan.path("patches"));
-        update(db, "insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select ?,id,rows_fingerprint,?,'verified',?::jsonb,? from logistics_version where id=?", UUID.randomUUID(), LogisticsBillingEngine.VERSION, proof.toString(), actor, id);
+        update(db, "insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select ?,id,rows_fingerprint,?,'verified',?::jsonb,? from logistics_version where id=?", UUID.randomUUID(), REPAIR_ENGINE_VERSION, proof.toString(), actor, id);
         require(scalar(db, "select logistics_version_quote_ready(?)::text", id).equals("true"), "Corrected version is not quote ready");
         var detail = mapper.createObjectNode().put("repairId", repairId).put("beforeVersionId", old.toString()).put("afterVersionId", id.toString())
                 .put("beforeRowsFingerprint", plan.path("rowsFingerprint").asText())

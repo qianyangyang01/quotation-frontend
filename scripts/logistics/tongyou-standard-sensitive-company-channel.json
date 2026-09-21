@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "id": "2c86b25a-92ad-4a3d-bda6-29b5675b7510",
+      "providerName": "通邮", "providerAliases": [],
+      "channelName": "标准挂号类-敏感", "aliases": ["线上敏感"],
+      "productCodes": [], "logisticsAttribute": "敏感货", "enabled": true
+    }
+  ]
+}

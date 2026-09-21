@@ -50,6 +50,11 @@ common:
   notes:
     contains: ["备注", "说明", "尺寸", "附加费", "服务费"]
 providers:
+  急速国际:
+    country:
+      exact: ["Country 国家"]
+    notes:
+      exact: ["产品属性"]
   极通环球:
     pricePerKg:
       exact: ["标准资费(元/千克)", "/KG"]

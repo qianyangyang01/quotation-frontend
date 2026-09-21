@@ -1,0 +1,8 @@
+{
+  "entries": [
+    {"id":"55d1ab32-c1c6-465c-a694-570ac83baed7","providerName":"云途","providerAliases":[],"channelName":"云途全球专线挂号（标快带电）","aliases":[],"productCodes":["BKZXR"],"logisticsAttribute":"带电","enabled":true},
+    {"id":"7a3866f4-fdf6-4627-9cda-a5a81c496a34","providerName":"云途","providerAliases":[],"channelName":"云途全球专线挂号（标快普货）","aliases":[],"productCodes":["BKPHR"],"logisticsAttribute":"普货","enabled":true},
+    {"id":"16e8a08c-4ae6-430e-a7df-b9452eb844b9","providerName":"云途","providerAliases":[],"channelName":"云途大货18000专线挂号（特惠带电）","aliases":[],"productCodes":["DHZXR"],"logisticsAttribute":"带电","enabled":true},
+    {"id":"b50ab52b-ebaf-4bc6-9b52-0cec1ca60b2d","providerName":"云途","providerAliases":[],"channelName":"云途大货18000专线挂号（特惠普货）","aliases":[],"productCodes":["DHZXRPH"],"logisticsAttribute":"普货","enabled":true}
+  ]
+}

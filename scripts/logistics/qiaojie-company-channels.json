@@ -1,0 +1,28 @@
+{
+  "entries": [
+    {
+      "id": "f0c25e45-aa48-43b6-8ff2-a69b2af5d781",
+      "providerName": "巧捷", "providerAliases": [],
+      "channelName": "巧捷专线小包全球特惠F(敏感)", "aliases": [],
+      "productCodes": ["QEGBTF"], "logisticsAttribute": "敏感货", "enabled": true
+    },
+    {
+      "id": "95504724-d0fd-4476-afde-3a9fbb5d2cee",
+      "providerName": "巧捷", "providerAliases": [],
+      "channelName": "巧捷小包全球商派E(服装)", "aliases": [],
+      "productCodes": ["QEUBF"], "logisticsAttribute": "普货", "enabled": true
+    },
+    {
+      "id": "0c9f62ef-f7d8-48ea-b79b-fca3672fd52e",
+      "providerName": "巧捷", "providerAliases": [],
+      "channelName": "巧捷小包全球特惠A(服装)", "aliases": [],
+      "productCodes": ["QEGBFA"], "logisticsAttribute": "普货", "enabled": true
+    },
+    {
+      "id": "ea00eaf9-e3c7-4133-889f-e1ba8f0d8044",
+      "providerName": "巧捷", "providerAliases": [],
+      "channelName": "巧捷小包快递特惠包税B", "aliases": [],
+      "productCodes": ["QEUFAB"], "logisticsAttribute": "普货", "enabled": true
+    }
+  ]
+}

@@ -42,7 +42,7 @@ export type EtaCorrection = { routeKey: string; etaMinDays: number; etaMaxDays: 
 export type LogisticsAdjustmentStatus = 'published' | 'pending'
 
 export function buildPriceCorrections(rows: Price[], snapshot: Price[]): RowCorrection[] {
-  const keys = ['weightFromKg', 'weightToKg', 'weightFromInclusive', 'weightToInclusive', 'pricePerKg', 'registrationFee'] as const
+  const keys = ['weightFromKg', 'weightToKg', 'weightFromInclusive', 'weightToInclusive', 'pricePerKg', 'registrationFee', 'intervalPrice'] as const
   if (rows.length !== snapshot.length) throw new Error('价格行已变化，请刷新后重试')
   return rows.flatMap((row, rowIndex) => {
     const before = snapshot[rowIndex]

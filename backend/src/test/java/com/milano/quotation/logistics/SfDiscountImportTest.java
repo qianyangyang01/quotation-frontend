@@ -57,6 +57,13 @@ class SfDiscountImportTest {
                 sheet.getRow(0).createCell(7).setCellValue("渠道名称");sheet.getRow(1).createCell(7).setCellValue("美猴专线普货");
                 book.write(bytes);input=bytes.toByteArray();
             }
+            if(provider.equals("急速国际"))try(var book=new XSSFWorkbook(new ByteArrayInputStream(input));var bytes=new ByteArrayOutputStream()) {
+                var sheet=book.getSheetAt(0);
+                sheet.getRow(1).getCell(0).setCellValue("美国");sheet.getRow(1).getCell(1).setCellValue("US");
+                sheet.getRow(0).createCell(7).setCellValue("渠道代码");sheet.getRow(1).createCell(7).setCellValue(JisuSourceRules.CODE);
+                sheet.getRow(1).getCell(6).setCellValue("0.05<W≤0.4");
+                book.write(bytes);input=bytes.toByteArray();
+            }
             assertEquals(97,channel(input,provider).path("rows").get(0).path("pricePerKg").asDouble(),provider);
         }
     }

@@ -13,7 +13,7 @@ import java.util.*;
 /** Fail-closed evaluator for explicitly supported, fully specified price rules. */
 @Component
 public class LogisticsBillingEngine {
-    public static final String VERSION="logistics-billing-v5";
+    public static final String VERSION="logistics-billing-v7";
     private final ObjectMapper mapper;
     public LogisticsBillingEngine(ObjectMapper mapper){this.mapper=mapper;}
     static BigDecimal minimum(JsonNode row){return n(row,"minChargeWeightKg").max(n(row,"startWeightKg"));}
@@ -24,18 +24,20 @@ public class LogisticsBillingEngine {
         if(!rows.isArray()||rows.isEmpty())reasons.add("没有完整价格行");
         for(var row:rows){
             if(row.path("pendingReason").asText().matches("(?s).*(最低|最小)计费重量.*"))reasons.add("最低计费重量尚未核对");
-            if(!model(row).equals("per-kg")||List.of("firstWeightKg","firstWeightPrice","nextWeightKg","nextWeightPrice","intervalPrice").stream().anyMatch(f->n(row,f).signum()>0))
+            boolean piece=LogisticsPiecePricing.applies(row);
+            if((!model(row).equals("per-kg")&&!LogisticsGramPricing.applies(row)&&!piece)||List.of("firstWeightKg","firstWeightPrice","nextWeightKg","nextWeightPrice").stream().anyMatch(f->n(row,f).signum()>0)||!piece&&n(row,"intervalPrice").signum()>0)
                 reasons.add("当前仅支持重量段公斤价加每票费，首重续重和区间一口价不参与报价");
+            if(piece&&!LogisticsPiecePricing.valid(row))reasons.add("0.5kg进位整票价的档位、起重或金额无效");
             if(n(row,"surcharge").signum()>0)reasons.add("当前仅支持公斤价和每票费，附加费尚未接入报价");
             long baseTypes=List.of("pricePerKg","intervalPrice","firstWeightPrice").stream().filter(f->n(row,f).signum()>0).count();
             if(baseTypes!=1)reasons.add("基础计费价格必须唯一，不能同时使用公斤价、区间价和首重价");
             if(!row.path("currency").asText("CNY").equals("CNY"))reasons.add("非人民币计价未适配");
-            if(!Set.of("per-kg","first-next","interval").contains(model(row)))reasons.add("未知计费方式");
+            if(!Set.of("per-kg","first-next","interval",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL).contains(model(row)))reasons.add("未知计费方式");
             if(n(row,"weightToKg").compareTo(n(row,"weightFromKg"))<=0)reasons.add("重量范围无效");
             var minimum=minimum(row);
             int minimumToUpper=minimum.compareTo(n(row,"weightToKg"));
             if(minimum.signum()>0&&(minimumToUpper>0||minimumToUpper==0&&!row.path("weightToInclusive").asBoolean(true)))reasons.add("最小计费重量超出重量段上限");
-            if(model(row).equals("per-kg")&&n(row,"pricePerKg").signum()<=0)reasons.add("公斤价格无效");
+            if((model(row).equals("per-kg")||LogisticsGramPricing.applies(row))&&n(row,"pricePerKg").signum()<=0)reasons.add("公斤价格无效");
             if(model(row).equals("interval")&&n(row,"intervalPrice").signum()<=0)reasons.add("区间价格无效");
             if(model(row).equals("first-next")&&(n(row,"firstWeightKg").signum()<=0||n(row,"firstWeightPrice").signum()<=0||n(row,"nextWeightKg").signum()<=0))reasons.add("首续重参数不完整");
             var route=routeKey(row);var price=priceKey(row);
@@ -59,8 +61,10 @@ public class LogisticsBillingEngine {
             if(!available(row))continue;
             if(!zones.isEmpty()&&!zoneMatches(row.path("zoneName").asText(),requestedZone))continue;
             BigDecimal minimum=minimum(row),charge=weight.max(minimum),volume=BigDecimal.ZERO;
+            if(LogisticsPiecePricing.applies(row))charge=LogisticsPiecePricing.charged(charge);
+            else if(LogisticsGramPricing.applies(row))charge=LogisticsGramPricing.charged(charge);
             if(!includes(row,charge))continue;
-            BigDecimal base=charge.multiply(n(row,"pricePerKg"));
+            BigDecimal base=LogisticsPiecePricing.applies(row)?n(row,"intervalPrice"):charge.multiply(n(row,"pricePerKg"));
             matches.add(mapper.createObjectNode().put("rowIndex",current).put("base",base).put("actualWeightKg",weight).put("minChargeWeightKg",minimum).put("chargeWeightKg",charge).put("volumeWeightKg",volume)
                     .put("total",base.add(n(row,"registrationFee")).setScale(2,RoundingMode.HALF_UP)).put("engineVersion",VERSION));
         }

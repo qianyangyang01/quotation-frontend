@@ -96,7 +96,7 @@ class LogisticsSourceParserTest {
     }
     @Test void twoLevelUnitHeadersRecognizeNewProvider()throws Exception {
         try(var book=new XSSFWorkbook()) {
-            var sheet=book.createSheet("Sheet1");
+            var sheet=book.createSheet("巧捷小包全球商派E(服装)");
             row(sheet,0,"国家/地区","重量","运费","处理费","重量尺寸要求及附加费");
             row(sheet,1,"","(KG)","(RMB/KG)","(RMB/票)");
             row(sheet,2,"美国","0-1",65,23);

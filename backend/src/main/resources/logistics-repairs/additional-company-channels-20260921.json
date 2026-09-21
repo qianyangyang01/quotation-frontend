@@ -1,0 +1,200 @@
+{
+  "entries": [
+    {
+      "id": "7e229353-8765-4fd8-a3bb-36b5792cc56c",
+      "providerName": "急速国际",
+      "providerAliases": [
+        "急速化妆品专线"
+      ],
+      "channelName": "急速-美国化妆品专线（商派）",
+      "aliases": [
+        "JS02-邮编敏感货-2"
+      ],
+      "productCodes": [
+        "JS02-邮编敏感货-2"
+      ],
+      "logisticsAttribute": "非液体化妆品",
+      "enabled": true,
+      "sources": [
+        {
+          "file": "JS-合肥米莱诺0825-新(1).xlsx",
+          "sheet": "美国",
+          "firstRow": 3,
+          "lastRow": 11
+        }
+      ]
+    },
+    {
+      "id": "f0c25e45-aa48-43b6-8ff2-a69b2af5d781",
+      "providerName": "巧捷",
+      "providerAliases": [],
+      "channelName": "巧捷专线小包全球特惠F(敏感)",
+      "aliases": [],
+      "productCodes": [
+        "QEGBTF"
+      ],
+      "logisticsAttribute": "敏感货",
+      "enabled": true
+    },
+    {
+      "id": "95504724-d0fd-4476-afde-3a9fbb5d2cee",
+      "providerName": "巧捷",
+      "providerAliases": [],
+      "channelName": "巧捷小包全球商派E(服装)",
+      "aliases": [],
+      "productCodes": [
+        "QEUBF"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "0c9f62ef-f7d8-48ea-b79b-fca3672fd52e",
+      "providerName": "巧捷",
+      "providerAliases": [],
+      "channelName": "巧捷小包全球特惠A(服装)",
+      "aliases": [],
+      "productCodes": [
+        "QEGBFA"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "ea00eaf9-e3c7-4133-889f-e1ba8f0d8044",
+      "providerName": "巧捷",
+      "providerAliases": [],
+      "channelName": "巧捷小包快递特惠包税B",
+      "aliases": [],
+      "productCodes": [
+        "QEUFAB"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "2c86b25a-92ad-4a3d-bda6-29b5675b7510",
+      "providerName": "通邮",
+      "providerAliases": [],
+      "channelName": "标准挂号类-敏感",
+      "aliases": [
+        "线上敏感"
+      ],
+      "productCodes": [],
+      "logisticsAttribute": "敏感货",
+      "enabled": true
+    },
+    {
+      "id": "0796f351-c479-45dc-9a66-2e923d921ae5",
+      "providerName": "极通环球",
+      "providerAliases": [],
+      "channelName": "极通环球专线 - 定制纯电",
+      "aliases": [
+        "极通环球专线-定制纯电"
+      ],
+      "productCodes": [
+        "JT-HQ-MDCD"
+      ],
+      "logisticsAttribute": "纯电",
+      "enabled": true
+    },
+    {
+      "id": "55d1ab32-c1c6-465c-a694-570ac83baed7",
+      "providerName": "云途",
+      "providerAliases": [],
+      "channelName": "云途全球专线挂号（标快带电）",
+      "aliases": [],
+      "productCodes": [
+        "BKZXR"
+      ],
+      "logisticsAttribute": "带电",
+      "enabled": true
+    },
+    {
+      "id": "7a3866f4-fdf6-4627-9cda-a5a81c496a34",
+      "providerName": "云途",
+      "providerAliases": [],
+      "channelName": "云途全球专线挂号（标快普货）",
+      "aliases": [],
+      "productCodes": [
+        "BKPHR"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "16e8a08c-4ae6-430e-a7df-b9452eb844b9",
+      "providerName": "云途",
+      "providerAliases": [],
+      "channelName": "云途大货18000专线挂号（特惠带电）",
+      "aliases": [],
+      "productCodes": [
+        "DHZXR"
+      ],
+      "logisticsAttribute": "带电",
+      "enabled": true
+    },
+    {
+      "id": "b50ab52b-ebaf-4bc6-9b52-0cec1ca60b2d",
+      "providerName": "云途",
+      "providerAliases": [],
+      "channelName": "云途大货18000专线挂号（特惠普货）",
+      "aliases": [],
+      "productCodes": [
+        "DHZXRPH"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "ecbd873c-7074-4f36-ad17-8d366871fa9c",
+      "providerName": "燕文",
+      "providerAliases": [],
+      "channelName": "燕文精品服装专线-普货",
+      "aliases": [],
+      "productCodes": [
+        "1667"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "ecbd873c-7074-4f36-ad17-8d366871fa9d",
+      "providerName": "燕文",
+      "providerAliases": [],
+      "channelName": "燕文大货专线追踪-特货",
+      "aliases": [],
+      "productCodes": [
+        "1558"
+      ],
+      "logisticsAttribute": "带电",
+      "enabled": true
+    },
+    {
+      "id": "ecbd873c-7074-4f36-ad17-8d366871fa9e",
+      "providerName": "燕文",
+      "providerAliases": [],
+      "channelName": "燕文大货专线追踪-普货",
+      "aliases": [],
+      "productCodes": [
+        "1557"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "ecbd873c-7074-4f36-ad17-8d366871fa9f",
+      "providerName": "万邦",
+      "providerAliases": [],
+      "channelName": "万邦大货专线挂号含电",
+      "aliases": [
+        "万邦大货专线含电"
+      ],
+      "productCodes": [
+        "WBSLLP"
+      ],
+      "logisticsAttribute": "带电",
+      "enabled": true
+    }
+  ]
+}

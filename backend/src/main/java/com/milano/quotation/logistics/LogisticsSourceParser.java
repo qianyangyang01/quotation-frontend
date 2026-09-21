@@ -21,10 +21,10 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.16-country-minimum-v2";
+    public static final String VERSION="company-channels-2026.09.21-additions-v2";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
-    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴");
+    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
     private static final Pattern DATE_METADATA=Pattern.compile("(?i)^(?:(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?\\s*)?(?:19|20)\\d{2}\\s*[-/.年]\\s*\\d{1,2}\\s*[-/.月]\\s*\\d{1,2}\\s*日?(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?$");
@@ -49,6 +49,7 @@ public class LogisticsSourceParser {
         var sheets=result.putArray("sheets"); var channels=new LinkedHashMap<String,ObjectNode>();var coverageSheets=new LinkedHashSet<String>();
         result.put("scopeRevision",scope.revision());
         String provider=scope.unrestricted()?provider(filename):scope.providerFromFilename(filename);
+        if(provider.isBlank()&&scope.containsProvider(JisuSourceRules.PROVIDER)&&JisuSourceRules.providerEvidence(filename))provider=JisuSourceRules.PROVIDER;
         try(var book=new LogisticsSheetReader(bytes,filename,name->referenceOnlySheet(name)&&!systemMetadataCandidate(name))) {
             while(book.hasNext()) {
                 var sheet=book.next();
@@ -56,6 +57,13 @@ public class LogisticsSourceParser {
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
                 var source=new Source(sheet,scope);
                 if(provider.isBlank())provider=providerFromTitles(source);
+                if(provider.equals(QiaojieSourceRules.PROVIDER)&&!referenceOnlySheet(sheet.getSheetName())
+                        &&!qiaojieStandardSheet(source)&&qiaojieProduct(source)==null) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","巧捷仅导入登记的四个渠道");continue;
+                }
+                if(provider.equals(JisuSourceRules.PROVIDER)&&!referenceOnlySheet(sheet.getSheetName())&&!jisuPriceSheet(source)) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","急速国际仅导入美国邮编敏感货");continue;
+                }
                 if(provider.isBlank()&&zhengzhouEpacket(source)&&scope.containsProvider("燕文"))provider="燕文";
                 if(provider.equals("闪电猴")&&!shandianhouPriceSheet(source)) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","闪电猴仅导入登记的三类专线美国价格");continue;
@@ -95,7 +103,8 @@ public class LogisticsSourceParser {
                     parseStandard(source,r,provider,filename,parsed); recognized=true; break;
                 }
                 if(!recognized) {
-                    if(provider.equals("通邮")&&sheet.getSheetName().toUpperCase(Locale.ROOT).contains("MINI"))recognized=parseIntervalMatrix(source,provider,filename,parsed);
+                    if(provider.equals(QiaojieSourceRules.PROVIDER)&&qiaojieProduct(source)!=null&&qiaojieProduct(source).perPiece())recognized=parseQiaojiePiece(source,filename,parsed);
+                    else if(provider.equals("通邮")&&sheet.getSheetName().toUpperCase(Locale.ROOT).contains("MINI"))recognized=parseIntervalMatrix(source,provider,filename,parsed);
                     else if(provider.equals("通邮") && (sheet.getSheetName().contains("美国专线小包")||sheet.getSheetName().contains("加拿大专线")||sheet.getSheetName().equals("ebay挂号保建品")||sheet.getSheetName().equals("通邮专线特货-澳大利亚"))) recognized=parseMatrix(source,provider,filename,parsed);
                     else recognized=parseTable(source,provider,filename,parsed);
                 }
@@ -152,6 +161,7 @@ public class LogisticsSourceParser {
                 }
                 if(source.ambiguous)for(var channel:parsed.values())issue(channel,0,"渠道匹配待确认","同一工作表存在冲突匹配，先确认渠道归属再导入，防止部分价格覆盖","error");
                 applyMinimumWeights(source,parsed);
+                if(provider.equals(JisuSourceRules.PROVIDER))for(var channel:parsed.values())JisuSourceRules.applyMinimum(channel);
                 applyFooterEta(source,parsed);
                 if(scope.unrestricted())splitDistinctProducts(parsed,provider);
                 int rows=0; int errors=0;
@@ -204,10 +214,37 @@ public class LogisticsSourceParser {
             if(detect(source,r,"")!=null||(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码")))break;
             for(var text:source.rowTexts(r)) {
                 var value=source.scope.unrestricted()?provider(text):source.scope.providerFromFilename(text);
+                if(value.isBlank()&&source.scope.containsProvider(JisuSourceRules.PROVIDER)&&JisuSourceRules.providerEvidence(text))value=JisuSourceRules.PROVIDER;
                 if(!value.isBlank())candidates.add(value);
             }
         }
         return candidates.size()==1?candidates.first():"";
+    }
+
+    private boolean jisuPriceSheet(Source source) {
+        Columns columns=null;
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码"))return true;
+            var header=detect(source,r,JisuSourceRules.PROVIDER);
+            if(header!=null&&header.country>=0&&header.code>=0){columns=header;continue;}
+            if(columns!=null&&JisuSourceRules.allowed(countryCode(source.text(r,columns.country)),source.text(r,columns.code)))return true;
+        }
+        return false;
+    }
+
+    private boolean qiaojieStandardSheet(Source source) {
+        for(int r=0;r<=source.lastContentRow;r++)if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码"))return true;
+        return false;
+    }
+    private QiaojieSourceRules.Product qiaojieProduct(Source source) {
+        var products=new LinkedHashSet<QiaojieSourceRules.Product>();
+        var named=QiaojieSourceRules.named(source.sheet.getSheetName());if(named!=null)products.add(named);
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(detect(source,r,QiaojieSourceRules.PROVIDER)!=null)break;
+            for(var text:source.rowTexts(r)){var product=QiaojieSourceRules.named(text);if(product!=null)products.add(product);}
+        }
+        if(products.size()>1)source.ambiguous=true;
+        return products.isEmpty()?null:products.iterator().next();
     }
 
     // Discover header columns and approved product identities; worksheet names and row positions are not identifiers.
@@ -245,7 +282,7 @@ public class LogisticsSourceParser {
         return postalReferenceSheet(name)||Set.of("墨西哥邮编","usps分区&Y2最优落地点参考","欧盟国家对应税率表参考","查询与赔偿方案","国家二字码","部分国家州城市对应关系","国家分组-澳洲邮编","澳大利亚分区","爱尔兰HPRA要求").contains(name)||name.matches("(?i).*(目录|派送范围|价格区域对应|禁运|禁限运|违禁品|处罚条款|异形件|说明|免责声明|须知|货物交接要求|托运条款|税率参照|VAT.*税率|禁塑令|VAT费率|揽收区域|理赔标准|赔偿标准|名牌录|可承运品类|无签收轨迹|WpsReserved_CellImgList|清单$|附件$).*");
     }
     private static boolean postalReferenceSheet(String name) {
-        if(Set.of("英国皇邮偏远表","美国附属岛屿邮编","南非尾程邮编").contains(name))return true;
+        if(Set.of("英国皇邮偏远表","美国附属岛屿邮编","南非尾程邮编","服装服务邮编").contains(name))return true;
         return name.matches(".*((邮编|邮政编码).*(分区|可达|不可达|偏远|无服务)|(分区|分组|通达|可达|不可达|偏远|不提供服务|无服务|可发货).*(邮编|邮政编码)).*");
     }
     private static boolean systemMetadataCandidate(String sheetName) {return clean(sheetName).equals("填写说明");}
@@ -345,9 +382,18 @@ public class LogisticsSourceParser {
                     ||List.of("首重","首重价","续重","续重单价").stream().anyMatch(label->hasFirstNextValue(value(source,sourceRowIndex,headers,label)))) {
                 source.filteredFirstNextRows.add(r);continue;
             }
-            if(pricingModel.equals("interval")||hasFirstNextValue(value(source,r,headers,"区间运费"))){source.filteredOtherRows.put(r,"整票档位价");continue;}
+            if(!pricingModel.equals(LogisticsPiecePricing.MODEL)&&(pricingModel.equals("interval")||hasFirstNextValue(value(source,r,headers,"区间运费")))){source.filteredOtherRows.put(r,"整票档位价");continue;}
             var name=value(source,r,headers,"渠道名称"); var prov=value(source,r,headers,"物流商");
             var effectiveProvider=prov.isBlank()?fallback:prov;
+            if(effectiveProvider.equals(QiaojieSourceRules.PROVIDER)&&!QiaojieSourceRules.allowed(name,
+                    defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")))) {
+                source.filteredOtherRows.put(r,"巧捷仅限登记的四个渠道");continue;
+            }
+            if(effectiveProvider.equals(JisuSourceRules.PROVIDER)&&!JisuSourceRules.allowedStandard(
+                    defaultText(value(source,r,headers,"国家简码"),countryCode(value(source,r,headers,"区域名称"))),name,
+                    defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")))) {
+                source.filteredOtherRows.put(r,"急速国际仅限美国邮编敏感货");continue;
+            }
             var sourceOrigin=value(source,r,headers,"发货区域");
             if(excludeSouthChinaPrice(effectiveProvider,sourceOrigin)){source.parsedRows.add(r);continue;}
             if(effectiveProvider.equals("闪电猴")&&!defaultText(value(source,r,headers,"国家简码"),countryCode(value(source,r,headers,"区域名称"))).equals("US")){source.filteredOtherRows.put(r,"闪电猴仅限美国");continue;}
@@ -377,8 +423,110 @@ public class LogisticsSourceParser {
         }
     }
 
+    private boolean parseQiaojiePiece(Source source,String file,Map<String,ObjectNode> channels) {
+        var product=qiaojieProduct(source);Columns columns=null;boolean recognized=false;
+        var prior=new HashMap<String,BigDecimal>();var minima=new HashMap<String,BigDecimal>();
+        for(int r=0;r<=source.lastContentRow;r++) {
+            var candidate=new Columns();candidate.headerRow=r;candidate.feeHeaderRow=r;
+            for(int col=0;col<Math.min(source.width(r),80);col++) {
+                var text=clean(source.text(r,col));
+                if(aliases.matches(QiaojieSourceRules.PROVIDER,"country",text))candidate.country=col;
+                else if(aliases.matches(QiaojieSourceRules.PROVIDER,"countryCode",text))candidate.countryCode=col;
+                else if(text.equals("重量")||text.equalsIgnoreCase("重量(KG)"))candidate.weight=col;
+                else if(aliases.matches(QiaojieSourceRules.PROVIDER,"minimumWeight",text))candidate.minimum=col;
+                else if(aliases.matches(QiaojieSourceRules.PROVIDER,"eta",text))candidate.eta=col;
+                else if(aliases.matches(QiaojieSourceRules.PROVIDER,"registrationFee",text))candidate.fee=col;
+                else if(text.matches("(?i)运费[(](?:RMB|CNY)/(?:件|票)[)]")||(text+clean(source.text(r+1,col))).matches("(?i)运费(?:[(](?:RMB|CNY)/(?:件|票)[)])+")) {
+                    if(candidate.rate>=0)source.ambiguous=true;
+                    candidate.rate=col;
+                }
+                else if(aliases.matches(QiaojieSourceRules.PROVIDER,"notes",text))candidate.notes.add(col);
+            }
+            if(candidate.country>=0&&candidate.weight>=0&&candidate.rate>=0&&candidate.minimum>=0&&candidate.fee>=0) {
+                columns=candidate;recognized=true;continue;
+            }
+            if(columns==null)continue;
+            var point=source.text(r,columns.weight);var amount=source.text(r,columns.rate);
+            var code=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(source.text(r,columns.country));
+            // Unit lines and footer prose are not price rows; numeric/invalid cells inside a country block are.
+            if(!code.matches("[A-Z]{2}")&&!point.matches("[0-9]+(?:\\.[0-9]+)?"))continue;
+            if(point.isBlank()&&amount.isBlank())continue;
+            var target=selected(source,QiaojieSourceRules.PROVIDER,product.name(),product.code(),r,channels);if(target==null)continue;
+            var row=mapper.createObjectNode().put("pricingModel",LogisticsPiecePricing.MODEL).put("currency","CNY")
+                    .put("areaName",countryName(source.text(r,columns.country))).put("countryCode",code).put("zoneName","")
+                    .put("sourceProductCode",product.code()).put("sourceCode",product.code()).put("sourceWeightRange",point)
+                    .put("weightFromInclusive",false).put("weightToInclusive",true).put("pricePerKg",0)
+                    .put("sourceFeeLabel",source.text(columns.headerRow,columns.fee)).put("sourcePriceUnit","RMB/件")
+                    .put("normalizationNote","用户确认：按0.5kg向上进位，匹配档位整票价，不再乘重量");
+            try {
+                var to=new BigDecimal(point);var from=to.subtract(LogisticsPiecePricing.STEP);
+                if(from.signum()<0||to.remainder(LogisticsPiecePricing.STEP).signum()!=0)throw new IllegalArgumentException();
+                if(from.compareTo(prior.getOrDefault(code,BigDecimal.ZERO))!=0)issue(target,r+1,"重量段","0.5kg整票档位缺失、重复或顺序错误，禁止部分替换","error");
+                prior.put(code,to);row.put("weightFromKg",from).put("weightToKg",to);
+                var rawMinimum=source.text(r,columns.minimum);
+                if(!rawMinimum.isBlank())minima.put(code,new BigDecimal(rawMinimum));
+                var minimum=minima.get(code);
+                if(minimum==null||minimum.compareTo(LogisticsPiecePricing.STEP)!=0)throw new IllegalArgumentException();
+                row.put("minChargeWeightKg",minimum).put("sourceMinimumWeightKind",rawMinimum.isBlank()?"column-inherited":"column")
+                        .put("sourceMinimumWeightCell",source.address(r,columns.minimum)).put("sourceMinimumWeightText","最低计费重(KG)="+minimum);
+            }catch(IllegalArgumentException invalid){issue(target,r+1,"重量段/最低计费重","整票渠道须为0.5kg起重及连续0.5kg档位","error");continue;}
+            numeric(row,"intervalPrice",source,r,columns.rate,target,false);numeric(row,"registrationFee",source,r,columns.fee,target,false);
+            if(columns.eta>=0){var values=numbers(source.text(r,columns.eta));if(values.size()>=2)row.put("etaMinDays",values.get(0)).put("etaMaxDays",values.get(1));}
+            var notes=new LinkedHashSet<String>();for(int col:columns.notes)if(!source.text(r,col).isBlank())notes.add(source.text(r,col));
+            row.put("notes",String.join("\n",notes));add(target,row,source,r,file);
+        }
+        return recognized;
+    }
+
+    private boolean jitongBatterySheet(Source source) {
+        if(JitongPureBatteryRules.named(source.sheet.getSheetName()))return true;
+        for(int r=0;r<=Math.min(20,source.lastContentRow);r++) {
+            if(detect(source,r,"极通环球")!=null)break;
+            for(var text:source.rowTexts(r))if(JitongPureBatteryRules.named(text))return true;
+        }
+        return false;
+    }
+
+    private YunexpressAdditionalRules.Product yunexpressAdditional(Source source) {
+        var product=YunexpressAdditionalRules.named(source.sheet.getSheetName());if(product!=null)return product;
+        for(int r=0;r<=Math.min(20,source.lastContentRow);r++) {
+            if(detect(source,r,"云途")!=null)break;
+            for(var text:source.rowTexts(r)){product=YunexpressAdditionalRules.named(text);if(product!=null)return product;}
+        }
+        return null;
+    }
+
+    private boolean tongyouStandardSensitive(Source source) {
+        if(CompanyChannelScope.normalize(source.sheet.getSheetName()).equals("标准挂号类-敏感"))return true;
+        for(int r=0;r<=Math.min(20,source.lastContentRow);r++) {
+            if(detect(source,r,"通邮")!=null)break;
+            for(var text:source.rowTexts(r))if(CompanyChannelScope.normalize(text).equals("标准挂号类-敏感"))return true;
+        }
+        return false;
+    }
+
+    private YanwenWanbangAdditionalRules.Product yanwenWanbangAdditional(Source source,String provider) {
+        var product=YanwenWanbangAdditionalRules.named(provider,source.sheet.getSheetName());if(product!=null)return product;
+        for(int r=0;r<=Math.min(20,source.lastContentRow);r++) {
+            if(detect(source,r,provider)!=null)break;
+            for(var text:source.rowTexts(r)){product=YanwenWanbangAdditionalRules.named(provider,text);if(product!=null)return product;}
+        }
+        return null;
+    }
+
     private boolean parseTable(Source source,String provider,String file,Map<String,ObjectNode> channels) {
         Columns columns=null; boolean recognized=false; String section=source.sheet.getSheetName().trim();
+        boolean jitongBattery=provider.equals("极通环球")&&jitongBatterySheet(source);
+        Columns kilogramColumns=null;String firstNextCountry="";
+        if(jitongBattery)section=JitongPureBatteryRules.NAME;
+        boolean tongyouSensitive=provider.equals("通邮")&&tongyouStandardSensitive(source);
+        if(tongyouSensitive)section="标准挂号类-敏感";
+        var yunexpress=provider.equals("云途")?yunexpressAdditional(source):null;
+        if(yunexpress!=null)section=yunexpress.name();
+        var yanwenWanbang=yanwenWanbangAdditional(source,provider);
+        if(yanwenWanbang!=null)section=yanwenWanbang.name();
+        var qiaojie=provider.equals(QiaojieSourceRules.PROVIDER)?qiaojieProduct(source):null;
+        if(qiaojie!=null)section=qiaojie.name();
         boolean zhengzhou=provider.equals("燕文")&&zhengzhouEpacket(source);
         if(zhengzhou)section="中邮郑州线下E邮宝";
         var yanwenEta=provider.equals("燕文")?yanwenEtaExtractor(source):null;
@@ -388,6 +536,9 @@ public class LogisticsSourceParser {
             var rowText=String.join("|",source.rowTexts(r).stream().filter(value->!value.isBlank()).toList());
             if(rowText.isBlank()&&source.width(r)>0)rowText=String.join("|",source.resolvedTexts(r));
             if(rowText.isBlank())continue;
+            if(yanwenWanbang!=null&&provider.equals("燕文")&&source.rowTexts(r).stream().anyMatch(t->clean(t).matches("价格使用说明[:：]?|国家维度具体要求[:：]?"))) {
+                columns=null;continue;
+            }
             if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
             if(reference){if(detect(source,r,provider)!=null)reference=false;else{source.referenceRows.add(r);continue;}}
             if(rowText.matches("(?s).*(注意事项说明如下|客户须知).*")||rowText.matches("^注意事项[:：]?$")){columns=null;continue;}
@@ -401,16 +552,27 @@ public class LogisticsSourceParser {
                 if(end>=r){r=end;columns=null;recognized=true;continue;}
             }
             var header=detect(source,r,provider);
-            if(header!=null && (header.country>=0||provider.equals("容鼎")||header.firstPrice>=0||header.nextPrice>=0||!inferredCountry(source.sheet.getSheetName()).isBlank())){columns=header;recognized=true;auxiliary=-1;example=false;continue;}
+            if(header!=null && (header.country>=0||provider.equals("容鼎")||header.firstPrice>=0||header.nextPrice>=0||!inferredCountry(source.sheet.getSheetName()).isBlank())){
+                if(jitongBattery) {
+                    if(header.rate>=0&&header.country>=0&&header.firstPrice<0&&header.nextPrice<0)kilogramColumns=header;
+                    else if(kilogramColumns!=null&&(header.firstPrice>=0||header.nextPrice>=0))firstNextCountry=countryCode(source.text(r,kilogramColumns.country));
+                }
+                columns=header;recognized=true;auxiliary=-1;example=false;continue;
+            }
             if(columns==null)for(var text:source.rowTexts(r))if(text.length()>20)allNotes.add(text);
             if(example){if(source.rowEmpty(r))example=false;else source.exampleRows.add(r);continue;}
             if(auxiliary>=0){source.auxiliaryRows.put(r,auxiliary);continue;}
             if(provider.equals("顺丰") && source.text(r,1).matches(".*[①②③④].*专线.*"))section=source.text(r,1).replaceAll("^[①②③④\\s]+","").trim();
             if(columns==null) continue;
+            if(jitongBattery&&kilogramColumns!=null&&!firstNextCountry.isBlank()) {
+                var destination=countryCode(source.text(r,kilogramColumns.country));
+                if(supportedCountryCode(destination)&&!destination.equals(firstNextCountry)) {columns=kilogramColumns;firstNextCountry="";}
+            }
             if(source.resolvedTexts(r).stream().anyMatch(t->t.matches("(?s).*(暂时关停|暂停服务|暂停收寄|停止收寄).*"))){source.filteredOtherRows.put(r,"暂停服务");continue;}
             if(!columns.fixedWeight.isBlank()&&aliases.matches(provider,"country",source.text(r,columns.country)))continue;
             if((columns.firstPrice>=0||columns.nextPrice>=0)&&(columns.rate<0
                     ||hasFirstNextValue(source.text(r,columns.firstPrice))||hasFirstNextValue(source.text(r,columns.nextPrice)))) {
+                if(yunexpress!=null)for(var text:source.rowTexts(r))if(text.length()>20)allNotes.add(text);
                 if(!source.rowEmpty(r))source.filteredFirstNextRows.add(r);
                 continue;
             }
@@ -418,18 +580,41 @@ public class LogisticsSourceParser {
                     source.numberText(r,columns.from)+(columns.boundsInGrams?"G":"")+"-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):
                     columns.to>=0?"0-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):source.text(r,columns.weight);
             if(!looksRange(weight)) {
+                if((tongyouSensitive||jitongBattery||yunexpress!=null||yanwenWanbang!=null)&&columns.rate>=0&&!source.text(r,columns.rate).isBlank()&&columns.country>=0
+                        &&supportedCountryCode(countryCode(source.text(r,columns.country)))) {
+                    var target=selected(source,provider,section,"",r,channels);
+                    if(target!=null)issue(target,r+1,"重量段","价格行缺少有效重量范围，禁止部分替换","error");
+                }
+                if(qiaojie!=null&&columns.rate>=0&&!source.text(r,columns.rate).isBlank()
+                        &&columns.countryCode>=0&&source.text(r,columns.countryCode).matches("[A-Z]{2}")) {
+                    var target=selected(source,provider,qiaojie.name(),qiaojie.code(),r,channels);
+                    if(target!=null)issue(target,r+1,"重量段","巧捷价格行缺少有效重量范围，禁止部分价格替换","error");
+                }
                 for(var text:source.rowTexts(r)) if(text.length()>20)allNotes.add(text);
                 continue;
             }
             var countryRaw=columns.country>=0?source.text(r,columns.country):provider.equals("容鼎")?"美国":inferredCountry(source.sheet.getSheetName());
             if(provider.equals("闪电猴")&&!countryCode(countryRaw).equals("US")){source.filteredOtherRows.put(r,"闪电猴仅限美国");continue;}
             var name=columns.channel>=0?source.text(r,columns.channel):section;
+            if(provider.equals(JisuSourceRules.PROVIDER)) {
+                if(!JisuSourceRules.allowed(countryCode(countryRaw),columns.code>=0?source.text(r,columns.code):"")) {
+                    source.filteredOtherRows.put(r,"急速国际仅限美国邮编敏感货，普货及其他国家不导入");continue;
+                }
+                name=JisuSourceRules.CHANNEL;
+            }
             if(provider.equals("云速递") && section.contains("美国商派"))name=section+"-"+countryRaw;
             if(name.isBlank())name=section;
             var sourceOrigin=columns.origin>=0?source.text(r,columns.origin):"";
             if(excludeSouthChinaPrice(provider,sourceOrigin)){source.parsedRows.add(r);continue;}
-            var target=selected(source,provider,name,columns.code>=0?source.text(r,columns.code):"",r,channels);
+            var productCode=qiaojie!=null?qiaojie.code():columns.code>=0?source.text(r,columns.code):"";
+            if(jitongBattery)productCode=JitongPureBatteryRules.code(productCode);
+            if(yunexpress!=null)productCode=yunexpress.code();
+            if(yanwenWanbang!=null&&provider.equals("燕文"))productCode=zhengzhouProductCode(source);
+            var target=selected(source,provider,name,productCode,r,channels);
             if(target==null)continue;
+            var additional=YanwenWanbangAdditionalRules.named(provider,target.path("channelName").asText());
+            if(additional!=null&&!additional.code().equals(productCode))issue(target,r+1,"产品代码","渠道名称与原表产品代码不一致或缺失，禁止混入其他产品","error");
+            if(jitongBattery&&productCode.isBlank())issue(target,r+1,"产品代码","定制纯电缺少明确的JT-HQ-MDCD产品代码","error");
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg");
             for(var label:columns.blockingFeeHeaders)pending(row,"未知价格附加费“"+label+"”未映射到公斤价或每票费");
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
@@ -439,6 +624,10 @@ public class LogisticsSourceParser {
             row.put("areaName",countryName(countryRaw)); row.put("countryCode",normalizedCode).put("sourceCountryCode",rawCode);
             row.put("sourceCountry",countryRaw).put("sourceCode",columns.code>=0?source.text(r,columns.code):"");
             row.put("sourceProductCode",row.path("sourceCode").asText());
+            if(jitongBattery)row.put("sourceProductCode",productCode);
+            if(yunexpress!=null)row.put("sourceProductCode",productCode);
+            if(additional!=null)row.put("sourceProductCode",productCode);
+            if(qiaojie!=null)row.put("sourceProductCode",qiaojie.code());
             if(zhengzhou&&row.path("sourceProductCode").asText().isBlank())row.put("sourceProductCode",zhengzhouProductCode(source));
             applyOriginPolicy(row,provider,sourceOrigin);
             String zoneName=columns.zone>=0?defaultText(source.text(r,columns.zone),zone(countryRaw)):zone(countryRaw);
@@ -522,6 +711,7 @@ public class LogisticsSourceParser {
             if(provider.equals("极通环球")){notes.add(columns.code>=0?source.text(r,columns.code):"");pending(row,"同表含多个下单产品及附加操作费，价格仅供管理，需人工确认适用产品");}
             for(int c:columns.notes) {var note=source.text(r,c);if(!note.isBlank()&&!note.equals("/"))notes.add(note);}
             row.put("notes",String.join("\n",notes));
+            if(provider.equals(JisuSourceRules.PROVIDER))row.put("sourceWeightCell",source.address(r,columns.weight));
             if(provider.equals("闪电猴")) {
                 var billingNote=row.path("notes").asText();
                 var minimum=Pattern.compile("(?i)([0-9]+(?:\\.[0-9]+)?)\\s*(KG|G|公斤|千克|克)\\s*起重").matcher(billingNote);
@@ -540,6 +730,19 @@ public class LogisticsSourceParser {
         }
         for(var c:channels.values()) {
             c.put("sourceNotes",String.join("\n",allNotes));
+            if(yunexpress!=null) {
+                var codePattern=Pattern.compile("产品代码[:：]\\s*([A-Z0-9]+)");var codes=new HashSet<String>();
+                for(int i=0;i<=Math.min(20,source.lastContentRow);i++)for(var text:source.rowTexts(i)){var match=codePattern.matcher(text);if(match.find())codes.add(match.group(1));}
+                if(!codes.equals(Set.of(yunexpress.code())))issue(c,0,"产品代码","云途渠道标题与产品代码不一致或缺失，禁止混入其他渠道","error");
+                var stepPattern=Pattern.compile(yunexpress.large()?"所有国家[^\\n]*以1[Gg]为单位进位":"加拿大[^\\n]*以1[Gg]为单位进位");
+                var step=stepPattern.matcher(String.join("\n",allNotes));boolean hasStep=step.find();String evidence=hasStep?step.group():"";
+                for(var value:c.path("rows"))if(yunexpress.large()||value.path("countryCode").asText().equals("CA")) {
+                    var row=(ObjectNode)value;
+                    if(!hasStep)issue(c,row.path("sourceRow").asInt(),"计费进位","云途渠道的1g进位原文缺失或变化，需重新核对","error");
+                    else row.put("pricingModel",LogisticsGramPricing.MODEL).put("sourceBillingStepKg",0.001).put("sourceBillingStepText",evidence);
+                }
+            }
+            if(provider.equals(JisuSourceRules.PROVIDER))JisuSourceRules.apply(c);
             // Unknown conditional pricing must not silently become zero surcharges.
             var important=String.join("\n",allNotes);
             if(important.matches("(?s).*(免泡|半泡|倍.*[泡重]|干线费|附加费|进位|起重|最低|起收|计费|体积|材积|燃油).*")) {
@@ -612,8 +815,11 @@ public class LogisticsSourceParser {
         if(weight<0||country<0||zones.size()<2)return -1;
         int end=source.mergeEndRow(header,country);
         if(end<=header+1)return -1;
-        var target=selected(source,provider,source.sheet.getSheetName().trim(),"",header,channels);
+        boolean jitongBattery=provider.equals("极通环球")&&jitongBatterySheet(source);
+        var sourceCode=jitongBattery?JitongPureBatteryRules.code(String.join("\n",source.resolvedTexts(header))):"";
+        var target=selected(source,provider,jitongBattery?JitongPureBatteryRules.NAME:source.sheet.getSheetName().trim(),sourceCode,header,channels);
         if(target==null){for(int r=header;r<=end;r++)source.parsedRows.add(r);return end;}
+        if(jitongBattery&&sourceCode.isBlank())issue(target,header+1,"产品代码","定制纯电分区缺少明确的JT-HQ-MDCD产品代码","error");
         for(var zone:zones.entrySet()) {
             int rate=zone.getKey(),fee=rate+1;
             if(!source.text(header+1,rate).contains("运费")||!source.text(header+1,fee).contains("挂号费")) {
@@ -624,6 +830,7 @@ public class LogisticsSourceParser {
                 var row=mapper.createObjectNode().put("areaName",countryName(source.text(header,country))).put("countryCode",countryCode(source.text(header,country)))
                         .put("zoneName",zone.getValue()).put("currency","CNY").put("pricingModel","per-kg").put("sourceWeightRange",rawWeight)
                         .put("sourceZoneLabel",source.text(header,rate)).put("sourceZoneCell",source.address(header,rate));
+                if(jitongBattery)row.put("sourceProductCode",sourceCode);
                 try{var range=parseRange(rawWeight);row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo);}
                 catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
                 numeric(row,"pricePerKg",source,r,rate,target,false);numeric(row,"registrationFee",source,r,fee,target,false);
@@ -946,16 +1153,31 @@ public class LogisticsSourceParser {
                 if(from>end+0.00100001)issue(channel,row.path("sourceRow").asInt(),"重量段","原表重量区间不连续，缺口内不报价","warning");
             }
             previous.put(group,row);
+            if(JitongPureBatteryRules.channel(channel)&&prev==null&&row.path("countryCode").asText().equals("IL")) {
+                row.put("minChargeWeightKg",from).put("weightFromInclusive",true)
+                    .put("sourceMinimumWeightKind","confirmed-lower-bound")
+                    .put("sourceMinimumWeightText","用户确认：以色列以原表首档下限为起重，不足补重；本表100g")
+                    .put("normalizationNote","用户确认以色列100g起重，不足补到100g，首档包含起重");
+            }
+            if(JitongPureBatteryRules.channel(channel)&&prev==null&&row.path("minChargeWeightKg").asDouble()>0
+                    &&Double.compare(from,row.path("minChargeWeightKg").asDouble())==0&&!row.path("weightFromInclusive").asBoolean()) {
+                row.put("weightFromInclusive",true).put("normalizationNote","按原表最低计费重量补重后，首档包含该起重；原重量表达式保留");
+            }
+            boolean minimumRequired=JitongPureBatteryRules.channel(channel)||(provider.equals("通邮")&&channel.path("channelName").asText().equals("标准挂号类-敏感"))
+                ||(provider.equals("燕文")&&YanwenWanbangAdditionalRules.named(provider,channel.path("channelName").asText())!=null);
+            if(minimumRequired&&row.path("minChargeWeightKg").asDouble()==0
+                    &&!Set.of("note","column","column-inherited","confirmed-lower-bound").contains(row.path("sourceMinimumWeightKind").asText()))
+                issue(channel,row.path("sourceRow").asInt(),"最低计费重量","原表缺少明确的起重依据，禁止默认零起重","error");
             if(!supportedCountryCode(row.path("countryCode").asText())||row.path("areaName").asText().isBlank())issue(channel,row.path("sourceRow").asInt(),"国家","国家不能准确识别","error");
             if(to<=from)issue(channel,row.path("sourceRow").asInt(),"重量段","重量上下限不合法","error");
             if(!(row.path("pricePerKg").asDouble()>0||row.path("firstWeightPrice").asDouble()>0||row.path("intervalPrice").asDouble()>0))issue(channel,row.path("sourceRow").asInt(),"价格","缺少有效计费价格","error");
             var model=row.path("pricingModel").asText();
-            if(!Set.of("per-kg","first-next").contains(model))pending(row,model.equals("interval")?"区间价计费方式暂不支持":"计费方式未适配");
+            if(!Set.of("per-kg","first-next",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL).contains(model))pending(row,model.equals("interval")?"区间价计费方式暂不支持":"计费方式未适配");
             int primaryPrices=(row.path("pricePerKg").asDouble()>0?1:0)+(row.path("firstWeightPrice").asDouble()>0?1:0)+(row.path("intervalPrice").asDouble()>0?1:0);
             if(primaryPrices>1)issue(channel,row.path("sourceRow").asInt(),"计费方式","多个基础计费价格同时非零，需要明确叠加或互斥规则","error");
             if(model.equals("first-next")&&(row.path("firstWeightKg").asDouble()<=0||row.path("firstWeightPrice").asDouble()<=0||(to>row.path("firstWeightKg").asDouble()&&row.path("nextWeightKg").asDouble()<=0)))
                 issue(channel,row.path("sourceRow").asInt(),"首续重","首重及续重参数不完整","error");
-            if(model.equals("per-kg")&&row.path("pricePerKg").asDouble()<=0)
+            if((model.equals("per-kg")||LogisticsGramPricing.applies(row))&&row.path("pricePerKg").asDouble()<=0)
                 issue(channel,row.path("sourceRow").asInt(),"计费方式","计费方式与基础价格字段不一致","error");
             if(!row.path("currency").asText("CNY").equals("CNY"))pending(row,"非人民币计价需要币种适配");
             if(row.path("surcharge").asDouble()>0)pending(row,"附加费需要明确计费适用规则");

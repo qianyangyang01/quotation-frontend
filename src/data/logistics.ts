@@ -235,11 +235,16 @@ function normalizeShippingMarks(marks: string[]) {
 }
 export function isWeightRangePrice(price: LogisticsPriceRow) {
   const minimum = Math.max(price.minChargeWeightKg ?? 0, price.startWeightKg ?? 0)
-  return (!price.pricingModel || price.pricingModel === 'per-kg') && price.pricePerKg > 0
+  const piece = price.pricingModel === 'per-piece-500g'
+  const validPiece = piece && minimum === .5 && price.pricePerKg === 0 && Number.isFinite(price.intervalPrice) && price.intervalPrice > 0
+    && Number.isFinite(price.weightFromKg) && price.weightFromKg >= 0 && Number.isInteger(price.weightFromKg * 2)
+    && price.weightToKg - price.weightFromKg === .5 && !price.weightFromInclusive && price.weightToInclusive !== false
+    && [price.firstWeightKg, price.firstWeightPrice, price.nextWeightKg, price.nextWeightPrice, price.surcharge].every(value => value === 0)
+  return (piece ? validPiece : (!price.pricingModel || price.pricingModel === 'per-kg' || price.pricingModel === 'per-kg-1g') && price.pricePerKg > 0)
     && [price.minChargeWeightKg ?? 0, price.startWeightKg ?? 0].every(value => Number.isFinite(value) && value >= 0)
     && Number.isFinite(minimum) && minimum >= 0
     && (minimum === 0 || (price.weightToInclusive === false ? minimum < price.weightToKg : minimum <= price.weightToKg))
-    && ![price.firstWeightKg, price.firstWeightPrice, price.nextWeightKg, price.nextWeightPrice, price.intervalPrice, price.surcharge].some(value => value > 0)
+    && ![price.firstWeightKg, price.firstWeightPrice, price.nextWeightKg, price.nextWeightPrice, ...(piece ? [] : [price.intervalPrice]), price.surcharge].some(value => value > 0)
 }
 export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: string[] = ['普货']) {
   productMarks = productMarks.map(normalizeLogisticsAttribute)
@@ -258,15 +263,17 @@ export function findPriceRow(rule: LogisticsRule, country: string, weightKg: num
   const { rows: countryRows, zoneRequired } = eligibleCountryRows(rule, country, productMarks)
   return selectBillingPrice(countryRows.filter(price => priceMatchesRegion(price, quoteRegion, zoneRequired)), weightKg)
 }
-export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive'> & Partial<Pick<LogisticsPriceRow, 'minChargeWeightKg' | 'startWeightKg'>>, weightKg: number) {
+export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive'> & Partial<Pick<LogisticsPriceRow, 'minChargeWeightKg' | 'startWeightKg' | 'pricingModel'>>, weightKg: number) {
   if (!Number.isFinite(weightKg) || weightKg <= 0) return false
-  const charged = Math.max(weightKg, price.minChargeWeightKg ?? 0, price.startWeightKg ?? 0)
+  const minimum = Math.max(weightKg, price.minChargeWeightKg ?? 0, price.startWeightKg ?? 0)
+  const charged = price.pricingModel === 'per-piece-500g' ? decimal(minimum).div(.5).ceil().times(.5).toNumber()
+    : price.pricingModel === 'per-kg-1g' ? decimal(minimum).times(1000).ceil().div(1000).toNumber() : minimum
   return (price.weightFromInclusive ? charged >= price.weightFromKg : charged > price.weightFromKg)
     && (price.weightToInclusive === false ? charged < price.weightToKg : charged <= price.weightToKg)
 }
 function selectBillingPrice(prices: LogisticsPriceRow[], weightKg: number) {
   const matches = prices.filter(price => weightMatchesPrice(price, weightKg))
-  const standards = new Set(matches.map(price => [Math.max(price.minChargeWeightKg || 0, price.startWeightKg || 0), price.pricePerKg, price.registrationFee || 0].join('|')))
+  const standards = new Set(matches.map(price => [price.pricingModel || 'per-kg', Math.max(price.minChargeWeightKg || 0, price.startWeightKg || 0), price.pricePerKg, price.intervalPrice || 0, price.registrationFee || 0].join('|')))
   return standards.size === 1 ? matches[0] : undefined
 }
 /** Explain a missing quote using the same eligible rows and boundaries as billing. */
@@ -309,8 +316,11 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   const price = selectBillingPrice(countryRows.filter(candidate => priceMatchesRegion(candidate, quoteRegion, zoneRequired)), actualWeightKg)
   if (!price) return null
   const minChargeWeightKg = Math.max(price.minChargeWeightKg || 0, price.startWeightKg || 0)
-  const chargeWeightKg = Math.max(actualWeightKg, minChargeWeightKg)
-  const base = decimal(chargeWeightKg).times(price.pricePerKg).toNumber()
+  const piece = price.pricingModel === 'per-piece-500g'
+  const minimum = Math.max(actualWeightKg, minChargeWeightKg)
+  const chargeWeightKg = piece ? decimal(minimum).div(.5).ceil().times(.5).toNumber()
+    : price.pricingModel === 'per-kg-1g' ? decimal(minimum).times(1000).ceil().div(1000).toNumber() : minimum
+  const base = piece ? price.intervalPrice : decimal(chargeWeightKg).times(price.pricePerKg).toNumber()
   const surcharge = 0
   const total = decimal(base).plus(price.registrationFee || 0).toDecimalPlaces(2).toNumber()
   return { total: Number(total.toFixed(2)), base, surcharge, price, actualWeightKg, minChargeWeightKg, volumeWeightKg, chargeWeightKg, volumeDivisor }

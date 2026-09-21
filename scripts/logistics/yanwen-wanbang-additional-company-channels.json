@@ -1,0 +1,8 @@
+{
+  "entries": [
+    {"id":"ecbd873c-7074-4f36-ad17-8d366871fa9c","providerName":"燕文","providerAliases":[],"channelName":"燕文精品服装专线-普货","aliases":[],"productCodes":["1667"],"logisticsAttribute":"普货","enabled":true},
+    {"id":"ecbd873c-7074-4f36-ad17-8d366871fa9d","providerName":"燕文","providerAliases":[],"channelName":"燕文大货专线追踪-特货","aliases":[],"productCodes":["1558"],"logisticsAttribute":"带电","enabled":true},
+    {"id":"ecbd873c-7074-4f36-ad17-8d366871fa9e","providerName":"燕文","providerAliases":[],"channelName":"燕文大货专线追踪-普货","aliases":[],"productCodes":["1557"],"logisticsAttribute":"普货","enabled":true},
+    {"id":"ecbd873c-7074-4f36-ad17-8d366871fa9f","providerName":"万邦","providerAliases":[],"channelName":"万邦大货专线挂号含电","aliases":["万邦大货专线含电"],"productCodes":["WBSLLP"],"logisticsAttribute":"带电","enabled":true}
+  ]
+}
