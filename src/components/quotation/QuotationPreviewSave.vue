@@ -86,7 +86,7 @@ const quoteRange = computed(() => {
           <div><dt>商品</dt><dd>{{ productName || '待查询' }}</dd></div>
           <div><dt>SKU</dt><dd>{{ sku || '—' }}</dd></div>
           <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
-          <div><dt>客户等级</dt><dd>{{ customerGradeLabel(customerGrade) }} × {{ coefficient.toString() }}</dd></div>
+          <div><dt>客户等级</dt><dd>{{ customerGradeLabel(customerGrade) }}</dd></div>
           <div><dt>自定义数量</dt><dd>{{ Math.max(1, customQuantity || 1) }}{{ unitLabel }}</dd></div>
         </dl>
       </section>

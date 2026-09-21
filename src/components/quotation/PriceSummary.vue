@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
+import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { computed, ref } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import QuoteUnavailableReason from './QuoteUnavailableReason.vue'
@@ -115,7 +116,7 @@ function isPrimary(row: QuotationMatrixRow) {
       <div><dt>国内运费</dt><dd>¥{{ domesticFreightCost.toFixed(2) }}</dd></div>
       <div><dt>首选方案利润</dt><dd class="profit">¥{{ profit.toFixed(2) }}</dd></div>
     </dl>
-    <div class="coefficient"><span>{{ grade }}级客户系数</span><b>× {{ coefficient.toString() }}</b></div>
+    <div class="coefficient"><span>客户等级</span><b>{{ customerGradeLabel(grade) }}</b></div>
     <button class="open-overview" :disabled="!hasOptions" @click="drawerOpen=true">查看报价单概览 <i>→</i></button>
   </aside>
 

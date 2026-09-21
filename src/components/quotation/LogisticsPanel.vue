@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { QuotationProduct } from './types'
+import { customerGradeLabel } from '@/data/financeChannelPolicies'
 defineProps<{ product: QuotationProduct; rules: string[]; grade: string; coefficient: number; exchangeRate: number }>()
 defineEmits<{ calculate: []; ruleChange: [] }>()
 function usdFromCny(value: number, rate: number) { return rate > 0 ? (value / rate).toFixed(2) : '0.00' }
@@ -11,7 +12,7 @@ function usdFromCny(value: number, rate: number) { return rate > 0 ? (value / ra
     <div class="route"><span>当前采用路线</span><strong><b>{{ product.country || '未选国家' }}</b><i>→</i><b>{{ product.channel || '未选物流商' }}</b></strong></div>
     <div class="fields">
       <label class="wide">运费规则<select v-model="product.rule" @change="$emit('ruleChange')"><option v-if="!rules.length" value="">当前条件无可用规则</option><option v-for="rule in rules" :key="rule">{{ rule }}</option></select></label>
-      <label>客户条件<input :value="`${grade}级客户 · 系数 ${coefficient.toString()}`" disabled></label>
+      <label>客户等级<input :value="customerGradeLabel(grade)" disabled></label>
     </div>
     <footer><div class="freight-summary"><span>国际运费</span><label class="freight-cny"><em>CNY ¥</em><input v-model.number="product.freight" disabled type="number"></label><strong>USD ${{ usdFromCny(product.freight, exchangeRate) }}</strong><button @click="$emit('calculate')">运费试算</button></div></footer>
   </section>

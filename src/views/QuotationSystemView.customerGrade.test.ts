@@ -71,7 +71,9 @@ describe('customer grades on a cold quotation page', () => {
     selector().value = 'NEW'
     selector().dispatchEvent(new Event('change'))
     await nextTick()
-    expect(host.textContent).toContain('报价系数 1.27635')
+    expect(selector().value).toBe('NEW')
+    expect(host.textContent).not.toContain('报价系数')
+    expect(host.innerHTML).not.toContain('1.27635')
     expect(vi.mocked(api.get).mock.calls.some(([path]) => path.includes('/purchase') || path.includes('/logistics'))).toBe(false)
   })
 })

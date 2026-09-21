@@ -106,12 +106,17 @@ describe('quotation finance initialization for an employee', () => {
   }
 
   function gradeField() { return host.querySelector<HTMLElement>('[data-validation-field="customerGrade"]')! }
+  function expectHiddenCoefficient(coefficient: number) {
+    expect(host.textContent).not.toContain('报价系数')
+    expect(host.innerHTML).not.toContain(coefficient.toString())
+    expect(state.salePrice({ purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct)).toBeCloseTo(100 * coefficient, 10)
+  }
 
   it.each([false, true])('uses the saved precise coefficient and exchange rates with warm cache %s', async warm => {
     await mountPage({ warm })
     resolveFinance(financeResponse())
     await vi.waitFor(() => expect(state.draftReady).toBe(true))
-    expect(gradeField().textContent).toContain('报价系数 1.21605')
+    expectHiddenCoefficient(1.21605)
     expect(host.textContent).toContain('财务汇率 6.7')
     expect(state.exchange.eurUsd).toBe(1.17)
     const product = { purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct
@@ -122,7 +127,7 @@ describe('quotation finance initialization for an employee', () => {
     select.value = 'A'
     select.dispatchEvent(new Event('change'))
     await nextTick()
-    expect(gradeField().textContent).toContain('报价系数 1.23615')
+    expectHiddenCoefficient(1.23615)
     expect(state.salePrice(product)).toBe(123.615)
   })
 
@@ -131,7 +136,7 @@ describe('quotation finance initialization for an employee', () => {
     resolveFinance(financeResponse())
     await vi.waitFor(() => expect(state.draftReady).toBe(true))
     expect(gradeField().querySelector('select')!.value).toBe(grade)
-    expect(gradeField().textContent).toContain(`报价系数 ${grade === 'A' ? '1.23615' : '1.21605'}`)
+    expectHiddenCoefficient(grade === 'A' ? 1.23615 : 1.21605)
   })
 
   it('applies country, channel, tax, surcharge and customer fee settings to the actual quotation calculation', async () => {
@@ -162,7 +167,7 @@ describe('quotation finance initialization for an employee', () => {
       .mockResolvedValueOnce({ ready: true, missing: [] })
     await vi.mocked(startQuotationSync).mock.calls[0]![0](new AbortController().signal)
     await nextTick()
-    expect(gradeField().textContent).toContain('报价系数 1.3')
+    expectHiddenCoefficient(1.3)
     expect(host.textContent).toContain('财务汇率 7')
   })
 
@@ -171,7 +176,7 @@ describe('quotation finance initialization for an employee', () => {
     resolveFinance(financeResponse(true))
     await vi.waitFor(() => expect(state.draftReady).toBe(true))
     expect(gradeField().querySelector('select')!.value).toBe('A')
-    expect(gradeField().textContent).toContain('报价系数 1.23615')
+    expectHiddenCoefficient(1.23615)
     expect(Array.from(gradeField().querySelectorAll('option')).map(option => option.value)).not.toContain('S')
   })
 
@@ -183,7 +188,7 @@ describe('quotation finance initialization for an employee', () => {
     vi.mocked(api.get).mockResolvedValueOnce(financeResponse())
     Array.from(host.querySelectorAll('button')).find(button => button.textContent === '重试读取')!.click()
     await vi.waitFor(() => expect(state.draftReady).toBe(true))
-    expect(gradeField().textContent).toContain('报价系数 1.21605')
+    expectHiddenCoefficient(1.21605)
     expect(host.textContent).toContain('财务汇率 6.7')
   })
 })
