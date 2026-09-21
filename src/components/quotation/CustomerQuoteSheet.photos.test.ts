@@ -67,3 +67,19 @@ it('clears photos when leaving the browser page, including back/forward cache na
   expect(document.querySelector('.sheet-photo-cell')).toBeNull()
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local')
 })
+
+it('moves the merged product column with its photos and preserves its position across hide/show', async () => {
+  mount(); await select()
+  document.querySelector('[data-group-handle="product"]')!.dispatchEvent(new Event('dragstart', { bubbles:true }))
+  document.querySelector('[data-group="processingTime"]')!.dispatchEvent(new Event('drop', { bubbles:true, cancelable:true }))
+  await settle()
+  expect(document.querySelector('.sheet-editor tbody tr')!.lastElementChild?.className).toContain('sheet-photo-cell')
+  expect(document.querySelector('.sheet-photo-cell')?.getAttribute('rowspan')).toBe('2')
+  expect(document.querySelectorAll('.sheet-photo-cell img')).toHaveLength(2)
+  const toggle = document.querySelector<HTMLInputElement>('[aria-label="显示商品图片列"]')!
+  toggle.click(); await settle(); toggle.click(); await settle()
+  expect(document.querySelector('.sheet-editor tbody tr')!.lastElementChild?.className).toContain('sheet-photo-cell')
+  await click('预览报价单')
+  expect(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![0].columnOrder?.at(-1)).toBe('product')
+  expect(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![2]).toHaveLength(2)
+})

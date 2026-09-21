@@ -24,7 +24,7 @@ it('copies the exact visible bundle TSV during the click without awaiting Web Lo
   })
   Object.defineProperty(document, 'execCommand', { configurable: true, value: exec })
   await copyQuoteSheetData(sheet())
-  expect(copied).toBe('No.\tSKU\tCountry\tLogistics Provider\t1 set (USD)\t2 sets (USD)\t3 sets (USD)\t5 sets (USD)\r\n1\tKJ2600787+YT2601676\tUnited States\t4PX\t$25.40\t$48.55\t$71.75\t$118.05')
+  expect(copied).toBe('No.\tSKU\t1 set (USD)\t2 sets (USD)\t3 sets (USD)\t5 sets (USD)\tCountry\tLogistics Provider\r\n1\tKJ2600787+YT2601676\t$25.40\t$48.55\t$71.75\t$118.05\tUnited States\t4PX')
   expect(writeText).not.toHaveBeenCalled(); expect(request).not.toHaveBeenCalled()
   expect(document.activeElement).toBe(button); expect(document.querySelector('textarea')).toBeNull()
 })

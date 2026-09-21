@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import SpecialPackagingInput from './SpecialPackagingInput.vue'
 import { displayWeightGrams, gramsToKg, sumDecimal, decimal } from "@/services/quotationDecimal"
 import type { QuotationProduct } from './types'
@@ -6,6 +7,8 @@ const props = defineProps<{ specialPackagingGrams?: string; specialPackagingWeig
 const emit = defineEmits<{ weightChange: []; 'update:specialPackagingGrams': [value: string] }>()
 
 const grams = displayWeightGrams
+const productCost = computed(() => decimal(props.product.purchase).times(props.product.quantity))
+const totalCost = computed(() => productCost.value.plus(props.domesticFreight))
 const actualWeight = () => sumDecimal(props.baseWeight, props.packagingWeight, props.specialPackagingWeight ?? 0)
 const volumeWeight = () => props.product.volumetricEnabled
   ? decimal(props.product.packageLengthCm).times(props.product.packageWidthCm).times(props.product.packageHeightCm).times(Math.max(1, props.product.quantity)).div(Math.max(1, props.product.volumeDivisor || 8000)).toNumber()
@@ -64,7 +67,10 @@ function purchasePricingLabel() {
       </div>
     </div>
     <SpecialPackagingInput :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
-    <div class="highlights"><p><span>含包材重量</span><b>{{ specialPackagingError ? '—' : grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></p><p><span>国内运费成本</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>{{ product.purchaseDataSource==='legacy_2026' ? '采用旧数据唯一单档运费' : '10件运费平摊，不计采购票点' }}</small></p></div>
+    <div class="highlights">
+      <p><span>总成本价（CNY）</span><b>¥{{ totalCost.toFixed(2) }}</b><small>商品成本 ¥{{ productCost.toFixed(2) }} + 国内运费 ¥{{ domesticFreight.toFixed(2) }}</small><small>不含国际运费</small></p>
+      <p><span>含包材重量</span><b>{{ specialPackagingError ? '—' : grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></p>
+    </div>
   </section>
 </template>
 

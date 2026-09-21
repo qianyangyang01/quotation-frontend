@@ -40,7 +40,7 @@ describe('customer quotation presentation', () => {
     const sheet = buildCustomerQuoteSheet({ rows: [row], countries: [], edits: edits(), customQuantity: 5, bundle: false })
     expect(sheet.issues).toEqual([])
     expect(sheet.rows[0].shippingTime).toBe('—')
-    expect(customerQuoteSheetTsv(sheet)).toContain('JITO\t—\t1-2 days')
+    expect(customerQuoteSheetTsv(sheet)).toContain('JITO\t—\t1-2 workingdays')
     expect(row.eta).toBe('该物流暂无时效说明')
     expect(formatShippingTime(formatLogisticsEta({ etaMinDays: 7, etaMaxDays: 15, etaStatus: 'conflict' }))).toBe('—')
     expect(formatShippingTime('旺季可能延误')).toBe('旺季可能延误')
@@ -101,7 +101,7 @@ describe('customer quotation presentation', () => {
     const sheet = buildCustomerQuoteSheet({ rows: [row], countries: [], edits: edits(), customQuantity: 12, bundle: true })
     expect(sheet.quantityLabels).toEqual(['1 set', '2 sets', '3 sets', '12 sets'])
     expect(sheet.rows[0].prices).toEqual([12.8, null, 0, 999.99])
-    expect(sheet.rows[0].shippingTime).toBe('6-12 days')
+    expect(sheet.rows[0].shippingTime).toBe('6-12 workingdays')
     expect(row.eta).toBe('6～12 天')
     expect(sheet.date).toBe('12 Sep 2026')
     expect(sheet.issues).toEqual([])
@@ -114,7 +114,7 @@ describe('customer quotation presentation', () => {
     draft.shippingTimes[quoteSheetRowKey(one)] = '8-15 days'
     const original = JSON.stringify([one, two])
     const sheet = buildCustomerQuoteSheet({ rows: [two, one], countries: [], edits: draft, customQuantity: 5, bundle: false })
-    expect(sheet.rows.map(row => row.shippingTime)).toEqual(['6-12 days', '8-15 days'])
+    expect(sheet.rows.map(row => row.shippingTime)).toEqual(['6-12 workingdays', '8-15 workingdays'])
     expect(JSON.stringify([one, two])).toBe(original)
     expect(reconcileQuoteSheetEdits(draft, [two]).shippingTimes).toEqual({})
     expect(newQuoteSheetEdits('Other agent').shippingTimes).toEqual({})
@@ -122,7 +122,7 @@ describe('customer quotation presentation', () => {
 
   it('does not invent missing delivery times and preserves explicit empty overrides', () => {
     for (const value of ['', '—', '-～- 天', '-～12 天', '6～- 天', '0～0 天']) expect(formatShippingTime(value)).toBe('—')
-    expect(formatShippingTime('6～12 个工作日')).toBe('6-12 working days')
+    expect(formatShippingTime('6～12 个工作日')).toBe('6-12 workingdays')
     const row = source()
     const draft = edits()
     draft.shippingTimes[quoteSheetRowKey(row)] = ''
@@ -184,7 +184,7 @@ describe('editable quantity quote sheet boundaries', () => {
     draft.fields={[quoteSheetRowKey(row)]:{provider:'=Custom',processingTime:'3-4 days',number:'8',prices:{'2':''}}}
     const sheet=buildCustomerQuoteSheet({rows:[row],countries:[],edits:draft,customQuantity:5,bundle:false})
     expect(sheet.title).toBe('Custom Quote');expect(sheet.notes).toHaveLength(4)
-    expect(customerQuoteSheetTsv(sheet)).toContain("8\t—\tUnited States\t'=Custom\t6-12 days\t3-4 days\t$12.80\t—")
+    expect(customerQuoteSheetTsv(sheet)).toContain("8\t—\t$12.80\t—\t$28.20\t$43.60\tUnited States\t'=Custom\t6-12 workingdays\t3-4 workingdays")
     expect(CUSTOMER_QUOTE_NOTES[1]).toContain('PayPal')
   })
 })

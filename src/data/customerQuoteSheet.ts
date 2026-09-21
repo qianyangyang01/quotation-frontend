@@ -10,11 +10,37 @@ export type QuoteSheetRowEdits = { number?: string; country?: string; provider?:
 export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
   { key: 'country', label: 'Country', name: '国家', width: 215 },
   { key: 'provider', label: 'Logistics Provider', name: '物流商', width: 245 },
-  { key: 'shippingTime', label: 'Shipping Time', name: '运输时效', width: 195 },
-  { key: 'processingTime', label: 'Processing Time', name: '处理时间', width: 176 },
+  { key: 'shippingTime', label: 'Shipping Time', name: '运输时效', width: 235 },
+  { key: 'processingTime', label: 'Processing Time', name: '处理时间', width: 220 },
 ] as const
 export type QuoteSheetOptionalColumn = typeof QUOTE_SHEET_OPTIONAL_COLUMNS[number]['key']
-export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[] }
+export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[]; whatsapp?: string; columnOrder?: QuoteSheetColumnKey[] }
+export const QUOTE_SHEET_COLUMN_ORDER = ['number', 'product', 'sku', 'prices', 'country', 'provider', 'shippingTime', 'processingTime'] as const
+export type QuoteSheetColumnKey = typeof QUOTE_SHEET_COLUMN_ORDER[number]
+export function normalizeQuoteSheetOrder(order: readonly QuoteSheetColumnKey[] = []) {
+  return [...new Set([...order.filter(key => QUOTE_SHEET_COLUMN_ORDER.includes(key)), ...QUOTE_SHEET_COLUMN_ORDER])]
+}
+/** One ordered group per draggable header. Quantity columns always travel together. */
+export function quoteSheetGroups(hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], order?: readonly QuoteSheetColumnKey[], withPhotos = false) {
+  const catalog = [
+    ...quoteSheetColumns(hiddenColumns),
+    { key: 'product' as const, label: 'Product', width: 240 },
+    { key: 'prices' as const, label: 'Quote by Quantity (USD)', width: 0 },
+  ]
+  return normalizeQuoteSheetOrder(order).flatMap(key => {
+    if (key === 'product' && !withPhotos) return []
+    const column = catalog.find(column => column.key === key)
+    return column ? [column] : []
+  })
+}
+/** Shared by the accessible preview and spreadsheet clipboard. Photos are image-only. */
+export function quoteSheetTextTable(sheet: CustomerQuoteSheet) {
+  const groups = quoteSheetGroups(sheet.hiddenColumns, sheet.columnOrder).filter(column => column.key !== 'product')
+  return [
+    groups.flatMap(column => column.key === 'prices' ? sheet.quantityLabels.map(label => `${label} (USD)`) : [column.label]),
+    ...sheet.rows.map(row => groups.flatMap(column => column.key === 'prices' ? row.prices.map(quoteSheetUsd) : [quoteSheetCell(row, column.key)])),
+  ]
+}
 export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColumn[] = []) {
   return [
     { key: 'number' as const, label: 'No.', width: 85 },
@@ -23,7 +49,8 @@ export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColu
   ]
 }
 export function quoteSheetCell(row: CustomerQuoteSheetRow, key: ReturnType<typeof quoteSheetColumns>[number]['key']) {
-  return String(row[key] ?? (key === 'processingTime' ? '1-2 days' : '—'))
+  if (key === 'shippingTime' || key === 'processingTime') return formatShippingTime(row[key] ?? (key === 'processingTime' ? '1-2 workingdays' : '—'))
+  return String(row[key] ?? '—')
 }
 export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: number) => number | null
 export const MAX_QUOTE_SHEET_COLUMNS = 10
@@ -37,6 +64,8 @@ export type CustomerQuoteSheet = {
   tableIssues?: string[]
   priceIssues?: string[]
   hiddenColumns?: QuoteSheetOptionalColumn[]
+  whatsapp?: string
+  columnOrder?: QuoteSheetColumnKey[]
   title?: string; notes?: string[]
 }
 
@@ -114,6 +143,7 @@ export function formatShippingTime(value: string) {
   if (/^(?:[-—]\s*[-~～]|\d+\s*[-~～]\s*[-—])/.test(text)) return '—'
   return text.replace(/[～~–—]/g, '-').replace(/\s*-\s*/g, '-')
     .replace(/(?:个)?工作日/g, ' working days').replace(/(?:个)?自然日|天|日/g, ' days')
+    .replace(/\b(?:working\s*days?|business\s+days?|days?)\b/gi, 'workingdays')
     .replace(/\s+/g, ' ').trim()
 }
 export function quoteSheetCountryCode(country: string, catalog: QuoteSheetCountry[]) {
@@ -169,8 +199,8 @@ export function buildCustomerQuoteSheet(input: {
     if (visible('provider') && !provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
     if (visible('provider') && /[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)
     const shippingTime = formatShippingTime(input.edits.shippingTimes[key] ?? row.eta)
-    if (visible('shippingTime') && /[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 days`)
-    const processingTime = formatShippingTime(fields.processingTime ?? '1-2 days')
+    if (visible('shippingTime') && /[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 workingdays`)
+    const processingTime = formatShippingTime(fields.processingTime ?? '1-2 workingdays')
     if (visible('processingTime') && /[^\x20-\x7e—]/.test(processingTime)) tableIssues.push(`第 ${index + 1} 行处理时间请填写英文`)
     const number = fields.number === undefined ? index + 1 : Number(fields.number)
     if (!validQuoteSheetQuantity(number)) tableIssues.push(`第 ${index + 1} 行序号须为正整数`)
@@ -199,6 +229,8 @@ export function buildCustomerQuoteSheet(input: {
   tableIssues.push(...priceIssues)
   return {
     hiddenColumns,
+    whatsapp: input.edits.whatsapp?.trim() || '',
+    columnOrder: normalizeQuoteSheetOrder(input.edits.columnOrder),
     title: input.edits.title ?? 'JerryFulfillment Quote Sheet', notes: input.edits.notes ?? [...CUSTOMER_QUOTE_NOTES],
     agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)], priceIssues: [...new Set(priceIssues)],
     quantityLabels: quantities.map((quantity, index) => isLegacyCustom(quantity, index) || (!input.quantities && index === 3 && !input.customQuantity) ? 'Custom' : `${validQuoteSheetQuantity(quantity) ? quantity : '—'} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
@@ -215,9 +247,5 @@ export function customerQuoteSheetTsv(sheet: CustomerQuoteSheet) {
     // Keep manually entered text from becoming a spreadsheet formula.
     return /^[=+@-]/.test(text) ? `'${text}` : text
   }
-  const columns = quoteSheetColumns(sheet.hiddenColumns)
-  return [
-    [...columns.map(column => column.label), ...sheet.quantityLabels.map(label => `${label} (USD)`)],
-    ...sheet.rows.map(row => [...columns.map(column => quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]),
-  ].map(row => row.map(cell).join('\t')).join('\r\n')
+  return quoteSheetTextTable(sheet).map(row => row.map(cell).join('\t')).join('\r\n')
 }

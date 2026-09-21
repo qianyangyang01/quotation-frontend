@@ -12,7 +12,7 @@ it('writes tabular text with headers and preserves clipboard rejection', async (
   const writeText = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal('navigator', { clipboard: { writeText } })
   await copyQuoteSheetData(sheet)
-  expect(writeText.mock.calls[0][0]).toContain('1\t—\tUS\tYanwen\t6-12 days\t1-2 days\t$12.80\t—')
+  expect(writeText.mock.calls[0][0]).toContain('1\t—\t$12.80\t—\t$28.20\t$43.60\tUS\tYanwen\t6-12 workingdays\t1-2 workingdays')
   expect(writeText.mock.calls[0][0]).not.toContain('private')
   writeText.mockRejectedValue(new Error('denied'))
   await expect(copyQuoteSheetData(sheet)).rejects.toThrow('未复制成功')

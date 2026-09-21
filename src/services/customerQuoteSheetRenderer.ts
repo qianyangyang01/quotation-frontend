@@ -1,24 +1,29 @@
 import brandUrl from '@/assets/quote-sheet/brand.png'
 import headerUrl from '@/assets/quote-sheet/table-header.png'
 import notesUrl from '@/assets/quote-sheet/notes.png'
-import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, quoteSheetColumns, quoteSheetCell, type QuoteSheetOptionalColumn, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, quoteSheetGroups, quoteSheetCell, type QuoteSheetColumnKey, type QuoteSheetOptionalColumn, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
 import type { QuoteLocalPhoto } from './quoteLocalPhotos'
 
 export const QUOTE_SHEET_WIDTH = 1536
 export const QUOTE_SHEET_ROWS_PER_IMAGE = 24
 export type QuoteSheetImage = { blob: Blob; width: number; height: number; firstRow: number; lastRow: number }
-export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], withPhotos = false) {
+export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], withPhotos = false, order?: readonly QuoteSheetColumnKey[]) {
   if (!Number.isInteger(priceColumns) || priceColumns < 1 || priceColumns > MAX_QUOTE_SHEET_COLUMNS) throw new Error('价格列须为 1–10 列')
-  const base = quoteSheetColumns(hiddenColumns)
-  const fixedColumns = withPhotos ? [base[0], { key: 'product' as const, label: 'Product', width: 240 }, ...base.slice(1)] : base
-  const columns = [22]
-  fixedColumns.forEach(column => columns.push(columns[columns.length - 1] + column.width))
-  const priceStart = columns[columns.length - 1]
-  const width = Math.max(QUOTE_SHEET_WIDTH, priceStart + priceColumns * 144 + 21)
+  const groups = quoteSheetGroups(hiddenColumns, order, withPhotos)
+  const fixedColumns = groups.filter(column => column.key !== 'prices')
+  const fixedWidth = fixedColumns.reduce((sum, column) => sum + column.width, 0)
+  const width = Math.max(QUOTE_SHEET_WIDTH, 22 + fixedWidth + priceColumns * 144 + 21)
   const right = width - 21
-  columns.push(...Array.from({ length: priceColumns }, (_, index) => priceStart + (right - priceStart) * (index + 1) / priceColumns))
-  return { width, right, columns, fixedColumns }
+  const priceWidth = (right - 22 - fixedWidth) / priceColumns
+  const cells = groups.flatMap<{ key: QuoteSheetColumnKey; label: string; width: number; priceIndex: number }>(column => column.key === 'prices'
+    ? Array.from({ length: priceColumns }, (_, priceIndex) => ({ ...column, width: priceWidth, priceIndex }))
+    : [{ ...column, priceIndex: -1 }])
+  const columns = [22]
+  cells.forEach(column => columns.push(columns[columns.length - 1] + column.width))
+  columns[columns.length - 1] = right
+  const priceIndex = cells.findIndex(column => column.key === 'prices')
+  return { width, right, columns, fixedColumns, cells, priceIndex }
 }
 const referenceRowHeights = [57, 59, 59, 60, 60, 60]
 
@@ -86,9 +91,11 @@ function exportBlob(canvas: HTMLCanvasElement) {
 export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCancelled: () => boolean = () => false, photos: readonly QuoteLocalPhoto[] = []): Promise<QuoteSheetImage[]> {
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
-  const { width, right, columns, fixedColumns } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0)
-  const fixedCount = fixedColumns.length
-  const priceStart = columns[fixedCount]
+  const { width, right, columns, cells, priceIndex } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0, sheet.columnOrder)
+  const priceStart = columns[priceIndex]
+  const priceEnd = columns[priceIndex + sheet.quantityLabels.length]
+  const valuesFor = (row: CustomerQuoteSheet['rows'][number]) => cells.map(column => column.key === 'product' ? '' : column.key === 'prices' ? quoteSheetUsd(row.prices[column.priceIndex]) : quoteSheetCell(row, column.key))
+  const boldCell = (index: number) => cells[index].key === 'number' || cells[index].key === 'prices'
   if (sheet.rows.some(row => row.prices.length !== sheet.quantityLabels.length)) throw new Error('价格数量与表头不一致，请重新预览')
   const noteTexts = sheet.notes ?? [...CUSTOMER_QUOTE_NOTES]
   const useNotesAsset = width === QUOTE_SHEET_WIDTH && JSON.stringify(noteTexts) === JSON.stringify(CUSTOMER_QUOTE_NOTES)
@@ -103,12 +110,12 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     const context = canvas.getContext('2d')
     if (!context) throw new Error('当前浏览器无法生成报价图片')
     font(context, true)
-    const quantityHeaderHeight = Math.max(44, ...sheet.quantityLabels.map((label, index) => lines(context, label, columns[index + fixedCount + 1] - columns[index + fixedCount] - 20).length * 26 + 8))
+    const quantityHeaderHeight = Math.max(44, ...sheet.quantityLabels.map((label, index) => lines(context, label, columns[index + priceIndex + 1] - columns[index + priceIndex] - 20).length * 26 + 8))
     const tableTop = 225 + quantityHeaderHeight
     const heights = rows.map((row, index) => {
-      const values = [...fixedColumns.map(column => column.key === 'product' ? '' : quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
+      const values = valuesFor(row)
       const lineCount = Math.max(...values.map((value, column) => {
-        font(context, column === 0 || column >= fixedCount)
+        font(context, boldCell(column))
         return lines(context, value, columns[column + 1] - columns[column] - 20).length
       }))
       return Math.max(referenceRowHeights[index % 6], lineCount * 26 + 8)
@@ -144,7 +151,15 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       const titleLines = lines(context, sheet.title, 755)
       if (titleLines.length > 2) throw new Error('报价单标题过长，请缩短后重试')
       context.fillStyle = '#202532'; context.textAlign = 'center'
-      titleLines.forEach((line, index) => context.fillText(line, 827 + metadataOffset / 2, 80 + (index - (titleLines.length - 1) / 2) * 52))
+      titleLines.forEach((line, index) => context.fillText(line, 827 + metadataOffset / 2, (sheet.whatsapp ? 67 : 80) + (index - (titleLines.length - 1) / 2) * 48))
+    }
+    if (sheet.whatsapp?.trim()) {
+      const contact = `WhatsApp: ${sheet.whatsapp.trim()}`
+      font(context, false, 22)
+      if (context.measureText(contact).width > 755) throw new Error('WhatsApp 联系方式过长，请缩短后重试')
+      context.fillStyle = '#fff'; context.fillRect(430 + metadataOffset / 2, 130, 795, 30)
+      context.fillStyle = '#237a48'; context.textAlign = 'center'
+      context.fillText(contact, 827 + metadataOffset / 2, 145)
     }
     context.strokeStyle = '#a8a8ad'
     context.lineWidth = 1
@@ -161,31 +176,39 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     // Reuse the approved orange shading while laying out only visible columns.
     context.drawImage(header, 548, 0, 1, 90, 22, 179, right - 22, tableTop - 179)
     context.fillStyle = '#ffffff'
-    fixedColumns.forEach((column, index) => centered(context, column.key === 'processingTime' ? 'Processing\nTime' : column.label, columns[index], columns[index + 1], 179, tableTop - 179, true))
-    centered(context, 'Quote by Quantity (USD)', priceStart, right, 179, 46, true)
+    cells.forEach((column, index) => {
+      if (column.key !== 'prices') centered(context, column.key === 'processingTime' ? 'Processing\nTime' : column.label, columns[index], columns[index + 1], 179, tableTop - 179, true)
+    })
+    // Fit the group label even when only one quantity column remains.
+    font(context, true, 22)
+    context.font = `700 ${Math.min(22, 22 * (priceEnd - priceStart - 16) / context.measureText('Quote by Quantity (USD)').width)}px Arial, sans-serif`
+    context.textAlign = 'center'
+    context.fillText('Quote by Quantity (USD)', (priceStart + priceEnd) / 2, 202)
     sheet.quantityLabels.forEach((label, index) => {
-      centered(context, label, columns[index + fixedCount], columns[index + fixedCount + 1], 225, quantityHeaderHeight, true)
+      centered(context, label, columns[index + priceIndex], columns[index + priceIndex + 1], 225, quantityHeaderHeight, true)
     })
     context.strokeStyle = '#fff'; context.lineWidth = 1
-    context.beginPath(); context.moveTo(priceStart, 225); context.lineTo(right, 225); context.stroke()
+    context.beginPath(); context.moveTo(priceStart, 225); context.lineTo(priceEnd, 225); context.stroke()
     columns.forEach((x, index) => {
-      context.beginPath(); context.moveTo(x, index <= fixedCount ? 179 : 225); context.lineTo(x, tableTop); context.stroke()
+      const insidePrices = index > priceIndex && index < priceIndex + sheet.quantityLabels.length
+      context.beginPath(); context.moveTo(x, insidePrices ? 225 : 179); context.lineTo(x, tableTop); context.stroke()
     })
     let y = tableTop
     rows.forEach((row, index) => {
       const height = heights[index]
       context.fillStyle = (offset + index) % 2 ? '#fff2e9' : '#ffffff'
       context.fillRect(22, y, right - 22, height)
-      const values = [...fixedColumns.map(column => column.key === 'product' ? '' : quoteSheetCell(row, column.key)), ...row.prices.map(quoteSheetUsd)]
+      const values = valuesFor(row)
       context.fillStyle = '#111111'
-      values.forEach((value, column) => centered(context, value, columns[column], columns[column + 1], y, height, column === 0 || column >= fixedCount))
+      values.forEach((value, column) => centered(context, value, columns[column], columns[column + 1], y, height, boldCell(column)))
       y += height
       context.strokeStyle = '#d7d7d7'
       context.lineWidth = 1
       context.beginPath(); context.moveTo(22, y - 0.5); context.lineTo(right, y - 0.5); context.stroke()
     })
     if (photos.length) {
-      const left = columns[1], photoRight = columns[2]
+      const photoIndex = cells.findIndex(column => column.key === 'product')
+      const left = columns[photoIndex], photoRight = columns[photoIndex + 1]
       // Paint over interior row lines so all routes share the same photos.
       context.fillStyle = '#fff'
       context.fillRect(left, tableTop, photoRight - left, tableBottom - tableTop - 1)

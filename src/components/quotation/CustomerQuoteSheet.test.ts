@@ -104,7 +104,7 @@ it('previews the formerly blocked carriers and copies the exact preview blob and
   await click('复制报价数据')
   const cells = writeText.mock.calls[0][0].split('\r\n').map((line: string) => line.split('\t'))
   expect(cells).toHaveLength(3); expect(cells.every((line: string[]) => line.length === 10)).toBe(true)
-  expect(cells[2]).toEqual(['2', 'SKU-001', 'United States', 'SDH Express', '8-12 days', '1-2 days', '$10.80', '$16.35', '$21.90', '$30.85'])
+  expect(cells[2]).toEqual(['2', 'SKU-001', '$10.80', '$16.35', '$21.90', '$30.85', 'United States', 'SDH Express', '8-12 workingdays', '1-2 workingdays'])
   expect(writeText.mock.calls[0][0]).not.toMatch(/内部|全国统一/)
   expect(JSON.stringify(state.rows)).toBe(original)
 })
@@ -113,11 +113,11 @@ it('previews and copies a saved missing-ETA route, supports a local supplement a
   const state = mount([{ ...row('legacy', '极通环球'), eta: '该物流暂无时效说明' }])
   expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('')
   await click('预览报价单'); expect(render.mock.lastCall![0].rows[0]!.shippingTime).toBe('—')
-  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 days')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 workingdays')
   await click('编辑报价单'); await input('第 1 行运输时效', '10-15 days')
-  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t10-15 days')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t10-15 workingdays')
   await click('恢复渠道时效'); await click('复制报价数据')
-  expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 days')
+  expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 workingdays')
   expect(state.rows[0]!.eta).toBe('该物流暂无时效说明')
 })
 
@@ -148,11 +148,11 @@ it('invalidates previews and binds time edits to route identity through reorder 
   state.rows.reverse(); await settle()
   expect(revoke).toHaveBeenCalledWith('blob:quote'); expect(button('复制报价图片').disabled).toBe(true)
   await click('复制报价数据')
-  expect(writeText.mock.lastCall![0].split('\r\n')[2]).toContain('15-20 days')
+  expect(writeText.mock.lastCall![0].split('\r\n')[2]).toContain('15-20 workingdays')
   state.contextKey = 'product-2'; await settle(); await click('复制报价数据')
-  expect(writeText.mock.lastCall![0]).not.toContain('15-20 days')
+  expect(writeText.mock.lastCall![0]).not.toContain('15-20 workingdays')
   state.rows[0]!.eta = '3～5 天'; state.rows[0]!.quote1 = 99.5; await settle(); await click('复制报价数据')
-  expect(writeText.mock.lastCall![0]).toContain('3-5 days\t1-2 days\t$99.50')
+  expect(writeText.mock.lastCall![0]).toContain('3-5 workingdays\t1-2 workingdays'); expect(writeText.mock.lastCall![0]).toContain('$99.50')
 })
 
 it('clears temporary provider names when switching quotation context', async () => {
@@ -217,11 +217,11 @@ it('adds inline quantity columns, calculates by original route identity and copi
   await click('预览报价单'); await click('复制报价数据')
   const snapshot = render.mock.lastCall![0]
   expect(snapshot.quantityLabels).toEqual(['1 pc', '2 pcs', '3 pcs', '5 pcs', '8 pcs'])
-  expect(snapshot.rows[0]).toMatchObject({ country: 'Canada', provider: 'Custom Carrier', processingTime: '3-4 days', prices: [10.8,16.35,21.9,30.85,27.5] })
+  expect(snapshot.rows[0]).toMatchObject({ country: 'Canada', provider: 'Custom Carrier', processingTime: '3-4 workingdays', prices: [10.8,16.35,21.9,30.85,27.5] })
   expect(snapshot.rows[1].prices[4]).toBeNull()
   const cells = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
   expect(cells.every((cells: string[]) => cells.length === 11)).toBe(true)
-  expect(cells[1][10]).toBe('$27.50'); expect(cells[2][10]).toBe('—')
+  expect(cells[1][6]).toBe('$27.50'); expect(cells[2][6]).toBe('—')
   expect(JSON.stringify(state.rows)).toBe(original)
 })
 
@@ -313,7 +313,7 @@ it('drag sorting moves the complete quantity column with manual prices into both
   expect(render.mock.lastCall![0].quantityLabels).toEqual(['8 pcs','1 pc','2 pcs','3 pcs','5 pcs'])
   expect(render.mock.lastCall![0].rows[0].prices).toEqual([77.75,10.8,16.35,21.9,30.85])
   expect(render.mock.lastCall![0].rows[1].prices[0]).toBe(8.5)
-  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[6]).toBe('$77.75')
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[2]).toBe('$77.75')
   expect(JSON.stringify(state.rows)).toBe(original)
 })
 
@@ -325,8 +325,8 @@ it('keyboard ordering supports boundaries and preserves focus, then editing stil
   handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await settle()
   expect(document.activeElement?.getAttribute('aria-label')).toBe('第 2 个价格列排序，左右键移动')
   await input('第 1 行第 2 列美元价格','66.66');await click('复制报价数据')
-  expect(writeText.mock.lastCall![0].split('\r\n')[0].split('\t').slice(6)).toEqual(['2 pcs (USD)','1 pc (USD)','3 pcs (USD)','5 pcs (USD)'])
-  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t').slice(6)).toEqual(['$16.35','$66.66','$21.90','$30.85'])
+  expect(writeText.mock.lastCall![0].split('\r\n')[0].split('\t').slice(2, -4)).toEqual(['2 pcs (USD)','1 pc (USD)','3 pcs (USD)','5 pcs (USD)'])
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t').slice(2, -4)).toEqual(['$16.35','$66.66','$21.90','$30.85'])
 })
 
 it.each(['edit-away', 'remove'])('preserves the original manual price when a duplicate quantity is corrected by %s', async action => {
@@ -337,7 +337,7 @@ it.each(['edit-away', 'remove'])('preserves the original manual price when a dup
   if (action === 'edit-away') await input('第 5 个价格列数量', '8')
   else { document.querySelector<HTMLButtonElement>('[aria-label="删除第 5 个价格列"]')!.click(); await settle() }
   await click('复制报价数据')
-  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[7]).toBe('$88.88')
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[3]).toBe('$88.88')
 })
 
 it('keeps duplicate quantity price inputs disabled so temporary duplicates cannot edit another column', async () => {
@@ -357,7 +357,7 @@ it('rejects a burst of repeated previews and only accepts the newest of reversed
   jobs[1].reject(new Error('old failure')); jobs[0].finish([png()]); await settle()
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
   expect(document.querySelector('[role="alert"]')).toBeNull()
-  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('2-3 days')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('2-3 workingdays')
 })
 
 it('does not allocate image URLs when an unmounted render finishes', async () => {
@@ -410,10 +410,10 @@ it.each([17, 43, 101])('checks every copied cell through 40 interleaved edits, m
     const sourceBeforeCopy = JSON.stringify(state.rows)
     await click('复制报价数据')
     const cells = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
-    expect(cells[0].slice(6)).toEqual(order.map(q=>`${q} ${q===1?'pc':'pcs'} (USD)`))
+    expect(cells[0].slice(2, -4)).toEqual(order.map(q=>`${q} ${q===1?'pc':'pcs'} (USD)`))
     state.rows.forEach((source, index) => {
       const saved = new Map([[1,source.quote1],[2,source.quote2],[3,source.quote3],[5,source.quoteCustom]])
-      expect(cells[index+1].slice(6)).toEqual(order.map(q=>`$${(manual.get(`${source.channelKey}:${q}`) ?? saved.get(q) ?? q+(source.channelKey==='one'?0.25:0.75)).toFixed(2)}`))
+      expect(cells[index+1].slice(2, -4)).toEqual(order.map(q=>`$${(manual.get(`${source.channelKey}:${q}`) ?? saved.get(q) ?? q+(source.channelKey==='one'?0.25:0.75)).toFixed(2)}`))
     })
     expect(JSON.stringify(state.rows)).toBe(sourceBeforeCopy)
   }
@@ -494,4 +494,80 @@ it('unlocks the quote editor and shows a truthful timeout when the native clipbo
     reject(new Error('late denial')); await settle()
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('复制超时')
   } finally { vi.useRealTimers() }
+})
+
+function groupKeys() { return [...document.querySelectorAll<HTMLElement>('.sheet-group')].map(header => header.dataset.group) }
+async function dragGroup(from: string, to: string) {
+  document.querySelector(`[data-group-handle="${from}"]`)!.dispatchEvent(new Event('dragstart', { bubbles: true }))
+  document.querySelector(`[data-group="${to}"]`)!.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }))
+  await settle()
+}
+it('moves the whole price group across both ends without changing captured prices, and aligns TSV and accessible preview', async () => {
+  const state = mount([row(), row('two')])
+  await input('第 1 行第 2 列美元价格', '42.6+2')
+  const captured = exposed.capturePrices(), source = JSON.stringify(state.rows)
+  expect(groupKeys()).toEqual(['number','sku','prices','country','provider','shippingTime','processingTime'])
+  for (const target of ['number', 'processingTime', 'sku']) {
+    await dragGroup('prices', target)
+    const keys = groupKeys()
+    expect(exposed.capturePrices()).toEqual(captured)
+    expect(document.querySelector('.sheet-price-group')?.getAttribute('colspan')).toBe('4')
+    await click('预览报价单'); await click('复制报价数据')
+    const table = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
+    const priceAt = table[0].indexOf('1 pc (USD)')
+    expect(priceAt).toBe(keys.indexOf('prices'))
+    expect(table[0].slice(priceAt, priceAt + 4)).toEqual(['1 pc (USD)','2 pcs (USD)','3 pcs (USD)','5 pcs (USD)'])
+    expect(table[1].slice(priceAt, priceAt + 4)).toEqual(['$10.80','$44.60','$21.90','$30.85'])
+    expect(table[2][table[0].indexOf('Logistics Provider')]).toBe('Hua Hai')
+    const accessible = [...document.querySelectorAll('.sheet-accessible tr')].map(tr => [...tr.children].map(td=>td.textContent))
+    expect(accessible).toEqual(table)
+    await click('编辑报价单')
+  }
+  expect(JSON.stringify(state.rows)).toBe(source)
+})
+it('keeps a moved hidden column in place when shown again, supports keyboard sorting and resets layout with the product', async () => {
+  const state = mount()
+  await dragGroup('country', 'number')
+  const toggle = document.querySelector<HTMLInputElement>('[aria-label="显示国家列"]')!
+  toggle.click(); await settle()
+  expect(groupKeys()).not.toContain('country')
+  toggle.click(); await settle()
+  expect(groupKeys()[0]).toBe('country')
+  document.querySelector('[data-group-handle="sku"]')!.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true }))
+  await settle()
+  expect(groupKeys().slice(0,3)).toEqual(['country','sku','number'])
+  expect(document.activeElement?.getAttribute('data-group-handle')).toBe('sku')
+  await input('第 1 行国家', 'CA'); await click('复制报价数据')
+  expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[0]).toBe('Canada')
+  state.contextKey = 'next-product'; await settle()
+  expect(groupKeys()).toEqual(['number','sku','prices','country','provider','shippingTime','processingTime'])
+})
+it('includes optional WhatsApp in the preview, invalidates changed contacts and clears them on product reset', async () => {
+  const state = mount()
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].whatsapp).toBe('')
+  await click('编辑报价单'); await input('WhatsApp 联系方式', '  +86 XXX XXXX XXXX  ')
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].whatsapp).toBe('+86 XXX XXXX XXXX')
+  expect(document.querySelector('.sheet-accessible p')?.textContent).toContain('WhatsApp: +86 XXX XXXX XXXX')
+  await click('编辑报价单'); await input('WhatsApp 联系方式', '+1 XXX XXX XXXX')
+  expect(button('复制报价图片').disabled).toBe(true)
+  await click('预览报价单'); expect(render.mock.lastCall![0].whatsapp).toBe('+1 XXX XXX XXXX')
+  state.contextKey = 'new-product'; await settle()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="WhatsApp 联系方式"]')?.value).toBe('')
+  await click('预览报价单'); expect(document.querySelector('.sheet-accessible p')?.textContent).not.toContain('WhatsApp')
+})
+it('blocks both kinds of sorting during a clipboard write', async () => {
+  mount()
+  let finish!: () => void
+  writeText.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+  await click('复制报价数据')
+  const keys = groupKeys()
+  await dragGroup('prices', 'number')
+  document.querySelector('[data-group-handle="sku"]')!.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowLeft', bubbles:true }))
+  document.querySelector('.sheet-drag')!.dispatchEvent(new KeyboardEvent('keydown', { key:'ArrowRight', bubbles:true }))
+  await settle()
+  expect(groupKeys()).toEqual(keys)
+  expect(document.querySelector<HTMLInputElement>('.sheet-quantity input')!.value).toBe('1')
+  finish(); await settle()
 })
