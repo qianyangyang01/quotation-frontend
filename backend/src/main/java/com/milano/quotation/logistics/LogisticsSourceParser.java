@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.21-additions-v2";
+    public static final String VERSION="company-channels-2026.09.21-qiaojie-us-v3";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际");
@@ -399,6 +399,10 @@ public class LogisticsSourceParser {
             if(effectiveProvider.equals("闪电猴")&&!defaultText(value(source,r,headers,"国家简码"),countryCode(value(source,r,headers,"区域名称"))).equals("US")){source.filteredOtherRows.put(r,"闪电猴仅限美国");continue;}
             var target=selected(source,effectiveProvider,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")),r,channels);
             if(target==null)continue;
+            if(QiaojieSourceRules.usOnly(target.path("channelName").asText(),defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")),target.path("companyChannelId").asText())
+                    && !defaultText(value(source,r,headers,"国家简码"),countryCode(value(source,r,headers,"区域名称"))).trim().equalsIgnoreCase("US")) {
+                source.filteredOtherRows.put(r,QiaojieSourceRules.US_ONLY_REASON);continue;
+            }
             if(target.path("providerName").asText().isBlank())issue(target,r+1,"物流商","标准表需填写物流商","error");
             var row=mapper.createObjectNode();
             for(int c=0;c<LogisticsWorkbookService.KEYS.length;c++) {
@@ -575,6 +579,14 @@ public class LogisticsSourceParser {
                 if(yunexpress!=null)for(var text:source.rowTexts(r))if(text.length()>20)allNotes.add(text);
                 if(!source.rowEmpty(r))source.filteredFirstNextRows.add(r);
                 continue;
+            }
+            // Apply destination scope before touching price/weight cells, including malformed excluded rows.
+            if(qiaojie!=null&&QiaojieSourceRules.usOnly(qiaojie.name(),qiaojie.code(),"")) {
+                var destination=defaultText(columns.countryCode>=0?source.text(r,columns.countryCode):"",countryCode(columns.country>=0?source.text(r,columns.country):""));
+                if(!destination.trim().equalsIgnoreCase("US")) {
+                    selected(source,provider,qiaojie.name(),qiaojie.code(),r,channels);
+                    source.filteredOtherRows.put(r,QiaojieSourceRules.US_ONLY_REASON);continue;
+                }
             }
             var weight=!columns.fixedWeight.isBlank()?columns.fixedWeight:columns.from>=0?
                     source.numberText(r,columns.from)+(columns.boundsInGrams?"G":"")+"-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):

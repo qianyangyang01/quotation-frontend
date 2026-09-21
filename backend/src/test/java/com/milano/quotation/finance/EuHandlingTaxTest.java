@@ -7,6 +7,13 @@ import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.*;
 
 class EuHandlingTaxTest {
+    @Test void acceptsExplicitlyIncludedDutyAndHandlingButRejectsForgedInclusion() {
+        var value=combinedSettings("exempt","exempt");
+        var option=combinedOption(BigDecimal.ZERO,BigDecimal.ZERO,false).put("taxIncluded",true).put("taxFeeMode","exempt");
+        assertTrue(ChannelTaxRules.validateQuote(value,option,exchange(),5));
+        ((ObjectNode)value.path("countries").get(1).path("handlingRules").get(0)).put("mode","fixed-order");
+        assertThrows(AppException.class,()->ChannelTaxRules.validateQuote(value,option,exchange(),5));
+    }
     private final ChannelTaxRulesTest fixtures = new ChannelTaxRulesTest();
     ObjectNode rule(String mode) { return fixtures.rule(mode); }
     ObjectNode settings(ObjectNode rule, String country) { return fixtures.settings(rule, country); }

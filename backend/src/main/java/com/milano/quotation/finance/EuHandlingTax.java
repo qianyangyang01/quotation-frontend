@@ -35,8 +35,10 @@ final class EuHandlingTax {
             euRule = formula;
         }
         boolean weighted = isWeight(euRule) || isWeight(handling);
-        if (!option.path("taxConfigured").asBoolean() || option.path("taxIncluded").asBoolean()
-            || !(weighted ? "weight-order" : "fixed-order").equals(option.path("taxFeeMode").asText())) changed();
+        boolean included=euRule!=null&&"exempt".equals(euRule.path("mode").asText())
+                &&handling!=null&&"exempt".equals(handling.path("mode").asText());
+        if (!option.path("taxConfigured").asBoolean() || option.path("taxIncluded").asBoolean()!=included
+            || !(included ? "exempt" : weighted ? "weight-order" : "fixed-order").equals(option.path("taxFeeMode").asText())) changed();
         var fixed = weighted ? BigDecimal.ZERO : euAmount(euRule, eu, settings, provider, BigDecimal.ZERO, exchange).add(amount(handling, BigDecimal.ZERO, exchange));
         equal(option.path("countryFixedTaxUsd"), fixed);
         var snapshots = option.path("taxCalculations");

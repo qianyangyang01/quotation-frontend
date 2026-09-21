@@ -13,6 +13,14 @@ function settings() {
 }
 const quote = (value: FinanceTaxSettings, country = '罗马尼亚', channelKey = key, weightKg = 0.5, eurUsd = 1.2) => calculateFinanceQuoteTax(value, country, channelKey.split('::')[1]!, 10, { channelKey, weightKg, usdCny: 6.7, eurUsd })
 describe('EU duty plus member-country handling fee', () => {
+  it('keeps explicitly included duty and handling marked as included', () => {
+    const value = settings()
+    value.countries.find(c => c.country === '欧盟')!.channelRules = [rule(0, { mode: 'exempt' })]
+    value.countries.find(c => c.country === '罗马尼亚')!.handlingRules = [rule(0, { mode: 'exempt' })]
+    expect(quote(value)).toMatchObject({ included: true, configured: true, feeMode: 'exempt', label: '已含税', taxUsd: 0, totalUsd: 10, calculation: { rule: 'eu-handling-v1', euTaxUsd: 0, handlingFeeUsd: 0 } })
+    value.countries.find(c => c.country === '罗马尼亚')!.handlingRules = [rule(1)]
+    expect(quote(value)).toMatchObject({ included: false, taxUsd: 1 })
+  })
   it.each(['罗马尼亚', 'Romania', 'RO'])('adds 3 + 1 for %s and preserves the original override', country => {
     const value = settings(), original = JSON.stringify(value)
     expect(quote(value, country)).toMatchObject({ taxUsd: 4, totalUsd: 14, fixedFeeUsd: 4, calculation: { rule: 'eu-handling-v1', euTaxUsd: 3, handlingFeeUsd: 1 } })

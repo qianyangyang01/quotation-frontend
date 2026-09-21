@@ -16,7 +16,7 @@ it.skipIf(!path)('matches Java for every Qiaojie kilogram tier and every country
     }
     return [channel.channelName, rule]
   }))
-  expect(evidence.cases).toHaveLength(420)
+  expect(evidence.cases).toHaveLength(276)
   for (const item of evidence.cases) {
     expect(calculateLogisticsFee(rules.get(item.channel)!, item.country, item.weightKg), `${item.channel}/${item.country}/${item.weightKg}`).toMatchObject({
       total: item.expected.total, chargeWeightKg: item.expected.chargeWeightKg, minChargeWeightKg: item.channel.endsWith('包税B') ? .5 : .05,

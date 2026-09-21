@@ -27,11 +27,12 @@ export function calculateEuHandlingTax(settings: FinanceTaxSettings, country: st
     const handlingFeeUsd = handling ? channelTaxAmount(handling, context || {}) : 0
     const taxUsd = decimal(eu.taxUsd).plus(handlingFeeUsd).toDecimalPlaces(2).toNumber()
     const weighted = ['weight-order', 'weight-eur'].includes(eu.feeMode) || handling?.mode === 'weight'
+    const included = eu.included && handling?.mode === 'exempt'
     return {
-      included: false, configured: true, ratePercent: null,
-      fixedFeeUsd: weighted ? 0 : taxUsd, feeMode: weighted ? 'weight-order' : 'fixed-order', taxUsd,
+      included, configured: true, ratePercent: null,
+      fixedFeeUsd: weighted ? 0 : taxUsd, feeMode: included ? 'exempt' : weighted ? 'weight-order' : 'fixed-order', taxUsd,
       totalUsd: decimal(baseUsd).plus(taxUsd).toDecimalPlaces(2).toNumber(),
-      label: `欧盟关税 $${eu.taxUsd.toFixed(2)} + 本国处理费 $${handlingFeeUsd.toFixed(2)} = $${taxUsd.toFixed(2)}/单${weighted ? '（按整单重量）' : ''}`,
+      label: included ? '已含税' : `欧盟关税 $${eu.taxUsd.toFixed(2)} + 本国处理费 $${handlingFeeUsd.toFixed(2)} = $${taxUsd.toFixed(2)}/单${weighted ? '（按整单重量）' : ''}`,
       calculation: { rule: 'eu-handling-v1', country: local.country, channelKey: context?.channelKey || '', weightKg: context?.weightKg || 0, euTaxUsd: eu.taxUsd, handlingFeeUsd, taxUsd },
     }
   } catch (error) { return missing(error instanceof Error ? error.message : '本国处理费设置无效') }

@@ -26,8 +26,8 @@ class QiaojieSourceParserTest {
         var result=parser.parse(Files.readAllBytes(path),path.getFileName().toString(),directory());
         Files.createDirectories(Path.of("target/qiaojie"));Files.writeString(Path.of("target/qiaojie/parsed.json"),result.toPrettyString());
         assertEquals(4,result.path("channels").size());
-        var counts=Map.of("QEGBTF",78,"QEUBF",7,"QEGBFA",64,"QEUFAB",10);
-        var countries=Map.of("QEGBTF",31,"QEUBF",1,"QEGBFA",23,"QEUFAB",1);
+        var counts=Map.of("QEGBTF",78,"QEUBF",7,"QEGBFA",8,"QEUFAB",10);
+        var countries=Map.of("QEGBTF",31,"QEUBF",1,"QEGBFA",1,"QEUFAB",1);
         var cases=mapper.createArrayNode();
         for(var c:result.path("channels")) {
             var product=QiaojieSourceRules.named(c.path("channelName").asText());assertNotNull(product);
@@ -58,7 +58,7 @@ class QiaojieSourceParserTest {
                 }
             }
         }
-        assertEquals(318,result.path("priceCellsParsed").asInt());
+        assertEquals(206,result.path("priceCellsParsed").asInt());
         var piece=result.path("channels").valueStream().filter(c->c.path("channelName").asText().equals("巧捷小包快递特惠包税B")).findFirst().orElseThrow();
         double[] amounts={91,121,161,192,231,266,298,358,428,489};
         for(int tier=0;tier<10;tier++)for(double offset:new double[]{.000001,.001,.25,.499999}) {
@@ -145,6 +145,42 @@ class QiaojieSourceParserTest {
         assertFalse(result.path("channels").get(0).path("quoteReady").asBoolean());
         for(var name:List.of("巧捷小包全球特惠E(服装)","巧捷专线小包全球特惠F(普货)","巧捷小包全球特惠M(特货)"))assertNull(QiaojieSourceRules.named(name));
         assertFalse(QiaojieSourceRules.allowed("巧捷小包全球商派E(服装)","QEGBFA"));
+    }
+    @Test void aOnlyRetainsUsBeforeReadingExcludedPriceCellsAndRejectsEmptyCoverage() throws Exception {
+        byte[] mixed,foreignOnly;
+        try(var book=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture("巧捷小包全球特惠A(服装)",51,false)))) {
+            var sheet=book.getSheetAt(0);
+            row(sheet,10,"INVALID","加拿大","CA","INVALID","INVALID","INVALID","7-12天");
+            mixed=bytes(book);
+            sheet.getRow(8).getCell(1).setCellValue("加拿大");sheet.getRow(8).getCell(2).setCellValue("CA");
+            foreignOnly=bytes(book);
+        }
+        var result=parser.parse(mixed,"巧捷.xlsx",directory());var channel=result.path("channels").get(0);
+        assertTrue(channel.path("quoteReady").asBoolean(),channel.toPrettyString());assertEquals(2,channel.path("rows").size());
+        assertTrue(channel.path("rows").valueStream().allMatch(r->r.path("countryCode").asText().equals("US")));
+        assertTrue(result.toString().contains(QiaojieSourceRules.US_ONLY_REASON));
+        var empty=parser.parse(foreignOnly,"巧捷.xlsx",directory());
+        assertTrue(empty.path("channels").valueStream().noneMatch(c->c.path("quoteReady").asBoolean()));
+    }
+    @Test void standardImportsFilterNonUsRowsBeforeParsingPrices() throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var sheet=book.createSheet("标准价格");var headers=new ArrayList<>(LogisticsWorkbookService.HEADERS);
+            headers.addAll(List.of("物流商","渠道名称","原产品代码","计费方式"));
+            row(sheet,0,headers.toArray());
+            for(int i=1;i<=2;i++) {
+                var r=sheet.createRow(i);
+                for(int c=0;c<headers.size();c++)r.createCell(c).setCellValue("");
+                r.getCell(0).setCellValue(i==1?"美国":"加拿大");r.getCell(1).setCellValue(i==1?"US":"CA");
+                r.getCell(2).setCellValue(7);r.getCell(3).setCellValue(12);
+                r.getCell(15).setCellValue(0);r.getCell(16).setCellValue(1);r.getCell(19).setCellValue(.05);
+                if(i==1)r.getCell(18).setCellValue(51);else r.getCell(18).setCellValue("INVALID");
+                r.getCell(38).setCellValue("巧捷");r.getCell(39).setCellValue("巧捷小包全球特惠A(服装)");r.getCell(40).setCellValue("QEGBFA");r.getCell(41).setCellValue("per-kg");
+            }
+            var result=parser.parse(bytes(book),"巧捷标准表.xlsx",directory());
+            var c=result.path("channels").get(0);assertEquals(1,c.path("rows").size());assertEquals(0,c.path("errors").asInt());
+            assertEquals("US",c.path("rows").get(0).path("countryCode").asText());
+            assertTrue(result.toString().contains(QiaojieSourceRules.US_ONLY_REASON));
+        }
     }
     byte[] pieceFixture(double minimum,double rate,double secondPoint,boolean singleHeader) throws Exception {
         try(var book=new XSSFWorkbook()) {
