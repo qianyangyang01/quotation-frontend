@@ -48,7 +48,7 @@ public class UserAccountService implements UserDetailsService {
     }
 
     @Transactional
-    public UserView update(UUID id, String role, String status, String actorAccount) {
+    public UserView update(UUID id, String role, String status, String actorAccount, Long expectedVersion) {
         validateRole(role);
         if (!List.of("enabled", "disabled").contains(status)) throw AppException.unprocessable("账号状态不合法");
         var user = users.findById(id).orElseThrow(() -> AppException.notFound("账号不存在"));
@@ -58,7 +58,10 @@ public class UserAccountService implements UserDetailsService {
         if (changesOwnRole || disablesSelf) {
             throw new AppException(HttpStatus.CONFLICT, "CURRENT_ACCOUNT_PROTECTED", "不能修改当前登录账号的角色或停用当前账号");
         }
+        if (expectedVersion == null || user.version != expectedVersion)
+            throw AppException.conflict("账号资料已更新或缺少版本信息，请刷新账号列表后重试");
         user.roleKey = role; user.status = status; user.updatedAt = Instant.now();
+        users.saveAndFlush(user);
         return UserView.of(user);
     }
 

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { currentAuthUser, defaultHomeForRole, hasPermission, initializeAuth, isAuthenticated, type PermissionKey } from '@/data/authStore'
 import { routeView } from '@/router/routeViews'
+import { installNavigationRecovery } from '@/router/navigationRecovery'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -22,6 +23,8 @@ const router = createRouter({
     { path: '/:pathMatch(.*)*', redirect: () => isAuthenticated.value ? defaultHomeForRole() : '/login' },
   ],
 })
+
+installNavigationRecovery(router)
 
 router.beforeEach(async (to) => {
   if (to.meta.public) return true

@@ -56,14 +56,14 @@ class UserAccountServiceTest {
         when(users.findById(current.id)).thenReturn(Optional.of(current));
 
         var disable = assertThrows(AppException.class,
-                () -> service.update(current.id, "super_admin", "disabled", "admin"));
+                () -> service.update(current.id, "super_admin", "disabled", "admin", 0L));
         assertEquals("CURRENT_ACCOUNT_PROTECTED", disable.code());
 
         var demote = assertThrows(AppException.class,
-                () -> service.update(current.id, "finance", "enabled", "ADMIN"));
+                () -> service.update(current.id, "finance", "enabled", "ADMIN", 0L));
         assertEquals("CURRENT_ACCOUNT_PROTECTED", demote.code());
 
-        var unchanged = service.update(current.id, "super_admin", "enabled", "ADMIN");
+        var unchanged = service.update(current.id, "super_admin", "enabled", "ADMIN", 0L);
         assertEquals("super_admin", unchanged.role());
         assertEquals("enabled", unchanged.status());
     }
@@ -72,9 +72,38 @@ class UserAccountServiceTest {
         var employee = UserAccount.create("EMP001", "员工", "hash", "employee", false);
         when(users.findById(employee.id)).thenReturn(Optional.of(employee));
 
-        var updated = service.update(employee.id, "purchase", "disabled", "ADMIN");
+        var updated = service.update(employee.id, "purchase", "disabled", "ADMIN", 0L);
 
         assertEquals("purchase", updated.role());
         assertEquals("disabled", updated.status());
+    }
+
+    @Test void staleAdministratorCannotReenableOrChangeAnAccount() {
+        var employee = UserAccount.create("EMP001", "员工", "hash", "employee", false);
+        employee.status = "disabled"; employee.version = 3;
+        when(users.findById(employee.id)).thenReturn(Optional.of(employee));
+        assertEquals("CONFLICT", assertThrows(AppException.class,
+                () -> service.update(employee.id, "purchase", "enabled", "ADMIN", 2L)).code());
+        assertEquals("disabled", employee.status);
+        assertEquals("employee", employee.roleKey);
+        verify(users, never()).saveAndFlush(any());
+    }
+
+    @Test void oldClientWithoutAccountVersionMustRefresh() {
+        var employee = UserAccount.create("EMP001", "员工", "hash", "employee", false);
+        when(users.findById(employee.id)).thenReturn(Optional.of(employee));
+        assertEquals("CONFLICT", assertThrows(AppException.class,
+                () -> service.update(employee.id, "purchase", "enabled", "ADMIN", null)).code());
+        verify(users, never()).saveAndFlush(any());
+    }
+
+    @Test void returnsFlushedVersionSoTheNextEditCanUseIt() {
+        var employee = UserAccount.create("EMP001", "员工", "hash", "employee", false);
+        employee.version = 3;
+        when(users.findById(employee.id)).thenReturn(Optional.of(employee));
+        when(users.saveAndFlush(employee)).thenAnswer(invocation -> { employee.version++; return employee; });
+        var updated = service.update(employee.id, "purchase", "disabled", "ADMIN", 3L);
+        assertEquals(4, updated.version());
+        verify(users).saveAndFlush(employee);
     }
 }

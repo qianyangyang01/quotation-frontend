@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ApiError } from '@/services/http'
 import {
   authState,
   currentAuthUser,
@@ -51,11 +52,17 @@ async function changeRole(id: string, role: RoleKey) {
   if (!user) return
   if (user.account === currentAuthUser.value.account) { toast('当前登录账号不能在本页修改自身角色'); return }
   try { await updateAuthUserRole(id, role); toast(`已将${user.name}调整为${roleName(role)}`) }
-  catch (error) { toast(error instanceof Error ? error.message : '角色修改失败') }
+  catch (error) { await showAccountUpdateError(error, '角色修改失败') }
 }
 async function changeStatus(id: string, status: AccountStatus) {
   try { await updateAuthUserStatus(id, status); toast(status === 'enabled' ? '账号已启用' : '账号已停用') }
-  catch (error) { toast(error instanceof Error ? error.message : '操作失败') }
+  catch (error) { await showAccountUpdateError(error, '操作失败') }
+}
+async function showAccountUpdateError(error: unknown, fallback: string) {
+  if (error instanceof ApiError && error.status === 409) {
+    await refreshUsers()
+    toast(loadError.value ? '账号资料已变化，重新加载失败，请重试。' : '账号资料已同步为最新状态，请确认后重试。')
+  } else toast(error instanceof Error ? error.message : fallback)
 }
 async function addUser() {
   if (adding.value) return

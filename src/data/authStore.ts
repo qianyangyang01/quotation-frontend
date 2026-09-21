@@ -86,19 +86,34 @@ export function hasAnyPermission(...permissions: PermissionKey[]) { return permi
 export function canAccessMyRecords(permissions: readonly PermissionKey[]) { return permissions.includes('myRecords') || permissions.includes('allRecords') }
 export function defaultHomeForRole(role = currentAuthUser.value.role) { if (role === 'logistics') return '/quotation/logistics'; if (role === 'purchase') return '/quotation/products'; if (role === 'employee') return '/quotation'; return '/quotation/overview' }
 
-export async function loadAuthUsers() { authState.users = await api.get<AuthUser[]>('/users', { signal: AbortSignal.timeout(20_000) }); return authState.users }
+export async function loadAuthUsers() {
+  const loaded = await api.get<AuthUser[]>('/users', { signal: AbortSignal.timeout(20_000) })
+  authState.users = loaded.map(user => {
+    const known = authState.users.find(item => item.id === user.id)
+    return known && (known.version ?? -1) > (user.version ?? -1) ? known : user
+  })
+  return authState.users
+}
 export async function saveAuthUser(input: { name: string; account: string; role: RoleKey; status: AccountStatus; password?: string }) {
   if (!input.password) throw new Error('请设置初始密码')
   const result = await request<AuthUser>('/users', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(20_000) }); authState.users.push(result); return result
 }
 export async function updateAuthUserRole(id: string, role: RoleKey) {
   const current = authState.users.find(user => user.id === id); if (!current) throw new Error('账号不存在')
-  const updated = await api.patch<AuthUser>(`/users/${id}`, { role, status: current.status }); Object.assign(current, updated); return updated
+  const updated = await api.patch<AuthUser>(`/users/${id}`, { role, status: current.status, version: userVersion(current) }); applyUserUpdate(updated); return updated
 }
 export async function updateAuthUserStatus(id: string, status: AccountStatus) {
   const current = authState.users.find(user => user.id === id); if (!current) throw new Error('账号不存在')
   if (current.account === currentAuthUser.value.account && status === 'disabled') throw new Error('不能停用当前登录账号')
-  const updated = await api.patch<AuthUser>(`/users/${id}`, { role: current.role, status }); Object.assign(current, updated); return updated
+  const updated = await api.patch<AuthUser>(`/users/${id}`, { role: current.role, status, version: userVersion(current) }); applyUserUpdate(updated); return updated
+}
+function userVersion(user: AuthUser) {
+  if (!Number.isSafeInteger(user.version) || user.version! < 0) throw new Error('账号资料缺少版本，请重新加载账号列表后重试')
+  return user.version!
+}
+function applyUserUpdate(updated: AuthUser) {
+  const current = authState.users.find(user => user.id === updated.id)
+  if (current && (updated.version ?? -1) >= (current.version ?? -1)) Object.assign(current, updated)
 }
 export async function resetAuthUserPassword(id: string, password: string) { await api.post(`/users/${id}/reset-password`, { password }) }
 export async function changeCurrentPassword(currentPassword: string, newPassword: string) { await api.post('/auth/change-password', { currentPassword, newPassword }); if (authState.current) authState.current.mustChangePassword = false }

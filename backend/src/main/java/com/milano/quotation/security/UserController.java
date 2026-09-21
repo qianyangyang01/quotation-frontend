@@ -28,7 +28,7 @@ public class UserController {
     @PatchMapping("/{id}") ApiResponse<UserAccountService.UserView> update(@PathVariable UUID id, @Valid @RequestBody UpdateUser body, Authentication authentication) {
         var actor = UserAccountService.normalizeAccount(authentication.getName());
         try {
-            var result = users.update(id, body.role(), body.status(), actor);
+            var result = users.update(id, body.role(), body.status(), actor, body.version());
             audit.record("user.update", "user", id.toString(), "success", Map.of("actor", actor, "targetAccount", result.account(), "role", body.role(), "status", body.status()));
             return ApiResponse.ok(result);
         } catch (com.milano.quotation.common.AppException error) {
@@ -41,6 +41,6 @@ public class UserController {
     }
 
     public record CreateUser(@NotBlank String account, @NotBlank String name, @NotBlank String password, @NotBlank String role) {}
-    public record UpdateUser(@NotBlank String role, @NotBlank String status) {}
+    public record UpdateUser(@NotBlank String role, @NotBlank String status, Long version) {}
     public record ResetPassword(@NotBlank String password) {}
 }

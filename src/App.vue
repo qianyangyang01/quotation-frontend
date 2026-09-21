@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
+import PageLoadNotice from '@/components/PageLoadNotice.vue'
 import { authState, isAuthenticated } from '@/data/authStore'
 import { hasRequestAccountChanged } from '@/services/http'
 
@@ -22,6 +23,7 @@ const showTopbar = computed(() => isAuthenticated.value && !['login', 'change-pa
   </div>
   <template v-else>
     <AppTopbar v-if="showTopbar" />
+    <PageLoadNotice />
     <aside v-if="accountChanged" class="account-change-notice" role="alert">
       <span>登录账号已在其他页面切换，当前操作未提交。请复制需要保留的内容，再刷新确认账号。</span>
       <button type="button" @click="refreshAccount">刷新并确认账号</button>
