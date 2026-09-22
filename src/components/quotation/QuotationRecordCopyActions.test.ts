@@ -34,10 +34,11 @@ it('both record scopes share working footer copying, with the saved USD snapshot
   state.record.quoteOptions![0]!.logisticsSamples = [{ quantity: 1, input: { weightKg: 0.6 }, total: 38.51 }]
   const before = JSON.stringify(state.record)
   footerButton('复制报价数据').click(); await settle()
-  expect(writeText.mock.calls[0][0]).toContain('闪电猴\t内部渠道\t内部规则')
-  expect(writeText.mock.calls[0][0]).toContain('1件系统价（USD）')
+  expect(writeText.mock.calls[0][0]).toContain('美国 · 闪电猴 · 内部渠道')
+  expect(writeText.mock.calls[0][0]).toContain('计费规则\t内部规则')
+  expect(writeText.mock.calls[0][0]).toContain('系统报价 USD')
   expect(writeText.mock.calls[0][0]).toContain('6.20')
-  expect(writeText.mock.calls[0][0]).toContain('1件物流运费（CNY/单）')
+  expect(writeText.mock.calls[0][0]).toContain('物流运费 CNY')
   expect(writeText.mock.calls[0][0]).toContain('38.51')
   expect(document.querySelector('dialog')!.open).toBe(false)
   footerButton('复制报价图片').click(); await settle()
@@ -52,7 +53,7 @@ it('both record scopes share working footer copying, with the saved USD snapshot
 it('copies internal details without needing an English provider name or rendering a customer image', async () => {
   const state = mount('新物流')
   footerButton('复制报价数据').click(); await settle()
-  expect(writeText.mock.lastCall![0]).toContain('新物流\t内部渠道')
+  expect(writeText.mock.lastCall![0]).toContain('新物流 · 内部渠道')
   expect(render).not.toHaveBeenCalled()
   expect(state.record.quoteOptions![0]!.carrier).toBe('新物流')
 })

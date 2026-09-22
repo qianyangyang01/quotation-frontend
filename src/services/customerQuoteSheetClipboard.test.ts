@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { copyQuoteSheetData } from './customerQuoteSheetClipboard'
+import { copyQuoteSheetData, copyQuotationText } from './customerQuoteSheetClipboard'
 import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 
 const sheet: CustomerQuoteSheet = {
@@ -20,4 +20,19 @@ it('writes tabular text with headers and preserves clipboard rejection', async (
 it('reports unsupported clipboard without fallback writes', async () => {
   vi.stubGlobal('isSecureContext', false)
   await expect(copyQuoteSheetData(sheet)).rejects.toThrow('不支持复制数据')
+})
+
+it('writes both clipboard formats asynchronously and falls back to the same narrow text when HTML is rejected', async () => {
+  vi.stubGlobal('isSecureContext', true)
+  vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Blob>) {} })
+  const write = vi.fn().mockResolvedValue(undefined), writeText = vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('navigator', { clipboard: { write, writeText } })
+  await copyQuotationText('数量\t运费\n1套\t55.78', '<table>saved</table>')
+  const item = write.mock.calls[0]![0][0]
+  expect(await item.data['text/html'].text()).toBe('<table>saved</table>')
+  expect(await item.data['text/plain'].text()).toBe('数量\t运费\n1套\t55.78')
+  expect(writeText).not.toHaveBeenCalled()
+  write.mockRejectedValueOnce(new Error('HTML unsupported'))
+  await copyQuotationText('same narrow text', '<table>saved</table>')
+  expect(writeText).toHaveBeenCalledWith('same narrow text')
 })

@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { updateQuotationRecord, type QuotationRecord } from '@/data/quotationRecords'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
-import { quotationRecordReconciliationTsv } from '@/data/quotationRecordReconciliation'
+import { quotationRecordCopyLayout } from '@/data/quotationRecordCopyLayout'
 import { copyQuotationText } from '@/services/customerQuoteSheetClipboard'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 
@@ -68,8 +68,9 @@ async function copyData() {
     const latest = props.refreshRecord ? await props.refreshRecord(props.record.id) : props.record
     if (context !== contextKey.value) return
     if (!latest) throw new Error('报价记录已不可用，请刷新后重试')
-    await copyQuotationText(quotationRecordReconciliationTsv(latest))
-    if (context === contextKey.value) status.value = { message: '已复制完整对账明细，可直接粘贴到 Excel', failed: false }
+    const layout = quotationRecordCopyLayout(latest)
+    await copyQuotationText(layout.text, layout.html)
+    if (context === contextKey.value) status.value = { message: '已复制完整对账明细（分区排版），可直接粘贴到 Excel', failed: false }
   }
   catch (error) { if (context === contextKey.value) status.value = { message: error instanceof Error ? error.message : '复制失败，请重试', failed: true } }
   finally { copyingData.value = false }
@@ -80,7 +81,7 @@ async function copyData() {
   <div class="record-copy-actions">
     <div class="record-copy-buttons">
       <button ref="imageButton" type="button" :disabled="copyingData" @click="openImage">复制报价图片</button>
-      <button type="button" :disabled="copyingData" title="复制完整对账明细：具体渠道、各数量物流运费、最终含包材重量、税费、附加费及各数量系统价和客户价（USD/CNY）" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
+      <button type="button" :disabled="copyingData" title="按国家与渠道分区复制：基本信息、各数量报价、运费与税费；粘贴到 Excel 可保留表格排版" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
     </div>
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>
     <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="copyData">重新复制对账明细</button>

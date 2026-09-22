@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { copyQuoteSheetData } from './customerQuoteSheetClipboard'
+import { copyQuoteSheetData, copyQuotationText } from './customerQuoteSheetClipboard'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits } from '@/data/customerQuoteSheet'
 
 const sheet = () => buildCustomerQuoteSheet({
@@ -49,5 +49,24 @@ it('does not claim success when both clipboard methods refuse the write', async 
   Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
   await expect(copyQuoteSheetData(sheet())).rejects.toThrow('未复制成功')
   expect(document.querySelector('textarea')).toBeNull()
+})
+
+it('writes styled HTML and matching plain text in the same synchronous copy event', async () => {
+  vi.stubGlobal('isSecureContext', true)
+  const writeText = vi.fn(), data = new DataTransfer()
+  vi.stubGlobal('navigator', { clipboard: { writeText } })
+  const button = document.createElement('button'); document.body.append(button); button.focus()
+  Object.defineProperty(document, 'execCommand', { configurable: true, value: () => {
+    const event = new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true })
+    document.activeElement!.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    return true
+  } })
+  await copyQuotationText('数量\t运费\n1套\t55.78', '<table><tr><td>55.78</td></tr></table>')
+  expect(data.getData('text/plain')).toBe('数量\t运费\n1套\t55.78')
+  expect(data.getData('text/html')).toContain('<table>')
+  expect(document.activeElement).toBe(button)
+  expect(document.querySelector('textarea')).toBeNull()
+  expect(writeText).not.toHaveBeenCalled()
 })
 
