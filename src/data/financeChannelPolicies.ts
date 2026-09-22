@@ -60,6 +60,11 @@ export type FinanceChannelPolicy = {
 
 export type CustomerGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'NEW'
 export function customerGradeLabel(grade: string) { return grade === 'NEW' ? '新客户' : `${grade}级客户` }
+// Display names are independent of the legacy values used by saved quotations.
+export function customerGradeDisplayLabel(grade: string) {
+  if (grade === 'E' || grade === 'E级客户') return '普通客户'
+  return /^(S|A|B|C|D|NEW)$/.test(grade) ? customerGradeLabel(grade) : grade
+}
 export type CustomerGradeSetting = { grade: CustomerGrade; coefficient: number; enabled: boolean }
 export type FinanceExchangeRateSetting = { usdCny: number; eurUsd?: number; updatedAt: string }
 

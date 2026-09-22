@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { customerGradeLabel } from '@/data/financeChannelPolicies'
+import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
 import { computed, ref } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
@@ -86,7 +86,7 @@ const quoteRange = computed(() => {
           <div><dt>商品</dt><dd>{{ productName || '待查询' }}</dd></div>
           <div><dt>SKU</dt><dd>{{ sku || '—' }}</dd></div>
           <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
-          <div><dt>客户等级</dt><dd>{{ customerGradeLabel(customerGrade) }}</dd></div>
+          <div><dt>客户等级</dt><dd>{{ customerGradeDisplayLabel(customerGrade) }}</dd></div>
           <div><dt>自定义数量</dt><dd>{{ Math.max(1, customQuantity || 1) }}{{ unitLabel }}</dd></div>
         </dl>
       </section>
