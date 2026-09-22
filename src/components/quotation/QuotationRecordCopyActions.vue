@@ -85,7 +85,7 @@ async function copyData(mode: 'full' | 'quote' = 'full') {
     <div class="record-copy-buttons">
       <button type="button" :disabled="copyingData" title="仅复制客户、SKU、国家、物流商与渠道、各数量报价及预计时效" @click="copyData('quote')">{{ copyingData && copyMode === 'quote' ? '正在复制…' : '仅复制报价单' }}</button>
       <button ref="imageButton" class="copy-image" type="button" :disabled="copyingData" @click="openImage">复制报价图片</button>
-      <button type="button" :disabled="copyingData" title="复制横向报价表：国家、运输、1—8件（组合为套）及已保存的其他数量，附产品成本、运费与税费明细；粘贴到 Excel 可保留排版" @click="copyData('full')">{{ copyingData && copyMode === 'full' ? '正在复制…' : '复制报价数据' }}</button>
+      <button type="button" :disabled="copyingData" title="复制横向报价表：国家与分区、运输及实际有报价的数量，附产品成本、运费与税费明细；粘贴到 Excel 可保留排版" @click="copyData('full')">{{ copyingData && copyMode === 'full' ? '正在复制…' : '复制报价数据' }}</button>
     </div>
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>
     <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="copyData(copyMode)">{{ copyMode === 'quote' ? '重新复制报价单' : '重新复制对账明细' }}</button>

@@ -2,6 +2,7 @@ import Decimal from 'decimal.js'
 import { customerGradeDisplayLabel } from './financeChannelPolicies'
 import type { QuotationRecord } from './quotationRecords'
 import { quotationProductCostSnapshot, snapshotMoney } from './quotationProductCostSnapshot'
+import { quotationRecordCopyCountry } from './quotationRecordCopyCountry'
 
 const escapeHtml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 const safe = (value: string) => {
@@ -17,7 +18,9 @@ export function quotationRecordCopyMatrix(record: QuotationRecord, source: strin
   const routes = source.slice(start + 1, start + 1 + (record.quoteOptions?.length ?? 0))
   const unit = record.quoteMode === 'bundle' ? '套' : '件'
   const savedLabels = headers.filter(header => header.endsWith('客户价（USD）')).map(header => header.replace(/客户价（USD）$/, ''))
-  const labels = [...new Set([...Array.from({ length: 8 }, (_, i) => `${i + 1}${unit}`), ...savedLabels])]
+  const hasPrice = (value: string | undefined) => value != null && value.trim() !== '' && Number.isFinite(Number(value))
+  const labels = [...new Set(savedLabels)].filter(label => routes.some(route =>
+    ['客户价（USD）', '系统价（USD）'].some(field => hasPrice(route[headers.indexOf(label + field)]))))
     .sort((a, b) => (parseInt(a) || Infinity) - (parseInt(b) || Infinity))
   const value = (route: string[], field: string, missing = '未保存') => route[headers.indexOf(field)] ?? missing
   const primaryIndex = Math.max(0, record.quoteOptions?.findIndex(option => option.isPrimary) ?? -1)
@@ -39,7 +42,7 @@ export function quotationRecordCopyMatrix(record: QuotationRecord, source: strin
   const htmlRows = metadata.map(row => `<tr>${row.map((cell, i) => renderCell(cell, i === 1 && row[0] === 'SKU' ? '#e2f4f4' : '#ffffff', false, i === 5 ? columnCount - 5 : 1, 'left')).join('')}</tr>`)
   const countryLabel = (route: string[]) => {
     const country = value(route, '国家'), region = value(route, '区域')
-    return region && !['全国统一', '未保存', country].includes(region) ? `${country} · ${region}` : country
+    return quotationRecordCopyCountry(country, region)
   }
   const countryColor = (country: string) => /香港/.test(country) ? '#00b0f0' : /加拿大|澳大利亚/.test(country) ? '#ff0000' : /美国/.test(country) ? '#ffc000' : /英国/.test(country) ? '#ffff00' : '#92d050'
   textRows.push([''], ['各数量客户报价 USD/单及费用明细'], heading)

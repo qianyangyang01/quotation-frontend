@@ -12,7 +12,8 @@ const record = () => normalizeQuotationRecord({ id: 'quote', no: 'QT-ONE', custo
 
 it('copies only customer quotation fields and routes, preserving customer blanks without leaking internal costs', () => {
   const saved = record(), before = JSON.stringify(saved), layout = quotationRecordQuoteOnlyLayout(saved)
-  expect(layout.text).toContain('澳大利亚 · 3区\t燕文｜化妆品专线\t20.00\t未报价')
+  expect(layout.text).toContain('澳大利亚 · 3区\t燕文｜化妆品专线\t20.00\t230.00')
+  expect(layout.text.split('\n').find(row => row.startsWith('国家\t'))).toBe('国家\t物流渠道\t1件\t12件\t预计时效')
   expect(layout.text).toContain('12件')
   expect(layout.text).toContain('230.00')
   for (const output of [layout.text, layout.html]) {
@@ -41,5 +42,20 @@ it('does not invent customer prices for missing route rows and supports empty re
   saved.customerQuote!.rows = []
   expect(quotationRecordQuoteOnlyLayout(saved).text).not.toContain('19.20')
   saved.quoteOptions = []
-  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('未保存国家与物流渠道报价')
+  const layout = quotationRecordQuoteOnlyLayout(saved)
+  expect(layout.text).toContain('未保存国家与物流渠道报价')
+  const doc = new DOMParser().parseFromString(layout.html, 'text/html')
+  for (const row of doc.querySelectorAll('tr')) expect([...row.children].reduce((n, cell) => n + Number(cell.getAttribute('colspan')), 0)).toBe(3)
+})
+
+it('keeps partial route blanks under priced columns and clearly distinguishes full Australian region names', () => {
+  const saved = record()
+  saved.quoteOptions![0]!.quoteRegion = '澳大利亚2区'
+  saved.quoteOptions!.push({ ...saved.quoteOptions![0]!, id: 'b', quoteRegion: '澳大利亚3区' })
+  saved.customerQuote!.rows.push({ optionId: 'b', prices: [null, 0, null] })
+  const layout = quotationRecordQuoteOnlyLayout(saved)
+  expect(layout.text).toContain('国家\t物流渠道\t1件\t2件\t12件\t预计时效')
+  expect(layout.text).toContain('澳大利亚2区\t燕文｜化妆品专线\t20.00\t未报价\t230.00')
+  expect(layout.text).toContain('澳大利亚3区\t燕文｜化妆品专线\t未报价\t0.00\t未报价')
+  expect(layout.text).not.toContain('澳大利亚 · 澳大利亚')
 })

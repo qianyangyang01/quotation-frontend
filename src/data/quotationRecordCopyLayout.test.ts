@@ -36,7 +36,9 @@ it('keeps every route and its quantity-specific fees on one row, without changin
   expect(layout.text.indexOf('4套\t')).toBeLessThan(layout.text.indexOf('5套\t'))
   expect(layout.text).toContain('001\t0.21\t普票\t6')
   expect(layout.text).toContain('001\t枕头\t2\t0.1\t11.00\t12.34')
-  expect(layout.text).toContain('国家\t运输\t1套\t2套\t3套\t4套\t5套\t6套\t7套\t8套')
+  expect(header.slice(0, 6)).toEqual(['国家', '运输', '1套', '2套', '4套', '5套'])
+  expect(header).not.toContain('3套')
+  expect(header).not.toContain('8套')
   expect(layout.text).toContain('产品成本快照（CNY）')
   const doc = new DOMParser().parseFromString(layout.html, 'text/html')
   for (const table of doc.querySelectorAll('table')) {
@@ -70,7 +72,7 @@ it('keeps countries and regions on separate matrix rows, preserves quantities ab
   expect(header).toContain('12套')
   const usa = rows.find(row => row[0] === '美国')!
   expect(usa[header.indexOf('1套')]).toBe('19.20')
-  expect(usa[header.indexOf('8套')]).toBe('未报价')
+  expect(header).not.toContain('8套')
   expect(usa[header.indexOf('12套')]).toBe('120.00')
   expect(rows.some(row => row[0] === '澳大利亚 · 3区')).toBe(true)
   const doc = new DOMParser().parseFromString(layout.html, 'text/html')
@@ -91,9 +93,30 @@ it('exports actual saved taxes, surcharge and operation fees in the same route r
   const rows = quotationRecordCopyLayout(saved).text.split('\n').map(row => row.split('\t'))
   const header = rows.find(row => row[0] === '国家')!, route = rows.find(row => row[0] === '美国')!
   expect(route[header.indexOf('关税 USD/单')]).toContain('1套：1.25；2套：2.50')
-  expect(route[header.indexOf('关税 USD/单')]).toContain('3套：未保存')
+  expect(route[header.indexOf('关税 USD/单')]).not.toContain('3套：')
   expect(route[header.indexOf('附加费 USD/单')]).toBe('0.60')
   expect(route[header.indexOf('操作费 USD/单')]).toContain('1套：0.30；2套：0.50')
   expect(route[header.indexOf('关税说明')]).toBe('按单税费')
   expect(rows.filter(row => row[0] === '美国')).toHaveLength(1)
+})
+
+it('omits quantities with no price across all routes from price and fee columns, retaining zero and priced custom quantities', () => {
+  const saved = record()
+  saved.customerQuote = undefined
+  saved.quoteOptions![0]!.quote1Usd = 0
+  saved.quoteOptions![0]!.quoteCustomUsd = null
+  const layout = quotationRecordCopyLayout(saved)
+  const rows = layout.text.split('\n').map(row => row.split('\t'))
+  const header = rows.find(row => row[0] === '国家')!, route = rows.find(row => row[0] === '美国')!
+  expect(header.slice(0, 5)).toEqual(['国家', '运输', '1套', '2套', '物流运费 CNY/单'])
+  expect(route[2]).toBe('0.00')
+  expect(route[header.indexOf('物流运费 CNY/单')]).not.toContain('5套：')
+  expect(route.join('\t')).not.toMatch(/[3-8]套：/)
+  saved.quoteOptions!.push({ ...saved.quoteOptions![0]!, id: 'au2', country: '澳大利亚', quoteRegion: '澳大利亚2区', quoteCustomUsd: 50 })
+  saved.quoteOptions!.push({ ...saved.quoteOptions![0]!, id: 'au3', country: '澳大利亚', quoteRegion: '澳大利亚3区', quoteCustomUsd: 60 })
+  const revised = quotationRecordCopyLayout(saved)
+  expect(revised.text).toContain('澳大利亚2区\t')
+  expect(revised.text).toContain('澳大利亚3区\t')
+  expect(revised.text).not.toContain('澳大利亚 · 澳大利亚')
+  expect(revised.text).toContain('1套\t2套\t5套')
 })
