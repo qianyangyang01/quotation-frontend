@@ -13,8 +13,8 @@ function setup(){
     loadQuotationSync:vi.fn(async():Promise<{purchaseVersions:Record<string,string>;logisticsRevision:string;financeVersions?:FinanceSettingVersions}>=>({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:{}})),
     logisticsLoadState:{value:'ready'}, productQueryBusy:{value:false},purchaseRecords:{value:[]},
     findPurchaseProduct:()=>({}),purchaseRevision:()=> 'v1',logisticsRevision:{value:'r1'},
-    savedQuoteRows:{value:[{}]},products:{value:[{logisticsAttribute:'普货'}]},buildQuoteOptions:()=>({}),
-    checkSelectedLogistics:vi.fn(async()=>({revision:'r1'})),ApiError,syncPending:{value:''},syncError:{value:''}}
+    savedQuoteRows:{value:[{}]},products:{value:[{logisticsAttribute:'普货'}]},customQuoteQuantity:{value:1},buildQuoteOptions:()=>({}),
+    checkSelectedLogistics:vi.fn(async(_body?:unknown)=>({revision:'r1'})),ApiError,syncPending:{value:''},syncError:{value:''}}
   const node=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='checkLiveVersions')!
   const js=ts.transpile(node.getText(ast),{target:ts.ScriptTarget.ES2022})
   const run=new Function('state',`with(state){${js};return checkLiveVersions}`)(state)
@@ -87,6 +87,28 @@ function backgroundSetup(){
   state.checkSelectedLogistics.mockResolvedValue({revision:'r2'})
   return {state:background,run}
 }
+it.each([1,4,5])('preserves quantity %i for weight-based tax validation before saving',async(quantity)=>{
+  const {state,run}=setup()
+  state.customQuoteQuantity.value=quantity
+  state.checkSelectedLogistics.mockImplementation(async body=>{
+    const requested=(body as {customQuoteQuantity?:number}).customQuoteQuantity ?? 1
+    // A CHC tax for four/five items cannot be checked against a one-item snapshot.
+    const tax=(qty:number)=>Math.round((0.6+0.159*qty*1.5)*1.16*100)/100
+    if(tax(requested)!==tax(quantity))throw new ApiError('渠道税费或汇率已变化',409,'CONFLICT','quantity')
+    return {revision:'r1'}
+  })
+  expect(await run(undefined,true)).toBe(true)
+  expect(state.syncPending.value).toBe('')
+  expect(state.checkSelectedLogistics).toHaveBeenCalledWith(expect.objectContaining({customQuoteQuantity:quantity}),undefined)
+})
+it.each([1,4,5])('keeps quantity %i on both background channel checks',async(quantity)=>{
+  const {state,run}=backgroundSetup()
+  state.customQuoteQuantity.value=quantity
+  expect(await run()).toBe(true)
+  expect(state.checkSelectedLogistics).toHaveBeenCalledTimes(2)
+  for(const [body] of state.checkSelectedLogistics.mock.calls)expect(body).toEqual(expect.objectContaining({customQuoteQuantity:quantity}))
+  expect(state.replaceLogisticsRules).toHaveBeenCalledOnce()
+})
 it('does not apply an obsolete background rules response after a newer save check',async()=>{
   const {state,run}=backgroundSetup();let done!:(value:{verified:boolean;revision:string;rules:object[]})=>void
   state.loadPublishedLogisticsRules.mockImplementationOnce(()=>new Promise(resolve=>{done=resolve}))

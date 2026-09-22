@@ -672,7 +672,7 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     const newerLogistics = Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
     // A library revision is only a signal to check. It is never itself a save blocker.
     if ((newerLogistics || beforeSave) && savedQuoteRows.value.length) {
-      try { await checkSelectedLogistics({ logisticsAttribute: products.value[0].logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal) }
+      try { await checkSelectedLogistics({ logisticsAttribute: products.value[0].logisticsAttribute, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), quoteOptions: buildQuoteOptions() }, signal) }
       catch (error) {
         if (error instanceof ApiError && [409, 422].includes(error.status)) changed.push('已选渠道的适用价格或可用性')
         else throw error
@@ -691,7 +691,7 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
       if (!latest.verified || signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature() || quoteLogisticsBusy()) return false
       if (savedQuoteRows.value.length) {
         try {
-          const checked = await checkSelectedLogistics({ logisticsAttribute: p.logisticsAttribute, quoteOptions: buildQuoteOptions() }, signal)
+          const checked = await checkSelectedLogistics({ logisticsAttribute: p.logisticsAttribute, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), quoteOptions: buildQuoteOptions() }, signal)
           if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature()) return false
           if (checked.revision !== latest.revision) return true
         } catch (error) {
