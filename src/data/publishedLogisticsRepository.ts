@@ -225,14 +225,14 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: {
   return { revision: manifest.revision, rules: await request, source: 'network' as const, verified }
 }
 
-export async function loadPublishedLogisticsRuleCatalog(attributes: string[], countries: string[], options: { signal?: AbortSignal; manifest?: PublishedLogisticsManifest } = {}) {
+export async function loadPublishedLogisticsRuleCatalog(attributes: string[], countries: string[], options: { signal?: AbortSignal; manifest?: PublishedLogisticsManifest; apply?: boolean } = {}) {
   void attributes
   const { manifest, verified } = options.manifest
     ? { manifest: options.manifest, verified: true }
     : await loadPublishedLogisticsManifest({ signal: options.signal, allowStale: false })
   options.signal?.throwIfAborted()
   if (!normalized(countries).length) {
-    replaceLogisticsRules([])
+    if (options.apply !== false) replaceLogisticsRules([])
     return { revision: manifest.revision, rules: [] as LogisticsRule[], verified }
   }
   const generation = catalogGeneration
@@ -256,10 +256,10 @@ export async function loadPublishedLogisticsRuleCatalog(attributes: string[], co
     }
     options.signal?.throwIfAborted()
     if (generation !== catalogGeneration) throw new Error('物流目录已失效，请重新加载')
-    replaceLogisticsRules(cached.rules)
+    if (options.apply !== false) replaceLogisticsRules(cached.rules)
     return { revision: cached.revision, rules: cached.rules, verified }
   } catch (error) {
-    if (generation === catalogGeneration) replaceLogisticsRules([])
+    if (generation === catalogGeneration && options.apply !== false) replaceLogisticsRules([])
     throw error
   }
 }

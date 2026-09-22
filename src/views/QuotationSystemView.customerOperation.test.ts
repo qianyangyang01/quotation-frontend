@@ -6,7 +6,7 @@ import { operationFeesLabel } from '@/data/customerOperationFees'
 import { api } from '@/services/http'
 import { clearFinanceSettingsCache, readFinanceSetting } from '@/services/financeSettings'
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), onBeforeRouteLeave: vi.fn() }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn().mockResolvedValue(undefined) }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/quotationSync')>(),
   startQuotationSync: vi.fn(() => vi.fn()),

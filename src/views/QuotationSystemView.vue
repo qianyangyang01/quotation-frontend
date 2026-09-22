@@ -9,7 +9,9 @@ import { normalizeLogisticsAttribute, selectableLogisticsAttributes } from '@/da
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { calculateFinanceQuoteFees, FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { loadRecord } from '@/data/quotationRecordQuery'
+import { quotationReissuePayload } from '@/services/quotationReissue'
 import { currentAuthUser } from '@/data/authStore'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
@@ -21,7 +23,7 @@ import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKA
 import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { applyCommissionThreshold, parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { validateQuotationConditions } from '@/services/quotationValidation'
-import { logisticsRebuilding, buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
+import { logisticsRebuilding, buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules, loadPublishedLogisticsRuleCatalog } from '@/data/publishedLogisticsRepository'
 import { loadQuotationWorkspaceConfiguration } from '@/services/quotationWorkspaceBootstrap'
 import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
 import QuotationHeader from '@/components/quotation/QuotationHeader.vue'
@@ -134,6 +136,45 @@ const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
 const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('common')
 const quoteMode = ref<QuotationMode>('single')
 const route = useRoute()
+const router = useRouter()
+const pendingReissue = shallowRef<Awaited<ReturnType<typeof loadRecord>>>(null)
+const reissueSource = ref('')
+const reissueBusy = ref(false)
+const reissueError = ref('')
+let reissueHandled = false
+function finishReissueRequest() {
+  reissueHandled = true
+  const query = { ...route.query }
+  delete query.reissue
+  void router.replace({ query }).catch(() => undefined)
+}
+
+async function applyReissue() {
+  const record = pendingReissue.value
+  if (!record || reissueBusy.value) return
+  reissueBusy.value = true
+  reissueError.value = ''
+  try {
+    window.clearTimeout(draftTimer)
+    await draftSavePromise
+    const payload = quotationReissuePayload(record)
+    const skus = payload.quoteMode === 'bundle' ? payload.bundleItems.map(item => item.sku) : [payload.product.sku]
+    const purchases = new Map<string, PurchaseProductRecord | undefined>()
+    for (const sku of skus) purchases.set(sku.trim().toUpperCase().replace(/\s+/g, ''), await recordForDraftSku(sku))
+    await applyDraftPayload(payload, purchases)
+    draftReady.value = true
+    markDraftDirty()
+    reissueSource.value = record.no
+    pendingReissue.value = null
+    finishReissueRequest()
+  } catch (error) {
+    reissueError.value = error instanceof Error ? error.message : '再次发起失败，请重试'
+  } finally { reissueBusy.value = false }
+}
+function keepExistingDraft() {
+  pendingReissue.value = null
+  finishReissueRequest()
+}
 const purchaseRecords = ref<PurchaseProductRecord[]>([])
 const financePolicies = shallowRef(loadFinanceChannelPolicies())
 const financeCountrySettings = ref(loadFinanceCountrySettings())
@@ -967,6 +1008,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     specified: draftSelection(payload.specifiedSelections || []),
     template: draftSelection(payload.templateSelections || []),
   }
+  Object.values(modeSelections.value).flat().forEach(selection => requestedQuoteCountries.add(selection.country))
   restoredCommonSelections.value = draftSelection(payload.commonSelections || [])
   restoredSpecifiedSelections.value = draftSelection(payload.specifiedSelections || [])
   restoredTemplateSelections.value = draftSelection(payload.templateSelections || [])
@@ -1008,6 +1050,7 @@ async function loadAndRestoreDraft() {
   return state
 }
 async function resetLocalDraft() {
+  reissueSource.value = ''
   purchaseQueryError.value = ''
   modeSelections.value = { common: [], specified: [], template: [] }
   draftReady.value = false
@@ -1048,7 +1091,14 @@ async function initializeQuotationWorkspace() {
     await loadQuotationWorkspaceConfiguration()
     applyLiveFinance()
     readiness.value = await loadQuotationReadiness()
+    const reissueId = !reissueHandled && typeof route.query.reissue === 'string' ? route.query.reissue : ''
+    const sourceRecord = reissueId ? await loadRecord(reissueId) : null
+    if (reissueId && !sourceRecord) throw new Error('原报价不存在或无权读取，请返回报价记录重新选择')
     const restored = await loadAndRestoreDraft()
+    if (sourceRecord) {
+      pendingReissue.value = sourceRecord
+      if (!restored.exists) await applyReissue()
+    }
     const requestedSku = String(route.query.sku || '').trim()
     if (requestedSku && !restored.exists) { skuSearch.value = requestedSku; markDraftDirty() }
   } catch (error) {
@@ -1134,7 +1184,7 @@ onMounted(async () => {
   catch { toast('报价工作区读取失败，请检查网络后重试') }
   if (viewDisposed) return
   stopLiveSync = startQuotationSync(async signal => {
-    if (!draftReady.value || syncRefreshing.value || savingQuotation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
+    if (!draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
     await checkLiveVersions(signal)
     if (!signal.aborted && !activePurchaseSkus().length && syncPending.value) {
       await reloadLiveConfiguration(); syncPending.value = ''
@@ -1413,6 +1463,23 @@ const activeQuoteMatrixContextKey = computed(() => {
 // Repricing invalidates prices, but local photos belong to the current account/product selection.
 const quoteSheetResetKey = computed(() => JSON.stringify([currentAuthUser.value.id, quoteMode.value, activePurchaseSkus()]))
 const activeCommonCountryCount = computed(() => activeQuotationCountries.value.filter(country => country.stage === 'common').length)
+async function searchChannelCountries(query: string): Promise<string[]> {
+  const countries = activeQuotationCountries.value
+  const attribute = products.value[0].logisticsAttribute
+  const result = await loadPublishedLogisticsRuleCatalog([attribute], countries.map(country => country.name), { apply: false })
+  const policies = financePolicies.value.filter(policy => normalizeLogisticsAttribute(policy.category) === normalizeLogisticsAttribute(attribute))
+  const policy = policies.length === 1 && policies[0]?.enabled ? policies[0] : undefined
+  const matching = result.rules.filter(rule => rule.status === '启用').map(rule => ({
+    prices: rule.prices,
+    keys: rule.relations.filter(relation => [rule.name, relation.carrier, relation.channel, relation.channelCode].some(value => value?.toLowerCase().includes(query)))
+      .map(relation => financeChannelKey(rule.id, relation)),
+  })).filter(rule => rule.keys.length)
+  return countries.filter(country => {
+    const allowed = policy?.countryRules.find(item => item.country === country.name)?.allowedChannels || []
+    return matching.some(rule => rule.keys.some(key => allowed.includes(key))
+      && rule.prices.some(price => price.areaName === country.name || price.countryCode.toUpperCase() === country.code.toUpperCase()))
+  }).map(country => country.name)
+}
 function activeQuoteRowsForCountry(country: string, region?: string) {
   return region === undefined ? countryQuoteRows(country) : regionalQuoteRows(JSON.stringify([country, region]))
 }
@@ -1903,6 +1970,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button v-if="draftVersion >= 0 || draftDirty" type="button" @click="clearDraft">清空重新开始</button>
       </section>
 
+      <section v-if="reissueSource" class="draft-status-bar"><span><b>再次发起 · 原报价 {{ reissueSource }}</b><small>已带入原报价条件，可修改 SKU、物流属性和渠道；价格按当前资料重新计算，保存后生成新的报价单。</small></span></section>
+
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
           :commission-threshold="commissionThreshold" :commission-error="commissionError" @update:commission-threshold="commissionThreshold=$event"
@@ -1949,6 +2018,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
           <QuotationCommonMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
+            :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
@@ -2012,6 +2082,14 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           <small>QUOTATION HISTORY</small><h2>最近报价记录</h2>
           <div class="history"><p><b>SKU00022968 · 美国</b><span>¥58.43</span><small>管理员 · 今天 09:48</small></p><p><b>SKU00023107 · 德国</b><span>¥212.74</span><small>管理员 · 昨天 16:20</small></p><p><b>SKU00022968 · 法国</b><span>¥61.20</span><small>范国华 · 07-29 11:05</small></p></div>
         </template>
+      </section>
+    </div>
+    <div v-if="pendingReissue" class="modal-mask draft-dialog-mask">
+      <section class="modal draft-dialog" role="dialog" aria-modal="true" aria-labelledby="reissue-title">
+        <h2 id="reissue-title">再次发起报价</h2>
+        <p>将带入 {{ pendingReissue.no }} 的客户、SKU、物流属性和渠道选择，并按当前资料重新计算。继续后会替换当前工作区草稿，原报价记录保持不变。</p>
+        <p v-if="reissueError" role="alert">{{ reissueError }}</p>
+        <footer><button :disabled="reissueBusy" @click="keepExistingDraft">保留当前草稿</button><button class="primary" :disabled="reissueBusy" @click="applyReissue">{{ reissueBusy ? '正在载入…' : '载入并再次发起' }}</button></footer>
       </section>
     </div>
     <div v-if="showDraftLeaveDialog" class="modal-mask draft-dialog-mask">
