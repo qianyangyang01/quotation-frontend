@@ -4,6 +4,7 @@ import { updateQuotationRecord, type QuotationRecord } from '@/data/quotationRec
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
 import { quotationRecordCopyLayout } from '@/data/quotationRecordCopyLayout'
+import { quotationRecordQuoteOnlyLayout } from '@/data/quotationRecordQuoteOnlyLayout'
 import { copyQuotationText } from '@/services/customerQuoteSheetClipboard'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 
@@ -17,6 +18,7 @@ const dialog = ref<HTMLDialogElement | null>(null)
 const imageButton = ref<HTMLButtonElement | null>(null)
 const status = ref<{ message: string; failed: boolean }>()
 const copyingData = ref(false)
+const copyMode = ref<'full' | 'quote'>('full')
 let opening = 0
 
 watch(contextKey, () => { opening++; status.value = undefined; dialog.value?.close() })
@@ -59,18 +61,19 @@ async function savePrices() {
   } catch(error) {if (props.record.id===id) status.value={message:error instanceof Error?error.message:'保存失败',failed:true}}
   finally {saving.value=false}
 }
-async function copyData() {
+async function copyData(mode: 'full' | 'quote' = 'full') {
   if (copyingData.value) return
   const context = contextKey.value
   copyingData.value = true
+  copyMode.value = mode
   status.value = undefined
   try {
     const latest = props.refreshRecord ? await props.refreshRecord(props.record.id) : props.record
     if (context !== contextKey.value) return
     if (!latest) throw new Error('报价记录已不可用，请刷新后重试')
-    const layout = quotationRecordCopyLayout(latest)
+    const layout = mode === 'quote' ? quotationRecordQuoteOnlyLayout(latest) : quotationRecordCopyLayout(latest)
     await copyQuotationText(layout.text, layout.html)
-    if (context === contextKey.value) status.value = { message: '已复制完整对账明细（分区排版），可直接粘贴到 Excel', failed: false }
+    if (context === contextKey.value) status.value = { message: mode === 'quote' ? '已复制报价单（含物流渠道），可直接粘贴到 Excel' : '已复制完整对账明细（横向报价表），可直接粘贴到 Excel', failed: false }
   }
   catch (error) { if (context === contextKey.value) status.value = { message: error instanceof Error ? error.message : '复制失败，请重试', failed: true } }
   finally { copyingData.value = false }
@@ -80,11 +83,12 @@ async function copyData() {
 <template>
   <div class="record-copy-actions">
     <div class="record-copy-buttons">
-      <button ref="imageButton" type="button" :disabled="copyingData" @click="openImage">复制报价图片</button>
-      <button type="button" :disabled="copyingData" title="按国家与渠道分区复制：基本信息、各数量报价、运费与税费；粘贴到 Excel 可保留表格排版" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
+      <button type="button" :disabled="copyingData" title="仅复制客户、SKU、国家、物流商与渠道、各数量报价及预计时效" @click="copyData('quote')">{{ copyingData && copyMode === 'quote' ? '正在复制…' : '仅复制报价单' }}</button>
+      <button ref="imageButton" class="copy-image" type="button" :disabled="copyingData" @click="openImage">复制报价图片</button>
+      <button type="button" :disabled="copyingData" title="复制横向报价表：国家、运输、1—8件（组合为套）及已保存的其他数量，附产品成本、运费与税费明细；粘贴到 Excel 可保留排版" @click="copyData('full')">{{ copyingData && copyMode === 'full' ? '正在复制…' : '复制报价数据' }}</button>
     </div>
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>
-    <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="copyData">重新复制对账明细</button>
+    <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="copyData(copyMode)">{{ copyMode === 'quote' ? '重新复制报价单' : '重新复制对账明细' }}</button>
     <Teleport to="body">
       <dialog ref="dialog" class="record-quote-dialog" aria-label="报价记录客户报价单" @cancel.prevent="closeImage">
         <header><div><strong>客户报价单</strong><p>使用本条记录保存的渠道与报价；预览后复制图片，或直接复制表格数据。</p></div><button type="button" :disabled="sheet?.copying" aria-label="关闭客户报价单" @click="closeImage">×</button></header>
@@ -97,5 +101,5 @@ async function copyData() {
 </template>
 
 <style scoped>
-.record-copy-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px}.record-copy-buttons{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}.record-copy-buttons button{height:40px;padding:0 16px;border:1px solid #f58220;border-radius:7px;background:#fff8f1;color:#a6530c;font-size:12px;font-weight:700;cursor:pointer}.record-copy-buttons button:first-child{background:#f58220;color:#fff}.record-copy-buttons button:disabled{opacity:.5;cursor:wait}.record-copy-actions>p{margin:0;max-width:420px;font-size:12px;line-height:1.6;color:#287a4d}.record-copy-actions>p.failed{color:#a65410}.record-quote-dialog{box-sizing:border-box;width:min(1600px,96vw);max-width:96vw;max-height:92vh;padding:0;border:1px solid #e0e4e8;border-radius:12px;background:#fff;color:#202532;font-family:Arial,"Microsoft YaHei",sans-serif;box-shadow:0 20px 60px #17212b33}.record-quote-dialog::backdrop{background:#17212b88}.record-quote-dialog>header{display:flex;justify-content:space-between;gap:20px;padding:18px 22px;margin-bottom:18px;border-bottom:1px solid #e5e9ed}.record-quote-dialog>header strong{font-size:16px}.record-quote-dialog>header p{margin:6px 0 0;font-size:12px;color:#72808a;line-height:1.6}.record-quote-dialog>header button{align-self:flex-start;width:32px;height:32px;border:0;border-radius:6px;background:#f3f5f7;font-size:24px;cursor:pointer}
+.record-copy-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px}.record-copy-buttons{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}.record-copy-buttons button{height:40px;padding:0 16px;border:1px solid #f58220;border-radius:7px;background:#fff8f1;color:#a6530c;font-size:12px;font-weight:700;cursor:pointer}.record-copy-buttons button.copy-image{background:#f58220;color:#fff}.record-copy-buttons button:disabled{opacity:.5;cursor:wait}.record-copy-actions>p{margin:0;max-width:420px;font-size:12px;line-height:1.6;color:#287a4d}.record-copy-actions>p.failed{color:#a65410}.record-quote-dialog{box-sizing:border-box;width:min(1600px,96vw);max-width:96vw;max-height:92vh;padding:0;border:1px solid #e0e4e8;border-radius:12px;background:#fff;color:#202532;font-family:Arial,"Microsoft YaHei",sans-serif;box-shadow:0 20px 60px #17212b33}.record-quote-dialog::backdrop{background:#17212b88}.record-quote-dialog>header{display:flex;justify-content:space-between;gap:20px;padding:18px 22px;margin-bottom:18px;border-bottom:1px solid #e5e9ed}.record-quote-dialog>header strong{font-size:16px}.record-quote-dialog>header p{margin:6px 0 0;font-size:12px;color:#72808a;line-height:1.6}.record-quote-dialog>header button{align-self:flex-start;width:32px;height:32px;border:0;border-radius:6px;background:#f3f5f7;font-size:24px;cursor:pointer}
 </style>

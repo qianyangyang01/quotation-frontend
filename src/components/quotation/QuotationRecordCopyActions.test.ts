@@ -34,8 +34,8 @@ it('both record scopes share working footer copying, with the saved USD snapshot
   state.record.quoteOptions![0]!.logisticsSamples = [{ quantity: 1, input: { weightKg: 0.6 }, total: 38.51 }]
   const before = JSON.stringify(state.record)
   footerButton('复制报价数据').click(); await settle()
-  expect(writeText.mock.calls[0][0]).toContain('美国 · 闪电猴 · 内部渠道')
-  expect(writeText.mock.calls[0][0]).toContain('计费规则\t内部规则')
+  expect(writeText.mock.calls[0][0]).toContain('美国\t闪电猴｜内部渠道')
+  expect(writeText.mock.calls[0][0]).toContain('计费规则：内部规则')
   expect(writeText.mock.calls[0][0]).toContain('系统报价 USD')
   expect(writeText.mock.calls[0][0]).toContain('6.20')
   expect(writeText.mock.calls[0][0]).toContain('物流运费 CNY')
@@ -53,7 +53,7 @@ it('both record scopes share working footer copying, with the saved USD snapshot
 it('copies internal details without needing an English provider name or rendering a customer image', async () => {
   const state = mount('新物流')
   footerButton('复制报价数据').click(); await settle()
-  expect(writeText.mock.lastCall![0]).toContain('新物流 · 内部渠道')
+  expect(writeText.mock.lastCall![0]).toContain('新物流｜内部渠道')
   expect(render).not.toHaveBeenCalled()
   expect(state.record.quoteOptions![0]!.carrier).toBe('新物流')
 })
@@ -103,4 +103,21 @@ it('a rejected financial review is advisory and keeps both copy paths available'
   footerButton('复制报价图片').click();await settle()
   expect(document.querySelector('dialog')!.open).toBe(true)
   expect(render).toHaveBeenCalledTimes(1)
+})
+
+it('copies the quote-only route table and retries that same scope after clipboard failure', async () => {
+  writeText.mockRejectedValueOnce(new Error('denied'))
+  const state = mount(), before = JSON.stringify(state.record)
+  footerButton('仅复制报价单').click(); await settle()
+  expect(footerButton('重新复制报价单')).toBeTruthy()
+  footerButton('重新复制报价单').click(); await settle()
+  expect(writeText).toHaveBeenCalledTimes(2)
+  for (const call of writeText.mock.calls) {
+    expect(call[0]).toContain('美国\t闪电猴｜内部渠道')
+    expect(call[0]).not.toContain('内部规则')
+    expect(call[0]).not.toContain('产品成本快照')
+  }
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('已复制报价单（含物流渠道）')
+  expect(JSON.stringify(state.record)).toBe(before)
+  expect(render).not.toHaveBeenCalled()
 })

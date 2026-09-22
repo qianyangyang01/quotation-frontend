@@ -1,5 +1,7 @@
 import { customerGradeDisplayLabel } from './financeChannelPolicies'
 import { quotationRecordReconciliationTsv } from './quotationRecordReconciliation'
+import { quotationRecordCopyMatrix } from './quotationRecordCopyMatrix'
+import { quotationProductCostSnapshot, snapshotMoney } from './quotationProductCostSnapshot'
 import type { QuotationRecord } from './quotationRecords'
 
 type LayoutRow = { kind: 'title' | 'section' | 'header' | 'data' | 'note' | 'blank'; cells: string[] }
@@ -9,9 +11,8 @@ const spans = (length: number) => length === 4 ? [1, 2, 1, 2] : length === 2 ? [
 /** Reflow the existing reconciliation export; all amounts still come from its saved-data path. */
 export function quotationRecordCopyLayout(record: QuotationRecord): { text: string; html: string } {
   const source = quotationRecordReconciliationTsv(record).split('\n').map(row => row.split('\t'))
+  const matrix = quotationRecordCopyMatrix(record, source)
   const tableStart = source.findIndex(row => row[0] === '序号')
-  const headers = source[tableStart]!
-  const quantityColumns = headers.flatMap((header, index) => header.endsWith('最终含包材重量（g）') ? [{ index, label: header.replace(/最终含包材重量（g）$/, '') }] : [])
   const routeCount = record.quoteOptions?.length ?? 0
   const rows: LayoutRow[] = []
   const add = (kind: LayoutRow['kind'], cells: string[]) => rows.push({ kind, cells })
@@ -28,33 +29,19 @@ export function quotationRecordCopyLayout(record: QuotationRecord): { text: stri
     if (grade >= 0) display[grade + 1] = customerGradeDisplayLabel(display[grade + 1]!)
     pairs(display)
   }
-  section('二、各国家与渠道报价')
-  if (!routeCount) add('note', ['未保存国家与渠道明细'])
-  for (const [index, route] of source.slice(tableStart + 1, tableStart + 1 + routeCount).entries()) {
-    const value = (header: string) => route[headers.indexOf(header)] ?? '未保存'
-    section(`${index + 1}. ${value('国家')} · ${value('物流商')} · ${value('渠道')}${value('首选') === '是' ? '（首选）' : ''}`)
-    // Identity and rule fields appear once per route, instead of on every quantity row.
-    const details: string[] = []
-    for (let col = 4; col < quantityColumns[0]!.index; col++) {
-      if (['物流商', '渠道'].includes(headers[col]!)) continue
-      details.push(headers[col]!, route[col]!)
-    }
-    pairs(details.slice(0, 12))
-    const groups: { label: string; values: string[] }[] = []
-    for (const { label } of quantityColumns) {
-      groups.push({ label, values: ['最终含包材重量（g）', '物流运费（CNY/单）', '系统价（USD）', '系统价（CNY）', '客户价（USD）', '客户价（CNY）', '关税（USD）', '操作费（USD/单）'].map(field => value(label + field)) })
-    }
-    groups.sort((a, b) => (parseInt(a.label) || Infinity) - (parseInt(b.label) || Infinity))
-    add('header', ['数量', '系统报价 USD', '系统报价 CNY', '客户报价 USD', '客户报价 CNY'])
-    for (const { label, values } of groups) add('data', [label, ...values.slice(2, 6)])
-    add('blank', [''])
-    add('header', ['数量', '含包材重量 g', '物流运费 CNY', '关税 USD', '附加费 USD', '操作费 USD'])
-    for (const { label, values } of groups) add('data', [label, values[0]!, values[1]!, values[6]!, value('附加费（USD/单）'), values[7]!])
-    add('blank', [''])
-    add('header', ['计费补充信息'])
-    pairs(details.slice(12))
+  section('产品成本快照（CNY）')
+  const cost = quotationProductCostSnapshot(record)
+  const safeCell = (value: string) => {
+    const text = value.replace(/[\t\r\n]+/g, ' ')
+    return /^[=+@-]/.test(text.trimStart()) ? `'${text}` : text
   }
-  section('三、包材、商品及成交明细')
+  for (const item of cost.items) {
+    pairs(['SKU', safeCell(item.sku), cost.bundle ? '每套件数' : '件数', String(item.count), '采购原价/件', snapshotMoney(item.base), '计入采购价/件', snapshotMoney(item.purchase), '采购发票', safeCell(item.invoice || '未保存'), '票点', item.rate == null ? '未保存' : `${item.rate}%`, '国内运费/件', snapshotMoney(item.freight)])
+  }
+  add('header', ['数量', '采购成本 CNY', '国内运费 CNY', '产品成本合计 CNY'])
+  for (const row of cost.rows) add('data', [`${row.quantity}${cost.unit}`, snapshotMoney(row.purchase), snapshotMoney(row.freight), snapshotMoney(row.total)])
+  add('note', ['产品成本合计为采购成本＋国内运费，不含国际运费、关税或操作费；缺失项不回填。'])
+  section('二、包材、商品及成交明细')
   // Preserve every appendix field. Wide appendix tables are split into narrow
   // tables with their identifier repeated, so the pasted sheet stays six columns wide.
   const appendix = source.slice(tableStart + 1 + routeCount)
@@ -76,14 +63,14 @@ export function quotationRecordCopyLayout(record: QuotationRecord): { text: stri
       add('blank', [''])
     }
   }
-  section('四、采购、审核与成交信息')
+  section('三、采购、审核与成交信息')
   source.slice(5, tableStart).filter(row => row.length > 1).forEach(pairs)
-  const text = rows.map(row => row.cells.join('\t')).join('\n')
+  const text = matrix.text + '\n' + rows.map(row => row.cells.join('\t')).join('\n')
   const htmlRows = rows.map(row => {
     const widths = spans(row.cells.length)
-    const background = row.kind === 'title' ? '#18334d' : row.kind === 'section' ? '#e8eef5' : row.kind === 'header' ? '#f1f5f9' : '#ffffff'
+    const background = row.kind === 'title' || row.kind === 'section' || row.kind === 'header' ? '#c6e0b4' : '#ffffff'
     const bold = ['title', 'section', 'header'].includes(row.kind)
-    return `<tr>${row.cells.map((value, i) => `<td colspan="${widths[i]}" style="padding:${row.kind === 'blank' ? '5px' : '9px 12px'};border:${row.kind === 'blank' ? '0' : '1px solid #dbe3ec'};background:${background};color:${row.kind === 'title' ? '#ffffff' : row.kind === 'note' ? '#66788a' : '#18334d'};font-weight:${bold ? '700' : '400'};font-size:${row.kind === 'title' ? '20px' : '12px'};text-align:${row.kind === 'data' && /^\d+(\.\d+)?$/.test(value) ? 'right' : 'left'};vertical-align:top;white-space:normal;word-wrap:break-word;mso-number-format:'\\@'">${escapeHtml(value)}</td>`).join('')}</tr>`
+    return `<tr>${row.cells.map((value, i) => `<td colspan="${widths[i]}" style="padding:${row.kind === 'blank' ? '5px' : '6px 8px'};border:${row.kind === 'blank' ? '0' : '1px solid #555555'};background:${background};color:#000000;font-weight:${bold ? '700' : '400'};font-size:${row.kind === 'title' ? '20px' : '12px'};text-align:${row.kind === 'data' && /^\d+(\.\d+)?$/.test(value) ? 'right' : 'left'};vertical-align:top;white-space:normal;word-wrap:break-word;mso-number-format:'\\@'">${escapeHtml(value)}</td>`).join('')}</tr>`
   }).join('')
-  return { text, html: `<html><head><meta charset="utf-8"></head><body><!--StartFragment--><table style="border-collapse:collapse;table-layout:fixed;width:900px;font-family:Arial,'Microsoft YaHei',sans-serif"><colgroup>${'<col width="150" style="width:150px">'.repeat(6)}</colgroup>${htmlRows}</table><!--EndFragment--></body></html>` }
+  return { text, html: `<html><head><meta charset="utf-8"></head><body><!--StartFragment-->${matrix.html}<br><table aria-label="保存的对账明细" style="border-collapse:collapse;table-layout:fixed;width:900px;font-family:Arial,'Microsoft YaHei',sans-serif"><colgroup>${'<col width="150" style="width:150px">'.repeat(6)}</colgroup>${htmlRows}</table><!--EndFragment--></body></html>` }
 }
