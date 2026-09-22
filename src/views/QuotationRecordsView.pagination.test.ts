@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import View from './QuotationRecordsView.vue'
+import { normalizeQuotationRecord } from '@/data/quotationRecords'
 const query=vi.hoisted(()=>({loadRecordPage:vi.fn(),loadFilteredRecords:vi.fn(),loadRecord:vi.fn(),recentRecordDates:()=>({startDate:'2026-09-04',endDate:'2026-09-10'})}))
 vi.mock('@/data/quotationRecordQuery',()=>query)
 vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([])}))
@@ -28,4 +29,20 @@ it('blocks a reversed date range without submitting a query',async()=>{
   vi.useFakeTimers();query.loadRecordPage.mockResolvedValue(result(5));await mount()
   for(const [name,value] of [['开始日期','2026-09-11'],['结束日期','2026-09-10']]){const input=document.querySelector(`[aria-label="${name}"]`) as HTMLInputElement;input.value=value!;input.dispatchEvent(new Event('input'))}
   await flush();await vi.advanceTimersByTimeAsync(250);await flush();expect(query.loadRecordPage).toHaveBeenCalledTimes(1);expect(document.querySelector('[role="alert"]')!.textContent).toContain('开始日期不能晚于结束日期')
+})
+
+it.each(['mine', 'company'])('opens the quotation overview from the detail cell and resets the previous tab for %s', async scope => {
+  const row = normalizeQuotationRecord({ id: 'saved', no: 'QT-SAVED', primarySku: 'SKU', customerName: '客户',
+    quoteOptions: [{ id: 'us', country: '美国', carrier: '燕文', channel: '原渠道', rule: '原规则', eta: '6-12天', quote1Usd: 19.2, quote2Usd: null, quote3Usd: null, quoteCustomUsd: null }] })!
+  query.loadRecordPage.mockResolvedValue({ ...result(1), items: [row] })
+  await mount(scope)
+  document.querySelector<HTMLButtonElement>('.difference-cell')!.click(); await flush()
+  expect(document.querySelector('.detail-tabs .active')?.textContent).toBe('报价概览')
+  expect(document.querySelector('.overview-panel')).not.toBeNull()
+  expect(document.querySelector('.drawer-view-footer')?.textContent).toContain('复制报价数据')
+  document.querySelectorAll<HTMLButtonElement>('.detail-tabs button')[1]!.click(); await flush()
+  expect(document.querySelector('.option-detail-panel')).not.toBeNull()
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭"]')!.click(); await flush()
+  document.querySelector<HTMLButtonElement>('.difference-cell')!.click(); await flush()
+  expect(document.querySelector('.detail-tabs .active')?.textContent).toBe('报价概览')
 })

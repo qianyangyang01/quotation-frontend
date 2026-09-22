@@ -80,7 +80,7 @@ async function copyData() {
   <div class="record-copy-actions">
     <div class="record-copy-buttons">
       <button ref="imageButton" type="button" :disabled="copyingData" @click="openImage">复制报价图片</button>
-      <button type="button" :disabled="copyingData" title="复制完整对账明细：具体渠道、最终含包材重量、税费、附加费及各数量系统价和客户价（USD/CNY）" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
+      <button type="button" :disabled="copyingData" title="复制完整对账明细：具体渠道、各数量物流运费、最终含包材重量、税费、附加费及各数量系统价和客户价（USD/CNY）" @click="copyData">{{ copyingData ? '正在复制…' : '复制报价数据' }}</button>
     </div>
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>
     <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="copyData">重新复制对账明细</button>

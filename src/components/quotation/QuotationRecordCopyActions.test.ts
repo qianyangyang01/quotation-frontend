@@ -30,11 +30,15 @@ beforeEach(() => {
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('both record scopes share working footer copying, with the saved USD snapshot and no business writes', async () => {
-  const state = mount(); const before = JSON.stringify(state.record)
+  const state = mount()
+  state.record.quoteOptions![0]!.logisticsSamples = [{ quantity: 1, input: { weightKg: 0.6 }, total: 38.51 }]
+  const before = JSON.stringify(state.record)
   footerButton('复制报价数据').click(); await settle()
   expect(writeText.mock.calls[0][0]).toContain('闪电猴\t内部渠道\t内部规则')
   expect(writeText.mock.calls[0][0]).toContain('1件系统价（USD）')
   expect(writeText.mock.calls[0][0]).toContain('6.20')
+  expect(writeText.mock.calls[0][0]).toContain('1件物流运费（CNY/单）')
+  expect(writeText.mock.calls[0][0]).toContain('38.51')
   expect(document.querySelector('dialog')!.open).toBe(false)
   footerButton('复制报价图片').click(); await settle()
   expect(document.querySelector('dialog')!.open).toBe(true)

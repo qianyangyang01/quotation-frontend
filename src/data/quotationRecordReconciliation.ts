@@ -47,11 +47,19 @@ export function savedFinalWeightKg(record: QuotationRecord, option: QuotationRec
 }
 const grams = (value?: number) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? new Decimal(value).mul(1000).toFixed() : missing
 
+function savedFreight(option: QuotationRecordQuoteOption, quantity: number): string {
+  // The headline freight has no reliable quantity on legacy records. Only use
+  // the matching saved sample; never multiply it or reprice a historical route.
+  const total = option.logisticsSamples?.find(sample => sample.quantity === quantity)?.total
+  return typeof total === 'number' && total >= 0 ? money(total) : missing
+}
+
 /** Internal reconciliation export: saved fields only, independent of the customer-facing sheet. */
 export function quotationRecordReconciliationTsv(record: QuotationRecord): string {
   const snapshot = record.customerQuote ?? record.sheetQuote
   const quantities = [...new Set([1, 2, 3, ...(record.customQuoteQuantity ? [record.customQuoteQuantity] : []),
     ...(record.systemQuantityQuotes?.quantities ?? []), ...(snapshot?.quantities ?? []),
+    ...(record.quoteOptions ?? []).flatMap(option => (option.logisticsSamples ?? []).map(sample => sample.quantity).filter(q => Number.isSafeInteger(q) && q > 0)),
     ...(!record.customQuoteQuantity && record.quoteOptions?.some(option => option.quoteCustomUsd != null) ? [0] : [])])]
   const unit = record.quoteMode === 'bundle' ? '套' : '件'
   const sku = record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => item.sku).join('+') : record.primarySku
@@ -71,7 +79,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', '最终含包材重量快照（g）', '重量快照对应数量', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
       ...quantities.flatMap(q => {
         const label = q ? `${q}${unit}` : '自定义（数量未保存）'
-        return [`${label}最终含包材重量（g）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`, `${label}操作费（USD/单）`]
+        return [`${label}最终含包材重量（g）`, `${label}物流运费（CNY/单）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`, `${label}操作费（USD/单）`]
       })]),
   ]
   for (const [index, option] of (record.quoteOptions ?? []).entries()) {
@@ -82,7 +90,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
         const system = savedSystemPrice(record, option, q)
         const customerIndex = snapshot?.quantities.indexOf(q) ?? -1
         const customer = snapshot ? customerRow && customerIndex >= 0 ? customerRow.prices[customerIndex] : null : system
-        return [grams(savedFinalWeightKg(record, option, q)), money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity), money(record.customerOperation ? customerOperationFeeForQuantity(record.customerOperation, q) : undefined)]
+        return [grams(savedFinalWeightKg(record, option, q)), savedFreight(option, q), money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity), money(record.customerOperation ? customerOperationFeeForQuantity(record.customerOperation, q) : undefined)]
       }),
     ]))
   }

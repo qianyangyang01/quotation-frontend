@@ -98,3 +98,40 @@ it.each(['single','bundle'] as const)('copies final %s weight alongside prices i
   expect(row[header.indexOf('1'+unit+'最终含包材重量（g）')]).toBe(mode==='bundle'?'214':'112')
   expect(row[header.indexOf('5'+unit+'最终含包材重量（g）')]).toBe(mode==='bundle'?'1030':'520')
 })
+
+it.each(['single', 'bundle'] as const)('copies saved %s freight by route and quantity without using the headline freight or recalculating', mode => {
+  const saved = record(); saved.quoteMode = mode
+  saved.quoteOptions![0]!.freightCny = 999
+  saved.quoteOptions![0]!.logisticsSamples = [
+    { quantity: 1, input: { weightKg: 0.603 }, total: 38.51 },
+    { quantity: 2, input: { weightKg: 1.206 }, total: 62.07 },
+    { quantity: 3, input: { weightKg: 1.809 }, total: 85.62 },
+    { quantity: 5, input: { weightKg: 3.015 }, total: 132.73 },
+    { quantity: 4, input: { weightKg: 2.412 }, total: 109.18 },
+  ]
+  saved.quoteOptions![1]!.logisticsSamples = [{ quantity: 1, input: { weightKg: 0.603 }, total: 40 }]
+  const normalized = normalizeQuotationRecord(saved)!, before = JSON.stringify(normalized)
+  const rows = table(quotationRecordReconciliationTsv(normalized)), unit = mode === 'bundle' ? '套' : '件'
+  for (const [quantity, freight] of [[1, '38.51'], [2, '62.07'], [3, '85.62'], [5, '132.73'], [4, '109.18']]) {
+    expect(rows[0]![`${quantity}${unit}物流运费（CNY/单）`]).toBe(freight)
+  }
+  expect(rows[1]![`1${unit}物流运费（CNY/单）`]).toBe('40.00')
+  expect(rows[1]![`2${unit}物流运费（CNY/单）`]).toBe('未保存')
+  expect(rows[0]![`4${unit}最终含包材重量（g）`]).toBe('2412')
+  expect(JSON.stringify(normalized)).toBe(before)
+})
+
+it('keeps absent or invalid freight distinct from explicit zero and never guesses a legacy freight quantity', () => {
+  const saved = record(), route = saved.quoteOptions![0]!
+  route.freightCny = 58
+  route.logisticsInput = { country: '美国', weightKg: 0.5, quantity: 5, marks: [] }
+  route.logisticsSamples = [
+    { quantity: 1, input: { weightKg: 0.1 }, total: 0 },
+    { quantity: 2, input: { weightKg: 0.2 }, total: null },
+    { quantity: 3, input: { weightKg: 0.3 }, total: NaN },
+  ]
+  const rows = table(quotationRecordReconciliationTsv(saved))
+  expect(rows[0]).toMatchObject({ '物流运费快照（CNY）': '58.00', '1套物流运费（CNY/单）': '0.00',
+    '2套物流运费（CNY/单）': '未保存', '3套物流运费（CNY/单）': '未保存', '5套物流运费（CNY/单）': '未保存' })
+  expect(rows[1]!['1套物流运费（CNY/单）']).toBe('未保存')
+})
