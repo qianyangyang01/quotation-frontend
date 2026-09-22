@@ -1,6 +1,12 @@
 import type { QuotationMatrixRow } from '@/components/quotation/types'
 import { parseQuotePriceInput } from './quotePriceExpression'
 
+/** Customer-facing composition of one set; keep quantities out of the underlying SKU identifiers. */
+export function quoteSheetBundleSkus(items: ReadonlyArray<{ sku: string; quantityPerSet: number }>) {
+  return items.filter(item => item.sku.trim()).map(item =>
+    `${item.sku.trim()}${item.quantityPerSet >= 2 ? `*${item.quantityPerSet}` : ''}`)
+}
+
 /** Customer-facing source model. Only explicit numeric snapshots are captured for record saving. */
 export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |

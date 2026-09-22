@@ -60,11 +60,11 @@ describe('saved record customer table copying', () => {
 })
 
 
-it('uses actual bundle SKU snapshots without quantities or price recalculation', () => {
+it('shows per-set quantities from bundle SKU snapshots without price recalculation', () => {
   const saved = normalizeQuotationRecord({ ...record(), primarySku: 'OLD × 2', bundleItems: [{ sku: 'SKU-A', name: 'A', quantityPerSet: 2, effectiveWeightKg: 0.1, purchaseUnitPriceCny: 10, domesticFreightPerUnitCny: 1 }, { sku: 'SKU-B', name: 'B', quantityPerSet: 1, effectiveWeightKg: 0.2, purchaseUnitPriceCny: 20, domesticFreightPerUnitCny: 2 }] })!
   const source = quotationRecordQuoteSheetSource(saved)
   const sheet = buildCustomerQuoteSheet({ ...source, edits: newQuoteSheetEdits('Alex') })
-  expect(sheet.rows.map(row => row.sku)).toEqual(['SKU-A+SKU-B', 'SKU-A+SKU-B'])
+  expect(sheet.rows.map(row => row.sku)).toEqual(['SKU-A*2+SKU-B', 'SKU-A*2+SKU-B'])
   expect(sheet.rows[0].prices).toEqual([13, null, 0, 55.678])
   saved.quoteMode = 'single'; saved.primarySku = 'SINGLE-001'
   expect(quotationRecordQuoteSheetSource(saved).skus).toEqual(['SINGLE-001'])

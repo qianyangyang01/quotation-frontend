@@ -2,7 +2,7 @@
 import { loadCustomerOperationSettings, resolveCustomerOperation, customerOperationFeeForQuantity, addCustomerOperationFee, CUSTOMER_OPERATION_FEES_UPDATED } from '@/data/customerOperationFees'
 import { purchaseCategoryForSkus } from '@/data/quotationAnalytics'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
-import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
+import { quoteSheetBundleSkus, quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { displayWeightGrams, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotationRowsSignature'
 import { normalizeLogisticsAttribute, selectableLogisticsAttributes } from '@/data/logisticsAttributes'
@@ -1986,7 +1986,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :reset-key="quoteSheetResetKey"
           :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
-          :skus="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku) : [p.sku]"
+          :skus="quoteMode === 'bundle' ? quoteSheetBundleSkus(bundleItems) : [p.sku]"
           :sku="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
           :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
           :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
