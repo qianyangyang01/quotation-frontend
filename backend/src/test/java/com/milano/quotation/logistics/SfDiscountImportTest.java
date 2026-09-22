@@ -50,6 +50,14 @@ class SfDiscountImportTest {
     @Test void otherProvidersIgnoreSfSettlementAndDiscountColumns() throws Exception {
         for(var provider:LogisticsSourceParser.PROVIDERS)if(!provider.equals("顺丰")) {
             var input=workbook("折后运费",0.7,97,51);
+            if(provider.equals("顺友"))try(var book=new XSSFWorkbook()) {
+                var sheet=book.createSheet("顺邮宝挂");
+                LogisticsSourceParserTest.row(sheet,0,"顺邮宝挂号价目表");
+                LogisticsSourceParserTest.row(sheet,2,"代码","中文","单价(元/KG)","处理费(元/件)","限重(KG)","折扣","折后运费");
+                LogisticsSourceParserTest.row(sheet,3,"FR","法国",97,20,2,.7,51);
+                input=LogisticsSourceParserTest.bytes(book);
+                assertFalse(channel(input,provider).path("quoteReady").asBoolean(),"Unknown extra freight columns require review, never SF discount fallback");
+            }
             // Shandianhou only accepts approved US channels; keep the same pricing assertion.
             if(provider.equals("闪电猴"))try(var book=new XSSFWorkbook(new ByteArrayInputStream(input));var bytes=new ByteArrayOutputStream()) {
                 var sheet=book.getSheetAt(0);
