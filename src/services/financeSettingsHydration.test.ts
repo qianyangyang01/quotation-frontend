@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { computed } from 'vue'
 
 const http = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('@/services/http', () => ({ api: http }))
@@ -6,6 +7,8 @@ vi.mock('@/services/http', () => ({ api: http }))
 import {
   clearFinanceSettingsCache,
   financeSettingsAreHydrated,
+  financeSettingsAreLoading,
+  financeSettingsLoadError,
   hydrateFinanceSettings,
   readFinanceSetting,
   writeFinanceSetting,
@@ -25,6 +28,24 @@ describe('finance settings hydration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearFinanceSettingsCache()
+  })
+
+  it('updates an already rendered save blocker when finance hydration finishes without editing the quote', async () => {
+    const saveBlocked = computed(() => !financeSettingsAreHydrated())
+    expect(saveBlocked.value).toBe(true)
+    http.get.mockResolvedValueOnce(settings())
+    await hydrateFinanceSettings()
+    expect(saveBlocked.value).toBe(false)
+
+    let resolve!: (value: ReturnType<typeof settings>) => void
+    http.get.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const refresh = hydrateFinanceSettings({ force: true })
+    expect(saveBlocked.value).toBe(true)
+    resolve(settings())
+    await refresh
+    expect(saveBlocked.value).toBe(false)
+    clearFinanceSettingsCache()
+    expect(saveBlocked.value).toBe(true)
   })
 
   it('coalesces concurrent requests and publishes all settings atomically', async () => {
@@ -63,10 +84,13 @@ describe('finance settings hydration', () => {
     http.get.mockRejectedValueOnce(new Error('网络不可用'))
     await expect(hydrateFinanceSettings({ force: true })).rejects.toThrow('网络不可用')
     expect(financeSettingsAreHydrated()).toBe(false)
+    expect(financeSettingsAreLoading()).toBe(false)
+    expect(financeSettingsLoadError()).toBe('网络不可用')
 
     http.get.mockResolvedValueOnce(settings(7.1))
     await hydrateFinanceSettings()
     expect(readFinanceSetting<{ usdCny: number }>('exchange-rate')?.usdCny).toBe(7.1)
+    expect(financeSettingsLoadError()).toBe('')
   })
 
   it('rejects incomplete responses without publishing partial settings', async () => {

@@ -16,7 +16,7 @@ import { currentAuthUser } from '@/data/authStore'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
 import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountryLoader'
-import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydrated, hydrateFinanceSettings, type FinanceSettingVersions } from '@/services/financeSettings'
+import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydrated, financeSettingsAreLoading, financeSettingsLoadError, hydrateFinanceSettings, type FinanceSettingVersions } from '@/services/financeSettings'
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKAGING_ERROR } from '@/data/quotationWeightSnapshot'
@@ -1577,7 +1577,8 @@ const saveValidationIssues = computed(() => {
   if (purchaseTaxBlockReason.value) issues.push({ key: 'sku', label: '采购票点', message: purchaseTaxBlockReason.value })
   if (quoteMode.value === 'single' && (purchaseQueryError.value || (p?.sku && skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== p.sku))) issues.push({ key: 'sku', label: '商品 SKU', message: purchaseQueryError.value || 'SKU 已改变，请重新查询商品后保存' })
   if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || '最新资料正在读取，请稍候' })
-  if (draftInitializationFailed.value || !financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: '财务设置尚未完整加载，请重试读取后保存' })
+  if (draftInitializationFailed.value) issues.push({ key: 'workspaceInitialization', label: '报价工作区', message: draftError.value || '报价工作区读取失败，请查看顶部错误提示' })
+  else if (!financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: financeSettingsAreLoading() ? '财务设置正在读取，请稍候' : financeSettingsLoadError() ? `财务设置读取失败：${financeSettingsLoadError()}；请重试读取` : '财务设置尚未完整加载，请重试读取后保存' })
   const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'预估月销量', commissionThreshold:'佣金阈值' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
   const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
@@ -1603,12 +1604,18 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
         : ''))
 const displayedSaveBlockReason = computed(() => specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
 const retryingSavePreparation = ref(false)
-const canRetrySavePreparation = computed(() => Boolean(syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
+const canRetrySavePreparation = computed(() => !draftInitializationFailed.value && Boolean(!financeSettingsAreHydrated() || syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
 async function retrySavePreparation() {
-  if (retryingSavePreparation.value || savingQuotation.value || syncRefreshing.value || quoteLogisticsBusy()) return
+  if (retryingSavePreparation.value || savingQuotation.value || syncRefreshing.value || quoteLogisticsBusy() || financeSettingsAreLoading() || draftInitializationFailed.value) return
   retryingSavePreparation.value = true
   try {
-    if (syncPending.value || syncError.value) await updateLiveQuotation()
+    if (!financeSettingsAreHydrated()) {
+      // Verify against the finance versions applied to this quote. A changed
+      // configuration still requires the existing explicit update flow.
+      // Do not reload the server draft or discard current form selections.
+      const verified = await checkLiveVersions(undefined, true)
+      if (verified) toast('财务设置已重新读取，当前报价内容已保留')
+    } else if (syncPending.value || syncError.value) await updateLiveQuotation()
     else await retryQuoteLogistics()
   } catch (error) { toast(error instanceof Error ? error.message : '重新检查失败，请重试') }
   finally { retryingSavePreparation.value = false }
@@ -1639,8 +1646,10 @@ async function attemptSave() {
   } finally { savingQuotation.value = false }
 }
 function locateValidationIssue(key: string) {
+  if (key === 'financeSettings') { void retrySavePreparation(); return }
   const selector = ['customerName','quoteMode','productCategory','sku','logisticsAttribute','customerGrade','monthlySalesEstimate','commissionThreshold'].includes(key)
     ? `[data-validation-field="${key}"]`
+    : key === 'workspaceInitialization' ? '.draft-status-bar'
     : key === 'taxPolicy' || key === 'businessReadiness'
       ? '.quote-preview'
       : '.matrix-mode-panel'
@@ -1825,7 +1834,8 @@ async function save() {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (specialPackagingError.value) { toast(specialPackagingError.value); return }
   if (commissionError.value) { toast(commissionError.value); return }
-  if (draftInitializationFailed.value || !financeSettingsAreHydrated()) { toast('财务设置尚未完整加载，请重试读取后保存'); return }
+  if (draftInitializationFailed.value) { toast(draftError.value || '报价工作区读取失败，请查看顶部错误提示'); return }
+  if (!financeSettingsAreHydrated()) { toast(financeSettingsLoadError() || '财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
   if (!customerOperation.value.configured) { toast(customerOperation.value.message); return }
   const customer = customerName.value.trim()
@@ -2063,7 +2073,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
           :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd"
           :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
-          :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave"
+          :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy() || financeSettingsAreLoading()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave"
         />
       </template>
     </main>

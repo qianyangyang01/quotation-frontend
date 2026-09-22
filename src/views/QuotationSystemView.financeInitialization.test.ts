@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import QuotationSystemView from './QuotationSystemView.vue'
 import type { QuotationProduct } from '@/components/quotation/types'
 import { api } from '@/services/http'
-import { clearFinanceSettingsCache, hydrateFinanceSettings } from '@/services/financeSettings'
+import { clearFinanceSettingsCache, financeSettingVersions, hydrateFinanceSettings } from '@/services/financeSettings'
 import { startQuotationSync } from '@/services/quotationSync'
 import type { FinanceChannelPolicy, FinanceCountrySetting } from '@/data/financeChannelPolicies'
 import type { FinanceTaxSettings } from '@/data/financeTaxSettings'
@@ -42,6 +42,13 @@ type PricingState = {
   usdPriceFromCny: (cny: number) => number
   exchange: { usd: number; eurUsd: number }
   draftReady: boolean
+  showSaveValidation: boolean
+  saveValidationIssues: Array<{ key: string; message: string }>
+  customerName: string
+  skuSearch: string
+  customQuoteQuantity: number
+  syncPending: string
+  draftPayload: () => unknown
   financePolicies: FinanceChannelPolicy[]
   financeCountrySettings: FinanceCountrySetting[]
   financeTaxSettings: FinanceTaxSettings
@@ -115,6 +122,60 @@ describe('quotation finance initialization for an employee', () => {
     expect(host.innerHTML).not.toContain(coefficient.toString())
     expect(state.salePrice({ purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct)).toBeCloseTo(100 * coefficient, 10)
   }
+
+  it.each([false, true])('recovers finance through the rendered retry action while preserving current input; changed settings %s', async changed => {
+    await mountPage()
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    state.customerName = '保留当前客户'
+    state.skuSearch = 'UNSAVED-SKU'
+    state.customQuoteQuantity = 7
+    state.showSaveValidation = true
+    const before = JSON.stringify(state.draftPayload())
+    const originalGet = vi.mocked(api.get).getMockImplementation()!
+    vi.mocked(api.get).mockImplementationOnce(async () => { throw new Error('财务读取超时') })
+    await expect(hydrateFinanceSettings({ force: true })).rejects.toThrow('财务读取超时')
+    await nextTick()
+    expect(host.textContent).toContain('财务设置读取失败：财务读取超时')
+    const latest = financeResponse()
+    const versions = financeSettingVersions()
+    if (changed) {
+      latest['exchange-rate']._version = 3
+      latest['exchange-rate'].value.usdCny = 7.1
+      versions['exchange-rate'] = 3
+    }
+    const draftReads = vi.mocked(api.get).mock.calls.filter(([path]) => path === '/quotation-drafts/mine/state').length
+    vi.mocked(api.get).mockImplementation(async (path, ...args) => {
+      if (path === '/finance-settings') return latest
+      if (path.startsWith('/quotation-sync')) return { purchaseVersions: {}, logisticsRevision: '', financeVersions: versions }
+      return originalGet(path, ...args)
+    })
+    const retry = [...host.querySelectorAll<HTMLButtonElement>('.validation-summary button')].find(button => button.textContent?.includes('重试读取'))!
+    expect(retry).toBeDefined()
+    retry.click()
+    await vi.waitFor(() => expect(state.saveValidationIssues.some(issue => issue.key === 'financeSettings')).toBe(false))
+    await vi.waitFor(() => expect(host.textContent).not.toContain('正在重新检查'))
+    expect(JSON.stringify(state.draftPayload())).toBe(before)
+    expect(vi.mocked(api.get).mock.calls.filter(([path]) => path === '/quotation-drafts/mine/state')).toHaveLength(draftReads)
+    expect(state.exchange.usd).toBe(6.7)
+    expect(state.syncPending).toBe(changed ? '汇率' : '')
+    if (changed) expect(state.saveValidationIssues.some(issue => issue.key === 'liveData')).toBe(true)
+  })
+
+  it('reports a readiness initialization error as a workspace problem rather than missing finance', async () => {
+    await mountPage()
+    const originalGet = vi.mocked(api.get).getMockImplementation()!
+    vi.mocked(api.get).mockImplementation(async (path, ...args) => {
+      if (path === '/quotation-readiness') throw new Error('业务就绪检查超时')
+      return originalGet(path, ...args)
+    })
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.saveValidationIssues).toContainEqual({ key: 'workspaceInitialization', label: '报价工作区', message: '业务就绪检查超时' }))
+    expect(state.saveValidationIssues.some(issue => issue.key === 'financeSettings')).toBe(false)
+    state.showSaveValidation = true
+    await nextTick()
+    expect(host.querySelector('.validation-summary')?.textContent).toContain('查看错误')
+  })
 
   it.each([false, true])('uses the saved precise coefficient and exchange rates with warm cache %s', async warm => {
     await mountPage({ warm })

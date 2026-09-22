@@ -99,7 +99,7 @@ const quoteRange = computed(() => {
       <header><span><i>!</i><b>暂时无法保存报价</b></span><em>请完成以下 {{ validationIssues.length }} 项必填内容</em></header>
       <div>
         <button v-for="(issue,index) in validationIssues" :key="issue.key" type="button" @click="emit('locateIssue',issue.key)">
-          <i>{{ index + 1 }}</i><span><b>{{ issue.label }}</b><small>{{ issue.message }}</small></span><em>{{ issue.key === 'taxPolicy' ? '查看提示' : '去填写' }} →</em>
+          <i>{{ index + 1 }}</i><span><b>{{ issue.label }}</b><small>{{ issue.message }}</small></span><em>{{ issue.key === 'financeSettings' ? '重试读取' : issue.key === 'workspaceInitialization' ? '查看错误' : issue.key === 'taxPolicy' ? '查看提示' : '去填写' }} →</em>
         </button>
       </div>
     </section>

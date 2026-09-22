@@ -1,4 +1,5 @@
 import { api } from '@/services/http'
+import { ref } from 'vue'
 
 export type FinanceSettingKey = 'country-classification' | 'channel-policies' | 'customer-grades' | 'exchange-rate' | 'tax-settings' | 'surcharge-settings' | 'customer-operation-fees'
 
@@ -12,7 +13,9 @@ const cache = new Map<FinanceSettingKey, unknown>()
 const versions = new Map<FinanceSettingKey, number>()
 let hydrationRequest: Promise<void> | null = null
 let hydrationGeneration = 0
-let hydrated = false
+const hydrated = ref(false)
+const hydrating = ref(false)
+const hydrationError = ref('')
 
 type VersionedSetting<T> = { value: T; _version: number }
 
@@ -35,8 +38,11 @@ export function normalizeFinanceSettingValue(key: FinanceSettingKey, value: unkn
 }
 
 export function financeSettingsAreHydrated() {
-  return hydrated
+  return hydrated.value
 }
+
+export function financeSettingsAreLoading() { return hydrating.value }
+export function financeSettingsLoadError() { return hydrationError.value }
 
 export function financeSettingVersions(): FinanceSettingVersions {
   return Object.fromEntries(versions)
@@ -49,15 +55,19 @@ export function changedFinanceSettings(applied: FinanceSettingVersions, latest: 
 export function clearFinanceSettingsCache() {
   hydrationGeneration += 1
   hydrationRequest = null
-  hydrated = false
+  hydrated.value = false
+  hydrating.value = false
+  hydrationError.value = ''
   cache.clear()
   versions.clear()
 }
 
 export function hydrateFinanceSettings(options: { force?: boolean; signal?: AbortSignal } = {}) {
-  if (hydrated && !options.force) return Promise.resolve()
+  if (hydrated.value && !options.force) return Promise.resolve()
   if (hydrationRequest) return hydrationRequest
-  if (options.force) hydrated = false
+  if (options.force) hydrated.value = false
+  hydrating.value = true
+  hydrationError.value = ''
 
   const generation = hydrationGeneration
   const request = (async () => {
@@ -91,12 +101,21 @@ export function hydrateFinanceSettings(options: { force?: boolean; signal?: Abor
     versions.clear()
     nextCache.forEach((value, key) => cache.set(key, value))
     nextVersions.forEach((value, key) => versions.set(key, value))
-    hydrated = true
-  })()
+    hydrated.value = true
+  })().catch(error => {
+    if (generation === hydrationGeneration) {
+      hydrated.value = false
+      hydrationError.value = error instanceof Error ? error.message : '财务设置读取失败'
+    }
+    throw error
+  })
 
   hydrationRequest = request
   return request.finally(() => {
-    if (hydrationRequest === request) hydrationRequest = null
+    if (hydrationRequest === request) {
+      hydrationRequest = null
+      hydrating.value = false
+    }
   })
 }
 
