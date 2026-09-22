@@ -21,10 +21,10 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.21-qiaojie-us-v3";
+    public static final String VERSION="company-channels-2026.09.22-sunyou-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
-    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际");
+    public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
     public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
     private static final Pattern DATE_METADATA=Pattern.compile("(?i)^(?:(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?\\s*)?(?:19|20)\\d{2}\\s*[-/.年]\\s*\\d{1,2}\\s*[-/.月]\\s*\\d{1,2}\\s*日?(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?$");
@@ -57,6 +57,12 @@ public class LogisticsSourceParser {
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
                 var source=new Source(sheet,scope);
                 if(provider.isBlank())provider=providerFromTitles(source);
+                if(provider.equals(SunyouSourceRules.PROVIDER)&&!referenceOnlySheet(sheet.getSheetName())&&!qiaojieStandardSheet(source)
+                        &&sunyouProduct(source)==null&&!SunyouSourceRules.selectedSheet(sheet.getSheetName())) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","顺友仅导入登记的三个渠道；其他产品及服务费表保留在原文件中");
+                    if(sheet.getSheetName().contains("附加费"))report.set("sourceCells",source.raw());
+                    continue;
+                }
                 if(provider.equals(QiaojieSourceRules.PROVIDER)&&!referenceOnlySheet(sheet.getSheetName())
                         &&!qiaojieStandardSheet(source)&&qiaojieProduct(source)==null) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","巧捷仅导入登记的四个渠道");continue;
@@ -103,7 +109,8 @@ public class LogisticsSourceParser {
                     parseStandard(source,r,provider,filename,parsed); recognized=true; break;
                 }
                 if(!recognized) {
-                    if(provider.equals(QiaojieSourceRules.PROVIDER)&&qiaojieProduct(source)!=null&&qiaojieProduct(source).perPiece())recognized=parseQiaojiePiece(source,filename,parsed);
+                    if(provider.equals(SunyouSourceRules.PROVIDER))recognized=parseSunyou(source,filename,parsed);
+                    else if(provider.equals(QiaojieSourceRules.PROVIDER)&&qiaojieProduct(source)!=null&&qiaojieProduct(source).perPiece())recognized=parseQiaojiePiece(source,filename,parsed);
                     else if(provider.equals("通邮")&&sheet.getSheetName().toUpperCase(Locale.ROOT).contains("MINI"))recognized=parseIntervalMatrix(source,provider,filename,parsed);
                     else if(provider.equals("通邮") && (sheet.getSheetName().contains("美国专线小包")||sheet.getSheetName().contains("加拿大专线")||sheet.getSheetName().equals("ebay挂号保建品")||sheet.getSheetName().equals("通邮专线特货-澳大利亚"))) recognized=parseMatrix(source,provider,filename,parsed);
                     else recognized=parseTable(source,provider,filename,parsed);
@@ -186,6 +193,7 @@ public class LogisticsSourceParser {
                 report.put("status",errors>0?"blocked":"parsed").put("priceRows",rows).put("channels",parsed.size()).put("errors",errors);
             }
         } catch(AppException e){throw e;} catch(Exception e){org.slf4j.LoggerFactory.getLogger(getClass()).warn("Workbook read failed: {}",filename,e);throw AppException.unprocessable("物流文件无法解析："+e.getClass().getSimpleName());}
+        if(provider.equals(SunyouSourceRules.PROVIDER))applySunyouReferences(sheets,channels);
         var items=result.putArray("channels");
         for(var reference:coverageSheets) {
             var matched=channels.values().stream().filter(channel->referenceAppliesToChannel(reference,channel.path("channelName").asText())).toList();
@@ -261,6 +269,111 @@ public class LogisticsSourceParser {
             else if(!source.scope.match("闪电猴",name,code).status().equals("filtered"))return true;
         }
         return false;
+    }
+
+    private SunyouSourceRules.Product sunyouProduct(Source source) {
+        var products=new LinkedHashSet<SunyouSourceRules.Product>();
+        for(int r=0;r<=source.lastContentRow;r++) {
+            if(source.rowTexts(r).stream().anyMatch(t->clean(t).matches("(?i)单价.*(?:KG|公斤).*")))break;
+            for(var text:source.rowTexts(r)){var product=SunyouSourceRules.title(text);if(product!=null)products.add(product);}
+        }
+        if(products.size()>1)source.ambiguous=true;
+        return products.isEmpty()?null:products.iterator().next();
+    }
+
+    /** Limit-weight columns describe consecutive upper bounds, not minimum billable weights. */
+    private boolean parseSunyou(Source source,String file,Map<String,ObjectNode> channels) {
+        var product=sunyouProduct(source);
+        if(product==null)return false;
+        var target=selected(source,SunyouSourceRules.PROVIDER,product.name(),product.code(),0,channels);
+        if(target==null)return true;
+        int header=-1,rate=-1,fee=-1,limit=-1,code=-1,country=-1,minimum=-1,minimumHeader=-1,english=-1;
+        for(int r=0;r<=source.lastContentRow;r++) {
+            int foundRate=-1,foundFee=-1,foundLimit=-1;
+            for(int c=0;c<source.width(r);c++) {
+                var label=clean(source.text(r,c));
+                if(label.matches("(?i)单价[（(]元/KG[)）]"))foundRate=c;
+                if(label.matches("处理费[（(]元/件[)）]"))foundFee=c;
+                if(label.matches("(?i)限重[（(]KG[)）]"))foundLimit=c;
+            }
+            if(foundRate<0||foundFee<0||foundLimit<0)continue;
+            rate=foundRate;fee=foundFee;limit=foundLimit;header=r;
+            for(int h=r;h<=Math.min(r+2,source.lastContentRow);h++)for(int c=0;c<source.width(h);c++) {
+                if(clean(source.text(h,c)).equals("代码"))code=c;
+                if(clean(source.text(h,c)).equals("中文"))country=c;
+                if(clean(source.text(h,c)).equals("英文"))english=c;
+                if(clean(source.text(h,c)).matches("(?i)(?:最低计费重量|最小计费重量|起重)[（(]?(?:KG|G|公斤|千克|克)[)）]?")){minimum=c;minimumHeader=h;}
+            }
+            for(int c=0;c<source.width(r);c++) {
+                var label=clean(source.text(r,c));
+                if(c!=rate&&c!=fee&&c!=limit&&c!=minimum&&label.matches("(?s).*(?:运费|单价|处理费|附加费|首重|续重|进位).*"))
+                    issue(target,r+1,"计费列","顺友出现新的计费列，禁止忽略："+label,"error");
+            }
+            break;
+        }
+        if(header<0||code<0||country<0) {
+            issue(target,0,"表头","顺友必须包含国家代码、中文、单价(元/KG)、处理费(元/件)和限重(KG)","error");return true;
+        }
+        var previous=new HashMap<String,BigDecimal>();var notes=new LinkedHashSet<String>();
+        for(int r=header+1;r<=source.lastContentRow;r++) {
+            String countryCode=source.text(r,code).trim().toUpperCase(Locale.ROOT),label=source.text(r,country);
+            if(countryCode.equals("代码")||source.rowEmpty(r))continue;
+            boolean priceCandidate=countryCode.matches("[A-Z]{2}");
+            for(int c:List.of(rate,fee,limit)) {
+                var value=source.text(r,c);if(!value.isBlank()&&!value.equals(source.text(r,code)))priceCandidate=true;
+            }
+            if(!priceCandidate){notes.add(String.join(" | ",new LinkedHashSet<>(source.resolvedTexts(r))));continue;}
+            source.parsedRows.add(r);
+            String zone="";var zoneMatch=Pattern.compile("[（(]([1-9一二三四五六七八九][0-9]*)区[)）]$").matcher(label);
+            if(zoneMatch.find()){zone=normalizeZone(zoneMatch.group(1)+"区");label=label.substring(0,zoneMatch.start()).trim();}
+            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg")
+                .put("areaName",label).put("countryCode",countryCode).put("zoneName",zone)
+                .put("sourceProductCode",product.code()).put("sourceCountry",source.text(r,country))
+                .put("sourceCountryCode",countryCode).put("sourceWeightRange",source.text(r,limit))
+                .put("sourceWeightCell",source.address(r,limit)).put("sourceFeeLabel",source.text(header,fee))
+                .put("sourcePriceCell",source.address(r,rate)).put("sourceFeeCell",source.address(r,fee));
+            // Read all critical numbers through the same cached-formula/error checks as other adapters.
+            numeric(row,"weightToKg",source,r,limit,target,false);source.priceCellsParsed--;
+            if(!row.has("weightToKg"))continue;
+            var end=row.path("weightToKg").decimalValue();var key=countryCode+"|"+zone;
+            var start=previous.getOrDefault(key,BigDecimal.ZERO);
+            row.put("weightFromKg",start).put("weightFromInclusive",false).put("weightToInclusive",true)
+                .put("sourceWeightKind","consecutive-upper-limits");
+            if(end.compareTo(start)<=0)issue(target,r+1,"限重","同一国家/分区限重必须严格递增，禁止重复或倒序价格档位","error");
+            else previous.put(key,end);
+            var rowNotes=new LinkedHashSet<String>();
+            for(int c=0;c<source.width(r);c++)if(c!=rate&&c!=fee&&c!=limit&&c!=code&&c!=country&&c!=minimum&&c!=english) {
+                var value=source.text(r,c);if(!value.isBlank())rowNotes.add(value);
+            }
+            var note=String.join(" | ",rowNotes);
+            if(note.matches("(?s).*(关闭|暂停|关停|停收|停止收寄).*")) {
+                source.filteredOtherRows.put(r,"原表标记关闭/暂停服务："+note);continue;
+            }
+            numeric(row,"pricePerKg",source,r,rate,target,false);numeric(row,"registrationFee",source,r,fee,target,false);
+            if(minimum>=0) {
+                numeric(row,"minChargeWeightKg",source,r,minimum,target,false);source.priceCellsParsed--;
+                if(row.has("minChargeWeightKg")) {
+                    var unit=clean(source.text(minimumHeader,minimum)).toUpperCase(Locale.ROOT);
+                    if(!unit.matches(".*(?:KG|公斤|千克).*"))row.put("minChargeWeightKg",row.path("minChargeWeightKg").decimalValue().movePointLeft(3));
+                    row.put("sourceMinimumWeightKind","column").put("sourceMinimumWeightCell",source.address(r,minimum))
+                        .put("sourceMinimumWeightText",source.text(minimumHeader,minimum)+"="+source.text(r,minimum));
+                }
+            }
+            row.put("notes",note);add(target,row,source,r,file);
+        }
+        target.put("sourceNotes",String.join("\n",notes));
+        if(notes.stream().anyMatch(n->n.matches("(?s).*(?:进位|向上取整|续重).*")))
+            issue(target,0,"计费规则","顺友新增进位或续重说明，需适配后再导入，禁止继续按实际重量计费","error");
+        return true;
+    }
+
+    private void applySunyouReferences(ArrayNode sheets,Map<String,ObjectNode> channels) {
+        for(var channel:channels.values()) {
+            if(!channel.path("channelName").asText().equals("顺速宝(特货)"))continue;
+            var reference=channel.putArray("sourceSupplementarySheets");
+            for(var sheet:sheets)if(sheet.path("name").asText().contains("附加费"))reference.add(sheet.deepCopy());
+            if(!reference.isEmpty())for(var value:channel.path("rows"))warn((ObjectNode)value,"顺速宝特货另有附加费、禁运品类和不通邮邮编说明，请核对原表附加费页；基础运费不包含条件性费用");
+        }
     }
 
     private ObjectNode selected(Source source,String provider,String name,String code,int row,Map<String,ObjectNode> channels) {
@@ -1180,6 +1293,9 @@ public class LogisticsSourceParser {
             if(minimumRequired&&row.path("minChargeWeightKg").asDouble()==0
                     &&!Set.of("note","column","column-inherited","confirmed-lower-bound").contains(row.path("sourceMinimumWeightKind").asText()))
                 issue(channel,row.path("sourceRow").asInt(),"最低计费重量","原表缺少明确的起重依据，禁止默认零起重","error");
+            if(provider.equals(SunyouSourceRules.PROVIDER)&&!row.has("sourceMinimumWeightKind"))
+                row.put("minChargeWeightKg",0).put("sourceMinimumWeightKind","user-confirmed")
+                    .put("sourceMinimumWeightText","2026-09-22 用户确认：顺友这三个渠道起重是0；新原表如有明确起重，以新原表为准");
             if(!supportedCountryCode(row.path("countryCode").asText())||row.path("areaName").asText().isBlank())issue(channel,row.path("sourceRow").asInt(),"国家","国家不能准确识别","error");
             if(to<=from)issue(channel,row.path("sourceRow").asInt(),"重量段","重量上下限不合法","error");
             if(!(row.path("pricePerKg").asDouble()>0||row.path("firstWeightPrice").asDouble()>0||row.path("intervalPrice").asDouble()>0))issue(channel,row.path("sourceRow").asInt(),"价格","缺少有效计费价格","error");
@@ -1334,8 +1450,8 @@ public class LogisticsSourceParser {
         if(value.matches("[0-9.]+-[0-9.]+")){var parts=value.split("-");double from=Double.parseDouble(parts[0]);return new WeightRange(from,Double.parseDouble(parts[1]),from>0,true);}
         throw new IllegalArgumentException("无法准确识别重量边界："+raw);
     }
-    // AC/XK and the carrier's separate Hawaii destination are explicit routing codes.
-    private static boolean supportedCountryCode(String code){return Arrays.asList(Locale.getISOCountries()).contains(code)||Set.of("AC","XK","HI").contains(code);}
+    // Preserve explicit carrier routing codes, including Sunyou's separate Tristan destination.
+    private static boolean supportedCountryCode(String code){return Arrays.asList(Locale.getISOCountries()).contains(code)||Set.of("AC","XK","HI","TA").contains(code);}
     static String countryCode(String text){return COUNTRIES.entrySet().stream().filter(e->text.startsWith(e.getKey())).max(Comparator.comparingInt(e->e.getKey().length())).map(Map.Entry::getValue).orElse("");}
     static String countryName(String text){return COUNTRIES.keySet().stream().filter(text::startsWith).max(Comparator.comparingInt(String::length)).orElse(text);}
     static String inferredCountry(String text){var normalized=text.replace("澳洲","澳大利亚");return COUNTRIES.keySet().stream().filter(normalized::contains).max(Comparator.comparingInt(String::length)).orElse("");}

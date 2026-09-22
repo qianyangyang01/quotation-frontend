@@ -9,6 +9,9 @@ import tools.jackson.databind.JsonNode;
 public final class AdditionalCompanyChannels {
     private AdditionalCompanyChannels() {}
     public static int apply(Connection connection,JsonNode additions) throws Exception {
+        return apply(connection,additions,"migration-v45-logistics-additions");
+    }
+    public static int apply(Connection connection,JsonNode additions,String actor) throws Exception {
         var mapper=new ObjectMapper();long revision;boolean enabled;
         try(var query=connection.prepareStatement("select revision,enabled,paused from logistics_company_state where singleton for update");var rows=query.executeQuery()) {
             if(!rows.next())throw new IllegalStateException("Missing company directory state");
@@ -33,7 +36,6 @@ public final class AdditionalCompanyChannels {
         }
         CompanyChannelService.validate(all); // Reject alias/code collisions before any write.
         if(inserted.isEmpty())return 0;
-        String actor="migration-v45-logistics-additions";
         try(var query=connection.prepareStatement("insert into logistics_company_channel(id,enabled,payload,updated_by) values(?,?,?::jsonb,?)")) {
             for(var entry:inserted){query.setObject(1,UUID.fromString(entry.path("id").asText()));query.setBoolean(2,entry.path("enabled").asBoolean());query.setString(3,entry.toString());query.setString(4,actor);query.addBatch();}query.executeBatch();
         }

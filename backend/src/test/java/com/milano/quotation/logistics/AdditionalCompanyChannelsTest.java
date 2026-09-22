@@ -29,7 +29,7 @@ class AdditionalCompanyChannelsTest {
             assertEquals(1,scalar(query,"select count(*) from logistics_company_channel"));
             var fingerprints=new java.util.HashMap<String,String>();
             for(var table:java.util.List.of("logistics_company_binding","logistics_version","quotation_record","finance_setting"))fingerprints.put(table,fingerprint(query,table));
-            Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
+            Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("45").load().migrate();
             assertEquals(15,scalar(query,"select count(*) from logistics_company_channel"));
             assertEquals(1,scalar(query,"select count(*) from logistics_company_channel where not enabled and updated_by='existing'"));
             assertEquals(8,scalar(query,"select revision from logistics_company_state where singleton"));
@@ -39,6 +39,25 @@ class AdditionalCompanyChannelsTest {
             assertEquals(8,scalar(query,"select revision from logistics_company_state where singleton"));
             query.executeUpdate("update logistics_company_state set paused=true where singleton");
             assertThrows(IllegalStateException.class,()->AdditionalCompanyChannels.apply(connection,plan));
+        }
+    }
+    @Test void sunyouMigrationAddsExactlyThreeChannelsWithoutPricesBindingsOrFinanceChanges() throws Exception {
+        var flyway=Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).cleanDisabled(false).target("45").load();
+        flyway.clean();flyway.migrate();
+        try(var connection=java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());var query=connection.createStatement();
+            var resource=getClass().getResourceAsStream("/logistics-repairs/sunyou-company-channels-20260922.json")) {
+            var plan=mapper.readTree(resource.readAllBytes());assertEquals(3,plan.path("entries").size());
+            assertEquals(0,AdditionalCompanyChannels.apply(connection,plan,"migration-v46-sunyou-channels"));
+            query.executeUpdate("update logistics_company_state set enabled=true,revision=9 where singleton");
+            var fingerprints=new java.util.HashMap<String,String>();
+            for(var table:java.util.List.of("logistics_company_binding","logistics_version","quotation_record","finance_setting"))fingerprints.put(table,fingerprint(query,table));
+            Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("46").load().migrate();
+            assertEquals(3,scalar(query,"select count(*) from logistics_company_channel where updated_by='migration-v46-sunyou-channels'"));
+            assertEquals(10,scalar(query,"select revision from logistics_company_state where singleton"));
+            assertEquals(1,scalar(query,"select count(*) from logistics_company_revision where revision=10 and jsonb_array_length(payload->'entries')=3 and created_by='migration-v46-sunyou-channels'"));
+            for(var entry:fingerprints.entrySet())assertEquals(entry.getValue(),fingerprint(query,entry.getKey()),entry.getKey());
+            assertEquals(0,AdditionalCompanyChannels.apply(connection,plan,"migration-v46-sunyou-channels"));
+            assertEquals(10,scalar(query,"select revision from logistics_company_state where singleton"));
         }
     }
     private int scalar(java.sql.Statement query,String sql)throws Exception {try(var result=query.executeQuery(sql)){assertTrue(result.next());return result.getInt(1);}}
