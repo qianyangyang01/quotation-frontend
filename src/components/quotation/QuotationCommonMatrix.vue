@@ -271,6 +271,9 @@ const filteredRows = computed(() => sortedRows.value.filter(row => !channelQuery
       || [row.carrier, row.transport, row.channelCode, row.rule].some(value => value?.toLowerCase().includes(query))
   }))
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize.value)))
+const channelCountLabel = computed(() => channelQuery.value || search.value.trim()
+  ? `匹配 ${filteredRows.value.length} / ${rows.value.length} 条渠道`
+  : `共 ${rows.value.length} 条渠道`)
 const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const activeSummary = computed(() => props.countries.find(country => country.name === activeCountry.value))
 
@@ -309,7 +312,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       <div class="sort-toolbar" aria-label="渠道排序方式">
         <div class="channel-filter">
           <label class="channel-search"><span aria-hidden="true">⌕</span><input v-model="channelSearch" type="search" aria-label="搜索物流渠道" placeholder="搜索物流商、渠道名称或编码"><button v-if="channelSearch" type="button" aria-label="清空渠道搜索" @click="channelSearch=''">清空</button></label>
-          <span class="channel-match-count" role="status">{{ channelQuery ? `匹配 ${filteredRows.length} / ${rows.length} 条渠道` : `共 ${rows.length} 条渠道` }}</span>
+          <span class="channel-match-count" role="status">{{ channelCountLabel }}</span>
         </div>
         <nav>
           <button :class="{ active:sortMode==='recommended' }" :aria-pressed="sortMode==='recommended'" @click="sortMode='recommended'">☷ 综合排序</button>
@@ -328,7 +331,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       </div>
       <div v-else-if="(channelQuery || search.trim()) && rows.length" class="empty-rows">当前国家没有匹配的物流渠道，请选择搜索结果中的国家、更换关键词或清空搜索。</div>
       <div v-else class="empty-rows">{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请先选择报价区域，再查看该分区的渠道和价格' : '当前重量和物流属性下暂无可用渠道，请检查财务授权或调整报价条件' }}</div>
-      <footer><span>{{ channelQuery ? `匹配 ${filteredRows.length} / ${rows.length} 条渠道` : `共 ${rows.length} 条渠道` }}</span><label>每页 <select v-model.number="pageSize"><option :value="5">5</option><option :value="10">10</option><option :value="20">20</option></select> 条</label><button :disabled="page<=1" @click="page--">上一页</button><b>{{ page }} / {{ pageCount }}</b><button :disabled="page>=pageCount" @click="page++">下一页</button></footer>
+      <footer><span>{{ channelCountLabel }}</span><label>每页 <select v-model.number="pageSize"><option :value="5">5</option><option :value="10">10</option><option :value="20">20</option></select> 条</label><button :disabled="page<=1" @click="page--">上一页</button><b>{{ page }} / {{ pageCount }}</b><button :disabled="page>=pageCount" @click="page++">下一页</button></footer>
     </template>
   </section>
 </template>
