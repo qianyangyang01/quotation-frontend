@@ -139,7 +139,12 @@ const financePolicies = shallowRef(loadFinanceChannelPolicies())
 const financeCountrySettings = ref(loadFinanceCountrySettings())
 const financeSurchargeSettings = ref(loadFinanceSurchargeSettings())
 const financeTaxSettings = ref(loadFinanceTaxSettings())
-const quotationAttributeOptions = computed(() => selectableLogisticsAttributes(financePolicies.value.map(policy => policy.category)))
+const quotationAttributeOptions = computed(() => {
+  const policies = financePolicies.value
+  if (!financeSettingsAreHydrated()) return []
+  const authorized = new Set(policies.filter(policy => policy.enabled).map(policy => normalizeLogisticsAttribute(policy.category)))
+  return selectableLogisticsAttributes([...authorized]).filter(attribute => authorized.has(attribute))
+})
 let appliedFinanceVersions: FinanceSettingVersions = {}
 const skuSearch = ref('')
 const customerName = ref('')

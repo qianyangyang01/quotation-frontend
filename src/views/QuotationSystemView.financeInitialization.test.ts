@@ -47,6 +47,8 @@ type PricingState = {
   financeTaxSettings: FinanceTaxSettings
   financeSurchargeSettings: FinanceSurchargeSettings
   quotationAttributeOptions: string[]
+  products: QuotationProduct[]
+  conditionIssues: (options: { includeSku: boolean; includeCategory: boolean }) => Array<{ key: string; message: string }>
   selectFinanceCustomer: (id: string) => void
   taxResult: (country: string, provider: string, cny: number, rule: string, channel: string, weight: number, quantity: number) => { configured: boolean; taxUsd: number; surchargeUsd: number; totalUsd: number }
 }
@@ -72,7 +74,7 @@ describe('quotation finance initialization for an employee', () => {
     clearFinanceSettingsCache()
   })
 
-  async function mountPage(options: { grade?: string; warm?: boolean; disableS?: boolean } = {}) {
+  async function mountPage(options: { grade?: string; attribute?: string; warm?: boolean; disableS?: boolean } = {}) {
     const finance = new Promise<ReturnType<typeof financeResponse>>((resolve, reject) => {
       resolveFinance = resolve
       rejectFinance = reject
@@ -90,8 +92,8 @@ describe('quotation finance initialization for an employee', () => {
       }
       if (path === '/quotation-templates') return []
       if (path === '/quotation-readiness') return { ready: true, missing: [] }
-      if (path === '/quotation-drafts/mine/state') return options.grade
-        ? { exists: true, version: 1, payload: { schemaVersion: 2, selectedCustomerGrade: options.grade, quoteMode: 'single' } }
+      if (path === '/quotation-drafts/mine/state') return options.grade || options.attribute
+        ? { exists: true, version: 1, payload: { schemaVersion: 2, selectedCustomerGrade: options.grade, logisticsAttribute: options.attribute, quoteMode: 'single' } }
         : { exists: false, version: -1, payload: null }
       throw new Error(`Unexpected request: ${path}`)
     })
@@ -106,6 +108,8 @@ describe('quotation finance initialization for an employee', () => {
   }
 
   function gradeField() { return host.querySelector<HTMLElement>('[data-validation-field="customerGrade"]')! }
+  function attributeSelect() { return host.querySelector<HTMLSelectElement>('[data-validation-field="logisticsAttribute"] select')! }
+  function selectableAttributes() { return Array.from(attributeSelect().options).filter(option => !option.disabled).map(option => option.value) }
   function expectHiddenCoefficient(coefficient: number) {
     expect(host.textContent).not.toContain('报价系数')
     expect(host.innerHTML).not.toContain(coefficient.toString())
@@ -151,6 +155,48 @@ describe('quotation finance initialization for an employee', () => {
     state.selectFinanceCustomer('bk')
     const product = { purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct
     expect(state.taxResult('美国', '物流商', state.salePrice(product), '', '', 1, 1)).toMatchObject({ configured: true, taxUsd: 2, surchargeUsd: 3, totalUsd: 23.55 })
+  })
+
+  it('offers only enabled finance attributes, without adding the built-in attributes', async () => {
+    await mountPage()
+    expect(selectableAttributes()).toEqual([])
+    const response = financeResponse()
+    const categories = ['服装', '纯电', '保健品', '化妆品', '带电', '普货', '香水', '大货普货', '大货带电']
+    response['channel-policies'].value = [...categories, '粉末'].map(category => ({
+      ...response['channel-policies'].value[0]!, id: category, category, enabled: category !== '粉末',
+    }))
+    resolveFinance(response)
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    expect(selectableAttributes()).toEqual(['普货', '化妆品', '保健品', '带电', '纯电', '服装', '香水', '大货普货', '大货带电'])
+    expect(state.quotationAttributeOptions).toEqual(selectableAttributes())
+  })
+
+  it('retains an unauthorized draft attribute without silently changing the shipment type', async () => {
+    await mountPage({ attribute: '粉末' })
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    expect(selectableAttributes()).toEqual(['香氛'])
+    expect(state.products[0]!.logisticsAttribute).toBe('粉末')
+    expect(attributeSelect().selectedOptions[0]!.disabled).toBe(true)
+    expect(attributeSelect().selectedOptions[0]!.textContent).toContain('原物流属性未获财务授权')
+    expect(state.conditionIssues({ includeSku: false, includeCategory: false })).toContainEqual({ key: 'logisticsAttribute', message: '请选择物流属性' })
+  })
+
+  it('reacts to finance additions and removals without replacing the current attribute', async () => {
+    await mountPage({ attribute: '香氛' })
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    const policy = state.financePolicies[0]!
+    state.financePolicies = [{ ...policy, enabled: false }, { ...policy, id: '粉末', category: '粉末' }]
+    await nextTick()
+    expect(selectableAttributes()).toEqual(['粉末'])
+    expect(state.products[0]!.logisticsAttribute).toBe('香氛')
+    expect(attributeSelect().selectedOptions[0]!.disabled).toBe(true)
+    state.financePolicies = []
+    await nextTick()
+    expect(selectableAttributes()).toEqual([])
+    expect(attributeSelect().textContent).toContain('暂无财务授权的物流属性')
+    expect(state.conditionIssues({ includeSku: false, includeCategory: false })).toContainEqual({ key: 'logisticsAttribute', message: '请选择物流属性' })
   })
 
   it('automatically applies a later finance revision to an empty quotation', async () => {
