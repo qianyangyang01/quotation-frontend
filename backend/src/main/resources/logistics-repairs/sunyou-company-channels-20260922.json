@@ -1,0 +1,37 @@
+{
+  "entries": [
+    {
+      "id": "ed09e44d-855d-4980-88c4-e79cfb04a206",
+      "providerName": "顺友",
+      "providerAliases": ["顺友物流", "SUNYOU"],
+      "channelName": "顺邮宝挂号",
+      "aliases": ["顺邮宝挂", "顺邮宝挂号价目表"],
+      "productCodes": ["SYBRAM"],
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "sourceGoodsNote": "可走带电产品、化妆品（香水除外）；实际报价属性以财务授权为准"
+    },
+    {
+      "id": "45c3da36-58c7-49ce-88d7-bd1e127cffcb",
+      "providerName": "顺友",
+      "providerAliases": ["顺友物流", "SUNYOU"],
+      "channelName": "顺速宝(特货)",
+      "aliases": ["顺速宝特", "顺速宝特货", "顺速宝特货价目表"],
+      "productCodes": ["SSBRAM"],
+      "logisticsAttribute": "带电",
+      "enabled": true,
+      "sourceGoodsNote": "可走带电产品、化妆品，全商清渠道；实际报价属性以财务授权为准"
+    },
+    {
+      "id": "3c57d889-c630-4288-97cc-6d081a5b2f6c",
+      "providerName": "顺友",
+      "providerAliases": ["顺友物流", "SUNYOU"],
+      "channelName": "顺速宝Plus",
+      "aliases": ["顺速宝Plus价目表"],
+      "productCodes": ["SYEPL"],
+      "logisticsAttribute": "纯电",
+      "enabled": true,
+      "sourceGoodsNote": "可走纯电池、带电产品、香水、化妆品；实际报价属性以财务授权为准"
+    }
+  ]
+}
