@@ -48,6 +48,7 @@ type PricingState = {
   skuSearch: string
   customQuoteQuantity: number
   syncPending: string
+  syncError: string
   draftPayload: () => unknown
   financePolicies: FinanceChannelPolicy[]
   financeCountrySettings: FinanceCountrySetting[]
@@ -122,6 +123,32 @@ describe('quotation finance initialization for an employee', () => {
     expect(host.innerHTML).not.toContain(coefficient.toString())
     expect(state.salePrice({ purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct)).toBeCloseTo(100 * coefficient, 10)
   }
+
+  it('rechecks a transient sync failure without writing or reloading the draft or recalculating the quote', async () => {
+    await mountPage()
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    state.customerName = '保留当前客户'
+    state.customQuoteQuantity = 7
+    state.syncError = '网络短暂不可用'
+    const before = JSON.stringify(state.draftPayload())
+    const originalGet = vi.mocked(api.get).getMockImplementation()!
+    vi.mocked(api.get).mockImplementation(async (path, ...args) => {
+      if (path.startsWith('/quotation-sync')) return { purchaseVersions: {}, logisticsRevision: '', financeVersions: financeSettingVersions() }
+      return originalGet(path, ...args)
+    })
+    const writeDraft = vi.spyOn(api, 'put').mockRejectedValue(new Error('本次重试不应写草稿'))
+    const draftReads = vi.mocked(api.get).mock.calls.filter(([path]) => path === '/quotation-drafts/mine/state').length
+    await nextTick()
+    const retry = host.querySelector<HTMLButtonElement>('.live-data-notice button')!
+    expect(retry.textContent).toBe('重试核验')
+    retry.click()
+    await vi.waitFor(() => expect(state.syncError).toBe(''))
+    expect(state.syncPending).toBe('')
+    expect(writeDraft).not.toHaveBeenCalled()
+    expect(JSON.stringify(state.draftPayload())).toBe(before)
+    expect(vi.mocked(api.get).mock.calls.filter(([path]) => path === '/quotation-drafts/mine/state')).toHaveLength(draftReads)
+  })
 
   it.each([false, true])('recovers finance through the rendered retry action while preserving current input; changed settings %s', async changed => {
     await mountPage()

@@ -715,7 +715,7 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     if ((newerLogistics || beforeSave) && savedQuoteRows.value.length) {
       try { await checkSelectedLogistics({ logisticsAttribute: products.value[0].logisticsAttribute, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), quoteOptions: buildQuoteOptions() }, signal) }
       catch (error) {
-        if (error instanceof ApiError && [409, 422].includes(error.status)) changed.push('已选渠道的适用价格或可用性')
+        if (error instanceof ApiError && [409, 422].includes(error.status)) changed.push(`已选渠道核验未通过：${error.message}${error.requestId ? `（核验编号：${error.requestId}）` : ''}`)
         else throw error
       }
     }
@@ -737,7 +737,7 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
           if (checked.revision !== latest.revision) return true
         } catch (error) {
           if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature()) return false
-          if (error instanceof ApiError && [409,422].includes(error.status)) { syncPending.value = '已选渠道的适用价格或可用性'; return false }
+          if (error instanceof ApiError && [409,422].includes(error.status)) { syncPending.value = `已选渠道核验未通过：${error.message}${error.requestId ? `（核验编号：${error.requestId}）` : ''}`; return false }
           throw error
         }
       }
@@ -1184,7 +1184,7 @@ onMounted(async () => {
   catch { toast('报价工作区读取失败，请检查网络后重试') }
   if (viewDisposed) return
   stopLiveSync = startQuotationSync(async signal => {
-    if (!draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
+    if (!draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
     await checkLiveVersions(signal)
     if (!signal.aborted && !activePurchaseSkus().length && syncPending.value) {
       await reloadLiveConfiguration(); syncPending.value = ''
@@ -1576,7 +1576,7 @@ const saveValidationIssues = computed(() => {
   const issues: Array<{ key: string; label: string; message: string }> = []
   if (purchaseTaxBlockReason.value) issues.push({ key: 'sku', label: '采购票点', message: purchaseTaxBlockReason.value })
   if (quoteMode.value === 'single' && (purchaseQueryError.value || (p?.sku && skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== p.sku))) issues.push({ key: 'sku', label: '商品 SKU', message: purchaseQueryError.value || 'SKU 已改变，请重新查询商品后保存' })
-  if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || '最新资料正在读取，请稍候' })
+  if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || '最新资料正在读取，请稍候' })
   if (draftInitializationFailed.value) issues.push({ key: 'workspaceInitialization', label: '报价工作区', message: draftError.value || '报价工作区读取失败，请查看顶部错误提示' })
   else if (!financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: financeSettingsAreLoading() ? '财务设置正在读取，请稍候' : financeSettingsLoadError() ? `财务设置读取失败：${financeSettingsLoadError()}；请重试读取` : '财务设置尚未完整加载，请重试读取后保存' })
   const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'预估月销量', commissionThreshold:'佣金阈值' }
@@ -1602,20 +1602,20 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : ''))
-const displayedSaveBlockReason = computed(() => specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}已更新，请更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
+const displayedSaveBlockReason = computed(() => specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
 const retryingSavePreparation = ref(false)
 const canRetrySavePreparation = computed(() => !draftInitializationFailed.value && Boolean(!financeSettingsAreHydrated() || syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
 async function retrySavePreparation() {
   if (retryingSavePreparation.value || savingQuotation.value || syncRefreshing.value || quoteLogisticsBusy() || financeSettingsAreLoading() || draftInitializationFailed.value) return
   retryingSavePreparation.value = true
   try {
-    if (!financeSettingsAreHydrated()) {
+    if (!financeSettingsAreHydrated() || (!syncPending.value && syncError.value)) {
       // Verify against the finance versions applied to this quote. A changed
       // configuration still requires the existing explicit update flow.
       // Do not reload the server draft or discard current form selections.
       const verified = await checkLiveVersions(undefined, true)
-      if (verified) toast('财务设置已重新读取，当前报价内容已保留')
-    } else if (syncPending.value || syncError.value) await updateLiveQuotation()
+      if (verified) toast('资料核验已恢复，当前报价内容已保留')
+    } else if (syncPending.value) await updateLiveQuotation()
     else await retryQuoteLogistics()
   } catch (error) { toast(error instanceof Error ? error.message : '重新检查失败，请重试') }
   finally { retryingSavePreparation.value = false }
@@ -1631,18 +1631,22 @@ async function attemptSave() {
     return
   }
   savingQuotation.value = true
+  let submittingQuotation = false
   try {
-    if (!await checkLiveVersions(undefined, true)) { toast('当前报价资料有变化，请核对后再保存'); return }
+    if (!await checkLiveVersions(undefined, true)) { toast(syncPending.value || '当前输入或核验状态已变化，请重新确认后保存'); return }
     if (countryLoads.value || countryLoadError.value) { toast(countryLoadError.value || '国家渠道正在加载，请稍候'); return }
     await flushDraft()
     logisticsLoadState.value = 'ready'
+    submittingQuotation = true
     await save()
   } catch (error) {
-    if (error instanceof ApiError && error.status === 409) syncPending.value = '报价依据'
+    // A draft version conflict is handled by the draft dialog, not repricing.
+    if (submittingQuotation && error instanceof ApiError && error.status === 409) syncPending.value = error.message
     const details = error instanceof ApiError && error.fieldErrors.length
       ? `：${error.fieldErrors.map(item => item.message).join('；')}`
       : ''
-    toast(error instanceof Error ? `${error.message}${details}` : '报价保存失败，请重试')
+    const requestId = error instanceof ApiError && error.requestId ? `（请求编号：${error.requestId}）` : ''
+    toast(error instanceof Error ? `${error.message}${details}${requestId}` : '报价保存失败，请重试')
   } finally { savingQuotation.value = false }
 }
 function locateValidationIssue(key: string) {
@@ -1966,8 +1970,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
     <main class="quotation-page" :inert="syncRefreshing || undefined">
       <p v-if="logisticsRebuilding" role="status" class="notice">物流价格正在重建，新报价提交已暂停；请等待基准审核完成。</p>
       <section v-if="syncPending || syncError || syncRefreshing" class="live-data-notice" role="status">
-        <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}已更新，当前报价尚未采用新数据。` : `同步暂不可用：${syncError}` }}</span>
-        <button type="button" :disabled="syncRefreshing || savingQuotation" @click="updateLiveQuotation">{{ syncRefreshing ? '更新中…' : '更新报价' }}</button>
+        <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}；请核对并更新报价。` : `同步暂不可用：${syncError}` }}</span>
+        <button type="button" :disabled="syncRefreshing || savingQuotation || retryingSavePreparation || financeSettingsAreLoading()" @click="retrySavePreparation">{{ syncRefreshing ? '更新中…' : retryingSavePreparation ? '核验中…' : syncPending ? '更新报价' : '重试核验' }}</button>
       </section>
       <QuotationHeader :salesperson="selectedSalesperson" :rate="exchange.usd" :status="products[0]?.status || '待查询'" :mode-label="quoteMode === 'bundle' ? '组合 SKU 报价' : '单品 SKU 报价'" @show-rule="showRule=true" />
 

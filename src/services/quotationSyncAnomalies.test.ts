@@ -36,9 +36,9 @@ it('requires refreshing a repaired purchase before an employee can save the old 
 it.each([
   [422,'当前重量没有可用运价'],[422,'渠道不在该国家及货物属性的财务允许范围内'],
   [409,'物流费用与服务器核算不一致，请重新计价'],[409,'当前渠道时效已变化，请更新报价'],
-])('diagnoses generic update wording for %s %s',async(status,message)=>{
+])('retains the server rejection reason and request ID for %s %s',async(status,message)=>{
   const {state,run}=setup();state.checkSelectedLogistics.mockRejectedValue(new ApiError(message as string,status as number,'ERROR','test'))
-  await run(undefined,true);expect(state.syncPending.value).toBe('已选渠道的适用价格或可用性')
+  await run(undefined,true);expect(state.syncPending.value).toBe(`已选渠道核验未通过：${message}（核验编号：test）`)
 })
 it('does not classify a network outage as a price change',async()=>{
   const {state,run}=setup();state.checkSelectedLogistics.mockRejectedValue(new Error('offline'))
@@ -67,7 +67,7 @@ it('keeps a newer rejection when an older successful check finishes late',async(
   const old=run(undefined,true);await vi.waitFor(()=>expect(state.checkSelectedLogistics).toHaveBeenCalledOnce())
   state.checkSelectedLogistics.mockRejectedValueOnce(new ApiError('current failure',422,'ERROR','test'))
   await run(undefined,true);resolve({revision:'r1'});expect(await old).toBe(false)
-  expect(state.syncPending.value).toBe('已选渠道的适用价格或可用性')
+  expect(state.syncPending.value).toBe('已选渠道核验未通过：current failure（核验编号：test）')
 })
 it('ignores obsolete network failures but surfaces the current failure',async()=>{
   const {state,run}=setup();let reject!:(error:Error)=>void

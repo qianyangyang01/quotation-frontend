@@ -63,15 +63,20 @@ export function clearFinanceSettingsCache() {
 }
 
 export function hydrateFinanceSettings(options: { force?: boolean; signal?: AbortSignal } = {}) {
+  if (options.signal?.aborted) return Promise.reject(options.signal.reason)
   if (hydrated.value && !options.force) return Promise.resolve()
-  if (hydrationRequest) return hydrationRequest
+  if (hydrationRequest) return waitForFinance(hydrationRequest, options.signal)
   if (options.force) hydrated.value = false
   hydrating.value = true
   hydrationError.value = ''
 
   const generation = hydrationGeneration
+  // The read is shared, but cancelling a SKU query must only cancel that caller.
+  // Bound the shared request so an interrupted connection cannot lock all retries.
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(new Error('财务设置读取超时，请重试读取')), 15000)
   const request = (async () => {
-    const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings', { signal: options.signal, cache: 'no-store' })
+    const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings', { signal: controller.signal, cache: 'no-store' })
     const nextCache = new Map<FinanceSettingKey, unknown>()
     const nextVersions = new Map<FinanceSettingKey, number>()
     const missing = financeSettingKeys.filter(key => !values[key] && key !== 'surcharge-settings' && key !== 'customer-operation-fees')
@@ -108,14 +113,24 @@ export function hydrateFinanceSettings(options: { force?: boolean; signal?: Abor
       hydrationError.value = error instanceof Error ? error.message : '财务设置读取失败'
     }
     throw error
-  })
-
-  hydrationRequest = request
-  return request.finally(() => {
+  }).finally(() => {
+    clearTimeout(timeout)
     if (hydrationRequest === request) {
       hydrationRequest = null
       hydrating.value = false
     }
+  })
+  hydrationRequest = request
+  return waitForFinance(request, options.signal)
+}
+
+function waitForFinance(request: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return request
+  return new Promise((resolve, reject) => {
+    const cancel = () => reject(signal.reason)
+    signal.addEventListener('abort', cancel, { once: true })
+    request.then(resolve, reject).finally(() => signal.removeEventListener('abort', cancel))
+    if (signal.aborted) cancel()
   })
 }
 

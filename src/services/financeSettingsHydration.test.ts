@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed } from 'vue'
 
 const http = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
@@ -25,6 +25,7 @@ function settings(exchangeRate = 6.75) {
 }
 
 describe('finance settings hydration', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
     vi.clearAllMocks()
     clearFinanceSettingsCache()
@@ -63,6 +64,39 @@ describe('finance settings hydration', () => {
     expect(financeSettingsAreHydrated()).toBe(true)
     expect(readFinanceSetting<{ usdCny: number }>('exchange-rate')?.usdCny).toBe(6.75)
     expect(readFinanceSetting<unknown[]>('customer-grades')).toHaveLength(1)
+  })
+
+  it('does not let a cancelled SKU load cancel another operation waiting for finance', async () => {
+    let resolve!: (value: ReturnType<typeof settings>) => void
+    http.get.mockImplementationOnce((_path, options) => new Promise((done, reject) => {
+      resolve = done
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+    }))
+    const caller = new AbortController()
+    const cancelled = expect(hydrateFinanceSettings({ force: true, signal: caller.signal })).rejects.toThrow('取消旧商品')
+    const current = hydrateFinanceSettings({ force: true })
+    caller.abort(new Error('取消旧商品'))
+    await cancelled
+    resolve(settings())
+    await current
+    expect(http.get).toHaveBeenCalledOnce()
+    expect(financeSettingsAreHydrated()).toBe(true)
+    expect(financeSettingsLoadError()).toBe('')
+  })
+
+  it('releases a stalled finance read and permits a successful retry', async () => {
+    vi.useFakeTimers()
+    http.get.mockImplementationOnce((_path, options) => new Promise((_done, reject) => {
+      options.signal?.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+    }))
+    const stalled = expect(hydrateFinanceSettings()).rejects.toThrow('财务设置读取超时')
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(financeSettingsAreLoading()).toBe(false)
+    await stalled
+    expect(financeSettingsAreHydrated()).toBe(false)
+    http.get.mockResolvedValueOnce(settings())
+    await hydrateFinanceSettings()
+    expect(financeSettingsAreHydrated()).toBe(true)
   })
 
   it('loads a newly unconfigured surcharge separately and creates it with version -1', async () => {
