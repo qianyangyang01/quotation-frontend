@@ -9,6 +9,15 @@ const rule: LogisticsRule = { id: 590, name: '云途全球化妆品类专线挂�
   type: '专线', currency: 'CNY', published: '', status: '启用', dates: '', users: '', relations: [],
   phoneRequired: false, areaCount: 1, priceRowCount: 1, billingVerified: true, prices: [price] }
 
+it('reconciles every whole-gram shipment up to 5kg against integer-cent arithmetic', () => {
+  for (let grams = 1; grams <= 5000; grams++) {
+    const units = Math.floor((grams + 99) / 100)
+    const result = calculateLogisticsFee(rule, 'KW', grams / 1000)
+    expect(result?.chargeWeightKg, `${grams}g weight`).toBe(units / 10)
+    expect(result?.total, `${grams}g fee`).toBe((units * 740 + 7500) / 100)
+  }
+})
+
 it('preserves source rounding through normalization and rounds the parcel after minimum padding', () => {
   expect(price).toMatchObject({ billingStepKg: .1, sourceSheet: '云途全球化妆品类专线挂号' })
   for (const [weight, charge, total] of [[.05,.1,82.4],[.1,.1,82.4],[.100001,.2,89.8],

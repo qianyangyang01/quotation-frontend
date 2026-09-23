@@ -16,6 +16,16 @@ class LogisticsKuwaitCosmeticsPricingTest {
     }
     ObjectNode input(double weight) { return mapper.createObjectNode().put("country","KW").put("weightKg",weight); }
 
+    @Test void reconcilesEveryWholeGramUpToFiveKilogramsUsingIntegerCents() {
+        var rows=mapper.createArrayNode().add(row());
+        for (int grams=1;grams<=5000;grams++) {
+            int units=(grams+99)/100;
+            var result=engine.calculate(rows,input(grams/1000.0));
+            assertEquals(units/10.0,result.path("chargeWeightKg").asDouble(),grams+"g weight");
+            assertEquals((units*740+7500)/100.0,result.path("total").asDouble(),grams+"g fee");
+        }
+    }
+
     @Test void sourceImportPreservesTheConfirmedStepAndDoesNotWarnThatItIsUnsupported() throws Exception {
         try (var book = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
             var sheet = book.createSheet("云途全球化妆品类专线挂号");
