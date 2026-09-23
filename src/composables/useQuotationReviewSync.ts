@@ -10,8 +10,11 @@ export function useQuotationReviewSync(rows: Ref<QuotationRecord[]>, selected: R
   let controller: AbortController | undefined
   let generation = 0
   let disposed = false
+  function newer(a:QuotationReviewState,b?:QuotationReviewState) {
+    return !b || (a._version??-1)>(b._version??-1) || ((a._version??-1)===(b._version??-1)&&(a._reviewVersion??0)>=(b._reviewVersion??0))
+  }
   function accept(state: QuotationReviewState) {
-    if ((state._version ?? -1) >= (states.value[state.id]?._version ?? -1)) states.value[state.id] = state
+    if (newer(state,states.value[state.id])) states.value[state.id] = state
   }
   function stop() { generation++; clearTimeout(timer); controller?.abort() }
   async function poll() {
@@ -39,7 +42,7 @@ export function useQuotationReviewSync(rows: Ref<QuotationRecord[]>, selected: R
   onUnmounted(() => { disposed = true; stop(); window.removeEventListener('focus', wake); document.removeEventListener('visibilitychange', wake); window.removeEventListener('online', wake) })
   function stateFor(row: QuotationRecord): QuotationReviewState {
     const state = states.value[row.id]
-    return state && (state._version ?? -1) >= (row._version ?? -1) ? state : row
+    return state && newer(state,row) ? state : row
   }
   return { stateFor, accept, error, poll }
 }

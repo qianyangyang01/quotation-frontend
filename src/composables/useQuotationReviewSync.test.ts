@@ -45,3 +45,11 @@ it('retries failures, refreshes on focus, and stops polling on unmount', async (
   app.unmount();const calls=api.get.mock.calls.length;await vi.advanceTimersByTimeAsync(10000)
   expect(api.get).toHaveBeenCalledTimes(calls)
 })
+it('orders workflow revisions independently when the quotation version is unchanged',async()=>{
+  vi.useFakeTimers();api.get.mockResolvedValue([]);const {sync,row}=mount();await vi.advanceTimersByTimeAsync(0)
+  sync.accept({id:'a',_version:1,_reviewVersion:4,financeReviewStatus:'reviewing',financeReviewClaimedBy:'财务一'})
+  sync.accept({id:'a',_version:1,_reviewVersion:3,financeReviewStatus:'pending'})
+  expect(sync.stateFor(row).financeReviewStatus).toBe('reviewing')
+  sync.accept({id:'a',_version:1,_reviewVersion:5,financeReviewStatus:'approved'})
+  expect(sync.stateFor(row).financeReviewStatus).toBe('approved')
+})
