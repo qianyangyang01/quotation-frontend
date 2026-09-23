@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="billing-steps-2026.09.23-v1";
+    public static final String VERSION="sheet-titles-2026.09.23-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -378,15 +378,59 @@ public class LogisticsSourceParser {
 
     private ObjectNode selected(Source source,String provider,String name,String code,int row,Map<String,ObjectNode> channels) {
         var decision=source.scope.match(provider,name,code);
+        TitleIdentity title=null;
+        // Only a sheet-level fallback may use its title. Never override explicit row/channel identities.
+        if(!source.scope.unrestricted()&&name.trim().equals(source.sheet.getSheetName().trim())) {
+            var sheetMatch=source.scope.match(provider,name,"");
+            if(sheetMatch.entry()==null&&sheetMatch.status().equals("filtered")) {
+                title=source.titleIdentities.computeIfAbsent(provider,p->titleIdentity(source,p));
+                if(title.decision().status().equals("ambiguous"))decision=title.decision();
+                else if(title.decision().entry()!=null) {
+                    decision=source.scope.match(provider,title.decision().entry().path("channelName").asText(),code);
+                }
+            }
+        }
         var key=CompanyChannelScope.normalize(provider)+"|"+CompanyChannelScope.normalize(name)+"|"+CompanyChannelScope.normalize(code);
         if(source.matchKeys.add(key)){
             var report=source.matches.addObject().put("providerName",provider).put("channelName",name).put("productCode",code)
                     .put("sourceRow",row+1).put("status",decision.status()).put("reason",decision.reason());
             if(decision.entry()!=null)report.put("companyChannelId",decision.entry().path("id").asText());
+            if(title!=null&&!title.evidence().isEmpty()) {
+                report.put("matchMethod","header-title").set("titleEvidence",title.evidence().deepCopy());
+                if(decision.entry()!=null)report.put("matchedChannelName",decision.entry().path("channelName").asText());
+            }
         }
         if(!decision.accepted()) {source.parsedRows.add(row);source.ambiguous|=decision.status().equals("ambiguous");return null;}
         String canonical=decision.entry()==null?name:decision.entry().path("channelName").asText();
         var target=channel(provider,canonical,channels);CompanyChannelScope.identify(target,decision);return target;
+    }
+
+    private record TitleIdentity(CompanyChannelScope.Match decision,ArrayNode evidence) {}
+    private TitleIdentity titleIdentity(Source source,String provider) {
+        var hits=new LinkedHashMap<String,CompanyChannelScope.Match>();
+        var evidence=mapper.createArrayNode();boolean ambiguous=false,priceHeader=false;
+        // Scan title/header cells before the first price header, never price rows or footer notes.
+        for(int r=0;r<=Math.min(39,source.lastContentRow);r++) {
+            if(detect(source,r,provider)!=null){priceHeader=true;break;}
+            for(int c=0;c<Math.min(80,source.width(r));c++) {
+                var text=source.text(r,c).trim();
+                if(text.isBlank()||text.length()>500||!source.address(r,c).equals(new CellReference(r,c).formatAsString()))continue;
+                var candidates=new LinkedHashSet<String>();candidates.add(text);
+                candidates.addAll(Arrays.asList(text.split("[/／|｜\\r\\n;；]+")));
+                for(var candidate:candidates) {
+                    var label=candidate.trim().replaceFirst("^(?:渠道名称|产品名称|渠道|产品)\\s*[:：]\\s*","");
+                    var match=source.scope.match(provider,label,"");
+                    if(match.entry()==null&&!match.status().equals("ambiguous"))continue;
+                    ambiguous|=match.status().equals("ambiguous");
+                    if(match.entry()!=null)hits.put(match.entry().path("id").asText(),match);
+                    evidence.addObject().put("cell",source.address(r,c)).put("text",text).put("matchedText",label);
+                }
+            }
+        }
+        if(!priceHeader)return new TitleIdentity(new CompanyChannelScope.Match("filtered","未找到可关联的价格表头",null),mapper.createArrayNode());
+        if(ambiguous||hits.size()>1)return new TitleIdentity(new CompanyChannelScope.Match("ambiguous","页内标题匹配多个公司渠道，需确认归属",null),evidence);
+        var match=hits.isEmpty()?new CompanyChannelScope.Match("filtered","页内标题未匹配登记渠道",null):hits.values().iterator().next();
+        return new TitleIdentity(match,evidence);
     }
 
     private static boolean referenceOnlySheet(String sheetName) {
@@ -1478,6 +1522,7 @@ public class LogisticsSourceParser {
     private class Source {
         final CompanyChannelScope scope;int priceCellsParsed;
         final ArrayNode matches=mapper.createArrayNode();final Set<String> matchKeys=new HashSet<>();boolean ambiguous;
+        final Map<String,TitleIdentity> titleIdentities=new HashMap<>();
         final Sheet sheet;final int nonempty;final int lastContentRow;final DataFormatter formatter=new DataFormatter(Locale.ROOT);
         final Set<Integer> parsedRows=new HashSet<>() {
             @Override public boolean add(Integer value) {
