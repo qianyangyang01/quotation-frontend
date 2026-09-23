@@ -29,6 +29,16 @@ UPDATE quotation_record SET payload=pg_temp.qa_scrub(payload);
 UPDATE quotation_template SET payload=pg_temp.qa_scrub(payload),name='QA template';
 UPDATE quotation_draft SET payload=pg_temp.qa_scrub(payload);
 UPDATE quotation_review SET state=pg_temp.qa_scrub(state);
+DO $$
+DECLARE r record;
+BEGIN
+ FOR r IN SELECT table_name,column_name FROM information_schema.columns
+  WHERE table_schema='public' AND data_type IN ('character varying','text')
+  AND (column_name LIKE '%account%' OR column_name IN ('requested_by','reviewed_by','archived_by','created_by','updated_by','changed_by'))
+  AND table_name<>'flyway_schema_history' LOOP
+  EXECUTE format('UPDATE %I SET %I = ''QA-'' || substr(md5(to_jsonb(%I)::text),1,12) WHERE %I IS NOT NULL AND %I NOT LIKE ''LOAD%%'' AND %I NOT LIKE ''PERF%%''',r.table_name,r.column_name,r.column_name,r.column_name,r.column_name,r.column_name);
+ END LOOP;
+END $$;
 UPDATE import_job SET status=CASE WHEN status IN ('queued','processing') THEN 'failed' ELSE status END;
 UPDATE logistics_import_batch SET status=CASE WHEN status IN ('queued','processing') THEN 'failed' ELSE status END;
 WITH users AS (
