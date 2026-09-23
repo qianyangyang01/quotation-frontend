@@ -10,12 +10,13 @@ const effectiveWeightKg = (item: BundleQuoteItem) => item.customWeightKg == null
 const packagedWeightKg = (item: BundleQuoteItem) => sumDecimal(effectiveWeightKg(item), packagingWeightKg(effectiveWeightKg(item)))
 const rowDomesticFreight = (item: BundleQuoteItem) => productDecimal(item.purchaseFreightPerUnit, Math.max(1, Math.floor(Number(item.quantityPerSet) || 1)))
 const purchasePricingLabel = (item: BundleQuoteItem) => {
-  if (item.purchaseZeroTaxPointAdjustment) return `采购票点为0 · 原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = ¥${item.purchaseUnitPrice.toFixed(2)}`
+  const tierLabel = item.purchaseTierLabel || '阶梯'
+  if (item.purchaseZeroTaxPointAdjustment) return `${tierLabel} · 采购票点为0 · 原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = ¥${item.purchaseUnitPrice.toFixed(2)}`
   if (item.purchaseDataSource === 'legacy_2026') return item.purchasePriceBasis === 'tax_included' ? `2026旧数据 · 优先采用含票价 ¥${item.purchaseUnitPrice.toFixed(2)}` : `2026旧数据 · 含票价为空，采用报价 ¥${item.purchaseUnitPrice.toFixed(2)}`
-  if (!item.purchaseInvoiceTaxApplied) return `阶梯原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} · 旧草稿沿用原规则`
-  if (item.purchaseInvoiceRatePercent <= 0 && Math.abs(item.purchaseUnitPrice - item.purchaseBaseUnitPrice) > 0.001) return `票点暂无数据 · 使用含票价 ¥${item.purchaseUnitPrice.toFixed(2)}`
-  if (item.purchaseInvoiceRatePercent <= 0) return `阶梯原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} · 未配置采购票率`
-  return `阶梯原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} × ${(1 + item.purchaseInvoiceRatePercent / 100).toFixed(2)}（${item.purchaseInvoiceType}）= ¥${item.purchaseUnitPrice.toFixed(2)}`
+  if (!item.purchaseInvoiceTaxApplied) return `${tierLabel}原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} · 旧草稿沿用原规则`
+  if (item.purchaseInvoiceRatePercent <= 0 && Math.abs(item.purchaseUnitPrice - item.purchaseBaseUnitPrice) > 0.001) return `${tierLabel} · 票点暂无数据 · 使用含票价 ¥${item.purchaseUnitPrice.toFixed(2)}`
+  if (item.purchaseInvoiceRatePercent <= 0) return `${tierLabel}原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} · 未配置采购票率`
+  return `${tierLabel}原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} × ${(1 + item.purchaseInvoiceRatePercent / 100).toFixed(2)}（${item.purchaseInvoiceType}）= ¥${item.purchaseUnitPrice.toFixed(2)}`
 }
 
 defineProps<{

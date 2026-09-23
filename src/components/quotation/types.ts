@@ -13,6 +13,7 @@ export type QuotationProduct = {
   quantity: number
   purchase: number
   purchaseBaseUnitPrice: number
+  purchaseTierLabel?: string
   purchaseInvoiceType: string
   purchaseZeroTaxPointAdjustment?: boolean
   purchaseInvoiceRatePercent: number
@@ -58,6 +59,7 @@ export type BundleQuoteItem = {
   quantityPerSet: number
   purchaseUnitPrice: number
   purchaseBaseUnitPrice: number
+  purchaseTierLabel?: string
   purchaseInvoiceType: string
   purchaseZeroTaxPointAdjustment?: boolean
   purchaseInvoiceRatePercent: number

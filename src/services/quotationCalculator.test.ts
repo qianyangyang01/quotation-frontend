@@ -13,7 +13,6 @@ import {
   purchaseInvoiceRatePercent,
   purchasePriceBreakdown,
   purchasePriceForMonthlySales,
-  purchaseQuantityForMonthlySales,
   resolveBundleProductCategory,
   singleActualWeight,
   singleBaseWeight,
@@ -38,9 +37,39 @@ const taxed = normalizePurchaseRecord({
 })
 
 describe('quotation purchase tiers', () => {
-  it('maps monthly sales bands to their documented purchase quantities', () => {
-    expect(['10', '100', '100+'].map(purchaseQuantityForMonthlySales)).toEqual([1, 10, 100])
-    expect(['10', '100', '100+'].map(monthlySalesTierLabel)).toEqual(['1件参考价', '10件采购价', '100件采购价'])
+  it('maps persisted option values to purchase tier labels', () => {
+    expect(['10', '100', '100+'].map(value => monthlySalesTierLabel(value))).toEqual(['阶梯价1', '阶梯价2', '阶梯价3'])
+  })
+
+  it('selects the displayed tiers for BK2601961-1 regardless of their minimum quantities', () => {
+    const record = normalizePurchaseRecord({
+      sku: 'BK2601961-1', weightG: 219, minOrderQty: 100, purchasePriceCny: 13.8,
+      tier2MinQty: 500, tier2PriceCny: 12.5, tier3MinQty: 1000, tier3PriceCny: 11.5,
+      taxPoint: .02, invoiceType: '普票', freight10Cny: 2.1,
+    })
+    expect(['10', '100', '100+'].map(value => purchasePriceBreakdown(record, value).baseUnitPriceCny)).toEqual([13.8, 12.5, 11.5])
+    expect(['10', '100', '100+'].map(value => purchasePriceForMonthlySales(record, value))).toEqual([14.08, 12.75, 11.73])
+    expect(monthlySalesTierLabel('100', record)).toBe('阶梯价2（500–999件）')
+    const items = [{ sku: record.sku, quantityPerSet: 2, purchaseUnitPrice: 99, purchaseFreightPerUnit: .21, weightKg: .219, customWeightKg: null }]
+    expect(bundlePurchaseCost(items, [record], '100', 3)).toBe(76.5)
+    expect(bundleDomesticFreight(items, 3)).toBe(1.26)
+  })
+
+  it('uses the last available tier with an explicit fallback label when higher tiers are absent', () => {
+    expect(purchasePriceForMonthlySales(taxed, '100+')).toBe(19.06)
+    expect(monthlySalesTierLabel('100+', taxed)).toBe('阶梯价3未配置，采用阶梯价2（10件起）')
+    const single = normalizePurchaseRecord({ sku: 'SINGLE', minOrderQty: 100, purchasePriceCny: 13.8 })
+    expect(purchasePriceForMonthlySales(single, '100')).toBe(13.8)
+    expect(monthlySalesTierLabel('100', single)).toBe('阶梯价2未配置，采用阶梯价1（100件起）')
+    const noTiers = normalizePurchaseRecord({ purchasePriceCny: 8 })
+    expect(purchasePriceForMonthlySales(noTiers, '100+')).toBe(8)
+    expect(monthlySalesTierLabel('100+', noTiers)).toBe('阶梯价3未配置，采用基准采购价')
+  })
+
+  it('matches the purchase list order even when optional tier fields are sparse and preserves a zero price', () => {
+    const sparse = normalizePurchaseRecord({ minOrderQty: 100, purchasePriceCny: 13.8, tier3MinQty: 1000, tier3PriceCny: 0 })
+    expect(purchasePriceForMonthlySales(sparse, '100')).toBe(0)
+    expect(monthlySalesTierLabel('100', sparse)).toBe('阶梯价2（1000件起）')
   })
 
   it('uses exact tier boundaries and accepts equal tier prices', () => {

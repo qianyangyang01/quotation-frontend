@@ -1,6 +1,6 @@
 import { decimal, sumDecimal, productDecimal } from './quotationDecimal'
 import type { ShipmentDimensions } from '@/data/logistics'
-import { findPurchaseProduct, purchaseUnitPrice, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { findPurchaseProduct, type PurchaseProductRecord } from '@/data/purchaseStore'
 
 export type MonthlySalesEstimate = '10' | '100' | '100+'
 
@@ -30,12 +30,24 @@ export function normalizedQuoteQuantity(value: number) {
   return Math.max(1, Math.floor(Number(value) || 1))
 }
 
-export function purchaseQuantityForMonthlySales(value: string): number {
-  return value === '100+' ? 100 : value === '100' ? 10 : 1
+// Keep persisted option values compatible with existing drafts and reissued quotes.
+function purchaseTierIndex(value: string): number {
+  return value === '100+' ? 2 : value === '100' ? 1 : 0
 }
 
-export function monthlySalesTierLabel(value: string) {
-  return value === '100+' ? '100件采购价' : value === '100' ? '10件采购价' : '1件参考价'
+function selectedPurchaseTier(record: PurchaseProductRecord, value: string) {
+  const index = Math.min(purchaseTierIndex(value), record.priceTiers.length - 1)
+  return { index, tier: record.priceTiers[index] }
+}
+
+export function monthlySalesTierLabel(value: string, record?: PurchaseProductRecord) {
+  const requested = purchaseTierIndex(value) + 1
+  if (!record) return `阶梯价${requested}`
+  const { index, tier } = selectedPurchaseTier(record, value)
+  if (!tier) return `阶梯价${requested}未配置，采用基准采购价`
+  const range = tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件`
+  const actual = index + 1
+  return `${actual === requested ? `阶梯价${actual}` : `阶梯价${requested}未配置，采用阶梯价${actual}`}（${range}）`
 }
 
 export type PurchasePriceBreakdown = {
@@ -69,7 +81,8 @@ export function missingPurchaseTaxPointSkus(skus: string[], records: PurchasePro
 }
 
 export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true): PurchasePriceBreakdown {
-  const baseUnitPriceCny = roundCny(purchaseUnitPrice(record, purchaseQuantityForMonthlySales(estimate)))
+  const { tier } = selectedPurchaseTier(record, estimate)
+  const baseUnitPriceCny = roundCny(tier?.unitPriceCny ?? record.purchasePriceCny ?? 0)
   if (record.taxPoint === 0) {
     return {
       baseUnitPriceCny, invoiceType: record.invoiceType, taxPoint: 0,
