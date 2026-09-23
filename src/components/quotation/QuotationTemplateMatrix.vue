@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import QuotationMatrix from './QuotationMatrix.vue'
+import QuotationTemplateDetails from './QuotationTemplateDetails.vue'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
 import {
   QUOTATION_TEMPLATES_UPDATED_EVENT,
@@ -57,6 +58,7 @@ const currentUnavailableCount = computed(() => currentRows.value.length - curren
 const presetSelection = ref<QuotationPresetSelection[]>([])
 const presetVersion = ref(0)
 const showManager = ref(false)
+const expandedTemplateId = ref('')
 const createName = ref('')
 const createDescription = ref('')
 const editingId = ref('')
@@ -251,6 +253,7 @@ function onTemplatesUpdated() {
 }
 
 watch(() => [props.ownerName, props.ownerAccount], () => {
+  expandedTemplateId.value = ''
   cancelClearConfirmation()
   activeTemplateId.value = ''
   presetSelection.value = []
@@ -386,11 +389,23 @@ function formatTime(value: string) {
               </span>
             </div>
             <div class="manager-actions">
+              <button
+                class="details-toggle"
+                :aria-expanded="expandedTemplateId === template.id"
+                :aria-controls="`template-details-${template.id}`"
+                @click="expandedTemplateId = expandedTemplateId === template.id ? '' : template.id"
+              >{{ expandedTemplateId === template.id ? '收起明细' : '明细' }}</button>
               <button class="use" @click="applyTemplate(template)">一键应用</button>
               <button @click="startRename(template)">重命名</button>
               <button @click="copyTemplate(template)">复制</button>
               <button class="danger" @click="removeTemplate(template)">{{ pendingDeleteId === template.id ? '确认删除' : '删除' }}</button>
             </div>
+            <QuotationTemplateDetails
+              v-if="expandedTemplateId === template.id"
+              :id="`template-details-${template.id}`"
+              class="template-details"
+              :items="template.items"
+            />
           </article>
           <div v-if="!templates.length" class="manager-empty"><i>☆</i><b>还没有个人报价模板</b><span>先在下方选择需要长期复用的国家和渠道，再回到这里新建。</span></div>
         </div>
@@ -412,5 +427,9 @@ function formatTime(value: string) {
 .status-actions .clear{border-color:#eccdc8;color:#a5483a}
 .status-actions .clear.confirming{border-color:#c95747;background:#fff2f0;color:#a23124}
 .cleared-note{padding:7px 9px;border-radius:6px;background:#f3f6f8;color:#596a76}
+.template-details{grid-column:1/-1;min-width:0}
+.manager-actions button{white-space:nowrap;cursor:pointer}
+.manager-actions .details-toggle{border-color:#cad8e2;color:#365b73;background:#f3f7fa}
+.manager-actions .details-toggle[aria-expanded="true"]{border-color:#64869c;background:#eaf2f7}
 @media(max-width:680px){.status-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.status-actions button{height:auto;min-height:38px;padding:7px 9px}.status-actions .update{grid-column:1/-1}}
 </style>
