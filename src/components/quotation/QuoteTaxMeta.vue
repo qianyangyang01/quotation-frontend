@@ -7,7 +7,7 @@ const missing = computed(() => props.row.taxFeeMode === 'missing')
 const badgeText = computed(() => {
   if (Object.values(props.row.taxCalculations || {}).some(value => value.rule === 'eu-handling-v1')) return props.row.taxLabel
   if (props.row.taxFeeMode === 'no-tax') return '无关税'
-  if (props.row.taxFeeMode === 'weight-eur') return props.row.taxLabel
+  if (props.row.taxFeeMode === 'weight-eur' || props.row.taxFeeMode === 'weight-order') return props.row.taxLabel
   if (props.row.taxIncluded) return '免税'
   if (missing.value) return props.row.taxLabel || '物流商税务属性待设置'
   return `关税 $${Number(props.row.countryFixedTaxUsd || 0).toFixed(2)}/单`
