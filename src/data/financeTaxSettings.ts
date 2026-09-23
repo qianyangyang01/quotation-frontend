@@ -153,9 +153,9 @@ export async function saveFinanceTaxSettings(settings: FinanceTaxSettings): Prom
     if (typeof country.fixedFeeUsd !== 'number' || !Number.isFinite(country.fixedFeeUsd) || country.fixedFeeUsd < 0) throw new Error(`${country.country}关税必须为有效非负金额`)
   }
   const normalized = normalizeFinanceTaxSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
-  await writeFinanceSetting('tax-settings', normalized)
+  const saved = await writeFinanceSetting('tax-settings', normalized)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_TAX_SETTINGS_UPDATED_EVENT))
-  return normalized
+  return normalizeFinanceTaxSettings(saved)
 }
 
 export function calculateFinanceQuoteTax(

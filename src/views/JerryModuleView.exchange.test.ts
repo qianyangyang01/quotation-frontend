@@ -14,7 +14,7 @@ vi.mock('@/data/publishedLogisticsRepository', async importOriginal => ({ ...awa
 }))
 vi.mock('@/services/quotationSync', () => ({startQuotationSync: () => () => {}, loadQuotationSync: async () => ({logisticsRevision:'test'})}))
 const saveEuro = vi.hoisted(() => vi.fn())
-const saveGrades = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const saveGrades = vi.hoisted(() => vi.fn(async value => value))
 vi.mock('@/data/financeChannelPolicies', async importOriginal => ({ ...await importOriginal<object>(), saveCustomerGradeSettings: saveGrades, saveFinanceEurUsdRate: saveEuro, channelsAvailableForCountry: () => [{ key: '1::测试::A', carrier: '测试', channel: '渠道A' }, { key: '2::测试::B', carrier: '测试', channel: '渠道B' }] }))
 import Jerry from './JerryModuleView.vue'
 let app: App

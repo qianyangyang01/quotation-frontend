@@ -34,9 +34,9 @@ export async function saveFinanceSurchargeSettings(settings: FinanceSurchargeSet
     }
   }
   const normalized = normalizeFinanceSurchargeSettings({ ...settings, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) })
-  await writeFinanceSetting('surcharge-settings', normalized)
+  const saved = await writeFinanceSetting('surcharge-settings', normalized)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT))
-  return normalized
+  return normalizeFinanceSurchargeSettings(saved)
 }
 
 export function calculateFinanceQuoteFees(taxes: FinanceTaxSettings, surcharges: FinanceSurchargeSettings, country: string, provider: string, baseUsd: number, channelKey = '', context?: Omit<EuYunExpressTaxContext, 'channelKey'>) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-vi.mock('@/services/financeSettings', () => ({ readFinanceSetting: vi.fn(), writeFinanceSetting: vi.fn() }))
+vi.mock('@/services/financeSettings', () => ({ readFinanceSetting: vi.fn(), writeFinanceSetting: vi.fn(async (_key, value) => value) }))
 import { calculateFinanceQuoteFees, normalizeFinanceSurchargeSettings, saveFinanceSurchargeSettings } from './financeSurchargeSettings'
 import { type FinanceTaxSettings } from './financeTaxSettings'
 import { writeFinanceSetting } from '@/services/financeSettings'

@@ -175,9 +175,9 @@ export function loadFinanceCountrySettings(): FinanceCountrySetting[] {
 
 export async function saveFinanceCountrySettings(settings: FinanceCountrySetting[]) {
   const normalized = normalizeFinanceCountrySettings(settings)
-  await writeFinanceSetting('country-classification', normalized)
+  const saved = await writeFinanceSetting('country-classification', normalized)
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT))
-  return normalized
+  return normalizeFinanceCountrySettings(saved)
 }
 
 export function financeChannelKey(ruleId: number, relation: Pick<LogisticsRelation, 'carrier' | 'channel' | 'channelCode'>) {
@@ -300,7 +300,8 @@ export function loadCustomerGradeSettings(): CustomerGradeSetting[] {
 }
 
 export async function saveCustomerGradeSettings(settings: CustomerGradeSetting[]) {
-  await writeFinanceSetting('customer-grades', settings)
+  const saved = await writeFinanceSetting('customer-grades', settings)
+  return normalizeCustomerGradeSettings(saved)
 }
 
 export function loadFinanceExchangeRate(): FinanceExchangeRateSetting {
@@ -318,15 +319,13 @@ export async function saveFinanceExchangeRate(usdCny: number): Promise<FinanceEx
     usdCny: Math.max(0.0001, Number(usdCny) || DEFAULT_USD_CNY_RATE),
     updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
   }
-  await writeFinanceSetting('exchange-rate', setting)
-  return setting
+  return writeFinanceSetting('exchange-rate', setting)
 }
 
 export async function saveFinanceEurUsdRate(eurUsd: number): Promise<FinanceExchangeRateSetting> {
   if (!Number.isFinite(eurUsd) || eurUsd <= 0) throw new Error('欧元兑美元汇率必须大于 0')
   const setting = { ...loadFinanceExchangeRate(), eurUsd, updatedAt: new Date().toLocaleString('zh-CN', { hour12: false }) }
-  await writeFinanceSetting('exchange-rate', setting)
-  return setting
+  return writeFinanceSetting('exchange-rate', setting)
 }
 
 export function customerGradeCoefficient(settings: CustomerGradeSetting[], grade: CustomerGrade) {

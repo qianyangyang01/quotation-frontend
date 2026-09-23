@@ -13,12 +13,12 @@ vi.mock('@/data/publishedLogisticsRepository', async importOriginal => ({ ...awa
   loadPublishedLogisticsRuleCatalog: async () => [],
 }))
 vi.mock('@/services/quotationSync', () => ({startQuotationSync: () => () => {}, loadQuotationSync: async () => ({logisticsRevision:'test'})}))
-const saveGrades = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const saveGrades = vi.hoisted(() => vi.fn(async value => value))
 vi.mock('@/data/financeChannelPolicies', async importOriginal => ({ ...await importOriginal<object>(), saveCustomerGradeSettings: saveGrades, channelsAvailableForCountry: () => [{ key: '1::测试::A', carrier: '测试', channel: '渠道A' }, { key: '2::测试::B', carrier: '测试', channel: '渠道B' }] }))
 import Jerry from './JerryModuleView.vue'
 import { normalizeCustomerGradeSettings } from '@/data/financeChannelPolicies'
 let app: App
-afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
+afterEach(() => { app?.unmount(); document.body.innerHTML = ''; saveGrades.mockClear() })
 
 it('lets finance configure and enable NEW independently, rejecting invalid input before saving', async () => {
   fixture.customerGrades = normalizeCustomerGradeSettings([{grade:'S',coefficient:1.21605,enabled:true},{grade:'E',coefficient:1.27635,enabled:true}])
@@ -37,4 +37,29 @@ it('lets finance configure and enable NEW independently, rejecting invalid input
   input.value='1.45678';input.dispatchEvent(new Event('input'));enabled.click();await nextTick();save.click();await nextTick()
   expect(saveGrades).toHaveBeenCalledOnce()
   expect(saveGrades.mock.calls[0]![0]).toEqual(expect.arrayContaining([{grade:'NEW',coefficient:1.45678,enabled:true},{grade:'S',coefficient:1.21605,enabled:true},{grade:'E',coefficient:1.27635,enabled:true}]))
+})
+
+it('shows failed grade saves, blocks duplicate submission and reads back the confirmed coefficient', async () => {
+  fixture.customerGrades = normalizeCustomerGradeSettings([{ grade: 'S', coefficient: 1.2, enabled: true }])
+  const host = document.createElement('div'); document.body.append(host)
+  app = createApp({ render: () => h(Jerry, { mode: 'members' }) }); app.mount(host)
+  const settle = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); await nextTick() } }
+  await settle()
+  ;[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')].find(e => e.textContent?.includes('客户等级系数'))!.click()
+  await settle()
+  const save = host.querySelector<HTMLButtonElement>('.grade-settings>header button')!
+  let fail!: (reason: Error) => void
+  saveGrades.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+  save.click(); await nextTick(); save.click(); await nextTick()
+  expect(saveGrades).toHaveBeenCalledOnce()
+  expect(save.disabled).toBe(true)
+  fail(new Error('财务设置已被其他账号更新，请重新加载'))
+  await settle()
+  expect(host.textContent).toContain('财务设置已被其他账号更新，请重新加载')
+  expect(host.textContent).not.toContain('客户等级计算系数已保存')
+  expect(save.disabled).toBe(false)
+  saveGrades.mockResolvedValueOnce(normalizeCustomerGradeSettings([{ grade: 'S', coefficient: 1.4, enabled: true }]))
+  save.click(); await settle()
+  const row = [...host.querySelectorAll('.grade-grid>label')].find(e => e.querySelector('strong')?.textContent?.includes('S'))!
+  expect(row.querySelector<HTMLInputElement>('input[type=number]')!.value).toBe('1.4')
 })
