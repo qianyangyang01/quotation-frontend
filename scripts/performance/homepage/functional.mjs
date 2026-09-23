@@ -93,7 +93,7 @@ await check('Purchase maintenance is immediately identical for employee/admin, r
 })
 await check('Draft isolation and optimistic version conflict; templates keep employee ownership',async()=>{
   const state=await employee.request('/quotation-drafts/mine/state')
-  const body={schemaVersion:2,customerName:'QA-DRAFT',skuSearch:fixtures[0].primarySku.split(/[、,+\s]+/)[0],quoteMode:'single'}
+  const body={schemaVersion:2,customerName:'QA-DRAFT-'+crypto.randomUUID(),skuSearch:fixtures[0].primarySku.split(/[、,+\s]+/)[0],quoteMode:'single'}
   const saved=await employee.request('/quotation-drafts/mine/state',{method:'PUT',headers:{'If-Match':String(state.version)},body})
   assert.deepEqual((await employee.request('/quotation-drafts/mine/state')).payload,saved.payload)
   assert.notDeepEqual((await other.request('/quotation-drafts/mine/state')).payload,saved.payload)
