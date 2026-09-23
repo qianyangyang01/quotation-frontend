@@ -148,9 +148,6 @@ async function reloadReview(row:QuotationRecord) {
   try { const fresh=await loadRecord(row.id);if(fresh&&selected.value?.id===row.id&&account===currentAuthUser.value.account&&!editing.value){selected.value=fresh;reviewSync.accept(fresh)} }
   catch(error) {toast(error instanceof Error?error.message:'详情加载失败，请重试')}
 }
-let reviewListTimer:ReturnType<typeof setInterval>|undefined
-onMounted(()=>{reviewListTimer=setInterval(()=>{if(document.visibilityState!=='hidden'&&reviewFiltered.value&&!loading.value)void refresh(true)},15000)})
-onUnmounted(()=>clearInterval(reviewListTimer))
 const editing = ref(false)
 const detailTab = ref<'overview' | 'options' | 'history'>('overview')
 const notice = ref('')
@@ -377,6 +374,11 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
         <p v-if="!isActive(selected)" class="lifecycle-readonly">{{ lifecycleLabel(selected.lifecycleState) }} · {{ selected.lifecycleChangedBy }} · {{ selected.lifecycleReason }}。恢复后可修改。</p>
         <template v-if="!editing">
+          <div class="detail-review-status" role="status" aria-label="审核状态">
+            {{ financeReviewLabel(reviewSync.stateFor(selected).financeReviewStatus) }}
+            <span v-if="reviewSync.stateFor(selected).financeReviewClaimedBy"> · {{ reviewSync.stateFor(selected).financeReviewClaimedBy }}审核中</span>
+            <span v-else-if="reviewSync.stateFor(selected).financeReviewedBy"> · {{ reviewSync.stateFor(selected).financeReviewedBy }}</span>
+          </div>
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
             <div class="overview-metrics"><article><small>报价国家</small><b>{{ recordCountries(selected).length || 1 }}</b><span>个国家</span></article><article><small>报价渠道</small><b>{{ recordOptions(selected).length || 1 }}</b><span>条渠道</span></article><article><small>1{{ selected.quoteMode==='bundle'?'套':'件' }}报价区间</small><b>{{ hasMultipleOptions(selected) ? quote1UsdRange(selected) : usd(selected.systemQuoteUsd) }}</b><span>{{ hasMultipleOptions(selected) ? quote1CnyRange(selected) : cny(selected.systemQuoteCny) }}</span></article></div>
@@ -411,6 +413,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
+.detail-review-status{margin:12px 24px;padding:10px 14px;background:#f4f7fa;border-radius:6px;color:#31526c;font-size:13px;font-weight:600}
 .reissue-quote{padding:7px 12px;border:1px solid #ffb54e;border-radius:6px;background:#fff8ed;color:#a95f00;font-size:11px;font-weight:700;text-decoration:none}
 .finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.record-row-actions{min-width:0;gap:8px}
 

@@ -44,6 +44,27 @@ it('employees see live ownership without getting review buttons',async()=>{
   mocks.get.mockResolvedValue([claimed()]);await vi.advanceTimersByTimeAsync(3000);await flush()
   expect(document.body.textContent).toContain('ADMIN审核中');expect(button('审核完成')).toBeUndefined()
 })
+it('refreshes externally changed review filters, including an empty result becoming eligible',async()=>{
+  vi.useFakeTimers();await mount('employee','mine')
+  const filter=document.querySelector('[aria-label="审核状态"]') as HTMLSelectElement
+  filter.value='pending';filter.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  mocks.get.mockResolvedValue([{...saved(),_reviewVersion:2,financeReviewStatus:'approved'}])
+  mocks.page.mockResolvedValue({items:[],page:0,size:10,total:0,totalPages:0,summary:{pending:0,won:0,lost:0,total:0},countries:[]})
+  await vi.advanceTimersByTimeAsync(6500);await flush()
+  expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 0 条')
+  mocks.page.mockResolvedValue({items:[saved()],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]})
+  await vi.advanceTimersByTimeAsync(6500);await flush()
+  expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 1 条')
+})
+it('shows the same live review conclusion in an employee detail without review actions',async()=>{
+  vi.useFakeTimers();await mount('employee','mine')
+  const detail=document.querySelector<HTMLButtonElement>('.difference-cell')!
+  detail.click();await flush()
+  mocks.get.mockResolvedValue([{...saved(),_reviewVersion:2,financeReviewStatus:'approved',financeReviewedBy:'ADMIN'}])
+  await vi.advanceTimersByTimeAsync(3000);await flush()
+  expect(document.querySelector('.record-drawer')?.textContent).toContain('审核通过')
+  expect(button('开始审核')).toBeUndefined()
+})
 it('submits a price exception without a note and keeps the selector openable after failure',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()

@@ -63,6 +63,17 @@ class QuotationFinanceReviewIntegrationTest {
         assertEquals("approved",view(r).path("financeReviewStatus").asText());assertEquals(2,reviews.findById(r.id).orElseThrow().state.path("history").size());
         mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(employee)).andExpect(jsonPath("$.data[0]._reviewVersion").value(rv(r))).andExpect(jsonPath("$.data[0]._version").value(0));
     }
+    @Test void returnedReviewVersionCanImmediatelyCompleteWithoutReload() throws Exception {
+        var r=record();
+        var response=action(r,finance,0,0,"claim",null,"").andExpect(status().isOk()).andReturn().getResponse();
+        var claimed=mapper.readTree(response.getContentAsString()).path("data");
+        assertEquals(rv(r),claimed.path("_reviewVersion").asLong(),"claim response version must equal committed version");
+        var completed=mapper.readTree(action(r,finance,claimed.path("_version").asLong(),claimed.path("_reviewVersion").asLong(),"complete","approved","").andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        assertEquals(rv(r),completed.path("_reviewVersion").asLong());
+        assertEquals(claimed.path("_reviewVersion").asLong()+1,completed.path("_reviewVersion").asLong());
+        assertEquals(2,reviews.findById(r.id).orElseThrow().state.path("history").size());
+        assertEquals(r.payload,records.findById(r.id).orElseThrow().payload);
+    }
     @Test void fourAccountsOnlyOneWinner() throws Exception {
         var r=record();var accounts=new ArrayList<RequestPostProcessor>();for(int i=0;i<4;i++)accounts.add(login("F"+i+owner,"finance"));var barrier=new CyclicBarrier(4);
         try(var executor=Executors.newFixedThreadPool(4)) {

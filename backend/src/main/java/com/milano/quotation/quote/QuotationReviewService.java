@@ -120,8 +120,12 @@ public class QuotationReviewService {
         audit.record("quotation.review.content-changed","quotation",quote.id.toString(),"success",Map.of("before",before,"after",row.status));
     }
     private static void event(ObjectNode state,QuotationPrincipal actor,String action,String before,String after,String note,long quoteVersion) {
-        state.withArray("history").addObject().put("id",UUID.randomUUID().toString()).put("action",action).put("before",before).put("after",after)
-            .put("actorAccount",actor.account()).put("actorName",actor.displayName()).put("at",Instant.now().toString()).put("note",note).put("quoteVersion",quoteVersion);
+        var event=state.withArray("history").addObject().put("id",UUID.randomUUID().toString()).put("action",action).put("before",before).put("after",after)
+            .put("actorAccount",actor.account()).put("actorName",actor.displayName()).put("at",Instant.now().toString()).put("note",note);
+        // Match JSON deserialization's numeric node type so Hibernate's snapshots remain equal.
+        // A small LongNode round-trips as IntNode, otherwise every flush increments the review version.
+        if (quoteVersion >= Integer.MIN_VALUE && quoteVersion <= Integer.MAX_VALUE) event.put("quoteVersion",(int)quoteVersion);
+        else event.put("quoteVersion",quoteVersion);
     }
     private static void preserveLegacyHistory(QuotationRecordEntity quote,ObjectNode state) {
         if(state.has("history") || !Set.of("approved","rejected").contains(state.path("financeReviewStatus").asText()))return;
