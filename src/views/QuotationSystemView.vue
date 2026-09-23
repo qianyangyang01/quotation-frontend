@@ -280,6 +280,7 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
     quantityPerSet,
     purchaseUnitPrice: pricing?.effectiveUnitPriceCny || 0,
     purchaseBaseUnitPrice: pricing?.baseUnitPriceCny || 0,
+    purchaseTierLabel: record ? calculateMonthlySalesTierLabel(monthlySalesEstimate.value, record) : '',
     purchaseInvoiceType: pricing?.invoiceType || '',
     purchaseInvoiceRatePercent: pricing?.invoiceRatePercent || 0,
     purchaseZeroTaxPointAdjustment: pricing?.priceSource === 'zero-tax-point',
@@ -349,6 +350,7 @@ function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, 
   const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
   p.purchase = pricing.effectiveUnitPriceCny
   p.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
+  p.purchaseTierLabel = calculateMonthlySalesTierLabel(monthlySalesEstimate.value, record)
   p.purchaseInvoiceType = pricing.invoiceType
   p.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
   p.purchaseZeroTaxPointAdjustment = pricing.priceSource === 'zero-tax-point'
@@ -361,6 +363,7 @@ function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProdu
   const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
   item.purchaseUnitPrice = pricing.effectiveUnitPriceCny
   item.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
+  item.purchaseTierLabel = calculateMonthlySalesTierLabel(monthlySalesEstimate.value, record)
   item.purchaseInvoiceType = pricing.invoiceType
   item.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
   item.purchaseZeroTaxPointAdjustment = pricing.priceSource === 'zero-tax-point'
@@ -1579,7 +1582,7 @@ const saveValidationIssues = computed(() => {
   if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || '最新资料正在读取，请稍候' })
   if (draftInitializationFailed.value) issues.push({ key: 'workspaceInitialization', label: '报价工作区', message: draftError.value || '报价工作区读取失败，请查看顶部错误提示' })
   else if (!financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: financeSettingsAreLoading() ? '财务设置正在读取，请稍候' : financeSettingsLoadError() ? `财务设置读取失败：${financeSettingsLoadError()}；请重试读取` : '财务设置尚未完整加载，请重试读取后保存' })
-  const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'预估月销量', commissionThreshold:'佣金阈值' }
+  const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'采购阶梯', commissionThreshold:'佣金阈值' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
   const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
   if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
