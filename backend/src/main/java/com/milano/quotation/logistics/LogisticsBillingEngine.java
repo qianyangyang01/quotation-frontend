@@ -13,7 +13,7 @@ import java.util.*;
 /** Fail-closed evaluator for explicitly supported, fully specified price rules. */
 @Component
 public class LogisticsBillingEngine {
-    public static final String VERSION="logistics-billing-v7";
+    public static final String VERSION="logistics-billing-v8";
     private final ObjectMapper mapper;
     public LogisticsBillingEngine(ObjectMapper mapper){this.mapper=mapper;}
     static BigDecimal minimum(JsonNode row){return n(row,"minChargeWeightKg").max(n(row,"startWeightKg"));}
@@ -63,6 +63,7 @@ public class LogisticsBillingEngine {
             BigDecimal minimum=minimum(row),charge=weight.max(minimum),volume=BigDecimal.ZERO;
             if(LogisticsPiecePricing.applies(row))charge=LogisticsPiecePricing.charged(charge);
             else if(LogisticsGramPricing.applies(row))charge=LogisticsGramPricing.charged(charge);
+            else if(LogisticsKuwaitCosmeticsPricing.applies(row))charge=LogisticsKuwaitCosmeticsPricing.charged(charge);
             if(!includes(row,charge))continue;
             BigDecimal base=LogisticsPiecePricing.applies(row)?n(row,"intervalPrice"):charge.multiply(n(row,"pricePerKg"));
             matches.add(mapper.createObjectNode().put("rowIndex",current).put("base",base).put("actualWeightKg",weight).put("minChargeWeightKg",minimum).put("chargeWeightKg",charge).put("volumeWeightKg",volume)
@@ -81,7 +82,7 @@ public class LogisticsBillingEngine {
     static String acceptanceTierKey(JsonNode row){return routeKey(row)+"|"+priceKey(row)+"|"+available(row);}
     private static String routeKey(JsonNode row){return String.join("|",row.path("countryCode").asText(row.path("areaName").asText()).toUpperCase(Locale.ROOT),n(row,"weightFromKg").stripTrailingZeros().toPlainString(),n(row,"weightToKg").stripTrailingZeros().toPlainString(),String.valueOf(row.path("weightFromInclusive").asBoolean()),String.valueOf(row.path("weightToInclusive").asBoolean(true)),normalizeZone(row.path("zoneName").asText()));}
     private static String priceKey(JsonNode row){
-        var values=new ArrayList<String>();values.add(model(row));values.add(minimum(row).stripTrailingZeros().toPlainString());
+        var values=new ArrayList<String>();values.add(model(row));values.add(LogisticsKuwaitCosmeticsPricing.applies(row)?"0.1":"0");values.add(minimum(row).stripTrailingZeros().toPlainString());
         for(var field:List.of("pricePerKg","intervalPrice","firstWeightKg","firstWeightPrice","nextWeightKg","nextWeightPrice","registrationFee","surcharge"))values.add(n(row,field).stripTrailingZeros().toPlainString());
         return String.join("|",values);
     }

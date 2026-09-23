@@ -2,6 +2,7 @@ import { countryIdentity, countryIdentityMatches } from './countryIdentity'
 import { decimal } from '@/services/quotationDecimal'
 import { normalizeLogisticsAttribute } from './logisticsAttributes'
 export interface LogisticsPriceRow {
+  billingStepKg?: number; sourceSheet?: string
   areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number; etaStatus?: string
   prohibitedMarks: string; allowedMarks: string; maxPerimeterCm: number; maxSideCm: number
   volumeDivisor: number; weightFromKg: number; weightToKg: number; startWeightKg: number
@@ -263,17 +264,26 @@ export function findPriceRow(rule: LogisticsRule, country: string, weightKg: num
   const { rows: countryRows, zoneRequired } = eligibleCountryRows(rule, country, productMarks)
   return selectBillingPrice(countryRows.filter(price => priceMatchesRegion(price, quoteRegion, zoneRequired)), weightKg)
 }
-export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive'> & Partial<Pick<LogisticsPriceRow, 'minChargeWeightKg' | 'startWeightKg' | 'pricingModel'>>, weightKg: number) {
+/** Only the confirmed source row is enabled; other countries/channels keep their billing rules. */
+function kuwaitCosmeticsRounding(price: Partial<LogisticsPriceRow>) {
+  return (!price.pricingModel || price.pricingModel === 'per-kg')
+    && price.sourceSheet === '云途全球化妆品类专线挂号' && price.countryCode === 'KW' && price.billingStepKg === .1
+}
+function roundedChargeWeight(price: Partial<LogisticsPriceRow>, minimum: number) {
+  if (price.pricingModel === 'per-piece-500g') return decimal(minimum).div(.5).ceil().times(.5).toNumber()
+  if (price.pricingModel === 'per-kg-1g') return decimal(minimum).times(1000).ceil().div(1000).toNumber()
+  return kuwaitCosmeticsRounding(price) ? decimal(minimum).div(.1).ceil().times(.1).toNumber() : minimum
+}
+export function weightMatchesPrice(price: Pick<LogisticsPriceRow, 'weightFromKg' | 'weightToKg' | 'weightFromInclusive' | 'weightToInclusive'> & Partial<Pick<LogisticsPriceRow, 'minChargeWeightKg' | 'startWeightKg' | 'pricingModel' | 'billingStepKg' | 'sourceSheet' | 'countryCode'>>, weightKg: number) {
   if (!Number.isFinite(weightKg) || weightKg <= 0) return false
   const minimum = Math.max(weightKg, price.minChargeWeightKg ?? 0, price.startWeightKg ?? 0)
-  const charged = price.pricingModel === 'per-piece-500g' ? decimal(minimum).div(.5).ceil().times(.5).toNumber()
-    : price.pricingModel === 'per-kg-1g' ? decimal(minimum).times(1000).ceil().div(1000).toNumber() : minimum
+  const charged = roundedChargeWeight(price, minimum)
   return (price.weightFromInclusive ? charged >= price.weightFromKg : charged > price.weightFromKg)
     && (price.weightToInclusive === false ? charged < price.weightToKg : charged <= price.weightToKg)
 }
 function selectBillingPrice(prices: LogisticsPriceRow[], weightKg: number) {
   const matches = prices.filter(price => weightMatchesPrice(price, weightKg))
-  const standards = new Set(matches.map(price => [price.pricingModel || 'per-kg', Math.max(price.minChargeWeightKg || 0, price.startWeightKg || 0), price.pricePerKg, price.intervalPrice || 0, price.registrationFee || 0].join('|')))
+  const standards = new Set(matches.map(price => [price.pricingModel || 'per-kg', kuwaitCosmeticsRounding(price) ? .1 : 0, Math.max(price.minChargeWeightKg || 0, price.startWeightKg || 0), price.pricePerKg, price.intervalPrice || 0, price.registrationFee || 0].join('|')))
   return standards.size === 1 ? matches[0] : undefined
 }
 /** Explain a missing quote using the same eligible rows and boundaries as billing. */
@@ -318,8 +328,7 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   const minChargeWeightKg = Math.max(price.minChargeWeightKg || 0, price.startWeightKg || 0)
   const piece = price.pricingModel === 'per-piece-500g'
   const minimum = Math.max(actualWeightKg, minChargeWeightKg)
-  const chargeWeightKg = piece ? decimal(minimum).div(.5).ceil().times(.5).toNumber()
-    : price.pricingModel === 'per-kg-1g' ? decimal(minimum).times(1000).ceil().div(1000).toNumber() : minimum
+  const chargeWeightKg = roundedChargeWeight(price, minimum)
   const base = piece ? price.intervalPrice : decimal(chargeWeightKg).times(price.pricePerKg).toNumber()
   const surcharge = 0
   const total = decimal(base).plus(price.registrationFee || 0).toDecimalPlaces(2).toNumber()

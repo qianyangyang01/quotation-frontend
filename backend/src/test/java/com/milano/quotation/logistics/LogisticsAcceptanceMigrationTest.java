@@ -11,6 +11,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers(disabledWithoutDocker=true)
 class LogisticsAcceptanceMigrationTest {
+    @Test void kuwaitRoundingProjectionUpgradesExistingRowsWithoutChangingPricesOrApprovals() {
+        resetDatabase();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("46").load().migrate();
+        var jdbc=JdbcClient.create(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
+        var mapper=new tools.jackson.databind.ObjectMapper();
+        var version=seed(jdbc,UUID.fromString("00000000-0000-0000-0000-000000000001"),"published",true,590);
+        var row=new LogisticsKuwaitCosmeticsPricingTest().row();
+        var rows=mapper.createArrayNode().add(row).add(row.deepCopy().put("countryCode","QA").put("areaName","卡塔尔"));
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',cast(:rows as jsonb)) where id=:id")
+            .param("id",version).param("rows",rows.toString()).update();
+        jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select :id,id,rows_fingerprint,'logistics-billing-v7','validated-import','{}','QA' from logistics_version where id=:version")
+            .param("id",UUID.randomUUID()).param("version",version).update();
+        var before=jdbc.sql("select payload::text || rows_fingerprint from logistics_version where id=:id").param("id",version).query(String.class).single();
+        assertFalse(jdbc.sql("select jsonb_exists(quote_rows->0,'billingStepKg') from logistics_version where id=:id").param("id",version).query(Boolean.class).single());
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
+        assertEquals(before,jdbc.sql("select payload::text || rows_fingerprint from logistics_version where id=:id").param("id",version).query(String.class).single());
+        assertTrue(ready(jdbc,version));
+        assertEquals(1,jdbc.sql("select count(*) from logistics_billing_acceptance where version_id=:id").param("id",version).query(Integer.class).single());
+        var queries=new LogisticsQueryService(jdbc,mapper);
+        var projected=queries.publishedRules(null,"普货",java.util.List.of("KW","QA"),java.util.List.of()).rules().getFirst().path("prices");
+        var engine=new LogisticsBillingEngine(mapper);
+        for(var value:projected) {
+            assertEquals(.1,value.path("billingStepKg").asDouble());
+            assertEquals("云途全球化妆品类专线挂号",value.path("sourceSheet").asText());
+        }
+        assertEquals(89.8,engine.calculate(projected,mapper.createObjectNode().put("country","KW").put("weightKg",.12)).path("total").asDouble());
+        assertEquals(83.88,engine.calculate(projected,mapper.createObjectNode().put("country","QA").put("weightKg",.12)).path("total").asDouble());
+        jdbc.sql("update logistics_billing_acceptance set engine_version='logistics-billing-v8' where version_id=:id").param("id",version).update();
+        assertTrue(ready(jdbc,version));
+    }
     @Test void halfKilogramParcelProjectionRequiresValidMinimumAndNewAcceptance() {
         resetDatabase();
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
@@ -107,7 +137,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("46",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("47",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_provider where id=:id").param("id",provider).query(UUID.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
         assertEquals(version,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());

@@ -38,7 +38,7 @@ public class LogisticsQueryService {
             "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee", "pricingModel",
             "surcharge", "fuelSurchargeRate", "prohibitGeneralCargo", "volumetric",
             "phoneRequired", "zoneName", "zoneExclude", "weightFromInclusive",
-            "weightToInclusive"
+            "weightToInclusive", "billingStepKg", "sourceSheet"
     );
     private record RuleCacheKey(String revision, String attribute, List<String> countries, List<String> channels) {}
     private final RevisionQueryCache<PublishedRules> ruleCache = new RevisionQueryCache<>(16, 32L * 1024 * 1024,
@@ -154,7 +154,7 @@ public class LogisticsQueryService {
         // Fingerprint all active published candidates, including currently unready ones.
         // Eligibility is expensive and only needs reevaluation when these inputs change.
         var companyRevision=jdbc.sql("select concat(revision,':',paused,':',enabled) from logistics_company_state where singleton=true").query(String.class).single();
-        var revision = sha256("country-aliases-v1\n" + companyRevision + dataset + "\n" + String.join("\n", revisionParts));
+        var revision = sha256("kuwait-cosmetics-100g-v1\ncountry-aliases-v1\n" + companyRevision + dataset + "\n" + String.join("\n", revisionParts));
         var publishedChannels = publishedCountCache.get(revision, () -> jdbc.sql("""
                 select count(*) from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id

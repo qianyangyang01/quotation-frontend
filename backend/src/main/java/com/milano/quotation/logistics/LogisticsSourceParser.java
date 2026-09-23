@@ -1310,7 +1310,7 @@ public class LogisticsSourceParser {
             if(!row.path("currency").asText("CNY").equals("CNY"))pending(row,"非人民币计价需要币种适配");
             if(row.path("surcharge").asDouble()>0)pending(row,"附加费需要明确计费适用规则");
             if(row.path("fuelSurchargeRate").asDouble()>0)pending(row,"燃油附加费率尚未接入自动计费");
-            if(row.path("billingStepKg").asDouble()>0 && !row.path("pricingModel").asText().equals("first-next"))pending(row,"普通计费进位规则需要适配");
+            if(row.path("billingStepKg").asDouble()>0 && !row.path("pricingModel").asText().equals("first-next") && !LogisticsKuwaitCosmeticsPricing.applies(row))pending(row,"普通计费进位规则需要适配");
             if(row.path("notes").asText().matches("(?s).*(免泡|半泡|倍|附加费|燃油|干线费|起重|最低|起收).*"))pending(row,"行级价格条件需适配核对");
             else if(!row.path("notes").asText().isBlank())warn(row,"原表普通尺寸、邮编或说明需要人工复核");
             if(row.path("linehaulPerKg").asDouble()>0)pending(row,"干线费需要明确计费叠加规则");
