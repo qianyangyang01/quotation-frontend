@@ -20,6 +20,7 @@ const snapshot = computed(() => quotationProductCostSnapshot(props.record))
       <thead><tr><th>数量</th><th>采购成本</th><th>国内运费</th><th>产品成本合计</th></tr></thead>
       <tbody><tr v-for="row in snapshot.rows" :key="row.quantity"><td>{{ row.quantity }}{{ snapshot.unit }}</td><td>{{ snapshotMoney(row.purchase) }}</td><td>{{ snapshotMoney(row.freight) }}</td><td>{{ snapshotMoney(row.total) }}</td></tr></tbody>
     </table></div>
+    <small v-if="snapshot.freightRecovered">国内运费由本报价已保存的同数量成本与国际运费还原。</small>
     <small>合计为采购成本＋国内运费，不含国际运费、关税或操作费。缺失项显示“未保存”，不按当前采购价回填。</small>
   </section>
 </template>

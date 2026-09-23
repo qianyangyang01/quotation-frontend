@@ -1908,6 +1908,7 @@ async function save() {
     purchaseInvoiceRatePercent: quoteMode.value === 'single' ? Math.max(0, p.purchaseInvoiceRatePercent) : undefined,
     purchaseInvoiceTaxApplied: quoteMode.value === 'single' ? p.purchaseInvoiceTaxApplied : undefined,
     purchaseUnitPriceCny: quoteMode.value === 'single' ? Math.max(0, p.purchase) : undefined,
+    domesticFreightPerUnitCny: quoteMode.value === 'single' ? Math.max(0, p.purchaseFreightPerUnit) : undefined,
     volumetricEnabled: false,
     packageLengthCm: quoteMode.value === 'single' ? p.packageLengthCm : undefined,
     packageWidthCm: quoteMode.value === 'single' ? p.packageWidthCm : undefined,

@@ -40,6 +40,7 @@ export function quotationRecordCopyLayout(record: QuotationRecord): { text: stri
   }
   add('header', ['数量', '采购成本 CNY', '国内运费 CNY', '产品成本合计 CNY'])
   for (const row of cost.rows) add('data', [`${row.quantity}${cost.unit}`, snapshotMoney(row.purchase), snapshotMoney(row.freight), snapshotMoney(row.total)])
+  if (cost.freightRecovered) add('note', ['国内运费由本报价已保存的同数量成本与国际运费还原。'])
   add('note', ['产品成本合计为采购成本＋国内运费，不含国际运费、关税或操作费；缺失项不回填。'])
   section('二、包材、商品及成交明细')
   // Preserve every appendix field. Wide appendix tables are split into narrow
