@@ -39,14 +39,22 @@ function purchasePricingLabel() {
 
 <template>
   <section class="module-card">
-    <header><div><i>02</i><span><b>成本与重量</b><small>采购数据与计费重量</small></span></div><em :class="{legacy:product.status==='采购资料已加载'&&product.purchaseDataSource==='legacy_2026'}">{{ product.status==='采购资料已加载' ? (product.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据') : '采购资料' }}</em></header>
+    <header><div><i>02</i><span><b>成本与重量</b><small>采购数据与计费重量</small></span></div><slot name="product" /><em :class="{legacy:product.status==='采购资料已加载'&&product.purchaseDataSource==='legacy_2026'}">{{ product.status==='采购资料已加载' ? (product.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据') : '采购资料' }}</em></header>
+    <div class="cost-metrics" :class="{ manual:product.weightSource==='manual' }">
     <div class="fields">
-      <label>计入成本单价（CNY）<input v-model.number="product.purchase" disabled><small class="tier-match">{{ purchasePricingLabel() }}</small></label>
+      <label>计入成本单价（CNY）<input v-model.number="product.purchase" disabled></label>
       <label>商品重量（g）<input :value="grams(product.netWeight)" disabled></label>
       <label>重量来源<select v-model="product.weightSource" @change="$emit('weightChange')"><option value="purchase">使用采购表重量</option><option value="manual">业务员指定重量</option></select></label>
       <label v-if="product.weightSource==='manual'">指定重量（g）<input :value="grams(product.manualWeight)" type="number" min="0" step="1" inputmode="numeric" @input="updateManualWeight"></label>
       <label>国内运费/件（CNY）<input :value="product.purchaseFreightPerUnit.toFixed(2)" disabled></label>
     </div>
+    <SpecialPackagingInput compact :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
+    <div class="highlights">
+      <p><span>总成本价（CNY）</span><b>¥{{ totalCost.toFixed(2) }}</b><small>商品成本 ¥{{ productCost.toFixed(2) }} + 国内运费 ¥{{ domesticFreight.toFixed(2) }}</small><small>不含国际运费</small></p>
+      <p><span>含包材重量</span><b>{{ specialPackagingError ? '—' : grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></p>
+    </div>
+    </div>
+    <div class="cost-notes"><small class="tier-match">{{ purchasePricingLabel() }}</small><small>普通包材：每件商品每 50g 加 1g，不足 50g 按 50g 计算；特殊包装整票只加一次，不随件数或套数增加，也不再计算普通包材。</small></div>
     <div v-if="product.volumetricEnabled" class="volumetric-card">
       <div class="volumetric-title">
         <span class="check">✓</span>
@@ -66,11 +74,6 @@ function purchasePricingLabel() {
         <p><span>体积重量</span><b>{{ grams(volumeWeight()) }} g</b><small>采购尺寸自动计算</small></p>
         <p class="charge-result"><span>最终计费重量</span><b>{{ specialPackagingError ? '—' : grams(chargeWeight) }} g</b><small>实重与体积重取最大值</small></p>
       </div>
-    </div>
-    <SpecialPackagingInput :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
-    <div class="highlights">
-      <p><span>总成本价（CNY）</span><b>¥{{ totalCost.toFixed(2) }}</b><small>商品成本 ¥{{ productCost.toFixed(2) }} + 国内运费 ¥{{ domesticFreight.toFixed(2) }}</small><small>不含国际运费</small></p>
-      <p><span>含包材重量</span><b>{{ specialPackagingError ? '—' : grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></p>
     </div>
   </section>
 </template>

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-defineProps<{ modelValue: string; error?: string }>()
+defineProps<{ modelValue: string; error?: string; compact?: boolean }>()
 defineEmits<{ 'update:modelValue': [value: string] }>()
 </script>
 <template>
-  <div class="special-packaging">
-    <span>普通包材：每件商品每 50g 加 1g，不足 50g 按 50g 计算</span>
+  <div class="special-packaging" :class="{ compact }">
+    <span v-if="!compact">普通包材：每件商品每 50g 加 1g，不足 50g 按 50g 计算</span>
     <label>特殊包装（g／票）<input :value="modelValue" type="text" inputmode="numeric" maxlength="6" aria-label="特殊包装克重" :aria-invalid="Boolean(error)" placeholder="0" @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"></label>
-    <small>整票只加一次，不随件数或套数增加，也不再计算普通包材。</small>
+    <small v-if="!compact">整票只加一次，不随件数或套数增加，也不再计算普通包材。</small>
     <small v-if="error" class="error" role="alert">{{ error }}</small>
   </div>
 </template>

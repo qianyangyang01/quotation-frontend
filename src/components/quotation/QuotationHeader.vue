@@ -6,9 +6,7 @@ defineEmits<{ showRule: [] }>()
 <template>
   <section class="quotation-header">
     <div class="heading">
-      <p>MILANO PRICING CENTER</p>
       <h1>产品报价工作台</h1>
-      <span>按 SKU、物流属性、国家和客户等级自动生成报价。</span>
     </div>
     <div class="header-meta">
       <dl><div><dt>报价模式</dt><dd>{{ modeLabel }}</dd></div><div><dt>当前币种</dt><dd>USD</dd></div><div><dt>报价状态</dt><dd class="ready"><i></i>{{ status }}</dd></div></dl>

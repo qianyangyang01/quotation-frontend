@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import "@/styles/quotationCompact.css"
 import { loadCustomerOperationSettings, resolveCustomerOperation, customerOperationFeeForQuantity, addCustomerOperationFee, CUSTOMER_OPERATION_FEES_UPDATED } from '@/data/customerOperationFees'
 import { purchaseCategoryForSkus } from '@/data/quotationAnalytics'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
@@ -1979,7 +1980,6 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       </section>
       <QuotationHeader :salesperson="selectedSalesperson" :rate="exchange.usd" :status="products[0]?.status || '待查询'" :mode-label="quoteMode === 'bundle' ? '组合 SKU 报价' : '单品 SKU 报价'" @show-rule="showRule=true" />
 
-      <nav class="workflow" aria-label="报价流程"><span class="active"><i>1</i>填写报价条件</span><b>→</b><span><i>2</i>核对成本与重量</span><b>→</b><span><i>3</i>选择报价方式与渠道</span><b>→</b><span><i>4</i>确认并保存报价单</span></nav>
 
       <section class="draft-status-bar" :class="draftStatus" aria-live="polite">
         <i>{{ draftStatus === 'saved' ? '✓' : draftStatus === 'error' || draftStatus === 'conflict' ? '!' : '↻' }}</i>
@@ -2006,8 +2006,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <section v-if="quoteMode === 'single'" class="cost-workbench">
-          <ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" />
-          <CostWeightPanel :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)" />
+          <CostWeightPanel :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)"><template #product><ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" /></template></CostWeightPanel>
         </section>
         <section v-else class="cost-workbench">
           <BundleProductCard
@@ -2019,8 +2018,9 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <section v-if="purchaseTaxBlockReason" class="logistics-load-panel error" role="alert"><span><b>{{ purchaseTaxBlockReason }}</b><small>请在采购数据补齐票点后重新查询商品；0%为有效票点。</small></span></section>
+        <section class="matrix-workbench">
         <section class="matrix-mode-switcher">
-          <header><div><p>STEP 03 · QUOTATION MATRIX</p><h2>选择报价方式与渠道</h2></div><span>三种模式独立保留，模板按当前业务员账号管理</span></header>
+          <header><div><h2><i class="section-number">03</i>选择报价方式与渠道</h2></div><span>三种模式独立保留，模板按当前业务员账号管理</span></header>
           <nav aria-label="报价矩阵分类">
             <button :class="{ active:quoteMatrixMode==='common' }" :aria-pressed="quoteMatrixMode==='common'" @click="quoteMatrixMode='common'">
               <i>⚡</i><span><b>常用国家快速报价</b><small>日常报价 · 直接比较财务已授权的全部渠道</small></span><em>{{ activeCommonCountryCount }}个国家</em>
@@ -2066,6 +2066,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
           />
         </div>
+
+        </section>
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
         <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"

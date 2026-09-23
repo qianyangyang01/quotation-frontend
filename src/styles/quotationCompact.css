@@ -1,0 +1,181 @@
+/* Quotation workspace only: compact presentation, without changing quote state or calculations. */
+.jerry-app .quotation-page {
+  --quote-amber: #fff4e3;
+  --quote-blue: #edf6ff;
+  --quote-green: #eaf7f0;
+  --quote-purple: #f2eeff;
+  width: min(1840px, 96vw) !important;
+  gap: 12px !important;
+  padding: 14px 0 32px !important;
+}
+.jerry-app .quotation-page .quotation-header { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; gap: 16px; }
+.jerry-app .quotation-page .heading h1 { margin: 0; font-size: 23px; white-space: nowrap; }
+.jerry-app .quotation-page .header-meta { display: flex; flex: 1; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 16px; }
+.jerry-app .quotation-page .header-meta dl { gap: 16px; flex-wrap: wrap; }
+.jerry-app .quotation-page .header-meta dl div { display: flex; align-items: center; gap: 6px; }
+.jerry-app .quotation-page .header-meta dt, .jerry-app .quotation-page .header-meta small { font-size: 11px; color: #637383; }
+.jerry-app .quotation-page .header-meta dd { font-size: 12px; }
+.jerry-app .quotation-page .header-meta .actions { order: 2; position: static; }
+.jerry-app .quotation-page .header-meta .rule { height: 34px; padding: 0 12px; }
+.jerry-app .quotation-page .draft-status-bar { padding: 7px 12px; gap: 9px; background: #f0faf5; }
+.jerry-app .quotation-page .draft-status-bar > span { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.jerry-app .quotation-page .draft-status-bar small { font-size: 10px; }
+.jerry-app .quotation-page .draft-status-bar.error, .jerry-app .quotation-page .draft-status-bar.conflict { background: #fff5f3; }
+.jerry-app .quotation-page .logistics-load-panel { margin: 0; padding: 8px 12px; }
+
+.jerry-app .quotation-page .condition-card { padding: 0; border-color: #eddec6; border-radius: 8px; box-shadow: none; }
+.jerry-app .quotation-page .condition-card > header { padding: 8px 14px; border-bottom: 1px solid #f0e5d5; background: var(--quote-amber); border-radius: 8px 8px 0 0; gap: 10px; }
+.jerry-app .quotation-page .condition-card > header > div { display: flex; align-items: center; gap: 16px; }
+.jerry-app .quotation-page .condition-card > header b { white-space: nowrap; }
+.jerry-app .quotation-page .condition-card > header b i { background: #f99013; color: white; font-size: 12px; }
+.jerry-app .quotation-page .condition-grid, .jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: minmax(150px,1.25fr) minmax(140px,1.15fr) minmax(165px,1.35fr) minmax(110px,1fr) minmax(110px,1fr) minmax(100px,.9fr) minmax(95px,.7fr) 110px; margin: 0; padding: 12px 14px; gap: 10px; align-items: start; }
+.jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: minmax(180px,1.4fr) minmax(150px,1.2fr) repeat(3,minmax(120px,1fr)) minmax(100px,.8fr) 130px; }
+.jerry-app .quotation-page .condition-grid label { grid-column: auto; grid-row: auto; font-size: 12px; gap: 6px; margin: 0; max-width: none; min-width: 0; }
+.jerry-app .quotation-page .condition-grid input, .jerry-app .quotation-page .condition-grid select { width: 100%; height: 36px; font-size: 13px; }
+.jerry-app .quotation-page .condition-grid small { font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.jerry-app .quotation-page .condition-grid footer { border: 0; padding: 22px 0 0; margin: 0; display: flex; flex-direction: column-reverse; align-items: stretch; gap: 6px; }
+.jerry-app .quotation-page .condition-grid footer button { background: #ed8300; color: white; height: 36px; min-width: 0; width: 100%; font-size: 13px; }
+.jerry-app .quotation-page .condition-grid footer span { display: none; }
+.jerry-app .quotation-page .condition-grid .customer-picker .entry input { box-sizing: border-box; }
+.jerry-app .quotation-page .condition-grid .customer-picker .options { min-width: 240px; max-width: min(360px,85vw); }
+
+.jerry-app .quotation-page .cost-workbench { gap: 0; }
+.jerry-app .quotation-page .cost-workbench > .module-card { padding: 0; border-color: #cfdff0; border-radius: 8px; box-shadow: none; min-width: 0; }
+.jerry-app .quotation-page .cost-workbench > .module-card > header { margin: 0; padding: 7px 14px; gap: 14px; background: var(--quote-blue); border-bottom: 1px solid #dce9f5; border-radius: 8px 8px 0 0; }
+.jerry-app .quotation-page .cost-workbench > .module-card > header > div { flex-shrink: 0; }
+.jerry-app .quotation-page .cost-workbench > .module-card > header b { white-space: nowrap; }
+.jerry-app .quotation-page .cost-workbench > .module-card > header i { background: #6cabeb; color: white; font-size: 12px; }
+.jerry-app .quotation-page .cost-workbench .product-card { display: flex; flex: 1; flex-wrap: wrap; gap: 8px 12px; padding: 0; border: 0; background: transparent; box-shadow: none; min-width: 0; }
+.jerry-app .quotation-page .cost-workbench .product-card .physical-image { flex: 0 0 38px; width: 38px; height: 36px; border-radius: 5px; }
+.jerry-app .quotation-page .cost-workbench .product-card .physical-image .purchase-category-badge { min-width: 0; width: 38px; height: 36px; padding: 3px; }
+.jerry-app .quotation-page .cost-workbench .product-card .info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.jerry-app .quotation-page .cost-workbench .product-card .info > small { display: none; }
+.jerry-app .quotation-page .cost-workbench .product-card .info h2 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.jerry-app .quotation-page .cost-workbench .product-card .info p { gap: 5px; }
+.jerry-app .quotation-page .cost-workbench .product-card .state { margin-left: auto; padding: 0; background: transparent; gap: 3px 6px; }
+.jerry-app .quotation-page .cost-workbench .product-card .state small { display: none; }
+.jerry-app .quotation-page .cost-metrics { display: grid; grid-template-columns: repeat(2,minmax(105px,1fr)) minmax(170px,1.35fr) repeat(2,minmax(115px,1fr)) repeat(2,minmax(165px,1.2fr)); align-items: start; gap: 10px; padding: 12px 14px 8px; }
+.jerry-app .quotation-page .cost-metrics.manual { grid-template-columns: repeat(2,minmax(95px,1fr)) minmax(150px,1.3fr) repeat(3,minmax(95px,1fr)) repeat(2,minmax(145px,1.2fr)); }
+.jerry-app .quotation-page .cost-metrics .fields, .jerry-app .quotation-page .cost-metrics .highlights { display: contents; }
+.jerry-app .quotation-page .cost-metrics label { min-width: 0; gap: 6px; font-size: 12px; }
+.jerry-app .quotation-page .cost-metrics input, .jerry-app .quotation-page .cost-metrics select { height: 36px; min-width: 0; font-size: 13px; }
+.jerry-app .quotation-page .cost-metrics .special-packaging { margin: 0; padding: 0; border: 0; background: transparent; min-width: 0; }
+.jerry-app .quotation-page .cost-metrics .special-packaging label { display: grid; width: 100%; color: #697580; }
+.jerry-app .quotation-page .cost-metrics .special-packaging input { width: 100%; }
+.jerry-app .quotation-page .cost-metrics .highlights p { padding: 7px 10px; gap: 3px; background: #f2f7fc; min-width: 0; }
+.jerry-app .quotation-page .cost-metrics .highlights b { font-size: 20px; }
+.jerry-app .quotation-page .cost-metrics .highlights small { font-size: 10px; color: #6b7d90; line-height: 1.4; }
+.jerry-app .quotation-page .cost-notes { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 18px; padding: 0 14px 10px; color: #657a91; }
+.jerry-app .quotation-page .cost-notes small { font-size: 11px !important; line-height: 1.5; font-weight: 400; }
+.jerry-app .quotation-page .cost-workbench .volumetric-card { margin: 0 14px 12px; padding: 10px; }
+.jerry-app .quotation-page .cost-workbench .volumetric-card .dimensions { gap: 10px; margin-top: 8px; }
+.jerry-app .quotation-page .cost-workbench .volumetric-card input { height: 34px; }
+
+.jerry-app .quotation-page .matrix-workbench { border: 1px solid #bbded0; border-radius: 8px; background: white; min-width: 0; }
+.jerry-app .quotation-page .matrix-mode-switcher { border: 0; border-radius: 8px 8px 0 0; box-shadow: none; background: var(--quote-green); }
+.jerry-app .quotation-page .matrix-mode-switcher > header { padding: 9px 14px; border-color: #d4eade; gap: 12px; }
+.jerry-app .quotation-page .matrix-mode-switcher > header h2, .jerry-app .quotation-page .preview-head h2 { display: flex; align-items: center; gap: 10px; font-size: 17px; margin: 0; }
+.jerry-app .quotation-page .section-number { display: inline-grid; place-items: center; width: 28px; height: 27px; border-radius: 6px; background: #16a06a; color: white; font-style: normal; font-size: 12px; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav { padding: 8px 14px; background: transparent; gap: 8px; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav button { min-height: 46px; padding: 6px 10px; gap: 8px; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav button > i { width: 26px; height: 26px; flex-basis: 26px; font-size: 14px; color: #16835a; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav button.active { border-color: #38a77d; background: #f4fcf7; box-shadow: inset 3px 0 #20a56f; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav button.active > i { background: #dcf3e7; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav button.active em { background: #16875d; }
+.jerry-app .quotation-page .matrix-mode-panel .common-matrix, .jerry-app .quotation-page .matrix-mode-panel .quotation-matrix, .jerry-app .quotation-page .matrix-mode-panel .template-workbench { border: 0; border-radius: 0 0 8px 8px; box-shadow: none; }
+.jerry-app .quotation-page .matrix-mode-panel .common-head, .jerry-app .quotation-page .matrix-mode-panel .matrix-head, .jerry-app .quotation-page .matrix-mode-panel .template-toolbar { padding: 10px 14px; gap: 12px; }
+.jerry-app .quotation-page .matrix-mode-panel .common-head h2, .jerry-app .quotation-page .matrix-mode-panel .matrix-head h2, .jerry-app .quotation-page .template-intro h2 { margin: 0; font-size: 15px; }
+.jerry-app .quotation-page .matrix-mode-panel .common-head p, .jerry-app .quotation-page .matrix-mode-panel .matrix-head p, .jerry-app .quotation-page .template-intro p { display: none; }
+.jerry-app .quotation-page .matrix-mode-panel .template-status { padding: 8px 14px; gap: 8px; }
+.jerry-app .quotation-page .matrix-mode-panel .active-template { gap: 8px; }
+.jerry-app .quotation-page .matrix-mode-panel .status-actions { gap: 8px; }
+.jerry-app .quotation-page .matrix-mode-panel .country-grid { padding: 8px 14px; gap: 6px; }
+.jerry-app .quotation-page .matrix-mode-panel .country-grid button { min-height: 38px; padding: 6px 8px; }
+.jerry-app .quotation-page .matrix-mode-panel .quote-rows article { padding-top: 8px; padding-bottom: 8px; }
+.jerry-app .quotation-page .matrix-mode-panel .country-summary, .jerry-app .quotation-page .matrix-mode-panel .sort-toolbar { padding-top: 8px; padding-bottom: 8px; }
+.jerry-app .quotation-page .matrix-mode-panel .specified-card { border: 0; border-radius: 0 0 8px 8px; box-shadow: none; }
+.jerry-app .quotation-page .specified-card > .specified-head { padding: 9px 14px; gap: 12px; }
+.jerry-app .quotation-page .specified-head h2 { margin: 0 0 3px; font-size: 15px; }
+.jerry-app .quotation-page .specified-head p { display: none; }
+.jerry-app .quotation-page .specified-card .country-card-grid { padding: 10px 14px; gap: 10px; }
+.jerry-app .quotation-page .specified-card .country-card > header { padding: 5px 10px; }
+.jerry-app .quotation-page .specified-card .country-card .country-actions button { height: 28px; padding: 0 9px; }
+.jerry-app .quotation-page .specified-card .country-metrics { padding: 4px 10px; }
+.jerry-app .quotation-page .specified-card .quote-head { padding: 5px 10px; }
+.jerry-app .quotation-page .specified-card .selected-channels > section { padding: 6px 10px; }
+.jerry-app .quotation-page .specified-card .add-country-empty { min-height: 34px; height: auto; margin: 0 14px 10px; padding: 7px 12px; }
+.jerry-app .quotation-page .specified-card > footer { padding: 8px 14px; }
+.jerry-app .quotation-page .cost-workbench .bundle-card { border-color: #cfdff0; box-shadow: none; border-radius: 8px; }
+.jerry-app .quotation-page .bundle-card > header { padding: 9px 14px; background: var(--quote-blue); }
+.jerry-app .quotation-page .bundle-card > header p { background: #6cabeb; color: white; }
+.jerry-app .quotation-page .bundle-card .bundle-rows article { padding-top: 8px; padding-bottom: 8px; }
+.jerry-app .quotation-page .bundle-card .summary-grid { padding: 8px 14px 12px; }
+.jerry-app .quotation-page .bundle-card .special-packaging { margin: 10px 14px; padding: 8px 10px; }
+.jerry-app .quotation-page .cost-workbench .product-card .physical-image .purchase-category-badge svg { width: 27px; height: 27px; }
+.jerry-app .quotation-page .cost-workbench .product-card .physical-image .purchase-category-badge small { display: none; }
+
+.jerry-app .quotation-page .quote-preview { border: 1px solid #dcd3f2; border-radius: 8px; box-shadow: none; }
+.jerry-app .quotation-page .preview-head { padding: 9px 14px; background: var(--quote-purple); gap: 12px; }
+.jerry-app .quotation-page .preview-head .section-number { background: #9672d9; }
+.jerry-app .quotation-page .preview-kpis { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 8px 14px; background: #fcfbff; }
+.jerry-app .quotation-page .preview-kpis article { min-height: 0; padding: 0; border: 0; background: transparent; gap: 6px; }
+.jerry-app .quotation-page .preview-kpis article > i { width: 24px; height: 24px; font-size: 12px; }
+.jerry-app .quotation-page .preview-kpis span { display: flex; align-items: baseline; gap: 5px; }
+.jerry-app .quotation-page .preview-kpis b { font-size: 15px; }
+.jerry-app .quotation-page .preview-kpis small { font-size: 11px; }
+.jerry-app .quotation-page .preview-info { padding: 8px 14px; }
+.jerry-app .quotation-page .preview-info > section { padding: 0; border: 0; display: flex; align-items: baseline; gap: 16px; }
+.jerry-app .quotation-page .preview-info h3 { font-size: 12px; white-space: nowrap; }
+.jerry-app .quotation-page .preview-info dl { flex: 1; grid-template-columns: repeat(3,minmax(0,1fr)); margin: 0; gap: 5px 14px; }
+.jerry-app .quotation-page .preview-info dt { font-size: 11px; min-width: 48px; }
+.jerry-app .quotation-page .preview-info dd { font-size: 12px; overflow-wrap: anywhere; }
+.jerry-app .quotation-page .customer-sheet { margin: 4px 14px 12px; }
+.jerry-app .quotation-page .sheet-toolbar p { margin: 3px 0; }
+.jerry-app .quotation-page .sheet-local-note, .jerry-app .quotation-page .sheet-edit-help { margin: 5px 0; }
+.jerry-app .quotation-page .sheet-visibility, .jerry-app .quotation-page .sheet-photos { padding: 6px 10px; margin: 7px 0; gap: 8px 14px; }
+.jerry-app .quotation-page .sheet-editor { padding: 10px; }
+.jerry-app .quotation-page .sheet-metadata { gap: 10px; }
+.jerry-app .quotation-page .sheet-metadata label { flex: 1; min-width: 150px; }
+.jerry-app .quotation-page .sheet-metadata input { min-width: 0; width: 100%; }
+.jerry-app .quotation-page .customer-sheet td { padding: 6px 8px; }
+.jerry-app .quotation-page .quote-preview > footer { margin-top: 8px; padding: 10px 14px; }
+.jerry-app .quotation-page .validation-summary { margin: 10px 14px 0; }
+
+@media (min-width: 1450px) {
+  .jerry-app .quotation-page .matrix-mode-switcher { display: flex; align-items: center; flex-wrap: wrap; }
+  .jerry-app .quotation-page .matrix-mode-switcher > header { border: 0; }
+  .jerry-app .quotation-page .matrix-mode-switcher > header > span { display: none; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav { flex: 1; }
+}
+@media (max-width: 1250px) {
+  .jerry-app .quotation-page .condition-grid, .jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  .jerry-app .quotation-page .cost-metrics, .jerry-app .quotation-page .cost-metrics.manual { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  .jerry-app .quotation-page .cost-workbench > .module-card > header { flex-wrap: wrap; }
+  .jerry-app .quotation-page .cost-workbench .product-card .state { margin-left: 0; }
+  .jerry-app .quotation-page .condition-card > header > div > span { display: none; }
+}
+@media (max-width: 900px) {
+  .jerry-app .quotation-page .quotation-header { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .jerry-app .quotation-page .header-meta { justify-content: flex-start; flex-basis: 100%; }
+  .jerry-app .quotation-page .header-meta small { display: block; }
+  .jerry-app .quotation-page .header-meta dl { gap: 6px 12px; }
+  .jerry-app .quotation-page .condition-card > header { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .jerry-app .quotation-page .condition-grid, .jerry-app .quotation-page .condition-grid.bundle, .jerry-app .quotation-page .cost-metrics, .jerry-app .quotation-page .cost-metrics.manual { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .jerry-app .quotation-page .matrix-mode-switcher > header { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav { grid-template-columns: 1fr; }
+  .jerry-app .quotation-page .preview-info > section { display: block; }
+  .jerry-app .quotation-page .preview-info dl { grid-template-columns: repeat(2,minmax(0,1fr)); margin-top: 6px; }
+  .jerry-app .quotation-page .preview-head { flex-wrap: wrap; }
+}
+@media (max-width: 520px) {
+  .jerry-app .quotation-page { width: 94vw !important; gap: 10px !important; }
+  .jerry-app .quotation-page .condition-card > header p { flex-wrap: wrap; }
+  .jerry-app .quotation-page .condition-grid, .jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: 1fr; }
+  .jerry-app .quotation-page .condition-grid footer { padding-top: 0; }
+  .jerry-app .quotation-page .cost-workbench .product-card { flex-basis: 100%; }
+  .jerry-app .quotation-page .cost-workbench .product-card .info { flex: 1; }
+  .jerry-app .quotation-page .cost-workbench .product-card .info code { overflow-wrap: anywhere; }
+  .jerry-app .quotation-page .cost-metrics, .jerry-app .quotation-page .cost-metrics.manual { grid-template-columns: 1fr; }
+  .jerry-app .quotation-page .preview-info dl { grid-template-columns: 1fr; }
+  .jerry-app .quotation-page .draft-status-bar > button { margin-left: 0; }
+}

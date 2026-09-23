@@ -67,7 +67,7 @@ const quoteRange = computed(() => {
 <template>
   <section class="quote-preview" aria-labelledby="quotation-preview-title">
     <header class="preview-head">
-      <div><p>STEP 04 · QUOTATION PREVIEW</p><h2 id="quotation-preview-title">报价单预览与保存</h2><span>核对本次报价包含的全部国家与渠道，确认后生成正式报价记录</span></div>
+      <div><h2 id="quotation-preview-title"><i class="section-number">04</i>报价单预览与保存</h2></div>
       <em :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ previewStatus }}</em>
     </header>
 
