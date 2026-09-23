@@ -120,6 +120,7 @@ public class LogisticsImportService {
         validateFiles(files);
         if(companyChannels!=null)companyChannels.assertImport(dataset);
         var id=UUID.randomUUID();var payload=mapper.createObjectNode().put("replaceDrafts",replaceDrafts);var sources=payload.putArray("files");
+        if(selectedProvider!=null)payload.put("selectedProviderName",jdbc.sql("select payload->>'name' from logistics_provider where id=:id").param("id",selectedProvider).query(String.class).single());
         if(companyChannels!=null){payload.set("companyScope",companyChannels.scopeFor(selectedProvider,selectedChannel));payload.put("scopeRevision",payload.path("companyScope").path("revision").asLong());}
         var signature=new StringBuilder(dataset.toString()).append(replaceDrafts);if(selectedProvider!=null||selectedChannel!=null)signature.append(selectedProvider).append(selectedChannel);
         var hashes=new ArrayList<String>();

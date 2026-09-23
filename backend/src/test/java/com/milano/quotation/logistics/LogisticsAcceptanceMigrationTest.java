@@ -11,6 +11,40 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers(disabledWithoutDocker=true)
 class LogisticsAcceptanceMigrationTest {
+    @Test void partialBatchCoverageIsCheckedAgainstCurrentDatabaseBeforePublishing() {
+        resetDatabase();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
+        var dataSource=new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());
+        var jdbc=JdbcClient.create(dataSource);var mapper=new tools.jackson.databind.ObjectMapper();
+        var dataset=UUID.fromString("00000000-0000-0000-0000-000000000001");
+        var old=seed(jdbc,dataset,"published",true,901);
+        var draft=seed(jdbc,dataset,"draft",true,902);
+        var draftChannel=jdbc.sql("select channel_id from logistics_version where id=:id").param("id",draft).query(UUID.class).single();
+        jdbc.sql("update logistics_provider set payload='{"+"\"name\":\"燕文\"}'::jsonb").update();
+        jdbc.sql("update logistics_channel set payload='{"+"\"name\":\"旧化妆品渠道\",\"enabled\":true}'::jsonb").update();
+        var payload=mapper.createObjectNode();payload.putArray("results").addObject().put("channelId",draftChannel.toString()).put("versionId",draft.toString()).put("providerName","燕文").put("channelName","新增渠道");
+        var batch=UUID.randomUUID();
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,:dataset,'tester',:key,'completed','review',cast(:payload as jsonb))")
+            .param("id",batch).param("dataset",dataset).param("key",batch.toString()).param("payload",payload.toString()).update();
+        var logistics=org.mockito.Mockito.mock(LogisticsService.class);var billing=org.mockito.Mockito.mock(LogisticsBillingAcceptanceService.class);
+        var service=new LogisticsBatchPublishService(jdbc,mapper,logistics,billing,new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+        var coverage=service.coverage(batch);assertEquals(1,coverage.path("missingCount").asInt());
+        var request=mapper.createObjectNode().put("note","核对局部更新");request.set("selections",payload.path("results"));
+        assertThrows(com.milano.quotation.common.AppException.class,()->service.publishReady(batch,request,"tester"));
+        org.mockito.Mockito.verifyNoInteractions(logistics,billing);
+        request.put("partialUpdateConfirmed",true).put("coverageToken",coverage.path("token").asText());
+        // A concurrent rename/source change must force a new coverage review before any price write.
+        jdbc.sql("update logistics_version set payload=payload || '{\"fileName\":\"new-source.xlsx\"}'::jsonb where id=:id").param("id",old).update();
+        assertThrows(com.milano.quotation.common.AppException.class,()->service.publishReady(batch,request,"tester"));
+        org.mockito.Mockito.verifyNoInteractions(logistics,billing);
+        request.put("coverageToken",service.coverage(batch).path("token").asText());
+        org.mockito.Mockito.when(logistics.publishReviewed(org.mockito.ArgumentMatchers.eq(draftChannel),org.mockito.ArgumentMatchers.eq(draft),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyString(),org.mockito.ArgumentMatchers.anyBoolean(),org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(mapper.createObjectNode());
+        var result=service.publishReady(batch,request,"tester");assertEquals(1,result.path("publishedCount").asInt());assertTrue(result.path("partialUpdateConfirmed").asBoolean());
+        assertEquals(1,result.path("coverage").path("missingCount").asInt());
+        org.mockito.Mockito.verify(billing).approveValidatedImport(org.mockito.ArgumentMatchers.eq(draft),org.mockito.ArgumentMatchers.eq("tester"),org.mockito.ArgumentMatchers.anyString());
+        jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false') where current_version_id=:id").param("id",old).update();
+        assertFalse(service.coverage(batch).path("partial").asBoolean(),"Disabled routes do not block active-channel updates");
+    }
     @Test void kuwaitRoundingProjectionUpgradesExistingRowsWithoutChangingPricesOrApprovals() {
         resetDatabase();
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("46").load().migrate();

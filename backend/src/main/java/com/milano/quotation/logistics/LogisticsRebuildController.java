@@ -107,7 +107,11 @@ public class LogisticsRebuildController {
         var result=imports.upload(id,files,actor(auth),key,replaceDrafts);audit.record("logistics.import-submit","logistics-import",result.path("id").asText(),"success",Map.of("fileCount",files.size()));return ApiResponse.ok(result);
     }
     @GetMapping("/datasets/{id}/imports") public ApiResponse<?> imports(@PathVariable UUID id){return ApiResponse.ok(imports.list(id));}
-    @GetMapping("/imports/{id}") public ApiResponse<?> batch(@PathVariable UUID id){return ApiResponse.ok(imports.get(id));}
+    @GetMapping("/imports/{id}") public ApiResponse<?> batch(@PathVariable UUID id){
+        var result=imports.get(id);
+        if(!Set.of("queued","processing").contains(result.path("status").asText()))((ObjectNode)result.path("payload")).set("coverage",batchPublish.coverage(id));
+        return ApiResponse.ok(result);
+    }
     @PostMapping("/imports/{id}/retry") public ApiResponse<?> retry(@PathVariable UUID id){imports.retry(id);audit.record("logistics.import-retry","logistics-import",id.toString(),"success",Map.of());return ApiResponse.ok(imports.get(id));}
     @GetMapping("/imports/{id}/files/{index}")
     public ResponseEntity<InputStreamResource> original(@PathVariable UUID id,@PathVariable int index){
@@ -136,7 +140,7 @@ public class LogisticsRebuildController {
     public ApiResponse<?> publishReady(@PathVariable UUID id,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){
         var actor=actor(auth);input.put("batchId",id.toString());
         var result=idempotency.executeIndependent(actor,"logistics-batch-publish-ready",key,input,()->batchPublish.publishReady(id,input,actor));
-        audit.record("logistics.batch-publish-ready","logistics-import",id.toString(),"success",Map.of("published",result.path("publishedCount").asInt(),"skipped",result.path("skippedCount").asInt(),"failed",result.path("failedCount").asInt()));return ApiResponse.ok(result);
+        audit.record("logistics.batch-publish-ready","logistics-import",id.toString(),"success",Map.of("published",result.path("publishedCount").asInt(),"skipped",result.path("skippedCount").asInt(),"failed",result.path("failedCount").asInt(),"coverage",result.path("coverage"),"partialUpdateConfirmed",result.path("partialUpdateConfirmed").asBoolean()));return ApiResponse.ok(result);
     }
     @PostMapping("/channels/{channel}/versions/{version}/review") @Transactional
     public ApiResponse<?> review(@PathVariable UUID channel,@PathVariable UUID version,@RequestBody ObjectNode input,@RequestHeader("Idempotency-Key")String key,Authentication auth){

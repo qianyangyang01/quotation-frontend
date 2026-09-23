@@ -15,6 +15,21 @@ public class LogisticsBatchPublishService {
     private final JdbcClient jdbc;private final ObjectMapper mapper;private final LogisticsService logistics;private final LogisticsBillingAcceptanceService billing;private final TransactionTemplate tx;
     public LogisticsBatchPublishService(JdbcClient jdbc,ObjectMapper mapper,LogisticsService logistics,LogisticsBillingAcceptanceService billing,PlatformTransactionManager manager){this.jdbc=jdbc;this.mapper=mapper;this.logistics=logistics;this.billing=billing;this.tx=new TransactionTemplate(manager);}
 
+    public ObjectNode coverage(UUID batchId){
+        var batch=jdbc.sql("select dataset_id, status, payload::text from logistics_import_batch where id=:id").param("id",batchId)
+                .query((rs,n)->mapper.createObjectNode().put("datasetId",rs.getString("dataset_id")).put("status",rs.getString("status")).set("payload",mapper.readTree(rs.getString("payload"))))
+                .optional().orElseThrow(()->AppException.notFound("导入批次不存在"));
+        var channels=jdbc.sql("""
+            select jsonb_build_object('channelId',c.id,'providerName',p.payload->>'name','channelName',c.payload->>'name',
+                'versionId',v.id,'versionNumber',v.version_number,'sourceFile',coalesce(v.payload->>'originalFileName',v.payload->>'fileName',''))::text
+            from logistics_channel c join logistics_provider p on p.id=c.provider_id
+            join logistics_version v on v.id=c.current_version_id
+            where c.dataset_id=:dataset and c.archived_at is null and v.status='published'
+                and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)
+            """).param("dataset",uuid(batch.path("datasetId").asText())).query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).list();
+        return LogisticsImportCoverage.calculate(batch.path("payload"),channels).put("batchStatus",batch.path("status").asText());
+    }
+
     public ObjectNode progress(UUID batchId){
         if(!jdbc.sql("select exists(select 1 from logistics_import_batch where id=:id)").param("id",batchId).query(Boolean.class).single())throw AppException.notFound("导入批次不存在");
         var ids=jdbc.sql("""
@@ -45,7 +60,12 @@ public class LogisticsBatchPublishService {
         for(var entry:candidates.entrySet())if(!requested.get(entry.getKey()).path("channelId").asText().equals(entry.getValue().path("channelId").asText()))throw AppException.unprocessable("发布选择的渠道与版本不匹配");
         if(candidates.isEmpty())throw AppException.unprocessable("本批次没有可发布的渠道版本");
         var note=input.path("note").asText().trim();if(note.isBlank())throw AppException.unprocessable("一键发布审核备注不能为空");
+        var coverage=coverage(batchId);
+        if(Set.of("queued","processing").contains(coverage.path("batchStatus").asText()))throw AppException.conflict("导入仍在进行，请等待解析完成后再核对发布范围");
+        LogisticsImportCoverage.requireAcknowledgment(coverage,input);
         var result=mapper.createObjectNode();var published=result.putArray("published");var skipped=result.putArray("skipped");var failed=result.putArray("failed");
+        result.set("coverage",coverage);
+        result.put("partialUpdateConfirmed",coverage.path("partial").asBoolean()&&input.path("partialUpdateConfirmed").asBoolean());
         for(var entry:candidates.entrySet()){
             var versionId=entry.getKey();var batchItem=entry.getValue();var selection=requested.getOrDefault(versionId,mapper.createObjectNode());
             try{

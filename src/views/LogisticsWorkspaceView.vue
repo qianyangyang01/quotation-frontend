@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { displayWeightGrams } from '@/services/quotationDecimal'
+import { coveragePublishInput, coveragePublishSummary } from '@/data/logisticsImportCoverage'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import LogisticsChannelStatus from '@/components/logistics/LogisticsChannelStatus.vue'
@@ -76,6 +77,9 @@ const editorRows = computed(() => {
 })
 const missingEtaMin = ref<number | null>(null), missingEtaMax = ref<number | null>(null)
 const readyPublishNote = ref(''), readyPublishConfirmed = ref(false), readyPublishResult = ref<ReadyPublishResult | null>(null)
+const partialUpdateConfirmed = ref(false)
+const importCoverage = computed(() => batch.value?.payload.coverage)
+watch(() => `${batch.value?.id}:${importCoverage.value?.token}`, () => { partialUpdateConfirmed.value = false })
 const publishFeedback = createLogisticsPublishFeedback()
 const { phase: publishPhase, detail: publishDetail, total: publishTotal, completed: publishCompleted, elapsed: publishElapsed } = publishFeedback
 const publishScope = ref<'batch' | 'version'>('batch'), publishSummary = ref('')
@@ -497,21 +501,33 @@ async function publish() {
   publishScope.value = 'version'; publishSummary.value = ''
   await run(() => publishFeedback.execute(
     () => service.review(target, note.value, changesConfirmed.value, changesConfirmed.value, reviewKey),
-    result => { version.value = result; reviewKey = idempotencyKey('logistics-review'); publishSummary.value = result.quoteReady === false ? '价格已发布；渠道尚未开放自动报价。' : '发布成功，新价格已生效。'; message.value = publishSummary.value },
+    result => { version.value = result; reviewKey = idempotencyKey('logistics-review'); publishSummary.value = result.quoteReady === false ? '价格已发布；渠道尚未开放自动报价。' : '此渠道价格已生效；其他渠道不随本次发布更新。'; message.value = publishSummary.value },
     async () => { await invalidatePublishedLogisticsCache(); await refresh() },
   ))
 }
 async function recompare() { await run(async () => { version.value = await service.recompare(version.value!); changesConfirmed.value = false; reviewKey = idempotencyKey('logistics-review'); message.value = '已按最新正式价格重新对比，请重新审核。' }) }
+async function refreshImportCoverage() {
+  const id = batch.value?.id
+  if (!id) return
+  await run(async () => {
+    const refreshed = await service.batch(id)
+    if (batch.value?.id !== id) return
+    batch.value = refreshed; partialUpdateConfirmed.value = false
+  })
+}
 async function rollback() { await run(async () => { version.value = await service.rollback(version.value!, note.value); await invalidatePublishedLogisticsCache(); await refresh(); message.value = '已创建新的回滚版本，历史报价没有改写。' }) }
 async function publishReadyBatch() {
   if (busy.value || !batch.value || !readyBatchResults.value.length || !readyPublishNote.value.trim() || ((readyBatchNeedsRemoval.value || readyBatchNeedsRisk.value) && !readyPublishConfirmed.value)) return
   const batchId = batch.value.id
+  let coverageInput: ReturnType<typeof coveragePublishInput>
+  try { coverageInput = coveragePublishInput(importCoverage.value, partialUpdateConfirmed.value) }
+  catch (e) { error.value = e instanceof Error ? e.message : '请核对导入范围'; return }
   const selections = readyBatchResults.value.map(item => ({ channelId: item.channelId!, versionId: item.versionId!, removalConfirmed: readyPublishConfirmed.value, reviewConfirmed: readyPublishConfirmed.value }))
   const selectedIds = new Set(selections.map(item => item.versionId))
   publishScope.value = 'batch'; publishSummary.value = ''; readyPublishResult.value = null
   await run(() => publishFeedback.execute(
-    () => service.publishReady(batchId, selections, readyPublishNote.value.trim(), idempotencyKey('logistics-ready-publish')),
-    result => { readyPublishResult.value = result; publishSummary.value = `发布结果：成功 ${result.publishedCount} · 跳过 ${result.skippedCount} · 失败 ${result.failedCount}`; message.value = publishSummary.value },
+    () => service.publishReady(batchId, selections, readyPublishNote.value.trim(), idempotencyKey('logistics-ready-publish'), coverageInput),
+    result => { readyPublishResult.value = result; publishSummary.value = `发布结果：成功 ${result.publishedCount} · 跳过 ${result.skippedCount} · 失败 ${result.failedCount}${coveragePublishSummary(result.coverage)}`; message.value = publishSummary.value },
     async () => { await invalidatePublishedLogisticsCache(); await Promise.all([refresh(), service.batch(batchId).then(result => { if (batch.value?.id === batchId) batch.value = result })]) },
     { total: selections.length, read: async () => (await service.publishProgress(batchId)).publishedVersionIds.filter(id => selectedIds.has(id)).length },
   ))
@@ -553,6 +569,19 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 
             <div v-if="['queued', 'processing'].includes(batch.status)" class="review-progress"><div><b>{{ uploadStatusText || statusLabel[batch.phase] || batch.phase }}</b><strong>{{ batch.payload.progress || 0 }}%</strong></div><progress :value="batch.payload.progress || 0" max="100" /></div>
             <p v-if="batch.payload.error" class="notice error">批次失败原因：{{ batch.payload.error }}</p>
+            <section v-if="importCoverage" class="import-coverage notice" :class="{ error: importCoverage.partial }" aria-label="导入覆盖核对">
+              <b>现行渠道覆盖：{{ importCoverage.coveredChannels }} / {{ importCoverage.existingChannels }} 个已纳入本批</b>
+              <button :disabled="busy" @click="refreshImportCoverage">重新核对覆盖范围</button>
+              <template v-if="importCoverage.partial">
+                <p>另有 {{ importCoverage.missingCount }} 个渠道未纳入本批核对，仍沿用原价格。上传新报价表或发布新增渠道，不代表该物流商的旧渠道已全部更新。</p>
+                <details><summary>查看 {{ importCoverage.missingCount }} 个未更新渠道及价格来源</summary><ul>
+                  <li v-for="item in importCoverage.missingChannels" :key="item.channelId">{{ item.providerName }} · {{ item.channelName }} · V{{ item.versionNumber }} · {{ item.sourceFile || '来源未记录' }}</li>
+                </ul></details>
+                <label class="check"><input v-model="partialUpdateConfirmed" :disabled="busy" type="checkbox">我已核对未更新清单，本次仅发布本批渠道，其余渠道保留原价</label>
+              </template>
+              <p v-else>本批已纳入相关物流商的现行渠道；有变化的价格仍需审核发布，待处理项请单独核对。</p>
+            </section>
+            <p v-else class="notice">未取得导入覆盖核对结果，暂不能批量发布。<button :disabled="busy" @click="refreshImportCoverage">核对覆盖范围</button></p>
             <p v-if="outOfScopeBatchResults.length" class="notice error">本次按“{{ uploadProviderName }}”单物流商更新导入，但解析结果还包含 {{ [...new Set(outOfScopeBatchResults.map(item => item.providerName))].join('、') }}。这些渠道不会被一键发布，请核对文件后分别处理。</p>
             <div class="batch-status-overview">
               <nav class="batch-status-tabs" aria-label="渠道发布状态">
@@ -583,7 +612,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 
             <div class="batch-release-note"><span>已有渠道发布后自动切换新价格；新增渠道进入财务设置列表，默认不勾选。</span><button v-if="(['failed', 'interrupted'].includes(batch.status) || batch.payload.fileReports?.some(file => file.status === 'failed')) && !archived" :disabled="busy" @click="run(async () => { batch = await service.retry(batch!.id); schedulePoll() })">重试失败 / 超时文件</button></div>
             <div v-if="readyPublishResult" class="publish-result"><b>发布结果：成功 {{ readyPublishResult.publishedCount }} · 跳过 {{ readyPublishResult.skippedCount }} · 失败 {{ readyPublishResult.failedCount }}</b><p v-for="item in readyPublishResult.skipped" :key="item.versionId">跳过 {{ item.channelName }}：{{ item.reason }}</p><p v-for="item in readyPublishResult.failed" :key="item.versionId">失败 {{ item.channelName }}：{{ item.reason }}</p></div>
-            <footer class="review-publish-bar"><LogisticsPublishStatus v-if="publishScope === 'batch'" :phase="publishPhase" :detail="publishDetail" :elapsed="publishElapsed" :completed="publishCompleted" :total="publishTotal" :summary="publishSummary" /><div><b>{{ batchResultCounts.blocked || batchFailedFiles ? `${batchResultCounts.blocked} 个渠道待处理，${batchFailedFiles} 个文件需处理` : '本批检查通过' }}</b><small>正常渠道不必等待失败文件，可直接发布给财务使用。</small></div><label>审核备注<input v-model="readyPublishNote" :disabled="busy" maxlength="500" placeholder="填写价格来源和审核结论"></label><label v-if="readyBatchNeedsRemoval || readyBatchNeedsRisk" class="check"><input v-model="readyPublishConfirmed" :disabled="busy" type="checkbox">已确认物流变化内容</label><button class="primary publish-all" :disabled="busy || !readyBatchResults.length || !readyPublishNote.trim() || ((readyBatchNeedsRemoval || readyBatchNeedsRisk) && !readyPublishConfirmed)" @click="publishReadyBatch">{{ publishScope === 'batch' && publishPhase === 'publishing' ? `发布中 ${publishCompleted}/${publishTotal}…` : publishScope === 'batch' && publishPhase === 'refreshing' ? '正在更新列表…' : `一键发布 ${readyBatchResults.length} 个可用渠道` }}</button></footer>
+            <footer class="review-publish-bar"><LogisticsPublishStatus v-if="publishScope === 'batch'" :phase="publishPhase" :detail="publishDetail" :elapsed="publishElapsed" :completed="publishCompleted" :total="publishTotal" :summary="publishSummary" /><div><b>{{ batchResultCounts.blocked || batchFailedFiles ? `${batchResultCounts.blocked} 个渠道待处理，${batchFailedFiles} 个文件需处理` : importCoverage?.partial ? '本批为局部更新' : '本批渠道检查通过' }}</b><small>请核对本批变化和未更新渠道；发布仅影响本批所选渠道。</small></div><label>审核备注<input v-model="readyPublishNote" :disabled="busy" maxlength="500" placeholder="填写价格来源和审核结论"></label><label v-if="readyBatchNeedsRemoval || readyBatchNeedsRisk" class="check"><input v-model="readyPublishConfirmed" :disabled="busy" type="checkbox">已确认物流变化内容</label><button class="primary publish-all" :disabled="busy || !importCoverage || (importCoverage.partial && !partialUpdateConfirmed) || !readyBatchResults.length || !readyPublishNote.trim() || ((readyBatchNeedsRemoval || readyBatchNeedsRisk) && !readyPublishConfirmed)" @click="publishReadyBatch">{{ publishScope === 'batch' && publishPhase === 'publishing' ? `发布中 ${publishCompleted}/${publishTotal}…` : publishScope === 'batch' && publishPhase === 'refreshing' ? '正在更新列表…' : `一键发布 ${readyBatchResults.length} 个可用渠道` }}</button></footer>
           </div>
         </template>
 
@@ -637,7 +666,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
           </section>
           <aside class="release-check-panel version-check-panel"><h3>发布前检查</h3><button @click="detailTab = 'diff'; diffType = 'price'"><span class="check-dot price">¥</span><span>价格变化<small>已清楚展示旧价、新价和涨跌</small></span><b>{{ versionChangeCounts.price }}</b></button><button @click="detailTab = 'diff'; diffType = 'range'"><span class="check-dot range">↔</span><span>重量区间<small>扩大、缩小、重叠和断档</small></span><b>{{ versionChangeCounts.range }}</b></button><button @click="detailTab = 'issues'"><span class="check-dot issue">!</span><span>价格 / 重量问题<small>{{ reviewErrorCount ? '修正后重新校验' : reviewIssues.length ? '有提醒，详见问题列表' : '当前没有阻断问题' }}</small></span><b>{{ reviewIssues.length }}</b></button><button><span class="check-dot ready">✓</span><span>调价状态<small>{{ version.pricingReady === false ? '计费模型待适配' : '计费结构已校验' }}</small></span><b>{{ version.status === 'published' ? '已发布' : '待处理' }}</b></button><LogisticsBillingReview :key="`${version.id}-${version.status}`" :version-id="version.id" :readonly="archived" @updated="acceptanceUpdated" /><template v-if="version.status === 'draft'"><label v-if="hasCoverageRemoval(version.summary) || (version.summary.highRisk || 0) > 0" class="check"><input v-model="changesConfirmed" :disabled="busy" type="checkbox">已确认物流变化内容</label></template></aside>
         </div>
-        <footer v-if="!archived" class="review-publish-bar version-publish-bar"><LogisticsPublishStatus v-if="publishScope === 'version'" :phase="publishPhase" :detail="publishDetail" :elapsed="publishElapsed" :completed="publishCompleted" :total="publishTotal" :summary="publishSummary" /><p v-if="error" class="edit-error" role="alert">{{ error }}</p><button :disabled="busy" @click="version = null">返回批次</button><button :disabled="busy" @click="recompare">重新对比最新价格</button><label>审核备注<input v-model="note" maxlength="500" placeholder="填写价格来源、调整原因和审核结论"></label><template v-if="version.status === 'draft'"><button v-if="editingRows" class="primary" :disabled="busy" @click="saveCorrections">保存修正并重新校验</button><button class="primary publish-all" :disabled="busy || editingRows || version.errors > 0 || Boolean(version.blockingReasons?.length) || version.pricingReady === false || !note.trim() || ((hasCoverageRemoval(version.summary) || (version.summary.highRisk || 0) > 0) && !changesConfirmed)" @click="publish">{{ publishScope === 'version' && publishPhase === 'publishing' ? '正在发布…' : publishScope === 'version' && publishPhase === 'refreshing' ? '正在更新列表…' : '一键审核并发布价格' }}</button></template><button v-else-if="version.status === 'superseded'" :disabled="busy || !note.trim()" @click="rollback">以此版本创建回滚</button></footer>
+        <footer v-if="!archived" class="review-publish-bar version-publish-bar"><LogisticsPublishStatus v-if="publishScope === 'version'" :phase="publishPhase" :detail="publishDetail" :elapsed="publishElapsed" :completed="publishCompleted" :total="publishTotal" :summary="publishSummary" /><p v-if="error" class="edit-error" role="alert">{{ error }}</p><button :disabled="busy" @click="version = null">返回批次</button><button :disabled="busy" @click="recompare">重新对比最新价格</button><label>审核备注<input v-model="note" maxlength="500" placeholder="填写价格来源、调整原因和审核结论"></label><template v-if="version.status === 'draft'"><button v-if="editingRows" class="primary" :disabled="busy" @click="saveCorrections">保存修正并重新校验</button><button class="primary publish-all" :disabled="busy || editingRows || version.errors > 0 || Boolean(version.blockingReasons?.length) || version.pricingReady === false || !note.trim() || ((hasCoverageRemoval(version.summary) || (version.summary.highRisk || 0) > 0) && !changesConfirmed)" @click="publish">{{ publishScope === 'version' && publishPhase === 'publishing' ? '正在发布…' : publishScope === 'version' && publishPhase === 'refreshing' ? '正在更新列表…' : '仅发布此渠道价格' }}</button></template><button v-else-if="version.status === 'superseded'" :disabled="busy || !note.trim()" @click="rollback">以此版本创建回滚</button></footer>
       </section>
     </main>
   </div>
