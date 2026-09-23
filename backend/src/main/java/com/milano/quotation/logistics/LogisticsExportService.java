@@ -70,7 +70,8 @@ public class LogisticsExportService {
                     row.createCell(c++).setCellValue(value.path("weightFromInclusive").asBoolean(false)?"是":"否");
                     row.createCell(c++).setCellValue(value.path("weightToInclusive").asBoolean(true)?"是":"否");
                     cell(row,c++,value.path("originRegion"));cell(row,c++,value.path("billingStepKg"));cell(row,c++,value.path("notes"));
-                    cell(row,c++,value.path("sourceSheet"));cell(row,c++,value.path("sourceRow"));cell(row,c++,value.path("pendingReason"));cell(row,c,value.path("linehaulPerKg"));included=true;
+                    cell(row,c++,value.path("sourceSheet"));cell(row,c++,value.path("sourceRow"));cell(row,c++,value.path("pendingReason"));cell(row,c++,value.path("linehaulPerKg"));
+                    row.createCell(c).setCellValue(LogisticsStepPricing.exportBands(LogisticsRoundingNotes.apply(value)));included=true;
                 }
                 if(included) {
                     var version=v.path("version");textRow(metadata,metadataRow++,List.of(v.path("provider").asText(),v.path("channel").asText(),v.path("id").asText(),version.path("versionNumber").asText(),v.path("status").asText(),version.path("fileName").asText(),version.path("importedAt").asText(),version.path("publishedAt").asText(),version.path("quoteReady").asBoolean(true)?"是":"待适配"));

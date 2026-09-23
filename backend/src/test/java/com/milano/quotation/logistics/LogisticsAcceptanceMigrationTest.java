@@ -45,6 +45,34 @@ class LogisticsAcceptanceMigrationTest {
         jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{enabled}','false') where current_version_id=:id").param("id",old).update();
         assertFalse(service.coverage(batch).path("partial").asBoolean(),"Disabled routes do not block active-channel updates");
     }
+
+    @Test void projectsReviewedCountryNotesWithoutChangingSourceRowsOrApprovals() throws Exception {
+        resetDatabase();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("47").load().migrate();
+        var jdbc=JdbcClient.create(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
+        var mapper=new tools.jackson.databind.ObjectMapper();
+        var fixtures=LogisticsStepPricingTest.fixtures();
+        var rows=mapper.createArrayNode();for(var fixture:fixtures)rows.add(fixture.path("source"));
+        var version=seed(jdbc,UUID.fromString("00000000-0000-0000-0000-000000000001"),"published",true,999);
+        jdbc.sql("update logistics_version set payload=jsonb_set(payload,'{rows}',cast(:rows as jsonb)) where id=:id")
+            .param("id",version).param("rows",rows.toString()).update();
+        jdbc.sql("insert into logistics_billing_acceptance(id,version_id,rows_fingerprint,engine_version,kind,payload,reviewed_by) select :id,id,rows_fingerprint,'logistics-billing-v8','validated-import','{}','QA' from logistics_version where id=:version")
+            .param("id",UUID.randomUUID()).param("version",version).update();
+        var before=jdbc.sql("select payload::text || rows_fingerprint from logistics_version where id=:id").param("id",version).query(String.class).single();
+        Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
+        assertEquals(before,jdbc.sql("select payload::text || rows_fingerprint from logistics_version where id=:id").param("id",version).query(String.class).single());
+        assertTrue(ready(jdbc,version));
+        assertEquals(1,jdbc.sql("select count(*) from logistics_billing_acceptance where version_id=:id").param("id",version).query(Integer.class).single());
+        var projected=mapper.readTree(jdbc.sql("select quote_rows::text from logistics_version where id=:id").param("id",version).query(String.class).single());
+        assertEquals(rows.size(),projected.size());
+        for(int i=0;i<rows.size();i++) {
+            assertEquals(LogisticsRoundingNotes.apply(rows.get(i)).get("billingStepBands"),projected.get(i).get("billingStepBands"),fixtures.get(i).path("channel").asText()+i);
+        }
+        var published=new LogisticsQueryService(jdbc,mapper).publishedRules(null,"普货",java.util.List.of("CL"),java.util.List.of()).rules().getFirst().path("prices");
+        assertTrue(java.util.stream.StreamSupport.stream(published.spliterator(),false).anyMatch(r->r.path("billingStepBands").size()==2),"published API must retain tiered increments");
+        jdbc.sql("update logistics_billing_acceptance set engine_version='logistics-billing-v9' where version_id=:id").param("id",version).update();assertTrue(ready(jdbc,version));
+    }
+
     @Test void kuwaitRoundingProjectionUpgradesExistingRowsWithoutChangingPricesOrApprovals() {
         resetDatabase();
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).target("46").load().migrate();
@@ -71,7 +99,7 @@ class LogisticsAcceptanceMigrationTest {
             assertEquals("云途全球化妆品类专线挂号",value.path("sourceSheet").asText());
         }
         assertEquals(89.8,engine.calculate(projected,mapper.createObjectNode().put("country","KW").put("weightKg",.12)).path("total").asDouble());
-        assertEquals(83.88,engine.calculate(projected,mapper.createObjectNode().put("country","QA").put("weightKg",.12)).path("total").asDouble());
+        assertEquals(89.8,engine.calculate(projected,mapper.createObjectNode().put("country","QA").put("weightKg",.12)).path("total").asDouble());
         jdbc.sql("update logistics_billing_acceptance set engine_version='logistics-billing-v8' where version_id=:id").param("id",version).update();
         assertTrue(ready(jdbc,version));
     }
@@ -171,7 +199,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("47",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("48",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_provider where id=:id").param("id",provider).query(UUID.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
         assertEquals(version,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());

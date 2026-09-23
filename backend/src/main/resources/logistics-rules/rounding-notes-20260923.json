@@ -1,0 +1,407 @@
+[
+  {
+    "sheets": [
+      "万邦化妆品专线",
+      "万邦专线挂号普货",
+      "万邦速达专线挂号含电",
+      "澳邮专线挂号普货",
+      "Sheet1"
+    ],
+    "countries": [
+      "JP"
+    ],
+    "note": "重量按0.5KG进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.5
+      }
+    ],
+    "evidence": "万邦原表日本段落B55/B181；只适用于日本",
+    "fileContains": "万邦"
+  },
+  {
+    "sheets": [
+      "全球专线敏感"
+    ],
+    "note": "以G为单位进位，美国最低50G计费；加拿大最低100G计费",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.001
+      }
+    ],
+    "evidence": "云速递2026.9.21，全球专线敏感A56",
+    "fileContains": "云速递"
+  },
+  {
+    "sheets": [
+      "联邮通标准挂号-带电（OH）",
+      "联邮通标准挂号-普货（QC）"
+    ],
+    "countries": [
+      "QA",
+      "KW",
+      "BH",
+      "OM",
+      "KZ"
+    ],
+    "note": "卡塔尔、科威特、巴林、阿曼、哈萨克斯坦：最低重量为0.1KG，按0.1KG进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.1
+      }
+    ],
+    "evidence": "4PX20260909，OH A66/QC A88",
+    "fileContains": "4PX"
+  },
+  {
+    "sheets": [
+      "联邮通标准挂号-带电（OH）",
+      "联邮通标准挂号-普货（QC）"
+    ],
+    "countries": [
+      "JP"
+    ],
+    "note": "日本：最低计费重0.5KG，超过0.5KG后按每0.5KG进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.5
+      }
+    ],
+    "evidence": "4PX20260909，OH A67/QC A86",
+    "fileContains": "4PX"
+  },
+  {
+    "sheets": [
+      "联邮通标准挂号-带电（OH）",
+      "联邮通标准挂号-普货（QC）"
+    ],
+    "countries": [
+      "NG",
+      "GH",
+      "UG",
+      "KE",
+      "MA",
+      "PK",
+      "TZ",
+      "RW",
+      "AO"
+    ],
+    "note": "尼日利亚、加纳、乌干达、肯尼亚、摩洛哥、巴基斯坦、坦桑尼亚、卢旺达、安哥拉：2KG以内按0.01KG进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.01
+      },
+      {
+        "aboveKg": 2,
+        "stepKg": 0.5
+      },
+      {
+        "aboveKg": 10,
+        "stepKg": 1
+      }
+    ],
+    "evidence": "4PX20260909，OH A68/QC A89",
+    "fileContains": "4PX"
+  },
+  {
+    "sheets": [
+      "联邮通标准挂号-带电（OH）",
+      "联邮通标准挂号-普货（QC）"
+    ],
+    "excludeCountries": [
+      "QA",
+      "KW",
+      "BH",
+      "OM",
+      "KZ",
+      "JP",
+      "NG",
+      "GH",
+      "UG",
+      "KE",
+      "MA",
+      "PK",
+      "TZ",
+      "RW",
+      "AO"
+    ],
+    "note": "最低重量为50G，不足50G按50G计费，超过50G按1G进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.001
+      }
+    ],
+    "evidence": "4PX20260909，OH A61/QC A82：全表以G为单位进位；其他国家特殊条款另行处理",
+    "fileContains": "4PX"
+  },
+  {
+    "sheets": [
+      "纯电池线路"
+    ],
+    "countries": [
+      "KR"
+    ],
+    "note": "按照1KG进位，即1.001KG按照2KG计费",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 1
+      }
+    ],
+    "evidence": "通邮2026-9-21，纯电池线路L36，韩国",
+    "fileContains": "通邮"
+  },
+  {
+    "sheets": [
+      "纯电池线路"
+    ],
+    "countries": [
+      "JP"
+    ],
+    "note": "按照500G进位，即0.501KG按照1KG计费",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.5
+      }
+    ],
+    "evidence": "通邮2026-9-21，纯电池线路L18，仅日本；当前正式表无该国价格行",
+    "fileContains": "通邮"
+  },
+  {
+    "sheets": [
+      "通邮挂号特货"
+    ],
+    "countries": [
+      "CL"
+    ],
+    "note": "2KG以上按照0.5进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0
+      },
+      {
+        "aboveKg": 2,
+        "stepKg": 0.5
+      }
+    ],
+    "evidence": "通邮2026-9-21，通邮挂号特货I96:I97，智利",
+    "fileContains": "通邮"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "CA"
+    ],
+    "fileContains": "顺丰",
+    "note": "以1g进位制",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.001
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B162:C162"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "GB",
+      "FR",
+      "DE",
+      "US",
+      "MX",
+      "ES",
+      "AT",
+      "BE",
+      "CZ",
+      "DK",
+      "IE",
+      "NL",
+      "NO",
+      "SE",
+      "HU",
+      "LT",
+      "PT",
+      "SI",
+      "SK",
+      "LU",
+      "PL",
+      "IS",
+      "FI",
+      "GR",
+      "CH",
+      "NZ"
+    ],
+    "fileContains": "顺丰",
+    "note": "续重按1g",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.001
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B163:C169、B177:C177"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "AU"
+    ],
+    "fileContains": "顺丰",
+    "note": "续重1G",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.001
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B172:C172"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "TH",
+      "MY",
+      "SG",
+      "ID",
+      "PH"
+    ],
+    "fileContains": "顺丰",
+    "note": "续重0.1KG",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.1
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B170:C173"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "SA",
+      "AE"
+    ],
+    "fileContains": "顺丰",
+    "note": "续重按0.1kg",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.1
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B175:C176"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "JP"
+    ],
+    "fileContains": "顺丰",
+    "note": "续重0.5KG",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.5
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B174:C174"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "NG",
+      "UG",
+      "KE",
+      "GH"
+    ],
+    "fileContains": "顺丰",
+    "note": "不足0.5KG按0.5KG进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.01
+      },
+      {
+        "aboveKg": 2,
+        "stepKg": 0.5
+      },
+      {
+        "aboveKg": 10,
+        "stepKg": 1
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B178:C178"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "RW",
+      "MU",
+      "MG",
+      "ZM",
+      "AZ",
+      "AO",
+      "SN",
+      "RE",
+      "SC",
+      "ZA"
+    ],
+    "fileContains": "顺丰",
+    "note": "不足0.01KG按0.01KG进位",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.01
+      }
+    ],
+    "evidence": "顺丰20260916，国际电商专递-CD B179:C179"
+  },
+  {
+    "sheets": [
+      "国际电商专递-CD"
+    ],
+    "countries": [
+      "IT",
+      "BG",
+      "RO",
+      "EE",
+      "LV",
+      "HR",
+      "TZ"
+    ],
+    "fileContains": "顺丰",
+    "note": "",
+    "bands": [
+      {
+        "aboveKg": 0,
+        "stepKg": 0.001
+      }
+    ],
+    "evidence": "2026-09-23 用户确认：顺丰CD原表未列明的7国按1g进位"
+  }
+]

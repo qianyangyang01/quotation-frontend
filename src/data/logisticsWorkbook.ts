@@ -9,7 +9,7 @@ export const LOGISTICS_WORKBOOK_HEADERS = [
 ] as const
 
 export type LogisticsRateRow = {
-  pricingModel?: string; billingStepKg?: number; sourceSheet?: string;
+  pricingModel?: string; billingStepKg?: number; billingStepBands?: { aboveKg: number; stepKg: number }[]; sourceSheet?: string;
   weightFromInclusive?: boolean; weightToInclusive?: boolean; quoteReady?: boolean
   sourceRow: number
   areaName: string; countryCode: string; etaMinDays: number; etaMaxDays: number; etaStatus?: string
