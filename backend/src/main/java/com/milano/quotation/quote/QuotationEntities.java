@@ -9,6 +9,7 @@ import java.util.UUID;
 
 @Entity @Table(name="quotation_record")
 class QuotationRecordEntity {
+    @Column(name="lifecycle_state",nullable=false,length=16) String lifecycleState = "active";
     @Id UUID id; @Column(name="quote_no",nullable=false,unique=true,length=40) String quoteNo;
     @Column(name="owner_account",nullable=false,length=24) String ownerAccount; @Column(nullable=false,length=16) String status;
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable=false,columnDefinition="jsonb") JsonNode payload; @Version long version;

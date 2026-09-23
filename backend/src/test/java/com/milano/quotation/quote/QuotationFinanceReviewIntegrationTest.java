@@ -105,6 +105,36 @@ class QuotationFinanceReviewIntegrationTest {
         mvc.perform(patch("/api/v1/quotations/{id}/finance-review",r.id).with(finance).with(csrf()).contentType("application/json").content("{\"_version\":1,\"financeReviewStatus\":\"approved\"}")).andExpect(status().isUnprocessableEntity());
         claim(r);action(r,finance,qv(r),rv(r),"complete","rejected","").andExpect(status().isUnprocessableEntity());action(r,finance,qv(r),rv(r),"complete","rejected","价格需调整").andExpect(status().isOk());
     }
+    ResultActions lifecycle(QuotationRecordEntity r,String operation,long version) throws Exception {
+        var body=Map.of("action",operation,"reason","联合回归", "items",List.of(Map.of("id",r.id,"version",version)));
+        return mvc.perform(post("/api/v1/quotations/lifecycle").with(admin).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(body)));
+    }
+    @Test void lifecycleUsesAuthoritativeReviewAndRestoreNeverRevivesClaim() throws Exception {
+        var r=record();((ObjectNode)r.payload).put("financeReviewStatus","approved");r=records.saveAndFlush(r);
+        claim(r);long claimedVersion=rv(r);
+        lifecycle(r,"archive",qv(r)).andExpect(status().isConflict());lifecycle(r,"trash",qv(r)).andExpect(status().isConflict());
+        action(r,finance,qv(r),claimedVersion,"cancel",null,"").andExpect(status().isOk());
+        // Legacy payload still says approved, but the independent review state is pending.
+        assertEquals("approved",records.findById(r.id).orElseThrow().payload.path("financeReviewStatus").asText());
+        lifecycle(r,"archive",qv(r)).andExpect(status().isOk());
+        action(r,finance,qv(r),rv(r),"claim",null,"").andExpect(status().isConflict());
+        lifecycle(r,"restore",qv(r)).andExpect(status().isOk());
+        assertEquals("pending",view(r).path("financeReviewStatus").asText());
+        action(r,finance,qv(r),claimedVersion,"complete","approved","").andExpect(status().isConflict());
+        claim(r);complete(r);
+        lifecycle(r,"trash",qv(r)).andExpect(status().isConflict());
+    }
+    @Test void concurrentClaimAndArchiveCannotBothSucceed() throws Exception {
+        var r=record();var start=new CyclicBarrier(2);
+        try(var executor=Executors.newFixedThreadPool(2)) {
+            var claim=executor.submit(()->{start.await();return action(r,finance,0,0,"claim",null,"").andReturn().getResponse().getStatus();});
+            var archive=executor.submit(()->{start.await();return lifecycle(r,"archive",0).andReturn().getResponse().getStatus();});
+            var outcomes=new ArrayList<>(List.of(claim.get(30,TimeUnit.SECONDS),archive.get(30,TimeUnit.SECONDS)));
+            Collections.sort(outcomes);assertEquals(List.of(200,409),outcomes);
+        }
+        var row=records.findById(r.id).orElseThrow();
+        assertEquals(row.lifecycleState.equals("active")?"reviewing":"pending",view(r).path("financeReviewStatus").asText());
+    }
     @Test void rejectsForgedClaimOnNormalPatchAndCreate() throws Exception {
         var r=record();mvc.perform(patch("/api/v1/quotations/{id}",r.id).with(employee).with(csrf()).contentType("application/json").content("{\"_version\":0,\"financeReviewClaimedAccount\":\"forged\"}")).andExpect(status().isUnprocessableEntity());
         var input=PackagingWeightTest.valid();input.put("financeReviewStatus","reviewing").put("financeReviewClaimedAccount","forged").put("_reviewVersion",90);
