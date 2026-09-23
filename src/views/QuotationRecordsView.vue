@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { operationFeesLabel } from '@/data/customerOperationFees'
 import { useQuotationReviewSync } from '@/composables/useQuotationReviewSync'
-import { reviewQuotationRecord, financeReviewLabel, type FinanceReviewStatus } from '@/data/quotationRecords'
+import { reviewQuotationRecord, financeReviewLabel, type ReviewAction } from '@/data/quotationRecords'
+import QuotationReviewPanel from '@/components/quotation/QuotationReviewPanel.vue'
+import QuotationReviewHistory from '@/components/quotation/QuotationReviewHistory.vue'
 import QuotationWeightTrace from '@/components/quotation/QuotationWeightTrace.vue'
 import QuotationProductCostTrace from '@/components/quotation/QuotationProductCostTrace.vue'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
@@ -26,7 +28,7 @@ const route = useRoute()
 const records = ref<QuotationRecord[]>([])
 const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
 const search = ref('')
-const filterStatus = ref<'' | 'pending' | 'won' | 'processed' | 'finance-pending' | 'finance-approved' | 'finance-rejected'>('')
+const filterStatus = ref<'' | 'pending' | 'won' | 'processed' | 'finance-pending' | 'finance-approved' | 'finance-rejected' | 'finance-reviewing' | 'finance-mine'>('')
 const filterCountry = ref('')
 const filterCategory = ref('')
 const startDate=ref('');const endDate=ref('');const page=ref(0);const pageSize=ref(10)
@@ -65,28 +67,33 @@ const selected = ref<QuotationRecord | null>(null)
 const reviewSync = useQuotationReviewSync(records, selected, computed(() => currentAuthUser.value.account))
 const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
 const reviewing = ref(new Set<string>())
-async function changeReview(row: QuotationRecord, event: Event) {
-  const target = event.target as HTMLSelectElement
-  const status = target.value as FinanceReviewStatus
-  target.value = reviewSync.stateFor(row).financeReviewStatus || 'pending'
+async function changeReview(row: QuotationRecord, action: ReviewAction) {
   if (!canReview.value || reviewing.value.has(row.id)) return
   const account = currentAuthUser.value.account
   reviewing.value.add(row.id)
   try {
-    const saved = await reviewQuotationRecord(row.id, status, row._version)
+    const saved = await reviewQuotationRecord(row.id, action, row._version, action.action==='claim'?reviewSync.stateFor(row)._reviewVersion:row._reviewVersion)
     if (account !== currentAuthUser.value.account) return
     reviewSync.accept(saved)
     records.value = records.value.map(item => item.id === saved.id ? saved : item)
-    if (selected.value?.id === saved.id && !editing.value) selected.value = saved
-    toast('审核状态已保存，员工端会自动同步')
+    if (action.action==='claim') open(saved)
+    else if (selected.value?.id === saved.id && !editing.value) selected.value = saved
+    toast(action.action==='claim'?'已开始审核，其他财务可看到你的占用':action.action==='complete'?'审核结果已保存':'已取消占用，其他财务可以开始审核')
     if (filterStatus.value.startsWith('finance-')) await refresh(true)
   } catch (error) {
     if (account !== currentAuthUser.value.account) return
-    toast(error instanceof Error ? error.message : '审核保存失败，请重试')
-    await refresh()
+    toast(error instanceof Error ? error.message : '审核操作失败，请重试')
     void reviewSync.poll()
   } finally { reviewing.value.delete(row.id) }
 }
+async function reloadReview(row:QuotationRecord) {
+  const account=currentAuthUser.value.account
+  try { const fresh=await loadRecord(row.id);if(fresh&&selected.value?.id===row.id&&account===currentAuthUser.value.account&&!editing.value){selected.value=fresh;reviewSync.accept(fresh)} }
+  catch(error) {toast(error instanceof Error?error.message:'详情加载失败，请重试')}
+}
+let reviewListTimer:ReturnType<typeof setInterval>|undefined
+onMounted(()=>{reviewListTimer=setInterval(()=>{if(document.visibilityState!=='hidden'&&filterStatus.value.startsWith('finance-')&&!loading.value)void refresh(true)},15000)})
+onUnmounted(()=>clearInterval(reviewListTimer))
 const editing = ref(false)
 const detailTab = ref<'overview' | 'options' | 'history'>('overview')
 const notice = ref('')
@@ -247,7 +254,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
   <div class="app">
     <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '核对客户报价、处理状态与成交结果' : '查看全体业务员的报价、处理状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>当前筛选范围</em></span></article><article><i>✓</i><span><small>已处理</small><b>{{ summary.processed || 0 }}</b><em>当前筛选范围</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>当前筛选范围</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ summary.total }}</b><em>当前筛选范围</em></span></article></section>
-      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="finance-pending">待财务审核</option><option value="finance-approved">财务已审核-可报价</option><option value="finance-rejected">财务已审核-价格有误不可报价</option><option value="won">已成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
+      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="finance-pending">待财务审核</option><option value="finance-reviewing">审核中</option><option v-if="canReview" value="finance-mine">我正在审核</option><option value="finance-approved">财务已审核-可报价</option><option value="finance-rejected">财务已审核-价格有误不可报价</option><option value="won">已成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
@@ -277,9 +284,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
           <button class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
-            <select v-if="canReview" class="finance-review" :class="reviewSync.stateFor(row).financeReviewStatus" :aria-label="row.no + ' 财务审核状态'" :value="reviewSync.stateFor(row).financeReviewStatus || 'pending'" :disabled="reviewing.has(row.id)" @change="changeReview(row,$event)"><option value="pending">待财务审核</option><option value="approved">财务已审核-可报价</option><option value="rejected">财务已审核-价格有误不可报价</option></select>
-            <strong v-else class="finance-review" :class="reviewSync.stateFor(row).financeReviewStatus">{{ financeReviewLabel(reviewSync.stateFor(row).financeReviewStatus) }}</strong>
-            <small v-if="reviewSync.stateFor(row).financeReviewedBy">{{ reviewSync.stateFor(row).financeReviewedBy }} · {{ dateTime(reviewSync.stateFor(row).financeReviewedAt) }}</small>
+            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)" compact @action="changeReview(row,$event)" @open="open(row)" />
             <div class="record-action-buttons">
               <em :class="row.status==='won' ? 'won' : row.quoteConfirmed ? 'processed' : 'pending'">{{ displayStatus(row) }}</em>
               <RouterLink v-if="hasPermission('quote')" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
@@ -300,7 +305,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
       <aside class="record-drawer">
         <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.productSummary }} · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
 
-        <p class="finance-review detail-review" :class="reviewSync.stateFor(selected).financeReviewStatus" role="status">{{ financeReviewLabel(reviewSync.stateFor(selected).financeReviewStatus) }}<small v-if="reviewSync.stateFor(selected).financeReviewedBy"> · {{ reviewSync.stateFor(selected).financeReviewedBy }} · {{ dateTime(reviewSync.stateFor(selected).financeReviewedAt) }}</small></p>
+        <QuotationReviewPanel class="detail-review" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&!editing" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(selected.id)" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
         <template v-if="!editing">
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
@@ -316,6 +321,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <CustomerPriceComparison :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" />
           </section>
           <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>报价处理</b>：{{ revision.after === 'true' ? '已确认报价，标记为已处理' : '客户报价已变化，需重新确认' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>处理状态</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
+          <QuotationReviewHistory v-if="detailTab==='history'" :id="selected.id" :version="reviewSync.stateFor(selected)._reviewVersion" :account="currentAuthUser.account" />
           <footer v-if="detailTab==='overview'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" /></footer>
         </template>
 

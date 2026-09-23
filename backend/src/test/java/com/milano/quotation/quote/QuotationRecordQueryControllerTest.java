@@ -14,7 +14,7 @@ class QuotationRecordQueryControllerTest {
     private UsernamePasswordAuthenticationToken auth(String... permissions){var p=new QuotationPrincipal(UUID.randomUUID(),"ME","本人","hash","employee",true,false,List.of(permissions));return new UsernamePasswordAuthenticationToken(p,"",p.getAuthorities());}
     @Test void companyScopeCannotExpandPersonalPermissionAndDeepLinksAreProtected(){
         var repo=mock(QuotationRecordRepository.class);var query=mock(QuotationRecordQuery.class);
-        var controller=new QuotationController(repo,null,null,null,query,null,null);
+        var controller=new QuotationController(repo,null,null,null,query,null,null,mock(QuotationReviewService.class));
         controller.search("company",0,10,"","","","",null,null,auth("myRecords"));verify(query).search(eq("ME"),any(),eq(0),eq(10));
         controller.search("company",0,10,"","","","",null,null,auth("allRecords"));verify(query).search(isNull(),any(),eq(0),eq(10));
         clearInvocations(query);controller.search("mine",0,10,"","","","",null,null,auth("allRecords"));verify(query).search(eq("ME"),any(),eq(0),eq(10));

@@ -199,7 +199,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("48",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("50",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_provider where id=:id").param("id",provider).query(UUID.class).single());
         assertEquals(legacy,jdbc.sql("select dataset_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());
         assertEquals(version,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channel).query(UUID.class).single());

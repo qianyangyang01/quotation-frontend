@@ -17,6 +17,7 @@ class QuotationRecordQueryPostgresIntegrationTest {
     @Test void filtersInDatabaseWithInclusiveShanghaiDaysStablePagesAndOwnerScope() {
         var jdbc=new NamedParameterJdbcTemplate(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
         jdbc.getJdbcTemplate().execute("create table quotation_record(id uuid primary key,quote_no text,owner_account text,status text,payload jsonb,version bigint,created_at timestamptz)");
+        jdbc.getJdbcTemplate().execute("create table quotation_review(id uuid primary key,status text,claimant_account text,state jsonb,version bigint)");
         jdbc.getJdbcTemplate().execute("insert into quotation_record select md5(i::text)::uuid,'Q-'||i,'ME','pending',jsonb_build_object('id',md5(i::text),'no','Q-'||i,'customerName','客户100%','productCategory','服装','country','美国','quoteOptions',jsonb_build_array(jsonb_build_object('country','法国','channel','渠道A'))),0,'2026-09-09 16:00:00+00'::timestamptz from generate_series(1,105) i");
         jdbc.getJdbcTemplate().execute("insert into quotation_record values(md5('other')::uuid,'OTHER','OTHER','won','{\"country\":\"日本\"}',0,'2026-09-10 15:59:59.999999+00'),(md5('next')::uuid,'NEXT','ME','lost','{}',0,'2026-09-10 16:00:00+00'),(md5('before')::uuid,'BEFORE','ME','lost','{}',0,'2026-09-09 15:59:59.999999+00')");
         var query=new QuotationRecordQuery(jdbc,new ObjectMapper());var date=LocalDate.parse("2026-09-10");
@@ -66,5 +67,12 @@ class QuotationRecordQueryPostgresIntegrationTest {
         assertEquals(105,query.search("ME",new QuotationRecordQuery.Filters("","pending","","",null,null),0,100).total());
         jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"quoteConfirmed\":true}'::jsonb where quote_no='NEXT'");
         assertEquals(3,query.search("ME",new QuotationRecordQuery.Filters("","processed","","",null,null),0,100).total());
+        jdbc.getJdbcTemplate().execute("insert into quotation_review select id,'reviewing',case when quote_no='Q-3' then 'F1' else 'F2' end,jsonb_build_object('financeReviewStatus','reviewing','financeReviewClaimedAccount',case when quote_no='Q-3' then 'F1' else 'F2' end),1 from quotation_record where quote_no in ('Q-3','Q-4')");
+        assertEquals(2,query.search("ME",new QuotationRecordQuery.Filters("","finance-reviewing","","",date,date),0,10).total());
+        var assigned=query.search("ME",new QuotationRecordQuery.Filters("","finance-mine","","",date,date,"F1"),0,10);
+        assertEquals(1,assigned.total());assertEquals("F1",assigned.items().getFirst().path("financeReviewClaimedAccount").asText());
+        assertEquals(1,assigned.items().getFirst().path("_reviewVersion").asInt());
+        assertEquals(101,query.search("ME",pendingReviewFilters,0,100).total());
+        assertEquals(0,query.search("OTHER",new QuotationRecordQuery.Filters("","finance-mine","","",date,date,"F1"),0,10).total());
     }
 }
