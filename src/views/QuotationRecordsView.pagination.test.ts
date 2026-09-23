@@ -13,9 +13,10 @@ const flush=async()=>{await nextTick();await Promise.resolve();await nextTick()}
 const button=(text:string)=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===text)!
 async function mount(scope='mine'){const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.useRealTimers();vi.resetAllMocks()})
-it('places pagination above records and resets date and page size changes to page one',async()=>{
-  vi.useFakeTimers();query.loadRecordPage.mockResolvedValue(result(35));await mount()
-  const nav=document.querySelector('[aria-label="报价记录分页"]')!;expect(nav.compareDocumentPosition(document.querySelector('.records')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+it.each(['mine', 'company'])('places pagination below records and resets date and page size changes to page one for %s',async scope=>{
+  vi.useFakeTimers();query.loadRecordPage.mockResolvedValue(result(35));await mount(scope)
+  const nav=document.querySelector('[aria-label="报价记录分页"]')!;expect(nav.compareDocumentPosition(document.querySelector('.records')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+  expect(button('导出筛选结果').compareDocumentPosition(document.querySelector('.records')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   query.loadRecordPage.mockResolvedValueOnce(result(35,1));button('下一页').click();await flush();expect(query.loadRecordPage.mock.calls[1]![2]).toBe(1)
   button('近 7 天').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush();expect(query.loadRecordPage.mock.lastCall?.[2]).toBe(0);expect(query.loadRecordPage.mock.lastCall?.[1]).toMatchObject({startDate:'2026-09-04',endDate:'2026-09-10'})
   const select=document.querySelector('[aria-label="每页记录数"]') as HTMLSelectElement;select.value='30';select.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);expect(query.loadRecordPage.mock.lastCall?.[3]).toBe(30)
