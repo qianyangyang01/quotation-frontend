@@ -1,0 +1,295 @@
+/* Quote-workspace-only layout. Keep component data, events and export styles intact. */
+.jerry-app .quotation-page {
+  --quote-green: #18794e;
+  --quote-green-soft: #edf8f1;
+  --quote-border: #cfdad5;
+  gap: 14px;
+  padding: 16px 0 32px;
+}
+
+.jerry-app .quotation-page .condition-card,
+.jerry-app .quotation-page .product-card,
+.jerry-app .quotation-page .module-card,
+.jerry-app .quotation-page .matrix-mode-switcher,
+.jerry-app .quotation-page .common-matrix,
+.jerry-app .quotation-page .specified-card,
+.jerry-app .quotation-page .quote-preview {
+  border-color: var(--quote-border);
+  box-shadow: 0 2px 6px #17232d05;
+}
+
+.jerry-app .quotation-page .condition-card,
+.jerry-app .quotation-page .module-card {
+  border-top: 3px solid #a1b0ba;
+}
+
+.jerry-app .quotation-page .matrix-mode-switcher,
+.jerry-app .quotation-page .common-matrix,
+.jerry-app .quotation-page .specified-card {
+  border-top: 3px solid var(--quote-green);
+}
+
+.jerry-app .quotation-page .matrix-mode-switcher > header,
+.jerry-app .quotation-page .common-head,
+.jerry-app .quotation-page .specified-head {
+  background: var(--quote-green-soft);
+  border-bottom-color: #cce2d5;
+}
+
+.jerry-app .quotation-page .matrix-mode-switcher > header p,
+.jerry-app .quotation-page .common-head p,
+.jerry-app .quotation-page .specified-head p,
+.jerry-app .quotation-page .matrix-mode-switcher > header h2,
+.jerry-app .quotation-page .common-head h2,
+.jerry-app .quotation-page .specified-head h2,
+.jerry-app .quotation-page .country-grid em {
+  color: var(--quote-green);
+}
+
+.jerry-app .quotation-page .matrix-mode-switcher > nav button.active,
+.jerry-app .quotation-page .country-grid button.active,
+.jerry-app .quotation-page .country-grid button.drag-over {
+  border-color: var(--quote-green);
+  background: #e6f5eb;
+  box-shadow: inset 3px 0 var(--quote-green);
+}
+
+.jerry-app .quotation-page .country-grid button:hover {
+  border-color: var(--quote-green);
+  background: #f0f9f3;
+}
+
+.jerry-app .quotation-page .matrix-mode-switcher > nav button.active > i {
+  background: #cee9d9;
+  color: var(--quote-green);
+}
+
+.jerry-app .quotation-page .matrix-mode-switcher > nav button.active em,
+.jerry-app .quotation-page .sort-toolbar button.active,
+.jerry-app .quotation-page .selection-actions button:first-child {
+  border-color: var(--quote-green);
+  background: var(--quote-green);
+  color: #fff;
+  box-shadow: none;
+}
+
+.jerry-app .quotation-page .quote-rows article.selected,
+.jerry-app .quotation-page .quote-rows article.adopted,
+.jerry-app .quotation-page .selected-channels section.adopted {
+  background: #f0f9f3;
+  box-shadow: inset 3px 0 var(--quote-green);
+}
+
+.jerry-app .quotation-page .custom-head,
+.jerry-app .quotation-page .custom-quote-head,
+.jerry-app .quotation-page .custom-quote-head small,
+.jerry-app .quotation-page .selection-actions .primary-action:hover {
+  color: var(--quote-green);
+}
+
+.jerry-app .quotation-page .custom-price {
+  background: #edf8f1;
+  color: #14633f;
+}
+
+.jerry-app .quotation-page .quote-region-select {
+  border-color: #91bda3;
+  background: #f0f9f3;
+  color: var(--quote-green);
+}
+
+.jerry-app .quotation-page .quote-region-select select {
+  color: var(--quote-green);
+}
+
+.jerry-app .quotation-page .commission-field {
+  padding: 7px 10px;
+  border: 1px solid #dce2e6;
+  border-radius: 7px;
+  background: #f2f4f6;
+}
+
+.jerry-app .quotation-page .commission-field input {
+  background: #e8edf0;
+  color: #374650;
+}
+
+.jerry-app .quotation-page .commission-field.invalid input {
+  background: #fff8f6;
+}
+
+/* Preserve visible focus and errors even inside the muted fixed-setting area. */
+.jerry-app .quotation-page .commission-field input:focus-visible,
+.jerry-app .quotation-page .common-matrix button:focus-visible,
+.jerry-app .quotation-page .matrix-mode-switcher button:focus-visible {
+  outline: 2px solid var(--quote-green);
+  outline-offset: 2px;
+}
+
+@media (min-width: 1101px) {
+  .jerry-app .quotation-page *, .jerry-app .quotation-page *::before, .jerry-app .quotation-page *::after { box-sizing: border-box; }
+  .jerry-app .quotation-page .quotation-header .heading { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; align-items: baseline; }
+  .jerry-app .quotation-page .quotation-header .heading p { grid-column: 1 / -1; }
+  .jerry-app .quotation-page { width: min(1760px, 96vw); gap: 10px; }
+  .jerry-app .quotation-page .quotation-header { padding: 12px 16px; }
+  .jerry-app .quotation-page .heading p { margin-bottom: 4px; }
+  .jerry-app .quotation-page .heading h1 { margin-bottom: 4px; font-size: 21px; }
+  .jerry-app .quotation-page .header-meta { grid-template-columns: 1fr auto; gap: 5px 16px; align-items: center; }
+  .jerry-app .quotation-page .header-meta small { grid-column: 1 / -1; }
+  .jerry-app .quotation-page .header-meta .actions button { height: 32px; }
+  .jerry-app .quotation-page .workflow { padding: 0 14px; border: 0; background: transparent; box-shadow: none; }
+  .jerry-app .quotation-page .draft-status-bar { padding: 7px 12px; }
+  .jerry-app .quotation-page .draft-status-bar > span { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+
+  .jerry-app .quotation-page .condition-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; padding: 10px 16px; }
+  .jerry-app .quotation-page .condition-card > header { grid-column: 1 / -1; padding-bottom: 8px; }
+  .jerry-app .quotation-page .condition-card > header > div { display: flex; align-items: center; gap: 12px; }
+  .jerry-app .quotation-page .condition-grid { grid-column: 1 / -1; grid-template-columns: 1.2fr 1.1fr 1.2fr 1fr 1fr 1fr; gap: 10px; margin: 0; }
+  .jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .jerry-app .quotation-page .condition-grid label { grid-column: auto; grid-row: auto; gap: 5px; font-size: 11px; }
+  .jerry-app .quotation-page .condition-grid input,
+  .jerry-app .quotation-page .condition-grid select { height: 34px; font-size: 12px; }
+  .jerry-app .quotation-page .customer-picker .entry input { height: 32px; box-sizing: border-box; }
+  .jerry-app .quotation-page .customer-picker .options { min-width: 260px; }
+  .jerry-app .quotation-page .commission-field { grid-template-columns: auto 74px minmax(0, 1fr); align-items: center; gap: 8px; margin: 0; padding: 4px 10px; max-width: none; }
+  .jerry-app .quotation-page .commission-field input { width: 74px; height: 30px; }
+  .jerry-app .quotation-page .condition-card > footer { align-self: center; margin: 0; padding: 0; border: 0; gap: 10px; }
+  .jerry-app .quotation-page .condition-card > footer button { height: 34px; }
+  .jerry-app .quotation-page .condition-card > footer > span { max-width: 260px; font-size: 10px; }
+
+  .jerry-app .quotation-page .cost-workbench { gap: 8px; }
+  .jerry-app .quotation-page .product-card { grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; padding: 9px 16px; }
+  .jerry-app .quotation-page .product-card .physical-image { width: 64px; height: 50px; }
+  .jerry-app .quotation-page .product-card .purchase-category-badge { gap: 2px; }
+  .jerry-app .quotation-page .product-card .purchase-category-badge.expanded svg { width: 27px; height: 27px; }
+  .jerry-app .quotation-page .product-card .info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+  .jerry-app .quotation-page .product-card .info h2 { margin: 0; font-size: 16px; }
+  .jerry-app .quotation-page .product-card .state { padding: 7px 10px; }
+  .jerry-app .quotation-page .module-card { padding: 8px 16px; }
+  .jerry-app .quotation-page .module-card > header { margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px solid #e1e7eb; }
+  .jerry-app .quotation-page .module-card > header span { display: flex; align-items: baseline; gap: 10px; }
+  .jerry-app .quotation-page .module-card .fields { grid-template-columns: 1.6fr 1fr 1.15fr 1fr; gap: 8px 12px; align-items: start; }
+  .jerry-app .quotation-page .module-card .fields:has(label:nth-child(5)) { grid-template-columns: 1.6fr 1fr 1.15fr 1fr 1fr; }
+  .jerry-app .quotation-page .module-card .fields label { min-width: 0; gap: 5px; }
+  .jerry-app .quotation-page .module-card .fields input,
+  .jerry-app .quotation-page .module-card .fields select,
+  .jerry-app .quotation-page .module-card .dimensions input { height: 32px; }
+  .jerry-app .quotation-page .special-packaging { margin-top: 8px; padding: 6px 10px; gap: 6px 12px; }
+  .jerry-app .quotation-page .special-packaging input { width: 74px; height: 30px; }
+  .jerry-app .quotation-page .module-card .highlights { margin-top: 8px; gap: 10px; }
+  .jerry-app .quotation-page .module-card .highlights p { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 8px 10px; border: 1px solid #e1e7eb; }
+  .jerry-app .quotation-page .module-card .highlights small { color: #6f7e88; }
+  .jerry-app .quotation-page .volumetric-card { margin-top: 8px; padding: 10px; }
+  .jerry-app .quotation-page .dimensions,
+  .jerry-app .quotation-page .weight-comparison { margin-top: 8px; gap: 8px; }
+  .jerry-app .quotation-page .weight-comparison p { padding: 7px 9px; }
+
+  .jerry-app .quotation-page .matrix-mode-switcher > header { padding: 9px 16px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > header > div { display: flex; align-items: baseline; gap: 12px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > header p { margin: 0; }
+  .jerry-app .quotation-page .matrix-mode-switcher > header h2 { font-size: 17px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav { padding: 8px 12px; gap: 8px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav button { min-height: 48px; padding: 7px 10px; gap: 8px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav button > i { width: 28px; height: 28px; flex-basis: 28px; }
+
+  .jerry-app .quotation-page .common-head,
+  .jerry-app .quotation-page .specified-head { padding: 10px 16px; }
+  .jerry-app .quotation-page .common-head h2 { font-size: 17px; }
+  .jerry-app .quotation-page .country-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); padding: 10px 12px; gap: 6px; }
+  .jerry-app .quotation-page .country-grid button { min-height: 44px; padding: 6px 8px; gap: 6px; }
+  .jerry-app .quotation-page .country-grid i { font-size: 17px; }
+  .jerry-app .quotation-page .country-grid span { gap: 2px; }
+  .jerry-app .quotation-page .country-grid small { font-size: 9px; }
+  .jerry-app .quotation-page .country-grid em { font-size: 9px; white-space: nowrap; }
+  .jerry-app .quotation-page .country-summary { grid-template-columns: minmax(230px, 1fr) 220px 220px auto; padding: 8px 12px; gap: 8px; }
+  .jerry-app .quotation-page .country-title { flex-wrap: wrap; gap: 5px 8px; }
+  .jerry-app .quotation-page .metric { padding: 5px 8px; }
+  .jerry-app .quotation-page .sort-toolbar { padding: 6px 12px; }
+  .jerry-app .quotation-page .table-head { padding: 7px 12px; }
+  .jerry-app .quotation-page .quote-rows article { min-height: 54px; padding: 7px 12px; border-top-color: #dce5e0; }
+  .jerry-app .quotation-page .quote-rows article:nth-child(even):not(.selected):not(.adopted) { background: #fafcfb; }
+  .jerry-app .quotation-page .common-matrix > footer { padding: 7px 12px; }
+
+  .jerry-app .quotation-page .preview-head { padding: 10px 16px; }
+  .jerry-app .quotation-page .preview-head h2 { font-size: 18px; margin-bottom: 3px; }
+  .jerry-app .quotation-page .preview-kpis { padding: 8px 16px; gap: 8px; }
+  .jerry-app .quotation-page .preview-kpis article { min-height: 36px; padding: 6px 10px; }
+  .jerry-app .quotation-page .preview-kpis article > i { width: 28px; height: 28px; }
+  .jerry-app .quotation-page .preview-kpis span { display: flex; align-items: baseline; gap: 8px; }
+  .jerry-app .quotation-page .preview-info { padding: 8px 16px; }
+  .jerry-app .quotation-page .preview-info > section { padding: 8px 10px; }
+  .jerry-app .quotation-page .preview-info dl { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 8px; gap: 6px 16px; }
+  .jerry-app .quotation-page .preview-info dd { overflow-wrap: anywhere; }
+  .jerry-app .quotation-page .quote-preview > footer { margin-top: 8px; padding: 9px 16px; }
+
+  /* Keep editor controls available; compress chrome without resizing exported images. */
+  .jerry-app .quotation-page .customer-sheet { margin: 0 16px 10px; }
+  .jerry-app .quotation-page .sheet-toolbar p { margin: 2px 0; }
+  .jerry-app .quotation-page .sheet-local-note { margin: 4px 0 6px; }
+  .jerry-app .quotation-page .sheet-visibility,
+  .jerry-app .quotation-page .sheet-photos { padding: 5px 10px; margin: 6px 0; gap: 6px 12px; }
+  .jerry-app .quotation-page .customer-sheet button { padding: 6px 10px; }
+  .jerry-app .quotation-page .sheet-editor { padding: 10px; }
+  .jerry-app .quotation-page .sheet-metadata { gap: 10px; }
+  .jerry-app .quotation-page .sheet-metadata label { gap: 4px; }
+  .jerry-app .quotation-page .customer-sheet input { height: 30px; }
+  .jerry-app .quotation-page .sheet-visibility input { height: 16px; }
+  .jerry-app .quotation-page .sheet-edit-help { margin: 4px 0; }
+  .jerry-app .quotation-page .sheet-column-tools { margin: 5px 0; }
+  .jerry-app .quotation-page .customer-sheet th,
+  .jerry-app .quotation-page .customer-sheet td { padding: 5px 7px; }
+  .jerry-app .quotation-page .customer-sheet .sheet-group-drag { padding: 2px; }
+  .jerry-app .quotation-page .sheet-notes-editor { margin-top: 6px; }
+  .jerry-app .quotation-page .sheet-empty { padding: 20px; margin: 8px 0; }
+}
+
+@media (min-width: 1280px) {
+  .jerry-app .quotation-page .cost-workbench:has(> .product-card) { grid-template-columns: 220px minmax(0, 1fr); align-items: stretch; }
+  .jerry-app .quotation-page .product-card { grid-template-columns: 56px minmax(0, 1fr); align-content: center; padding: 12px; }
+  .jerry-app .quotation-page .product-card .physical-image { width: 56px; }
+  .jerry-app .quotation-page .product-card .info { gap: 5px; }
+  .jerry-app .quotation-page .product-card .info > small { width: 100%; }
+  .jerry-app .quotation-page .product-card .info p { gap: 4px; }
+  .jerry-app .quotation-page .product-card .state { grid-column: 1 / -1; margin-top: 6px; }
+
+  /* Keep country selection beside the channel comparison on desktop. */
+  .jerry-app .quotation-page .common-matrix { display: grid; grid-template-columns: minmax(350px, .9fr) minmax(0, 2.4fr); align-items: start; }
+  .jerry-app .quotation-page .common-head { grid-column: 1 / -1; }
+  .jerry-app .quotation-page .country-grid { grid-column: 1; grid-row: 2 / span 7; grid-template-columns: repeat(3, minmax(0, 1fr)); align-self: stretch; align-content: start; border-right: 1px solid #d5e3da; }
+  .jerry-app .quotation-page .country-grid button { flex-wrap: wrap; gap: 3px 5px; }
+  .jerry-app .quotation-page .country-grid button > span { flex: 1; }
+  .jerry-app .quotation-page .country-grid em { flex-basis: 100%; text-align: right; }
+  .jerry-app .quotation-page .common-matrix > :not(.common-head):not(.country-grid) { grid-column: 2; }
+  .jerry-app .quotation-page .common-matrix > .country-summary { grid-template-columns: minmax(170px, 1fr) 180px 180px auto; }
+  .jerry-app .quotation-page .country-summary .metric em { max-width: 100px; }
+  .jerry-app .quotation-page .common-matrix .table-head,
+  .jerry-app .quotation-page .common-matrix .quote-rows article { grid-template-columns: minmax(210px, 1.5fr) .55fr repeat(4, .65fr) 92px; gap: 8px; }
+
+  /* Put the summary beside the editor instead of above it. */
+  .jerry-app .quotation-page .quote-preview { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; }
+  .jerry-app .quotation-page .preview-head { grid-column: 1; padding: 12px; flex-direction: column; align-items: flex-start; gap: 8px; border-bottom: 0; }
+  .jerry-app .quotation-page .preview-kpis { grid-column: 1; grid-template-columns: 1fr 1fr; padding: 8px 12px; }
+  .jerry-app .quotation-page .preview-kpis article { padding: 7px; gap: 6px; }
+  .jerry-app .quotation-page .preview-kpis article > i { display: none; }
+  .jerry-app .quotation-page .preview-kpis .range { grid-column: 1 / -1; }
+  .jerry-app .quotation-page .preview-info { grid-column: 1; padding: 8px 12px 12px; }
+  .jerry-app .quotation-page .preview-info dl { grid-template-columns: 1fr; }
+  .jerry-app .quotation-page .customer-sheet { grid-column: 2; grid-row: 1 / span 3; min-width: 0; margin: 0; padding: 12px; border-left: 1px solid #dce5e0; }
+  .jerry-app .quotation-page .sheet-metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .jerry-app .quotation-page .sheet-metadata input { min-width: 0; width: 100%; }
+  .jerry-app .quotation-page .quote-preview > .validation-summary,
+  .jerry-app .quotation-page .quote-preview > footer { grid-column: 1 / -1; }
+}
+
+@media (min-width: 1280px) and (max-width: 1599px) {
+  .jerry-app .quotation-page .common-matrix > .country-summary { grid-template-columns: 1fr 1fr auto; }
+  .jerry-app .quotation-page .country-summary .country-title { grid-column: 1 / -1; }
+  .jerry-app .quotation-page .common-matrix .sort-toolbar { gap: 6px; }
+}
+
+@media (max-width: 1100px) {
+  .jerry-app .quotation-page .condition-card,
+  .jerry-app .quotation-page .module-card { padding: 14px; }
+  .jerry-app .quotation-page .cost-workbench { gap: 12px; }
+  .jerry-app .quotation-page .commission-field { box-sizing: border-box; max-width: 100%; }
+}
