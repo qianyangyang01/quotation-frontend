@@ -53,7 +53,8 @@ async function saveQuote(s,n){
   assert.equal(priceSnapshot(readback),priceSnapshot(row))
   assert.equal(readback.salespersonAccount,s.account)
   s.ownQuote=row
-  if(reviewQueue.length<1000)reviewQueue.push({id:row.id,owner:s.account,prices:priceSnapshot(row)})
+  assert(reviewQueue.length<1000,'Review workload is accumulating instead of recovering')
+  reviewQueue.push({id:row.id,owner:s.account,prices:priceSnapshot(row)})
 }
 async function review(s,n){
   const queued=reviewQueue.shift()
@@ -108,7 +109,7 @@ async function operation(s){
     return s.request('/purchase-products?q='+encodeURIComponent(step%2?sku.slice(0,3):'服装')+'&size=20',{label:'purchase-search'})
   }
   if(s.role==='finance'){
-    if(step%4===0)return review(s,n)
+    if(step%3===0||step%3===2)return review(s,n)
     if(step===1){
       const key=financeKeys[(Number(s.account.slice(4))-41)%4]
       const before=await s.request('/finance-settings/'+key,{label:'finance-setting-read'})
@@ -154,7 +155,7 @@ for(const stage of stages){
   const operations=Object.fromEntries(Object.entries(metrics.samples).map(([name,values])=>[name,{count:values.length,p50:percent(values,.5),p95:percent(values,.95),p99:percent(values,.99),max:Math.max(...values)}]))
   const thresholds=Object.entries(operations).filter(([name,o])=>!name.includes('logistics-import-')&&o.p95>(name.startsWith('GET ')?1500:2500)).map(([name])=>name)
   const summary={...metrics};delete summary.samples
-  const report={...summary,finishedAt:new Date().toISOString(),peakInFlight:peak,operations,thresholdFailures:thresholds,passed:metrics.httpFailures===0&&metrics.businessFailures===0&&(['peak','warmup'].includes(stage.name)||thresholds.length===0),base}
+  const report={...summary,finishedAt:new Date().toISOString(),peakInFlight:peak,pendingReviewWork:reviewQueue.length,operations,thresholdFailures:thresholds,passed:metrics.httpFailures===0&&metrics.businessFailures===0&&(['peak','warmup'].includes(stage.name)||thresholds.length===0),base}
   await writeFile(output+'/'+stage.name+'.json',JSON.stringify(report,null,2))
   console.log(JSON.stringify({stage:stage.name,passed:report.passed,requests:report.requests,errors:report.errors.slice(0,3),thresholds}))
   metrics=null

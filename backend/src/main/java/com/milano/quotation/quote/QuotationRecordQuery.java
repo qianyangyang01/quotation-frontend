@@ -13,6 +13,7 @@ import java.util.*;
 public class QuotationRecordQuery {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper mapper;
+    @org.springframework.beans.factory.annotation.Autowired private QuotationCountryIndex countryIndex;
     public QuotationRecordQuery(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc=jdbc; this.mapper=mapper; }
     public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine) {
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,null,false); }
@@ -74,7 +75,7 @@ public class QuotationRecordQuery {
             }
         }
         var ownerWhere=" where lifecycle_state=:lifecycle"+(owner==null?"":" and owner_account=:owner");
-        var countries=jdbc.queryForList("select distinct country from (select payload->>'country' country from quotation_record"+ownerWhere+" union select o->>'country' country from quotation_record cross join lateral "+options+" o"+ownerWhere+") c where country is not null and country<>'' and country<>'—' order by country",params,String.class);
+        var countries=countryIndex!=null?countryIndex.countries(owner,lifecycle):jdbc.queryForList("select distinct country from (select payload->>'country' country from quotation_record"+ownerWhere+" union select o->>'country' country from quotation_record cross join lateral "+options+" o"+ownerWhere+") c where country is not null and country<>'' and country<>'—' order by country",params,String.class);
         return new Result(items,safePage,safeSize,summary.total(),pages,summary,countries);
     }
 }

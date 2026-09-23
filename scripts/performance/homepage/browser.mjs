@@ -59,6 +59,14 @@ try{
     const download=page.waitForEvent('download');await page.getByRole('button',{name:'⇩ 导出报表'}).click()
     const file=await download;await file.saveAs(out+'/overview.csv');const csv=await readFile(out+'/overview.csv','utf8');assert(csv.includes('QA-'))
     reports.push({role:'super_admin',failedCatalogBlocksStatistics:true,retryAndExport:true})
+    await page.locator('.app-topbar nav a[href="/quotation/records"]').click();await page.waitForURL(base+'/quotation/records')
+    await context.setOffline(true)
+    await page.locator('.app-topbar nav a[href="/quotation/overview"]').click()
+    await page.getByText('采购类别读取失败，暂不展示统计',{exact:false}).waitFor()
+    assert.equal(await page.locator('.overview-app .kpis').count(),0);assert(await page.getByRole('button',{name:'⇩ 导出报表'}).isDisabled())
+    await context.setOffline(false)
+    for(const button of await page.getByRole('button',{name:'重新读取',exact:true}).all())await button.click()
+    await waitReady(page,'super_admin');reports.push({role:'super_admin',offlineBlocksFalseStatistics:true,onlineRetryRestoresCompleteData:true})
     await context.close()
   }
 }catch(e){errors.push(e.stack)}finally{await browser.close()}
