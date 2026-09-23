@@ -371,7 +371,7 @@ public class LogisticsQueryService {
                 """);
         var rowSql = new StringBuilder("""
                 select c.id::text as channel_id,
-                  (item - array['notes','rawValues','normalizationNote','sourceFile','sourceRow','sourceSheet',
+                  (item - array['notes','rawValues','normalizationNote','sourceFile','sourceRow',
                     'sourceCountry','sourceCountryCode','sourceWeightRange','sourceCode','sourceOriginRegion',
                     'originRegion','rowKey'])::text as row_payload
                 from logistics_channel c
