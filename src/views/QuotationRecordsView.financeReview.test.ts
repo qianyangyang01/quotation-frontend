@@ -65,6 +65,29 @@ it('shows the same live review conclusion in an employee detail without review a
   expect(document.querySelector('.record-drawer')?.textContent).toContain('审核通过')
   expect(button('开始审核')).toBeUndefined()
 })
+it('renders identical quotation detail data for employee and administrator, with different actions',async()=>{
+  vi.useFakeTimers();await mount('employee','mine')
+  document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
+  const employeeData=document.querySelector('.overview-panel')!.textContent
+  expect(button('开始审核')).toBeUndefined()
+  app.unmount();document.body.innerHTML=''
+  await mount('super_admin','company')
+  document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
+  expect(document.querySelector('.overview-panel')!.textContent).toBe(employeeData)
+  expect(button('开始审核')).toBeDefined()
+})
+it('does not overlap slow filtered-list synchronization with a second timer',async()=>{
+  vi.useFakeTimers();await mount('employee','mine')
+  const filter=document.querySelector('[aria-label="审核状态"]') as HTMLSelectElement
+  filter.value='approved';filter.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  let finish!:(value:unknown)=>void
+  mocks.page.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+  const before=mocks.page.mock.calls.length
+  await vi.advanceTimersByTimeAsync(3000);await flush()
+  await vi.advanceTimersByTimeAsync(15000);await flush()
+  expect(mocks.page).toHaveBeenCalledTimes(before+1)
+  finish({items:[saved()],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});await flush()
+})
 it('submits a price exception without a note and keeps the selector openable after failure',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()

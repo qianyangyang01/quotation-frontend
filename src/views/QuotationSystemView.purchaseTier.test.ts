@@ -33,7 +33,7 @@ let state: {
 beforeEach(() => { vi.clearAllMocks(); clearFinanceSettingsCache() })
 afterEach(() => { app?.unmount(); app = undefined; host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache() })
 
-async function mount(mode: 'single' | 'bundle', estimate = '10') {
+async function mount(mode: 'single' | 'bundle', estimate = '10', omitProductSnapshot = false) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return {
       'country-classification': { value: [], _version: 1 }, 'channel-policies': { value: [], _version: 1 },
@@ -47,7 +47,7 @@ async function mount(mode: 'single' | 'bundle', estimate = '10') {
     if (path === '/quotation-drafts/mine/state') return { exists: true, version: 1, payload: {
       schemaVersion: 2, quoteMode: mode, customerName: '阶梯回归', skuSearch: record.sku,
       selectedCustomerGrade: 'S', monthlySalesEstimate: estimate, logisticsAttribute: '普货',
-      product: { sku: record.sku, quantity: 1, purchaseInvoiceTaxApplied: true },
+      ...(omitProductSnapshot ? {} : { product: { sku: record.sku, quantity: 1, purchaseInvoiceTaxApplied: true } }),
       bundleItems: [
         { sku: record.sku, quantityPerSet: 2, purchaseInvoiceTaxApplied: true },
         { sku: 'SINGLE', quantityPerSet: 1, purchaseInvoiceTaxApplied: true },
@@ -72,6 +72,13 @@ async function selectTier(value: string) {
   select.dispatchEvent(new Event('change', { bubbles: true }))
   await nextTick()
 }
+it('restores a draft containing a SKU but no product snapshot without blocking future edits', async () => {
+  await mount('single', '10', true)
+  expect(state.draftReady).toBe(true)
+  expect(state.products[0]?.sku).toBe(record.sku)
+  expect(state.products[0]?.purchaseBaseUnitPrice).toBe(13.8)
+  expect(host.textContent).not.toContain('primaryChannelKey')
+})
 
 it('updates the single SKU cost and quotation immediately when selecting tier 2 or tier 3', async () => {
   await mount('single')
