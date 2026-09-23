@@ -2,7 +2,7 @@ import JSZip from 'jszip'
 import assert from 'node:assert/strict'
 import {base} from './client.mjs'
 export async function importLogistics(session){
-const request=(path,args={})=>session.request(path,{...args,headers:{'Idempotency-Key':crypto.randomUUID()},label:'logistics-import-'+(args.method||'GET')})
+const request=(path,args={})=>session.request(path,{...args,headers:{'Idempotency-Key':crypto.randomUUID(),...args.headers},label:'logistics-import-'+(args.method||'GET')})
 const run=Date.now().toString(36).toUpperCase()+session.account
 if(!session.importFixture){
  const providerName='隔离导入'+run,channelName='隔离渠道'+run
@@ -32,6 +32,14 @@ let version=imported
 if(!fixture.channelId){
  assert.equal(imported.items?.length,1,JSON.stringify(imported));const item=imported.items[0];fixture.channelId=item.channelId
  version=await request('/logistics/rebuild/versions/'+item.versionId)
+ const channels=await request('/logistics/channels?query='+encodeURIComponent(fixture.channelName)+'&size=200')
+ const importedChannel=channels.items.find(row=>row.id===fixture.channelId)
+ assert(importedChannel,'Imported channel must exist before publication')
+ const providers=await request('/logistics/providers?query='+encodeURIComponent(fixture.providerName)+'&size=200')
+ const actualProvider=providers.items.find(row=>row.id===importedChannel.providerId)
+ assert.equal(actualProvider?.name,fixture.providerName)
+ if(actualProvider.enabled)await request('/logistics/providers/'+actualProvider.id+'/status',{method:'PATCH',headers:{'If-Match':String(actualProvider._version)},body:{enabled:false}})
+ fixture.actualProviderId=actualProvider.id
 }
 const channel={id:fixture.channelId}
 const importMs=performance.now()-started
@@ -40,6 +48,8 @@ const publishStarted=performance.now()
 await request('/logistics/rebuild/channels/'+channel.id+'/versions/'+version.id+'/review',{method:'POST',body:{reviewConfirmed:true,removalConfirmed:true,note:'隔离表格导入审核测试，渠道及物流商保持停用'}})
 const reviewMs=performance.now()-publishStarted
 const readback=await request('/logistics/rebuild/versions/'+version.id)
+const providers=await request('/logistics/providers?query='+encodeURIComponent(fixture.providerName)+'&size=200')
+assert.equal(providers.items.find(row=>row.id===fixture.actualProviderId)?.enabled,false,'The actual imported provider must remain disabled')
 const report={base,channelId:channel.id,versionId:version.id,importMs,reviewMs,errors:version.errors,validRows:version.validRows??version.rowCount??version.rows?.length,pricingReady:review.pricingReady,status:readback.status,passed:!(version.errors>0)&&readback.status==='published',scope:'One of the configured logistics workers imports and publishes an isolated registered channel; provider disabled, unrelated active prices preserved'}
 
 assert(report.passed,JSON.stringify(report));return report
