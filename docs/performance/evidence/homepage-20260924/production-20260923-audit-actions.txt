@@ -1,0 +1,17 @@
+finance.update|finance-setting|success|5
+logistics.batch-publish-ready|logistics-import|success|3
+logistics.upload-complete|logistics-upload|success|3
+logistics.upload-start|logistics-upload|success|3
+purchase.batch-upsert|purchase-product|success|3
+purchase.maintenance|purchase-product-history|success|2
+purchase.paste-create|purchase-product|success|65
+quotation.finance-review|quotation|success|79
+quotation.review.claim|quotation|success|4
+quotation.review.complete|quotation|success|4
+quotation.trash|quotation|success|87
+template.create|quotation-template|success|9
+template.delete|quotation-template|success|2
+template.sync|quotation-template|success|7
+template.update|quotation-template|success|17
+user.create|user|success|7
+user.reset-password|user|success|2

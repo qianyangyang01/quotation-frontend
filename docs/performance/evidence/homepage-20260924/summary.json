@@ -1,0 +1,387 @@
+{
+  "stages": [
+    {
+      "name": "warmup",
+      "users": 50,
+      "seconds": 300,
+      "requests": 18646,
+      "httpFailures": 0,
+      "businessFailures": 0,
+      "expectedConflicts": 11,
+      "exports": 26,
+      "pendingReviewWork": 1,
+      "passed": true,
+      "thresholdFailures": [],
+      "slowestRead": [
+        "GET analytics-catalog",
+        {
+          "count": 26,
+          "p50": 377.7,
+          "p95": 554.41,
+          "p99": 596.14,
+          "max": 596.1353999999992
+        }
+      ],
+      "save": {
+        "count": 433,
+        "p50": 208.06,
+        "p95": 384.5,
+        "p99": 625.85,
+        "max": 743.5346999999892
+      },
+      "claim": {
+        "count": 421,
+        "p50": 21.75,
+        "p95": 38.1,
+        "p99": 85.57,
+        "max": 129.75789999999688
+      },
+      "complete": {
+        "count": 421,
+        "p50": 19.69,
+        "p95": 35.94,
+        "p99": 62.61,
+        "max": 100.12409999999727
+      },
+      "imports": [
+        [
+          "POST logistics-import-POST",
+          {
+            "count": 16,
+            "p50": 107.33,
+            "p95": 368.36,
+            "p99": 368.36,
+            "max": 368.362999999983
+          }
+        ],
+        [
+          "GET logistics-import-GET",
+          {
+            "count": 24,
+            "p50": 16.52,
+            "p95": 102.71,
+            "p99": 124.74,
+            "max": 124.73500000001513
+          }
+        ]
+      ]
+    },
+    {
+      "name": "sustained",
+      "users": 50,
+      "seconds": 1800,
+      "requests": 113244,
+      "httpFailures": 0,
+      "businessFailures": 0,
+      "expectedConflicts": 91,
+      "exports": 162,
+      "pendingReviewWork": 1,
+      "passed": true,
+      "thresholdFailures": [],
+      "slowestRead": [
+        "GET analytics-catalog",
+        {
+          "count": 162,
+          "p50": 365.21,
+          "p95": 582.41,
+          "p99": 705.92,
+          "max": 881.2145000000019
+        }
+      ],
+      "save": {
+        "count": 2650,
+        "p50": 195.51,
+        "p95": 312.03,
+        "p99": 412.21,
+        "max": 574.5032999999821
+      },
+      "claim": {
+        "count": 2559,
+        "p50": 19.45,
+        "p95": 30.88,
+        "p99": 42.87,
+        "max": 124.50269999995362
+      },
+      "complete": {
+        "count": 2559,
+        "p50": 16.26,
+        "p95": 29.77,
+        "p99": 41.2,
+        "max": 80.27230000006966
+      },
+      "imports": [
+        [
+          "POST logistics-import-POST",
+          {
+            "count": 72,
+            "p50": 91.21,
+            "p95": 157.67,
+            "p99": 330.66,
+            "max": 330.66130000003614
+          }
+        ],
+        [
+          "GET logistics-import-GET",
+          {
+            "count": 108,
+            "p50": 11.74,
+            "p95": 23.45,
+            "p99": 26.53,
+            "max": 42.43919999990612
+          }
+        ]
+      ]
+    },
+    {
+      "name": "peak",
+      "users": 100,
+      "seconds": 300,
+      "requests": 25857,
+      "httpFailures": 0,
+      "businessFailures": 0,
+      "expectedConflicts": 157,
+      "exports": 42,
+      "pendingReviewWork": 14,
+      "passed": true,
+      "thresholdFailures": [
+        "GET purchase-search"
+      ],
+      "slowestRead": [
+        "GET purchase-search",
+        {
+          "count": 3809,
+          "p50": 933.79,
+          "p95": 1613.69,
+          "p99": 1861.34,
+          "max": 2257.648199999705
+        }
+      ],
+      "save": {
+        "count": 744,
+        "p50": 519.64,
+        "p95": 959.99,
+        "p99": 1188.93,
+        "max": 1464.5183999999426
+      },
+      "claim": {
+        "count": 584,
+        "p50": 264.14,
+        "p95": 624.34,
+        "p99": 853.76,
+        "max": 1071.4220000002533
+      },
+      "complete": {
+        "count": 584,
+        "p50": 240.64,
+        "p95": 606.48,
+        "p99": 816.32,
+        "max": 1217.040600000415
+      },
+      "imports": [
+        [
+          "POST logistics-import-POST",
+          {
+            "count": 16,
+            "p50": 287.97,
+            "p95": 1011.42,
+            "p99": 1011.42,
+            "max": 1011.4244999997318
+          }
+        ],
+        [
+          "GET logistics-import-GET",
+          {
+            "count": 24,
+            "p50": 332.2,
+            "p95": 836.49,
+            "p99": 1195.26,
+            "max": 1195.2606000001542
+          }
+        ]
+      ]
+    },
+    {
+      "name": "recovery",
+      "users": 50,
+      "seconds": 300,
+      "requests": 18733,
+      "httpFailures": 0,
+      "businessFailures": 0,
+      "expectedConflicts": 19,
+      "exports": 26,
+      "pendingReviewWork": 3,
+      "passed": true,
+      "thresholdFailures": [],
+      "slowestRead": [
+        "GET analytics-catalog",
+        {
+          "count": 26,
+          "p50": 387.13,
+          "p95": 586.46,
+          "p99": 742.55,
+          "max": 742.5476999999955
+        }
+      ],
+      "save": {
+        "count": 443,
+        "p50": 199.88,
+        "p95": 361.92,
+        "p99": 428.56,
+        "max": 478.8314000000246
+      },
+      "claim": {
+        "count": 435,
+        "p50": 19.71,
+        "p95": 31.2,
+        "p99": 43.21,
+        "max": 74.56700000027195
+      },
+      "complete": {
+        "count": 435,
+        "p50": 16.23,
+        "p95": 28.94,
+        "p99": 39.44,
+        "max": 71.81279999995604
+      },
+      "imports": [
+        [
+          "POST logistics-import-POST",
+          {
+            "count": 8,
+            "p50": 32.95,
+            "p95": 310.68,
+            "p99": 310.68,
+            "max": 310.68390000006184
+          }
+        ],
+        [
+          "GET logistics-import-GET",
+          {
+            "count": 12,
+            "p50": 12.17,
+            "p95": 20.07,
+            "p99": 20.07,
+            "max": 20.07370000006631
+          }
+        ]
+      ]
+    },
+    {
+      "name": "soak",
+      "users": 50,
+      "seconds": 3600,
+      "requests": 224161,
+      "httpFailures": 0,
+      "businessFailures": 0,
+      "expectedConflicts": 195,
+      "exports": 308,
+      "pendingReviewWork": 1,
+      "passed": true,
+      "thresholdFailures": [],
+      "slowestRead": [
+        "GET analytics-catalog",
+        {
+          "count": 308,
+          "p50": 386.98,
+          "p95": 635.17,
+          "p99": 779.23,
+          "max": 985.7781999995932
+        }
+      ],
+      "save": {
+        "count": 5278,
+        "p50": 206.2,
+        "p95": 404.12,
+        "p99": 610.63,
+        "max": 1008.223600000143
+      },
+      "claim": {
+        "count": 5085,
+        "p50": 19.66,
+        "p95": 34.41,
+        "p99": 66.43,
+        "max": 342.53129999991506
+      },
+      "complete": {
+        "count": 5085,
+        "p50": 16.36,
+        "p95": 30.61,
+        "p99": 67.75,
+        "max": 280.3203000007197
+      },
+      "imports": [
+        [
+          "POST logistics-import-POST",
+          {
+            "count": 144,
+            "p50": 82.64,
+            "p95": 143.84,
+            "p99": 301.69,
+            "max": 306.9747999999672
+          }
+        ],
+        [
+          "GET logistics-import-GET",
+          {
+            "count": 216,
+            "p50": 13.13,
+            "p95": 26.18,
+            "p99": 51.62,
+            "max": 60.60960000008345
+          }
+        ]
+      ]
+    }
+  ],
+  "resources": {
+    "connectionsMax": 12,
+    "connectionsLast": 11,
+    "lockWaitSamples": 7,
+    "longestQuerySeconds": 0.742262,
+    "containers": {
+      "quotation-homepage-acceptance-20260923-quotation-backend-1": {
+        "firstMiB": 530.1,
+        "lastMiB": 989.7,
+        "maxMiB": 990.4,
+        "last10MinuteMeanMiB": 974.4311475409836,
+        "previous10MinuteMeanMiB": 964.5050000000002,
+        "maxCpuPercent": 178.53
+      },
+      "quotation-homepage-acceptance-20260923-db-1": {
+        "firstMiB": 412.3,
+        "lastMiB": 513.1,
+        "maxMiB": 571.6,
+        "last10MinuteMeanMiB": 485.38360655737705,
+        "previous10MinuteMeanMiB": 473.97166666666664,
+        "maxCpuPercent": 206.45
+      },
+      "quotation-homepage-acceptance-20260923-redis-1": {
+        "firstMiB": 5.094,
+        "lastMiB": 5.574,
+        "maxMiB": 5.84,
+        "last10MinuteMeanMiB": 5.346475409836067,
+        "previous10MinuteMeanMiB": 5.3375333333333295,
+        "maxCpuPercent": 5.38
+      },
+      "quotation-homepage-acceptance-20260923-parser-1": {
+        "firstMiB": 85.16,
+        "lastMiB": 103.2,
+        "maxMiB": 112.2,
+        "last10MinuteMeanMiB": 102.860655737705,
+        "previous10MinuteMeanMiB": 102.13166666666665,
+        "maxCpuPercent": 27.04
+      },
+      "quotation-homepage-acceptance-20260923-minio-1": {
+        "firstMiB": 225.6,
+        "lastMiB": 233.3,
+        "maxMiB": 233.3,
+        "last10MinuteMeanMiB": 233.0721311475411,
+        "previous10MinuteMeanMiB": 232.07166666666663,
+        "maxCpuPercent": 86.03
+      }
+    }
+  },
+  "requests": 400641,
+  "passed": true,
+  "note": "Independent authenticated HTTP sessions with real reads/writes; browser roles and pricing are separate real Chrome acceptance. Import timings are reported separately. RSS includes JVM heap retention and cache growth, not a proof against every possible leak."
+}

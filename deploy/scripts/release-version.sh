@@ -74,9 +74,9 @@ sed -i "s/^QUOTATION_RELEASE=.*/QUOTATION_RELEASE=$release/" "$release_deploy_di
 docker compose --project-name quotation-prod --env-file "$release_deploy_dir/.env" -f "$release_deploy_dir/docker-compose.yml" \
   pull --policy missing quotation-postgres quotation-redis quotation-minio
 if [[ -n "$existing_containers" ]]; then
-  active_imports="$(docker exec quotation-prod-quotation-postgres-1 psql -U "${QUOTATION_DB_USER:-quotation_app}" -d "${QUOTATION_DB_NAME:-quotation_prod}" -Atc "select count(*) from logistics_import_batch where status in ('queued','processing')")"
+  active_imports="$(docker exec quotation-prod-quotation-postgres-1 psql -v ON_ERROR_STOP=1 -U "${QUOTATION_DB_USER:-quotation_app}" -d "${QUOTATION_DB_NAME:-quotation_prod}" -Atc "select (select count(*) from logistics_import_batch where status in ('queued','processing')) + (select count(*) from import_job where status in ('queued','parsing','import-queued','importing','rollback-queued','rolling-back'))")"
   if [[ "$active_imports" != "0" ]]; then
-    echo "ERROR: $active_imports logistics imports are active; finish them before switching containers" >&2
+    echo "ERROR: $active_imports purchase or logistics imports are active; finish them before switching containers" >&2
     exit 1
   fi
 fi

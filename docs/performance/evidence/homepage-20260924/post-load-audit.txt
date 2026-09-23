@@ -1,0 +1,14 @@
+DO
+load-quotes|13046
+load-review-states|approved|5723
+load-review-states|rejected|6978
+load-review-states|pending|345
+logistics-import-states|completed|288
+logistics-import-states|failed|6
+purchase-import-states|completed|17
+purchase-import-states|completed-with-errors|4
+purchase-import-states|failed|2
+purchase-import-states|preview|2
+purchase-import-states|ready|1
+purchase-import-states|rolled-back|5
+database-size|740 MB

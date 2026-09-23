@@ -1,0 +1,28 @@
+{
+  "base": "http://127.0.0.1:18249",
+  "sku": "QA-LINK-PRICE-1790184371964",
+  "checks": [
+    {
+      "name": "Browser-calculated original purchase, packaging, freight and total independently match",
+      "passed": true,
+      "id": "d6ec424f-0560-47ec-8236-d1ae26aa0a35"
+    },
+    {
+      "name": "Purchase update blocks the old page, refresh recalculates tax/weight/freight/cost, saved history is unchanged",
+      "passed": true,
+      "id": "3064cd87-f07d-4c82-8410-4cb056ea1f17"
+    },
+    {
+      "name": "Selected purchase tier and quantity-based domestic freight reach the saved quote without changing history",
+      "passed": true,
+      "id": "47f5b759-7f43-41da-8a15-afe317233678"
+    },
+    {
+      "name": "Finance exchange change reaches the open page, new quote uses new rate, review and other roles preserve exact saved prices",
+      "passed": true,
+      "id": "74535bd4-6631-4552-b068-2b95e0193fbb"
+    }
+  ],
+  "pageErrors": [],
+  "passed": true
+}

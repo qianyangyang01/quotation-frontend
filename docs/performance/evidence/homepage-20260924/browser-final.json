@@ -1,0 +1,315 @@
+{
+  "mode": "candidate",
+  "base": "http://127.0.0.1:18249",
+  "browser": "installed Chrome, headless, 1440x1000, loopback, fresh context per trial",
+  "reports": [
+    {
+      "trial": 0,
+      "role": "super_admin",
+      "loginToReadyMs": 2083.1791999999996,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 1,
+      "role": "super_admin",
+      "loginToReadyMs": 1907.3944999999999,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 2,
+      "role": "super_admin",
+      "loginToReadyMs": 1799.5396999999994,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 3,
+      "role": "super_admin",
+      "loginToReadyMs": 1882.1642999999995,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 4,
+      "role": "super_admin",
+      "loginToReadyMs": 1754.58,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 5,
+      "role": "super_admin",
+      "loginToReadyMs": 1866.4982999999993,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 6,
+      "role": "super_admin",
+      "loginToReadyMs": 1847.6440000000002,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 7,
+      "role": "super_admin",
+      "loginToReadyMs": 1881.3106999999982,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 8,
+      "role": "super_admin",
+      "loginToReadyMs": 1853.7702000000027,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 9,
+      "role": "super_admin",
+      "loginToReadyMs": 1871.0733,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 10,
+      "role": "super_admin",
+      "loginToReadyMs": 1860.3580999999976,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 11,
+      "role": "super_admin",
+      "loginToReadyMs": 1877.0139000000017,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 12,
+      "role": "super_admin",
+      "loginToReadyMs": 1752.6155000000035,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 13,
+      "role": "super_admin",
+      "loginToReadyMs": 1883.7374999999993,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 14,
+      "role": "super_admin",
+      "loginToReadyMs": 1892.2740999999987,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 15,
+      "role": "super_admin",
+      "loginToReadyMs": 1750.039499999999,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 16,
+      "role": "super_admin",
+      "loginToReadyMs": 1908.794600000001,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 17,
+      "role": "super_admin",
+      "loginToReadyMs": 1843.0909000000029,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 18,
+      "role": "super_admin",
+      "loginToReadyMs": 1866.5743999999977,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "trial": 19,
+      "role": "super_admin",
+      "loginToReadyMs": 1873.3480999999956,
+      "requests": [
+        "/auth/me",
+        "/auth/csrf",
+        "/auth/login",
+        "/quotations/analytics-records",
+        "/purchase-products/analytics-catalog"
+      ]
+    },
+    {
+      "role": "employee",
+      "paths": [
+        "/quotation",
+        "/quotation/my-records"
+      ],
+      "loginToReadyMs": 1198.7309000000023,
+      "logoutAndSwitch": true
+    },
+    {
+      "role": "purchase",
+      "paths": [
+        "/quotation/products"
+      ],
+      "loginToReadyMs": 1124.9421999999977,
+      "logoutAndSwitch": true
+    },
+    {
+      "role": "finance",
+      "paths": [
+        "/quotation/overview",
+        "/quotation",
+        "/quotation/products",
+        "/quotation/logistics",
+        "/quotation/members",
+        "/quotation/my-records",
+        "/quotation/records",
+        "/quotation/permissions"
+      ],
+      "loginToReadyMs": 1894.5516999999963,
+      "logoutAndSwitch": true
+    },
+    {
+      "role": "logistics",
+      "paths": [
+        "/quotation/logistics"
+      ],
+      "loginToReadyMs": 1184.0351999999984,
+      "logoutAndSwitch": true
+    },
+    {
+      "role": "super_admin",
+      "paths": [
+        "/quotation/overview",
+        "/quotation",
+        "/quotation/products",
+        "/quotation/logistics",
+        "/quotation/members",
+        "/quotation/my-records",
+        "/quotation/records",
+        "/quotation/permissions"
+      ],
+      "loginToReadyMs": 1885.357999999993,
+      "logoutAndSwitch": true
+    },
+    {
+      "role": "super_admin",
+      "failedCatalogBlocksStatistics": true,
+      "retryAndExport": true
+    },
+    {
+      "role": "super_admin",
+      "offlineBlocksFalseStatistics": true,
+      "onlineRetryRestoresCompleteData": true
+    }
+  ],
+  "errors": [],
+  "p95": 1908.794600000001,
+  "passed": true
+}

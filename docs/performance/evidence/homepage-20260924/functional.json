@@ -1,0 +1,80 @@
+{
+  "checks": [
+    {
+      "name": "Full production-size catalog and quotation snapshot match existing endpoints",
+      "passed": true,
+      "ms": 12489
+    },
+    {
+      "name": "Five-role permission isolation for analytics, purchases, finance and review",
+      "passed": true,
+      "ms": 384
+    },
+    {
+      "name": "Current single and bundle quotation fixtures save with verified revisions and unchanged monetary snapshots",
+      "passed": true,
+      "ms": 1374
+    },
+    {
+      "name": "Claim response version completes immediately; competing reviewer and stale completion are rejected; employee/admin agree",
+      "passed": true,
+      "ms": 650
+    },
+    {
+      "name": "Finance update invalidates an open quote; historical amounts remain unchanged",
+      "passed": true,
+      "ms": 768
+    },
+    {
+      "name": "Purchase maintenance is immediately identical for employee/admin, rejects stale edits and records history",
+      "passed": true,
+      "ms": 225
+    },
+    {
+      "name": "Draft isolation and optimistic version conflict; templates keep employee ownership",
+      "passed": true,
+      "ms": 211
+    },
+    {
+      "name": "Archive, recycle bin, restoration and dashboard scope remain linked",
+      "passed": true,
+      "ms": 982
+    }
+  ],
+  "timings": [
+    {
+      "oldPath": "/purchase-products",
+      "newPath": "/purchase-products/analytics-catalog",
+      "legacy": {
+        "ms": 5830.941500000001,
+        "requests": 51,
+        "bytes": 44490300,
+        "count": 25120
+      },
+      "optimized": {
+        "ms": 357.4221000000007,
+        "requests": 1,
+        "bytes": 1595556,
+        "count": 25120
+      }
+    },
+    {
+      "oldPath": "/quotations",
+      "newPath": "/quotations/analytics-records",
+      "legacy": {
+        "ms": 4948.6162,
+        "requests": 43,
+        "bytes": 69252436,
+        "count": 4207
+      },
+      "optimized": {
+        "ms": 1305.9169000000002,
+        "requests": 1,
+        "bytes": 2474735,
+        "count": 4207
+      }
+    }
+  ],
+  "fixtureErrors": [],
+  "passed": true
+}

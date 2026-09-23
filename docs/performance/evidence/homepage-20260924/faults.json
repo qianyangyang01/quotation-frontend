@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "name": "Expired session and missing CSRF cannot read or write business data",
+      "passed": true
+    },
+    {
+      "name": "Twenty concurrent duplicate submissions create exactly one record and replay identical prices",
+      "passed": true
+    },
+    {
+      "name": "Concurrent finance changes have one winner and preserve the winning value",
+      "passed": true
+    },
+    {
+      "name": "Freight tampering and obsolete logistics revision cannot create quotations",
+      "passed": true
+    },
+    {
+      "name": "Malformed import leaves the published channel unchanged and a valid retry can publish",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

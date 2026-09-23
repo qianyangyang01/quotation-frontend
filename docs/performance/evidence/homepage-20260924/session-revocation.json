@@ -1,0 +1,23 @@
+{
+  "base": "http://127.0.0.1:18249",
+  "checks": [
+    {
+      "name": "Existing admin session immediately loses company analytics permission after role change; allowed employee reads continue",
+      "passed": true
+    },
+    {
+      "name": "Stale concurrent account edit cannot overwrite the winning role",
+      "passed": true
+    },
+    {
+      "name": "An old page expecting another account cannot read through a replaced session cookie",
+      "passed": true
+    },
+    {
+      "name": "Disabled account immediately loses its existing session",
+      "passed": true
+    }
+  ],
+  "restored": true,
+  "passed": true
+}
