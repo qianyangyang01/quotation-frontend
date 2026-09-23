@@ -4,7 +4,8 @@ import { createApp, nextTick, type App } from 'vue'
 import PurchaseDataWorkspace from './PurchaseDataWorkspace.vue'
 import { normalizePurchaseRecord } from '@/data/purchaseStore'
 
-const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn()}))
+const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn()}))
+vi.mock('@/services/purchaseHistory',async original=>({...await original<object>(),updatePurchaseProduct:mocks.update,loadPurchaseHistory:mocks.history}))
 vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseProductPage:mocks.page,loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save}))
 let app:App
 const row=(sku:string)=>normalizePurchaseRecord({sku,weightG:100,minOrderQty:1,purchasePriceCny:10,_version:5})
@@ -71,4 +72,20 @@ it('uses authoritative save data on the unfiltered first page without a second l
   expect(mocks.page).toHaveBeenCalledTimes(1)
   expect(document.querySelector('table')?.textContent).toContain('NEW-SAVED')
   expect(mocks.stats).toHaveBeenCalledTimes(2)
+})
+
+it('opens product history from list and editor and saves existing products atomically',async()=>{
+  mocks.history.mockResolvedValue({items:[],page:0,size:10,total:0,totalPages:0})
+  await mount()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='修改记录')!.click();await flush()
+  expect(document.querySelector('[role=dialog]')?.textContent).toContain('INITIAL')
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭修改记录"]')!.click();await flush()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click();await flush()
+  const history=Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='修改记录')!
+  history.click();await flush();expect(mocks.history).toHaveBeenCalledTimes(2)
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭修改记录"]')!.click();await flush()
+  mocks.update.mockResolvedValueOnce(row('INITIAL'))
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='保存资料')!.click();await flush()
+  expect(mocks.update).toHaveBeenCalledWith('INITIAL',expect.objectContaining({sku:'INITIAL',_version:5}))
+  expect(mocks.save).not.toHaveBeenCalled()
 })

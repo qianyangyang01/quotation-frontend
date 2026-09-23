@@ -10,6 +10,10 @@ import { preparePurchaseWorkbookTextOnly } from '@/services/purchaseWorkbookText
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
+import PurchaseHistoryDialog from './PurchaseHistoryDialog.vue'
+import { updatePurchaseProduct } from '@/services/purchaseHistory'
+
+const historySku = ref('')
 
 const showPasteDialog = ref(false)
 function pasteSaved(count: number) { toast(`已新增${count}条采购资料`); reload() }
@@ -309,8 +313,9 @@ async function saveEditor() {
   const renamed=Boolean(editingOriginalSku.value&&editingOriginalSku.value!==sku)
   editorSaving.value=true
   try {
-    if (editingOriginalSku.value && editingOriginalSku.value !== sku) await deletePurchaseProduct(editingOriginalSku.value, editor.value._version ?? -1)
-    const [saved]=await upsertPurchaseProducts([record])
+    const saved=editingOriginalSku.value
+      ? await updatePurchaseProduct(editingOriginalSku.value,record)
+      : (await upsertPurchaseProducts([record]))[0]
     editor.value = null
     if(saved&&!search.value.trim()&&currentPage.value===1&&!renamed){
       // The server response contains the authoritative version, readiness and costs.
@@ -381,6 +386,7 @@ const detailFields = computed(() => detail.value ? [
 
 <template>
   <PurchasePasteDialog v-if="showPasteDialog" @close="showPasteDialog=false" @saved="pasteSaved" />
+  <PurchaseHistoryDialog v-if="historySku" :sku="historySku" @close="historySku=''" />
   <section class="purchase-heading">
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
     <div class="heading-actions">
@@ -426,7 +432,7 @@ const detailFields = computed(() => detail.value ? [
         <td><template v-if="purchaseFreightChoices(record).length"><small v-for="choice in purchaseFreightChoices(record)" :key="choice.quantity">{{ choice.quantity }}件 {{ unitFreight(record,choice.quantity) }}</small></template><small v-else>暂无数据</small></td>
         <td><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small><small>实物图：{{ record.physicalImage ? '已上传' : '暂无数据' }}</small></td>
         <td><em :class="{ ready:record.quoteReady, warn:!record.quoteReady }">{{ record.status }}</em><small>库存：{{ record.stockStatus || '暂无数据' }}</small><small v-if="!record.quoteReady" class="quote-blocked">{{ purchaseQuoteBlockingMessage(record) }}</small></td>
-        <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button><button v-if="record.catalogState!=='disabled'" @click="requestCatalogState(record,'disabled')">停用</button><button v-else @click="requestCatalogState(record,'ready')">启用</button><button class="danger-link" @click="requestDelete(record)">删除</button></td>
+        <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button><button @click="historySku=record.sku">修改记录</button><button v-if="record.catalogState!=='disabled'" @click="requestCatalogState(record,'disabled')">停用</button><button v-else @click="requestCatalogState(record,'ready')">启用</button><button class="danger-link" @click="requestDelete(record)">删除</button></td>
       </tr></tbody>
     </table>
     <footer v-if="totalRecords" class="pagination" aria-label="采购资料分页">
@@ -551,7 +557,7 @@ const detailFields = computed(() => detail.value ? [
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>
     </div>
-    <footer><button @click="editor=null">取消</button><button :disabled="editorSaving" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存资料' }}</button><button v-if="editor.catalogState==='pending_template'" class="primary" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
+    <footer><button v-if="editingOriginalSku" @click="historySku=editingOriginalSku">修改记录</button><button @click="editor=null">取消</button><button :disabled="editorSaving" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存资料' }}</button><button v-if="editor.catalogState==='pending_template'" class="primary" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
   </section></div>
 
   <div v-if="previewImage" class="image-preview" @click.self="previewImage=null"><button @click="previewImage=null">×</button><figure><img :src="previewImage.src"><figcaption>{{ previewImage.title }}</figcaption></figure></div>

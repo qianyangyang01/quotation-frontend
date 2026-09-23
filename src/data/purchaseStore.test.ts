@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { findPurchaseProduct, normalizePurchaseRecord, purchaseQuoteFreightUnit, purchaseQuoteBlockingMessage, purchaseSourceLabel, purchaseUnitPrice } from './purchaseStore'
 
 describe('purchase catalog state', () => {
+  it('preserves explicit image removal while still accepting old image-only records', () => {
+    expect(normalizePurchaseRecord({ productImage:'', image:'/old.png' }).productImage).toBe('')
+    expect(normalizePurchaseRecord({ image:'/old.png' }).productImage).toBe('/old.png')
+  })
   it('revalidates a completed new form instead of persisting its initial missing fields', () => {
     const empty = normalizePurchaseRecord({})
     const filled = normalizePurchaseRecord({ ...empty, sku: 'YS260911-NEW', skuOrigin: 'manual', weightG: 350, minOrderQty: 1, purchasePriceCny: 13.2, taxPoint: 0.01 })
