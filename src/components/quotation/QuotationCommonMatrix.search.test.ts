@@ -76,3 +76,15 @@ it('keeps unavailable reissued channels visible and removable without reusing hi
   expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ channelKey: 'expired', available: false, quote1: null })])
   button('移除渠道').click(); await tick(); expect(changed.mock.lastCall?.[0]).toEqual([])
 })
+
+it('shows loading or network failure instead of a finance-authorization warning while source rules are unavailable', async () => {
+  const {state}=mount({sourcePending:true,sourceError:'',quoteRowsForCountry:()=>[]})
+  await tick()
+  expect(document.body.textContent).toContain('正在读取物流规则与财务设置')
+  expect(document.body.textContent).not.toContain('请检查财务授权')
+  Object.assign(state,{sourcePending:false,sourceError:'物流规则读取超时'});await tick()
+  expect(document.body.textContent).toContain('物流规则读取超时')
+  expect(document.body.textContent).not.toContain('请检查财务授权')
+  Object.assign(state,{sourceError:''});await tick()
+  expect(document.body.textContent).toContain('请检查财务授权')
+})

@@ -9,6 +9,9 @@ import { startQuotationSync } from '@/services/quotationSync'
 import type { FinanceChannelPolicy, FinanceCountrySetting } from '@/data/financeChannelPolicies'
 import type { FinanceTaxSettings } from '@/data/financeTaxSettings'
 import type { FinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
+import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
+import type { QuotationDraftPayload } from '@/services/quotationDrafts'
+import type { PurchaseProductRecord } from '@/data/purchaseStore'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn().mockResolvedValue(undefined) }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/data/authStore', () => ({ currentAuthUser: { value: { name: '员工', account: 'employee', role: 'employee', permissions: ['quotation'] } } }))
@@ -19,6 +22,7 @@ vi.mock('@/services/quotationSync', async importOriginal => ({
 vi.mock('@/data/publishedLogisticsRepository', async importOriginal => ({
   ...await importOriginal<typeof import('@/data/publishedLogisticsRepository')>(),
   loadPublishedLogisticsManifest: vi.fn().mockResolvedValue({ verified: true }),
+  loadPublishedLogisticsRules: vi.fn().mockResolvedValue({ revision:'r1', verified:true, rules:[] }),
 }))
 
 function financeResponse(disableS = false) {
@@ -38,6 +42,9 @@ function financeResponse(disableS = false) {
 }
 
 type PricingState = {
+  ensureQuoteLogistics: (product: QuotationProduct) => Promise<void>
+  normalizeRule: (product: QuotationProduct, silent?: boolean) => void
+  applyDraftPayload: (payload: QuotationDraftPayload, purchases?: Map<string, PurchaseProductRecord | undefined>) => Promise<void>
   salePrice: (product: QuotationProduct) => number
   usdPriceFromCny: (cny: number) => number
   exchange: { usd: number; eurUsd: number }
@@ -123,6 +130,48 @@ describe('quotation finance initialization for an employee', () => {
     expect(host.innerHTML).not.toContain(coefficient.toString())
     expect(state.salePrice({ purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct)).toBeCloseTo(100 * coefficient, 10)
   }
+
+  it('reuses hydrated finance on attribute loads without flashing authorization errors and still refreshes known changes', async () => {
+    await mountPage()
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    const beforeReads = vi.mocked(api.get).mock.calls.filter(([path]) => path === '/finance-settings').length
+    let finish!: (value: Awaited<ReturnType<typeof loadPublishedLogisticsRules>>) => void
+    vi.mocked(loadPublishedLogisticsRules).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const loading = state.ensureQuoteLogistics(state.products[0])
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    state.normalizeRule(state.products[0], true)
+    await nextTick()
+    expect(selectableAttributes()).toContain('香氛')
+    expect(attributeSelect().textContent).not.toContain('暂无财务授权')
+    expect(state.products[0].status).toContain('正在加载')
+    expect(vi.mocked(api.get).mock.calls.filter(([path]) => path === '/finance-settings')).toHaveLength(beforeReads)
+    finish({ revision:'r1', verified:true, rules:[], source:'network' })
+    await loading
+    state.syncPending = '财务设置已变化'
+    await state.ensureQuoteLogistics(state.products[0])
+    expect(vi.mocked(api.get).mock.calls.filter(([path]) => path === '/finance-settings')).toHaveLength(beforeReads + 1)
+  })
+
+  it('updates the rendered product status after asynchronously restoring a draft', async () => {
+    await mountPage()
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    let finish!: (value: Awaited<ReturnType<typeof loadPublishedLogisticsRules>>) => void
+    vi.mocked(loadPublishedLogisticsRules).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const purchase = { sku:'RESTORE', category:'宠物用品', productName:'宠物用品', purchasePriceCny:10, weightKg:0.21,
+      quoteReady:true, status:'资料完整', taxPoint:0, domesticFreight:0.2, priceTiers:[] } as unknown as PurchaseProductRecord
+    const payload = { schemaVersion:2, quoteMode:'single', skuSearch:'RESTORE', logisticsAttribute:'香氛',
+      product:{sku:'RESTORE'}, customerName:'客户' } as QuotationDraftPayload
+    const restoring = state.applyDraftPayload(payload, new Map([['RESTORE', purchase]]))
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(host.querySelector('.product-card .state')?.textContent).toContain('正在加载')
+    finish({ revision:'r1', verified:true, rules:[], source:'network' })
+    await restoring; await nextTick()
+    expect(state.products[0].status).toBe('当前条件没有已发布物流渠道')
+    expect(host.querySelector('.product-card .state')?.textContent).toContain('当前条件没有已发布物流渠道')
+    expect(host.querySelector('.product-card .state')?.textContent).not.toContain('正在加载')
+  })
 
   it('rechecks a transient sync failure without writing or reloading the draft or recalculating the quote', async () => {
     await mountPage()

@@ -41,6 +41,7 @@ function loadImage(url: string) {
     const timeout = setTimeout(() => finish(new Error('报价单样式素材加载超时，请检查网络后重试')), 15000)
     image.onload = () => finish()
     image.onerror = () => finish(new Error('报价单样式素材加载失败，请重试'))
+    image.fetchPriority = 'low'
     image.src = url
   })
 }
@@ -50,6 +51,11 @@ function loadAssets() {
     throw error
   })
   return assets
+}
+// Start while the user chooses channels. Share the same request with Preview;
+// a failed warm-up is retried by the next click and never blocks quotation entry.
+export async function preloadQuoteSheetAssets() {
+  await loadAssets()
 }
 function font(context: CanvasRenderingContext2D, bold = false, size = 22) {
   context.font = `${bold ? 700 : 400} ${size}px Arial, sans-serif`

@@ -643,7 +643,7 @@ async function runQuoteLogistics(p: Product) {
     // Refresh both independently, then use this operation's verified manifest.
     // Promise.all also observes both failures if a SKU change aborts the load.
     const [, manifestResult] = await Promise.all([
-      hydrateFinanceSettings({ force: true, signal: controller.signal }),
+      hydrateFinanceSettings({ force: Boolean(syncPending.value), signal: controller.signal }),
       loadPublishedLogisticsManifest({ signal: controller.signal }),
     ])
     controller.signal.throwIfAborted()
@@ -801,6 +801,9 @@ async function updateLiveQuotation() {
   finally { draftReady.value = true; syncRefreshing.value = false }
 }
 function normalizeRule(p: Product, silent = false) {
+  if (logisticsLoadState.value === 'loading') { p.status = '正在加载当前商品所需物流规则'; return }
+  if (!financeSettingsAreHydrated()) { p.status = financeSettingsAreLoading() ? '财务设置正在读取，请稍候' : '财务设置读取失败，请重试'; return }
+  if (logisticsLoadState.value === 'error') { p.status = '物流规则加载失败，请重试'; return }
   if (purchaseTaxBlockReason.value) { p.channel = ''; p.rule = ''; p.selectedChannelKey = ''; p.freight = 0; p.status = purchaseTaxBlockReason.value; return }
   const policyCountries = availableQuoteCountries(p)
   if (!policyCountries.includes(p.country)) p.country = policyCountries[0] || ''
@@ -821,7 +824,7 @@ function normalizeRule(p: Product, silent = false) {
     p.channel = ''
     p.rule = ''; p.selectedChannelKey = ''
     p.freight = 0
-    p.status = `财务策略无可用渠道：${p.logisticsAttribute}`
+    p.status = `当前重量、分区及物流属性下暂无可用渠道：${p.logisticsAttribute}`
     return
   }
   selectedQuoteRegions.value[p.country] = best.quoteRegion || ''
@@ -970,7 +973,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   quoteMatrixMode.value = ['specified', 'template'].includes(payload.quoteMatrixMode) ? payload.quoteMatrixMode : 'common'
   selectedQuoteRegions.value = Object.fromEntries(Object.entries(payload.selectedQuoteRegions || {})
     .filter(([, region]) => typeof region === 'string')) as Record<string, string>
-  const p = emptyQuotationProduct()
+  const p = reactive(emptyQuotationProduct())
   p.logisticsAttribute = normalizeLogisticsAttribute(payload.logisticsAttribute || '')
   const singleSku = payload.product?.sku || payload.skuSearch
   let restoredFromPurchase = false
@@ -1994,6 +1997,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <QuotationCondition
           :commission-threshold="commissionThreshold" :commission-error="commissionError" @update:commission-threshold="commissionThreshold=$event"
           :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
+          :finance-pending="!financeSettingsAreHydrated()" :finance-error="financeSettingsLoadError()"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode"
@@ -2035,7 +2039,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
-          <QuotationCommonMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
+          <QuotationCommonMatrix :source-pending="logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
             :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"

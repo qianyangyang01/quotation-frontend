@@ -103,3 +103,27 @@ it('renders hidden columns without their labels or values, wrapping long SKU tex
   expect(canvases[0].height).toBeGreaterThan(269 + 57 + 400)
   pending[0](new Blob(['png'])); expect(await result).toHaveLength(1)
 })
+
+it('shares asset warm-up with preview and starts no duplicate download on repeated previews', async () => {
+  const requests: Array<{onload?:()=>void;onerror?:()=>void}> = []
+  vi.stubGlobal('Image', class { onload?:()=>void; onerror?:()=>void; set src(_url:string){requests.push(this)} })
+  const {preloadQuoteSheetAssets,renderCustomerQuoteSheet}=await import('./customerQuoteSheetRenderer')
+  const warming=preloadQuoteSheetAssets()
+  const rendering=renderCustomerQuoteSheet(sheet()); await settle()
+  expect(requests).toHaveLength(3); expect(canvases).toHaveLength(0)
+  requests.forEach(image=>image.onload?.()); await warming; await settle()
+  pending[0](new Blob(['first'])); await rendering
+  const second=renderCustomerQuoteSheet(sheet()); await settle()
+  expect(requests).toHaveLength(3)
+  pending[1](new Blob(['second'])); await second
+})
+
+it('retries failed speculative asset loading when the user requests a preview', async () => {
+  let fail=true
+  vi.stubGlobal('Image', class { onload?:()=>void; onerror?:()=>void; set src(_url:string){queueMicrotask(()=>fail?this.onerror?.():this.onload?.())} })
+  const {preloadQuoteSheetAssets,renderCustomerQuoteSheet}=await import('./customerQuoteSheetRenderer')
+  await expect(preloadQuoteSheetAssets()).rejects.toThrow('素材加载失败')
+  fail=false
+  const rendering=renderCustomerQuoteSheet(sheet()); await settle()
+  pending[0](new Blob(['recovered'])); expect(await rendering).toHaveLength(1)
+})

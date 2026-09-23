@@ -1,8 +1,28 @@
 // @vitest-environment happy-dom
-import { createApp, h, nextTick, ref } from 'vue'
+import { createApp, h, nextTick, reactive, ref } from 'vue'
 import { expect, it } from 'vitest'
 import Condition from './QuotationCondition.vue'
 import { parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
+
+it('distinguishes pending and failed finance reads from genuinely unauthorized attributes', async () => {
+  const state = reactive({ financePending: true, financeError: '', attributes: [] as string[] })
+  const host = document.createElement('div')
+  const app = createApp({ render: () => h(Condition, { ...state, commissionThreshold:'1', mode:'single', skuSearch:'SKU',
+    customerName:'客户', monthlySalesEstimate:'10', logisticsAttribute:'普货', grades:[{grade:'S'}], grade:'S', coefficient:1.2, salesperson:'员工' }) })
+  app.mount(host)
+  const field = host.querySelector<HTMLSelectElement>('.logistics-field select')!
+  expect(field.disabled).toBe(true)
+  expect(field.textContent).toContain('财务设置正在读取')
+  expect(field.textContent).not.toContain('授权')
+  state.financeError = '网络超时'; await nextTick()
+  expect(field.textContent).toContain('读取失败')
+  state.financeError = ''; state.financePending = false; await nextTick()
+  expect(field.textContent).toContain('暂无财务授权')
+  state.attributes = ['普货']; await nextTick()
+  expect(field.value).toBe('普货')
+  expect(field.disabled).toBe(false)
+  app.unmount()
+})
 
 it('keeps invalid input visible instead of replacing it with a valid default', async () => {
   const threshold = ref('1')

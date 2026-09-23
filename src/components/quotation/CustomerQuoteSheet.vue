@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
   quoteSheetRowKey, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
@@ -7,7 +7,7 @@ import {
   type QuoteSheetOptionalColumn, type QuoteSheetColumnKey,
   type QuoteSheetCountry, type QuoteSheetSourceRow, type QuoteSheetPriceCalculator, type QuoteSheetRowEdits,
 } from '@/data/customerQuoteSheet'
-import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
+import { copyQuoteSheetImage, preloadQuoteSheetAssets, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
@@ -23,6 +23,7 @@ const props = defineProps<{
   skus?: string[]
 }>()
 const edits = ref(newQuoteSheetEdits(props.salesperson))
+onMounted(() => { void preloadQuoteSheetAssets().catch(() => undefined) })
 let columnId = 0
 function initialColumns() {
   if (props.initialQuote) return props.initialQuote.quantities.map(quantity=>({ id:++columnId, quantity:quantity===0?'':String(quantity), legacyCustom:quantity===0 }))

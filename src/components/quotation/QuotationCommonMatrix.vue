@@ -12,6 +12,8 @@ import QuoteTaxLegend from './QuoteTaxLegend.vue'
 const props = withDefaults(defineProps<{
   unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
+  sourcePending?: boolean
+  sourceError?: string
   ensureCountries?: (countries: string[]) => Promise<boolean>
   searchChannelCountries?: (query: string) => Promise<string[]>
   countries: QuotationCountrySummary[]
@@ -299,10 +301,10 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
     <div v-else-if="!searchLoading" class="empty-countries">{{ search.trim() ? '没有匹配的国家或授权渠道，请更换关键词。' : '暂未配置常用国家，可搜索全部国家或渠道。' }}</div>
     <div v-if="searchLoading" class="search-feedback" role="status">正在搜索全部渠道…</div>
     <div v-if="searchError" class="search-feedback" role="alert">{{ searchError }} <button @click="runGlobalSearch">重试搜索</button></div>
-    <div v-if="countryLoading" class="search-feedback" role="status">正在加载 {{ activeCountry }} 的渠道…</div>
+    <div v-if="sourcePending" class="search-feedback" role="status">正在读取物流规则与财务设置，请稍候…</div><div v-else-if="sourceError" class="search-feedback" role="alert">{{ sourceError }}</div><div v-else-if="countryLoading" class="search-feedback" role="status">正在加载 {{ activeCountry }} 的渠道…</div>
     <div v-if="countryError" class="search-feedback" role="alert">{{ countryError }} <button @click="selectCountry(activeCountry)">重新加载</button></div>
 
-    <template v-if="activeCountry && !countryLoading && !countryError">
+    <template v-if="activeCountry && !sourcePending && !sourceError && !countryLoading && !countryError">
       <div class="country-summary">
         <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请选择报价区域以匹配渠道' : `当前条件下 ${rows.length} 个可用渠道` }}</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
         <div class="metric lowest"><i>¥</i><span><small>最低价渠道</small><b>{{ formatUsd(lowest?.quote1 ?? null) }}</b><em>{{ lowest ? `${lowest.carrier}｜${lowest.transport}` : '暂无可用渠道' }}</em></span></div>
