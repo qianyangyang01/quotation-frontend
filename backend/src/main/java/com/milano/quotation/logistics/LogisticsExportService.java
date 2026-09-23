@@ -38,7 +38,7 @@ public class LogisticsExportService {
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public byte[] prices(UUID dataset,UUID versionId,String query,String country,String attribute,String snapshot,boolean includeSourceNotes) {
         if(snapshot!=null&&!snapshot.equals(priceSnapshot(dataset,versionId,query,country,attribute)))throw AppException.conflict("价格版本已变化，请重新生成下载链接");
-        query=query==null?"":query.strip().toLowerCase(Locale.ROOT);
+        var queryTerms=LogisticsPriceSearch.terms(query);
         country=country==null?"":country.strip().toLowerCase(Locale.ROOT);
         var versions=jdbc.sql("""
                 select (v.payload || jsonb_build_object('quoteReady',logistics_version_quote_ready(v.id)))::text as payload,p.payload->>'name' as provider,c.payload->>'name' as channel,
@@ -58,7 +58,7 @@ public class LogisticsExportService {
             if(rules!=null){textRow(rules,0,List.of("MILANO_LOGISTICS_METADATA_V1","规则仅用于审阅，不会作为导入指令执行"));textRow(rules,1,List.of("物流商","渠道","原表规则说明","说明分段（按序拼接为完整原文）"));}
             int rowNumber=1,metadataRow=2,rulesRow=2;
             for(var v:versions) {
-                if(!query.isBlank() && !(v.path("provider").asText()+v.path("channel").asText()).toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT)))continue;
+                if(!LogisticsPriceSearch.matches(queryTerms,v.path("provider").asText(),v.path("channel").asText()))continue;
                 if(!attribute.isBlank()&&!attribute.equals(v.path("attribute").asText()))continue;
                 boolean included=false;
                 for(var value:v.path("version").path("rows")) {

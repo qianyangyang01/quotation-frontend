@@ -41,6 +41,17 @@ class LogisticsRebuildPermissionTest {
     }
     @Test void rejectsAnonymousExports()throws Exception {mvc.perform(get(root+"/datasets/"+id+"/prices.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/versions/"+id+"/standardized.xlsx")).andExpect(status().isUnauthorized());mvc.perform(get(root+"/downloads/prepare?kind=prices&id="+id)).andExpect(status().isUnauthorized());}
 
+    @Test void combinedSearchStillRequiresLoginAndLogisticsPermission()throws Exception {
+        var path=root+"/datasets/"+id+"/prices";
+        mvc.perform(get(path).param("query","云途化妆品").param("country","科威特")).andExpect(status().isUnauthorized());
+        for(var permission:new String[]{"PERM_purchase","PERM_quotation","PERM_finance"}) {
+            var user=org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("QA-"+permission)
+                    .authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority(permission));
+            mvc.perform(get(path).with(user).param("query","云途化妆品").param("country","科威特")).andExpect(status().isForbidden());
+            mvc.perform(get(path+".xlsx").with(user).param("query","云途化妆品").param("country","科威特")).andExpect(status().isForbidden());
+        }
+    }
+
     @Test @WithMockUser(authorities={"PERM_quotation","PERM_finance"}) void nonLogisticsRolesCannotToggleChannels()throws Exception {
         mvc.perform(patch("/api/v1/logistics/channels/"+id+"/status").with(csrf()).header("If-Match","0").contentType("application/json").content("{\"enabled\":false}")).andExpect(status().isForbidden());
     }

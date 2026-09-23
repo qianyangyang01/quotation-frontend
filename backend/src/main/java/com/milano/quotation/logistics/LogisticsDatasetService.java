@@ -142,7 +142,7 @@ public class LogisticsDatasetService {
     @Transactional(readOnly=true)
     public com.milano.quotation.common.PageResponse<JsonNode> prices(UUID id,int page,int size,String query,String country,String attribute) {
         if(page<0||size<1||size>200)throw AppException.unprocessable("分页参数不合法");
-        query=query==null?"":query.strip();
+        var queryTerms=LogisticsPriceSearch.terms(query);
         country=country==null?"":country.strip();
         dataset(id);
         // The materialized page/count query briefly holds the expanded current rows twice. Keep this
@@ -158,13 +158,22 @@ public class LogisticsDatasetService {
                   from logistics_channel c join logistics_provider p on p.id=c.provider_id
                   join logistics_version v on v.id=c.current_version_id
                   where c.dataset_id=:dataset
+                    and not exists (
+                      select 1 from jsonb_array_elements_text(cast(:queryTerms as jsonb)) terms(term)
+                      where not (
+                        position(terms.term in lower(concat(p.payload->>'name',c.payload->>'name')))>0
+                        or (coalesce(p.payload->>'name','')<>''
+                            and position(lower(p.payload->>'name') in terms.term)>0
+                            and position(replace(terms.term,lower(p.payload->>'name'),'')
+                              in lower(coalesce(c.payload->>'name','')))>0)
+                      )
+                    )
                 ), filtered as materialized (
                   select item,channel_id,version_id,version_number,quote_ready,
                          provider_payload->>'name' provider_name,channel_payload->>'name' channel_name,
                          channel_payload->>'logisticsAttribute' logistics_attribute
                   from channel_base cross join lateral jsonb_array_elements(version_payload->'rows') item
-                  where (:query='' or position(lower(:query) in lower(concat(provider_payload->>'name',channel_payload->>'name')))>0)
-                    and (:country='' or position(lower(:country) in lower(item->>'countryCode'))>0
+                  where (:country='' or position(lower(:country) in lower(item->>'countryCode'))>0
                          or position(lower(:country) in lower(item->>'areaName'))>0)
                     and (:attribute='' or channel_payload->>'logisticsAttribute'=:attribute)
                 ), stats as (select count(*) total from filtered), page_rows as (
@@ -179,7 +188,7 @@ public class LogisticsDatasetService {
                   jsonb_agg(page_rows.payload order by page_rows.provider_name,page_rows.channel_name,page_rows.country_code,page_rows.weight_from)
                     filter(where page_rows.payload is not null),'[]'::jsonb))::text
                 from stats left join page_rows on true group by stats.total
-                """).param("dataset",id).param("query",query).param("country",country).param("attribute",attribute)
+                """).param("dataset",id).param("queryTerms",mapper.valueToTree(queryTerms).toString()).param("country",country).param("attribute",attribute)
                 .param("limit",size).param("offset",(long)page*size).query(String.class).single();
         var payload=json(result);long total=payload.path("total").asLong();var items=new ArrayList<JsonNode>();payload.path("items").forEach(items::add);
         return new com.milano.quotation.common.PageResponse<>(items,page,size,total,(int)Math.ceil(total/(double)size));

@@ -96,6 +96,56 @@ class LogisticsDatasetPostgresIntegrationTest {
             assertEquals(2,book.getSheet("价格明细").getLastRowNum());
         } catch(IOException e){throw new AssertionError(e);}
     }finally{s.setRollbackOnly();}});}
+    @Test void combinedProviderAndChannelSearchKeepsCountryPaginationAndExportAligned(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();
+        var cosmetics=seedSearchChannel(dataset,"云途","云途全球化妆品类专线挂号");
+        seedSearchChannel(dataset,"云途","云途全球服装专线挂号");
+        seedSearchChannel(dataset,"其他物流","全球化妆品类专线挂号");
+        var otherDataset=UUID.fromString(datasets.create("搜索隔离库","QA").path("id").asText());
+        seedSearchChannel(otherDataset,"云途","云途全球化妆品类专线挂号");
+        var version=mapper.readTree(jdbc.sql("select payload::text from logistics_version where channel_id=:id").param("id",cosmetics).query(String.class).single());
+        var rows=(ArrayNode)version.path("rows");
+        rows.add(((ObjectNode)rows.get(0)).deepCopy().put("weightFromKg",1).put("weightToKg",2).put("pricePerKg",60));
+        rows.add(((ObjectNode)rows.get(0)).deepCopy().put("countryCode","US").put("areaName","美国"));
+        jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where channel_id=:id").param("p",version.toString()).param("id",cosmetics).update();
+        var before=jdbc.sql("select md5(string_agg(payload::text,',' order by id)) from logistics_version").query(String.class).single();
+        var cases=new LinkedHashMap<String,Integer>();
+        for(var query:List.of("云途化妆品","化妆品云途"," 云途 化妆品 ","化妆品 云途","云途\u3000化妆品","云途\t化妆品\n挂号","云途全球化妆品类专线挂号"))cases.put(query,2);
+        cases.put("化妆品",3);cases.put("云途",3);cases.put("",4);
+        for(var query:List.of("云途 化妆品 服装","云途%","_","'",".*","云途 不存在"))cases.put(query,0);
+        for(var entry:cases.entrySet()) {
+            var query=entry.getKey();var result=datasets.prices(dataset,0,1,query,"科威特","");
+            assertEquals(entry.getValue().longValue(),result.total(),query);
+            assertEquals(entry.getValue().intValue(),result.totalPages(),query);
+            assertEquals(Math.min(1,entry.getValue()),result.items().size(),query);
+            var all=datasets.prices(dataset,0,50,query," kw ","");
+            assertEquals(result.total(),all.total(),query);
+            assertTrue(all.items().stream().allMatch(r->r.path("countryCode").asText().equals("KW")),query);
+            var snapshot=exports.priceSnapshot(dataset,null,query,"科威特","");
+            try(var book=new XSSFWorkbook(new ByteArrayInputStream(exports.prices(dataset,null,query,"科威特","",snapshot,false)))) {
+                var sheet=book.getSheet("价格明细");assertEquals(result.total(),sheet.getLastRowNum(),query);
+                var expectedPrices=all.items().stream().map(r->r.path("pricePerKg").asDouble()).sorted().toList();
+                var actualPrices=new ArrayList<Double>();int priceColumn=Arrays.asList(LogisticsWorkbookService.KEYS).indexOf("pricePerKg");
+                for(int i=1;i<=sheet.getLastRowNum();i++)actualPrices.add(sheet.getRow(i).getCell(priceColumn).getNumericCellValue());
+                Collections.sort(actualPrices);assertEquals(expectedPrices,actualPrices,query);
+            }catch(IOException e){throw new AssertionError(e);}
+        }
+        var first=datasets.prices(dataset,0,1,"云途化妆品","科威特","");
+        var second=datasets.prices(dataset,1,1,"云途化妆品","科威特","");
+        assertEquals(cosmetics.toString(),first.items().get(0).path("channelId").asText());
+        assertNotEquals(first.items().get(0).path("weightFromKg"),second.items().get(0).path("weightFromKg"));
+        assertEquals(0,datasets.prices(dataset,2,1,"云途化妆品","科威特","").items().size());
+        assertEquals(1,datasets.prices(dataset,0,10,"云途化妆品","美国","").total());
+        assertEquals(0,datasets.prices(dataset,0,10,"云途化妆品","科威特","带电").total());
+        assertEquals(before,jdbc.sql("select md5(string_agg(payload::text,',' order by id)) from logistics_version").query(String.class).single());
+    }finally{s.setRollbackOnly();}});}
+    static UUID seedSearchChannel(UUID dataset,String provider,String channel) {
+        var id=seed(dataset,"搜索-"+UUID.randomUUID(),false);
+        jdbc.sql("update logistics_provider set payload=jsonb_set(payload,'{name}',cast(:name as jsonb)) where id=(select provider_id from logistics_channel where id=:id)").param("id",id).param("name",mapper.valueToTree(provider).toString()).update();
+        jdbc.sql("update logistics_channel set payload=jsonb_set(payload,'{name}',cast(:name as jsonb)) where id=:id").param("id",id).param("name",mapper.valueToTree(channel).toString()).update();
+        jdbc.sql("update logistics_version set payload=jsonb_set(jsonb_set(payload,'{rows,0,countryCode}','\"KW\"'::jsonb),'{rows,0,areaName}','\"科威特\"'::jsonb) where channel_id=:id").param("id",id).update();
+        return id;
+    }
     @Test void quotationRejectsStaleVersionsTamperedFreightAndUnacceptedPrices(){tx.executeWithoutResult(s->{try{
         var c=seed(guard.activeId(),"服务端计费测试",true);var v=jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",c).query(UUID.class).single();
         var policies=mapper.createArrayNode();policies.addObject().put("enabled",true).put("category","普货").putArray("countryRules").addObject().put("country","美国").putArray("allowedChannels").add(key(c));
