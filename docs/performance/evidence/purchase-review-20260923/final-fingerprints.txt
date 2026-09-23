@@ -1,0 +1,6 @@
+finance|5|7b48cbc7760d6ed2c1436cbc3114c0f4
+logistics|1|88600b18fd73f0a197e7acff7aaadadb
+channels|1|bcb69b1a93a788682930866990dd5343
+existing-products|10000|a9240fc8f574575887fd8ce2125fb2ca
+quotations-all-business-fields|2600|edb24f10de5a21ff6478912027581a62
+drafts|60|9afb19678e27a776e9bb4550278649c6

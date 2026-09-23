@@ -1,0 +1,186 @@
+{
+  "run": "MUE8Y8U7",
+  "base": "http://127.0.0.1:18239",
+  "users": 100,
+  "seconds": 180,
+  "roles": {
+    "employee": 60,
+    "purchase": 20,
+    "admin": 20
+  },
+  "peakRequests": 100,
+  "checks": [
+    {
+      "name": "100-row paste; all rows immediately searchable by employee and admin",
+      "passed": true
+    },
+    {
+      "name": "invalid batch is atomic and 101 rows rejected",
+      "passed": true
+    },
+    {
+      "name": "employee cannot paste/review or read another employee review state",
+      "passed": true
+    },
+    {
+      "name": "simultaneous duplicate paste never overwrites or duplicates",
+      "passed": true
+    },
+    {
+      "name": "simultaneous review claim has exactly one winner",
+      "passed": true
+    },
+    {
+      "name": "employee/admin product, quotation, list and review-state payloads are identical",
+      "passed": true
+    },
+    {
+      "name": "all sessions can search a fresh SKU in synchronized bursts",
+      "passed": true
+    }
+  ],
+  "observations": [
+    {
+      "case": "same-SKU paste race",
+      "requests": 20,
+      "rejected": [
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        },
+        {
+          "status": 409,
+          "error": "409 POST /purchase-products/paste: 数据已变化或存在重复，请刷新后重试"
+        }
+      ]
+    }
+  ],
+  "writes": 63010,
+  "reviewed": 8475,
+  "observedDuringLoad": 8401,
+  "pendingAfterDrain": 0,
+  "errors": [],
+  "errorCount": 0,
+  "metrics": {
+    "paste-100": {
+      "count": 1,
+      "p50": 172.13,
+      "p95": 172.13,
+      "p99": 172.13,
+      "max": 172.13
+    },
+    "immediate-search-100": {
+      "count": 2,
+      "p50": 20.92,
+      "p95": 32.32,
+      "p99": 32.32,
+      "max": 32.32
+    },
+    "synchronized-search-burst": {
+      "count": 500,
+      "p50": 35.74,
+      "p95": 77.28,
+      "p99": 81.53,
+      "max": 82.98
+    },
+    "review-poll-10": {
+      "count": 3544,
+      "p50": 18.63,
+      "p95": 78.2,
+      "p99": 208.23,
+      "max": 544.78
+    },
+    "employee-approved-list": {
+      "count": 3544,
+      "p50": 16.3,
+      "p95": 88.32,
+      "p99": 200.28,
+      "max": 495.66
+    },
+    "paste-10": {
+      "count": 6301,
+      "p50": 46.27,
+      "p95": 107.96,
+      "p99": 161.48,
+      "max": 569.61
+    },
+    "employee-search": {
+      "count": 1798,
+      "p50": 8.98,
+      "p95": 86.06,
+      "p99": 180.69,
+      "max": 300.52
+    },
+    "review-claim": {
+      "count": 8475,
+      "p50": 16.86,
+      "p95": 46.42,
+      "p99": 91.29,
+      "max": 493.34
+    },
+    "purchase-immediate-search": {
+      "count": 6301,
+      "p50": 7.78,
+      "p95": 48.94,
+      "p99": 77.66,
+      "max": 296.56
+    },
+    "paste-visible-after-ack": {
+      "count": 6301,
+      "p50": 7.79,
+      "p95": 48.95,
+      "p99": 77.67,
+      "max": 296.59
+    },
+    "review-complete": {
+      "count": 8475,
+      "p50": 16.36,
+      "p95": 71.2,
+      "p99": 87.61,
+      "max": 219.69
+    },
+    "admin-search": {
+      "count": 8475,
+      "p50": 7.39,
+      "p95": 42.97,
+      "p99": 73.03,
+      "max": 304.28
+    },
+    "review-visible-after-ack": {
+      "count": 8401,
+      "p50": 1526.73,
+      "p95": 2908.55,
+      "p99": 3023.49,
+      "max": 3225.2
+    }
+  },
+  "passed": true
+}
