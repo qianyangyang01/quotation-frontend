@@ -47,10 +47,28 @@ export function cleanQuotation(row) {
   for(const key of Object.keys(body)) if (key.startsWith('_')||key.startsWith('financeReview')||key.startsWith('lifecycle')||['id','no','createdAt','updatedAt','revisions','quoteConfirmed','quoteConfirmedAt','quoteConfirmedBy'].includes(key)) delete body[key]
   return body
 }
+export async function stableManifest(session) {
+  for(let attempt=0;attempt<5;attempt++){
+    const value=await session.request('/logistics/published/manifest',{label:'logistics-manifest',allow:[409]})
+    if(!value.expectedStatus)return value
+    assert.match(value.message,/物流正式版本已更新/)
+    await sleep(100)
+  }
+  throw Error('Logistics publication did not converge after five manifest refreshes')
+}
+export async function currentRules(session,attribute,country){
+  for(let attempt=0;attempt<5;attempt++){
+    const manifest=await stableManifest(session)
+    const rules=await session.request('/logistics/published/rules?revision='+encodeURIComponent(manifest.revision)+'&attribute='+encodeURIComponent(attribute)+'&country='+encodeURIComponent(country),{label:'logistics-rules',allow:[409]})
+    if(!rules.expectedStatus)return rules
+    assert.match(rules.message,/物流正式版本已更新/)
+  }
+  throw Error('Logistics rules did not converge after five publication refreshes')
+}
 export async function refreshVersions(session, body) {
   const settings=await session.request('/finance-settings',{label:'finance-read'})
   body.financeVersions=Object.fromEntries(Object.entries(settings).map(([key,value])=>[key,value._version]))
-  body.logisticsRevision=(await session.request('/logistics/published/manifest',{label:'logistics-manifest'})).revision
+  body.logisticsRevision=(await stableManifest(session)).revision
   const skus=[...new Set(body.primarySku.split(/[、,+\s]+/).filter(Boolean))]
   body.purchaseVersions=Object.fromEntries(await Promise.all(skus.map(async sku=>{const row=await session.request('/purchase-products/'+encodeURIComponent(sku),{label:'product-detail'});return [sku,row._version+':'+row._updatedAt]})))
   return body

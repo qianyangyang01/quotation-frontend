@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {quotationDetailsCsv,filterQuotationRecords,buildDashboardSummary} from '../../../src/data/quotationAnalytics.ts'
 import {importLogistics} from './logistics-import.mjs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { Session, setObserver, cleanQuotation, refreshVersions, priceSnapshot, sleep, base, peak, resetPeak } from './client.mjs'
+import { Session, setObserver, cleanQuotation, refreshVersions, priceSnapshot, sleep, base, peak, resetPeak, stableManifest, currentRules } from './client.mjs'
 
 const output=process.env.PERF_OUTPUT_DIR||'artifacts/performance/mixed'
 await mkdir(output,{recursive:true})
@@ -34,7 +34,7 @@ const runId=Date.now().toString(36).toUpperCase()
 const percent=(values,p)=>values.length?Math.round([...values].sort((a,b)=>a-b)[Math.ceil(values.length*p)-1]*100)/100:0
 
 async function saveQuote(s,n){
-  const body=cleanQuotation(fixtures[n%fixtures.length]);body.customerName=`QA-${runId}-${s.account}-${n}`
+  const body=cleanQuotation(fixtures[(Math.floor(n/20)+Number(s.account.slice(4)))%fixtures.length]);body.customerName=`QA-${runId}-${s.account}-${n}`
   await refreshVersions(s,body)
   const key=crypto.randomUUID()
   let row=await s.request('/quotations',{method:'POST',headers:{'Idempotency-Key':key},body,label:'quotation-save',allow:[409]})
@@ -73,11 +73,10 @@ async function operation(s){
   if(s.role==='employee'){
     if(step===0)return saveQuote(s,n)
     if(step===1)return s.request('/finance-settings',{label:'finance-read'})
-    if(step===2)return s.request('/logistics/published/manifest',{label:'logistics-manifest'})
+    if(step===2)return stableManifest(s)
     if(step===3){
       const country=source.quoteOptions.find(o=>o.available!==false)?.country||'美国'
-      const m=await s.request('/logistics/published/manifest',{label:'logistics-manifest'})
-      return s.request('/logistics/published/rules?revision='+encodeURIComponent(m.revision)+'&attribute='+encodeURIComponent(source.logisticsAttribute)+'&country='+encodeURIComponent(country),{label:'logistics-rules'})
+      return currentRules(s,source.logisticsAttribute,country)
     }
     if(step===4||step===12)return s.request('/purchase-products?q='+encodeURIComponent(sku.slice(0,4))+'&size=20',{label:'purchase-search'})
     if(step===5){
@@ -147,7 +146,7 @@ for(const stage of stages){
   await Promise.all(sessions.slice(0,stage.users).map(async(s,index)=>{
     await sleep(index*100)
     while(performance.now()<end){
-      try{await operation(s)}catch(error){metrics.businessFailures++;if(metrics.errors.length<40)metrics.errors.push({account:s.account,error:error.message,stack:error.stack})}
+      try{await operation(s)}catch(error){metrics.businessFailures++;if(metrics.errors.length<40){metrics.errors.push({account:s.account,error:error.message,stack:error.stack});console.log(JSON.stringify({stage:stage.name,account:s.account,error:error.message}))}}
       await sleep(Number(process.env.PERF_THINK_MS||1000))
     }
   }))
