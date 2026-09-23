@@ -19,6 +19,7 @@ class QuotationRecordQueryPostgresIntegrationTest {
         jdbc.getJdbcTemplate().execute("create table quotation_record(id uuid primary key,quote_no text,owner_account text,status text,payload jsonb,version bigint,created_at timestamptz)");
         jdbc.getJdbcTemplate().execute("insert into quotation_record select md5(i::text)::uuid,'Q-'||i,'ME','pending',jsonb_build_object('id',md5(i::text),'no','Q-'||i,'customerName','客户100%','productCategory','服装','country','美国','quoteOptions',jsonb_build_array(jsonb_build_object('country','法国','channel','渠道A'))),0,'2026-09-09 16:00:00+00'::timestamptz from generate_series(1,105) i");
         jdbc.getJdbcTemplate().execute("insert into quotation_record values(md5('other')::uuid,'OTHER','OTHER','won','{\"country\":\"日本\"}',0,'2026-09-10 15:59:59.999999+00'),(md5('next')::uuid,'NEXT','ME','lost','{}',0,'2026-09-10 16:00:00+00'),(md5('before')::uuid,'BEFORE','ME','lost','{}',0,'2026-09-09 15:59:59.999999+00')");
+        jdbc.getJdbcTemplate().execute("alter table quotation_record add column lifecycle_state varchar(16) not null default 'active'");
         var query=new QuotationRecordQuery(jdbc,new ObjectMapper());var date=LocalDate.parse("2026-09-10");
         var filters=new QuotationRecordQuery.Filters("","","","",date,date);
         var mine=query.search("ME",filters,0,10);assertEquals(105,mine.total());assertEquals(11,mine.totalPages());assertEquals(105,mine.summary().pending());assertEquals(10,mine.items().size());assertFalse(mine.countries().contains("日本"));assertTrue(mine.countries().contains("法国"));

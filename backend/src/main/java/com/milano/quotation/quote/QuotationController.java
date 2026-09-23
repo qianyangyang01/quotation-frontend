@@ -46,7 +46,7 @@ public class QuotationController {
                                              Authentication auth) {
         var principal = principal(auth); var all = hasAll(auth);
         var pageable = PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size)), Sort.by(Sort.Direction.DESC, "createdAt"));
-        var rows = all && scope.equals("company") ? records.findAll(pageable) : records.findByOwnerAccount(principal.account(), pageable);
+        var rows = all && scope.equals("company") ? records.findByLifecycleStateNot("trashed", pageable) : records.findByOwnerAccountAndLifecycleStateNot(principal.account(), "trashed", pageable);
         return ApiResponse.ok(PageResponse.from(rows.map(this::view)));
     }
 
@@ -57,9 +57,10 @@ public class QuotationController {
         @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="10") int size,
         @RequestParam(defaultValue="") String q, @RequestParam(defaultValue="") String status,
         @RequestParam(defaultValue="") String country, @RequestParam(defaultValue="") String category,
+        @RequestParam(defaultValue="active") String lifecycle,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate, Authentication auth) {
-        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate),page,size));
+        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle),page,size));
     }
     /** Poll only visible records; enforce owner scope on the server. */
     @GetMapping("/review-status")
@@ -72,6 +73,7 @@ public class QuotationController {
         for (var row : records.findAllById(ids)) {
             if (!hasAll(auth) && !row.ownerAccount.equals(owner)) continue;
             var value = JsonNodeFactory.instance.objectNode().put("id", row.id.toString()).put("_version", row.version);
+            value.put("lifecycleState", row.lifecycleState);
             value.put("financeReviewStatus", row.payload.path("financeReviewStatus").asText("pending"));
             for (var field : QuotationFinanceReview.FIELDS) if (row.payload.has(field)) value.set(field, row.payload.get(field));
             result.add(value);
@@ -89,8 +91,9 @@ public class QuotationController {
                 || !patch.path("financeReviewStatus").isTextual()
                 || !QuotationFinanceReview.STATUSES.contains(patch.path("financeReviewStatus").asText()))
             throw AppException.unprocessable("审核状态或记录版本不合法");
-        var row = records.findById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
+        var row = records.lockById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
         assertVersion(row, patch.path("_version").asLong(-1));
+        QuotationLifecycleController.assertActive(row);
         var current = (ObjectNode) row.payload.deepCopy();
         var target = patch.path("financeReviewStatus").asText();
         if (current.path("financeReviewStatus").asText("pending").equals(target)) return ApiResponse.ok(view(row));
@@ -126,7 +129,7 @@ public class QuotationController {
         readiness.assertCanCreate(input);
         var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = input.deepCopy();
         logisticsGuard.validate(payload);
-        payload.remove("customerId");
+        payload.remove(List.of("customerId", "lifecycleState", "lifecyclePreviousState", "lifecycleChangedAt", "lifecycleChangedBy", "lifecycleChangedAccount", "lifecycleReason"));
         payload.put("id", id.toString()); payload.put("no", no); payload.put("salespersonName", principal.displayName());
         payload.put("salespersonAccount", principal.account()); payload.put("status", "pending");
         payload.put("createdAt", now.toString()); payload.put("updatedAt", now.toString());
@@ -147,6 +150,7 @@ public class QuotationController {
     @Transactional
     ApiResponse<JsonNode> update(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
         var row = mine(id, auth); assertVersion(row, patch.path("_version").asLong(-1));
+        QuotationLifecycleController.assertActive(row);
         submissionValidator.validateUpdate(patch);
         QuotationFinanceReview.rejectDirectPatch(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
@@ -186,12 +190,12 @@ public class QuotationController {
     }
 
     private QuotationRecordEntity mine(UUID id, Authentication auth) {
-        var row = records.findById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
+        var row = records.lockById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
         if (!row.ownerAccount.equals(principal(auth).account())) throw new org.springframework.security.access.AccessDeniedException("forbidden");
         return row;
     }
     private static void assertVersion(QuotationRecordEntity row, long expected) { if (expected != row.version) throw AppException.conflict("报价记录已被其他用户修改，请刷新后重试"); }
-    private JsonNode view(QuotationRecordEntity row) { var payload = (ObjectNode) row.payload.deepCopy(); payload.put("_version", row.version); return payload; }
+    private JsonNode view(QuotationRecordEntity row) { var payload = (ObjectNode) row.payload.deepCopy(); payload.put("_version", row.version); payload.put("lifecycleState", row.lifecycleState); return payload; }
     private static void revision(ArrayNode revisions, QuotationPrincipal principal, String field, JsonNode before, JsonNode after, Instant now) { var revision = revisions.addObject(); revision.put("id", UUID.randomUUID().toString()); revision.put("changedAt", now.toString()); revision.put("editorName", principal.displayName()); revision.put("editorAccount", principal.account()); revision.put("field", field); revision.set("before", before == null ? NullNode.instance : before); revision.set("after", after); }
     private static boolean hasAll(Authentication auth) { return auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("PERM_allRecords")); }
     private static QuotationPrincipal principal(Authentication auth) { return (QuotationPrincipal) auth.getPrincipal(); }

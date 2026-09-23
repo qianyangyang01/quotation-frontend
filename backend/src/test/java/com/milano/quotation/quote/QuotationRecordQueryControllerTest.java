@@ -15,9 +15,9 @@ class QuotationRecordQueryControllerTest {
     @Test void companyScopeCannotExpandPersonalPermissionAndDeepLinksAreProtected(){
         var repo=mock(QuotationRecordRepository.class);var query=mock(QuotationRecordQuery.class);
         var controller=new QuotationController(repo,null,null,null,query,null,null);
-        controller.search("company",0,10,"","","","",null,null,auth("myRecords"));verify(query).search(eq("ME"),any(),eq(0),eq(10));
-        controller.search("company",0,10,"","","","",null,null,auth("allRecords"));verify(query).search(isNull(),any(),eq(0),eq(10));
-        clearInvocations(query);controller.search("mine",0,10,"","","","",null,null,auth("allRecords"));verify(query).search(eq("ME"),any(),eq(0),eq(10));
+        controller.search("company",0,10,"","","","","active",null,null,auth("myRecords"));verify(query).search(eq("ME"),any(),eq(0),eq(10));
+        controller.search("company",0,10,"","","","","active",null,null,auth("allRecords"));verify(query).search(isNull(),any(),eq(0),eq(10));
+        clearInvocations(query);controller.search("mine",0,10,"","","","","active",null,null,auth("allRecords"));verify(query).search(eq("ME"),any(),eq(0),eq(10));
         var row=new QuotationRecordEntity();row.id=UUID.randomUUID();row.ownerAccount="OTHER";row.payload=JsonNodeFactory.instance.objectNode().put("id",row.id.toString());when(repo.findById(row.id)).thenReturn(Optional.of(row));
         assertThrows(AccessDeniedException.class,()->controller.get(row.id,auth("myRecords")));
         assertEquals(row.id.toString(),controller.get(row.id,auth("allRecords")).data().path("id").asText());
