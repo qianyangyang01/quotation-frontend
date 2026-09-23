@@ -31,6 +31,19 @@ it('blocks a reversed date range without submitting a query',async()=>{
   await flush();await vi.advanceTimersByTimeAsync(250);await flush();expect(query.loadRecordPage).toHaveBeenCalledTimes(1);expect(document.querySelector('[role="alert"]')!.textContent).toContain('开始日期不能晚于结束日期')
 })
 
+it.each(['mine', 'company'])('filters pending finance reviews and resets pagination for %s', async scope => {
+  vi.useFakeTimers(); query.loadRecordPage.mockResolvedValue(result(35)); await mount(scope)
+  query.loadRecordPage.mockResolvedValueOnce(result(35,1)); button('下一页').click(); await flush()
+  const select = document.querySelector('.filters select') as HTMLSelectElement
+  expect(Array.from(select.options).find(option => option.value === 'finance-pending')?.textContent).toBe('待财务审核')
+  query.loadRecordPage.mockResolvedValue(result(3))
+  select.value = 'finance-pending'; select.dispatchEvent(new Event('change'))
+  await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
+  expect(query.loadRecordPage.mock.lastCall).toEqual([scope, expect.objectContaining({status:'finance-pending'}), 0, 10])
+  expect(document.querySelector('[aria-label="报价记录分页"]')!.textContent).toContain('共 3 条')
+  expect(document.querySelector('.stats')!.textContent).toContain('3')
+})
+
 it.each(['mine', 'company'])('opens the quotation overview from the detail cell and resets the previous tab for %s', async scope => {
   const row = normalizeQuotationRecord({ id: 'saved', no: 'QT-SAVED', primarySku: 'SKU', customerName: '客户',
     quoteOptions: [{ id: 'us', country: '美国', carrier: '燕文', channel: '原渠道', rule: '原规则', eta: '6-12天', quote1Usd: 19.2, quote2Usd: null, quote3Usd: null, quoteCustomUsd: null }] })!

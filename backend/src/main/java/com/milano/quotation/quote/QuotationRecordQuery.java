@@ -20,13 +20,16 @@ public class QuotationRecordQuery {
     @Transactional(readOnly=true, isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Result search(String owner, Filters filters, int page, int size) {
         if(filters.startDate()!=null && filters.endDate()!=null && filters.startDate().isAfter(filters.endDate())) throw AppException.unprocessable("开始日期不能晚于结束日期");
-        if(filters.status()!=null && !filters.status().isBlank() && !Set.of("pending","won","lost","processed","finance-approved","finance-rejected").contains(filters.status())) throw AppException.unprocessable("报价状态不合法");
+        if(filters.status()!=null && !filters.status().isBlank() && !Set.of("pending","won","lost","processed","finance-pending","finance-approved","finance-rejected").contains(filters.status())) throw AppException.unprocessable("报价状态不合法");
         var params=new HashMap<String,Object>(); var where=new StringBuilder(" where 1=1");
         if(owner!=null) { where.append(" and owner_account=:owner");params.put("owner",owner); }
         var zone=ZoneId.of("Asia/Shanghai");
         if(filters.startDate()!=null) { where.append(" and created_at>=:start");params.put("start",java.sql.Timestamp.from(filters.startDate().atStartOfDay(zone).toInstant())); }
         if(filters.endDate()!=null) { where.append(" and created_at<:end");params.put("end",java.sql.Timestamp.from(filters.endDate().plusDays(1).atStartOfDay(zone).toInstant())); }
-        if(filters.status()!=null && !filters.status().isBlank()) { if (filters.status().startsWith("finance-")) { where.append(" and payload->>'financeReviewStatus'=:reviewStatus");params.put("reviewStatus",filters.status().substring(8)); }
+        if(filters.status()!=null && !filters.status().isBlank()) { if (filters.status().equals("finance-pending")) {
+                // Match the displayed default for legacy records without a review status.
+                where.append(" and coalesce(payload->>'financeReviewStatus','') not in ('approved','rejected')");
+            } else if (filters.status().startsWith("finance-")) { where.append(" and payload->>'financeReviewStatus'=:reviewStatus");params.put("reviewStatus",filters.status().substring(8)); }
             else if (filters.status().equals("processed")) where.append(" and status in ('pending','lost') and payload->>'quoteConfirmed'='true'");
             else if (filters.status().equals("pending")) where.append(" and status in ('pending','lost') and coalesce(payload->>'quoteConfirmed','false')<>'true'");
             else { where.append(" and status=:status");params.put("status",filters.status()); } }

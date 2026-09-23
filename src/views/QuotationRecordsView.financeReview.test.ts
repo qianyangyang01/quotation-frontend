@@ -37,6 +37,19 @@ it('employee cannot review and receives the changed status while the page remain
   expect(document.querySelector('strong.finance-review')?.textContent).toBe('财务已审核-价格有误不可报价')
   expect(document.querySelector('strong.finance-review')?.classList.contains('rejected')).toBe(true)
 })
+it('refreshes the pending review list and totals after approving a record', async () => {
+  vi.useFakeTimers(); await mount('super_admin','company')
+  const filter=document.querySelector('.filters select') as HTMLSelectElement
+  filter.value='finance-pending'; filter.dispatchEvent(new Event('change'))
+  await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
+  mocks.patch.mockResolvedValue({...saved(),_version:3,financeReviewStatus:'approved'})
+  mocks.page.mockResolvedValue({items:[],page:0,size:10,total:0,totalPages:0,summary:{pending:0,won:0,lost:0,total:0},countries:[]})
+  const review=document.querySelector('select.finance-review') as HTMLSelectElement
+  review.value='approved'; review.dispatchEvent(new Event('change')); await flush()
+  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'finance-pending'})
+  expect(document.querySelector('select.finance-review')).toBeNull()
+  expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 0 条')
+})
 it('failed review retains saved status and asks for a fresh version instead of optimistic approval',async()=>{
   vi.useFakeTimers();await mount('super_admin','company');mocks.patch.mockRejectedValue(new Error('报价记录已被其他用户修改，请刷新后重试'))
   const select=document.querySelector('select.finance-review') as HTMLSelectElement

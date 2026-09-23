@@ -26,7 +26,7 @@ const route = useRoute()
 const records = ref<QuotationRecord[]>([])
 const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
 const search = ref('')
-const filterStatus = ref<'' | 'pending' | 'won' | 'processed' | 'finance-approved' | 'finance-rejected'>('')
+const filterStatus = ref<'' | 'pending' | 'won' | 'processed' | 'finance-pending' | 'finance-approved' | 'finance-rejected'>('')
 const filterCountry = ref('')
 const filterCategory = ref('')
 const startDate=ref('');const endDate=ref('');const page=ref(0);const pageSize=ref(10)
@@ -79,6 +79,7 @@ async function changeReview(row: QuotationRecord, event: Event) {
     records.value = records.value.map(item => item.id === saved.id ? saved : item)
     if (selected.value?.id === saved.id && !editing.value) selected.value = saved
     toast('审核状态已保存，员工端会自动同步')
+    if (filterStatus.value.startsWith('finance-')) await refresh(true)
   } catch (error) {
     if (account !== currentAuthUser.value.account) return
     toast(error instanceof Error ? error.message : '审核保存失败，请重试')
@@ -246,7 +247,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
   <div class="app">
     <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '核对客户报价、处理状态与成交结果' : '查看全体业务员的报价、处理状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>当前筛选范围</em></span></article><article><i>✓</i><span><small>已处理</small><b>{{ summary.processed || 0 }}</b><em>当前筛选范围</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>当前筛选范围</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ summary.total }}</b><em>当前筛选范围</em></span></article></section>
-      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="finance-approved">财务已审核-可报价</option><option value="finance-rejected">财务已审核-价格有误不可报价</option><option value="won">已成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
+      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="finance-pending">待财务审核</option><option value="finance-approved">财务已审核-可报价</option><option value="finance-rejected">财务已审核-价格有误不可报价</option><option value="won">已成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>

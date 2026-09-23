@@ -42,6 +42,23 @@ class QuotationRecordQueryPostgresIntegrationTest {
         assertEquals(1,query.search("ME",new QuotationRecordQuery.Filters("","finance-approved","","",date,date),0,10).total());
         assertEquals(2,query.search(null,new QuotationRecordQuery.Filters("","finance-approved","","",date,date),0,10).total());
         assertEquals(1,query.search("ME",new QuotationRecordQuery.Filters("","finance-rejected","","",date,date),0,10).total());
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":\"pending\"}'::jsonb where quote_no='Q-3'");
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":null}'::jsonb where quote_no='Q-4'");
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":\"\"}'::jsonb where quote_no='Q-5'");
+        var pendingReviewFilters=new QuotationRecordQuery.Filters("100%","finance-pending","法国","服装",date,date);
+        var pendingReview=query.search("ME",pendingReviewFilters,0,100);
+        assertEquals(103,pendingReview.total());assertEquals(103,pendingReview.summary().pending());
+        var exportRows=new java.util.ArrayList<>(pendingReview.items());
+        exportRows.addAll(query.search("ME",pendingReviewFilters,1,100).items());
+        assertEquals(103,exportRows.size());assertEquals(103,exportRows.stream().map(row->row.path("id").asText()).distinct().count());
+        assertTrue(exportRows.stream().noneMatch(row->java.util.Set.of("approved","rejected").contains(row.path("financeReviewStatus").asText())));
+        for(var no:java.util.List.of("Q-3","Q-4","Q-5","Q-6")) assertTrue(exportRows.stream().anyMatch(row->row.path("no").asText().equals(no)));
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":\"pending\"}'::jsonb where quote_no='OTHER'");
+        var allPendingReview=new QuotationRecordQuery.Filters("","finance-pending","","",date,date);
+        assertEquals(103,query.search("ME",allPendingReview,0,10).total());
+        assertEquals(104,query.search(null,allPendingReview,0,10).total());
+        assertEquals(1,query.search(null,allPendingReview,0,10).summary().won()); // Review and deal status are independent.
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":\"approved\"}'::jsonb where quote_no='OTHER'");
         var everyDate=new QuotationRecordQuery.Filters("","","","",null,null);
         var historical=query.search("ME",everyDate,0,100);
         assertEquals(105,historical.summary().pending()); // 103 pending + 2 legacy lost

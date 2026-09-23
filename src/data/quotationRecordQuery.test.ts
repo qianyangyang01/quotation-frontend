@@ -12,7 +12,8 @@ describe('record query',()=>{
   })
   it('exports all matching pages beyond 100 using captured filters',async()=>{
     get.mockResolvedValueOnce({items:Array.from({length:100},(_,i)=>row(i)),page:0,total:105,totalPages:2}).mockResolvedValueOnce({items:Array.from({length:5},(_,i)=>row(i+100)),page:1,total:105,totalPages:2})
-    expect(await loadFilteredRecords('company',{startDate:'2026-09-01'})).toHaveLength(105)
+    expect(await loadFilteredRecords('company',{startDate:'2026-09-01',status:'finance-pending'})).toHaveLength(105)
+    for (const [url] of get.mock.calls) expect(new URLSearchParams(url.split('?')[1]).get('status')).toBe('finance-pending')
     expect(get.mock.calls[1]![0]).toContain('page=1');expect(get.mock.calls[1]![0]).toContain('startDate=2026-09-01')
   })
   it('rejects a partial export when records change between requests',async()=>{
