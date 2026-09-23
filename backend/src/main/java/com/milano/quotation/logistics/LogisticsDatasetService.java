@@ -142,6 +142,8 @@ public class LogisticsDatasetService {
     @Transactional(readOnly=true)
     public com.milano.quotation.common.PageResponse<JsonNode> prices(UUID id,int page,int size,String query,String country,String attribute) {
         if(page<0||size<1||size>200)throw AppException.unprocessable("分页参数不合法");
+        query=query==null?"":query.strip();
+        country=country==null?"":country.strip();
         dataset(id);
         // The materialized page/count query briefly holds the expanded current rows twice. Keep this
         // transaction-local so production-wide memory settings and unrelated requests are unaffected.
@@ -162,7 +164,8 @@ public class LogisticsDatasetService {
                          channel_payload->>'logisticsAttribute' logistics_attribute
                   from channel_base cross join lateral jsonb_array_elements(version_payload->'rows') item
                   where (:query='' or position(lower(:query) in lower(concat(provider_payload->>'name',channel_payload->>'name')))>0)
-                    and (:country='' or lower(item->>'countryCode')=lower(:country) or item->>'areaName'=:country)
+                    and (:country='' or position(lower(:country) in lower(item->>'countryCode'))>0
+                         or position(lower(:country) in lower(item->>'areaName'))>0)
                     and (:attribute='' or channel_payload->>'logisticsAttribute'=:attribute)
                 ), stats as (select count(*) total from filtered), page_rows as (
                   select (item || jsonb_build_object('providerName',provider_name,'channelName',channel_name,

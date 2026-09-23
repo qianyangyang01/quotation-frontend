@@ -75,6 +75,27 @@ class LogisticsDatasetPostgresIntegrationTest {
         var empty=datasets.prices(dataset,0,20,"不存在的渠道","US","普货");
         assertEquals(0,empty.total());assertEquals(0,empty.totalPages());assertEquals(0,empty.items().size());
     }finally{s.setRollbackOnly();}});}
+    @Test void priceSearchMatchesPartialNamesAndCountriesAndExportsTheSameRows(){tx.executeWithoutResult(s->{try{
+        var dataset=guard.activeId();seed(dataset,"模糊物流甲",false);var german=seed(dataset,"模糊物流乙",false);
+        jdbc.sql("update logistics_version set payload=jsonb_set(jsonb_set(payload,'{rows,0,countryCode}','\"DE\"'::jsonb),'{rows,0,areaName}','\"德国\"'::jsonb) where channel_id=:id").param("id",german).update();
+        for(var country:List.of("美"," u ","us"," US ")) {
+            var result=datasets.prices(dataset,0,10," 模糊 ",country,"");
+            assertEquals(1,result.total());assertEquals("US",result.items().get(0).path("countryCode").asText());
+            try(var book=new XSSFWorkbook(new ByteArrayInputStream(exports.prices(dataset,null," 模糊 ",country,"")))) {
+                assertEquals(result.total(),book.getSheet("价格明细").getLastRowNum());
+            } catch(IOException e){throw new AssertionError(e);}
+        }
+        var broad=datasets.prices(dataset,0,1,"模糊","国","");
+        assertEquals(2,broad.total());assertEquals(2,broad.totalPages());assertEquals(1,broad.items().size());
+        assertEquals(1,datasets.prices(dataset,1,1,"模糊","国","").items().size());
+        assertEquals(2,datasets.prices(dataset,0,10,"货渠","国","").total());
+        assertEquals(2,datasets.prices(dataset,0,10,"模糊","  ","").total());
+        for(var country:List.of("瑞","%","_"))assertEquals(0,datasets.prices(dataset,0,10,"模糊",country,"").total());
+        assertEquals(0,datasets.prices(dataset,0,10,"%","","").total());
+        try(var book=new XSSFWorkbook(new ByteArrayInputStream(exports.prices(dataset,null,"模糊","国","")))) {
+            assertEquals(2,book.getSheet("价格明细").getLastRowNum());
+        } catch(IOException e){throw new AssertionError(e);}
+    }finally{s.setRollbackOnly();}});}
     @Test void quotationRejectsStaleVersionsTamperedFreightAndUnacceptedPrices(){tx.executeWithoutResult(s->{try{
         var c=seed(guard.activeId(),"服务端计费测试",true);var v=jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",c).query(UUID.class).single();
         var policies=mapper.createArrayNode();policies.addObject().put("enabled",true).put("category","普货").putArray("countryRules").addObject().put("country","美国").putArray("allowedChannels").add(key(c));

@@ -38,6 +38,8 @@ public class LogisticsExportService {
     @Transactional(readOnly=true,isolation=Isolation.REPEATABLE_READ)
     public byte[] prices(UUID dataset,UUID versionId,String query,String country,String attribute,String snapshot,boolean includeSourceNotes) {
         if(snapshot!=null&&!snapshot.equals(priceSnapshot(dataset,versionId,query,country,attribute)))throw AppException.conflict("价格版本已变化，请重新生成下载链接");
+        query=query==null?"":query.strip().toLowerCase(Locale.ROOT);
+        country=country==null?"":country.strip().toLowerCase(Locale.ROOT);
         var versions=jdbc.sql("""
                 select (v.payload || jsonb_build_object('quoteReady',logistics_version_quote_ready(v.id)))::text as payload,p.payload->>'name' as provider,c.payload->>'name' as channel,
                 c.payload->>'logisticsAttribute' as attribute,v.id::text as id,v.status
@@ -60,7 +62,7 @@ public class LogisticsExportService {
                 if(!attribute.isBlank()&&!attribute.equals(v.path("attribute").asText()))continue;
                 boolean included=false;
                 for(var value:v.path("version").path("rows")) {
-                    if(!country.isBlank()&&!country.equalsIgnoreCase(value.path("countryCode").asText())&&!country.equals(value.path("areaName").asText()))continue;
+                    if(!country.isBlank()&&!value.path("countryCode").asText().toLowerCase(Locale.ROOT).contains(country)&&!value.path("areaName").asText().toLowerCase(Locale.ROOT).contains(country))continue;
                     var row=sheet.createRow(rowNumber++);
                     for(int col=0;col<LogisticsWorkbookService.KEYS.length;col++)cell(row,col,value.path(LogisticsWorkbookService.KEYS[col]));
                     int c=LogisticsWorkbookService.KEYS.length;
