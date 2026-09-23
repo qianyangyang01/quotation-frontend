@@ -1,0 +1,7 @@
+# Java migration checksums use raw resource bytes. Preserve the line endings
+# of the already deployed migrations across Windows and Linux builds.
+backend/src/main/resources/logistics-repairs/documented-minimum-20260915.json text eol=crlf
+backend/src/main/resources/logistics-repairs/tongyou-sensitive-b-minimum-20260916.json text eol=crlf
+backend/src/main/resources/logistics-repairs/all-channel-minimum-20260916.json text eol=crlf
+backend/src/main/resources/logistics-repairs/additional-company-channels-20260921.json text eol=crlf
+backend/src/main/resources/logistics-repairs/sunyou-company-channels-20260922.json text eol=lf
