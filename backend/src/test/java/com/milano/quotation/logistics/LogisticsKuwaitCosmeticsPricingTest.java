@@ -33,7 +33,8 @@ class LogisticsKuwaitCosmeticsPricingTest {
             LogisticsSourceParserTest.row(sheet,1,"科威特","8-12工作日","0<W≤5",.1,.1,74,75);
             var parsed=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper))
                     .parse(LogisticsSourceParserTest.bytes(book),"云途价格.xlsx").path("channels").get(0).path("rows").get(0);
-            assertTrue(LogisticsKuwaitCosmeticsPricing.applies(parsed),parsed.toPrettyString());
+            assertTrue(LogisticsStepPricing.supported(parsed),parsed.toPrettyString());
+            assertEquals(.1,parsed.path("billingStepKg").asDouble());
             assertFalse(parsed.path("reviewWarning").asText().contains("普通计费进位规则需要适配"));
             assertEquals(89.8,engine.calculate(mapper.createArrayNode().add(parsed),input(.12)).path("total").asDouble());
         }
@@ -55,11 +56,12 @@ class LogisticsKuwaitCosmeticsPricingTest {
         assertThrows(AppException.class,()->engine.calculate(mapper.createArrayNode().add(row()).add(row().put("billingStepKg",0)),input(.12)));
     }
 
-    @Test void doesNotChangeOtherCountriesChannelsOrSteps() {
-        for (var other : java.util.List.of(row().put("countryCode","QA"),row().put("sourceSheet","云途全球服装专线挂号"),
-                row().put("billingStepKg",.01),row().put("billingStepKg",0),row().put("billingStepKg","0.1"))) {
+    @Test void supportsOtherExplicitStepsAndPreservesUnconfiguredRows() {
+        for (var other : java.util.List.of(row().put("countryCode","QA"),row().put("sourceSheet","云途全球服装专线挂号"))) {
             var result=engine.calculate(mapper.createArrayNode().add(other),input(.12).put("country",other.path("countryCode").asText()));
-            assertEquals(.12,result.path("chargeWeightKg").asDouble());assertEquals(83.88,result.path("total").asDouble());
+            assertEquals(.2,result.path("chargeWeightKg").asDouble());
         }
+        assertEquals(.12,engine.calculate(mapper.createArrayNode().add(row().put("billingStepKg",0)),input(.12)).path("chargeWeightKg").asDouble());
+        assertThrows(AppException.class,()->engine.calculate(mapper.createArrayNode().add(row().put("billingStepKg","0.1")),input(.12)));
     }
 }

@@ -34,10 +34,13 @@ it('selects the price tier using rounded weight and rejects conflicting rounding
   expect(calculateLogisticsFee({ ...rule, prices: [price, { ...price, billingStepKg: 0 }] }, 'KW', .12)).toBeNull()
 })
 
-it('does not enable rounding for other countries, channels, or unconfirmed steps', () => {
-  for (const patch of [{ countryCode: 'QA', areaName: '卡塔尔' }, { sourceSheet: '云途全球服装专线挂号' },
-    { billingStepKg: .01 }, { billingStepKg: undefined }, { sourceSheet: undefined }]) {
+it('keeps unconfigured tariffs unrounded while supporting other explicit steps', () => {
+  for (const billingStepKg of [undefined, 0]) {
+    const row = { ...price, billingStepKg }
+    expect(calculateLogisticsFee({ ...rule, prices: [row] }, 'KW', .12)).toMatchObject({ chargeWeightKg: .12, total: 83.88 })
+  }
+  for (const patch of [{ countryCode: 'QA' }, { sourceSheet: '云途全球服装专线挂号' }, { sourceSheet: undefined }]) {
     const row = { ...price, ...patch }
-    expect(calculateLogisticsFee({ ...rule, prices: [row] }, row.countryCode, .12)).toMatchObject({ chargeWeightKg: .12, total: 83.88 })
+    expect(calculateLogisticsFee({ ...rule, prices: [row] }, row.countryCode, .12)?.chargeWeightKg).toBe(.2)
   }
 })

@@ -56,7 +56,7 @@ final class LogisticsReadiness {
             if(row.path("surcharge").asDouble()>0)block(row,"附加费需要明确计费适用规则");
             if(row.path("fuelSurchargeRate").asDouble()>0)block(row,"燃油附加费率尚未接入自动计费");
             if(row.path("linehaulPerKg").asDouble()>0)block(row,"干线费需要明确计费叠加规则");
-            if(row.path("billingStepKg").asDouble()>0&&!model.equals("first-next")&&!LogisticsKuwaitCosmeticsPricing.applies(row))block(row,"普通计费进位规则需要适配");
+            if(!model.equals("first-next")&&!LogisticsStepPricing.supported(row))block(row,"计费进位参数无效");
             if(!row.path("currency").asText("CNY").equals("CNY"))block(row,"非人民币计价需要币种适配");
             var routeKey=routeKey(row);row.put("routeKey",routeKey);
             routes.computeIfAbsent(routeKey,ignored->new ArrayList<>()).add(row);

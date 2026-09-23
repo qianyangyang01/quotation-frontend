@@ -21,11 +21,11 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="company-channels-2026.09.22-sunyou-v1";
+    public static final String VERSION="billing-steps-2026.09.23-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
-    public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG");
+    public static final List<String> EXTRA_HEADERS=List.of("物流商","渠道名称","货物属性","币种","计费方式","起点包含","终点包含","发货区域","计费进位KG","规则备注","来源表","来源行","待适配原因","干线费每KG","分段进位KG");
     private static final Pattern NUM=Pattern.compile("[0-9]+(?:\\.[0-9]+)?");
     private static final Pattern DATE_METADATA=Pattern.compile("(?i)^(?:(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?\\s*)?(?:19|20)\\d{2}\\s*[-/.年]\\s*\\d{1,2}\\s*[-/.月]\\s*\\d{1,2}\\s*日?(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?$");
     private static final Pattern DATE_LABEL=Pattern.compile("(?i)^(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?$");
@@ -533,6 +533,11 @@ public class LogisticsSourceParser {
             row.put("sourceCode",row.path("sourceProductCode").asText()).put("sourceFeeLabel","挂号费");
             if(row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt())row.put("etaSource","source-row");
             if(headers.containsKey("计费进位KG"))numeric(row,"billingStepKg",source,r,headers.get("计费进位KG"),target,true);
+            var stepBands=value(source,r,headers,"分段进位KG");
+            if(!stepBands.isBlank()) {
+                try {row.set("billingStepBands",LogisticsStepPricing.importBands(stepBands));}
+                catch(IllegalArgumentException error){issue(target,r+1,"分段进位KG",error.getMessage(),"error");}
+            }
             pending(row,value(source,r,headers,"待适配原因"));
             if(headers.containsKey("干线费每KG"))numeric(row,"linehaulPerKg",source,r,headers.get("干线费每KG"),target,true);
             if(source.scope.unrestricted())target.put("logisticsAttribute",defaultText(value(source,r,headers,"货物属性"),"普货"));
@@ -1310,11 +1315,13 @@ public class LogisticsSourceParser {
             if(!row.path("currency").asText("CNY").equals("CNY"))pending(row,"非人民币计价需要币种适配");
             if(row.path("surcharge").asDouble()>0)pending(row,"附加费需要明确计费适用规则");
             if(row.path("fuelSurchargeRate").asDouble()>0)pending(row,"燃油附加费率尚未接入自动计费");
-            if(row.path("billingStepKg").asDouble()>0 && !row.path("pricingModel").asText().equals("first-next") && !LogisticsKuwaitCosmeticsPricing.applies(row))pending(row,"普通计费进位规则需要适配");
+            if(!row.path("pricingModel").asText().equals("first-next") && !LogisticsStepPricing.supported(row))issue(channel,row.path("sourceRow").asInt(),"计费进位","计费进位参数无效","error");
             if(row.path("notes").asText().matches("(?s).*(免泡|半泡|倍|附加费|燃油|干线费|起重|最低|起收).*"))pending(row,"行级价格条件需适配核对");
             else if(!row.path("notes").asText().isBlank())warn(row,"原表普通尺寸、邮编或说明需要人工复核");
             if(row.path("linehaulPerKg").asDouble()>0)pending(row,"干线费需要明确计费叠加规则");
             for(var unsupported:List.of("minLengthCm","maxLengthCm","minWidthCm","maxWidthCm","minSideAreaCm2","maxSideAreaCm2"))if(row.path(unsupported).asDouble()>0)warn(row,"尺寸准入信息需要人工复核");
+            var rounded=LogisticsRoundingNotes.apply(row);
+            if(rounded.has("billingStepBands"))row.set("billingStepBands",rounded.path("billingStepBands"));
             var key=LogisticsDatasetService.hash(group+"|"+row.path("weightFromKg").asDouble()+"|"+to+"|"+row.path("weightFromInclusive").asBoolean()+"|"+row.path("weightToInclusive").asBoolean());row.put("rowKey",key);
             if(!seen.add(key))issue(channel,row.path("sourceRow").asInt(),"重量段","重复计费档位","error");
         }

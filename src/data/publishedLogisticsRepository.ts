@@ -30,7 +30,7 @@ export function buildQuoteLogisticsCountryQuery(
 export const logisticsRebuilding = ref(false)
 const DB_NAME = 'milano-quotation-cache'
 const DB_VERSION = 3
-const CACHE_SCHEMA = 'published-logistics-v4-kuwait-100g'
+const CACHE_SCHEMA = 'published-logistics-v5-rounding'
 const MANIFEST_STORE = 'logisticsManifest'
 const RULE_STORE = 'publishedRuleQueries'
 const CACHE_EVENT = 'milano:published-logistics-cache'
