@@ -22,7 +22,7 @@ const hint = computed(() => {
   if (needsReload.value) return `${stale.value ? '报价内容已更新' : '审核占用已变化'}，请重新加载并核对后完成审核。`
   return own.value ? '选择审核通过或价格异常' : '开始审核并占用当前报价'
 })
-watch(() => [props.record.id, props.state._version, props.state._reviewVersion, props.state.financeReviewStatus, props.state.financeReviewClaimedAccount, props.busy], () => dialog.value?.close())
+watch([() => props.record.id, () => props.state._version, () => props.state._reviewVersion, () => props.state.financeReviewStatus, () => props.state.financeReviewClaimedAccount, () => props.busy], () => dialog.value?.close())
 function submit() {
   if (props.busy || (active.value && !own.value)) return
   if (needsReload.value) { emit('reload'); return }

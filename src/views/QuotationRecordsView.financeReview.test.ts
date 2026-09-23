@@ -69,6 +69,17 @@ it('closes the result selector when a newer quotation arrives',async()=>{
   button('价格异常不可报价').click();await flush()
   expect(mocks.patch).toHaveBeenCalledTimes(1)
 })
+it('keeps the selector open during unchanged status polling and closes without submitting',async()=>{
+  vi.useFakeTimers();await mount('super_admin','company')
+  mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()
+  mocks.get.mockResolvedValue([claimed()])
+  button('审核完成').click();await flush()
+  const dialog=document.querySelector<HTMLDialogElement>('dialog[aria-label="选择审核结果"]')!
+  await vi.advanceTimersByTimeAsync(3000);await flush()
+  expect(dialog.open).toBe(true)
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭审核结果"]')!.click();await flush()
+  expect(dialog.open).toBe(false);expect(mocks.patch).toHaveBeenCalledTimes(1)
+})
 it('combines processing and review filters and clears mine when leaving reviewing',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   const select=async(label:string,value:string)=>{
