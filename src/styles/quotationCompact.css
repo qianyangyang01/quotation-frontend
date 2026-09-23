@@ -243,53 +243,131 @@
   .jerry-app .quotation-page .sheet-empty { padding: 20px; margin: 8px 0; }
 }
 
-@media (min-width: 1280px) {
-  .jerry-app .quotation-page .cost-workbench:has(> .product-card) { grid-template-columns: 220px minmax(0, 1fr); align-items: stretch; }
-  .jerry-app .quotation-page .product-card { grid-template-columns: 56px minmax(0, 1fr); align-content: center; padding: 12px; }
+/* The surrounding workspace places the summary alongside either matrix mode. */
+.jerry-app .quotation-page { width: min(1880px, 96vw); --quote-border: #dfe6eb; }
+.jerry-app .quotation-page .quotation-selection-workspace { display: grid; gap: 12px; min-width: 0; }
+.jerry-app .quotation-page .matrix-mode-panel, .jerry-app .quotation-page .quote-editor, .jerry-app .quotation-page .quote-summary { min-width: 0; }
+.jerry-app .quotation-page .condition-card, .jerry-app .quotation-page .module-card { border-top-color: #ffd79b; }
+.jerry-app .quotation-page .custom-price { background: #fff3df; color: #b96800; }
+.jerry-app .quotation-page .custom-head, .jerry-app .quotation-page .custom-quote-head, .jerry-app .quotation-page .custom-quote-head small { color: #b96800; }
+.jerry-app .quotation-page .country-picker-panel { min-width: 0; background: #f7f9fa; }
+.jerry-app .quotation-page .country-picker-panel h3 { margin: 0; padding: 12px; color: #fff; background: #18794e; font-size: 14px; }
+.jerry-app .quotation-page .country-search { box-sizing: border-box; display: flex; align-items: center; gap: 7px; height: 34px; margin: 10px; padding: 0 9px; border: 1px solid #d8e1e6; border-radius: 6px; color: #7e8b94; background: #fff; }
+.jerry-app .quotation-page .country-search input { width: 100%; font-size: 11px; }
+.jerry-app .quotation-page .channel-comparison { min-width: 0; overflow-x: auto; }
+.jerry-app .quotation-page .channel-comparison > footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 9px 12px; border-top: 1px solid #e3e9ed; color: #73808a; font-size: 10px; }
+.jerry-app .quotation-page .channel-comparison > footer > span { margin-right: auto; }
+.jerry-app .quotation-page .channel-comparison > footer label { display: flex; align-items: center; gap: 5px; }
+.jerry-app .quotation-page .channel-comparison > footer select, .jerry-app .quotation-page .channel-comparison > footer button { height: 28px; border: 1px solid #d9e1e6; border-radius: 5px; background: #fff; color: #566570; font-size: 10px; }
+.jerry-app .quotation-page .channel-comparison > footer button:disabled { opacity: .4; }
+.jerry-app .quotation-page .selection-actions button:first-child { background: #fff; border: 1px solid #4d9b68; color: #18794e; }
+.jerry-app .quotation-page .quote-rows article.selected .selection-actions button:first-child { background: #18794e; color: #fff; }
+.jerry-app .quotation-page .selection-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.jerry-app .quotation-page .quote-editor-heading { padding: 12px 16px; border-top: 3px solid #ff9700; border-bottom: 1px solid #e2e7ea; }
+.jerry-app .quotation-page .quote-editor-heading h2 { margin: 0 0 4px; font-size: 18px; }
+.jerry-app .quotation-page .quote-editor-heading span { color: #7c8993; font-size: 11px; }
+@media (min-width: 1101px) {
+  .jerry-app .quotation-page .quotation-header { padding: 4px 0; background: transparent; border: 0; box-shadow: none; }
+  .jerry-app .quotation-page .quotation-header .heading p, .jerry-app .quotation-page .workflow { display: none; }
+  .jerry-app .quotation-page .draft-status-bar { padding: 5px 12px; }
+  .jerry-app .quotation-page .condition-card { grid-template-columns: minmax(0, 1fr) 140px 120px; gap: 8px 12px; }
+  .jerry-app .quotation-page .condition-grid { grid-column: 1; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .jerry-app .quotation-page .commission-field { display: grid; grid-template-columns: 1fr; gap: 5px; padding: 0; border: 0; background: transparent; align-self: start; }
+  .jerry-app .quotation-page .commission-field input { width: 100%; height: 34px; }
+  .jerry-app .quotation-page .commission-field small { font-size: 9px; }
+  .jerry-app .quotation-page .condition-card > footer { align-self: start; padding-top: 22px; }
+  .jerry-app .quotation-page .condition-card > footer > span { display: none; }
+  .jerry-app .quotation-page .condition-card > footer button { width: 100%; }
+  .jerry-app .quotation-page .cost-workbench:has(> .product-card) { grid-template-columns: 215px minmax(0, 1fr); gap: 0; border: 1px solid #dfe6eb; border-radius: 10px; background: #fff; }
+  .jerry-app .quotation-page .cost-workbench > .product-card { grid-template-columns: 56px minmax(0, 1fr); align-content: center; padding: 12px; border: 0; border-right: 1px solid #e2e7ea; border-radius: 0; box-shadow: none; }
   .jerry-app .quotation-page .product-card .physical-image { width: 56px; }
   .jerry-app .quotation-page .product-card .info { gap: 5px; }
   .jerry-app .quotation-page .product-card .info > small { width: 100%; }
   .jerry-app .quotation-page .product-card .info p { gap: 4px; }
   .jerry-app .quotation-page .product-card .state { grid-column: 1 / -1; margin-top: 6px; }
-
-  /* Keep country selection beside the channel comparison on desktop. */
-  .jerry-app .quotation-page .common-matrix { display: grid; grid-template-columns: minmax(350px, .9fr) minmax(0, 2.4fr); align-items: start; }
-  .jerry-app .quotation-page .common-head { grid-column: 1 / -1; }
-  .jerry-app .quotation-page .country-grid { grid-column: 1; grid-row: 2 / span 7; grid-template-columns: repeat(3, minmax(0, 1fr)); align-self: stretch; align-content: start; border-right: 1px solid #d5e3da; }
-  .jerry-app .quotation-page .country-grid button { flex-wrap: wrap; gap: 3px 5px; }
-  .jerry-app .quotation-page .country-grid button > span { flex: 1; }
-  .jerry-app .quotation-page .country-grid em { flex-basis: 100%; text-align: right; }
-  .jerry-app .quotation-page .common-matrix > :not(.common-head):not(.country-grid) { grid-column: 2; }
-  .jerry-app .quotation-page .common-matrix > .country-summary { grid-template-columns: minmax(170px, 1fr) 180px 180px auto; }
-  .jerry-app .quotation-page .country-summary .metric em { max-width: 100px; }
-  .jerry-app .quotation-page .common-matrix .table-head,
-  .jerry-app .quotation-page .common-matrix .quote-rows article { grid-template-columns: minmax(210px, 1.5fr) .55fr repeat(4, .65fr) 92px; gap: 8px; }
-
-  /* Put the summary beside the editor instead of above it. */
-  .jerry-app .quotation-page .quote-preview { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; }
-  .jerry-app .quotation-page .preview-head { grid-column: 1; padding: 12px; flex-direction: column; align-items: flex-start; gap: 8px; border-bottom: 0; }
-  .jerry-app .quotation-page .preview-kpis { grid-column: 1; grid-template-columns: 1fr 1fr; padding: 8px 12px; }
+  .jerry-app .quotation-page .cost-workbench > .module-card { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 8px 12px; border: 0; box-shadow: none; }
+  .jerry-app .quotation-page .module-card > header { grid-column: 1 / -1; margin: 0; }
+  .jerry-app .quotation-page .module-card .fields { grid-column: 1; grid-row: 2; }
+  .jerry-app .quotation-page .module-card .highlights { grid-column: 2; grid-row: 2; margin: 0; }
+  .jerry-app .quotation-page .module-card .highlights p { margin: 0; align-content: center; }
+  .jerry-app .quotation-page .special-packaging, .jerry-app .quotation-page .volumetric-card { grid-column: 1 / -1; margin-top: 0; }
+  .jerry-app .quotation-page .matrix-mode-switcher > header { padding: 7px 12px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav { padding: 5px 10px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav button { min-height: 40px; }
+  .jerry-app .quotation-page .matrix-mode-switcher > nav button > i, .jerry-app .quotation-page .matrix-mode-switcher > nav button small { display: none; }
+  .jerry-app .quotation-page .common-matrix { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; }
+  .jerry-app .quotation-page .common-head { grid-column: 1 / -1; padding: 10px 12px; }
+  .jerry-app .quotation-page .country-picker-panel { grid-column: 1; grid-row: 2; align-self: stretch; border-right: 1px solid #dfe6eb; }
+  .jerry-app .quotation-page .channel-comparison { grid-column: 2; grid-row: 2; }
+  .jerry-app .quotation-page .country-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 520px; overflow-y: auto; scrollbar-gutter: stable; padding: 0 8px 8px; gap: 6px; }
+  .jerry-app .quotation-page .country-grid button { position: relative; min-height: 48px; padding: 7px 6px; gap: 4px; }
+  .jerry-app .quotation-page .country-grid button.active { padding-top: 14px; }
+  .jerry-app .quotation-page .country-grid i { font-size: 14px; }
+  .jerry-app .quotation-page .country-grid b { font-size: 11px; }
+  .jerry-app .quotation-page .country-grid small { font-size: 9px; white-space: normal; }
+  .jerry-app .quotation-page .country-grid em { position: absolute; right: 4px; top: 2px; font-size: 8px; }
+  .jerry-app .quotation-page .country-summary { grid-template-columns: 1fr 1fr auto; padding: 10px 12px; }
+  .jerry-app .quotation-page .country-title { grid-column: 1 / -1; }
+  .jerry-app .quotation-page .sort-toolbar { flex-wrap: wrap; gap: 6px; }
+  .jerry-app .quotation-page .table-head, .jerry-app .quotation-page .quote-rows article { min-width: 700px; grid-template-columns: minmax(180px, 1.5fr) .6fr repeat(4, .7fr) 88px; gap: 8px; }
+  .jerry-app .quotation-page .quote-rows article { min-height: 68px; padding: 10px 12px; font-size: 12px; }
+  .jerry-app .quotation-page .quote-rows article > div b, .jerry-app .quotation-page .quote-rows article > div small { white-space: normal; overflow-wrap: anywhere; }
+  .jerry-app .quotation-page .quote-rows small { font-size: 9px; }
+  .jerry-app .quotation-page .quote-preview { border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
+  .jerry-app .quotation-page .quote-summary { display: flex; flex-direction: column; align-self: start; border: 1px solid #dfe6eb; border-top: 3px solid #ff9700; border-radius: 10px; background: #fff; overflow: hidden; }
+  .jerry-app .quotation-page .preview-head { order: 0; padding: 12px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .jerry-app .quotation-page .preview-info { order: 1; padding: 10px 12px; }
+  .jerry-app .quotation-page .preview-info > section { border: 0; padding: 0; }
+  .jerry-app .quotation-page .preview-info dl { grid-template-columns: 1fr; gap: 8px; }
+  .jerry-app .quotation-page .preview-info dt { font-size: 11px; }
+  .jerry-app .quotation-page .preview-info dd { font-size: 12px; }
+  .jerry-app .quotation-page .preview-kpis { order: 2; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 10px 12px; }
   .jerry-app .quotation-page .preview-kpis article { padding: 7px; gap: 6px; }
   .jerry-app .quotation-page .preview-kpis article > i { display: none; }
-  .jerry-app .quotation-page .preview-kpis .range { grid-column: 1 / -1; }
-  .jerry-app .quotation-page .preview-info { grid-column: 1; padding: 8px 12px 12px; }
-  .jerry-app .quotation-page .preview-info dl { grid-template-columns: 1fr; }
-  .jerry-app .quotation-page .customer-sheet { grid-column: 2; grid-row: 1 / span 3; min-width: 0; margin: 0; padding: 12px; border-left: 1px solid #dce5e0; }
+  .jerry-app .quotation-page .preview-kpis span { display: grid; }
+  .jerry-app .quotation-page .preview-kpis .range { grid-column: 1 / -1; background: #fff3df; border-color: #ffe1ac; }
+  .jerry-app .quotation-page .quote-summary .validation-summary { order: 3; margin: 8px 12px; }
+  .jerry-app .quotation-page .validation-summary > div { grid-template-columns: 1fr; }
+  .jerry-app .quotation-page .validation-summary > header { flex-direction: column; align-items: flex-start; gap: 5px; }
+  .jerry-app .quotation-page .validation-summary button small { white-space: normal; }
+  .jerry-app .quotation-page .quote-summary > footer { order: 4; flex-direction: column; align-items: stretch; padding: 12px; margin-top: 0; gap: 10px; }
+  .jerry-app .quotation-page .quote-summary > footer > div { display: flex; flex-direction: column; }
+  .jerry-app .quotation-page .quote-summary > footer button { width: 100%; min-width: 0; }
+  .jerry-app .quotation-page .quote-editor { border: 1px solid #dfe6eb; border-radius: 10px; overflow: hidden; background: #fff; }
+  .jerry-app .quotation-page .customer-sheet { margin: 0; padding: 12px; }
   .jerry-app .quotation-page .sheet-metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .jerry-app .quotation-page .sheet-metadata input { min-width: 0; width: 100%; }
-  .jerry-app .quotation-page .quote-preview > .validation-summary,
-  .jerry-app .quotation-page .quote-preview > footer { grid-column: 1 / -1; }
 }
-
-@media (min-width: 1280px) and (max-width: 1599px) {
-  .jerry-app .quotation-page .common-matrix > .country-summary { grid-template-columns: 1fr 1fr auto; }
-  .jerry-app .quotation-page .country-summary .country-title { grid-column: 1 / -1; }
-  .jerry-app .quotation-page .common-matrix .sort-toolbar { gap: 6px; }
+@media (min-width: 1280px) {
+  .jerry-app .quotation-page .quotation-selection-workspace { grid-template-columns: minmax(0, 1fr) 255px; align-items: start; }
+  .jerry-app .quotation-page .quotation-selection-workspace > .matrix-mode-panel { grid-column: 1; grid-row: 1; }
+  /* Retain a real box for the existing validation scrollIntoView target. */
+  .jerry-app .quotation-page .quote-preview { display: grid; grid-column: 1 / -1; grid-row: 1 / span 2; grid-template-columns: subgrid; grid-template-rows: subgrid; pointer-events: none; }
+  .jerry-app .quotation-page .quote-preview > * { pointer-events: auto; }
+  .jerry-app .quotation-page .quote-summary { grid-column: 2; grid-row: 1; }
+  .jerry-app .quotation-page .quote-editor { grid-column: 1 / -1; grid-row: 2; }
 }
-
+@media (min-width: 1600px) {
+  .jerry-app .quotation-page .quotation-selection-workspace { grid-template-columns: minmax(0, 1fr) 280px; }
+  .jerry-app .quotation-page .common-matrix { grid-template-columns: 260px minmax(0, 1fr); }
+}
+@media (min-width: 1101px) and (max-width: 1599px) {
+  .jerry-app .quotation-page .condition-grid { grid-column: 1 / -1; }
+  .jerry-app .quotation-page .commission-field { grid-column: 1 / 3; grid-template-columns: auto 74px 1fr; align-items: center; }
+  .jerry-app .quotation-page .condition-card > footer { padding-top: 0; }
+  .jerry-app .quotation-page .cost-workbench > .module-card { grid-template-columns: minmax(0, 1fr); }
+  .jerry-app .quotation-page .module-card .highlights { grid-column: 1; grid-row: 3; }
+  .jerry-app .quotation-page .common-matrix { grid-template-columns: 205px minmax(0, 1fr); }
+}
 @media (max-width: 1100px) {
-  .jerry-app .quotation-page .condition-card,
-  .jerry-app .quotation-page .module-card { padding: 14px; }
-  .jerry-app .quotation-page .cost-workbench { gap: 12px; }
+  .jerry-app .quotation-page .common-matrix { overflow: hidden; }
+  .jerry-app .quotation-page .country-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: 340px; overflow-y: auto; }
+  .jerry-app .quotation-page .quote-editor { margin-top: 12px; }
+  .jerry-app .quotation-page .condition-card, .jerry-app .quotation-page .module-card { padding: 14px; }
   .jerry-app .quotation-page .commission-field { box-sizing: border-box; max-width: 100%; }
+}
+@media (max-width: 680px) {
+  .jerry-app .quotation-page .country-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .jerry-app .quotation-page .channel-comparison > footer { min-width: 520px; }
+  .jerry-app .quotation-page .preview-head { flex-direction: column; align-items: flex-start; }
 }

@@ -287,52 +287,57 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       <div><p>MODE A · COMMON COUNTRY QUOTATION</p><h2>常用国家快速报价</h2><span>默认展示常用国家，搜索可查找全部国家及授权渠道，选择国家后查看价格。</span></div>
       <div class="common-head-actions">
         <label class="quantity-field">自定义数量<input :value="customQuantity || 1" type="number" min="1" @input="$emit('update:customQuantity',Math.max(1,Number(($event.target as HTMLInputElement).value)||1))"><span>{{ unitLabel || '件' }}</span></label>
-        <label class="country-search">⌕<input v-model="search" type="search" aria-label="搜索全部国家或渠道" placeholder="搜索全部国家、代码或物流渠道"></label>
       </div>
     </header>
 
-    <div v-if="filteredCountries.length" class="country-grid">
-      <button v-for="country in filteredCountries" :key="country.name" :draggable="!search.trim() && country.stage==='common'" :class="{ active:activeCountry===country.name, dragging:draggedCountry===country.name, 'drag-over':dragOverCountry===country.name }" :title="country.stage==='common' && !search.trim() ? '按住卡片拖动排序' : '查看该国渠道'" @click="selectCountry(country.name)" @dragstart="startCountryDrag(country.name,$event)" @dragover="moveCountryOver(country.name,$event)" @drop="dropCountry(country.name,$event)" @dragend="endCountryDrag">
-        <u v-if="country.stage==='common' && !search.trim()" aria-hidden="true">⋮⋮</u><i>{{ countryFlag(country.code) }}</i><span><b>{{ country.name }}</b><small>{{ country.code }} · {{ country.channelsLoaded === false ? '点击加载渠道' : `${country.channelCount} 条可用渠道` }}</small></span><em v-if="activeCountry===country.name">已选择</em>
-      </button>
-    </div>
-    <div v-else-if="!searchLoading" class="empty-countries">{{ search.trim() ? '没有匹配的国家或授权渠道，请更换关键词。' : '暂未配置常用国家，可搜索全部国家或渠道。' }}</div>
-    <div v-if="searchLoading" class="search-feedback" role="status">正在搜索全部渠道…</div>
-    <div v-if="searchError" class="search-feedback" role="alert">{{ searchError }} <button @click="runGlobalSearch">重试搜索</button></div>
-    <div v-if="countryLoading" class="search-feedback" role="status">正在加载 {{ activeCountry }} 的渠道…</div>
-    <div v-if="countryError" class="search-feedback" role="alert">{{ countryError }} <button @click="selectCountry(activeCountry)">重新加载</button></div>
+    <aside class="country-picker-panel" aria-label="选择国家">
+      <h3>选择国家</h3>
+      <label class="country-search">⌕<input v-model="search" type="search" aria-label="搜索全部国家或渠道" placeholder="搜索全部国家、代码或物流渠道"></label>
+      <div v-if="filteredCountries.length" class="country-grid">
+        <button v-for="country in filteredCountries" :key="country.name" :draggable="!search.trim() && country.stage==='common'" :class="{ active:activeCountry===country.name, dragging:draggedCountry===country.name, 'drag-over':dragOverCountry===country.name }" :title="country.stage==='common' && !search.trim() ? '按住卡片拖动排序' : '查看该国渠道'" @click="selectCountry(country.name)" @dragstart="startCountryDrag(country.name,$event)" @dragover="moveCountryOver(country.name,$event)" @drop="dropCountry(country.name,$event)" @dragend="endCountryDrag">
+          <u v-if="country.stage==='common' && !search.trim()" aria-hidden="true">⋮⋮</u><i>{{ countryFlag(country.code) }}</i><span><b>{{ country.name }}</b><small>{{ country.code }} · {{ country.channelsLoaded === false ? '点击加载渠道' : `${country.channelCount} 条可用渠道` }}</small></span><em v-if="activeCountry===country.name">已选择</em>
+        </button>
+      </div>
+      <div v-else-if="!searchLoading" class="empty-countries">{{ search.trim() ? '没有匹配的国家或授权渠道，请更换关键词。' : '暂未配置常用国家，可搜索全部国家或渠道。' }}</div>
+      <div v-if="searchLoading" class="search-feedback" role="status">正在搜索全部渠道…</div>
+      <div v-if="searchError" class="search-feedback" role="alert">{{ searchError }} <button @click="runGlobalSearch">重试搜索</button></div>
+    </aside>
+    <div class="channel-comparison">
+      <div v-if="countryLoading" class="search-feedback" role="status">正在加载 {{ activeCountry }} 的渠道…</div>
+      <div v-if="countryError" class="search-feedback" role="alert">{{ countryError }} <button @click="selectCountry(activeCountry)">重新加载</button></div>
 
-    <template v-if="activeCountry && !countryLoading && !countryError">
-      <div class="country-summary">
-        <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请选择报价区域以匹配渠道' : `当前条件下 ${rows.length} 个可用渠道` }}</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
-        <div class="metric lowest"><i>¥</i><span><small>最低价渠道</small><b>{{ formatUsd(lowest?.quote1 ?? null) }}</b><em>{{ lowest ? `${lowest.carrier}｜${lowest.transport}` : '暂无可用渠道' }}</em></span></div>
-        <div class="metric fastest"><i>⚡</i><span><small>最快渠道</small><b>{{ fastest?.eta || '—' }}</b><em>{{ fastest ? `${fastest.carrier}｜${fastest.transport}` : '暂无可用渠道' }}</em></span></div>
-        <button :disabled="!rows.length" @click="$emit('copy',sortedRows)">▦ 复制当前国家</button>
-      </div>
-      <div class="sort-toolbar" aria-label="渠道排序方式">
-        <div class="channel-filter">
-          <label class="channel-search"><span aria-hidden="true">⌕</span><input v-model="channelSearch" type="search" aria-label="搜索物流渠道" placeholder="搜索物流商、渠道名称或编码"><button v-if="channelSearch" type="button" aria-label="清空渠道搜索" @click="channelSearch=''">清空</button></label>
-          <span class="channel-match-count" role="status">{{ channelCountLabel }}</span>
+      <template v-if="activeCountry && !countryLoading && !countryError">
+        <div class="country-summary">
+          <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请选择报价区域以匹配渠道' : `当前条件下 ${rows.length} 个可用渠道` }}</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
+          <div class="metric lowest"><i>¥</i><span><small>最低价渠道</small><b>{{ formatUsd(lowest?.quote1 ?? null) }}</b><em>{{ lowest ? `${lowest.carrier}｜${lowest.transport}` : '暂无可用渠道' }}</em></span></div>
+          <div class="metric fastest"><i>⚡</i><span><small>最快渠道</small><b>{{ fastest?.eta || '—' }}</b><em>{{ fastest ? `${fastest.carrier}｜${fastest.transport}` : '暂无可用渠道' }}</em></span></div>
+          <button :disabled="!rows.length" @click="$emit('copy',sortedRows)">▦ 复制当前国家</button>
         </div>
-        <nav>
-          <button :class="{ active:sortMode==='recommended' }" :aria-pressed="sortMode==='recommended'" @click="sortMode='recommended'">☷ 综合排序</button>
-          <button :class="{ active:sortMode==='price' }" :aria-pressed="sortMode==='price'" @click="sortMode='price'">¥ 1{{ unitLabel || '件' }}价格从低到高</button>
-          <button :class="{ active:sortMode==='speed' }" :aria-pressed="sortMode==='speed'" @click="sortMode='speed'">⚡ 速度从快到慢</button>
-        </nav>
-      </div>
-      <QuoteTaxLegend />
-      <div class="table-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>2{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>3{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span class="custom-head">{{ customQuantity || 1 }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
-      <div v-if="pagedRows.length" class="quote-rows">
-        <article v-for="row in pagedRows" :key="rowKey(row)" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
-          <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><QuoteMinimumWeight :weight-kg="row.minChargeWeightKg" /></div><b>{{ row.eta }}</b>
-          <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span>
-          <div class="selection-actions"><button :disabled="!isSelected(row) && !hasAnyQuotationPrice(row)" @click="toggleSelection(row)">{{ isSelected(row) ? (row.available === false ? '移除渠道' : '已加入') : '加入报价单' }}</button><button v-if="isSelected(row) && hasAnyQuotationPrice(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
-        </article>
-      </div>
-      <div v-else-if="(channelQuery || search.trim()) && rows.length" class="empty-rows">当前国家没有匹配的物流渠道，请选择搜索结果中的国家、更换关键词或清空搜索。</div>
-      <div v-else class="empty-rows">{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请先选择报价区域，再查看该分区的渠道和价格' : '当前重量和物流属性下暂无可用渠道，请检查财务授权或调整报价条件' }}</div>
-      <footer><span>{{ channelCountLabel }}</span><label>每页 <select v-model.number="pageSize"><option :value="5">5</option><option :value="10">10</option><option :value="20">20</option></select> 条</label><button :disabled="page<=1" @click="page--">上一页</button><b>{{ page }} / {{ pageCount }}</b><button :disabled="page>=pageCount" @click="page++">下一页</button></footer>
-    </template>
+        <div class="sort-toolbar" aria-label="渠道排序方式">
+          <div class="channel-filter">
+            <label class="channel-search"><span aria-hidden="true">⌕</span><input v-model="channelSearch" type="search" aria-label="搜索物流渠道" placeholder="搜索物流商、渠道名称或编码"><button v-if="channelSearch" type="button" aria-label="清空渠道搜索" @click="channelSearch=''">清空</button></label>
+            <span class="channel-match-count" role="status">{{ channelCountLabel }}</span>
+          </div>
+          <nav>
+            <button :class="{ active:sortMode==='recommended' }" :aria-pressed="sortMode==='recommended'" @click="sortMode='recommended'">☷ 综合排序</button>
+            <button :class="{ active:sortMode==='price' }" :aria-pressed="sortMode==='price'" @click="sortMode='price'">¥ 1{{ unitLabel || '件' }}价格从低到高</button>
+            <button :class="{ active:sortMode==='speed' }" :aria-pressed="sortMode==='speed'" @click="sortMode='speed'">⚡ 速度从快到慢</button>
+          </nav>
+        </div>
+        <QuoteTaxLegend />
+        <div class="table-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>2{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>3{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span class="custom-head">{{ customQuantity || 1 }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
+        <div v-if="pagedRows.length" class="quote-rows">
+          <article v-for="row in pagedRows" :key="rowKey(row)" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
+            <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><QuoteMinimumWeight :weight-kg="row.minChargeWeightKg" /></div><b>{{ row.eta }}</b>
+            <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span>
+            <div class="selection-actions"><button :disabled="!isSelected(row) && !hasAnyQuotationPrice(row)" @click="toggleSelection(row)">{{ isSelected(row) ? (row.available === false ? '移除渠道' : '已加入') : '加入报价单' }}</button><button v-if="isSelected(row) && hasAnyQuotationPrice(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
+          </article>
+        </div>
+        <div v-else-if="(channelQuery || search.trim()) && rows.length" class="empty-rows">当前国家没有匹配的物流渠道，请选择搜索结果中的国家、更换关键词或清空搜索。</div>
+        <div v-else class="empty-rows">{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请先选择报价区域，再查看该分区的渠道和价格' : '当前重量和物流属性下暂无可用渠道，请检查财务授权或调整报价条件' }}</div>
+        <footer><span>{{ channelCountLabel }}</span><label>每页 <select v-model.number="pageSize"><option :value="5">5</option><option :value="10">10</option><option :value="20">20</option></select> 条</label><button :disabled="page<=1" @click="page--">上一页</button><b>{{ page }} / {{ pageCount }}</b><button :disabled="page>=pageCount" @click="page++">下一页</button></footer>
+      </template>
+    </div>
   </section>
 </template>
 

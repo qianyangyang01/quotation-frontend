@@ -66,45 +66,49 @@ const quoteRange = computed(() => {
 
 <template>
   <section class="quote-preview" aria-labelledby="quotation-preview-title">
-    <header class="preview-head">
-      <div><p>STEP 04 · QUOTATION PREVIEW</p><h2 id="quotation-preview-title">报价单预览与保存</h2><span>核对本次报价包含的全部国家与渠道，确认后生成正式报价记录</span></div>
-      <em :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ previewStatus }}</em>
-    </header>
+    <aside class="quote-summary">
+      <header class="preview-head">
+        <div><p>STEP 04 · QUOTATION PREVIEW</p><h2 id="quotation-preview-title">本次报价</h2><span>核对本次报价包含的全部国家与渠道，确认后生成正式报价记录</span></div>
+        <em :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ previewStatus }}</em>
+      </header>
 
-    <div class="preview-kpis">
-      <article><i>▤</i><span><b>1</b><small>张报价单</small></span></article>
-      <article><i>◎</i><span><b>{{ countryCount }}</b><small>个国家</small></span></article>
-      <article><i>⌘</i><span><b>{{ rows.length }}</b><small>条渠道</small></span></article>
-      <article class="range"><i>$</i><span><small>1{{ unitLabel }}报价范围</small><b>{{ quoteRange }}</b></span></article>
-    </div>
-
-    <div class="preview-info">
-      <section>
-        <h3>报价基本信息</h3>
-        <dl>
-          <div><dt>客户</dt><dd>{{ customerName || '待填写' }}</dd></div>
-          <div><dt>商品</dt><dd>{{ productName || '待查询' }}</dd></div>
-          <div><dt>SKU</dt><dd>{{ sku || '—' }}</dd></div>
-          <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
-          <div><dt>客户等级</dt><dd>{{ customerGradeDisplayLabel(customerGrade) }}</dd></div>
-          <div><dt>自定义数量</dt><dd>{{ Math.max(1, customQuantity || 1) }}{{ unitLabel }}</dd></div>
-        </dl>
-      </section>
-    </div>
-
-    <CustomerQuoteSheet ref="customerSheet" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
-      :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
-
-    <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">
-      <header><span><i>!</i><b>暂时无法保存报价</b></span><em>请完成以下 {{ validationIssues.length }} 项必填内容</em></header>
-      <div>
-        <button v-for="(issue,index) in validationIssues" :key="issue.key" type="button" @click="emit('locateIssue',issue.key)">
-          <i>{{ index + 1 }}</i><span><b>{{ issue.label }}</b><small>{{ issue.message }}</small></span><em>{{ issue.key === 'financeSettings' ? '重试读取' : issue.key === 'workspaceInitialization' ? '查看错误' : issue.key === 'taxPolicy' ? '查看提示' : '去填写' }} →</em>
-        </button>
+      <div class="preview-kpis">
+        <article><i>▤</i><span><b>1</b><small>张报价单</small></span></article>
+        <article><i>◎</i><span><b>{{ countryCount }}</b><small>个国家</small></span></article>
+        <article><i>⌘</i><span><b>{{ rows.length }}</b><small>条渠道</small></span></article>
+        <article class="range"><i>$</i><span><small>1{{ unitLabel }}报价范围</small><b>{{ quoteRange }}</b></span></article>
       </div>
-    </section>
 
-    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? '正在校验并保存…' : `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
+      <div class="preview-info">
+        <section>
+          <h3>报价基本信息</h3>
+          <dl>
+            <div><dt>客户</dt><dd>{{ customerName || '待填写' }}</dd></div>
+            <div><dt>商品</dt><dd>{{ productName || '待查询' }}</dd></div>
+            <div><dt>SKU</dt><dd>{{ sku || '—' }}</dd></div>
+            <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
+            <div><dt>客户等级</dt><dd>{{ customerGradeDisplayLabel(customerGrade) }}</dd></div>
+            <div><dt>自定义数量</dt><dd>{{ Math.max(1, customQuantity || 1) }}{{ unitLabel }}</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">
+        <header><span><i>!</i><b>暂时无法保存报价</b></span><em>请完成以下 {{ validationIssues.length }} 项必填内容</em></header>
+        <div>
+          <button v-for="(issue,index) in validationIssues" :key="issue.key" type="button" @click="emit('locateIssue',issue.key)">
+            <i>{{ index + 1 }}</i><span><b>{{ issue.label }}</b><small>{{ issue.message }}</small></span><em>{{ issue.key === 'financeSettings' ? '重试读取' : issue.key === 'workspaceInitialization' ? '查看错误' : issue.key === 'taxPolicy' ? '查看提示' : '去填写' }} →</em>
+          </button>
+        </div>
+      </section>
+
+      <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? '正在校验并保存…' : `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
+    </aside>
+    <div class="quote-editor">
+      <header class="quote-editor-heading"><h2>报价单预览与保存</h2><span>核对已选国家、渠道与客户价格</span></header>
+      <CustomerQuoteSheet ref="customerSheet" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
+        :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
+    </div>
   </section>
 </template>
 
