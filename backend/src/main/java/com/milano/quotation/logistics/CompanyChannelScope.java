@@ -55,6 +55,24 @@ public final class CompanyChannelScope {
         for(var alias:aliases)if(n.equals(normalize(alias.asText())))return true;
         return false;
     }
+    /** Only exact registered identities in the title area count; never fuzzy-match notes. */
+    public Match matchTitles(String provider,List<String> cells) {
+        if(unrestricted)return null;
+        var hits=new LinkedHashMap<String,JsonNode>();boolean explicit=false;
+        for(var cell:cells)for(var line:cell.split("[\\r\\n]+")) {
+            var text=normalize(line);
+            var value=text.replaceFirst("^(?:渠道名称|渠道名|产品名称|渠道代码|产品代码|产品编码|渠道|产品)[:：]","");
+            explicit|=!value.equals(text);
+            var name=value.replaceFirst("(?:运价表|报价表|价格表)$","");
+            var decision=match(provider,name,value);
+            if(decision.status().equals("ambiguous"))return decision;
+            if(decision.entry()!=null)hits.put(decision.entry().path("id").asText(),decision.entry());
+        }
+        if(hits.size()>1)return new Match("ambiguous","表内标题或产品代码指向多个渠道",null);
+        if(hits.isEmpty())return explicit?new Match("filtered","表内渠道标题未登记，未使用工作表名称覆盖",null):null;
+        var entry=hits.values().iterator().next();
+        return new Match(entry.path("enabled").asBoolean(true)?"matched":"filtered","表内渠道标题或产品代码",entry);
+    }
     public static String normalize(String value) {
         var n=Normalizer.normalize(value==null?"":value,Normalizer.Form.NFKC).replaceAll("[\\s\\u00a0]+","").toLowerCase(Locale.ROOT);
         return n.equals("4px")?"递四方":n;

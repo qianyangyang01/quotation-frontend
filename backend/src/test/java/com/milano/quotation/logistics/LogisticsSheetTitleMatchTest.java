@@ -75,11 +75,11 @@ class LogisticsSheetTitleMatchTest {
             assertEquals(0,parser.parse(bytes(w),"乙物流.xlsx",new CompanyChannelScope(scope("甲物流","普货专线A"))).path("channels").size());
         }
     }
-    @Test void preservesExactSheetAndExplicitRowIdentityAndRejectsCodeConflicts()throws Exception {
+    @Test void prioritizesBodyTitleOverSheetAndPreservesExplicitRowIdentityAndCodeConflicts()throws Exception {
         try(var w=new XSSFWorkbook()) {
             table(w.createSheet("带电专线"),"普货专线");
             var parsed=parser.parse(bytes(w),"甲物流.xlsx",new CompanyChannelScope(scope("甲物流","普货专线","带电专线")));
-            assertEquals("带电专线",parsed.path("channels").get(0).path("channelName").asText());
+            assertEquals("普货专线",parsed.path("channels").get(0).path("channelName").asText());
         }
         try(var w=new XSSFWorkbook()) {
             var sheet=w.createSheet("线上价格");table(sheet,"普货专线");

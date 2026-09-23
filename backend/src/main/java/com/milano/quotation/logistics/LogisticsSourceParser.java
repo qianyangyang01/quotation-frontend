@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="sheet-titles-2026.09.23-v1";
+    public static final String VERSION="sheet-titles-2026.09.23-v2";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -109,10 +109,11 @@ public class LogisticsSourceParser {
                     parseStandard(source,r,provider,filename,parsed); recognized=true; break;
                 }
                 if(!recognized) {
+                    var sheetChannel=sheetChannelName(source,provider);
                     if(provider.equals(SunyouSourceRules.PROVIDER))recognized=parseSunyou(source,filename,parsed);
                     else if(provider.equals(QiaojieSourceRules.PROVIDER)&&qiaojieProduct(source)!=null&&qiaojieProduct(source).perPiece())recognized=parseQiaojiePiece(source,filename,parsed);
-                    else if(provider.equals("通邮")&&sheet.getSheetName().toUpperCase(Locale.ROOT).contains("MINI"))recognized=parseIntervalMatrix(source,provider,filename,parsed);
-                    else if(provider.equals("通邮") && (sheet.getSheetName().contains("美国专线小包")||sheet.getSheetName().contains("加拿大专线")||sheet.getSheetName().equals("ebay挂号保建品")||sheet.getSheetName().equals("通邮专线特货-澳大利亚"))) recognized=parseMatrix(source,provider,filename,parsed);
+                    else if(provider.equals("通邮")&&sheetChannel.toUpperCase(Locale.ROOT).contains("MINI"))recognized=parseIntervalMatrix(source,provider,filename,parsed);
+                    else if(provider.equals("通邮") && (sheetChannel.contains("美国专线小包")||sheetChannel.contains("加拿大专线")||sheetChannel.equals("ebay挂号保建品")||sheetChannel.equals("通邮专线特货-澳大利亚"))) recognized=parseMatrix(source,provider,filename,parsed);
                     else recognized=parseTable(source,provider,filename,parsed);
                 }
                 } catch(PriceRowLimit exceeded) {
@@ -132,7 +133,7 @@ public class LogisticsSourceParser {
                 if(!recognized || parsed.isEmpty()) {
                     var reason=source.pendingExplanation();
                     if(!source.matches.isEmpty()&&parsed.isEmpty()){report.put("status",source.ambiguous?"match-pending":"filtered");continue;}
-                    var pending=selected(source,provider.isBlank()?"未识别物流商":provider,sheet.getSheetName().trim(),"",0,parsed);
+                    var pending=selected(source,provider.isBlank()?"未识别物流商":provider,sheet.getSheetName().trim(),"",0,parsed,true);
                     if(pending==null){report.put("status",source.ambiguous?"match-pending":"filtered");continue;}
                     report.put("templateStatus","adapter-required").put("message",reason);
                     pending.put("templateStatus","adapter-required");
@@ -377,19 +378,33 @@ public class LogisticsSourceParser {
     }
 
     private ObjectNode selected(Source source,String provider,String name,String code,int row,Map<String,ObjectNode> channels) {
-        var decision=source.scope.match(provider,name,code);
-        TitleIdentity title=null;
-        // Only a sheet-level fallback may use its title. Never override explicit row/channel identities.
-        if(!source.scope.unrestricted()&&name.trim().equals(source.sheet.getSheetName().trim())) {
-            var sheetMatch=source.scope.match(provider,name,"");
-            if(sheetMatch.entry()==null&&sheetMatch.status().equals("filtered")) {
-                title=source.titleIdentities.computeIfAbsent(provider,p->titleIdentity(source,p));
-                if(title.decision().status().equals("ambiguous"))decision=title.decision();
-                else if(title.decision().entry()!=null) {
-                    decision=source.scope.match(provider,title.decision().entry().path("channelName").asText(),code);
-                }
-            }
+        return selected(source,provider,name,code,row,channels,false);
+    }
+
+    private CompanyChannelScope.Match sheetIdentity(Source source,String provider,String name,String code) {
+        if(source.scope.unrestricted())return source.scope.match(provider,name,code);
+        var identity=source.titleIdentities.computeIfAbsent(provider,p->titleIdentity(source,p));
+        var title=identity.evidence().isEmpty()?null:identity.decision();
+        if(title!=null&&title.status().equals("ambiguous"))return title;
+        // The worksheet is only a fallback, so its name must not contradict an explicit product code.
+        var byCode=source.scope.match(provider,"",code);
+        if(byCode.status().equals("ambiguous"))return byCode;
+        if(byCode.entry()!=null) {
+            if(title!=null&&title.entry()!=null&&!title.entry().path("id").equals(byCode.entry().path("id")))
+                return new CompanyChannelScope.Match("ambiguous","表内标题与产品代码指向不同渠道",null);
+            return byCode;
         }
+        return title!=null?title:source.scope.match(provider,name,code);
+    }
+
+    private String sheetChannelName(Source source,String provider) {
+        var decision=sheetIdentity(source,provider,source.sheet.getSheetName().trim(),"");
+        return decision.accepted()&&decision.entry()!=null?decision.entry().path("channelName").asText():source.sheet.getSheetName().trim();
+    }
+
+    private ObjectNode selected(Source source,String provider,String name,String code,int row,Map<String,ObjectNode> channels,boolean sheetFallback) {
+        var decision=sheetFallback?sheetIdentity(source,provider,name,code):source.scope.match(provider,name,code);
+        TitleIdentity title=sheetFallback?source.titleIdentities.get(provider):null;
         var key=CompanyChannelScope.normalize(provider)+"|"+CompanyChannelScope.normalize(name)+"|"+CompanyChannelScope.normalize(code);
         if(source.matchKeys.add(key)){
             var report=source.matches.addObject().put("providerName",provider).put("channelName",name).put("productCode",code)
@@ -411,16 +426,16 @@ public class LogisticsSourceParser {
         var evidence=mapper.createArrayNode();boolean ambiguous=false,priceHeader=false;
         // Scan title/header cells before the first price header, never price rows or footer notes.
         for(int r=0;r<=Math.min(39,source.lastContentRow);r++) {
-            if(detect(source,r,provider)!=null){priceHeader=true;break;}
+            if(detect(source,r,provider)!=null||source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码")){priceHeader=true;break;}
             for(int c=0;c<Math.min(80,source.width(r));c++) {
                 var text=source.text(r,c).trim();
                 if(text.isBlank()||text.length()>500||!source.address(r,c).equals(new CellReference(r,c).formatAsString()))continue;
                 var candidates=new LinkedHashSet<String>();candidates.add(text);
                 candidates.addAll(Arrays.asList(text.split("[/／|｜\\r\\n;；]+")));
                 for(var candidate:candidates) {
-                    var label=candidate.trim().replaceFirst("^(?:渠道名称|产品名称|渠道|产品)\\s*[:：]\\s*","");
-                    var match=source.scope.match(provider,label,"");
-                    if(match.entry()==null&&!match.status().equals("ambiguous"))continue;
+                    var label=candidate.trim();
+                    var match=source.scope.matchTitles(provider,List.of(label));
+                    if(match==null)continue;
                     ambiguous|=match.status().equals("ambiguous");
                     if(match.entry()!=null)hits.put(match.entry().path("id").asText(),match);
                     evidence.addObject().put("cell",source.address(r,c)).put("text",text).put("matchedText",label);
@@ -526,7 +541,9 @@ public class LogisticsSourceParser {
                 var provider=defaultText(value(source,r,headers,"物流商"),fallback);
                 var name=defaultText(value(source,r,headers,"渠道名称"),source.sheet.getSheetName());
                 var code=defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码"));
-                if(source.scope.match(provider,name,code).accepted())any=true;else selected(source,provider,name,code,r,channels);
+                boolean sheetFallback=value(source,r,headers,"渠道名称").isBlank();
+                if((sheetFallback?sheetIdentity(source,provider,name,code):source.scope.match(provider,name,code)).accepted())any=true;
+                else selected(source,provider,name,code,r,channels,sheetFallback);
             }
             if(!any)return;
         }
@@ -554,7 +571,7 @@ public class LogisticsSourceParser {
             var sourceOrigin=value(source,r,headers,"发货区域");
             if(excludeSouthChinaPrice(effectiveProvider,sourceOrigin)){source.parsedRows.add(r);continue;}
             if(effectiveProvider.equals("闪电猴")&&!defaultText(value(source,r,headers,"国家简码"),countryCode(value(source,r,headers,"区域名称"))).equals("US")){source.filteredOtherRows.put(r,"闪电猴仅限美国");continue;}
-            var target=selected(source,effectiveProvider,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")),r,channels);
+            var target=selected(source,effectiveProvider,name.isBlank()?source.sheet.getSheetName():name,defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")),r,channels,name.isBlank());
             if(target==null)continue;
             if(QiaojieSourceRules.usOnly(target.path("channelName").asText(),defaultText(value(source,r,headers,"原产品代码"),value(source,r,headers,"产品代码")),target.path("companyChannelId").asText())
                     && !defaultText(value(source,r,headers,"国家简码"),countryCode(value(source,r,headers,"区域名称"))).trim().equalsIgnoreCase("US")) {
@@ -756,7 +773,7 @@ public class LogisticsSourceParser {
             if(!looksRange(weight)) {
                 if((tongyouSensitive||jitongBattery||yunexpress!=null||yanwenWanbang!=null)&&columns.rate>=0&&!source.text(r,columns.rate).isBlank()&&columns.country>=0
                         &&supportedCountryCode(countryCode(source.text(r,columns.country)))) {
-                    var target=selected(source,provider,section,"",r,channels);
+                    var target=selected(source,provider,section,"",r,channels,section.equals(source.sheet.getSheetName().trim()));
                     if(target!=null)issue(target,r+1,"重量段","价格行缺少有效重量范围，禁止部分替换","error");
                 }
                 if(qiaojie!=null&&columns.rate>=0&&!source.text(r,columns.rate).isBlank()
@@ -784,7 +801,8 @@ public class LogisticsSourceParser {
             if(jitongBattery)productCode=JitongPureBatteryRules.code(productCode);
             if(yunexpress!=null)productCode=yunexpress.code();
             if(yanwenWanbang!=null&&provider.equals("燕文"))productCode=zhengzhouProductCode(source);
-            var target=selected(source,provider,name,productCode,r,channels);
+            boolean sheetFallback=(columns.channel<0||source.text(r,columns.channel).isBlank())&&section.equals(source.sheet.getSheetName().trim());
+            var target=selected(source,provider,name,productCode,r,channels,sheetFallback);
             if(target==null)continue;
             var additional=YanwenWanbangAdditionalRules.named(provider,target.path("channelName").asText());
             if(additional!=null&&!additional.code().equals(productCode))issue(target,r+1,"产品代码","渠道名称与原表产品代码不一致或缺失，禁止混入其他产品","error");
@@ -934,6 +952,7 @@ public class LogisticsSourceParser {
         return recognized;
     }
     private boolean parseMatrix(Source source,String provider,String file,Map<String,ObjectNode> channels) {
+        var sheetChannel=sheetChannelName(source,provider);
         int header=-1;
         for(int r=0;r<=source.lastContentRow;r++)if(source.text(r,1).contains("运费")&&source.text(r,2).contains("费")){header=r;break;}
         if(header<0)return false;
@@ -944,13 +963,14 @@ public class LogisticsSourceParser {
             if(name.isBlank())for(int h=header-1;h>=0;h--){var label=source.text(h,c);if(!label.isBlank()){name=label;break;}}
             if(name.isBlank())name=source.sheet.getSheetName()+"-"+CellReference.convertNumToColString(c);
             boolean zoned=name.matches("[1-9一二三四五六七八九]区");String zone=zoned?normalizeZone(name):"";
-            if(zoned||source.sheet.getSheetName().equals("ebay挂号保建品"))name=source.sheet.getSheetName();
-            var target=selected(source,provider,name,"",header,channels);
+            boolean sheetFallback=zoned||sheetChannel.equals("ebay挂号保建品");
+            if(sheetFallback)name=source.sheet.getSheetName();
+            var target=selected(source,provider,name,"",header,channels,sheetFallback);
             if(target==null){for(int r=header+1;r<=source.lastContentRow;r++)source.parsedRows.add(r);continue;}
             for(int r=header+1;r<=source.lastContentRow;r++) {
                 if(source.text(r,0).contains("邮编分区")||source.text(r,0).equals("分区")){for(int i=r;i<=source.lastContentRow;i++)source.referenceRows.add(i);break;}
                 var text=source.text(r,0);if(!looksRange(text))continue;
-                var destination=source.sheet.getSheetName().contains("加拿大")?"加拿大":source.sheet.getSheetName().contains("澳大利亚")?"澳大利亚":"美国";
+                var destination=sheetChannel.contains("加拿大")?"加拿大":sheetChannel.contains("澳大利亚")?"澳大利亚":"美国";
                 var row=mapper.createObjectNode().put("areaName",destination).put("zoneName",zone)
                         .put("countryCode",countryCode(destination)).put("currency","CNY").put("pricingModel","per-kg");
                 try{var range=parseRange(text);row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo);}
@@ -991,7 +1011,7 @@ public class LogisticsSourceParser {
         if(end<=header+1)return -1;
         boolean jitongBattery=provider.equals("极通环球")&&jitongBatterySheet(source);
         var sourceCode=jitongBattery?JitongPureBatteryRules.code(String.join("\n",source.resolvedTexts(header))):"";
-        var target=selected(source,provider,jitongBattery?JitongPureBatteryRules.NAME:source.sheet.getSheetName().trim(),sourceCode,header,channels);
+        var target=selected(source,provider,jitongBattery?JitongPureBatteryRules.NAME:source.sheet.getSheetName().trim(),sourceCode,header,channels,!jitongBattery);
         if(target==null){for(int r=header;r<=end;r++)source.parsedRows.add(r);return end;}
         if(jitongBattery&&sourceCode.isBlank())issue(target,header+1,"产品代码","定制纯电分区缺少明确的JT-HQ-MDCD产品代码","error");
         for(var zone:zones.entrySet()) {
