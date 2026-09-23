@@ -2034,57 +2034,55 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           </nav>
         </section>
 
-        <section class="quotation-selection-workspace" aria-label="渠道选择与报价单">
-          <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
-            <QuotationCommonMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
-              :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
-              :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
-              :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
-              :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
-              :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
-              @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
-            />
-          </div>
-
-          <div v-show="quoteMatrixMode==='specified'" class="matrix-mode-panel">
-            <QuotationMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='specified'"
-              :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
-              :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
-              :unit-label="quoteMode === 'bundle' ? '套' : '件'"
-              :preset-selection="restoredSpecifiedSelections" :preset-version="restoredSelectionVersion"
-              @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateSpecifiedQuotes" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
-            />
-          </div>
-
-          <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel">
-            <QuotationTemplateMatrix :active="quoteMatrixMode==='template'"
-              :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
-              :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
-              :unavailable-reason="unavailableTemplateReason" :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"
-              :unit-label="quoteMode === 'bundle' ? '套' : '件'"
-              :draft-selection="restoredTemplateSelections" :draft-template="activeTemplateSnapshot" :draft-version="restoredSelectionVersion"
-              @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateTemplateQuotes" @template-change="updateActiveTemplate"
-              @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
-            />
-          </div>
-
-          <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
-          <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"
-            :calculate-price="(row, quantity) => { const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey); return result?.tax.configured ? result.quoteUsd : null }"
-            :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
-            :reset-key="quoteSheetResetKey"
-            :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
-            :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
-            :skus="quoteMode === 'bundle' ? quoteSheetBundleSkus(bundleItems) : [p.sku]"
-            :sku="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
-            :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
-            :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
-            :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
-            :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd"
-            :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
-            :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy() || financeSettingsAreLoading()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave"
+        <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
+          <QuotationCommonMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
+            :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
+            :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
+            :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
+            :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
+            :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
+            @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
           />
-        </section>
+        </div>
+
+        <div v-show="quoteMatrixMode==='specified'" class="matrix-mode-panel">
+          <QuotationMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='specified'"
+            :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
+            :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
+            :unit-label="quoteMode === 'bundle' ? '套' : '件'"
+            :preset-selection="restoredSpecifiedSelections" :preset-version="restoredSelectionVersion"
+            @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateSpecifiedQuotes" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
+          />
+        </div>
+
+        <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel">
+          <QuotationTemplateMatrix :active="quoteMatrixMode==='template'"
+            :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
+            :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
+            :unavailable-reason="unavailableTemplateReason" :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"
+            :unit-label="quoteMode === 'bundle' ? '套' : '件'"
+            :draft-selection="restoredTemplateSelections" :draft-template="activeTemplateSnapshot" :draft-version="restoredSelectionVersion"
+            @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateTemplateQuotes" @template-change="updateActiveTemplate"
+            @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
+          />
+        </div>
+
+        <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"
+          :calculate-price="(row, quantity) => { const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey); return result?.tax.configured ? result.quoteUsd : null }"
+          :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
+          :reset-key="quoteSheetResetKey"
+          :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
+          :product-name="quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
+          :skus="quoteMode === 'bundle' ? quoteSheetBundleSkus(bundleItems) : [p.sku]"
+          :sku="quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
+          :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
+          :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
+          :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
+          :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd"
+          :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
+          :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy() || financeSettingsAreLoading()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave"
+        />
       </template>
     </main>
 
@@ -2149,5 +2147,3 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 .draft-status-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid #dce5ea;border-left:4px solid #6d8da0;border-radius:9px;background:#fff}.draft-status-bar>i{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#eaf0f4;color:#496575;font-style:normal;font-weight:900}.draft-status-bar>span{display:grid;gap:3px;min-width:0}.draft-status-bar b{font-size:11px}.draft-status-bar small{color:#7d8992;font-size:9px}.draft-status-bar>button{height:30px;margin-left:auto;padding:0 11px;border:1px solid #d5dde2;border-radius:6px;background:#fff;color:#5e6e78;font-size:9px;font-weight:800}.draft-status-bar>button+button{margin-left:0}.draft-status-bar.saved{border-left-color:#2a9360}.draft-status-bar.saved>i{background:#e5f5ec;color:#278657}.draft-status-bar.dirty,.draft-status-bar.saving{border-left-color:#e69a1a}.draft-status-bar.error,.draft-status-bar.conflict{border-left-color:#ce4e43;background:#fff9f8}.draft-status-bar.error>i,.draft-status-bar.conflict>i{background:#ffe9e6;color:#bd4037}.draft-dialog-mask{z-index:140}.draft-dialog{width:min(560px,92vw)}.draft-dialog>p{color:#66747e;line-height:1.7}.draft-dialog>footer{display:flex;justify-content:flex-end;gap:9px;margin-top:24px}.draft-dialog>footer button{height:36px;padding:0 14px;border:1px solid #d7dfe4;border-radius:7px;background:#fff;color:#53616c;font-size:10px;font-weight:800}.draft-dialog>footer button.primary{border-color:#17232d;background:#17232d;color:#fff}.draft-dialog>footer button.danger{border-color:#e5b9b5;color:#bd443b}@media(max-width:680px){.draft-status-bar{align-items:flex-start;flex-wrap:wrap}.draft-status-bar>span{width:calc(100% - 40px)}.draft-status-bar>button{margin-left:36px}.draft-dialog>footer{align-items:stretch;flex-direction:column}}
 .live-data-notice{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;border:1px solid #efc77d;border-radius:10px;background:#fff8ea;color:#784900;font-size:13px}.live-data-notice button{flex-shrink:0;padding:8px 14px;border:1px solid #d99127;border-radius:6px;background:#fff;color:#784900;cursor:pointer}
 </style>
-
-<style src="../styles/quotationCompact.css"></style>
