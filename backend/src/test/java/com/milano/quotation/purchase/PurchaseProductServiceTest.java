@@ -137,7 +137,7 @@ class PurchaseProductServiceTest {
         images = mock(PurchaseProductImageRepository.class);
         storage = mock(AssetStorageService.class);
         deletionGuard = mock(PurchaseProductDeletionGuard.class);
-        service = new PurchaseProductService(products, images, storage, deletionGuard);
+        service = new PurchaseProductService(products, images, storage, deletionGuard, mock(PurchaseHistoryService.class));
         when(products.findBySku(anyString())).thenAnswer(call -> Optional.ofNullable(rows.get(call.getArgument(0))));
         when(products.findLockedBySku(anyString())).thenAnswer(call -> Optional.ofNullable(rows.get(call.getArgument(0))));
         when(products.saveAndFlush(any())).thenAnswer(call -> {

@@ -59,7 +59,7 @@ class PurchaseSearchPostgresIntegrationTest {
         }
     }
     @Test void servicePreservesPayloadVersionsAndEmptyPageTotals(){
-        var service=new PurchaseProductService(repository,null,null,null);
+        var service=new PurchaseProductService(repository,null,null,null,null);
         var page=service.page("蓝色",PageRequest.of(0,10));
         assertEquals(31,page.getTotalElements());assertEquals(10,page.getContent().size());
         assertEquals(7,page.getContent().getFirst().path("_version").asInt());
