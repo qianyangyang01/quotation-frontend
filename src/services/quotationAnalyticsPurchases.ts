@@ -1,15 +1,22 @@
-import { loadPurchaseProductPage, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { normalizePurchaseRecord, type PurchaseProductRecord } from '@/data/purchaseStore'
+import type { AnalyticsPurchase } from '@/data/quotationAnalytics'
+import { api } from '@/services/http'
 
-// Analytics needs the entire purchase category catalog, not only the first 500 products.
-export async function loadAnalyticsPurchases(): Promise<PurchaseProductRecord[]> {
-  const first = await loadPurchaseProductPage('', 0, 500)
-  const rows = [...first.items]
-  for (let page = 1; page < first.totalPages; page++) {
-    const next = await loadPurchaseProductPage('', page, 500)
-    if (next.total !== first.total) throw new Error('采购目录在读取期间发生变化，请刷新后重试')
-    rows.push(...next.items)
+export async function loadAnalyticsPurchases(signal?: AbortSignal): Promise<AnalyticsPurchase[]> {
+  const response = await api.get<{ items: Partial<PurchaseProductRecord>[]; total: number }>(
+    '/purchase-products/analytics-catalog',
+    { cache: 'no-store', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000) },
+  )
+  if (!Array.isArray(response.items) || !Number.isSafeInteger(response.total) || response.total !== response.items.length) {
+    throw new Error('采购目录读取不完整，请重试')
   }
-  const unique = new Map(rows.map(row => [row.sku.toUpperCase(), row]))
-  if (unique.size !== first.total) throw new Error('采购目录读取不完整，请刷新后重试')
-  return [...unique.values()]
+  // Preserve the same legacy price and SKU normalization as full product reads.
+  const rows = response.items.map(item => {
+    const { sku, category, purchasePriceCny } = normalizePurchaseRecord(item)
+    return { sku, category, purchasePriceCny }
+  })
+  if (rows.some(row => !row.sku) || new Set(rows.map(row => row.sku)).size !== response.total) {
+    throw new Error('采购目录读取不完整，请重试')
+  }
+  return rows
 }

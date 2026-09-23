@@ -28,11 +28,20 @@ public class LogisticsParserClient {
         var request=HttpRequest.newBuilder(URI.create(endpoint+"/parse")).timeout(Duration.ofSeconds(125))
             .header("X-Workbook-Name",URLEncoder.encode(name,StandardCharsets.UTF_8)).header("X-Company-Scope","length-prefixed-json-v1").POST(bodyPublisher).build();
         try {
-            var response=http.send(request,HttpResponse.BodyHandlers.ofInputStream());
-            try(var body=response.body()) {
-                if(response.statusCode()!=200)throw AppException.unprocessable(response.statusCode()==429?"解析服务繁忙，请稍后重试此文件":"文件解析失败，请核对模板或解析证据");
-                return (ObjectNode)mapper.readTree(body);
+            for(int attempt=0;attempt<5;attempt++) {
+                var response=http.send(request,HttpResponse.BodyHandlers.ofInputStream());
+                try(var body=response.body()) {
+                    if(response.statusCode()==429 && attempt<4) {
+                        // Parsing is stateless. Let simultaneous small imports use the
+                        // bounded parser slot in turn; never retry malformed workbooks.
+                        Thread.sleep(200L << attempt);
+                        continue;
+                    }
+                    if(response.statusCode()!=200)throw AppException.unprocessable(response.statusCode()==429?"解析服务繁忙，请稍后重试此文件":"文件解析失败，请核对模板或解析证据");
+                    return (ObjectNode)mapper.readTree(body);
+                }
             }
+            throw new IllegalStateException("Parser retry exhausted");
         } catch(java.io.IOException error){throw AppException.unprocessable("独立解析进程中断或超时，此文件未完成；其他文件将继续处理");}
     }
 }

@@ -19,6 +19,8 @@ public class PurchaseProductController {
     public PurchaseProductController(PurchaseProductService products, AuditService audit) { this.products=products; this.audit=audit; }
     @GetMapping @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<PageResponse<JsonNode>> list(@RequestParam(defaultValue="")String q,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="100")int size) { var safePage=Math.max(0,page);var safeSize=Math.max(1,Math.min(size,500));return ApiResponse.ok(PageResponse.from(products.page(q,PageRequest.of(safePage,safeSize)))); }
     @GetMapping("/stats") @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<PurchaseProductService.Stats> stats(){return ApiResponse.ok(products.stats());}
+    @GetMapping("/analytics-catalog") @PreAuthorize("hasAuthority('PERM_allRecords')")
+    ApiResponse<PurchaseProductService.AnalyticsCatalog> analyticsCatalog(){return ApiResponse.ok(products.analyticsCatalog());}
     @GetMapping("/{sku}") @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<JsonNode> get(@PathVariable String sku){return ApiResponse.ok(products.get(sku));}
     @GetMapping("/{sku}/history") @PreAuthorize("hasAuthority('PERM_purchase')") ApiResponse<PageResponse<PurchaseHistoryService.Entry>> history(@PathVariable String sku,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="10") int size) {
         return ApiResponse.ok(PageResponse.from(products.history(sku,PageRequest.of(Math.max(0,page),Math.max(1,Math.min(size,50))))));

@@ -1,6 +1,8 @@
 import type { PurchaseProductRecord } from './purchaseStore'
 import type { QuotationRecord } from './quotationRecords'
 
+export type AnalyticsPurchase = Pick<PurchaseProductRecord, 'sku' | 'category' | 'purchasePriceCny'>
+
 export interface DashboardFilters {
   keyword: string
   startDate: string
@@ -52,16 +54,16 @@ export function recordCountries(record: QuotationRecord) {
   return [...new Set([record.country, ...(record.quoteOptions || []).map(option => option.country)].map(value => value?.trim()).filter((value): value is string => Boolean(value && value !== '—')))]
 }
 
-export function purchaseCategoryForSkus(skus: string[], purchaseBySku: Map<string, PurchaseProductRecord>) {
+export function purchaseCategoryForSkus(skus: string[], purchaseBySku: Map<string, AnalyticsPurchase>) {
   const categories = new Set(skus.map(sku => purchaseBySku.get(sku.trim().toUpperCase())?.category?.trim() || '其他'))
   return categories.size === 1 ? [...categories][0]! : '其他'
 }
 
-export function resolveRecordCategory(record: QuotationRecord, purchaseBySku: Map<string, PurchaseProductRecord>) {
+export function resolveRecordCategory(record: QuotationRecord, purchaseBySku: Map<string, AnalyticsPurchase>) {
   return purchaseCategoryForSkus(quotationSkus(record), purchaseBySku)
 }
 
-export function filterQuotationRecords(records: QuotationRecord[], filters: DashboardFilters, purchases: PurchaseProductRecord[]) {
+export function filterQuotationRecords(records: QuotationRecord[], filters: DashboardFilters, purchases: AnalyticsPurchase[]) {
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
   const keyword = filters.keyword.trim().toLowerCase()
   return records.filter(record => {
@@ -119,9 +121,9 @@ export function buildSalespersonRanking(records: QuotationRecord[]): Salesperson
   })
 }
 
-export function buildCategoryPerformance(records: QuotationRecord[], purchases: PurchaseProductRecord[]): CategoryPerformanceRow[] {
+export function buildCategoryPerformance(records: QuotationRecord[], purchases: AnalyticsPurchase[]): CategoryPerformanceRow[] {
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
-  const catalog = new Map<string, PurchaseProductRecord[]>()
+  const catalog = new Map<string, AnalyticsPurchase[]>()
   for (const product of purchases) {
     const category = product.category?.trim() || '其他'
     const rows = catalog.get(category)
@@ -159,7 +161,7 @@ function csvCell(value: string | number) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
-export function quotationDetailsCsv(records: QuotationRecord[], purchases: PurchaseProductRecord[]) {
+export function quotationDetailsCsv(records: QuotationRecord[], purchases: AnalyticsPurchase[]) {
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
   const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '成本(RMB)', '报价(USD)', '报价(RMB)']
   const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2)])

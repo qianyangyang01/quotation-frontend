@@ -106,9 +106,7 @@ public class LogisticsQueryService {
             where.append(" and status = :status");
             params.put("status", status);
         }
-        var select = "(payload - 'rows' - 'issues' - 'diffRows')::text as payload, " +
-                "jsonb_array_length(case when jsonb_typeof(payload->'rows')='array' then payload->'rows' else '[]'::jsonb end) as row_count, " +
-                "jsonb_array_length(case when jsonb_typeof(payload->'issues')='array' then payload->'issues' else '[]'::jsonb end) as issue_count, " +
+        var select = "workspace_payload::text as payload, row_count, issue_count, " +
                 "jsonb_array_length(case when jsonb_typeof(payload->'diffRows')='array' then payload->'diffRows' else '[]'::jsonb end) as diff_count, " +
                 "(select count(distinct coalesce(nullif(item->>'countryCode',''), item->>'areaName')) from jsonb_array_elements(case when jsonb_typeof(payload->'rows')='array' then payload->'rows' else '[]'::jsonb end) item) as country_count";
         return jsonPage("logistics_version" + where, select, "created_at desc", page, size, params, false);
@@ -484,7 +482,10 @@ public class LogisticsQueryService {
     private PageResponse<JsonNode> jsonPage(String from, String select, String order, int page, int size, Map<String, Object> params, boolean includeVersion) {
         validatePage(page, size);
         var total = jdbc.sql("select count(*) from " + from).params(params).query(Long.class).single();
-        List<JsonNode> items = jdbc.sql("select " + select + " from " + from + " order by " + order + " limit :limit offset :offset")
+        // PostgreSQL can evaluate JSON projection below the sort, decompressing
+        // every historical workbook before LIMIT. Materialize the page first.
+        List<JsonNode> items = jdbc.sql("with selected as materialized (select * from " + from + " order by " + order +
+                        " limit :limit offset :offset) select " + select + " from selected order by " + order)
                 .params(withPage(params, page, size)).query((rs, rowNum) -> {
                     var body = json(rs.getString("payload"));
                     if (includeVersion) body.put("_version", rs.getLong("version"));

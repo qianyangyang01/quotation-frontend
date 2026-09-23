@@ -15,12 +15,18 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class PurchaseProductService {
+    public record AnalyticsCatalog(List<JsonNode> items,int total) {}
+    @Transactional(readOnly=true) public AnalyticsCatalog analyticsCatalog() {
+        var items=products.analyticsCatalog().stream().map(searchMapper::readTree).toList();
+        return new AnalyticsCatalog(items,items.size());
+    }
     private final tools.jackson.databind.ObjectMapper searchMapper = new tools.jackson.databind.ObjectMapper();
     public static final String CATALOG_PENDING_TEMPLATE = "pending_template";
     public static final String CATALOG_READY = "ready";
     public static final String CATALOG_DISABLED = "disabled";
     private final PurchaseProductRepository products; private final PurchaseProductImageRepository images; private final AssetStorageService storage; private final PurchaseProductDeletionGuard deletionGuard;
     private final PurchaseHistoryService history;
+    @org.springframework.beans.factory.annotation.Autowired private PurchaseSearchIndex searchIndex;
     public PurchaseProductService(PurchaseProductRepository products,PurchaseProductImageRepository images,AssetStorageService storage,PurchaseProductDeletionGuard deletionGuard,PurchaseHistoryService history) { this.products = products; this.images=images; this.storage=storage;this.deletionGuard=deletionGuard;this.history=history; }
 
     @Transactional(readOnly=true) public Page<PurchaseHistoryService.Entry> history(String sku, Pageable pageable) {
@@ -32,7 +38,7 @@ public class PurchaseProductService {
         return upsert(input,true,null,null,normalizeSku(originalSku));
     }
 
-    @Transactional(readOnly=true) public Page<JsonNode> page(String query,Pageable pageable) {
+    @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ) public Page<JsonNode> page(String query,Pageable pageable) {
         var cleaned=query==null?"":query.trim();
         var exact=referencedSku(cleaned).flatMap(products::findBySku);
         if(exact.isPresent()) {
@@ -42,6 +48,15 @@ public class PurchaseProductService {
         if(cleaned.isEmpty()) return products.findAll(org.springframework.data.domain.PageRequest.of(
                 pageable.getPageNumber(),pageable.getPageSize(),org.springframework.data.domain.Sort.by(
                         org.springframework.data.domain.Sort.Order.desc("updatedAt"),org.springframework.data.domain.Sort.Order.asc("id")))).map(this::view);
+        // Preserve legacy SQL wildcard/escape semantics. Literal searches reuse validated
+        // text without caching product payloads, permissions or prices.
+        if(searchIndex!=null && cleaned.indexOf('%')<0 && cleaned.indexOf('_')<0 && cleaned.indexOf('\\')<0) {
+            var selection=searchIndex.select(cleaned,pageable.getOffset(),pageable.getPageSize());
+            var selected=new HashMap<UUID,PurchaseProduct>();
+            products.findAllById(selection.ids()).forEach(row->selected.put(row.id,row));
+            var content=selection.ids().stream().map(id->view(Objects.requireNonNull(selected.get(id)))).toList();
+            return new PageImpl<>(content,pageable,selection.total());
+        }
         // Short/common words need a different plan from selective SKUs. Limit the setting
         // to this read transaction; a cached generic GIN plan scans the entire index for them.
         products.useCustomSearchPlan();

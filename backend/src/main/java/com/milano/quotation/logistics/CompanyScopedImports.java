@@ -12,6 +12,7 @@ import java.util.*;
 /** Compatibility endpoints use the same directory, durable batch and parser as the workspace. */
 @Service
 public class CompanyScopedImports {
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
     private final CompanyChannelService directory;private final LogisticsParserClient parser;private final LogisticsImportService imports;
     private final JdbcClient jdbc;private final ObjectMapper mapper;
     public CompanyScopedImports(CompanyChannelService directory,LogisticsParserClient parser,LogisticsImportService imports,JdbcClient jdbc,ObjectMapper mapper){this.directory=directory;this.parser=parser;this.imports=imports;this.jdbc=jdbc;this.mapper=mapper;}
@@ -41,7 +42,12 @@ public class CompanyScopedImports {
             var item=(ObjectNode)value.deepCopy();item.put("action",item.path("status").asText().equals("unchanged")?"duplicate":"updated");items.add(item);
         }
         result.put("count",items.size()).put("filteredChannels",batch.path("payload").path("filteredChannels").asInt());result.set("fileReports",batch.path("payload").path("fileReports"));
-        if(channel!=null&&items.size()==1&&!items.get(0).path("versionId").asText().isBlank())return jdbc.sql("select payload::text from logistics_version where id=:id").param("id",UUID.fromString(items.get(0).path("versionId").asText())).query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).single();
+        if(channel!=null&&items.size()==1&&!items.get(0).path("versionId").asText().isBlank()) {
+            // Draft creation uses JPA in this transaction; the compatibility
+            // response uses JDBC, which does not trigger Hibernate auto-flush.
+            entityManager.flush();
+            return jdbc.sql("select payload::text from logistics_version where id=:id").param("id",UUID.fromString(items.get(0).path("versionId").asText())).query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).single();
+        }
         if(channel!=null)result.put("filtered",true).put("message","处理完成，文件未匹配该公司渠道，请查看导入批次报告");
         return result;
     }

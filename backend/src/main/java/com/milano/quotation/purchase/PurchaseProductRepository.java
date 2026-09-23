@@ -13,6 +13,13 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PurchaseProductRepository extends JpaRepository<PurchaseProduct, UUID> {
+    // A single database snapshot without loading image/notes/tier payloads into Hibernate.
+    @Query(value="""
+        SELECT jsonb_build_object('sku',sku,'category',payload->'category',
+          'purchasePriceCny',payload->'purchasePriceCny')::text
+        FROM purchase_product ORDER BY sku
+        """,nativeQuery=true)
+    List<String> analyticsCatalog();
     Optional<PurchaseProduct> findBySku(String sku);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select product from PurchaseProduct product where product.sku=:sku")

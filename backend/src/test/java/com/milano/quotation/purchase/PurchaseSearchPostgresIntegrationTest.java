@@ -47,6 +47,29 @@ class PurchaseSearchPostgresIntegrationTest {
         em.getTransaction().rollback();em.getTransaction().begin();
         assertEquals("auto",em.createNativeQuery("show plan_cache_mode").getSingleResult());
     }
+    @Test void analyticsProjectsEveryProductFromOneSnapshotWithoutPrivatePayloads(){
+        em.createNativeQuery("""
+            insert into purchase_product(id,sku,payload,version,created_at,updated_at,catalog_state,quote_ready)
+            select gen_random_uuid(),'ANALYTICS-'||n,
+              jsonb_build_object('category',' 服装 ','purchasePriceCny',case when n%2=0 then '12.30' else null end,
+                'notes',repeat('private',1000),'productImage','private-url'),0,now(),now(),'disabled',false
+            from generate_series(1,601) n
+            """).executeUpdate();
+        var service=new PurchaseProductService(repository,null,null,null,null);
+        var result=service.analyticsCatalog();
+        assertEquals(632,result.total());
+        assertEquals(632,result.items().size());
+        for(var item:result.items()) {
+            assertEquals(3,item.size());
+            assertTrue(item.has("sku"));assertTrue(item.has("category"));assertTrue(item.has("purchasePriceCny"));
+            assertFalse(item.has("notes"));assertFalse(item.has("productImage"));
+        }
+        var sample=result.items().stream().filter(row->row.path("sku").asText().equals("ANALYTICS-2")).findFirst().orElseThrow();
+        assertEquals("12.30",sample.path("purchasePriceCny").asText());
+        assertEquals(" 服装 ",sample.path("category").asText());
+        em.createNativeQuery("delete from purchase_product").executeUpdate();
+        assertEquals(new PurchaseProductService.AnalyticsCatalog(List.of(),0),service.analyticsCatalog());
+    }
     @Test void matchingAndTotalsAgreeWithOriginalSearchAcrossPages(){
         for(var query:List.of("BIZ-","蓝色","xl","100%_","not-found")){
             var expected=jdbc.queryForList("select sku from purchase_product where lower(sku) like concat('%',lower(?),'%') or lower(payload::text) like concat('%',lower(?),'%') order by updated_at desc,id",String.class,query,query);

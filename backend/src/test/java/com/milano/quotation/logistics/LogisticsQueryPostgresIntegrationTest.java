@@ -309,6 +309,11 @@ class LogisticsQueryPostgresIntegrationTest {
 
         assertEquals(1, providers.total());
         assertEquals(2, versions.items().getFirst().path("rowCount").asInt());
+        assertEquals(2, versions.items().getFirst().path("countryCount").asInt());
+        assertEquals(0, versions.items().getFirst().path("issueCount").asInt());
+        assertEquals(0, versions.items().getFirst().path("diffCount").asInt());
+        var emptyPage=service.versions(1,50,channelId,"published");
+        assertEquals(versions.total(),emptyPage.total());assertTrue(emptyPage.items().isEmpty());
         assertFalse(versions.items().getFirst().has("rows"));
         assertEquals(1, rows.items().size());
         assertEquals("US", rows.items().getFirst().path("countryCode").asText());

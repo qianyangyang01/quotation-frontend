@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import DateFilter from '@/components/DateFilter.vue'
 import {
   buildCategoryPerformance,
@@ -11,22 +11,33 @@ import {
   recordCountries,
   resolveRecordCategory,
   type DashboardFilters,
+  type AnalyticsPurchase,
 } from '@/data/quotationAnalytics'
-import { type PurchaseProductRecord } from '@/data/purchaseStore'
 import { loadAnalyticsPurchases } from '@/services/quotationAnalyticsPurchases'
-import { loadQuotationRecords, type QuotationRecord } from '@/data/quotationRecords'
+import { type QuotationRecord } from '@/data/quotationRecords'
+import { loadAnalyticsRecords } from '@/services/quotationAnalyticsRecords'
 
-const records = ref<QuotationRecord[]>([])
+const records = shallowRef<QuotationRecord[]>([])
 const recordsReady = ref(false)
 const recordLoadError = ref('')
 async function reloadRecords() {
   recordsReady.value = false
   recordLoadError.value = ''
-  try { records.value = await loadQuotationRecords('company'); recordsReady.value = true }
+  try { records.value = await loadAnalyticsRecords(catalogController.signal); recordsReady.value = true }
   catch (error) { recordLoadError.value = error instanceof Error ? error.message : '报价记录读取失败' }
 }
-const purchases = ref<PurchaseProductRecord[]>([])
+const purchases = shallowRef<AnalyticsPurchase[]>([])
 const purchaseLoadFailed = ref(false)
+const catalogController = new AbortController()
+onUnmounted(() => catalogController.abort())
+async function reloadPurchases() {
+  purchasesReady.value = false
+  purchaseLoadFailed.value = false
+  try {
+    purchases.value = await loadAnalyticsPurchases(catalogController.signal)
+    purchasesReady.value = true
+  } catch { purchaseLoadFailed.value = true }
+}
 const purchasesReady = ref(false)
 const globalSearch = ref('')
 const startDate = ref('')
@@ -125,13 +136,9 @@ watch([filters, categorySearch, categoryMode, categorySort, categoryPageSize], (
 watch(categoryPageCount, count => { if (categoryPage.value > count) categoryPage.value = count })
 watch(detailPageCount, count => { if (detailPage.value > count) detailPage.value = count })
 
-onMounted(async () => {
-  const [, purchaseResult] = await Promise.allSettled([
-    reloadRecords(),
-    loadAnalyticsPurchases(),
-  ])
-  if (purchaseResult.status === 'fulfilled') { purchases.value = purchaseResult.value; purchasesReady.value = true }
-  else { purchaseLoadFailed.value = true; purchases.value = [] }
+onMounted(() => {
+  void reloadRecords()
+  void reloadPurchases()
 })
 </script>
 
@@ -145,7 +152,9 @@ onMounted(async () => {
 
       <p v-if="recordLoadError" class="data-warning" role="alert">完整报价统计暂不可用：{{ recordLoadError }}。<button type="button" @click="reloadRecords">重新读取</button></p>
       <p v-else-if="!recordsReady" role="status">正在读取完整报价统计…</p>
-      <template v-if="recordsReady">
+      <p v-if="purchaseLoadFailed" class="data-warning" role="alert">采购类别读取失败，暂不展示统计，避免分类与金额不一致。<button type="button" @click="reloadPurchases">重新读取</button></p>
+      <p v-else-if="!purchasesReady" role="status">正在读取采购类别…</p>
+      <template v-if="recordsReady && purchasesReady">
       <section class="global-filters">
         <label class="global-search">⌕<input v-model="globalSearch" placeholder="搜索报价、客户、SKU、业务员"></label>
         <DateFilter v-model="startDate" label="开始日期" :max="endDate || undefined" />

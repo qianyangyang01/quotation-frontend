@@ -1,7 +1,7 @@
 import { computed, reactive } from 'vue'
 import { api, request, resetCsrf, setRequestAccount } from '@/services/http'
 import { clearPublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
-import { clearFinanceSettingsCache, hydrateFinanceSettings } from '@/services/financeSettings'
+import { clearFinanceSettingsCache } from '@/services/financeSettings'
 
 export type RoleKey = 'super_admin' | 'finance' | 'logistics' | 'purchase' | 'employee'
 export type PermissionKey = 'quote' | 'purchase' | 'logistics' | 'finance' | 'myRecords' | 'allRecords' | 'permissions'
@@ -53,30 +53,15 @@ export function validatePassword(password: string) {
   return ''
 }
 
-const FINANCE_LOGIN_HYDRATION_TIMEOUT_MS = 8_000
-
-async function hydrateFinanceSettingsAfterLogin() {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FINANCE_LOGIN_HYDRATION_TIMEOUT_MS)
-  try {
-    await hydrateFinanceSettings({ force: true, signal: controller.signal })
-    return { ready: true as const, message: '' }
-  } catch (error) {
-    return {
-      ready: false as const,
-      message: controller.signal.aborted ? '财务设置加载超时，请进入财务页面重试' : error instanceof Error ? error.message : '财务设置加载失败，请进入财务页面重试',
-    }
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
 export async function login(account: string, password: string) {
   try {
-    applySession(await api.post<SessionUser>('/auth/login', { account: account.trim().toUpperCase(), password }))
+    const session = await api.post<SessionUser>('/auth/login', { account: account.trim().toUpperCase(), password })
+    // Invalidate prior settings even when logging in again without a logout.
+    // The destination workspace must verify fresh settings before calculating.
+    clearFinanceSettingsCache()
+    applySession(session)
     authState.initialized = true
-    const financeSettings = await hydrateFinanceSettingsAfterLogin()
-    return { ok: true as const, user: currentAuthUser.value, financeSettingsReady: financeSettings.ready, financeSettingsMessage: financeSettings.message }
+    return { ok: true as const, user: currentAuthUser.value }
   }
   catch (error) { return { ok: false as const, message: error instanceof Error ? error.message : '登录失败' } }
 }

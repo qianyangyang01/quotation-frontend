@@ -97,9 +97,9 @@ await check('all sessions can search a fresh SKU in synchronized bursts',async()
   }
 })
 
-const queue=[],latest=[],pending=new Map();let writes=0,reviewed=0,seen=0
+const latest=[],pending=new Map();let writes=0,reviewed=0,seen=0
 const begin=performance.now(),end=begin+seconds*1000
-async function reader(s,i){
+async function reader(s){
   const rows=quoteRows.get(s.account),ids=rows.map(r=>r.id).join(',');let n=0
   while(performance.now()<end){
     try{
