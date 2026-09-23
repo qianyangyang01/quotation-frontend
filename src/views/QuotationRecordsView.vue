@@ -5,6 +5,7 @@ import { operationFeesLabel } from '@/data/customerOperationFees'
 import { useQuotationReviewSync } from '@/composables/useQuotationReviewSync'
 import { reviewQuotationRecord, financeReviewLabel, type ReviewAction } from '@/data/quotationRecords'
 import QuotationReviewPanel from '@/components/quotation/QuotationReviewPanel.vue'
+import QuotationReviewButton from '@/components/quotation/QuotationReviewButton.vue'
 import QuotationReviewHistory from '@/components/quotation/QuotationReviewHistory.vue'
 import QuotationWeightTrace from '@/components/quotation/QuotationWeightTrace.vue'
 import QuotationProductCostTrace from '@/components/quotation/QuotationProductCostTrace.vue'
@@ -370,7 +371,6 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.productSummary }} · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
 
         <p v-if="!isActive(selected)" class="lifecycle-readonly">{{ lifecycleLabel(selected.lifecycleState) }} · {{ selected.lifecycleChangedBy }} · {{ selected.lifecycleReason }}。恢复后可修改。</p>
-        <QuotationReviewPanel class="detail-review" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&!editing&&isActive(selected)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(selected.id)||lifecycleBusy" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
         <template v-if="!editing">
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
@@ -387,7 +387,9 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           </section>
           <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>报价处理</b>：{{ revision.after === 'true' ? '已确认报价，标记为已处理' : '客户报价已变化，需重新确认' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>处理状态</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
           <QuotationReviewHistory v-if="detailTab==='history'" :id="selected.id" :version="reviewSync.stateFor(selected)._reviewVersion" :account="currentAuthUser.account" />
-          <footer v-if="detailTab==='overview'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" /></footer>
+          <footer v-if="detailTab==='overview'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved">
+            <QuotationReviewButton v-if="canReview&&isActive(selected)" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :busy="reviewing.has(selected.id)||lifecycleBusy" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
+          </QuotationRecordCopyActions></footer>
         </template>
 
         <template v-else>
@@ -405,7 +407,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
 <style scoped>
 .reissue-quote{padding:7px 12px;border:1px solid #ffb54e;border-radius:6px;background:#fff8ed;color:#a95f00;font-size:11px;font-weight:700;text-decoration:none}
-.finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.detail-review{margin:12px 24px}.record-row-actions{min-width:0;gap:8px}
+.finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.record-row-actions{min-width:0;gap:8px}
 
 .stats{grid-template-columns:repeat(4,1fr)}.record-row-actions{flex-wrap:wrap}.record-row-actions>em.processed{background:#e8f3ff;border-color:#b4d3f0;color:#256da6}.record-row-actions>small{font-size:10px;color:#71808c}
 .revision-history article>.customer-price-revision{grid-column:1/-1;min-width:0}

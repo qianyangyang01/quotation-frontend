@@ -21,19 +21,25 @@ async function mount(role:'super_admin'|'employee',scope:'mine'|'company') {
 }
 afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;authState.permissions=[];vi.useRealTimers();vi.resetAllMocks()})
 it('requires claiming before completion and opens the exact returned quotation',async()=>{
-  vi.useFakeTimers();await mount('super_admin','company');expect(button('审核完成 · 可报价')).toBeUndefined()
+  vi.useFakeTimers();await mount('super_admin','company');expect(button('审核完成')).toBeUndefined()
   mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()
   expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'claim',_version:2,_reviewVersion:0})
   expect(document.querySelector('.record-drawer')).not.toBeNull();expect(document.body.textContent).toContain('ADMIN审核中')
   mocks.patch.mockResolvedValue({...saved(),_reviewVersion:2,financeReviewStatus:'approved',financeReviewedBy:'ADMIN'})
-  button('审核完成 · 可报价').click();await flush()
+  const footer=document.querySelector('.drawer-view-footer')!
+  expect(footer.contains(button('审核完成'))).toBe(true)
+  expect(button('审核完成').previousElementSibling?.textContent).toBe('复制报价数据')
+  expect(document.querySelector('.record-drawer .review-panel')).toBeNull()
+  expect(document.querySelector('.record-drawer textarea')).toBeNull()
+  expect(footer.querySelectorAll('.review-button')).toHaveLength(1)
+  button('审核完成').click();await flush()
   expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'approved',note:'',_version:2,_reviewVersion:1})
   expect(document.querySelector('.finance-review.approved')).not.toBeNull()
 })
 it('employees see live ownership without getting review buttons',async()=>{
   vi.useFakeTimers();await mount('employee','mine');expect(button('开始审核')).toBeUndefined()
   mocks.get.mockResolvedValue([claimed()]);await vi.advanceTimersByTimeAsync(3000);await flush()
-  expect(document.body.textContent).toContain('ADMIN审核中');expect(button('审核完成 · 可报价')).toBeUndefined()
+  expect(document.body.textContent).toContain('ADMIN审核中');expect(button('审核完成')).toBeUndefined()
 })
 it('refreshes filtered list and count after claim, while keeping the claimed detail open',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
@@ -49,12 +55,12 @@ it('failed claim is never displayed as successful ownership',async()=>{
 it('polling a newer price cannot silently approve the stale drawer snapshot',async()=>{
   vi.useFakeTimers();await mount('super_admin','company');mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()
   mocks.get.mockResolvedValue([{...claimed(),_version:3,_reviewVersion:2}]);await vi.advanceTimersByTimeAsync(3000);await flush()
-  expect(button('审核完成 · 可报价').disabled).toBe(true);expect(document.body.textContent).toContain('报价内容已更新')
-  mocks.load.mockResolvedValue({...claimed(),_version:3,_reviewVersion:2});button('重新加载详情').click();await flush();expect(button('审核完成 · 可报价').disabled).toBe(false)
+  expect(button('审核完成')).toBeUndefined();expect(button('重新加载详情').title).toContain('报价内容已更新')
+  mocks.load.mockResolvedValue({...claimed(),_version:3,_reviewVersion:2});button('重新加载详情').click();await flush();expect(button('审核完成').disabled).toBe(false)
 })
 it('a released and reclaimed quotation cannot be completed from the previous claim session',async()=>{
   vi.useFakeTimers();await mount('super_admin','company');mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()
   mocks.get.mockResolvedValue([{...claimed(),_reviewVersion:3}]);await vi.advanceTimersByTimeAsync(3000);await flush()
-  expect(button('审核完成 · 可报价').disabled).toBe(true);expect(button('取消审核').disabled).toBe(true)
-  expect(document.body.textContent).toContain('审核占用已变化');expect(mocks.patch).toHaveBeenCalledTimes(1)
+  expect(button('审核完成')).toBeUndefined();expect(button('取消审核')).toBeUndefined()
+  expect(button('重新加载详情').title).toContain('审核占用已变化');expect(mocks.patch).toHaveBeenCalledTimes(1)
 })
