@@ -65,7 +65,7 @@ try{
     await page.getByText('采购类别读取失败，暂不展示统计',{exact:false}).waitFor()
     assert.equal(await page.locator('.overview-app .kpis').count(),0);assert(await page.getByRole('button',{name:'⇩ 导出报表'}).isDisabled())
     await context.setOffline(false)
-    for(const button of await page.getByRole('button',{name:'重新读取',exact:true}).all())await button.click()
+    for(let attempt=0;attempt<3&&await page.getByRole('button',{name:'重新读取',exact:true}).count();attempt++)await page.getByRole('button',{name:'重新读取',exact:true}).first().click()
     await waitReady(page,'super_admin');reports.push({role:'super_admin',offlineBlocksFalseStatistics:true,onlineRetryRestoresCompleteData:true})
     await context.close()
   }

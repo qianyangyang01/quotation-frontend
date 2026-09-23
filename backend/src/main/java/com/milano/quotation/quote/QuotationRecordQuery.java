@@ -31,6 +31,12 @@ public class QuotationRecordQuery {
         var lifecycle=filters.lifecycle()==null ? "active" : filters.lifecycle();
         if(!Set.of("active","archived","trashed").contains(lifecycle)) throw AppException.unprocessable("记录分类不合法");
         var params=new HashMap<String,Object>(); params.put("lifecycle",lifecycle);
+        var countrySnapshot=countryIndex==null?null:countryIndex.snapshot(owner,lifecycle);
+        var confirmed="(coalesce(payload->>'quoteConfirmed','false')='true')";
+        if(countrySnapshot!=null){
+            params.put("confirmedIds","{"+String.join(",",countrySnapshot.confirmedIds().stream().map(UUID::toString).toList())+"}");
+            confirmed="(id=ANY(CAST(:confirmedIds AS uuid[])))";
+        }
         var where=new StringBuilder(" where lifecycle_state=:lifecycle");
         if(owner!=null) { where.append(" and owner_account=:owner");params.put("owner",owner); }
         var zone=ZoneId.of("Asia/Shanghai");
@@ -43,8 +49,8 @@ public class QuotationRecordQuery {
                 where.append(" and exists(select 1 from quotation_review r where r.id=quotation_record.id and r.status='reviewing' and r.claimant_account=:reviewer)");
                 params.put("reviewer",filters.reviewer()==null?"":filters.reviewer());
             } else if (filters.status().startsWith("finance-")) { where.append(" and "+reviewStatus+"=:reviewStatus");params.put("reviewStatus",filters.status().substring(8)); }
-            else if (filters.status().equals("processed")) where.append(" and status in ('pending','lost') and payload->>'quoteConfirmed'='true'");
-            else if (filters.status().equals("pending")) where.append(" and status in ('pending','lost') and coalesce(payload->>'quoteConfirmed','false')<>'true'");
+            else if (filters.status().equals("processed")) where.append(" and status in ('pending','lost') and "+confirmed);
+            else if (filters.status().equals("pending")) where.append(" and status in ('pending','lost') and not "+confirmed);
             else { where.append(" and status=:status");params.put("status",filters.status()); } }
         if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank()) {
             if(filters.reviewStatus().equals("pending")) where.append(" and "+reviewStatus+" not in ('approved','rejected','reviewing')");
@@ -61,7 +67,7 @@ public class QuotationRecordQuery {
             where.append(" and position(:q in lower(concat_ws(' ',quote_no,payload->>'customerName',payload->>'primarySku',payload->>'productCategory',payload->>'country',payload->>'carrier',payload->>'channel',payload->>'salespersonName',(select string_agg(concat_ws(' ',o->>'country',o->>'carrier',o->>'channel',o->>'rule'),' ') from "+options+" o))))>0");
             params.put("q",filters.q().trim().toLowerCase(Locale.ROOT));
         }
-        var summary=jdbc.queryForObject("select count(*) total,count(*) filter(where status in ('pending','lost') and coalesce(payload->>'quoteConfirmed','false')<>'true') pending,count(*) filter(where status in ('pending','lost') and payload->>'quoteConfirmed'='true') processed,count(*) filter(where status='won') won,count(*) filter(where status='lost') lost from quotation_record"+where,params,(rs,n)->new Summary(rs.getLong("pending"),rs.getLong("won"),rs.getLong("lost"),rs.getLong("total"),rs.getLong("processed")));
+        var summary=jdbc.queryForObject("select count(*) total,count(*) filter(where status in ('pending','lost') and not "+confirmed+") pending,count(*) filter(where status in ('pending','lost') and "+confirmed+") processed,count(*) filter(where status='won') won,count(*) filter(where status='lost') lost from quotation_record"+where,params,(rs,n)->new Summary(rs.getLong("pending"),rs.getLong("won"),rs.getLong("lost"),rs.getLong("total"),rs.getLong("processed")));
         int safeSize=Math.max(1,Math.min(100,size)); int pages=(int)Math.ceil((double)summary.total()/safeSize); int safePage=Math.max(0,Math.min(page,Math.max(0,pages-1)));
         params.put("limit",safeSize);params.put("offset",(long)safePage*safeSize);
         var items=jdbc.query("select id,payload,version,lifecycle_state from quotation_record"+where+" order by created_at desc,id desc limit :limit offset :offset",params,(rs,n)->{var payload=(tools.jackson.databind.node.ObjectNode)mapper.readTree(rs.getString("payload"));payload.put("id",rs.getObject("id",UUID.class).toString());payload.put("_version",rs.getLong("version"));payload.put("lifecycleState",rs.getString("lifecycle_state"));return (JsonNode)payload;});
@@ -75,7 +81,7 @@ public class QuotationRecordQuery {
             }
         }
         var ownerWhere=" where lifecycle_state=:lifecycle"+(owner==null?"":" and owner_account=:owner");
-        var countries=countryIndex!=null?countryIndex.countries(owner,lifecycle):jdbc.queryForList("select distinct country from (select payload->>'country' country from quotation_record"+ownerWhere+" union select o->>'country' country from quotation_record cross join lateral "+options+" o"+ownerWhere+") c where country is not null and country<>'' and country<>'—' order by country",params,String.class);
+        var countries=countrySnapshot!=null?countrySnapshot.countries():jdbc.queryForList("select distinct country from (select payload->>'country' country from quotation_record"+ownerWhere+" union select o->>'country' country from quotation_record cross join lateral "+options+" o"+ownerWhere+") c where country is not null and country<>'' and country<>'—' order by country",params,String.class);
         return new Result(items,safePage,safeSize,summary.total(),pages,summary,countries);
     }
 }
