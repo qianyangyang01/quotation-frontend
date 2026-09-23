@@ -1,11 +1,11 @@
 import { api } from '@/services/http'
 import { normalizeQuotationRecord, type QuotationRecord } from './quotationRecords'
 
-export interface RecordFilters { lifecycle?: 'active' | 'archived' | 'trashed'; q?: string; status?: string; country?: string; category?: string; startDate?: string; endDate?: string }
+export interface RecordFilters { lifecycle?: 'active' | 'archived' | 'trashed'; q?: string; status?: string; reviewStatus?: string; reviewMine?: boolean; country?: string; category?: string; startDate?: string; endDate?: string }
 export interface RecordPage { items: QuotationRecord[]; page: number; size: number; total: number; totalPages: number; summary: { processed?: number; pending: number; won: number; lost: number; total: number }; countries: string[] }
 export async function loadRecordPage(scope: 'mine' | 'company', filters: RecordFilters, page=0, size=10): Promise<RecordPage> {
   const query=new URLSearchParams({scope,page:String(page),size:String(size)})
-  for(const [key,value] of Object.entries(filters)) if(value) query.set(key,value)
+  for(const [key,value] of Object.entries(filters)) if(value) query.set(key,String(value))
   const result=await api.get<RecordPage>(`/quotations/search?${query}`)
   return {...result,items:result.items.map(normalizeQuotationRecord).filter((row): row is QuotationRecord=>!!row)}
 }

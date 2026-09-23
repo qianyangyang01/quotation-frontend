@@ -75,5 +75,21 @@ class QuotationRecordQueryPostgresIntegrationTest {
         assertEquals(1,assigned.items().getFirst().path("_reviewVersion").asInt());
         assertEquals(101,query.search("ME",pendingReviewFilters,0,100).total());
         assertEquals(0,query.search("OTHER",new QuotationRecordQuery.Filters("","finance-mine","","",date,date,"active","F1"),0,10).total());
+        var approvedProcessed=query.search("ME",new QuotationRecordQuery.Filters("","processed","","",date,date,"active","F1","approved",false),0,10);
+        assertEquals(1,approvedProcessed.total());assertEquals(1,approvedProcessed.summary().processed());
+        assertEquals("Q-1",approvedProcessed.items().getFirst().path("no").asText());
+        assertEquals(0,query.search("ME",new QuotationRecordQuery.Filters("","pending","","",date,date,"active","F1","approved",false),0,10).total());
+        assertEquals(1,query.search("ME",new QuotationRecordQuery.Filters("","processed","","",date,date,"active","F1","rejected",false),0,10).total());
+        assertEquals(1,query.search(null,new QuotationRecordQuery.Filters("","won","","",date,date,"active","F1","approved",false),0,10).total());
+        var mineReview=new QuotationRecordQuery.Filters("","pending","","",date,date,"active","F1","reviewing",true);
+        assertEquals(1,query.search("ME",mineReview,0,10).total());
+        assertEquals(0,query.search("OTHER",mineReview,0,10).total());
+        assertEquals(0,query.search("ME",new QuotationRecordQuery.Filters("","processed","","",date,date,"active","F1","reviewing",true),0,10).total());
+        var combinedPending=new QuotationRecordQuery.Filters("100%","pending","法国","服装",date,date,"active","F1","pending",false);
+        var firstPage=query.search("ME",combinedPending,0,100);
+        var lastPage=query.search("ME",combinedPending,1,100);
+        assertEquals(101,firstPage.total());assertEquals(100,firstPage.items().size());assertEquals(1,lastPage.items().size());
+        assertTrue(firstPage.items().stream().noneMatch(lastPage.items()::contains));
+        assertThrows(RuntimeException.class,()->query.search("ME",new QuotationRecordQuery.Filters("","","","",date,date,"active","F1","invalid",false),0,10));
     }
 }

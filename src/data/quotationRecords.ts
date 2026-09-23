@@ -6,7 +6,7 @@ import { normalizeCustomerPrices, type CustomerPriceSnapshot } from './customerQ
 import { api, idempotencyKey } from '@/services/http'
 
 export type FinanceReviewStatus = 'pending' | 'reviewing' | 'approved' | 'rejected'
-export const financeReviewLabel = (value?: string) => value === 'reviewing' ? '审核中' : value === 'approved' ? '财务已审核-可报价' : value === 'rejected' ? '财务已审核-价格有误不可报价' : '待财务审核'
+export const financeReviewLabel = (value?: string) => value === 'reviewing' ? '审核中' : value === 'approved' ? '审核通过' : value === 'rejected' ? '价格异常' : '待审核'
 
 export type QuotationRecordStatus = 'pending' | 'won' | 'lost'
 

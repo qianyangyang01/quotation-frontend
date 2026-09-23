@@ -73,13 +73,18 @@ async function confirmLifecycle(reason: string) {
   } finally { lifecycleBusy.value = false }
 }
 const search = ref('')
-const filterStatus = ref<'' | 'pending' | 'won' | 'processed' | 'finance-pending' | 'finance-approved' | 'finance-rejected' | 'finance-reviewing' | 'finance-mine'>('')
+const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
+const filterStatus = ref<'' | 'pending' | 'won' | 'processed'>('')
+const filterReviewStatus = ref<'' | 'pending' | 'reviewing' | 'approved' | 'rejected'>('')
+const reviewMine = ref(false)
+watch(filterReviewStatus, value => { if (value !== 'reviewing') reviewMine.value = false })
+const reviewFiltered = computed(() => Boolean(filterReviewStatus.value))
 const filterCountry = ref('')
 const filterCategory = ref('')
 const startDate=ref('');const endDate=ref('');const page=ref(0);const pageSize=ref(10)
 const total=ref(0);const totalPages=ref(0);const loading=ref(false);const loadError=ref('');const exporting=ref(false)
 const summary=ref<{pending:number;won:number;lost:number;total:number;processed?:number}>({pending:0,won:0,lost:0,total:0});const countries=ref<string[]>([])
-const filters=computed(()=>({lifecycle:lifecycle.value,q:search.value.trim(),status:filterStatus.value,country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
+const filters=computed(()=>({lifecycle:lifecycle.value,q:search.value.trim(),status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
 const dateError=computed(()=>startDate.value && endDate.value && startDate.value>endDate.value ? '开始日期不能晚于结束日期' : '')
 let requestId=0;let refreshTimer:ReturnType<typeof setTimeout>|undefined
 async function refresh(silent = false) {
@@ -95,7 +100,7 @@ async function refresh(silent = false) {
   } catch(error) {if(id===requestId){records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};loadError.value=error instanceof Error?error.message:'加载失败，请重试'}}
   finally {if(id===requestId)loading.value=false}
 }
-function resetFilters(){search.value='';filterStatus.value='';filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
+function resetFilters(){search.value='';filterStatus.value='';filterReviewStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
 function recent(days:number){const dates=recentRecordDates(days);startDate.value=dates.startDate;endDate.value=dates.endDate}
 function changePage(next:number){if(loading.value)return;page.value=next;void refresh()}
 async function exportRecords(){
@@ -117,7 +122,7 @@ watch(() => records.value.map(row => reviewSync.stateFor(row).lifecycleState || 
     selected.value = null; void refresh(true)
   }
 })
-const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
+
 const reviewing = ref(new Set<string>())
 async function changeReview(row: QuotationRecord, action: ReviewAction) {
   if (!canReview.value || !isActive(row) || lifecycleBusy.value || reviewing.value.has(row.id)) return
@@ -131,7 +136,7 @@ async function changeReview(row: QuotationRecord, action: ReviewAction) {
     if (action.action==='claim') open(saved)
     else if (selected.value?.id === saved.id && !editing.value) selected.value = saved
     toast(action.action==='claim'?'已开始审核，其他财务可看到你的占用':action.action==='complete'?'审核结果已保存':'已取消占用，其他财务可以开始审核')
-    if (filterStatus.value.startsWith('finance-')) await refresh(true)
+    if (reviewFiltered.value) await refresh(true)
   } catch (error) {
     if (account !== currentAuthUser.value.account) return
     toast(error instanceof Error ? error.message : '审核操作失败，请重试')
@@ -144,7 +149,7 @@ async function reloadReview(row:QuotationRecord) {
   catch(error) {toast(error instanceof Error?error.message:'详情加载失败，请重试')}
 }
 let reviewListTimer:ReturnType<typeof setInterval>|undefined
-onMounted(()=>{reviewListTimer=setInterval(()=>{if(document.visibilityState!=='hidden'&&filterStatus.value.startsWith('finance-')&&!loading.value)void refresh(true)},15000)})
+onMounted(()=>{reviewListTimer=setInterval(()=>{if(document.visibilityState!=='hidden'&&reviewFiltered.value&&!loading.value)void refresh(true)},15000)})
 onUnmounted(()=>clearInterval(reviewListTimer))
 const editing = ref(false)
 const detailTab = ref<'overview' | 'options' | 'history'>('overview')
@@ -228,7 +233,7 @@ let filteredSyncBusy = false
 onUnmounted(() => clearInterval(filteredSyncTimer))
 onMounted(async () => {
   filteredSyncTimer = setInterval(async () => {
-    if (!filterStatus.value.startsWith('finance-') || loading.value || filteredSyncBusy || document.visibilityState === 'hidden') return
+    if (!reviewFiltered.value || loading.value || filteredSyncBusy || document.visibilityState === 'hidden') return
     filteredSyncBusy = true
     try { await refresh(true) } finally { filteredSyncBusy = false }
   }, 3000)
@@ -310,7 +315,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <button v-for="state in (['active','archived','trashed'] as const)" :key="state" :class="{active:lifecycle===state}" :aria-current="lifecycle===state ? 'page' : undefined" :disabled="lifecycleBusy" @click="lifecycle=state">{{ lifecycleLabel(state) }}</button>
         <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
       </nav>
-      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>状态<select v-model="filterStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="finance-pending">待财务审核</option><option value="finance-reviewing">审核中</option><option v-if="canReview" value="finance-mine">我正在审核</option><option value="finance-approved">财务已审核-可报价</option><option value="finance-rejected">财务已审核-价格有误不可报价</option><option value="won">已成交</option></select></label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
+      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>处理状态<select v-model="filterStatus" aria-label="处理状态"><option value="">全部</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="won">已成交</option></select></label><label>审核状态<select v-model="filterReviewStatus" aria-label="审核状态"><option value="">全部</option><option value="pending">待审核</option><option value="reviewing">审核中</option><option value="approved">审核通过</option><option value="rejected">价格异常</option></select></label><label v-if="canReview&&filterReviewStatus==='reviewing'" class="review-mine"><input v-model="reviewMine" type="checkbox">只看我的</label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
@@ -436,7 +441,7 @@ main{width:min(1680px,calc(100% - 48px))}
 .filters input,.filters select,.filters button{font-size:14px;height:40px}
 .filters .search{width:360px;height:40px}
 .filters .search input{height:38px}
-.filters>b{font-size:14px}
+.filters>b{font-size:14px}.filters .review-mine{display:flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap}.filters .review-mine input{width:16px;height:16px;padding:0}
 .record-date-filters{gap:10px;font-size:14px;margin:14px 0}
 .record-date-filters input,.record-date-filters button,.record-pagination button,.record-pagination select{min-height:38px;font:inherit}
 .record-date-filters small{flex-basis:100%;font-size:13px;line-height:1.5;color:#63717d}

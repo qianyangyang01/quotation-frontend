@@ -14,7 +14,8 @@ public class QuotationRecordQuery {
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper mapper;
     public QuotationRecordQuery(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc=jdbc; this.mapper=mapper; }
-    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer) {
+    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine) {
+        public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,null,false); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate) { this(q,status,country,category,startDate,endDate,"active",null); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle) { this(q,status,country,category,startDate,endDate,lifecycle,null); }
     }
@@ -25,6 +26,7 @@ public class QuotationRecordQuery {
         if(filters.startDate()!=null && filters.endDate()!=null && filters.startDate().isAfter(filters.endDate())) throw AppException.unprocessable("开始日期不能晚于结束日期");
         if(filters.status()!=null && !filters.status().isBlank() && !Set.of("pending","won","lost","processed","finance-pending","finance-approved","finance-rejected","finance-reviewing","finance-mine").contains(filters.status())) throw AppException.unprocessable("报价状态不合法");
         var reviewStatus="coalesce((select r.status from quotation_review r where r.id=quotation_record.id),nullif(payload->>'financeReviewStatus',''),'pending')";
+        if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank() && !Set.of("pending","reviewing","approved","rejected").contains(filters.reviewStatus())) throw AppException.unprocessable("审核状态不合法");
         var lifecycle=filters.lifecycle()==null ? "active" : filters.lifecycle();
         if(!Set.of("active","archived","trashed").contains(lifecycle)) throw AppException.unprocessable("记录分类不合法");
         var params=new HashMap<String,Object>(); params.put("lifecycle",lifecycle);
@@ -43,6 +45,14 @@ public class QuotationRecordQuery {
             else if (filters.status().equals("processed")) where.append(" and status in ('pending','lost') and payload->>'quoteConfirmed'='true'");
             else if (filters.status().equals("pending")) where.append(" and status in ('pending','lost') and coalesce(payload->>'quoteConfirmed','false')<>'true'");
             else { where.append(" and status=:status");params.put("status",filters.status()); } }
+        if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank()) {
+            if(filters.reviewStatus().equals("pending")) where.append(" and "+reviewStatus+" not in ('approved','rejected','reviewing')");
+            else { where.append(" and "+reviewStatus+"=:independentReviewStatus");params.put("independentReviewStatus",filters.reviewStatus()); }
+        }
+        if(filters.reviewMine()) {
+            where.append(" and exists(select 1 from quotation_review r where r.id=quotation_record.id and r.status='reviewing' and r.claimant_account=:reviewer)");
+            params.put("reviewer",filters.reviewer()==null?"":filters.reviewer());
+        }
         if(filters.category()!=null && !filters.category().isBlank()) { where.append(" and payload->>'productCategory'=:category");params.put("category",filters.category()); }
         var options="jsonb_array_elements(case when jsonb_typeof(payload->'quoteOptions')='array' then payload->'quoteOptions' else '[]'::jsonb end)";
         if(filters.country()!=null && !filters.country().isBlank()) { where.append(" and (payload->>'country'=:country or exists(select 1 from "+options+" o where o->>'country'=:country))");params.put("country",filters.country()); }

@@ -99,7 +99,7 @@ it('does not render another record after an in-flight opening switches context',
 it('a rejected financial review is advisory and keeps both copy paths available', async () => {
   const state=mount();state.record.financeReviewStatus='rejected';await settle()
   footerButton('复制报价数据').click();await settle()
-  expect(writeText.mock.lastCall![0]).toContain('财务已审核-价格有误不可报价')
+  expect(writeText.mock.lastCall![0]).toContain('价格异常')
   footerButton('复制报价图片').click();await settle()
   expect(document.querySelector('dialog')!.open).toBe(true)
   expect(render).toHaveBeenCalledTimes(1)

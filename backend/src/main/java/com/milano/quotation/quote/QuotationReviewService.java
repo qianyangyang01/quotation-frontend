@@ -90,7 +90,6 @@ public class QuotationReviewService {
                 requireQuoteVersion(quote,request);
                 var result=request.path("financeReviewStatus").asText();
                 if(!Set.of("approved","rejected").contains(result)) throw AppException.unprocessable("请选择审核结论");
-                if(result.equals("rejected")&&note.isBlank()) throw AppException.unprocessable("请填写价格有误的原因");
                 row.status=result;
                 current.put("financeReviewedBy",actor.displayName()).put("financeReviewedAccount",actor.account()).put("financeReviewedAt",Instant.now().toString());
                 current.put("financeReviewNote",note);

@@ -35,12 +35,12 @@ it('blocks a reversed date range without submitting a query',async()=>{
 it.each(['mine', 'company'])('filters pending finance reviews and resets pagination for %s', async scope => {
   vi.useFakeTimers(); query.loadRecordPage.mockResolvedValue(result(35)); await mount(scope)
   query.loadRecordPage.mockResolvedValueOnce(result(35,1)); button('下一页').click(); await flush()
-  const select = document.querySelector('.filters select') as HTMLSelectElement
-  expect(Array.from(select.options).find(option => option.value === 'finance-pending')?.textContent).toBe('待财务审核')
+  const select = document.querySelector('[aria-label="审核状态"]') as HTMLSelectElement
+  expect(Array.from(select.options).find(option => option.value === 'pending')?.textContent).toBe('待审核')
   query.loadRecordPage.mockResolvedValue(result(3))
-  select.value = 'finance-pending'; select.dispatchEvent(new Event('change'))
+  select.value = 'pending'; select.dispatchEvent(new Event('change'))
   await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
-  expect(query.loadRecordPage.mock.lastCall).toEqual([scope, expect.objectContaining({status:'finance-pending'}), 0, 10])
+  expect(query.loadRecordPage.mock.lastCall).toEqual([scope, expect.objectContaining({reviewStatus:'pending'}), 0, 10])
   expect(document.querySelector('[aria-label="报价记录分页"]')!.textContent).toContain('共 3 条')
   expect(document.querySelector('.stats')!.textContent).toContain('3')
 })

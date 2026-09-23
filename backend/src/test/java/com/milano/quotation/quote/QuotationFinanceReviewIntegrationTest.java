@@ -103,7 +103,12 @@ class QuotationFinanceReviewIntegrationTest {
     @Test void preservesLegacyConclusionsAndRejectsOldDirectReviewApi() throws Exception {
         var r=record();((ObjectNode)r.payload).put("financeReviewStatus","approved").put("financeReviewedBy","历史审核人");r=records.saveAndFlush(r);assertEquals("approved",view(r).path("financeReviewStatus").asText());
         mvc.perform(patch("/api/v1/quotations/{id}/finance-review",r.id).with(finance).with(csrf()).contentType("application/json").content("{\"_version\":1,\"financeReviewStatus\":\"approved\"}")).andExpect(status().isUnprocessableEntity());
-        claim(r);action(r,finance,qv(r),rv(r),"complete","rejected","").andExpect(status().isUnprocessableEntity());action(r,finance,qv(r),rv(r),"complete","rejected","价格需调整").andExpect(status().isOk());
+        claim(r);action(r,finance,qv(r),rv(r),"complete","rejected","").andExpect(status().isOk());
+        assertEquals("rejected",view(r).path("financeReviewStatus").asText());
+        assertEquals("",view(r).path("financeReviewNote").asText());
+        assertEquals(r.payload,records.findById(r.id).orElseThrow().payload);
+        assertEquals(r.version,qv(r));
+        assertEquals("rejected",reviews.findById(r.id).orElseThrow().state.path("history").get(2).path("after").asText());
     }
     ResultActions lifecycle(QuotationRecordEntity r,String operation,long version) throws Exception {
         var body=Map.of("action",operation,"reason","联合回归", "items",List.of(Map.of("id",r.id,"version",version)));
