@@ -75,7 +75,11 @@ async function confirmLifecycle(reason: string) {
     lifecycleError.value = error instanceof Error ? error.message : '操作失败，请刷新后重新选择'
   } finally { lifecycleBusy.value = false }
 }
-const search = ref('')
+const filterProduct = ref('')
+const filterCustomer = ref('')
+const filterChannel = ref('')
+const filterOptionScale = ref<'' | 'single' | 'multiple'>('')
+const filterPriceDifference = ref<'' | 'lower' | 'equal' | 'higher' | 'missing'>('')
 const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
 const filterStatus = ref<'' | 'pending' | 'won' | 'processed'>('')
 const reviewGroups = [
@@ -94,7 +98,7 @@ const filterCategory = ref('')
 const startDate=ref('');const endDate=ref('');const page=ref(0);const pageSize=ref(10)
 const total=ref(0);const totalPages=ref(0);const loading=ref(false);const loadError=ref('');const exporting=ref(false)
 const summary=ref<{pending:number;won:number;lost:number;total:number;processed?:number}>({pending:0,won:0,lost:0,total:0});const countries=ref<string[]>([])
-const filters=computed(()=>({lifecycle:lifecycle.value,q:search.value.trim(),status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
+const filters=computed(()=>({lifecycle:lifecycle.value,product:filterProduct.value.trim(),customer:filterCustomer.value.trim(),channel:filterChannel.value.trim(),optionScale:filterOptionScale.value,priceDifference:filterPriceDifference.value,status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
 const dateError=computed(()=>startDate.value && endDate.value && startDate.value>endDate.value ? '开始日期不能晚于结束日期' : '')
 let requestId=0;let refreshTimer:ReturnType<typeof setTimeout>|undefined
 async function refresh(silent = false) {
@@ -110,7 +114,7 @@ async function refresh(silent = false) {
   } catch(error) {if(id===requestId){records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};loadError.value=error instanceof Error?error.message:'加载失败，请重试'}}
   finally {if(id===requestId)loading.value=false}
 }
-function resetFilters(){search.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
+function resetFilters(){filterProduct.value='';filterCustomer.value='';filterChannel.value='';filterOptionScale.value='';filterPriceDifference.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
 function recent(days:number){const dates=recentRecordDates(days);startDate.value=dates.startDate;endDate.value=dates.endDate}
 function changePage(next:number){if(loading.value)return;page.value=next;void refresh()}
 async function exportRecords(){
@@ -357,13 +361,14 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
       </nav>
       <nav class="review-groups" aria-label="审核分类">
         <button v-for="group in reviewGroups" :key="group.value" type="button" :class="{ active: filterReviewStatus === group.value }" :aria-pressed="filterReviewStatus === group.value" :disabled="lifecycleBusy" @click="filterReviewStatus = group.value">{{ group.label }}</button>
+        <label v-if="canReview&&filterReviewStatus==='reviewing'" class="review-mine"><input v-model="reviewMine" type="checkbox">只看我的</label>
         <small>按审核结果自动分类</small>
       </nav>
-      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label v-if="canReview&&filterReviewStatus==='reviewing'" class="review-mine"><input v-model="reviewMine" type="checkbox">只看我的</label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
         <button @click="recent(1)">今天</button><button @click="recent(7)">近 7 天</button><button @click="recent(30)">近 30 天</button><button @click="startDate='';endDate=''">全部时间</button>
+        <button type="button" class="reset-record-filters" @click="resetFilters">重置</button>
         <div class="record-export-actions">
         <button :disabled="loading || exporting || !!dateError || !!loadError || !total" @click="exportRecords">{{ exporting ? '正在导出…' : '导出筛选结果' }}</button>
         </div>
@@ -379,7 +384,27 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <small>{{ lifecycle==='active' ? '已成交、审核中或已审核记录不可批量清理' : '保留原报价及操作记录' }}</small>
       </section>
       <section class="records quote-record-table" :aria-busy="loading">
-        <header><span>报价单 / 商品</span><span>客户</span><span>报价规模</span><span>报价差异</span><label class="record-status-filter">处理状态<select v-model="filterStatus" aria-label="处理状态"><option value="">全部</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="won">已成交</option></select></label></header>
+        <header class="record-column-filters" aria-label="报价记录列筛选">
+          <div class="record-column-filter">
+            <label for="record-product-filter">报价单 / 商品</label>
+            <input id="record-product-filter" v-model="filterProduct" type="search" placeholder="搜索报价单号 / SKU / 商品 / 业务员">
+            <select v-model="filterCategory" aria-label="产品品类"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select>
+          </div>
+          <label class="record-column-filter">客户<input v-model="filterCustomer" type="search" aria-label="客户" placeholder="搜索客户名称"></label>
+          <div class="record-column-filter">
+            <label for="record-scale-filter">报价规模</label>
+            <div class="record-filter-pair">
+              <select id="record-scale-filter" v-model="filterOptionScale"><option value="">全部方案</option><option value="single">单方案报价</option><option value="multiple">多方案报价</option></select>
+              <select v-model="filterCountry" aria-label="报价国家"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select>
+            </div>
+            <input v-model="filterChannel" type="search" aria-label="报价渠道" placeholder="搜索渠道 / 物流商">
+          </div>
+          <label class="record-column-filter">报价差异
+            <select v-model="filterPriceDifference" aria-label="报价差异"><option value="">全部差异</option><option value="lower">客户报价低于系统报价</option><option value="equal">客户报价等于系统报价</option><option value="higher">客户报价高于系统报价</option><option value="missing">未报价 / 无系统基准</option></select>
+            <small v-if="filterPriceDifference==='lower'||filterPriceDifference==='higher'">任一渠道、数量符合即显示</small>
+          </label>
+          <label class="record-column-filter record-status-filter">处理状态<select v-model="filterStatus" aria-label="处理状态"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="won">已成交</option></select></label>
+        </header>
         <article v-for="row in list" :key="row.id">
           <div class="quote-info">
             <input v-if="canManageLifecycle" v-model="checkedIds" type="checkbox" class="lifecycle-checkbox" :value="row.id" :aria-label="'选择报价 ' + row.no" :disabled="loading || lifecycleBusy || !!selectionBlocked(row)" :title="selectionBlocked(row) || '选择此报价'">
@@ -522,7 +547,7 @@ main{width:min(1680px,calc(100% - 48px))}
 .quote-record-table{overflow-x:auto;box-shadow:none}
 .quote-record-table>header,.quote-record-table>article{
   box-sizing:border-box;width:100%;min-width:1180px;
-  grid-template-columns:minmax(330px,1.65fr) minmax(145px,.8fr) minmax(170px,.9fr) minmax(170px,.85fr) minmax(240px,1fr);
+  grid-template-columns:minmax(330px,1.65fr) minmax(145px,.8fr) minmax(215px,.9fr) minmax(170px,.85fr) minmax(240px,1fr);
   gap:16px;padding:14px 16px;
 }
 .quote-record-table>header{font-size:14px;font-weight:600;color:#52616d}
@@ -568,7 +593,15 @@ main{width:min(1680px,calc(100% - 48px))}
   .record-pagination{gap:12px}
 }
 .lifecycle-tabs{display:flex;align-items:center;gap:24px;margin:20px 0 14px;border-bottom:1px solid #dfe5eb}.lifecycle-tabs button{padding:12px 8px;border:0;border-bottom:3px solid transparent;background:none;color:#66717c;font:inherit;font-weight:700;cursor:pointer}.lifecycle-tabs button.active{border-bottom-color:var(--orange);color:#17212b}.lifecycle-tabs small{margin-left:auto;color:#788590;font-size:12px}.lifecycle-toolbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:12px 0 0;padding:12px 16px;border:1px solid #e1e7ec;border-radius:8px 8px 0 0;background:#fff;font-size:13px}.lifecycle-toolbar label{display:flex;align-items:center;gap:8px}.lifecycle-toolbar>div{display:flex;gap:8px;margin-left:auto}.lifecycle-toolbar button{padding:8px 12px;border:1px solid #e0e5eb;border-radius:6px;background:#fff8ed;color:#925900;font:inherit;font-weight:600;cursor:pointer}.lifecycle-toolbar .trash-button{color:#bd3c32;background:#fff5f4;border-color:#edb7b2}.lifecycle-toolbar button:disabled{opacity:.45;cursor:not-allowed}.lifecycle-toolbar small{color:#77838e}.lifecycle-checkbox,.lifecycle-toolbar input{flex:0 0 17px;width:17px;height:17px;accent-color:#ed990f;cursor:pointer}.lifecycle-checkbox:disabled{cursor:not-allowed}.quote-info-copy .lifecycle-metadata{white-space:normal;line-height:1.6;color:#796341}.quote-info-copy .lifecycle-lock{white-space:normal;color:#8a7560;font-size:11px}.lifecycle-readonly{padding:12px;background:#fff8ed;border:1px solid #f0d9b6;border-radius:6px;font-size:12px}@media(max-width:720px){.lifecycle-tabs{gap:12px;flex-wrap:wrap}.lifecycle-tabs small{width:100%;margin:0 0 8px}.lifecycle-toolbar>div{margin-left:0}}
-.quote-record-table>header .record-status-filter{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;min-width:0;margin:0;font-size:inherit;color:inherit}.record-status-filter select{box-sizing:border-box;width:112px;max-width:100%;height:32px;padding:0 9px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#26313b;font:inherit;font-weight:400}.record-status-filter select:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.quote-record-table>header.record-column-filters{align-items:start}
+.record-column-filter{display:grid;align-content:start;gap:8px;min-width:0;margin:0;font-size:inherit;color:inherit}
+.record-column-filter input,.record-column-filter select{box-sizing:border-box;width:100%;min-width:0;height:36px;padding:0 10px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#26313b;font:inherit;font-size:13px;font-weight:400}
+.record-column-filter input::placeholder{color:#81909a}
+.record-column-filter input:focus-visible,.record-column-filter select:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.record-column-filter small{font-size:12px;font-weight:400;line-height:1.5;color:#71808c}
+.record-filter-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}
+.review-groups .review-mine{display:flex;align-items:center;gap:6px;margin-left:8px;font-size:14px;color:#53616c;white-space:nowrap}
+.review-groups .review-mine input{width:16px;height:16px;accent-color:#ed990f}
 </style>
 
 <style scoped>

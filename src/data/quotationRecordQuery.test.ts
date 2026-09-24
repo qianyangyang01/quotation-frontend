@@ -7,14 +7,16 @@ const row=(id:number)=>({id:String(id),no:'Q-'+id,createdAt:'2026-09-10T00:00:00
 describe('record query',()=>{
   it('encodes all filters and keeps backend page totals',async()=>{
     get.mockResolvedValue({items:[row(1)],page:2,size:30,total:70,totalPages:3})
-    expect((await loadRecordPage('mine',{q:'客户 & SKU',startDate:'2026-09-01',endDate:'2026-09-10',country:'法国',status:'won',category:'服装'},2,30)).total).toBe(70)
+    expect((await loadRecordPage('mine',{q:'客户 & SKU',product:'SKU+1',customer:'客户 & 100%',channel:'专线',optionScale:'multiple',priceDifference:'lower',startDate:'2026-09-01',endDate:'2026-09-10',country:'法国',status:'won',category:'服装'},2,30)).total).toBe(70)
     const query=new URLSearchParams(get.mock.calls[0]![0].split('?')[1]);expect(query.get('q')).toBe('客户 & SKU');expect(query.get('scope')).toBe('mine');expect(query.get('page')).toBe('2');expect(query.get('endDate')).toBe('2026-09-10')
+    expect(Object.fromEntries(query)).toMatchObject({product:'SKU+1',customer:'客户 & 100%',channel:'专线',optionScale:'multiple',priceDifference:'lower'})
   })
   it('exports all matching pages beyond 100 using captured filters',async()=>{
     get.mockResolvedValueOnce({items:Array.from({length:100},(_,i)=>row(i)),page:0,total:105,totalPages:2}).mockResolvedValueOnce({items:Array.from({length:5},(_,i)=>row(i+100)),page:1,total:105,totalPages:2})
-    expect(await loadFilteredRecords('company',{startDate:'2026-09-01',status:'processed',reviewStatus:'reviewing',reviewMine:true})).toHaveLength(105)
+    expect(await loadFilteredRecords('company',{startDate:'2026-09-01',status:'processed',reviewStatus:'reviewing',reviewMine:true,product:'SKU',customer:'Alice',optionScale:'single',priceDifference:'higher'})).toHaveLength(105)
     for (const [url] of get.mock.calls) { const filters=new URLSearchParams(url.split('?')[1]);expect(filters.get('status')).toBe('processed');expect(filters.get('reviewStatus')).toBe('reviewing');expect(filters.get('reviewMine')).toBe('true') }
     expect(get.mock.calls[1]![0]).toContain('page=1');expect(get.mock.calls[1]![0]).toContain('startDate=2026-09-01')
+    for(const [url] of get.mock.calls) expect(Object.fromEntries(new URLSearchParams(url.split('?')[1]))).toMatchObject({product:'SKU',customer:'Alice',optionScale:'single',priceDifference:'higher'})
   })
   it('rejects a partial export when records change between requests',async()=>{
     get.mockResolvedValueOnce({items:[row(1)],page:0,total:105,totalPages:2}).mockResolvedValueOnce({items:[],page:1,total:104,totalPages:2})
