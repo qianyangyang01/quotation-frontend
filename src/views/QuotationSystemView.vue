@@ -41,6 +41,8 @@ import { type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatri
 import { logisticsUnavailableReason, isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord } from '@/data/quotationRecords'
+import { cancelQuotation, withdrawalSubmitter } from '@/services/quotationWithdrawal'
+import type { QuotationDraftState } from '@/services/quotationDrafts'
 import { preferredQuotationImage } from '@/data/quotationImages'
 import { FINANCE_TAX_SETTINGS_UPDATED_EVENT, loadFinanceTaxSettings } from '@/data/financeTaxSettings'
 import { inferCountryContinent } from '@/data/countryClassification'
@@ -168,6 +170,8 @@ async function applyReissue() {
   try {
     window.clearTimeout(draftTimer)
     await draftSavePromise
+    const serverDraft = await loadQuotationDraft()
+    if (draftSource.value || serverDraft.sourceQuote) throw new Error('请先完成撤回报价草稿，或放弃编辑并取消报价，再次发起不会覆盖它')
     const payload = quotationReissuePayload(record)
     const skus = payload.quoteMode === 'bundle' ? payload.bundleItems.map(item => item.sku) : [payload.product.sku]
     const purchases = new Map<string, PurchaseProductRecord | undefined>()
@@ -216,6 +220,9 @@ watch(specialPackagingGrams, () => { if (draftReady.value && !specialPackagingEr
 const specialPackagingWeightKg = computed(() => { const grams = parseSpecialPackagingGrams(specialPackagingGrams.value); return grams === null ? NaN : productDecimal(grams, 0.001) })
 const commissionThreshold = ref('1')
 const commissionError = computed(() => parseCommissionThreshold(commissionThreshold.value) == null ? COMMISSION_THRESHOLD_ERROR : '')
+const draftSource = ref<QuotationDraftState['sourceQuote']>()
+const clearingDraft = ref(false)
+const submitWithdrawn = withdrawalSubmitter()
 const draftVersion = ref(-1)
 const draftUpdatedAt = ref('')
 const draftStatus = ref<'loading' | 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict'>('loading')
@@ -949,7 +956,7 @@ async function flushDraft() {
       try {
         if (specialPackagingError.value) throw new Error(specialPackagingError.value)
         if (commissionError.value) throw new Error(commissionError.value)
-        const saved = await saveQuotationDraft(payload, draftVersion.value)
+        const saved = await saveQuotationDraft(payload, draftVersion.value, draftSource.value?.id)
         draftVersion.value = saved.version
         draftUpdatedAt.value = saved.updatedAt || new Date().toISOString()
         lastSavedDraftSignature = signature
@@ -1133,10 +1140,11 @@ async function loadAndRestoreDraft() {
   draftStatus.value = 'loading'
   draftInitializationFailed.value = false
   const state = await loadQuotationDraft()
+  draftSource.value = state.sourceQuote
   draftVersion.value = state.version
   draftUpdatedAt.value = state.updatedAt || ''
   if (state.exists && state.payload) {
-    await applyDraftPayload(state.payload)
+    await applyDraftPayload(state.payload, undefined, { restoreQuotation: !!state.sourceQuote })
     await establishDraftBaseline('saved')
   } else await establishDraftBaseline('idle')
   return state
@@ -1145,6 +1153,7 @@ async function resetLocalDraft() {
   draftNeedsQuery.value = false
   draftChannelNotice.value = ''
   reissueSource.value = ''
+  draftSource.value = undefined
   purchaseQueryError.value = ''
   modeSelections.value = { common: [], specified: [], template: [] }
   draftReady.value = false
@@ -1207,12 +1216,25 @@ async function retryDraftInitialization() {
   catch { toast('报价工作区读取失败，请检查网络后重试') }
 }
 async function clearDraft() {
-  try { if (draftVersion.value >= 0) await deleteQuotationDraft(draftVersion.value) }
-  catch (error) { toast(error instanceof Error ? error.message : '草稿清除失败'); return }
-  draftVersion.value = -1
-  draftUpdatedAt.value = ''
-  await resetLocalDraft()
-  toast('已清空草稿，可以开始新的报价')
+  if (clearingDraft.value || savingQuotation.value) return
+  const source = draftSource.value
+  if (source && !window.confirm(`放弃编辑并永久取消报价 ${source.no}？原单和草稿将永久删除，无法恢复。`)) return
+  clearingDraft.value = true
+  try {
+    if (source) {
+      window.clearTimeout(draftTimer)
+      await draftSavePromise?.catch(() => undefined)
+      draftReady.value = false
+      try { await cancelQuotation(source.id, source.version, draftVersion.value) }
+      catch (error) { draftReady.value = true; toast(error instanceof Error ? error.message : '取消失败，请重试'); return }
+    }
+    try { if (!source && draftVersion.value >= 0) await deleteQuotationDraft(draftVersion.value) }
+    catch (error) { toast(error instanceof Error ? error.message : '草稿清除失败'); return }
+    draftVersion.value = -1
+    draftUpdatedAt.value = ''
+    await resetLocalDraft()
+    toast('已清空草稿，可以开始新的报价')
+  } finally { clearingDraft.value = false }
 }
 async function reloadServerDraftAfterConflict() {
   if (resolvingDraftConflict.value) return
@@ -1224,9 +1246,10 @@ async function reloadServerDraftAfterConflict() {
     const state = await loadQuotationDraft()
     if (signature !== draftSignature()) throw new Error('读取期间内容已修改，已保留当前输入，请重新选择')
     draftReady.value = false
+    draftSource.value = state.sourceQuote
     draftVersion.value = state.version
     draftUpdatedAt.value = state.updatedAt || ''
-    if (state.payload) await applyDraftPayload(state.payload)
+    if (state.payload) await applyDraftPayload(state.payload, undefined, { restoreQuotation: !!state.sourceQuote })
     else await resetLocalDraft()
     await establishDraftBaseline(state.exists ? 'saved' : 'idle')
     showDraftConflictDialog.value = false
@@ -1246,7 +1269,8 @@ async function overwriteServerDraftAfterConflict() {
     const payload = draftPayload()
     const signature = JSON.stringify(payload)
     const latest = await loadQuotationDraft()
-    const saved = await saveQuotationDraft(payload, latest.version)
+    if (latest.sourceQuote?.id !== draftSource.value?.id) throw new Error('草稿关联已变化，请加载服务器草稿；不能覆盖另一份撤回报价')
+    const saved = await saveQuotationDraft(payload, latest.version, draftSource.value?.id)
     draftVersion.value = saved.version
     draftUpdatedAt.value = saved.updatedAt || ''
     lastSavedDraftSignature = signature
@@ -1935,6 +1959,14 @@ function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>
     systemQuoteUsd: price.quoteUsd, systemQuoteCny: price.quoteCny, totalCostCny: price.cost }
 }
 const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave> | null>(null)
+async function persistQuotation(input: Parameters<typeof createQuotationRecord>[0]) {
+  if (!draftSource.value) return createQuotationRecord(input)
+  await flushDraft()
+  window.clearTimeout(draftTimer)
+  draftReady.value = false
+  try { return await submitWithdrawn(draftSource.value, draftVersion.value, input) }
+  catch (error) { draftReady.value = true; throw error }
+}
 async function save() {
   await nextTick() // Capture the editor only after recalculated parent props reach it.
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
@@ -1984,7 +2016,8 @@ async function save() {
     return { optionId: option.id, prices: row!.prices }
   }) } : undefined
   const systemQuantityQuotes = captured ? { quantities:captured.quantities, rows:quoteOptions.map(option=>({ optionId:option.id, prices:captured!.rows.find(row=>row.key===option.quoteSheetKey)!.systemPrices })) } : undefined
-  const record = await createQuotationRecord({
+  const wasWithdrawal = !!draftSource.value
+  const record = await persistQuotation({
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
     weightSnapshot: buildQuotationWeightSnapshot(quoteMode.value === 'bundle'
@@ -2025,7 +2058,7 @@ async function save() {
   const countryCount = new Set(selectedMatrixRows.map(row => row.country)).size
   let draftCleanup: 'deleted' | 'newer' | 'failed' = 'deleted'
   let draftCleanupMessage = ''
-  try { if (draftVersion.value >= 0) await deleteQuotationDraft(draftVersion.value) }
+  try { if (!wasWithdrawal && draftVersion.value >= 0) await deleteQuotationDraft(draftVersion.value) }
   catch (error) {
     draftCleanup = error instanceof ApiError && error.status === 409 ? 'newer' : 'failed'
     draftCleanupMessage = error instanceof Error ? error.message : '服务器草稿清除失败'
@@ -2083,10 +2116,11 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <i>{{ draftStatus === 'saved' ? '✓' : draftStatus === 'error' || draftStatus === 'conflict' ? '!' : '↻' }}</i>
         <span><b>{{ draftStatusText }}</b><small>切换模块后返回“我的报价”可继续录入；正式报价保存成功后自动清除草稿。</small></span>
         <button v-if="draftStatus === 'conflict'" type="button" @click="showDraftConflictDialog=true">处理草稿冲突</button><button v-if="draftStatus === 'error'" type="button" @click="draftInitializationFailed ? retryDraftInitialization() : flushDraft()">{{ draftInitializationFailed ? '重试读取' : '重试保存' }}</button>
-        <button v-if="draftVersion >= 0 || draftDirty" type="button" @click="clearDraft">清空重新开始</button>
+        <button v-if="draftVersion >= 0 || draftDirty" type="button" :disabled="clearingDraft || savingQuotation" @click="clearDraft">{{ draftSource ? '放弃编辑并取消报价' : '清空重新开始' }}</button>
       </section>
 
       <section v-if="draftChannelNotice" class="live-data-notice" role="status">{{ draftChannelNotice }}</section>
+      <section v-if="draftSource" class="draft-status-bar"><span><b>撤回重新编辑 · 报价 {{ draftSource.no }}</b><small>原审核已终止。价格按当前资料重新计算，提交后保留原单号并重新待审核。</small></span></section>
       <section v-if="reissueSource" class="draft-status-bar"><span><b>再次发起 · 原报价 {{ reissueSource }}</b><small>已带入原报价条件，可修改 SKU、物流属性和渠道；价格按当前资料重新计算，保存后生成新的报价单。</small></span></section>
 
       <template v-for="p in products.slice(0,1)" :key="p.id">

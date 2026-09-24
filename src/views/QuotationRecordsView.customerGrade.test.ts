@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({ page: vi.fn() }))
 vi.mock('@/data/quotationRecordQuery', () => ({ loadRecordPage: mocks.page, loadFilteredRecords: vi.fn(), loadRecord: vi.fn(), recentRecordDates: () => ({ startDate: '', endDate: '' }) }))
 vi.mock('@/data/purchaseStore', () => ({ loadPurchaseProducts: () => Promise.resolve([]) }))
 vi.mock('@/services/http', () => ({ api: { get: vi.fn().mockResolvedValue([]) }, setRequestAccount: vi.fn() }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined) }), useRoute: () => ({ query: {} }) }))
 let app: App | undefined
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.clearAllMocks() })
 

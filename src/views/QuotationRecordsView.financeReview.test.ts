@@ -8,7 +8,7 @@ const mocks=vi.hoisted(()=>({page:vi.fn(),get:vi.fn(),patch:vi.fn(),load:vi.fn()
 vi.mock('@/data/quotationRecordQuery',()=>({loadRecordPage:mocks.page,loadFilteredRecords:vi.fn(),loadRecord:mocks.load,recentRecordDates:()=>({startDate:'',endDate:''})}))
 vi.mock('@/services/http',()=>({api:{get:mocks.get,patch:mocks.patch},setRequestAccount:vi.fn()}))
 vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([])}))
-vi.mock('vue-router',()=>({useRoute:()=>({query:{}})}))
+vi.mock('vue-router',()=>({useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined) }), useRoute:()=>({query:{}})}))
 let app:App
 const flush=async()=>{for(let i=0;i<6;i++){await nextTick();await Promise.resolve()}}
 const saved=()=>normalizeQuotationRecord({id:'r',no:'QT-1',createdAt:'2026-09-23T12:00:00Z',updatedAt:'2026-09-23T12:00:00Z',salespersonAccount:'EMPLOYEE',_version:2,_reviewVersion:0,financeReviewStatus:'pending'})!

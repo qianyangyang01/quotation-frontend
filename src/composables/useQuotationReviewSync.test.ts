@@ -88,3 +88,22 @@ it('discards delayed data after pagination and keeps business fields unchanged',
   old([{id:'a',_version:9,financeReviewStatus:'approved'}]);await vi.advanceTimersByTimeAsync(0)
   expect(sync.stateFor(row).financeReviewStatus).toBe('pending');expect(JSON.stringify(row)).toBe(original)
 })
+
+it('invalidates deleted records only after a successful full poll and never restores them from delayed data',async()=>{
+  vi.useFakeTimers();api.get.mockResolvedValue([{id:'a',_version:1,financeReviewStatus:'reviewing'}])
+  const {sync,row}=mount();await vi.advanceTimersByTimeAsync(0)
+  api.get.mockRejectedValueOnce(new Error('offline'));await vi.advanceTimersByTimeAsync(3000)
+  expect(sync.isMissing('a')).toBe(false)
+  api.get.mockResolvedValue([]);await vi.advanceTimersByTimeAsync(3000)
+  expect(sync.isMissing('a')).toBe(true)
+  sync.accept({...row,_version:1,financeReviewStatus:'approved'})
+  expect(sync.isMissing('a')).toBe(true)
+})
+it('keeps withdrawn quotes unavailable until a newer resubmitted version arrives',async()=>{
+  vi.useFakeTimers();api.get.mockResolvedValue([{id:'a',_version:2,lifecycleState:'withdrawn',financeReviewStatus:'pending'}])
+  const {sync,row}=mount();await vi.advanceTimersByTimeAsync(0)
+  sync.accept({...row,_version:1,financeReviewStatus:'approved'})
+  expect(sync.stateFor(row).lifecycleState).toBe('withdrawn')
+  sync.accept({...row,_version:3,lifecycleState:'active',financeReviewStatus:'pending'})
+  expect(sync.stateFor(row).lifecycleState).toBe('active')
+})

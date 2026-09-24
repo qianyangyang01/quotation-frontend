@@ -28,7 +28,16 @@ public class IdempotencyService {
         validateKey(key);
         // Hold the request lock through the caller's business transaction and response write.
         lock(account,operation,key);
-        var hash=hash(request);return records.findByAccountAndOperationAndIdempotencyKey(account,operation,key).map(row->{if(!row.requestHash.equals(hash))throw AppException.conflict("同一幂等键不能用于不同请求");if(row.responseStatus==102)throw AppException.conflict("该请求正在处理，请查看进度，完成后刷新重试");return row.responseBody.deepCopy();});
+        var hash=hash(request);return records.findByAccountAndOperationAndIdempotencyKey(account,operation,key).map(row->{if(!row.requestHash.equals(hash))throw AppException.conflict("同一幂等键不能用于不同请求");if(row.responseStatus==410)throw new AppException(org.springframework.http.HttpStatus.GONE,"QUOTATION_CANCELLED","报价已取消，不能重放原请求");if(row.responseStatus==102)throw AppException.conflict("该请求正在处理，请查看进度，完成后刷新重试");return row.responseBody.deepCopy();});
+    }
+    @Transactional public void eraseQuotationResponses(String account, UUID id) {
+        for(var row:records.findByAccount(account)) {
+            if(!row.operation.startsWith("quotation-"))continue;
+            var response=row.responseBody;
+            if(id.toString().equals(response.path("id").asText()) || id.toString().equals(response.path("sourceQuote").path("id").asText())) {
+                row.responseStatus=410;row.responseBody=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();records.save(row);
+            }
+        }
     }
     private void lock(String account,String operation,String key){
         if(jdbc!=null){

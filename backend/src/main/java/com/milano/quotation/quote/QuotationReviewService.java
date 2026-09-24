@@ -119,6 +119,14 @@ public class QuotationReviewService {
         row.state=current;reviews.saveAndFlush(row);
         audit.record("quotation.review.content-changed","quotation",quote.id.toString(),"success",Map.of("before",before,"after",row.status));
     }
+    void withdrawn(QuotationRecordEntity quote, QuotationPrincipal actor) {
+        var row=state(quote);var current=(ObjectNode)row.state.deepCopy();var before=row.status;
+        preserveLegacyHistory(quote,current);
+        VIEW_FIELDS.forEach(current::remove);
+        row.status="pending";row.claimantAccount=null;current.put("financeReviewStatus","pending");
+        event(current,actor,"withdraw",before,"pending","报价已撤回，原审核失效",quote.version+1);
+        row.state=current;reviews.saveAndFlush(row);
+    }
     private static void event(ObjectNode state,QuotationPrincipal actor,String action,String before,String after,String note,long quoteVersion) {
         var event=state.withArray("history").addObject().put("id",UUID.randomUUID().toString()).put("action",action).put("before",before).put("after",after)
             .put("actorAccount",actor.account()).put("actorName",actor.displayName()).put("at",Instant.now().toString()).put("note",note);

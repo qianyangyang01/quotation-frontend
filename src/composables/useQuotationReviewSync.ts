@@ -5,6 +5,7 @@ import { loadQuotationReviewStates, type QuotationRecord, type QuotationReviewSt
 export function useQuotationReviewSync(rows: Ref<QuotationRecord[]>, selected: Ref<QuotationRecord | null>, account: Ref<string>) {
   const states = ref<Record<string, QuotationReviewState>>({})
   const error = ref('')
+  const missing = ref(new Set<string>())
   const ids = computed(() => [...new Set([...rows.value.map(row => row.id), ...(selected.value ? [selected.value.id] : [])])].sort().join(','))
   let timer: ReturnType<typeof setTimeout> | undefined
   let controller: AbortController | undefined
@@ -21,13 +22,16 @@ export function useQuotationReviewSync(rows: Ref<QuotationRecord[]>, selected: R
     stop()
     if (disposed || !account.value || !ids.value || document.visibilityState === 'hidden') return
     const current = generation
+    const requestedIds = ids.value.split(',')
     const requestController = new AbortController()
     controller = requestController
     const timeout = setTimeout(() => requestController.abort(), 10_000)
     try {
-      const result = await loadQuotationReviewStates(ids.value.split(','), requestController.signal)
+      const result = await loadQuotationReviewStates(requestedIds, requestController.signal)
       if (current !== generation) return
-      for (const state of result) accept(state)
+      const returned = new Set(result.map(state => state.id))
+      for (const id of requestedIds) if (!returned.has(id)) missing.value.add(id)
+      for (const state of result) if (!missing.value.has(state.id)) accept(state)
       error.value = ''
     } catch {
       if (current === generation) error.value = '审核状态同步失败，正在重试；当前显示可能不是最新状态'
@@ -36,7 +40,8 @@ export function useQuotationReviewSync(rows: Ref<QuotationRecord[]>, selected: R
       if (current === generation && !disposed) timer = setTimeout(() => void poll(), 3000)
     }
   }
-  watch([ids, account], () => { states.value = {}; error.value = ''; void poll() }, { immediate: true })
+  watch(account, () => { states.value = {}; missing.value = new Set(); error.value = ''; void poll() })
+  watch(ids, () => { void poll() }, { immediate: true })
   const wake = () => { void poll() }
   onMounted(() => { window.addEventListener('focus', wake); document.addEventListener('visibilitychange', wake); window.addEventListener('online', wake) })
   onUnmounted(() => { disposed = true; stop(); window.removeEventListener('focus', wake); document.removeEventListener('visibilitychange', wake); window.removeEventListener('online', wake) })
@@ -44,5 +49,5 @@ export function useQuotationReviewSync(rows: Ref<QuotationRecord[]>, selected: R
     const state = states.value[row.id]
     return state && newer(state,row) ? state : row
   }
-  return { stateFor, accept, error, poll }
+  return { stateFor, accept, error, poll, markMissing: (id: string) => missing.value.add(id), isMissing: (id: string) => missing.value.has(id) }
 }

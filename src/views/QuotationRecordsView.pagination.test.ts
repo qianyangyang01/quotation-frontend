@@ -6,7 +6,7 @@ import { normalizeQuotationRecord } from '@/data/quotationRecords'
 const query=vi.hoisted(()=>({loadRecordPage:vi.fn(),loadFilteredRecords:vi.fn(),loadRecord:vi.fn(),recentRecordDates:()=>({startDate:'2026-09-04',endDate:'2026-09-10'})}))
 vi.mock('@/data/quotationRecordQuery',()=>query)
 vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([])}))
-vi.mock('vue-router',()=>({useRoute:()=>({query:{}})}))
+vi.mock('vue-router',()=>({useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined) }), useRoute:()=>({query:{}})}))
 let app:App
 const result=(total:number,page=0)=>({items:[],page,size:10,total,totalPages:Math.ceil(total/10),summary:{pending:total,won:0,lost:0,total},countries:['美国']})
 const flush=async()=>{await nextTick();await Promise.resolve();await nextTick()}

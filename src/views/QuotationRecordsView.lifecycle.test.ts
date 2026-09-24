@@ -10,8 +10,8 @@ vi.mock('@/data/quotationRecordQuery',()=>query)
 vi.mock('@/data/quotationLifecycle',async importOriginal=>({...await importOriginal<typeof import('@/data/quotationLifecycle')>(),changeQuotationLifecycle:change}))
 vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([])}))
 vi.mock('@/data/authStore',async()=>{const {ref}=await import('vue');return {currentAuthUser:ref({account:'ME',role:'super_admin'}),hasPermission:()=>true}})
-vi.mock('@/composables/useQuotationReviewSync',()=>({useQuotationReviewSync:()=>({stateFor:(r:unknown)=>r,accept:vi.fn(),error:{value:''},poll:vi.fn()})}))
-vi.mock('vue-router',()=>({useRoute:()=>({query:{}})}))
+vi.mock('@/composables/useQuotationReviewSync',()=>({useQuotationReviewSync:()=>({isMissing: () => false, markMissing: vi.fn(), stateFor:(r:unknown)=>r,accept:vi.fn(),error:{value:''},poll:vi.fn()})}))
+vi.mock('vue-router',()=>({useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined) }), useRoute:()=>({query:{}})}))
 let app:App
 const normal=()=>normalizeQuotationRecord({id:'one',no:'QT-TEST',_version:3,customerName:'测试客户',primarySku:'SKU',salespersonAccount:'ME'})!
 const result=(rows=[normal()])=>({items:rows,page:0,size:10,total:rows.length,totalPages:1,summary:{pending:rows.length,won:0,lost:0,total:rows.length},countries:['美国']})

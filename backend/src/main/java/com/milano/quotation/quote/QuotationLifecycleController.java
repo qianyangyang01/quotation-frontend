@@ -50,6 +50,7 @@ public class QuotationLifecycleController {
             var row = records.lockById(entry.getKey()).orElseThrow(() -> AppException.notFound("所选报价记录不存在，请刷新"));
             if (!admin && !row.ownerAccount.equals(principal.account())) throw new AccessDeniedException("只能处理自己的报价记录");
             if (row.version != entry.getValue()) throw AppException.conflict("所选报价已变更，本次未执行，请刷新后重新选择");
+            if (row.lifecycleState.equals("withdrawn")) throw AppException.conflict("报价已撤回，请从报价草稿继续编辑");
             if (request.action().equals("restore")) {
                 if (row.lifecycleState.equals("active")) throw AppException.conflict("所选记录已在当前记录中，请刷新");
                 // Employees cannot undo an administrator's disposition of their records.
@@ -100,6 +101,6 @@ public class QuotationLifecycleController {
                 || !review.isBlank() && !review.equals("pending");
     }
     static void assertActive(QuotationRecordEntity row) {
-        if (!row.lifecycleState.equals("active")) throw AppException.conflict("报价已归档或移入回收站，请恢复后再修改");
+        if (!row.lifecycleState.equals("active")) throw AppException.conflict("报价已撤回、归档或移入回收站，请刷新后处理");
     }
 }

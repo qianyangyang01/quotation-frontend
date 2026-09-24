@@ -25,6 +25,7 @@ class QuotationDraftControllerTest {
     @BeforeEach void setup() {
         drafts = mock(QuotationDraftRepository.class);
         controller = new QuotationDraftController(drafts, mock(PurchaseProductService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(controller,"guard",mock(QuotationDraftGuard.class));
         var principal = new QuotationPrincipal(UUID.randomUUID(), "ADMIN", "管理员", "hash", "superadmin", true, false, List.of("quote"));
         auth = new UsernamePasswordAuthenticationToken(principal, "", principal.getAuthorities());
     }
@@ -36,7 +37,7 @@ class QuotationDraftControllerTest {
         assertEquals(-1, empty.path("version").asInt());
         when(drafts.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
         var draft = validDraft(); draft.putObject("product").put("sku", "SKU-1").put("purchaseInvoiceTaxApplied", true);
-        var saved = controller.saveState(draft, -1, auth).data();
+        var saved = controller.saveState(draft, -1, null, auth).data();
         assertTrue(saved.path("exists").asBoolean());
         assertEquals("客户A", saved.path("payload").path("customerName").asText());
         assertTrue(saved.path("payload").path("product").path("purchaseInvoiceTaxApplied").asBoolean());
@@ -48,12 +49,12 @@ class QuotationDraftControllerTest {
             var login = new UsernamePasswordAuthenticationToken(principal, "", principal.getAuthorities());
             when(drafts.findById(role)).thenReturn(Optional.empty());
             when(drafts.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
-            var saved = controller.saveState(validDraft().put("commissionThreshold", .95), -1, login).data();
+            var saved = controller.saveState(validDraft().put("commissionThreshold", .95), -1, null, login).data();
             assertEquals(.95, saved.path("payload").path("commissionThreshold").asDouble());
-            var old = controller.saveState(validDraft(), -1, login).data();
+            var old = controller.saveState(validDraft(), -1, null, login).data();
             assertEquals(1, old.path("payload").path("commissionThreshold").asInt());
-            for (double bad : new double[]{0, -1, 1.01}) assertThrows(com.milano.quotation.common.FieldValidationException.class, () -> controller.saveState(validDraft().put("commissionThreshold", bad), -1, login));
-            assertThrows(com.milano.quotation.common.FieldValidationException.class, () -> controller.saveState(validDraft().putNull("commissionThreshold"), -1, login));
+            for (double bad : new double[]{0, -1, 1.01}) assertThrows(com.milano.quotation.common.FieldValidationException.class, () -> controller.saveState(validDraft().put("commissionThreshold", bad), -1, null, login));
+            assertThrows(com.milano.quotation.common.FieldValidationException.class, () -> controller.saveState(validDraft().putNull("commissionThreshold"), -1, null, login));
         }
     }
 
@@ -63,19 +64,19 @@ class QuotationDraftControllerTest {
             var login=new UsernamePasswordAuthenticationToken(principal,"",principal.getAuthorities());
             when(drafts.findById(role)).thenReturn(Optional.empty());
             when(drafts.saveAndFlush(any())).thenAnswer(call->call.getArgument(0));
-            var saved=controller.saveState(validDraft().put("specialPackagingGrams",10),-1,login).data();
+            var saved=controller.saveState(validDraft().put("specialPackagingGrams",10),-1, null,login).data();
             assertEquals(10,saved.path("payload").path("specialPackagingGrams").asInt());
             verify(drafts).saveAndFlush(argThat(row->row.ownerAccount.equals(role)&&row.payload.path("specialPackagingGrams").asInt()==10));
-            for(double bad:new double[]{-1,.5,100001}) assertThrows(AppException.class,()->controller.saveState(validDraft().put("specialPackagingGrams",bad),-1,login));
-            assertThrows(AppException.class,()->controller.saveState(validDraft().putNull("specialPackagingGrams"),-1,login));
-            assertThrows(AppException.class,()->controller.saveState(validDraft().put("specialPackagingGrams","10"),-1,login));
+            for(double bad:new double[]{-1,.5,100001}) assertThrows(AppException.class,()->controller.saveState(validDraft().put("specialPackagingGrams",bad),-1, null,login));
+            assertThrows(AppException.class,()->controller.saveState(validDraft().putNull("specialPackagingGrams"),-1, null,login));
+            assertThrows(AppException.class,()->controller.saveState(validDraft().put("specialPackagingGrams","10"),-1, null,login));
         }
     }
 
     @Test void rejectsStaleVersionAndProtectsNewerDraftFromDelete() {
         var row = row(3);
         when(drafts.findById("ADMIN")).thenReturn(Optional.of(row));
-        assertThrows(AppException.class, () -> controller.saveState(validDraft(), 2, auth));
+        assertThrows(AppException.class, () -> controller.saveState(validDraft(), 2, null, auth));
         assertThrows(AppException.class, () -> controller.deleteState(2, auth));
         verify(drafts, never()).delete(any());
     }
@@ -84,12 +85,12 @@ class QuotationDraftControllerTest {
         var payload = validDraft();
         var row = row(4); row.payload = payload.deepCopy();
         when(drafts.findById("ADMIN")).thenReturn(Optional.of(row));
-        assertEquals(4, controller.saveState(payload, 4, auth).data().path("version").asInt());
+        assertEquals(4, controller.saveState(payload, 4, null, auth).data().path("version").asInt());
         verify(drafts, never()).saveAndFlush(any());
         var unsafe = validDraft(); unsafe.putObject("product").put("customerId", "secret");
-        assertThrows(AppException.class, () -> controller.saveState(unsafe, 4, auth));
+        assertThrows(AppException.class, () -> controller.saveState(unsafe, 4, null, auth));
         var dataUrl = validDraft(); dataUrl.putObject("product").put("sku", "data:image/png;base64,AAAA");
-        assertThrows(AppException.class, () -> controller.saveState(dataUrl, 4, auth));
+        assertThrows(AppException.class, () -> controller.saveState(dataUrl, 4, null, auth));
     }
 
     @Test void updatesAndDeletesOnlyTheExpectedVersion() {
@@ -97,28 +98,28 @@ class QuotationDraftControllerTest {
         when(drafts.findById("ADMIN")).thenReturn(Optional.of(row));
         when(drafts.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
         var updated = validDraft().put("customerName", "客户B");
-        assertEquals("客户B", controller.saveState(updated, 5, auth).data().path("payload").path("customerName").asText());
+        assertEquals("客户B", controller.saveState(updated, 5, null, auth).data().path("payload").path("customerName").asText());
         assertDoesNotThrow(() -> controller.deleteState(5, auth));
         verify(drafts).delete(row);
 
         reset(drafts);
         when(drafts.findById("ADMIN")).thenReturn(Optional.empty());
         assertDoesNotThrow(() -> controller.deleteState(-1, auth));
-        assertThrows(AppException.class, () -> controller.saveState(validDraft(), 0, auth));
+        assertThrows(AppException.class, () -> controller.saveState(validDraft(), 0, null, auth));
     }
 
     @Test void rejectsInvalidSchemaTopLevelFieldsAndNestedSecrets() {
-        assertThrows(AppException.class, () -> controller.saveState(JsonNodeFactory.instance.arrayNode(), -1, auth));
-        assertThrows(AppException.class, () -> controller.saveState(validDraft().put("schemaVersion", 1), -1, auth));
-        assertThrows(AppException.class, () -> controller.saveState(validDraft().put("unexpected", true), -1, auth));
+        assertThrows(AppException.class, () -> controller.saveState(JsonNodeFactory.instance.arrayNode(), -1, null, auth));
+        assertThrows(AppException.class, () -> controller.saveState(validDraft().put("schemaVersion", 1), -1, null, auth));
+        assertThrows(AppException.class, () -> controller.saveState(validDraft().put("unexpected", true), -1, null, auth));
 
         var nestedSecret = validDraft();
         nestedSecret.putArray("bundleItems").addObject().put("session_token", "secret");
-        assertThrows(AppException.class, () -> controller.saveState(nestedSecret, -1, auth));
+        assertThrows(AppException.class, () -> controller.saveState(nestedSecret, -1, null, auth));
 
         var nestedDataUrl = validDraft();
         nestedDataUrl.putArray("commonSelections").add("  DATA:image/png;base64,AAAA");
-        assertThrows(AppException.class, () -> controller.saveState(nestedDataUrl, -1, auth));
+        assertThrows(AppException.class, () -> controller.saveState(nestedDataUrl, -1, null, auth));
     }
 
     private tools.jackson.databind.node.ObjectNode validDraft() {

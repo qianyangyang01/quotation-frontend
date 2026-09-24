@@ -17,6 +17,7 @@ import java.util.*;
 public class QuotationAnalyticsController {
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
+    public synchronized void invalidate(UUID id) { projections.remove(id); }
     private record Header(UUID id,long version,Instant updatedAt) {}
     private record Entry(Header header,JsonNode projection) {}
     private final Map<UUID,Entry> projections=new LinkedHashMap<>(128,.75f,true);
@@ -26,7 +27,7 @@ public class QuotationAnalyticsController {
     @PreAuthorize("hasAuthority('PERM_allRecords')")
     @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public synchronized ApiResponse<Snapshot> snapshot() {
-        var headers=jdbc.sql("SELECT id,version,updated_at FROM quotation_record WHERE lifecycle_state<>'trashed' ORDER BY created_at DESC,id")
+        var headers=jdbc.sql("SELECT id,version,updated_at FROM quotation_record WHERE lifecycle_state IN ('active','archived') ORDER BY created_at DESC,id")
                 .query((rs,n)->new Header(rs.getObject("id",UUID.class),rs.getLong("version"),rs.getTimestamp("updated_at").toInstant())).list();
         var current=new HashMap<UUID,Header>();var changed=new ArrayList<UUID>();
         for(var header:headers){

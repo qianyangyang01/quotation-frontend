@@ -27,6 +27,8 @@ class QuotationTemplateEntity {
 
 @Entity @Table(name="quotation_draft")
 class QuotationDraftEntity {
+    @Column(name="source_quote_id") UUID sourceQuoteId;
+    @Column(name="source_quote_version") Long sourceQuoteVersion;
     @Id @Column(name="owner_account",length=24) String ownerAccount;
     @JdbcTypeCode(SqlTypes.JSON) @Column(nullable=false,columnDefinition="jsonb") JsonNode payload; @Version long version;
     @Column(name="updated_at",nullable=false) Instant updatedAt; protected QuotationDraftEntity() {}

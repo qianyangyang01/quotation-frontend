@@ -51,6 +51,7 @@ export interface QuotationDraftPayload {
 }
 
 export interface QuotationDraftState {
+  sourceQuote?: { id: string; no: string; version: number }
   exists: boolean
   payload: QuotationDraftPayload | null
   version: number
@@ -60,6 +61,7 @@ export interface QuotationDraftState {
 export function normalizeDraftState(input: Partial<QuotationDraftState> | null | undefined): QuotationDraftState {
   const payload = input?.payload
   return {
+    ...(input?.sourceQuote ? { sourceQuote: input.sourceQuote } : {}),
     exists: input?.exists === true && payload?.schemaVersion === 2,
     payload: payload?.schemaVersion === 2 ? payload : null,
     version: Number.isInteger(input?.version) ? Number(input?.version) : -1,
@@ -71,8 +73,8 @@ export async function loadQuotationDraft() {
   return normalizeDraftState(await api.get<QuotationDraftState>('/quotation-drafts/mine/state'))
 }
 
-export async function saveQuotationDraft(payload: QuotationDraftPayload, version: number) {
-  return normalizeDraftState(await api.put<QuotationDraftState>('/quotation-drafts/mine/state', payload, { 'If-Match': String(version) }))
+export async function saveQuotationDraft(payload: QuotationDraftPayload, version: number, sourceId?: string) {
+  return normalizeDraftState(await api.put<QuotationDraftState>('/quotation-drafts/mine/state', payload, { 'If-Match': String(version), ...(sourceId ? { 'X-Quotation-Source': sourceId } : {}) }))
 }
 
 export async function deleteQuotationDraft(version: number) {

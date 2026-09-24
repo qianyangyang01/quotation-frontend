@@ -27,7 +27,7 @@ it.each(['draft', 'quotation'])('distinguishes a %s conflict during Save and alw
 })
 it('keeps editing paused after conflict without scheduling another save or losing dirty input', () => {
   const state = { draftReady: { value: true }, lastSavedDraftSignature: 'old', draftDirty: false,
-    draftStatus: { value: 'conflict' }, resolvingDraftConflict: { value: false }, window: { setTimeout: vi.fn() } }
+    draftStatus: { value: 'conflict' }, draftSource:{value:undefined},resolvingDraftConflict: { value: false }, window: { setTimeout: vi.fn() } }
   handler('markDraftDirty', state)('new')
   expect(state.draftDirty).toBe(true)
   expect(state.draftStatus.value).toBe('conflict')
@@ -37,13 +37,13 @@ it('rejects a flush during conflict so navigation cannot silently discard change
   await expect(handler('flushDraft', { draftStatus: { value: 'conflict' } })()).rejects.toThrow('当前输入已保留')
 })
 it('saves edits made during explicit overwrite afterwards using the returned version', async () => {
-  const state = { resolvingDraftConflict: { value: false }, window: { clearTimeout: vi.fn() }, draftTimer: 0,
+  const state = { draftSource:{value:undefined},resolvingDraftConflict: { value: false }, window: { clearTimeout: vi.fn() }, draftTimer: 0,
     draftSavePromise: null, draftPayload: () => ({ name: 'before' }), draftSignature: () => '{"name":"after"}',
     loadQuotationDraft: async () => ({ version: 3 }), saveQuotationDraft: vi.fn(async () => ({ version: 4 })),
     draftVersion: { value: 2 }, draftUpdatedAt: { value: '' }, lastSavedDraftSignature: '', draftDirty: false,
     draftStatus: { value: 'conflict' }, showDraftConflictDialog: { value: true }, toast: vi.fn(), flushDraft: vi.fn() }
   await handler('overwriteServerDraftAfterConflict', state)()
-  expect(state.saveQuotationDraft).toHaveBeenCalledWith({ name: 'before' }, 3)
+  expect(state.saveQuotationDraft).toHaveBeenCalledWith({ name: 'before' }, 3, undefined)
   expect(state.draftVersion.value).toBe(4)
   expect(state.draftDirty).toBe(true)
   expect(state.flushDraft).toHaveBeenCalledOnce()

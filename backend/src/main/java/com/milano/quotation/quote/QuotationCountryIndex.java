@@ -12,6 +12,7 @@ import java.util.*;
 public class QuotationCountryIndex {
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
+    public synchronized void invalidate(UUID id) { entries.remove(id); }
     private record Header(UUID id,long version,Instant updatedAt) {}
     private record Entry(Header header,Set<String> countries,boolean confirmed) {}
     public record Snapshot(List<String> countries,List<UUID> confirmedIds) {}

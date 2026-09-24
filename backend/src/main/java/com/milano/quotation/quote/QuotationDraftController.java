@@ -25,25 +25,30 @@ public class QuotationDraftController {
             "monthlySalesEstimate", "commissionThreshold", "specialPackagingGrams", "customQuoteQuantity", "quoteMatrixMode",
             "selectedQuoteRegions", "product", "bundleItems", "commonSelections",
             "specifiedSelections", "templateSelections", "activeTemplate");
+    @org.springframework.beans.factory.annotation.Autowired private QuotationDraftGuard guard;
+    @org.springframework.beans.factory.annotation.Autowired private QuotationRecordRepository records;
     private final QuotationDraftRepository drafts;private final PurchaseProductService products; public QuotationDraftController(QuotationDraftRepository drafts,PurchaseProductService products){this.drafts=drafts;this.products=products;}
     @GetMapping("/mine") @Transactional(readOnly=true) ApiResponse<JsonNode> get(Authentication auth){return ApiResponse.ok(drafts.findById(account(auth)).map(row->row.payload).orElse(null));}
-    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){if(body instanceof ObjectNode object){CommissionThreshold.normalize(object);PackagingWeight.draft(object);}products.lockStructuredReferences(body);var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
-    @DeleteMapping("/mine") @Transactional ApiResponse<Void> delete(Authentication auth){drafts.deleteById(account(auth));return ApiResponse.ok(null);}
+    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){guard.requireOrdinary(account(auth));if(body instanceof ObjectNode object){CommissionThreshold.normalize(object);PackagingWeight.draft(object);}products.lockStructuredReferences(body);var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
+    @DeleteMapping("/mine") @Transactional ApiResponse<Void> delete(Authentication auth){guard.requireOrdinary(account(auth));drafts.deleteById(account(auth));return ApiResponse.ok(null);}
 
-    @GetMapping("/mine/state") @Transactional(readOnly=true)
+    @GetMapping("/mine/state") @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     ApiResponse<JsonNode> state(Authentication auth){
         return ApiResponse.ok(drafts.findById(account(auth)).map(this::view).orElseGet(this::emptyView));
     }
 
     @PutMapping("/mine/state") @Transactional
-    ApiResponse<JsonNode> saveState(@RequestBody JsonNode body,@RequestHeader("If-Match") long expectedVersion,Authentication auth){
+    ApiResponse<JsonNode> saveState(@RequestBody JsonNode body,@RequestHeader("If-Match") long expectedVersion, @RequestHeader(value="X-Quotation-Source",required=false) String source,Authentication auth){
+        guard.lock(account(auth));
         var payload=validated(body);products.lockStructuredReferences(payload);var owner=account(auth);var existing=drafts.findById(owner);
         if(existing.isEmpty()){
+            if(source!=null)throw AppException.conflict("撤回草稿已提交或取消，请重新加载");
             if(expectedVersion!=-1)throw AppException.conflict("草稿已经变化，请重新加载后继续");
             var row=new QuotationDraftEntity();row.ownerAccount=owner;row.payload=payload;row.updatedAt=Instant.now();
             drafts.saveAndFlush(row);return ApiResponse.ok(view(row));
         }
         var row=existing.get();
+        guard.requireSource(row,source);
         if(row.version!=expectedVersion)throw AppException.conflict("草稿已在另一个页面更新，请选择加载服务器草稿或明确覆盖");
         var comparable = row.payload.deepCopy();
         if (comparable instanceof ObjectNode object && !object.has("commissionThreshold")) object.put("commissionThreshold", 1);
@@ -53,13 +58,14 @@ public class QuotationDraftController {
 
     @DeleteMapping("/mine/state") @Transactional
     ApiResponse<Void> deleteState(@RequestHeader("If-Match") long expectedVersion,Authentication auth){
+        guard.requireOrdinary(account(auth));
         var existing=drafts.findById(account(auth));
         if(existing.isEmpty())return ApiResponse.ok(null);
         if(existing.get().version!=expectedVersion)throw AppException.conflict("草稿已在另一个页面更新，未清除较新的草稿");
         drafts.delete(existing.get());return ApiResponse.ok(null);
     }
 
-    private ObjectNode validated(JsonNode body){
+    ObjectNode validated(JsonNode body){
         if(!(body instanceof ObjectNode input)||body.toString().length()>MAX_DRAFT_BYTES)throw AppException.unprocessable("草稿格式错误或内容过大");
         if(input.path("schemaVersion").asInt()!=2)throw AppException.unprocessable("草稿版本不受支持");
         input.propertyNames().forEach(key->{if(!DRAFT_FIELDS.contains(key))throw AppException.unprocessable("草稿包含不支持的字段："+key);});
@@ -87,6 +93,6 @@ public class QuotationDraftController {
         });
     }
     private ObjectNode emptyView(){var result=JsonNodeFactory.instance.objectNode();result.put("exists",false);result.set("payload",NullNode.instance);result.put("version",-1);result.set("updatedAt",NullNode.instance);return result;}
-    private ObjectNode view(QuotationDraftEntity row){var result=JsonNodeFactory.instance.objectNode();result.put("exists",true);result.set("payload",row.payload.deepCopy());result.put("version",row.version);result.put("updatedAt",row.updatedAt.toString());return result;}
+    ObjectNode view(QuotationDraftEntity row){var result=JsonNodeFactory.instance.objectNode();result.put("exists",true);result.set("payload",row.payload.deepCopy());result.put("version",row.version);result.put("updatedAt",row.updatedAt.toString());if(row.sourceQuoteId!=null){var quote=records.findById(row.sourceQuoteId).orElseThrow();result.putObject("sourceQuote").put("id",row.sourceQuoteId.toString()).put("no",quote.quoteNo).put("version",row.sourceQuoteVersion);}return result;}
     private static String account(Authentication auth){return ((QuotationPrincipal)auth.getPrincipal()).account();}
 }

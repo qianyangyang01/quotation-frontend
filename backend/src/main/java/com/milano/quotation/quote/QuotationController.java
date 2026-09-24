@@ -24,6 +24,7 @@ public class QuotationController {
             "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerName", "customerQuote", "quoteConfirmed");
     private final QuotationRecordRepository records;
     private final QuotationReviewService reviews;
+    @org.springframework.beans.factory.annotation.Autowired private QuotationDraftGuard draftGuard;
     private final QuotationRecordQuery recordQuery;
     private final AuditService audit;
     private final IdempotencyService idempotency;
@@ -48,7 +49,7 @@ public class QuotationController {
                                              Authentication auth) {
         var principal = principal(auth); var all = hasAll(auth);
         var pageable = PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size)), Sort.by(Sort.Direction.DESC, "createdAt"));
-        var rows = all && scope.equals("company") ? records.findByLifecycleStateNot("trashed", pageable) : records.findByOwnerAccountAndLifecycleStateNot(principal.account(), "trashed", pageable);
+        var rows = all && scope.equals("company") ? records.findByLifecycleStateIn(List.of("active","archived"), pageable) : records.findByOwnerAccountAndLifecycleStateIn(principal.account(), List.of("active","archived"), pageable);
         var payloads=rows.stream().map(this::rawView).toList();reviews.enrich(payloads);
         var byId=new HashMap<String,JsonNode>();payloads.forEach(p->byId.put(p.path("id").asText(),p));
         return ApiResponse.ok(PageResponse.from(rows.map(row->byId.get(row.id.toString()))));
@@ -117,6 +118,7 @@ public class QuotationController {
     ApiResponse<JsonNode> get(@PathVariable UUID id, Authentication auth) {
         var row=records.findById(id).orElseThrow(()->AppException.notFound("报价记录不存在"));
         if(!hasAll(auth)&&!row.ownerAccount.equals(principal(auth).account())) throw new org.springframework.security.access.AccessDeniedException("forbidden");
+        if(row.lifecycleState.equals("withdrawn")) throw AppException.conflict("报价已撤回，请从本人草稿继续编辑");
         return ApiResponse.ok(view(row));
     }
 
@@ -126,6 +128,7 @@ public class QuotationController {
     ApiResponse<JsonNode> create(@RequestBody JsonNode body, @RequestHeader("Idempotency-Key") String key,
                                  Authentication auth) {
         if (!(body instanceof ObjectNode input) || body.toString().length() > 4_000_000) throw AppException.unprocessable("报价数据格式错误或过大");
+        draftGuard.requireOrdinary(principal(auth).account());
         submissionValidator.validate(input);
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());

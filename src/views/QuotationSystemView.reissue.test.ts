@@ -7,8 +7,8 @@ import { clearFinanceSettingsCache } from '@/services/financeSettings'
 import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import type { QuotationMatrixRow } from '@/components/quotation/types'
 
-const router = vi.hoisted(() => ({ replace: vi.fn().mockResolvedValue(undefined) }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: { reissue: 'original', release: 'local' } }), useRouter: () => router, onBeforeRouteLeave: vi.fn() }))
+const router = vi.hoisted(() => ({ replace: vi.fn().mockResolvedValue(undefined), query: { reissue: 'original', release: 'local' } as Record<string, string> }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: router.query }), useRouter: () => router, onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async original => ({ ...await original<typeof import('@/services/quotationSync')>(), startQuotationSync: vi.fn(() => vi.fn()) }))
 vi.mock('@/data/publishedLogisticsRepository', async original => ({
   ...await original<typeof import('@/data/publishedLogisticsRepository')>(),
@@ -35,15 +35,15 @@ let state: { draftReady: boolean; draftStatus: string; reissueSource: string; cu
   quoteMatrixMode: 'common' | 'specified' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[]; specifiedQuoteRows: QuotationMatrixRow[] }
 let purchaseFailure = false
 let sourceFailure = false
-beforeEach(() => { clearFinanceSettingsCache(); vi.clearAllMocks(); purchaseFailure = false; sourceFailure = false })
+beforeEach(() => { clearFinanceSettingsCache(); vi.clearAllMocks(); purchaseFailure = false; sourceFailure = false; router.query = { reissue: 'original', release: 'local' } })
 afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks() })
-async function mount(existing: boolean) {
+async function mount(existing: boolean, withdrawn = false) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return finance
     if (path === '/quotation-readiness') return { ready: true, missing: [] }
     if (path === '/quotation-templates') return []
     if (path === '/quotations/original') { if (sourceFailure) throw new Error('无权读取原报价'); return source }
-    if (path === '/quotation-drafts/mine/state') return { exists: existing, version: existing ? 7 : -1, payload: existing ? oldDraft : null }
+    if (path === '/quotation-drafts/mine/state') return { exists: existing, version: existing ? 7 : -1, payload: existing ? oldDraft : null, ...(withdrawn ? { sourceQuote: { id: 'original', no: 'QT-OLD', version: 8 } } : {}) }
     if (path === '/purchase-products/BK100') {
       if (purchaseFailure) throw new Error('采购资料读取失败')
       return { sku: 'BK100', category: '日用品', catalogState: 'ready', weightG: 50, minOrderQty: 1, purchasePriceCny: 12, singleFreightCny: 0, taxPoint: 0 }
@@ -130,4 +130,27 @@ it.each(['common', 'specified'] as const)('saves the selected %s list through th
   await vi.waitFor(() => expect(api.post).toHaveBeenCalledWith('/quotation-templates', expect.objectContaining({
     name: '普货', items: [expect.objectContaining({ country: '日本', channelKey: '1::原物流::JP', transport: '指定普货' })],
   }), expect.any(String)))
+})
+
+it('restores the original quotation identity and explicitly cancels it when abandoning a withdrawn draft', async () => {
+  router.query = { release: 'local' }
+  await mount(true, true)
+  expect(host.textContent).toContain('撤回重新编辑 · 报价 QT-OLD')
+  const confirm = vi.fn().mockReturnValue(false)
+  Object.defineProperty(window, 'confirm', { configurable: true, value: confirm })
+  button('放弃编辑并取消报价').click(); await nextTick()
+  expect(api.post).not.toHaveBeenCalled()
+  confirm.mockReturnValue(true)
+  vi.mocked(api.post).mockResolvedValue({ cancelled: true })
+  button('放弃编辑并取消报价').click()
+  button('放弃编辑并取消报价').click()
+  await vi.waitFor(() => expect(api.post).toHaveBeenCalledWith('/quotations/original/cancel', { _version: 8, draftVersion: 7 }, 'cancel:original:8:7'))
+  expect(api.post).toHaveBeenCalledTimes(1)
+  await vi.waitFor(() => expect(host.textContent).not.toContain('撤回重新编辑 · 报价 QT-OLD'))
+})
+it('refuses to overwrite a withdrawn draft through the reissue dialog', async () => {
+  await mount(true, true)
+  button('载入并再次发起').click()
+  await vi.waitFor(() => expect(host.textContent).toContain('再次发起不会覆盖它'))
+  expect(api.put).not.toHaveBeenCalled()
 })

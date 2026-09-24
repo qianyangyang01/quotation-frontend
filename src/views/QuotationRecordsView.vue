@@ -7,10 +7,12 @@ import { reviewQuotationRecord, financeReviewLabel, type ReviewAction } from '@/
 import QuotationReviewPanel from '@/components/quotation/QuotationReviewPanel.vue'
 import QuotationReviewButton from '@/components/quotation/QuotationReviewButton.vue'
 import QuotationReviewHistory from '@/components/quotation/QuotationReviewHistory.vue'
+import QuotationRevisionSnapshot from '@/components/quotation/QuotationRevisionSnapshot.vue'
 import QuotationWeightTrace from '@/components/quotation/QuotationWeightTrace.vue'
 import QuotationProductCostTrace from '@/components/quotation/QuotationProductCostTrace.vue'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { cancelQuotation, withdrawQuotation, withdrawalBlocked } from '@/services/quotationWithdrawal'
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
 import { updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
 import { loadPurchaseProducts } from '@/data/purchaseStore'
@@ -28,6 +30,7 @@ import { quotationDetailsCsv } from '@/data/quotationAnalytics'
 
 const props = defineProps<{ scope: 'mine' | 'company' }>()
 const route = useRoute()
+const router = useRouter()
 const records = ref<QuotationRecord[]>([])
 const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
 const lifecycle = ref<RecordLifecycle>('active')
@@ -38,7 +41,7 @@ const lifecycleBusy = ref(false)
 const lifecycleError = ref('')
 const lifecycleAdmin = computed(() => currentAuthUser.value.role === 'super_admin' && hasPermission('allRecords'))
 const canManageLifecycle = computed(() => lifecycleAdmin.value || props.scope === 'mine')
-function isActive(row: QuotationRecord) { return (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') === 'active' }
+function isActive(row: QuotationRecord) { return !reviewSync.isMissing(row.id) && (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') === 'active' }
 function selectionBlocked(row: QuotationRecord) {
   if (!canManageLifecycle.value || (!lifecycleAdmin.value && row.salespersonAccount !== currentAuthUser.value.account)) return '只能处理自己的报价记录'
   if (row._version == null) return '记录版本缺失，请刷新'
@@ -120,15 +123,45 @@ async function exportRecords(){
     toast('已导出当前筛选范围全部 '+rows.length+' 条记录')
   }catch(error){toast(error instanceof Error?error.message:'导出失败，请重试')}finally{exporting.value=false}
 }
-watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{checkedIds.value=[];lifecycleAction.value=null;++requestId;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
+watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{checkedIds.value=[];lifecycleAction.value=null;mutationDialog.value=null;mutationError.value='';++requestId;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
 onUnmounted(()=>{++requestId;clearTimeout(refreshTimer)})
 const selected = ref<QuotationRecord | null>(null)
 const reviewSync = useQuotationReviewSync(records, selected, computed(() => currentAuthUser.value.account))
-watch(() => records.value.map(row => reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active').join(','), () => {
-  if (records.value.some(row => (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') !== (row.lifecycleState || 'active'))) {
-    selected.value = null; void refresh(true)
+const observedRecords = computed(() => [...records.value, ...(selected.value ? [selected.value] : [])])
+watch(() => observedRecords.value.map(row => reviewSync.isMissing(row.id) ? 'missing' : reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active').join(','), () => {
+  if (observedRecords.value.some(row => reviewSync.isMissing(row.id) || (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') !== (row.lifecycleState || 'active'))) {
+    selected.value = null; mutationDialog.value = null; void refresh(true)
   }
 })
+
+const mutationDialog = ref<{ action: 'cancel' | 'withdraw'; row: QuotationRecord } | null>(null)
+const mutationBusy = ref(false)
+const mutationError = ref('')
+function canWithdraw(row: QuotationRecord) { return isActive(row) && !withdrawalBlocked(row, currentAuthUser.value.account) }
+function beginMutation(action: 'cancel' | 'withdraw', row: QuotationRecord) {
+  if (!canWithdraw(row) || mutationBusy.value) return
+  mutationError.value = ''; mutationDialog.value = { action, row: structuredClone(JSON.parse(JSON.stringify(row))) }
+}
+async function confirmMutation() {
+  const operation = mutationDialog.value
+  if (!operation || mutationBusy.value) return
+  mutationBusy.value = true; mutationError.value = ''
+  const account = currentAuthUser.value.account
+  try {
+    if (operation.action === 'cancel') await cancelQuotation(operation.row.id, operation.row._version!)
+    else await withdrawQuotation(operation.row)
+    if (account !== currentAuthUser.value.account) return
+    if (operation.action === 'cancel') reviewSync.markMissing(operation.row.id)
+    else reviewSync.accept({ ...operation.row, _version: operation.row._version! + 1, lifecycleState: 'withdrawn' })
+    ++requestId
+    selected.value = null; checkedIds.value = checkedIds.value.filter(id => id !== operation.row.id)
+    records.value = records.value.filter(row => row.id !== operation.row.id)
+    mutationDialog.value = null
+    if (operation.action === 'withdraw') await router.push('/quotation')
+    else { toast('报价已永久取消'); await refresh() }
+  } catch (error) { mutationError.value = error instanceof Error ? error.message : '操作失败，请重试'; void reviewSync.poll() }
+  finally { mutationBusy.value = false }
+}
 
 const reviewing = ref(new Set<string>())
 async function changeReview(row: QuotationRecord, action: ReviewAction) {
@@ -138,6 +171,7 @@ async function changeReview(row: QuotationRecord, action: ReviewAction) {
   try {
     const saved = await reviewQuotationRecord(row.id, action, row._version, action.action==='claim'?reviewSync.stateFor(row)._reviewVersion:row._reviewVersion)
     if (account !== currentAuthUser.value.account) return
+    if (!isActive(row) || (reviewSync.stateFor(row)._version ?? -1) > (saved._version ?? -1)) return
     reviewSync.accept(saved)
     records.value = records.value.map(item => item.id === saved.id ? saved : item)
     if (action.action==='claim') open(saved)
@@ -163,7 +197,7 @@ interface DealLineForm { id: string; optionId: string; unitPriceUsd: string; qua
 const form = reactive({ status: 'won' as 'won' | 'lost', dealLines: [] as DealLineForm[], date: new Date().toISOString().slice(0, 10), note: '' })
 const isMine = computed(() => props.scope === 'mine')
 const title = computed(() => isMine.value ? '我的报价记录' : '报价记录')
-const list = computed(() => records.value)
+const list = computed(() => records.value.filter(row => !reviewSync.isMissing(row.id) && (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') === lifecycle.value))
 function recordSku(row: QuotationRecord) {
   if (row.quoteMode === 'bundle' && row.bundleItems?.length) return row.bundleItems.map(item => item.sku).join('+')
   return row.quoteMode === 'bundle' ? row.primarySku.replace(/[、,，]/g, '+') : row.primarySku
@@ -190,6 +224,7 @@ function optionPrice(value: number | null) { return value == null ? '—' : usd(
 
 function canEditPrices(row:QuotationRecord) { return isActive(row) && row.salespersonAccount===currentAuthUser.value.account }
 function pricesSaved(row:QuotationRecord) {
+  if (!isActive(row)) return
   const index=records.value.findIndex(item=>item.id===row.id)
   if(index>=0) records.value[index]=row
   if(selected.value?.id===row.id) selected.value=row
@@ -270,6 +305,7 @@ function availableDealOptions(line: DealLineForm) {
   return recordOptions(selected.value).filter(option => option.available !== false && (option.id === line.optionId || !used.has(option.id)))
 }
 function open(row: QuotationRecord) {
+  if (reviewSync.isMissing(row.id) || reviewSync.stateFor(row).lifecycleState === 'withdrawn') return
   selected.value = row
   detailTab.value = 'overview'
   editing.value = false
@@ -354,7 +390,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
               <small class="record-number" :title="row.no">报价单号：{{ row.no }}</small>
               <small>创建于 {{ dateTime(row.createdAt) }}</small>
               <small v-if="row.lifecycleChangedAt" class="lifecycle-metadata">{{ lifecycleLabel(row.lifecycleState) }} · {{ row.lifecycleChangedBy }} · {{ dateTime(row.lifecycleChangedAt) }}<br>原因：{{ row.lifecycleReason }}</small>
-              <small v-if="lifecycle==='active' && selectionBlocked(row)" class="lifecycle-lock">{{ selectionBlocked(row) }}</small>
+              <small v-if="lifecycle==='active' && selectionBlocked(row)" class="lifecycle-lock">批量清理限制：{{ selectionBlocked(row) }}</small>
             </div>
           </div>
           <div class="record-customer"><b>{{ row.customerName }}</b><small class="record-customer-grade">客户级别：{{ customerGradeDisplayLabel(row.customerGrade) }}</small></div>
@@ -365,6 +401,10 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <div class="record-action-buttons">
               <em :class="row.status==='won' ? 'won' : row.quoteConfirmed ? 'processed' : 'pending'">{{ displayStatus(row) }}</em>
               <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
+            </div>
+            <div v-if="canWithdraw(row)" class="record-action-buttons record-mutation-buttons">
+              <button type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('cancel', row)">取消</button>
+              <button v-if="hasPermission('quote')" type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('withdraw', row)">撤回重新编辑</button>
             </div>
             <small v-if="row.status==='won'">{{ row.quoteConfirmed ? '报价已确认' : '报价待确认' }}</small>
           </div>
@@ -403,7 +443,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <section v-else-if="detailTab==='options'" class="option-detail-panel">
             <CustomerPriceComparison :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" />
           </section>
-          <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>报价处理</b>：{{ revision.after === 'true' ? '已确认报价，标记为已处理' : '客户报价已变化，需重新确认' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>处理状态</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
+          <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><QuotationRevisionSnapshot v-else-if="revision.field==='quoteRevision'" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>报价处理</b>：{{ revision.after === 'true' ? '已确认报价，标记为已处理' : '客户报价已变化，需重新确认' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>处理状态</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
           <QuotationReviewHistory v-if="detailTab==='history'" :id="selected.id" :version="reviewSync.stateFor(selected)._reviewVersion" :account="currentAuthUser.account" />
           <footer v-if="detailTab==='overview'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved">
             <QuotationReviewButton v-if="canReview&&isActive(selected)" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :busy="reviewing.has(selected.id)||lifecycleBusy" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
@@ -420,6 +460,15 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
       </aside>
     </div>
     <Transition name="toast"><div v-if="notice" class="toast">✓ {{ notice }}</div></Transition>
+  </div>
+  <div v-if="mutationDialog" class="mutation-overlay" @click.self="!mutationBusy && (mutationDialog = null)">
+    <section class="mutation-dialog" role="dialog" aria-modal="true" aria-labelledby="mutation-title">
+      <h2 id="mutation-title">{{ mutationDialog.action === 'cancel' ? '取消报价' : '撤回重新编辑' }}</h2>
+      <p>报价单：{{ mutationDialog.row.no }}</p>
+      <p>{{ mutationDialog.action === 'cancel' ? '确认后永久删除这张报价及关联审核记录，不进入回收站，无法恢复。' : '撤回后将终止当前审核，保留原单号并转入报价草稿；重新提交后需要重新审核。已有其他草稿时，本次撤回不会执行。' }}</p>
+      <p v-if="mutationError" role="alert">{{ mutationError }}</p>
+      <footer><button :disabled="mutationBusy" @click="mutationDialog = null">返回</button><button :disabled="mutationBusy" @click="confirmMutation">{{ mutationBusy ? '正在处理…' : mutationDialog.action === 'cancel' ? '确认永久取消' : '确认撤回并编辑' }}</button></footer>
+    </section>
   </div>
 </template>
 
@@ -520,4 +569,8 @@ main{width:min(1680px,calc(100% - 48px))}
 }
 .lifecycle-tabs{display:flex;align-items:center;gap:24px;margin:20px 0 14px;border-bottom:1px solid #dfe5eb}.lifecycle-tabs button{padding:12px 8px;border:0;border-bottom:3px solid transparent;background:none;color:#66717c;font:inherit;font-weight:700;cursor:pointer}.lifecycle-tabs button.active{border-bottom-color:var(--orange);color:#17212b}.lifecycle-tabs small{margin-left:auto;color:#788590;font-size:12px}.lifecycle-toolbar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:12px 0 0;padding:12px 16px;border:1px solid #e1e7ec;border-radius:8px 8px 0 0;background:#fff;font-size:13px}.lifecycle-toolbar label{display:flex;align-items:center;gap:8px}.lifecycle-toolbar>div{display:flex;gap:8px;margin-left:auto}.lifecycle-toolbar button{padding:8px 12px;border:1px solid #e0e5eb;border-radius:6px;background:#fff8ed;color:#925900;font:inherit;font-weight:600;cursor:pointer}.lifecycle-toolbar .trash-button{color:#bd3c32;background:#fff5f4;border-color:#edb7b2}.lifecycle-toolbar button:disabled{opacity:.45;cursor:not-allowed}.lifecycle-toolbar small{color:#77838e}.lifecycle-checkbox,.lifecycle-toolbar input{flex:0 0 17px;width:17px;height:17px;accent-color:#ed990f;cursor:pointer}.lifecycle-checkbox:disabled{cursor:not-allowed}.quote-info-copy .lifecycle-metadata{white-space:normal;line-height:1.6;color:#796341}.quote-info-copy .lifecycle-lock{white-space:normal;color:#8a7560;font-size:11px}.lifecycle-readonly{padding:12px;background:#fff8ed;border:1px solid #f0d9b6;border-radius:6px;font-size:12px}@media(max-width:720px){.lifecycle-tabs{gap:12px;flex-wrap:wrap}.lifecycle-tabs small{width:100%;margin:0 0 8px}.lifecycle-toolbar>div{margin-left:0}}
 .quote-record-table>header .record-status-filter{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;min-width:0;margin:0;font-size:inherit;color:inherit}.record-status-filter select{box-sizing:border-box;width:112px;max-width:100%;height:32px;padding:0 9px;border:1px solid #dce3e8;border-radius:6px;background:#fff;color:#26313b;font:inherit;font-weight:400}.record-status-filter select:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+</style>
+
+<style scoped>
+.record-mutation-buttons button{flex:1;padding:8px;border:1px solid #d5dce3;background:#fff;border-radius:6px;cursor:pointer;color:#52606d}.record-mutation-buttons button:first-child{color:#b52b25;border-color:#efb0ac}.mutation-overlay{position:fixed;inset:0;z-index:1200;background:#0006;display:flex;align-items:center;justify-content:center}.mutation-dialog{max-width:480px;margin:20px;padding:24px;background:white;border-radius:12px;line-height:1.7}.mutation-dialog footer{display:flex;justify-content:flex-end;gap:12px}.mutation-dialog button{padding:8px 16px;cursor:pointer}.mutation-dialog [role=alert]{color:#b52b25}
 </style>
