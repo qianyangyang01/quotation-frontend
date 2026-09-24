@@ -12,6 +12,9 @@ import type { FinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import type { QuotationDraftPayload } from '@/services/quotationDrafts'
 import type { PurchaseProductRecord } from '@/data/purchaseStore'
+import { replaceLogisticsRules, type LogisticsRule, type LogisticsPriceRow } from '@/data/logistics'
+import type { QuotationMatrixRow } from '@/components/quotation/types'
+import type { QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn().mockResolvedValue(undefined) }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/data/authStore', () => ({ currentAuthUser: { value: { name: '员工', account: 'employee', role: 'employee', permissions: ['quotation'] } } }))
@@ -57,6 +60,9 @@ type PricingState = {
   syncPending: string
   syncError: string
   draftPayload: () => unknown
+  modeSelections: Record<string, Array<{ channelKey?: string }>>
+  savedQuoteRows: QuotationMatrixRow[]
+  quoteSheetPrice: (product: QuotationProduct, row: QuoteSheetSourceRow, quantity: number) => number | null
   financePolicies: FinanceChannelPolicy[]
   financeCountrySettings: FinanceCountrySetting[]
   financeTaxSettings: FinanceTaxSettings
@@ -87,6 +93,7 @@ describe('quotation finance initialization for an employee', () => {
     host.remove()
     vi.restoreAllMocks()
     clearFinanceSettingsCache()
+    replaceLogisticsRules([])
   })
 
   async function mountPage(options: { grade?: string; attribute?: string; warm?: boolean; disableS?: boolean } = {}) {
@@ -130,6 +137,56 @@ describe('quotation finance initialization for an employee', () => {
     expect(host.innerHTML).not.toContain(coefficient.toString())
     expect(state.salePrice({ purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct)).toBeCloseTo(100 * coefficient, 10)
   }
+
+  it.each(['common', 'specified', 'template'] as const)('removes unauthorized restored channels from %s after loading, including preview and the next draft', async mode => {
+    await mountPage()
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    const price = { areaName:'美国', countryCode:'US', etaMinDays:6, etaMaxDays:12,
+      weightFromKg:0, weightToKg:10, pricePerKg:20, registrationFee:5, allowedMarks:'', prohibitedMarks:'',
+      minChargeWeightKg:0, startWeightKg:0, firstWeightKg:0, firstWeightPrice:0, nextWeightKg:0, nextWeightPrice:0,
+      intervalPrice:0, surcharge:0, fuelSurchargeRate:0 } as LogisticsPriceRow
+    const rules = [1,2].map(id => ({ id, name:'同名规则', status:'启用', prices:[price],
+      relations:[{carrier:'物流商', channel:'同名渠道', channelCode:id === 1 ? 'CHANNEL' : 'OLD', discounts:''}] } as LogisticsRule))
+    let finish!: () => void
+    vi.mocked(loadPublishedLogisticsRules).mockImplementationOnce(() => new Promise(resolve => { finish = () => {
+      replaceLogisticsRules(rules); resolve({ revision:'r1', verified:true, rules, source:'network' })
+    } }))
+    const selected = [1,2].map(id => ({ country:'美国', channelKey:`${id}::物流商::${id === 1 ? 'CHANNEL' : 'OLD'}`, rule:'同名规则', carrier:'物流商', transport:'同名渠道' }))
+    const purchase = { sku:'RESTORE', category:'宠物用品', productName:'宠物用品', purchasePriceCny:10, weightKg:0.21,
+      quoteReady:true, status:'资料完整', taxPoint:0, domesticFreight:0.2, priceTiers:[] } as unknown as PurchaseProductRecord
+    const payload = { schemaVersion:2, quoteMode:'single', quoteMatrixMode:mode, skuSearch:'RESTORE', logisticsAttribute:'香氛',
+      product:{sku:'RESTORE'}, customerName:'客户', commonSelections:selected, specifiedSelections:selected, templateSelections:selected } as QuotationDraftPayload
+    const restoring = state.applyDraftPayload(payload, new Map([['RESTORE', purchase]]))
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    expect(state.modeSelections[mode]).toHaveLength(2)
+    finish(); await restoring
+    await vi.waitFor(() => expect(state.savedQuoteRows.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL']))
+    for (const selections of Object.values(state.modeSelections)) expect(selections.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL'])
+    expect(JSON.stringify(state.draftPayload())).not.toContain('2::物流商::OLD')
+    expect(host.textContent).toContain('已按当前物流属性“香氛”移除')
+    const good = state.savedQuoteRows[0]!
+    expect(state.quoteSheetPrice(state.products[0]!, good, 5)).toEqual(expect.any(Number))
+    expect(state.quoteSheetPrice(state.products[0]!, { ...good, channelKey:'2::物流商::OLD', ruleId:2 }, 5)).toBeNull()
+    expect(state.quoteSheetPrice(state.products[0]!, { ...good, available:false }, 5)).toBeNull()
+  })
+
+  it.each(['failed', 'unverified'] as const)('retains draft channels when logistics is %s, and prunes only after a verified retry', async outcome => {
+    await mountPage(); resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    if (outcome === 'failed') vi.mocked(loadPublishedLogisticsRules).mockRejectedValueOnce(new Error('网络失败'))
+    else vi.mocked(loadPublishedLogisticsRules).mockResolvedValueOnce({revision:'r1', verified:false, rules:[], source:'network'})
+    const purchase = { sku:'RESTORE', category:'宠物用品', productName:'宠物用品', purchasePriceCny:10, weightKg:0.21,
+      quoteReady:true, status:'资料完整', taxPoint:0, domesticFreight:0.2, priceTiers:[] } as unknown as PurchaseProductRecord
+    const selection = {country:'美国', channelKey:'2::物流商::OLD', rule:'旧规则', carrier:'物流商', transport:'旧渠道'}
+    await state.applyDraftPayload({schemaVersion:2, quoteMode:'single', quoteMatrixMode:'common', logisticsAttribute:'香氛',
+      product:{sku:'RESTORE'}, commonSelections:[selection]} as QuotationDraftPayload, new Map([['RESTORE',purchase]]))
+    expect(state.modeSelections.common).toEqual([selection])
+    expect(host.textContent).not.toContain('已按当前物流属性')
+    await state.ensureQuoteLogistics(state.products[0]!)
+    await vi.waitFor(() => expect(state.modeSelections.common).toEqual([]))
+    expect(state.savedQuoteRows).toEqual([])
+  })
 
   it('reuses hydrated finance on attribute loads without flashing authorization errors and still refreshes known changes', async () => {
     await mountPage()

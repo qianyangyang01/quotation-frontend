@@ -16,6 +16,14 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it('does not calculate extra quantities or reuse prices for an unavailable restored route', () => {
+    let calls = 0
+    const sheet = buildCustomerQuoteSheet({rows:[source({available:false}),source({channelKey:'good'})],countries:[],edits:edits(),
+      customQuantity:6,bundle:false,quantities:[2,5],calculatePrice:() => { calls++; return 11.5 }})
+    expect(sheet.rows[0]!.prices).toEqual([null,null])
+    expect(sheet.rows[1]!.prices).toEqual([20.5,11.5])
+    expect(calls).toBe(1)
+  })
   it('uses full English country names for live rows, saved country codes and manual edits', () => {
     const countries = [{ name: '阿联酋', code: 'AE' }]
     expect(['US','UK','GB','AU','NZ','IE','DE','FR','CA','阿联酋'].map(value => quoteSheetCountryName(value, countries)))
