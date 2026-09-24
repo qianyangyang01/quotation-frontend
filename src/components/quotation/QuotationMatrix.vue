@@ -200,12 +200,14 @@ async function applyPresetSelection() {
 
   selectedCountries.value = nextCountries
   selectedChannelKeys.value = nextChannelKeys
-  emit('selectionChange', selectedCountries.value.flatMap(country => selectedRows(country)))
-  emit('presetStateChange', 'ready')
   closeChannelPicker()
   showCountryPicker.value = false
   emit('presetApplied', valid, missing)
   regionFeedback.value = missing ? `${missing} 条方案的渠道或区域无法匹配，请重新添加；旧模板未保存区域时不会自动套用分区。不可用方案已保留。` : ''
+  // Publish through the existing watcher before enabling saves. An immediate
+  // duplicate emission could overwrite a draft being restored by the parent.
+  await nextTick()
+  if (request === presetRequest && version === (props.presetVersion || 0)) emit('presetStateChange', 'ready')
 }
 
 function resetSelectionForMode() {
