@@ -16,6 +16,21 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it('formats catalog names, codes and edited English names consistently without guessing unknown codes', () => {
+    const countries = [{ name: '荷兰', code: 'NL' }, { name: '阿联酋', code: 'AE' }]
+    const draft = edits(); draft.countryFormat = 'code'
+    const rows = ['英国', 'gb', 'UK', '荷兰', 'United Arab Emirates', ' canada ', 'Germany', 'Myanmar (Burma)'].map((country, index) => source({ country, channelKey: String(index) }))
+    const original = JSON.stringify(rows)
+    const input = { rows, countries, edits: draft, customQuantity: 5, bundle: false }
+    const sheet = buildCustomerQuoteSheet(input)
+    expect(sheet.issues).toEqual([])
+    expect(sheet.rows.map(row => row.country)).toEqual(['GB', 'GB', 'GB', 'NL', 'AE', 'CA', 'DE', 'MM'])
+    expect(JSON.stringify(rows)).toBe(original)
+    draft.fields = { [quoteSheetRowKey(rows[0])]: { country: 'Imaginary Country' } }
+    expect(() => customerQuoteSheetTsv(buildCustomerQuoteSheet(input))).toThrow('二字码')
+    draft.countryFormat = 'name'
+    expect(buildCustomerQuoteSheet(input).rows[0].country).toBe('Imaginary Country')
+  })
   it('does not calculate extra quantities or reuse prices for an unavailable restored route', () => {
     let calls = 0
     const sheet = buildCustomerQuoteSheet({rows:[source({available:false}),source({channelKey:'good'})],countries:[],edits:edits(),

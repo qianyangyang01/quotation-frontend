@@ -5,6 +5,7 @@ import {
   quoteSheetRowKey, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
   MAX_QUOTE_SHEET_COLUMNS, validQuoteSheetQuantity, QUOTE_SHEET_OPTIONAL_COLUMNS, quoteSheetGroups, quoteSheetTextTable, normalizeQuoteSheetOrder,
   type QuoteSheetOptionalColumn, type QuoteSheetColumnKey,
+  formatQuoteSheetCountry, type QuoteSheetCountryFormat,
   type QuoteSheetCountry, type QuoteSheetSourceRow, type QuoteSheetPriceCalculator, type QuoteSheetRowEdits,
 } from '@/data/customerQuoteSheet'
 import { copyQuoteSheetImage, preloadQuoteSheetAssets, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
@@ -209,6 +210,16 @@ function rowEdits(key: string) {
 }
 function updateField(key: string, field: Exclude<keyof QuoteSheetRowEdits, 'prices'>, event: Event) {
   rowEdits(key)[field] = (event.target as HTMLInputElement).value
+}
+function setCountryFormat(format: QuoteSheetCountryFormat) {
+  if (copying.value || (edits.value.countryFormat ?? 'name') === format) return
+  for (const fields of Object.values(edits.value.fields || {})) {
+    if (fields.country !== undefined) {
+      const formatted = formatQuoteSheetCountry(fields.country, props.countries, format)
+      if (formatted) fields.country = formatted
+    }
+  }
+  edits.value.countryFormat = format
 }
 function updatePrice(key: string, quantity: number, event: Event) {
   if (quantities.value.filter(value => value === quantity).length !== 1) return
@@ -433,6 +444,10 @@ onBeforeUnmount(() => {
                   :aria-label="`${groupNames[group.key]}排序，左右键移动`" title="拖动排序，或聚焦后按左右方向键" :disabled="copying"
                   @dragstart="startGroupDrag(group.key, $event)" @dragend="endColumnDrag"
                   @keydown.left.prevent="moveGroupByKey(group.key, -1)" @keydown.right.prevent="moveGroupByKey(group.key, 1)">⠿ <span>{{ group.key === 'prices' ? '价格 · 整组拖动' : group.label }}</span></button>
+                <div v-if="group.key === 'country'" class="sheet-country-format" role="group" aria-label="国家显示方式">
+                  <button type="button" :aria-pressed="(edits.countryFormat ?? 'name') === 'name'" :disabled="copying" @click="setCountryFormat('name')">全称</button>
+                  <button type="button" :aria-pressed="edits.countryFormat === 'code'" :disabled="copying" @click="setCountryFormat('code')">二字码</button>
+                </div>
               </th>
             </tr>
             <tr>
@@ -481,6 +496,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-country-format{display:flex;justify-content:center;margin-top:8px}.customer-sheet .sheet-country-format button{padding:6px 14px;border-color:#f58220;border-radius:0;font-size:12px;font-weight:650}.customer-sheet .sheet-country-format button:first-child{border-radius:6px 0 0 6px}.customer-sheet .sheet-country-format button:last-child{border-left:0;border-radius:0 6px 6px 0}.customer-sheet .sheet-country-format button[aria-pressed="true"]{background:#f58220;color:#fff}.sheet-country-format button:focus-visible{outline:2px solid #924e10;outline-offset:2px}
 .sheet-photos{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0;padding:12px;border:1px solid #dfe5e9;border-radius:6px}.sheet-photos legend{font-size:12px;font-weight:650}.sheet-photos label{display:flex;align-items:center;gap:6px;font-size:12px}.sheet-photos span{flex:1;min-width:220px;font-size:12px;color:#72808a;line-height:1.6}.sheet-photo-cell{min-width:180px}.sheet-photo-grid{display:grid;justify-content:center;gap:10px}.sheet-photo-grid img{width:150px;height:150px;object-fit:contain;background:#fff}.sheet-photo-grid-many{grid-template-columns:repeat(2,100px)}.sheet-photo-grid-many img{width:100px;height:100px}
 .customer-sheet{margin:0 22px 18px;color:#202532}.sheet-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px}.sheet-toolbar h3{margin:0;font-size:15px}.sheet-toolbar p,.sheet-local-note,.sheet-edit-help{color:#72808a;font-size:12px;line-height:1.6}.sheet-toolbar p{margin:5px 0}.sheet-local-note{margin:8px 0 14px}.sheet-actions{display:flex;gap:8px;flex-wrap:wrap}.customer-sheet button{padding:9px 13px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font-size:12px;font-weight:650;cursor:pointer}.customer-sheet button.sheet-primary{background:#f58220;border-color:#f58220;color:#fff}.customer-sheet button:disabled{background:#edf0f2;border-color:#e0e4e8;color:#919aa3;cursor:not-allowed}.sheet-editor{padding:16px;background:#fafbfc;border:1px solid #dfe5e9;border-radius:8px}.sheet-metadata{display:flex;gap:18px;flex-wrap:wrap}.sheet-metadata label{display:grid;gap:6px;font-size:12px;font-weight:650}.customer-sheet input{height:36px;padding:0 9px;box-sizing:border-box;border:1px solid #ccd4db;border-radius:4px;background:#fff;color:#202532;font:inherit}.sheet-metadata input{min-width:205px}.sheet-editor-scroll,.sheet-image-scroll,.sheet-accessible{overflow-x:auto}.customer-sheet table{width:100%;border-collapse:collapse;font-size:12px}.sheet-editor table{width:max-content;min-width:0}.customer-sheet th,.customer-sheet td{padding:10px 9px;border:1px solid #e0e3e6;text-align:center;vertical-align:middle}.customer-sheet th{background:#fff0e3;color:#924e10;font-weight:650}.customer-sheet td{background:#fff}.customer-sheet small{display:block;margin-top:4px;font-weight:400}.sheet-source{max-width:230px;color:#76828c;font-size:10px;line-height:1.5}.sheet-time input{width:170px;font-size:12px}.sheet-time button{display:block;margin:5px auto 0;padding:2px 4px;border:0;color:#a85d16;background:transparent;font-size:10px}.sheet-empty{padding:35px;text-align:center;border:1px dashed #d9e1e6;color:#87939d;font-size:12px}.sheet-image-area{border:1px solid #e0e4e8;background:#f6f7f9}.sheet-image-scroll img{display:block;width:100%;height:auto;min-width:768px}.sheet-pages{display:flex;justify-content:center;align-items:center;gap:15px;padding:10px;font-size:12px}.sheet-message,.sheet-pending{padding:10px 12px;border-radius:5px;background:#f0f7f1;color:#287a4d;font-size:12px;line-height:1.6}.sheet-message.failed,.sheet-pending{background:#fff4e6;color:#a65410}.sheet-accessible{padding:10px;background:#fff;font-size:12px;line-height:1.6}.sheet-accessible summary{cursor:pointer;color:#64727e}.sheet-accessible li{margin:8px 0}@media(max-width:850px){.sheet-toolbar{align-items:flex-start;flex-direction:column}.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:12px}.sheet-pages{gap:8px}.sheet-metadata{width:100%}.sheet-metadata label{flex:1}}
 .sheet-column-count{display:block;text-align:right;font-size:12px;color:#72808a;margin:8px 0}.sheet-quantity{position:relative;min-width:112px;padding-top:22px!important}.sheet-quantity input{width:66px}.sheet-remove{position:absolute;right:2px;top:0;padding:0 5px!important;border:0!important;background:transparent!important}.sheet-price{white-space:nowrap}.sheet-price input{width:140px;text-align:center}.sheet-price-error{max-width:160px;white-space:normal;color:#b42318;line-height:1.5}.sheet-price input[aria-invalid="true"]{border-color:#b42318!important}.sheet-number{width:45px}.sheet-country{width:190px}.sheet-provider{width:160px}.sheet-processing{width:130px}.sheet-editor td input:not(:focus){border-color:transparent}.sheet-editor td input:hover{border-color:#ccd4db}.customer-sheet input:focus{outline:1px solid #f58220;border-color:#f58220}.sheet-notes-editor{margin-top:14px;font-size:12px}.sheet-notes-editor summary{cursor:pointer;color:#925013}.sheet-notes-editor label{display:flex;gap:12px;margin:10px 0}.sheet-notes-editor textarea{width:100%;min-height:70px;resize:vertical;border:1px solid #ccd4db;padding:8px;font:inherit;line-height:1.6}

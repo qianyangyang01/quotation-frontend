@@ -45,6 +45,58 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('switches the Country header, preview and copied data together without changing source rows or saved prices', async () => {
+  const state = mount([{ ...row(), country: 'GB' }, { ...row('two'), country: 'NL' }])
+  const original = JSON.stringify(state.rows)
+  const prices = exposed.capturePrices()
+  expect(document.querySelector('[data-group="country"] [aria-label="国家显示方式"]')).not.toBeNull()
+  expect(button('全称').getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector<HTMLInputElement>('.sheet-country')!.value).toBe('United Kingdom')
+  await click('二字码')
+  expect(button('二字码').getAttribute('aria-pressed')).toBe('true')
+  expect([...document.querySelectorAll<HTMLInputElement>('.sheet-country')].map(input => input.value)).toEqual(['GB', 'NL'])
+  await click('预览报价单'); await click('复制报价数据')
+  expect(render.mock.lastCall![0].rows.map(row => row.country)).toEqual(['GB', 'NL'])
+  expect(writeText.mock.lastCall![0]).toContain('\tGB\t')
+  expect(writeText.mock.lastCall![0]).toContain('\tNL\t')
+  await click('编辑报价单'); await click('全称'); await click('预览报价单'); await click('复制报价数据')
+  expect(render.mock.lastCall![0].rows.map(row => row.country)).toEqual(['United Kingdom', 'Netherlands'])
+  expect(writeText.mock.lastCall![0]).toContain('\tUnited Kingdom\t')
+  expect(exposed.capturePrices()).toEqual(prices)
+  expect(JSON.stringify(state.rows)).toBe(original)
+})
+
+it('converts manual country edits on toggling and keeps the format across recalculation but resets for a new product', async () => {
+  const state = mount()
+  state.resetKey = 'sku-one'; await settle()
+  await input('第 1 行国家', 'Netherlands')
+  await click('二字码')
+  expect(document.querySelector<HTMLInputElement>('.sheet-country')!.value).toBe('NL')
+  state.contextKey = 'price-changed'; await settle()
+  expect(button('二字码').getAttribute('aria-pressed')).toBe('true')
+  await click('全称')
+  expect(document.querySelector<HTMLInputElement>('.sheet-country')!.value).toBe('Netherlands')
+  await click('二字码'); state.resetKey = 'sku-two'; await settle()
+  expect(button('全称').getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector<HTMLInputElement>('.sheet-country')!.value).toBe('United States')
+})
+
+it('invalidates a pending full-name image on format change and locks both choices during clipboard writes', async () => {
+  let finish!: (images: QuoteSheetImage[]) => void
+  render.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  mount(); await click('预览报价单'); await click('二字码')
+  finish([png()]); await settle()
+  expect(document.querySelector('.sheet-image-scroll img')).toBeNull()
+  expect(button('复制报价图片').disabled).toBe(true)
+  let copied!: () => void
+  writeText.mockImplementationOnce(() => new Promise<void>(resolve => { copied = resolve }))
+  await click('复制报价数据')
+  expect(button('全称').disabled).toBe(true)
+  expect(button('二字码').disabled).toBe(true)
+  copied(); await settle()
+  expect(button('全称').disabled).toBe(false)
+})
+
 it.each([false, true])('keeps arithmetic preview, clipboard and saved prices consistent (bundle=%s)', async bundle => {
   const state = mount([row('one'), row('two')]); state.bundle = bundle; await settle()
   const original = JSON.stringify(state.rows)

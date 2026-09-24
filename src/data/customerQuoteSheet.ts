@@ -12,6 +12,7 @@ export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |
   'quote1' | 'quote2' | 'quote3' | 'quoteCustom' | 'available'>
 export type QuoteSheetCountry = { name: string; code: string }
+export type QuoteSheetCountryFormat = 'name' | 'code'
 export type QuoteSheetRowEdits = { number?: string; country?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
 export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
   { key: 'country', label: 'Country', name: '国家', width: 215 },
@@ -20,7 +21,7 @@ export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
   { key: 'processingTime', label: 'Processing Time', name: '处理时间', width: 220 },
 ] as const
 export type QuoteSheetOptionalColumn = typeof QUOTE_SHEET_OPTIONAL_COLUMNS[number]['key']
-export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[]; whatsapp?: string; columnOrder?: QuoteSheetColumnKey[] }
+export type QuoteSheetEdits = { agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[]; whatsapp?: string; columnOrder?: QuoteSheetColumnKey[]; countryFormat?: QuoteSheetCountryFormat }
 export const QUOTE_SHEET_COLUMN_ORDER = ['number', 'product', 'sku', 'prices', 'country', 'provider', 'shippingTime', 'processingTime'] as const
 export type QuoteSheetColumnKey = typeof QUOTE_SHEET_COLUMN_ORDER[number]
 export function normalizeQuoteSheetOrder(order: readonly QuoteSheetColumnKey[] = []) {
@@ -165,6 +166,29 @@ export function quoteSheetCountryName(country: string, catalog: QuoteSheetCountr
   // Preserve an explicitly entered English name; unknown Chinese names still need a catalog mapping.
   return /^[A-Za-z][A-Za-z .,'’()&-]{2,79}$/.test(value) ? value : ''
 }
+let countryCodesByEnglishName: Map<string, string> | undefined
+function codeForEnglishCountryName(value: string) {
+  if (!countryCodesByEnglishName) {
+    countryCodesByEnglishName = new Map()
+    // Historical sheets can lack a catalog. Use the same locale data as full-name display.
+    for (let first = 65; first <= 90; first++) {
+      for (let second = 65; second <= 90; second++) {
+        const code = String.fromCharCode(first, second)
+        if (new Intl.Locale(`und-${code}`).region !== code) continue
+        const name = englishCountryNames.of(code)
+        if (name && !countryCodesByEnglishName.has(name.toLowerCase())) countryCodesByEnglishName.set(name.toLowerCase(), code)
+      }
+    }
+  }
+  return countryCodesByEnglishName.get(value.toLowerCase()) || ''
+}
+/** Display-only formatting; route identities and saved country codes remain unchanged. */
+export function formatQuoteSheetCountry(country: string, catalog: QuoteSheetCountry[], format: QuoteSheetCountryFormat = 'name') {
+  if (format === 'name') return quoteSheetCountryName(country, catalog)
+  const value = country.trim()
+  const code = quoteSheetCountryCode(value, catalog) || codeForEnglishCountryName(value)
+  return code === 'UK' ? 'GB' : code
+}
 export function quoteSheetProviderKey(provider: string) {
   return provider.normalize('NFKC').toLowerCase().replace(/[\s._-]/g, '')
 }
@@ -198,10 +222,10 @@ export function buildCustomerQuoteSheet(input: {
   const rows = input.rows.map((row, index) => {
     const key = quoteSheetRowKey(row)
     const fields = input.edits.fields?.[key] || {}
-    const country = quoteSheetCountryName(fields.country ?? row.country, input.countries)
+    const country = formatQuoteSheetCountry(fields.country ?? row.country, input.countries, input.edits.countryFormat)
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
     const provider = fields.provider === undefined ? quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '') : fields.provider.trim()
-    if (visible('country') && !country) tableIssues.push(`第 ${index + 1} 行缺少国家英文全称：${row.country}`)
+    if (visible('country') && !country) tableIssues.push(`第 ${index + 1} 行缺少国家${input.edits.countryFormat === 'code' ? '二字码' : '英文全称'}：${fields.country ?? row.country}`)
     if (visible('provider') && !provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
     if (visible('provider') && /[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)
     const shippingTime = formatShippingTime(input.edits.shippingTimes[key] ?? row.eta)
