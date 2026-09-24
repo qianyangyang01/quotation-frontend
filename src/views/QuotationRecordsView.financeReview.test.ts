@@ -11,13 +11,13 @@ vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([]
 vi.mock('vue-router',()=>({useRoute:()=>({query:{}})}))
 let app:App
 const flush=async()=>{for(let i=0;i<6;i++){await nextTick();await Promise.resolve()}}
-const saved=()=>normalizeQuotationRecord({id:'r',no:'QT-1',salespersonAccount:'EMPLOYEE',_version:2,_reviewVersion:0,financeReviewStatus:'pending'})!
+const saved=()=>normalizeQuotationRecord({id:'r',no:'QT-1',createdAt:'2026-09-23T12:00:00Z',updatedAt:'2026-09-23T12:00:00Z',salespersonAccount:'EMPLOYEE',_version:2,_reviewVersion:0,financeReviewStatus:'pending'})!
 const claimed=()=>({...saved(),_reviewVersion:1,financeReviewStatus:'reviewing' as const,financeReviewClaimedBy:'ADMIN',financeReviewClaimedAccount:'ADMIN',financeReviewStartedAt:'2026-09-23T12:00:00Z'})
 const button=(text:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===text) as HTMLButtonElement
 async function mount(role:'super_admin'|'employee',scope:'mine'|'company') {
   authState.current={id:role,name:role,account:role==='employee'?'EMPLOYEE':'ADMIN',role,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=role==='employee'?['myRecords']:['allRecords']
   mocks.page.mockResolvedValue({items:[saved()],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});mocks.get.mockResolvedValue([saved()])
-  const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush()
+  const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush();button('全部').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
 }
 afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;authState.permissions=[];vi.useRealTimers();vi.resetAllMocks()})
 it('requires claiming before completion and opens the exact returned quotation',async()=>{
@@ -46,8 +46,7 @@ it('employees see live ownership without getting review buttons',async()=>{
 })
 it('refreshes externally changed review filters, including an empty result becoming eligible',async()=>{
   vi.useFakeTimers();await mount('employee','mine')
-  const filter=document.querySelector('[aria-label="审核状态"]') as HTMLSelectElement
-  filter.value='pending';filter.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  button('待审核').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   mocks.get.mockResolvedValue([{...saved(),_reviewVersion:2,financeReviewStatus:'approved'}])
   mocks.page.mockResolvedValue({items:[],page:0,size:10,total:0,totalPages:0,summary:{pending:0,won:0,lost:0,total:0},countries:[]})
   await vi.advanceTimersByTimeAsync(6500);await flush()
@@ -78,8 +77,7 @@ it('renders identical quotation detail data for employee and administrator, with
 })
 it('does not overlap slow filtered-list synchronization with a second timer',async()=>{
   vi.useFakeTimers();await mount('employee','mine')
-  const filter=document.querySelector('[aria-label="审核状态"]') as HTMLSelectElement
-  filter.value='approved';filter.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  button('审核通过').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   let finish!:(value:unknown)=>void
   mocks.page.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
   const before=mocks.page.mock.calls.length
@@ -127,6 +125,7 @@ it('keeps the selector open during unchanged status polling and closes without s
 it('combines processing and review filters and clears mine when leaving reviewing',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   const select=async(label:string,value:string)=>{
+    if(label==='审核状态') { button(value==='reviewing'?'审核中':'价格异常').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush();return }
     const input=document.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!
     input.value=value;input.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   }
@@ -138,11 +137,11 @@ it('combines processing and review filters and clears mine when leaving reviewin
   expect(document.querySelector('.review-mine')).toBeNull()
   expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'processed',reviewStatus:'rejected',reviewMine:false})
   button('重置').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
-  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'',reviewStatus:'',reviewMine:false})
+  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'',reviewStatus:'rejected',reviewMine:false})
 })
 it('refreshes filtered list and count after claim, while keeping the claimed detail open',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
-  const filter=document.querySelector('[aria-label="审核状态"]') as HTMLSelectElement;filter.value='pending';filter.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  button('待审核').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   mocks.patch.mockResolvedValue(claimed());mocks.page.mockResolvedValue({items:[],page:0,size:10,total:0,totalPages:0,summary:{pending:0,won:0,lost:0,total:0},countries:[]})
   button('开始审核').click();await flush();expect(mocks.page.mock.lastCall?.[1]).toMatchObject({reviewStatus:'pending'})
   expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 0 条');expect(document.querySelector('.record-drawer')).not.toBeNull()

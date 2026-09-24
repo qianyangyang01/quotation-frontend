@@ -75,7 +75,14 @@ async function confirmLifecycle(reason: string) {
 const search = ref('')
 const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
 const filterStatus = ref<'' | 'pending' | 'won' | 'processed'>('')
-const filterReviewStatus = ref<'' | 'pending' | 'reviewing' | 'approved' | 'rejected'>('')
+const reviewGroups = [
+  { value: 'pending', label: '待审核' },
+  { value: 'reviewing', label: '审核中' },
+  { value: 'approved', label: '审核通过' },
+  { value: 'rejected', label: '价格异常' },
+  { value: '', label: '全部' },
+] as const
+const filterReviewStatus = ref<typeof reviewGroups[number]['value']>('pending')
 const reviewMine = ref(false)
 watch(filterReviewStatus, value => { if (value !== 'reviewing') reviewMine.value = false })
 const reviewFiltered = computed(() => Boolean(filterReviewStatus.value))
@@ -100,7 +107,7 @@ async function refresh(silent = false) {
   } catch(error) {if(id===requestId){records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};loadError.value=error instanceof Error?error.message:'加载失败，请重试'}}
   finally {if(id===requestId)loading.value=false}
 }
-function resetFilters(){search.value='';filterStatus.value='';filterReviewStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
+function resetFilters(){search.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
 function recent(days:number){const dates=recentRecordDates(days);startDate.value=dates.startDate;endDate.value=dates.endDate}
 function changePage(next:number){if(loading.value)return;page.value=next;void refresh()}
 async function exportRecords(){
@@ -312,7 +319,11 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <button v-for="state in (['active','archived','trashed'] as const)" :key="state" :class="{active:lifecycle===state}" :aria-current="lifecycle===state ? 'page' : undefined" :disabled="lifecycleBusy" @click="lifecycle=state">{{ lifecycleLabel(state) }}</button>
         <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
       </nav>
-      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label>审核状态<select v-model="filterReviewStatus" aria-label="审核状态"><option value="">全部</option><option value="pending">待审核</option><option value="reviewing">审核中</option><option value="approved">审核通过</option><option value="rejected">价格异常</option></select></label><label v-if="canReview&&filterReviewStatus==='reviewing'" class="review-mine"><input v-model="reviewMine" type="checkbox">只看我的</label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
+      <nav class="review-groups" aria-label="审核分类">
+        <button v-for="group in reviewGroups" :key="group.value" type="button" :class="{ active: filterReviewStatus === group.value }" :aria-pressed="filterReviewStatus === group.value" :disabled="lifecycleBusy" @click="filterReviewStatus = group.value">{{ group.label }}</button>
+        <small>按审核结果自动分类</small>
+      </nav>
+      <section class="filters"><label class="search">⌕<input v-model="search" placeholder="搜索客户、SKU、品类、国家、渠道或报价单号"></label><label v-if="canReview&&filterReviewStatus==='reviewing'" class="review-mine"><input v-model="reviewMine" type="checkbox">只看我的</label><label>产品品类<select v-model="filterCategory"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select></label><label>报价国家<select v-model="filterCountry"><option value="">全部国家</option><option v-for="item in countries" :key="item">{{ item }}</option></select></label><button @click="resetFilters">重置</button><b>共 {{ total }} 条记录</b></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
@@ -413,6 +424,15 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
+.review-groups{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0;padding:12px;background:#fff;border:1px solid #dfe5eb;border-radius:10px}
+.review-groups button{min-height:42px;padding:9px 24px;border:1px solid transparent;border-radius:7px;background:#f3f6f8;color:#536374;font:inherit;font-weight:600;cursor:pointer}
+.review-groups button.active{background:#fff2db;border-color:#eda636;color:#854b00;box-shadow:inset 0 -2px #ed990f}
+.review-groups button:hover:not(:disabled){border-color:#ed990f}
+.review-groups button:focus-visible{outline:2px solid #ed990f;outline-offset:2px}
+.review-groups button:disabled{opacity:.5;cursor:not-allowed}
+.review-groups small{margin-left:auto;color:#71808c;font-size:12px}
+@media(max-width:720px){.review-groups button{flex:1 1 90px;padding:9px 12px}.review-groups small{flex-basis:100%;margin:2px 0 0}}
+
 .detail-review-status{margin:12px 24px;padding:10px 14px;background:#f4f7fa;border-radius:6px;color:#31526c;font-size:13px;font-weight:600}
 .reissue-quote{padding:7px 12px;border:1px solid #ffb54e;border-radius:6px;background:#fff8ed;color:#a95f00;font-size:11px;font-weight:700;text-decoration:none}
 .finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.record-row-actions{min-width:0;gap:8px}

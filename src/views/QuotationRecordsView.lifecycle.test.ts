@@ -60,8 +60,7 @@ it('retains dialog and error on conflict and never displays a successful cleanup
 })
 it('keeps eligible selection during review polling and removes it if another reviewer claims the quote',async()=>{
   await mount()
-  const status=document.querySelector<HTMLSelectElement>('[aria-label="审核状态"]')!
-  status.value='pending';status.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  button('待审核').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   document.querySelector<HTMLInputElement>('.lifecycle-checkbox')!.click();await flush()
   await vi.advanceTimersByTimeAsync(15000);await flush()
   expect(document.querySelector('.lifecycle-toolbar')?.textContent).toContain('已选 1 条')

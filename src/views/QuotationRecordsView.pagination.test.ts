@@ -34,11 +34,12 @@ it('blocks a reversed date range without submitting a query',async()=>{
 
 it.each(['mine', 'company'])('filters pending finance reviews and resets pagination for %s', async scope => {
   vi.useFakeTimers(); query.loadRecordPage.mockResolvedValue(result(35)); await mount(scope)
+  expect(query.loadRecordPage.mock.lastCall?.[1]).toMatchObject({reviewStatus:'pending'})
+  expect(document.querySelector('.review-groups [aria-pressed="true"]')?.textContent).toBe('待审核')
+  button('全部').click(); await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
   query.loadRecordPage.mockResolvedValueOnce(result(35,1)); button('下一页').click(); await flush()
-  const select = document.querySelector('[aria-label="审核状态"]') as HTMLSelectElement
-  expect(Array.from(select.options).find(option => option.value === 'pending')?.textContent).toBe('待审核')
   query.loadRecordPage.mockResolvedValue(result(3))
-  select.value = 'pending'; select.dispatchEvent(new Event('change'))
+  button('待审核').click()
   await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
   expect(query.loadRecordPage.mock.lastCall).toEqual([scope, expect.objectContaining({reviewStatus:'pending'}), 0, 10])
   expect(document.querySelector('[aria-label="报价记录分页"]')!.textContent).toContain('共 3 条')
@@ -59,4 +60,37 @@ it.each(['mine', 'company'])('opens the quotation overview from the detail cell 
   document.querySelector<HTMLButtonElement>('[aria-label="关闭"]')!.click(); await flush()
   document.querySelector<HTMLButtonElement>('.difference-cell')!.click(); await flush()
   expect(document.querySelector('.detail-tabs .active')?.textContent).toBe('报价概览')
+})
+
+it.each(['mine', 'company'])('keeps review groups separate and exports the selected group for %s', async scope => {
+  vi.useFakeTimers()
+  let rows = (['pending', 'reviewing', 'approved', 'rejected'] as const).map((status, index) => normalizeQuotationRecord({
+    id: String(index), no: 'QT-' + status, primarySku: 'SKU-' + status, financeReviewStatus: status,
+  })!)
+  query.loadRecordPage.mockImplementation(async (_scope, filters) => {
+    const items = rows.filter(row => !filters.reviewStatus || row.financeReviewStatus === filters.reviewStatus)
+    return { ...result(items.length), items }
+  })
+  query.loadFilteredRecords.mockResolvedValue([])
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  const objectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:review-export')
+  try {
+    await mount(scope)
+    expect(document.querySelector('.records')?.textContent).toContain('QT-pending')
+    expect(document.querySelector('.records')?.textContent).not.toContain('QT-approved')
+    rows = rows.map(row => row.financeReviewStatus === 'pending' ? { ...row, financeReviewStatus: 'approved' as const } : row)
+    await vi.advanceTimersByTimeAsync(3000); await flush()
+    expect(document.querySelector('.records')?.textContent).not.toContain('QT-pending')
+    expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 0 条')
+    button('审核通过').click(); await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
+    expect(document.querySelector('.records')?.textContent).toContain('QT-approved')
+    expect(document.querySelector('.records')?.textContent).toContain('QT-pending')
+    expect(document.querySelector('.records')?.textContent).not.toContain('QT-reviewing')
+    expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 2 条')
+    button('重置').click(); await flush()
+    expect(document.querySelector('.review-groups [aria-pressed="true"]')?.textContent).toBe('审核通过')
+    button('导出筛选结果').click(); await flush()
+    expect(query.loadFilteredRecords).toHaveBeenCalledWith(scope, expect.objectContaining({ reviewStatus: 'approved' }))
+    expect(download).toHaveBeenCalledOnce()
+  } finally { download.mockRestore(); objectUrl.mockRestore() }
 })
