@@ -2011,7 +2011,7 @@ async function save() {
     }
   }
   catch (error) { toast(error instanceof Error ? error.message : '客户报价无法保存'); return }
-  const snapshot = captured ? { contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
+  const snapshot = captured ? { hiddenOptionIds: quoteOptions.filter(option => captured.hiddenRowKeys?.includes(option.quoteSheetKey)).map(option => option.id), contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
     const row = captured!.rows.find(row => row.key === option.quoteSheetKey)
     return { optionId: option.id, prices: row!.prices }
   }) } : undefined

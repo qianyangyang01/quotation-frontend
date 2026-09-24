@@ -26,9 +26,9 @@ public class QuotationRecordQuery {
     @Transactional(readOnly=true, isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Result search(String owner, Filters filters, int page, int size) {
         if(filters.startDate()!=null && filters.endDate()!=null && filters.startDate().isAfter(filters.endDate())) throw AppException.unprocessable("开始日期不能晚于结束日期");
-        if(filters.status()!=null && !filters.status().isBlank() && !Set.of("pending","won","lost","processed","finance-pending","finance-approved","finance-rejected","finance-reviewing","finance-mine").contains(filters.status())) throw AppException.unprocessable("报价状态不合法");
+        if(filters.status()!=null && !filters.status().isBlank() && !Set.of("pending","won","lost","processed","finance-pending","finance-approved","finance-rejected","finance-channel-exempt","finance-reviewing","finance-mine").contains(filters.status())) throw AppException.unprocessable("报价状态不合法");
         var reviewStatus="coalesce((select r.status from quotation_review r where r.id=quotation_record.id),nullif(payload->>'financeReviewStatus',''),'pending')";
-        if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank() && !Set.of("pending","reviewing","approved","rejected").contains(filters.reviewStatus())) throw AppException.unprocessable("审核状态不合法");
+        if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank() && !Set.of("pending","reviewing","approved","rejected","channel-exempt").contains(filters.reviewStatus())) throw AppException.unprocessable("审核状态不合法");
         var lifecycle=filters.lifecycle()==null ? "active" : filters.lifecycle();
         if(!Set.of("active","archived","trashed").contains(lifecycle)) throw AppException.unprocessable("记录分类不合法");
         var params=new HashMap<String,Object>(); params.put("lifecycle",lifecycle);
@@ -45,7 +45,7 @@ public class QuotationRecordQuery {
         if(filters.endDate()!=null) { where.append(" and created_at<:end");params.put("end",java.sql.Timestamp.from(filters.endDate().plusDays(1).atStartOfDay(zone).toInstant())); }
         if(filters.status()!=null && !filters.status().isBlank()) { if (filters.status().equals("finance-pending")) {
                 // Match the displayed default for legacy records without a review status.
-                where.append(" and "+reviewStatus+" not in ('approved','rejected','reviewing')");
+                where.append(" and "+reviewStatus+" not in ('approved','rejected','reviewing','channel-exempt')");
             } else if (filters.status().equals("finance-mine")) {
                 where.append(" and exists(select 1 from quotation_review r where r.id=quotation_record.id and r.status='reviewing' and r.claimant_account=:reviewer)");
                 params.put("reviewer",filters.reviewer()==null?"":filters.reviewer());
@@ -54,7 +54,7 @@ public class QuotationRecordQuery {
             else if (filters.status().equals("pending")) where.append(" and status in ('pending','lost') and not "+confirmed);
             else { where.append(" and status=:status");params.put("status",filters.status()); } }
         if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank()) {
-            if(filters.reviewStatus().equals("pending")) where.append(" and "+reviewStatus+" not in ('approved','rejected','reviewing')");
+            if(filters.reviewStatus().equals("pending")) where.append(" and "+reviewStatus+" not in ('approved','rejected','reviewing','channel-exempt')");
             else { where.append(" and "+reviewStatus+"=:independentReviewStatus");params.put("independentReviewStatus",filters.reviewStatus()); }
         }
         if(filters.reviewMine()) {

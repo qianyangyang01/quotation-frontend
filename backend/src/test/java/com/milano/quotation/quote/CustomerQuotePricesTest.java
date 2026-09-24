@@ -6,6 +6,38 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CustomerQuotePricesTest {
     final ObjectMapper mapper=new ObjectMapper();
+    @Test void persistsHiddenRoutesWithoutDroppingPricesAndPreservesThemForOldClients() {
+        var r = record();
+        ((ObjectNode) r.path("customerQuote")).putArray("hiddenOptionIds").add("a");
+        CustomerQuotePrices.initialize(r);
+        var reloaded = (ObjectNode) mapper.readTree(r.toString());
+        assertEquals("[\"a\"]", reloaded.path("sheetQuote").path("hiddenOptionIds").toString());
+        assertEquals(1, reloaded.path("customerQuote").path("rows").size());
+        assertFalse(reloaded.path("systemQuantityQuotes").has("hiddenOptionIds"));
+        var patch = mapper.createObjectNode();
+        var prices = (ObjectNode) reloaded.path("customerQuote").deepCopy(); prices.remove("hiddenOptionIds");
+        patch.set("customerQuote", prices);
+        CustomerQuotePrices.preparePatch(reloaded, patch);
+        assertEquals(reloaded.path("customerQuote"), patch.path("customerQuote"));
+        ((ObjectNode) patch.path("customerQuote")).putArray("hiddenOptionIds");
+        CustomerQuotePrices.preparePatch(reloaded, patch);
+        assertTrue(patch.path("customerQuote").path("hiddenOptionIds").isEmpty());
+        assertFalse(QuotationFinanceReview.pricesChanged(reloaded, patch));
+        reloaded.put("quoteConfirmed", true);
+        QuotationConfirmation.prepare(reloaded, patch);
+        assertFalse(patch.has("quoteConfirmed"));
+        assertEquals("[\"a\"]", reloaded.path("sheetQuote").path("hiddenOptionIds").toString());
+    }
+    @Test void rejectsMalformedDuplicateAndForeignHiddenRows() {
+        var r = record();
+        for (var json : new String[]{"null", "{}", "[1]", "[\"foreign\"]", "[\"a\",\"a\"]"}) {
+            var value = (ObjectNode) r.path("customerQuote").deepCopy();
+            value.set("hiddenOptionIds", mapper.readTree(json));
+            assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
+        }
+        CustomerQuotePrices.initialize(r);
+        assertFalse(r.path("customerQuote").has("hiddenOptionIds"));
+    }
     @Test void savesContactThroughJsonRoundTripAndKeepsItWhenOnlyPricesChange() {
         var r = record();
         ((ObjectNode) r.path("customerQuote")).putObject("contact").put("agent", "Vivian").put("whatsapp", "+183 5650 6953");

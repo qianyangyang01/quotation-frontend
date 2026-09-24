@@ -45,6 +45,21 @@ class QuotationWithdrawalPostgresTest extends QuotationFinanceReviewIntegrationT
         var request=put("/api/v1/quotation-drafts/mine/state").with(employee).with(csrf()).header("If-Match",version).contentType("application/json").content(draft().put("customerName","另一个页面").toString());
         if(source!=null)request.header("X-Quotation-Source",source);return mvc.perform(request);
     }
+    @Test void withdrawalInvalidatesManualExemptionButRetainsItsAuditHistory() throws Exception {
+        var q=record();claim(q);
+        action(q,finance,qv(q),rv(q),"complete","channel-exempt","").andExpect(status().isOk());
+        var before=records.findById(q.id).orElseThrow().payload.deepCopy();
+        withdraw(q);
+        assertEquals("pending",reviews.findById(q.id).orElseThrow().status);
+        mvc.perform(get("/api/v1/quotations/{id}",q.id).with(employee)).andExpect(status().isConflict());
+        assertEquals(before.path("customerQuote"),records.findById(q.id).orElseThrow().payload.path("customerQuote"));
+        var history=reviews.findById(q.id).orElseThrow().state.path("history");
+        assertEquals("channel-exempt",history.get(1).path("after").asText());
+        assertEquals("channel-exempt",history.get(2).path("before").asText());
+        command(q,"resubmit",resubmission(q),"resubmit-exempt",employee).andExpect(status().isOk());
+        assertEquals("pending",view(q).path("financeReviewStatus").asText());
+        assertEquals("channel-exempt",reviews.findById(q.id).orElseThrow().state.path("history").get(1).path("after").asText());
+    }
     @Test void withdrawTerminatesReviewAndResubmitsSameNumberAtomically() throws Exception {
         var q=record();claim(q);var oldReview=rv(q);withdraw(q);
         command(q,"withdraw",withdrawal(q),"withdraw-"+q.id,employee).andExpect(status().isOk());

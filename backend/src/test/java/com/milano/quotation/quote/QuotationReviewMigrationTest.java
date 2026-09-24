@@ -20,5 +20,12 @@ class QuotationReviewMigrationTest {
         assertEquals(before,jdbc.queryForList("select * from quotation_record order by id"));assertEquals(2,jdbc.queryForObject("select count(*) from quotation_review",Integer.class));
         assertEquals("财务甲",jdbc.queryForObject("select state->>'financeReviewedBy' from quotation_review where status='approved'",String.class));
         assertEquals(0,jdbc.queryForObject("select count(*) from quotation_review where id=md5('won')::uuid",Integer.class));
+        var reviewsBefore=jdbc.queryForList("select * from quotation_review order by id");
+        try(var resource=getClass().getResourceAsStream("/db/migration/V53__quotation_channel_exempt_review.sql")){assertNotNull(resource);jdbc.execute(new String(resource.readAllBytes(),StandardCharsets.UTF_8));}
+        assertEquals(before,jdbc.queryForList("select * from quotation_record order by id"));
+        assertEquals(reviewsBefore,jdbc.queryForList("select * from quotation_review order by id"));
+        jdbc.execute("insert into quotation_review values(md5('won')::uuid,'channel-exempt',null,'{\"financeReviewStatus\":\"channel-exempt\"}',0)");
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->jdbc.execute("update quotation_review set status='invalid' where id=md5('won')::uuid"));
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->jdbc.execute("update quotation_review set claimant_account='FINANCE' where id=md5('won')::uuid"));
     }
 }
