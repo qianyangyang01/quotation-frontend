@@ -23,6 +23,8 @@ let app: App | undefined
 let host: HTMLDivElement
 let state: {
   draftReady: boolean
+  queryProduct: () => Promise<void>
+  queryBundleItems: () => Promise<void>
   products: QuotationProduct[]
   bundleItems: BundleQuoteItem[]
   monthlySalesEstimate: string
@@ -36,7 +38,7 @@ afterEach(() => { app?.unmount(); app = undefined; host?.remove(); vi.restoreAll
 async function mount(mode: 'single' | 'bundle', estimate = '10', omitProductSnapshot = false) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return {
-      'country-classification': { value: [], _version: 1 }, 'channel-policies': { value: [], _version: 1 },
+      'country-classification': { value: [], _version: 1 }, 'channel-policies': { value: [{id:'普货',category:'普货',enabled:true,countryRules:[{country:'美国',allowedChannels:['1::测试::A']}]}], _version: 1 },
       'customer-grades': { value: [{ grade: 'S', coefficient: 1.2, enabled: true }], _version: 1 },
       'exchange-rate': { value: { usdCny: 6.7, updatedAt: 'test' }, _version: 1 },
       'tax-settings': { value: { countries: [], providers: [], updatedAt: 'test' }, _version: 1 },
@@ -63,6 +65,10 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', omitProductSnap
   const vm = app.mount(host)
   state = (vm.$ as unknown as { setupState: typeof state }).setupState
   await vi.waitFor(() => expect(state.draftReady).toBe(true))
+  expect(state.products[0]?.purchaseBaseUnitPrice || 0).toBe(0)
+  if (mode === 'single') await state.queryProduct()
+  else await state.queryBundleItems()
+  await nextTick()
 }
 
 async function selectTier(value: string) {

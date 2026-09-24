@@ -163,7 +163,7 @@ async function applyReissue() {
     const skus = payload.quoteMode === 'bundle' ? payload.bundleItems.map(item => item.sku) : [payload.product.sku]
     const purchases = new Map<string, PurchaseProductRecord | undefined>()
     for (const sku of skus) purchases.set(sku.trim().toUpperCase().replace(/\s+/g, ''), await recordForDraftSku(sku))
-    await applyDraftPayload(payload, purchases)
+    await applyDraftPayload(payload, purchases, { restoreQuotation: true })
     draftReady.value = true
     markDraftDirty()
     reissueSource.value = record.no
@@ -212,6 +212,7 @@ const draftUpdatedAt = ref('')
 const draftStatus = ref<'loading' | 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict'>('loading')
 const draftError = ref('')
 const draftRestored = ref(false)
+const draftNeedsQuery = ref(false)
 const draftChannelNotice = ref('')
 const draftReady = ref(false)
 const draftInitializationFailed = ref(false)
@@ -434,7 +435,9 @@ async function queryProduct() {
   if (!matches.length && candidates.length) { purchaseQueryError.value = purchaseQuoteBlockingMessage(candidates[0]); toast(purchaseQueryError.value); return }
   if (!matches.length) { toast(`未找到可报价 SKU：${skuSearch.value}，请确认采购资料已完整保存`); return }
   const p = products.value[0]
+  const restoredManualWeight = draftNeedsQuery.value && p.sku === normalizedSku && p.weightSource === 'manual' ? p.manualWeight : undefined
   applyPurchaseRecord(p, matches[0])
+  if (restoredManualWeight !== undefined) p.manualWeight = restoredManualWeight
   skuSearch.value = matches[0].sku
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: true }))) {
     p.channel = ''; p.rule = ''; p.selectedChannelKey = ''; p.freight = 0; p.status = '产品品类待补充'
@@ -484,7 +487,7 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   item.image = record.image
   item.physicalImage = record.physicalImage
   item.stockStatus = record.stockStatus || '待确认'
-  item.customWeightKg = null
+  if (!draftNeedsQuery.value) item.customWeightKg = null
   item.weightKg = record.weightKg || 0
   applyBundlePurchasePricing(item, record, true)
   item.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record)
@@ -622,9 +625,11 @@ function cancelQuoteLogistics() {
   logisticsLoadError.value = ''
 }
 function startQuoteLogisticsInBackground(p: Product) {
+  draftNeedsQuery.value = false
   void ensureQuoteLogistics(p)
 }
 function ensureQuoteLogistics(p: Product) {
+  if (draftNeedsQuery.value) return Promise.resolve()
   initialLogisticsLoad = runQuoteLogistics(p)
   return initialLogisticsLoad
 }
@@ -716,8 +721,8 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
       ...(result.financeVersions ? changedFinanceSettings(appliedFinanceVersions, result.financeVersions) : []),
       ...changedFinanceSettings(appliedFinanceVersions, latestFinanceVersions),
     ]))
-    if (skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
-    const newerLogistics = Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
+    if (!draftNeedsQuery.value && skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
+    const newerLogistics = !draftNeedsQuery.value && Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
     // A library revision is only a signal to check. It is never itself a save blocker.
     if ((newerLogistics || beforeSave) && savedQuoteRows.value.length) {
       try { await checkSelectedLogistics({ logisticsAttribute: products.value[0].logisticsAttribute, customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1), quoteOptions: buildQuoteOptions() }, signal) }
@@ -789,13 +794,18 @@ async function updateLiveQuotation() {
   const payload = draftPayload()
   try {
     await flushDraft()
+    if (draftNeedsQuery.value) {
+      await reloadLiveConfiguration()
+      syncPending.value = ''; syncError.value = ''
+      return
+    }
     const freshPurchases = new Map<string, PurchaseProductRecord | undefined>(await Promise.all(activePurchaseSkus().map(async sku => {
       try { return [sku, await loadPurchaseProduct(sku)] as const }
       catch (error) { if (error instanceof ApiError && error.status === 404) return [sku, undefined] as const; throw error }
     })))
     await reloadLiveConfiguration()
     purchaseRecords.value = []
-    await applyDraftPayload(payload, freshPurchases)
+    await applyDraftPayload(payload, freshPurchases, { restoreQuotation: true })
     draftReady.value = true
     markDraftDirty()
     await checkLiveVersions()
@@ -804,6 +814,7 @@ async function updateLiveQuotation() {
   finally { draftReady.value = true; syncRefreshing.value = false }
 }
 function normalizeRule(p: Product, silent = false) {
+  if (draftNeedsQuery.value) { p.status = '已恢复报价条件，请点击查询商品'; return }
   if (logisticsLoadState.value === 'loading') { p.status = '正在加载当前商品所需物流规则'; return }
   if (!financeSettingsAreHydrated()) { p.status = financeSettingsAreLoading() ? '财务设置正在读取，请稍候' : '财务设置读取失败，请重试'; return }
   if (logisticsLoadState.value === 'error') { p.status = '物流规则加载失败，请重试'; return }
@@ -962,8 +973,13 @@ async function recordForDraftSku(sku: string, freshPurchases?: Map<string, Purch
   catch (error) { if (error instanceof ApiError && error.status === 404) return undefined; throw error }
   return record?.quoteReady ? record : undefined
 }
-async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>) {
+async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>, options: { restoreQuotation?: boolean } = {}) {
   draftReady.value = false
+  draftNeedsQuery.value = !options.restoreQuotation
+  productQueryGeneration += 1
+  productQueryAbort?.abort()
+  productQueryBusy.value = false
+  cancelQuoteLogistics()
   draftChannelNotice.value = ''
   quoteMode.value = payload.quoteMode === 'bundle' ? 'bundle' : 'single'
   customerName.value = String(payload.customerName || '').slice(0, 120)
@@ -980,6 +996,34 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   const p = reactive(emptyQuotationProduct())
   p.logisticsAttribute = normalizeLogisticsAttribute(payload.logisticsAttribute || '')
   const singleSku = payload.product?.sku || payload.skuSearch
+  if (draftNeedsQuery.value) {
+    // Server drafts restore input conditions only. Reissue/live refresh explicitly
+    // opt into restoring a quotation; ordinary navigation must never select routes.
+    skuSearch.value = String(payload.skuSearch || singleSku || '').trim().toUpperCase()
+    p.sku = String(singleSku || '').trim().toUpperCase()
+    p.quantity = Math.max(1, Math.floor(Number(payload.product?.quantity) || 1))
+    p.weightSource = payload.product?.weightSource === 'manual' ? 'manual' : 'purchase'
+    p.manualWeight = Math.max(0, Number(payload.product?.manualWeight) || 0)
+    p.purchaseInvoiceTaxApplied = payload.product?.purchaseInvoiceTaxApplied === true
+    p.status = '已恢复报价条件，请点击查询商品'
+    products.value = [p]
+    bundleItems.value = payload.quoteMode === 'bundle' ? (payload.bundleItems || []).map(saved => ({
+      ...bundleItemFromRecord(undefined, saved.purchaseInvoiceTaxApplied === true),
+      sku: String(saved.sku || '').trim().toUpperCase(), quantityPerSet: normalizedBundleSets(saved.quantityPerSet),
+      customWeightKg: saved.customWeightKg == null ? null : Math.max(0, Number(saved.customWeightKg) || 0),
+    })) : [bundleItemFromRecord()]
+    if (!bundleItems.value.length) bundleItems.value = [bundleItemFromRecord()]
+    selectedQuoteRegions.value = {}
+    requestedQuoteCountries.clear()
+    modeSelections.value = { common: [], specified: [], template: [] }
+    commonQuoteRows.value = []; specifiedQuoteRows.value = []; templateQuoteRows.value = []
+    restoredCommonSelections.value = []; restoredSpecifiedSelections.value = []; restoredTemplateSelections.value = []
+    activeTemplateSnapshot.value = null
+    restoredSelectionVersion.value += 1
+    draftRestored.value = true
+    await nextTick()
+    return
+  }
   let restoredFromPurchase = false
   if (quoteMode.value === 'single' && singleSku) {
     const record = await recordForDraftSku(singleSku, freshPurchases)
@@ -1089,6 +1133,7 @@ async function loadAndRestoreDraft() {
   return state
 }
 async function resetLocalDraft() {
+  draftNeedsQuery.value = false
   draftChannelNotice.value = ''
   reissueSource.value = ''
   purchaseQueryError.value = ''
@@ -2047,14 +2092,15 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           @query="queryProduct" @query-bundle="queryBundleItems" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
-        <section v-if="p.sku && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">
+        <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ quoteMode === 'bundle' ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
+        <section v-if="!draftNeedsQuery && p.sku && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">
           <i></i><span><b>{{ logisticsLoadState === 'loading' ? '正在按商品条件加载物流规则' : logisticsLoadState === 'stale' ? '当前显示缓存物流规则' : logisticsLoadState === 'empty' ? '没有匹配的已发布物流渠道' : logisticsLoadState === 'error' ? '物流规则加载失败' : '物流规则待加载' }}</b><small>{{ logisticsLoadState === 'loading' ? '页面其他内容可继续查看，完成后将自动计算最低报价渠道' : logisticsLoadState === 'stale' ? '网络恢复并确认正式版本后才能保存报价' : logisticsLoadState === 'idle' ? '点击重新加载，按当前商品条件获取正式物流规则' : logisticsLoadError || p.status }}</small></span><button v-if="logisticsLoadState !== 'loading'" type="button" @click="retryQuoteLogistics">重新加载</button>
         </section>
 
-        <section v-if="quoteMode === 'single'" class="cost-workbench">
+        <section v-if="quoteMode === 'single' && !draftNeedsQuery" class="cost-workbench">
           <CostWeightPanel :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)"><template #product><ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" /></template></CostWeightPanel>
         </section>
-        <section v-else class="cost-workbench">
+        <section v-else-if="quoteMode === 'bundle'" class="cost-workbench">
           <BundleProductCard
             :items="bundleItems" :purchase-cost="bundlePurchaseCost(1)"
             :base-weight="bundleBaseWeight(1)" :packaging-weight="bundlePackagingWeight(1)" :total-weight="bundleGoodsWeight(1)" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" :domestic-freight="bundleDomesticFreight(1)"
@@ -2063,8 +2109,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           />
         </section>
 
-        <section v-if="purchaseTaxBlockReason" class="logistics-load-panel error" role="alert"><span><b>{{ purchaseTaxBlockReason }}</b><small>请在采购数据补齐票点后重新查询商品；0%为有效票点。</small></span></section>
-        <section class="matrix-workbench">
+        <section v-if="!draftNeedsQuery && purchaseTaxBlockReason" class="logistics-load-panel error" role="alert"><span><b>{{ purchaseTaxBlockReason }}</b><small>请在采购数据补齐票点后重新查询商品；0%为有效票点。</small></span></section>
+        <section v-if="!draftNeedsQuery" class="matrix-workbench">
         <section class="matrix-mode-switcher">
           <header><div><h2><i class="section-number">03</i>选择报价方式与渠道</h2></div><span>三种模式独立保留，模板按当前业务员账号管理</span></header>
           <nav aria-label="报价矩阵分类">
@@ -2116,7 +2162,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
-        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" v-if="!draftNeedsQuery"
           :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"

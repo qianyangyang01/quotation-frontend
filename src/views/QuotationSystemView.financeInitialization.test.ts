@@ -47,11 +47,16 @@ function financeResponse(disableS = false) {
 type PricingState = {
   ensureQuoteLogistics: (product: QuotationProduct) => Promise<void>
   normalizeRule: (product: QuotationProduct, silent?: boolean) => void
-  applyDraftPayload: (payload: QuotationDraftPayload, purchases?: Map<string, PurchaseProductRecord | undefined>) => Promise<void>
+  applyDraftPayload: (payload: QuotationDraftPayload, purchases?: Map<string, PurchaseProductRecord | undefined>, options?: { restoreQuotation?: boolean }) => Promise<void>
   salePrice: (product: QuotationProduct) => number
   usdPriceFromCny: (cny: number) => number
   exchange: { usd: number; eurUsd: number }
   draftReady: boolean
+  draftNeedsQuery: boolean
+  queryProduct: () => Promise<void>
+  queryBundleItems: () => Promise<void>
+  changeLogisticsAttribute: (product: QuotationProduct, value: string) => Promise<void>
+  bundleItems: Array<{ sku: string; quantityPerSet: number; customWeightKg: number | null }>
   showSaveValidation: boolean
   saveValidationIssues: Array<{ key: string; message: string }>
   customerName: string
@@ -96,7 +101,7 @@ describe('quotation finance initialization for an employee', () => {
     replaceLogisticsRules([])
   })
 
-  async function mountPage(options: { grade?: string; attribute?: string; warm?: boolean; disableS?: boolean } = {}) {
+  async function mountPage(options: { grade?: string; attribute?: string; warm?: boolean; disableS?: boolean; draft?: QuotationDraftPayload } = {}) {
     const finance = new Promise<ReturnType<typeof financeResponse>>((resolve, reject) => {
       resolveFinance = resolve
       rejectFinance = reject
@@ -114,6 +119,7 @@ describe('quotation finance initialization for an employee', () => {
       }
       if (path === '/quotation-templates') return []
       if (path === '/quotation-readiness') return { ready: true, missing: [] }
+      if (path === '/quotation-drafts/mine/state' && options.draft) return {exists:true, version:3, payload:options.draft}
       if (path === '/quotation-drafts/mine/state') return options.grade || options.attribute
         ? { exists: true, version: 1, payload: { schemaVersion: 2, selectedCustomerGrade: options.grade, logisticsAttribute: options.attribute, quoteMode: 'single' } }
         : { exists: false, version: -1, payload: null }
@@ -138,6 +144,76 @@ describe('quotation finance initialization for an employee', () => {
     expect(state.salePrice({ purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct)).toBeCloseTo(100 * coefficient, 10)
   }
 
+  it.each(['common', 'specified', 'template'] as const)('restores only conditions for a %s draft and leaves routes unselected after explicit query', async mode => {
+    const old = [{country:'美国', channelKey:'1::物流商::CHANNEL', rule:'旧规则', carrier:'物流商', transport:'旧渠道'}]
+    const payload = {schemaVersion:2, quoteMode:'single', quoteMatrixMode:mode, skuSearch:'RESTORE', logisticsAttribute:'香氛',
+      customerName:'原客户', selectedCustomerGrade:'S', monthlySalesEstimate:'100', commissionThreshold:0.95,
+      customQuoteQuantity:6, specialPackagingGrams:3, product:{sku:'RESTORE',weightSource:'manual',manualWeight:0.4},
+      commonSelections:old,specifiedSelections:old,templateSelections:old,activeTemplate:{id:'old',name:'旧模板'}} as QuotationDraftPayload
+    await mountPage({draft:payload}); resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    expect(state.customerName).toBe('原客户'); expect(state.skuSearch).toBe('RESTORE')
+    expect(state.customQuoteQuantity).toBe(6); expect(state.draftNeedsQuery).toBe(true)
+    expect(state.products[0]).toMatchObject({logisticsAttribute:'香氛',weightSource:'manual',manualWeight:0.4})
+    expect(loadPublishedLogisticsRules).not.toHaveBeenCalled()
+    expect(vi.mocked(api.get).mock.calls.some(([path]) => path.startsWith('/purchase-products/'))).toBe(false)
+    expect(state.savedQuoteRows).toEqual([])
+    expect(host.querySelector('.matrix-workbench')).toBeNull()
+    expect(host.textContent).toContain('已恢复报价条件。点击“查询商品”')
+    // Changing an input before Query must not restore/generate any routes either.
+    await state.changeLogisticsAttribute(state.products[0]!, '香氛')
+    expect(loadPublishedLogisticsRules).not.toHaveBeenCalled()
+    const originalGet = vi.mocked(api.get).getMockImplementation()!
+    vi.mocked(api.get).mockImplementation(async (path,...args) => path === '/purchase-products/RESTORE'
+      ? {sku:'RESTORE',category:'日用品',catalogState:'ready',weightG:50,minOrderQty:1,purchasePriceCny:12,singleFreightCny:0,taxPoint:0}
+      : originalGet(path,...args))
+    const price = {areaName:'美国',countryCode:'US',etaMinDays:6,etaMaxDays:12,weightFromKg:0,weightToKg:10,pricePerKg:20,
+      registrationFee:5,allowedMarks:'',prohibitedMarks:'',minChargeWeightKg:0,startWeightKg:0,firstWeightKg:0,firstWeightPrice:0,
+      nextWeightKg:0,nextWeightPrice:0,intervalPrice:0,surcharge:0,fuelSurchargeRate:0} as LogisticsPriceRow
+    const rules = [{id:1,name:'最新渠道',status:'启用',prices:[price],relations:[{carrier:'物流商',channel:'最新渠道',channelCode:'CHANNEL',discounts:''}]} as LogisticsRule]
+    vi.mocked(loadPublishedLogisticsRules).mockImplementationOnce(async () => { replaceLogisticsRules(rules); return {revision:'r1',verified:true,rules,source:'network'} })
+    const query = [...host.querySelectorAll('button')].find(button => button.textContent?.trim() === '查询商品')!
+    expect(query).toBeDefined(); query.click()
+    await vi.waitFor(() => expect(loadPublishedLogisticsRules).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(state.draftNeedsQuery).toBe(false))
+    expect(host.querySelector('.matrix-workbench')).not.toBeNull()
+    expect(state.products[0]!.manualWeight).toBe(0.4)
+    expect(state.savedQuoteRows).toEqual([])
+    expect(Object.values(state.modeSelections).flat()).toEqual([])
+    expect(JSON.stringify(state.draftPayload())).not.toContain('旧模板')
+  })
+
+  it('restores bundle SKU conditions without purchase or logistics requests', async () => {
+    await mountPage({draft:{schemaVersion:2,quoteMode:'bundle',logisticsAttribute:'香氛',customerName:'组合客户',
+      bundleItems:[{sku:'BUNDLE1',quantityPerSet:2,customWeightKg:0.3}],commonSelections:[{country:'美国',channelKey:'old'}]} as QuotationDraftPayload})
+    resolveFinance(financeResponse()); await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    expect(state.bundleItems[0]).toMatchObject({sku:'BUNDLE1',quantityPerSet:2,customWeightKg:0.3})
+    expect(state.savedQuoteRows).toEqual([])
+    expect(loadPublishedLogisticsRules).not.toHaveBeenCalled()
+    expect(vi.mocked(api.get).mock.calls.some(([path]) => path.startsWith('/purchase-products/'))).toBe(false)
+    expect(host.querySelector('.matrix-workbench')).toBeNull()
+    const originalGet = vi.mocked(api.get).getMockImplementation()!
+    vi.mocked(api.get).mockImplementation(async (path,...args) => path === '/purchase-products/BUNDLE1'
+      ? {sku:'BUNDLE1',category:'日用品',catalogState:'ready',weightG:50,minOrderQty:1,purchasePriceCny:12,singleFreightCny:0,taxPoint:0}
+      : originalGet(path,...args))
+    await state.queryBundleItems()
+    await vi.waitFor(() => expect(loadPublishedLogisticsRules).toHaveBeenCalledTimes(1))
+    expect(state.draftNeedsQuery).toBe(false)
+    expect(state.bundleItems[0]).toMatchObject({sku:'BUNDLE1',quantityPerSet:2,customWeightKg:0.3})
+    expect(state.savedQuoteRows).toEqual([])
+  })
+
+  it('keeps a restored draft waiting for Query after purchase lookup fails', async () => {
+    await mountPage({draft:{schemaVersion:2,quoteMode:'single',logisticsAttribute:'香氛',customerName:'客户',skuSearch:'FAIL',
+      product:{sku:'FAIL'},commonSelections:[{country:'美国',channelKey:'old'}]} as QuotationDraftPayload})
+    resolveFinance(financeResponse()); await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    await state.queryProduct()
+    expect(state.draftNeedsQuery).toBe(true)
+    expect(loadPublishedLogisticsRules).not.toHaveBeenCalled()
+    expect(state.savedQuoteRows).toEqual([])
+    expect(host.querySelector('.matrix-workbench')).toBeNull()
+  })
+
   it.each(['common', 'specified', 'template'] as const)('removes unauthorized restored channels from %s after loading, including preview and the next draft', async mode => {
     await mountPage()
     resolveFinance(financeResponse())
@@ -157,7 +233,7 @@ describe('quotation finance initialization for an employee', () => {
       quoteReady:true, status:'资料完整', taxPoint:0, domesticFreight:0.2, priceTiers:[] } as unknown as PurchaseProductRecord
     const payload = { schemaVersion:2, quoteMode:'single', quoteMatrixMode:mode, skuSearch:'RESTORE', logisticsAttribute:'香氛',
       product:{sku:'RESTORE'}, customerName:'客户', commonSelections:selected, specifiedSelections:selected, templateSelections:selected } as QuotationDraftPayload
-    const restoring = state.applyDraftPayload(payload, new Map([['RESTORE', purchase]]))
+    const restoring = state.applyDraftPayload(payload, new Map([['RESTORE', purchase]]), { restoreQuotation: true })
     await vi.waitFor(() => expect(finish).toBeDefined())
     expect(state.modeSelections[mode]).toHaveLength(2)
     finish(); await restoring
@@ -180,7 +256,7 @@ describe('quotation finance initialization for an employee', () => {
       quoteReady:true, status:'资料完整', taxPoint:0, domesticFreight:0.2, priceTiers:[] } as unknown as PurchaseProductRecord
     const selection = {country:'美国', channelKey:'2::物流商::OLD', rule:'旧规则', carrier:'物流商', transport:'旧渠道'}
     await state.applyDraftPayload({schemaVersion:2, quoteMode:'single', quoteMatrixMode:'common', logisticsAttribute:'香氛',
-      product:{sku:'RESTORE'}, commonSelections:[selection]} as QuotationDraftPayload, new Map([['RESTORE',purchase]]))
+      product:{sku:'RESTORE'}, commonSelections:[selection]} as QuotationDraftPayload, new Map([['RESTORE',purchase]]), { restoreQuotation: true })
     expect(state.modeSelections.common).toEqual([selection])
     expect(host.textContent).not.toContain('已按当前物流属性')
     await state.ensureQuoteLogistics(state.products[0]!)
@@ -220,7 +296,7 @@ describe('quotation finance initialization for an employee', () => {
       quoteReady:true, status:'资料完整', taxPoint:0, domesticFreight:0.2, priceTiers:[] } as unknown as PurchaseProductRecord
     const payload = { schemaVersion:2, quoteMode:'single', skuSearch:'RESTORE', logisticsAttribute:'香氛',
       product:{sku:'RESTORE'}, customerName:'客户' } as QuotationDraftPayload
-    const restoring = state.applyDraftPayload(payload, new Map([['RESTORE', purchase]]))
+    const restoring = state.applyDraftPayload(payload, new Map([['RESTORE', purchase]]), { restoreQuotation: true })
     await vi.waitFor(() => expect(finish).toBeDefined())
     expect(host.querySelector('.product-card .state')?.textContent).toContain('正在加载')
     finish({ revision:'r1', verified:true, rules:[], source:'network' })

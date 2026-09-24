@@ -11,7 +11,7 @@ function setup(){
     hydrateFinanceSettings:vi.fn(async()=>{}),loadCustomerOperationSettings:()=>({}),resolveCustomerOperation:vi.fn(()=>({configured:true,snapshot:{id:'a',name:'甲',feeUsd:1}})),
     appliedFinanceVersions:{} as FinanceSettingVersions,financeSettingVersions:vi.fn<()=>FinanceSettingVersions>(()=>({})),changedFinanceSettings,
     loadQuotationSync:vi.fn(async():Promise<{purchaseVersions:Record<string,string>;logisticsRevision:string;financeVersions?:FinanceSettingVersions}>=>({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:{}})),
-    logisticsLoadState:{value:'ready'}, productQueryBusy:{value:false},purchaseRecords:{value:[]},
+    draftNeedsQuery:{value:false}, logisticsLoadState:{value:'ready'}, productQueryBusy:{value:false},purchaseRecords:{value:[]},
     findPurchaseProduct:()=>({}),purchaseRevision:()=> 'v1',logisticsRevision:{value:'r1'},
     savedQuoteRows:{value:[{}]},products:{value:[{logisticsAttribute:'普货'}]},customQuoteQuantity:{value:1},buildQuoteOptions:()=>({}),
     checkSelectedLogistics:vi.fn(async(_body?:unknown)=>({revision:'r1'})),ApiError,syncPending:{value:''},syncError:{value:''}}
@@ -87,6 +87,15 @@ function backgroundSetup(){
   state.checkSelectedLogistics.mockResolvedValue({revision:'r2'})
   return {state:background,run}
 }
+it('does not fetch logistics or report unloaded purchase costs while a restored draft awaits Query',async()=>{
+  const {state,run}=backgroundSetup()
+  state.draftNeedsQuery.value=true;state.savedQuoteRows.value=[]
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'new'},logisticsRevision:'new',financeVersions:{}})
+  await run()
+  expect(state.syncPending.value).toBe('')
+  expect(state.loadPublishedLogisticsRules).not.toHaveBeenCalled()
+  expect(state.checkSelectedLogistics).not.toHaveBeenCalled()
+})
 it.each([1,4,5])('preserves quantity %i for weight-based tax validation before saving',async(quantity)=>{
   const {state,run}=setup()
   state.customQuoteQuantity.value=quantity
