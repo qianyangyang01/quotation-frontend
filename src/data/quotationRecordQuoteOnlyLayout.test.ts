@@ -2,6 +2,7 @@
 import { expect, it } from 'vitest'
 import { normalizeQuotationRecord } from './quotationRecords'
 import { quotationRecordQuoteOnlyLayout } from './quotationRecordQuoteOnlyLayout'
+import { buildQuotationWeightSnapshot } from './quotationWeightSnapshot'
 
 const record = () => normalizeQuotationRecord({ id: 'quote', no: 'QT-ONE', customerName: '客户甲', primarySku: '001', productSummary: '枕头', customQuoteQuantity: 12,
   customerGrade: 'E', commissionThreshold: .9876, totalCostCny: 987.65, purchaseUnitPriceCny: 876.54, note: '内部备注', salespersonAccount: 'PRIVATE-ACCOUNT',
@@ -10,7 +11,7 @@ const record = () => normalizeQuotationRecord({ id: 'quote', no: 'QT-ONE', custo
   customerQuote: { quantities: [1, 2, 12], rows: [{ optionId: 'a', prices: [20, null, 230] }] },
 })!
 
-it('copies only customer quotation fields and routes, preserving customer blanks without leaking internal costs', () => {
+it('adds the approved summary while preserving customer blanks and excluding unrelated internal details', () => {
   const saved = record(), before = JSON.stringify(saved), layout = quotationRecordQuoteOnlyLayout(saved)
   expect(layout.text).toContain('澳大利亚 · 3区\t燕文｜化妆品专线\t20.00\t230.00')
   expect(layout.text.split('\n').find(row => row.startsWith('国家\t'))).toBe('国家\t物流渠道\t1件\t12件\t预计时效')
@@ -20,12 +21,93 @@ it('copies only customer quotation fields and routes, preserving customer blanks
   expect(layout.text).toContain(`创建时间\t${saved.createdAt}`)
   for (const output of [layout.text, layout.html]) {
     expect(output).toContain('普通客户')
-    for (const secret of ['内部备注', '内部计费规则', 'PRIVATE-ACCOUNT', '987.65', '876.54', '765.43', '17.23', '19.20', '采购', '佣金', '操作费', '成本']) expect(output).not.toContain(secret)
+    expect(output).toContain('876.54')
+    for (const secret of ['内部备注', '内部计费规则', 'PRIVATE-ACCOUNT', '987.65', '765.43', '17.23', '19.20', '佣金', '操作费']) expect(output).not.toContain(secret)
   }
   expect(JSON.stringify(saved)).toBe(before)
   const doc = new DOMParser().parseFromString(layout.html, 'text/html')
   const columns = doc.querySelectorAll('col').length
   for (const row of doc.querySelectorAll('tr')) expect([...row.children].reduce((n, cell) => n + Number(cell.getAttribute('colspan')), 0)).toBe(columns)
+})
+
+function withSummary() {
+  const saved = record()
+  saved.customQuoteQuantity = 5
+  saved.purchaseUnitPriceCny = 46
+  saved.domesticFreightPerUnitCny = 2
+  saved.weightSnapshot = buildQuotationWeightSnapshot([{ sku: '001', quantityPerSet: 1, baseWeightKg: .2 }], 3, [1, 2, 3, 5])
+  saved.quoteOptions![0]!.isPrimary = true
+  saved.quoteOptions![0]!.totalCostCny = 999 // The custom-quantity amount is not the 1-item cost.
+  saved.quoteOptions![0]!.logisticsSamples = [{ quantity: 5, input: { weightKg: 1.023 }, total: 80 }, { quantity: 1, input: { weightKg: .207 }, total: 35 }]
+  return saved
+}
+
+it('inserts exactly two summary rows before the seven-column quote table and matches 1-item freight and weights', () => {
+  const saved = withSummary()
+  saved.customerQuote = undefined
+  const before = JSON.stringify(saved), layout = quotationRecordQuoteOnlyLayout(saved)
+  const lines = layout.text.split('\n'), created = lines.findIndex(line => line.startsWith('创建时间\t'))
+  expect(lines[created + 1]).toBe('计算含税单价（元/件）\t46.00\t计算运费（元/1件）\t35.00\t最终合计成本（元/1件）\t83.00')
+  expect(lines[created + 2]).toBe('计算产品重量（g/1件）\t200\t计算包材重量（g/1件）\t7\t最终合计重量（g/1件）\t207')
+  expect(lines[created + 3]).toMatch(/^国家\t物流渠道\t/)
+  expect(layout.text).toContain('首选渠道：澳大利亚 · 3区｜燕文｜化妆品专线')
+  expect(layout.text).not.toContain('999')
+  const doc = new DOMParser().parseFromString(layout.html, 'text/html'), rows = [...doc.querySelectorAll('tr')]
+  expect(rows[3]!.textContent).toContain('83.00')
+  expect(rows[4]!.textContent).toContain('207')
+  expect(rows[5]!.textContent).toContain('国家')
+  for (const row of rows) expect([...row.children].reduce((n, cell) => n + Number(cell.getAttribute('colspan')), 0)).toBe(7)
+  expect(JSON.stringify(saved)).toBe(before)
+})
+
+it('uses the marked primary even when it is not the first route, preserving zero freight and decimal totals', () => {
+  const saved = withSummary(), primary = saved.quoteOptions![0]!
+  saved.purchaseUnitPriceCny = .1
+  saved.domesticFreightPerUnitCny = .2
+  primary.logisticsSamples = [{ quantity: 1, input: { weightKg: .207 }, total: 0 }]
+  saved.quoteOptions!.unshift({ ...primary, id: 'other', isPrimary: false, country: '美国', logisticsSamples: [{ quantity: 1, input: { weightKg: .207 }, total: 123 }] })
+  const layout = quotationRecordQuoteOnlyLayout(saved)
+  expect(layout.text).toContain('计算运费（元/1件）\t0.00\t最终合计成本（元/1件）\t0.30')
+  expect(layout.text).toContain('首选渠道：澳大利亚 · 3区')
+})
+
+it.each(['no-sample', 'duplicate-sample', 'null-freight', 'negative-freight', 'no-domestic', 'unavailable', 'ambiguous-primary'] as const)('keeps incomplete or ambiguous 1-item costs unknown: %s', reason => {
+  const saved = withSummary(), primary = saved.quoteOptions![0]!
+  if (reason === 'no-sample') primary.logisticsSamples = primary.logisticsSamples!.filter(row => row.quantity === 5)
+  if (reason === 'duplicate-sample') primary.logisticsSamples!.push({ quantity: 1, input: { weightKg: .207 }, total: 42 })
+  if (reason === 'null-freight') primary.logisticsSamples![1]!.total = null
+  if (reason === 'negative-freight') primary.logisticsSamples![1]!.total = -1
+  if (reason === 'no-domestic') { saved.domesticFreightPerUnitCny = undefined; primary.totalCostCny = undefined }
+  if (reason === 'unavailable') primary.available = false
+  if (reason === 'ambiguous-primary') { primary.isPrimary = false; saved.quoteOptions!.push({ ...primary, id: 'other' }) }
+  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('最终合计成本（元/1件）\t未保存')
+})
+
+it('does not turn absent legacy fields into zero, or derive packaging from current rules', () => {
+  const saved = normalizeQuotationRecord({ id: 'legacy', no: 'QT-LEGACY', quoteOptions: [{ ...record().quoteOptions![0]!, id: 'a', freightCny: 35, logisticsInput: { country: '美国', quantity: 5, baseWeightKg: 1, packagingWeightKg: .02, weightKg: 1.02, marks: [] } }] })!
+  const lines = quotationRecordQuoteOnlyLayout(saved).text.split('\n')
+  for (const label of ['计算含税单价', '计算产品重量']) expect(lines.find(line => line.startsWith(label))?.split('\t').filter((_, index) => index % 2 === 1)).toEqual(['未保存', '未保存', '未保存'])
+  saved.quoteOptions![0]!.logisticsInput!.quantity = 1
+  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('计算产品重量（g/1件）\t1000\t计算包材重量（g/1件）\t20\t最终合计重量（g/1件）\t1020')
+})
+
+it('summarizes bundle component counts for one set and includes special packaging once', () => {
+  const saved = withSummary()
+  saved.quoteMode = 'bundle'
+  saved.bundleItems = [
+    { sku: 'A', name: 'A', effectiveWeightKg: .1, quantityPerSet: 2, purchaseUnitPriceCny: .1, domesticFreightPerUnitCny: .2 },
+    { sku: 'B', name: 'B', effectiveWeightKg: .05, quantityPerSet: 1, purchaseUnitPriceCny: .2, domesticFreightPerUnitCny: 0 },
+  ]
+  saved.weightSnapshot = buildQuotationWeightSnapshot([{ sku: 'A', quantityPerSet: 2, baseWeightKg: .1 }, { sku: 'B', quantityPerSet: 1, baseWeightKg: .05 }], 3, [1, 5])
+  const text = quotationRecordQuoteOnlyLayout(saved).text
+  expect(text).toContain('计算含税单价（元/套）\t0.40\t计算运费（元/1套）\t35.00\t最终合计成本（元/1套）\t35.80')
+  expect(text).toContain('计算产品重量（g/1套）\t250\t计算包材重量（g/1套）\t8\t最终合计重量（g/1套）\t258')
+})
+
+it('preserves a saved total weight without inventing its missing product and packaging breakdown', () => {
+  const saved = withSummary()
+  saved.weightSnapshot = undefined
+  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('计算产品重量（g/1件）\t未保存\t计算包材重量（g/1件）\t未保存\t最终合计重量（g/1件）\t207')
 })
 
 it('uses saved system prices only when no customer sheet exists, including zero, and escapes names', () => {

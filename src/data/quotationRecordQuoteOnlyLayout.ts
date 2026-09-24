@@ -2,6 +2,8 @@ import { savedSystemPrice } from './customerQuotePrices'
 import { customerGradeDisplayLabel } from './financeChannelPolicies'
 import type { QuotationRecord } from './quotationRecords'
 import { quotationRecordCopyCountry } from './quotationRecordCopyCountry'
+import Decimal from 'decimal.js'
+import { quotationProductCostSnapshot, snapshotMoney } from './quotationProductCostSnapshot'
 
 const safe = (value: unknown) => {
   const text = String(value ?? '').replace(/[\t\r\n]+/g, ' ')
@@ -9,7 +11,39 @@ const safe = (value: unknown) => {
 }
 const escapeHtml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 
-/** Customer quotation allowlist. No procurement, margin, commission or cost fields. */
+const savedAmount = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+const grams = (value: unknown) => {
+  const kg = savedAmount(value)
+  return kg == null ? '未保存' : new Decimal(kg).mul(1000).toFixed()
+}
+
+/** Only the requested summary fields; all values use saved, matching-quantity data. */
+function costWeightSummary(record: QuotationRecord, unit: string) {
+  const options = record.quoteOptions ?? []
+  const matching = options.filter(option => option.country === record.country && option.carrier === record.carrier && option.channel === record.channel && option.rule === record.rule)
+  const selected = options.find(option => option.isPrimary) ?? (matching.length === 1 ? matching[0] : options.length === 1 ? options[0] : undefined)
+  const primary = selected?.available === false ? undefined : selected
+  const samples = primary?.logisticsSamples?.filter(sample => sample.quantity === 1) ?? []
+  // freightCny/logisticsInput may describe a different quantity; they cannot
+  // replace the explicit 1-item freight sample.
+  const freight = samples.length === 1 ? savedAmount(samples[0]?.total) : undefined
+  const cost = quotationProductCostSnapshot(record).rows.find(row => row.quantity === 1)
+  const total = cost?.total == null || freight == null ? undefined : new Decimal(cost.total).plus(freight).toNumber()
+  const weight = record.weightSnapshot?.quantities.find(row => row.quantity === 1)
+  const input = primary?.logisticsInput?.quantity === 1 ? primary.logisticsInput : undefined
+  const standard = savedAmount(weight?.standardPackagingWeightKg), special = savedAmount(weight?.specialPackagingWeightKg)
+  const packaging = weight ? standard == null || special == null ? undefined : new Decimal(standard).plus(special).toNumber() : input?.packagingWeightKg
+  const finalWeight = weight ? weight.weightKg : input?.weightKg ?? (samples.length === 1 ? samples[0]?.input?.weightKg : undefined)
+  return {
+    rows: [
+      [`计算含税单价（元/${unit}）`, snapshotMoney(cost?.purchase), `计算运费（元/1${unit}）`, snapshotMoney(freight), `最终合计成本（元/1${unit}）`, snapshotMoney(total)],
+      [`计算产品重量（g/1${unit}）`, grams(weight ? weight.baseWeightKg : input?.baseWeightKg), `计算包材重量（g/1${unit}）`, grams(packaging), `最终合计重量（g/1${unit}）`, grams(finalWeight)],
+    ],
+    note: `上方运费及成本对应1${unit}；首选渠道：${primary ? [quotationRecordCopyCountry(primary.country, primary.quoteRegion), primary.carrier, primary.channel].filter(Boolean).join('｜') : '未保存'}。合计成本为计入采购价＋国内运费＋国际运费；包材包含标准包材及特殊包装。缺失项显示“未保存”，不按当前规则回算。`,
+  }
+}
+
+/** Quotation table with the explicitly requested saved cost and weight summary. */
 export function quotationRecordQuoteOnlyLayout(record: QuotationRecord): { text: string; html: string } {
   const snapshot = record.customerQuote ?? record.sheetQuote
   const options = record.quoteOptions ?? []
@@ -28,12 +62,14 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord): { text:
     return value != null && Number.isFinite(value)
   })).sort((a, b) => (a || Infinity) - (b || Infinity))
   const unit = record.quoteMode === 'bundle' ? '套' : '件'
+  const summary = costWeightSummary(record, unit)
   const sku = record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') : record.primarySku
   const header = ['国家', '物流渠道', ...quantities.map(q => q ? `${q}${unit}` : '自定义（数量未保存）'), '预计时效']
   const rows: { kind: 'metadata' | 'header' | 'route' | 'note'; cells: string[] }[] = [
     { kind: 'metadata', cells: ['报价编号', record.no, '客户', record.customerName, '客户等级', customerGradeDisplayLabel(record.customerGrade)] },
     { kind: 'metadata', cells: ['SKU', sku, '商品', record.productSummary, '币种', 'USD（美元/单）'] },
     { kind: 'metadata', cells: ['创建时间', record.createdAt] },
+    ...summary.rows.map(cells => ({ kind: 'metadata' as const, cells })),
     { kind: 'header', cells: header },
   ]
   for (const option of options) {
@@ -46,6 +82,7 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord): { text:
   }
   if (!options.length) rows.push({ kind: 'note', cells: ['未保存国家与物流渠道报价'] })
   rows.push({ kind: 'note', cells: ['各数量价格为整单报价；未报价项不补算。'] })
+  rows.push({ kind: 'note', cells: [summary.note] })
   const columnCount = header.length
   const htmlRows = rows.flatMap(row => row.kind === 'metadata' && columnCount < row.cells.length
     ? [0, 2, 4].map(i => ({ ...row, cells: row.cells.slice(i, i + 2) })) : [row]).map(row => `<tr>${row.cells.map((value, i) => {

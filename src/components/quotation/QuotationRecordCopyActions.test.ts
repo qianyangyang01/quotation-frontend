@@ -116,6 +116,8 @@ it('copies the quote-only route table and retries that same scope after clipboar
     expect(call[0]).toContain('美国\t闪电猴｜内部渠道')
     expect(call[0]).not.toContain('内部规则')
     expect(call[0]).not.toContain('产品成本快照')
+    expect(call[0]).toContain('计算含税单价（元/件）')
+    expect(call[0]).toContain('最终合计重量（g/1件）')
   }
   expect(document.querySelector('[role="status"]')?.textContent).toContain('已复制报价单（含物流渠道）')
   expect(JSON.stringify(state.record)).toBe(before)
