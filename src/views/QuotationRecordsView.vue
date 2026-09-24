@@ -85,6 +85,7 @@ const filterStatus = ref<'' | 'pending' | 'won' | 'processed'>('')
 const reviewGroups = [
   { value: 'pending', label: '待审核' },
   { value: 'reviewing', label: '审核中' },
+  { value: 'channel-exempt', label: '同渠道免审' },
   { value: 'approved', label: '审核通过' },
   { value: 'rejected', label: '价格异常' },
   { value: '', label: '全部' },
@@ -509,7 +510,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
 .detail-review-status{margin:12px 24px;padding:10px 14px;background:#f4f7fa;border-radius:6px;color:#31526c;font-size:13px;font-weight:600}
 .reissue-quote{padding:7px 12px;border:1px solid #ffb54e;border-radius:6px;background:#fff8ed;color:#a95f00;font-size:11px;font-weight:700;text-decoration:none}
-.finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.record-row-actions{min-width:0;gap:8px}
+.finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.channel-exempt{color:#17659b;background:#edf6ff;border-color:#9bc8e8}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.record-row-actions{min-width:0;gap:8px}
 
 .stats{grid-template-columns:repeat(4,1fr)}.record-row-actions{flex-wrap:wrap}.record-row-actions>em.processed{background:#e8f3ff;border-color:#b4d3f0;color:#256da6}.record-row-actions>small{font-size:10px;color:#71808c}
 .revision-history article>.customer-price-revision{grid-column:1/-1;min-width:0}

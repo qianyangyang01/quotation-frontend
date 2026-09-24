@@ -91,5 +91,16 @@ class QuotationRecordQueryPostgresIntegrationTest {
         assertEquals(101,firstPage.total());assertEquals(100,firstPage.items().size());assertEquals(1,lastPage.items().size());
         assertTrue(firstPage.items().stream().noneMatch(lastPage.items()::contains));
         assertThrows(RuntimeException.class,()->query.search("ME",new QuotationRecordQuery.Filters("","","","",date,date,"active","F1","invalid",false),0,10));
+        jdbc.getJdbcTemplate().execute("insert into quotation_review select id,'channel-exempt',null,jsonb_build_object('financeReviewStatus','channel-exempt','financeReviewedBy','管理员'),2 from quotation_record where quote_no in ('Q-5','OTHER')");
+        var exemptFilters=new QuotationRecordQuery.Filters("","","","",date,date,"active","F1","channel-exempt",false);
+        var exempt=query.search("ME",exemptFilters,0,1);
+        assertEquals(1,exempt.total());assertEquals(1,exempt.summary().pending());
+        assertEquals("channel-exempt",exempt.items().getFirst().path("financeReviewStatus").asText());
+        assertEquals(2,exempt.items().getFirst().path("_reviewVersion").asInt());
+        assertEquals(2,query.search(null,exemptFilters,0,100).total());
+        assertEquals(1,query.search("ME",new QuotationRecordQuery.Filters("","finance-channel-exempt","","",date,date),0,100).total());
+        assertEquals(100,query.search("ME",pendingReviewFilters,0,100).total());
+        assertEquals(100,query.search("ME",combinedPending,0,100).total());
+        assertEquals(1,query.search(null,new QuotationRecordQuery.Filters("","won","","",date,date,"active","F1","channel-exempt",false),0,100).total());
     }
 }

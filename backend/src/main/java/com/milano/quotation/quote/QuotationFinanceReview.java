@@ -7,7 +7,7 @@ import java.util.Set;
 
 final class QuotationFinanceReview {
     static final Set<String> FIELDS = QuotationReviewService.VIEW_FIELDS;
-    static final Set<String> STATUSES = Set.of("pending", "approved", "rejected");
+    static final Set<String> STATUSES = Set.of("pending", "approved", "rejected", "channel-exempt");
     private QuotationFinanceReview() {}
     static void initialize(ObjectNode payload) {
         FIELDS.forEach(payload::remove);
