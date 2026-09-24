@@ -135,6 +135,15 @@ public class PurchaseProductService {
     }
 
     private JsonNode upsert(JsonNode input, boolean requireVersionForExisting, String requestedCatalogState, String sourceHash, String originalSku) {
+        return upsert(input, requireVersionForExisting, requestedCatalogState, sourceHash, originalSku, null);
+    }
+
+    @Transactional
+    public JsonNode savePasted(ObjectNode input) {
+        return upsert(input, true, null, null, null, "采购粘贴更新");
+    }
+
+    private JsonNode upsert(JsonNode input, boolean requireVersionForExisting, String requestedCatalogState, String sourceHash, String originalSku, String operation) {
         if (!(input instanceof ObjectNode object)) throw AppException.unprocessable("商品数据格式错误");
         var sku = normalizeSku(object.path("sku").asText());
         externalizeImage(object,"productImage","product"); externalizeImage(object,"physicalImage","physical");
@@ -166,7 +175,7 @@ public class PurchaseProductService {
         if(sourceHash!=null)row.sourceHash=normalizeSourceHash(sourceHash);
         row.updatedAt = PurchaseProduct.databaseNow(); products.saveAndFlush(row); linkFromUrl(row.id,object.path("productImage").asText(""),"product");linkFromUrl(row.id,object.path("physicalImage").asText(""),"physical");
         var result=view(row);
-        if(requireVersionForExisting)history.record(row.id,before,result,before==null?"新增资料":"修改资料");
+        if(requireVersionForExisting)history.record(row.id,before,result,before==null?"新增资料":operation==null?"修改资料":operation);
         return result;
     }
 
@@ -308,7 +317,7 @@ public class PurchaseProductService {
         if(!nonNegative(object,"singleFreightCny"))reasons.add("1件运费");
         return reasons;
     }
-    private static void normalizeLegacyPrice(ObjectNode object){
+    static void normalizeLegacyPrice(ObjectNode object){
         if(!"legacy_2026".equals(object.path("dataSource").asText()))return;
         if(positive(object,"taxIncludedPriceCny")){
             object.set("purchasePriceCny",object.get("taxIncludedPriceCny").deepCopy());object.put("purchasePriceBasis","tax_included");return;

@@ -40,13 +40,7 @@ public class PurchaseHistoryService {
     // Joins the product transaction: failed saves must never leave a successful history entry.
     @Transactional
     public void record(UUID productId, JsonNode before, JsonNode after, String operation) {
-        var changes = new ArrayList<Change>();
-        FIELDS.forEach((field, label) -> {
-            var oldValue = value(before, field); var newValue = value(after, field);
-            boolean equal = oldValue.isNumber() && newValue.isNumber()
-                    ? oldValue.decimalValue().compareTo(newValue.decimalValue()) == 0 : oldValue.equals(newValue);
-            if (!equal) changes.add(new Change(field, label, oldValue, newValue));
-        });
+        var changes = changes(before, after);
         if (changes.isEmpty()) return;
         var auth = SecurityContextHolder.getContext().getAuthentication();
         var name = auth != null && auth.getPrincipal() instanceof QuotationPrincipal principal ? principal.displayName() : "";
@@ -56,6 +50,16 @@ public class PurchaseHistoryService {
         detail.put("operation", operation);
         detail.put("changes", changes);
         audit.record("purchase.maintenance", RESOURCE, productId.toString(), "success", detail);
+    }
+    static List<Change> changes(JsonNode before, JsonNode after) {
+        var changes = new ArrayList<Change>();
+        FIELDS.forEach((field, label) -> {
+            var oldValue = value(before, field); var newValue = value(after, field);
+            boolean equal = oldValue.isNumber() && newValue.isNumber()
+                    ? oldValue.decimalValue().compareTo(newValue.decimalValue()) == 0 : oldValue.equals(newValue);
+            if (!equal) changes.add(new Change(field, label, oldValue, newValue));
+        });
+        return changes;
     }
     private static JsonNode value(JsonNode snapshot, String field) {
         var value = snapshot == null ? null : snapshot.get(field);

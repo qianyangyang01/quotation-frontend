@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { PasteSavedCounts } from '@/services/purchasePaste'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { deletePurchaseProduct, loadPurchaseDeletionCheck, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseFreightChoices, purchaseQuoteBlockingMessage, purchaseSourceLabel, setPurchaseProductCatalogState, upsertPurchaseProducts, type PurchaseDeletionCheck, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImportJob, loadPurchaseImportDuplicateGroups, loadPurchaseImportJob, loadPurchaseImportJobs, loadPurchaseImportRows, purchaseImportErrorsUrl, retryPurchaseImportJob, rollbackPurchaseImportJob, uploadPurchaseImagePart, type PurchaseImportDuplicateGroup, type PurchaseImportJob, type PurchaseImportProfile, type PurchaseImportRowView } from '@/services/purchaseAsyncImports'
@@ -16,7 +17,7 @@ import { updatePurchaseProduct } from '@/services/purchaseHistory'
 const historySku = ref('')
 
 const showPasteDialog = ref(false)
-function pasteSaved(count: number) { toast(`已新增${count}条采购资料`); reload() }
+function pasteSaved(counts: PasteSavedCounts) { toast(`采购资料：新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条`); reload() }
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
 const records = ref<PurchaseProductRecord[]>([])

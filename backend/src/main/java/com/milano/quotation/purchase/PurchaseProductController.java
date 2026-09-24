@@ -15,8 +15,17 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/v1/purchase-products")
 public class PurchaseProductController {
+    private final PurchasePasteService pasteService;
     private final PurchaseProductService products; private final AuditService audit;
-    public PurchaseProductController(PurchaseProductService products, AuditService audit) { this.products=products; this.audit=audit; }
+    public PurchaseProductController(PurchaseProductService products, AuditService audit, PurchasePasteService pasteService) { this.products=products; this.audit=audit; this.pasteService=pasteService; }
+    @PostMapping("/paste/preview") @PreAuthorize("hasAuthority('PERM_purchase')")
+    ApiResponse<PurchasePasteService.Preview> previewPaste(@RequestBody List<JsonNode> body) {
+        return ApiResponse.ok(pasteService.preview(body));
+    }
+    @PostMapping("/paste/confirm") @PreAuthorize("hasAuthority('PERM_purchase')")
+    ApiResponse<PurchasePasteService.Result> confirmPaste(@RequestBody PurchasePasteService.Confirmation body) {
+        return ApiResponse.ok(pasteService.confirm(body));
+    }
     @GetMapping @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<PageResponse<JsonNode>> list(@RequestParam(defaultValue="")String q,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="100")int size) { var safePage=Math.max(0,page);var safeSize=Math.max(1,Math.min(size,500));return ApiResponse.ok(PageResponse.from(products.page(q,PageRequest.of(safePage,safeSize)))); }
     @GetMapping("/stats") @PreAuthorize("hasAnyAuthority('PERM_purchase','PERM_quote','PERM_allRecords')") ApiResponse<PurchaseProductService.Stats> stats(){return ApiResponse.ok(products.stats());}
     @GetMapping("/analytics-catalog") @PreAuthorize("hasAuthority('PERM_allRecords')")

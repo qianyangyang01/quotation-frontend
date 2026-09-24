@@ -12,7 +12,7 @@ import static org.mockito.Mockito.*;
 class PurchaseProductControllerTest {
     private PurchaseProductService products; private AuditService audit; private PurchaseProductController controller;
 
-    @BeforeEach void setup(){products=mock(PurchaseProductService.class);audit=mock(AuditService.class);controller=new PurchaseProductController(products,audit);}
+    @BeforeEach void setup(){products=mock(PurchaseProductService.class);audit=mock(AuditService.class);controller=new PurchaseProductController(products,audit,mock(PurchasePasteService.class));}
     @Test void pastedCreationUsesDedicatedValidationAndAudit() {
         var rows=java.util.List.<tools.jackson.databind.JsonNode>of(JsonNodeFactory.instance.objectNode().put("sku","P-1"));
         when(products.createPasted(rows)).thenReturn(rows);

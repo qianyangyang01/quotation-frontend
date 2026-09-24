@@ -62,17 +62,23 @@ export function applyPurchasePaste(grid: string[][], clipboard: string[][], star
 
 export type PurchasePasteIssue = { row: number; column: number; message: string }
 const numericFields = new Set(['weightG', 'lengthCm', 'widthCm', 'heightCm', 'minOrderQty', 'purchasePriceCny', 'tier2MinQty', 'tier2PriceCny', 'tier3MinQty', 'tier3PriceCny', 'singleFreightCny', 'freight10Cny', 'freight100Cny', 'taxIncludedPriceCny', 'taxPoint'])
-export function validatePurchasePaste(grid: string[][]) {
-  const issues: PurchasePasteIssue[] = []; const records: PurchaseProductRecord[] = []; const seen = new Map<string, number>(); const skipped: string[] = []
+export type PurchasePastePatch = Partial<PurchaseProductRecord> & { sku: string; sourceRow: number }
+type PasteCheck<T> = { issues: PurchasePasteIssue[]; records: T[]; skipped: string[]; skippedRows: { sku: string; sourceRow: number }[]; canSave: boolean }
+export function validatePurchasePaste(grid: string[][], sparse: true): PasteCheck<PurchasePastePatch>
+export function validatePurchasePaste(grid: string[][], sparse?: false): PasteCheck<PurchaseProductRecord>
+export function validatePurchasePaste(grid: string[][], sparse = false): PasteCheck<PurchaseProductRecord | PurchasePastePatch> {
+  const issues: PurchasePasteIssue[] = []; const records: (PurchaseProductRecord | PurchasePastePatch)[] = []; const seen = new Map<string, number>(); const skipped: string[] = []
+  const skippedRows: { sku: string; sourceRow: number }[] = []
   grid.forEach((cells, row) => {
     if (cells.every(cell => !cell.trim())) return
     const key = (cells[3] || '').toUpperCase().replace(/\s+/g, '')
-    if (key && seen.has(key)) { skipped.push(key); return }
+    if (key && seen.has(key)) { skipped.push(key); skippedRows.push({ sku: key, sourceRow: row + 1 }); return }
     if (key) seen.set(key, row)
-    const data: Record<string, unknown> = { skuOrigin: 'manual', dataSource: 'standard', sourceSheet: '采购粘贴新增', sourceRow: row + 1 }
+    const data: Record<string, unknown> = sparse ? { sourceRow: row + 1 } : { skuOrigin: 'manual', dataSource: 'standard', sourceSheet: '采购粘贴新增', sourceRow: row + 1 }
     const issue = (field: string, message: string) => issues.push({ row, column: PURCHASE_PASTE_COLUMNS.findIndex(c => c[1] === field), message })
     PURCHASE_PASTE_COLUMNS.forEach(([, field], col) => {
       const raw = (cells[col] || '').trim()
+      if (sparse && !raw) return
       if (!numericFields.has(field)) { data[field] = raw; return }
       if (!raw) { data[field] = null; return }
       const numeric = field === 'taxPoint' ? raw.replace(/[％%]$/, '') : raw
@@ -81,35 +87,35 @@ export function validatePurchasePaste(grid: string[][]) {
       data[field] = field === 'taxPoint' && (/[％%]$/.test(raw) || value > 1) ? value / 100 : value
       if (field === 'taxPoint' && Number(data[field]) > 1) issue(field, '票点须在0%至100%之间')
     })
-    const sku = String(data.sku).toUpperCase().replace(/\s+/g, '')
+    const sku = String(data.sku || '').toUpperCase().replace(/\s+/g, '')
     data.sku = sku
     if (!/^[A-Z0-9._/-]{1,96}$/.test(sku) || /^(TESTP|TEST|DEMO|MOCK|AUTO-)/i.test(sku)) issue('sku', '请填写有效的正式SKU')
 
     for (const field of ['weightG', 'minOrderQty']) {
-      if (data[field] == null || Number(data[field]) <= 0) issue(field, '必填，须大于0')
+      if ((!sparse && data[field] == null) || (data[field] != null && Number(data[field]) <= 0)) issue(field, '必填，须大于0')
     }
-    if (data.purchasePriceCny == null) issue('purchasePriceCny', '请填写基准采购单价')
-    if (data.taxPoint == null) issue('taxPoint', '请填写票点；无票点请明确填0%')
+    if (!sparse && data.purchasePriceCny == null) issue('purchasePriceCny', '请填写基准采购单价')
+    if (!sparse && data.taxPoint == null) issue('taxPoint', '请填写票点；无票点请明确填0%')
     for (const field of ['minOrderQty', 'tier2MinQty', 'tier3MinQty']) if (data[field] != null && (!Number.isSafeInteger(data[field]) || Number(data[field]) <= 0)) issue(field, '起订量须为正整数')
-    for (const [qty, price, previous] of [['tier2MinQty', 'tier2PriceCny', 'minOrderQty'], ['tier3MinQty', 'tier3PriceCny', 'tier2MinQty']]) {
+    if (!sparse) for (const [qty, price, previous] of [['tier2MinQty', 'tier2PriceCny', 'minOrderQty'], ['tier3MinQty', 'tier3PriceCny', 'tier2MinQty']]) {
       if ((data[qty!] == null) !== (data[price!] == null)) issue(data[qty!] == null ? qty! : price!, '阶梯起订量与价格须一起填写')
       if (data[qty!] != null && (data[previous!] == null || Number(data[qty!]) <= Number(data[previous!]))) issue(qty!, '须大于前一档起订量，请按顺序填写')
     }
     const dimensions = ['lengthCm', 'widthCm', 'heightCm']
-    if (dimensions.some(field => data[field] != null)) dimensions.forEach(field => { if (data[field] == null || Number(data[field]) <= 0) issue(field, '长宽高须一起填写且大于0；也可全部留空') })
-    if (!['', '是', '否'].includes(String(data.freeShipping))) issue('freeShipping', '请填写是或否')
-    if (data.freeShipping !== '是') for (const field of ['singleFreightCny', 'freight10Cny']) if (data[field] == null) issue(field, '未包邮时须填写运费；免运费请明确填0或选择包邮')
+    if (dimensions.some(field => data[field] != null)) dimensions.forEach(field => { if ((!sparse && data[field] == null) || (data[field] != null && Number(data[field]) <= 0)) issue(field, '长宽高须一起填写且大于0；也可全部留空') })
+    if (!['', '是', '否'].includes(String(data.freeShipping || ''))) issue('freeShipping', '请填写是或否')
+    if (!sparse && data.freeShipping !== '是') for (const field of ['singleFreightCny', 'freight10Cny']) if (data[field] == null) issue(field, '未包邮时须填写运费；免运费请明确填0或选择包邮')
     if (data.stockStatus === '有') data.stockStatus = '有货'
     if (data.stockStatus === '无') data.stockStatus = '无货'
-    if (!['', '有货', '无货', '待确认', '定制款'].includes(String(data.stockStatus))) issue('stockStatus', '请填写有/有货、无/无货、待确认或定制款')
-    if (String(data.quotationDate)) {
+    if (!['', '有货', '无货', '待确认', '定制款'].includes(String(data.stockStatus || ''))) issue('stockStatus', '请填写有/有货、无/无货、待确认或定制款')
+    if (data.quotationDate) {
       const date = String(data.quotationDate).replace(/[./]/g, '-'); const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date)
       const canonical = match ? `${match[1]}-${match[2]!.padStart(2, '0')}-${match[3]!.padStart(2, '0')}` : ''
       const parsed = new Date(canonical)
       if (!canonical || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== canonical) issue('quotationDate', '日期格式应为2026-09-05或2026.9.5')
       else data.quotationDate = canonical
     }
-    records.push(normalizePurchaseRecord(data as Partial<PurchaseProductRecord>))
+    records.push(sparse ? data as PurchasePastePatch : normalizePurchaseRecord(data as Partial<PurchaseProductRecord>))
   })
-  return { issues, records, skipped, canSave: records.length > 0 && records.length <= PURCHASE_PASTE_LIMIT && issues.length === 0 }
+  return { issues, records, skipped, skippedRows, canSave: records.length > 0 && records.length <= PURCHASE_PASTE_LIMIT && issues.length === 0 }
 }
