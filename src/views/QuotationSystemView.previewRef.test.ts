@@ -94,6 +94,7 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
   await input('第 1 行第 2 列美元价格','2.70')
   button('新增列').click();await settle();await input('第 5 个价格列数量','8')
   await input('第 1 行第 5 列美元价格','8.80')
+  document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 1 行"]')!.click(); await settle()
   const script=source.split('<script setup lang="ts">')[1]!.split('</script>')[0]!
   const ast=ts.createSourceFile('view.ts',script,ts.ScriptTarget.Latest,true)
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
@@ -119,7 +120,7 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
     purchaseUnitPriceCny:2, domesticFreightPerUnitCny:grade==='A'?.21:0,
     weightSnapshot: buildQuotationWeightSnapshot([{sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14}],10,[1,2,3,4,8]),
-    customerQuote:{contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
+    customerQuote:{hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))
   expect(resetLocalDraft).toHaveBeenCalledOnce()

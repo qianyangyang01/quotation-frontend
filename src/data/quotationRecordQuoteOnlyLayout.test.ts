@@ -42,6 +42,22 @@ function withSummary() {
   return saved
 }
 
+it('hides only saved option identities and retains the original primary weight summary', () => {
+  const saved = withSummary()
+  saved.weightSnapshot = undefined
+  saved.quoteOptions!.push({ ...saved.quoteOptions![0]!, id: 'b', isPrimary: false, channel: '可见渠道', logisticsSamples: [{ quantity: 1, input: { weightKg: .9 }, total: 9 }] })
+  saved.customerQuote!.rows.push({ optionId: 'b', prices: [21, null, 240] })
+  saved.customerQuote!.hiddenOptionIds = ['a']
+  const original = JSON.stringify(saved)
+  const full = quotationRecordQuoteOnlyLayout(saved, 'full')
+  const visible = quotationRecordQuoteOnlyLayout(saved, 'visible')
+  expect(full.text).toContain('化妆品专线')
+  expect(visible.text).not.toContain('化妆品专线')
+  expect(visible.text).toContain('可见渠道')
+  expect(visible.text).toContain('含包材重量（g/1件）\t207')
+  expect(JSON.stringify(saved)).toBe(original)
+})
+
 it('copies product cost excluding international freight and the complete packaging breakdown', () => {
   const saved = withSummary()
   saved.customerQuote = undefined

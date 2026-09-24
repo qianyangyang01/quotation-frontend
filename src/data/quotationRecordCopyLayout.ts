@@ -3,17 +3,19 @@ import { quotationRecordReconciliationTsv } from './quotationRecordReconciliatio
 import { quotationRecordCopyMatrix } from './quotationRecordCopyMatrix'
 import { quotationProductCostSnapshot, snapshotMoney } from './quotationProductCostSnapshot'
 import type { QuotationRecord } from './quotationRecords'
+import { recordQuoteSheetVersion } from './customerQuotePrices'
 
 type LayoutRow = { kind: 'title' | 'section' | 'header' | 'data' | 'note' | 'blank'; cells: string[] }
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 const spans = (length: number) => length === 4 ? [1, 2, 1, 2] : length === 2 ? [1, 5] : Array.from({ length }, (_, i) => i === 0 ? 7 - length : 1)
 
 /** Reflow the existing reconciliation export; all amounts still come from its saved-data path. */
-export function quotationRecordCopyLayout(record: QuotationRecord): { text: string; html: string } {
-  const source = quotationRecordReconciliationTsv(record).split('\n').map(row => row.split('\t'))
-  const matrix = quotationRecordCopyMatrix(record, source)
+export function quotationRecordCopyLayout(record: QuotationRecord, version: 'full' | 'visible' = 'full'): { text: string; html: string } {
+  const selected = recordQuoteSheetVersion(record, version)
+  const source = quotationRecordReconciliationTsv(selected).split('\n').map(row => row.split('\t'))
+  const matrix = quotationRecordCopyMatrix(selected, source)
   const tableStart = source.findIndex(row => row[0] === '序号')
-  const routeCount = record.quoteOptions?.length ?? 0
+  const routeCount = selected.quoteOptions?.length ?? 0
   const rows: LayoutRow[] = []
   const add = (kind: LayoutRow['kind'], cells: string[]) => rows.push({ kind, cells })
   const section = (title: string) => { add('blank', ['']); add('section', [title]) }

@@ -21,7 +21,14 @@ function mount(carrier?: string) {
   app = createApp({ render: () => h(CopyActions, { ...state, onSaved: (saved: QuotationRecord) => { state.record = saved } }) }); app.mount(host); return state
 }
 async function settle() { for (let i = 0; i < 10; i++) await nextTick() }
-function footerButton(label: string) { return [...document.querySelectorAll<HTMLButtonElement>('.record-copy-actions button')].find(button => button.textContent === label)! }
+function footerButton(label: string) { return [...document.querySelectorAll<HTMLButtonElement>('.record-copy-actions button')].find(button => button.textContent === label || button.getAttribute('aria-label') === label)! }
+async function openImageVersion(label = '隐藏行后的报价单') {
+  footerButton('复制报价图片').click(); await settle()
+  expect(document.querySelector('dialog')!.open).toBe(false)
+  expect(document.querySelector('[aria-label="报价单版本"]')).toBeNull()
+  const choice = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.querySelector('strong')?.textContent === label)!
+  choice.click(); await settle()
+}
 beforeEach(() => {
   vi.mocked(updateQuotationRecord).mockReset()
   writeText.mockReset().mockResolvedValue(undefined)
@@ -30,6 +37,65 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:quote'); vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('reopens saved hidden rows and selects either version for images and both data copy paths without writes', async () => {
+  const state = mount()
+  state.record.quoteOptions!.push({ ...state.record.quoteOptions![0]!, id: 'b', channel: '隐藏渠道', country: '加拿大', countryCode: 'CA' })
+  state.record.customerQuote = { hiddenOptionIds: ['b'], quantities: [1], rows: [{ optionId: 'a', prices: [6.2] }, { optionId: 'b', prices: [19] }] }
+  state.record._version = 1
+  await settle()
+  const before = JSON.stringify(state.record)
+  for (const label of ['仅复制报价单', '复制报价数据']) {
+    footerButton(label).click(); await settle()
+    expect(writeText.mock.lastCall![0]).not.toContain('隐藏渠道')
+  }
+  await openImageVersion()
+  expect(render.mock.lastCall![0].rows).toHaveLength(1)
+  const version = document.querySelector<HTMLSelectElement>('[aria-label="图片报价单版本"]')!
+  version.value = 'full'; version.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  expect(render.mock.lastCall![0].rows).toHaveLength(2)
+  expect(render.mock.lastCall![0].rows[1]!.prices).toEqual([19])
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭客户报价单"]')!.click(); await settle()
+  for (const label of ['仅复制报价单', '复制报价数据']) {
+    footerButton(label).click(); await settle()
+    expect(writeText.mock.lastCall![0]).toContain('隐藏渠道')
+  }
+  expect(JSON.stringify(state.record)).toBe(before)
+  expect(updateQuotationRecord).not.toHaveBeenCalled()
+})
+
+it('saves hidden identities alongside every price and keeps them when saving the full version', async () => {
+  const state = mount(); state.canEdit = true
+  state.record.quoteOptions!.push({ ...state.record.quoteOptions![0]!, id: 'b' })
+  await settle(); footerButton('复制报价图片').click(); await settle()
+  ;[...document.querySelectorAll('button')].find(button => button.textContent === '编辑报价单')!.click(); await settle()
+  document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 2 行"]')!.click(); await settle()
+  vi.mocked(updateQuotationRecord).mockImplementation(async (_id, patch) => normalizeQuotationRecord(JSON.parse(JSON.stringify({ ...state.record, ...patch, _version: (state.record._version ?? 0) + 1 })))!)
+  const save = () => [...document.querySelectorAll('button')].find(button => button.textContent === '保存客户报价')!.click()
+  save(); await settle()
+  expect(state.record.customerQuote!.hiddenOptionIds).toEqual(['b'])
+  expect(state.record.customerQuote!.rows).toHaveLength(2)
+  await openImageVersion()
+  expect(render.mock.lastCall![0].rows).toHaveLength(1)
+  const version = document.querySelector<HTMLSelectElement>('[aria-label="图片报价单版本"]')!
+  version.value = 'full'; version.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  save(); await settle()
+  expect(state.record.customerQuote!.hiddenOptionIds).toEqual(['b'])
+  expect(state.record.customerQuote!.rows).toHaveLength(2)
+})
+
+it('blocks an empty hidden version and allows the complete version; legacy records have no selector', async () => {
+  const state = mount()
+  expect(document.querySelector('[aria-label="报价单版本"]')).toBeNull()
+  state.record.customerQuote = { hiddenOptionIds: ['a'], quantities: [1], rows: [{ optionId: 'a', prices: [6.2] }] }
+  await settle(); footerButton('仅复制报价单').click(); await settle()
+  expect(writeText).not.toHaveBeenCalled()
+  expect(document.querySelector('[role="status"]')!.textContent).toContain('所有报价行均已隐藏')
+  await openImageVersion('完整报价单')
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭客户报价单"]')!.click(); await settle()
+  footerButton('仅复制报价单').click(); await settle()
+  expect(writeText.mock.lastCall![0]).toContain('6.20')
+})
 
 it('saves edited signature and contact from the record sheet and restores them on reopening', async () => {
   const state = mount(); state.canEdit = true; await settle()

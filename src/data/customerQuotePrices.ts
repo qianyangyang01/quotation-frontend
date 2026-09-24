@@ -2,8 +2,21 @@ import Decimal from 'decimal.js'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 
 export type QuoteSheetContact = { agent: string; whatsapp: string }
-export type CustomerPriceSnapshot = { contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
-export type CapturedSheetPrices = { contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
+export type CustomerPriceSnapshot = { hiddenOptionIds?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
+export type CapturedSheetPrices = { hiddenRowKeys?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
+
+export function recordHiddenOptionIds(record: QuotationRecord): string[] {
+  return [...(record.customerQuote?.hiddenOptionIds ?? record.sheetQuote?.hiddenOptionIds ?? [])]
+}
+
+/** A presentation-only copy. Never mutate or recalculate the historical record. */
+export function recordQuoteSheetVersion(record: QuotationRecord, version: 'full' | 'visible'): QuotationRecord {
+  if (version === 'full') return record
+  const hidden = new Set(recordHiddenOptionIds(record))
+  const quoteOptions = record.quoteOptions?.filter(option => !hidden.has(option.id))
+  if (hidden.size && !quoteOptions?.length) throw new Error('所有报价行均已隐藏，请选择完整报价单')
+  return { ...record, quoteOptions }
+}
 
 export function normalizeQuoteSheetContact(value: unknown): QuoteSheetContact | undefined {
   if (!value || typeof value !== 'object') return undefined
@@ -23,7 +36,7 @@ export function savedSystemPrice(record: QuotationRecord, option: QuotationRecor
 }
 export function recordCustomerPrices(record: QuotationRecord): CustomerPriceSnapshot {
   const saved = record.customerQuote ?? record.sheetQuote
-  if (saved) return { ...(saved.contact ? { contact: { ...saved.contact } } : {}), quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  if (saved) return { hiddenOptionIds: recordHiddenOptionIds(record), ...(saved.contact ? { contact: { ...saved.contact } } : {}), quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
   const quantities = [...new Set([1,2,3,record.customQuoteQuantity || 0])]
   return { quantities, rows: (record.quoteOptions || []).map(option => ({ optionId: option.id, prices: quantities.map(q => savedSystemPrice(record, option, q)) })) }
 }
@@ -34,7 +47,8 @@ export function normalizeCustomerPrices(value: unknown): CustomerPriceSnapshot |
     v.quantities.some(q=>!Number.isSafeInteger(q)||q<0) || new Set(v.quantities).size !== v.quantities.length ||
     v.rows.some(row=>!row || typeof row.optionId!=='string' || !Array.isArray(row.prices) || row.prices.length!==v.quantities.length || row.prices.some(p=>p!==null && (typeof p!=='number'||!Number.isFinite(p)||p<0)))) return undefined
   const contact = normalizeQuoteSheetContact(v.contact)
-  return { ...(contact ? { contact } : {}), quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  const hiddenOptionIds = Array.isArray(v.hiddenOptionIds) ? [...new Set(v.hiddenOptionIds.filter(id => typeof id === 'string' && v.rows.some(row => row.optionId === id)))] : undefined
+  return { ...(hiddenOptionIds ? { hiddenOptionIds } : {}), ...(contact ? { contact } : {}), quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
 }
 export function priceComparison(record: QuotationRecord, snapshot = recordCustomerPrices(record)) {
   return snapshot.rows.flatMap(row => {

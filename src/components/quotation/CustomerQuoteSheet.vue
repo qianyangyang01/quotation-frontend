@@ -25,6 +25,7 @@ const props = defineProps<{
   resetKey?: string
   initialQuote?: CustomerPriceSnapshot
   recordMode?: boolean
+  showAllRows?: boolean
   skus?: string[]
 }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
@@ -128,10 +129,15 @@ watch(showPhotos, invalidate, { flush: 'sync' })
 // Also clear before an external navigation is placed in the browser back/forward cache.
 window.addEventListener('pagehide', clearPhotos)
 
-// Visibility is local presentation state; saved prices still include every selected route.
-const hiddenRowKeys = ref(new Set<string>())
+// Persist visibility separately; saved prices always include every selected route.
+function initialHiddenRows() {
+  const ids = new Set(props.initialQuote?.hiddenOptionIds ?? [])
+  return new Set(props.rows.filter(row => row.channelKey && ids.has(row.channelKey)).map(quoteSheetRowKey))
+}
+const hiddenRowKeys = ref(initialHiddenRows())
+watch(() => JSON.stringify(props.initialQuote?.hiddenOptionIds), () => { hiddenRowKeys.value = initialHiddenRows() })
 const showHiddenRows = ref(false)
-const visibleSourceRows = computed(() => props.rows.filter(row => !hiddenRowKeys.value.has(quoteSheetRowKey(row))))
+const visibleSourceRows = computed(() => props.showAllRows ? props.rows : props.rows.filter(row => !hiddenRowKeys.value.has(quoteSheetRowKey(row))))
 function buildSheet(rows: QuoteSheetSourceRow[]) { return buildCustomerQuoteSheet({
   rows, countries: props.countries, edits: edits.value, skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle,
@@ -142,7 +148,7 @@ const allRowsSheet = computed(() => buildSheet(props.rows))
 const sheet = computed(() => buildSheet(visibleSourceRows.value))
 const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
 function hideRow(key: string) {
-  if (copying.value) return
+  if (copying.value || props.showAllRows) return
   hiddenRowKeys.value.add(key)
   showHiddenRows.value = true
 }
@@ -153,7 +159,7 @@ function restoreAllRows() {
   if (!copying.value) hiddenRowKeys.value = new Set()
 }
 watch(() => JSON.stringify([layoutUserId.value, props.skus, props.resetKey ?? props.contextKey, props.bundle]), () => {
-  hiddenRowKeys.value = new Set()
+  hiddenRowKeys.value = initialHiddenRows()
   showHiddenRows.value = false
 }, { flush: 'sync' })
 watch(() => props.rows, () => {
@@ -434,7 +440,7 @@ function capturePrices(): CapturedSheetPrices {
     customQuantity:props.customQuantity, bundle:props.bundle, quantities:quantities.value, calculatePrice:props.calculatePrice,
     legacyCustomIndex:columns.value.findIndex(column=>column.legacyCustom) })
   if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
-  return { contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
+  return { hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
 }
 defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
@@ -501,7 +507,7 @@ onBeforeUnmount(() => {
         <strong>显示 {{ sheet.rows.length }} 行 · 已隐藏 {{ hiddenRows.length }} 行</strong>
         <button v-if="hiddenRows.length" type="button" :aria-expanded="showHiddenRows" @click="showHiddenRows = !showHiddenRows">{{ showHiddenRows ? '收起隐藏行' : '查看隐藏行' }}（{{ hiddenRows.length }}）</button>
         <button v-if="hiddenRows.length" type="button" :disabled="copying" @click="restoreAllRows">恢复全部</button>
-        <span>隐藏行不参与报价预览、复制图片和复制数据；仅本次有效，保存记录仍保留全部渠道及价格。</span>
+        <span>{{ showAllRows ? '正在查看完整报价单；切换到隐藏行后的报价单可调整隐藏行。' : '隐藏行不参与报价预览、复制图片和复制数据；保存时保留隐藏设置及全部渠道价格，后台可选择两个版本。' }}</span>
         <div class="sheet-column-tools"><span class="sheet-column-count">价格列 {{ columns.length }} / 10</span><button type="button" class="sheet-add-button" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button></div>
       </div>
       <p v-if="!sheet.rows.length" class="sheet-pending" role="status">所有行已隐藏，请恢复至少一行后再预览或复制。</p>
@@ -546,7 +552,7 @@ onBeforeUnmount(() => {
               <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" :aria-invalid="Boolean(priceInputError(row.key, quantities[priceIndex]))" inputmode="text" placeholder="金额或算式" :maxlength="MAX_PRICE_EXPRESSION_LENGTH" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)" @blur="confirmPrice(row.key, quantities[priceIndex], $event)" @keydown.enter.prevent="confirmPrice(row.key, quantities[priceIndex], $event)"><small v-if="priceInputError(row.key, quantities[priceIndex])" class="sheet-price-error">{{ priceInputError(row.key, quantities[priceIndex]) }}</small></td>
               </template>
               </template>
-              <td class="sheet-row-action"><button type="button" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying" @click="hideRow(row.key)">隐藏</button></td>
+              <td class="sheet-row-action"><button type="button" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button></td>
             </tr>
           </tbody>
         </table>

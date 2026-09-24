@@ -7,6 +7,21 @@ export function exampleRecord() {return normalizeQuotationRecord({id:'r',no:'QT-
   quoteOptions:[{id:'yanwen-a',country:'US',carrier:'Yanwen',channel:'A',rule:'',eta:'5-8 days',quote1Usd:2,quote2Usd:3,quote3Usd:null,quoteCustomUsd:5}],
   systemQuantityQuotes:snapshot([2,3,5]),sheetQuote:snapshot([1.8,2.7,4.6]),customerQuote:snapshot([1.8,2.7,4.6])})!}
 describe('original system vs final customer price',()=>{
+  it('round trips hidden option identities and clones them for price edits, including an explicit restore', () => {
+    const raw = exampleRecord()
+    raw.customerQuote!.hiddenOptionIds = ['yanwen-a']
+    raw.sheetQuote!.hiddenOptionIds = ['yanwen-a']
+    const saved = normalizeQuotationRecord(JSON.parse(JSON.stringify(raw)))!
+    const draft = recordCustomerPrices(saved)
+    expect(draft.hiddenOptionIds).toEqual(['yanwen-a'])
+    draft.hiddenOptionIds!.splice(0)
+    expect(saved.customerQuote!.hiddenOptionIds).toEqual(['yanwen-a'])
+    saved.customerQuote = draft
+    expect(recordCustomerPrices(saved).hiddenOptionIds).toEqual([])
+    delete saved.customerQuote.hiddenOptionIds
+    expect(recordCustomerPrices(saved).hiddenOptionIds).toEqual(['yanwen-a'])
+    expect(saved.quoteOptions).toEqual(raw.quoteOptions)
+  })
   it('preserves saved contacts on record normalization and price draft cloning', () => {
     const raw = exampleRecord()
     raw.customerQuote!.contact = { agent: 'Vivian', whatsapp: '+183 5650 6953' }

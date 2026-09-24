@@ -1,4 +1,4 @@
-import { savedSystemPrice } from './customerQuotePrices'
+import { savedSystemPrice, recordQuoteSheetVersion } from './customerQuotePrices'
 import { customerGradeDisplayLabel } from './financeChannelPolicies'
 import type { QuotationRecord } from './quotationRecords'
 import { quotationRecordCopyCountry } from './quotationRecordCopyCountry'
@@ -43,9 +43,9 @@ function costWeightSummary(record: QuotationRecord, unit: string) {
 }
 
 /** Quotation table with the explicitly requested saved cost and weight summary. */
-export function quotationRecordQuoteOnlyLayout(record: QuotationRecord): { text: string; html: string } {
+export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version: 'full' | 'visible' = 'full'): { text: string; html: string } {
   const snapshot = record.customerQuote ?? record.sheetQuote
-  const options = record.quoteOptions ?? []
+  const options = recordQuoteSheetVersion(record, version).quoteOptions ?? []
   const price = (option: NonNullable<QuotationRecord['quoteOptions']>[number], quantity: number) => {
     const index = snapshot?.quantities.indexOf(quantity) ?? -1
     return snapshot ? index >= 0 ? snapshot.rows.find(row => row.optionId === option.id)?.prices[index] : null : savedSystemPrice(record, option, quantity)

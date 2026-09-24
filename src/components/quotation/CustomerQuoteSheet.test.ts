@@ -139,7 +139,7 @@ it('hides rows from preview and clipboard while preserving all saved prices and 
   await hideRowAt(1)
   expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(1)
   expect(document.querySelector('.sheet-row-tools')!.textContent).toContain('显示 1 行 · 已隐藏 1 行')
-  expect(exposed.capturePrices()).toEqual(prices)
+  expect(exposed.capturePrices()).toEqual({ ...prices, hiddenRowKeys: [prices.rows[0]!.key] })
   await click('预览报价单')
   expect(render.mock.lastCall![0].rows.map(row => row.provider)).toEqual(['Hua Hai'])
   expect(render.mock.lastCall![0].rows[0].number).toBe(1)

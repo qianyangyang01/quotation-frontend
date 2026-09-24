@@ -57,6 +57,17 @@ final class CustomerQuotePrices {
             }
         }
         if (!ids.equals(options.keySet())) throw AppException.unprocessable("客户报价必须包含原报价的全部渠道");
+        if (value.has("hiddenOptionIds")) {
+            var hidden = value.path("hiddenOptionIds");
+            if (!hidden.isArray()) throw AppException.unprocessable("隐藏报价行格式错误");
+            var hiddenIds = new HashSet<String>();
+            var savedHidden = clean.putArray("hiddenOptionIds");
+            for (var id : hidden) {
+                if (!id.isTextual() || !options.containsKey(id.asText()) || !hiddenIds.add(id.asText()))
+                    throw AppException.unprocessable("隐藏报价行须对应不重复的原报价渠道");
+                savedHidden.add(id.asText());
+            }
+        }
         if (value.has("contact")) {
             var contact = value.path("contact");
             if (!contact.isObject()) throw AppException.unprocessable("报价单署名及联系方式格式错误");
@@ -81,6 +92,7 @@ final class CustomerQuotePrices {
         var customer = validate(payload, payload.path("customerQuote"));
         var system = payload.has("systemQuantityQuotes") ? validate(payload, payload.path("systemQuantityQuotes")) : customer.deepCopy();
         system.remove("contact");
+        system.remove("hiddenOptionIds");
         if (!system.path("quantities").equals(customer.path("quantities"))) throw AppException.unprocessable("系统与客户报价数量不一致");
         var opts = options(payload);
         for (var row : system.path("rows")) {
@@ -105,6 +117,12 @@ final class CustomerQuotePrices {
                 var previous = current.path("customerQuote").path("contact");
                 if (previous.isMissingNode()) previous = current.path("sheetQuote").path("contact");
                 if (previous.isObject()) customer.set("contact", previous.deepCopy());
+            }
+            // Older price-only clients must not silently restore hidden routes.
+            if (!customer.has("hiddenOptionIds")) {
+                var previous = current.path("customerQuote").path("hiddenOptionIds");
+                if (previous.isMissingNode()) previous = current.path("sheetQuote").path("hiddenOptionIds");
+                if (previous.isArray()) customer.set("hiddenOptionIds", previous.deepCopy());
             }
             patch.set("customerQuote", customer);
         }
