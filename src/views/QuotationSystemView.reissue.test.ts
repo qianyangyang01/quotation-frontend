@@ -5,6 +5,7 @@ import View from './QuotationSystemView.vue'
 import { api } from '@/services/http'
 import { clearFinanceSettingsCache } from '@/services/financeSettings'
 import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
+import type { QuotationMatrixRow } from '@/components/quotation/types'
 
 const router = vi.hoisted(() => ({ replace: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: { reissue: 'original', release: 'local' } }), useRouter: () => router, onBeforeRouteLeave: vi.fn() }))
@@ -30,7 +31,8 @@ const source = { id: 'original', no: 'QT-OLD', customerName: '原客户', primar
 const oldDraft = { schemaVersion: 2, quoteMode: 'single', customerName: '未完成客户', skuSearch: '', logisticsAttribute: '普货' }
 let app: App
 let host: HTMLDivElement
-let state: { draftReady: boolean; draftStatus: string; reissueSource: string; customerName: string; products: Array<{ sku: string; purchase: number }>; modeSelections: { common: unknown[] }; searchChannelCountries: (query: string) => Promise<string[]> }
+let state: { draftReady: boolean; draftStatus: string; reissueSource: string; customerName: string; products: Array<{ sku: string; purchase: number }>; modeSelections: { common: unknown[] }; searchChannelCountries: (query: string) => Promise<string[]>;
+  quoteMatrixMode: 'common' | 'specified' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[]; specifiedQuoteRows: QuotationMatrixRow[] }
 let purchaseFailure = false
 let sourceFailure = false
 beforeEach(() => { clearFinanceSettingsCache(); vi.clearAllMocks(); purchaseFailure = false; sourceFailure = false })
@@ -105,4 +107,27 @@ it('does not copy inaccessible source records', async () => {
   expect(state.draftStatus).toBe('error')
   expect(state.reissueSource).toBe('')
   expect(api.put).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled()
+})
+
+it.each(['common', 'specified'] as const)('saves the selected %s list through the actual page template entry', async mode => {
+  await mount(false)
+  await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
+  state.quoteMatrixMode = mode; await nextTick()
+  state.logisticsLoadState = 'ready'; await nextTick()
+  const selected = { country: '日本', quoteRegion: '全国统一', rule: '指定普货', carrier: '原物流', transport: '指定普货',
+    channelKey: '1::原物流::JP', channelCode: 'JP', ruleId: 1, quote1: 10, taxConfigured: true } as QuotationMatrixRow
+  if (mode === 'common') state.commonQuoteRows = [selected]
+  else state.specifiedQuoteRows = [selected]
+  await nextTick()
+  const entry = [...host.querySelectorAll<HTMLButtonElement>('.save-selection-template')][mode === 'common' ? 0 : 1]!
+  expect(entry.disabled).toBe(false); entry.click()
+  await vi.waitFor(() => expect(host.querySelector('.creation-preview')?.textContent).toContain('指定普货'))
+  expect(state.quoteMatrixMode).toBe('template')
+  const name = host.querySelector<HTMLInputElement>('.create-template input')!
+  name.value = '普货'; name.dispatchEvent(new Event('input')); await nextTick()
+  vi.mocked(api.post).mockImplementationOnce(async (_path, body) => ({ ...(body as object), id: 'new-template', createdAt: '2026-09-24', updatedAt: '2026-09-24' }))
+  button('＋ 新建模板').click()
+  await vi.waitFor(() => expect(api.post).toHaveBeenCalledWith('/quotation-templates', expect.objectContaining({
+    name: '普货', items: [expect.objectContaining({ country: '日本', channelKey: '1::原物流::JP', transport: '指定普货' })],
+  }), expect.any(String)))
 })

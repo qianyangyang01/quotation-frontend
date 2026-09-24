@@ -37,6 +37,7 @@ const emit = defineEmits<{
   adopt: [row: QuotationMatrixRow]
   copy: [rows: QuotationMatrixRow[]]
   presetApplied: [valid: number, missing: number]
+  presetStateChange: [state: 'loading' | 'ready' | 'error']
   quoteRegionChange: [payload: { country: string; region: string }]
 }>()
 
@@ -151,10 +152,15 @@ async function applyPresetSelection() {
   const request = ++presetRequest
   const version = props.presetVersion || 0
   pendingPresetVersion = version
-  if (props.ensureCountries && !await props.ensureCountries((props.presetSelection || []).map(row => row.country))) {
+  emit('presetStateChange', 'loading')
+  let loaded: boolean
+  try { loaded = !props.ensureCountries || await props.ensureCountries((props.presetSelection || []).map(row => row.country)) }
+  catch { loaded = false }
+  if (!loaded) {
     if (request === presetRequest) {
       regionFeedback.value = '模板渠道加载失败，请重新应用模板'
       pendingPresetVersion = undefined
+      emit('presetStateChange', 'error')
     }
     return
   }
@@ -194,6 +200,8 @@ async function applyPresetSelection() {
 
   selectedCountries.value = nextCountries
   selectedChannelKeys.value = nextChannelKeys
+  emit('selectionChange', selectedCountries.value.flatMap(country => selectedRows(country)))
+  emit('presetStateChange', 'ready')
   closeChannelPicker()
   showCountryPicker.value = false
   emit('presetApplied', valid, missing)

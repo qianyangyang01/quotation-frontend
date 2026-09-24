@@ -53,6 +53,11 @@ const templates = ref<QuotationPersonalTemplate[]>([])
 const selectedTemplateId = ref('')
 const activeTemplateId = ref('')
 const currentRows = ref<QuotationMatrixRow[]>([])
+const selectionState = ref<'loading' | 'ready' | 'error'>('ready')
+const savingTemplate = ref(false)
+const creationSource = ref('模板报价清单')
+const canSaveSelection = computed(() => selectionState.value === 'ready' && !savingTemplate.value && currentRows.value.length > 0)
+const creationItems = computed(() => templateItems(currentRows.value))
 const currentAvailableCount = computed(() => currentRows.value.filter(row => row.available !== false && [row.quote1, row.quote2, row.quote3, row.quoteCustom].some(value => typeof value === 'number' && Number.isFinite(value))).length)
 const currentUnavailableCount = computed(() => currentRows.value.length - currentAvailableCount.value)
 const presetSelection = ref<QuotationPresetSelection[]>([])
@@ -119,6 +124,8 @@ function applyTemplate(template = selectedTemplate.value) {
   }
   selectedTemplateId.value = template.id
   activeTemplateId.value = template.id
+  creationSource.value = '模板报价清单'
+  selectionState.value = 'loading'
   cancelClearConfirmation()
   presetSelection.value = template.items.map(item => ({
     country: item.country,
@@ -142,6 +149,7 @@ function handleSelectionChange(rows: QuotationMatrixRow[]) {
 
 
 async function createFromCurrent() {
+  if (selectionState.value !== 'ready' || savingTemplate.value) return
   const name = createName.value.trim()
   if (!currentRows.value.length) {
     notify('当前还没有选择渠道，请先在下方添加国家和渠道，再新建模板')
@@ -152,20 +160,32 @@ async function createFromCurrent() {
     notify('已生成模板名称，可修改后再次点击“新建模板”')
     return
   }
-  const created = await createQuotationTemplate(owner.value, {
-    name,
-    description: createDescription.value.trim(),
-    items: templateItems(currentRows.value),
-  })
-  createName.value = ''
-  createDescription.value = ''
-  await refreshTemplates(created.id)
-  applyTemplate(created)
-  showManager.value = true
-  notify(`模板“${created.name}”已新建`)
+  savingTemplate.value = true
+  const savedPresetVersion = presetVersion.value
+  try {
+    const created = await createQuotationTemplate(owner.value, {
+      name,
+      description: createDescription.value.trim(),
+      items: templateItems(currentRows.value),
+    })
+    createName.value = ''
+    createDescription.value = ''
+    templates.value = [created, ...templates.value.filter(template => template.id !== created.id)]
+    // Saving must not replay an older snapshot over edits made while the request was in flight.
+    selectedTemplateId.value = created.id
+    if (presetVersion.value === savedPresetVersion) {
+      activeTemplateId.value = created.id
+      emit('templateChange', { id: created.id, name: created.name })
+    }
+    showManager.value = true
+    notify(`模板“${created.name}”已新建`)
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '模板保存失败，请重试')
+  } finally { savingTemplate.value = false }
 }
 
 async function updateActiveFromCurrent() {
+  if (selectionState.value !== 'ready' || savingTemplate.value) return
   const template = activeTemplate.value
   if (!template) {
     notify('请先应用需要更新的模板')
@@ -175,16 +195,37 @@ async function updateActiveFromCurrent() {
     notify('模板至少需要保留一条渠道，当前选择为空，未执行更新')
     return
   }
-  const updated = await updateQuotationTemplate(owner.value, template.id, { items: templateItems(currentRows.value) }, template._version)
-  if (!updated) {
-    notify('模板已不存在，请刷新后重试')
-    await refreshTemplates()
-    return
-  }
-  await refreshTemplates(updated.id)
-  emit('templateChange', { id: updated.id, name: updated.name })
-  notify(`模板“${updated.name}”已按当前临时清单更新`)
+  savingTemplate.value = true
+  try {
+    const updated = await updateQuotationTemplate(owner.value, template.id, { items: templateItems(currentRows.value) }, template._version)
+    if (!updated) {
+      notify('模板已不存在，请刷新后重试')
+      await refreshTemplates()
+      return
+    }
+    templates.value = templates.value.map(item => item.id === updated.id ? updated : item)
+    if (activeTemplateId.value === updated.id) emit('templateChange', { id: updated.id, name: updated.name })
+    notify(`模板“${updated.name}”已按当前临时清单更新`)
+  } catch (error) {
+    notify(error instanceof Error ? error.message : '模板保存失败，请重试')
+  } finally { savingTemplate.value = false }
 }
+
+function startFromSelection(rows: QuotationMatrixRow[], source: string) {
+  if (!rows.length || savingTemplate.value) return
+  cancelClearConfirmation()
+  activeTemplateId.value = ''
+  emit('templateChange', null)
+  creationSource.value = source
+  createName.value = ''
+  createDescription.value = ''
+  currentRows.value = rows.map(row => ({ ...row }))
+  presetSelection.value = templateItems(currentRows.value)
+  selectionState.value = 'loading'
+  presetVersion.value += 1
+  showManager.value = true
+}
+defineExpose({ startFromSelection })
 
 function clearCurrentSelection() {
   if (!pendingClear.value) {
@@ -196,6 +237,7 @@ function clearCurrentSelection() {
   }
 
   cancelClearConfirmation()
+  selectionState.value = 'loading'
   presetSelection.value = []
   presetVersion.value += 1
   notify(`已清空本次报价应用清单；模板“${activeTemplate.value?.name || ''}”未修改，可随时恢复`)
@@ -270,6 +312,7 @@ watch(() => props.draftVersion || 0, version => {
   selectedTemplateId.value = draftTemplate?.id || ''
   activeTemplateId.value = draftTemplate?.id || ''
   presetSelection.value = (props.draftSelection || []).map(item => ({ ...item }))
+  selectionState.value = 'loading'
   presetVersion.value += 1
   emit('templateChange', draftTemplate ? { ...draftTemplate } : null)
 }, { immediate: true })
@@ -324,7 +367,7 @@ function formatTime(value: string) {
         <div class="status-actions">
           <button @click="applyTemplate(activeTemplate)">恢复模板已保存清单</button>
           <button class="clear" :class="{ confirming: pendingClear }" @click="clearCurrentSelection">{{ pendingClear ? '确认清空清单' : '清空本次清单' }}</button>
-          <button class="update" :disabled="!currentRows.length" @click="updateActiveFromCurrent">更新为当前清单</button>
+          <button class="update" :disabled="!canSaveSelection" @click="updateActiveFromCurrent">更新为当前清单</button>
         </div>
       </template>
       <template v-else>
@@ -349,6 +392,7 @@ function formatTime(value: string) {
       :preset-version="presetVersion"
       @update:custom-quantity="$emit('update:customQuantity', $event)"
       @selection-change="handleSelectionChange"
+      @preset-state-change="selectionState = $event"
 
       @quote-region-change="$emit('quoteRegionChange', $event)"
       @adopt="$emit('adopt', $event)"
@@ -363,13 +407,22 @@ function formatTime(value: string) {
         </header>
 
         <div class="create-template">
-          <div><b>从当前临时报价清单新建</b><span>当前 {{ currentCountryCount }} 个国家 · {{ currentRows.length }} 条渠道</span></div>
+          <div><b>从{{ creationSource }}新建</b><span>当前 {{ currentCountryCount }} 个国家 · {{ currentRows.length }} 条渠道</span></div>
           <label>模板名称<input v-model="createName" maxlength="40" placeholder="例如：美英加澳常用报价"></label>
           <label>说明（选填）<input v-model="createDescription" maxlength="80" placeholder="例如：张三日常新品报价"></label>
-          <button :disabled="!currentRows.length" @click="createFromCurrent">＋ 新建模板</button>
+          <button :disabled="!canSaveSelection" @click="createFromCurrent">{{ savingTemplate ? '保存中…' : '＋ 新建模板' }}</button>
         </div>
 
         <div class="manager-list">
+          <div class="creation-preview">
+            <b>即将保存的渠道 · {{ creationSource }}</b>
+            <p v-if="selectionState === 'loading'">正在加载所选清单，完成后才能保存。</p>
+            <p v-else-if="selectionState === 'error'">清单加载失败，请关闭此窗口后重新应用模板或重新选择清单。</p>
+            <template v-else>
+              <p>保存以下国家、区域和渠道。要保存常用或指定模式的选择，请使用该模式下的“将当前清单存为模板”。</p>
+              <QuotationTemplateDetails :items="creationItems" />
+            </template>
+          </div>
           <article v-for="template in templates" :key="template.id" :class="{ active: template.id === activeTemplateId }">
             <div class="template-name">
               <template v-if="editingId === template.id">
@@ -428,6 +481,7 @@ function formatTime(value: string) {
 .status-actions .clear.confirming{border-color:#c95747;background:#fff2f0;color:#a23124}
 .cleared-note{padding:7px 9px;border-radius:6px;background:#f3f6f8;color:#596a76}
 .template-details{grid-column:1/-1;min-width:0}
+.creation-preview{padding:12px 14px;border:1px solid #f3c27e;border-radius:9px;background:#fffaf1;font-size:12px}.creation-preview>p{color:#65747e;font-size:11px;line-height:1.6}.creation-preview .details-panel{max-height:240px;overflow:auto}
 .manager-actions button{white-space:nowrap;cursor:pointer}
 .manager-actions .details-toggle{border-color:#cad8e2;color:#365b73;background:#f3f7fa}
 .manager-actions .details-toggle[aria-expanded="true"]{border-color:#64869c;background:#eaf2f7}
