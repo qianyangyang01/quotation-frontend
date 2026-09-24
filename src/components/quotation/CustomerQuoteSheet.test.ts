@@ -50,6 +50,101 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+async function hideRowAt(index: number) {
+  document.querySelector<HTMLButtonElement>(`[aria-label="隐藏第 ${index} 行"]`)!.click()
+  await settle()
+}
+
+it('hides rows from preview and clipboard while preserving all saved prices and restoring edits', async () => {
+  const state = mount([row('one', '4PX'), row('two')])
+  const original = JSON.stringify(state.rows)
+  await input('第 1 行第 1 列美元价格', '12.34')
+  await input('第 1 行运输时效', '15-20 days')
+  const prices = exposed.capturePrices()
+  await hideRowAt(1)
+  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(1)
+  expect(document.querySelector('.sheet-row-tools')!.textContent).toContain('显示 1 行 · 已隐藏 1 行')
+  expect(exposed.capturePrices()).toEqual(prices)
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows.map(row => row.provider)).toEqual(['Hua Hai'])
+  expect(render.mock.lastCall![0].rows[0].number).toBe(1)
+  await click('复制报价图片')
+  expect(write.mock.lastCall![0][0].items['image/png']).toBe((await render.mock.results[0].value)[0].blob)
+  await click('复制报价数据')
+  expect(writeText.mock.lastCall![0]).toContain('Hua Hai')
+  expect(writeText.mock.lastCall![0]).not.toContain('4PX')
+  expect(writeText.mock.lastCall![0]).not.toContain('操作')
+  await click('编辑报价单'); await click('恢复')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行第 1 列美元价格"]')!.value).toBe('12.34')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('15-20 days')
+  expect(JSON.stringify(state.rows)).toBe(original)
+})
+
+it('binds time edits to the visible route after hiding and reordering', async () => {
+  const state = mount([{ ...row('one', '4PX'), eta: '2-3 days' }, { ...row('two'), eta: '7-9 days' }, row('three', 'SDH')])
+  await hideRowAt(1)
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('7-9 workingdays')
+  await input('第 1 行运输时效', '10-12 days')
+  state.rows.reverse(); await settle()
+  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(2)
+  await click('恢复全部')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 2 行运输时效"]')!.value).toBe('10-12 days')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 3 行运输时效"]')!.value).toBe('2-3 workingdays')
+})
+
+it('allows all rows to be hidden but disables empty exports until a row is restored', async () => {
+  mount([row('one'), row('two')])
+  await hideRowAt(1); await hideRowAt(1)
+  expect(button('预览报价单').disabled).toBe(true)
+  expect(button('复制报价数据').disabled).toBe(true)
+  expect(document.body.textContent).toContain('所有行已隐藏')
+  await exposed.preview(); const result = await exposed.copyData()
+  expect(render).not.toHaveBeenCalled(); expect(writeText).not.toHaveBeenCalled()
+  expect(result?.failed).toBe(true)
+  await click('恢复全部')
+  expect(button('预览报价单').disabled).toBe(false)
+  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(2)
+})
+
+it('ignores hidden display validation for export but retains hidden price validation for saving', async () => {
+  mount([row('one', '未知物流商'), row('two')])
+  await input('第 1 行第 1 列美元价格', '1/0')
+  await hideRowAt(1)
+  await click('预览报价单'); expect(render).toHaveBeenCalledTimes(1)
+  await click('复制报价数据'); expect(writeText).toHaveBeenCalledTimes(1)
+  expect(() => exposed.capturePrices()).toThrow()
+})
+
+it('preserves hiding across recalculation but resets on product or account change and prunes removed routes', async () => {
+  const state = mount([row('one'), row('two')]); state.resetKey = 'stable-product'; await settle()
+  await hideRowAt(1)
+  state.contextKey = 'new-calculation'; state.rows[1].quote1 = 20; await settle()
+  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(1)
+  state.rows = [row('two')]; await settle()
+  state.rows.push(row('one')); await settle()
+  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(2)
+  await hideRowAt(1); state.resetKey = 'different-product'; await settle()
+  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(2)
+  await hideRowAt(1); authState.current = layoutUser('account-b'); await settle()
+  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(2)
+})
+
+it('invalidates a pending preview when visibility changes and locks row actions during copying', async () => {
+  mount([row('one'), row('two')])
+  let finish!: (images: QuoteSheetImage[]) => void
+  render.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await click('预览报价单'); await hideRowAt(1); finish([png()]); await settle()
+  expect(document.querySelector('.sheet-image-area')).toBeNull()
+  let copied!: () => void
+  writeText.mockImplementationOnce(() => new Promise<void>(resolve => { copied = resolve }))
+  await click('复制报价数据')
+  expect(button('隐藏').disabled).toBe(true)
+  expect(button('恢复').disabled).toBe(true)
+  expect(button('恢复全部').disabled).toBe(true)
+  copied(); await settle()
+  expect(button('隐藏').disabled).toBe(false)
+})
+
 it('switches the Country header, preview and copied data together without changing source rows or saved prices', async () => {
   const state = mount([{ ...row(), country: 'GB' }, { ...row('two'), country: 'NL' }])
   const original = JSON.stringify(state.rows)
