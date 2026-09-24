@@ -78,7 +78,7 @@ it('blocks saving old rows while a new template is loading, including rejected l
   button('一键应用').click(); await tick(); button('管理我的模板').click(); await tick()
   inputName('化妆品'); await tick()
   expect(button('＋ 新建模板').disabled).toBe(true)
-  expect(button('更新为当前清单').disabled).toBe(true)
+  expect(button('更新模板').disabled).toBe(true)
   reject(new Error('网络失败')); await tick()
   expect(button('＋ 新建模板').disabled).toBe(true)
   expect(document.querySelector('.creation-preview')?.textContent).toContain('加载失败')

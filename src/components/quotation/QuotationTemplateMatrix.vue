@@ -53,6 +53,9 @@ const templates = ref<QuotationPersonalTemplate[]>([])
 const selectedTemplateId = ref('')
 const activeTemplateId = ref('')
 const currentRows = ref<QuotationMatrixRow[]>([])
+// This snapshot belongs to the editable rows. List refreshes must never advance it.
+const editBase = ref<QuotationPersonalTemplate | null>(null)
+const pendingUpdate = ref<{ base: QuotationPersonalTemplate; items: QuotationTemplateSelectionItem[] } | null>(null)
 const selectionState = ref<'loading' | 'ready' | 'error'>('ready')
 const savingTemplate = ref(false)
 const creationSource = ref('模板报价清单')
@@ -79,6 +82,27 @@ const selectedTemplate = computed(() => templates.value.find(item => item.id ===
 const activeTemplate = computed(() => templates.value.find(item => item.id === activeTemplateId.value))
 const activeTemplateCountryCount = computed(() => new Set(activeTemplate.value?.items.map(item => item.country) || []).size)
 const currentCountryCount = computed(() => new Set(currentRows.value.map(row => row.country)).size)
+const updateBlockReason = computed(() => {
+  if (!activeTemplate.value) return '请先应用需要更新的模板'
+  if (selectedTemplateId.value !== activeTemplateId.value) return '选择的模板与当前应用不同，请先点击“一键应用”再编辑'
+  if (!editBase.value || editBase.value.id !== activeTemplateId.value || editBase.value._version == null) return '请重新应用已保存模板后再编辑；恢复的临时清单不能直接覆盖模板'
+  if (editBase.value._version !== activeTemplate.value._version) return '模板已被修改，当前临时清单可能过期。请先另存需要保留的清单，再重新应用最新模板'
+  return ''
+})
+const canUpdateTemplate = computed(() => canSaveSelection.value && !updateBlockReason.value)
+function itemSignature(item: QuotationTemplateSelectionItem) {
+  return JSON.stringify([item.country, item.quoteRegion || '', item.countryCode, item.channelKey, item.ruleId, item.rule, item.carrier, item.transport, item.channelCode.toUpperCase()])
+}
+function itemsSignature(items: QuotationTemplateSelectionItem[]) { return items.map(itemSignature).sort().join('\n') }
+function snapshot(template: QuotationPersonalTemplate): QuotationPersonalTemplate {
+  return { ...template, items: template.items.map(item => ({ ...item })) }
+}
+const removedItems = computed(() => pendingUpdate.value?.base.items.filter(item => !pendingUpdate.value!.items.some(next => itemSignature(next) === itemSignature(item))) || [])
+const addedItems = computed(() => pendingUpdate.value?.items.filter(item => !pendingUpdate.value!.base.items.some(old => itemSignature(old) === itemSignature(item))) || [])
+const confirmationCurrent = computed(() => !!pendingUpdate.value && canUpdateTemplate.value
+  && pendingUpdate.value.base.id === activeTemplateId.value
+  && pendingUpdate.value.base._version === editBase.value?._version
+  && itemsSignature(pendingUpdate.value.items) === itemsSignature(creationItems.value))
 
 function notify(message: string) {
   feedback.value = message
@@ -124,6 +148,8 @@ function applyTemplate(template = selectedTemplate.value) {
   }
   selectedTemplateId.value = template.id
   activeTemplateId.value = template.id
+  editBase.value = snapshot(template)
+  pendingUpdate.value = null
   creationSource.value = '模板报价清单'
   selectionState.value = 'loading'
   cancelClearConfirmation()
@@ -175,6 +201,7 @@ async function createFromCurrent() {
     selectedTemplateId.value = created.id
     if (presetVersion.value === savedPresetVersion) {
       activeTemplateId.value = created.id
+      editBase.value = snapshot(created)
       emit('templateChange', { id: created.id, name: created.name })
     }
     showManager.value = true
@@ -184,27 +211,33 @@ async function createFromCurrent() {
   } finally { savingTemplate.value = false }
 }
 
-async function updateActiveFromCurrent() {
-  if (selectionState.value !== 'ready' || savingTemplate.value) return
-  const template = activeTemplate.value
-  if (!template) {
-    notify('请先应用需要更新的模板')
-    return
-  }
-  if (!currentRows.value.length) {
-    notify('模板至少需要保留一条渠道，当前选择为空，未执行更新')
-    return
-  }
+function updateActiveFromCurrent() {
+  if (!canUpdateTemplate.value || !editBase.value) return
+  const items = templateItems(currentRows.value)
+  if (itemsSignature(items) === itemsSignature(editBase.value.items)) { notify('渠道清单未变化，无需更新模板'); return }
+  feedback.value = ''
+  pendingUpdate.value = { base: snapshot(editBase.value), items }
+}
+
+async function confirmTemplateUpdate() {
+  if (!confirmationCurrent.value || !pendingUpdate.value) return
+  const { base: template, items } = pendingUpdate.value
+  const ownerAtStart = owner.value.account
   savingTemplate.value = true
   try {
-    const updated = await updateQuotationTemplate(owner.value, template.id, { items: templateItems(currentRows.value) }, template._version)
+    const updated = await updateQuotationTemplate(owner.value, template.id, { items }, template._version, true)
+    if (owner.value.account !== ownerAtStart) return
     if (!updated) {
       notify('模板已不存在，请刷新后重试')
       await refreshTemplates()
       return
     }
     templates.value = templates.value.map(item => item.id === updated.id ? updated : item)
-    if (activeTemplateId.value === updated.id) emit('templateChange', { id: updated.id, name: updated.name })
+    if (activeTemplateId.value === updated.id && editBase.value?._version === template._version) {
+      editBase.value = snapshot(updated)
+      emit('templateChange', { id: updated.id, name: updated.name })
+    }
+    pendingUpdate.value = null
     notify(`模板“${updated.name}”已按当前临时清单更新`)
   } catch (error) {
     notify(error instanceof Error ? error.message : '模板保存失败，请重试')
@@ -215,6 +248,8 @@ function startFromSelection(rows: QuotationMatrixRow[], source: string) {
   if (!rows.length || savingTemplate.value) return
   cancelClearConfirmation()
   activeTemplateId.value = ''
+  editBase.value = null
+  pendingUpdate.value = null
   emit('templateChange', null)
   creationSource.value = source
   createName.value = ''
@@ -256,6 +291,7 @@ async function saveRename(template: QuotationPersonalTemplate) {
     return
   }
   const updated = await updateQuotationTemplate(owner.value, template.id, { name }, template._version)
+  if (updated && editBase.value?.id === template.id && editBase.value._version === template._version) editBase.value = snapshot(updated)
   editingId.value = ''
   editingName.value = ''
   await refreshTemplates(updated?.id || template.id)
@@ -295,6 +331,8 @@ function onTemplatesUpdated() {
 }
 
 watch(() => [props.ownerName, props.ownerAccount], () => {
+  editBase.value = null
+  pendingUpdate.value = null
   expandedTemplateId.value = ''
   cancelClearConfirmation()
   activeTemplateId.value = ''
@@ -311,6 +349,8 @@ watch(() => props.draftVersion || 0, version => {
   const draftTemplate = props.draftTemplate
   selectedTemplateId.value = draftTemplate?.id || ''
   activeTemplateId.value = draftTemplate?.id || ''
+  editBase.value = null
+  pendingUpdate.value = null
   presetSelection.value = (props.draftSelection || []).map(item => ({ ...item }))
   selectionState.value = 'loading'
   presetVersion.value += 1
@@ -367,13 +407,29 @@ function formatTime(value: string) {
         <div class="status-actions">
           <button @click="applyTemplate(activeTemplate)">恢复模板已保存清单</button>
           <button class="clear" :class="{ confirming: pendingClear }" @click="clearCurrentSelection">{{ pendingClear ? '确认清空清单' : '清空本次清单' }}</button>
-          <button class="update" :disabled="!canSaveSelection" @click="updateActiveFromCurrent">更新为当前清单</button>
+          <button class="update" :disabled="!canUpdateTemplate" @click="updateActiveFromCurrent">更新模板“{{ activeTemplate.name }}”</button>
         </div>
       </template>
       <template v-else>
         <div class="empty-template"><i>☆</i><span><b>尚未应用个人模板</b><small>可先在下方选择国家与渠道，再从当前选择新建模板。</small></span></div>
         <button @click="showManager = true">＋ 从当前选择新建模板</button>
       </template>
+    </div>
+
+    <p v-if="activeTemplate && updateBlockReason" class="template-conflict" role="status">{{ updateBlockReason }}</p>
+
+    <div v-if="pendingUpdate" class="manager-mask update-mask" @click.self="!savingTemplate && (pendingUpdate = null)">
+      <section class="update-confirmation" role="dialog" aria-modal="true" aria-label="确认更新报价模板">
+        <h2>确认覆盖模板“{{ pendingUpdate.base.name }}”</h2>
+        <p>以下变更会保存到此模板，影响今后应用它的新报价。</p>
+        <div class="update-diff">
+          <section><h3>移除的渠道（{{ removedItems.length }}）</h3><QuotationTemplateDetails :items="removedItems" /></section>
+          <section><h3>新增的渠道（{{ addedItems.length }}）</h3><QuotationTemplateDetails :items="addedItems" /></section>
+        </div>
+        <p v-if="!confirmationCurrent" class="template-conflict" role="alert">{{ updateBlockReason || '清单或应用目标已变化，请取消并重新核对' }}</p>
+        <p v-if="feedback" role="status">{{ feedback }}</p>
+        <footer><button :disabled="savingTemplate" @click="pendingUpdate = null">取消</button><button :disabled="!confirmationCurrent" @click="confirmTemplateUpdate">{{ savingTemplate ? '保存中…' : '确认保存模板变更' }}</button></footer>
+      </section>
     </div>
 
     <QuotationMatrix
@@ -476,6 +532,7 @@ function formatTime(value: string) {
 </template>
 
 <style scoped>
+.template-conflict{margin:0;padding:10px 14px;border:1px solid #e6b467;border-radius:8px;background:#fff6e6;color:#8c5100;font-size:12px;line-height:1.6}.update-mask{z-index:145}.update-confirmation{width:min(960px,100%);max-height:90vh;overflow:auto;padding:22px;box-sizing:border-box;border-radius:12px;background:#fff}.update-confirmation h2{margin:0;font-size:18px}.update-confirmation p{font-size:12px;line-height:1.6}.update-diff{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}.update-diff>section{min-width:0}.update-diff h3{font-size:13px}.update-confirmation footer{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.update-confirmation button{padding:9px 14px;border:1px solid #d8e1e6;border-radius:6px;background:#fff;cursor:pointer}.update-confirmation button:last-child{background:#ff9700;border-color:#ff9700}.update-confirmation button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:680px){.update-diff{grid-template-columns:1fr}}
 .template-workbench{position:relative;display:grid;gap:12px;color:#17232d}.template-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 21px;border:1px solid #dfe6eb;border-radius:12px;background:#fff;box-shadow:0 10px 28px rgba(20,34,45,.05)}.template-intro p,.template-manager>header p{margin:0 0 4px;color:#d97800;font-size:9px;font-weight:900;letter-spacing:.15em}.template-intro h2,.template-manager>header h2{margin:0 0 4px;font-size:19px}.template-intro span,.template-manager>header span{color:#7d8992;font-size:10px}.template-actions{display:flex;align-items:flex-end;gap:8px}.template-actions label{display:grid;gap:5px;color:#69757f;font-size:9px}.template-actions select{width:270px;height:38px;padding:0 10px;border:1px solid #d8e1e6;border-radius:7px;background:#fff;color:#26343e;font-size:10px}.template-actions button,.template-status button{height:38px;padding:0 13px;border:1px solid #d9e1e6;border-radius:7px;background:#fff;color:#4f5e69;font-size:9px;font-weight:850;cursor:pointer}.template-actions .apply{border-color:#ff9700;background:#ff9700;color:#17232d}.template-actions button:disabled,.template-status button:disabled,.create-template button:disabled{opacity:.42;cursor:not-allowed}.template-status{display:flex;align-items:center;gap:13px;min-height:58px;padding:10px 16px;border:1px solid #dfe6eb;border-left:4px solid #ff9700;border-radius:10px;background:#fff}.active-template,.empty-template{display:flex;align-items:center;gap:9px}.active-template>i,.empty-template>i{width:30px;height:30px;display:grid;place-items:center;border-radius:50%;background:#fff0d6;color:#c76b00;font-style:normal;font-weight:900}.active-template>span,.empty-template>span{display:grid;gap:2px}.active-template small,.empty-template small{color:#86929b;font-size:8px}.active-template b,.empty-template b{font-size:11px}.active-template em{padding:4px 8px;border-radius:12px;background:#eff4f6;color:#65747e;font-size:8px;font-style:normal}.template-status>p{margin:0;font-size:9px}.matched-note{color:#27845a}.missing-warning{padding:7px 9px;border-radius:6px;background:#fff1dd;color:#a35b00}.status-actions{display:flex;gap:7px;margin-left:auto}.status-actions .update{border-color:#e7a13b;color:#ae6100}.template-status>.empty-template+button{margin-left:auto;border-color:#e7a13b;color:#ae6100}.manager-mask{position:fixed;z-index:135;inset:0;display:grid;place-items:center;padding:22px;background:rgba(17,27,36,.5);backdrop-filter:blur(3px)}.template-manager{display:grid;grid-template-rows:auto auto minmax(160px,1fr) auto;width:min(980px,95vw);max-height:min(760px,92vh);overflow:hidden;border-radius:13px;background:#f7f9fb;box-shadow:0 28px 80px rgba(8,18,27,.35)}.template-manager>header{display:flex;align-items:flex-start;justify-content:space-between;padding:20px 22px;border-bottom:1px solid #e3e9ed;background:#fff}.template-manager>header>button{border:0;background:none;color:#596873;font-size:24px;cursor:pointer}.create-template{display:grid;grid-template-columns:minmax(190px,1fr) 1fr 1fr auto;align-items:end;gap:10px;padding:15px 20px;border-bottom:1px solid #e2e8ec;background:#fffaf1}.create-template>div{display:grid;gap:3px}.create-template>div b{font-size:11px}.create-template>div span{color:#73818c;font-size:9px}.create-template label{display:grid;gap:5px;color:#69757f;font-size:8px}.create-template input{height:35px;box-sizing:border-box;padding:0 9px;border:1px solid #d8e0e5;border-radius:6px;outline:0}.create-template input:focus{border-color:#f1a239;box-shadow:0 0 0 3px rgba(255,151,0,.1)}.create-template button{height:35px;padding:0 13px;border:0;border-radius:6px;background:#ff9700;color:#17232d;font-size:9px;font-weight:850}.manager-list{display:grid;align-content:start;gap:9px;padding:14px 18px;overflow:auto}.manager-list article{display:grid;grid-template-columns:minmax(230px,1.1fr) minmax(260px,1.4fr) auto;align-items:center;gap:14px;padding:12px 14px;border:1px solid #dce4e9;border-radius:9px;background:#fff}.manager-list article.active{border-color:#f3a638;box-shadow:inset 3px 0 #ff9700}.template-name{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 7px;min-width:0}.template-name>b{overflow:hidden;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.template-name>em{padding:3px 6px;border-radius:9px;background:#e9f7ef;color:#238354;font-size:7px;font-style:normal}.template-name>span,.template-name>small{grid-column:1/-1;color:#65747e;font-size:8px}.template-name>small{color:#929ca3}.template-name>input{height:30px;padding:0 8px;border:1px solid #f0a33a;border-radius:5px}.template-name>button{height:29px;border:0;border-radius:5px;background:#17232d;color:#fff;font-size:8px}.template-country-tags{display:flex;flex-wrap:wrap;gap:5px}.template-country-tags span{padding:5px 7px;border-radius:12px;background:#eef3f6;color:#536672;font-size:8px}.manager-actions{display:flex;justify-content:flex-end;gap:5px}.manager-actions button{height:31px;padding:0 8px;border:1px solid #dce3e7;border-radius:5px;background:#fff;color:#586670;font-size:8px;font-weight:800}.manager-actions .use{border-color:#f2a237;background:#fff6e7;color:#ad6200}.manager-actions .danger{border-color:#f0d3cf;color:#b74b3c}.manager-empty{display:grid;place-items:center;gap:6px;padding:55px;color:#83909a}.manager-empty i{font-size:30px;font-style:normal}.manager-empty b{color:#3a4852}.manager-empty span{font-size:9px}.template-manager>footer{display:flex;align-items:center;gap:12px;min-height:53px;padding:0 20px;border-top:1px solid #e1e7eb;background:#fff;color:#6e7b85;font-size:9px}.template-manager>footer p{margin:0;color:#a25b00;font-weight:800}.template-manager>footer button{height:33px;margin-left:auto;padding:0 17px;border:0;border-radius:6px;background:#17232d;color:#fff;font-size:9px;font-weight:800}.template-feedback{position:fixed;right:24px;bottom:24px;z-index:150;max-width:380px;padding:11px 15px;border-radius:8px;background:#17232d;color:#fff;box-shadow:0 12px 30px rgba(0,0,0,.2);font-size:10px}.feedback-enter-active,.feedback-leave-active{transition:.2s}.feedback-enter-from,.feedback-leave-to{opacity:0;transform:translateY(7px)}@media(max-width:1050px){.template-toolbar{align-items:flex-start;flex-direction:column}.template-actions{width:100%;flex-wrap:wrap}.template-actions label{flex:1}.template-actions select{width:100%}.create-template{grid-template-columns:1fr 1fr}.create-template>div{grid-column:1/-1}.manager-list article{grid-template-columns:1fr}.manager-actions{justify-content:flex-start}}@media(max-width:680px){.template-actions{align-items:stretch;flex-direction:column}.template-status{align-items:flex-start;flex-wrap:wrap}.active-template{flex-wrap:wrap}.status-actions{width:100%;margin-left:0}.status-actions button{flex:1}.template-status>.empty-template+button{width:100%;margin-left:0}.create-template{grid-template-columns:1fr}.create-template>div{grid-column:auto}.template-manager{max-height:94vh}.manager-actions{flex-wrap:wrap}.manager-actions button{flex:1}}
 .status-actions .clear{border-color:#eccdc8;color:#a5483a}
 .status-actions .clear.confirming{border-color:#c95747;background:#fff2f0;color:#a23124}
