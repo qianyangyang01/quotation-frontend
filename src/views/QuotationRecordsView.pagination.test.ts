@@ -13,6 +13,38 @@ const flush=async()=>{await nextTick();await Promise.resolve();await nextTick()}
 const button=(text:string)=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===text)!
 async function mount(scope='mine'){const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.useRealTimers();vi.resetAllMocks()})
+it.each(['mine', 'company'])('combines column filters, resets pagination and exports the same criteria for %s', async scope => {
+  vi.useFakeTimers(); query.loadRecordPage.mockResolvedValue(result(35)); query.loadFilteredRecords.mockResolvedValue([])
+  const download=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{})
+  const objectUrl=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:column-export')
+  try {
+    await mount(scope)
+    expect(document.querySelector('section.filters')).toBeNull()
+    const header=document.querySelector('[aria-label="报价记录列筛选"]')!
+    expect(header.querySelectorAll('input')).toHaveLength(3)
+    expect(header.querySelectorAll('select')).toHaveLength(5)
+    query.loadRecordPage.mockResolvedValueOnce(result(35,1));button('下一页').click();await flush()
+    const change=(selector:string,value:string)=>{
+      const field=header.querySelector<HTMLInputElement|HTMLSelectElement>(selector)!
+      field.value=value;field.dispatchEvent(new Event(field.tagName==='SELECT'?'change':'input'))
+    }
+    change('#record-product-filter',' SKU-1 ');change('[aria-label="客户"]',' Alice ')
+    change('[aria-label="报价渠道"]',' 专线 ');change('#record-scale-filter','multiple')
+    change('[aria-label="报价差异"]','lower');change('[aria-label="处理状态"]','processed')
+    change('[aria-label="产品品类"]','服装');change('[aria-label="报价国家"]','美国')
+    button('近 7 天').click()
+    await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+    const expected={product:'SKU-1',customer:'Alice',channel:'专线',optionScale:'multiple',priceDifference:'lower',status:'processed',category:'服装',country:'美国',startDate:'2026-09-04',endDate:'2026-09-10',reviewStatus:'pending'}
+    expect(query.loadRecordPage.mock.lastCall).toEqual([scope,expect.objectContaining(expected),0,10])
+    expect(header.textContent).toContain('任一渠道、数量符合即显示')
+    button('导出筛选结果').click();await flush()
+    expect(query.loadFilteredRecords).toHaveBeenCalledWith(scope,expect.objectContaining(expected))
+    expect(download).toHaveBeenCalledOnce()
+    button('重置').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+    expect(query.loadRecordPage.mock.lastCall?.[1]).toMatchObject({product:'',customer:'',channel:'',optionScale:'',priceDifference:'',status:'',category:'',country:'',startDate:'',endDate:'',reviewStatus:'pending'})
+    expect(header.textContent).not.toContain('任一渠道、数量符合即显示')
+  } finally {download.mockRestore();objectUrl.mockRestore()}
+})
 it.each(['mine', 'company'])('places pagination below records and resets date and page size changes to page one for %s',async scope=>{
   vi.useFakeTimers();query.loadRecordPage.mockResolvedValue(result(35));await mount(scope)
   const nav=document.querySelector('[aria-label="报价记录分页"]')!;expect(nav.compareDocumentPosition(document.querySelector('.records')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()

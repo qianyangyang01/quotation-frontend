@@ -63,10 +63,13 @@ public class QuotationController {
         @RequestParam(defaultValue="") String q, @RequestParam(defaultValue="") String status,
         @RequestParam(defaultValue="") String reviewStatus, @RequestParam(defaultValue="false") boolean reviewMine,
         @RequestParam(defaultValue="") String country, @RequestParam(defaultValue="") String category,
+        @RequestParam(defaultValue="") String product, @RequestParam(defaultValue="") String customer,
+        @RequestParam(defaultValue="") String channel, @RequestParam(defaultValue="") String optionScale,
+        @RequestParam(defaultValue="") String priceDifference,
         @RequestParam(defaultValue="active") String lifecycle,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate, Authentication auth) {
-        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine),page,size));
+        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference),page,size));
     }
     /** Poll only visible records; enforce owner scope on the server. */
     @GetMapping("/review-status")

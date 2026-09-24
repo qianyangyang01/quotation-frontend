@@ -15,7 +15,8 @@ public class QuotationRecordQuery {
     private final ObjectMapper mapper;
     @org.springframework.beans.factory.annotation.Autowired private QuotationCountryIndex countryIndex;
     public QuotationRecordQuery(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc=jdbc; this.mapper=mapper; }
-    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine) {
+    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine, String product, String customer, String channel, String optionScale, String priceDifference) {
+        public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer,String reviewStatus,boolean reviewMine) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,reviewStatus,reviewMine,null,null,null,null,null); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,null,false); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate) { this(q,status,country,category,startDate,endDate,"active",null); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle) { this(q,status,country,category,startDate,endDate,lifecycle,null); }
@@ -63,6 +64,7 @@ public class QuotationRecordQuery {
         if(filters.category()!=null && !filters.category().isBlank()) { where.append(" and payload->>'productCategory'=:category");params.put("category",filters.category()); }
         var options="jsonb_array_elements(case when jsonb_typeof(payload->'quoteOptions')='array' then payload->'quoteOptions' else '[]'::jsonb end)";
         if(filters.country()!=null && !filters.country().isBlank()) { where.append(" and (payload->>'country'=:country or exists(select 1 from "+options+" o where o->>'country'=:country))");params.put("country",filters.country()); }
+        QuotationRecordColumnFilters.append(where, params, filters);
         if(filters.q()!=null && !filters.q().isBlank()) {
             where.append(" and position(:q in lower(concat_ws(' ',quote_no,payload->>'customerName',payload->>'primarySku',payload->>'productCategory',payload->>'country',payload->>'carrier',payload->>'channel',payload->>'salespersonName',(select string_agg(concat_ws(' ',o->>'country',o->>'carrier',o->>'channel',o->>'rule'),' ') from "+options+" o))))>0");
             params.put("q",filters.q().trim().toLowerCase(Locale.ROOT));
