@@ -10,7 +10,7 @@ export function quoteSheetBundleSkus(items: ReadonlyArray<{ sku: string; quantit
 /** Customer-facing source model. Only explicit numeric snapshots are captured for record saving. */
 export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |
-  'quote1' | 'quote2' | 'quote3' | 'quoteCustom'>
+  'quote1' | 'quote2' | 'quote3' | 'quoteCustom' | 'available'>
 export type QuoteSheetCountry = { name: string; code: string }
 export type QuoteSheetRowEdits = { number?: string; country?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
 export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
@@ -219,7 +219,7 @@ export function buildCustomerQuoteSheet(input: {
         if (parsed.error) priceIssues.push(`第 ${index + 1} 行 ${quantity} 数量的美元金额：${parsed.error}`)
         return parsed.value
       }
-      if (!validQuantities) return null
+      if (!validQuantities || row.available === false) return null
       // Existing snapshot prices remain authoritative. Only additional quantities use the live calculator.
       const sourceIndex = isLegacyCustom(quantity, column) ? 3 : input.quantities ? sourceQuantities.indexOf(quantity) : column
       let value: number | null | undefined

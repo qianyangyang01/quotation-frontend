@@ -59,13 +59,13 @@ async function mount(existing: boolean) {
 }
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
 
-it('opens a new draft, reads current purchase data and preserves the source channels without creating a record', async () => {
+it('opens a new draft, reads current purchase data and removes unavailable source channels without creating a record', async () => {
   await mount(false)
   await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
   expect(state.customerName).toBe('原客户')
   // Current zero-tax-point purchase pricing adds the configured 1%, rather than copying the old 999.
   expect(state.products[0]).toMatchObject({ sku: 'BK100', purchase: 12.12 })
-  expect(state.modeSelections.common).toEqual([expect.objectContaining({ country: '日本', channelKey: '1::原物流::JP' })])
+  expect(state.modeSelections.common).toEqual([])
   expect(loadPublishedLogisticsRules).toHaveBeenCalledWith(expect.objectContaining({ countries: expect.arrayContaining(['日本']) }), expect.anything())
   expect(router.replace).toHaveBeenCalledWith({ query: { release: 'local' } })
   expect(api.post).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled()

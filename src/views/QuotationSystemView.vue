@@ -34,6 +34,7 @@ import BundleProductCard from '@/components/quotation/BundleProductCard.vue'
 import CostWeightPanel from '@/components/quotation/CostWeightPanel.vue'
 import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vue'
 import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
+import type { QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
@@ -211,6 +212,7 @@ const draftUpdatedAt = ref('')
 const draftStatus = ref<'loading' | 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict'>('loading')
 const draftError = ref('')
 const draftRestored = ref(false)
+const draftChannelNotice = ref('')
 const draftReady = ref(false)
 const draftInitializationFailed = ref(false)
 const showDraftLeaveDialog = ref(false)
@@ -664,6 +666,7 @@ async function runQuoteLogistics(p: Product) {
   financeSurchargeSettings.value = loadFinanceSurchargeSettings()
     logisticsRevision.value = result.revision
     logisticsLoadState.value = result.rules.length ? (result.verified ? 'ready' : 'stale') : 'empty'
+    if (result.verified) reconcileRestoredChannels(p)
     if (!result.rules.length) {
       p.channel = ''; p.rule = ''; p.selectedChannelKey = ''; p.freight = 0; p.status = '当前条件没有已发布物流渠道'
       return
@@ -961,6 +964,7 @@ async function recordForDraftSku(sku: string, freshPurchases?: Map<string, Purch
 }
 async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>) {
   draftReady.value = false
+  draftChannelNotice.value = ''
   quoteMode.value = payload.quoteMode === 'bundle' ? 'bundle' : 'single'
   customerName.value = String(payload.customerName || '').slice(0, 120)
   selectedCustomerId.value = String(payload.selectedCustomerId || '')
@@ -1036,6 +1040,34 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   draftRestored.value = true
   await nextTick()
 }
+function reconcileRestoredChannels(p: Product) {
+  // Only run after a verified load. An empty/loading/failed cache is not evidence
+  // that the user's saved channels are no longer authorized.
+  const allowedByCountry = new Map<string, Set<string>>()
+  const keep = (selection: DraftChannelSelection) => {
+    if (!loadedQuoteCountries.value.includes(selection.country)) return true
+    if (!allowedByCountry.has(selection.country)) {
+      allowedByCountry.set(selection.country, financeAllowedChannelKeys(financePolicies.value, p.logisticsAttribute, selection.country))
+    }
+    const allowed = allowedByCountry.get(selection.country)!
+    if (selection.channelKey) return allowed.has(selection.channelKey)
+    return logisticsRules.some(rule => rule.name === selection.rule && rule.relations.some(relation =>
+      relation.carrier === selection.carrier && relation.channel === selection.transport
+      && allowed.has(financeChannelKey(rule.id, relation))))
+  }
+  let removed = 0
+  for (const mode of ['common', 'specified', 'template'] as const) {
+    const previous = modeSelections.value[mode]
+    modeSelections.value[mode] = previous.filter(keep)
+    removed += previous.length - modeSelections.value[mode].length
+  }
+  if (!removed) return
+  restoredCommonSelections.value = draftSelection(modeSelections.value.common)
+  restoredSpecifiedSelections.value = draftSelection(modeSelections.value.specified)
+  restoredTemplateSelections.value = draftSelection(modeSelections.value.template)
+  restoredSelectionVersion.value += 1
+  draftChannelNotice.value = `已按当前物流属性“${p.logisticsAttribute}”移除 ${removed} 个未授权或已停用的旧渠道；可在“添加渠道”中重新选择。`
+}
 async function establishDraftBaseline(status: 'idle' | 'saved') {
   await nextTick()
   await new Promise(resolve => window.setTimeout(resolve, 0))
@@ -1057,6 +1089,7 @@ async function loadAndRestoreDraft() {
   return state
 }
 async function resetLocalDraft() {
+  draftChannelNotice.value = ''
   reissueSource.value = ''
   purchaseQueryError.value = ''
   modeSelections.value = { common: [], specified: [], template: [] }
@@ -1303,6 +1336,14 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
   const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey, weightKg, normalizedQuantity)
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
+}
+function quoteSheetPrice(p: Product, row: QuoteSheetSourceRow, quantity: number) {
+  if (row.available === false || logisticsLoadState.value !== 'ready' || !financeSettingsAreHydrated()) return null
+  const rule = logisticsRuleForChannel(row.rule, row.channelKey || '')
+  const relation = rule?.relations.find(relation => financeChannelKey(rule.id, relation) === row.channelKey)
+  if (!rule || !relation || !financeAllowsLogisticsChannel(financePolicies.value, p.logisticsAttribute, row.country, rule.id, relation)) return null
+  const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)
+  return result?.tax.configured ? result.quoteUsd : null
 }
 function bestLogisticsOption(p: Product, country = p.country) {
   const rows = isAustraliaQuoteCountry(country) ? excelQuoteRows(p, country) : expandedCountryQuoteRows(p, country)
@@ -1991,6 +2032,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button v-if="draftVersion >= 0 || draftDirty" type="button" @click="clearDraft">清空重新开始</button>
       </section>
 
+      <section v-if="draftChannelNotice" class="live-data-notice" role="status">{{ draftChannelNotice }}</section>
       <section v-if="reissueSource" class="draft-status-bar"><span><b>再次发起 · 原报价 {{ reissueSource }}</b><small>已带入原报价条件，可修改 SKU、物流属性和渠道；价格按当前资料重新计算，保存后生成新的报价单。</small></span></section>
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
@@ -2075,7 +2117,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
         <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview"
-          :calculate-price="(row, quantity) => { const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey); return result?.tax.configured ? result.quoteUsd : null }"
+          :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"
           :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
