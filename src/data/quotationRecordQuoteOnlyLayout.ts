@@ -24,22 +24,21 @@ function costWeightSummary(record: QuotationRecord, unit: string) {
   const selected = options.find(option => option.isPrimary) ?? (matching.length === 1 ? matching[0] : options.length === 1 ? options[0] : undefined)
   const primary = selected?.available === false ? undefined : selected
   const samples = primary?.logisticsSamples?.filter(sample => sample.quantity === 1) ?? []
-  // freightCny/logisticsInput may describe a different quantity; they cannot
-  // replace the explicit 1-item freight sample.
-  const freight = samples.length === 1 ? savedAmount(samples[0]?.total) : undefined
   const cost = quotationProductCostSnapshot(record).rows.find(row => row.quantity === 1)
-  const total = cost?.total == null || freight == null ? undefined : new Decimal(cost.total).plus(freight).toNumber()
   const weight = record.weightSnapshot?.quantities.find(row => row.quantity === 1)
   const input = primary?.logisticsInput?.quantity === 1 ? primary.logisticsInput : undefined
-  const standard = savedAmount(weight?.standardPackagingWeightKg), special = savedAmount(weight?.specialPackagingWeightKg)
-  const packaging = weight ? standard == null || special == null ? undefined : new Decimal(standard).plus(special).toNumber() : input?.packagingWeightKg
   const finalWeight = weight ? weight.weightKg : input?.weightKg ?? (samples.length === 1 ? samples[0]?.input?.weightKg : undefined)
+  const weightDetails = weight
+    ? `基础 ${grams(weight.baseWeightKg)}g + 普通包材 ${grams(weight.standardPackagingWeightKg)}g + 特殊包装 ${grams(weight.specialPackagingWeightKg)}g`
+    : `基础 ${grams(input?.baseWeightKg)}g + 包材合计 ${grams(input?.packagingWeightKg)}g（普通包材、特殊包装明细未保存）`
   return {
     rows: [
-      [`计算含税单价（元/${unit}）`, snapshotMoney(cost?.purchase), `计算运费（元/1${unit}）`, snapshotMoney(freight), `最终合计成本（元/1${unit}）`, snapshotMoney(total)],
-      [`计算产品重量（g/1${unit}）`, grams(weight ? weight.baseWeightKg : input?.baseWeightKg), `计算包材重量（g/1${unit}）`, grams(packaging), `最终合计重量（g/1${unit}）`, grams(finalWeight)],
+      [`总成本价（CNY/1${unit}）`, snapshotMoney(cost?.total), `商品成本 ${snapshotMoney(cost?.purchase)} + 国内运费 ${snapshotMoney(cost?.freight)}（CNY，不含国际运费）`],
+      [`含包材重量（g/1${unit}）`, grams(finalWeight), weightDetails],
     ],
-    note: `上方运费及成本对应1${unit}；首选渠道：${primary ? [quotationRecordCopyCountry(primary.country, primary.quoteRegion), primary.carrier, primary.channel].filter(Boolean).join('｜') : '未保存'}。合计成本为计入采购价＋国内运费＋国际运费；包材包含标准包材及特殊包装。缺失项显示“未保存”，不按当前规则回算。`,
+    note: record.weightSnapshot
+      ? '普通包材：每件商品每 50g 加 1g，不足 50g 按 50g 计算；特殊包装整票只加一次，不随件数或套数增加，特殊包装本身不再计算普通包材。'
+      : '包材规则及拆分明细未保存；缺失项显示“未保存”，不按当前规则回算。',
   }
 }
 

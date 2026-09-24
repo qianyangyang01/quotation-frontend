@@ -16,6 +16,7 @@ import { loadQuotePhotos, releaseQuotePhotos, type QuoteLocalPhoto } from '@/ser
 import { MAX_PRICE_EXPRESSION_LENGTH, parseQuotePriceInput } from '@/data/quotePriceExpression'
 import { currentAuthUser } from '@/data/authStore'
 import { loadQuoteSheetColumnOrder, saveQuoteSheetColumnOrder } from '@/data/quoteSheetColumnPreferences'
+import { loadQuoteSheetContact, saveQuoteSheetContact } from '@/data/quoteSheetContactPreferences'
 
 const props = defineProps<{
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; salesperson: string
@@ -23,16 +24,30 @@ const props = defineProps<{
   calculatePrice?: QuoteSheetPriceCalculator
   resetKey?: string
   initialQuote?: CustomerPriceSnapshot
+  recordMode?: boolean
   skus?: string[]
 }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
 function initialEdits() {
-  return { ...newQuoteSheetEdits(props.salesperson), columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
+  const contact = props.recordMode ? props.initialQuote?.contact : loadQuoteSheetContact(layoutUserId.value)
+  return { ...newQuoteSheetEdits(props.salesperson), whatsapp: '', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
 }
 const edits = ref<QuoteSheetEdits>(initialEdits())
 const layoutSaveState = ref<'saved' | 'failed' | ''>('')
+const contactSaveFailed = ref(false)
+function rememberContact(field: 'agent' | 'whatsapp', event: Event) {
+  const value = (event.target as HTMLInputElement).value.slice(0, 40)
+  edits.value[field] = value
+  contactSaveFailed.value = !saveQuoteSheetContact(layoutUserId.value, { [field]: value })
+}
 watch(layoutUserId, userId => {
   edits.value.columnOrder = loadQuoteSheetColumnOrder(userId)
+  if (!props.recordMode) {
+    const contact = loadQuoteSheetContact(userId)
+    edits.value.agent = contact.agent ?? props.salesperson
+    edits.value.whatsapp = contact.whatsapp ?? ''
+  }
+  contactSaveFailed.value = false
   layoutSaveState.value = ''
 }, { flush: 'sync' })
 onMounted(() => { void preloadQuoteSheetAssets().catch(() => undefined) })
@@ -208,7 +223,7 @@ watch(() => props.rows, () => {
 watch(edits, invalidate, { deep: true, flush: 'sync' })
 watch(columns, invalidate, { deep: true, flush: 'sync' })
 watch(() => props.salesperson, (value, previous) => {
-  if (edits.value.agent === previous) edits.value.agent = value
+  if (!props.initialQuote?.contact && (props.recordMode || loadQuoteSheetContact(layoutUserId.value).agent === undefined) && edits.value.agent === previous) edits.value.agent = value
 })
 
 function updateShippingTime(row: QuoteSheetSourceRow, event: Event) {
@@ -393,7 +408,7 @@ function capturePrices(): CapturedSheetPrices {
     customQuantity:props.customQuantity, bundle:props.bundle, quantities:quantities.value, calculatePrice:props.calculatePrice,
     legacyCustomIndex:columns.value.findIndex(column=>column.legacyCustom) })
   if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
-  return { quantities:[...quantities.value], rows:sheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
+  return { contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:sheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
 }
 defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
@@ -419,7 +434,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
-    <p class="sheet-local-note">图片仅在当前页面临时生成，不上传、不存储；保存报价记录时带入客户价格，系统原价与物流资料不变。</p>
+    <p class="sheet-local-note">图片仅在当前页面临时生成，不上传、不存储；保存报价记录时带入客户价格、署名和联系方式，系统原价与物流资料不变。</p>
     <fieldset v-if="rows.length" class="sheet-visibility" :disabled="copying"><legend>显示列</legend>
       <label v-for="column in QUOTE_SHEET_OPTIONAL_COLUMNS" :key="column.key"><input type="checkbox" :checked="columnVisible(column.key)" :aria-label="`显示${column.name}列`" @change="toggleColumn(column.key)">{{ column.name }}</label>
       <span>取消勾选后，报价图片和复制数据中将隐藏该列；仅当前报价单有效。</span>
@@ -438,10 +453,11 @@ onBeforeUnmount(() => {
     <div v-else-if="editing" class="sheet-editor">
       <div class="sheet-metadata">
         <label>报价单标题<input :value="edits.title ?? 'JerryFulfillment Quote Sheet'" aria-label="报价单标题" maxlength="80" :disabled="copying" @input="edits.title = ($event.target as HTMLInputElement).value"></label>
-        <label>By Agent · 署名<input v-model="edits.agent" aria-label="报价单署名" autocomplete="off" maxlength="40" :disabled="copying"></label>
+        <label>By Agent · 署名<input :value="edits.agent" @input="rememberContact('agent', $event)" aria-label="报价单署名" autocomplete="off" maxlength="40" :disabled="copying"></label>
         <label>Date · 日期<input v-model="edits.date" aria-label="报价单日期" type="date" min="1000-01-01" max="9999-12-31" :disabled="copying"></label>
-        <label>WhatsApp · 联系方式<input v-model="edits.whatsapp" aria-label="WhatsApp 联系方式" type="tel" autocomplete="off" maxlength="40" placeholder="例如 +86 138 0013 8000" :disabled="copying"></label>
+        <label>WhatsApp · 联系方式<input :value="edits.whatsapp" @input="rememberContact('whatsapp', $event)" aria-label="WhatsApp 联系方式" type="tel" autocomplete="off" maxlength="40" placeholder="例如 +86 138 0013 8000" :disabled="copying"></label>
       </div>
+      <p v-if="contactSaveFailed" role="alert" class="sheet-message failed">署名或联系方式未能记住，请检查浏览器存储权限后重新填写。</p>
       <div v-if="missingProviders.length" class="sheet-provider-editor">
         <p class="sheet-edit-help">英文名补填：以下物流商尚无英文显示名，请填写后预览或复制。同一物流商的全部渠道共用此名称，仅当前页面有效。</p>
         <div class="sheet-metadata"><label v-for="provider in missingProviders" :key="provider.key">{{ provider.name }} · English name<input :value="edits.providerNames?.[provider.key] || ''" :aria-label="`${provider.name}英文名`" autocomplete="off" placeholder="Enter English name" maxlength="80" :disabled="copying" @input="updateProviderName(provider.key, $event)"></label></div>

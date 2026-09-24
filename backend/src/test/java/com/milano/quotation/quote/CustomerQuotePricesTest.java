@@ -6,6 +6,37 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class CustomerQuotePricesTest {
     final ObjectMapper mapper=new ObjectMapper();
+    @Test void savesContactThroughJsonRoundTripAndKeepsItWhenOnlyPricesChange() {
+        var r = record();
+        ((ObjectNode) r.path("customerQuote")).putObject("contact").put("agent", "Vivian").put("whatsapp", "+183 5650 6953");
+        CustomerQuotePrices.initialize(r);
+        var reloaded = (ObjectNode) mapper.readTree(r.toString());
+        assertEquals("Vivian", reloaded.path("customerQuote").path("contact").path("agent").asText());
+        assertEquals("+183 5650 6953", reloaded.path("sheetQuote").path("contact").path("whatsapp").asText());
+        assertFalse(reloaded.path("systemQuantityQuotes").has("contact"));
+        var patch = mapper.createObjectNode();
+        var prices = (ObjectNode) reloaded.path("customerQuote").deepCopy(); prices.remove("contact");
+        patch.set("customerQuote", prices);
+        CustomerQuotePrices.preparePatch(reloaded, patch);
+        assertEquals(reloaded.path("customerQuote").path("contact"), patch.path("customerQuote").path("contact"));
+        ((ObjectNode) patch.path("customerQuote")).putObject("contact").put("agent", "New name").put("whatsapp", "");
+        CustomerQuotePrices.preparePatch(reloaded, patch);
+        assertEquals("New name", patch.path("customerQuote").path("contact").path("agent").asText());
+        assertEquals("", patch.path("customerQuote").path("contact").path("whatsapp").asText());
+        assertEquals("Vivian", reloaded.path("sheetQuote").path("contact").path("agent").asText());
+        assertFalse(QuotationFinanceReview.pricesChanged(reloaded, patch));
+        reloaded.put("quoteConfirmed", true);
+        QuotationConfirmation.prepare(reloaded, patch);
+        assertFalse(patch.has("quoteConfirmed"));
+    }
+    @Test void rejectsMalformedContactAndDoesNotBackfillOldRecords() {
+        var r = record(); CustomerQuotePrices.initialize(r);
+        assertFalse(r.path("customerQuote").has("contact"));
+        for (var json : new String[]{"null", "[]", "{}", "{\"agent\":1,\"whatsapp\":\"123\"}", "{\"agent\":\"A\",\"whatsapp\":\"" + "1".repeat(41) + "\"}"}) {
+            var value = (ObjectNode) r.path("customerQuote").deepCopy(); value.set("contact", mapper.readTree(json));
+            assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
+        }
+    }
     ObjectNode record() { return (ObjectNode)mapper.readTree("""
         {"id":"r","customQuoteQuantity":4,"quoteOptions":[{"id":"a","quote1Usd":2,"quote2Usd":3,"quoteCustomUsd":5}],
          "customerQuote":{"quantities":[1,2,4],"rows":[{"optionId":"a","prices":[1.8,2.7,4.6]}]},

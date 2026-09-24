@@ -2,12 +2,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import CopyActions from './QuotationRecordCopyActions.vue'
-import { normalizeQuotationRecord } from '@/data/quotationRecords'
+import { normalizeQuotationRecord, updateQuotationRecord, type QuotationRecord } from '@/data/quotationRecords'
 import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
 
 vi.mock('@/services/customerQuoteSheetRenderer', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/customerQuoteSheetRenderer')>(), renderCustomerQuoteSheet: vi.fn(),
 }))
+vi.mock('@/data/quotationRecords', async original => ({ ...await original<typeof import('@/data/quotationRecords')>(), updateQuotationRecord: vi.fn() }))
 let app: App
 const writeText = vi.fn(), render = vi.mocked(renderCustomerQuoteSheet)
 function record(id = 'one', carrier = '闪电猴') {
@@ -15,19 +16,38 @@ function record(id = 'one', carrier = '闪电猴') {
     quoteOptions: [{ id: 'a', country: '美国', countryCode: 'US', carrier, channel: '内部渠道', rule: '内部规则', eta: '5-12 天', quote1Usd: 6.2, quote2Usd: 8.3, quote3Usd: 10.95, quoteCustomUsd: 15.9 }] })!
 }
 function mount(carrier?: string) {
-  const state = reactive({ record: record('one', carrier) })
+  const state = reactive({ record: record('one', carrier), canEdit: false })
   const host = document.createElement('div'); document.body.append(host)
-  app = createApp({ render: () => h(CopyActions, state) }); app.mount(host); return state
+  app = createApp({ render: () => h(CopyActions, { ...state, onSaved: (saved: QuotationRecord) => { state.record = saved } }) }); app.mount(host); return state
 }
 async function settle() { for (let i = 0; i < 10; i++) await nextTick() }
 function footerButton(label: string) { return [...document.querySelectorAll<HTMLButtonElement>('.record-copy-actions button')].find(button => button.textContent === label)! }
 beforeEach(() => {
+  vi.mocked(updateQuotationRecord).mockReset()
   writeText.mockReset().mockResolvedValue(undefined)
   render.mockReset().mockResolvedValue([{ blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow: 1, lastRow: 1 }])
   vi.stubGlobal('isSecureContext', true); vi.stubGlobal('navigator', { clipboard: { writeText } })
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:quote'); vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('saves edited signature and contact from the record sheet and restores them on reopening', async () => {
+  const state = mount(); state.canEdit = true; await settle()
+  footerButton('复制报价图片').click(); await settle()
+  const edit = [...document.querySelectorAll('button')].find(button => button.textContent === '编辑报价单')!
+  edit.click(); await settle()
+  for (const [label, value] of [['报价单署名', 'Vivian'], ['WhatsApp 联系方式', '+183 5650 6953']]) {
+    const field = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+    field.value = value!; field.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  await settle()
+  vi.mocked(updateQuotationRecord).mockImplementation(async (_id, patch) => normalizeQuotationRecord(JSON.parse(JSON.stringify({ ...state.record, ...patch, _version: 2 })))!)
+  ;[...document.querySelectorAll('button')].find(button => button.textContent === '保存客户报价')!.click(); await settle()
+  expect(vi.mocked(updateQuotationRecord).mock.lastCall![1].customerQuote?.contact).toEqual({ agent: 'Vivian', whatsapp: '+183 5650 6953' })
+  expect(state.record.salespersonName).toBe('Alex')
+  footerButton('复制报价图片').click(); await settle()
+  expect(render.mock.lastCall![0]).toMatchObject({ agent: 'Vivian', whatsapp: '+183 5650 6953' })
+})
 
 it('both record scopes share working footer copying, with the saved USD snapshot and no business writes', async () => {
   const state = mount()
@@ -116,8 +136,8 @@ it('copies the quote-only route table and retries that same scope after clipboar
     expect(call[0]).toContain('美国\t闪电猴｜内部渠道')
     expect(call[0]).not.toContain('内部规则')
     expect(call[0]).not.toContain('产品成本快照')
-    expect(call[0]).toContain('计算含税单价（元/件）')
-    expect(call[0]).toContain('最终合计重量（g/1件）')
+    expect(call[0]).toContain('总成本价（CNY/1件）')
+    expect(call[0]).toContain('含包材重量（g/1件）')
   }
   expect(document.querySelector('[role="status"]')?.textContent).toContain('已复制报价单（含物流渠道）')
   expect(JSON.stringify(state.record)).toBe(before)

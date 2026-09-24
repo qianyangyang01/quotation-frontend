@@ -7,6 +7,15 @@ export function exampleRecord() {return normalizeQuotationRecord({id:'r',no:'QT-
   quoteOptions:[{id:'yanwen-a',country:'US',carrier:'Yanwen',channel:'A',rule:'',eta:'5-8 days',quote1Usd:2,quote2Usd:3,quote3Usd:null,quoteCustomUsd:5}],
   systemQuantityQuotes:snapshot([2,3,5]),sheetQuote:snapshot([1.8,2.7,4.6]),customerQuote:snapshot([1.8,2.7,4.6])})!}
 describe('original system vs final customer price',()=>{
+  it('preserves saved contacts on record normalization and price draft cloning', () => {
+    const raw = exampleRecord()
+    raw.customerQuote!.contact = { agent: 'Vivian', whatsapp: '+183 5650 6953' }
+    const saved = normalizeQuotationRecord(JSON.parse(JSON.stringify(raw)))!
+    expect(saved.customerQuote!.contact).toEqual(raw.customerQuote!.contact)
+    const draft = recordCustomerPrices(saved)
+    draft.contact!.agent = 'Changed'
+    expect(saved.customerQuote!.contact!.agent).toBe('Vivian')
+  })
   it('uses initial quote sheet edits until a record edit is saved, then compares final prices with the immutable original',()=>{
     const record=exampleRecord(),before=JSON.stringify(record.systemQuantityQuotes)
     expect(priceComparison(record).map(l=>[l.customer,l.difference,l.percent])).toEqual([[1.8,-.2,-10],[2.7,-.3,-10],[4.6,-.4,-8]])

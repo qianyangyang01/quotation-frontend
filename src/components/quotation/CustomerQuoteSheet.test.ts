@@ -23,8 +23,8 @@ function row(key = 'one', carrier = '花海'): QuoteSheetSourceRow {
 function png(firstRow = 1, lastRow = 1): QuoteSheetImage {
   return { blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow, lastRow }
 }
-function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot) {
-  const state = reactive({ skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, resetKey: undefined as string | undefined })
+function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot, recordMode = false) {
+  const state = reactive({ skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, recordMode, resetKey: undefined as string | undefined })
   const host = document.createElement('div'); document.body.append(host)
   app = createApp({ render: () => h(CustomerQuoteSheet, { ...state, ref:(instance:unknown)=>{exposed=instance as typeof exposed} }) }); app.mount(host)
   return state
@@ -49,6 +49,81 @@ beforeEach(() => {
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(revoke)
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+const contactValue = (label: string) => document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!.value
+
+it('captures each quotation contact and restores it instead of the viewers current default', async () => {
+  mount()
+  await input('报价单署名', 'Vivian'); await input('WhatsApp 联系方式', '+183 5650 6953')
+  const captured = exposed.capturePrices()
+  expect(captured.contact).toEqual({ agent: 'Vivian', whatsapp: '+183 5650 6953' })
+  await input('报价单署名', 'Next quotation'); await input('WhatsApp 联系方式', '+222')
+  app.unmount(); document.body.innerHTML = ''
+  mount([row()], undefined, { contact: captured.contact, quantities: captured.quantities, rows: [{ optionId: 'one', prices: captured.rows[0]!.prices }] }, true)
+  await click('预览报价单')
+  expect(render.mock.lastCall![0]).toMatchObject({ agent: 'Vivian', whatsapp: '+183 5650 6953' })
+  authState.current = layoutUser('another-viewer'); await settle()
+  expect(contactValue('报价单署名')).toBe('Vivian')
+  expect(contactValue('WhatsApp 联系方式')).toBe('+183 5650 6953')
+})
+
+it('never inserts the viewers contact into a legacy record with no saved contact', async () => {
+  mount(); await input('报价单署名', 'Viewer'); await input('WhatsApp 联系方式', '+999')
+  app.unmount(); document.body.innerHTML = ''
+  mount([row()], undefined, undefined, true)
+  expect(contactValue('报价单署名')).toBe('Alex')
+  expect(contactValue('WhatsApp 联系方式')).toBe('')
+})
+
+it('remembers the latest signature and contact for new products, remounts and rendered sheets', async () => {
+  const state = mount()
+  await input('报价单署名', 'Vivian')
+  await input('WhatsApp 联系方式', '+183 5650 6953')
+  state.contextKey = 'new-product'; await settle()
+  expect(contactValue('报价单署名')).toBe('Vivian')
+  expect(contactValue('WhatsApp 联系方式')).toBe('+183 5650 6953')
+  app.unmount(); document.body.innerHTML = ''; mount(); await settle()
+  await click('预览报价单')
+  expect(render.mock.lastCall![0]).toMatchObject({ agent: 'Vivian', whatsapp: '+183 5650 6953' })
+  await click('编辑报价单'); await input('WhatsApp 联系方式', '+86 123')
+  app.unmount(); document.body.innerHTML = ''; mount(); await settle()
+  expect(contactValue('WhatsApp 联系方式')).toBe('+86 123')
+})
+
+it('isolates contacts by signed-in account even when opening another salesperson record', async () => {
+  const state = mount()
+  await input('报价单署名', 'Alex') // Also preserve a saved name equal to the previous default.
+  await input('WhatsApp 联系方式', '+111')
+  state.salesperson = 'Record owner'; state.contextKey = 'other-record'; await settle()
+  expect(contactValue('报价单署名')).toBe('Alex')
+  authState.current = layoutUser('account-b'); await settle()
+  expect(contactValue('WhatsApp 联系方式')).toBe('')
+  await input('报价单署名', 'Bob'); await input('WhatsApp 联系方式', '+222')
+  authState.current = layoutUser('account-a'); await settle()
+  expect(contactValue('报价单署名')).toBe('Alex')
+  expect(contactValue('WhatsApp 联系方式')).toBe('+111')
+  authState.current = null; await settle()
+  expect(contactValue('WhatsApp 联系方式')).toBe('')
+})
+
+it('keeps deliberate clearing and does not reset quote dates from contact preferences', async () => {
+  const state = mount()
+  await input('报价单署名', 'Vivian'); await input('WhatsApp 联系方式', '+111')
+  await input('WhatsApp 联系方式', '')
+  state.contextKey = 'new-product'; await settle()
+  expect(contactValue('WhatsApp 联系方式')).toBe('')
+  expect(contactValue('报价单署名')).toBe('Vivian')
+})
+
+it('continues editing with corrupt or unavailable preference storage and reports failed saving', async () => {
+  localStorage.setItem('milano.quote-sheet-contact.v1:account-a', '{broken')
+  mount()
+  expect(contactValue('报价单署名')).toBe('Alex')
+  vi.stubGlobal('localStorage', { getItem: () => null, clear: () => {}, setItem: () => { throw new Error('quota') } })
+  await input('WhatsApp 联系方式', '+111')
+  expect(contactValue('WhatsApp 联系方式')).toBe('+111')
+  expect(document.body.textContent).toContain('署名或联系方式未能记住')
+})
 
 it('switches the Country header, preview and copied data together without changing source rows or saved prices', async () => {
   const state = mount([{ ...row(), country: 'GB' }, { ...row('two'), country: 'NL' }])
@@ -636,7 +711,7 @@ it('falls back from invalid stored layout and reports unavailable storage withou
   expect(document.querySelector('.sheet-layout-preference [role="alert"]')?.textContent).toContain('列顺序未能保存')
   expect(exposed.capturePrices()).toEqual(prices)
 })
-it('includes optional WhatsApp in the preview, invalidates changed contacts and clears them on product reset', async () => {
+it('includes optional WhatsApp in the preview, invalidates changed contacts and retains them on product reset', async () => {
   const state = mount()
   await click('预览报价单')
   expect(render.mock.lastCall![0].whatsapp).toBe('')
@@ -648,8 +723,8 @@ it('includes optional WhatsApp in the preview, invalidates changed contacts and 
   expect(button('复制报价图片').disabled).toBe(true)
   await click('预览报价单'); expect(render.mock.lastCall![0].whatsapp).toBe('+1 XXX XXX XXXX')
   state.contextKey = 'new-product'; await settle()
-  expect(document.querySelector<HTMLInputElement>('[aria-label="WhatsApp 联系方式"]')?.value).toBe('')
-  await click('预览报价单'); expect(document.querySelector('.sheet-accessible p')?.textContent).not.toContain('WhatsApp')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="WhatsApp 联系方式"]')?.value).toBe('+1 XXX XXX XXXX')
+  await click('预览报价单'); expect(document.querySelector('.sheet-accessible p')?.textContent).toContain('WhatsApp: +1 XXX XXX XXXX')
 })
 it('blocks both kinds of sorting during a clipboard write', async () => {
   mount()

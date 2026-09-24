@@ -129,7 +129,7 @@ const bundleQueryGenerations = new WeakMap<BundleQuoteItem, number>()
 let logisticsRequest: AbortController | null = null
 const showRule = ref(false)
 const showHistory = ref(false)
-const customQuoteQuantity = ref(5)
+const customQuoteQuantity = ref(3)
 const selectedQuoteRegions = ref<Record<string, string>>({})
 const specifiedQuoteRows = ref<QuotationMatrixRow[]>([])
 const templateQuoteRows = ref<QuotationMatrixRow[]>([])
@@ -1169,7 +1169,7 @@ async function resetLocalDraft() {
   selectedCustomerGrade.value = (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   quoteMode.value = 'single'
   quoteMatrixMode.value = 'common'
-  customQuoteQuantity.value = 5
+  customQuoteQuantity.value = 3
   selectedQuoteRegions.value = {}
   products.value = [emptyQuotationProduct()]
   bundleItems.value = [bundleItemFromRecord()]
@@ -2011,7 +2011,7 @@ async function save() {
     }
   }
   catch (error) { toast(error instanceof Error ? error.message : '客户报价无法保存'); return }
-  const snapshot = captured ? { quantities: captured.quantities, rows: quoteOptions.map(option => {
+  const snapshot = captured ? { contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
     const row = captured!.rows.find(row => row.key === option.quoteSheetKey)
     return { optionId: option.id, prices: row!.prices }
   }) } : undefined

@@ -1,8 +1,16 @@
 import Decimal from 'decimal.js'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 
-export type CustomerPriceSnapshot = { quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
-export type CapturedSheetPrices = { quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
+export type QuoteSheetContact = { agent: string; whatsapp: string }
+export type CustomerPriceSnapshot = { contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
+export type CapturedSheetPrices = { contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
+
+export function normalizeQuoteSheetContact(value: unknown): QuoteSheetContact | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const contact = value as QuoteSheetContact
+  return typeof contact.agent === 'string' && contact.agent.length <= 40 && typeof contact.whatsapp === 'string' && contact.whatsapp.length <= 40
+    ? { agent: contact.agent, whatsapp: contact.whatsapp } : undefined
+}
 
 export function savedSystemPrice(record: QuotationRecord, option: QuotationRecordQuoteOption, quantity: number) {
   const index = record.systemQuantityQuotes?.quantities.indexOf(quantity) ?? -1
@@ -15,7 +23,7 @@ export function savedSystemPrice(record: QuotationRecord, option: QuotationRecor
 }
 export function recordCustomerPrices(record: QuotationRecord): CustomerPriceSnapshot {
   const saved = record.customerQuote ?? record.sheetQuote
-  if (saved) return { quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  if (saved) return { ...(saved.contact ? { contact: { ...saved.contact } } : {}), quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
   const quantities = [...new Set([1,2,3,record.customQuoteQuantity || 0])]
   return { quantities, rows: (record.quoteOptions || []).map(option => ({ optionId: option.id, prices: quantities.map(q => savedSystemPrice(record, option, q)) })) }
 }
@@ -25,7 +33,8 @@ export function normalizeCustomerPrices(value: unknown): CustomerPriceSnapshot |
   if (!Array.isArray(v.quantities) || !Array.isArray(v.rows) || !v.quantities.length || v.quantities.length > 10 ||
     v.quantities.some(q=>!Number.isSafeInteger(q)||q<0) || new Set(v.quantities).size !== v.quantities.length ||
     v.rows.some(row=>!row || typeof row.optionId!=='string' || !Array.isArray(row.prices) || row.prices.length!==v.quantities.length || row.prices.some(p=>p!==null && (typeof p!=='number'||!Number.isFinite(p)||p<0)))) return undefined
-  return { quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  const contact = normalizeQuoteSheetContact(v.contact)
+  return { ...(contact ? { contact } : {}), quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
 }
 export function priceComparison(record: QuotationRecord, snapshot = recordCustomerPrices(record)) {
   return snapshot.rows.flatMap(row => {

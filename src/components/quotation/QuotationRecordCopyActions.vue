@@ -47,7 +47,7 @@ async function savePrices() {
   try {
     const captured=sheet.value?.capturePrices()
     if (!captured) throw new Error('报价单尚未就绪')
-    const customerQuote={ quantities:captured.quantities, rows:captured.rows.map(row=>{
+    const customerQuote={ contact:captured.contact, quantities:captured.quantities, rows:captured.rows.map(row=>{
       const sourceRow=source.value.rows.find(source=>quoteSheetRowKey(source)===row.key)
       if (!sourceRow) throw new Error('客户报价渠道不匹配')
       return {optionId:sourceRow.channelKey!,prices:row.prices}

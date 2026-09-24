@@ -42,53 +42,53 @@ function withSummary() {
   return saved
 }
 
-it('inserts exactly two summary rows before the seven-column quote table and matches 1-item freight and weights', () => {
+it('copies product cost excluding international freight and the complete packaging breakdown', () => {
   const saved = withSummary()
   saved.customerQuote = undefined
   const before = JSON.stringify(saved), layout = quotationRecordQuoteOnlyLayout(saved)
   const lines = layout.text.split('\n'), created = lines.findIndex(line => line.startsWith('创建时间\t'))
-  expect(lines[created + 1]).toBe('计算含税单价（元/件）\t46.00\t计算运费（元/1件）\t35.00\t最终合计成本（元/1件）\t83.00')
-  expect(lines[created + 2]).toBe('计算产品重量（g/1件）\t200\t计算包材重量（g/1件）\t7\t最终合计重量（g/1件）\t207')
+  expect(lines[created + 1]).toBe('总成本价（CNY/1件）\t48.00\t商品成本 46.00 + 国内运费 2.00（CNY，不含国际运费）')
+  expect(lines[created + 2]).toBe('含包材重量（g/1件）\t207\t基础 200g + 普通包材 4g + 特殊包装 3g')
   expect(lines[created + 3]).toMatch(/^国家\t物流渠道\t/)
-  expect(layout.text).toContain('首选渠道：澳大利亚 · 3区｜燕文｜化妆品专线')
+  expect(layout.text).toContain('每件商品每 50g 加 1g，不足 50g 按 50g 计算')
+  expect(layout.text).toContain('特殊包装整票只加一次，不随件数或套数增加，特殊包装本身不再计算普通包材')
+  for (const label of ['计算含税单价', '计算运费', '最终合计成本', '计算产品重量', '计算包材重量', '最终合计重量', '首选渠道']) expect(layout.text).not.toContain(label)
   expect(layout.text).not.toContain('999')
   const doc = new DOMParser().parseFromString(layout.html, 'text/html'), rows = [...doc.querySelectorAll('tr')]
-  expect(rows[3]!.textContent).toContain('83.00')
+  expect(rows[3]!.textContent).toContain('48.00')
   expect(rows[4]!.textContent).toContain('207')
   expect(rows[5]!.textContent).toContain('国家')
   for (const row of rows) expect([...row.children].reduce((n, cell) => n + Number(cell.getAttribute('colspan')), 0)).toBe(7)
   expect(JSON.stringify(saved)).toBe(before)
 })
 
-it('uses the marked primary even when it is not the first route, preserving zero freight and decimal totals', () => {
+it('keeps product cost independent of selected international routes, preserving decimal totals', () => {
   const saved = withSummary(), primary = saved.quoteOptions![0]!
   saved.purchaseUnitPriceCny = .1
   saved.domesticFreightPerUnitCny = .2
   primary.logisticsSamples = [{ quantity: 1, input: { weightKg: .207 }, total: 0 }]
   saved.quoteOptions!.unshift({ ...primary, id: 'other', isPrimary: false, country: '美国', logisticsSamples: [{ quantity: 1, input: { weightKg: .207 }, total: 123 }] })
   const layout = quotationRecordQuoteOnlyLayout(saved)
-  expect(layout.text).toContain('计算运费（元/1件）\t0.00\t最终合计成本（元/1件）\t0.30')
-  expect(layout.text).toContain('首选渠道：澳大利亚 · 3区')
+  expect(layout.text).toContain('总成本价（CNY/1件）\t0.30\t商品成本 0.10 + 国内运费 0.20')
 })
 
-it.each(['no-sample', 'duplicate-sample', 'null-freight', 'negative-freight', 'no-domestic', 'unavailable', 'ambiguous-primary'] as const)('keeps incomplete or ambiguous 1-item costs unknown: %s', reason => {
+it.each(['no-sample', 'duplicate-sample', 'null-freight', 'negative-freight', 'unavailable', 'ambiguous-primary'] as const)('does not require international freight to display product cost: %s', reason => {
   const saved = withSummary(), primary = saved.quoteOptions![0]!
   if (reason === 'no-sample') primary.logisticsSamples = primary.logisticsSamples!.filter(row => row.quantity === 5)
   if (reason === 'duplicate-sample') primary.logisticsSamples!.push({ quantity: 1, input: { weightKg: .207 }, total: 42 })
   if (reason === 'null-freight') primary.logisticsSamples![1]!.total = null
   if (reason === 'negative-freight') primary.logisticsSamples![1]!.total = -1
-  if (reason === 'no-domestic') { saved.domesticFreightPerUnitCny = undefined; primary.totalCostCny = undefined }
   if (reason === 'unavailable') primary.available = false
   if (reason === 'ambiguous-primary') { primary.isPrimary = false; saved.quoteOptions!.push({ ...primary, id: 'other' }) }
-  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('最终合计成本（元/1件）\t未保存')
+  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('总成本价（CNY/1件）\t48.00')
 })
 
 it('does not turn absent legacy fields into zero, or derive packaging from current rules', () => {
   const saved = normalizeQuotationRecord({ id: 'legacy', no: 'QT-LEGACY', quoteOptions: [{ ...record().quoteOptions![0]!, id: 'a', freightCny: 35, logisticsInput: { country: '美国', quantity: 5, baseWeightKg: 1, packagingWeightKg: .02, weightKg: 1.02, marks: [] } }] })!
   const lines = quotationRecordQuoteOnlyLayout(saved).text.split('\n')
-  for (const label of ['计算含税单价', '计算产品重量']) expect(lines.find(line => line.startsWith(label))?.split('\t').filter((_, index) => index % 2 === 1)).toEqual(['未保存', '未保存', '未保存'])
+  for (const label of ['总成本价', '含包材重量']) expect(lines.find(line => line.startsWith(label))?.split('\t')[1]).toBe('未保存')
   saved.quoteOptions![0]!.logisticsInput!.quantity = 1
-  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('计算产品重量（g/1件）\t1000\t计算包材重量（g/1件）\t20\t最终合计重量（g/1件）\t1020')
+  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('含包材重量（g/1件）\t1020\t基础 1000g + 包材合计 20g（普通包材、特殊包装明细未保存）')
 })
 
 it('summarizes bundle component counts for one set and includes special packaging once', () => {
@@ -100,14 +100,30 @@ it('summarizes bundle component counts for one set and includes special packagin
   ]
   saved.weightSnapshot = buildQuotationWeightSnapshot([{ sku: 'A', quantityPerSet: 2, baseWeightKg: .1 }, { sku: 'B', quantityPerSet: 1, baseWeightKg: .05 }], 3, [1, 5])
   const text = quotationRecordQuoteOnlyLayout(saved).text
-  expect(text).toContain('计算含税单价（元/套）\t0.40\t计算运费（元/1套）\t35.00\t最终合计成本（元/1套）\t35.80')
-  expect(text).toContain('计算产品重量（g/1套）\t250\t计算包材重量（g/1套）\t8\t最终合计重量（g/1套）\t258')
+  expect(text).toContain('总成本价（CNY/1套）\t0.80\t商品成本 0.40 + 国内运费 0.40')
+  expect(text).toContain('含包材重量（g/1套）\t258\t基础 250g + 普通包材 5g + 特殊包装 3g')
 })
 
 it('preserves a saved total weight without inventing its missing product and packaging breakdown', () => {
   const saved = withSummary()
   saved.weightSnapshot = undefined
-  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('计算产品重量（g/1件）\t未保存\t计算包材重量（g/1件）\t未保存\t最终合计重量（g/1件）\t207')
+  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('含包材重量（g/1件）\t207\t基础 未保存g + 包材合计 未保存g')
+})
+
+it('does not turn missing domestic freight into zero or use a logistics total', () => {
+  const saved = withSummary()
+  saved.domesticFreightPerUnitCny = undefined
+  saved.quoteOptions![0]!.totalCostCny = undefined
+  expect(quotationRecordQuoteOnlyLayout(saved).text).toContain('总成本价（CNY/1件）\t未保存\t商品成本 46.00 + 国内运费 未保存')
+})
+
+it('retains zero domestic freight and rounds ordinary packaging per individual bundle item', () => {
+  const saved = withSummary()
+  saved.domesticFreightPerUnitCny = 0
+  saved.weightSnapshot = buildQuotationWeightSnapshot([{ sku: 'A', quantityPerSet: 2, baseWeightKg: .026 }], 100, [1, 3])
+  const text = quotationRecordQuoteOnlyLayout(saved).text
+  expect(text).toContain('总成本价（CNY/1件）\t46.00')
+  expect(text).toContain('含包材重量（g/1件）\t154\t基础 52g + 普通包材 2g + 特殊包装 100g')
 })
 
 it('uses saved system prices only when no customer sheet exists, including zero, and escapes names', () => {
