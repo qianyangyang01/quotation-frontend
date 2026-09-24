@@ -4,7 +4,7 @@ import {
   buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
   quoteSheetRowKey, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
   MAX_QUOTE_SHEET_COLUMNS, validQuoteSheetQuantity, QUOTE_SHEET_OPTIONAL_COLUMNS, quoteSheetGroups, quoteSheetTextTable, normalizeQuoteSheetOrder,
-  type QuoteSheetOptionalColumn, type QuoteSheetColumnKey,
+  type QuoteSheetOptionalColumn, type QuoteSheetColumnKey, type QuoteSheetEdits,
   formatQuoteSheetCountry, type QuoteSheetCountryFormat,
   type QuoteSheetCountry, type QuoteSheetSourceRow, type QuoteSheetPriceCalculator, type QuoteSheetRowEdits,
 } from '@/data/customerQuoteSheet'
@@ -14,6 +14,8 @@ import QuoteBackToTop from './QuoteBackToTop.vue'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
 import { loadQuotePhotos, releaseQuotePhotos, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
 import { MAX_PRICE_EXPRESSION_LENGTH, parseQuotePriceInput } from '@/data/quotePriceExpression'
+import { currentAuthUser } from '@/data/authStore'
+import { loadQuoteSheetColumnOrder, saveQuoteSheetColumnOrder } from '@/data/quoteSheetColumnPreferences'
 
 const props = defineProps<{
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; salesperson: string
@@ -23,7 +25,16 @@ const props = defineProps<{
   initialQuote?: CustomerPriceSnapshot
   skus?: string[]
 }>()
-const edits = ref(newQuoteSheetEdits(props.salesperson))
+const layoutUserId = computed(() => currentAuthUser.value.id)
+function initialEdits() {
+  return { ...newQuoteSheetEdits(props.salesperson), columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
+}
+const edits = ref<QuoteSheetEdits>(initialEdits())
+const layoutSaveState = ref<'saved' | 'failed' | ''>('')
+watch(layoutUserId, userId => {
+  edits.value.columnOrder = loadQuoteSheetColumnOrder(userId)
+  layoutSaveState.value = ''
+}, { flush: 'sync' })
 onMounted(() => { void preloadQuoteSheetAssets().catch(() => undefined) })
 let columnId = 0
 function initialColumns() {
@@ -119,13 +130,20 @@ const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && 
 const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value))
 const textTable = computed(() => quoteSheetTextTable(sheet.value))
 const groupNames: Record<QuoteSheetColumnKey, string> = { number: '序号', sku: 'SKU', product: '商品图片', prices: '价格整组', country: '国家', provider: '物流商', shippingTime: '运输时效', processingTime: '处理时间' }
+function rememberColumnOrder(order: QuoteSheetColumnKey[]) {
+  edits.value.columnOrder = order
+  layoutSaveState.value = saveQuoteSheetColumnOrder(layoutUserId.value, order) ? 'saved' : 'failed'
+}
+function resetColumnOrder() {
+  if (!copying.value) rememberColumnOrder(normalizeQuoteSheetOrder())
+}
 function moveGroup(key: QuoteSheetColumnKey, target: QuoteSheetColumnKey) {
   if (copying.value || key === target) return
   const order = normalizeQuoteSheetOrder(edits.value.columnOrder)
   const from = order.indexOf(key), to = order.indexOf(target)
   order.splice(from, 1)
   order.splice(to, 0, key)
-  edits.value.columnOrder = order
+  rememberColumnOrder(order)
   nextTick(() => editorScroll.value?.querySelector<HTMLButtonElement>(`[data-group-handle="${key}"]`)?.focus())
 }
 function moveGroupByKey(key: QuoteSheetColumnKey, direction: number) {
@@ -172,7 +190,7 @@ watch(() => [props.contextKey, props.resetKey, props.rows, props.countries, prop
 watch(() => [props.contextKey, props.resetKey], () => {
   const resetKey = props.resetKey ?? props.contextKey
   if (resetKey !== previousResetKey) {
-    edits.value = newQuoteSheetEdits(props.salesperson)
+    edits.value = initialEdits()
     columns.value = initialColumns()
     loadSavedPrices()
     previousResetKey = resetKey
@@ -429,6 +447,12 @@ onBeforeUnmount(() => {
         <div class="sheet-metadata"><label v-for="provider in missingProviders" :key="provider.key">{{ provider.name }} · English name<input :value="edits.providerNames?.[provider.key] || ''" :aria-label="`${provider.name}英文名`" autocomplete="off" placeholder="Enter English name" maxlength="80" :disabled="copying" @input="updateProviderName(provider.key, $event)"></label></div>
       </div>
       <p class="sheet-edit-help">各列可拖动排序；价格按整组移动，组内数量仍可单独排序。数量填写正整数，最多 10 个价格列，空价格显示 —。</p>
+      <div class="sheet-layout-preference">
+        <span>列顺序按当前登录账号自动记在本浏览器，下次打开继续使用。</span>
+        <button type="button" :disabled="copying" @click="resetColumnOrder">恢复默认列顺序</button>
+        <span v-if="layoutSaveState === 'saved'" role="status">已记住列顺序</span>
+        <span v-else-if="layoutSaveState === 'failed'" role="alert">列顺序未能保存，当前调整仅本次有效；请允许浏览器本地存储后重新调整。</span>
+      </div>
       <p class="sheet-edit-help">价格支持加减乘除和括号，例如 42.6+2、42.6*1.05、42.6/0.95；按回车或离开输入框后计算，结果四舍五入保留两位小数。</p>
       <p v-if="!calculatePrice" class="sheet-edit-help">历史记录仅带出已保存数量的价格；新增数量没有历史价格时，请手动填写。</p>
       <div class="sheet-column-tools"><span class="sheet-column-count">价格列 {{ columns.length }} / 10</span><button type="button" class="sheet-add-button" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button></div>
@@ -496,6 +520,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-layout-preference{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0;font-size:12px;color:#72808a}.sheet-layout-preference [role="status"]{color:#287a4d}.sheet-layout-preference [role="alert"]{color:#b42318}
 .sheet-country-format{display:flex;justify-content:center;margin-top:8px}.customer-sheet .sheet-country-format button{padding:6px 14px;border-color:#f58220;border-radius:0;font-size:12px;font-weight:650}.customer-sheet .sheet-country-format button:first-child{border-radius:6px 0 0 6px}.customer-sheet .sheet-country-format button:last-child{border-left:0;border-radius:0 6px 6px 0}.customer-sheet .sheet-country-format button[aria-pressed="true"]{background:#f58220;color:#fff}.sheet-country-format button:focus-visible{outline:2px solid #924e10;outline-offset:2px}
 .sheet-photos{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0;padding:12px;border:1px solid #dfe5e9;border-radius:6px}.sheet-photos legend{font-size:12px;font-weight:650}.sheet-photos label{display:flex;align-items:center;gap:6px;font-size:12px}.sheet-photos span{flex:1;min-width:220px;font-size:12px;color:#72808a;line-height:1.6}.sheet-photo-cell{min-width:180px}.sheet-photo-grid{display:grid;justify-content:center;gap:10px}.sheet-photo-grid img{width:150px;height:150px;object-fit:contain;background:#fff}.sheet-photo-grid-many{grid-template-columns:repeat(2,100px)}.sheet-photo-grid-many img{width:100px;height:100px}
 .customer-sheet{margin:0 22px 18px;color:#202532}.sheet-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px}.sheet-toolbar h3{margin:0;font-size:15px}.sheet-toolbar p,.sheet-local-note,.sheet-edit-help{color:#72808a;font-size:12px;line-height:1.6}.sheet-toolbar p{margin:5px 0}.sheet-local-note{margin:8px 0 14px}.sheet-actions{display:flex;gap:8px;flex-wrap:wrap}.customer-sheet button{padding:9px 13px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font-size:12px;font-weight:650;cursor:pointer}.customer-sheet button.sheet-primary{background:#f58220;border-color:#f58220;color:#fff}.customer-sheet button:disabled{background:#edf0f2;border-color:#e0e4e8;color:#919aa3;cursor:not-allowed}.sheet-editor{padding:16px;background:#fafbfc;border:1px solid #dfe5e9;border-radius:8px}.sheet-metadata{display:flex;gap:18px;flex-wrap:wrap}.sheet-metadata label{display:grid;gap:6px;font-size:12px;font-weight:650}.customer-sheet input{height:36px;padding:0 9px;box-sizing:border-box;border:1px solid #ccd4db;border-radius:4px;background:#fff;color:#202532;font:inherit}.sheet-metadata input{min-width:205px}.sheet-editor-scroll,.sheet-image-scroll,.sheet-accessible{overflow-x:auto}.customer-sheet table{width:100%;border-collapse:collapse;font-size:12px}.sheet-editor table{width:max-content;min-width:0}.customer-sheet th,.customer-sheet td{padding:10px 9px;border:1px solid #e0e3e6;text-align:center;vertical-align:middle}.customer-sheet th{background:#fff0e3;color:#924e10;font-weight:650}.customer-sheet td{background:#fff}.customer-sheet small{display:block;margin-top:4px;font-weight:400}.sheet-source{max-width:230px;color:#76828c;font-size:10px;line-height:1.5}.sheet-time input{width:170px;font-size:12px}.sheet-time button{display:block;margin:5px auto 0;padding:2px 4px;border:0;color:#a85d16;background:transparent;font-size:10px}.sheet-empty{padding:35px;text-align:center;border:1px dashed #d9e1e6;color:#87939d;font-size:12px}.sheet-image-area{border:1px solid #e0e4e8;background:#f6f7f9}.sheet-image-scroll img{display:block;width:100%;height:auto;min-width:768px}.sheet-pages{display:flex;justify-content:center;align-items:center;gap:15px;padding:10px;font-size:12px}.sheet-message,.sheet-pending{padding:10px 12px;border-radius:5px;background:#f0f7f1;color:#287a4d;font-size:12px;line-height:1.6}.sheet-message.failed,.sheet-pending{background:#fff4e6;color:#a65410}.sheet-accessible{padding:10px;background:#fff;font-size:12px;line-height:1.6}.sheet-accessible summary{cursor:pointer;color:#64727e}.sheet-accessible li{margin:8px 0}@media(max-width:850px){.sheet-toolbar{align-items:flex-start;flex-direction:column}.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:12px}.sheet-pages{gap:8px}.sheet-metadata{width:100%}.sheet-metadata label{flex:1}}
