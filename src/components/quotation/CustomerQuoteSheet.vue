@@ -128,16 +128,42 @@ watch(showPhotos, invalidate, { flush: 'sync' })
 // Also clear before an external navigation is placed in the browser back/forward cache.
 window.addEventListener('pagehide', clearPhotos)
 
-const sheet = computed(() => buildCustomerQuoteSheet({
-  rows: props.rows, countries: props.countries, edits: edits.value, skus: props.skus,
+// Visibility is local presentation state; saved prices still include every selected route.
+const hiddenRowKeys = ref(new Set<string>())
+const showHiddenRows = ref(false)
+const visibleSourceRows = computed(() => props.rows.filter(row => !hiddenRowKeys.value.has(quoteSheetRowKey(row))))
+function buildSheet(rows: QuoteSheetSourceRow[]) { return buildCustomerQuoteSheet({
+  rows, countries: props.countries, edits: edits.value, skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle,
   quantities: quantities.value, calculatePrice: props.sourcePending ? undefined : props.calculatePrice,
   legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom),
-}))
+}) }
+const allRowsSheet = computed(() => buildSheet(props.rows))
+const sheet = computed(() => buildSheet(visibleSourceRows.value))
+const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
+function hideRow(key: string) {
+  if (copying.value) return
+  hiddenRowKeys.value.add(key)
+  showHiddenRows.value = true
+}
+function restoreRow(key: string) {
+  if (!copying.value) hiddenRowKeys.value.delete(key)
+}
+function restoreAllRows() {
+  if (!copying.value) hiddenRowKeys.value = new Set()
+}
+watch(() => JSON.stringify([layoutUserId.value, props.skus, props.resetKey ?? props.contextKey, props.bundle]), () => {
+  hiddenRowKeys.value = new Set()
+  showHiddenRows.value = false
+}, { flush: 'sync' })
+watch(() => props.rows, () => {
+  const keys = new Set(props.rows.map(quoteSheetRowKey))
+  hiddenRowKeys.value = new Set([...hiddenRowKeys.value].filter(key => keys.has(key)))
+}, { deep: true })
 // Tracks calculator dependencies too (tax, weight, exchange rate), even if the original four prices are unchanged.
 watch(sheet, invalidate, { flush: 'sync' })
 const currentImage = computed(() => images.value[activeImage.value])
-const missingProviders = computed(() => !columnVisible('provider') ? [] : [...new Map(props.rows
+const missingProviders = computed(() => !columnVisible('provider') ? [] : [...new Map(visibleSourceRows.value
   .filter(row => !quoteSheetProviderName(row.carrier))
   .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
 const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value && !loadingPhotos.value)
@@ -327,7 +353,7 @@ function dropColumn(index: number) {
   endColumnDrag()
 }
 async function preview() {
-  if (disposed || copying.value || loadingPhotos.value || props.sourcePending || rendering.value || !props.rows.length) return
+  if (disposed || copying.value || loadingPhotos.value || props.sourcePending || rendering.value || !sheet.value.rows.length) return
   invalidate()
   if (sheet.value.issues.length) {
     failed.value = true
@@ -403,12 +429,12 @@ async function copyData() {
 // Record drawers reuse this same model, edits and clipboard flow.
 function capturePrices(): CapturedSheetPrices {
   if (props.sourcePending || copying.value) throw new Error('报价仍在计算或复制，请稍后保存')
-  if (sheet.value.priceIssues?.length) throw new Error(sheet.value.priceIssues.join('；'))
+  if (allRowsSheet.value.priceIssues?.length) throw new Error(allRowsSheet.value.priceIssues.join('；'))
   const system = buildCustomerQuoteSheet({ rows:props.rows, countries:props.countries, edits:newQuoteSheetEdits(props.salesperson),
     customQuantity:props.customQuantity, bundle:props.bundle, quantities:quantities.value, calculatePrice:props.calculatePrice,
     legacyCustomIndex:columns.value.findIndex(column=>column.legacyCustom) })
   if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
-  return { contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:sheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
+  return { contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
 }
 defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
@@ -428,9 +454,9 @@ onBeforeUnmount(() => {
       <div><h3 id="customer-sheet-title">客户报价单</h3><p>点击内容可修改；右侧新增列，填写数量后自动带出对应价格</p></div>
       <div class="sheet-actions">
         <button v-if="!editing" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
-        <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !rows.length || rendering || copying || loadingPhotos" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
+        <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying || loadingPhotos" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
         <button type="button" class="sheet-primary" :disabled="!canCopy" @click="copyCurrent">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
-        <button type="button" :disabled="sourcePending || !rows.length || rendering || copying" @click="copyData">复制报价数据</button>
+        <button type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="copyData">复制报价数据</button>
       </div>
     </div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
@@ -471,7 +497,14 @@ onBeforeUnmount(() => {
       </div>
       <p class="sheet-edit-help">价格支持加减乘除和括号，例如 42.6+2、42.6*1.05、42.6/0.95；按回车或离开输入框后计算，结果四舍五入保留两位小数。</p>
       <p v-if="!calculatePrice" class="sheet-edit-help">历史记录仅带出已保存数量的价格；新增数量没有历史价格时，请手动填写。</p>
-      <div class="sheet-column-tools"><span class="sheet-column-count">价格列 {{ columns.length }} / 10</span><button type="button" class="sheet-add-button" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button></div>
+      <div class="sheet-row-tools">
+        <strong>显示 {{ sheet.rows.length }} 行 · 已隐藏 {{ hiddenRows.length }} 行</strong>
+        <button v-if="hiddenRows.length" type="button" :aria-expanded="showHiddenRows" @click="showHiddenRows = !showHiddenRows">{{ showHiddenRows ? '收起隐藏行' : '查看隐藏行' }}（{{ hiddenRows.length }}）</button>
+        <button v-if="hiddenRows.length" type="button" :disabled="copying" @click="restoreAllRows">恢复全部</button>
+        <span>隐藏行不参与报价预览、复制图片和复制数据；仅本次有效，保存记录仍保留全部渠道及价格。</span>
+        <div class="sheet-column-tools"><span class="sheet-column-count">价格列 {{ columns.length }} / 10</span><button type="button" class="sheet-add-button" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button></div>
+      </div>
+      <p v-if="!sheet.rows.length" class="sheet-pending" role="status">所有行已隐藏，请恢复至少一行后再预览或复制。</p>
       <div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
         <table>
           <thead>
@@ -489,6 +522,7 @@ onBeforeUnmount(() => {
                   <button type="button" :aria-pressed="edits.countryFormat === 'code'" :disabled="copying" @click="setCountryFormat('code')">二字码</button>
                 </div>
               </th>
+              <th rowspan="2" class="sheet-row-action">操作</th>
             </tr>
             <tr>
             <th v-for="(column, index) in columns" :key="column.id" class="sheet-quantity" :class="{ 'sheet-drop-target': dropTarget === column.id && draggedColumn !== column.id }" @dragover.prevent.stop="dropTarget = draggedColumn == null ? null : column.id; groupDropTarget = draggedGroup ? 'prices' : null; scrollWhileDragging($event)" @drop.prevent.stop="draggedGroup ? dropGroup('prices') : dropColumn(index)">
@@ -506,15 +540,23 @@ onBeforeUnmount(() => {
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
               <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
               <td v-else-if="group.key === 'provider'"><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source">{{ row.sourceDescription }}</small></td>
-              <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(rows[index].eta) === '—' ? '' : formatShippingTime(rows[index].eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 workingdays" maxlength="80" :disabled="copying" @input="updateShippingTime(rows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(rows[index])">恢复渠道时效</button></td>
+              <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(visibleSourceRows[index].eta) === '—' ? '' : formatShippingTime(visibleSourceRows[index].eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 workingdays" maxlength="80" :disabled="copying" @input="updateShippingTime(visibleSourceRows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(visibleSourceRows[index])">恢复渠道时效</button></td>
               <td v-else-if="group.key === 'processingTime'"><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
               <template v-else-if="group.key === 'prices'">
               <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" :aria-invalid="Boolean(priceInputError(row.key, quantities[priceIndex]))" inputmode="text" placeholder="金额或算式" :maxlength="MAX_PRICE_EXPRESSION_LENGTH" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)" @blur="confirmPrice(row.key, quantities[priceIndex], $event)" @keydown.enter.prevent="confirmPrice(row.key, quantities[priceIndex], $event)"><small v-if="priceInputError(row.key, quantities[priceIndex])" class="sheet-price-error">{{ priceInputError(row.key, quantities[priceIndex]) }}</small></td>
               </template>
               </template>
+              <td class="sheet-row-action"><button type="button" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying" @click="hideRow(row.key)">隐藏</button></td>
             </tr>
           </tbody>
         </table>
+      </div>
+      <div v-if="hiddenRows.length && showHiddenRows" class="sheet-hidden-rows">
+        <div class="sheet-hidden-heading"><strong>已隐藏行（{{ hiddenRows.length }}）</strong><span>仅当前报价单有效，可随时恢复。</span></div>
+        <div v-for="row in hiddenRows" :key="row.key" class="sheet-hidden-row">
+          <span>{{ row.sku }}</span><span>{{ row.country }}</span><span>{{ row.provider }}<small>{{ row.sourceDescription }}</small></span>
+          <button type="button" :aria-label="`恢复 ${row.sourceDescription}`" :disabled="copying" @click="restoreRow(row.key)">恢复</button>
+        </div>
       </div>
       <p v-if="sheet.tableIssues?.length" class="sheet-pending" role="status">{{ sheet.tableIssues.join('；') }}</p>
       <details class="sheet-notes-editor"><summary>报价说明 · 点击编辑</summary><label v-for="(note, index) in (edits.notes ?? CUSTOMER_QUOTE_NOTES)" :key="index">{{ index + 1 }}<textarea :value="note" :aria-label="`第 ${index + 1} 条报价说明`" maxlength="3000" :disabled="copying" @input="updateNote(index, $event)"></textarea></label></details>
@@ -536,6 +578,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-row-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0;font-size:12px}.sheet-row-tools>span{color:#72808a;flex:1;min-width:220px;line-height:1.6}.sheet-row-tools .sheet-column-tools{margin:0 0 0 auto}.customer-sheet .sheet-row-tools>button,.customer-sheet .sheet-row-action button,.customer-sheet .sheet-hidden-row button{color:#d86b13;border-color:#f58220;white-space:nowrap}.sheet-row-action{position:sticky;right:0;z-index:1;min-width:70px;box-shadow:-2px 0 4px #20253212}.sheet-hidden-rows{margin-top:12px;border:1px solid #dfe5e9;border-radius:6px;overflow:hidden;font-size:12px}.sheet-hidden-heading{display:flex;gap:18px;padding:12px;background:#f1f3f5;flex-wrap:wrap}.sheet-hidden-heading span,.sheet-hidden-row small{color:#72808a}.sheet-hidden-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px;border-top:1px solid #dfe5e9;background:#fff}.sheet-hidden-row>span{flex:1;min-width:130px;overflow-wrap:anywhere}.sheet-hidden-row small{line-height:1.5}.sheet-hidden-row button{margin-left:auto}
 .sheet-layout-preference{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0;font-size:12px;color:#72808a}.sheet-layout-preference [role="status"]{color:#287a4d}.sheet-layout-preference [role="alert"]{color:#b42318}
 .sheet-country-format{display:flex;justify-content:center;margin-top:8px}.customer-sheet .sheet-country-format button{padding:6px 14px;border-color:#f58220;border-radius:0;font-size:12px;font-weight:650}.customer-sheet .sheet-country-format button:first-child{border-radius:6px 0 0 6px}.customer-sheet .sheet-country-format button:last-child{border-left:0;border-radius:0 6px 6px 0}.customer-sheet .sheet-country-format button[aria-pressed="true"]{background:#f58220;color:#fff}.sheet-country-format button:focus-visible{outline:2px solid #924e10;outline-offset:2px}
 .sheet-photos{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0;padding:12px;border:1px solid #dfe5e9;border-radius:6px}.sheet-photos legend{font-size:12px;font-weight:650}.sheet-photos label{display:flex;align-items:center;gap:6px;font-size:12px}.sheet-photos span{flex:1;min-width:220px;font-size:12px;color:#72808a;line-height:1.6}.sheet-photo-cell{min-width:180px}.sheet-photo-grid{display:grid;justify-content:center;gap:10px}.sheet-photo-grid img{width:150px;height:150px;object-fit:contain;background:#fff}.sheet-photo-grid-many{grid-template-columns:repeat(2,100px)}.sheet-photo-grid-many img{width:100px;height:100px}
