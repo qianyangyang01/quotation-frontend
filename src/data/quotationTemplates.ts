@@ -225,6 +225,7 @@ export async function updateQuotationTemplate(
   id: string,
   patch: QuotationTemplateUpdateInput,
   expectedVersion?: number,
+  confirmedUpdate = false,
 ) {
   const ownerKey = quotationTemplateOwnerKey(owner)
   const updated = normalizeApiTemplate(await api.put(`/quotation-templates/${id}`, {
@@ -232,6 +233,7 @@ export async function updateQuotationTemplate(
     ...(patch.description !== undefined ? { description: cleanText(patch.description) } : {}),
     ...(patch.items !== undefined ? { items: normalizeSelectionItems(patch.items) } : {}),
     _version: expectedVersion,
+    ...(confirmedUpdate ? { _confirmedUpdate: { templateId: id, baseVersion: expectedVersion, source: 'template-channel-confirmation' } } : {}),
   }))
   notifyTemplatesUpdated(ownerKey)
   return updated
