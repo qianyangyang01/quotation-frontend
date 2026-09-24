@@ -6,6 +6,7 @@ import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelect
 import { hasAnyQuotationPrice } from '@/services/quotationAvailability'
 import QuoteUnavailableReason from './QuoteUnavailableReason.vue'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
+import QuoteChannelName from './QuoteChannelName.vue'
 import QuoteMinimumWeight from './QuoteMinimumWeight.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
 
@@ -326,7 +327,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
       <div class="table-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>2{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span>3{{ unitLabel || '件' }}报价<small>USD / CNY</small></span><span class="custom-head">{{ customQuantity || 1 }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
       <div v-if="pagedRows.length" class="quote-rows">
         <article v-for="row in pagedRows" :key="rowKey(row)" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
-          <div><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><QuoteMinimumWeight :weight-kg="row.minChargeWeightKg" /></div><b>{{ row.eta }}</b>
+          <div><span class="channel-name-line"><QuoteChannelName :row="row" /><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><QuoteMinimumWeight :weight-kg="row.minChargeWeightKg" /></div><b>{{ row.eta }}</b>
           <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span>
           <div class="selection-actions"><button :disabled="!isSelected(row) && !hasAnyQuotationPrice(row)" @click="toggleSelection(row)">{{ isSelected(row) ? (row.available === false ? '移除渠道' : '已加入') : '加入报价单' }}</button><button v-if="isSelected(row) && hasAnyQuotationPrice(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
         </article>
@@ -349,5 +350,5 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 .quote-rows article.selected{box-shadow:inset 3px 0 #ff9700}.selection-actions{display:grid;gap:4px}.selection-actions button{height:27px;border:0;border-radius:5px;background:#17232d;color:#fff;font-size:8px;font-weight:800;cursor:pointer}.selection-actions button:first-child{background:#ff9700;color:#17232d}.selection-actions .primary-action{height:auto;padding:2px 0;background:none;color:#7d8992}.selection-actions .primary-action:hover{color:#c66b00}
 @media(max-width:680px){.common-head-actions{width:100%;align-items:stretch;flex-direction:column}.common-head-actions .country-search,.common-head-actions .quantity-field{width:100%}.quantity-field input{flex:1}}
 .country-grid button{cursor:grab;transition:border-color .15s,background .15s,box-shadow .15s,opacity .15s,transform .15s}.country-grid button:active{cursor:grabbing}.country-grid button.dragging{opacity:.42;transform:scale(.98)}.country-grid button.drag-over{border-color:#ff8f00;background:#fff2dc;box-shadow:0 0 0 3px rgba(255,143,0,.15)}.country-grid u{color:#aeb8bf;font-size:13px;line-height:1;text-decoration:none;letter-spacing:-3px}
-.channel-name-line{display:flex!important;align-items:center;gap:7px;min-width:0}.channel-name-line>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.channel-name-line{display:flex!important;flex-wrap:wrap;align-items:center;gap:7px;min-width:0}.channel-name-line>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>

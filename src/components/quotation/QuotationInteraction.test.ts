@@ -12,6 +12,33 @@ import type { QuotationCountrySummary, QuotationMatrixRow } from './types'
 
 let app: App
 
+it('shows and searches all four Canadian Yanwen zones while retaining the exact selected route', async () => {
+  const changed = vi.fn()
+  const routes = [1, 2, 3, 4].map(zone => ({
+    ...row('加拿大', 599), carrier: '燕文', transport: '燕文服装专线-普货', rule: '燕文服装专线-普货',
+    channelCode: 'C-24f9a67d7c0a3109b5aa', quoteRegion: `燕文｜燕文服装专线-普货｜${zone}区`,
+    quote1: 30 + zone,
+  }))
+  mount(Matrix, { active: true, variant: 'template',
+    countries: [{ name: '加拿大', code: 'CA', stage: 'common', sortOrder: 0, channelCount: 4 }],
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 6.7, presetVersion: 1,
+    presetSelection: [routes[0]], quoteRowsForCountry: () => routes, onSelectionChange: changed })
+  await nextTick(); await nextTick()
+  button('添加渠道').click(); await nextTick(); await nextTick(); await nextTick()
+  expect([...document.querySelectorAll('.picker-list .channel-region')].map(el => el.textContent))
+    .toEqual(['加拿大 · 1区', '加拿大 · 2区', '加拿大 · 3区', '加拿大 · 4区'])
+  const input = document.querySelector<HTMLInputElement>('.channel-dialog input[placeholder]')!
+  input.value = '3区'; input.dispatchEvent(new Event('input', { bubbles: true })); await nextTick()
+  expect(document.querySelectorAll('.picker-list label')).toHaveLength(1)
+  expect(document.querySelector('.picker-list')?.textContent).toContain('$33.00')
+  document.querySelector<HTMLInputElement>('.picker-list input[type="checkbox"]')!.click(); await nextTick()
+  document.querySelector<HTMLButtonElement>('.batch-add')!.click(); await nextTick(); await nextTick()
+  expect(changed.mock.lastCall?.[0].map((value: QuotationMatrixRow) => value.quoteRegion))
+    .toEqual([routes[0]!.quoteRegion, routes[2]!.quoteRegion])
+  expect(document.querySelector('.selected-channels')?.textContent).toContain('加拿大 · 3区')
+  expect(routes[2]!.transport).toBe('燕文服装专线-普货')
+})
+
 it.each(['specified', 'template'])('reuses country calculations while searching and opening channels in %s mode', async variant => {
   const generation = createCountryQuotationGeneration(ref(0))
   const pricing = reactive({ weight: 1 })
