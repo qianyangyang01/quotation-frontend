@@ -176,3 +176,42 @@ it('preserves the latest state through 40 alternating eligible and overweight re
     expect(changed.mock.lastCall?.[0][0].quote1).toBe(i%2 ? null : 10+i)
   }
 })
+
+it.each(['template','specified'])('keeps %s snapshots consistent through 60 hidden-mode updates and copies',async variant=>{
+  const {state,changed}=setup();const copied=vi.fn();Object.assign(state,{variant,onCopy:copied});
+  state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  for(let i=0;i<60;i++) {
+    state.active=false;await tick();const count=changed.mock.calls.length;
+    state.quoteRowsForCountry=()=>i%3===0?[]:[{...row('ok'),quote1:10+i,freight:i/100,quantityMessages:{'3':`重量上限-${i}`}}];
+    state.unavailableReason=()=>`不可用-${i}`;state.contextKey=`hidden-${i}`;await tick();
+    expect(changed.mock.calls.length).toBe(count);
+    state.active=true;await tick();button('复制表格数据').click();await tick();
+    expect(copied.mock.lastCall?.[0]).toEqual(changed.mock.lastCall?.[0]);
+    expect(changed.mock.lastCall?.[0]).toHaveLength(1);
+    expect(changed.mock.lastCall?.[0][0].quote1).toBe(i%3===0?null:10+i);
+    if(i%3===0) expect(changed.mock.lastCall?.[0][0].availabilityMessage).toBe(`不可用-${i}`)
+  }
+})
+
+it('completes an in-flight template while hidden then restores current prices on activation',async()=>{
+  const {state,changed}=setup();await tick();let resolve!:(ok:boolean)=>void;
+  Object.assign(state,{ensureCountries:()=>new Promise<boolean>(done=>{resolve=done})});
+  state.presetSelection=[row('ok')];state.presetVersion++;await tick();state.active=false;await tick();
+  state.quoteRowsForCountry=()=>[{...row('ok'),quote1:47}];state.contextKey='latest';resolve(true);await tick();
+  state.active=true;await tick();expect(changed.mock.lastCall?.[0][0]).toMatchObject({channelKey:'ok',quote1:47})
+})
+
+it('restores only the latest draft selection received while hidden',async()=>{
+  const {state,changed}=setup();await tick();state.active=false;await tick();
+  state.presetSelection=[row('old-draft')];state.presetVersion++;await tick();
+  state.presetSelection=[row('ok')];state.presetVersion++;await tick();
+  state.active=true;await tick();expect(changed.mock.lastCall?.[0].map((r:QuotationMatrixRow)=>r.channelKey)).toEqual(['ok'])
+})
+
+it('retains same-channel Canadian zones and latest independent prices after a hidden update',async()=>{
+  const {state,changed}=setup();state.countries=[{...country,name:'加拿大',code:'CA'}];
+  const zones=[{...row('ok'),country:'加拿大',quoteRegion:'1区',quote1:11},{...row('ok'),country:'加拿大',quoteRegion:'2区',quote1:22}];
+  state.quoteRowsForCountry=()=>zones;state.presetSelection=zones;state.presetVersion++;await tick();
+  state.active=false;await tick();state.quoteRowsForCountry=()=>zones.map(r=>({...r,quote1:r.quote1!+10}));state.contextKey='new';await tick();
+  state.active=true;await tick();expect(changed.mock.lastCall?.[0].map((r:QuotationMatrixRow)=>[r.quoteRegion,r.quote1])).toEqual([['1区',21],['2区',32]])
+})
