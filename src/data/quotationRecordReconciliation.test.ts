@@ -23,6 +23,13 @@ function table(text: string) {
   })
 }
 
+it('exports the manual channel exemption label without changing the price snapshot', () => {
+  const row=normalizeQuotationRecord({...record(),financeReviewStatus:'channel-exempt',financeReviewedBy:'管理员'})!
+  const before=JSON.stringify(row)
+  expect(quotationRecordReconciliationTsv(row)).toContain('同渠道免审')
+  expect(JSON.stringify(row)).toBe(before)
+})
+
 it.each(['common', 'specified', 'template'] as const)('exports every route, full identities and both currencies for %s without mutating or repricing', mode => {
   const saved = record(); saved.matrixMode = mode
   const before = JSON.stringify(saved), text = quotationRecordReconciliationTsv(saved), rows = table(text)
