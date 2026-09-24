@@ -4,7 +4,7 @@ import { normalizeQuotationRecord } from './quotationRecords'
 import { quotationRecordQuoteOnlyLayout } from './quotationRecordQuoteOnlyLayout'
 
 const record = () => normalizeQuotationRecord({ id: 'quote', no: 'QT-ONE', customerName: '客户甲', primarySku: '001', productSummary: '枕头', customQuoteQuantity: 12,
-  customerGrade: '内部等级', commissionThreshold: .9876, totalCostCny: 987.65, purchaseUnitPriceCny: 876.54, note: '内部备注', salespersonAccount: 'PRIVATE-ACCOUNT',
+  customerGrade: 'E', commissionThreshold: .9876, totalCostCny: 987.65, purchaseUnitPriceCny: 876.54, note: '内部备注', salespersonAccount: 'PRIVATE-ACCOUNT',
   customerOperation: { id: 'internal', name: '内部操作费', feeUsd: 17.23 },
   quoteOptions: [{ id: 'a', country: '澳大利亚', quoteRegion: '3区', carrier: '燕文', channel: '化妆品专线', rule: '内部计费规则', eta: '6-12天', quote1Usd: 19.2, quote2Usd: 37.4, quote3Usd: 55, quoteCustomUsd: 222, freightCny: 765.43 }],
   customerQuote: { quantities: [1, 2, 12], rows: [{ optionId: 'a', prices: [20, null, 230] }] },
@@ -16,8 +16,11 @@ it('copies only customer quotation fields and routes, preserving customer blanks
   expect(layout.text.split('\n').find(row => row.startsWith('国家\t'))).toBe('国家\t物流渠道\t1件\t12件\t预计时效')
   expect(layout.text).toContain('12件')
   expect(layout.text).toContain('230.00')
+  expect(layout.text).toContain('客户\t客户甲\t客户等级\t普通客户')
+  expect(layout.text).toContain(`创建时间\t${saved.createdAt}`)
   for (const output of [layout.text, layout.html]) {
-    for (const secret of ['内部等级', '内部备注', '内部计费规则', 'PRIVATE-ACCOUNT', '987.65', '876.54', '765.43', '17.23', '19.20', '采购', '佣金', '操作费', '成本']) expect(output).not.toContain(secret)
+    expect(output).toContain('普通客户')
+    for (const secret of ['内部备注', '内部计费规则', 'PRIVATE-ACCOUNT', '987.65', '876.54', '765.43', '17.23', '19.20', '采购', '佣金', '操作费', '成本']) expect(output).not.toContain(secret)
   }
   expect(JSON.stringify(saved)).toBe(before)
   const doc = new DOMParser().parseFromString(layout.html, 'text/html')

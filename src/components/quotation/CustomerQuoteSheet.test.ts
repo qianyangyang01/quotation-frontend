@@ -5,6 +5,9 @@ import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import { renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import type { QuoteSheetPriceCalculator, QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import type { CustomerPriceSnapshot } from '@/data/customerQuotePrices'
+import { authState, type AuthUser } from '@/data/authStore'
+
+const layoutUser = (id: string): AuthUser => ({ id, account: id, name: id, role: 'employee', status: 'enabled', mustChangePassword: false, passwordUpdatedAt: '' })
 
 vi.mock('@/services/customerQuoteSheetRenderer', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/customerQuoteSheetRenderer')>(),
@@ -34,6 +37,8 @@ async function input(label: string, value: string) {
   field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); await settle()
 }
 beforeEach(() => {
+  localStorage.clear()
+  authState.current = layoutUser('account-a')
   vi.clearAllMocks()
   render.mockReset().mockResolvedValue([png()])
   write.mockReset().mockResolvedValue(undefined); writeText.mockReset().mockResolvedValue(undefined)
@@ -43,7 +48,7 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:quote')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(revoke)
 })
-afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('switches the Country header, preview and copied data together without changing source rows or saved prices', async () => {
   const state = mount([{ ...row(), country: 'GB' }, { ...row('two'), country: 'NL' }])
@@ -577,7 +582,7 @@ it('moves the whole price group across both ends without changing captured price
   }
   expect(JSON.stringify(state.rows)).toBe(source)
 })
-it('keeps a moved hidden column in place when shown again, supports keyboard sorting and resets layout with the product', async () => {
+it('keeps a moved hidden column in place when shown again, supports keyboard sorting and preserves layout across products', async () => {
   const state = mount()
   await dragGroup('country', 'number')
   const toggle = document.querySelector<HTMLInputElement>('[aria-label="显示国家列"]')!
@@ -592,7 +597,44 @@ it('keeps a moved hidden column in place when shown again, supports keyboard sor
   await input('第 1 行国家', 'CA'); await click('复制报价数据')
   expect(writeText.mock.lastCall![0].split('\r\n')[1].split('\t')[0]).toBe('Canada')
   state.contextKey = 'next-product'; await settle()
+  expect(groupKeys()).toEqual(['country','sku','number','prices','provider','shippingTime','processingTime'])
+  expect(document.querySelector<HTMLInputElement>('.sheet-country')!.value).toBe('United States')
+})
+it('restores layout after remount and isolates layouts by signed-in account instead of salesperson', async () => {
+  mount()
+  await dragGroup('country', 'prices')
+  const accountAOrder = groupKeys()
+  app.unmount(); document.body.innerHTML = ''
+  const state = mount()
+  expect(groupKeys()).toEqual(accountAOrder)
+  state.salesperson = 'Another record owner'; await settle()
+  expect(groupKeys()).toEqual(accountAOrder)
+  authState.current = layoutUser('account-b'); await settle()
   expect(groupKeys()).toEqual(['number','sku','prices','country','provider','shippingTime','processingTime'])
+  await dragGroup('provider', 'number')
+  const accountBOrder = groupKeys()
+  authState.current = null; await settle()
+  expect(groupKeys()).toEqual(['number','sku','prices','country','provider','shippingTime','processingTime'])
+  authState.current = layoutUser('account-a'); await settle()
+  expect(groupKeys()).toEqual(accountAOrder)
+  authState.current = layoutUser('account-b'); await settle()
+  expect(groupKeys()).toEqual(accountBOrder)
+  await click('恢复默认列顺序')
+  app.unmount(); document.body.innerHTML = ''; mount()
+  expect(groupKeys()).toEqual(['number','sku','prices','country','provider','shippingTime','processingTime'])
+  authState.current = layoutUser('account-a'); await settle()
+  expect(groupKeys()).toEqual(accountAOrder)
+})
+it('falls back from invalid stored layout and reports unavailable storage without blocking rearrangement', async () => {
+  localStorage.setItem('milano.quote-sheet-column-order.v1:account-a', '{broken')
+  mount()
+  const prices = exposed.capturePrices()
+  expect(groupKeys()).toEqual(['number','sku','prices','country','provider','shippingTime','processingTime'])
+  vi.stubGlobal('localStorage', { getItem: () => null, clear: () => {}, setItem: () => { throw new Error('Storage blocked') } })
+  await dragGroup('country', 'number')
+  expect(groupKeys()[0]).toBe('country')
+  expect(document.querySelector('.sheet-layout-preference [role="alert"]')?.textContent).toContain('列顺序未能保存')
+  expect(exposed.capturePrices()).toEqual(prices)
 })
 it('includes optional WhatsApp in the preview, invalidates changed contacts and clears them on product reset', async () => {
   const state = mount()

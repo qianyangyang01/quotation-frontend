@@ -1,4 +1,5 @@
 import { savedSystemPrice } from './customerQuotePrices'
+import { customerGradeDisplayLabel } from './financeChannelPolicies'
 import type { QuotationRecord } from './quotationRecords'
 import { quotationRecordCopyCountry } from './quotationRecordCopyCountry'
 
@@ -30,8 +31,9 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord): { text:
   const sku = record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') : record.primarySku
   const header = ['国家', '物流渠道', ...quantities.map(q => q ? `${q}${unit}` : '自定义（数量未保存）'), '预计时效']
   const rows: { kind: 'metadata' | 'header' | 'route' | 'note'; cells: string[] }[] = [
-    { kind: 'metadata', cells: ['报价编号', record.no, '客户', record.customerName, '创建时间', record.createdAt] },
+    { kind: 'metadata', cells: ['报价编号', record.no, '客户', record.customerName, '客户等级', customerGradeDisplayLabel(record.customerGrade)] },
     { kind: 'metadata', cells: ['SKU', sku, '商品', record.productSummary, '币种', 'USD（美元/单）'] },
+    { kind: 'metadata', cells: ['创建时间', record.createdAt] },
     { kind: 'header', cells: header },
   ]
   for (const option of options) {
@@ -45,7 +47,7 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord): { text:
   if (!options.length) rows.push({ kind: 'note', cells: ['未保存国家与物流渠道报价'] })
   rows.push({ kind: 'note', cells: ['各数量价格为整单报价；未报价项不补算。'] })
   const columnCount = header.length
-  const htmlRows = rows.flatMap(row => row.kind === 'metadata' && columnCount < 6
+  const htmlRows = rows.flatMap(row => row.kind === 'metadata' && columnCount < row.cells.length
     ? [0, 2, 4].map(i => ({ ...row, cells: row.cells.slice(i, i + 2) })) : [row]).map(row => `<tr>${row.cells.map((value, i) => {
     const span = row.kind === 'metadata' && i === row.cells.length - 1 ? columnCount - row.cells.length + 1 : row.kind === 'note' ? columnCount : 1
     const bg = row.kind === 'header' ? '#c6e0b4' : row.kind === 'route' && i === 1 ? '#92d050' : '#ffffff'
