@@ -11,6 +11,8 @@ import {
 import { copyQuoteSheetImage, preloadQuoteSheetAssets, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import QuoteBackToTop from './QuoteBackToTop.vue'
+import QuoteAveragePanel from './QuoteAveragePanel.vue'
+import { applyAveragePlans, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
 import { releaseQuotePhotos, MAX_QUOTE_PHOTOS, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
 import QuotePhotoPicker from './QuotePhotoPicker.vue'
@@ -25,6 +27,7 @@ const props = defineProps<{
   calculatePrice?: QuoteSheetPriceCalculator
   resetKey?: string
   initialQuote?: CustomerPriceSnapshot
+  initialSystemQuote?: CustomerPriceSnapshot
   recordMode?: boolean
   showAllRows?: boolean
   skus?: string[]
@@ -126,11 +129,66 @@ function buildSheet(rows: QuoteSheetSourceRow[]) { return buildCustomerQuoteShee
   quantities: quantities.value, calculatePrice: props.sourcePending ? undefined : props.calculatePrice,
   legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom),
 }) }
+function loadAveragePlans() {
+  return mapAveragePlans(props.initialQuote?.averagePlans, id => { const row = props.rows.find(row => row.channelKey === id); return row ? quoteSheetRowKey(row) : id })
+}
+const averagePlans = ref<AveragePlan[]>(loadAveragePlans())
+const averageOpen = ref(averagePlans.value.length > 0)
+const averageNotice = ref('')
+const averageInputs = ref<Record<string, string>>({})
+const averagePriceErrors = ref<Record<string, string>>({})
+function withAverageErrors(value: ReturnType<typeof applyAveragePlans>) {
+  const errors = Object.values(averagePriceErrors.value)
+  return { ...value, issues: [...value.issues, ...errors], tableIssues: [...(value.tableIssues ?? []), ...errors], priceIssues: [...(value.priceIssues ?? []), ...errors] }
+}
+const systemSheet = computed(() => buildCustomerQuoteSheet({ rows: props.rows, countries: props.countries, edits: newQuoteSheetEdits(props.salesperson), skus: props.skus,
+  customQuantity: props.customQuantity, bundle: props.bundle, quantities: quantities.value,
+  calculatePrice: props.recordMode ? (row, quantity) => {
+    const saved = props.initialSystemQuote
+    return saved?.rows.find(r => r.optionId === row.channelKey)?.prices[saved.quantities.indexOf(quantity)] ?? null
+  } : props.calculatePrice, legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom) }))
+function addAverage(plan: AveragePlan) {
+  const index = averagePlans.value.findIndex(p => p.id === plan.id)
+  if (index < 0 && averagePlans.value.length >= 20) { averageNotice.value = '每张报价单最多 20 个综合方案'; return }
+  if (index < 0) averagePlans.value.push(plan)
+  else averagePlans.value.splice(index, 1, plan)
+  for (const key of Object.keys(averageInputs.value)) if (key.startsWith(plan.id + ':')) delete averageInputs.value[key]
+  for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(plan.id + ':')) delete averagePriceErrors.value[key]
+  averageNotice.value = ''
+  invalidate()
+}
+function removeAverage(id: string) { for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(id + ':')) delete averagePriceErrors.value[key]; averagePlans.value = averagePlans.value.filter(plan => plan.id !== id); invalidate() }
+function averageMember(key: string) { return averagePlans.value.some(plan => plan.members.some(m => m.optionId === key)) }
+function sourceFor(key: string) { return props.rows.find(row => quoteSheetRowKey(row) === key)! }
+function changeAveragePrice(id: string, quantity: number, event: Event) {
+  const plan = averagePlans.value.find(plan => plan.id === id)
+  const raw = (event.target as HTMLInputElement).value
+  averageInputs.value[id + ':' + quantity] = raw
+  const parsed = parseQuotePriceInput(raw)
+  if (!plan) return
+  const key = id + ':' + quantity
+  if (parsed.error) { averagePriceErrors.value[key] = `综合报价 ${quantity} 数量：${parsed.error}`; averageNotice.value = parsed.error; invalidate(); return }
+  delete averagePriceErrors.value[key]
+  const index = plan.quantities.indexOf(quantity)
+  if (index >= 0) plan.prices[index] = parsed.value
+  averageNotice.value = ''
+}
+watch(() => JSON.stringify([layoutUserId.value, props.resetKey ?? props.contextKey, props.bundle, props.skus]), () => {
+  averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = loadAveragePlans(); averageOpen.value = averagePlans.value.length > 0; averageNotice.value = ''
+})
+watch(() => JSON.stringify(props.initialQuote?.averagePlans), () => { averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = loadAveragePlans() })
+watch(() => JSON.stringify(systemSheet.value.rows.map(row => [row.key, quantities.value.map((q, i) => [q, row.prices[i]]).sort((a, b) => Number(a[0]) - Number(b[0]))]).sort()), (value, previous) => {
+  if (!props.recordMode && value !== previous && averagePlans.value.length) {
+    averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = []; averageNotice.value = '系统价格、渠道或数量已变化，请重新生成综合报价'; averageOpen.value = true
+  }
+})
+watch(averagePlans, invalidate, { deep: true, flush: 'sync' })
 const allRowsSheet = computed(() => buildSheet(props.rows))
-const sheet = computed(() => buildSheet(visibleSourceRows.value))
+const sheet = computed(() => withAverageErrors(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, props.showAllRows)))
+const editorSheet = computed(() => applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, true))
 const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
 function hideRow(key: string) {
-  if (copying.value || props.showAllRows) return
+  if (copying.value || props.showAllRows || averageMember(key)) return
   hiddenRowKeys.value.add(key)
   showHiddenRows.value = true
 }
@@ -417,12 +475,11 @@ async function copyData() {
 // Record drawers reuse this same model, edits and clipboard flow.
 function capturePrices(): CapturedSheetPrices {
   if (props.sourcePending || copying.value) throw new Error('报价仍在计算或复制，请稍后保存')
+  if (sheet.value.priceIssues?.length) throw new Error(sheet.value.priceIssues.join('；'))
   if (allRowsSheet.value.priceIssues?.length) throw new Error(allRowsSheet.value.priceIssues.join('；'))
-  const system = buildCustomerQuoteSheet({ rows:props.rows, countries:props.countries, edits:newQuoteSheetEdits(props.salesperson),
-    customQuantity:props.customQuantity, bundle:props.bundle, quantities:quantities.value, calculatePrice:props.calculatePrice,
-    legacyCustomIndex:columns.value.findIndex(column=>column.legacyCustom) })
+  const system = systemSheet.value
   if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
-  return { hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
+  return { averagePlans: cloneAveragePlans(averagePlans.value).map(plan => ({ ...plan, quantities: [...quantities.value], prices: quantities.value.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null), systemPrices: quantities.value.map(q => plan.systemPrices[plan.quantities.indexOf(q)] ?? null), members: plan.members.map(m => ({...m, sourcePrices: quantities.value.map(q => m.sourcePrices[plan.quantities.indexOf(q)] ?? null)})) })), hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
 }
 defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
@@ -440,6 +497,7 @@ onBeforeUnmount(() => {
     <div class="sheet-toolbar">
       <div><h3 id="customer-sheet-title">客户报价单</h3><p>点击内容可修改；右侧新增列，填写数量后自动带出对应价格</p></div>
       <div class="sheet-actions">
+        <button v-if="rows.length" type="button" :disabled="copying" :aria-expanded="averageOpen" @click="averageOpen = !averageOpen">渠道平均报价</button>
         <button v-if="!editing" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
         <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
         <button type="button" class="sheet-primary" :disabled="!canCopy" @click="copyCurrent">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
@@ -459,6 +517,8 @@ onBeforeUnmount(() => {
       <label v-if="photos.length"><input v-model="showPhotos" type="checkbox" aria-label="显示商品图片列">显示图片</label>
       <span>已添加 {{ photos.length }} / {{ MAX_QUOTE_PHOTOS }} 张。打开弹窗后可连续粘贴或选择图片，最后统一确认；图片仅用于本次展示，刷新、离开页面或更换商品后清除。</span>
     </fieldset>
+    <QuoteAveragePanel v-if="averageOpen" :rows="visibleSourceRows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" />
+    <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
     <QuotePhotoPicker v-if="photoPickerOpen" :photos="photos" @cancel="photoPickerOpen = false" @confirm="confirmPhotos" />
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
@@ -519,20 +579,24 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in sheet.rows" :key="row.key">
+            <tr v-for="(row, index) in editorSheet.rows" :key="row.key" :class="{ 'sheet-average-row': row.averageId }">
               <template v-for="group in visibleGroups" :key="group.key">
-              <td v-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
-              <td v-else-if="group.key === 'product' && index === 0" :rowspan="sheet.rows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`临时商品图 ${photoIndex + 1}`"></div></td>
+              <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
+              <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
+              <td v-else-if="group.key === 'product' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`临时商品图 ${photoIndex + 1}`"></div></td>
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
+              <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}</td>
               <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
               <td v-else-if="group.key === 'provider'"><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source">{{ row.sourceDescription }}</small></td>
-              <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(visibleSourceRows[index].eta) === '—' ? '' : formatShippingTime(visibleSourceRows[index].eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 workingdays" maxlength="80" :disabled="copying" @input="updateShippingTime(visibleSourceRows[index], $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(visibleSourceRows[index])">恢复渠道时效</button></td>
+              <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(sourceFor(row.key).eta) === '—' ? '' : formatShippingTime(sourceFor(row.key).eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 workingdays" maxlength="80" :disabled="copying" @input="updateShippingTime(sourceFor(row.key), $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(sourceFor(row.key))">恢复渠道时效</button></td>
               <td v-else-if="group.key === 'processingTime'"><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
+              <template v-else-if="group.key === 'prices' && row.averageId"><td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="averageInputs[row.averageId + ':' + quantities[priceIndex]] ?? (price == null ? '' : price.toFixed(2))" :aria-label="'综合报价 ' + row.averageId + ' 数量 ' + quantities[priceIndex]" placeholder="客户报价" :disabled="copying || sourcePending" @input="changeAveragePrice(row.averageId!, quantities[priceIndex], $event)"></td></template>
               <template v-else-if="group.key === 'prices'">
               <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" :aria-invalid="Boolean(priceInputError(row.key, quantities[priceIndex]))" inputmode="text" placeholder="金额或算式" :maxlength="MAX_PRICE_EXPRESSION_LENGTH" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)" @blur="confirmPrice(row.key, quantities[priceIndex], $event)" @keydown.enter.prevent="confirmPrice(row.key, quantities[priceIndex], $event)"><small v-if="priceInputError(row.key, quantities[priceIndex])" class="sheet-price-error">{{ priceInputError(row.key, quantities[priceIndex]) }}</small></td>
               </template>
               </template>
-              <td class="sheet-row-action"><button type="button" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button></td>
+              <td v-if="row.averageId" class="sheet-row-action"><button type="button" :disabled="copying" @click="removeAverage(row.averageId!)">移除方案</button></td>
+              <td v-else class="sheet-row-action"><button type="button" :title="averageMember(row.key) ? '请先移除引用此渠道的综合方案' : '隐藏此渠道'" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows || averageMember(row.key)" @click="hideRow(row.key)">隐藏</button></td>
             </tr>
           </tbody>
         </table>
@@ -564,6 +628,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-average-row td{background:#fff1df!important;border-top:1px solid #f58220!important;border-bottom:1px solid #f58220!important;color:#c95d00}.sheet-average-row input{color:#c95d00!important;font-weight:700}
 .sheet-row-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0;font-size:12px}.sheet-row-tools>span{color:#72808a;flex:1;min-width:220px;line-height:1.6}.sheet-row-tools .sheet-column-tools{margin:0 0 0 auto}.customer-sheet .sheet-row-tools>button,.customer-sheet .sheet-row-action button,.customer-sheet .sheet-hidden-row button{color:#d86b13;border-color:#f58220;white-space:nowrap}.sheet-row-action{position:sticky;right:0;z-index:1;min-width:70px;box-shadow:-2px 0 4px #20253212}.sheet-hidden-rows{margin-top:12px;border:1px solid #dfe5e9;border-radius:6px;overflow:hidden;font-size:12px}.sheet-hidden-heading{display:flex;gap:18px;padding:12px;background:#f1f3f5;flex-wrap:wrap}.sheet-hidden-heading span,.sheet-hidden-row small{color:#72808a}.sheet-hidden-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px;border-top:1px solid #dfe5e9;background:#fff}.sheet-hidden-row>span{flex:1;min-width:130px;overflow-wrap:anywhere}.sheet-hidden-row small{line-height:1.5}.sheet-hidden-row button{margin-left:auto}
 .sheet-layout-preference{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0;font-size:12px;color:#72808a}.sheet-layout-preference [role="status"]{color:#287a4d}.sheet-layout-preference [role="alert"]{color:#b42318}
 .sheet-country-format{display:flex;justify-content:center;margin-top:8px}.customer-sheet .sheet-country-format button{padding:6px 14px;border-color:#f58220;border-radius:0;font-size:12px;font-weight:650}.customer-sheet .sheet-country-format button:first-child{border-radius:6px 0 0 6px}.customer-sheet .sheet-country-format button:last-child{border-left:0;border-radius:0 6px 6px 0}.customer-sheet .sheet-country-format button[aria-pressed="true"]{background:#f58220;color:#fff}.sheet-country-format button:focus-visible{outline:2px solid #924e10;outline-offset:2px}

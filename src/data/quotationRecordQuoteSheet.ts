@@ -1,4 +1,4 @@
-import type { QuotationRecord } from './quotationRecords'
+import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 import { recordHiddenOptionIds } from './customerQuotePrices'
 import { quoteSheetBundleSkus, type QuoteSheetSourceRow } from './customerQuoteSheet'
 
@@ -8,6 +8,7 @@ export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
   const rows: QuoteSheetSourceRow[] = options.map(option => ({
     country: String(('countryCode' in option && option.countryCode) || option.country),
     quoteRegion: option.quoteRegion,
+    ...('id' in option ? { available: (option as QuotationRecordQuoteOption).available, taxFeeMode: (option as QuotationRecordQuoteOption).taxFeeMode, taxIncluded: (option as QuotationRecordQuoteOption).taxIncluded, taxConfigured: (option as QuotationRecordQuoteOption).taxConfigured, taxRatePercent: (option as QuotationRecordQuoteOption).taxRatePercent } : {}),
     // The saved option id also distinguishes historical routes without channel keys.
     channelKey: 'id' in option ? String(option.id) : JSON.stringify([option.country, option.quoteRegion, option.carrier, option.channel, option.rule]),
     ruleId: 0,
@@ -18,5 +19,5 @@ export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
   const snapshot = record.customerQuote ?? record.sheetQuote
   const saved = snapshot ? { ...snapshot, hiddenOptionIds: recordHiddenOptionIds(record) } : undefined
   const contact = saved?.contact ?? record.sheetQuote?.contact
-  return { recordMode: true, skus: record.quoteMode === 'bundle' && record.bundleItems?.length ? quoteSheetBundleSkus(record.bundleItems) : [record.primarySku], rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: record.quoteMode === 'bundle', initialQuote: saved && contact ? { ...saved, contact } : saved }
+  return { initialSystemQuote: record.systemQuantityQuotes, recordMode: true, skus: record.quoteMode === 'bundle' && record.bundleItems?.length ? quoteSheetBundleSkus(record.bundleItems) : [record.primarySku], rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: record.quoteMode === 'bundle', initialQuote: saved && contact ? { ...saved, contact } : saved }
 }

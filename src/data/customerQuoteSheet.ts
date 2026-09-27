@@ -10,7 +10,7 @@ export function quoteSheetBundleSkus(items: ReadonlyArray<{ sku: string; quantit
 /** Customer-facing source model. Only explicit numeric snapshots are captured for record saving. */
 export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |
-  'quote1' | 'quote2' | 'quote3' | 'quoteCustom' | 'available'>
+  'quote1' | 'quote2' | 'quote3' | 'quoteCustom' | 'available'> & { taxFeeMode?: string; taxIncluded?: boolean; taxConfigured?: boolean; taxRatePercent?: number | null }
 export type QuoteSheetCountry = { name: string; code: string }
 export type QuoteSheetCountryFormat = 'name' | 'code'
 export type QuoteSheetRowEdits = { number?: string; country?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
@@ -63,7 +63,7 @@ export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: num
 export const MAX_QUOTE_SHEET_COLUMNS = 10
 export function validQuoteSheetQuantity(value: number) { return Number.isSafeInteger(value) && value > 0 }
 export type CustomerQuoteSheetRow = {
-  key: string; number: number; sku?: string; country: string; provider: string; shippingTime: string; processingTime?: string
+  key: string; number: number | string; averageId?: string; sku?: string; country: string; provider: string; shippingTime: string; processingTime?: string
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {

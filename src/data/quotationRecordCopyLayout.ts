@@ -66,7 +66,19 @@ export function quotationRecordCopyLayout(record: QuotationRecord, version: 'ful
       add('blank', [''])
     }
   }
-  section('三、采购、审核与成交信息')
+  if ((record.customerQuote ?? record.sheetQuote)?.averagePlans?.length) {
+    section('三、综合报价方案（保存快照）')
+    for (const plan of (record.customerQuote ?? record.sheetQuote)!.averagePlans!) {
+      add('data', ['方案', safeCell(plan.provider), '算法', plan.mode === 'equal' ? '普通平均' : '加权平均'])
+      for (const member of plan.members) {
+        const option = record.quoteOptions?.find(o => o.id === member.optionId)
+        add('data', ['来源渠道', safeCell([option?.country, option?.quoteRegion, option?.carrier, option?.channel].filter(Boolean).join(' · ')), '占比', plan.mode === 'equal' ? '等权' : member.weight + '%'])
+      }
+      add('header', ['数量', '系统平均 USD', '客户报价 USD', '时效'])
+      plan.quantities.forEach((q, i) => add('data', [String(q), plan.systemPrices[i]?.toFixed(2) ?? '未保存', plan.prices[i]?.toFixed(2) ?? '未报价', safeCell(plan.shippingTime || 'To be confirmed')]))
+    }
+  }
+  section('采购、审核与成交信息')
   source.slice(5, tableStart).filter(row => row.length > 1).forEach(pairs)
   const text = matrix.text + '\n' + rows.map(row => row.cells.join('\t')).join('\n')
   const htmlRows = rows.map(row => {

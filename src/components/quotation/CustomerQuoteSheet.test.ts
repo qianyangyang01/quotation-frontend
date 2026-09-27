@@ -4,6 +4,8 @@ import { createApp, h, nextTick, reactive, type App } from 'vue'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import { renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import type { QuoteSheetPriceCalculator, QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
+import { mapAveragePlans } from '@/data/quoteChannelAverage'
+import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import type { CustomerPriceSnapshot } from '@/data/customerQuotePrices'
 import { authState, type AuthUser } from '@/data/authStore'
 
@@ -24,7 +26,7 @@ function png(firstRow = 1, lastRow = 1): QuoteSheetImage {
   return { blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow, lastRow }
 }
 function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot, recordMode = false) {
-  const state = reactive({ skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, recordMode, resetKey: undefined as string | undefined })
+  const state = reactive({ skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, recordMode, initialSystemQuote: undefined as CustomerPriceSnapshot | undefined, resetKey: undefined as string | undefined })
   const host = document.createElement('div'); document.body.append(host)
   app = createApp({ render: () => h(CustomerQuoteSheet, { ...state, ref:(instance:unknown)=>{exposed=instance as typeof exposed} }) }); app.mount(host)
   return state
@@ -834,4 +836,72 @@ it('blocks both kinds of sorting during a clipboard write', async () => {
   expect(groupKeys()).toEqual(keys)
   expect(document.querySelector<HTMLInputElement>('.sheet-quantity input')!.value).toBe('1')
   finish(); await settle()
+})
+
+async function generateWeighted() {
+  await click('渠道平均报价'); await click('加权平均')
+  for (const [carrier, weight] of [['SDH', '50'], ['顺丰', '30'], ['燕文', '20']]) {
+    const checkbox = document.querySelector<HTMLInputElement>(`input[aria-label="参与平均：${carrier} · 内部渠道"]`)!
+    checkbox.click(); await settle()
+    await input(`${carrier} · 内部渠道 权重`, weight!)
+  }
+  await input('综合报价运输时效', '7-12 workingdays')
+  await click('生成平均行')
+}
+const averageRows = () => ['SDH', '顺丰', '燕文'].map((carrier, i) => ({ ...row(String(i), carrier), quote1: [5,5.25,5.3][i]!, quote2: [5.95,6.25,6.45][i]!, quote3: [7,7,7.45][i]!, quoteCustom: [7,7,7.45][i]! }))
+it('generates weighted AVG, preserves system inputs after channel edits, and blocks invalid aggregate edits in save and copy', async () => {
+  const state = mount(averageRows()); await settle()
+  await input('第 1 行第 1 列美元价格', '4.80')
+  await generateWeighted()
+  const captured = exposed.capturePrices()
+  expect(captured.averagePlans?.[0]).toMatchObject({ mode: 'weighted', systemPrices: [5.14,6.14,7.09,7.09], prices: [5.14,6.14,7.09,7.09] })
+  expect(captured.rows).toHaveLength(3); expect(captured.rows[0]!.prices[0]).toBe(4.8)
+  const id = captured.averagePlans![0]!.id
+  await input('综合报价 ' + id + ' 数量 1', '4.80')
+  expect(exposed.capturePrices().averagePlans?.[0]?.prices[0]).toBe(4.8)
+  await input('综合报价 ' + id + ' 数量 1', 'bad')
+  expect(() => exposed.capturePrices()).toThrow('综合报价')
+  await exposed.copyData(); expect(write).not.toHaveBeenCalled()
+  await input('综合报价 ' + id + ' 数量 1', '5.14')
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows[3]).toMatchObject({ number: 'AVG', prices: [5.14,6.14,7.09,7.09] })
+  state.rows[0]!.quote1 = 6; await settle()
+  expect(exposed.capturePrices().averagePlans).toEqual([])
+})
+it('restores aggregate snapshots by stable channel id and keeps the saved custom quantity baseline', async () => {
+  const rows = averageRows(); mount(rows); await settle(); await generateWeighted()
+  const saved = exposed.capturePrices()
+  const ids = (key: string) => rows.find(row => quoteSheetRowKey(row) === key)?.channelKey
+  const initialQuote = { quantities: saved.quantities, rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.prices })), averagePlans: mapAveragePlans(saved.averagePlans, ids) }
+  const system = { quantities: saved.quantities, rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.systemPrices })) }
+  app.unmount(); document.body.innerHTML = ''
+  const calculate = vi.fn(() => 999)
+  const state = mount(rows, calculate, initialQuote, true); state.initialSystemQuote = system; await settle()
+  expect(exposed.capturePrices().averagePlans?.[0]?.systemPrices).toEqual([5.14,6.14,7.09,7.09])
+  expect(calculate).not.toHaveBeenCalled()
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows[3]).toMatchObject({ number: 'AVG', prices: [5.14,6.14,7.09,7.09] })
+})
+
+it('updates an existing plan instead of duplicating it and outputs only AVG in summary mode', async () => {
+  mount(averageRows()); await settle(); await generateWeighted()
+  const id = exposed.capturePrices().averagePlans![0]!.id
+  await input('综合报价 ' + id + ' 数量 1', '4.80')
+  document.querySelector<HTMLInputElement>('input[type="radio"][value="summary"]')!.click(); await settle()
+  await click('应用修改')
+  expect(exposed.capturePrices().averagePlans![0]!.prices[0]).toBe(4.8)
+  const handle = document.querySelector('[aria-label="第 1 个价格列排序，左右键移动"]')!
+  handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await settle()
+  expect(exposed.capturePrices().averagePlans![0]).toMatchObject({ id, quantities: [2,1,3,5], prices: [6.14,4.8,7.09,7.09] })
+  document.querySelector('[aria-label="第 2 个价格列排序，左右键移动"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); await settle()
+  await input('SDH · 内部渠道 权重', '30'); await input('顺丰 · 内部渠道 权重', '50')
+  await click('应用修改')
+  expect(exposed.capturePrices().averagePlans).toHaveLength(1)
+  expect(exposed.capturePrices().averagePlans![0]).toMatchObject({ id, display: 'summary', systemPrices: [5.19,6.2,7.09,7.09] })
+  await click('预览报价单'); expect(render.mock.lastCall![0].rows).toHaveLength(1)
+  expect(render.mock.lastCall![0].rows[0]).toMatchObject({ number: 'AVG', prices: [5.19,6.2,7.09,7.09] })
+  await click('编辑报价单')
+  document.querySelector<HTMLButtonElement>('[aria-label="移除综合方案 Combined Shipping"]')!.click(); await settle()
+  expect(exposed.capturePrices().averagePlans).toEqual([])
+  expect(button('生成平均行')).toBeTruthy()
 })

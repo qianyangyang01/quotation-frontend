@@ -14,7 +14,7 @@ const inputs=ref<Record<string,string>>({})
 const key=(id:string,q:number)=>JSON.stringify([id,q])
 function reset() {
   draft.value=recordCustomerPrices(props.record); editing.value=false; error.value=''; conflict.value=false
-  inputs.value=Object.fromEntries(draft.value.rows.flatMap(row=>draft.value.quantities.map((q,i)=>[key(row.optionId,q),row.prices[i]==null?'':row.prices[i]!.toFixed(2)])))
+  inputs.value=Object.fromEntries(priceComparison(props.record, draft.value).map(line => [key(line.option.id, line.quantity), line.customer == null ? '' : line.customer.toFixed(2)]))
 }
 watch(()=>[props.record.id,props.record._version,props.record.updatedAt],()=>{filter.value='';reset()})
 reset()
@@ -24,7 +24,13 @@ const usd=quoteSheetUsd
 const signed=(v:number|null,suffix='')=>v==null?'—':`${v>0?'+':''}${v.toFixed(2)}${suffix}`
 function restore(id:string,q:number,price:number|null) { inputs.value[key(id,q)]=price==null?'':price.toFixed(2) }
 function buildDraft() {
-  return { hiddenOptionIds: draft.value.hiddenOptionIds, ...(draft.value.contact ? { contact: { ...draft.value.contact } } : {}), quantities:[...draft.value.quantities], rows:draft.value.rows.map(row=>({optionId:row.optionId,prices:draft.value.quantities.map(q=>{
+  const averagePlans = draft.value.averagePlans?.map(plan => ({ ...plan, prices: plan.quantities.map(q => {
+    const text = (inputs.value[key('average:' + plan.id, q)] ?? '').trim()
+    if (!text) return null
+    if (!/^\d+(?:\.\d{1,2})?$/.test(text) || Number(text) > 999999999.99) throw new Error('综合报价须为非负美元金额，最多两位小数')
+    return Number(text)
+  }) }))
+  return { averagePlans, hiddenOptionIds: draft.value.hiddenOptionIds, ...(draft.value.contact ? { contact: { ...draft.value.contact } } : {}), quantities:[...draft.value.quantities], rows:draft.value.rows.map(row=>({optionId:row.optionId,prices:draft.value.quantities.map(q=>{
     const text=inputs.value[key(row.optionId,q)].trim()
     if (!text) return null
     if (!/^\d+(?:\.\d{1,2})?$/.test(text) || Number(text)>999999999.99) throw new Error('客户价格须为非负美元金额，最多两位小数；留空表示未报价')
@@ -59,7 +65,7 @@ const history=computed(()=>props.record.revisions.filter(item=>item.field==='cus
 <template>
   <section class="customer-price-comparison">
     <header><div><h3>系统报价与客户报价对比</h3><p>系统原价保留；记录未改价时沿用报价单，改价后以记录最后保存为准。</p></div><b>{{ priceComparisonLabel(record) }}</b></header>
-    <div class="price-controls"><label>国家 / 区域 / 渠道 <select v-model="filter"><option value="">全部渠道</option><option v-for="option in record.quoteOptions" :key="option.id" :value="option.id">{{ option.country }} · {{ option.quoteRegion || '' }} · {{ option.carrier }} · {{ option.channel }}</option></select></label><span>USD · 同渠道、同数量整单价</span></div>
+    <div class="price-controls"><label>国家 / 区域 / 渠道 <select v-model="filter"><option value="">全部渠道</option><option v-for="option in record.quoteOptions" :key="option.id" :value="option.id">{{ option.country }} · {{ option.quoteRegion || '' }} · {{ option.carrier }} · {{ option.channel }}</option><option v-for="plan in draft.averagePlans" :key="plan.id" :value="'average:' + plan.id">综合报价 · {{ plan.provider }}</option></select></label><span>USD · 同渠道、同数量整单价</span></div>
     <p v-if="!record.customerQuote && !record.sheetQuote" class="price-note">历史记录未保存客户改价，暂按系统报价显示。</p>
     <p v-if="error" role="alert">{{ error }} <button v-if="conflict" type="button" :disabled="saving" @click="reload">重新加载记录（放弃未保存修改）</button></p>
     <div class="price-table-scroll"><table><thead><tr><th>国家 / 渠道</th><th>数量</th><th>系统报价</th><th>最终客户报价</th><th>较系统差额</th><th>调整幅度</th></tr></thead><tbody>

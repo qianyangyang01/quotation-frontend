@@ -202,10 +202,10 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     let y = tableTop
     rows.forEach((row, index) => {
       const height = heights[index]
-      context.fillStyle = (offset + index) % 2 ? '#fff2e9' : '#ffffff'
+      context.fillStyle = row.averageId ? '#fff1df' : (offset + index) % 2 ? '#fff2e9' : '#ffffff'
       context.fillRect(22, y, right - 22, height)
       const values = valuesFor(row)
-      context.fillStyle = '#111111'
+      context.fillStyle = row.averageId ? '#d96100' : '#111111'
       values.forEach((value, column) => centered(context, value, columns[column], columns[column + 1], y, height, boldCell(column)))
       y += height
       context.strokeStyle = '#d7d7d7'

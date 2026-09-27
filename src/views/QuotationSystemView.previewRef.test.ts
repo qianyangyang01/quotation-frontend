@@ -8,6 +8,7 @@ import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vu
 import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams } from '@/data/quotationWeightSnapshot'
 import { parseCommissionThreshold } from '@/services/quotationCommission'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
+import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 
 // Compile the production loop and ref binding, and mount BOTH real child components.
@@ -100,7 +101,7 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
-  const context={
+  const context={ mapAveragePlans,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
@@ -120,7 +121,7 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
     purchaseUnitPriceCny:2, domesticFreightPerUnitCny:grade==='A'?.21:0,
     weightSnapshot: buildQuotationWeightSnapshot([{sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14}],10,[1,2,3,4,8]),
-    customerQuote:{hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
+    customerQuote:{averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))
   expect(resetLocalDraft).toHaveBeenCalledOnce()

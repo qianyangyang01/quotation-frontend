@@ -75,6 +75,9 @@ final class QuotationRecordColumnFilters {
             + " on coalesce(nullif(o.value->>'id',''),'legacy-'||id::text||'-'||(o.ordinality-1))=c.value->>'optionId'"
             + " cross join lateral jsonb_array_elements("+array("snap.snapshot->'quantities'")+") with ordinality q(value,ordinality)"
             + " left join lateral (select value from jsonb_array_elements("+array("payload->'systemQuantityQuotes'->'rows'")+") r(value) where r.value->>'optionId'=c.value->>'optionId' limit 1) s on true"
-            + " left join lateral (select ordinality from jsonb_array_elements("+array("payload->'systemQuantityQuotes'->'quantities'")+") with ordinality quantities(value,ordinality) where quantities.value=q.value limit 1) sq on true) cells";
+            + " left join lateral (select ordinality from jsonb_array_elements("+array("payload->'systemQuantityQuotes'->'quantities'")+") with ordinality quantities(value,ordinality) where quantities.value=q.value limit 1) sq on true) cells"
+            + " union all select "+number("p.value->'prices'->(q.ordinality::int-1)")+" customer_price,"+number("p.value->'systemPrices'->(q.ordinality::int-1)")+" system_price"
+            + " from lateral jsonb_array_elements("+array("coalesce(nullif(payload->'customerQuote','null'::jsonb),payload->'sheetQuote')->'averagePlans'")+") p(value)"
+            + " cross join lateral jsonb_array_elements("+array("p.value->'quantities'")+") with ordinality q(value,ordinality)";
     }
 }
