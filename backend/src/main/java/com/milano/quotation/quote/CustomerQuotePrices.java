@@ -105,7 +105,9 @@ final class CustomerQuotePrices {
                     throw AppException.unprocessable("新增数量系统报价须按0.05取整");
             }
         }
-        payload.set("systemQuantityQuotes",system); payload.set("sheetQuote",customer.deepCopy()); payload.set("customerQuote",customer);
+        payload.set("systemQuantityQuotes",system);
+        if (payload.path("customerQuote").has("averagePlans")) customer.set("averagePlans", AverageQuotePlans.validate(payload, customer, payload.path("customerQuote").path("averagePlans")));
+        payload.set("sheetQuote",customer.deepCopy()); payload.set("customerQuote",customer);
     }
     static void preparePatch(ObjectNode current, ObjectNode patch) {
         for (var field : List.of("systemQuantityQuotes","sheetQuote","quoteOptions","systemQuoteUsd","systemQuoteCny","weightSnapshot"))
@@ -124,6 +126,12 @@ final class CustomerQuotePrices {
                 if (previous.isMissingNode()) previous = current.path("sheetQuote").path("hiddenOptionIds");
                 if (previous.isArray()) customer.set("hiddenOptionIds", previous.deepCopy());
             }
+            var plans = patch.path("customerQuote").path("averagePlans");
+            if (plans.isMissingNode()) {
+                plans = current.path("customerQuote").path("averagePlans");
+                if (plans.isMissingNode()) plans = current.path("sheetQuote").path("averagePlans");
+            }
+            if (!plans.isMissingNode()) customer.set("averagePlans", AverageQuotePlans.validate(current, customer, plans));
             patch.set("customerQuote", customer);
         }
     }

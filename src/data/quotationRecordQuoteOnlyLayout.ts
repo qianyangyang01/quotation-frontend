@@ -45,6 +45,7 @@ function costWeightSummary(record: QuotationRecord, unit: string) {
 /** Quotation table with the explicitly requested saved cost and weight summary. */
 export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version: 'full' | 'visible' = 'full'): { text: string; html: string } {
   const snapshot = record.customerQuote ?? record.sheetQuote
+  const plans = snapshot?.averagePlans ?? []
   const options = recordQuoteSheetVersion(record, version).quoteOptions ?? []
   const price = (option: NonNullable<QuotationRecord['quoteOptions']>[number], quantity: number) => {
     const index = snapshot?.quantities.indexOf(quantity) ?? -1
@@ -56,10 +57,10 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version:
     ...(record.systemQuantityQuotes?.quantities ?? []), ...(snapshot?.quantities ?? []),
     ...options.flatMap(option => (option.logisticsSamples ?? []).map(sample => sample.quantity)),
     ...(!record.customQuoteQuantity && options.some(option => option.quoteCustomUsd != null) ? [0] : []),
-  ])].filter(q => Number.isSafeInteger(q) && q >= 0 && options.some(option => {
+  ])].filter(q => Number.isSafeInteger(q) && q >= 0 && (plans.some(plan => plan.prices[plan.quantities.indexOf(q)] != null) || options.some(option => {
     const value = price(option, q)
     return value != null && Number.isFinite(value)
-  })).sort((a, b) => (a || Infinity) - (b || Infinity))
+  }))).sort((a, b) => (a || Infinity) - (b || Infinity))
   const unit = record.quoteMode === 'bundle' ? '套' : '件'
   const summary = costWeightSummary(record, unit)
   const sku = record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') : record.primarySku
@@ -71,13 +72,18 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version:
     ...summary.rows.map(cells => ({ kind: 'metadata' as const, cells })),
     { kind: 'header', cells: header },
   ]
-  for (const option of options) {
+  const summaryMembers = new Set(plans.filter(p => version !== 'full' && p.display === 'summary').flatMap(p => p.members.map(m => m.optionId)))
+  for (const option of options.filter(option => !summaryMembers.has(option.id))) {
     const country = quotationRecordCopyCountry(option.country, option.quoteRegion)
     const prices = quantities.map(quantity => {
       const value = price(option, quantity)
       return value == null || !Number.isFinite(value) ? '未报价' : value.toFixed(2)
     })
     rows.push({ kind: 'route', cells: [country, [option.carrier, option.channel].filter(Boolean).join('｜'), ...prices, option.eta || '未保存'] })
+  }
+  for (const plan of plans) {
+    const first = record.quoteOptions?.find(option => option.id === plan.members[0]?.optionId)
+    rows.push({kind: 'route', cells: [first ? quotationRecordCopyCountry(first.country, first.quoteRegion) : '综合方案', plan.provider + '（综合报价）', ...quantities.map(q => { const p = plan.prices[plan.quantities.indexOf(q)]; return p == null ? '未报价' : p.toFixed(2) }), plan.shippingTime || 'To be confirmed']})
   }
   if (!options.length) rows.push({ kind: 'note', cells: ['未保存国家与物流渠道报价'] })
   rows.push({ kind: 'note', cells: ['各数量价格为整单报价；未报价项不补算。'] })

@@ -45,6 +45,18 @@ final class QuotationConfirmation {
             }
             result.put(row.path("optionId").asText(), prices);
         }
+        for (var plan : snapshot.path("averagePlans")) {
+            var prices = new TreeMap<Long, String>();
+            for (int i = 0; i < plan.path("quantities").size(); i++) {
+                var price = plan.path("prices").path(i);
+                prices.put(plan.path("quantities").get(i).asLong(), price.isNumber() ? new BigDecimal(price.asText()).stripTrailingZeros().toPlainString() : "blank");
+            }
+            // Membership and weights are part of the explicitly edited business quote.
+            var members = new TreeMap<String, String>();
+            for (var member : plan.path("members")) members.put(member.path("optionId").asText(), new BigDecimal(member.path("weight").asText("0")).stripTrailingZeros().toPlainString());
+            prices.put(-1L, plan.path("mode").asText() + members);
+            result.put("average:" + plan.path("id").asText(), prices);
+        }
         return result;
     }
 }

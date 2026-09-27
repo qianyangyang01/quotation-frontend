@@ -5,6 +5,7 @@ function parseSnapshot(text: string) {
   try {
     const snapshot = normalizeCustomerPrices(JSON.parse(text))
     if (!snapshot || new Set(snapshot.rows.map(row => row.optionId)).size !== snapshot.rows.length) return undefined
+    for (const plan of snapshot.averagePlans ?? []) snapshot.rows.push({ optionId: 'average:' + plan.id, prices: snapshot.quantities.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null) })
     return snapshot
   } catch { return undefined }
 }
@@ -29,8 +30,10 @@ export function customerPriceRevision(record: QuotationRecord, beforeText: strin
     })
     if (!changes.length) return []
     const option = record.quoteOptions?.find(item => item.id === optionId)
-    const route = option ? [option.country, option.quoteRegion, option.carrier, option.channel].filter(Boolean).join(' · ') : `历史渠道 ${ids.indexOf(optionId) + 1}（当前记录已无渠道名称）`
+    const plan = [...(after.averagePlans ?? []), ...(before.averagePlans ?? [])].find(p => 'average:' + p.id === optionId)
+    const route = plan ? `综合报价 · ${plan.provider}` : option ? [option.country, option.quoteRegion, option.carrier, option.channel].filter(Boolean).join(' · ') : `历史渠道 ${ids.indexOf(optionId) + 1}（当前记录已无渠道名称）`
     return [{ optionId, route, changes }]
   })
-  return { groups, note: groups.length ? '' : '本次未改变客户报价金额（仅调整排列或保存格式）。' }
+  const planSettings = (s: typeof before) => JSON.stringify(s.averagePlans?.map(p => ({ id: p.id, mode: p.mode, display: p.display, provider: p.provider, shippingTime: p.shippingTime, members: p.members.map(m => [m.optionId, m.weight]).sort() })) ?? [])
+  return { groups, note: planSettings(before) !== planSettings(after) ? '本次同时新增、移除或调整了综合报价方案、参与渠道、权重或展示设置。' : groups.length ? '' : '本次未改变客户报价金额（仅调整排列或保存格式）。' }
 }

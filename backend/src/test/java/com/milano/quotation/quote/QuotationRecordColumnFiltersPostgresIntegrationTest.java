@@ -105,4 +105,23 @@ class QuotationRecordColumnFiltersPostgresIntegrationTest {
         assertThrows(RuntimeException.class,()->query.search("ME",filters("","","","bad",""),0,10));
         assertThrows(RuntimeException.class,()->query.search("ME",filters("","","","","bad"),0,10));
     }
+
+    @Test void averagePriceDifferencesParticipateInFiltersSummaryAndPagedExport() {
+        for (int i=0;i<105;i++) {
+            var row=record("AVG-"+i,10);
+            var plan=((ObjectNode)row.path("customerQuote")).putArray("averagePlans").addObject();
+            plan.putArray("quantities").add(1); plan.putArray("systemPrices").add(5.14); plan.putArray("prices").add(4.8);
+            save(row,"ME");
+        }
+        for(var name: List.of("HIGH","MISSING","EQUAL")) {
+            var row=record(name,10); var plan=((ObjectNode)row.path("customerQuote")).putArray("averagePlans").addObject();
+            plan.putArray("quantities").add(1); plan.putArray("systemPrices").add(5.14);
+            var prices=plan.putArray("prices");if(name.equals("MISSING"))prices.addNull();else prices.add(name.equals("HIGH")?6:5.14);
+            save(row,"ME");
+        }
+        var first=query.search("ME",filters("","","","","lower"),0,100);
+        var second=query.search("ME",filters("","","","","lower"),1,100);
+        assertEquals(105,first.total());assertEquals(100,first.items().size());assertEquals(5,second.items().size());
+        assertEquals(Set.of("HIGH"),names("higher"));assertEquals(Set.of("MISSING"),names("missing"));assertEquals(Set.of("EQUAL"),names("equal"));
+    }
 }

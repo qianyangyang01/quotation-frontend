@@ -1,9 +1,10 @@
 import Decimal from 'decimal.js'
+import { cloneAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 
 export type QuoteSheetContact = { agent: string; whatsapp: string }
-export type CustomerPriceSnapshot = { hiddenOptionIds?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
-export type CapturedSheetPrices = { hiddenRowKeys?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
+export type CustomerPriceSnapshot = { averagePlans?: AveragePlan[]; hiddenOptionIds?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
+export type CapturedSheetPrices = { averagePlans?: AveragePlan[]; hiddenRowKeys?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
 
 export function recordHiddenOptionIds(record: QuotationRecord): string[] {
   return [...(record.customerQuote?.hiddenOptionIds ?? record.sheetQuote?.hiddenOptionIds ?? [])]
@@ -36,7 +37,7 @@ export function savedSystemPrice(record: QuotationRecord, option: QuotationRecor
 }
 export function recordCustomerPrices(record: QuotationRecord): CustomerPriceSnapshot {
   const saved = record.customerQuote ?? record.sheetQuote
-  if (saved) return { hiddenOptionIds: recordHiddenOptionIds(record), ...(saved.contact ? { contact: { ...saved.contact } } : {}), quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  if (saved) return { ...(saved.averagePlans ? { averagePlans: cloneAveragePlans(saved.averagePlans) } : {}), hiddenOptionIds: recordHiddenOptionIds(record), ...(saved.contact ? { contact: { ...saved.contact } } : {}), quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
   const quantities = [...new Set([1,2,3,record.customQuoteQuantity || 0])]
   return { quantities, rows: (record.quoteOptions || []).map(option => ({ optionId: option.id, prices: quantities.map(q => savedSystemPrice(record, option, q)) })) }
 }
@@ -46,12 +47,13 @@ export function normalizeCustomerPrices(value: unknown): CustomerPriceSnapshot |
   if (!Array.isArray(v.quantities) || !Array.isArray(v.rows) || !v.quantities.length || v.quantities.length > 10 ||
     v.quantities.some(q=>!Number.isSafeInteger(q)||q<0) || new Set(v.quantities).size !== v.quantities.length ||
     v.rows.some(row=>!row || typeof row.optionId!=='string' || !Array.isArray(row.prices) || row.prices.length!==v.quantities.length || row.prices.some(p=>p!==null && (typeof p!=='number'||!Number.isFinite(p)||p<0)))) return undefined
+  if (v.averagePlans !== undefined && !validAveragePlans(v.averagePlans)) return undefined
   const contact = normalizeQuoteSheetContact(v.contact)
   const hiddenOptionIds = Array.isArray(v.hiddenOptionIds) ? [...new Set(v.hiddenOptionIds.filter(id => typeof id === 'string' && v.rows.some(row => row.optionId === id)))] : undefined
-  return { ...(hiddenOptionIds ? { hiddenOptionIds } : {}), ...(contact ? { contact } : {}), quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  return { ...(Array.isArray(v.averagePlans) ? { averagePlans: cloneAveragePlans(v.averagePlans) } : {}), ...(hiddenOptionIds ? { hiddenOptionIds } : {}), ...(contact ? { contact } : {}), quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
 }
 export function priceComparison(record: QuotationRecord, snapshot = recordCustomerPrices(record)) {
-  return snapshot.rows.flatMap(row => {
+  const routeLines = snapshot.rows.flatMap(row => {
     const option = record.quoteOptions?.find(option=>option.id===row.optionId)
     if (!option) return []
     return snapshot.quantities.map((quantity,index) => {
@@ -64,6 +66,20 @@ export function priceComparison(record: QuotationRecord, snapshot = recordCustom
       return { option, quantity, system, sheet, customer, difference, percent, changed: system!==customer, recordEdited: sheet!==customer }
     })
   })
+  const averageLines = (snapshot.averagePlans ?? []).flatMap(plan => {
+    const first = record.quoteOptions?.find(option => option.id === plan.members[0]?.optionId)
+    if (!first) return []
+    const option = { ...first, id: 'average:' + plan.id, carrier: plan.provider, channel: '综合报价', rule: plan.mode === 'equal' ? '普通平均' : '加权平均' }
+    const initial = record.sheetQuote?.averagePlans?.find(p => p.id === plan.id)
+    return plan.quantities.map((quantity, index) => {
+      const system = plan.systemPrices[index] ?? null, customer = plan.prices[index] ?? null
+      const initialIndex = initial?.quantities.indexOf(quantity) ?? -1
+      const sheet = initial && initialIndex >= 0 ? initial.prices[initialIndex] ?? null : system
+      const difference = system == null || customer == null ? null : new Decimal(customer).minus(system).toDecimalPlaces(2).toNumber()
+      return { option, quantity, system, sheet, customer, difference, percent: difference == null || !system ? null : new Decimal(difference).div(system).mul(100).toDecimalPlaces(2).toNumber(), changed: system !== customer, recordEdited: sheet !== customer }
+    })
+  })
+  return [...routeLines, ...averageLines]
 }
 export function priceComparisonLabel(record: QuotationRecord) {
   const lines=priceComparison(record), changed=lines.filter(line=>line.changed && line.system!=null && line.customer!=null).length
