@@ -97,6 +97,14 @@ const reviewFiltered = computed(() => Boolean(filterReviewStatus.value))
 const filterCountry = ref('')
 const filterCategory = ref('')
 const startDate=ref('');const endDate=ref('');const page=ref(0);const pageSize=ref(10)
+const datePresets = [{ days: 1, label: '今天' }, { days: 7, label: '近 7 天' }, { days: 30, label: '近 30 天' }]
+const activeDatePreset = computed(() => {
+  if (!startDate.value && !endDate.value) return 'all'
+  return datePresets.find(({ days }) => {
+    const range = recentRecordDates(days)
+    return startDate.value === range.startDate && endDate.value === range.endDate
+  })?.days ?? 'custom'
+})
 const total=ref(0);const totalPages=ref(0);const loading=ref(false);const loadError=ref('');const exporting=ref(false)
 const summary=ref<{pending:number;won:number;lost:number;total:number;processed?:number}>({pending:0,won:0,lost:0,total:0});const countries=ref<string[]>([])
 const filters=computed(()=>({lifecycle:lifecycle.value,product:filterProduct.value.trim(),customer:filterCustomer.value.trim(),channel:filterChannel.value.trim(),optionScale:filterOptionScale.value,priceDifference:filterPriceDifference.value,status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
@@ -367,16 +375,20 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
-        <button @click="recent(1)">今天</button><button @click="recent(7)">近 7 天</button><button @click="recent(30)">近 30 天</button><button @click="startDate='';endDate=''">全部时间</button>
+        <button v-for="preset in datePresets" :key="preset.days" type="button" :class="{ active: activeDatePreset === preset.days }" :aria-pressed="activeDatePreset === preset.days" @click="recent(preset.days)">{{ preset.label }}</button>
+        <button type="button" :class="{ active: activeDatePreset === 'all' }" :aria-pressed="activeDatePreset === 'all'" @click="startDate='';endDate=''">全部时间</button>
         <button type="button" class="reset-record-filters" @click="resetFilters">重置</button>
         <div class="record-export-actions">
-        <button :disabled="loading || exporting || !!dateError || !!loadError || !total" @click="exportRecords">{{ exporting ? '正在导出…' : '导出筛选结果' }}</button>
+        <button :aria-busy="exporting" :disabled="loading || exporting || !!dateError || !!loadError || !total" @click="exportRecords"><i v-if="exporting" class="record-feedback-spinner" aria-hidden="true"></i>{{ exporting ? '正在导出…' : '导出筛选结果' }}</button>
         </div>
         <small>按北京时间的创建日期筛选，包含结束日期全天</small>
       </section>
       <p v-if="dateError" role="alert">{{ dateError }}</p>
       <p v-if="loadError" role="alert">{{ loadError }} <button @click="refresh()">重试</button></p>
-      <p v-if="loading" role="status">正在加载报价记录…</p>
+      <div class="record-query-feedback" :class="{ 'is-loading': loading }" role="status" aria-live="polite" aria-atomic="true">
+        <template v-if="loading"><i class="record-feedback-spinner" aria-hidden="true"></i>正在加载报价记录…</template>
+        <template v-else-if="!loadError && !dateError"><span aria-hidden="true">✓</span>当前筛选共 {{ total }} 条报价记录</template>
+      </div>
       <p v-if="reviewSync.error.value" role="alert">{{ reviewSync.error.value }}</p>
       <section v-if="canManageLifecycle" class="lifecycle-toolbar" aria-label="报价记录批量操作">
         <label><input type="checkbox" aria-label="全选本页可操作记录" :checked="allPageChecked" :indeterminate="checkedIds.length>0 && !allPageChecked" :disabled="loading || lifecycleBusy || !selectableRows.length" @change="togglePage">全选本页</label><span>已选 {{ checkedIds.length }} 条</span>
@@ -603,6 +615,15 @@ main{width:min(1680px,calc(100% - 48px))}
 .record-filter-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}
 .review-groups .review-mine{display:flex;align-items:center;gap:6px;margin-left:8px;font-size:14px;color:#53616c;white-space:nowrap}
 .review-groups .review-mine input{width:16px;height:16px;accent-color:#ed990f}
+.record-date-filters button.active{border-color:#eda636;background:#fff2db;color:#854b00;box-shadow:inset 0 -2px #ed990f;font-weight:600}
+.record-date-filters>button:hover{border-color:#ed990f;background:#fff8eb}
+.record-query-feedback{display:flex;align-items:center;gap:8px;min-height:32px;margin:0 0 8px;color:#63717d;font-size:13px}
+.record-query-feedback>span{color:#16834e}
+.record-query-feedback.is-loading{color:#995700}
+.record-feedback-spinner{display:inline-block;flex-shrink:0;width:14px;height:14px;box-sizing:border-box;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:record-feedback-spin .7s linear infinite;vertical-align:-2px}
+.record-export-actions .record-feedback-spinner{margin-right:7px}
+@keyframes record-feedback-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.record-feedback-spinner{animation:none}}
 </style>
 
 <style scoped>

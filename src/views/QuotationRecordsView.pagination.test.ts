@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import View from './QuotationRecordsView.vue'
 import { normalizeQuotationRecord } from '@/data/quotationRecords'
-const query=vi.hoisted(()=>({loadRecordPage:vi.fn(),loadFilteredRecords:vi.fn(),loadRecord:vi.fn(),recentRecordDates:()=>({startDate:'2026-09-04',endDate:'2026-09-10'})}))
+const query=vi.hoisted(()=>({loadRecordPage:vi.fn(),loadFilteredRecords:vi.fn(),loadRecord:vi.fn(),recentRecordDates:(days:number)=>({startDate:days===1?'2026-09-10':days===30?'2026-08-12':'2026-09-04',endDate:'2026-09-10'})}))
 vi.mock('@/data/quotationRecordQuery',()=>query)
 vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([])}))
 vi.mock('vue-router',()=>({useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined) }), useRoute:()=>({query:{}})}))
@@ -13,6 +13,26 @@ const flush=async()=>{await nextTick();await Promise.resolve();await nextTick()}
 const button=(text:string)=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===text)!
 async function mount(scope='mine'){const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.useRealTimers();vi.resetAllMocks()})
+it('keeps the selected date visible during a pending query and clears it for a custom range', async () => {
+  vi.useFakeTimers(); query.loadRecordPage.mockResolvedValue(result(35)); await mount()
+  const selected = () => document.querySelector('.record-date-filters [aria-pressed="true"]')?.textContent
+  expect(selected()).toBe('全部时间')
+  let resolveQuery!: (value: ReturnType<typeof result>) => void
+  query.loadRecordPage.mockReturnValueOnce(new Promise(resolve => { resolveQuery = resolve }))
+  button('近 7 天').click(); await flush()
+  expect(selected()).toBe('近 7 天')
+  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('正在加载')
+  await vi.advanceTimersByTimeAsync(250); await flush()
+  expect(document.querySelector('.record-feedback-spinner')).not.toBeNull()
+  resolveQuery(result(2)); await flush()
+  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('当前筛选共 2 条')
+  expect(document.querySelector('.record-feedback-spinner')).toBeNull()
+  const start = document.querySelector<HTMLInputElement>('[aria-label="开始日期"]')!
+  start.value = '2026-09-02'; start.dispatchEvent(new Event('input')); await flush()
+  expect(selected()).toBeUndefined()
+  button('重置').click(); await flush()
+  expect(selected()).toBe('全部时间')
+})
 it.each(['mine', 'company'])('combines column filters, resets pagination and exports the same criteria for %s', async scope => {
   vi.useFakeTimers(); query.loadRecordPage.mockResolvedValue(result(35)); query.loadFilteredRecords.mockResolvedValue([])
   const download=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{})

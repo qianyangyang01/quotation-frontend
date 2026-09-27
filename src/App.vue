@@ -5,6 +5,12 @@ import AppTopbar from '@/components/AppTopbar.vue'
 import PageLoadNotice from '@/components/PageLoadNotice.vue'
 import { authState, isAuthenticated } from '@/data/authStore'
 import { hasRequestAccountChanged } from '@/services/http'
+import { installButtonFeedback } from '@/services/buttonFeedback'
+import '@/styles/buttonFeedback.css'
+
+let removeButtonFeedback: (() => void) | undefined
+onMounted(() => { removeButtonFeedback = installButtonFeedback() })
+onUnmounted(() => removeButtonFeedback?.())
 
 const accountChanged = ref(hasRequestAccountChanged())
 const showAccountChange = () => { accountChanged.value = true }
