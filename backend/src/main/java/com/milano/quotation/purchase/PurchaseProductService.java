@@ -119,6 +119,13 @@ public class PurchaseProductService {
         for (var sku : payload.path("primarySku").asText("").split("[,，、+\\s]+")) addReferencedSku(skus, sku);
         payload.path("bundleItems").forEach(item -> addReferencedSku(skus, item.path("sku").asText("")));
         var rows = products.findAllLockedBySkuIn(skus);
+        var pendingInvoice = rows.stream().filter(row -> {
+            var product = row.payload;
+            var invoice = product.path("invoiceType").asText("").trim();
+            if (invoice.isEmpty()) invoice = product.path("taxDifference").asText("").trim();
+            return "legacy_2026".equals(product.path("dataSource").asText()) && "待确认".equals(invoice);
+        }).map(row -> row.sku).toList();
+        if (!pendingInvoice.isEmpty()) throw AppException.unprocessable("采购票点为待确认，不可报价。需要采购在系统里确认并修改该 SKU 的票点、票类型后，才可以报价：" + String.join("、", pendingInvoice));
         var valid = rows.stream().filter(row -> row.payload.path("taxPoint").isNumber())
                 .map(row -> row.sku).collect(java.util.stream.Collectors.toSet());
         var missing = skus.stream().filter(sku -> !valid.contains(sku)).toList();

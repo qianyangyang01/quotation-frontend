@@ -65,6 +65,23 @@ class PurchaseProductServiceTest {
             assertThrows(AppException.class, () -> service.assertQuotationVersions(quote));
         }
     }
+    @Test void legacyPendingInvoiceBlocksNewQuotesAndBundlesUntilPurchaseConfirmsType() {
+        var pending = PurchaseProduct.create("OLD", pasted("OLD").put("dataSource", "legacy_2026").put("taxPoint", 0).put("invoiceType", "待确认"), "ready", true, null);
+        var normal = PurchaseProduct.create("NEW", pasted("NEW").put("taxPoint", 0).put("invoiceType", "待确认"), "ready", true, null);
+        when(products.findAllLockedBySkuIn(anyCollection())).thenReturn(List.of(pending, normal));
+        var quote = JsonNodeFactory.instance.objectNode().put("primarySku", "NEW");
+        quote.putArray("bundleItems").addObject().put("sku", "OLD");
+        var error = assertThrows(AppException.class, () -> service.assertQuotationTaxPoints(quote));
+        assertEquals(422, error.status().value()); assertTrue(error.getMessage().contains("采购票点为待确认")); assertTrue(error.getMessage().contains("OLD"));
+        var payload = (tools.jackson.databind.node.ObjectNode) pending.payload;
+        payload.put("taxPoint", .08);
+        assertThrows(AppException.class, () -> service.assertQuotationTaxPoints(quote));
+        payload.put("invoiceType", "不开票").put("taxPoint", 0);
+        assertDoesNotThrow(() -> service.assertQuotationTaxPoints(quote));
+        payload.put("invoiceType", "").put("taxDifference", "待确认");
+        assertThrows(AppException.class, () -> service.assertQuotationTaxPoints(quote));
+        verify(products, never()).saveAndFlush(any());
+    }
     @Test void taxPointIsRequiredEvenWithoutClientVersionsAndAcrossBundleItems() {
         var zero = PurchaseProduct.create("ZERO", pasted("ZERO").put("taxPoint", 0), "ready", true, null);
         var missing = PurchaseProduct.create("MISSING", pasted("MISSING").putNull("taxPoint").put("dataSource", "legacy_2026").put("taxIncludedPriceCny", 20), "ready", true, null);
