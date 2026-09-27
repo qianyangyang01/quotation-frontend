@@ -1,4 +1,5 @@
 import { api } from '@/services/http'
+import { decimal } from '@/services/quotationDecimal'
 
 export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPriceCny: number; source: string }
 export type PurchaseStockStatus = '有货' | '无货' | '待确认' | '定制款' | ''
@@ -102,7 +103,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const priceTiers = buildPriceTiers(base)
   return {
     ...base, catalogState, quoteReady, status, priceTiers, quotationBlockingReasons,
-    name: category || `商品 ${sku}`, image: productImage, weightKg: weightG == null ? null : weightG / 1000, colorSku: color,
+    name: category || `商品 ${sku}`, image: productImage, weightKg: weightG == null ? null : decimal(weightG).div(1000).toNumber(), colorSku: color,
     material: String(input.material || '').trim(), marks: '', shippingMarks: [], rawTierPrice: priceTiers.map(item => `${item.minQty}${item.maxQty == null ? '+' : `-${item.maxQty}`}件 ¥${item.unitPriceCny}`).join('；'),
     l6Price: '', freightTrial: '', invoiceInfo: '', taxIncludedPrice: base.taxIncludedPriceCny == null ? '' : String(base.taxIncludedPriceCny),
     taxDifference: base.invoiceType, packagingInfo: base.factoryInfo,

@@ -87,7 +87,7 @@ public class PurchaseImportRowMapper {
         o.put("catalogState",ready?"ready":"pending_template");o.put("quoteReady",ready);o.put("status",ready?"资料完整":legacy2026?"关键信息待补全（不可报价）":"模板待补全（不可报价）");
         var blockerArray=o.putArray("quotationBlockingReasons");blockers.forEach(blockerArray::add);if(legacy2026)for(var blocker:blockers)warnings.add("缺少"+blocker+"，请采购补全后再报价");
         o.put("name",o.path("category").asText().isBlank()?"商品 "+o.path("sku").asText():o.path("category").asText());
-        var weight=o.get("weightG");if(weight==null||weight.isNull()){o.putNull("weightKg");o.put("weightDescription","");}else{o.put("weightKg",weight.asDouble()/1000);o.put("weightDescription",weight.asText());}
+        var weight=o.get("weightG");if(weight==null||weight.isNull()){o.putNull("weightKg");o.put("weightDescription","");}else{o.put("weightKg",new java.math.BigDecimal(weight.asText()).movePointLeft(3));o.put("weightDescription",weight.asText());}
         o.put("colorSku",o.path("color").asText());for(var f:List.of("marks","rawTierPrice","l6Price","freightTrial","invoiceInfo","otherNotes","more"))o.put(f,"");o.putArray("shippingMarks");
         o.put("taxIncludedPrice",o.path("taxIncludedPriceCny").isNumber()?o.path("taxIncludedPriceCny").asText():"");o.put("taxDifference",o.path("invoiceType").asText());o.put("packagingInfo",o.path("factoryInfo").asText());
         var links=o.putArray("sourceLinks");for(var k:List.of("sourceLink1","sourceLink2","sourceLink3","similarSource"))links.add(o.path(k).asText());

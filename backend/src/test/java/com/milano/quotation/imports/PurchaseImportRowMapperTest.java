@@ -6,6 +6,12 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PurchaseImportRowMapperTest {
+    @Test void convertsFractionalGramsToExactDecimalKilograms() {
+        var v=values("FL2600257");v[8]="39.7";
+        var payload=mapper.map(2,v).payload();
+        assertEquals("39.7",payload.path("weightG").asText());
+        assertEquals("0.0397",payload.path("weightKg").asText());
+    }
     private final PurchaseImportRowMapper mapper=new PurchaseImportRowMapper(JsonMapper.builder().build());
     @Test void acceptsCompleteBusinessSkuAsReady(){var row=mapper.map(2,values("MLN-P-000001"));assertTrue(row.errors().isEmpty());assertTrue(row.payload().path("quoteReady").asBoolean());assertEquals("ready",row.payload().path("catalogState").asText());}
     @Test void acceptsMissingOptionalDimensionsAsReady(){var v=values("MLN-P-000002");v[9]="";v[10]="";v[11]="";var row=mapper.map(2,v);assertTrue(row.errors().isEmpty());assertTrue(row.payload().path("quoteReady").asBoolean());assertTrue(row.payload().path("lengthCm").isNull());}

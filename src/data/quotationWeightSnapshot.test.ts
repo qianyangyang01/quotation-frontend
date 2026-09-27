@@ -3,6 +3,32 @@ import { buildQuotationWeightSnapshot, normalizeQuotationWeightSnapshot, parseSp
 import { bundleGoodsWeight, singleActualWeight, type SingleWeightInput } from '@/services/quotationCalculator'
 import { normalizeQuotationRecord } from './quotationRecords'
 import { quotationRecordReconciliationTsv } from './quotationRecordReconciliation'
+import { normalizePurchaseRecord } from './purchaseStore'
+
+it('quotes fractional gram procurement weights without importing the old kg floating point tail', () => {
+  const raw = { sku:'FL2600257', weightG:39.7, weightKg:0.039700000000000006 }
+  const product = normalizePurchaseRecord(raw)
+  expect(product.weightKg).toBe(0.0397)
+  const snapshot = buildQuotationWeightSnapshot([{sku:product.sku, quantityPerSet:1, baseWeightKg:product.weightKg!}], 0, [1,2,3,7])
+  expect(snapshot.quantities.map(row=>row.weightKg)).toEqual([0.0407,0.0814,0.1221,0.2849])
+  for (const row of snapshot.quantities) {
+    expect(singleActualWeight({...single,netWeight:product.weightKg!}, row.quantity)).toBe(row.weightKg)
+  }
+  expect(raw.weightKg).toBe(0.039700000000000006)
+})
+
+it('keeps fractional gram bundle weights and one-time special packaging consistent', () => {
+  const items = [
+    {sku:'FL2600257',quantityPerSet:2,baseWeightKg:normalizePurchaseRecord({weightG:39.7}).weightKg!},
+    {sku:'SECOND',quantityPerSet:1,baseWeightKg:normalizePurchaseRecord({weightG:50.001}).weightKg!},
+  ]
+  const snapshot = buildQuotationWeightSnapshot(items, 13, [1,2,3])
+  expect(snapshot.quantities.map(row=>row.weightKg)).toEqual([0.146401,0.279802,0.413203])
+  expect(snapshot.quantities.map(row=>row.standardPackagingWeightKg)).toEqual([0.004,0.008,0.012])
+  for (const row of snapshot.quantities) {
+    expect(bundleGoodsWeight(items.map(item=>({...item,weightKg:item.baseWeightKg,customWeightKg:null,purchaseUnitPrice:0,purchaseFreightPerUnit:0})),row.quantity,.013)).toBe(row.weightKg)
+  }
+})
 
 const single = { quantity: 1, netWeight: .14, weightSource: 'purchase', manualWeight: 0 } as SingleWeightInput
 it.each(['single', 'bundle'])('adds special packaging once per shipment and preserves the %s saved basis', mode => {

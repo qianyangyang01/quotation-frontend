@@ -7,6 +7,32 @@ import tools.jackson.databind.node.ObjectNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PackagingWeightTest {
+    static ObjectNode fractionalGramBrowserSnapshot() {
+        // Serialized browser arithmetic for the existing 39.7g procurement value.
+        return (ObjectNode) JsonMapper.builder().build().readTree("""
+          {"weightSnapshot":{"schemaVersion":1,"rule":"per-item-50g-1g-v1","specialPackagingScope":"per-shipment","specialPackagingGrams":0,
+            "items":[{"sku":"FL2600257","quantityPerSet":1,"baseWeightKg":0.039700000000000006,"standardPackagingWeightKg":0.001}],
+            "quantities":[
+              {"quantity":1,"baseWeightKg":0.039700000000000006,"standardPackagingWeightKg":0.001,"specialPackagingWeightKg":0,"weightKg":0.04070000000000001},
+              {"quantity":2,"baseWeightKg":0.07940000000000001,"standardPackagingWeightKg":0.002,"specialPackagingWeightKg":0,"weightKg":0.08140000000000001},
+              {"quantity":3,"baseWeightKg":0.11910000000000001,"standardPackagingWeightKg":0.003,"specialPackagingWeightKg":0,"weightKg":0.12210000000000001}]},
+           "quoteOptions":[{"logisticsInput":{"quantity":1,"baseWeightKg":0.039700000000000006,"standardPackagingWeightKg":0.001,"specialPackagingWeightKg":0,"packagingWeightKg":0.001,"weightKg":0.04070000000000001},
+             "logisticsSamples":[{"quantity":1,"input":{"weightKg":0.04070000000000001}},{"quantity":2,"input":{"weightKg":0.08140000000000001}},{"quantity":3,"input":{"weightKg":0.12210000000000002}}]}]}
+          """);
+    }
+    @Test void acceptsOnlyFloatingPointTailsWithoutRewritingTheSubmittedSnapshot() {
+        var input=fractionalGramBrowserSnapshot();var before=input.deepCopy();
+        assertDoesNotThrow(()->PackagingWeight.record(input));
+        assertEquals(before,input);
+    }
+    @Test void stillRejectsWeightDifferencesBeyondNumericalRoundoff() {
+        var input=fractionalGramBrowserSnapshot();
+        ((ObjectNode)input.path("weightSnapshot").path("quantities").get(0)).put("weightKg",0.0407000001);
+        assertThrows(AppException.class,()->PackagingWeight.record(input));
+        var wrongSample=fractionalGramBrowserSnapshot();
+        ((ObjectNode)wrongSample.path("quoteOptions").get(0).path("logisticsSamples").get(2).path("input")).put("weightKg",0.122101);
+        assertThrows(AppException.class,()->PackagingWeight.record(wrongSample));
+    }
     static ObjectNode valid() {
         return (ObjectNode) JsonMapper.builder().build().readTree("""
           {"customerName":"包材验收","quoteMode":"single","primarySku":"A","productCategory":"日用品","logisticsAttribute":"普货","customerGrade":"A级客户","monthlySalesEstimate":"10",

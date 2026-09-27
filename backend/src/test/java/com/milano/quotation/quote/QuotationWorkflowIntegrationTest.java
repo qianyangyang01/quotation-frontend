@@ -37,6 +37,30 @@ class QuotationWorkflowIntegrationTest {
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
+    @Test void savesFractionalGramSnapshotIdempotentlyWithoutChangingEarlierQuote() throws Exception {
+        var session=authenticatedSession();
+        var earlier=PackagingWeightTest.valid();
+        var first=mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","weight-earlier")
+                .contentType("application/json").content(earlier.toString())).andExpect(status().isOk()).andReturn();
+        var previous=mapper.readTree(first.getResponse().getContentAsByteArray()).path("data");
+        var input=PackagingWeightTest.valid();
+        var fractional=PackagingWeightTest.fractionalGramBrowserSnapshot();
+        input.set("weightSnapshot",fractional.path("weightSnapshot"));
+        input.put("primarySku","FL2600257");
+        var option=(tools.jackson.databind.node.ObjectNode)input.path("quoteOptions").get(0);
+        option.set("logisticsInput",fractional.path("quoteOptions").get(0).path("logisticsInput"));
+        option.set("logisticsSamples",fractional.path("quoteOptions").get(0).path("logisticsSamples"));
+        var saved=mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","weight-fractional")
+                .contentType("application/json").content(input.toString())).andExpect(status().isOk()).andReturn();
+        var id=mapper.readTree(saved.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+        mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","weight-fractional")
+                .contentType("application/json").content(input.toString())).andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(id));
+        var read=mvc.perform(get("/api/v1/quotations/{id}",id).session(session)).andExpect(status().isOk()).andReturn();
+        org.junit.jupiter.api.Assertions.assertEquals(input.path("weightSnapshot"),mapper.readTree(read.getResponse().getContentAsByteArray()).path("data").path("weightSnapshot"));
+        var oldRead=mvc.perform(get("/api/v1/quotations/{id}",previous.path("id").asText()).session(session)).andExpect(status().isOk()).andReturn();
+        org.junit.jupiter.api.Assertions.assertEquals(previous,mapper.readTree(oldRead.getResponse().getContentAsByteArray()).path("data"));
+    }
+
     @Test void channelPolicyUpdatesRequireFinanceCsrfAndFreshVersionAndRejectMalformedReplacement() throws Exception {
         var session=authenticatedSession();
         var body="""

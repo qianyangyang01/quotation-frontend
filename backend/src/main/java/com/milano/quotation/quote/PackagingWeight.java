@@ -9,6 +9,10 @@ import java.util.HashMap;
 
 /** Validate the new snapshot without reinterpreting historical records that lack it. */
 final class PackagingWeight {
+    // Browser Number serialization can round decimal arithmetic on older kg values.
+    // One billionth of a gram absorbs that tail, not a measurable weight change.
+    // Compare only: never round or rewrite submitted or historical snapshots.
+    private static final BigDecimal MAX_ROUNDOFF_KG = new BigDecimal("0.000000000001");
     private PackagingWeight() {}
     /** Called only for a new submission, after successful idempotent retries are returned. */
     static void requireCurrentCalculatedQuote(ObjectNode input) {
@@ -42,7 +46,7 @@ final class PackagingWeight {
         return value;
     }
     private static void equal(JsonNode n, BigDecimal expected) {
-        if (number(n).compareTo(expected) != 0) throw AppException.unprocessable("包材重量快照与计算依据不一致，请重新报价");
+        if (number(n).subtract(expected).abs().compareTo(MAX_ROUNDOFF_KG) > 0) throw AppException.unprocessable("包材重量快照与计算依据不一致，请重新报价");
     }
     static void record(ObjectNode input) {
         if (!input.has("weightSnapshot")) return; // Old clients and records remain identifiable by the missing snapshot.
