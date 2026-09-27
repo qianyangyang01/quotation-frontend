@@ -25,6 +25,7 @@ import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKA
 import { draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { applyCommissionThreshold, parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { validateQuotationConditions } from '@/services/quotationValidation'
+import { pendingPurchaseInvoiceSkus, purchaseInvoicePending, PURCHASE_INVOICE_PENDING_MESSAGE } from '@/services/purchaseInvoiceConfirmation'
 import { logisticsRebuilding, buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules, loadPublishedLogisticsRuleCatalog } from '@/data/publishedLogisticsRepository'
 import { loadQuotationWorkspaceConfiguration } from '@/services/quotationWorkspaceBootstrap'
 import { loadQuotationReadiness, type QuotationReadiness } from '@/services/quotationReadiness'
@@ -317,7 +318,18 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
 const bundleItems = ref<BundleQuoteItem[]>([bundleItemFromRecord()])
 const missingTaxPointSkus = computed(() => missingPurchaseTaxPointSkus(
   quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || ''], purchaseRecords.value))
-const purchaseTaxBlockReason = computed(() => !missingTaxPointSkus.value.length ? '' : quoteMode.value === 'bundle'
+const pendingInvoiceSkus = computed(() => pendingPurchaseInvoiceSkus(
+  quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || ''], purchaseRecords.value))
+const purchaseInvoiceNotice = ref<string[]>([])
+function blockPendingPurchaseInvoice(record: PurchaseProductRecord) {
+  if (!purchaseInvoicePending(record)) return false
+  purchaseQueryError.value = `${record.sku}：${PURCHASE_INVOICE_PENDING_MESSAGE}`
+  purchaseInvoiceNotice.value = [...new Set([...purchaseInvoiceNotice.value, record.sku])]
+  return true
+}
+const purchaseTaxBlockReason = computed(() => pendingInvoiceSkus.value.length
+  ? `${PURCHASE_INVOICE_PENDING_MESSAGE} SKU：${pendingInvoiceSkus.value.join('、')}`
+  : !missingTaxPointSkus.value.length ? '' : quoteMode.value === 'bundle'
   ? `组合商品采购票点为空，请补齐后报价：${missingTaxPointSkus.value.join('、')}`
   : '该商品采购票点为空，请补齐后报价')
 function normalizedBundleSets(value: number) { return normalizedQuoteQuantity(value) }
@@ -448,6 +460,7 @@ async function queryProduct() {
     toast(purchaseQueryError.value)
     return
   } finally { if (request === productQueryGeneration) productQueryBusy.value = false }
+  if (candidates.some(blockPendingPurchaseInvoice)) return
   const matches = candidates.filter(item => item.quoteReady)
   if (!matches.length && candidates.length) { purchaseQueryError.value = purchaseQuoteBlockingMessage(candidates[0]); toast(purchaseQueryError.value); return }
   if (!matches.length) { toast(`未找到可报价 SKU：${skuSearch.value}，请确认采购资料已完整保存`); return }
@@ -487,6 +500,7 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   if (bundleQueryGenerations.get(item) !== generation || !bundleItems.value.includes(item) || item.sku.trim().toUpperCase().replace(/\s+/g, '') !== normalizedSku) return false
   rememberPurchase(record)
   if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return false }
+  if (blockPendingPurchaseInvoice(record)) return false
   if (!record.quoteReady) { toast(purchaseQuoteBlockingMessage(record)); return false }
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
   if (duplicate) {
@@ -2151,7 +2165,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           />
         </section>
 
-        <section v-if="!draftNeedsQuery && purchaseTaxBlockReason" class="logistics-load-panel error" role="alert"><span><b>{{ purchaseTaxBlockReason }}</b><small>请在采购数据补齐票点后重新查询商品；0%为有效票点。</small></span></section>
+        <section v-if="!draftNeedsQuery && purchaseTaxBlockReason" class="logistics-load-panel error" role="alert"><span><b>{{ purchaseTaxBlockReason }}</b><small>请在采购数据确认票点和票类型后重新查询商品；已明确票类型的0%票点可以报价。</small></span></section>
         <section v-if="!draftNeedsQuery" class="matrix-workbench">
         <section class="matrix-mode-switcher">
           <header><div><h2><i class="section-number">03</i>选择报价方式与渠道</h2></div><span>三种模式独立保留，模板按当前业务员账号管理</span></header>
@@ -2224,6 +2238,14 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       </template>
     </main>
 
+    <div v-if="purchaseInvoiceNotice.length" class="modal-mask" @click.self="purchaseInvoiceNotice=[]" @keydown.esc="purchaseInvoiceNotice=[]">
+      <section class="modal" role="alertdialog" aria-modal="true" aria-labelledby="purchase-invoice-pending-title">
+        <h2 id="purchase-invoice-pending-title">采购票点待确认，不可报价</h2>
+        <p>{{ PURCHASE_INVOICE_PENDING_MESSAGE }}</p>
+        <p>SKU：{{ purchaseInvoiceNotice.join('、') }}</p>
+        <button type="button" class="primary" autofocus @click="purchaseInvoiceNotice=[]">我知道了</button>
+      </section>
+    </div>
     <div v-if="showRule || showHistory" class="modal-mask" @click.self="showRule = showHistory = false">
       <section class="modal">
         <button class="modal-close" @click="showRule = showHistory = false">×</button>

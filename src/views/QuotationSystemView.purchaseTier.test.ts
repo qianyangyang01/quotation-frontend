@@ -21,6 +21,7 @@ const record = {
 }
 let app: App | undefined
 let host: HTMLDivElement
+let purchaseOverride: Record<string, unknown> = {}
 let state: {
   draftReady: boolean
   queryProduct: () => Promise<void>
@@ -31,8 +32,11 @@ let state: {
   bundlePurchaseCost: (sets?: number) => number
   bundleDomesticFreight: (sets?: number) => number
   salePrice: (product: QuotationProduct) => number
+  purchaseInvoiceNotice: string[]
+  purchaseTaxBlockReason: string
+  purchaseQueryError: string
 }
-beforeEach(() => { vi.clearAllMocks(); clearFinanceSettingsCache() })
+beforeEach(() => { vi.clearAllMocks(); clearFinanceSettingsCache(); purchaseOverride = {} })
 afterEach(() => { app?.unmount(); app = undefined; host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache() })
 
 async function mount(mode: 'single' | 'bundle', estimate = '10', omitProductSnapshot = false) {
@@ -55,7 +59,7 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', omitProductSnap
         { sku: 'SINGLE', quantityPerSet: 1, purchaseInvoiceTaxApplied: true },
       ],
     } }
-    if (path === `/purchase-products/${record.sku}`) return record
+    if (path === `/purchase-products/${record.sku}`) return { ...record, ...purchaseOverride }
     if (path === '/purchase-products/SINGLE') return { sku: 'SINGLE', category: '宠物用品', weightG: 100, minOrderQty: 100, purchasePriceCny: 20, taxPoint: .02, freight10Cny: 5 }
     throw new Error(`Unexpected API: ${path}`)
   })
@@ -121,4 +125,28 @@ it('updates every bundle SKU and explains a missing tier without changing domest
   const labels = [...host.querySelectorAll('.purchase-price small')].map(item => item.textContent)
   expect(labels[0]).toContain('阶梯价2（500–999件）原价 ¥12.50')
   expect(labels[1]).toContain('阶梯价2未配置，采用阶梯价1（100件起）')
+})
+
+it('opens a blocking dialog for legacy pending invoices and allows requery after purchase confirms', async () => {
+  purchaseOverride = { dataSource: 'legacy_2026', taxPoint: 0, invoiceType: '待确认', singleFreightCny: 2.1, quoteReady: true }
+  await mount('single')
+  const dialog = host.querySelector('[role="alertdialog"]')
+  expect(dialog?.textContent).toContain('采购票点为待确认，不可报价')
+  expect(dialog?.textContent).toContain(record.sku)
+  expect(state.purchaseQueryError).toContain('待确认')
+  state.purchaseInvoiceNotice = []
+  purchaseOverride = { ...purchaseOverride, invoiceType: '不开票' }
+  await state.queryProduct(); await nextTick()
+  expect(host.querySelector('[role="alertdialog"]')).toBeNull()
+  expect(state.purchaseTaxBlockReason).toBe('')
+  expect(state.purchaseQueryError).toBe('')
+  expect(state.products[0]?.purchase).toBe(13.94)
+})
+
+it('blocks the whole bundle while any legacy SKU still needs invoice confirmation', async () => {
+  purchaseOverride = { dataSource: 'legacy_2026', taxPoint: .08, invoiceType: '待确认', singleFreightCny: 2.1, quoteReady: true }
+  await mount('bundle')
+  expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain(record.sku)
+  expect(state.purchaseTaxBlockReason).toContain('待确认')
+  expect(state.purchaseTaxBlockReason).toContain(record.sku)
 })
