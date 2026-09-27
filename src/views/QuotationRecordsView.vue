@@ -3,7 +3,7 @@ import QuotationLifecycleDialog from '@/components/quotation/QuotationLifecycleD
 import { changeQuotationLifecycle, lifecycleLabel, lifecycleProtection, type RecordLifecycle, type LifecycleAction } from '@/data/quotationLifecycle'
 import { operationFeesLabel } from '@/data/customerOperationFees'
 import { useQuotationReviewSync } from '@/composables/useQuotationReviewSync'
-import { reviewQuotationRecord, financeReviewLabel, type ReviewAction } from '@/data/quotationRecords'
+import { reviewQuotationRecord, financeReviewLabel, quotationDealLabel, type ReviewAction } from '@/data/quotationRecords'
 import QuotationReviewPanel from '@/components/quotation/QuotationReviewPanel.vue'
 import QuotationReviewButton from '@/components/quotation/QuotationReviewButton.vue'
 import QuotationReviewHistory from '@/components/quotation/QuotationReviewHistory.vue'
@@ -81,7 +81,7 @@ const filterChannel = ref('')
 const filterOptionScale = ref<'' | 'single' | 'multiple'>('')
 const filterPriceDifference = ref<'' | 'lower' | 'equal' | 'higher' | 'missing'>('')
 const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
-const filterStatus = ref<'' | 'pending' | 'won' | 'processed'>('')
+const filterStatus = ref<'' | 'won' | 'lost'>('')
 const reviewGroups = [
   { value: 'pending', label: '待审核' },
   { value: 'reviewing', label: '审核中' },
@@ -123,7 +123,7 @@ async function exportRecords(){
   exporting.value=true
   try {
     const rows=await loadFilteredRecords(props.scope,{...filters.value})
-    const blob=new Blob([quotationDetailsCsv(rows,purchaseProducts.value)],{type:'text/csv;charset=utf-8'})
+    const blob=new Blob([quotationDetailsCsv(rows,purchaseProducts.value,{includeReview:true})],{type:'text/csv;charset=utf-8'})
     const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=title.value+'-'+recentRecordDates(1).endDate+'.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
     toast('已导出当前筛选范围全部 '+rows.length+' 条记录')
   }catch(error){toast(error instanceof Error?error.message:'导出失败，请重试')}finally{exporting.value=false}
@@ -233,7 +233,8 @@ function pricesSaved(row:QuotationRecord) {
   const index=records.value.findIndex(item=>item.id===row.id)
   if(index>=0) records.value[index]=row
   if(selected.value?.id===row.id) selected.value=row
-  toast(row.status==='won' ? '报价记录已更新，状态为已成交' : row.quoteConfirmed ? '报价已确认，已标记为已处理' : '客户报价已保存，请核对后确认报价'); void refresh()
+  reviewSync.accept(row)
+  toast(row.status==='won' ? '报价记录已更新，成交结果为已成交' : '客户报价已保存'); void refresh()
 }
 const revisionGroups = computed(() => {
   const groups = new Map<string, { id: string; changedAt: string; editorName: string; editorAccount: string; changes: QuotationRecord['revisions'] }>()
@@ -257,12 +258,10 @@ const selectedOptionGroups = computed(() => {
 const selectedDealOptionIds = computed(() => new Set((selected.value?.dealLines || []).map(line => line.optionId)))
 const formDealTotalQuantity = computed(() => form.dealLines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0))
 const formDealTotalUsd = computed(() => form.dealLines.reduce((sum, line) => sum + (Number(line.unitPriceUsd) || 0) * (Number(line.quantity) || 0), 0))
-const pending = computed(() => summary.value.pending)
 const won = computed(() => summary.value.won)
 const cny = (value: number) => `¥${value.toFixed(2)}`
 const usd = (value: number) => `$${value.toFixed(2)}`
-function displayStatus(row:QuotationRecord) { return row.status==='won' ? '已成交' : row.quoteConfirmed ? '已处理' : '待处理' }
-const statusText = (value: QuotationRecordStatus) => ({ pending: '待处理', won: '已成交', lost: '未成交' })[value]
+const statusText = quotationDealLabel
 const dateTime = (value?: string) => {
   if (!value) return '—'
   const date = new Date(value)
@@ -336,7 +335,7 @@ async function submit() {
     if (!Number.isInteger(quantity) || quantity <= 0) { toast(`请填写第 ${index + 1} 条成交方案的正整数成交数量`); return }
     dealLines.push({ id: line.id.startsWith('draft-') ? `deal-${Date.now()}-${index}` : line.id, optionId: option.id, optionLabel: optionLabel(option), country: option.country, carrier: option.carrier, channel: option.channel, unitPriceUsd, quantity, amountUsd: Number((unitPriceUsd * quantity).toFixed(2)) })
   }
-  if (!form.date) { toast('请选择处理日期'); return }
+  if (!form.date) { toast('请选择成交结果日期'); return }
   const previousUpdatedAt = selected.value.updatedAt
   const savedLines = form.status === 'won' ? dealLines : []
   const totalUsd = savedLines.reduce((sum, line) => sum + line.amountUsd, 0)
@@ -354,8 +353,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
 <template>
   <div class="app">
-    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '核对客户报价、处理状态与成交结果' : '查看全体业务员的报价、处理状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
-      <section class="stats"><article class="red"><i>!</i><span><small>待处理</small><b>{{ pending }}</b><em>当前筛选范围</em></span></article><article><i>✓</i><span><small>已处理</small><b>{{ summary.processed || 0 }}</b><em>当前筛选范围</em></span></article><article class="green"><i>✓</i><span><small>已成交</small><b>{{ won }}</b><em>当前筛选范围</em></span></article><article><i>总</i><span><small>全部报价</small><b>{{ summary.total }}</b><em>当前筛选范围</em></span></article></section>
+    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <nav class="lifecycle-tabs" aria-label="报价记录分类">
         <button v-for="state in (['active','archived','trashed'] as const)" :key="state" :class="{active:lifecycle===state}" :aria-current="lifecycle===state ? 'page' : undefined" :disabled="lifecycleBusy" @click="lifecycle=state">{{ lifecycleLabel(state) }}</button>
         <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
@@ -365,6 +363,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <label v-if="canReview&&filterReviewStatus==='reviewing'" class="review-mine"><input v-model="reviewMine" type="checkbox">只看我的</label>
         <small>按审核结果自动分类</small>
       </nav>
+      <section class="stats review-summary" aria-label="当前筛选统计"><span>{{ reviewGroups.find(group => group.value === filterReviewStatus)?.label }} · 共 <b>{{ summary.total }}</b> 条报价</span><span>其中已成交 <b>{{ won }}</b> 条</span><small>当前筛选范围</small></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
         <label>结束日期<input v-model="endDate" type="date" aria-label="结束日期" :min="startDate || undefined"></label>
@@ -404,7 +403,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <select v-model="filterPriceDifference" aria-label="报价差异"><option value="">全部差异</option><option value="lower">客户报价低于系统报价</option><option value="equal">客户报价等于系统报价</option><option value="higher">客户报价高于系统报价</option><option value="missing">未报价 / 无系统基准</option></select>
             <small v-if="filterPriceDifference==='lower'||filterPriceDifference==='higher'">任一渠道、数量符合即显示</small>
           </label>
-          <label class="record-column-filter record-status-filter">处理状态<select v-model="filterStatus" aria-label="处理状态"><option value="">全部状态</option><option value="pending">待处理</option><option value="processed">已处理</option><option value="won">已成交</option></select></label>
+          <div class="record-column-filter record-status-filter"><span>审核状态 / 操作</span><label class="deal-filter">成交结果<select v-model="filterStatus" aria-label="成交结果"><option value="">全部成交结果</option><option value="won">已成交</option><option value="lost">未成交</option></select></label></div>
         </header>
         <article v-for="row in list" :key="row.id">
           <div class="quote-info">
@@ -425,14 +424,13 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div class="record-row-actions">
             <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" />
             <div class="record-action-buttons">
-              <em :class="row.status==='won' ? 'won' : row.quoteConfirmed ? 'processed' : 'pending'">{{ displayStatus(row) }}</em>
+              <small v-if="row.status !== 'pending'" class="deal-result" :class="row.status">成交结果：{{ quotationDealLabel(row.status) }}</small>
               <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
             </div>
             <div v-if="canWithdraw(row)" class="record-action-buttons record-mutation-buttons">
               <button type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('cancel', row)">取消</button>
               <button v-if="hasPermission('quote')" type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('withdraw', row)">撤回重新编辑</button>
             </div>
-            <small v-if="row.status==='won'">{{ row.quoteConfirmed ? '报价已确认' : '报价待确认' }}</small>
           </div>
         </article>
         <div v-if="!loading && !loadError && !dateError && !list.length" class="empty"><b>暂无报价记录</b><span>当前筛选范围内没有记录，可以调整日期或重置筛选。</span><RouterLink v-if="isMine" to="/quotation">去新建报价</RouterLink></div>
@@ -455,6 +453,8 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             {{ financeReviewLabel(reviewSync.stateFor(selected).financeReviewStatus) }}
             <span v-if="reviewSync.stateFor(selected).financeReviewClaimedBy"> · {{ reviewSync.stateFor(selected).financeReviewClaimedBy }}审核中</span>
             <span v-else-if="reviewSync.stateFor(selected).financeReviewedBy"> · {{ reviewSync.stateFor(selected).financeReviewedBy }}</span>
+            <span v-if="reviewSync.stateFor(selected).financeReviewStatus==='reviewing' && reviewSync.stateFor(selected).financeReviewStartedAt"> · 开始于 {{ dateTime(reviewSync.stateFor(selected).financeReviewStartedAt) }}</span>
+            <span v-else-if="reviewSync.stateFor(selected).financeReviewedAt"> · 审核于 {{ dateTime(reviewSync.stateFor(selected).financeReviewedAt) }}</span>
           </div>
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
@@ -469,7 +469,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <section v-else-if="detailTab==='options'" class="option-detail-panel">
             <CustomerPriceComparison :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" />
           </section>
-          <section v-else class="revision-history detail-history"><header><b>处理 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><QuotationRevisionSnapshot v-else-if="revision.field==='quoteRevision'" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>报价处理</b>：{{ revision.after === 'true' ? '已确认报价，标记为已处理' : '客户报价已变化，需重新确认' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>处理状态</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
+          <section v-else class="revision-history detail-history"><header><b>操作 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><QuotationRevisionSnapshot v-else-if="revision.field==='quoteRevision'" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>历史报价确认</b>：{{ revision.after === 'true' ? '业务员已确认报价（历史操作）' : '客户报价变化，历史确认已失效' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>成交结果</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
           <QuotationReviewHistory v-if="detailTab==='history'" :id="selected.id" :version="reviewSync.stateFor(selected)._reviewVersion" :account="currentAuthUser.account" />
           <footer v-if="detailTab==='overview'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved">
             <QuotationReviewButton v-if="canReview&&isActive(selected)" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :busy="reviewing.has(selected.id)||lifecycleBusy" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
@@ -481,7 +481,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <QuotationProductCostTrace :record="selected" />
           <section class="snapshot"><span>报价单号</span><b>{{ selected.no }}</b><span>客户</span><b>{{ selected.customerName }}</b><span>{{ hasMultipleOptions(selected) ? `1${selected.quoteMode==='bundle'?'套':'件'}报价区间` : '系统报价' }}</span><b>{{ hasMultipleOptions(selected) ? `${quote1UsdRange(selected)} / ${quote1CnyRange(selected)}` : `${usd(selected.systemQuoteUsd)} / ${cny(selected.systemQuoteCny)}` }}</b><span>佣金设置</span><b>{{ recordCommission(selected) }}</b><span>首选报价渠道</span><b>{{ selected.country }} · {{ selected.carrier }}｜{{ selected.channel }}</b><span>创建时间</span><b>{{ dateTime(selected.createdAt) }}</b><span>最后修改</span><b>{{ dateTime(selected.updatedAt) }}</b></section>
           <section v-if="recordOptions(selected).length" class="specified-snapshot"><header><b>{{ selected.matrixMode === 'template' ? '模板报价清单' : hasMultipleOptions(selected) ? '多国家渠道报价清单' : '报价方案' }}</b><span>{{ selectedOptionGroups.length }} 个国家 · {{ recordOptions(selected).length }} 条渠道</span></header><div class="option-table-head"><span>物流商 / 渠道</span><span>预计时效</span><span>1{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>2{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>3{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>{{ selected.customQuoteQuantity || '自定义' }}{{ selected.quoteMode==='bundle'?'套':'件' }}</span></div><div class="country-option-groups"><details v-for="(group,index) in selectedOptionGroups" :key="group.country" :open="index===0 || group.options.some(option=>option.isPrimary || selectedDealOptionIds.has(option.id))"><summary><span><b>{{ group.countryCode || '' }} {{ group.country }}</b><small>{{ group.options.length }} 条渠道</small></span><i>⌄</i></summary><article v-for="option in group.options" :key="option.id" :class="{ primary:option.isPrimary, deal:selectedDealOptionIds.has(option.id) }"><span><b>{{ option.carrier }}｜{{ option.channel }}</b><small v-if="option.available === false">{{ option.availabilityMessage }}</small><small v-for="message in option.quantityMessages" :key="message">{{ message }}</small><small>渠道编码：{{ option.channelCode || '—' }} · 计费规则：{{ option.rule }}<template v-if="option.quoteRegion"> · {{ option.quoteRegion }}</template></small><em v-if="option.isPrimary">首选</em><em v-if="selectedDealOptionIds.has(option.id)" class="deal-badge">已成交</em></span><b>{{ option.eta }}</b><em>{{ optionPrice(option.quote1Usd) }}</em><em>{{ optionPrice(option.quote2Usd) }}</em><em>{{ optionPrice(option.quote3Usd) }}</em><em class="custom-option-price">{{ optionPrice(option.quoteCustomUsd) }}</em></article></details></div></section>
-          <template v-if="isMine && isActive(selected)"><label class="result">成交结果 <span><label><input v-model="form.status" type="radio" value="won"> 已成交</label><label><input v-model="form.status" type="radio" value="lost"> 未成交</label></span></label><section v-if="form.status==='won'" ref="dealLineEditor" class="deal-line-editor"><header><div><b>成交方案明细</b><span>每个渠道分别填写成交单价和数量</span></div><button type="button" @click="addDealLine">＋ 添加成交方案</button></header><div class="deal-line-head"><span>成交国家与渠道</span><span>成交单价</span><span>数量</span><span>成交金额</span><span>操作</span></div><article v-for="(line,index) in form.dealLines" :key="line.id"><select v-model="line.optionId"><option value="">请选择成交国家和物流渠道</option><option v-for="option in availableDealOptions(line)" :key="option.id" :value="option.id">{{ optionLabel(option) }} · {{ option.eta }}</option></select><label><i>$</i><input v-model="line.unitPriceUsd" type="number" min="0.01" step="0.01"></label><label><input v-model="line.quantity" type="number" min="1" step="1"><i>{{ selected.quoteMode==='bundle'?'套':'件' }}</i></label><strong>{{ usd((Number(line.unitPriceUsd)||0)*(Number(line.quantity)||0)) }}</strong><button type="button" @click="removeDealLine(index)">删除</button></article><div v-if="!form.dealLines.length" class="deal-line-empty">尚未添加成交方案，请点击右上角“＋ 添加成交方案”</div><footer><span>成交渠道 <b>{{ form.dealLines.length }}</b> 条</span><span>成交总数量 <b>{{ formDealTotalQuantity }}</b>{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>成交总金额 <strong>{{ usd(formDealTotalUsd) }}</strong></span></footer></section><label>处理日期<input v-model="form.date" type="date"></label><label>备注 / 未成交原因<textarea v-model="form.note" maxlength="200"></textarea></label><footer><button @click="cancelEdit">取消</button><button class="primary" @click="submit">保存修改</button></footer></template>
+          <template v-if="isMine && isActive(selected)"><label class="result">成交结果 <span><label><input v-model="form.status" type="radio" value="won"> 已成交</label><label><input v-model="form.status" type="radio" value="lost"> 未成交</label></span></label><section v-if="form.status==='won'" ref="dealLineEditor" class="deal-line-editor"><header><div><b>成交方案明细</b><span>每个渠道分别填写成交单价和数量</span></div><button type="button" @click="addDealLine">＋ 添加成交方案</button></header><div class="deal-line-head"><span>成交国家与渠道</span><span>成交单价</span><span>数量</span><span>成交金额</span><span>操作</span></div><article v-for="(line,index) in form.dealLines" :key="line.id"><select v-model="line.optionId"><option value="">请选择成交国家和物流渠道</option><option v-for="option in availableDealOptions(line)" :key="option.id" :value="option.id">{{ optionLabel(option) }} · {{ option.eta }}</option></select><label><i>$</i><input v-model="line.unitPriceUsd" type="number" min="0.01" step="0.01"></label><label><input v-model="line.quantity" type="number" min="1" step="1"><i>{{ selected.quoteMode==='bundle'?'套':'件' }}</i></label><strong>{{ usd((Number(line.unitPriceUsd)||0)*(Number(line.quantity)||0)) }}</strong><button type="button" @click="removeDealLine(index)">删除</button></article><div v-if="!form.dealLines.length" class="deal-line-empty">尚未添加成交方案，请点击右上角“＋ 添加成交方案”</div><footer><span>成交渠道 <b>{{ form.dealLines.length }}</b> 条</span><span>成交总数量 <b>{{ formDealTotalQuantity }}</b>{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>成交总金额 <strong>{{ usd(formDealTotalUsd) }}</strong></span></footer></section><label>成交结果日期<input v-model="form.date" type="date"></label><label>备注 / 未成交原因<textarea v-model="form.note" maxlength="200"></textarea></label><footer><button @click="cancelEdit">取消</button><button class="primary" @click="submit">保存修改</button></footer></template>
         </template>
       </aside>
     </div>
@@ -512,7 +512,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 .reissue-quote{padding:7px 12px;border:1px solid #ffb54e;border-radius:6px;background:#fff8ed;color:#a95f00;font-size:11px;font-weight:700;text-decoration:none}
 .finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.channel-exempt{color:#17659b;background:#edf6ff;border-color:#9bc8e8}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.record-row-actions{min-width:0;gap:8px}
 
-.stats{grid-template-columns:repeat(4,1fr)}.record-row-actions{flex-wrap:wrap}.record-row-actions>em.processed{background:#e8f3ff;border-color:#b4d3f0;color:#256da6}.record-row-actions>small{font-size:10px;color:#71808c}
+.stats.review-summary{display:flex;align-items:center;flex-wrap:wrap;gap:10px 24px;margin:12px 0 18px;padding:10px 14px;border:1px solid #e4e9ee;border-radius:8px;background:#fff;font-size:13px}.stats.review-summary>span{display:inline}.stats.review-summary b{display:inline;margin:0;font-size:14px;color:#17212b}.review-summary small{color:#71808c;font-size:11px}.record-status-filter .deal-filter{font-size:11px;font-weight:400;color:#71808c}.record-action-buttons .deal-result{font-size:11px;color:#71808c}.record-action-buttons .deal-result.won{color:#178653}
 .revision-history article>.customer-price-revision{grid-column:1/-1;min-width:0}
 .record-date-filters,.record-pagination{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0;color:#53616c;font-size:12px}.record-date-filters label,.record-pagination label{display:flex;align-items:center;gap:7px}.record-date-filters input,.record-date-filters button,.record-pagination button,.record-pagination select,.record-export-actions button{min-height:34px;padding:5px 10px;background:#fff;border:1px solid #dce3e8;border-radius:6px;color:#34434f}.record-date-filters small{color:#798690}.record-pagination{padding:12px;background:#f7f9fa;border-radius:8px}.record-pagination>span{margin-right:auto}.record-export-actions{display:flex;justify-content:flex-end;margin:12px 0}.record-pagination button:disabled,.record-export-actions button:disabled{opacity:.45;cursor:not-allowed}
 

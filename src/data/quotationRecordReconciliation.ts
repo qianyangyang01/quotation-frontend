@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js'
 import { customerOperationFeeForQuantity, operationFeesLabel } from './customerOperationFees'
-import { financeReviewLabel } from './quotationRecords'
+import { financeReviewLabel, quotationDealLabel } from './quotationRecords'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 import { savedSystemPrice } from './customerQuotePrices'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
@@ -71,7 +71,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['客户等级', record.customerGrade, '汇率（CNY/USD）', record.exchangeRate > 0 ? record.exchangeRate : missing, '佣金阈值', record.commissionThreshold ?? 1, '公司操作费（USD/单）', record.customerOperation?.feesByQuantityUsd ? operationFeesLabel(record.customerOperation, unit) : money(record.customerOperation?.feeUsd)]),
     line(['报价模式', record.matrixMode === 'template' ? '模板报价' : record.matrixMode === 'specified' ? '指定国家与渠道' : '常用国家', '模板', record.quotationTemplateName, '创建时间', record.createdAt, '修改时间', record.updatedAt]),
     line(['财务审核', financeReviewLabel(record.financeReviewStatus), '审核人', record.financeReviewedBy, '审核时间', record.financeReviewedAt]),
-    line(['处理状态', record.status === 'won' ? '已成交' : record.status === 'lost' ? '未成交' : record.quoteConfirmed ? '已处理' : '待处理', '备注', record.note || '', '成交日期', record.closedAt]),
+    line(['成交结果', quotationDealLabel(record.status), '备注', record.note || '', '成交日期', record.closedAt]),
     line(['采购原价（CNY/件）', money(record.purchaseBaseUnitPriceCny), '计入采购价（CNY/件）', money(record.purchaseUnitPriceCny), '采购发票', record.purchaseInvoiceType, '采购票点（%）', record.purchaseInvoiceRatePercent]),
     line(['首选系统价（USD）', money(record.systemQuoteUsd), '首选系统价（CNY快照）', money(record.systemQuoteCny), '首选综合成本（CNY）', money(record.totalCostCny)]),
     line(['成交价（USD）', money(record.actualQuoteUsd), '成交价（CNY快照）', money(record.actualQuoteCny), '成交数量', record.dealQuantity, '成交方案', record.dealOptionLabel]),

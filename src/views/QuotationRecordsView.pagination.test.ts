@@ -30,15 +30,16 @@ it.each(['mine', 'company'])('combines column filters, resets pagination and exp
     }
     change('#record-product-filter',' SKU-1 ');change('[aria-label="客户"]',' Alice ')
     change('[aria-label="报价渠道"]',' 专线 ');change('#record-scale-filter','multiple')
-    change('[aria-label="报价差异"]','lower');change('[aria-label="处理状态"]','processed')
+    change('[aria-label="报价差异"]','lower');change('[aria-label="成交结果"]','won')
     change('[aria-label="产品品类"]','服装');change('[aria-label="报价国家"]','美国')
     button('近 7 天').click()
     await flush();await vi.advanceTimersByTimeAsync(250);await flush()
-    const expected={product:'SKU-1',customer:'Alice',channel:'专线',optionScale:'multiple',priceDifference:'lower',status:'processed',category:'服装',country:'美国',startDate:'2026-09-04',endDate:'2026-09-10',reviewStatus:'pending'}
+    const expected={product:'SKU-1',customer:'Alice',channel:'专线',optionScale:'multiple',priceDifference:'lower',status:'won',category:'服装',country:'美国',startDate:'2026-09-04',endDate:'2026-09-10',reviewStatus:'pending'}
     expect(query.loadRecordPage.mock.lastCall).toEqual([scope,expect.objectContaining(expected),0,10])
     expect(header.textContent).toContain('任一渠道、数量符合即显示')
     button('导出筛选结果').click();await flush()
     expect(query.loadFilteredRecords).toHaveBeenCalledWith(scope,expect.objectContaining(expected))
+    expect(await (objectUrl.mock.calls[0]![0] as Blob).text()).toContain('审核状态,审核人,审核时间,成交结果')
     expect(download).toHaveBeenCalledOnce()
     button('重置').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
     expect(query.loadRecordPage.mock.lastCall?.[1]).toMatchObject({product:'',customer:'',channel:'',optionScale:'',priceDifference:'',status:'',category:'',country:'',startDate:'',endDate:'',reviewStatus:'pending'})

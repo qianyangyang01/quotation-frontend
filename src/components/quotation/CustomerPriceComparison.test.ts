@@ -56,8 +56,8 @@ it('keeps other owners read-only',()=>{mount(false);expect(button('编辑客户�
 it('does not publish a stale save after the user leaves the detail tab',async()=>{
   const {saved}=mount();let finish!:(value:QuotationRecord)=>void
   update.mockReturnValue(new Promise(resolve=>{finish=resolve}))
-  button('确认报价').click();await settle();app.unmount()
-  finish({...record(),_version:3,quoteConfirmed:true});await settle()
+  button('编辑客户报价').click();await settle();button('保存客户报价').click();await settle();app.unmount()
+  finish({...record(),_version:3});await settle()
   expect(saved).not.toHaveBeenCalled()
 })
 
@@ -71,21 +71,19 @@ it('marks a quote won without requiring or changing prices, confirmation, or dea
   expect(state.record.quoteConfirmed).toBe(false)
 })
 
-it('confirms the current saved version once and displays server confirmation metadata',async()=>{
-  const {state}=mount();let finish!:(value:QuotationRecord)=>void
-  update.mockReturnValue(new Promise(resolve=>{finish=resolve}))
-  const confirm=button('确认报价');confirm.click();confirm.click();await settle()
-  expect(update).toHaveBeenCalledTimes(1);expect(update).toHaveBeenCalledWith('one',{quoteConfirmed:true},2)
-  expect(button('编辑客户报价').disabled).toBe(true)
-  finish({...record(),_version:3,status:'won',quoteConfirmed:true,quoteConfirmedBy:'业务员',quoteConfirmedAt:'2026-09-12T06:00:00Z'});await settle()
-  expect(button('已处理').disabled).toBe(true);expect(document.body.textContent).toContain('已确认报价 · 业务员')
-  expect(state.record.status).toBe('won')
+it.each([false,true])('does not require business confirmation or mistake legacy confirmation for review (%s)',async confirmed=>{
+  const {state}=mount()
+  state.record={...record(),quoteConfirmed:confirmed,quoteConfirmedBy:'业务员',financeReviewStatus:'pending'};await settle()
+  expect(button('确认报价')).toBeUndefined();expect(button('已处理')).toBeUndefined()
+  expect(document.body.textContent).not.toContain('再次改价需重新确认')
+  expect(button('编辑客户报价')).toBeDefined();expect(button('标记已成交')).toBeDefined()
+  expect(update).not.toHaveBeenCalled();expect(state.record.quoteConfirmed).toBe(confirmed)
 })
-it('does not confirm unsaved prices and handles a competing edit conflict',async()=>{
-  mount();button('编辑客户报价').click();await settle();expect(button('确认报价')).toBeUndefined()
+it('does not mark unsaved prices won and handles a competing edit conflict',async()=>{
+  mount();button('编辑客户报价').click();await settle();expect(button('标记已成交')).toBeUndefined()
   button('取消').click();await settle();update.mockRejectedValue(Object.assign(new Error('报价已被修改'),{status:409}))
-  button('确认报价').click();await settle()
-  expect(button('已处理')).toBeUndefined();expect(document.querySelector('[role=alert]')?.textContent).toContain('报价已被修改')
+  button('标记已成交').click();await settle()
+  expect(button('已成交')).toBeUndefined();expect(document.querySelector('[role=alert]')?.textContent).toContain('报价已被修改')
   expect(button('重新加载记录（放弃未保存修改）')).toBeTruthy()
 })
 

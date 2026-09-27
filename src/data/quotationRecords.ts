@@ -9,6 +9,7 @@ export type FinanceReviewStatus = 'pending' | 'reviewing' | 'approved' | 'reject
 export const financeReviewLabel = (value?: string) => value === 'channel-exempt' ? '同渠道免审' : value === 'reviewing' ? '审核中' : value === 'approved' ? '审核通过' : value === 'rejected' ? '价格异常' : '待审核'
 
 export type QuotationRecordStatus = 'pending' | 'won' | 'lost'
+export const quotationDealLabel = (value: QuotationRecordStatus) => ({ pending: '未标记成交', won: '已成交', lost: '未成交' })[value]
 
 export interface QuotationRecordSpecifiedQuote {
   country: string
@@ -158,11 +159,11 @@ const fieldLabels: Record<QuotationRecordEditableField, string> = {
   lifecycleState: '记录分类',
   financeReviewStatus: '财务审核',
   customerQuote: '客户报价', quoteConfirmed: '报价确认',
-  status: '处理状态',
+  status: '成交结果',
   actualQuoteUsd: '客户最终报价（USD）',
   actualQuoteCny: '客户最终报价（CNY）',
   dealQuantity: '成交数量',
-  closedAt: '处理日期',
+  closedAt: '成交结果日期',
   note: '备注 / 未成交原因',
   dealOptionLabel: '成交渠道',
   dealLines: '成交方案明细',

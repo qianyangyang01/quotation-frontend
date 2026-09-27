@@ -30,6 +30,15 @@ it('exports the manual channel exemption label without changing the price snapsh
   expect(JSON.stringify(row)).toBe(before)
 })
 
+it.each([false,true])('keeps review and deal labels independent of legacy confirmation (%s)', confirmed => {
+  const row={...record(),quoteConfirmed:confirmed,financeReviewStatus:'pending' as const,status:'pending' as const}
+  const before=JSON.stringify(row), text=quotationRecordReconciliationTsv(row)
+  expect(text).toContain('财务审核\t待审核')
+  expect(text).toContain('成交结果\t未标记成交')
+  expect(text).not.toMatch(/待处理|已处理|处理状态/)
+  expect(JSON.stringify(row)).toBe(before)
+})
+
 it.each(['common', 'specified', 'template'] as const)('exports every route, full identities and both currencies for %s without mutating or repricing', mode => {
   const saved = record(); saved.matrixMode = mode
   const before = JSON.stringify(saved), text = quotationRecordReconciliationTsv(saved), rows = table(text)

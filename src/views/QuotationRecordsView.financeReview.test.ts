@@ -20,6 +20,45 @@ async function mount(role:'super_admin'|'employee',scope:'mine'|'company') {
   const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush();button('全部').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
 }
 afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;authState.permissions=[];vi.useRealTimers();vi.resetAllMocks()})
+it.each([['employee','mine'],['super_admin','company']] as const)('uses the same review conclusions regardless of legacy business confirmation for %s',async(role,scope)=>{
+  vi.useFakeTimers();await mount(role,scope)
+  const states=['pending','reviewing','channel-exempt','approved','rejected'] as const
+  const labels=['待审核','ADMIN审核中','同渠道免审','审核通过','价格异常']
+  const rows=states.flatMap((status,index)=>[false,true].map(confirmed=>({
+    ...saved(),id:status+confirmed,no:'QT-'+status+confirmed,quoteConfirmed:confirmed,financeReviewStatus:status,
+    financeReviewClaimedBy:status==='reviewing'?'ADMIN':undefined,
+    financeReviewedBy:status==='approved'?'ADMIN':undefined,
+    financeReviewedAt:status==='approved'?'2026-09-27T02:00:00Z':undefined,
+    status:index===3?'won' as const:'pending' as const,
+  })))
+  mocks.get.mockResolvedValue(rows)
+  mocks.page.mockResolvedValue({items:rows,page:0,size:10,total:10,totalPages:1,summary:{pending:4,processed:4,won:2,lost:0,total:10},countries:[]})
+  button('重置').click();await flush();await vi.advanceTimersByTimeAsync(3500);await flush()
+  const badges=[...document.querySelectorAll('.records .finance-review')].map(el=>el.textContent)
+  expect(badges).toEqual(labels.flatMap(label=>[label,label]))
+  expect(document.querySelector('[aria-label="处理状态"]')).toBeNull()
+  expect(document.querySelector('.records')?.textContent).not.toMatch(/待处理|已处理|报价待确认/)
+  expect(document.querySelector('.stats')?.textContent).toContain('共 10 条报价')
+  expect(document.querySelector('.stats')?.textContent).toContain('其中已成交 2 条')
+  expect([...document.querySelectorAll('[aria-label="成交结果"] option')].map(el=>el.getAttribute('value'))).toEqual(['','won','lost'])
+  document.querySelectorAll<HTMLButtonElement>('.difference-cell')[6]!.click();await flush()
+  const detail=document.querySelector('.detail-review-status')!.textContent
+  expect(detail).toContain('审核通过');expect(detail).toContain('ADMIN')
+  expect(detail).toContain('2026');expect(detail).toContain('10:00:00')
+  expect(mocks.patch).not.toHaveBeenCalled()
+})
+
+it('shows a saved price change returning to review without requesting business confirmation',async()=>{
+  vi.useFakeTimers();await mount('employee','mine')
+  document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
+  document.querySelectorAll<HTMLButtonElement>('.detail-tabs button')[1]!.click();await flush()
+  mocks.patch.mockResolvedValue({...saved(),_version:3,_reviewVersion:2,financeReviewStatus:'pending',quoteConfirmed:false})
+  button('编辑客户报价').click();await flush();button('保存客户报价').click();await flush()
+  expect(mocks.patch.mock.lastCall?.[1]).toHaveProperty('customerQuote')
+  expect(mocks.patch.mock.lastCall?.[1]).not.toHaveProperty('quoteConfirmed')
+  expect(document.querySelector('.detail-review-status')?.textContent).toContain('待审核')
+  expect(document.body.textContent).not.toContain('请核对后确认报价')
+})
 it('manually completes with channel exemption and refreshes the filtered list',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()
@@ -40,7 +79,7 @@ it('employees see channel exemption from polling without any review action',asyn
   expect(button('开始审核')).toBeUndefined();expect(button('重新审核')).toBeUndefined()
   expect(document.querySelector('.review-results')).toBeNull()
 })
-it('filters channel exemption independently of processing status',async()=>{
+it('filters channel exemption independently of deal result',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   button('审核中').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   document.querySelector<HTMLInputElement>('.review-mine input')!.click();await flush()
@@ -150,20 +189,20 @@ it('keeps the selector open during unchanged status polling and closes without s
   document.querySelector<HTMLButtonElement>('[aria-label="关闭审核结果"]')!.click();await flush()
   expect(dialog.open).toBe(false);expect(mocks.patch).toHaveBeenCalledTimes(1)
 })
-it('combines processing and review filters and clears mine when leaving reviewing',async()=>{
+it('combines deal and review filters and clears mine when leaving reviewing',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   const select=async(label:string,value:string)=>{
     if(label==='审核状态') { button(value==='reviewing'?'审核中':'价格异常').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush();return }
     const input=document.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!
     input.value=value;input.dispatchEvent(new Event('change'));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   }
-  await select('处理状态','processed');await select('审核状态','reviewing')
+  await select('成交结果','won');await select('审核状态','reviewing')
   const mine=document.querySelector<HTMLInputElement>('.review-mine input')!
   mine.click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
-  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'processed',reviewStatus:'reviewing',reviewMine:true})
+  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'won',reviewStatus:'reviewing',reviewMine:true})
   await select('审核状态','rejected')
   expect(document.querySelector('.review-mine')).toBeNull()
-  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'processed',reviewStatus:'rejected',reviewMine:false})
+  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'won',reviewStatus:'rejected',reviewMine:false})
   button('重置').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page.mock.lastCall?.[1]).toMatchObject({status:'',reviewStatus:'rejected',reviewMine:false})
 })

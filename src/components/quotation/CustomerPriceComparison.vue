@@ -31,16 +31,15 @@ function buildDraft() {
     return Number(text)
   })})) }
 }
-async function save(confirm = false, markWon = false) {
-  if (saving.value || !props.canEdit || (confirm && (editing.value || props.record.quoteConfirmed)) || (markWon && (editing.value || props.record.status==='won'))) return
+async function save(markWon = false) {
+  if (saving.value || !props.canEdit || (markWon && (editing.value || props.record.status==='won'))) return
   const id=props.record.id, version=props.record._version
   error.value='';saving.value=true
   try {
-    const updated=await updateQuotationRecord(id,markWon ? {status:'won'} : confirm ? {quoteConfirmed:true} : {customerQuote:buildDraft()},version)
+    const updated=await updateQuotationRecord(id,markWon ? {status:'won'} : {customerQuote:buildDraft()},version)
     if (props.record.id!==id) return
     if (!updated) throw new Error('保存失败，请重试')
     if (markWon && updated.status!=='won') throw new Error('标记成交未生效，请刷新后重试')
-    if (confirm && !updated.quoteConfirmed) throw new Error('确认报价未生效，请刷新后重试')
     if ((updated._version ?? -1)<(props.record._version ?? -1)) return
     emit('saved',updated); editing.value=false
   } catch(e) {
@@ -72,9 +71,8 @@ const history=computed(()=>props.record.revisions.filter(item=>item.field==='cus
       </tr>
     </tbody></table></div>
     <p class="price-note">{{ editing?'正在编辑，保存后更新对比与复制结果。':'只计算金额差异；名称、时效修改不计入改价。' }}</p>
-    <footer v-if="canEdit"><template v-if="editing"><button type="button" :disabled="saving" @click="reset">取消</button><button class="primary" type="button" :disabled="saving" @click="save()">{{ saving?'正在保存…':'保存客户报价' }}</button></template><template v-else><button class="mark-won" type="button" :disabled="saving || record.status==='won'" @click="save(false,true)">{{ record.status==='won' ? '已成交' : '标记已成交' }}</button><button type="button" :disabled="saving || record.quoteConfirmed" @click="save(true)">{{ record.quoteConfirmed ? '已处理' : '确认报价' }}</button><button class="primary" type="button" :disabled="saving" @click="editing=true">编辑客户报价</button></template></footer>
-    <p v-if="record.quoteConfirmed" class="confirmation-note">已确认报价 · {{ record.quoteConfirmedBy }} · {{ record.quoteConfirmedAt ? new Date(record.quoteConfirmedAt).toLocaleString('zh-CN') : '' }}</p>
-    <p v-else class="confirmation-note">核对后点击“确认报价”标记已处理；再次改价需重新确认。</p>
+    <footer v-if="canEdit"><template v-if="editing"><button type="button" :disabled="saving" @click="reset">取消</button><button class="primary" type="button" :disabled="saving" @click="save()">{{ saving?'正在保存…':'保存客户报价' }}</button></template><template v-else><button class="mark-won" type="button" :disabled="saving || record.status==='won'" @click="save(true)">{{ record.status==='won' ? '已成交' : '标记已成交' }}</button><button class="primary" type="button" :disabled="saving" @click="editing=true">编辑客户报价</button></template></footer>
+    <p class="review-note">报价是否已审核，请查看审核状态；客户价格变化后需重新审核。</p>
     <details v-if="history.length"><summary>客户报价修改记录 · {{ history.length }} 次</summary><article v-for="entry in history" :key="entry.id"><b>{{ entry.editorName }} · {{ new Date(entry.changedAt).toLocaleString('zh-CN') }}</b><CustomerPriceRevision :record="record" :before="entry.before" :after="entry.after" /></article></details>
   </section>
 </template>
