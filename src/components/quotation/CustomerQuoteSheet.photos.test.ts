@@ -10,10 +10,19 @@ let app: App, exposed: InstanceType<typeof CustomerQuoteSheet>
 const photo = (url='blob:local') => ({url,name:'sample.png',image:Object.assign(document.createElement('img'), {src:url})})
 const click = async (text:string) => { [...document.querySelectorAll('button')].find(b=>b.textContent===text)!.click(); await settle() }
 async function settle() { for(let i=0;i<10;i++) await nextTick() }
+async function openPicker() {
+  if (!document.querySelector('[role=dialog]')) await click([...document.querySelectorAll('button')].some(button => button.textContent === '管理图片') ? '管理图片' : '添加图片')
+}
+async function confirmPicker() {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('[role=dialog] button')].find(button => button.textContent?.startsWith('确定（'))!
+  button.click(); await settle()
+}
 async function select() {
+  await openPicker()
   const input=document.querySelector<HTMLInputElement>('input[type=file]')!
   Object.defineProperty(input,'files',{value:[new File(['x'],'sample.png',{type:'image/png'})],configurable:true})
   input.dispatchEvent(new Event('change')); await settle()
+  if (!document.querySelector('[role=alert]')) await confirmPicker()
 }
 function mount() {
   const row={country:'US',carrier:'4PX',channelKey:'a',ruleId:1,rule:'',channelCode:'a',transport:'',eta:'5-8 days',quote1:1,quote2:2,quote3:3,quoteCustom:5}
@@ -94,4 +103,120 @@ it('keeps the shared photos on the first visible row with the correct span after
   expect(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![2]).toHaveLength(2)
   await click('编辑报价单'); await click('恢复全部')
   expect(document.querySelector('.sheet-photo-cell')?.getAttribute('rowspan')).toBe('2')
+})
+
+function paste(target: Element, files = [new File(['png'], 'pasted.png', { type: 'image/png' })], html = '') {
+  const event = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'clipboardData', { value: { files, items: [], getData: () => html } })
+  target.dispatchEvent(event)
+  return event
+}
+it('collects repeated individual pastes in one dialog and changes the quote only on confirmation', async () => {
+  mount(); const before = exposed.capturePrices()
+  await openPicker()
+  const dialog = document.querySelector('[role=dialog]')!
+  for (let i = 1; i <= 6; i++) {
+    vi.mocked(loadQuotePhotos).mockResolvedValueOnce([photo(`blob:pasted-${i}`)])
+    expect(paste(dialog).defaultPrevented).toBe(true); await settle()
+    expect(document.querySelectorAll('[role=dialog] img')).toHaveLength(i)
+    expect(document.querySelector('.sheet-photo-cell')).toBeNull()
+  }
+  paste(dialog); await settle()
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('最多添加 6 张')
+  expect(loadQuotePhotos).toHaveBeenCalledTimes(6)
+  await confirmPicker()
+  expect(document.querySelector('[role=dialog]')).toBeNull()
+  expect(document.querySelectorAll('.sheet-photo-cell img')).toHaveLength(6)
+  expect(exposed.capturePrices()).toEqual(before)
+  await click('预览报价单')
+  expect(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![2]).toHaveLength(6)
+})
+it('cancels collected images and staged removal without altering the original quote or preview', async () => {
+  mount(); await select(); await click('预览报价单')
+  await openPicker()
+  document.querySelector<HTMLButtonElement>('[aria-label="移除第 1 张图片"]')!.click(); await settle()
+  vi.mocked(loadQuotePhotos).mockResolvedValueOnce([photo('blob:unconfirmed')])
+  paste(document.querySelector('[role=dialog]')!); await settle()
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:local')
+  await click('取消')
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:unconfirmed')
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:local')
+  expect(document.querySelector('img[alt*="客户报价图片预览"]')).not.toBeNull()
+  await click('编辑报价单')
+  expect(document.querySelectorAll('.sheet-photo-cell img')).toHaveLength(2)
+})
+it('releases removed originals only on confirm, and supports confirmation of zero images', async () => {
+  mount(); await select(); await openPicker()
+  document.querySelector<HTMLButtonElement>('[aria-label="移除第 1 张图片"]')!.click(); await settle()
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:local')
+  await confirmPicker()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:local')
+  expect(document.querySelectorAll('.sheet-photo-cell img')).toHaveLength(1)
+  await openPicker()
+  document.querySelector<HTMLButtonElement>('[aria-label="移除第 1 张图片"]')!.click(); await settle()
+  await confirmPicker()
+  expect(document.querySelector('.sheet-photo-cell')).toBeNull()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:second')
+})
+it('releases newly removed photos immediately and keeps confirmed photos alive after closing', async () => {
+  mount(); await openPicker()
+  vi.mocked(loadQuotePhotos).mockResolvedValueOnce([photo('blob:temporary'), photo('blob:kept')])
+  paste(document.querySelector('[role=dialog]')!); await settle()
+  document.querySelector<HTMLButtonElement>('[aria-label="移除第 1 张图片"]')!.click(); await settle()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:temporary')
+  await confirmPicker()
+  expect(URL.revokeObjectURL).not.toHaveBeenCalledWith('blob:kept')
+  await click('移除图片')
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:kept')
+})
+it('supports clipboard button and text-only guidance while retaining collected images after denial', async () => {
+  mount(); await openPicker()
+  const read = vi.fn().mockResolvedValue([{ types: ['image/png'], getType: vi.fn().mockResolvedValue(new Blob(['png'], { type: 'image/png' })) }])
+  Object.assign(navigator.clipboard, { read })
+  await click('粘贴图片')
+  expect(document.querySelectorAll('[role=dialog] img')).toHaveLength(2)
+  paste(document.querySelector('[role=dialog]')!, []); await settle()
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('复制图片')
+  read.mockRejectedValueOnce(new Error('permission denied')); await click('粘贴图片')
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('Ctrl+V')
+  expect(document.querySelectorAll('[role=dialog] img')).toHaveLength(2)
+  expect(document.querySelector('.sheet-photo-cell')).toBeNull()
+})
+it('ignores paste in ordinary quote input fields outside the dialog', async () => {
+  mount()
+  expect(paste(document.querySelector('[aria-label="报价单标题"]')!).defaultPrevented).toBe(false)
+  expect(loadQuotePhotos).not.toHaveBeenCalled()
+})
+it.each(['cancel', 'switch', 'unmount'])('discards delayed clipboard reads after %s', async mode => {
+  const state = mount(); await openPicker()
+  let finish!: (items: unknown[]) => void
+  Object.assign(navigator.clipboard, { read: vi.fn(() => new Promise(resolve => { finish = resolve })) })
+  await click('粘贴图片')
+  if (mode === 'cancel') await click('取消')
+  else if (mode === 'switch') { state.skus = ['OTHER']; await settle() }
+  else app.unmount()
+  finish([{ types: ['image/png'], getType: vi.fn().mockResolvedValue(new Blob(['png'])) }]); await settle()
+  expect(loadQuotePhotos).not.toHaveBeenCalled()
+  expect(document.querySelector('[role=dialog]')).toBeNull()
+})
+it('allows cancellation during image decoding and releases the late result', async () => {
+  mount(); await openPicker()
+  let finish!: (photos: QuoteLocalPhoto[]) => void
+  vi.mocked(loadQuotePhotos).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  paste(document.querySelector('[role=dialog]')!); await settle()
+  await click('取消'); finish([photo('blob:late')]); await settle()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:late')
+  expect(document.querySelector('.sheet-photo-cell')).toBeNull()
+})
+it('focuses the dialog, traps Tab, and restores focus on Escape', async () => {
+  mount()
+  const opener = [...document.querySelectorAll('button')].find(button => button.textContent === '添加图片')!
+  opener.focus(); await openPicker()
+  const dialog = document.querySelector<HTMLElement>('[role=dialog]')!
+  expect(document.activeElement).toBe(dialog)
+  dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+  expect(document.activeElement?.textContent).toBe('确定（0 张）')
+  dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await settle()
+  expect(document.querySelector('[role=dialog]')).toBeNull()
+  expect(document.activeElement).toBe(opener)
 })

@@ -24,10 +24,13 @@ it('loads only local blob URLs and releases every owned image URL', async () => 
   expect(revoke.mock.calls.flat()).toEqual(['blob:one.png', 'blob:two.webp'])
 })
 it('rejects unsupported types, empty files, oversized files and excess count before allocating URLs', async () => {
-  for (const files of [[file('bad.svg','image/svg+xml')], [new File([], 'empty.png', { type:'image/png' })], Array.from({length:5},()=>file()), [new File([new Uint8Array(10*1024*1024+1)],'large.png',{type:'image/png'})]]) {
+  for (const files of [[file('bad.svg','image/svg+xml')], [new File([], 'empty.png', { type:'image/png' })], Array.from({length:7},()=>file()), [new File([new Uint8Array(10*1024*1024+1)],'large.png',{type:'image/png'})]]) {
     await expect(loadQuotePhotos(files)).rejects.toThrow()
   }
   expect(URL.createObjectURL).not.toHaveBeenCalled()
+})
+it('accepts six photos', async () => {
+  expect(await loadQuotePhotos(Array.from({length:6}, (_, index) => file(`${index}.png`)))).toHaveLength(6)
 })
 it.each(['decode', 'dimensions', 'timeout'])('cleans up failed %s images', async mode => {
   fail = mode === 'decode'; width = mode === 'dimensions' ? 100000 : 600; stall = mode === 'timeout'

@@ -12,7 +12,8 @@ import { copyQuoteSheetImage, preloadQuoteSheetAssets, renderCustomerQuoteSheet,
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
-import { loadQuotePhotos, releaseQuotePhotos, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
+import { releaseQuotePhotos, MAX_QUOTE_PHOTOS, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
+import QuotePhotoPicker from './QuotePhotoPicker.vue'
 import { MAX_PRICE_EXPRESSION_LENGTH, parseQuotePriceInput } from '@/data/quotePriceExpression'
 import { currentAuthUser } from '@/data/authStore'
 import { loadQuoteSheetColumnOrder, saveQuoteSheetColumnOrder } from '@/data/quoteSheetColumnPreferences'
@@ -86,42 +87,23 @@ let generation = 0
 let previousContext = props.contextKey
 let previousResetKey = props.resetKey ?? props.contextKey
 let disposed = false
-const photoInput = ref<HTMLInputElement>()
 const photos = shallowRef<QuoteLocalPhoto[]>([])
 const showPhotos = ref(true)
-const loadingPhotos = ref(false)
-const photoError = ref('')
-let photoGeneration = 0
+const photoPickerOpen = ref(false)
 const hasPhotos = computed(() => showPhotos.value && photos.value.length > 0)
 function clearPhotos() {
-  photoGeneration++
+  photoPickerOpen.value = false
   releaseQuotePhotos(photos.value)
   photos.value = []
-  loadingPhotos.value = false
-  photoError.value = ''
   showPhotos.value = true
   invalidate()
 }
-async function choosePhotos(event: Event) {
-  const input = event.target as HTMLInputElement
-  const files = Array.from(input.files ?? [])
-  input.value = '' // Allow selecting the same file again.
-  if (!files.length || copying.value || disposed) return
-  const token = ++photoGeneration
-  loadingPhotos.value = true
-  photoError.value = ''
-  try {
-    const loaded = await loadQuotePhotos(files)
-    if (disposed || token !== photoGeneration) { releaseQuotePhotos(loaded); return }
-    releaseQuotePhotos(photos.value)
-    photos.value = loaded
-    showPhotos.value = true
-    invalidate()
-  } catch (error) {
-    if (!disposed && token === photoGeneration) photoError.value = error instanceof Error ? error.message : '图片读取失败，请重新选择'
-  } finally {
-    if (!disposed && token === photoGeneration) loadingPhotos.value = false
-  }
+function confirmPhotos(selected: QuoteLocalPhoto[]) {
+  releaseQuotePhotos(photos.value.filter(photo => !selected.includes(photo)))
+  photos.value = selected
+  showPhotos.value = true
+  photoPickerOpen.value = false
+  invalidate()
 }
 // Keep local photos out of sheet edits and all persisted snapshots. Product/account/record resets clear them.
 watch(() => JSON.stringify([props.skus, props.resetKey ?? props.contextKey, props.bundle]), clearPhotos, { flush: 'sync' })
@@ -172,7 +154,7 @@ const currentImage = computed(() => images.value[activeImage.value])
 const missingProviders = computed(() => !columnVisible('provider') ? [] : [...new Map(visibleSourceRows.value
   .filter(row => !quoteSheetProviderName(row.carrier))
   .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
-const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value && !loadingPhotos.value)
+const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
 
 const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value))
 const textTable = computed(() => quoteSheetTextTable(sheet.value))
@@ -359,7 +341,7 @@ function dropColumn(index: number) {
   endColumnDrag()
 }
 async function preview() {
-  if (disposed || copying.value || loadingPhotos.value || props.sourcePending || rendering.value || !sheet.value.rows.length) return
+  if (disposed || copying.value || props.sourcePending || rendering.value || !sheet.value.rows.length) return
   invalidate()
   if (sheet.value.issues.length) {
     failed.value = true
@@ -446,7 +428,6 @@ defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', clearPhotos)
   disposed = true
-  photoGeneration++
   releaseQuotePhotos(photos.value)
   generation++
   releaseImages()
@@ -460,7 +441,7 @@ onBeforeUnmount(() => {
       <div><h3 id="customer-sheet-title">客户报价单</h3><p>点击内容可修改；右侧新增列，填写数量后自动带出对应价格</p></div>
       <div class="sheet-actions">
         <button v-if="!editing" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
-        <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying || loadingPhotos" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
+        <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
         <button type="button" class="sheet-primary" :disabled="!canCopy" @click="copyCurrent">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
         <button type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="copyData">复制报价数据</button>
       </div>
@@ -471,15 +452,14 @@ onBeforeUnmount(() => {
       <label v-for="column in QUOTE_SHEET_OPTIONAL_COLUMNS" :key="column.key"><input type="checkbox" :checked="columnVisible(column.key)" :aria-label="`显示${column.name}列`" @change="toggleColumn(column.key)">{{ column.name }}</label>
       <span>取消勾选后，报价图片和复制数据中将隐藏该列；仅当前报价单有效。</span>
     </fieldset>
-    <fieldset v-if="rows.length" class="sheet-photos" :disabled="copying || rendering || loadingPhotos">
+    <fieldset v-if="rows.length" class="sheet-photos" :disabled="copying || rendering">
       <legend>临时商品图</legend>
-      <input ref="photoInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden aria-label="选择临时商品图片" @change="choosePhotos">
-      <button type="button" @click="photoInput?.click()">{{ loadingPhotos ? '正在读取图片…' : photos.length ? '替换图片' : '选择图片' }}</button>
+      <button type="button" @click="photoPickerOpen = true">{{ photos.length ? '管理图片' : '添加图片' }}</button>
       <button v-if="photos.length" type="button" @click="clearPhotos">移除图片</button>
       <label v-if="photos.length"><input v-model="showPhotos" type="checkbox" aria-label="显示商品图片列">显示图片</label>
-      <span>图片仅用于本次展示，不上传保存；刷新、离开页面或更换商品后清除。支持 JPG / PNG / WebP，最多 4 张，每张不超过 10MB。</span>
+      <span>已添加 {{ photos.length }} / {{ MAX_QUOTE_PHOTOS }} 张。打开弹窗后可连续粘贴或选择图片，最后统一确认；图片仅用于本次展示，刷新、离开页面或更换商品后清除。</span>
     </fieldset>
-    <p v-if="photoError" class="sheet-message failed" role="alert">{{ photoError }}</p>
+    <QuotePhotoPicker v-if="photoPickerOpen" :photos="photos" @cancel="photoPickerOpen = false" @confirm="confirmPhotos" />
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
     <div v-else-if="editing" class="sheet-editor">

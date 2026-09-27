@@ -26,10 +26,14 @@ it('keeps temporary photos through repricing with the production product reset k
   const app = createApp({ render: () => h(QuotationPreviewSave, { rows:[row], countries:[], salesperson:'QA', contextKey:'price-'+revision.value, resetKey:key.value, skus:skus.value, sourcePending:false, matrixModeLabel:'common', customerName:'QA', productName:'Bundle', sku:'ONE+TWO', customerGrade:'S', coefficient:1, customQuantity:5, unitLabel:'套', exchangeRate:6.7, primaryCountry:'US', primaryCarrier:'4PX', primaryRule:'', primaryCnyPrice:6.7, primaryUsdPrice:1 }) })
   try {
     app.mount(host)
-    const input = host.querySelector<HTMLInputElement>('input[type=file]')!
+    ;[...host.querySelectorAll('button')].find(button => button.textContent === '添加图片')!.click()
+    await nextTick()
+    const input = document.querySelector<HTMLInputElement>('[role=dialog] input[type=file]')!
     Object.defineProperty(input,'files',{value:[new File(['x'],'fixture.png',{type:'image/png'})]})
     input.dispatchEvent(new Event('change'))
     for(let i=0;i<8;i++)await nextTick()
+    ;[...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent === '确定（1 张）')!.dispatchEvent(new MouseEvent('click'))
+    await nextTick()
     expect(host.querySelector('.sheet-photo-cell')).not.toBeNull()
     revision.value++
     await nextTick(); await nextTick()
