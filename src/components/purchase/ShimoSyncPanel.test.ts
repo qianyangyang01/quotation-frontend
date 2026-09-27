@@ -22,13 +22,51 @@ it('loads only when opened and shows checkpoints, pending reason and before/afte
   await mount();expect(mocks.request).not.toHaveBeenCalled()
   button('石墨新版自动同步').click();await flush()
   expect(document.body.textContent).toContain('152')
-  expect(document.body.textContent).toContain('缺票点')
+  expect(document.querySelector('[aria-label="同步变更记录"]')).not.toBeNull()
   expect(document.body.textContent).toContain('等待 10 分钟')
+  expect(document.body.textContent).toContain('12:00 / 18:00')
   expect(document.body.textContent).toContain('100 → 120')
   expect(document.body.textContent).toContain('8% → 0%')
   expect(button('暂停同步')).toBeUndefined()
   const filter = document.querySelector<HTMLInputElement>('input[type=checkbox]')!;filter.checked = true;filter.dispatchEvent(new Event('change'));await flush()
-  expect(mocks.request).toHaveBeenCalledWith('/purchase-shimo-sync/changes?page=0&weightOnly=true')
+  expect(mocks.request).toHaveBeenCalledWith('/purchase-shimo-sync/changes?page=0&size=10&weightOnly=true')
+  button('待处理').click();await flush()
+  expect(document.body.textContent).toContain('缺票点')
+  expect(document.querySelector('[aria-label="同步待处理记录"]')).not.toBeNull()
+})
+it('filters server pages by dates, keeps them on pagination and resets the page when filters change', async () => {
+  const original=mocks.request.getMockImplementation()!
+  mocks.request.mockImplementation(async (path: string, ...rest: unknown[]) => {
+    const response=await original(path,...rest)
+    return path.includes('/changes?') ? {...response,total:25} : response
+  })
+  await mount();button('石墨新版自动同步').click();await flush()
+  const start=document.querySelector<HTMLInputElement>('[aria-label="同步开始日期"]')!
+  const end=document.querySelector<HTMLInputElement>('[aria-label="同步结束日期"]')!
+  start.value='2026-09-25';start.dispatchEvent(new Event('input'))
+  end.value='2026-09-27';end.dispatchEvent(new Event('input'))
+  document.querySelector('form')!.dispatchEvent(new Event('submit',{cancelable:true}));await flush()
+  expect(mocks.request).toHaveBeenCalledWith('/purchase-shimo-sync/changes?page=0&size=10&startDate=2026-09-25&endDate=2026-09-27&weightOnly=false')
+  button('下一页').click();await flush()
+  expect(mocks.request).toHaveBeenCalledWith('/purchase-shimo-sync/changes?page=1&size=10&startDate=2026-09-25&endDate=2026-09-27&weightOnly=false')
+  const size=document.querySelector<HTMLSelectElement>('[aria-label="同步每页条数"]')!;size.value='20';size.dispatchEvent(new Event('change'));await flush()
+  expect(mocks.request).toHaveBeenCalledWith('/purchase-shimo-sync/changes?page=0&size=20&startDate=2026-09-25&endDate=2026-09-27&weightOnly=false')
+  button('全部时间').click();await flush()
+  expect(mocks.request).toHaveBeenCalledWith('/purchase-shimo-sync/changes?page=0&size=20&weightOnly=false')
+})
+it('rejects reversed dates and expands only requested field details', async () => {
+  await mount();button('石墨新版自动同步').click();await flush()
+  expect(document.querySelector('.shimo-detail')).toBeNull()
+  button('详情').click();await flush();expect(document.querySelector('.shimo-detail')).not.toBeNull()
+  document.querySelector<HTMLButtonElement>('[aria-label="收起 AB124 的字段变化"]')!.click();await flush()
+  expect(document.querySelector('.shimo-detail')).toBeNull()
+  const start=document.querySelector<HTMLInputElement>('[aria-label="同步开始日期"]')!
+  const end=document.querySelector<HTMLInputElement>('[aria-label="同步结束日期"]')!
+  start.value='2026-09-28';start.dispatchEvent(new Event('input'));end.value='2026-09-27';end.dispatchEvent(new Event('input'))
+  const calls=mocks.request.mock.calls.length
+  document.querySelector('form')!.dispatchEvent(new Event('submit',{cancelable:true}));await flush()
+  expect(document.querySelector('[role=alert]')?.textContent).toContain('开始日期不能晚于结束日期')
+  expect(mocks.request).toHaveBeenCalledTimes(calls)
 })
 it('allows administrators to pause without changing purchase fields', async () => {
   mocks.user.value.role = 'super_admin';await mount();button('石墨新版自动同步').click();await flush()

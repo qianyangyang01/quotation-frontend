@@ -31,6 +31,7 @@ class ShimoSyncPostgresIntegrationTest {
     @Autowired PurchasePasteService paste;
     @Autowired JdbcTemplate db;
     @Autowired ObjectMapper mapper;
+    @Autowired org.springframework.web.context.WebApplicationContext context;
     @MockitoBean ShimoClient client;
     @BeforeEach void before() {
         db.update("delete from shimo_sync_change");db.update("delete from shimo_sync_item");db.update("delete from shimo_sync_fetch_page");db.update("delete from shimo_sync_fetch_sheet");db.update("delete from shimo_sync_run");db.update("update shimo_sync_control set enabled=true");
@@ -40,6 +41,70 @@ class ShimoSyncPostgresIntegrationTest {
     void read(ShimoClient.SourceRow... rows) {when(client.readAll(any(),any())).thenReturn(List.of(rows));sync.runOnce();}
     String state(String sku) {return db.queryForObject("select status from shimo_sync_item where sku=?",String.class,sku);}
     long changes() {return db.queryForObject("select count(*) from shimo_sync_change",Long.class);}
+    @Test void noonAndEveningEachRunOnceAndRestartsUsePersistedSchedule() {
+        db.update("update shimo_sync_control set updated_at='2026-09-27T00:00:00Z'");
+        var noon=java.time.Instant.parse("2026-09-27T04:00:00Z");
+        var row=ShimoRowMapperTest.cells(sku());
+        when(client.readAll(any(),any())).thenReturn(List.of(source("业务新人",row)));
+        sync.runOnce(null,noon);
+        db.update("update shimo_sync_run set finished_at='2026-09-27T04:00:01Z'");
+        sync.runOnce(null,noon.plusSeconds(30));verify(client,times(1)).readAll(any(),any());
+        row.set(4,IntNode.valueOf(170));row.set(22,IntNode.valueOf(8));
+        sync.runOnce(null,java.time.Instant.parse("2026-09-27T10:00:00Z"));
+        assertEquals(170,products.get(ShimoRowMapper.sku(row)).path("weightG").asInt());
+        assertEquals(List.of("daily_evening","daily_noon"),db.queryForList("select mode from shimo_sync_run where status='completed' order by mode",String.class));
+        db.update("update shimo_sync_run set finished_at='2026-09-27T10:00:01Z' where mode='daily_evening'");
+        assertNull(sync.automaticMode(java.time.Instant.parse("2026-09-27T10:00:30Z")));
+        assertEquals("incremental",sync.automaticMode(java.time.Instant.parse("2026-09-27T10:10:01Z")));
+        assertEquals("daily_noon",sync.automaticMode(java.time.Instant.parse("2026-09-28T04:00:00Z")));
+    }
+    @Test void failedDailySlotBacksOffAndResumesWithoutSuppressingEvening() {
+        db.update("update shimo_sync_control set updated_at='2026-09-27T00:00:00Z'");
+        var noon=java.time.Instant.parse("2026-09-27T04:00:00Z");
+        when(client.readAll(any(),any())).thenThrow(new IllegalStateException("模拟断网"));sync.runOnce(null,noon);
+        var id=db.queryForObject("select id from shimo_sync_run",UUID.class);
+        db.update("update shimo_sync_run set finished_at='2026-09-27T04:00:02Z'");
+        sync.runOnce(null,noon.plusSeconds(300));verify(client,times(1)).readAll(any(),any());
+        doReturn(List.of()).when(client).readAll(any(),any());sync.runOnce(null,noon.plusSeconds(602));
+        assertEquals(List.of(id),db.queryForList("select id from shimo_sync_run where status='completed'",UUID.class));
+        assertEquals("daily_evening",sync.automaticMode(java.time.Instant.parse("2026-09-27T10:00:00Z")));
+    }
+    @Test void dateFilteringHappensBeforePagingAndIncludesWholeShanghaiEndDate() {
+        var a=ShimoRowMapperTest.cells(sku());var b=ShimoRowMapperTest.cells(sku());var c=ShimoRowMapperTest.cells(sku());
+        read(source("业务新人",a),source("业务新人",b),source("业务新人",c));
+        db.update("update shimo_sync_change set created_at='2026-09-26T16:00:00Z' where sku=?",ShimoRowMapper.sku(a));
+        db.update("update shimo_sync_change set created_at='2026-09-27T15:59:59Z' where sku=?",ShimoRowMapper.sku(b));
+        db.update("update shimo_sync_change set created_at='2026-09-27T16:00:00Z' where sku=?",ShimoRowMapper.sku(c));
+        var day=java.time.LocalDate.parse("2026-09-27");
+        var first=sync.changes(0,false,1,day,day);var second=sync.changes(1,false,1,day,day);
+        assertEquals(2L,first.get("total"));
+        assertEquals(ShimoRowMapper.sku(b),((Map<?,?>)((List<?>)first.get("rows")).getFirst()).get("sku"));
+        assertEquals(ShimoRowMapper.sku(a),((Map<?,?>)((List<?>)second.get("rows")).getFirst()).get("sku"));
+        assertEquals(0L,sync.changes(0,true,10,day,day).get("total"));
+        assertThrows(com.milano.quotation.common.AppException.class,()->sync.changes(0,false,10,day.plusDays(1),day));
+        db.update("update shimo_sync_item set status='pending',checked_at='2026-09-27T15:59:59Z'");
+        db.update("update shimo_sync_item set checked_at='2026-09-27T16:00:00Z' where sku=?",ShimoRowMapper.sku(c));
+        assertEquals(2L,sync.items(0,true,1,day,day).get("total"));
+        assertEquals(1,((List<?>)sync.items(1,true,1,day,day).get("rows")).size());
+    }
+    @Test void synchronizedProductIsIdenticalForAllAuthorizedRolesWithoutGrantingWrites() throws Exception {
+        var row=ShimoRowMapperTest.cells(sku());read(source("业务新人",row));
+        row.set(4,IntNode.valueOf(180));row.set(22,JsonNodeFactory.instance.textNode("8%"));read(source("业务新人",row));
+        var sku=ShimoRowMapper.sku(row);var expected=products.get(sku);
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+            .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+        for(var role:List.of(new String[]{"SUPER_ADMIN","purchase"},new String[]{"EMPLOYEE","quote"},new String[]{"FINANCE","allRecords"},new String[]{"PURCHASE","purchase"},new String[]{"LOGISTICS","quote"})) {
+            var user=org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user(role[0]).authorities(
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_"+role[0]),new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_"+role[1]));
+            var response=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/purchase-products/"+sku).with(user))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andReturn().getResponse();
+            assertEquals(mapper.readTree(mapper.writeValueAsString(expected)),mapper.readTree(response.getContentAsString()).path("data"),role[0]);
+            if(!"SUPER_ADMIN".equals(role[0])) mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/purchase-shimo-sync/enabled").with(user)
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()).contentType("application/json").content("{\"enabled\":false}"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        }
+        assertTrue(sync.enabled());
+    }
     @Test void missingTaxAndWeightPersistThenZeroTaxCompletesWithoutManualPaste() {
         var sku=sku();var cells=ShimoRowMapperTest.cells(sku);cells.set(22,NullNode.instance);
         read(source("业务新人",cells));assertFalse(products.exists(sku));assertEquals("pending",state(sku));

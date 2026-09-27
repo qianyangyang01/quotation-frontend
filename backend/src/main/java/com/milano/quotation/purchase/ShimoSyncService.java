@@ -17,6 +17,8 @@ import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Connection;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,7 +50,10 @@ public class ShimoSyncService {
         this.intervalSeconds=Math.max(300,Math.min(600,intervalSeconds));
         tx.setTimeout(15);
     }
-    @PostConstruct void start() { if(workerEnabled&&client.configured()) worker.scheduleWithFixedDelay(this::scheduledRun,30,intervalSeconds,TimeUnit.SECONDS); }
+    @PostConstruct void start() {
+        if(workerEnabled&&client.configured()) worker.scheduleAtFixedRate(this::scheduledRun,
+            ShimoSyncSchedule.nextTickMillis(Instant.now()),30_000,TimeUnit.MILLISECONDS);
+    }
     @PreDestroy void stop() { worker.shutdownNow(); }
     private void scheduledRun() {
         if(!scheduled.compareAndSet(false,true)) return;
@@ -76,25 +81,38 @@ public class ShimoSyncService {
         result.put("configured",workerEnabled&&client.configured());result.put("enabled",enabled());
         result.put("fileName","国际站2026询价新版");result.put("fileGuid",ShimoRowMapper.FILE_GUID);result.put("sheets",client.sheets());
         result.put("intervalSeconds",intervalSeconds);result.put("running",scheduled.get());
+        result.put("dailyTimes",List.of("12:00","18:00"));result.put("timeZone",ShimoSyncSchedule.ZONE.toString());
         result.put("runs",db.queryForList("select * from shimo_sync_run order by started_at desc limit 5"));
         result.put("counts",db.queryForList("select status,count(*) as total from shimo_sync_item group by status order by status"));
         return result;
     }
-    public Map<String,Object> items(int page, boolean pending) {
-        String where=pending?" where status <> 'synced'":"";
-        return Map.of("total",Objects.requireNonNull(db.queryForObject("select count(*) from shimo_sync_item"+where,Long.class)),
-            "rows",db.queryForList("select sku,sheet,source_row,status,reason,first_seen_at,checked_at,synced_at from shimo_sync_item"+where+" order by checked_at desc,sku limit 50 offset ?",Math.max(0,Math.min(page,10000))*50));
+    private String dateWhere(String column,LocalDate start,LocalDate end,List<Object> args) {
+        if(start!=null&&end!=null&&start.isAfter(end)) throw AppException.unprocessable("开始日期不能晚于结束日期");
+        String where="";
+        if(start!=null) {where+=" and "+column+">=?";args.add(java.sql.Timestamp.from(start.atStartOfDay(ShimoSyncSchedule.ZONE).toInstant()));}
+        if(end!=null) {where+=" and "+column+"<?";args.add(java.sql.Timestamp.from(end.plusDays(1).atStartOfDay(ShimoSyncSchedule.ZONE).toInstant()));}
+        return where;
     }
-    public Map<String,Object> changes(int page,boolean weightOnly) {
-        String where=weightOnly?" where before_payload is not null and before_payload->'weightG' is distinct from after_payload->'weightG'":"";
-        var rows=db.queryForList("select id,run_id,sku,sheet,source_row,before_payload,after_payload,created_at,reverted_at from shimo_sync_change"+where+" order by created_at desc,id limit 20 offset ?",Math.max(0,Math.min(page,10000))*20);
+    public Map<String,Object> items(int page,boolean pending,int size,LocalDate start,LocalDate end) {
+        var args=new ArrayList<Object>();
+        String where=" where 1=1"+(pending?" and status <> 'synced'":"")+dateWhere("checked_at",start,end,args);
+        long total=Objects.requireNonNull(db.queryForObject("select count(*) from shimo_sync_item"+where,Long.class,args.toArray()));
+        int limit=Math.max(1,Math.min(size,50));args.add(limit);args.add(Math.max(0,Math.min(page,10000))*limit);
+        return Map.of("total",total,"rows",db.queryForList("select sku,sheet,source_row,status,reason,first_seen_at,checked_at,synced_at from shimo_sync_item"+where+" order by checked_at desc,sku limit ? offset ?",args.toArray()));
+    }
+    public Map<String,Object> changes(int page,boolean weightOnly,int size,LocalDate start,LocalDate end) {
+        var args=new ArrayList<Object>();
+        String where=" where 1=1"+(weightOnly?" and before_payload is not null and before_payload->'weightG' is distinct from after_payload->'weightG'":"")+dateWhere("created_at",start,end,args);
+        long total=Objects.requireNonNull(db.queryForObject("select count(*) from shimo_sync_change"+where,Long.class,args.toArray()));
+        int limit=Math.max(1,Math.min(size,50));args.add(limit);args.add(Math.max(0,Math.min(page,10000))*limit);
+        var rows=db.queryForList("select id,run_id,sku,sheet,source_row,before_payload,after_payload,created_at,reverted_at from shimo_sync_change"+where+" order by created_at desc,id limit ? offset ?",args.toArray());
         var result=new ArrayList<Map<String,Object>>();
         for(var row:rows) {
             var before=row.remove("before_payload");var after=row.remove("after_payload");
             row.put("fields",PurchaseHistoryService.changes(before==null?null:mapper.readTree(before.toString()),mapper.readTree(after.toString())));
             result.add(row);
         }
-        return Map.of("total",Objects.requireNonNull(db.queryForObject("select count(*) from shimo_sync_change"+where,Long.class)),"rows",result);
+        return Map.of("total",total,"rows",result);
     }
     public Map<String,Object> rollback(UUID run,boolean preview) {
         if(enabled()) throw AppException.conflict("请先暂停石墨自动同步，再预览或执行回退");
@@ -131,6 +149,21 @@ public class ShimoSyncService {
         runOnce("manual");
     }
     void runOnce(String requestedMode) {
+        runOnce(requestedMode,Instant.now());
+    }
+    String automaticMode(Instant now) {
+        var activated=db.queryForObject("select updated_at from shimo_sync_control where id=1",java.sql.Timestamp.class).toInstant();
+        String due=ShimoSyncSchedule.dueMode(now,activated);
+        var day=java.sql.Date.valueOf(ShimoSyncSchedule.day(now));
+        if(due!=null&&db.queryForObject("select count(*) from shimo_sync_run where mode=? and schedule_day=? and status='completed'",Long.class,due,day)==0) {
+            var attempts=db.queryForList("select coalesce(finished_at,started_at) as attempted_at from shimo_sync_run where mode=? and schedule_day=? order by started_at desc limit 1",due,day);
+            if(!attempts.isEmpty()&&now.isBefore(((java.sql.Timestamp)attempts.getFirst().get("attempted_at")).toInstant().plusSeconds(intervalSeconds))) return null;
+            return due;
+        }
+        var latest=db.queryForList("select coalesce(finished_at,started_at) as attempted_at from shimo_sync_run order by coalesce(finished_at,started_at) desc limit 1");
+        return !latest.isEmpty()&&now.isBefore(((java.sql.Timestamp)latest.getFirst().get("attempted_at")).toInstant().plusSeconds(intervalSeconds))?null:"incremental";
+    }
+    void runOnce(String requestedMode,Instant now) {
         UUID run=null;
         var previous=SecurityContextHolder.getContext();
         var context=SecurityContextHolder.createEmptyContext();
@@ -143,16 +176,17 @@ public class ShimoSyncService {
             }
             try {
                 if(!enabled()) return;
-                var now=java.time.Instant.now();
                 var day=ShimoSyncSchedule.day(now);
-                boolean dailyDone=db.queryForObject("select count(*) from shimo_sync_run where mode='daily' and schedule_day=? and status='completed'",Long.class,java.sql.Date.valueOf(day))>0;
-                String mode=requestedMode!=null?requestedMode:ShimoSyncSchedule.dailyWindow(now)&&!dailyDone?"daily":"incremental";
-                var resumable=db.queryForList("select id,mode,changed from shimo_sync_run where status in ('fetching','fetch_failed','applying','apply_failed') and (mode <> 'daily' or ?) order by started_at desc limit 1",ShimoSyncSchedule.dailyWindow(now));
+                String mode=requestedMode!=null?requestedMode:automaticMode(now);
+                if(mode==null) return;
+                var resumable=ShimoSyncSchedule.daily(mode)
+                    ? db.queryForList("select id,mode from shimo_sync_run where status in ('fetching','fetch_failed','applying','apply_failed') and mode=? and schedule_day=? order by started_at desc limit 1",mode,java.sql.Date.valueOf(day))
+                    : db.queryForList("select id,mode from shimo_sync_run where status in ('fetching','fetch_failed','applying','apply_failed') and mode not in ('daily','daily_noon','daily_evening') order by started_at desc limit 1");
                 int previousChanges=0;
                 if(!resumable.isEmpty()) {
                     var saved=resumable.getFirst();run=(UUID)saved.get("id");mode=saved.get("mode").toString();previousChanges=db.queryForObject("select count(*) from shimo_sync_change where run_id=?",Integer.class,run);
                     db.update("update shimo_sync_run set status='fetching',finished_at=null,reason='' where id=?",run);
-                } else {run=UUID.randomUUID();db.update("insert into shimo_sync_run(id,status,mode,schedule_day) values (?,'fetching',?,?)",run,mode,java.sql.Date.valueOf(day));}
+                } else {run=UUID.randomUUID();db.update("insert into shimo_sync_run(id,status,mode,schedule_day,started_at) values (?,'fetching',?,?,?)",run,mode,java.sql.Date.valueOf(day),java.sql.Timestamp.from(now));}
                 var known=new HashSet<>(db.queryForList("select sku from purchase_product",String.class));
                 var pending=new HashSet<>(db.queryForList("select sku from shimo_sync_item where status='pending'",String.class));
                 boolean incremental="incremental".equals(mode);
@@ -243,7 +277,7 @@ public class ShimoSyncService {
             synced(run,row,hash,current.id,current.version,false);return false;
         }
         if("incremental".equals(mode)&&current!=null&&(old==null||!"pending".equals(old.get("status")))) {
-            pending(run,row,"awaiting_daily","已有资料变化，等待每天12:30完整检查");
+            pending(run,row,"awaiting_daily","已有资料变化，等待每天12:00或18:00批量更新");
             // Establish a version guard on the first observation without claiming it was synchronized.
             if(old==null||old.get("product_id")==null) db.update("update shimo_sync_item set product_id=?,product_version=? where sku=?",current.id,current.version,row.sku());
             return false;
