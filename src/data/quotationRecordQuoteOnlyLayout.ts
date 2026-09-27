@@ -1,4 +1,5 @@
 import { savedSystemPrice, recordQuoteSheetVersion } from './customerQuotePrices'
+import { averageSelectedRegions } from './quoteChannelAverage'
 import { customerGradeDisplayLabel } from './financeChannelPolicies'
 import type { QuotationRecord } from './quotationRecords'
 import { quotationRecordCopyCountry } from './quotationRecordCopyCountry'
@@ -83,7 +84,7 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version:
   }
   for (const plan of plans) {
     const first = record.quoteOptions?.find(option => option.id === plan.members[0]?.optionId)
-    rows.push({kind: 'route', cells: [first ? quotationRecordCopyCountry(first.country, first.quoteRegion) : '综合方案', plan.provider + '（综合报价）', ...quantities.map(q => { const p = plan.prices[plan.quantities.indexOf(q)]; return p == null ? '未报价' : p.toFixed(2) }), plan.shippingTime || 'To be confirmed']})
+    rows.push({kind: 'route', cells: [first ? quotationRecordCopyCountry(first.country, averageSelectedRegions(plan, record.quoteOptions)) : '综合方案', plan.provider + '（综合报价）', ...quantities.map(q => { const p = plan.prices[plan.quantities.indexOf(q)]; return p == null ? '未报价' : p.toFixed(2) }), plan.shippingTime || 'To be confirmed']})
   }
   if (!options.length) rows.push({ kind: 'note', cells: ['未保存国家与物流渠道报价'] })
   rows.push({ kind: 'note', cells: ['各数量价格为整单报价；未报价项不补算。'] })

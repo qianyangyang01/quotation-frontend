@@ -40,7 +40,7 @@ export function buildQuotationPayload(account, sequence, bundle, logisticsRevisi
     monthlySalesEstimate: '100',
     productSummary: bundle ? `${firstSku} × 1 + ${secondSku} × 2` : firstSku,
     logisticsRevision,
-    quoteOptions: [{ country: '美国', carrier: '燕文', channel: '性能普货专线', quoteCustomUsd: 12.34,
+    quoteOptions: [{ country: '美国', carrier: '燕文', channel: '性能普货专线', quoteCustomUsd: 12.35,
       channelKey: '9001::燕文::PERF-CHANNEL', logisticsVersionId: '33333333-3333-4333-8333-333333333333',
       logisticsChannelId: '22222222-2222-4222-8222-222222222222', logisticsInput: { country: '美国', weightKg },
       freightCny: Math.round((weightKg * 48 + 8) * 100) / 100,

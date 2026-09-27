@@ -6,6 +6,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.*;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.data.domain.PageRequest;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -28,7 +29,7 @@ class ShimoSyncPostgresIntegrationTest {
     }
     @Autowired ShimoSyncService sync;
     @Autowired PurchaseProductService products;
-    @Autowired PurchasePasteService paste;
+    @MockitoSpyBean PurchasePasteService paste;
     @Autowired JdbcTemplate db;
     @Autowired ObjectMapper mapper;
     @Autowired org.springframework.web.context.WebApplicationContext context;
@@ -148,6 +149,27 @@ class ShimoSyncPostgresIntegrationTest {
         cells.set(12,IntNode.valueOf(77));read(source("业务新人",cells));
         assertEquals("conflict",state(sku));assertEquals(20,products.get(sku).path("purchasePriceCny").asInt());
         read();assertTrue(products.exists(sku));assertEquals("source_missing",state(sku));
+    }
+    @Test void manualEditBetweenSyncVersionCheckAndPastePreviewIsNeverOverwritten() throws Exception {
+        var sku=sku();var cells=ShimoRowMapperTest.cells(sku);read(source("业务新人",cells));
+        cells.set(12,IntNode.valueOf(77));
+        when(client.readAll(any(),any())).thenReturn(List.of(source("业务新人",cells)));
+        var entered=new java.util.concurrent.CountDownLatch(1);
+        var resume=new java.util.concurrent.CountDownLatch(1);
+        doAnswer(invocation->{
+            entered.countDown();
+            if(!resume.await(15,java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("test barrier timeout");
+            return invocation.callRealMethod();
+        }).when(paste).preview(any());
+        var task=java.util.concurrent.CompletableFuture.runAsync(sync::runOnce);
+        try {
+            assertTrue(entered.await(15,java.util.concurrent.TimeUnit.SECONDS));
+            products.update(sku,((ObjectNode)products.get(sku)).put("notes","concurrent manual edit"));
+        } finally {resume.countDown();}
+        task.get(30,java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals("concurrent manual edit",products.get(sku).path("notes").asText());
+        assertEquals(20,products.get(sku).path("purchasePriceCny").asInt());
+        assertEquals(1,changes());
     }
     @Test void oldSourceOnlyUpdatesFromExplicitOldUpdateSheetAndKeepsLegacyPriceRule() {
         var sku=sku();var cells=ShimoRowMapperTest.cells(sku);

@@ -4,6 +4,7 @@ import { priceComparison, recordCustomerPrices } from './customerQuotePrices'
 import { customerPriceRevision } from './customerPriceRevision'
 import { quotationRecordQuoteOnlyLayout } from './quotationRecordQuoteOnlyLayout'
 import { quotationRecordCopyLayout } from './quotationRecordCopyLayout'
+import { averageSelectedRegions } from './quoteChannelAverage'
 
 function record() {
   return normalizeQuotationRecord({ id: 'r', no: 'QT-AVG', primarySku: 'AVG-TEST', quoteOptions: [
@@ -28,4 +29,18 @@ it('copies aggregate-only customer rows even if every channel customer price is 
   expect(full.text).toContain('SDH｜A'); expect(full.text).toContain('Combined Shipping')
   const audit = quotationRecordCopyLayout(r)
   expect(audit.text).toContain('综合报价方案（保存快照）'); expect(audit.text).toContain('5.10'); expect(audit.text).toContain('4.90')
+})
+
+it('labels every participating Australian zone in record comparison and customer copy without changing snapshots', () => {
+  const r = record()
+  r.quoteOptions![0]!.country = '澳大利亚'; r.quoteOptions![0]!.quoteRegion = '澳大利亚2区'
+  r.quoteOptions![1]!.country = '澳大利亚'; r.quoteOptions![1]!.quoteRegion = '澳大利亚3区'
+  const before = JSON.stringify(r)
+  expect(priceComparison(r).find(line => line.option.id === 'average:p')!.option.quoteRegion).toBe('澳大利亚2区 / 澳大利亚3区')
+  const copied = quotationRecordQuoteOnlyLayout(r, 'visible')
+  expect(copied.text).toContain('澳大利亚2区 / 澳大利亚3区')
+  expect(copied.html).toContain('澳大利亚2区 / 澳大利亚3区')
+  expect(JSON.stringify(r)).toBe(before)
+  r.quoteOptions![1]!.quoteRegion = '澳大利亚2区'
+  expect(averageSelectedRegions(r.customerQuote!.averagePlans![0]!, r.quoteOptions)).toBe('澳大利亚2区')
 })

@@ -126,7 +126,7 @@ const visibleSourceRows = computed(() => props.showAllRows ? props.rows : props.
 function buildSheet(rows: QuoteSheetSourceRow[]) { return buildCustomerQuoteSheet({
   rows, countries: props.countries, edits: edits.value, skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle,
-  quantities: quantities.value, calculatePrice: props.sourcePending ? undefined : props.calculatePrice,
+  quantities: quantities.value, calculatePrice: props.sourcePending ? undefined : cachedSystemPrice,
   legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom),
 }) }
 function loadAveragePlans() {
@@ -146,7 +146,13 @@ const systemSheet = computed(() => buildCustomerQuoteSheet({ rows: props.rows, c
   calculatePrice: props.recordMode ? (row, quantity) => {
     const saved = props.initialSystemQuote
     return saved?.rows.find(r => r.optionId === row.channelKey)?.prices[saved.quantities.indexOf(quantity)] ?? null
-  } : props.calculatePrice, legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom) }))
+  } : props.sourcePending ? undefined : props.calculatePrice, legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom) }))
+// Table, preview, hidden rows and averages share one calculation per source/quantity.
+// Presentation edits and customer overrides must not rerun logistics pricing.
+const systemPriceRows = computed(() => new Map(systemSheet.value.rows.map(row => [row.key, row.prices])))
+function cachedSystemPrice(row: QuoteSheetSourceRow, quantity: number) {
+  return systemPriceRows.value.get(quoteSheetRowKey(row))?.[quantities.value.indexOf(quantity)] ?? null
+}
 function addAverage(plan: AveragePlan) {
   const index = averagePlans.value.findIndex(p => p.id === plan.id)
   if (index < 0 && averagePlans.value.length >= 20) { averageNotice.value = '每张报价单最多 20 个综合方案'; return }

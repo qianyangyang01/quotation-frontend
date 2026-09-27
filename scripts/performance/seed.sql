@@ -121,7 +121,11 @@ SELECT (
   jsonb_build_object('id','perf-' || value,'no','PERFQ' || lpad(value::text,8,'0'),'customerName','性能客户' || value,'quoteMode',CASE WHEN value % 3=0 THEN 'bundle' ELSE 'single' END,'primarySku','PERF-SKU-' || lpad((((value - 1) % 10000) + 1)::text,5,'0'),'productCategory','服装','logisticsAttribute','普货','customerGrade','A级客户','taxCustomerType','A','monthlySalesEstimate','100','status',CASE WHEN value % 5 = 0 THEN 'won' WHEN value % 7 = 0 THEN 'lost' ELSE 'pending' END,'createdAt',(now() - make_interval(secs => value))::text,'updatedAt',(now() - make_interval(secs => value))::text,'quoteOptions',jsonb_build_array(jsonb_build_object('country','美国','channel','性能普货专线')),'revisions','[]'::jsonb),
   0, now() - make_interval(secs => value), now() - make_interval(secs => value)
 FROM generate_series(1, 2000) AS value
-ON CONFLICT (quote_no) DO NOTHING;
+  ON CONFLICT (quote_no) DO NOTHING;
+
+-- Match the API-created record contract so owner-scope assertions also cover seeded history.
+UPDATE quotation_record SET payload = payload || jsonb_build_object('salespersonAccount', owner_account)
+WHERE quote_no LIKE 'PERFQ%';
 
 ANALYZE purchase_product;
 ANALYZE quotation_record;

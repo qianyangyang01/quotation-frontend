@@ -218,6 +218,23 @@ it('allows cancellation during image decoding and releases the late result', asy
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:late')
   expect(document.querySelector('.sheet-photo-cell')).toBeNull()
 })
+it.each(['cancel', 'switch'])('aborts pending HTML image downloads on %s', async mode => {
+  const state = mount(); await openPicker()
+  let signal!: AbortSignal
+  const fetch = vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+    signal = options.signal!
+    signal.addEventListener('abort', () => reject(new Error('aborted')))
+  }))
+  vi.stubGlobal('fetch', fetch)
+  paste(document.querySelector('[role=dialog]')!, [], '<img src="https://example.com/one.png"><img src="https://example.com/two.png">')
+  await settle(); expect(signal.aborted).toBe(false)
+  if (mode === 'cancel') await click('取消')
+  else { state.skus = ['OTHER']; await settle() }
+  expect(signal.aborted).toBe(true)
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(loadQuotePhotos).not.toHaveBeenCalled()
+  expect(document.querySelector('[role=dialog]')).toBeNull()
+})
 it('focuses the dialog, traps Tab, and restores focus on Escape', async () => {
   mount()
   const opener = [...document.querySelectorAll('button')].find(button => button.textContent === '添加图片')!

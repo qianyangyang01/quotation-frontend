@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import { cloneAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
+import { averageSelectedRegions, cloneAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 
 export type QuoteSheetContact = { agent: string; whatsapp: string }
@@ -69,7 +69,7 @@ export function priceComparison(record: QuotationRecord, snapshot = recordCustom
   const averageLines = (snapshot.averagePlans ?? []).flatMap(plan => {
     const first = record.quoteOptions?.find(option => option.id === plan.members[0]?.optionId)
     if (!first) return []
-    const option = { ...first, id: 'average:' + plan.id, carrier: plan.provider, channel: '综合报价', rule: plan.mode === 'equal' ? '普通平均' : '加权平均' }
+    const option = { ...first, id: 'average:' + plan.id, quoteRegion: averageSelectedRegions(plan, record.quoteOptions), carrier: plan.provider, channel: '综合报价', rule: plan.mode === 'equal' ? '普通平均' : '加权平均' }
     const initial = record.sheetQuote?.averagePlans?.find(p => p.id === plan.id)
     return plan.quantities.map((quantity, index) => {
       const system = plan.systemPrices[index] ?? null, customer = plan.prices[index] ?? null

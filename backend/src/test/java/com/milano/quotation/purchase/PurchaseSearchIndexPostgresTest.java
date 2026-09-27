@@ -49,4 +49,29 @@ class PurchaseSearchIndexPostgresTest {
         compare("服装");jdbc.execute("delete from purchase_product");compare("服装");
         jdbc.execute("insert into purchase_product values(gen_random_uuid(),'restored',0,now(),'{\"name\":\"服装\"}')");compare("服装");
     }
+    @Test void overlappingOldAndNewSnapshotsNeverShareChangedSearchText() throws Exception {
+        compare("服装");
+        var oldSnapshot=new java.util.concurrent.CountDownLatch(1);
+        var newerRead=new java.util.concurrent.CountDownLatch(1);
+        var old=java.util.concurrent.CompletableFuture.runAsync(()->tx.execute(status->{
+            assertEquals(601,jdbc.queryForObject("select count(*) from purchase_product",Integer.class));
+            oldSnapshot.countDown();
+            try { assertTrue(newerRead.await(10,java.util.concurrent.TimeUnit.SECONDS)); }
+            catch(InterruptedException e){Thread.currentThread().interrupt();throw new RuntimeException(e);}
+            assertEquals(601,index.select("服装",0,700).total());
+            assertEquals(0,index.select("concurrent-new",0,700).total());
+            return null;
+        }));
+        assertTrue(oldSnapshot.await(10,java.util.concurrent.TimeUnit.SECONDS));
+        try {
+            jdbc.update("update purchase_product set payload='{\"name\":\"concurrent-new\"}',version=version+1,updated_at=now() where sku='BIZ-1'");
+            compare("concurrent-new");compare("服装");
+        } finally {newerRead.countDown();}
+        old.get(15,java.util.concurrent.TimeUnit.SECONDS);
+        compare("concurrent-new");compare("服装");
+        var readers=java.util.stream.IntStream.range(0,8).mapToObj(n->java.util.concurrent.CompletableFuture.runAsync(()->{
+            for(int i=0;i<5;i++)compare(i%2==0?"服装":"concurrent-new");
+        })).toArray(java.util.concurrent.CompletableFuture[]::new);
+        java.util.concurrent.CompletableFuture.allOf(readers).get(30,java.util.concurrent.TimeUnit.SECONDS);
+    }
 }

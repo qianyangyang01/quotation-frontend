@@ -34,7 +34,8 @@ export async function readPhotoClipboard(): Promise<PhotoClipboardData> {
   return { files, html: html.join('') }
 }
 
-export async function resolvePhotoPaste(data: PhotoClipboardData): Promise<File[]> {
+export async function resolvePhotoPaste(data: PhotoClipboardData, signal?: AbortSignal): Promise<File[]> {
+  signal?.throwIfAborted()
   if (data.files.length) return data.files
   // A detached template is inert: pasted HTML is never inserted into the page.
   const template = document.createElement('template')
@@ -44,10 +45,13 @@ export async function resolvePhotoPaste(data: PhotoClipboardData): Promise<File[
   if (sources.length > MAX_QUOTE_PHOTOS) throw new Error(`最多粘贴 ${MAX_QUOTE_PHOTOS} 张商品图片`)
   const files: File[] = []
   for (const source of sources) {
+    signal?.throwIfAborted()
     // No server proxy, source cookies, local files, or executable URL schemes.
     if (!/^https:\/\//i.test(source) && !/^data:image\/(png|jpeg|webp);base64,/i.test(source)) throw new Error(PHOTO_PASTE_HELP)
     if (source.startsWith('data:') && source.length > MAX_QUOTE_PHOTO_BYTES * 1.4) throw new Error('每张图片须大于 0 且不超过 10MB')
     const controller = new AbortController()
+    const cancel = () => controller.abort()
+    signal?.addEventListener('abort', cancel, { once: true })
     const timer = setTimeout(() => controller.abort(), 15000)
     try {
       const response = await fetch(source, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', mode: 'cors' })
@@ -69,7 +73,7 @@ export async function resolvePhotoPaste(data: PhotoClipboardData): Promise<File[
       files.push(new File(chunks, `粘贴图片-${files.length + 1}`, { type }))
     } catch {
       throw new Error('图片链接无法读取或图片不符合要求，请在石墨中打开原图并选择“复制图片”，或截图后粘贴。')
-    } finally { clearTimeout(timer) }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel) }
   }
   return files
 }

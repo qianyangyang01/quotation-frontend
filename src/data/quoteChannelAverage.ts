@@ -8,6 +8,11 @@ export type AveragePlan = {
   systemPrices: Array<number | null>; prices: Array<number | null>
 }
 export const cloneAveragePlans = (plans: AveragePlan[] = []): AveragePlan[] => JSON.parse(JSON.stringify(plans))
+/** Describe every saved source region; a cross-zone plan must not inherit only the first zone. */
+export function averageSelectedRegions(plan: AveragePlan, options: { id: string; quoteRegion?: string }[] = []) {
+  const members = new Set(plan.members.map(member => member.optionId))
+  return [...new Set(options.filter(option => members.has(option.id)).map(option => option.quoteRegion?.trim()).filter(Boolean))].join(' / ')
+}
 export function validAveragePlans(plans: unknown): plans is AveragePlan[] {
   if (!Array.isArray(plans) || plans.length > 20) return false
   const ids = new Set<string>()

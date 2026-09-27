@@ -52,6 +52,53 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('does not reprice custom quantity routes when editing presentation or customer amounts', async () => {
+  const calculate = vi.fn((_row: QuoteSheetSourceRow, quantity: number) => quantity * 2)
+  mount(Array.from({ length: 30 }, (_, i) => row(`perf-${i}`)), calculate)
+  await settle()
+  await input('第 4 个价格列数量', '7')
+  expect(calculate.mock.calls.length).toBeLessThanOrEqual(30)
+  calculate.mockClear()
+  await input('报价单署名', 'Updated agent')
+  await input('第 1 行第 4 列美元价格', '18.50')
+  expect(calculate).not.toHaveBeenCalled()
+  expect(exposed.capturePrices().rows[0]!.prices[3]).toBe(18.5)
+  expect(exposed.capturePrices().rows[0]!.systemPrices[3]).toBe(14)
+})
+
+it('refreshes shared prices when calculator dependencies or source rows change and suspends pending calculations', async () => {
+  const pricing = reactive({ multiplier: 2 })
+  const calculate = vi.fn((_row: QuoteSheetSourceRow, quantity: number) => quantity * pricing.multiplier)
+  const state = mount([row()], calculate)
+  await input('第 4 个价格列数量', '7')
+  expect(exposed.capturePrices().rows[0]!.systemPrices[3]).toBe(14)
+  calculate.mockClear()
+  pricing.multiplier = 3; await settle()
+  expect(calculate).toHaveBeenCalledTimes(1)
+  expect(exposed.capturePrices().rows[0]!.systemPrices[3]).toBe(21)
+  state.rows[0]!.quote1 = 99; await settle()
+  expect(exposed.capturePrices().rows[0]!.systemPrices[0]).toBe(99)
+  state.sourcePending = true; await settle(); calculate.mockClear()
+  pricing.multiplier = 4; await settle()
+  expect(calculate).not.toHaveBeenCalled()
+  expect(() => exposed.capturePrices()).toThrow('报价仍在计算')
+  state.sourcePending = false; await settle()
+  expect(calculate).toHaveBeenCalledTimes(1)
+  expect(exposed.capturePrices().rows[0]!.systemPrices[3]).toBe(28)
+})
+
+it('uses only saved historical system prices for custom quantities even when a live calculator is supplied', async () => {
+  const calculate = vi.fn(() => 999)
+  const state = mount([row()], calculate, { quantities: [1, 2, 3, 7], rows: [{ optionId: 'one', prices: [11, 17, 22, 18.5] }] }, true)
+  state.initialSystemQuote = { quantities: [1, 2, 3, 7], rows: [{ optionId: 'one', prices: [10.8, 16.35, 21.9, 14] }] }
+  await settle()
+  expect(calculate).not.toHaveBeenCalled()
+  expect(exposed.capturePrices().rows[0]!.systemPrices[3]).toBe(14)
+  await input('报价单署名', 'New viewer')
+  expect(calculate).not.toHaveBeenCalled()
+  expect(exposed.capturePrices().rows[0]!.prices[3]).toBe(18.5)
+})
+
 const contactValue = (label: string) => document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!.value
 
 it('captures each quotation contact and restores it instead of the viewers current default', async () => {

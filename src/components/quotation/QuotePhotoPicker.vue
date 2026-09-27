@@ -17,6 +17,7 @@ const error = ref('')
 const status = ref('')
 const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
 let disposed = false
+const downloads = new AbortController()
 
 async function addPhotos(readFiles: () => Promise<File[]>) {
   if (disposed || busy.value) return
@@ -46,7 +47,7 @@ function choosePhotos(event: Event) {
 }
 function pastePhotos() {
   dialog.value?.focus()
-  void addPhotos(async () => resolvePhotoPaste(await readPhotoClipboard()))
+  void addPhotos(async () => resolvePhotoPaste(await readPhotoClipboard(), downloads.signal))
 }
 function paste(event: ClipboardEvent) {
   event.preventDefault()
@@ -54,7 +55,7 @@ function paste(event: ClipboardEvent) {
   if (busy.value || disposed) return
   const data = capturePhotoPaste(event.clipboardData)
   if (!data.files.length && !/<img\b/i.test(data.html)) { error.value = PHOTO_PASTE_HELP; return }
-  void addPhotos(() => resolvePhotoPaste(data))
+  void addPhotos(() => resolvePhotoPaste(data, downloads.signal))
 }
 function removePhoto(index: number) {
   if (busy.value) return
@@ -66,7 +67,7 @@ function removePhoto(index: number) {
   status.value = `已移除图片，还可添加 ${MAX_QUOTE_PHOTOS - selected.value.length} 张。`
   nextTick(() => dialog.value?.focus())
 }
-function cancel() { disposed = true; emit('cancel') }
+function cancel() { disposed = true; downloads.abort(); emit('cancel') }
 function confirm() {
   if (busy.value || disposed) return
   disposed = true
@@ -89,6 +90,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   disposed = true
+  downloads.abort()
   releaseQuotePhotos([...owned])
   owned.clear()
   if (previousFocus?.isConnected) previousFocus.focus()

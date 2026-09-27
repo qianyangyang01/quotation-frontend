@@ -66,3 +66,26 @@ it('times out a stalled image download', async () => {
   await vi.advanceTimersByTimeAsync(15000)
   expect((await result).message).toContain('复制图片')
 })
+
+it('aborts an in-flight download when the picker closes and never starts remaining images', async () => {
+  vi.useFakeTimers()
+  const controller = new AbortController()
+  let downloading!: AbortSignal
+  const fetch = vi.fn((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+    downloading = options.signal!
+    downloading.addEventListener('abort', () => reject(new Error('cancelled')))
+  }))
+  vi.stubGlobal('fetch', fetch)
+  const result = resolvePhotoPaste({ files: [], html: '<img src="https://example.com/one.png"><img src="https://example.com/two.png">' }, controller.signal).catch(error => error)
+  controller.abort()
+  expect(downloading.aborted).toBe(true)
+  await result
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+it('never downloads if cancellation happens while the clipboard permission is pending', async () => {
+  const controller = new AbortController(); controller.abort()
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+  await expect(resolvePhotoPaste({ files: [], html: '<img src="https://example.com/image.png">' }, controller.signal)).rejects.toThrow()
+  expect(fetch).not.toHaveBeenCalled()
+})
