@@ -56,7 +56,7 @@ describe('customer operation settings on the actual quotation page', () => {
       if (path === '/quotation-templates') return []
       if (path === '/quotation-readiness') return { ready: true, missing: [] }
       if (path === '/quotation-drafts/mine/state') return {
-        exists: true, version: 1, updatedAt: '2026-09-16T00:44:59Z',
+        exists: true, version: 1, sourceQuote: { id: 'withdrawn', no: 'QT-WITHDRAWN', version: 1 }, updatedAt: '2026-09-16T00:44:59Z',
         payload: { schemaVersion: 2, customerName, selectedCustomerId, specialPackagingGrams, quoteMode: 'single', skuSearch: '', logisticsAttribute: '普货' },
       }
       throw new Error(`Unexpected request: ${path}`)
@@ -68,7 +68,7 @@ describe('customer operation settings on the actual quotation page', () => {
     await vi.waitFor(() => expect(host.textContent).toContain('已恢复并保存草稿'))
   }
 
-  it.each([undefined,10])('restores packaging from the account draft and retains it when autosaving: %s', async grams => {
+  it.each([undefined,10])('restores packaging from the withdrawn quotation draft and retains it when autosaving: %s', async grams => {
     await mountWithDraft('包材草稿','',grams)
     const put=vi.spyOn(api,'put').mockResolvedValue({exists:true,version:2,updatedAt:'2026-09-18T04:00:00Z'})
     const ruleButton=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('计算规则'))!
@@ -99,7 +99,7 @@ describe('customer operation settings on the actual quotation page', () => {
     expect(vi.mocked(api.get).mock.calls.some(([path]) => path.includes('/purchase'))).toBe(false)
   })
 
-  it.each([0,1])('restores legacy or tiered customer fees from an account draft before querying products: %s', async index => {
+  it.each([0,1])('restores legacy or tiered customer fees from an withdrawn quotation draft before querying products: %s', async index => {
     const customer=customers[index]!
     await mountWithDraft(customer.name, customer.id)
     expect(host.textContent).toContain('公司操作费：' + operationFeesLabel(customer))

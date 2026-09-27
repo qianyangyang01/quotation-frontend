@@ -102,9 +102,11 @@ class QuotationWithdrawalPostgresTest extends QuotationFinanceReviewIntegrationT
     @Test void ownershipDealsAndExistingDraftAreEnforcedWithoutPartialChanges() throws Exception {
         var q=record();claim(q);
         for(var actor:List.of(other,admin,finance))command(q,"cancel",cancelBody(q),"deny-owner",actor).andExpect(status().isForbidden());
-        saveDraft(-1,null).andExpect(status().isOk());command(q,"withdraw",withdrawal(q),"draft-conflict",employee).andExpect(status().isConflict());
+        var existing=record();withdraw(existing);
+        command(q,"withdraw",withdrawal(q),"draft-conflict",employee).andExpect(status().isConflict());
         assertEquals("reviewing",reviews.findById(q.id).orElseThrow().status);assertEquals("active",records.findById(q.id).orElseThrow().lifecycleState);
-        drafts.deleteById(owner);
+        assertEquals(existing.id,drafts.findById(owner).orElseThrow().sourceQuoteId);
+        command(existing,"cancel",cancelBody(existing),"cleanup-existing",employee).andExpect(status().isOk());
         for(boolean won:List.of(true,false)) {
             var blocked=record();if(won){blocked.status="won";((ObjectNode)blocked.payload).put("status","won");}else ((ObjectNode)blocked.payload).putArray("dealLines").addObject().put("quantity",1);
             blocked=records.saveAndFlush(blocked);command(blocked,"withdraw",withdrawal(blocked),"deny-withdraw",employee).andExpect(status().isConflict());command(blocked,"cancel",cancelBody(blocked),"deny-cancel",employee).andExpect(status().isConflict());
@@ -129,11 +131,43 @@ class QuotationWithdrawalPostgresTest extends QuotationFinanceReviewIntegrationT
             if(operation.equals("withdraw")){assertEquals("pending",reviews.findById(q.id).orElseThrow().status);assertNull(reviews.findById(q.id).orElseThrow().claimantAccount);command(q,"cancel",cancelBody(q),"cleanup-draft",employee).andExpect(status().isOk());}else assertFalse(records.existsById(q.id));
         }
     }
-    @Test void concurrentDraftCreationNeverOverwritesAnotherDraft() throws Exception {
+    @Test void concurrentLegacyAutosaveCannotOverwriteWithdrawal() throws Exception {
         var q=record();var body=withdrawal(q);
         var codes=race(()->command(q,"withdraw",body,"race-draft",employee).andReturn().getResponse().getStatus(),()->saveDraft(-1,null).andReturn().getResponse().getStatus());
-        assertEquals(1,Collections.frequency(codes,200));assertEquals(1,Collections.frequency(codes,409));
-        var d=drafts.findById(owner).orElseThrow();assertEquals(d.sourceQuoteId==null?"active":"withdrawn",records.findById(q.id).orElseThrow().lifecycleState);
+        assertEquals(200,codes.get(0));assertTrue(Set.of(200,409).contains(codes.get(1)),codes.toString());
+        var d=drafts.findById(owner).orElseThrow();assertEquals(q.id,d.sourceQuoteId);
+        assertEquals("撤回草稿",d.payload.path("customerName").asText());
+        assertEquals("withdrawn",records.findById(q.id).orElseThrow().lifecycleState);
+    }
+    @Test void explicitWithdrawalReusesLegacyOrdinaryDraftAndRetainsOriginalQuoteIdentity() throws Exception {
+        var q=record();var original=q.payload.deepCopy();var number=q.quoteNo;
+        saveDraft(-1,null).andExpect(status().isOk());
+        var oldVersion=drafts.findById(owner).orElseThrow().version;
+        withdraw(q);
+        var draft=drafts.findById(owner).orElseThrow();
+        assertEquals(q.id,draft.sourceQuoteId);assertTrue(draft.version>oldVersion);
+        assertEquals(number,records.findById(q.id).orElseThrow().quoteNo);
+        assertEquals(original.path("customerQuote"),records.findById(q.id).orElseThrow().payload.path("customerQuote"));
+        saveDraft(oldVersion,null).andExpect(status().isConflict());
+        command(q,"resubmit",resubmission(q),"resubmit-with-legacy",employee).andExpect(status().isOk());
+        assertEquals(number,records.findById(q.id).orElseThrow().quoteNo);
+        assertFalse(drafts.existsById(owner));
+    }
+    @Test void failedLegacyDraftUpdateRollsBackWithdrawalWithoutLosingPreviousContents() throws Exception {
+        var q=record();claim(q);saveDraft(-1,null).andExpect(status().isOk());
+        var before=drafts.findById(owner).orElseThrow();var payload=before.payload.deepCopy();var version=before.version;
+        jdbc.sql("create function withdrawal_update_fail() returns trigger language plpgsql as $$ begin raise exception 'test draft update failure'; end $$").update();
+        jdbc.sql("create trigger withdrawal_update_fail before update on quotation_draft for each row execute function withdrawal_update_fail()").update();
+        try {
+            assertTrue(command(q,"withdraw",withdrawal(q),"rollback-legacy",employee).andReturn().getResponse().getStatus()>=400);
+            assertEquals("active",records.findById(q.id).orElseThrow().lifecycleState);
+            assertEquals("reviewing",reviews.findById(q.id).orElseThrow().status);
+            var after=drafts.findById(owner).orElseThrow();assertNull(after.sourceQuoteId);
+            assertEquals(version,after.version);assertEquals(payload,after.payload);
+        } finally {
+            jdbc.sql("drop trigger withdrawal_update_fail on quotation_draft").update();
+            jdbc.sql("drop function withdrawal_update_fail()").update();
+        }
     }
     @Test void resubmitRacingAutosaveOrCancellationCannotLoseDraftOrResurrectRecord() throws Exception {
         for(String operation:List.of("save","cancel")) {

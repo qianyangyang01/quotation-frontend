@@ -54,16 +54,20 @@ public class QuotationWithdrawalController {
             return ApiResponse.ok(draftApi.view(draft));
         }
         var quote=owned(id,actor,body);QuotationLifecycleController.assertActive(quote);requireNoDeal(quote);
-        if(drafts.existsById(actor.account()))throw AppException.conflict("已有草稿，请先完成或放弃现有草稿，再撤回报价");
+        var existingDraft=drafts.findById(actor.account()).orElse(null);
+        if(existingDraft!=null && existingDraft.sourceQuoteId!=null)
+            throw AppException.conflict("已有撤回报价，请先完成或放弃现有编辑，再撤回报价");
         var payload=draftApi.validated(body.path("draft").deepCopy());products.lockStructuredReferences(payload);
         reviews.withdrawn(quote,actor);
         quote.lifecycleState="withdrawn";quote.updatedAt=Instant.now();
         var old=(ObjectNode)quote.payload.deepCopy();old.put("updatedAt",quote.updatedAt.toString());quote.payload=old;
         records.saveAndFlush(quote);
-        var draft=new QuotationDraftEntity();draft.ownerAccount=actor.account();draft.payload=payload;draft.updatedAt=Instant.now();
+        // Ordinary autosave is retired. Reuse its old row only on explicit withdrawal,
+        // under the account lock and in the same transaction as the quotation change.
+        var draft=existingDraft!=null?existingDraft:new QuotationDraftEntity();draft.ownerAccount=actor.account();draft.payload=payload;draft.updatedAt=Instant.now();
         draft.sourceQuoteId=id;draft.sourceQuoteVersion=quote.version;drafts.saveAndFlush(draft);
         idempotency.save(actor.account(),operation,key,body,JsonNodeFactory.instance.objectNode().put("id",id.toString()));
-        audit.record("quotation.withdraw","quotation",id.toString(),"success",Map.of("quoteNo",quote.quoteNo));
+        audit.record("quotation.withdraw","quotation",id.toString(),"success",Map.of("quoteNo",quote.quoteNo,"replacedOrdinaryDraft",existingDraft!=null));
         invalidateAfterCommit(id);
         return ApiResponse.ok(draftApi.view(draft));
     }

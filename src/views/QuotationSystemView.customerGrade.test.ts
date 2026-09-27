@@ -55,6 +55,7 @@ describe('customer grades on a cold quotation page', () => {
       if (path === '/quotation-readiness') return { ready: true, missing: [] }
       if (path === '/quotation-drafts/mine/state') return {
         exists: Boolean(draftGrade), version: draftGrade ? 1 : -1,
+        ...(draftGrade ? { sourceQuote: { id: 'withdrawn', no: 'QT-WITHDRAWN', version: 1 } } : {}),
         payload: draftGrade ? { schemaVersion: 2, selectedCustomerGrade: draftGrade, quoteMode: 'single', skuSearch: '', logisticsAttribute: '普货' } : null,
       }
       throw new Error(`Unexpected request: ${path}`)
@@ -64,7 +65,7 @@ describe('customer grades on a cold quotation page', () => {
     const selector = () => host.querySelector<HTMLSelectElement>('[data-validation-field="customerGrade"] select')!
     expect(Array.from(selector().options).some(option => option.value === 'NEW')).toBe(false)
     resolveFinance(finance)
-    await vi.waitFor(() => expect(host.textContent).toContain(draftGrade ? '已恢复并保存草稿' : '自动草稿已开启'))
+    await vi.waitFor(() => expect(host.textContent).toContain(draftGrade ? '已恢复并保存草稿' : '当前输入不会自动保存'))
     await vi.waitFor(() => expect(Array.from(selector().options).map(option => option.value)).toEqual(['S', 'A', 'B', 'C', 'D', 'NEW']))
     expect(selector().value).toBe(expectedGrade)
     expect(Array.from(selector().options).find(option => option.value === 'NEW')?.textContent).toBe('新客户')

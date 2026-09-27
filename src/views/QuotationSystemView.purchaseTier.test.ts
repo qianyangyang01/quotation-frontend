@@ -46,7 +46,7 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', omitProductSnap
     }
     if (path === '/quotation-readiness') return { ready: true, missing: [] }
     if (path === '/quotation-templates') return []
-    if (path === '/quotation-drafts/mine/state') return { exists: true, version: 1, payload: {
+    if (path === '/quotation-drafts/mine/state') return { exists: true, version: 1, sourceQuote: { id: 'withdrawn', no: 'QT-WITHDRAWN', version: 1 }, payload: {
       schemaVersion: 2, quoteMode: mode, customerName: '阶梯回归', skuSearch: record.sku,
       selectedCustomerGrade: 'S', monthlySalesEstimate: estimate, logisticsAttribute: '普货',
       ...(omitProductSnapshot ? {} : { product: { sku: record.sku, quantity: 1, purchaseInvoiceTaxApplied: true } }),
@@ -65,7 +65,6 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', omitProductSnap
   const vm = app.mount(host)
   state = (vm.$ as unknown as { setupState: typeof state }).setupState
   await vi.waitFor(() => expect(state.draftReady).toBe(true))
-  expect(state.products[0]?.purchaseBaseUnitPrice || 0).toBe(0)
   if (mode === 'single') await state.queryProduct()
   else await state.queryBundleItems()
   await nextTick()
@@ -78,7 +77,7 @@ async function selectTier(value: string) {
   select.dispatchEvent(new Event('change', { bubbles: true }))
   await nextTick()
 }
-it('restores a draft containing a SKU but no product snapshot without blocking future edits', async () => {
+it('restores a withdrawn quotation containing a SKU but no product snapshot without blocking future edits', async () => {
   await mount('single', '10', true)
   expect(state.draftReady).toBe(true)
   expect(state.products[0]?.sku).toBe(record.sku)
@@ -104,7 +103,7 @@ it('updates the single SKU cost and quotation immediately when selecting tier 2 
   expect(product.purchase).toBe(14.08)
 })
 
-it('recalculates a restored tier 2 draft with current purchase tiers and keeps the persisted option value', async () => {
+it('recalculates a restored withdrawn tier 2 quotation with current purchase tiers and keeps the persisted option value', async () => {
   await mount('single', '100')
   expect(state.monthlySalesEstimate).toBe('100')
   expect(state.products[0]!.purchase).toBe(12.75)

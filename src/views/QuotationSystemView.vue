@@ -21,7 +21,7 @@ import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydra
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKAGING_ERROR } from '@/data/quotationWeightSnapshot'
-import { deleteQuotationDraft, draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
+import { draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { applyCommissionThreshold, parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { validateQuotationConditions } from '@/services/quotationValidation'
 import { logisticsRebuilding, buildQuoteLogisticsCountryQuery, loadPublishedLogisticsManifest, loadPublishedLogisticsRules, loadPublishedLogisticsRuleCatalog } from '@/data/publishedLogisticsRepository'
@@ -934,6 +934,12 @@ function draftPayload(): QuotationDraftPayload {
 function draftSignature() { return JSON.stringify(draftPayload()) }
 function markDraftDirty(signature = draftSignature()) {
   if (!draftReady.value) return
+  // Ordinary quotes live only in this page until explicitly submitted.
+  if (!draftSource.value) {
+    draftDirty = signature !== lastSavedDraftSignature
+    draftStatus.value = draftDirty ? 'dirty' : 'idle'
+    return
+  }
   if (signature === lastSavedDraftSignature && !draftDirty && draftStatus.value !== 'error') return
   draftDirty = true
   if (draftStatus.value === 'conflict' || resolvingDraftConflict.value) return
@@ -943,6 +949,7 @@ function markDraftDirty(signature = draftSignature()) {
   draftTimer = window.setTimeout(() => { void flushDraft().catch(() => undefined) }, 800)
 }
 async function flushDraft() {
+  if (!draftSource.value) return
   if (draftStatus.value === 'conflict' || resolvingDraftConflict.value) throw new Error('草稿版本冲突，请先处理冲突；当前输入已保留')
   if (!draftReady.value || (!draftDirty && draftSignature() === lastSavedDraftSignature)) return
   if (draftSavePromise) return draftSavePromise
@@ -1094,7 +1101,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     const primary = primaryRows.find(row => productState?.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
       || (!productState?.primaryChannelKey ? primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier) : undefined)
     if (primary) { selectedQuoteRegions.value[primary.country] = primary.quoteRegion || ''; p.country = primary.country; p.rule = primary.rule; p.selectedChannelKey = primary.channelKey; p.channel = primary.carrier; p.freight = primary.freight; p.status = '已恢复草稿并按当前规则重新计算' }
-    else if (productState?.primaryChannelKey) { p.rule = ''; p.selectedChannelKey = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已失效，请重新选择物流并确认价格'; toast('草稿引用的渠道不在当前物流库，请重新选择，不会按同名渠道自动套价') }
+    else if (productState?.primaryChannelKey) { p.rule = ''; p.selectedChannelKey = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已失效，请重新选择物流并确认价格'; toast('原报价引用的渠道不在当前物流库，请重新选择，不会按同名渠道自动套价') }
   }
   restoredSelectionVersion.value += 1
   draftRestored.value = true
@@ -1141,13 +1148,13 @@ async function loadAndRestoreDraft() {
   draftInitializationFailed.value = false
   const state = await loadQuotationDraft()
   draftSource.value = state.sourceQuote
-  draftVersion.value = state.version
-  draftUpdatedAt.value = state.updatedAt || ''
-  if (state.exists && state.payload) {
-    await applyDraftPayload(state.payload, undefined, { restoreQuotation: !!state.sourceQuote })
+  draftVersion.value = state.sourceQuote ? state.version : -1
+  draftUpdatedAt.value = state.sourceQuote ? state.updatedAt || '' : ''
+  if (state.sourceQuote && state.exists && state.payload) {
+    await applyDraftPayload(state.payload, undefined, { restoreQuotation: true })
     await establishDraftBaseline('saved')
   } else await establishDraftBaseline('idle')
-  return state
+  return state.sourceQuote ? state : { exists: false, payload: null, version: -1, updatedAt: null }
 }
 async function resetLocalDraft() {
   draftNeedsQuery.value = false
@@ -1228,15 +1235,14 @@ async function clearDraft() {
       try { await cancelQuotation(source.id, source.version, draftVersion.value) }
       catch (error) { draftReady.value = true; toast(error instanceof Error ? error.message : '取消失败，请重试'); return }
     }
-    try { if (!source && draftVersion.value >= 0) await deleteQuotationDraft(draftVersion.value) }
-    catch (error) { toast(error instanceof Error ? error.message : '草稿清除失败'); return }
     draftVersion.value = -1
     draftUpdatedAt.value = ''
     await resetLocalDraft()
-    toast('已清空草稿，可以开始新的报价')
+    toast('已清空当前内容，可以开始新的报价')
   } finally { clearingDraft.value = false }
 }
 async function reloadServerDraftAfterConflict() {
+  if (!draftSource.value) return
   if (resolvingDraftConflict.value) return
   resolvingDraftConflict.value = true
   window.clearTimeout(draftTimer)
@@ -1247,13 +1253,13 @@ async function reloadServerDraftAfterConflict() {
     if (signature !== draftSignature()) throw new Error('读取期间内容已修改，已保留当前输入，请重新选择')
     draftReady.value = false
     draftSource.value = state.sourceQuote
-    draftVersion.value = state.version
-    draftUpdatedAt.value = state.updatedAt || ''
-    if (state.payload) await applyDraftPayload(state.payload, undefined, { restoreQuotation: !!state.sourceQuote })
+    draftVersion.value = state.sourceQuote ? state.version : -1
+    draftUpdatedAt.value = state.sourceQuote ? state.updatedAt || '' : ''
+    if (state.sourceQuote && state.payload) await applyDraftPayload(state.payload, undefined, { restoreQuotation: true })
     else await resetLocalDraft()
-    await establishDraftBaseline(state.exists ? 'saved' : 'idle')
+    await establishDraftBaseline(state.sourceQuote && state.exists ? 'saved' : 'idle')
     showDraftConflictDialog.value = false
-    toast('已加载服务器上的最新草稿')
+    toast(state.sourceQuote ? '已加载服务器上的最新草稿' : '撤回编辑已结束，可以开始新的报价')
   } catch (error) {
     draftStatus.value = 'conflict'
     toast(error instanceof Error ? error.message : '草稿读取失败，请重试')
@@ -1261,6 +1267,7 @@ async function reloadServerDraftAfterConflict() {
   } finally { resolvingDraftConflict.value = false; draftReady.value = true }
 }
 async function overwriteServerDraftAfterConflict() {
+  if (!draftSource.value) return
   if (resolvingDraftConflict.value) throw new Error('正在处理草稿，请稍候')
   resolvingDraftConflict.value = true
   window.clearTimeout(draftTimer)
@@ -1284,7 +1291,9 @@ async function overwriteServerDraftAfterConflict() {
     throw error
   } finally { resolvingDraftConflict.value = false }
   if (draftDirty) await flushDraft()
-}function beforeWindowUnload(event: BeforeUnloadEvent) {
+}
+function beforeWindowUnload(event: BeforeUnloadEvent) {
+  if (!draftSource.value && !draftDirty) return
   if (!draftDirty && draftStatus.value !== 'error' && draftStatus.value !== 'conflict') return
   event.preventDefault()
   event.returnValue = ''
@@ -1327,6 +1336,11 @@ onBeforeUnmount(() => {
 })
 onBeforeRouteLeave(async () => {
   window.clearTimeout(draftTimer)
+  if (!draftSource.value) {
+    if (!draftDirty) return true
+    showDraftLeaveDialog.value = true
+    return await new Promise<boolean>(resolve => { leaveDecision = resolve })
+  }
   if (!draftDirty && !['error', 'conflict'].includes(draftStatus.value)) return true
   if (draftInitializationFailed.value || (draftStatus.value === 'error' && !draftDirty)) {
     showDraftConflictDialog.value = false
@@ -1341,6 +1355,7 @@ onBeforeRouteLeave(async () => {
   }
 })
 async function retryLeaveAfterDraftFailure() {
+  if (!draftSource.value) return
   try {
     if (draftInitializationFailed.value) await initializeQuotationWorkspace()
     else if (draftStatus.value === 'conflict') await overwriteServerDraftAfterConflict()
@@ -2016,7 +2031,6 @@ async function save() {
     return { optionId: option.id, prices: row!.prices }
   }) } : undefined
   const systemQuantityQuotes = captured ? { quantities:captured.quantities, rows:quoteOptions.map(option=>({ optionId:option.id, prices:captured!.rows.find(row=>row.key===option.quoteSheetKey)!.systemPrices })) } : undefined
-  const wasWithdrawal = !!draftSource.value
   const record = await persistQuotation({
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
@@ -2056,31 +2070,10 @@ async function save() {
     specifiedQuotes: selectedMatrixRows.map(row => ({ country: row.country, quoteRegion: row.quoteRegion, carrier: row.carrier, channel: row.transport, rule: row.rule, eta: row.eta, quote1Usd: row.quote1, quote2Usd: row.quote2, quote3Usd: row.quote3, quoteCustomUsd: row.quoteCustom })),
   })
   const countryCount = new Set(selectedMatrixRows.map(row => row.country)).size
-  let draftCleanup: 'deleted' | 'newer' | 'failed' = 'deleted'
-  let draftCleanupMessage = ''
-  try { if (!wasWithdrawal && draftVersion.value >= 0) await deleteQuotationDraft(draftVersion.value) }
-  catch (error) {
-    draftCleanup = error instanceof ApiError && error.status === 409 ? 'newer' : 'failed'
-    draftCleanupMessage = error instanceof Error ? error.message : '服务器草稿清除失败'
-  }
-  if (draftCleanup === 'deleted') {
-    draftVersion.value = -1
-    draftUpdatedAt.value = ''
-  }
+  draftVersion.value = -1
+  draftUpdatedAt.value = ''
   await resetLocalDraft()
-  if (draftCleanup === 'newer') {
-    draftStatus.value = 'conflict'
-    draftError.value = '另一页面已有较新草稿，系统未执行删除'
-    showDraftConflictDialog.value = true
-  } else if (draftCleanup === 'failed') {
-    draftStatus.value = 'error'
-    draftError.value = `报价已保存，但${draftCleanupMessage}`
-  }
-  toast(draftCleanup === 'newer'
-    ? `报价已保存：${record.no}；另一页面有较新草稿，已为其保留`
-    : draftCleanup === 'failed'
-      ? `报价已保存：${record.no}；服务器草稿未能清除，请重试`
-      : `报价已保存：${record.no}（1 张报价单 · ${countryCount} 个国家 · ${selectedMatrixRows.length} 条渠道）`)
+  toast(`报价已保存：${record.no}（1 张报价单 · ${countryCount} 个国家 · ${selectedMatrixRows.length} 条渠道）`)
 }
 function toast(message: string) {
   notice.value = message
@@ -2112,7 +2105,12 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       <QuotationHeader :salesperson="selectedSalesperson" :rate="exchange.usd" :status="products[0]?.status || '待查询'" :mode-label="quoteMode === 'bundle' ? '组合 SKU 报价' : '单品 SKU 报价'" @show-rule="showRule=true" />
 
 
-      <section class="draft-status-bar" :class="draftStatus" aria-live="polite">
+      <section v-if="!draftSource" class="draft-status-bar" aria-live="polite">
+        <span><b>{{ draftInitializationFailed ? `报价工作区读取失败：${draftError}` : !draftReady ? '正在加载报价工作区…' : '报价仅在点击“保存报价”后保存' }}</b><small>当前输入不会自动保存，刷新或离开页面后不会恢复。</small></span>
+        <button v-if="draftInitializationFailed" type="button" @click="retryDraftInitialization">重试读取</button>
+        <button v-else-if="draftReady && draftStatus === 'dirty'" type="button" :disabled="clearingDraft || savingQuotation" @click="clearDraft">清空重新开始</button>
+      </section>
+      <section v-else class="draft-status-bar" :class="draftStatus" aria-live="polite">
         <i>{{ draftStatus === 'saved' ? '✓' : draftStatus === 'error' || draftStatus === 'conflict' ? '!' : '↻' }}</i>
         <span><b>{{ draftStatusText }}</b><small>切换模块后返回“我的报价”可继续录入；正式报价保存成功后自动清除草稿。</small></span>
         <button v-if="draftStatus === 'conflict'" type="button" @click="showDraftConflictDialog=true">处理草稿冲突</button><button v-if="draftStatus === 'error'" type="button" @click="draftInitializationFailed ? retryDraftInitialization() : flushDraft()">{{ draftInitializationFailed ? '重试读取' : '重试保存' }}</button>
@@ -2244,19 +2242,19 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
     <div v-if="pendingReissue" class="modal-mask draft-dialog-mask">
       <section class="modal draft-dialog" role="dialog" aria-modal="true" aria-labelledby="reissue-title">
         <h2 id="reissue-title">再次发起报价</h2>
-        <p>将带入 {{ pendingReissue.no }} 的客户、SKU、物流属性和渠道选择，并按当前资料重新计算。继续后会替换当前工作区草稿，原报价记录保持不变。</p>
+        <p>将带入 {{ pendingReissue.no }} 的客户、SKU、物流属性和渠道选择，并按当前资料重新计算。原报价记录保持不变。{{ draftSource ? '请先完成当前撤回报价的编辑，再次发起不会覆盖它。' : '载入后请核对并保存报价。' }}</p>
         <p v-if="reissueError" role="alert">{{ reissueError }}</p>
-        <footer><button :disabled="reissueBusy" @click="keepExistingDraft">保留当前草稿</button><button class="primary" :disabled="reissueBusy" @click="applyReissue">{{ reissueBusy ? '正在载入…' : '载入并再次发起' }}</button></footer>
+        <footer><button :disabled="reissueBusy" @click="keepExistingDraft">{{ draftSource ? '保留撤回编辑' : '返回当前内容' }}</button><button class="primary" :disabled="reissueBusy" @click="applyReissue">{{ reissueBusy ? '正在载入…' : '载入并再次发起' }}</button></footer>
       </section>
     </div>
     <div v-if="showDraftLeaveDialog" class="modal-mask draft-dialog-mask">
       <section class="modal draft-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-leave-title">
-        <small>UNSAVED DRAFT</small><h2 id="draft-leave-title">草稿尚未保存，已阻止离开</h2>
-        <p>{{ draftError || '服务器暂时无法保存当前内容，请重试后再切换模块。' }}</p>
-        <footer><button type="button" @click="cancelLeave">继续编辑</button><button type="button" class="danger" @click="discardUnsavedAndLeave">放弃未保存修改</button><button type="button" class="primary" @click="retryLeaveAfterDraftFailure">重试并离开</button></footer>
+        <small>UNSAVED CHANGES</small><h2 id="draft-leave-title">{{ draftSource ? '撤回编辑内容尚未保存' : '报价尚未保存，是否离开？' }}</h2>
+        <p>{{ draftSource ? draftError || '服务器暂时无法保存当前内容，请重试后再切换模块。' : '当前输入不会自动保存。离开后这些未保存内容将丢失；可继续编辑并点击“保存报价”。' }}</p>
+        <footer><button type="button" @click="cancelLeave">继续编辑</button><button type="button" class="danger" @click="discardUnsavedAndLeave">放弃未保存修改</button><button v-if="draftSource" type="button" class="primary" @click="retryLeaveAfterDraftFailure">重试并离开</button></footer>
       </section>
     </div>
-    <div v-if="showDraftConflictDialog" class="modal-mask draft-dialog-mask">
+    <div v-if="draftSource && showDraftConflictDialog" class="modal-mask draft-dialog-mask">
       <section class="modal draft-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-conflict-title">
         <small>DRAFT CONFLICT</small><h2 id="draft-conflict-title">草稿版本发生变化</h2>
         <p>自动保存已暂停，当前输入已保留。可继续编辑后处理冲突，或选择加载服务器草稿、使用当前内容覆盖。</p>
