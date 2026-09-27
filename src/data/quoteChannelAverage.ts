@@ -22,8 +22,19 @@ export function validAveragePlans(plans: unknown): plans is AveragePlan[] {
     try { return JSON.stringify(averagePrices(p.members, p.mode, p.quantities.length)) === JSON.stringify(p.systemPrices) } catch { return false }
   })
 }
+function averageCountry(row: QuoteSheetSourceRow) {
+  return quoteSheetCountryCode(row.country, []) || (row.country.trim().toLowerCase() === 'australia' ? 'AU' : row.country)
+}
+export function australiaAverageZone(row: QuoteSheetSourceRow) {
+  const region = (row.quoteRegion || '').replace(/[（）()\s]/g, '').replace(/^澳大利亚/, '')
+    .replace('一区', '1区').replace('二区', '2区').replace('三区', '3区').replace('四区', '4区')
+  return averageCountry(row) === 'AU' && /^[1-4]区$/.test(region) ? Number(region[0]) : undefined
+}
+export function averageRegionLabel(row: QuoteSheetSourceRow) {
+  return australiaAverageZone(row) ? '1–4区（自由组合）' : row.quoteRegion || '全国统一'
+}
 export function averageScope(row: QuoteSheetSourceRow) {
-  return JSON.stringify([quoteSheetCountryCode(row.country, []) || row.country, row.quoteRegion || '', row.taxFeeMode ?? '', row.taxIncluded ?? null, row.taxConfigured ?? null, row.taxRatePercent ?? null])
+  return JSON.stringify([averageCountry(row), australiaAverageZone(row) ? '@AU:zones-1-4' : row.quoteRegion || '', row.taxFeeMode ?? '', row.taxIncluded ?? null, row.taxConfigured ?? null, row.taxRatePercent ?? null])
 }
 export function averagePrices(members: AveragePlan['members'], mode: AveragePlan['mode'], count: number) {
   if (members.length < 2) throw new Error('请至少选择两条渠道')
@@ -46,7 +57,7 @@ export function mapAveragePlans(plans: AveragePlan[] | undefined, keyFor: (key: 
 export function averagePlanIssues(plan: AveragePlan, sources: QuoteSheetSourceRow[], quantities: number[]) {
   const selected = plan.members.map(m => sources.find(row => quoteSheetRowKey(row) === m.optionId))
   if (selected.some(row => !row || row.available === false)) return ['综合报价来源渠道已移除或不可用，请移除方案后重新生成']
-  if (new Set(selected.map(row => averageScope(row!))).size !== 1) return ['只能合并同一国家、报价区域和税费口径的渠道']
+  if (new Set(selected.map(row => averageScope(row!))).size !== 1) return ['只能合并同一国家和税费口径的渠道；澳大利亚1–4区可自由组合，其他区域须一致']
   const missing = quantities.filter(q => plan.quantities.indexOf(q) < 0 || plan.systemPrices[plan.quantities.indexOf(q)] == null)
   return missing.length ? [`综合报价缺少 ${missing.join('、')} 数量档位的系统价格，请补齐来源报价后重新生成`] : []
 }

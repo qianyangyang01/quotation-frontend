@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyAveragePlans, averagePrices, averagePlanIssues, mapAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
+import { applyAveragePlans, averageScope, averagePrices, averagePlanIssues, mapAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, quoteSheetRowKey, quoteSheetTextTable, type QuoteSheetSourceRow } from './customerQuoteSheet'
 
 const sources: QuoteSheetSourceRow[] = ['SDH', 'SF', '燕文'].map((carrier, i) => ({ country: '美国', quoteRegion: '全国统一', carrier, transport: '普货', channelKey: String(i), rule: '', ruleId: i, channelCode: String(i), eta: '7-12 workingdays', quote1: [5, 5.25, 5.3][i]!, quote2: [5.95, 6.25, 6.45][i]!, quote3: [7, 7, 7.45][i]!, quoteCustom: null }))
@@ -46,4 +46,30 @@ describe('channel average snapshot', () => {
     const duplicate = plan(); duplicate.members[1]!.optionId = duplicate.members[0]!.optionId
     expect(validAveragePlans([duplicate])).toBe(false)
   })
+})
+
+const australiaSources = () => [1, 2, 3, 4].map(zone => ({ ...sources[0]!, country: '澳大利亚', quoteRegion: `澳大利亚${zone}区`, quote1: zone * 10, quote2: zone * 20, quote3: zone * 30 }))
+it('combines any subset of Australia zones while retaining distinct same-channel identities and source prices', () => {
+  const rows = australiaSources(), original = JSON.stringify(rows)
+  expect(new Set(rows.map(quoteSheetRowKey)).size).toBe(4)
+  expect(new Set(rows.map(averageScope)).size).toBe(1)
+  for (let mask = 1; mask < 16; mask++) {
+    const selected = rows.filter((_, i) => mask & (1 << i))
+    if (selected.length < 2) continue
+    const p = plan(); p.mode = 'equal'
+    p.members = selected.map(row => ({ optionId: quoteSheetRowKey(row), weight: 1, sourcePrices: [row.quote1, row.quote2, row.quote3] }))
+    p.systemPrices = p.prices = averagePrices(p.members, 'equal', 3)
+    expect(averagePlanIssues(p, rows, [1, 2, 3])).toEqual([])
+    expect(validAveragePlans([p])).toBe(true)
+    if (mask === 9 || mask === 15) expect(p.prices).toEqual([25, 50, 75])
+  }
+  expect(JSON.stringify(rows)).toBe(original)
+})
+it('accepts Australia zone aliases but keeps other countries, unknown zones and tax scopes separate', () => {
+  const row = australiaSources()[0]!, scope = averageScope(row)
+  for (const quoteRegion of ['2区', '澳大利亚（三区）', ' 四区 ']) expect(averageScope({ ...row, quoteRegion })).toBe(scope)
+  for (const change of [{ country: '加拿大' }, { quoteRegion: '5区' }, { quoteRegion: '全国统一' }, { quoteRegion: '' }, { taxIncluded: true }]) {
+    expect(averageScope({ ...row, ...change })).not.toBe(scope)
+  }
+  expect(averageScope({ ...row, country: '加拿大', quoteRegion: '2区' })).not.toBe(averageScope({ ...row, country: '加拿大', quoteRegion: '3区' }))
 })

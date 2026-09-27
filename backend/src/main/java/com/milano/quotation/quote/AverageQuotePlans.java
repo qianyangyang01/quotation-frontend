@@ -40,7 +40,7 @@ final class AverageQuotePlans {
                 if (option == null || !memberIds.add(optionId) || (option.has("available") && !option.path("available").asBoolean())) throw AppException.unprocessable("综合报价来源渠道不存在、重复或不可用");
                 for (var hidden : customer.path("hiddenOptionIds")) if (hidden.asText().equals(optionId)) throw AppException.unprocessable("请先移除综合方案后再隐藏来源渠道");
                 var nextScope = scope(option);
-                if (scope != null && !scope.equals(nextScope)) throw AppException.unprocessable("综合报价只能包含相同国家、区域和税费口径的渠道");
+                if (scope != null && !scope.equals(nextScope)) throw AppException.unprocessable("综合报价须为相同国家和税费口径；澳大利亚1–4区可自由组合，其他区域须一致");
                 scope = nextScope;
                 var weight = amount(member.path("weight"), false);
                 if (weight.signum() <= 0 || weight.compareTo(new BigDecimal("100")) > 0) throw AppException.unprocessable("渠道权重须大于0且不超过100");
@@ -78,8 +78,14 @@ final class AverageQuotePlans {
     }
     static String scope(JsonNode option) {
         var key = JsonNodeFactory.instance.arrayNode();
-        key.add(option.hasNonNull("countryCode") && !option.path("countryCode").asText().isBlank() ? option.path("countryCode").asText() : option.path("country").asText());
-        key.add(option.path("quoteRegion").asText(""));
+        var country = option.hasNonNull("countryCode") && !option.path("countryCode").asText().isBlank()
+            ? option.path("countryCode").asText() : option.path("country").asText();
+        boolean australia = country.equalsIgnoreCase("AU") || country.equals("澳大利亚") || country.equalsIgnoreCase("Australia");
+        key.add(australia ? "AU" : country);
+        var region = option.path("quoteRegion").asText("");
+        var zone = region.replaceAll("[（）()\\s]", "").replaceFirst("^澳大利亚", "")
+            .replace("一区", "1区").replace("二区", "2区").replace("三区", "3区").replace("四区", "4区");
+        key.add(australia && zone.matches("[1-4]区") ? "@AU:zones-1-4" : region);
         for (var field : List.of("taxFeeMode", "taxIncluded", "taxConfigured", "taxRatePercent")) key.add(option.hasNonNull(field) ? option.path(field) : NullNode.instance);
         return key.toString();
     }

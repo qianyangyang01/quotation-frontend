@@ -91,4 +91,57 @@ class AverageQuotePlansTest {
         ((ObjectNode) r.path("quoteOptions").get(0)).put("quote1Usd", 999);
         CustomerQuotePrices.preparePatch(r, p); // Read existing saved system values, not a changed route price.
     }
+    ObjectNode australia(int... zones) {
+        var r = record();
+        var options = ((ArrayNode) r.path("quoteOptions")).removeAll();
+        var rows = ((ArrayNode) r.path("customerQuote").path("rows")).removeAll();
+        var p = plan(r).put("mode", "equal");
+        var members = ((ArrayNode) p.path("members")).removeAll();
+        int sum = 0;
+        for (int zone : zones) {
+            String id = "zone-" + zone; sum += zone;
+            options.addObject().put("id", id).put("country", "澳大利亚").put("countryCode", "AU")
+                .put("quoteRegion", "澳大利亚" + zone + "区").put("carrier", "同一物流商").put("channel", "同一渠道")
+                .put("quote1Usd", zone * 10).put("quote2Usd", zone * 20).put("quote3Usd", zone * 30);
+            rows.addObject().put("optionId", id).putArray("prices").add(zone * 10).add(zone * 20).add(zone * 30);
+            members.addObject().put("optionId", id).put("weight", 1).putArray("sourcePrices").add(zone * 10).add(zone * 20).add(zone * 30);
+        }
+        var system = p.putArray("systemPrices");
+        for (int quantity = 1; quantity <= 3; quantity++)
+            system.add(java.math.BigDecimal.valueOf(sum * quantity * 10).divide(java.math.BigDecimal.valueOf(zones.length), 2, java.math.RoundingMode.HALF_UP).doubleValue());
+        p.set("prices", system.deepCopy());
+        return r;
+    }
+    @Test void savesAndRestoresAnySelectedAustraliaZonesWithoutChangingSourceSnapshots() {
+        for (int mask = 1; mask < 16; mask++) {
+            final int selected = mask;
+            int[] zones = java.util.stream.IntStream.rangeClosed(1, 4).filter(zone -> (selected & (1 << (zone - 1))) != 0).toArray();
+            if (zones.length < 2) continue;
+            var r = australia(zones); var sources = r.path("quoteOptions").deepCopy();
+            CustomerQuotePrices.initialize(r);
+            assertEquals(sources, r.path("quoteOptions"));
+            assertEquals(zones.length, plan(r).path("members").size());
+            if (mask == 9 || mask == 15) assertEquals("[25.0,50.0,75.0]", plan(r).path("systemPrices").toString());
+            var restored = (ObjectNode) mapper.readTree(r.toString());
+            var p = patch(restored); CustomerQuotePrices.preparePatch(restored, p);
+            assertFalse(QuotationFinanceReview.pricesChanged(restored, p));
+        }
+    }
+    @Test void normalizesAustraliaZoneNamesButRejectsOtherCountriesUnknownZonesAndMixedTaxes() {
+        var valid = australia(2, 3);
+        ((ObjectNode) valid.path("quoteOptions").get(0)).put("quoteRegion", "二区").remove("countryCode");
+        ((ObjectNode) valid.path("quoteOptions").get(1)).put("quoteRegion", "澳大利亚（三 区）");
+        assertDoesNotThrow(() -> CustomerQuotePrices.initialize(valid));
+        List<Consumer<ObjectNode>> changes = List.of(
+            o -> o.put("countryCode", "CA"), o -> o.put("quoteRegion", "5区"),
+            o -> o.put("quoteRegion", "全国统一"), o -> o.put("quoteRegion", ""), o -> o.put("taxIncluded", true));
+        for (var change : changes) {
+            var r = australia(2, 3); change.accept((ObjectNode) r.path("quoteOptions").get(0));
+            assertThrows(RuntimeException.class, () -> CustomerQuotePrices.initialize(r));
+        }
+        var canada = australia(2, 3);
+        for (var option : canada.path("quoteOptions")) ((ObjectNode) option).put("country", "加拿大").put("countryCode", "CA");
+        assertThrows(RuntimeException.class, () -> CustomerQuotePrices.initialize(canada));
+    }
+
 }
