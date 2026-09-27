@@ -65,6 +65,11 @@ management:
         enabled: true
 
 app:
+  shimo:
+    worker-enabled: ${APP_SHIMO_WORKER_ENABLED:false}
+    token: ${APP_SHIMO_TOKEN:}
+    sheets: ${APP_SHIMO_SHEETS:}
+    interval-seconds: ${APP_SHIMO_INTERVAL_SECONDS:600}
   logistics:
     worker-count: ${APP_LOGISTICS_WORKER_COUNT:1}
     queue-capacity: ${APP_LOGISTICS_QUEUE_CAPACITY:100}

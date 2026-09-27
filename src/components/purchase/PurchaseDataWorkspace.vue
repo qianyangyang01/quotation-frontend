@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ShimoSyncPanel from './ShimoSyncPanel.vue'
 import type { PasteSavedCounts } from '@/services/purchasePaste'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { deletePurchaseProduct, loadPurchaseDeletionCheck, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseFreightChoices, purchaseQuoteBlockingMessage, purchaseSourceLabel, setPurchaseProductCatalogState, upsertPurchaseProducts, type PurchaseDeletionCheck, type PurchaseProductRecord } from '@/data/purchaseStore'
@@ -404,6 +405,7 @@ const detailFields = computed(() => detail.value ? [
   </section>
   <SupplierRecordsPanel v-if="showSupplierRecords" @close="showSupplierRecords=false" @notice="toast" />
   <template v-else>
+  <ShimoSyncPanel />
   <p class="append-import-help"><b>新数据导入</b> 使用当前标准模板，入库后统一标记“新数据”。无 SKU 的行也可先入库，以后在原行补 SKU，会补到原商品并保留图片和人工维护资料。保持文件名、工作表名和旧行位置不变，新数据放在末尾；旧行除补空白 SKU 外的内容变化会拦截。</p>
   <p class="legacy-import-help"><b>旧数据导入</b> 用于以前未标准化的采购表，系统会先在本机过滤 Excel 图片；入库后统一标记“2026旧数据”。无克重、有效价格或1件运费的商品仅可补全资料，不能参与报价。</p>
   <section v-if="asyncUploading" class="upload-status"><div><b>{{ uploadProgress.fileName }} <em :class="{legacy:uploadProgress.profile==='legacy-2026'}">{{ uploadProgress.profile==='legacy-2026' ? '2026旧数据' : '新数据' }}</em></b><span v-if="uploadProgress.removedMediaCount">原始 {{ formatBytes(uploadProgress.originalSize) }} → 无图数据 {{ formatBytes(uploadProgress.size) }} · 已过滤 {{ uploadProgress.removedMediaCount }} 张图片 · 减少 {{ uploadProgress.reductionPercent }}%</span><span v-else>{{ formatBytes(uploadProgress.loaded) }} / {{ formatBytes(uploadProgress.size) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatBytes(uploadProgress.bytesPerSecond) }}/s</template></span></div><strong>{{ uploadProgress.stage }} {{ uploadProgress.percent }}%</strong><div class="progress"><i :style="{width:`${uploadProgress.percent}%`}"></i></div><button @click="cancelUpload">取消</button></section>

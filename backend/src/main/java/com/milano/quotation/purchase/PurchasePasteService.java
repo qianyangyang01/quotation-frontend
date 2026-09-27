@@ -38,6 +38,15 @@ public class PurchasePasteService {
 
     @Transactional
     public Result confirm(Confirmation input) {
+        return confirm(input, false);
+    }
+
+    @Transactional
+    Result confirmSynchronized(Confirmation input) {
+        return confirm(input, true);
+    }
+
+    private Result confirm(Confirmation input, boolean synchronizedSource) {
         if (input == null || input.expected == null) throw AppException.unprocessable("请先预览采购数据");
         var batch = parse(input.rows);
         // Lock in SKU order, including unchanged rows. Missing rows are protected by the unique SKU constraint.
@@ -62,7 +71,7 @@ public class PurchasePasteService {
         var unchanged = new ArrayList<String>();
         for (var row : preview.rows) {
             if ("unchanged".equals(row.action)) { unchanged.add(row.sku); continue; }
-            var saved = products.savePasted(row.effective.deepCopy());
+            var saved = synchronizedSource ? products.saveSynchronized(row.effective.deepCopy()) : products.savePasted(row.effective.deepCopy());
             ("create".equals(row.action) ? added : updated).add(saved);
         }
         return new Result(added, updated, unchanged, preview.skipped);
