@@ -24,10 +24,10 @@ async function select() {
   input.dispatchEvent(new Event('change')); await settle()
   if (!document.querySelector('[role=alert]')) await confirmPicker()
 }
-function mount() {
+function mount(parent: HTMLElement = document.body) {
   const row={country:'US',carrier:'4PX',channelKey:'a',ruleId:1,rule:'',channelCode:'a',transport:'',eta:'5-8 days',quote1:1,quote2:2,quote3:3,quoteCustom:5}
   const state=reactive({rows:[row,{...row,channelKey:'b'}],skus:['ONE','TWO'],countries:[],salesperson:'QA',contextKey:'context',resetKey:'account/bundle',customQuantity:5,bundle:true,sourcePending:false})
-  const host=document.createElement('div');document.body.append(host)
+  const host=document.createElement('div');parent.append(host)
   app=createApp({render:()=>h(CustomerQuoteSheet,{...state,ref:(vm:unknown)=>{exposed=vm as typeof exposed}})});app.mount(host)
   return state
 }
@@ -37,6 +37,16 @@ beforeEach(()=>{
   vi.stubGlobal('isSecureContext',true);vi.stubGlobal('navigator',{clipboard:{writeText:vi.fn().mockResolvedValue(undefined)}})
 })
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.restoreAllMocks();vi.unstubAllGlobals()})
+it('keeps the picker inside a native quotation modal and restores focus after cancellation', async () => {
+  const modal=document.createElement('dialog');modal.setAttribute('open','');document.body.append(modal)
+  mount(modal);await settle()
+  const opener=[...modal.querySelectorAll('button')].find(b=>b.textContent==='添加图片')!
+  opener.focus();await openPicker()
+  const picker=modal.querySelector<HTMLElement>('[role=dialog]')!
+  expect(picker).not.toBeNull();expect(document.activeElement).toBe(picker)
+  await click('取消')
+  expect(modal.querySelector('[role=dialog]')).toBeNull();expect(document.activeElement).toBe(opener)
+})
 it('shares one image cell, exports photos separately and never includes them in price snapshots or copied data',async()=>{
   mount();const before=exposed.capturePrices()
   expect(document.querySelector('.sheet-photo-cell')).toBeNull()

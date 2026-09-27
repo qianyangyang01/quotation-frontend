@@ -9,6 +9,8 @@ const selected = shallowRef([...props.photos])
 // Existing photos remain owned by the quotation until confirmation. Only new images belong to this dialog.
 const owned = new Set<QuoteLocalPhoto>()
 const dialog = ref<HTMLElement>()
+const anchor = ref<HTMLElement>()
+const teleportTarget = shallowRef<HTMLElement | string>('body')
 const fileInput = ref<HTMLInputElement>()
 const busy = ref(false)
 const error = ref('')
@@ -79,7 +81,12 @@ function keydown(event: KeyboardEvent) {
   if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.value)) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog.value)) { event.preventDefault(); first?.focus() }
 }
-onMounted(() => dialog.value?.focus())
+onMounted(async () => {
+  // A native modal makes body-level overlays inert; keep this picker inside its owning modal.
+  teleportTarget.value = anchor.value?.closest<HTMLDialogElement>('dialog[open]') ?? 'body'
+  await nextTick()
+  if (!disposed) dialog.value?.focus()
+})
 onBeforeUnmount(() => {
   disposed = true
   releaseQuotePhotos([...owned])
@@ -89,7 +96,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport to="body">
+  <span ref="anchor" hidden aria-hidden="true" />
+  <Teleport :to="teleportTarget">
     <div class="photo-picker-overlay">
       <section ref="dialog" class="photo-picker" role="dialog" aria-modal="true" aria-labelledby="photo-picker-title" aria-describedby="photo-picker-help" tabindex="-1" @paste="paste" @keydown="keydown">
         <header><div><h3 id="photo-picker-title">添加报价单图片</h3><p>收集好图片后，一次确认放入报价单</p></div><button type="button" aria-label="关闭图片弹窗" @click="cancel">×</button></header>
@@ -118,4 +126,3 @@ onBeforeUnmount(() => {
 <style scoped>
 .photo-picker-overlay{position:fixed;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;background:#18253580}.photo-picker{width:760px;max-width:100%;max-height:calc(100dvh - 40px);display:flex;flex-direction:column;border-radius:12px;background:#fff;color:#243440;box-shadow:0 20px 70px #0004;outline:none;font-size:13px}.photo-picker header,.photo-picker footer{display:flex;align-items:center;gap:12px;padding:18px 22px}.photo-picker header{justify-content:space-between;border-bottom:1px solid #e5e9ed}.photo-picker h3{margin:0;font-size:18px}.photo-picker header p{margin:6px 0 0;color:#71808b}.photo-picker button{padding:9px 14px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font:inherit;cursor:pointer}.photo-picker button:disabled{opacity:.5;cursor:not-allowed}.photo-picker button:focus-visible{outline:2px solid #f58220;outline-offset:2px}.photo-picker-content{overflow:auto;padding:20px 22px}.photo-picker-tools{display:flex;align-items:center;gap:10px}.photo-picker-tools strong{margin-left:auto;color:#ad5811}.photo-picker-content p{line-height:1.7}.photo-picker-note{color:#788591;font-size:12px}.photo-picker-error{padding:10px;background:#fff0e6;color:#a44818;border-radius:6px}.photo-picker-status{color:#287a4d}.photo-picker-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:16px}.photo-picker-grid figure{margin:0;padding:9px;border:1px solid #dfe5eb;border-radius:8px}.photo-picker-grid img{display:block;width:100%;height:112px;object-fit:contain;background:#f6f8fa}.photo-picker-grid figcaption{display:flex;align-items:center;justify-content:space-between;margin-top:8px}.photo-picker-grid button{padding:4px 8px;color:#af4c22}.photo-picker-empty{padding:50px 12px;text-align:center;line-height:2;border:2px dashed #d6dee6;border-radius:8px;background:#fafbfc;color:#657584}.photo-picker-empty small{font-size:12px}.photo-picker footer{border-top:1px solid #e5e9ed;flex-wrap:wrap}.photo-picker footer span{flex:1;min-width:180px;color:#788591;font-size:12px}.photo-picker .photo-picker-confirm{background:#f58220;border-color:#f58220;color:#fff}@media(max-width:600px){.photo-picker-overlay{padding:10px}.photo-picker{max-height:calc(100dvh - 20px)}.photo-picker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.photo-picker-content{padding:14px}.photo-picker header,.photo-picker footer{padding:14px}}
 </style>
-
