@@ -93,4 +93,23 @@ class PurchaseSearchPostgresIntegrationTest {
         assertEquals(31,service.page("",PageRequest.of(0,10)).getTotalElements());
         assertEquals(new PurchaseProductService.Stats(31,31,0,0),service.stats());
     }
+    @Test void selectiveSkuFragmentsKeepPayloadMatchesAndExactTotalsWithoutScanningCatalogHeaders(){
+        em.createNativeQuery("""
+            insert into purchase_product(id,sku,payload,version,created_at,updated_at,catalog_state,quote_ready) values
+            (gen_random_uuid(),'PERF-SKU-00001','{}',0,now(),now(),'ready',true),
+            (gen_random_uuid(),'OTHER-ITEM','{"notes":"perf-sku-000-reference"}',0,now(),now(),'ready',true)
+            """).executeUpdate();
+        var service=new PurchaseProductService(repository,null,null,null,null);
+        var index=org.mockito.Mockito.mock(PurchaseSearchIndex.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"searchIndex",index);
+        var found=new HashSet<String>();
+        for(int page=0;page<3;page++){
+            var result=service.page(" PeRf-SkU-000 ",PageRequest.of(page,1));
+            assertEquals(2,result.getTotalElements());
+            result.forEach(row->found.add(row.path("sku").asText()));
+            if(page==2)assertTrue(result.isEmpty());
+        }
+        assertEquals(Set.of("PERF-SKU-00001","OTHER-ITEM"),found);
+        org.mockito.Mockito.verifyNoInteractions(index);
+    }
 }

@@ -50,7 +50,10 @@ public class PurchaseProductService {
                         org.springframework.data.domain.Sort.Order.desc("updatedAt"),org.springframework.data.domain.Sort.Order.asc("id")))).map(this::view);
         // Preserve legacy SQL wildcard/escape semantics. Literal searches reuse validated
         // text without caching product payloads, permissions or prices.
-        if(searchIndex!=null && cleaned.indexOf('%')<0 && cleaned.indexOf('_')<0 && cleaned.indexOf('\\')<0) {
+        // Selective SKU fragments use PostgreSQL's trigram indexes. Loading every
+        // catalog header for these queries costs more than the small matching page.
+        boolean skuFragment=cleaned.length()>=6 && cleaned.matches("(?i)(?=.*[a-z])(?=.*[0-9])[a-z0-9./-]+");
+        if(searchIndex!=null && !skuFragment && cleaned.indexOf('%')<0 && cleaned.indexOf('_')<0 && cleaned.indexOf('\\')<0) {
             var selection=searchIndex.select(cleaned,pageable.getOffset(),pageable.getPageSize());
             var selected=new HashMap<UUID,PurchaseProduct>();
             products.findAllById(selection.ids()).forEach(row->selected.put(row.id,row));
