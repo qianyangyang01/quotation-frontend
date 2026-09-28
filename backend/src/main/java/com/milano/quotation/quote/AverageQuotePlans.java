@@ -38,7 +38,6 @@ final class AverageQuotePlans {
             for (var member : members) {
                 var optionId = text(member, "optionId", 1000); var option = options.get(optionId);
                 if (option == null || !memberIds.add(optionId) || (option.has("available") && !option.path("available").asBoolean())) throw AppException.unprocessable("综合报价来源渠道不存在、重复或不可用");
-                for (var hidden : customer.path("hiddenOptionIds")) if (hidden.asText().equals(optionId)) throw AppException.unprocessable("请先移除综合方案后再隐藏来源渠道");
                 var nextScope = scope(option);
                 if (scope != null && !scope.equals(nextScope)) throw AppException.unprocessable("综合报价须为相同国家和税费口径；澳大利亚1–4区可自由组合，其他区域须一致");
                 scope = nextScope;

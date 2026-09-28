@@ -66,13 +66,14 @@ export function averagePlanIssues(plan: AveragePlan, sources: QuoteSheetSourceRo
   const missing = quantities.filter(q => plan.quantities.indexOf(q) < 0 || plan.systemPrices[plan.quantities.indexOf(q)] == null)
   return missing.length ? [`综合报价缺少 ${missing.join('、')} 数量档位的系统价格，请补齐来源报价后重新生成`] : []
 }
-export function applyAveragePlans(sheet: CustomerQuoteSheet, plans: AveragePlan[], sources: QuoteSheetSourceRow[], quantities: number[], editor = false) {
+export function applyAveragePlans(sheet: CustomerQuoteSheet, plans: AveragePlan[], sources: QuoteSheetSourceRow[], quantities: number[], editor = false, sourceRows = sheet.rows) {
   const issues = plans.flatMap(plan => averagePlanIssues(plan, sources, quantities))
   const rows = [...sheet.rows]
   const hidden = new Set<string>()
   for (const plan of plans) {
     const keys = new Set(plan.members.map(m => m.optionId))
-    const first = sheet.rows.find(row => keys.has(row.key))
+    // Hidden source rows remain calculation inputs and supply summary metadata.
+    const first = sourceRows.find(row => keys.has(row.key))
     if (!first) continue
     const summary: CustomerQuoteSheetRow = {
       ...first, key: `average:${plan.id}`, number: 'AVG', averageId: plan.id, provider: plan.provider,
@@ -81,7 +82,7 @@ export function applyAveragePlans(sheet: CustomerQuoteSheet, plans: AveragePlan[
       sourceDescription: `${plan.mode === 'equal' ? '普通平均' : '加权平均'} · ${plan.members.length} 条渠道 · 系统报价为计算基准`,
     }
     const last = rows.reduce((found, row, index) => keys.has(row.key) ? index : found, -1)
-    rows.splice(last + 1, 0, summary)
+    rows.splice(last < 0 ? rows.length : last + 1, 0, summary)
     if (!editor && plan.display === 'summary') {
       keys.forEach(key => hidden.add(key))
     }
