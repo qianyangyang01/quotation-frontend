@@ -200,6 +200,8 @@ export function quoteSheetRegion(region = '', country = '', catalog: QuoteSheetC
   value = value.replace(/^[\s(（·:-]+|[\s)）]+$/g, '')
   if (!value || ['全国统一', '全国', '全境', '未保存', '—', '-'].includes(value)) return ''
   const names: Record<string, string> = {
+    西马: 'West Malaysia', 东马: 'East Malaysia', 普货: 'General Cargo', 带电: 'With Battery',
+    共和国: 'Republic', 岛: 'Island',
     普通区域: 'Standard Area', 普通地区: 'Standard Area', 普通区: 'Standard Area',
     非偏远: 'Non-remote Area', 非偏远地区: 'Non-remote Area', 非偏远区域: 'Non-remote Area', 非偏远区: 'Non-remote Area',
     偏远: 'Remote Area', 偏远地区: 'Remote Area', 偏远区域: 'Remote Area', 偏远区: 'Remote Area',
