@@ -46,6 +46,44 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
 
+it('starts a blank template from the dropdown and saves a separate template inline', async () => {
+  await mount()
+  const select = document.querySelector<HTMLSelectElement>('[aria-label="选择个人报价模板"]')!
+  select.value = ''; select.dispatchEvent(new Event('change')); await tick()
+  expect(document.querySelector('.selected-channels')).toBeNull()
+  expect(document.querySelector('.template-manager')).toBeNull()
+  expect(stored[0]!.items[0]!.channelKey).toBe(row('带电').channelKey)
+  window.dispatchEvent(new CustomEvent('milano:quotation-personal-templates-updated')); await tick()
+  expect(select.value).toBe('')
+  button('＋ 添加国家').click(); await tick(); button('美国').click(); await tick()
+  button('添加渠道').click(); await tick()
+  const candidate = [...document.querySelectorAll('.picker-list label')].find(element => element.textContent?.includes('普货'))!
+  candidate.querySelector<HTMLInputElement>('input')!.click(); await tick()
+  button('批量添加渠道').click(); await tick()
+  const name = document.querySelector<HTMLInputElement>('.new-template-name input')!
+  name.value = '全新普货模板'; name.dispatchEvent(new Event('input')); await tick()
+  document.querySelector<HTMLButtonElement>('.save-new-template')!.click(); await tick()
+  expect(api.put).not.toHaveBeenCalled()
+  expect(stored.map(template => [template.name, template.items.map(item => item.channelKey)])).toEqual([
+    ['带电', [row('带电').channelKey]], ['全新普货模板', [row('普货').channelKey]],
+  ])
+  expect(document.querySelector('.template-manager')).toBeNull()
+})
+
+it('can start a blank template even while the previous template load is unresolved', async () => {
+  const state = await mount()
+  let finish!: (value: boolean) => void
+  state.ensureCountries.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  button('一键应用').click(); await tick()
+  const select = document.querySelector<HTMLSelectElement>('[aria-label="选择个人报价模板"]')!
+  select.value = ''; select.dispatchEvent(new Event('change')); await tick()
+  expect(document.querySelector('.selected-channels')).toBeNull()
+  finish(true); await tick()
+  expect(document.querySelector('.selected-channels')).toBeNull()
+  expect(select.value).toBe('')
+  expect(api.post).not.toHaveBeenCalled()
+})
+
 it('saves different ordinary and cosmetic selections without copying the first battery template', async () => {
   const state = await mount()
   for (const name of ['普货', '化妆品']) {

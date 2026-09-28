@@ -51,6 +51,7 @@ const owner = computed<QuotationTemplateOwner>(() => ({
 }))
 const templates = ref<QuotationPersonalTemplate[]>([])
 const selectedTemplateId = ref('')
+const newTemplateMode = ref(false)
 const activeTemplateId = ref('')
 const currentRows = ref<QuotationMatrixRow[]>([])
 // This snapshot belongs to the editable rows. List refreshes must never advance it.
@@ -117,8 +118,9 @@ function cancelClearConfirmation() {
 
 async function refreshTemplates(preferredId = '') {
   templates.value = await loadQuotationTemplates(owner.value)
+  if (!templates.value.length) newTemplateMode.value = true
   const preferred = preferredId || selectedTemplateId.value
-  selectedTemplateId.value = templates.value.some(item => item.id === preferred)
+  selectedTemplateId.value = newTemplateMode.value && !preferredId ? '' : templates.value.some(item => item.id === preferred)
     ? preferred
     : templates.value[0]?.id || ''
   if (activeTemplateId.value && !templates.value.some(item => item.id === activeTemplateId.value)) {
@@ -147,6 +149,7 @@ function applyTemplate(template = selectedTemplate.value) {
     return
   }
   selectedTemplateId.value = template.id
+  newTemplateMode.value = false
   activeTemplateId.value = template.id
   editBase.value = snapshot(template)
   pendingUpdate.value = null
@@ -165,6 +168,24 @@ function applyTemplate(template = selectedTemplate.value) {
   emit('templateChange', { id: template.id, name: template.name })
   notify(`已应用模板“${template.name}”，可在下方临时增删国家和渠道`)
   showManager.value = false
+}
+
+function changeTemplateSelection() {
+  newTemplateMode.value = !selectedTemplateId.value
+  if (!newTemplateMode.value) return
+  cancelClearConfirmation()
+  activeTemplateId.value = ''
+  editBase.value = null
+  pendingUpdate.value = null
+  createName.value = ''
+  createDescription.value = ''
+  creationSource.value = '当前选择'
+  currentRows.value = []
+  presetSelection.value = []
+  selectionState.value = 'loading'
+  presetVersion.value += 1
+  emit('templateChange', null)
+  emit('selectionChange', [])
 }
 
 function handleSelectionChange(rows: QuotationMatrixRow[]) {
@@ -187,6 +208,7 @@ async function createFromCurrent() {
     return
   }
   savingTemplate.value = true
+  const savedInline = newTemplateMode.value
   const savedPresetVersion = presetVersion.value
   try {
     const created = await createQuotationTemplate(owner.value, {
@@ -199,12 +221,13 @@ async function createFromCurrent() {
     templates.value = [created, ...templates.value.filter(template => template.id !== created.id)]
     // Saving must not replay an older snapshot over edits made while the request was in flight.
     selectedTemplateId.value = created.id
+    newTemplateMode.value = false
     if (presetVersion.value === savedPresetVersion) {
       activeTemplateId.value = created.id
       editBase.value = snapshot(created)
       emit('templateChange', { id: created.id, name: created.name })
     }
-    showManager.value = true
+    showManager.value = !savedInline
     notify(`模板“${created.name}”已新建`)
   } catch (error) {
     notify(error instanceof Error ? error.message : '模板保存失败，请重试')
@@ -247,6 +270,7 @@ async function confirmTemplateUpdate() {
 function startFromSelection(rows: QuotationMatrixRow[], source: string) {
   if (!rows.length || savingTemplate.value) return
   cancelClearConfirmation()
+  newTemplateMode.value = false
   activeTemplateId.value = ''
   editBase.value = null
   pendingUpdate.value = null
@@ -331,6 +355,7 @@ function onTemplatesUpdated() {
 }
 
 watch(() => [props.ownerName, props.ownerAccount], () => {
+  newTemplateMode.value = false
   editBase.value = null
   pendingUpdate.value = null
   expandedTemplateId.value = ''
@@ -347,6 +372,7 @@ watch(() => props.draftVersion || 0, version => {
   appliedDraftVersion = version
   cancelClearConfirmation()
   const draftTemplate = props.draftTemplate
+  newTemplateMode.value = false
   selectedTemplateId.value = draftTemplate?.id || ''
   activeTemplateId.value = draftTemplate?.id || ''
   editBase.value = null
@@ -382,14 +408,14 @@ function formatTime(value: string) {
       <div class="template-actions">
         <label>
           <span>选择个人模板</span>
-          <select v-model="selectedTemplateId" aria-label="选择个人报价模板">
-            <option value="">{{ templates.length ? '请选择模板' : '暂未创建模板' }}</option>
+          <select v-model="selectedTemplateId" :disabled="savingTemplate" aria-label="选择个人报价模板" @change="changeTemplateSelection">
+            <option value="">新建模板</option>
             <option v-for="template in templates" :key="template.id" :value="template.id">
               {{ template.name }} · {{ new Set(template.items.map(item => item.country)).size }}国 / {{ template.items.length }}渠道
             </option>
           </select>
         </label>
-        <button class="apply" :disabled="!selectedTemplate" @click="applyTemplate()">⚡ 一键应用</button>
+        <button class="apply" :disabled="!selectedTemplate || savingTemplate" @click="applyTemplate()">⚡ 一键应用</button>
         <button @click="showManager = true">⚙ 管理我的模板</button>
       </div>
     </header>
@@ -411,8 +437,9 @@ function formatTime(value: string) {
         </div>
       </template>
       <template v-else>
-        <div class="empty-template"><i>☆</i><span><b>尚未应用个人模板</b><small>可先在下方选择国家与渠道，再从当前选择新建模板。</small></span></div>
-        <button @click="showManager = true">＋ 从当前选择新建模板</button>
+        <div class="empty-template"><i>☆</i><span><b>{{ newTemplateMode ? '新建模板' : '尚未应用个人模板' }}</b><small>{{ newTemplateMode ? '在下方添加国家与渠道，填写模板名称后保存。' : '选择“新建模板”可清空当前清单，自定义添加国家与渠道。' }}</small></span></div>
+        <label v-if="newTemplateMode" class="new-template-name">模板名称<input v-model="createName" :disabled="savingTemplate" maxlength="40" placeholder="输入模板名称"></label>
+        <button class="save-new-template" :disabled="savingTemplate || (newTemplateMode && (!canSaveSelection || !createName.trim()))" @click="newTemplateMode ? createFromCurrent() : (showManager = true)">{{ savingTemplate ? '保存中…' : '保存' }}</button>
       </template>
     </div>
 
@@ -532,6 +559,7 @@ function formatTime(value: string) {
 </template>
 
 <style scoped>
+.new-template-name{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:11px;color:#65747e}.new-template-name input{width:210px;height:36px;box-sizing:border-box;padding:0 10px;border:1px solid #d8e1e6;border-radius:6px;background:#fff;color:#26343e}.new-template-name input:focus{outline:2px solid #ffcf8b;outline-offset:1px}.template-status>.save-new-template{min-width:76px;margin-left:auto;border-color:#e7a13b;color:#ae6100}.template-status>.new-template-name+.save-new-template{margin-left:0}@media(max-width:680px){.new-template-name{width:100%;margin-left:0}.new-template-name input{flex:1;min-width:0}.template-status>.save-new-template{width:100%}}
 .template-conflict{margin:0;padding:10px 14px;border:1px solid #e6b467;border-radius:8px;background:#fff6e6;color:#8c5100;font-size:12px;line-height:1.6}.update-mask{z-index:145}.update-confirmation{width:min(960px,100%);max-height:90vh;overflow:auto;padding:22px;box-sizing:border-box;border-radius:12px;background:#fff}.update-confirmation h2{margin:0;font-size:18px}.update-confirmation p{font-size:12px;line-height:1.6}.update-diff{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}.update-diff>section{min-width:0}.update-diff h3{font-size:13px}.update-confirmation footer{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.update-confirmation button{padding:9px 14px;border:1px solid #d8e1e6;border-radius:6px;background:#fff;cursor:pointer}.update-confirmation button:last-child{background:#ff9700;border-color:#ff9700}.update-confirmation button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:680px){.update-diff{grid-template-columns:1fr}}
 .template-workbench{position:relative;display:grid;gap:12px;color:#17232d}.template-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 21px;border:1px solid #dfe6eb;border-radius:12px;background:#fff;box-shadow:0 10px 28px rgba(20,34,45,.05)}.template-intro p,.template-manager>header p{margin:0 0 4px;color:#d97800;font-size:9px;font-weight:900;letter-spacing:.15em}.template-intro h2,.template-manager>header h2{margin:0 0 4px;font-size:19px}.template-intro span,.template-manager>header span{color:#7d8992;font-size:10px}.template-actions{display:flex;align-items:flex-end;gap:8px}.template-actions label{display:grid;gap:5px;color:#69757f;font-size:9px}.template-actions select{width:270px;height:38px;padding:0 10px;border:1px solid #d8e1e6;border-radius:7px;background:#fff;color:#26343e;font-size:10px}.template-actions button,.template-status button{height:38px;padding:0 13px;border:1px solid #d9e1e6;border-radius:7px;background:#fff;color:#4f5e69;font-size:9px;font-weight:850;cursor:pointer}.template-actions .apply{border-color:#ff9700;background:#ff9700;color:#17232d}.template-actions button:disabled,.template-status button:disabled,.create-template button:disabled{opacity:.42;cursor:not-allowed}.template-status{display:flex;align-items:center;gap:13px;min-height:58px;padding:10px 16px;border:1px solid #dfe6eb;border-left:4px solid #ff9700;border-radius:10px;background:#fff}.active-template,.empty-template{display:flex;align-items:center;gap:9px}.active-template>i,.empty-template>i{width:30px;height:30px;display:grid;place-items:center;border-radius:50%;background:#fff0d6;color:#c76b00;font-style:normal;font-weight:900}.active-template>span,.empty-template>span{display:grid;gap:2px}.active-template small,.empty-template small{color:#86929b;font-size:8px}.active-template b,.empty-template b{font-size:11px}.active-template em{padding:4px 8px;border-radius:12px;background:#eff4f6;color:#65747e;font-size:8px;font-style:normal}.template-status>p{margin:0;font-size:9px}.matched-note{color:#27845a}.missing-warning{padding:7px 9px;border-radius:6px;background:#fff1dd;color:#a35b00}.status-actions{display:flex;gap:7px;margin-left:auto}.status-actions .update{border-color:#e7a13b;color:#ae6100}.template-status>.empty-template+button{margin-left:auto;border-color:#e7a13b;color:#ae6100}.manager-mask{position:fixed;z-index:135;inset:0;display:grid;place-items:center;padding:22px;background:rgba(17,27,36,.5);backdrop-filter:blur(3px)}.template-manager{display:grid;grid-template-rows:auto auto minmax(160px,1fr) auto;width:min(980px,95vw);max-height:min(760px,92vh);overflow:hidden;border-radius:13px;background:#f7f9fb;box-shadow:0 28px 80px rgba(8,18,27,.35)}.template-manager>header{display:flex;align-items:flex-start;justify-content:space-between;padding:20px 22px;border-bottom:1px solid #e3e9ed;background:#fff}.template-manager>header>button{border:0;background:none;color:#596873;font-size:24px;cursor:pointer}.create-template{display:grid;grid-template-columns:minmax(190px,1fr) 1fr 1fr auto;align-items:end;gap:10px;padding:15px 20px;border-bottom:1px solid #e2e8ec;background:#fffaf1}.create-template>div{display:grid;gap:3px}.create-template>div b{font-size:11px}.create-template>div span{color:#73818c;font-size:9px}.create-template label{display:grid;gap:5px;color:#69757f;font-size:8px}.create-template input{height:35px;box-sizing:border-box;padding:0 9px;border:1px solid #d8e0e5;border-radius:6px;outline:0}.create-template input:focus{border-color:#f1a239;box-shadow:0 0 0 3px rgba(255,151,0,.1)}.create-template button{height:35px;padding:0 13px;border:0;border-radius:6px;background:#ff9700;color:#17232d;font-size:9px;font-weight:850}.manager-list{display:grid;align-content:start;gap:9px;padding:14px 18px;overflow:auto}.manager-list article{display:grid;grid-template-columns:minmax(230px,1.1fr) minmax(260px,1.4fr) auto;align-items:center;gap:14px;padding:12px 14px;border:1px solid #dce4e9;border-radius:9px;background:#fff}.manager-list article.active{border-color:#f3a638;box-shadow:inset 3px 0 #ff9700}.template-name{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 7px;min-width:0}.template-name>b{overflow:hidden;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.template-name>em{padding:3px 6px;border-radius:9px;background:#e9f7ef;color:#238354;font-size:7px;font-style:normal}.template-name>span,.template-name>small{grid-column:1/-1;color:#65747e;font-size:8px}.template-name>small{color:#929ca3}.template-name>input{height:30px;padding:0 8px;border:1px solid #f0a33a;border-radius:5px}.template-name>button{height:29px;border:0;border-radius:5px;background:#17232d;color:#fff;font-size:8px}.template-country-tags{display:flex;flex-wrap:wrap;gap:5px}.template-country-tags span{padding:5px 7px;border-radius:12px;background:#eef3f6;color:#536672;font-size:8px}.manager-actions{display:flex;justify-content:flex-end;gap:5px}.manager-actions button{height:31px;padding:0 8px;border:1px solid #dce3e7;border-radius:5px;background:#fff;color:#586670;font-size:8px;font-weight:800}.manager-actions .use{border-color:#f2a237;background:#fff6e7;color:#ad6200}.manager-actions .danger{border-color:#f0d3cf;color:#b74b3c}.manager-empty{display:grid;place-items:center;gap:6px;padding:55px;color:#83909a}.manager-empty i{font-size:30px;font-style:normal}.manager-empty b{color:#3a4852}.manager-empty span{font-size:9px}.template-manager>footer{display:flex;align-items:center;gap:12px;min-height:53px;padding:0 20px;border-top:1px solid #e1e7eb;background:#fff;color:#6e7b85;font-size:9px}.template-manager>footer p{margin:0;color:#a25b00;font-weight:800}.template-manager>footer button{height:33px;margin-left:auto;padding:0 17px;border:0;border-radius:6px;background:#17232d;color:#fff;font-size:9px;font-weight:800}.template-feedback{position:fixed;right:24px;bottom:24px;z-index:150;max-width:380px;padding:11px 15px;border-radius:8px;background:#17232d;color:#fff;box-shadow:0 12px 30px rgba(0,0,0,.2);font-size:10px}.feedback-enter-active,.feedback-leave-active{transition:.2s}.feedback-enter-from,.feedback-leave-to{opacity:0;transform:translateY(7px)}@media(max-width:1050px){.template-toolbar{align-items:flex-start;flex-direction:column}.template-actions{width:100%;flex-wrap:wrap}.template-actions label{flex:1}.template-actions select{width:100%}.create-template{grid-template-columns:1fr 1fr}.create-template>div{grid-column:1/-1}.manager-list article{grid-template-columns:1fr}.manager-actions{justify-content:flex-start}}@media(max-width:680px){.template-actions{align-items:stretch;flex-direction:column}.template-status{align-items:flex-start;flex-wrap:wrap}.active-template{flex-wrap:wrap}.status-actions{width:100%;margin-left:0}.status-actions button{flex:1}.template-status>.empty-template+button{width:100%;margin-left:0}.create-template{grid-template-columns:1fr}.create-template>div{grid-column:auto}.template-manager{max-height:94vh}.manager-actions{flex-wrap:wrap}.manager-actions button{flex:1}}
 .status-actions .clear{border-color:#eccdc8;color:#a5483a}
