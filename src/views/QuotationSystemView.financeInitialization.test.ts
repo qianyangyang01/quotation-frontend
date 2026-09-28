@@ -45,6 +45,9 @@ function financeResponse(disableS = false) {
 }
 
 type PricingState = {
+  ensureCountries: (countries: string[]) => Promise<boolean>
+  logisticsLoadState: string
+  countryLoads: number
   ensureQuoteLogistics: (product: QuotationProduct) => Promise<void>
   normalizeRule: (product: QuotationProduct, silent?: boolean) => void
   applyDraftPayload: (payload: QuotationDraftPayload, purchases?: Map<string, PurchaseProductRecord | undefined>, options?: { restoreQuotation?: boolean }) => Promise<void>
@@ -224,6 +227,40 @@ describe('quotation finance initialization for an employee', () => {
     await state.ensureQuoteLogistics(state.products[0]!)
     await vi.waitFor(() => expect(state.modeSelections.common).toEqual([]))
     expect(state.savedQuoteRows).toEqual([])
+  })
+
+  it.each(['failed', 'unverified'] as const)('recovers %s initial logistics through the channel picker without refreshing the page', async outcome => {
+    await mountPage(); resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    state.customerName = '保留客户'
+    state.customQuoteQuantity = 7
+    if (outcome === 'failed') vi.mocked(loadPublishedLogisticsRules).mockRejectedValueOnce(new Error('网络失败'))
+    else vi.mocked(loadPublishedLogisticsRules).mockResolvedValueOnce({revision:'r1', verified:false, rules:[], source:'cache'})
+    await state.ensureQuoteLogistics(state.products[0]!)
+    expect(state.logisticsLoadState).toBe(outcome === 'failed' ? 'error' : 'stale')
+    const before = vi.mocked(loadPublishedLogisticsRules).mock.calls.length
+    const results = await Promise.all([state.ensureCountries(['泰国']), state.ensureCountries(['泰国'])])
+    expect(results).toEqual([true, true])
+    expect(loadPublishedLogisticsRules).toHaveBeenCalledTimes(before + 1)
+    expect(vi.mocked(loadPublishedLogisticsRules).mock.lastCall?.[0].countries).toContain('泰国')
+    expect(state.logisticsLoadState).toBe('empty')
+    expect(state.countryLoads).toBe(0)
+    expect(state.customerName).toBe('保留客户')
+    expect(state.customQuoteQuantity).toBe(7)
+  })
+
+  it('does not loop or accept channels when the picker recovery also fails', async () => {
+    await mountPage(); resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    vi.mocked(loadPublishedLogisticsRules).mockRejectedValueOnce(new Error('第一次失败'))
+    await state.ensureQuoteLogistics(state.products[0]!)
+    const before = vi.mocked(loadPublishedLogisticsRules).mock.calls.length
+    vi.mocked(loadPublishedLogisticsRules).mockRejectedValueOnce(new Error('重试仍失败'))
+    expect(await state.ensureCountries(['泰国'])).toBe(false)
+    expect(loadPublishedLogisticsRules).toHaveBeenCalledTimes(before + 1)
+    expect(state.logisticsLoadState).toBe('error')
+    expect(state.countryLoads).toBe(0)
+    expect(await state.ensureCountries(['泰国'])).toBe(true)
   })
 
   it('reuses hydrated finance on attribute loads without flashing authorization errors and still refreshes known changes', async () => {

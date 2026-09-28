@@ -612,8 +612,12 @@ function resetCountryLoads() {
 }
 function ensureCountries(countries: string[]): Promise<boolean> {
   if (!countries.length) return Promise.resolve(true)
-  const generation = countryGeneration
   countries.forEach(country => requestedQuoteCountries.add(country))
+  // The picker is also the retry entry point after the initial request failed.
+  // Start recovery before capturing the generation because it resets the queue.
+  // Concurrent pickers then await the same initial load, including their countries.
+  if (['error', 'stale'].includes(logisticsLoadState.value)) void ensureQuoteLogistics(products.value[0])
+  const generation = countryGeneration
   countryLoads.value += 1
   const task = countryQueue.then(async () => {
     await initialLogisticsLoad
@@ -701,10 +705,11 @@ async function runQuoteLogistics(p: Product) {
     financeTaxSettings.value = loadFinanceTaxSettings()
   financeSurchargeSettings.value = loadFinanceSurchargeSettings()
     logisticsRevision.value = result.revision
-    logisticsLoadState.value = result.rules.length ? (result.verified ? 'ready' : 'stale') : 'empty'
+    logisticsLoadState.value = result.verified ? (result.rules.length ? 'ready' : 'empty') : 'stale'
     if (result.verified) reconcileRestoredChannels(p)
     if (!result.rules.length) {
-      p.channel = ''; p.rule = ''; p.selectedChannelKey = ''; p.freight = 0; p.status = '当前条件没有已发布物流渠道'
+      p.channel = ''; p.rule = ''; p.selectedChannelKey = ''; p.freight = 0
+      p.status = result.verified ? '当前条件没有已发布物流渠道' : '无法确认最新物流版本，请重试'
       return
     }
     normalizeRule(p, true)
