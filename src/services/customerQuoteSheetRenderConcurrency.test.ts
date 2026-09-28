@@ -9,6 +9,17 @@ function sheet(count = 1) {
   return buildCustomerQuoteSheet({ rows: Array.from({ length: count }, (_, i) => ({ country: 'US', carrier: '4PX', channelKey: String(i), ruleId: i, rule: '', channelCode: '', transport: '', eta: '5-8 days', quote1: 1, quote2: 2, quote3: 3, quoteCustom: 5 })), countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 5, bundle: false })
 }
 async function settle() { for (let i = 0; i < 15; i++) await Promise.resolve() }
+it('renders separate English zone badges in images and preserves multi-zone summaries', async () => {
+  const { renderCustomerQuoteSheet } = await import('./customerQuoteSheetRenderer')
+  const data = sheet(2)
+  data.rows[0].country = 'Australia'; data.rows[0].region = 'Zone 2'
+  data.rows[1].country = 'AU'; data.rows[1].region = 'Zone 1 / Zone 3'
+  const result = renderCustomerQuoteSheet(data); await settle()
+  expect(drawnText).toContain('Australia'); expect(drawnText).toContain('Zone 2')
+  expect(drawnText.join(' ')).toContain('Zone 1 / Zone 3')
+  expect(drawnText).not.toContain('Australia · Zone 2')
+  pending[0](new Blob(['zones'])); expect(await result).toHaveLength(1)
+})
 beforeEach(() => {
   vi.resetModules(); canvases.length = 0; pending.length = 0; drawnText.length = 0; drawnImages.length = 0
   vi.stubGlobal('Image', class { onload?: () => void; set src(_value: string) { queueMicrotask(() => this.onload?.()) } })
@@ -92,7 +103,7 @@ it('renders hidden columns without their labels or values, wrapping long SKU tex
   data.hiddenColumns = ['country', 'provider', 'shippingTime', 'processingTime']
   data.rows[0].sku = 'SKU-ABCDEFGHIJK-1234567890+SKU-SECOND-9876543210'
   const result = renderCustomerQuoteSheet(data); await settle()
-  expect(drawnText).not.toContain('Country')
+  expect(drawnText).not.toContain('Country / Zone')
   expect(drawnText).not.toContain('United States')
   expect(drawnText).not.toContain('4PX')
   expect(drawnText).not.toContain('5-8 days')

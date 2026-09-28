@@ -13,9 +13,9 @@ export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'quote1' | 'quote2' | 'quote3' | 'quoteCustom' | 'available'> & { taxFeeMode?: string; taxIncluded?: boolean; taxConfigured?: boolean; taxRatePercent?: number | null }
 export type QuoteSheetCountry = { name: string; code: string }
 export type QuoteSheetCountryFormat = 'name' | 'code'
-export type QuoteSheetRowEdits = { number?: string; country?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
+export type QuoteSheetRowEdits = { number?: string; country?: string; region?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
 export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
-  { key: 'country', label: 'Country', name: '国家', width: 215 },
+  { key: 'country', label: 'Country / Zone', name: '国家', width: 215 },
   { key: 'provider', label: 'Logistics Provider', name: '物流商', width: 245 },
   { key: 'shippingTime', label: 'Shipping Time', name: '运输时效', width: 235 },
   { key: 'processingTime', label: 'Processing Time', name: '处理时间', width: 220 },
@@ -56,6 +56,7 @@ export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColu
   ]
 }
 export function quoteSheetCell(row: CustomerQuoteSheetRow, key: ReturnType<typeof quoteSheetColumns>[number]['key']) {
+  if (key === 'country') return [row.country, row.region].filter(Boolean).join(' · ')
   if (key === 'shippingTime' || key === 'processingTime') return formatShippingTime(row[key] ?? (key === 'processingTime' ? '1-2 workingdays' : '—'))
   return String(row[key] ?? '—')
 }
@@ -63,6 +64,7 @@ export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: num
 export const MAX_QUOTE_SHEET_COLUMNS = 10
 export function validQuoteSheetQuantity(value: number) { return Number.isSafeInteger(value) && value > 0 }
 export type CustomerQuoteSheetRow = {
+  region?: string; regionTranslationRequired?: boolean
   key: string; number: number | string; averageId?: string; sku?: string; country: string; provider: string; shippingTime: string; processingTime?: string
   prices: Array<number | null>; sourceDescription: string
 }
@@ -189,6 +191,26 @@ export function formatQuoteSheetCountry(country: string, catalog: QuoteSheetCoun
   const code = quoteSheetCountryCode(value, catalog) || codeForEnglishCountryName(value)
   return code === 'UK' ? 'GB' : code
 }
+/** Translate only the saved/selected region, never infer a zone from current prices. */
+export function quoteSheetRegion(region = '', country = '', catalog: QuoteSheetCountry[] = []): string | null {
+  let value = region.normalize('NFKC').split(/[｜|]/).at(-1)!.trim()
+  for (const prefix of [country, quoteSheetCountryName(country, catalog), quoteSheetCountryCode(country, catalog), '澳大利亚', '加拿大'].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    if (value.toLowerCase().startsWith(prefix.toLowerCase())) { value = value.slice(prefix.length).trim(); break }
+  }
+  value = value.replace(/^[\s(（·:-]+|[\s)）]+$/g, '')
+  if (!value || ['全国统一', '全国', '全境', '未保存', '—', '-'].includes(value)) return ''
+  const names: Record<string, string> = {
+    普通区域: 'Standard Area', 普通地区: 'Standard Area', 普通区: 'Standard Area',
+    非偏远: 'Non-remote Area', 非偏远地区: 'Non-remote Area', 非偏远区域: 'Non-remote Area', 非偏远区: 'Non-remote Area',
+    偏远: 'Remote Area', 偏远地区: 'Remote Area', 偏远区域: 'Remote Area', 偏远区: 'Remote Area',
+  }
+  if (names[value]) return names[value]
+  const digits = value.replace(/[一二三四五六七八九]/g, digit => String('一二三四五六七八九'.indexOf(digit) + 1))
+  const zone = /^(?:第\s*)?([0-9]+|[A-Z])\s*区$/i.exec(digits) || /^zone\s*([0-9]+|[A-Z])$/i.exec(digits)
+  if (zone) return `Zone ${zone[1].toUpperCase()}`
+  // Unmapped Chinese regions require explicit English input instead of silently disappearing.
+  return /^[A-Za-z0-9][\x20-\x7e]*$/.test(value) ? value : null
+}
 export function quoteSheetProviderKey(provider: string) {
   return provider.normalize('NFKC').toLowerCase().replace(/[\s._-]/g, '')
 }
@@ -223,6 +245,10 @@ export function buildCustomerQuoteSheet(input: {
     const key = quoteSheetRowKey(row)
     const fields = input.edits.fields?.[key] || {}
     const country = formatQuoteSheetCountry(fields.country ?? row.country, input.countries, input.edits.countryFormat)
+    const translatedRegion = quoteSheetRegion(row.quoteRegion, row.country, input.countries)
+    const region = fields.region?.trim() ?? translatedRegion ?? ''
+    const regionTranslationRequired = translatedRegion === null || !!translatedRegion
+    if (visible('country') && (regionTranslationRequired && !region || /[^\x20-\x7e]/.test(region))) tableIssues.push(`第 ${index + 1} 行分区请填写英文，例如 Zone 2：${row.quoteRegion}`)
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
     const provider = fields.provider === undefined ? quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '') : fields.provider.trim()
     if (visible('country') && !country) tableIssues.push(`第 ${index + 1} 行缺少国家${input.edits.countryFormat === 'code' ? '二字码' : '英文全称'}：${fields.country ?? row.country}`)
@@ -252,7 +278,7 @@ export function buildCustomerQuoteSheet(input: {
       return value != null && Number.isFinite(value) && value >= 0 ? value : null
     })
     return {
-      key, number, sku, country: country || '—', provider: provider || '—', shippingTime, processingTime, prices,
+      key, number, sku, country: country || '—', region, regionTranslationRequired, provider: provider || '—', shippingTime, processingTime, prices,
       sourceDescription: [row.country, row.quoteRegion, row.carrier, row.transport, row.channelCode].filter(Boolean).join(' · '),
     }
   })

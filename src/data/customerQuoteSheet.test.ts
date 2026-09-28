@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { formatLogisticsEta } from './logistics'
 import {
-  buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatQuoteDate, formatShippingTime,
+  buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatQuoteDate, formatShippingTime, quoteSheetRegion,
   localQuoteDate, newQuoteSheetEdits, quoteSheetCountryCode, quoteSheetCountryName, quoteSheetProviderName,
   quoteSheetRowKey, quoteSheetProviderKey, customerQuoteSheetTsv, reconcileQuoteSheetEdits, type QuoteSheetSourceRow,
 } from './customerQuoteSheet'
@@ -16,6 +16,37 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it.each([
+    ['澳大利亚2区', 'AU', 'Zone 2'], ['澳大利亚（二区）', '澳大利亚', 'Zone 2'],
+    ['燕文｜服装专线｜2区', '加拿大', 'Zone 2'], ['加拿大一区', 'CA', 'Zone 1'],
+    ['Zone 3', 'AU', 'Zone 3'], ['Australia Zone 4', 'AU', 'Zone 4'], ['A区', 'CA', 'Zone A'],
+    ['全国统一', 'GB', ''], ['', 'US', ''], ['非偏远', 'GB', 'Non-remote Area'],
+    ['偏远地区', 'CA', 'Remote Area'], ['Northern Ireland', 'GB', 'Northern Ireland'], ['特殊地区', 'CA', null],
+  ])('translates the explicit region %s without guessing', (region, country, expected) => {
+    expect(quoteSheetRegion(region, country)).toBe(expected)
+  })
+  it('keeps zones in full-name/code clipboard output without changing source keys or prices', () => {
+    const rows = [1, 2, 3].map(zone => source({ country: 'AU', quoteRegion: `澳大利亚${zone}区`, quote1: zone * 10 }))
+    const original = JSON.stringify(rows), draft = edits()
+    for (const format of ['name', 'code'] as const) {
+      draft.countryFormat = format
+      const sheet = buildCustomerQuoteSheet({ rows, countries: [], edits: draft, customQuantity: 5, bundle: false })
+      expect(sheet.issues).toEqual([])
+      expect(sheet.rows.map(row => row.key)).toEqual(rows.map(quoteSheetRowKey))
+      expect(sheet.rows.map(row => row.prices[0])).toEqual([10, 20, 30])
+      for (const zone of [1, 2, 3]) expect(customerQuoteSheetTsv(sheet)).toContain(`${format === 'name' ? 'Australia' : 'AU'} · Zone ${zone}`)
+    }
+    expect(JSON.stringify(rows)).toBe(original)
+  })
+  it('requires an English translation for an unknown region rather than omitting it', () => {
+    const row = source({ quoteRegion: '特殊地区' }), draft = edits()
+    const input = { rows: [row], countries: [], edits: draft, customQuantity: 5, bundle: false }
+    expect(() => customerQuoteSheetTsv(buildCustomerQuoteSheet(input))).toThrow('分区请填写英文')
+    draft.fields = { [quoteSheetRowKey(row)]: { region: 'Special Area' } }
+    expect(customerQuoteSheetTsv(buildCustomerQuoteSheet(input))).toContain('United States · Special Area')
+    draft.fields[quoteSheetRowKey(row)].region = ''
+    expect(buildCustomerQuoteSheet(input).tableIssues).toHaveLength(1)
+  })
   it('formats catalog names, codes and edited English names consistently without guessing unknown codes', () => {
     const countries = [{ name: '荷兰', code: 'NL' }, { name: '阿联酋', code: 'AE' }]
     const draft = edits(); draft.countryFormat = 'code'

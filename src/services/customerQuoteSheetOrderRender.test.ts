@@ -33,7 +33,7 @@ it('draws the contact on every page and aligns moved prices, fixed columns and t
   const layout=quoteSheetLayout(4,[],true,order)
   for(const page of pages){
     expect(page.text.filter(call=>call[0]==='WhatsApp: +86 XXX XXXX XXXX')).toHaveLength(1)
-    for(const [index,label] of ['1 pc','2 pcs','3 pcs','5 pcs','SKU','Country','Logistics Provider','No.','Shipping Time','Processing','Product'].entries()){
+    for(const [index,label] of ['1 pc','2 pcs','3 pcs','5 pcs','SKU','Country / Zone','Logistics Provider','No.','Shipping Time','Processing','Product'].entries()){
       const cellIndex=index
       const matches=page.text.filter(call=>call[0]===label && call[2]<269)
       expect(matches.length).toBeGreaterThan(0)
