@@ -83,6 +83,7 @@ defineEmits<{
 </style>
 
 <style scoped>
+.qty{align-items:center}
 .purchase-price{align-self:stretch;grid-template-rows:1fr 34px 1fr;gap:0}
 .purchase-tier-price{grid-row:2;display:flex;align-items:center;gap:10px}
 .purchase-price>small{grid-row:3;align-self:start;padding-top:4px}
