@@ -8,9 +8,9 @@ import type { QuoteLocalPhoto } from './quoteLocalPhotos'
 export const QUOTE_SHEET_WIDTH = 1536
 export const QUOTE_SHEET_ROWS_PER_IMAGE = 24
 export type QuoteSheetImage = { blob: Blob; width: number; height: number; firstRow: number; lastRow: number }
-export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], withPhotos = false, order?: readonly QuoteSheetColumnKey[]) {
+export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], withPhotos = false, order?: readonly QuoteSheetColumnKey[], withSizeRules = false) {
   if (!Number.isInteger(priceColumns) || priceColumns < 1 || priceColumns > MAX_QUOTE_SHEET_COLUMNS) throw new Error('价格列须为 1–10 列')
-  const groups = quoteSheetGroups(hiddenColumns, order, withPhotos)
+  const groups = quoteSheetGroups(hiddenColumns, order, withPhotos, withSizeRules)
   const fixedColumns = groups.filter(column => column.key !== 'prices')
   const fixedWidth = fixedColumns.reduce((sum, column) => sum + column.width, 0)
   const width = Math.max(QUOTE_SHEET_WIDTH, 22 + fixedWidth + priceColumns * 144 + 21)
@@ -97,10 +97,10 @@ function exportBlob(canvas: HTMLCanvasElement) {
 export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCancelled: () => boolean = () => false, photos: readonly QuoteLocalPhoto[] = []): Promise<QuoteSheetImage[]> {
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
-  const { width, right, columns, cells, priceIndex } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0, sheet.columnOrder)
+  const { width, right, columns, cells, priceIndex } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0, sheet.columnOrder, typeof sheet.sizeRules === 'string')
   const priceStart = columns[priceIndex]
   const priceEnd = columns[priceIndex + sheet.quantityLabels.length]
-  const valuesFor = (row: CustomerQuoteSheet['rows'][number]) => cells.map(column => column.key === 'product' ? '' : column.key === 'prices' ? quoteSheetUsd(row.prices[column.priceIndex]) : quoteSheetCell(row, column.key))
+  const valuesFor = (row: CustomerQuoteSheet['rows'][number]) => cells.map(column => column.key === 'product' || column.key === 'sizeRules' ? '' : column.key === 'prices' ? quoteSheetUsd(row.prices[column.priceIndex]) : quoteSheetCell(row, column.key))
   const boldCell = (index: number) => cells[index].key === 'number' || cells[index].key === 'prices'
   if (sheet.rows.some(row => row.prices.length !== sheet.quantityLabels.length)) throw new Error('价格数量与表头不一致，请重新预览')
   const noteTexts = sheet.notes ?? [...CUSTOMER_QUOTE_NOTES]
@@ -131,7 +131,10 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     const photoSize = photoColumns === 2 ? 104 : 160
     const photoRows = Math.ceil(photos.length / photoColumns)
     const photoHeight = photos.length ? photoRows * (photoSize + 12) + 12 : 0
-    const extraHeight = Math.max(0, photoHeight - heights.reduce((sum, height) => sum + height, 0))
+    const sizeRulesIndex = cells.findIndex(column => column.key === 'sizeRules')
+    font(context)
+    const rulesHeight = sizeRulesIndex < 0 ? 0 : lines(context, sheet.sizeRules ?? '', cells[sizeRulesIndex].width - 20).length * 26 + 20
+    const extraHeight = Math.max(0, Math.max(photoHeight, rulesHeight) - heights.reduce((sum, height) => sum + height, 0))
     heights.forEach((height, index) => { heights[index] = height + extraHeight / heights.length })
     const tableBottom = tableTop + heights.reduce((sum, height) => sum + height, 0)
     font(context, false, 20)
@@ -212,6 +215,13 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       context.lineWidth = 1
       context.beginPath(); context.moveTo(22, y - 0.5); context.lineTo(right, y - 0.5); context.stroke()
     })
+    if (sizeRulesIndex >= 0) {
+      const left = columns[sizeRulesIndex], right = columns[sizeRulesIndex + 1]
+      context.fillStyle = '#fff'
+      context.fillRect(left, tableTop, right - left, tableBottom - tableTop - 1)
+      context.fillStyle = '#111111'
+      centered(context, sheet.sizeRules ?? '', left, right, tableTop, tableBottom - tableTop)
+    }
     if (photos.length) {
       const photoIndex = cells.findIndex(column => column.key === 'product')
       const left = columns[photoIndex], photoRight = columns[photoIndex + 1]

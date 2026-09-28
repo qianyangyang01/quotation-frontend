@@ -1,4 +1,4 @@
-import { customerQuoteSheetTsv, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { customerQuoteSheetTsv, customerQuoteSheetHtml, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { withQuoteSheetCopyLock, withSynchronousQuoteSheetCopy } from './customerQuoteSheetCopyLock'
 
 function copyTextDuringClick(text: string, html?: string) {
@@ -38,7 +38,7 @@ function copyTextDuringClick(text: string, html?: string) {
 }
 
 export async function copyQuoteSheetData(sheet: CustomerQuoteSheet) {
-  return copyQuotationText(customerQuoteSheetTsv(sheet))
+  return copyQuotationText(customerQuoteSheetTsv(sheet), typeof sheet.sizeRules === 'string' ? customerQuoteSheetHtml(sheet) : undefined)
 }
 
 export async function copyQuotationText(text: string, html?: string) {

@@ -38,7 +38,7 @@ const emit = defineEmits<{ removeRow: [key: string] }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
 function initialEdits() {
   const contact = props.recordMode ? props.initialQuote?.contact : loadQuoteSheetContact(layoutUserId.value)
-  return { ...newQuoteSheetEdits(props.salesperson), whatsapp: '', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
+  return { ...newQuoteSheetEdits(props.salesperson), whatsapp: '', sizeRules: props.initialQuote?.sizeRules, sizeRulesEnabled: props.initialQuote?.sizeRulesEnabled ?? typeof props.initialQuote?.sizeRules === 'string', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
 }
 const edits = ref<QuoteSheetEdits>(initialEdits())
 const layoutSaveState = ref<'saved' | 'failed' | ''>('')
@@ -284,9 +284,10 @@ const missingProviders = computed(() => !columnVisible('provider') ? [] : [...ne
   .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
 const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
 
-const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value))
+const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value, typeof sheet.value.sizeRules === 'string'))
 const textTable = computed(() => quoteSheetTextTable(sheet.value))
-const groupNames: Record<QuoteSheetColumnKey, string> = { number: '序号', sku: 'SKU', product: '商品图片', prices: '价格整组', country: '国家', provider: '物流商', shippingTime: '运输时效', processingTime: '处理时间' }
+const sizeRulesTextIndex = computed(() => textTable.value[0].indexOf('Size Rules'))
+const groupNames: Record<QuoteSheetColumnKey, string> = { sizeRules: '尺码规则', number: '序号', sku: 'SKU', product: '商品图片', prices: '价格整组', country: '国家', provider: '物流商', shippingTime: '运输时效', processingTime: '处理时间' }
 function rememberColumnOrder(order: QuoteSheetColumnKey[]) {
   edits.value.columnOrder = order
   layoutSaveState.value = saveQuoteSheetColumnOrder(layoutUserId.value, order) ? 'saved' : 'failed'
@@ -426,6 +427,14 @@ watch(() => new Map(props.rows.map(row => [quoteSheetRowKey(row), JSON.stringify
   loadSavedPrices()
 })
 watch(() => props.sourcePending, value => { if (value) clearPriceEdits() })
+async function toggleSizeRules(event: Event) {
+  if (copying.value) return
+  edits.value.sizeRulesEnabled = (event.target as HTMLInputElement).checked
+  if (!edits.value.sizeRulesEnabled) return
+  edits.value.sizeRules ??= ''
+  await nextTick()
+  editorScroll.value?.querySelector<HTMLTextAreaElement>('.sheet-size-rules textarea')?.focus()
+}
 async function addColumn() {
   if (copying.value || columns.value.length >= MAX_QUOTE_SHEET_COLUMNS) return
   columns.value.push({ id: ++columnId, quantity: '', legacyCustom: false })
@@ -556,7 +565,7 @@ function capturePrices(): CapturedSheetPrices {
   if (allRowsSheet.value.priceIssues?.length) throw new Error(allRowsSheet.value.priceIssues.join('；'))
   const system = systemSheet.value
   if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
-  return { averagePlans: cloneAveragePlans(averagePlans.value).map(plan => ({ ...plan, quantities: [...quantities.value], prices: quantities.value.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null), systemPrices: quantities.value.map(q => plan.systemPrices[plan.quantities.indexOf(q)] ?? null), members: plan.members.map(m => ({...m, sourcePrices: quantities.value.map(q => m.sourcePrices[plan.quantities.indexOf(q)] ?? null)})) })), hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
+  return { averagePlans: cloneAveragePlans(averagePlans.value).map(plan => ({ ...plan, quantities: [...quantities.value], prices: quantities.value.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null), systemPrices: quantities.value.map(q => plan.systemPrices[plan.quantities.indexOf(q)] ?? null), members: plan.members.map(m => ({...m, sourcePrices: quantities.value.map(q => m.sourcePrices[plan.quantities.indexOf(q)] ?? null)})) })), sizeRules: edits.value.sizeRules, sizeRulesEnabled: edits.value.sizeRulesEnabled, hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
 }
 defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {
@@ -641,6 +650,7 @@ onBeforeUnmount(() => {
                   :aria-label="`${groupNames[group.key]}排序，左右键移动`" title="拖动排序，或聚焦后按左右方向键" :disabled="copying"
                   @dragstart="startGroupDrag(group.key, $event)" @dragend="endColumnDrag"
                   @keydown.left.prevent="moveGroupByKey(group.key, -1)" @keydown.right.prevent="moveGroupByKey(group.key, 1)">⠿ <span>{{ group.key === 'prices' ? '价格 · USD' : group.label }}</span></button>
+                <label v-if="group.key === 'sku'" class="sheet-size-rules-toggle"><input type="checkbox" :checked="edits.sizeRulesEnabled" aria-label="显示尺码规则列" :disabled="copying" @change="toggleSizeRules">尺码规则</label>
                 <div v-if="group.key === 'country'" class="sheet-country-format" role="group" aria-label="国家显示方式">
                   <button type="button" :aria-pressed="(edits.countryFormat ?? 'name') === 'name'" :disabled="copying" @click="setCountryFormat('name')">全称</button>
                   <button type="button" :aria-pressed="edits.countryFormat === 'code'" :disabled="copying" @click="setCountryFormat('code')">二字码</button>
@@ -662,6 +672,7 @@ onBeforeUnmount(() => {
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
               <td v-else-if="group.key === 'product' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`临时商品图 ${photoIndex + 1}`"></div></td>
+              <td v-else-if="group.key === 'sizeRules' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-size-rules"><textarea v-model="edits.sizeRules" aria-label="尺码规则说明" placeholder="填写尺码规则或备注说明，支持换行" maxlength="2000" rows="4" :disabled="copying" /><small class="sheet-size-rules-count">{{ edits.sizeRules?.length ?? 0 }} / 2000</small></td>
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
               <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}</td>
               <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
@@ -704,7 +715,7 @@ onBeforeUnmount(() => {
       <div class="sheet-image-scroll"><img :src="currentImage.url" :width="currentImage.width" :height="currentImage.height" alt="JerryFulfillment Quote Sheet 客户报价图片预览" draggable="false"></div>
       <details class="sheet-accessible"><summary>查看报价单文字内容</summary>
         <p>{{ sheet.title }} — By Agent: {{ sheet.agent }} — Date: {{ sheet.date }}<span v-if="sheet.whatsapp"> — WhatsApp: {{ sheet.whatsapp }}</span></p>
-        <table><thead><tr><th v-for="(label, index) in textTable[0]" :key="index">{{ label }}</th></tr></thead><tbody><tr v-for="(row, index) in textTable.slice(1)" :key="sheet.rows[index].key"><td v-for="(cell, column) in row" :key="column">{{ cell }}</td></tr></tbody></table>
+        <table><thead><tr><th v-for="(label, index) in textTable[0]" :key="index">{{ label }}</th></tr></thead><tbody><tr v-for="(row, index) in textTable.slice(1)" :key="sheet.rows[index].key"><template v-for="(cell, column) in row" :key="column"><td v-if="column !== sizeRulesTextIndex || index === 0" :rowspan="column === sizeRulesTextIndex ? sheet.rows.length : 1">{{ cell }}</td></template></tr></tbody></table>
         <h4>IMPORTANT NOTES</h4><ol><li v-for="note in sheet.notes" :key="note">{{ note }}</li></ol>
       </details>
     </div>
@@ -713,6 +724,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-size-rules-toggle{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:3px;font-size:12px;white-space:nowrap;cursor:pointer}.sheet-size-rules-toggle input{accent-color:#f58220}.sheet-size-rules-count{display:block;text-align:right;color:#72808a;font-size:11px;padding:2px 6px}
+.sheet-size-rules{min-width:220px;width:260px;vertical-align:middle;background:#fff!important}.sheet-size-rules textarea{display:block;box-sizing:border-box;width:100%;min-height:100px;resize:vertical;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;padding:8px;border:1px solid transparent;border-radius:4px;font:inherit;color:inherit;background:transparent}.sheet-size-rules textarea:hover{border-color:#f7bd90}.sheet-size-rules textarea:focus{outline:2px solid #f58220;outline-offset:1px;background:#fffaf5}
 .sheet-row-controls{display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
 .customer-sheet .sheet-row-controls button{padding:3px 6px;font-size:12px}
 .customer-sheet .sheet-row-controls .sheet-row-handle{cursor:grab;font-size:18px;line-height:18px}

@@ -79,6 +79,16 @@ final class CustomerQuotePrices {
                 savedContact.put(field, text.asText());
             }
         }
+        if (value.has("sizeRules")) {
+            var rules = value.path("sizeRules");
+            if (!rules.isNull() && (!rules.isTextual() || rules.asText().length() > 2000))
+                throw AppException.unprocessable("尺码规则须为不超过2000字的文本");
+            clean.set("sizeRules", rules.deepCopy());
+        }
+        if (value.has("sizeRulesEnabled")) {
+            if (!value.path("sizeRulesEnabled").isBoolean()) throw AppException.unprocessable("尺码规则开关格式错误");
+            clean.put("sizeRulesEnabled", value.path("sizeRulesEnabled").asBoolean());
+        }
         return clean;
     }
     static JsonNode originalPrice(ObjectNode record, JsonNode option, long quantity) {
@@ -91,6 +101,8 @@ final class CustomerQuotePrices {
         if (!payload.has("customerQuote")) { payload.remove("systemQuantityQuotes"); payload.remove("sheetQuote"); return; }
         var customer = validate(payload, payload.path("customerQuote"));
         var system = payload.has("systemQuantityQuotes") ? validate(payload, payload.path("systemQuantityQuotes")) : customer.deepCopy();
+        system.remove("sizeRules");
+        system.remove("sizeRulesEnabled");
         system.remove("contact");
         system.remove("hiddenOptionIds");
         if (!system.path("quantities").equals(customer.path("quantities"))) throw AppException.unprocessable("系统与客户报价数量不一致");
@@ -114,6 +126,13 @@ final class CustomerQuotePrices {
             if (patch.has(field)) throw AppException.unprocessable("系统报价及首次报价单价格不可覆盖");
         if (patch.has("customerQuote")) {
             var customer = validate(current, patch.path("customerQuote"));
+            for (var field : List.of("sizeRules", "sizeRulesEnabled")) {
+                if (!customer.has(field)) {
+                    var previous = current.path("customerQuote").path(field);
+                    if (previous.isMissingNode()) previous = current.path("sheetQuote").path(field);
+                    if (!previous.isMissingNode()) customer.set(field, previous.deepCopy());
+                }
+            }
             // A price-only update from an older client must retain the saved header.
             if (!customer.has("contact")) {
                 var previous = current.path("customerQuote").path("contact");
