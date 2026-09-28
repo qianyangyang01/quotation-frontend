@@ -34,6 +34,7 @@ export function quotationReissuePayload(record: QuotationRecord): QuotationDraft
       primaryRule: primary?.rule || '', primaryCarrier: primary?.carrier || '',
     },
     bundleItems: (record.bundleItems || []).map(item => ({ sku: item.sku, quantityPerSet: item.quantityPerSet,
+      purchaseTier: item.purchaseTier,
       customWeightKg: null, purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied })),
     commonSelections: mode === 'common' ? selections : [], specifiedSelections: mode === 'specified' ? selections : [],
     templateSelections: mode === 'template' ? selections : [],

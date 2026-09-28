@@ -10,6 +10,7 @@ import { parseCommissionThreshold } from '@/services/quotationCommission'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
+import { normalizePurchaseTier } from '@/services/quotationCalculator'
 
 // Compile the production loop and ref binding, and mount BOTH real child components.
 // A mocked capturePrices object hides Vue's ref-in-v-for array behavior.
@@ -110,7 +111,7 @@ it.each([
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
-  const context={ mapAveragePlans,
+  const context={ mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
@@ -125,10 +126,12 @@ it.each([
     appliedFinanceVersions:{'country-classification':3,'channel-policies':43,'customer-grades':14,'exchange-rate':7,'tax-settings':28,'surcharge-settings':12,'customer-operation-fees':4},
   }
   const run=new Function(...Object.keys(context),ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn save')(...Object.values(context))
+  if (mode === 'bundle') Object.assign(context.bundleItems.value[0]!, { purchaseTier: '100' })
   await run()
   expect(createQuotationRecord).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
     purchaseUnitPriceCny:mode==='single'?2:undefined, domesticFreightPerUnitCny:mode==='single'?(grade==='A'?.21:0):undefined,
+    bundleItems: mode === 'bundle' ? [expect.objectContaining({ sku: 'SKU-A', purchaseTier: '100' }), expect.objectContaining({ sku: 'SKU-B', purchaseTier: '10' })] : undefined,
     weightSnapshot: expect.objectContaining({items:mode==='single'
       ? [expect.objectContaining({sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14,weightSource:manual?'manual':'purchase',purchaseWeightKg:manual?.12:.14})]
       : [expect.objectContaining({sku:'SKU-A',quantityPerSet:2,baseWeightKg:.14,weightSource:'manual',purchaseWeightKg:.12}),expect.objectContaining({sku:'SKU-B',quantityPerSet:1,baseWeightKg:.05,weightSource:'purchase',purchaseWeightKg:.05})]}),

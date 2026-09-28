@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { findPurchaseProduct, normalizePurchaseRecord, purchaseQuoteFreightUnit, purchaseQuoteBlockingMessage, purchaseSourceLabel, purchaseUnitPrice } from './purchaseStore'
 
 describe('purchase catalog state', () => {
+  it('splits domestic freight exactly without rounding away sub-cent unit costs', () => {
+    expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: 2.1 }))).toBe(.21)
+    expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: .01 }))).toBe(.001)
+    expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: 0 }))).toBe(0)
+    expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ dataSource: 'legacy_2026', singleFreightCny: 1.7, freight10Cny: 99 }))).toBe(1.7)
+  })
+
   it('preserves explicit image removal while still accepting old image-only records', () => {
     expect(normalizePurchaseRecord({ productImage:'', image:'/old.png' }).productImage).toBe('')
     expect(normalizePurchaseRecord({ image:'/old.png' }).productImage).toBe('/old.png')

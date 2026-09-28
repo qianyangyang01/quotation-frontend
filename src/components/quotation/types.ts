@@ -50,6 +50,8 @@ export { quotationProductCategories, type QuotationProductCategory } from '@/dat
 
 export type BundleQuoteItem = {
   id: number
+  /** 每个 SKU 独立选档；旧数据缺省时沿用报价的统一档位。 */
+  purchaseTier?: string
   sku: string
   name: string
   supplier: string

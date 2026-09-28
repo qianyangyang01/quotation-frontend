@@ -74,6 +74,7 @@ import {
   missingPurchaseTaxPointSkus,
   monthlySalesTierLabel as calculateMonthlySalesTierLabel,
   normalizedQuoteQuantity,
+  normalizePurchaseTier,
   purchasePriceBreakdown as calculatePurchasePriceBreakdown,
   purchasePriceForMonthlySales as calculatePurchasePriceForMonthlySales,
   singleActualWeight as calculateSingleActualWeight,
@@ -291,11 +292,13 @@ function emptyQuotationProduct(): Product {
 }
 const products = ref<Product[]>([emptyQuotationProduct()])
 let bundleItemId = 1
-function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied = true): BundleQuoteItem {
+function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied = true, tier = '10'): BundleQuoteItem {
   const quantityPerSet = 1
-  const pricing = record ? purchasePricingForMonthlySales(record, invoiceTaxApplied) : null
+  const purchaseTier = normalizePurchaseTier(tier, monthlySalesEstimate.value)
+  const pricing = record ? calculatePurchasePriceBreakdown(record, purchaseTier, invoiceTaxApplied) : null
   return {
     id: bundleItemId++,
+    purchaseTier,
     sku: record?.sku || '',
     name: record ? purchaseDisplayName(record) : '',
     supplier: record?.quotationOwner || '',
@@ -305,7 +308,7 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
     quantityPerSet,
     purchaseUnitPrice: pricing?.effectiveUnitPriceCny || 0,
     purchaseBaseUnitPrice: pricing?.baseUnitPriceCny || 0,
-    purchaseTierLabel: record ? calculateMonthlySalesTierLabel(monthlySalesEstimate.value, record) : '',
+    purchaseTierLabel: record ? calculateMonthlySalesTierLabel(purchaseTier, record) : '',
     purchaseInvoiceType: pricing?.invoiceType || '',
     purchaseInvoiceRatePercent: pricing?.invoiceRatePercent || 0,
     purchaseZeroTaxPointAdjustment: pricing?.priceSource === 'zero-tax-point',
@@ -396,10 +399,11 @@ function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, 
 }
 function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProductRecord, invoiceTaxApplied = item.purchaseInvoiceTaxApplied) {
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
-  const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
+  item.purchaseTier = normalizePurchaseTier(item.purchaseTier, monthlySalesEstimate.value)
+  const pricing = calculatePurchasePriceBreakdown(record, item.purchaseTier, effectiveInvoiceTaxApplied)
   item.purchaseUnitPrice = pricing.effectiveUnitPriceCny
   item.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
-  item.purchaseTierLabel = calculateMonthlySalesTierLabel(monthlySalesEstimate.value, record)
+  item.purchaseTierLabel = calculateMonthlySalesTierLabel(item.purchaseTier, record)
   item.purchaseInvoiceType = pricing.invoiceType
   item.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
   item.purchaseZeroTaxPointAdjustment = pricing.priceSource === 'zero-tax-point'
@@ -569,6 +573,12 @@ function updateBundleItemQuantity(item: BundleQuoteItem, showToast = false) {
   normalizeRule(products.value[0], true)
   if (showToast) toast(`已更新 ${item.sku} 的单套数量`)
 }
+function changeBundleItemTier(item: BundleQuoteItem, value: string) {
+  item.purchaseTier = normalizePurchaseTier(value)
+  const record = findPurchaseProduct(purchaseRecords.value, item.sku)
+  if (record) applyBundlePurchasePricing(item, record)
+  normalizeRule(products.value[0], true)
+}
 function updateBundleItemWeight(item: BundleQuoteItem) {
   const rawWeight = item.customWeightKg as number | string | null
   if (rawWeight !== null && rawWeight !== '') {
@@ -586,10 +596,6 @@ function changeMonthlySalesEstimate(p: Product, value: string) {
   monthlySalesEstimate.value = value
   const record = findPurchaseProduct(purchaseRecords.value, p.sku)
   if (record) applyProductPurchasePricing(p, record)
-  bundleItems.value.forEach(item => {
-    const itemRecord = findPurchaseProduct(purchaseRecords.value, item.sku)
-    if (itemRecord) applyBundlePurchasePricing(item, itemRecord)
-  })
   normalizeRule(p, true)
   toast(`已匹配${monthlySalesTierLabel()}，采购单价与报价已更新`)
 }
@@ -947,7 +953,7 @@ function draftPayload(): QuotationDraftPayload {
       primaryRule: p.rule,
       primaryCarrier: p.channel,
     },
-    bundleItems: bundleItems.value.map(item => ({ sku: item.sku, quantityPerSet: normalizedBundleSets(item.quantityPerSet), customWeightKg: item.customWeightKg == null ? null : Math.max(0, Number(item.customWeightKg) || 0), purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied })),
+    bundleItems: bundleItems.value.map(item => ({ sku: item.sku, purchaseTier: normalizePurchaseTier(item.purchaseTier, monthlySalesEstimate.value), quantityPerSet: normalizedBundleSets(item.quantityPerSet), customWeightKg: item.customWeightKg == null ? null : Math.max(0, Number(item.customWeightKg) || 0), purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied })),
     commonSelections: modeSelections.value.common,
     specifiedSelections: modeSelections.value.specified,
     templateSelections: modeSelections.value.template,
@@ -1054,7 +1060,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     p.status = '已恢复报价条件，请点击查询商品'
     products.value = [p]
     bundleItems.value = payload.quoteMode === 'bundle' ? (payload.bundleItems || []).map(saved => ({
-      ...bundleItemFromRecord(undefined, saved.purchaseInvoiceTaxApplied === true),
+      ...bundleItemFromRecord(undefined, saved.purchaseInvoiceTaxApplied === true, normalizePurchaseTier(saved.purchaseTier, monthlySalesEstimate.value)),
       sku: String(saved.sku || '').trim().toUpperCase(), quantityPerSet: normalizedBundleSets(saved.quantityPerSet),
       customWeightKg: saved.customWeightKg == null ? null : Math.max(0, Number(saved.customWeightKg) || 0),
     })) : [bundleItemFromRecord()]
@@ -1096,7 +1102,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     const restoredItems: BundleQuoteItem[] = []
     for (const savedItem of payload.bundleItems || []) {
       const record = await recordForDraftSku(savedItem.sku, freshPurchases)
-      const item = bundleItemFromRecord(record, savedItem.purchaseInvoiceTaxApplied === true)
+      const item = bundleItemFromRecord(record, savedItem.purchaseInvoiceTaxApplied === true, normalizePurchaseTier(savedItem.purchaseTier, monthlySalesEstimate.value))
       item.sku = record?.sku || String(savedItem.sku || '').trim().toUpperCase()
       item.quantityPerSet = normalizedBundleSets(savedItem.quantityPerSet)
       item.customWeightKg = savedItem.customWeightKg == null ? null : Math.max(0, Number(savedItem.customWeightKg) || 0)
@@ -1606,7 +1612,7 @@ function quotationCountries(p: Product): QuotationCountrySummary[] {
 }
 function quoteMatrixContextKey(p: Product) {
   const bundleKey = quoteMode.value === 'bundle'
-    ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}`).join('|')
+    ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}:${item.purchaseTier}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
   const priceInputs = {
     customerOperation: customerOperation.value,
@@ -2056,6 +2062,7 @@ async function save() {
   const recordBundleItems = quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => {
     return {
       sku: item.sku.trim().toUpperCase(),
+      purchaseTier: normalizePurchaseTier(item.purchaseTier, monthlySalesEstimate.value),
       name: item.name,
       quantityPerSet: normalizedBundleSets(item.quantityPerSet),
       effectiveWeightKg: item.customWeightKg == null ? Math.max(0, item.weightKg) : Math.max(0, Number(item.customWeightKg) || 0),
@@ -2199,6 +2206,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :base-weight="bundleBaseWeight(1)" :packaging-weight="bundlePackagingWeight(1)" :total-weight="bundleGoodsWeight(1)" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" :domestic-freight="bundleDomesticFreight(1)"
             @add="addBundleItem" @remove="removeBundleItem" @query="queryBundleItem"
             @quantity-change="updateBundleItemQuantity" @weight-change="updateBundleItemWeight"
+            @tier-change="changeBundleItemTier"
           />
         </section>
 

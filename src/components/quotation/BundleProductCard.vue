@@ -36,6 +36,7 @@ defineEmits<{
   remove: [id: number]
   query: [item: BundleQuoteItem]
   quantityChange: [item: BundleQuoteItem]
+  tierChange: [item: BundleQuoteItem, value: string]
   weightChange: [item: BundleQuoteItem]
 }>()
 </script>
@@ -43,7 +44,7 @@ defineEmits<{
 <template>
   <section class="bundle-card">
     <header>
-      <div><p>02</p><section><h2>组合商品明细</h2><span>每行数量表示一套组合中包含的商品件数</span></section></div>
+      <div><p>02</p><section><h2>组合商品明细</h2><span>每行数量表示一套组合中包含的商品件数，采购阶梯可按 SKU 单独选择</span></section></div>
       <button type="button" @click="$emit('add')">＋ 添加 SKU</button>
     </header>
 
@@ -55,7 +56,10 @@ defineEmits<{
           <div><label><input v-model.trim="item.sku" placeholder="输入 SKU" @keyup.enter="$emit('query',item)"><button type="button" @click="$emit('query',item)">查询</button></label><b>{{ item.name || '等待查询采购资料' }} <em v-if="item.status==='采购资料已加载'" class="source-badge" :class="{legacy:item.purchaseDataSource==='legacy_2026'}">{{ item.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据' }}</em></b><small>{{ item.supplier || '—' }} · {{ item.status || '待查询' }} · 库存：<em :class="{ out:item.stockStatus==='无货', pending:item.stockStatus==='待确认' }">{{ item.stockStatus }}</em></small></div>
         </div>
         <label class="qty"><input v-model.number="item.quantityPerSet" type="number" min="1" step="1" @change="$emit('quantityChange',item)"><span>件/套</span></label>
-        <div class="purchase-price"><b>¥{{ item.purchaseUnitPrice.toFixed(2) }}</b><small>{{ purchasePricingLabel(item) }}</small></div>
+        <div class="purchase-price">
+          <div class="purchase-tier-price"><select class="purchase-tier" :aria-label="(item.sku || `第${index + 1}行`) + '采购阶梯'" :value="item.purchaseTier || '10'" @change="$emit('tierChange', item, ($event.target as HTMLSelectElement).value)"><option value="10">阶梯价1</option><option value="100">阶梯价2</option><option value="100+">阶梯价3</option></select><b>¥{{ item.purchaseUnitPrice.toFixed(2) }}</b></div>
+          <small>{{ purchasePricingLabel(item) }}</small>
+        </div>
         <label class="custom-weight"><input :value="grams(effectiveWeightKg(item))" type="number" min="0" step="1" @input="item.customWeightKg=gramsToKg(Number(($event.target as HTMLInputElement).value)||0);$emit('weightChange',item)"><span>g</span><small>{{ item.customWeightKg == null ? '采购' : '自定义' }} {{ grams(effectiveWeightKg(item)) }}g + 包材 {{ grams(packagingWeightKg(effectiveWeightKg(item))) }}g = {{ grams(packagedWeightKg(item)) }}g</small><button v-if="item.customWeightKg != null" type="button" @click="item.customWeightKg=null;$emit('weightChange',item)">恢复</button></label>
         <div class="row-domestic-freight"><b>¥{{ rowDomesticFreight(item).toFixed(2) }}</b><small>¥{{ item.purchaseFreightPerUnit.toFixed(2) }}/件 × {{ Math.max(1, Math.floor(Number(item.quantityPerSet) || 1)) }}</small></div>
         <button class="remove" type="button" :disabled="items.length <= 1" @click="$emit('remove',item.id)">删除</button>
@@ -64,7 +68,7 @@ defineEmits<{
 
     <SpecialPackagingInput :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
     <div class="summary-grid">
-      <div><span>单套采购成本</span><b>¥{{ purchaseCost.toFixed(2) }}</b><small>各 SKU 按阶梯价及采购票点计算</small></div>
+      <div><span>单套采购成本</span><b>¥{{ purchaseCost.toFixed(2) }}</b><small>各 SKU 按各自所选阶梯价及采购票点计算</small></div>
       <div><span>单套含包材重量（g）</span><b>{{ specialPackagingError ? '—' : grams(totalWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></div>
       <div><span>单套国内运费</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>标准数据采用10件运费平摊；2026旧数据采用唯一单档运费</small></div>
     </div>
@@ -76,4 +80,11 @@ defineEmits<{
 .table-head,.bundle-rows article{grid-template-columns:minmax(330px,2.2fr) 110px 120px 155px 55px}.purchase-price{display:grid;gap:4px}.purchase-price b{font-size:12px}.purchase-price small{color:#8a959e;font-size:8px}.custom-weight{position:relative;display:grid;grid-template-columns:80px 28px 38px;align-items:center;min-height:50px}.custom-weight input{box-sizing:border-box;width:80px;height:32px;border:1px solid #d9e0e5;border-radius:6px 0 0 6px;padding:0 8px;color:#17232d;font-size:11px;font-weight:800;outline:0}.custom-weight input:focus{border-color:#ff9900;box-shadow:0 0 0 2px rgba(255,153,0,.12)}.custom-weight>span{height:32px;display:grid;place-items:center;border:1px solid #d9e0e5;border-left:0;border-radius:0 6px 6px 0;background:#f5f7f9;color:#596671;font-size:9px;font-weight:850}.custom-weight small{position:absolute;left:0;bottom:0;color:#8a959e;font-size:8px}.custom-weight>button{height:25px;margin-left:5px;border:0;background:none;color:#ba6800;font-size:8px;font-weight:800;cursor:pointer}
 .table-head,.bundle-rows article{min-width:980px;grid-template-columns:minmax(300px,2.2fr) 105px 220px 150px 125px 50px}.purchase-price small{white-space:normal;line-height:1.45}.row-domestic-freight{display:grid;gap:4px}.row-domestic-freight b{font-size:12px}.row-domestic-freight small{color:#8a959e;font-size:8px}
 .source-badge{display:inline-block;margin-left:5px;padding:3px 6px;border-radius:8px;background:#e7f6ed;color:#17794f;font-size:8px;font-style:normal;vertical-align:middle}.source-badge.legacy{background:#eee8ff;color:#5f42a8}
+</style>
+
+<style scoped>
+.purchase-tier-price{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.purchase-tier{height:32px;max-width:100%;padding:0 8px;border:1px solid #d9e0e5;border-radius:6px;background:#fff;color:#17232d;font-size:11px;cursor:pointer}
+.purchase-tier:hover{border-color:#ff9900}
+.purchase-tier:focus-visible{outline:2px solid #ff9900;outline-offset:2px}
 </style>

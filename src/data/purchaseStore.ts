@@ -174,7 +174,7 @@ export function purchaseFreightChoices(record: PurchaseProductRecord) {
   if (record.freeShipping === '是') return (record.dataSource === 'legacy_2026' ? [1] : [1, 10, 100]).map(quantity => ({ quantity, totalFreightCny: 0, unitFreightCny: 0 }))
   return [{ quantity: 1, totalFreightCny: record.singleFreightCny }, { quantity: 10, totalFreightCny: record.freight10Cny }, { quantity: 100, totalFreightCny: record.freight100Cny }]
     .filter((item): item is { quantity: number; totalFreightCny: number } => item.totalFreightCny != null)
-    .map(item => ({ ...item, unitFreightCny: item.totalFreightCny / item.quantity }))
+    .map(item => ({ ...item, unitFreightCny: decimal(item.totalFreightCny).div(item.quantity).toNumber() }))
 }
 
 export function purchaseFreightUnit(record: PurchaseProductRecord, batchQuantity: number) {

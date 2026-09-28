@@ -43,7 +43,7 @@ export interface QuotationDraftPayload {
     primaryRule: string
     primaryCarrier: string
   }
-  bundleItems: Array<{ sku: string; quantityPerSet: number; customWeightKg: number | null; purchaseInvoiceTaxApplied?: boolean }>
+  bundleItems: Array<{ sku: string; purchaseTier?: string; quantityPerSet: number; customWeightKg: number | null; purchaseInvoiceTaxApplied?: boolean }>
   commonSelections: DraftChannelSelection[]
   specifiedSelections: DraftChannelSelection[]
   templateSelections: DraftChannelSelection[]

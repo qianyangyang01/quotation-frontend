@@ -37,6 +37,20 @@ const taxed = normalizePurchaseRecord({
 })
 
 describe('quotation purchase tiers', () => {
+  it('prices bundle rows at independent tiers, including quantities, taxes and legacy fallback', () => {
+    const records = ['BK2601961', 'BK2601961-1'].map(sku => normalizePurchaseRecord({
+      sku, catalogState: 'ready', weightG: 200, minOrderQty: 100, purchasePriceCny: 13.8, tier2MinQty: 500, tier2PriceCny: 12.5,
+      tier3MinQty: 1000, tier3PriceCny: 11.5, taxPoint: .02, invoiceType: '普票',
+    }))
+    const rows = records.map((record, index) => ({ sku: record.sku, purchaseTier: index ? '100' : '10',
+      quantityPerSet: index + 1, purchaseUnitPrice: 999, purchaseFreightPerUnit: .21, weightKg: .2, customWeightKg: null }))
+    // 1 x 14.08 + 2 x 12.75 per set; the global tier 3 must not override either row.
+    expect(bundlePurchaseCost(rows, records, '100+', 3)).toBe(118.74)
+    expect(bundlePurchaseCost(rows.map(row => ({ ...row, purchaseTier: undefined })), records, '100', 3)).toBe(114.75)
+    expect(bundlePurchaseCost(rows.map(row => ({ ...row, purchaseInvoiceTaxApplied: false })), records, '100+', 3)).toBe(116.4)
+    expect(bundlePurchaseCost([{ ...rows[0]!, sku: 'UNAVAILABLE', purchaseUnitPrice: 8 }], records, '100+', 2)).toBe(16)
+  })
+
   it('maps persisted option values to purchase tier labels', () => {
     expect(['10', '100', '100+'].map(value => monthlySalesTierLabel(value))).toEqual(['阶梯价1', '阶梯价2', '阶梯价3'])
   })

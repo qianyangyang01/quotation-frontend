@@ -6,6 +6,7 @@ export type MonthlySalesEstimate = '10' | '100' | '100+'
 
 export type BundleCalculationItem = {
   sku: string
+  purchaseTier?: string
   quantityPerSet: number
   purchaseUnitPrice: number
   purchaseInvoiceTaxApplied?: boolean
@@ -31,6 +32,11 @@ export function normalizedQuoteQuantity(value: number) {
 }
 
 // Keep persisted option values compatible with existing drafts and reissued quotes.
+export function normalizePurchaseTier(value: unknown, fallback = '10'): MonthlySalesEstimate {
+  if (value === '10' || value === '100' || value === '100+') return value
+  return fallback === '100' || fallback === '100+' ? fallback : '10'
+}
+
 function purchaseTierIndex(value: string): number {
   return value === '100+' ? 2 : value === '100' ? 1 : 0
 }
@@ -138,7 +144,7 @@ export function bundlePurchaseCost(
   const setCount = normalizedQuoteQuantity(sets)
   return items.reduce((sum, item) => {
     const record = findPurchaseProduct(records, item.sku)
-    const purchasePrice = record ? purchasePriceForMonthlySales(record, estimate, item.purchaseInvoiceTaxApplied !== false) : item.purchaseUnitPrice
+    const purchasePrice = record ? purchasePriceForMonthlySales(record, normalizePurchaseTier(item.purchaseTier, estimate), item.purchaseInvoiceTaxApplied !== false) : item.purchaseUnitPrice
     return sumDecimal(sum, productDecimal(purchasePrice, normalizedQuoteQuantity(item.quantityPerSet), setCount))
   }, 0)
 }

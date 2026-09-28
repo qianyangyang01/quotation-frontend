@@ -16,6 +16,19 @@ describe('reissuing a quotation as new editable inputs', () => {
     }))
     expect(payload).toMatchObject({ commissionThreshold: 0.95, specialPackagingGrams: 25 })
   })
+  it('preserves mixed bundle tiers through record normalization and reissue without mutating historical prices', () => {
+    const original = record({ quoteMode: 'bundle', monthlySalesEstimate: '100+', bundleItems: [
+      { sku: 'BK2601961', name: 'A', purchaseTier: '10', quantityPerSet: 1, effectiveWeightKg: .2, purchaseUnitPriceCny: 14.08, domesticFreightPerUnitCny: .21 },
+      { sku: 'BK2601961-1', name: 'B', purchaseTier: '100', quantityPerSet: 2, effectiveWeightKg: .219, purchaseUnitPriceCny: 12.75, domesticFreightPerUnitCny: .21 },
+    ] })
+    const before = JSON.stringify(original)
+    expect(original.bundleItems?.map(item => item.purchaseTier)).toEqual(['10', '100'])
+    const payload = quotationReissuePayload(original)
+    expect(payload.bundleItems.map(item => item.purchaseTier)).toEqual(['10', '100'])
+    expect(payload.bundleItems.every(item => !('purchaseUnitPriceCny' in item))).toBe(true)
+    expect(JSON.stringify(original)).toBe(before)
+  })
+
   it('copies a legacy record without copying its identity, deal, approval or prices', () => {
     const original = record()
     const before = JSON.stringify(original)
