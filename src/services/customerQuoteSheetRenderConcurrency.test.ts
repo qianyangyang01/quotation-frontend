@@ -138,3 +138,14 @@ it('retries failed speculative asset loading when the user requests a preview', 
   const rendering=renderCustomerQuoteSheet(sheet()); await settle()
   pending[0](new Blob(['recovered'])); expect(await rendering).toHaveLength(1)
 })
+
+it('renders size rules once per page and gives long multiline notes sufficient merged height', async () => {
+  const { renderCustomerQuoteSheet } = await import('./customerQuoteSheetRenderer')
+  const data=sheet(25);data.sizeRules=Array.from({length:30},()=> 'Size note').join('\n')
+  const result=renderCustomerQuoteSheet(data);await settle()
+  pending[0](new Blob(['first']));await settle()
+  expect(drawnText.filter(text=>text==='Size Rules')).toHaveLength(2)
+  expect(drawnText.filter(text=>text==='Size note')).toHaveLength(60)
+  expect(canvases[1].height).toBeGreaterThan(269+30*26)
+  pending[1](new Blob(['second']));expect(await result).toHaveLength(2)
+})

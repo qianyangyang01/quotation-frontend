@@ -1178,3 +1178,44 @@ it('blocks row mutations during saving or calculation and never offers deletion 
   state.sourcePending = false; state.recordMode = true; await settle()
   expect(document.querySelector('[aria-label="移除第 1 行渠道"]')).toBeNull()
 })
+
+
+it('toggles the merged Size Rules cell from SKU and keeps text and prices through hide, reorder and restore', async () => {
+  const state = mount([row('a'), row('b'), row('c')])
+  const checkbox = () => document.querySelector<HTMLInputElement>('input[aria-label="显示尺码规则列"]')!
+  const toggle = async (checked: boolean) => { checkbox().checked = checked; checkbox().dispatchEvent(new Event('change', { bubbles: true })); await settle() }
+  expect(checkbox().closest('th')?.dataset.group).toBe('sku')
+  expect(checkbox().checked).toBe(false)
+  expect(document.querySelector('.sheet-size-rules')).toBeNull()
+  const original = exposed.capturePrices().rows
+  await toggle(true)
+  const field = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="尺码规则说明"]')!
+  expect(field.maxLength).toBe(2000)
+  field.value = 'S–XXL\nManual measurement: ±1–2 cm.'; field.dispatchEvent(new Event('input', { bubbles: true })); await settle()
+  expect(document.querySelector('.sheet-size-rules')?.getAttribute('rowspan')).toBe('3')
+  const headers = [...document.querySelectorAll('th[data-group]')].map(th => (th as HTMLElement).dataset.group)
+  expect(headers.indexOf('sizeRules')).toBe(headers.indexOf('sku') + 1)
+  await toggle(false)
+  expect(document.querySelector('.sheet-size-rules')).toBeNull()
+  expect(exposed.capturePrices()).toMatchObject({ sizeRules: field.value, sizeRulesEnabled: false })
+  await toggle(true)
+  expect(document.querySelector<HTMLTextAreaElement>('.sheet-size-rules textarea')!.value).toBe(field.value)
+  state.rows.reverse(); await settle()
+  await click('隐藏')
+  expect(document.querySelector('.sheet-size-rules')?.getAttribute('rowspan')).toBe('2')
+  await click('预览报价单')
+  expect(render.mock.calls.at(-1)![0].sizeRules).toBe(field.value)
+  expect(render.mock.calls.at(-1)![0].rows).toHaveLength(2)
+  expect(exposed.capturePrices().rows.slice().sort((a,b)=>a.key.localeCompare(b.key))).toEqual(original.slice().sort((a,b)=>a.key.localeCompare(b.key)))
+})
+
+it('restores saved notes and switch state, but starts a new product with the switch off', async () => {
+  const state = mount([row()], undefined, { quantities:[1], rows:[{optionId:'one',prices:[10.8]}], sizeRules:'S / M / L', sizeRulesEnabled:false }, true)
+  expect(document.querySelector('.sheet-size-rules')).toBeNull()
+  const checkbox = document.querySelector<HTMLInputElement>('input[aria-label="显示尺码规则列"]')!
+  checkbox.checked=true;checkbox.dispatchEvent(new Event('change',{bubbles:true}));await settle()
+  expect(document.querySelector<HTMLTextAreaElement>('.sheet-size-rules textarea')!.value).toBe('S / M / L')
+  state.initialQuote=undefined;state.recordMode=false;state.contextKey='new-product';await settle()
+  expect(document.querySelector('.sheet-size-rules')).toBeNull()
+  expect(exposed.capturePrices().sizeRules).toBeUndefined()
+})

@@ -69,6 +69,37 @@ class CustomerQuotePricesTest {
             assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
         }
     }
+    @Test void sizeRulesRoundTripOldClientPreservationAndToggleDoNotChangePricesOrReview() {
+        var r = record();
+        ((ObjectNode) r.path("customerQuote")).put("sizeRules", "S–XXL\nManual measurement: ±1–2 cm.").put("sizeRulesEnabled", true);
+        CustomerQuotePrices.initialize(r);
+        var saved = (ObjectNode) mapper.readTree(r.toString());
+        assertEquals(r.path("customerQuote"), saved.path("sheetQuote"));
+        assertFalse(saved.path("systemQuantityQuotes").has("sizeRules"));
+        assertFalse(saved.path("systemQuantityQuotes").has("sizeRulesEnabled"));
+        var patch = mapper.createObjectNode();
+        var prices = (ObjectNode) saved.path("customerQuote").deepCopy();
+        prices.remove("sizeRules"); prices.remove("sizeRulesEnabled"); patch.set("customerQuote", prices);
+        CustomerQuotePrices.preparePatch(saved, patch);
+        assertEquals(saved.path("customerQuote"), patch.path("customerQuote"));
+        ((ObjectNode) patch.path("customerQuote")).put("sizeRulesEnabled", false);
+        CustomerQuotePrices.preparePatch(saved, patch);
+        assertFalse(patch.path("customerQuote").path("sizeRulesEnabled").asBoolean());
+        assertEquals(saved.path("customerQuote").path("sizeRules"), patch.path("customerQuote").path("sizeRules"));
+        assertFalse(QuotationFinanceReview.pricesChanged(saved, patch));
+        saved.put("quoteConfirmed", true); QuotationConfirmation.prepare(saved, patch);
+        assertFalse(patch.has("quoteConfirmed"));
+        assertTrue(saved.path("sheetQuote").path("sizeRulesEnabled").asBoolean());
+    }
+    @Test void sizeRulesLimitsAndLegacyRecords() {
+        var r = record(); CustomerQuotePrices.initialize(r);
+        assertFalse(r.path("customerQuote").has("sizeRules"));
+        var value = (ObjectNode) r.path("customerQuote").deepCopy();
+        value.put("sizeRules", "中".repeat(2000)); assertDoesNotThrow(() -> CustomerQuotePrices.validate(r, value));
+        value.put("sizeRules", "中".repeat(2001)); assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
+        value.put("sizeRules", 123); assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
+        value.put("sizeRules", ""); value.put("sizeRulesEnabled", "true"); assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
+    }
     ObjectNode record() { return (ObjectNode)mapper.readTree("""
         {"id":"r","customQuoteQuantity":4,"quoteOptions":[{"id":"a","quote1Usd":2,"quote2Usd":3,"quoteCustomUsd":5}],
          "customerQuote":{"quantities":[1,2,4],"rows":[{"optionId":"a","prices":[1.8,2.7,4.6]}]},
