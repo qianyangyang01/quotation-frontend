@@ -5,6 +5,9 @@ import { type QuotationRecord, type QuotationReviewState, type ReviewAction } fr
 const props = defineProps<{ record: QuotationRecord; state: QuotationReviewState; account: string; busy: boolean }>()
 const emit = defineEmits<{ action: [value: ReviewAction]; reload: [] }>()
 const dialog = ref<HTMLDialogElement | null>(null)
+const note = ref('')
+watch(() => props.record.id, () => { note.value = '' })
+watch(() => props.state.financeReviewStatus, value => { if (value !== 'reviewing') note.value = '' })
 const active = computed(() => props.state.financeReviewStatus === 'reviewing')
 const own = computed(() => active.value && props.state.financeReviewClaimedAccount === props.account)
 const stale = computed(() => (props.state._version ?? 0) > (props.record._version ?? 0))
@@ -32,7 +35,7 @@ function submit() {
 function complete(financeReviewStatus: 'approved' | 'rejected' | 'channel-exempt') {
   if (props.busy || !own.value || needsReload.value) return
   dialog.value?.close()
-  emit('action', { action: 'complete', financeReviewStatus, note: '' })
+  emit('action', { action: 'complete', financeReviewStatus, note: note.value.trim() })
 }
 </script>
 
@@ -41,6 +44,8 @@ function complete(financeReviewStatus: 'approved' | 'rejected' | 'channel-exempt
   <Teleport to="body">
     <dialog ref="dialog" class="review-result-dialog" aria-label="选择审核结果" @click="($event.target === dialog) && dialog?.close()">
       <header><strong>选择审核结果</strong><button type="button" aria-label="关闭审核结果" @click="dialog?.close()">×</button></header>
+      <p class="review-context">{{ record.primarySku }} · {{ record.customerName }}<small>{{ record.no }}</small></p>
+      <label class="review-note">审核意见（选填）<textarea v-model="note" maxlength="500" rows="3" aria-label="审核意见（选填）" placeholder="有建议时填写，保存后业务员可查看；不填写也可完成审核" /></label>
       <div class="review-results">
         <button type="button" class="channel-exempt" :disabled="busy || !own || needsReload" @click="complete('channel-exempt')"><b>同渠道免审</b><small>可报价 · 不再审核</small></button>
         <button type="button" class="approved" :disabled="busy || !own || needsReload" @click="complete('approved')"><b>审核通过</b><small>可报价</small></button>
@@ -51,6 +56,8 @@ function complete(financeReviewStatus: 'approved' | 'rejected' | 'channel-exempt
 </template>
 
 <style scoped>
+.review-context{display:grid;gap:4px;margin:0 0 16px;color:#526575;font-size:13px;overflow-wrap:anywhere}.review-context small{font-size:11px;color:#748493}
+.review-note{display:grid;gap:8px;margin-bottom:18px;font-size:13px}.review-note textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #ccd7e2;border-radius:6px;resize:vertical;font:inherit;line-height:1.6}.review-note textarea:focus-visible{outline:2px solid #3782d6;outline-offset:2px}
 .review-button{height:40px;padding:0 16px;border:1px solid #078347;border-radius:7px;background:#078347;color:#fff;font-size:12px;font-weight:700;cursor:pointer}.review-button:disabled{opacity:.5;cursor:not-allowed}
 .review-result-dialog{box-sizing:border-box;width:min(530px,calc(100vw - 32px));padding:20px;border:1px solid #e0e4e8;border-radius:12px;color:#202532;background:#fff;box-shadow:0 20px 60px #17212b33;font-family:Arial,"Microsoft YaHei",sans-serif}.review-result-dialog::backdrop{background:#17212b66}.review-result-dialog header{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:18px}.review-result-dialog header button{border:0;background:transparent;color:#65717c;font-size:24px;cursor:pointer}.review-results{display:flex;gap:12px}.review-results button{flex:1;display:grid;gap:6px;padding:18px 12px;border:1px solid;border-radius:8px;cursor:pointer;font:inherit}.review-results b{font-size:15px}.review-results small{font-size:12px}.review-results .channel-exempt{color:#17659b;background:#edf6ff;border-color:#9bc8e8}.review-results .approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.review-results .rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.review-results button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:480px){.review-results{flex-direction:column}.review-results button{padding:14px 12px}}

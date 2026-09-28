@@ -11,13 +11,13 @@ async function mount(account='F2',admin=false){
   const host=document.createElement('div');document.body.append(host);app.mount(host);await nextTick();return actions
 }
 it('another finance account has no cancel, complete or release control',async()=>{
-  await mount();expect(document.querySelectorAll('button')).toHaveLength(0);expect(document.body.textContent).toContain('财务一审核中')
+  await mount();expect([...document.querySelectorAll('button')].map(button=>button.textContent)).toEqual(['审核意见']);expect(document.body.textContent).toContain('财务一审核中')
 })
 it('only admin may release with a nonempty reason',async()=>{
-  const actions=await mount('ADMIN',true);const button=document.querySelector('button')!;expect(button.disabled).toBe(true)
+  const actions=await mount('ADMIN',true);const button=[...document.querySelectorAll('button')].find(button=>button.textContent==='解除占用')!;expect(button.disabled).toBe(true)
   const note=document.querySelector('textarea')!;note.value='审核人休假，解除占用';note.dispatchEvent(new Event('input'));await nextTick();button.click();expect(actions).toEqual([{action:'release',note:note.value}])
 })
-it('owner may cancel without a note but rejection requires explanation',async()=>{
-  const actions=await mount('F1');const buttons=[...document.querySelectorAll('button')];expect(buttons.find(b=>b.textContent==='审核完成 · 价格有误')?.disabled).toBe(true)
+it('owner may cancel or reject without an optional opinion',async()=>{
+  const actions=await mount('F1');const buttons=[...document.querySelectorAll('button')];expect(buttons.find(b=>b.textContent==='审核完成 · 价格有误')?.disabled).toBe(false)
   buttons.find(b=>b.textContent==='取消审核')!.click();expect(actions).toEqual([{action:'cancel'}])
 })

@@ -6,6 +6,7 @@ import { useQuotationReviewSync } from '@/composables/useQuotationReviewSync'
 import { reviewQuotationRecord, financeReviewLabel, quotationDealLabel, type ReviewAction } from '@/data/quotationRecords'
 import QuotationReviewPanel from '@/components/quotation/QuotationReviewPanel.vue'
 import QuotationReviewButton from '@/components/quotation/QuotationReviewButton.vue'
+import QuotationReviewComments from '@/components/quotation/QuotationReviewComments.vue'
 import QuotationReviewHistory from '@/components/quotation/QuotationReviewHistory.vue'
 import QuotationRevisionSnapshot from '@/components/quotation/QuotationRevisionSnapshot.vue'
 import QuotationWeightTrace from '@/components/quotation/QuotationWeightTrace.vue'
@@ -142,8 +143,12 @@ const selected = ref<QuotationRecord | null>(null)
 const reviewSync = useQuotationReviewSync(records, selected, computed(() => currentAuthUser.value.account))
 const observedRecords = computed(() => [...records.value, ...(selected.value ? [selected.value] : [])])
 watch(() => observedRecords.value.map(row => reviewSync.isMissing(row.id) ? 'missing' : reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active').join(','), () => {
-  if (observedRecords.value.some(row => reviewSync.isMissing(row.id) || (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') !== (row.lifecycleState || 'active'))) {
-    selected.value = null; mutationDialog.value = null; void refresh(true)
+  const changed = (row: QuotationRecord) => reviewSync.isMissing(row.id) || (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') !== (row.lifecycleState || 'active')
+  if (observedRecords.value.some(changed)) {
+    // A different record changing must not interrupt the quotation currently being reviewed.
+    if (selected.value && changed(selected.value)) selected.value = null
+    if (mutationDialog.value && changed(mutationDialog.value.row)) mutationDialog.value = null
+    void refresh(true)
   }
 })
 
@@ -177,6 +182,21 @@ async function confirmMutation() {
 }
 
 const reviewing = ref(new Set<string>())
+function commentSaved(saved: QuotationRecord) {
+  const row = records.value.find(item => item.id === saved.id) || (selected.value?.id === saved.id ? selected.value : undefined)
+  const live = row && reviewSync.stateFor(row)
+  if (live && ((live._version ?? -1) > (saved._version ?? -1)
+      || ((live._version ?? -1) === (saved._version ?? -1) && (live._reviewVersion ?? 0) > (saved._reviewVersion ?? 0)))) {
+    toast('审核意见已保存，当前显示更新后的记录')
+    return
+  }
+  reviewSync.accept(saved)
+  // Advance only the exact snapshot that preceded this comment, never a stale review session.
+  if (!editing.value && selected.value?.id === saved.id && selected.value._version === saved._version
+      && (selected.value._reviewVersion ?? 0) === (saved._reviewVersion ?? 0) - 1) selected.value = saved
+  records.value = records.value.map(row => row.id === saved.id ? saved : row)
+  toast('审核意见已保存，业务员可查看')
+}
 async function changeReview(row: QuotationRecord, action: ReviewAction) {
   if (!canReview.value || !isActive(row) || lifecycleBusy.value || reviewing.value.has(row.id)) return
   const account = currentAuthUser.value.account
@@ -434,7 +454,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
           <button class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
-            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" />
+            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" />
             <div class="record-action-buttons">
               <small v-if="row.status !== 'pending'" class="deal-result" :class="row.status">成交结果：{{ quotationDealLabel(row.status) }}</small>
               <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
@@ -468,6 +488,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <span v-if="reviewSync.stateFor(selected).financeReviewStatus==='reviewing' && reviewSync.stateFor(selected).financeReviewStartedAt"> · 开始于 {{ dateTime(reviewSync.stateFor(selected).financeReviewStartedAt) }}</span>
             <span v-else-if="reviewSync.stateFor(selected).financeReviewedAt"> · 审核于 {{ dateTime(reviewSync.stateFor(selected).financeReviewedAt) }}</span>
           </div>
+          <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" /></div>
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
             <div class="overview-metrics"><article><small>报价国家</small><b>{{ recordCountries(selected).length || 1 }}</b><span>个国家</span></article><article><small>报价渠道</small><b>{{ recordOptions(selected).length || 1 }}</b><span>条渠道</span></article><article><small>1{{ selected.quoteMode==='bundle'?'套':'件' }}报价区间</small><b>{{ hasMultipleOptions(selected) ? quote1UsdRange(selected) : usd(selected.systemQuoteUsd) }}</b><span>{{ hasMultipleOptions(selected) ? quote1CnyRange(selected) : cny(selected.systemQuoteCny) }}</span></article></div>
@@ -511,6 +532,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
+.detail-review-comments{margin:0 24px 12px}
 .review-groups{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0;padding:12px;background:#fff;border:1px solid #dfe5eb;border-radius:10px}
 .review-groups button{min-height:42px;padding:9px 24px;border:1px solid transparent;border-radius:7px;background:#f3f6f8;color:#536374;font:inherit;font-weight:600;cursor:pointer}
 .review-groups button.active{background:#fff2db;border-color:#eda636;color:#854b00;box-shadow:inset 0 -2px #ed990f}

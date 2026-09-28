@@ -28,7 +28,8 @@ interface QuotationReviewRepository extends JpaRepository<QuotationReviewEntity,
 @Service
 public class QuotationReviewService {
     static final Set<String> VIEW_FIELDS = Set.of("financeReviewStatus", "financeReviewedAt", "financeReviewedBy", "financeReviewedAccount",
-        "financeReviewStartedAt", "financeReviewClaimedBy", "financeReviewClaimedAccount", "financeReviewNote");
+        "financeReviewStartedAt", "financeReviewClaimedBy", "financeReviewClaimedAccount", "financeReviewNote",
+        "financeReviewCommentCount", "financeReviewLatestComment");
     private final QuotationReviewRepository reviews;
     private final AuditService audit;
     public QuotationReviewService(QuotationReviewRepository reviews, AuditService audit) { this.reviews=reviews; this.audit=audit; }
@@ -45,7 +46,27 @@ public class QuotationReviewService {
     static void overlay(ObjectNode payload, JsonNode state, long version) {
         VIEW_FIELDS.forEach(payload::remove);
         for (var key:VIEW_FIELDS) if(state.has(key)) payload.set(key,state.get(key));
+        var comments = comments(state);
+        payload.put("financeReviewCommentCount", comments.size());
+        payload.remove("financeReviewLatestComment");
+        if (!comments.isEmpty()) payload.set("financeReviewLatestComment", comments.getLast());
         payload.put("_reviewVersion",version);
+    }
+    private static List<JsonNode> comments(JsonNode state) {
+        var result = new ArrayList<JsonNode>();
+        for (var event : state.path("history")) {
+            if (Set.of("comment", "complete", "legacy-review").contains(event.path("action").asText())
+                    && !event.path("note").asText().isBlank()
+                    && !(event.path("action").asText().equals("legacy-review") && event.path("note").asText().equals("保留的历史审核结果"))) result.add(event);
+        }
+        if (!state.has("history") && !state.path("financeReviewNote").asText("").isBlank()) {
+            result.add(JsonNodeFactory.instance.objectNode().put("id", "legacy-comment").put("action", "legacy-review")
+                .put("actorName", state.path("financeReviewedBy").asText("历史审核人未保存"))
+                .put("actorAccount", state.path("financeReviewedAccount").asText(""))
+                .put("at", state.path("financeReviewedAt").asText(""))
+                .put("note", state.path("financeReviewNote").asText()));
+        }
+        return result;
     }
     void enrich(List<JsonNode> payloads) {
         var ids=payloads.stream().map(p->UUID.fromString(p.path("id").asText())).toList();
@@ -57,7 +78,9 @@ public class QuotationReviewService {
         }
     }
     JsonNode history(QuotationRecordEntity quote) {
-        return reviews.findById(quote.id).map(row->row.state.has("history")?row.state.get("history").deepCopy():(JsonNode)JsonNodeFactory.instance.arrayNode()).orElse(JsonNodeFactory.instance.arrayNode());
+        var current = (ObjectNode) reviews.findById(quote.id).map(row -> row.state.deepCopy()).orElseGet(() -> legacy(quote.payload));
+        preserveLegacyHistory(quote, current);
+        return current.has("history") ? current.get("history") : JsonNodeFactory.instance.arrayNode();
     }
     private QuotationReviewEntity state(QuotationRecordEntity quote) {
         return reviews.findById(quote.id).orElseGet(()->{
@@ -72,8 +95,12 @@ public class QuotationReviewService {
         var current=(ObjectNode)row.state.deepCopy();var before=row.status;
         preserveLegacyHistory(quote,current);
         var note=request.path("note").asText("").trim();
-        if (note.length()>500) throw AppException.unprocessable("审核备注不能超过500字");
-        if(action.equals("claim")) {
+        if (note.length()>500) throw AppException.unprocessable("审核意见不能超过500字");
+        if(action.equals("comment")) {
+            requireQuoteVersion(quote,request);
+            if(note.isBlank()) throw AppException.unprocessable("请填写意见后保存，或关闭窗口继续审核");
+            // Comments are append-only and never change the quote, conclusion or review ownership.
+        } else if(action.equals("claim")) {
             if(row.status.equals("reviewing")) throw AppException.conflict("该报价已由"+current.path("financeReviewClaimedBy").asText()+"审核中");
             requireQuoteVersion(quote,request);
             VIEW_FIELDS.forEach(current::remove);
@@ -140,6 +167,6 @@ public class QuotationReviewService {
         state.withArray("history").addObject().put("id",quote.id+"-legacy").put("action","legacy-review").put("before","pending")
             .put("after",state.path("financeReviewStatus").asText()).put("actorAccount",state.path("financeReviewedAccount").asText("历史记录未保存"))
             .put("actorName",state.path("financeReviewedBy").asText("历史审核人未保存")).put("at",state.path("financeReviewedAt").asText(""))
-            .put("note","保留的历史审核结果");
+            .put("note",state.path("financeReviewNote").asText("").isBlank() ? "保留的历史审核结果" : state.path("financeReviewNote").asText());
     }
 }

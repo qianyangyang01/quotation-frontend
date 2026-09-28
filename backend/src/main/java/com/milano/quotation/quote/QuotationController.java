@@ -97,7 +97,7 @@ public class QuotationController {
     ApiResponse<JsonNode> review(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
         var fields = new HashSet<String>(); patch.properties().forEach(entry -> fields.add(entry.getKey()));
         if (!Set.of("action", "_version", "_reviewVersion", "financeReviewStatus", "note").containsAll(fields)
-                || !patch.path("action").isTextual() || !Set.of("claim","cancel","release","complete").contains(patch.path("action").asText())
+                || !patch.path("action").isTextual() || !Set.of("claim","cancel","release","complete","comment").contains(patch.path("action").asText())
                 || (patch.has("note") && !patch.path("note").isTextual()))
             throw AppException.unprocessable("请刷新页面，使用开始审核或完成审核操作");
         var row=records.lockById(id).orElseThrow(()->AppException.notFound("报价记录不存在"));

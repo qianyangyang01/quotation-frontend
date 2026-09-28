@@ -153,6 +153,62 @@ class QuotationFinanceReviewIntegrationTest {
         assertEquals(r.version,qv(r));
         assertEquals("rejected",reviews.findById(r.id).orElseThrow().state.path("history").get(2).path("after").asText());
     }
+    @Test void commentsAreAppendOnlyOptionalAndVisibleToOwnerWithoutChangingSnapshot() throws Exception {
+        var r=record(); var initialVersion=r.version; var original=r.payload.deepCopy(); var updatedAt=r.updatedAt;
+        action(r,finance,qv(r),rv(r),"comment",null,"  请核实包装重量  ").andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.financeReviewStatus").value("pending"))
+            .andExpect(jsonPath("$.data.financeReviewCommentCount").value(1));
+        var first=rv(r);
+        mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].financeReviewLatestComment.note").value("请核实包装重量"))
+            .andExpect(jsonPath("$.data[0].financeReviewLatestComment.actorName").value("F"+owner))
+            .andExpect(jsonPath("$.data[0].financeReviewLatestComment.at").isNotEmpty());
+        claim(r);
+        action(r,admin,qv(r),rv(r),"comment",null,"建议优先使用英国专线").andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.financeReviewClaimedAccount").value("F"+owner))
+            .andExpect(jsonPath("$.data.financeReviewStatus").value("reviewing"));
+        complete(r); // An empty completion note must neither block approval nor clear earlier comments.
+        assertEquals(2,view(r).path("financeReviewCommentCount").asInt());
+        action(r,finance,qv(r),rv(r),"comment",null,"已核实").andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.financeReviewStatus").value("approved"));
+        assertEquals("F"+owner,view(r).path("financeReviewedAccount").asText());
+        assertEquals(3,view(r).path("financeReviewCommentCount").asInt());
+        mvc.perform(get("/api/v1/quotations/{id}/review-history",r.id).with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].note").value("请核实包装重量"));
+        action(r,finance,qv(r),first,"comment",null,"过期意见").andExpect(status().isConflict());
+        var persisted=records.findById(r.id).orElseThrow();
+        assertEquals(original,persisted.payload);assertEquals(initialVersion,persisted.version);assertEquals(updatedAt,persisted.updatedAt);
+        price(r,8); // An explicit customer-price edit resets the review, but retains its opinions.
+        assertEquals("pending",view(r).path("financeReviewStatus").asText());
+        assertEquals(3,view(r).path("financeReviewCommentCount").asInt());
+    }
+    @Test void commentWritesRequireReviewerAndVersionsAndCannotForgeSummary() throws Exception {
+        var r=record();
+        for(var actor:List.of(employee,other,purchase)) action(r,actor,qv(r),rv(r),"comment",null,"forged").andExpect(status().isForbidden());
+        action(r,finance,qv(r)+1,rv(r),"comment",null,"stale").andExpect(status().isConflict());
+        action(r,finance,qv(r),rv(r),"comment",null,"  ").andExpect(status().isUnprocessableEntity());
+        action(r,finance,qv(r),rv(r),"comment",null,"a".repeat(501)).andExpect(status().isUnprocessableEntity());
+        action(r,finance,qv(r),rv(r),"comment",null,"a".repeat(500)).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/quotations/{id}/review-history",r.id).with(other)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(other)).andExpect(jsonPath("$.data").isEmpty());
+        mvc.perform(patch("/api/v1/quotations/{id}",r.id).with(employee).with(csrf()).contentType("application/json")
+            .content("{\"_version\":0,\"financeReviewCommentCount\":0}")).andExpect(status().isUnprocessableEntity());
+        lifecycle(r,"archive",qv(r)).andExpect(status().isOk());
+        action(r,finance,qv(r),rv(r),"comment",null,"archived").andExpect(status().isConflict());
+    }
+    @Test void completionCommentsAndLegacyNotesSurviveReReview() throws Exception {
+        var r=record();((ObjectNode)r.payload).put("financeReviewStatus","approved").put("financeReviewNote","旧版审核意见").put("financeReviewedBy","历史审核人");r=records.saveAndFlush(r);
+        assertEquals("旧版审核意见",view(r).path("financeReviewLatestComment").path("note").asText());
+        mvc.perform(get("/api/v1/quotations/{id}/review-history",r.id).with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].note").value("旧版审核意见"));
+        claim(r);
+        action(r,finance,qv(r),rv(r),"complete","rejected","请重新核对运费").andExpect(status().isOk());
+        assertEquals(2,view(r).path("financeReviewCommentCount").asInt());
+        assertEquals("请重新核对运费",view(r).path("financeReviewLatestComment").path("note").asText());
+        claim(r);complete(r);
+        assertEquals(2,view(r).path("financeReviewCommentCount").asInt());
+        assertEquals("请重新核对运费",view(r).path("financeReviewLatestComment").path("note").asText());
+    }
     ResultActions lifecycle(QuotationRecordEntity r,String operation,long version) throws Exception {
         var body=Map.of("action",operation,"reason","联合回归", "items",List.of(Map.of("id",r.id,"version",version)));
         return mvc.perform(post("/api/v1/quotations/lifecycle").with(admin).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(body)));

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { financeReviewLabel, type QuotationRecord, type QuotationReviewState, type ReviewAction } from '@/data/quotationRecords'
+import QuotationReviewComments from './QuotationReviewComments.vue'
 const props=defineProps<{ record:QuotationRecord; state:QuotationReviewState; account:string; canReview:boolean; admin:boolean; busy:boolean; compact?:boolean }>()
-const emit=defineEmits<{ action:[value:ReviewAction]; open:[]; reload:[] }>()
+const emit=defineEmits<{ action:[value:ReviewAction]; open:[]; reload:[]; commentSaved:[record:QuotationRecord] }>()
 const note=ref('')
 watch(()=>[props.record.id,props.state.financeReviewStatus,props.state.financeReviewClaimedAccount],()=>{note.value=''})
 const active=computed(()=>props.state.financeReviewStatus==='reviewing')
@@ -17,18 +18,23 @@ const time=(value?:string)=>value?new Date(value).toLocaleString('zh-CN',{timeZo
     <strong class="finance-review" :class="state.financeReviewStatus" role="status">{{ active ? `${state.financeReviewClaimedBy || '其他财务'}审核中` : financeReviewLabel(state.financeReviewStatus) }}</strong>
     <small v-if="active">开始于 {{ time(state.financeReviewStartedAt) }}</small>
     <small v-else-if="state.financeReviewedBy">{{ state.financeReviewedBy }} · {{ time(state.financeReviewedAt) }}</small>
-    <p v-if="!compact&&state.financeReviewNote">审核备注：{{ state.financeReviewNote }}</p>
-    <template v-if="canReview">
+    <QuotationReviewComments :record="record" :state="state" :account="account" :can-review="canReview && !compact" :busy="busy" @saved="emit('commentSaved', $event)">
+      <template v-if="compact && canReview" #default>
+        <button v-if="!active" type="button" :disabled="busy" @click="emit('action',{action:'claim'})">{{ state.financeReviewStatus==='pending' ? '开始审核' : '重新审核' }}</button>
+        <button v-else type="button" :disabled="busy" @click="emit('open')">{{ own?'继续审核':'查看详情' }}</button>
+      </template>
+    </QuotationReviewComments>
+    <template v-if="canReview && !compact">
       <p v-if="!compact&&(stale||claimChanged)" class="changed" role="alert">{{ stale?'报价内容已更新':'审核占用已变化' }}，请重新加载并核对后完成审核。<button type="button" :disabled="busy" @click="emit('reload')">重新加载详情</button></p>
       <button v-if="!active" type="button" :disabled="busy" @click="emit('action',{action:'claim'})">{{ state.financeReviewStatus==='pending' ? '开始审核' : '重新审核' }}</button>
       <button v-else-if="compact" type="button" :disabled="busy" @click="emit('open')">{{ own?'继续审核':'查看详情' }}</button>
       <template v-else>
         <template v-if="own">
-          <label>审核备注<textarea v-model="note" maxlength="500" placeholder="可填写审核意见；价格有误时必须填写原因" /></label>
+          <label>审核意见（选填）<textarea v-model="note" maxlength="500" placeholder="可填写审核意见，不填写也可完成审核" /></label>
           <div class="actions">
             <button type="button" :disabled="busy||stale||claimChanged" @click="emit('action',{action:'complete',financeReviewStatus:'channel-exempt',note})">同渠道免审 · 可报价</button>
             <button type="button" class="approve" :disabled="busy||stale||claimChanged" @click="emit('action',{action:'complete',financeReviewStatus:'approved',note})">审核完成 · 可报价</button>
-            <button type="button" :disabled="busy||stale||claimChanged||!note.trim()" @click="emit('action',{action:'complete',financeReviewStatus:'rejected',note})">审核完成 · 价格有误</button>
+            <button type="button" :disabled="busy||stale||claimChanged" @click="emit('action',{action:'complete',financeReviewStatus:'rejected',note})">审核完成 · 价格有误</button>
             <button type="button" :disabled="busy||claimChanged" @click="emit('action',{action:'cancel'})">取消审核</button>
           </div>
           <small>关闭页面会保留审核占用，稍后可继续；不再处理请取消审核。</small>
