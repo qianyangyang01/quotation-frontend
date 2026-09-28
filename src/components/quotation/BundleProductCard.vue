@@ -83,8 +83,10 @@ defineEmits<{
 </style>
 
 <style scoped>
-.purchase-tier-price{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.purchase-tier{height:32px;max-width:100%;padding:0 8px;border:1px solid #d9e0e5;border-radius:6px;background:#fff;color:#17232d;font-size:11px;cursor:pointer}
+.purchase-price{align-self:stretch;grid-template-rows:1fr 34px 1fr;gap:0}
+.purchase-tier-price{grid-row:2;display:flex;align-items:center;gap:10px}
+.purchase-price>small{grid-row:3;align-self:start;padding-top:4px}
+.purchase-tier{box-sizing:border-box;height:34px;max-width:100%;padding:0 8px;border:1px solid #d9e0e5;border-radius:6px;background:#fff;color:#17232d;font-size:11px;cursor:pointer}
 .purchase-tier:hover{border-color:#ff9900}
 .purchase-tier:focus-visible{outline:2px solid #ff9900;outline-offset:2px}
 </style>
