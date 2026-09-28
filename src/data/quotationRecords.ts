@@ -383,9 +383,20 @@ export async function loadQuotationRecords(scope: 'mine' | 'company' = 'company'
   throw new Error('报价记录正在变化，完整统计尚未读取成功，请刷新重试')
 }
 export async function saveQuotationRecords(_rows: QuotationRecord[]) { throw new Error('报价记录必须通过独立报价 API 创建或修改') }
-export async function createQuotationRecord(input: Omit<QuotationRecord, 'id' | 'no' | 'status' | 'createdAt' | 'updatedAt' | 'revisions'>) {
-  const raw = await api.post<QuotationRecord>('/quotations', input, idempotencyKey('quotation-create'))
+export async function createQuotationRecord(input: Omit<QuotationRecord, 'id' | 'no' | 'status' | 'createdAt' | 'updatedAt' | 'revisions'>, key = idempotencyKey('quotation-create')) {
+  const raw = await api.post<QuotationRecord>('/quotations', input, key)
   return normalizeQuotationRecord(raw)!
+}
+/** Page-local retry identity: an uncertain response must not create a second record. */
+export function quotationSubmitter() {
+  let previous = '', key = ''
+  return async (input: Parameters<typeof createQuotationRecord>[0]) => {
+    const signature = JSON.stringify(input)
+    if (signature !== previous) { previous = signature; key = idempotencyKey('quotation-create') }
+    const record = await createQuotationRecord(input, key)
+    previous = ''; key = ''
+    return record
+  }
 }
 export async function updateQuotationRecord(id: string, patch: QuotationRecordUpdate, expectedVersion?: number) {
   const raw = await api.patch<QuotationRecord>(`/quotations/${id}`, { ...patch, _version: expectedVersion })

@@ -35,8 +35,9 @@ it('does not restore an ordinary draft when explicitly reloading a completed wit
   expect(state.draftVersion.value).toBe(-1)
   expect(state.showDraftConflictDialog.value).toBe(false)
 })
-it.each(['draft', 'quotation'])('distinguishes a %s conflict during Save and always releases the busy state', async stage => {
-  const error = new ApiError(stage === 'draft' ? '草稿已在另一个页面更新' : '汇率已变化', 409, 'CONFLICT', 'save-check')
+it.each(['draft', 'quotation', 'timeout'])('distinguishes a %s failure during Save and always releases the busy state', async stage => {
+  const error = stage === 'timeout' ? new ApiError('保存结果尚未确认，当前输入已保留', 0, 'QUOTATION_REQUEST_TIMEOUT', 'save-check')
+    : new ApiError(stage === 'draft' ? '草稿已在另一个页面更新' : '汇率已变化', 409, 'CONFLICT', 'save-check')
   const state = {
     purchaseTaxBlockReason: { value: '' }, savingQuotation: { value: false }, countryLoads: { value: 0 }, countryLoadError: { value: '' },
     showSaveValidation: { value: false }, saveValidationIssues: { value: [] }, checkLiveVersions: vi.fn(async () => true),
@@ -44,7 +45,7 @@ it.each(['draft', 'quotation'])('distinguishes a %s conflict during Save and alw
     save: vi.fn(async () => { throw error }), logisticsLoadState: { value: 'ready' }, syncPending: { value: '' }, ApiError, toast: vi.fn(),
   }
   await handler('attemptSave', state)()
-  expect(state.syncPending.value).toBe(stage === 'draft' ? '' : '汇率已变化')
+  expect(state.syncPending.value).toBe(stage === 'quotation' ? '汇率已变化' : '')
   expect(state.save).toHaveBeenCalledTimes(stage === 'draft' ? 0 : 1)
   expect(state.toast).toHaveBeenCalledWith(`${error.message}（请求编号：save-check）`)
   expect(state.savingQuotation.value).toBe(false)

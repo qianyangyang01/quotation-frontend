@@ -42,7 +42,7 @@ import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMat
 import { type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
 import { logisticsUnavailableReason, isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
-import { createQuotationRecord } from '@/data/quotationRecords'
+import { createQuotationRecord, quotationSubmitter } from '@/data/quotationRecords'
 import { cancelQuotation, withdrawalSubmitter } from '@/services/quotationWithdrawal'
 import type { QuotationDraftState } from '@/services/quotationDrafts'
 import { preferredQuotationImage } from '@/data/quotationImages'
@@ -1172,6 +1172,7 @@ async function loadAndRestoreDraft() {
   return state.sourceQuote ? state : { exists: false, payload: null, version: -1, updatedAt: null }
 }
 async function resetLocalDraft() {
+  submitOrdinaryQuotation = quotationSubmitter()
   draftNeedsQuery.value = false
   draftChannelNotice.value = ''
   reissueSource.value = ''
@@ -1989,8 +1990,9 @@ function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>
     systemQuoteUsd: price.quoteUsd, systemQuoteCny: price.quoteCny, totalCostCny: price.cost }
 }
 const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave> | null>(null)
+let submitOrdinaryQuotation = quotationSubmitter()
 async function persistQuotation(input: Parameters<typeof createQuotationRecord>[0]) {
-  if (!draftSource.value) return createQuotationRecord(input)
+  if (!draftSource.value) return submitOrdinaryQuotation(input)
   await flushDraft()
   window.clearTimeout(draftTimer)
   draftReady.value = false

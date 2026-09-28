@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, api, request, conditionalGet, downloadFile, idempotencyKey, resetCsrf, uploadForm, setRequestAccount } from './http'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   resetCsrf()
@@ -9,6 +10,56 @@ afterEach(() => {
 })
 
 describe('quotation API client', () => {
+  it.each(['/quotations', '/quotations/record/resubmit', '/quotation-drafts/mine/state'])('releases a stalled save request for %s and preserves its uncertain outcome', async path => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { headerName: 'X-XSRF-TOKEN', token: 'csrf' } })))
+      .mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason))))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = request(path, { method: path.includes('drafts') ? 'PUT' : 'POST', body: '{}' })
+    const result = pending.catch(error => error)
+    await vi.advanceTimersByTimeAsync(30_001)
+    expect(fetchMock.mock.calls[1]![1].signal?.aborted).toBe(true)
+    expect(await result).toMatchObject({ code: 'QUOTATION_REQUEST_TIMEOUT' })
+    expect(await result).toMatchObject({ message: expect.stringContaining('未确认') })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('also bounds draft/readiness loading and CSRF preparation without sending a late save', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason))))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = api.post('/quotations', {}).catch(error => error)
+    await vi.advanceTimersByTimeAsync(30_001)
+    expect(await pending).toMatchObject({ code: 'QUOTATION_REQUEST_TIMEOUT' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    for (const path of ['/quotation-readiness', '/quotation-drafts/mine/state']) {
+      const read = api.get(path).catch(error => error)
+      await vi.advanceTimersByTimeAsync(30_001)
+      expect(await read).toMatchObject({ code: 'QUOTATION_REQUEST_TIMEOUT' })
+    }
+  })
+
+  it('keeps caller cancellation distinct from a save timeout and clears the deadline', async () => {
+    vi.useFakeTimers()
+    const caller = new AbortController()
+    vi.stubGlobal('fetch', vi.fn((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)))))
+    const pending = request('/quotations', { method: 'POST', body: '{}', signal: caller.signal }).catch(error => error)
+    caller.abort(new Error('caller cancelled'))
+    expect(await pending).toMatchObject({ message: 'caller cancelled' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('clears the save deadline on successful and rejected HTTP responses', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { headerName: 'X-CSRF', token: 'csrf' } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: 'saved' } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 'CONFLICT', message: '已更新', requestId: 'server-id' }), { status: 409 })))
+    await expect(api.post('/quotations', {})).resolves.toEqual({ id: 'saved' })
+    expect(vi.getTimerCount()).toBe(0)
+    await expect(api.post('/quotations', {})).rejects.toMatchObject({ status: 409, requestId: 'server-id' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('binds business requests to the account displayed when they started and latches a server mismatch', async () => {
     setRequestAccount('employee-a')
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'ACCOUNT_CHANGED', message: '账号已切换' }), { status: 409 }))

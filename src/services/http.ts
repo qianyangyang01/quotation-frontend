@@ -29,7 +29,10 @@ function guardAccount(path: string, account: string) {
 async function parseEnvelope<T>(response: Response): Promise<ApiEnvelope<T>> {
   let body: ApiEnvelope<T>
   try { body = await response.json() as ApiEnvelope<T> }
-  catch { throw new ApiError('服务器返回了无法识别的响应', response.status, 'INVALID_RESPONSE', response.headers.get('X-Request-Id') || 'unknown') }
+  catch (error) {
+    if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) throw error
+    throw new ApiError('服务器返回了无法识别的响应', response.status, 'INVALID_RESPONSE', response.headers.get('X-Request-Id') || 'unknown')
+  }
   if (!response.ok) {
     if (body.code === 'ACCOUNT_CHANGED') throw accountError()
     if (response.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('quotation:session-expired'))
@@ -49,20 +52,38 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const account = expectedAccount
   guardAccount(path, account)
   const method = String(init.method || 'GET').toUpperCase()
+  // Bound every network stage that can hold quotation initialization/submission open.
+  // Import/export requests have separate, deliberately longer deadlines.
+  const bounded = /^\/(quotation-readiness|quotation-drafts\/mine\/state)(?:[?]|$)/.test(path)
+    || (method === 'POST' && /^\/quotations(?:\/[^/]+\/resubmit)?$/.test(path))
+  const deadline = bounded ? new AbortController() : undefined
+  const timer = deadline ? setTimeout(() => deadline.abort(new DOMException('Quotation request timed out', 'TimeoutError')), 30_000) : undefined
+  const signal = deadline ? (init.signal ? AbortSignal.any([init.signal, deadline.signal]) : deadline.signal) : init.signal
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
   headers.set('X-Request-Id', crypto.randomUUID())
   if (account) headers.set('X-Expected-Account', account)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    const token = await ensureCsrf(init.signal)
-    headers.set(token.headerName, token.token)
+  try {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const token = await ensureCsrf(signal)
+      headers.set(token.headerName, token.token)
+    }
+    guardAccount(path, account)
+    const response = await fetch(`${API_BASE}${path}`, { ...init, signal, method, headers, credentials: 'include' })
+    const result = await parseEnvelope<T>(response)
+    guardAccount(path, account)
+    return result.data
+  } catch (error) {
+    if (deadline?.signal.aborted && !init.signal?.aborted) {
+      const message = method === 'GET' ? '报价资料读取超时，请检查网络后重试，当前输入已保留。'
+        : '请求超时，保存结果尚未确认，当前输入已保留。请先查看报价记录；如需重试，请保持内容不变，勿刷新页面。'
+      throw new ApiError(message, 0, 'QUOTATION_REQUEST_TIMEOUT', headers.get('X-Request-Id') || 'unknown')
+    }
+    throw error
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
-  guardAccount(path, account)
-  const response = await fetch(`${API_BASE}${path}`, { ...init, method, headers, credentials: 'include' })
-  const result = await parseEnvelope<T>(response)
-  guardAccount(path, account)
-  return result.data
 }
 
 export interface UploadProgress { loaded:number;total:number;percent:number;bytesPerSecond:number;phase?:'hashing'|'uploading'|'confirming' }
