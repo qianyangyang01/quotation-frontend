@@ -896,6 +896,79 @@ async function generateWeighted() {
   await click('生成平均行')
 }
 const averageRows = () => ['SDH', '顺丰', '燕文'].map((carrier, i) => ({ ...row(String(i), carrier), quote1: [5,5.25,5.3][i]!, quote2: [5.95,6.25,6.45][i]!, quote3: [7,7,7.45][i]!, quoteCustom: [7,7,7.45][i]! }))
+it('moves an average among source rows by drag, buttons and keyboard without changing prices, then exports that order', async () => {
+  const rows = averageRows(); mount(rows); await settle(); await generateWeighted()
+  const id = exposed.capturePrices().averagePlans![0]!.id
+  const key = `average:${id}`
+  await input(`综合报价 ${id} 数量 1`, '4.80')
+  const original = exposed.capturePrices().averagePlans
+  const keys = () => [...document.querySelectorAll<HTMLElement>('[data-row-handle]')].map(el => el.dataset.rowHandle)
+  const action = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+  action('第 4 行排序，上下键移动').dispatchEvent(new Event('dragstart', { bubbles: true }))
+  const first = document.querySelector('.sheet-editor tbody tr')!
+  first.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true })); await settle()
+  expect(first.classList.contains('sheet-row-drop-target')).toBe(true)
+  first.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true })); await settle()
+  expect(keys()).toEqual([key, ...rows.map(quoteSheetRowKey)])
+  expect(action('上移第 1 行').disabled).toBe(true)
+  action('下移第 1 行').click(); await settle()
+  expect(keys()).toEqual([quoteSheetRowKey(rows[0]!), key, ...rows.slice(1).map(quoteSheetRowKey)])
+  action('第 2 行排序，上下键移动').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); await settle()
+  expect(document.activeElement?.getAttribute('data-row-handle')).toBe(key)
+  // A normal route can also be dropped onto an average row.
+  action('第 4 行排序，上下键移动').dispatchEvent(new Event('dragstart', { bubbles: true }))
+  document.querySelector('.sheet-average-row')!.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true })); await settle()
+  const expected = [quoteSheetRowKey(rows[2]!), key, ...rows.slice(0, 2).map(quoteSheetRowKey)]
+  expect(keys()).toEqual(expected)
+  expect(exposed.capturePrices().averagePlans).toEqual(original)
+  await exposed.copyData(); await settle()
+  const copied = writeText.mock.lastCall![0]
+  expect(copied.indexOf('5.30')).toBeLessThan(copied.indexOf('4.80'))
+  expect(copied.indexOf('4.80')).toBeLessThan(copied.indexOf('5.00'))
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows.map(r => r.key)).toEqual(expected)
+})
+
+it('keeps a moved average in place through source refresh, hiding and plan edits; deleting it removes the plan only', async () => {
+  const state = mount(averageRows()); await settle(); await generateWeighted()
+  const id = exposed.capturePrices().averagePlans![0]!.id
+  document.querySelector<HTMLButtonElement>('[aria-label="上移第 4 行"]')!.click(); await settle()
+  state.rows = state.rows.map(r => ({ ...r })); await settle()
+  expect(document.querySelectorAll('[data-row-handle]')[2]!.getAttribute('data-row-handle')).toBe(`average:${id}`)
+  await input('综合报价方案名称', 'Updated Shipping'); await click('应用修改')
+  document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 1 行"]')!.click(); await settle()
+  expect(document.querySelectorAll('[data-row-handle]')[1]!.getAttribute('data-row-handle')).toBe(`average:${id}`)
+  const saved = exposed.capturePrices()
+  state.removalDisabled = true; await settle()
+  const remove = document.querySelector<HTMLButtonElement>('[aria-label="删除第 2 行综合方案"]')!
+  expect(remove.disabled).toBe(true)
+  state.removalDisabled = false; await settle(); remove.click(); await settle()
+  expect(document.querySelector('.sheet-average-row')).toBeNull()
+  expect(document.querySelector('.average-saved')).toBeNull()
+  expect(exposed.capturePrices().averagePlans).toEqual([])
+  expect(exposed.capturePrices().rows).toEqual(saved.rows)
+  expect(exposed.capturePrices().hiddenRowKeys).toEqual(saved.hiddenRowKeys)
+  expect(button('生成平均行')).toBeTruthy()
+})
+
+it('sorts multiple averages independently and deletes just the selected plan', async () => {
+  mount(averageRows()); await settle(); await generateWeighted()
+  const first = exposed.capturePrices().averagePlans![0]!
+  await click('新增方案'); await click('普通平均')
+  for (const checkbox of document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')) { checkbox.click(); await settle() }
+  await settle(); await input('综合报价方案名称', 'Second Shipping'); await click('生成平均行')
+  const second = exposed.capturePrices().averagePlans![1]!
+  expect(second).toBeDefined()
+  const handle = document.querySelector(`[data-row-handle="average:${first.id}"]`)!
+  handle.dispatchEvent(new Event('dragstart', { bubbles: true }))
+  document.querySelector('.sheet-editor tbody tr')!.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true })); await settle()
+  expect(document.querySelector('[data-row-handle]')!.getAttribute('data-row-handle')).toBe(`average:${first.id}`)
+  document.querySelector<HTMLButtonElement>('[aria-label="删除第 1 行综合方案"]')!.click(); await settle()
+  expect(exposed.capturePrices().averagePlans).toEqual([second])
+  expect(document.querySelectorAll('.sheet-average-row')).toHaveLength(1)
+  expect(document.querySelector('.sheet-average-row')!.textContent).toContain('AVG')
+})
+
 it('hides all average sources while retaining the editable plan, copied AVG and saved source prices', async () => {
   const rows = averageRows(); mount(rows); await settle(); await generateWeighted()
   const original = exposed.capturePrices()

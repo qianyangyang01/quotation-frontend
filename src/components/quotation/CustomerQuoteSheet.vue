@@ -136,7 +136,7 @@ const orderedSourceRows = computed(() => {
 const visibleSourceRows = computed(() => props.showAllRows ? orderedSourceRows.value : orderedSourceRows.value.filter(row => !hiddenRowKeys.value.has(quoteSheetRowKey(row))))
 function moveRow(key: string, target: string) {
   if (rowControlsDisabled.value || key === target) return
-  const keys = orderedSourceRows.value.map(quoteSheetRowKey)
+  const keys = orderedRowsSheet.value.rows.map(row => row.key)
   const from = keys.indexOf(key), to = keys.indexOf(target)
   if (from < 0 || to < 0) return
   keys.splice(from, 1)
@@ -145,7 +145,7 @@ function moveRow(key: string, target: string) {
   nextTick(() => [...(editorScroll.value?.querySelectorAll<HTMLButtonElement>('[data-row-handle]') ?? [])].find(button => button.dataset.rowHandle === key)?.focus())
 }
 function moveRowByKey(key: string, direction: number) {
-  const keys = visibleSourceRows.value.map(quoteSheetRowKey)
+  const keys = editorSheet.value.rows.map(row => row.key)
   const target = keys[keys.indexOf(key) + direction]
   if (target) moveRow(key, target)
 }
@@ -250,8 +250,14 @@ watch(() => JSON.stringify(systemSheet.value.rows.map(row => [row.key, quantitie
 })
 watch(averagePlans, invalidate, { deep: true, flush: 'sync' })
 const allRowsSheet = computed(() => buildSheet(orderedSourceRows.value))
-const sheet = computed(() => withAverageErrors(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, props.showAllRows, allRowsSheet.value.rows)))
-const editorSheet = computed(() => applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, true, allRowsSheet.value.rows))
+function orderSheetRows(value: ReturnType<typeof applyAveragePlans>) {
+  const order = new Map(rowOrder.value.map((key, index) => [key, index]))
+  return { ...value, rows: [...value.rows].sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity)) }
+}
+// Average rows share the same presentation order as their source routes, including hidden rows.
+const orderedRowsSheet = computed(() => orderSheetRows(applyAveragePlans(allRowsSheet.value, averagePlans.value, props.rows, quantities.value, true)))
+const sheet = computed(() => withAverageErrors(orderSheetRows(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, props.showAllRows, allRowsSheet.value.rows))))
+const editorSheet = computed(() => orderSheetRows(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, true, allRowsSheet.value.rows)))
 const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
 function hideRow(key: string) {
   if (copying.value || props.showAllRows) return
@@ -272,10 +278,13 @@ watch(() => JSON.stringify([layoutUserId.value, props.skus, props.resetKey ?? pr
 }, { flush: 'sync' })
 watch(() => props.rows, () => {
   const keys = new Set(props.rows.map(quoteSheetRowKey))
-  rowOrder.value = rowOrder.value.filter(key => keys.has(key))
-  if (draggedRow.value && !keys.has(draggedRow.value)) endRowDrag()
   hiddenRowKeys.value = new Set([...hiddenRowKeys.value].filter(key => keys.has(key)))
 }, { deep: true })
+watch(() => [...props.rows.map(quoteSheetRowKey), ...averagePlans.value.map(plan => `average:${plan.id}`)], keys => {
+  const current = new Set(keys)
+  rowOrder.value = rowOrder.value.filter(key => current.has(key))
+  if (draggedRow.value && !current.has(draggedRow.value)) endRowDrag()
+})
 // Tracks calculator dependencies too (tax, weight, exchange rate), even if the original four prices are unchanged.
 watch(sheet, invalidate, { flush: 'sync' })
 const currentImage = computed(() => images.value[activeImage.value])
@@ -657,7 +666,7 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in editorSheet.rows" :key="row.key" :class="{ 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="!row.averageId && dragOverRow(row.key, $event)" @drop.prevent="!row.averageId && dropRow(row.key)">
+            <tr v-for="(row, index) in editorSheet.rows" :key="row.key" :class="{ 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
               <template v-for="group in visibleGroups" :key="group.key">
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
@@ -673,13 +682,15 @@ onBeforeUnmount(() => {
               <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" :aria-invalid="Boolean(priceInputError(row.key, quantities[priceIndex]))" inputmode="text" placeholder="金额或算式" :maxlength="MAX_PRICE_EXPRESSION_LENGTH" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)" @blur="confirmPrice(row.key, quantities[priceIndex], $event)" @keydown.enter.prevent="confirmPrice(row.key, quantities[priceIndex], $event)"><small v-if="priceInputError(row.key, quantities[priceIndex])" class="sheet-price-error">{{ priceInputError(row.key, quantities[priceIndex]) }}</small></td>
               </template>
               </template>
-              <td v-if="row.averageId" class="sheet-row-action"><button type="button" :disabled="copying" @click="removeAverage(row.averageId!)">移除方案</button></td>
-              <td v-else class="sheet-row-action"><div class="sheet-row-controls">
+              <td class="sheet-row-action"><div class="sheet-row-controls">
                 <button v-if="!recordMode" type="button" class="sheet-row-handle" :data-row-handle="row.key" :draggable="!rowControlsDisabled" :disabled="rowControlsDisabled" :aria-label="`第 ${index + 1} 行排序，上下键移动`" title="拖拽整行排序，也可按上下方向键" @dragstart.stop="startRowDrag(row.key, $event)" @dragend="endRowDrag" @keydown.up.prevent="moveRowByKey(row.key, -1)" @keydown.down.prevent="moveRowByKey(row.key, 1)">⠿</button>
-                <button v-if="!recordMode" type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || visibleSourceRows[0] && quoteSheetRowKey(visibleSourceRows[0]) === row.key" @click="moveRowByKey(row.key, -1)">↑</button>
-                <button v-if="!recordMode" type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || visibleSourceRows.length > 0 && quoteSheetRowKey(visibleSourceRows[visibleSourceRows.length - 1]) === row.key" @click="moveRowByKey(row.key, 1)">↓</button>
-                <button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button>
-                <button v-if="canRemoveRows && !recordMode" type="button" class="sheet-delete-row" :aria-label="`移除第 ${index + 1} 行渠道`" title="从本次报价删除，并取消渠道选择" :disabled="rowControlsDisabled" @click="removeRow(row.key)">删除</button>
+                <button v-if="!recordMode" type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || index === 0" @click="moveRowByKey(row.key, -1)">↑</button>
+                <button v-if="!recordMode" type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || index === editorSheet.rows.length - 1" @click="moveRowByKey(row.key, 1)">↓</button>
+                <button v-if="row.averageId" type="button" class="sheet-delete-row" :aria-label="`删除第 ${index + 1} 行综合方案`" title="删除此平均行，同时移除上方对应方案" :disabled="rowControlsDisabled" @click="removeAverage(row.averageId!)">删除</button>
+                <template v-else>
+                  <button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button>
+                  <button v-if="canRemoveRows && !recordMode" type="button" class="sheet-delete-row" :aria-label="`移除第 ${index + 1} 行渠道`" title="从本次报价删除，并取消渠道选择" :disabled="rowControlsDisabled" @click="removeRow(row.key)">删除</button>
+                </template>
               </div></td>
             </tr>
           </tbody>
