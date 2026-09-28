@@ -2087,8 +2087,8 @@ async function save() {
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
     weightSnapshot: buildQuotationWeightSnapshot(quoteMode.value === 'bundle'
-      ? bundleItems.value.filter(item => item.sku).map(item => ({sku:item.sku, quantityPerSet:normalizedBundleSets(item.quantityPerSet), baseWeightKg:item.customWeightKg ?? item.weightKg}))
-      : [{sku:p.sku, quantityPerSet:1, baseWeightKg:singleBaseWeight(p,1)}],
+      ? bundleItems.value.filter(item => item.sku).map(item => ({sku:item.sku, quantityPerSet:normalizedBundleSets(item.quantityPerSet), baseWeightKg:item.customWeightKg ?? item.weightKg, weightSource:item.customWeightKg == null ? 'purchase' as const : 'manual' as const, purchaseWeightKg:item.weightKg}))
+      : [{sku:p.sku, quantityPerSet:1, baseWeightKg:singleBaseWeight(p,1), weightSource:p.weightSource, purchaseWeightKg:p.netWeight}],
       parseSpecialPackagingGrams(specialPackagingGrams.value)!, [...new Set([1,2,3,customQuoteQuantity.value,quoteMode.value==='bundle'?1:p.quantity,...captured.quantities])]),
     purchaseVersions: Object.fromEntries(activePurchaseSkus().map(sku => [sku, purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)) || ''])),
     logisticsRevision: logisticsRevision.value,

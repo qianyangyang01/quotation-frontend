@@ -88,7 +88,11 @@ it('uses the current mounted preview after product replacement, and blocks inval
   expect(state.persisted).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({rows:[expect.objectContaining({prices:[2,3,4,5]})]}))
 })
 
-it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the save function into the API payload',async(grade)=>{
+it.each([
+  {grade:'A',mode:'single',manual:false},
+  {grade:'NEW',mode:'single',manual:true},
+  {grade:'A',mode:'bundle',manual:true},
+])('passes mounted prices and weight provenance through save: $grade / $mode / manual=$manual',async({grade,mode,manual})=>{
   const state=mount('template');await settle()
   await input('报价单署名','Vivian')
   await input('WhatsApp 联系方式','+183 5650 6953')
@@ -105,9 +109,9 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
-    products:{value:[{sku:'SKU-A',quantity:1,name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:grade==='A'?.21:0}]},
+    products:{value:[{sku:'SKU-A',quantity:1,name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:grade==='A'?.21:0,netWeight:manual?.12:.14,weightSource:manual?'manual':'purchase'}]},
     customerOperation:{value:{configured:true,snapshot:undefined}},customerName:{value:'QA'},productCategory:{value:'日用品'},savedQuoteRows:{value:state.previewProps.rows.map(row=>({...row,taxConfigured:true}))},
-    hasQuotationProduct:()=>true,quoteMode:{value:'single'},bundleItems:{value:[]},quoteMatrixMode:{value:'template'},activeTemplateSnapshot:{value:{id:'template-a',name:'QA'}},
+    hasQuotationProduct:()=>true,quoteMode:{value:mode},bundleItems:{value:mode==='bundle'?[{sku:'SKU-A',quantityPerSet:2,weightKg:.12,customWeightKg:.14,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21},{sku:'SKU-B',quantityPerSet:1,weightKg:.05,customWeightKg:null,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21}]:[]},normalizedBundleSets:(n:number)=>n,quoteMatrixMode:{value:'template'},activeTemplateSnapshot:{value:{id:'template-a',name:'QA'}},
     buildQuoteOptions:()=>[{id:'option-a',quoteSheetKey:quoteSheetRowKey(state.previewProps.rows[0]!)}],
     selectedQuoteSummary:()=>({systemQuoteUsd:2,systemQuoteCny:13.4,totalCostCny:10}),
     activePurchaseSkus:()=>[],logisticsRevision:{value:'revision-a'},currentSalespersonName:{value:'QA'},currentSalespersonAccount:{value:'QA'},
@@ -119,8 +123,10 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
   await run()
   expect(createQuotationRecord).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
-    purchaseUnitPriceCny:2, domesticFreightPerUnitCny:grade==='A'?.21:0,
-    weightSnapshot: buildQuotationWeightSnapshot([{sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14}],10,[1,2,3,4,8]),
+    purchaseUnitPriceCny:mode==='single'?2:undefined, domesticFreightPerUnitCny:mode==='single'?(grade==='A'?.21:0):undefined,
+    weightSnapshot: expect.objectContaining({items:mode==='single'
+      ? [expect.objectContaining({sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14,weightSource:manual?'manual':'purchase',purchaseWeightKg:manual?.12:.14})]
+      : [expect.objectContaining({sku:'SKU-A',quantityPerSet:2,baseWeightKg:.14,weightSource:'manual',purchaseWeightKg:.12}),expect.objectContaining({sku:'SKU-B',quantityPerSet:1,baseWeightKg:.05,weightSource:'purchase',purchaseWeightKg:.05})]}),
     customerQuote:{averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))

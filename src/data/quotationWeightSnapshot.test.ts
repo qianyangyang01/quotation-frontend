@@ -31,6 +31,24 @@ it('keeps fractional gram bundle weights and one-time special packaging consiste
 })
 
 const single = { quantity: 1, netWeight: .14, weightSource: 'purchase', manualWeight: 0 } as SingleWeightInput
+it('retains weight provenance through serialization, record normalization and reconciliation without repricing', () => {
+  const item = {sku:'A',quantityPerSet:1,baseWeightKg:.315,weightSource:'manual' as const,purchaseWeightKg:.3}
+  const snapshot = buildQuotationWeightSnapshot([item], 0, [1,2,3])
+  const record = normalizeQuotationRecord(JSON.parse(JSON.stringify({id:'source',no:'QT-SOURCE',weightSnapshot:snapshot,systemQuoteUsd:42.6})))!
+  item.purchaseWeightKg = .8
+  expect(record.weightSnapshot!.items[0]).toMatchObject({weightSource:'manual',purchaseWeightKg:.3,baseWeightKg:.315})
+  expect(record.weightSnapshot!.quantities.map(row=>row.weightKg)).toEqual([.322,.644,.966])
+  expect(record.systemQuoteUsd).toBe(42.6)
+  expect(quotationRecordReconciliationTsv(record)).toContain('业务指定重量\t0.3')
+})
+it('preserves old snapshots as unknown and ignores malformed optional provenance', () => {
+  const old = buildQuotationWeightSnapshot([{sku:'A',quantityPerSet:1,baseWeightKg:.315}], 0, [1])
+  expect(normalizeQuotationWeightSnapshot(old)).toEqual(old)
+  expect(quotationRecordReconciliationTsv(normalizeQuotationRecord({id:'old-source',no:'OLD',weightSnapshot:old})!)).toContain('来源未记录')
+  const malformed = {...old,items:[{...old.items[0],weightSource:'untrusted',purchaseWeightKg:-1}]}
+  expect(normalizeQuotationWeightSnapshot(malformed)).toEqual(old)
+  expect(malformed.items[0]!.weightSource).toBe('untrusted')
+})
 it.each(['single', 'bundle'])('adds special packaging once per shipment and preserves the %s saved basis', mode => {
   const items = mode === 'single' ? [{sku:'A',quantityPerSet:1,baseWeightKg:.14}]
     : [{sku:'A',quantityPerSet:2,baseWeightKg:.05},{sku:'B',quantityPerSet:1,baseWeightKg:.050001}]
