@@ -29,9 +29,12 @@ const props = defineProps<{
   initialQuote?: CustomerPriceSnapshot
   initialSystemQuote?: CustomerPriceSnapshot
   recordMode?: boolean
+  canRemoveRows?: boolean
+  removalDisabled?: boolean
   showAllRows?: boolean
   skus?: string[]
 }>()
+const emit = defineEmits<{ removeRow: [key: string] }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
 function initialEdits() {
   const contact = props.recordMode ? props.initialQuote?.contact : loadQuoteSheetContact(layoutUserId.value)
@@ -122,7 +125,53 @@ function initialHiddenRows() {
 const hiddenRowKeys = ref(initialHiddenRows())
 watch(() => JSON.stringify(props.initialQuote?.hiddenOptionIds), () => { hiddenRowKeys.value = initialHiddenRows() })
 const showHiddenRows = ref(false)
-const visibleSourceRows = computed(() => props.showAllRows ? props.rows : props.rows.filter(row => !hiddenRowKeys.value.has(quoteSheetRowKey(row))))
+const rowOrder = ref<string[]>([])
+const draggedRow = ref<string | null>(null)
+const rowDropTarget = ref<string | null>(null)
+const rowControlsDisabled = computed(() => copying.value || props.removalDisabled || props.sourcePending)
+const orderedSourceRows = computed(() => {
+  const order = new Map(rowOrder.value.map((key, index) => [key, index]))
+  return [...props.rows].sort((a, b) => (order.get(quoteSheetRowKey(a)) ?? Infinity) - (order.get(quoteSheetRowKey(b)) ?? Infinity))
+})
+const visibleSourceRows = computed(() => props.showAllRows ? orderedSourceRows.value : orderedSourceRows.value.filter(row => !hiddenRowKeys.value.has(quoteSheetRowKey(row))))
+function moveRow(key: string, target: string) {
+  if (rowControlsDisabled.value || key === target) return
+  const keys = orderedSourceRows.value.map(quoteSheetRowKey)
+  const from = keys.indexOf(key), to = keys.indexOf(target)
+  if (from < 0 || to < 0) return
+  keys.splice(from, 1)
+  keys.splice(to, 0, key)
+  rowOrder.value = keys
+  nextTick(() => [...(editorScroll.value?.querySelectorAll<HTMLButtonElement>('[data-row-handle]') ?? [])].find(button => button.dataset.rowHandle === key)?.focus())
+}
+function moveRowByKey(key: string, direction: number) {
+  const keys = visibleSourceRows.value.map(quoteSheetRowKey)
+  const target = keys[keys.indexOf(key) + direction]
+  if (target) moveRow(key, target)
+}
+function endRowDrag() { draggedRow.value = null; rowDropTarget.value = null }
+function startRowDrag(key: string, event: DragEvent) {
+  if (rowControlsDisabled.value) { event.preventDefault(); return }
+  endColumnDrag()
+  draggedRow.value = key
+  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', key) }
+}
+function dragOverRow(key: string, event: DragEvent) {
+  if (!draggedRow.value || rowControlsDisabled.value) return
+  event.preventDefault()
+  rowDropTarget.value = key
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (event.clientY < 100) window.scrollBy(0, -24)
+  else if (event.clientY > window.innerHeight - 80) window.scrollBy(0, 24)
+}
+function dropRow(key: string) {
+  if (draggedRow.value) moveRow(draggedRow.value, key)
+  endRowDrag()
+}
+function removeRow(key: string) {
+  if (!props.canRemoveRows || props.recordMode || rowControlsDisabled.value) return
+  emit('removeRow', key)
+}
 function buildSheet(rows: QuoteSheetSourceRow[]) { return buildCustomerQuoteSheet({
   rows, countries: props.countries, edits: edits.value, skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle,
@@ -200,7 +249,7 @@ watch(() => JSON.stringify(systemSheet.value.rows.map(row => [row.key, quantitie
   }
 })
 watch(averagePlans, invalidate, { deep: true, flush: 'sync' })
-const allRowsSheet = computed(() => buildSheet(props.rows))
+const allRowsSheet = computed(() => buildSheet(orderedSourceRows.value))
 const sheet = computed(() => withAverageErrors(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, props.showAllRows, allRowsSheet.value.rows)))
 const editorSheet = computed(() => applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, true, allRowsSheet.value.rows))
 const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
@@ -217,10 +266,14 @@ function restoreAllRows() {
 }
 watch(() => JSON.stringify([layoutUserId.value, props.skus, props.resetKey ?? props.contextKey, props.bundle]), () => {
   hiddenRowKeys.value = initialHiddenRows()
+  rowOrder.value = []
+  endRowDrag()
   showHiddenRows.value = false
 }, { flush: 'sync' })
 watch(() => props.rows, () => {
   const keys = new Set(props.rows.map(quoteSheetRowKey))
+  rowOrder.value = rowOrder.value.filter(key => keys.has(key))
+  if (draggedRow.value && !keys.has(draggedRow.value)) endRowDrag()
   hiddenRowKeys.value = new Set([...hiddenRowKeys.value].filter(key => keys.has(key)))
 }, { deep: true })
 // Tracks calculator dependencies too (tax, weight, exchange rate), even if the original four prices are unchanged.
@@ -258,6 +311,7 @@ function startGroupDrag(key: QuoteSheetColumnKey, event: DragEvent) {
   if (copying.value) { event.preventDefault(); return }
   endColumnDrag()
   draggedGroup.value = key
+  endRowDrag()
   if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', key) }
 }
 function dropGroup(key: QuoteSheetColumnKey) {
@@ -365,7 +419,12 @@ function confirmPrice(key: string, quantity: number, event: Event) {
   rowEdits(key).prices![String(quantity)] = parsed.value.toFixed(2)
   input.value = parsed.value.toFixed(2)
 }
-watch(() => props.rows.map(row => [quoteSheetRowKey(row), row.quote1, row.quote2, row.quote3, row.quoteCustom]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(row => JSON.stringify(row)).join('|'), () => { clearPriceEdits(); loadSavedPrices() })
+watch(() => new Map(props.rows.map(row => [quoteSheetRowKey(row), JSON.stringify([row.quote1, row.quote2, row.quote3, row.quoteCustom])])), (current, previous) => {
+  // Deletion and sorting must not erase customer prices on surviving routes.
+  if (current.size <= previous.size && [...current].every(([key, prices]) => previous.get(key) === prices)) return
+  clearPriceEdits()
+  loadSavedPrices()
+})
 watch(() => props.sourcePending, value => { if (value) clearPriceEdits() })
 async function addColumn() {
   if (copying.value || columns.value.length >= MAX_QUOTE_SHEET_COLUMNS) return
@@ -408,6 +467,7 @@ function startColumnDrag(id: number, event: DragEvent) {
   if (copying.value) { event.preventDefault(); return }
   endColumnDrag()
   draggedColumn.value = id
+  endRowDrag()
   if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', String(id)) }
 }
 function endColumnDrag() { draggedColumn.value = null; dropTarget.value = null; draggedGroup.value = null; groupDropTarget.value = null }
@@ -597,7 +657,7 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in editorSheet.rows" :key="row.key" :class="{ 'sheet-average-row': row.averageId }">
+            <tr v-for="(row, index) in editorSheet.rows" :key="row.key" :class="{ 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="!row.averageId && dragOverRow(row.key, $event)" @drop.prevent="!row.averageId && dropRow(row.key)">
               <template v-for="group in visibleGroups" :key="group.key">
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
@@ -614,7 +674,13 @@ onBeforeUnmount(() => {
               </template>
               </template>
               <td v-if="row.averageId" class="sheet-row-action"><button type="button" :disabled="copying" @click="removeAverage(row.averageId!)">移除方案</button></td>
-              <td v-else class="sheet-row-action"><button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button></td>
+              <td v-else class="sheet-row-action"><div class="sheet-row-controls">
+                <button v-if="!recordMode" type="button" class="sheet-row-handle" :data-row-handle="row.key" :draggable="!rowControlsDisabled" :disabled="rowControlsDisabled" :aria-label="`第 ${index + 1} 行排序，上下键移动`" title="拖拽整行排序，也可按上下方向键" @dragstart.stop="startRowDrag(row.key, $event)" @dragend="endRowDrag" @keydown.up.prevent="moveRowByKey(row.key, -1)" @keydown.down.prevent="moveRowByKey(row.key, 1)">⠿</button>
+                <button v-if="!recordMode" type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || visibleSourceRows[0] && quoteSheetRowKey(visibleSourceRows[0]) === row.key" @click="moveRowByKey(row.key, -1)">↑</button>
+                <button v-if="!recordMode" type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || visibleSourceRows.length > 0 && quoteSheetRowKey(visibleSourceRows[visibleSourceRows.length - 1]) === row.key" @click="moveRowByKey(row.key, 1)">↓</button>
+                <button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button>
+                <button v-if="canRemoveRows && !recordMode" type="button" class="sheet-delete-row" :aria-label="`移除第 ${index + 1} 行渠道`" title="从本次报价删除，并取消渠道选择" :disabled="rowControlsDisabled" @click="removeRow(row.key)">删除</button>
+              </div></td>
             </tr>
           </tbody>
         </table>
@@ -647,6 +713,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-row-controls{display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
+.customer-sheet .sheet-row-controls button{padding:3px 6px;font-size:12px}
+.customer-sheet .sheet-row-controls .sheet-row-handle{cursor:grab;font-size:18px;line-height:18px}
+.customer-sheet .sheet-row-controls .sheet-row-handle:active{cursor:grabbing}
+.customer-sheet .sheet-row-controls .sheet-delete-row{color:#b42318;border-color:#e8b9b4}
+.customer-sheet .sheet-row-controls button:hover:not(:disabled){background:#fff0e3;border-color:#f58220}
+.customer-sheet .sheet-row-controls .sheet-delete-row:hover:not(:disabled){background:#fff1f0;border-color:#b42318}
+.sheet-row-controls button:focus-visible{outline:2px solid #f58220;outline-offset:2px}
+.customer-sheet .sheet-row-dragging td{opacity:.5}
+.customer-sheet .sheet-row-drop-target td{box-shadow:inset 0 -3px #f58220;background:#fff7ed}
 .sheet-average-row td{background:#fff1df!important;border-top:1px solid #f58220!important;border-bottom:1px solid #f58220!important;color:#c95d00}.sheet-average-row input{color:#c95d00!important;font-weight:700}
 .sheet-row-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0;padding:4px 0 0;font-size:12px}.customer-sheet .sheet-row-tools>button,.customer-sheet .sheet-row-action button,.customer-sheet .sheet-hidden-row button{color:#d86b13;border-color:#f58220;white-space:nowrap}.sheet-row-action{position:sticky;right:0;z-index:1;min-width:58px;box-shadow:-2px 0 4px #20253212}.sheet-hidden-rows{margin-top:12px;border:1px solid #dfe5e9;border-radius:6px;overflow:hidden;font-size:12px}.sheet-hidden-heading{display:flex;gap:18px;padding:12px;background:#f1f3f5;flex-wrap:wrap}.sheet-hidden-heading span,.sheet-hidden-row small{color:#72808a}.sheet-hidden-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px;border-top:1px solid #dfe5e9;background:#fff}.sheet-hidden-row>span{flex:1;min-width:130px;overflow-wrap:anywhere}.sheet-hidden-row small{line-height:1.5}.sheet-hidden-row button{margin-left:auto}
 .sheet-layout-preference{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 0;font-size:12px;color:#72808a}.sheet-layout-preference [role="status"]{color:#287a4d}.sheet-layout-preference [role="alert"]{color:#b42318}
