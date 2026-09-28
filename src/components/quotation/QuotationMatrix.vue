@@ -373,6 +373,10 @@ function removeChannel(country: string, row: QuotationMatrixRow) {
     [country]: (selectedChannelKeys.value[country] || []).filter(key => !selectionKeys(country, row).includes(key)),
   }
 }
+function removeSelection(row: QuotationMatrixRow) {
+  removeChannel(row.country, row)
+}
+defineExpose({ removeSelection })
 function changeRowRegion(country: string, row: QuotationMatrixRow, region: string) {
   const next = availableRows(country).find(candidate => candidate.quoteRegion === region && candidate.channelKey === row.channelKey)
   if (!next) { regionFeedback.value = '该渠道在所选区域暂无可用报价，原方案已保留'; return false }

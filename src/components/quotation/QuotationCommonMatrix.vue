@@ -128,6 +128,10 @@ function toggleSelection(row: QuotationMatrixRow) {
   if (!removing && !primaryStillSelected) emit('adopt', row)
   else if (removingPrimary && selected[0]) emit('adopt', selected[0])
 }
+function removeSelection(row: QuotationMatrixRow) {
+  if (isSelected(row)) toggleSelection(row)
+}
+defineExpose({ removeSelection })
 function startCountryDrag(country: string, event: DragEvent) {
   draggedCountry.value = country
   dragOverCountry.value = ''

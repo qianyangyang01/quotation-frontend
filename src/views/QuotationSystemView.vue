@@ -141,6 +141,8 @@ const commonQuoteRows = ref<QuotationMatrixRow[]>([])
 const modeSelections = ref<Record<'common' | 'specified' | 'template', DraftChannelSelection[]>>({ common: [], specified: [], template: [] })
 const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
 const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('template')
+const commonMatrix = ref<InstanceType<typeof QuotationCommonMatrix> | null>(null)
+const specifiedMatrix = ref<InstanceType<typeof QuotationMatrix> | null>(null)
 const templateWorkbench = ref<InstanceType<typeof QuotationTemplateMatrix> | null>(null)
 function createTemplateFromCurrentMode() {
   const mode = quoteMatrixMode.value
@@ -1735,6 +1737,14 @@ const savedQuoteRows = computed(() => {
   if (quoteMatrixMode.value !== 'common') return activeMatrixRows.value
   return commonQuoteRows.value
 })
+function removePreviewRow(key: string) {
+  if (savingQuotation.value || retryingSavePreparation.value) return
+  const row = savedQuoteRows.value.find(row => quoteSheetRowKey(row) === key)
+  if (!row) return
+  const matrix = quoteMatrixMode.value === 'common' ? commonMatrix.value
+    : quoteMatrixMode.value === 'specified' ? specifiedMatrix.value : templateWorkbench.value
+  matrix?.removeSelection(row)
+}
 const matrixModeLabel = computed(() => quoteMatrixMode.value === 'common'
   ? '常用国家快速报价'
   : quoteMatrixMode.value === 'specified'
@@ -2065,6 +2075,9 @@ async function save() {
     }
   }
   catch (error) { toast(error instanceof Error ? error.message : '客户报价无法保存'); return }
+  // Persist the preview order in the option array, so reopening and copying use the same sequence.
+  const previewOrder = new Map(captured.rows.map((row, index) => [row.key, index]))
+  quoteOptions.sort((a, b) => previewOrder.get(a.quoteSheetKey)! - previewOrder.get(b.quoteSheetKey)!)
   const snapshot = captured ? { averagePlans: mapAveragePlans(captured.averagePlans, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), hiddenOptionIds: quoteOptions.filter(option => captured.hiddenRowKeys?.includes(option.quoteSheetKey)).map(option => option.id), contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
     const row = captured!.rows.find(row => row.key === option.quoteSheetKey)
     return { optionId: option.id, prices: row!.prices }
@@ -2208,7 +2221,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
           <button type="button" class="save-selection-template" :disabled="!commonQuoteRows.length || logisticsLoadState !== 'ready'" @click="createTemplateFromCurrentMode">将当前清单存为模板</button>
-          <QuotationCommonMatrix :source-pending="logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
+          <QuotationCommonMatrix :ref="instance => commonMatrix = instance as typeof commonMatrix" :source-pending="logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
             :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
@@ -2220,7 +2233,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='specified'" class="matrix-mode-panel">
           <button type="button" class="save-selection-template" :disabled="!specifiedQuoteRows.length || logisticsLoadState !== 'ready'" @click="createTemplateFromCurrentMode">将当前清单存为模板</button>
-          <QuotationMatrix :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='specified'"
+          <QuotationMatrix :ref="instance => specifiedMatrix = instance as typeof specifiedMatrix" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='specified'"
             :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'"
@@ -2257,7 +2270,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
           :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd"
           :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
-          :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy() || financeSettingsAreLoading()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave"
+          :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy() || financeSettingsAreLoading()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave" @remove-row="removePreviewRow"
         />
       </template>
     </main>

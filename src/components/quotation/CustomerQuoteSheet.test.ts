@@ -26,7 +26,7 @@ function png(firstRow = 1, lastRow = 1): QuoteSheetImage {
   return { blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow, lastRow }
 }
 function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot, recordMode = false) {
-  const state = reactive({ skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, recordMode, initialSystemQuote: undefined as CustomerPriceSnapshot | undefined, resetKey: undefined as string | undefined })
+  const state = reactive({ canRemoveRows: false, removalDisabled: false, skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, recordMode, initialSystemQuote: undefined as CustomerPriceSnapshot | undefined, resetKey: undefined as string | undefined })
   const host = document.createElement('div'); document.body.append(host)
   app = createApp({ render: () => h(CustomerQuoteSheet, { ...state, ref:(instance:unknown)=>{exposed=instance as typeof exposed} }) }); app.mount(host)
   return state
@@ -1033,4 +1033,63 @@ it('keeps region selection independent of channels and excludes removed regions 
   expect(channels().map(c => c.checked)).toEqual([true])
   expect(zone(1).checked).toBe(false); expect(zone(4).checked).toBe(true)
   expect(button('应用修改').disabled).toBe(true)
+})
+
+
+it('moves routes by buttons, keyboard and drag while keeping prices, times, exports and capture in sync', async () => {
+  const rows = [row('first'), row('second'), row('third')]
+  mount(rows)
+  await input('第 2 行第 1 列美元价格', '99.50')
+  await input('第 2 行运输时效', '20-25 days')
+  const action = (label: string) => document.querySelector<HTMLButtonElement>('[aria-label="' + label + '"]')!
+  action('上移第 2 行').click(); await settle()
+  expect(exposed.capturePrices().rows.map(r => r.key)).toEqual([rows[1], rows[0], rows[2]].map(quoteSheetRowKey))
+  expect(exposed.capturePrices().rows[0]!.prices[0]).toBe(99.5)
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('20-25 days')
+  expect(action('上移第 1 行').disabled).toBe(true)
+  expect(action('下移第 3 行').disabled).toBe(true)
+  action('第 1 行排序，上下键移动').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); await settle()
+  expect(exposed.capturePrices().rows.map(r => r.key)).toEqual(rows.map(quoteSheetRowKey))
+  action('第 3 行排序，上下键移动').dispatchEvent(new Event('dragstart', { bubbles: true })); await settle()
+  const target = document.querySelectorAll('.sheet-editor tbody tr')[0]!
+  target.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true })); await settle()
+  expect(target.classList.contains('sheet-row-drop-target')).toBe(true)
+  target.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true })); await settle()
+  expect(document.querySelector('.sheet-row-drop-target')).toBeNull()
+  const expected = [rows[2], rows[0], rows[1]].map(quoteSheetRowKey)
+  expect(exposed.capturePrices().rows.map(r => r.key)).toEqual(expected)
+  await exposed.copyData(); await settle()
+  expect(writeText.mock.lastCall![0].indexOf('99.50')).toBeGreaterThan(writeText.mock.lastCall![0].indexOf('10.80'))
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows.map(r => r.key)).toEqual(expected)
+  expect(render.mock.lastCall![0].rows[2]!.prices[0]).toBe(99.5)
+})
+
+it('preserves hidden routes and edited prices through sorting and deletion, appends new routes, and resets for another product', async () => {
+  const rows = [row('first'), row('second'), row('third')]
+  const state = mount(rows)
+  state.resetKey = 'sku-1'; await settle()
+  await input('第 3 行第 1 列美元价格', '88.50')
+  document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 2 行"]')!.click(); await settle()
+  document.querySelector<HTMLButtonElement>('[aria-label="上移第 2 行"]')!.click(); await settle()
+  expect(exposed.capturePrices().rows.map(r => r.key)).toEqual([rows[2], rows[0], rows[1]].map(quoteSheetRowKey))
+  state.rows = [rows[1]!, rows[2]!]; await settle()
+  expect(exposed.capturePrices().rows[0]!.prices[0]).toBe(88.5)
+  state.rows.push(row('new')); await settle()
+  expect(exposed.capturePrices().rows.map(r => r.key)).toEqual([rows[2], rows[1], row('new')].map(quoteSheetRowKey))
+  state.resetKey = 'sku-2'; await settle()
+  expect(exposed.capturePrices().rows.map(r => r.key)).toEqual(state.rows.map(quoteSheetRowKey))
+  expect(exposed.capturePrices().hiddenRowKeys).toEqual([])
+})
+
+it('blocks row mutations during saving or calculation and never offers deletion in a historical record', async () => {
+  const state = mount([row('first'), row('second')])
+  state.canRemoveRows = true
+  state.removalDisabled = true; await settle()
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="下移第 1 行"]')!.disabled).toBe(true)
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="移除第 1 行渠道"]')!.disabled).toBe(true)
+  state.removalDisabled = false; state.sourcePending = true; await settle()
+  expect(document.querySelector<HTMLButtonElement>('[data-row-handle]')!.getAttribute('draggable')).toBe('false')
+  state.sourcePending = false; state.recordMode = true; await settle()
+  expect(document.querySelector('[aria-label="移除第 1 行渠道"]')).toBeNull()
 })

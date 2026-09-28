@@ -36,7 +36,7 @@ const props = withDefaults(defineProps<{
   validationIssues?: Array<{ key: string; label: string; message: string }>
 }>(), { blockReason: '', saving: false, retrying: false, canRetry: false, validationIssues: () => [] })
 
-const emit = defineEmits<{ save: []; retry: []; locateIssue: [key: string] }>()
+const emit = defineEmits<{ save: []; retry: []; locateIssue: [key: string]; removeRow: [key: string] }>()
 const customerSheet = ref<InstanceType<typeof CustomerQuoteSheet>>()
 defineExpose({ capturePrices: () => customerSheet.value?.capturePrices() })
 const countryCount = computed(() => new Set(props.rows.map(row => row.country)).size)
@@ -92,7 +92,7 @@ const quoteRange = computed(() => {
       </section>
     </div>
 
-    <CustomerQuoteSheet ref="customerSheet" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
+    <CustomerQuoteSheet ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
       :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
 
     <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">

@@ -284,7 +284,9 @@ function startFromSelection(rows: QuotationMatrixRow[], source: string) {
   presetVersion.value += 1
   showManager.value = true
 }
-defineExpose({ startFromSelection })
+const matrix = ref<InstanceType<typeof QuotationMatrix> | null>(null)
+function removeSelection(row: QuotationMatrixRow) { matrix.value?.removeSelection(row) }
+defineExpose({ startFromSelection, removeSelection })
 
 function clearCurrentSelection() {
   if (!pendingClear.value) {
@@ -459,7 +461,7 @@ function formatTime(value: string) {
       </section>
     </div>
 
-    <QuotationMatrix
+    <QuotationMatrix ref="matrix"
       variant="template"
       :active="active"
       :countries="countries" :ensure-countries="ensureCountries"
