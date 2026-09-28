@@ -896,6 +896,41 @@ async function generateWeighted() {
   await click('生成平均行')
 }
 const averageRows = () => ['SDH', '顺丰', '燕文'].map((carrier, i) => ({ ...row(String(i), carrier), quote1: [5,5.25,5.3][i]!, quote2: [5.95,6.25,6.45][i]!, quote3: [7,7,7.45][i]!, quoteCustom: [7,7,7.45][i]! }))
+it('hides all average sources while retaining the editable plan, copied AVG and saved source prices', async () => {
+  const rows = averageRows(); mount(rows); await settle(); await generateWeighted()
+  const original = exposed.capturePrices()
+  await input('综合报价 ' + original.averagePlans![0]!.id + ' 数量 1', '4.80')
+  for (let i = 0; i < rows.length; i++) {
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 1 行"]')!.disabled).toBe(false)
+    await hideRowAt(1)
+  }
+  expect(document.querySelector('.sheet-row-tools')!.textContent).toContain('显示 1 行 · 已隐藏 3 行')
+  expect(document.querySelectorAll('.sheet-editor tbody tr')).toHaveLength(1)
+  expect(document.querySelector('.average-saved')!.textContent).not.toContain('来源渠道已移除')
+  await click('应用修改')
+  const saved = exposed.capturePrices()
+  expect(saved.rows).toEqual(original.rows)
+  expect(saved.hiddenRowKeys).toEqual(rows.map(quoteSheetRowKey))
+  expect(saved.averagePlans![0]).toMatchObject({ members: original.averagePlans![0]!.members, prices: [4.8,6.14,7.09,7.09] })
+  await exposed.copyData(); await settle()
+  expect(writeText.mock.lastCall![0]).toContain('AVG')
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows).toHaveLength(1)
+  expect(render.mock.lastCall![0].rows[0]).toMatchObject({ number: 'AVG', country: 'United States', prices: [4.8,6.14,7.09,7.09] })
+  const ids = (key: string) => rows.find(row => quoteSheetRowKey(row) === key)?.channelKey
+  const initialQuote = { quantities: saved.quantities, hiddenOptionIds: saved.hiddenRowKeys!.map(key => ids(key)!), rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.prices })), averagePlans: mapAveragePlans(saved.averagePlans, ids) }
+  const system = { quantities: saved.quantities, rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.systemPrices })) }
+  app.unmount(); document.body.innerHTML = ''
+  const state = mount(rows, undefined, initialQuote, true); state.initialSystemQuote = system; await settle()
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows).toHaveLength(1)
+  expect(render.mock.lastCall![0].rows[0]!.prices[0]).toBe(4.8)
+  await click('编辑报价单'); await click('恢复全部')
+  expect(exposed.capturePrices().hiddenRowKeys).toEqual([])
+  expect(exposed.capturePrices().rows).toEqual(saved.rows)
+  expect(exposed.capturePrices().averagePlans).toEqual(saved.averagePlans)
+})
+
 it('generates weighted AVG, preserves system inputs after channel edits, and blocks invalid aggregate edits in save and copy', async () => {
   const state = mount(averageRows()); await settle()
   await input('第 1 行第 1 列美元价格', '4.80')

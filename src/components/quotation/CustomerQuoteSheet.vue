@@ -172,7 +172,6 @@ function addAverage(plan: AveragePlan) {
   invalidate()
 }
 function removeAverage(id: string) { for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(id + ':')) delete averagePriceErrors.value[key]; averagePlans.value = averagePlans.value.filter(plan => plan.id !== id); invalidate() }
-function averageMember(key: string) { return averagePlans.value.some(plan => plan.members.some(m => m.optionId === key)) }
 function sourceFor(key: string) { return props.rows.find(row => quoteSheetRowKey(row) === key)! }
 function compactSourceLabel(key: string) {
   const source = sourceFor(key)
@@ -202,11 +201,11 @@ watch(() => JSON.stringify(systemSheet.value.rows.map(row => [row.key, quantitie
 })
 watch(averagePlans, invalidate, { deep: true, flush: 'sync' })
 const allRowsSheet = computed(() => buildSheet(props.rows))
-const sheet = computed(() => withAverageErrors(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, props.showAllRows)))
-const editorSheet = computed(() => applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, true))
+const sheet = computed(() => withAverageErrors(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, props.showAllRows, allRowsSheet.value.rows)))
+const editorSheet = computed(() => applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, true, allRowsSheet.value.rows))
 const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
 function hideRow(key: string) {
-  if (copying.value || props.showAllRows || averageMember(key)) return
+  if (copying.value || props.showAllRows) return
   hiddenRowKeys.value.add(key)
   showHiddenRows.value = true
 }
@@ -514,7 +513,7 @@ onBeforeUnmount(() => {
     <QuoteBackToTop />
     <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
-    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :rows="visibleSourceRows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" /></div>
+    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
     <QuotePhotoPicker v-if="photoPickerOpen" :photos="photos" @cancel="photoPickerOpen = false" @confirm="confirmPhotos" />
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
@@ -615,7 +614,7 @@ onBeforeUnmount(() => {
               </template>
               </template>
               <td v-if="row.averageId" class="sheet-row-action"><button type="button" :disabled="copying" @click="removeAverage(row.averageId!)">移除方案</button></td>
-              <td v-else class="sheet-row-action"><button type="button" :title="averageMember(row.key) ? '请先移除引用此渠道的综合方案' : '隐藏此渠道'" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows || averageMember(row.key)" @click="hideRow(row.key)">隐藏</button></td>
+              <td v-else class="sheet-row-action"><button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button></td>
             </tr>
           </tbody>
         </table>

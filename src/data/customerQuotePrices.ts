@@ -15,7 +15,8 @@ export function recordQuoteSheetVersion(record: QuotationRecord, version: 'full'
   if (version === 'full') return record
   const hidden = new Set(recordHiddenOptionIds(record))
   const quoteOptions = record.quoteOptions?.filter(option => !hidden.has(option.id))
-  if (hidden.size && !quoteOptions?.length) throw new Error('所有报价行均已隐藏，请选择完整报价单')
+  const plans = (record.customerQuote ?? record.sheetQuote)?.averagePlans
+  if (hidden.size && !quoteOptions?.length && !plans?.length) throw new Error('所有报价行均已隐藏，请选择完整报价单')
   return { ...record, quoteOptions }
 }
 

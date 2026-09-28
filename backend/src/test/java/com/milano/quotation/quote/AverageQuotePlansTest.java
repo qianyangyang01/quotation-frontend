@@ -40,7 +40,24 @@ class AverageQuotePlansTest {
         CustomerQuotePrices.initialize(equal);
         assertEquals(1, member(equal).path("weight").asDouble());
     }
-    @Test void rejectsBadWeightsForgedTotalsDuplicateMissingHiddenAndMixedScopeSources() {
+    @Test void hidesSourcePresentationWithoutChangingPlanPricesHistoryOrReview() {
+        var r = record(); CustomerQuotePrices.initialize(r);
+        var original = r.deepCopy(); var p = patch(r);
+        ((ObjectNode) p.path("customerQuote")).putArray("hiddenOptionIds").add("a").add("b").add("c");
+        CustomerQuotePrices.preparePatch(r, p);
+        assertEquals(plan(r), plan(p));
+        assertEquals(r.path("customerQuote").path("rows"), p.path("customerQuote").path("rows"));
+        assertFalse(QuotationFinanceReview.pricesChanged(r, p));
+        QuotationConfirmation.prepare(r, p); assertFalse(p.has("quoteConfirmed"));
+        assertEquals(original, r);
+        var fresh = record();
+        ((ObjectNode) fresh.path("customerQuote")).putArray("hiddenOptionIds").add("a").add("b").add("c");
+        CustomerQuotePrices.initialize(fresh);
+        assertEquals(fresh.path("customerQuote"), fresh.path("sheetQuote"));
+        assertEquals(3, fresh.path("quoteOptions").size());
+        assertEquals(plan(r), plan(fresh));
+    }
+    @Test void rejectsBadWeightsForgedTotalsDuplicateMissingAndMixedScopeSources() {
         List<Consumer<ObjectNode>> mutations = List.of(
             r -> member(r).put("weight", 49), r -> member(r).put("weight", 0), r -> member(r).put("weight", 50.001),
             r -> ((ArrayNode) member(r).path("sourcePrices")).set(0, DoubleNode.valueOf(0)),
@@ -51,7 +68,6 @@ class AverageQuotePlansTest {
             r -> ((ObjectNode) r.path("quoteOptions").get(0)).put("countryCode", "GB"),
             r -> ((ObjectNode) r.path("quoteOptions").get(0)).put("quoteRegion", "remote"),
             r -> ((ObjectNode) r.path("quoteOptions").get(0)).put("taxRatePercent", 5),
-            r -> ((ObjectNode) r.path("customerQuote")).putArray("hiddenOptionIds").add("a"),
             r -> plan(r).putArray("quantities").add(3).add(2).add(3));
         for (var mutation : mutations) { var r = record(); mutation.accept(r); assertThrows(RuntimeException.class, () -> CustomerQuotePrices.initialize(r)); }
     }

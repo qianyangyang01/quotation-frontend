@@ -42,6 +42,20 @@ function withSummary() {
   return saved
 }
 
+it('copies the saved average when every source route is hidden without changing the record', () => {
+  const saved = withSummary()
+  saved.quoteOptions!.push({ ...saved.quoteOptions![0]!, id: 'b', isPrimary: false })
+  saved.customerQuote!.rows.push({ optionId: 'b', prices: [20, null, 230] })
+  saved.customerQuote!.hiddenOptionIds = ['a', 'b']
+  saved.customerQuote!.averagePlans = [{ id: 'p', mode: 'equal', display: 'details', provider: 'Combined Shipping', shippingTime: '', quantities: [1], members: ['a', 'b'].map(optionId => ({ optionId, weight: 1, sourcePrices: [20] })), systemPrices: [20], prices: [19] }]
+  const original = JSON.stringify(saved)
+  const visible = quotationRecordQuoteOnlyLayout(saved, 'visible')
+  expect(visible.text).toContain('Combined Shipping（综合报价）\t19.00')
+  expect(visible.text).not.toContain('化妆品专线')
+  expect(quotationRecordQuoteOnlyLayout(saved, 'full').text).toContain('化妆品专线')
+  expect(JSON.stringify(saved)).toBe(original)
+})
+
 it('hides only saved option identities and retains the original primary weight summary', () => {
   const saved = withSummary()
   saved.weightSnapshot = undefined
