@@ -24,7 +24,7 @@ describe('saved record customer table copying', () => {
     const sheet = buildCustomerQuoteSheet({ ...source, edits })
     const lines = customerQuoteSheetTsv(sheet).split('\r\n').map(row => row.split('\t'))
     expect(lines).toEqual([
-      ['No.', 'SKU', '1 set (USD)', '2 sets (USD)', '3 sets (USD)', '7 sets (USD)', 'Country', 'Logistics Provider', 'Shipping Time', 'Processing Time'],
+      ['No.', 'SKU', '1 set (USD)', '2 sets (USD)', '3 sets (USD)', '7 sets (USD)', 'Country / Zone', 'Logistics Provider', 'Shipping Time', 'Processing Time'],
       ['1', '—', '$13.00', '—', '$0.00', '$55.68', 'New Zealand', 'SFYD Express', '7-12 workingdays', '1-2 workingdays'],
       ['2', '—', '$13.00', '—', '$0.00', '$55.68', 'New Zealand', 'SFYD Express', '9-15 workingdays', '1-2 workingdays'],
     ])

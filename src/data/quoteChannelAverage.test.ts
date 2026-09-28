@@ -5,6 +5,15 @@ import { buildCustomerQuoteSheet, newQuoteSheetEdits, quoteSheetRowKey, quoteShe
 const sources: QuoteSheetSourceRow[] = ['SDH', 'SF', '燕文'].map((carrier, i) => ({ country: '美国', quoteRegion: '全国统一', carrier, transport: '普货', channelKey: String(i), rule: '', ruleId: i, channelCode: String(i), eta: '7-12 workingdays', quote1: [5, 5.25, 5.3][i]!, quote2: [5.95, 6.25, 6.45][i]!, quote3: [7, 7, 7.45][i]!, quoteCustom: null }))
 const plan = (): AveragePlan => ({ id: 'plan-1', mode: 'weighted', display: 'details', provider: 'Combined Shipping', shippingTime: '7-12 workingdays', quantities: [1, 2, 3], members: sources.map((row, i) => ({ optionId: quoteSheetRowKey(row), weight: [50, 30, 20][i]!, sourcePrices: [row.quote1, row.quote2, row.quote3] })), systemPrices: [5.14, 6.14, 7.09], prices: [5.14, 6.14, 7.09] })
 describe('channel average snapshot', () => {
+  it('lists every selected zone on a cross-zone summary instead of inheriting only the first zone', () => {
+    const rows = sources.map((row, i) => ({ ...row, country: 'AU', quoteRegion: `澳大利亚${i + 1}区` }))
+    const sheet = buildCustomerQuoteSheet({ rows, countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 0, bundle: false, quantities: [1, 2, 3] })
+    const p = plan(); p.members = rows.map((row, i) => ({ ...p.members[i], optionId: quoteSheetRowKey(row) })); p.display = 'summary'
+    const result = applyAveragePlans(sheet, [p], rows, [1, 2, 3])
+    expect(result.rows).toHaveLength(1)
+    expect(result.rows[0].region).toBe('Zone 1 / Zone 2 / Zone 3')
+    expect(result.rows[0].prices).toEqual(p.prices)
+  })
   it('calculates each tier independently with decimal half-up rounding', () => {
     const p = plan()
     expect(averagePrices(p.members, 'weighted', 3)).toEqual([5.14, 6.14, 7.09])

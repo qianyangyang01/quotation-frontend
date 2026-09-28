@@ -80,6 +80,22 @@ function centered(context: CanvasRenderingContext2D, text: string, left: number,
   wrapped.forEach((line, index) => context.fillText(line, (left + right) / 2,
     top + height / 2 + (index - (wrapped.length - 1) / 2) * 26))
 }
+function countryCell(context: CanvasRenderingContext2D, row: CustomerQuoteSheet['rows'][number], left: number, right: number, top: number, height: number) {
+  font(context)
+  const countryLines = lines(context, row.country, right - left - 20)
+  const zoneLines = lines(context, row.region!, right - left - 40)
+  const badgeHeight = zoneLines.length * 26 + 10
+  const blockHeight = countryLines.length * 26 + 6 + badgeHeight
+  const y = top + (height - blockHeight) / 2
+  context.fillStyle = '#111111'
+  centered(context, row.country, left, right, y, countryLines.length * 26)
+  const badgeWidth = Math.min(right - left - 20, Math.max(...zoneLines.map(line => context.measureText(line).width)) + 20)
+  const x = (left + right - badgeWidth) / 2, badgeTop = y + countryLines.length * 26 + 6
+  context.fillStyle = '#fff0e3'; context.strokeStyle = '#f58220'; context.lineWidth = 1
+  context.beginPath(); context.roundRect(x, badgeTop, badgeWidth, badgeHeight, 6); context.fill(); context.stroke()
+  context.fillStyle = '#b94f00'; context.textAlign = 'center'
+  zoneLines.forEach((line, index) => context.fillText(line, (left + right) / 2, badgeTop + 5 + 13 + index * 26))
+}
 function exportBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('报价图片生成超时，请重试')), 15000)
@@ -122,6 +138,7 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       const values = valuesFor(row)
       const lineCount = Math.max(...values.map((value, column) => {
         font(context, boldCell(column))
+        if (cells[column].key === 'country' && row.region) return lines(context, row.country, columns[column + 1] - columns[column] - 20).length + lines(context, row.region, columns[column + 1] - columns[column] - 40).length + 1
         return lines(context, value, columns[column + 1] - columns[column] - 20).length
       }))
       return Math.max(referenceRowHeights[index % 6], lineCount * 26 + 8)
@@ -206,7 +223,10 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       context.fillRect(22, y, right - 22, height)
       const values = valuesFor(row)
       context.fillStyle = row.averageId ? '#d96100' : '#111111'
-      values.forEach((value, column) => centered(context, value, columns[column], columns[column + 1], y, height, boldCell(column)))
+      values.forEach((value, column) => {
+        if (cells[column].key === 'country' && row.region) countryCell(context, row, columns[column], columns[column + 1], y, height)
+        else { context.fillStyle = row.averageId ? '#d96100' : '#111111'; centered(context, value, columns[column], columns[column + 1], y, height, boldCell(column)) }
+      })
       y += height
       context.strokeStyle = '#d7d7d7'
       context.lineWidth = 1

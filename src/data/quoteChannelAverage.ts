@@ -77,6 +77,7 @@ export function applyAveragePlans(sheet: CustomerQuoteSheet, plans: AveragePlan[
     if (!first) continue
     const summary: CustomerQuoteSheetRow = {
       ...first, key: `average:${plan.id}`, number: 'AVG', averageId: plan.id, provider: plan.provider,
+      region: [...new Set(sourceRows.filter(row => keys.has(row.key)).map(row => row.region).filter(Boolean))].join(' / '),
       shippingTime: plan.shippingTime || 'To be confirmed', processingTime: '1-2 workingdays',
       prices: quantities.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null),
       sourceDescription: `${plan.mode === 'equal' ? '普通平均' : '加权平均'} · ${plan.members.length} 条渠道 · 系统报价为计算基准`,

@@ -672,8 +672,8 @@ onBeforeUnmount(() => {
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
               <td v-else-if="group.key === 'product' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`临时商品图 ${photoIndex + 1}`"></div></td>
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
-              <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}</td>
-              <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
+              <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}<small v-if="group.key === 'country' && row.region" class="sheet-zone-label">{{ row.region }}</small></td>
+              <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"><div v-if="row.region || row.regionTranslationRequired"><input class="sheet-zone-label" :value="edits.fields?.[row.key]?.region ?? row.region" :aria-label="`第 ${index + 1} 行英文分区`" placeholder="English zone" maxlength="80" :disabled="copying" @input="updateField(row.key, 'region', $event)"></div></td>
               <td v-else-if="group.key === 'provider'"><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source" :title="row.sourceDescription">{{ compactSourceLabel(row.key) }}</small></td>
               <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(sourceFor(row.key).eta) === '—' ? '' : formatShippingTime(sourceFor(row.key).eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 workingdays" maxlength="80" :disabled="copying" @input="updateShippingTime(sourceFor(row.key), $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(sourceFor(row.key))">恢复渠道时效</button></td>
               <td v-else-if="group.key === 'processingTime'"><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
@@ -699,7 +699,7 @@ onBeforeUnmount(() => {
       <div v-if="hiddenRows.length && showHiddenRows" class="sheet-hidden-rows">
         <div class="sheet-hidden-heading"><strong>已隐藏行（{{ hiddenRows.length }}）</strong><span>仅当前报价单有效，可随时恢复。</span></div>
         <div v-for="row in hiddenRows" :key="row.key" class="sheet-hidden-row">
-          <span>{{ row.sku }}</span><span>{{ row.country }}</span><span>{{ row.provider }}<small>{{ row.sourceDescription }}</small></span>
+          <span>{{ row.sku }}</span><span>{{ row.country }}<small v-if="row.region" class="sheet-zone-label">{{ row.region }}</small></span><span>{{ row.provider }}<small>{{ row.sourceDescription }}</small></span>
           <button type="button" :aria-label="`恢复 ${row.sourceDescription}`" :disabled="copying" @click="restoreRow(row.key)">恢复</button>
         </div>
       </div>
@@ -724,6 +724,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.customer-sheet .sheet-zone-label{display:inline-block;max-width:180px;width:122px;height:auto;min-height:24px;box-sizing:border-box;margin:3px auto;padding:3px 6px;border:1px solid #f58220!important;border-radius:6px;background:#fff0e3;color:#b94f00;font-size:12px;text-align:center;overflow-wrap:anywhere}
 .sheet-row-controls{display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
 .customer-sheet .sheet-row-controls button{padding:3px 6px;font-size:12px}
 .customer-sheet .sheet-row-controls .sheet-row-handle{cursor:grab;font-size:18px;line-height:18px}

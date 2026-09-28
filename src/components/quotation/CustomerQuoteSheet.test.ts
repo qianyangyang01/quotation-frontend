@@ -52,6 +52,18 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('keeps the English zone when switching country format, previewing and copying a saved quote', async () => {
+  const source = { ...row(), country: '澳大利亚', quoteRegion: '澳大利亚2区' }
+  mount([source], undefined, undefined, true)
+  const before = exposed.capturePrices()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行英文分区"]')?.value).toBe('Zone 2')
+  await click('二字码'); await click('预览报价单')
+  expect(render.mock.lastCall![0].rows[0]).toMatchObject({ country: 'AU', region: 'Zone 2' })
+  await click('复制报价数据')
+  expect(writeText.mock.lastCall![0]).toContain('AU · Zone 2')
+  expect(exposed.capturePrices()).toEqual(before)
+})
+
 it('does not reprice custom quantity routes when editing presentation or customer amounts', async () => {
   const calculate = vi.fn((_row: QuoteSheetSourceRow, quantity: number) => quantity * 2)
   mount(Array.from({ length: 30 }, (_, i) => row(`perf-${i}`)), calculate)
