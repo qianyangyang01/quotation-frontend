@@ -124,6 +124,6 @@ it.each(['A', 'NEW'])('passes the mounted sheet prices and %s grade through the 
     customerQuote:{averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))
-  expect(resetLocalDraft).toHaveBeenCalledOnce()
+  expect(resetLocalDraft).toHaveBeenCalledExactlyOnceWith({ name: 'QA', selectedCustomerId: '' })
   expect(toast).toHaveBeenCalledWith(expect.stringContaining('报价已保存：QA-SAVE-REF'))
 })

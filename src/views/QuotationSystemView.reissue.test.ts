@@ -7,6 +7,8 @@ import { api } from '@/services/http'
 import { clearFinanceSettingsCache } from '@/services/financeSettings'
 import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import type { QuotationMatrixRow } from '@/components/quotation/types'
+import { authState } from '@/data/authStore'
+import { loadLastQuotationCustomer, rememberQuotationCustomer } from '@/data/lastQuotationCustomer'
 
 const router = vi.hoisted(() => ({ replace: vi.fn().mockResolvedValue(undefined), query: { reissue: 'original', release: 'local' } as Record<string, string> }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: router.query }), useRouter: () => router, onBeforeRouteLeave: vi.fn() }))
@@ -36,8 +38,12 @@ let state: { flushDraft: () => Promise<void>; persistQuotation: (input: never) =
   quoteMatrixMode: 'common' | 'specified' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[]; specifiedQuoteRows: QuotationMatrixRow[] }
 let purchaseFailure = false
 let sourceFailure = false
-beforeEach(() => { clearFinanceSettingsCache(); vi.clearAllMocks(); purchaseFailure = false; sourceFailure = false; router.query = { reissue: 'original', release: 'local' } })
-afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks() })
+beforeEach(() => {
+  clearFinanceSettingsCache(); vi.clearAllMocks(); localStorage.clear()
+  authState.current = { id: 'employee-a', account: 'A', name: '业务员 A', role: 'employee', status: 'enabled', mustChangePassword: false, passwordUpdatedAt: '' }
+  purchaseFailure = false; sourceFailure = false; router.query = { reissue: 'original', release: 'local' }
+})
+afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks(); localStorage.clear(); authState.current = null })
 async function mount(existing: boolean, withdrawn = false) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return finance
@@ -64,6 +70,7 @@ async function mount(existing: boolean, withdrawn = false) {
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
 
 it('reissues in memory, reads current purchase data and removes unavailable source channels without creating a record', async () => {
+  rememberQuotationCustomer('employee-a', { name: '上次提交客户', selectedCustomerId: '' })
   await mount(false)
   await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
   expect(state.customerName).toBe('原客户')
@@ -162,11 +169,51 @@ it('starts empty again after reopening and stops warning when ordinary input is 
 })
 
 it('still autosaves edits to a withdrawn quotation with its original source and version', async () => {
+  rememberQuotationCustomer('employee-a', { name: '上次提交客户', selectedCustomerId: '' })
   router.query = { release: 'local' }
   await mount(true, true)
+  expect(state.customerName).toBe('未完成客户')
   state.customerName = '撤回后修改'; await nextTick()
   await vi.waitFor(() => expect(api.put).toHaveBeenCalledWith('/quotation-drafts/mine/state',
     expect.objectContaining({ customerName: '撤回后修改' }), { 'If-Match': '7', 'X-Quotation-Source': 'original' }), { timeout: 2000 })
+})
+
+it('remembers only successful submissions when returning to the quotation page', async () => {
+  router.query = {}
+  await mount(false)
+  state.customerName = '已提交客户'
+  vi.mocked(api.post).mockResolvedValue({ id: 'saved', no: 'QT-SAVED' })
+  await state.persistQuotation({ customerName: '已提交客户' } as never)
+  expect(loadLastQuotationCustomer('employee-a')).toEqual({ name: '已提交客户', selectedCustomerId: '' })
+  state.customerName = '未提交修改'
+  app.unmount(); host.remove()
+  await mount(false)
+  expect(state.customerName).toBe('已提交客户')
+  expect(state.products[0].sku).toBe('')
+  const leave = vi.mocked(onBeforeRouteLeave).mock.calls.at(-1)![0]
+  expect(await leave.call(undefined as never, {} as never, {} as never, vi.fn())).toBe(true)
+  vi.mocked(api.post).mockRejectedValue(new Error('保存失败'))
+  await expect(state.persistQuotation({ customerName: '失败客户' } as never)).rejects.toThrow('保存失败')
+  expect(loadLastQuotationCustomer('employee-a')?.name).toBe('已提交客户')
+})
+
+it('keeps remembered customers separate for each signed-in account', async () => {
+  rememberQuotationCustomer('employee-b', { name: 'B 的客户', selectedCustomerId: '' })
+  router.query = {}
+  await mount(false)
+  expect(state.customerName).toBe('')
+  vi.mocked(api.post).mockResolvedValue({ id: 'saved', no: 'QT-SAVED' })
+  await state.persistQuotation({ customerName: 'A 的客户' } as never)
+  expect(loadLastQuotationCustomer('employee-a')?.name).toBe('A 的客户')
+  expect(loadLastQuotationCustomer('employee-b')?.name).toBe('B 的客户')
+})
+
+it('does not fail a completed quotation when browser storage is unavailable', async () => {
+  router.query = {}
+  await mount(false)
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage unavailable') })
+  vi.mocked(api.post).mockResolvedValue({ id: 'saved', no: 'QT-SAVED' })
+  await expect(state.persistQuotation({ customerName: '成功客户' } as never)).resolves.toMatchObject({ id: 'saved', no: 'QT-SAVED' })
 })
 
 it('does not copy inaccessible source records', async () => {

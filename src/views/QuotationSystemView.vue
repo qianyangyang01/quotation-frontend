@@ -15,6 +15,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { loadRecord } from '@/data/quotationRecordQuery'
 import { quotationReissuePayload } from '@/services/quotationReissue'
 import { currentAuthUser } from '@/data/authStore'
+import { loadLastQuotationCustomer, rememberQuotationCustomer, type LastQuotationCustomer } from '@/data/lastQuotationCustomer'
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
 import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountryLoader'
@@ -1173,10 +1174,19 @@ async function loadAndRestoreDraft() {
   if (state.sourceQuote && state.exists && state.payload) {
     await applyDraftPayload(state.payload, undefined, { restoreQuotation: true })
     await establishDraftBaseline('saved')
-  } else await establishDraftBaseline('idle')
+  } else {
+    if (!route.query.reissue) {
+      const customer = loadLastQuotationCustomer(currentAuthUser.value.id)
+      if (customer) {
+        customerName.value = customer.name
+        selectedCustomerId.value = customer.selectedCustomerId
+      }
+    }
+    await establishDraftBaseline('idle')
+  }
   return state.sourceQuote ? state : { exists: false, payload: null, version: -1, updatedAt: null }
 }
-async function resetLocalDraft() {
+async function resetLocalDraft(customer?: LastQuotationCustomer) {
   submitOrdinaryQuotation = quotationSubmitter()
   draftNeedsQuery.value = false
   draftChannelNotice.value = ''
@@ -1188,8 +1198,8 @@ async function resetLocalDraft() {
   window.clearTimeout(draftTimer)
   draftError.value = ''
   showDraftConflictDialog.value = false
-  customerName.value = ''
-  selectedCustomerId.value = ''
+  customerName.value = customer?.name || ''
+  selectedCustomerId.value = customer?.selectedCustomerId || ''
   skuSearch.value = ''
   monthlySalesEstimate.value = '10'
   specialPackagingGrams.value = ''
@@ -1997,12 +2007,19 @@ function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>
 const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave> | null>(null)
 let submitOrdinaryQuotation = quotationSubmitter()
 async function persistQuotation(input: Parameters<typeof createQuotationRecord>[0]) {
-  if (!draftSource.value) return submitOrdinaryQuotation(input)
-  await flushDraft()
-  window.clearTimeout(draftTimer)
-  draftReady.value = false
-  try { return await submitWithdrawn(draftSource.value, draftVersion.value, input) }
-  catch (error) { draftReady.value = true; throw error }
+  const userId = currentAuthUser.value.id
+  const customer = { name: input.customerName, selectedCustomerId: input.customerOperation?.id || '' }
+  let record: Awaited<ReturnType<typeof createQuotationRecord>>
+  if (!draftSource.value) record = await submitOrdinaryQuotation(input)
+  else {
+    await flushDraft()
+    window.clearTimeout(draftTimer)
+    draftReady.value = false
+    try { record = await submitWithdrawn(draftSource.value, draftVersion.value, input) }
+    catch (error) { draftReady.value = true; throw error }
+  }
+  rememberQuotationCustomer(userId, customer)
+  return record
 }
 async function save() {
   await nextTick() // Capture the editor only after recalculated parent props reach it.
@@ -2094,7 +2111,7 @@ async function save() {
   const countryCount = new Set(selectedMatrixRows.map(row => row.country)).size
   draftVersion.value = -1
   draftUpdatedAt.value = ''
-  await resetLocalDraft()
+  await resetLocalDraft({ name: customer, selectedCustomerId: record.customerOperation?.id || '' })
   toast(`报价已保存：${record.no}（1 张报价单 · ${countryCount} 个国家 · ${selectedMatrixRows.length} 条渠道）`)
 }
 function toast(message: string) {
@@ -2128,7 +2145,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
 
       <section v-if="!draftSource" class="draft-status-bar" aria-live="polite">
-        <span><b>{{ draftInitializationFailed ? `报价工作区读取失败：${draftError}` : !draftReady ? '正在加载报价工作区…' : '报价仅在点击“保存报价”后保存' }}</b><small>当前输入不会自动保存，刷新或离开页面后不会恢复。</small></span>
+        <span><b>{{ draftInitializationFailed ? `报价工作区读取失败：${draftError}` : !draftReady ? '正在加载报价工作区…' : '报价仅在点击“保存报价”后保存' }}</b><small>当前输入不会自动保存；提交成功后会记住客户名称。</small></span>
         <button v-if="draftInitializationFailed" type="button" @click="retryDraftInitialization">重试读取</button>
         <button v-else-if="draftReady && draftStatus === 'dirty'" type="button" :disabled="clearingDraft || savingQuotation" @click="clearDraft">清空重新开始</button>
       </section>

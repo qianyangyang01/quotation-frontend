@@ -5,6 +5,8 @@ import QuotationSystemView from './QuotationSystemView.vue'
 import { operationFeesLabel } from '@/data/customerOperationFees'
 import { api } from '@/services/http'
 import { clearFinanceSettingsCache, readFinanceSetting } from '@/services/financeSettings'
+import { authState } from '@/data/authStore'
+import { rememberQuotationCustomer } from '@/data/lastQuotationCustomer'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn().mockResolvedValue(undefined) }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async importOriginal => ({
@@ -38,6 +40,8 @@ describe('customer operation settings on the actual quotation page', () => {
 
   beforeEach(() => {
     clearFinanceSettingsCache()
+    localStorage.clear()
+    authState.current = { id: 'employee-a', account: 'A', name: '业务员 A', role: 'employee', status: 'enabled', mustChangePassword: false, passwordUpdatedAt: '' }
     host = document.createElement('div')
     document.body.append(host)
   })
@@ -47,16 +51,18 @@ describe('customer operation settings on the actual quotation page', () => {
     host.remove()
     vi.restoreAllMocks()
     clearFinanceSettingsCache()
+    localStorage.clear()
+    authState.current = null
   })
 
-  async function mountWithDraft(customerName: string, selectedCustomerId = '', specialPackagingGrams?: number) {
+  async function mountWithDraft(customerName: string, selectedCustomerId = '', specialPackagingGrams?: number, withdrawn = true) {
     const finance = new Promise<typeof financeResponse>(resolve => { resolveFinance = resolve })
     vi.spyOn(api, 'get').mockImplementation(async path => {
       if (path === '/finance-settings') return finance
       if (path === '/quotation-templates') return []
       if (path === '/quotation-readiness') return { ready: true, missing: [] }
       if (path === '/quotation-drafts/mine/state') return {
-        exists: true, version: 1, sourceQuote: { id: 'withdrawn', no: 'QT-WITHDRAWN', version: 1 }, updatedAt: '2026-09-16T00:44:59Z',
+        exists: true, version: 1, ...(withdrawn ? { sourceQuote: { id: 'withdrawn', no: 'QT-WITHDRAWN', version: 1 } } : {}), updatedAt: '2026-09-16T00:44:59Z',
         payload: { schemaVersion: 2, customerName, selectedCustomerId, specialPackagingGrams, quoteMode: 'single', skuSearch: '', logisticsAttribute: '普货' },
       }
       throw new Error(`Unexpected request: ${path}`)
@@ -65,8 +71,16 @@ describe('customer operation settings on the actual quotation page', () => {
     app.mount(host)
     expect(readFinanceSetting('customer-operation-fees')).toBeUndefined()
     resolveFinance(financeResponse)
-    await vi.waitFor(() => expect(host.textContent).toContain('已恢复并保存草稿'))
+    await vi.waitFor(() => expect(host.textContent).toContain(withdrawn ? '已恢复并保存草稿' : '报价仅在点击“保存报价”后保存'))
   }
+
+  it.each(['', 'bk', 'off'])('restores remembered customer selection without silently changing fee semantics: %s', async selectedCustomerId => {
+    rememberQuotationCustomer('employee-a', { name: 'BK', selectedCustomerId })
+    await mountWithDraft('', '', undefined, false)
+    expect(host.querySelector<HTMLInputElement>('[aria-label="客户名称"]')!.value).toBe('BK')
+    expect(host.textContent).toContain(selectedCustomerId === 'bk' ? '公司操作费：' + operationFeesLabel(customers[0]!)
+      : selectedCustomerId === 'off' ? '所选客户设置已变化' : '手动填写，不加公司操作费')
+  })
 
   it.each([undefined,10])('restores packaging from the withdrawn quotation draft and retains it when autosaving: %s', async grams => {
     await mountWithDraft('包材草稿','',grams)
