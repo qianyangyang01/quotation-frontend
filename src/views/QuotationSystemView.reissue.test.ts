@@ -67,6 +67,7 @@ it('reissues in memory, reads current purchase data and removes unavailable sour
   await mount(false)
   await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
   expect(state.customerName).toBe('原客户')
+  expect(state.quoteMatrixMode).toBe('common')
   // Current zero-tax-point purchase pricing adds the configured 1%, rather than copying the old 999.
   expect(state.products[0]).toMatchObject({ sku: 'BK100', purchase: 12.12 })
   expect(state.modeSelections.common).toEqual([])
@@ -123,8 +124,10 @@ it('keeps ordinary edits local, warns before leaving, and clears without server 
   expect(await discarded).toBe(true)
   expect(api.put).not.toHaveBeenCalled(); expect(api.delete).not.toHaveBeenCalled()
   state.customerName = '新的输入'; await nextTick()
+  state.quoteMatrixMode = 'specified'; await nextTick()
   button('清空重新开始').click()
   await vi.waitFor(() => expect(state.customerName).toBe(''))
+  expect(state.quoteMatrixMode).toBe('template')
   expect(api.delete).not.toHaveBeenCalled()
 })
 
@@ -141,6 +144,7 @@ it('submits ordinary quotes directly without waiting for or creating a server dr
 it('starts empty again after reopening and stops warning when ordinary input is reverted', async () => {
   router.query = { release: 'local' }
   await mount(true)
+  expect(state.quoteMatrixMode).toBe('template')
   state.customerName = '临时客户'; await nextTick()
   state.customerName = ''; await nextTick()
   const leave = vi.mocked(onBeforeRouteLeave).mock.calls.at(-1)![0]
@@ -153,6 +157,7 @@ it('starts empty again after reopening and stops warning when ordinary input is 
   await mount(true)
   expect(state.customerName).toBe('')
   expect(state.draftVersion).toBe(-1)
+  expect(state.quoteMatrixMode).toBe('template')
   expect(api.put).not.toHaveBeenCalled(); expect(api.delete).not.toHaveBeenCalled()
 })
 

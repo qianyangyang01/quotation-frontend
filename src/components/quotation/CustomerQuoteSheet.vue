@@ -134,6 +134,14 @@ function loadAveragePlans() {
 }
 const averagePlans = ref<AveragePlan[]>(loadAveragePlans())
 const averageOpen = ref(averagePlans.value.length > 0)
+const averagePanelAnchor = ref<HTMLElement>()
+async function toggleAveragePanel() {
+  averageOpen.value = !averageOpen.value
+  if (averageOpen.value) {
+    await nextTick()
+    averagePanelAnchor.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }
+}
 const averageNotice = ref('')
 const averageInputs = ref<Record<string, string>>({})
 const averagePriceErrors = ref<Record<string, string>>({})
@@ -166,6 +174,10 @@ function addAverage(plan: AveragePlan) {
 function removeAverage(id: string) { for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(id + ':')) delete averagePriceErrors.value[key]; averagePlans.value = averagePlans.value.filter(plan => plan.id !== id); invalidate() }
 function averageMember(key: string) { return averagePlans.value.some(plan => plan.members.some(m => m.optionId === key)) }
 function sourceFor(key: string) { return props.rows.find(row => quoteSheetRowKey(row) === key)! }
+function compactSourceLabel(key: string) {
+  const source = sourceFor(key)
+  return [source.transport || source.rule, source.quoteRegion === '全国统一' ? '' : source.quoteRegion].filter(Boolean).join(' · ')
+}
 function changeAveragePrice(id: string, quantity: number, event: Event) {
   const plan = averagePlans.value.find(plan => plan.id === id)
   const raw = (event.target as HTMLInputElement).value
@@ -500,35 +512,15 @@ onBeforeUnmount(() => {
 <template>
   <section class="customer-sheet" aria-labelledby="customer-sheet-title">
     <QuoteBackToTop />
-    <div class="sheet-toolbar">
-      <div><h3 id="customer-sheet-title">客户报价单</h3><p>点击内容可修改；右侧新增列，填写数量后自动带出对应价格</p></div>
-      <div class="sheet-actions">
-        <button v-if="rows.length" type="button" :disabled="copying" :aria-expanded="averageOpen" @click="averageOpen = !averageOpen">渠道平均报价</button>
-        <button v-if="!editing" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
-        <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
-        <button type="button" class="sheet-primary" :disabled="!canCopy" @click="copyCurrent">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
-        <button type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="copyData">复制报价数据</button>
-      </div>
-    </div>
+    <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
-    <p class="sheet-local-note">图片仅在当前页面临时生成，不上传、不存储；保存报价记录时带入客户价格、署名和联系方式，系统原价与物流资料不变。</p>
-    <fieldset v-if="rows.length" class="sheet-visibility" :disabled="copying"><legend>显示列</legend>
-      <label v-for="column in QUOTE_SHEET_OPTIONAL_COLUMNS" :key="column.key"><input type="checkbox" :checked="columnVisible(column.key)" :aria-label="`显示${column.name}列`" @change="toggleColumn(column.key)">{{ column.name }}</label>
-      <span>取消勾选后，报价图片和复制数据中将隐藏该列；仅当前报价单有效。</span>
-    </fieldset>
-    <fieldset v-if="rows.length" class="sheet-photos" :disabled="copying || rendering">
-      <legend>临时商品图</legend>
-      <button type="button" @click="photoPickerOpen = true">{{ photos.length ? '管理图片' : '添加图片' }}</button>
-      <button v-if="photos.length" type="button" @click="clearPhotos">移除图片</button>
-      <label v-if="photos.length"><input v-model="showPhotos" type="checkbox" aria-label="显示商品图片列">显示图片</label>
-      <span>已添加 {{ photos.length }} / {{ MAX_QUOTE_PHOTOS }} 张。打开弹窗后可连续粘贴或选择图片，最后统一确认；图片仅用于本次展示，刷新、离开页面或更换商品后清除。</span>
-    </fieldset>
-    <QuoteAveragePanel v-if="averageOpen" :rows="visibleSourceRows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" />
+    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :rows="visibleSourceRows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
     <QuotePhotoPicker v-if="photoPickerOpen" :photos="photos" @cancel="photoPickerOpen = false" @confirm="confirmPhotos" />
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
-    <div v-else-if="editing" class="sheet-editor">
+    <div v-else class="sheet-editor">
+      <template v-if="editing">
       <div class="sheet-metadata">
         <label>报价单标题<input :value="edits.title ?? 'JerryFulfillment Quote Sheet'" aria-label="报价单标题" maxlength="80" :disabled="copying" @input="edits.title = ($event.target as HTMLInputElement).value"></label>
         <label>By Agent · 署名<input :value="edits.agent" @input="rememberContact('agent', $event)" aria-label="报价单署名" autocomplete="off" maxlength="40" :disabled="copying"></label>
@@ -540,22 +532,43 @@ onBeforeUnmount(() => {
         <p class="sheet-edit-help">英文名补填：以下物流商尚无英文显示名，请填写后预览或复制。同一物流商的全部渠道共用此名称，仅当前页面有效。</p>
         <div class="sheet-metadata"><label v-for="provider in missingProviders" :key="provider.key">{{ provider.name }} · English name<input :value="edits.providerNames?.[provider.key] || ''" :aria-label="`${provider.name}英文名`" autocomplete="off" placeholder="Enter English name" maxlength="80" :disabled="copying" @input="updateProviderName(provider.key, $event)"></label></div>
       </div>
-      <p class="sheet-edit-help">各列可拖动排序；价格按整组移动，组内数量仍可单独排序。数量填写正整数，最多 10 个价格列，空价格显示 —。</p>
-      <div class="sheet-layout-preference">
-        <span>列顺序按当前登录账号自动记在本浏览器，下次打开继续使用。</span>
-        <button type="button" :disabled="copying" @click="resetColumnOrder">恢复默认列顺序</button>
-        <span v-if="layoutSaveState === 'saved'" role="status">已记住列顺序</span>
-        <span v-else-if="layoutSaveState === 'failed'" role="alert">列顺序未能保存，当前调整仅本次有效；请允许浏览器本地存储后重新调整。</span>
-      </div>
-      <p class="sheet-edit-help">价格支持加减乘除和括号，例如 42.6+2、42.6*1.05、42.6/0.95；按回车或离开输入框后计算，结果四舍五入保留两位小数。</p>
       <p v-if="!calculatePrice" class="sheet-edit-help">历史记录仅带出已保存数量的价格；新增数量没有历史价格时，请手动填写。</p>
+      </template>
+      <div class="sheet-controls">
+        <div class="sheet-display-tools">
+          <fieldset class="sheet-visibility" :disabled="copying" aria-label="显示列">
+            <strong>显示列</strong>
+            <label v-for="column in QUOTE_SHEET_OPTIONAL_COLUMNS" :key="column.key"><input type="checkbox" :checked="columnVisible(column.key)" :aria-label="`显示${column.name}列`" @change="toggleColumn(column.key)">{{ column.name }}</label>
+          </fieldset>
+          <fieldset class="sheet-photos" :disabled="copying || rendering" aria-label="报价单图片">
+            <button class="sheet-photo-button" type="button" @click="photoPickerOpen = true">{{ photos.length ? '管理图片' : '添加图片' }}</button>
+            <span>{{ photos.length }} / {{ MAX_QUOTE_PHOTOS }} 张</span>
+            <button v-if="photos.length" type="button" @click="clearPhotos">移除图片</button>
+            <label v-if="photos.length"><input v-model="showPhotos" type="checkbox" aria-label="显示商品图片列">显示图片</label>
+          </fieldset>
+        </div>
       <div class="sheet-row-tools">
+        <template v-if="editing">
         <strong>显示 {{ sheet.rows.length }} 行 · 已隐藏 {{ hiddenRows.length }} 行</strong>
         <button v-if="hiddenRows.length" type="button" :aria-expanded="showHiddenRows" @click="showHiddenRows = !showHiddenRows">{{ showHiddenRows ? '收起隐藏行' : '查看隐藏行' }}（{{ hiddenRows.length }}）</button>
         <button v-if="hiddenRows.length" type="button" :disabled="copying" @click="restoreAllRows">恢复全部</button>
-        <span>{{ showAllRows ? '正在查看完整报价单；切换到隐藏行后的报价单可调整隐藏行。' : '隐藏行不参与报价预览、复制图片和复制数据；保存时保留隐藏设置及全部渠道价格，后台可选择两个版本。' }}</span>
-        <div class="sheet-column-tools"><span class="sheet-column-count">价格列 {{ columns.length }} / 10</span><button type="button" class="sheet-add-button" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button></div>
+        <button type="button" :disabled="copying" @click="resetColumnOrder">恢复默认列顺序</button>
+        </template>
+        <div class="sheet-actions">
+          <button type="button" :disabled="copying" :aria-expanded="averageOpen" @click="toggleAveragePanel">渠道平均报价</button>
+          <button v-if="!editing" class="sheet-primary" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
+          <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
+          <button type="button" :disabled="!canCopy" @click="copyCurrent">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
+          <button type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="copyData">复制报价数据</button>
+          <button v-if="editing" type="button" class="sheet-add-button" :title="`价格列 ${columns.length} / ${MAX_QUOTE_SHEET_COLUMNS}`" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button>
+        </div>
       </div>
+      <div v-if="editing && layoutSaveState" class="sheet-layout-preference">
+        <span v-if="layoutSaveState === 'saved'" role="status">已记住列顺序</span>
+        <span v-else-if="layoutSaveState === 'failed'" role="alert">列顺序未能保存，当前调整仅本次有效；请允许浏览器本地存储后重新调整。</span>
+      </div>
+      </div>
+      <template v-if="editing">
       <p v-if="!sheet.rows.length" class="sheet-pending" role="status">所有行已隐藏，请恢复至少一行后再预览或复制。</p>
       <div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
         <table>
@@ -568,7 +581,7 @@ onBeforeUnmount(() => {
                 <button type="button" class="sheet-group-drag" :draggable="!copying" :data-group-handle="group.key"
                   :aria-label="`${groupNames[group.key]}排序，左右键移动`" title="拖动排序，或聚焦后按左右方向键" :disabled="copying"
                   @dragstart="startGroupDrag(group.key, $event)" @dragend="endColumnDrag"
-                  @keydown.left.prevent="moveGroupByKey(group.key, -1)" @keydown.right.prevent="moveGroupByKey(group.key, 1)">⠿ <span>{{ group.key === 'prices' ? '价格 · 整组拖动' : group.label }}</span></button>
+                  @keydown.left.prevent="moveGroupByKey(group.key, -1)" @keydown.right.prevent="moveGroupByKey(group.key, 1)">⠿ <span>{{ group.key === 'prices' ? '价格 · USD' : group.label }}</span></button>
                 <div v-if="group.key === 'country'" class="sheet-country-format" role="group" aria-label="国家显示方式">
                   <button type="button" :aria-pressed="(edits.countryFormat ?? 'name') === 'name'" :disabled="copying" @click="setCountryFormat('name')">全称</button>
                   <button type="button" :aria-pressed="edits.countryFormat === 'code'" :disabled="copying" @click="setCountryFormat('code')">二字码</button>
@@ -580,7 +593,7 @@ onBeforeUnmount(() => {
             <th v-for="(column, index) in columns" :key="column.id" class="sheet-quantity" :class="{ 'sheet-drop-target': dropTarget === column.id && draggedColumn !== column.id }" @dragover.prevent.stop="dropTarget = draggedColumn == null ? null : column.id; groupDropTarget = draggedGroup ? 'prices' : null; scrollWhileDragging($event)" @drop.prevent.stop="draggedGroup ? dropGroup('prices') : dropColumn(index)">
               <button type="button" class="sheet-drag" :draggable="!copying" :data-column-handle="column.id" :aria-label="`第 ${index + 1} 个价格列排序，左右键移动`" title="拖动排序，或聚焦后按左右方向键" :disabled="copying" @dragstart="startColumnDrag(column.id, $event)" @dragend="endColumnDrag" @keydown.left.prevent="moveColumn(index, index - 1)" @keydown.right.prevent="moveColumn(index, index + 1)">⠿</button>
               <button v-if="columns.length > 1" type="button" class="sheet-remove" :aria-label="`删除第 ${index + 1} 个价格列`" :disabled="copying" @click="removeColumn(index)">×</button>
-              <label><input :value="column.quantity" type="number" min="1" step="1" :aria-label="`第 ${index + 1} 个价格列数量`" :placeholder="column.legacyCustom ? 'Custom' : '数量'" :disabled="copying" @input="updateQuantity(index, $event)"> {{ bundle ? (Number(column.quantity) === 1 ? 'set' : 'sets') : (Number(column.quantity) === 1 ? 'pc' : 'pcs') }}</label><small>USD</small>
+              <label><input :value="column.quantity" type="number" min="1" step="1" :aria-label="`第 ${index + 1} 个价格列数量`" :placeholder="column.legacyCustom ? 'Custom' : '数量'" :disabled="copying" @input="updateQuantity(index, $event)"> {{ bundle ? (Number(column.quantity) === 1 ? 'set' : 'sets') : (Number(column.quantity) === 1 ? 'pc' : 'pcs') }}</label>
             </th>
             </tr>
           </thead>
@@ -593,7 +606,7 @@ onBeforeUnmount(() => {
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
               <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}</td>
               <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"></td>
-              <td v-else-if="group.key === 'provider'"><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source">{{ row.sourceDescription }}</small></td>
+              <td v-else-if="group.key === 'provider'"><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source" :title="row.sourceDescription">{{ compactSourceLabel(row.key) }}</small></td>
               <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><input :value="edits.shippingTimes[row.key] ?? (formatShippingTime(sourceFor(row.key).eta) === '—' ? '' : formatShippingTime(sourceFor(row.key).eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 workingdays" maxlength="80" :disabled="copying" @input="updateShippingTime(sourceFor(row.key), $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(sourceFor(row.key))">恢复渠道时效</button></td>
               <td v-else-if="group.key === 'processingTime'"><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
               <template v-else-if="group.key === 'prices' && row.averageId"><td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="averageInputs[row.averageId + ':' + quantities[priceIndex]] ?? (price == null ? '' : price.toFixed(2))" :aria-label="'综合报价 ' + row.averageId + ' 数量 ' + quantities[priceIndex]" placeholder="客户报价" :disabled="copying || sourcePending" @input="changeAveragePrice(row.averageId!, quantities[priceIndex], $event)"></td></template>
@@ -615,8 +628,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <p v-if="sheet.tableIssues?.length" class="sheet-pending" role="status">{{ sheet.tableIssues.join('；') }}</p>
-      <details class="sheet-notes-editor"><summary>报价说明 · 点击编辑</summary><label v-for="(note, index) in (edits.notes ?? CUSTOMER_QUOTE_NOTES)" :key="index">{{ index + 1 }}<textarea :value="note" :aria-label="`第 ${index + 1} 条报价说明`" maxlength="3000" :disabled="copying" @input="updateNote(index, $event)"></textarea></label></details>
-    </div>
+      <details class="sheet-notes-editor"><summary>报价说明</summary><label v-for="(note, index) in (edits.notes ?? CUSTOMER_QUOTE_NOTES)" :key="index">{{ index + 1 }}<textarea :value="note" :aria-label="`第 ${index + 1} 条报价说明`" maxlength="3000" :disabled="copying" @input="updateNote(index, $event)"></textarea></label></details>
+      </template>
     <div v-if="!editing && currentImage" class="sheet-image-area">
       <div v-if="images.length > 1" class="sheet-pages">
         <button type="button" :disabled="activeImage === 0 || copying" @click="activeImage--">上一张</button>
@@ -630,19 +643,32 @@ onBeforeUnmount(() => {
         <h4>IMPORTANT NOTES</h4><ol><li v-for="note in sheet.notes" :key="note">{{ note }}</li></ol>
       </details>
     </div>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .sheet-average-row td{background:#fff1df!important;border-top:1px solid #f58220!important;border-bottom:1px solid #f58220!important;color:#c95d00}.sheet-average-row input{color:#c95d00!important;font-weight:700}
-.sheet-row-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0;font-size:12px}.sheet-row-tools>span{color:#72808a;flex:1;min-width:220px;line-height:1.6}.sheet-row-tools .sheet-column-tools{margin:0 0 0 auto}.customer-sheet .sheet-row-tools>button,.customer-sheet .sheet-row-action button,.customer-sheet .sheet-hidden-row button{color:#d86b13;border-color:#f58220;white-space:nowrap}.sheet-row-action{position:sticky;right:0;z-index:1;min-width:70px;box-shadow:-2px 0 4px #20253212}.sheet-hidden-rows{margin-top:12px;border:1px solid #dfe5e9;border-radius:6px;overflow:hidden;font-size:12px}.sheet-hidden-heading{display:flex;gap:18px;padding:12px;background:#f1f3f5;flex-wrap:wrap}.sheet-hidden-heading span,.sheet-hidden-row small{color:#72808a}.sheet-hidden-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px;border-top:1px solid #dfe5e9;background:#fff}.sheet-hidden-row>span{flex:1;min-width:130px;overflow-wrap:anywhere}.sheet-hidden-row small{line-height:1.5}.sheet-hidden-row button{margin-left:auto}
-.sheet-layout-preference{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0;font-size:12px;color:#72808a}.sheet-layout-preference [role="status"]{color:#287a4d}.sheet-layout-preference [role="alert"]{color:#b42318}
-.sheet-country-format{display:flex;justify-content:center;margin-top:8px}.customer-sheet .sheet-country-format button{padding:6px 14px;border-color:#f58220;border-radius:0;font-size:12px;font-weight:650}.customer-sheet .sheet-country-format button:first-child{border-radius:6px 0 0 6px}.customer-sheet .sheet-country-format button:last-child{border-left:0;border-radius:0 6px 6px 0}.customer-sheet .sheet-country-format button[aria-pressed="true"]{background:#f58220;color:#fff}.sheet-country-format button:focus-visible{outline:2px solid #924e10;outline-offset:2px}
-.sheet-photos{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0;padding:12px;border:1px solid #dfe5e9;border-radius:6px}.sheet-photos legend{font-size:12px;font-weight:650}.sheet-photos label{display:flex;align-items:center;gap:6px;font-size:12px}.sheet-photos span{flex:1;min-width:220px;font-size:12px;color:#72808a;line-height:1.6}.sheet-photo-cell{min-width:180px}.sheet-photo-grid{display:grid;justify-content:center;gap:10px}.sheet-photo-grid img{width:150px;height:150px;object-fit:contain;background:#fff}.sheet-photo-grid-many{grid-template-columns:repeat(2,100px)}.sheet-photo-grid-many img{width:100px;height:100px}
-.customer-sheet{margin:0 22px 18px;color:#202532}.sheet-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px}.sheet-toolbar h3{margin:0;font-size:15px}.sheet-toolbar p,.sheet-local-note,.sheet-edit-help{color:#72808a;font-size:12px;line-height:1.6}.sheet-toolbar p{margin:5px 0}.sheet-local-note{margin:8px 0 14px}.sheet-actions{display:flex;gap:8px;flex-wrap:wrap}.customer-sheet button{padding:9px 13px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font-size:12px;font-weight:650;cursor:pointer}.customer-sheet button.sheet-primary{background:#f58220;border-color:#f58220;color:#fff}.customer-sheet button:disabled{background:#edf0f2;border-color:#e0e4e8;color:#919aa3;cursor:not-allowed}.sheet-editor{padding:16px;background:#fafbfc;border:1px solid #dfe5e9;border-radius:8px}.sheet-metadata{display:flex;gap:18px;flex-wrap:wrap}.sheet-metadata label{display:grid;gap:6px;font-size:12px;font-weight:650}.customer-sheet input{height:36px;padding:0 9px;box-sizing:border-box;border:1px solid #ccd4db;border-radius:4px;background:#fff;color:#202532;font:inherit}.sheet-metadata input{min-width:205px}.sheet-editor-scroll,.sheet-image-scroll,.sheet-accessible{overflow-x:auto}.customer-sheet table{width:100%;border-collapse:collapse;font-size:12px}.sheet-editor table{width:max-content;min-width:0}.customer-sheet th,.customer-sheet td{padding:10px 9px;border:1px solid #e0e3e6;text-align:center;vertical-align:middle}.customer-sheet th{background:#fff0e3;color:#924e10;font-weight:650}.customer-sheet td{background:#fff}.customer-sheet small{display:block;margin-top:4px;font-weight:400}.sheet-source{max-width:230px;color:#76828c;font-size:10px;line-height:1.5}.sheet-time input{width:170px;font-size:12px}.sheet-time button{display:block;margin:5px auto 0;padding:2px 4px;border:0;color:#a85d16;background:transparent;font-size:10px}.sheet-empty{padding:35px;text-align:center;border:1px dashed #d9e1e6;color:#87939d;font-size:12px}.sheet-image-area{border:1px solid #e0e4e8;background:#f6f7f9}.sheet-image-scroll img{display:block;width:100%;height:auto;min-width:768px}.sheet-pages{display:flex;justify-content:center;align-items:center;gap:15px;padding:10px;font-size:12px}.sheet-message,.sheet-pending{padding:10px 12px;border-radius:5px;background:#f0f7f1;color:#287a4d;font-size:12px;line-height:1.6}.sheet-message.failed,.sheet-pending{background:#fff4e6;color:#a65410}.sheet-accessible{padding:10px;background:#fff;font-size:12px;line-height:1.6}.sheet-accessible summary{cursor:pointer;color:#64727e}.sheet-accessible li{margin:8px 0}@media(max-width:850px){.sheet-toolbar{align-items:flex-start;flex-direction:column}.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:12px}.sheet-pages{gap:8px}.sheet-metadata{width:100%}.sheet-metadata label{flex:1}}
-.sheet-column-count{display:block;text-align:right;font-size:12px;color:#72808a;margin:8px 0}.sheet-quantity{position:relative;min-width:112px;padding-top:22px!important}.sheet-quantity input{width:66px}.sheet-remove{position:absolute;right:2px;top:0;padding:0 5px!important;border:0!important;background:transparent!important}.sheet-price{white-space:nowrap}.sheet-price input{width:140px;text-align:center}.sheet-price-error{max-width:160px;white-space:normal;color:#b42318;line-height:1.5}.sheet-price input[aria-invalid="true"]{border-color:#b42318!important}.sheet-number{width:45px}.sheet-country{width:190px}.sheet-provider{width:160px}.sheet-processing{width:130px}.sheet-editor td input:not(:focus){border-color:transparent}.sheet-editor td input:hover{border-color:#ccd4db}.customer-sheet input:focus{outline:1px solid #f58220;border-color:#f58220}.sheet-notes-editor{margin-top:14px;font-size:12px}.sheet-notes-editor summary{cursor:pointer;color:#925013}.sheet-notes-editor label{display:flex;gap:12px;margin:10px 0}.sheet-notes-editor textarea{width:100%;min-height:70px;resize:vertical;border:1px solid #ccd4db;padding:8px;font:inherit;line-height:1.6}
-.sheet-visibility{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:12px 0;padding:12px 14px;border:1px solid #e0e4e8;border-radius:6px;font-size:12px}.sheet-visibility legend{padding:0 5px;font-weight:650}.sheet-visibility label{display:flex;align-items:center;gap:6px;cursor:pointer}.sheet-visibility input{width:16px;height:16px;padding:0;accent-color:#f58220}.sheet-visibility span{color:#72808a}.sheet-sku{min-width:160px;max-width:240px;overflow-wrap:anywhere}
+.sheet-row-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0;padding:4px 0 0;font-size:12px}.customer-sheet .sheet-row-tools>button,.customer-sheet .sheet-row-action button,.customer-sheet .sheet-hidden-row button{color:#d86b13;border-color:#f58220;white-space:nowrap}.sheet-row-action{position:sticky;right:0;z-index:1;min-width:58px;box-shadow:-2px 0 4px #20253212}.sheet-hidden-rows{margin-top:12px;border:1px solid #dfe5e9;border-radius:6px;overflow:hidden;font-size:12px}.sheet-hidden-heading{display:flex;gap:18px;padding:12px;background:#f1f3f5;flex-wrap:wrap}.sheet-hidden-heading span,.sheet-hidden-row small{color:#72808a}.sheet-hidden-row{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px;border-top:1px solid #dfe5e9;background:#fff}.sheet-hidden-row>span{flex:1;min-width:130px;overflow-wrap:anywhere}.sheet-hidden-row small{line-height:1.5}.sheet-hidden-row button{margin-left:auto}
+.sheet-layout-preference{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 0;font-size:12px;color:#72808a}.sheet-layout-preference [role="status"]{color:#287a4d}.sheet-layout-preference [role="alert"]{color:#b42318}
+.sheet-country-format{display:flex;justify-content:center;margin-top:2px}.customer-sheet .sheet-country-format button{padding:2px 8px;border-color:#f58220;border-radius:0;font-size:12px;font-weight:650}.customer-sheet .sheet-country-format button:first-child{border-radius:6px 0 0 6px}.customer-sheet .sheet-country-format button:last-child{border-left:0;border-radius:0 6px 6px 0}.customer-sheet .sheet-country-format button[aria-pressed="true"]{background:#f58220;color:#fff}.sheet-country-format button:focus-visible{outline:2px solid #924e10;outline-offset:2px}
+.sheet-photos{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;margin:0 0 0 auto;padding:0;border:0}.sheet-photos label{display:flex;align-items:center;gap:6px;font-size:12px}.sheet-photos span{font-size:12px;color:#64717d;white-space:nowrap}.sheet-photo-cell{min-width:180px}.sheet-photo-grid{display:grid;justify-content:center;gap:10px}.sheet-photo-grid img{width:150px;height:150px;object-fit:contain;background:#fff}.sheet-photo-grid-many{grid-template-columns:repeat(2,100px)}.sheet-photo-grid-many img{width:100px;height:100px}
+.customer-sheet{margin:0 12px 10px;color:#202532}.sheet-toolbar{display:flex;align-items:center;margin-bottom:6px}.sheet-toolbar h3{margin:0;font-size:15px}.sheet-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}.customer-sheet button{padding:4px 8px;border:1px solid #d7dce1;border-radius:6px;background:#fff;color:#243440;font-size:12px;font-weight:650;cursor:pointer}.customer-sheet button.sheet-primary{background:#f58220;border-color:#f58220;color:#fff}.customer-sheet button:disabled{background:#edf0f2;border-color:#e0e4e8;color:#919aa3;cursor:not-allowed}.sheet-editor{padding:6px;background:#fafbfc;border:1px solid #dfe5e9;border-radius:8px}.sheet-metadata{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.sheet-metadata label{display:grid;gap:2px;min-width:0;font-size:12px;font-weight:650}.customer-sheet input{height:28px;padding:0 5px;box-sizing:border-box;border:1px solid #ccd4db;border-radius:4px;background:#fff;color:#202532;font:inherit}.sheet-metadata input{width:100%;min-width:0}.sheet-editor-scroll,.sheet-image-scroll,.sheet-accessible{overflow-x:auto}.customer-sheet table{width:100%;border-collapse:collapse;font-size:12px}.sheet-editor table{width:100%;min-width:0}.customer-sheet th,.customer-sheet td{padding:3px 5px;border:1px solid #e0e3e6;text-align:center;vertical-align:middle}.customer-sheet th{background:#fff0e3;color:#924e10;font-weight:650}.customer-sheet td{background:#fff}.customer-sheet small{display:block;margin-top:2px;font-weight:400}.customer-sheet .sheet-source{max-width:200px;margin:0 auto;color:#76828c;font-size:10px;line-height:1.2;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.sheet-time input{width:136px;font-size:12px}.sheet-time button{display:block;margin:2px auto 0;padding:2px 4px;border:0;color:#a85d16;background:transparent;font-size:10px}.sheet-empty{padding:35px;text-align:center;border:1px dashed #d9e1e6;color:#87939d;font-size:12px}.sheet-image-area{border:1px solid #e0e4e8;background:#f6f7f9}.sheet-image-scroll img{display:block;width:100%;height:auto;min-width:768px}.sheet-pages{display:flex;justify-content:center;align-items:center;gap:15px;padding:10px;font-size:12px}.sheet-message,.sheet-pending{padding:10px 12px;border-radius:5px;background:#f0f7f1;color:#287a4d;font-size:12px;line-height:1.6}.sheet-message.failed,.sheet-pending{background:#fff4e6;color:#a65410}.sheet-accessible{padding:10px;background:#fff;font-size:12px;line-height:1.6}.sheet-accessible summary{cursor:pointer;color:#64727e}.sheet-accessible li{margin:8px 0}.sheet-quantity{position:relative;box-sizing:border-box;min-width:106px;padding:3px 16px!important;border-bottom-color:#f58220!important}.sheet-quantity label{white-space:nowrap}.sheet-quantity input{width:48px;height:24px}.sheet-remove{position:absolute;right:2px;top:0;padding:0 5px!important;border:0!important;background:transparent!important}.sheet-price{white-space:nowrap}.sheet-price input{width:76px;text-align:center}.sheet-price-error{max-width:160px;white-space:normal;color:#b42318;line-height:1.5}.sheet-price input[aria-invalid="true"]{border-color:#b42318!important}.sheet-number{width:32px;text-align:center}.sheet-country{width:122px}.sheet-provider{width:150px}.sheet-processing{width:118px}.sheet-editor td input:not(:focus){border-color:transparent}.sheet-editor td input:hover{border-color:#ccd4db}.customer-sheet input:focus{outline:1px solid #f58220;border-color:#f58220}.sheet-notes-editor{margin-top:5px;font-size:12px}.sheet-notes-editor summary{cursor:pointer;color:#925013}.sheet-notes-editor label{display:flex;gap:12px;margin:10px 0}.sheet-notes-editor textarea{width:100%;min-height:70px;resize:vertical;border:1px solid #ccd4db;padding:8px;font:inherit;line-height:1.6}
+.sheet-visibility{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0;margin:0;padding:0;border:0;font-size:12px}.sheet-visibility label{display:flex;align-items:center;gap:6px;cursor:pointer}.sheet-visibility input{width:16px;height:16px;padding:0;accent-color:#f58220}.sheet-sku{min-width:90px;max-width:180px;overflow-wrap:anywhere}
 
-.sheet-drag{position:absolute;left:3px;top:0;padding:0 5px!important;border:0!important;background:transparent!important;color:#b46726!important;cursor:grab!important;font-size:17px!important;line-height:20px}.sheet-drag:active{cursor:grabbing!important}.sheet-drag:focus-visible{outline:2px solid #f58220;outline-offset:1px}.sheet-drop-target{box-shadow:inset 3px 0 #f58220;background:#ffe1c6}
-.sheet-column-tools{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin:8px 0}.sheet-column-tools .sheet-column-count{margin:0}.customer-sheet .sheet-add-button{color:#d86b13;border-color:#f58220}.sheet-group{position:relative;white-space:nowrap}.customer-sheet .sheet-group-drag{display:inline-flex;align-items:center;gap:8px;border:0;background:transparent;color:#924e10;cursor:grab;padding:4px;font-size:17px}.sheet-group-drag span{font-size:12px}.sheet-group-drag:active{cursor:grabbing}.sheet-group-drag:focus-visible{outline:2px solid #f58220;outline-offset:2px}.sheet-price-group{border:1px solid #f58220!important}.sheet-quantity{border-bottom-color:#f58220!important}
+.sheet-drag{position:absolute;left:3px;top:0;padding:0 5px!important;border:0!important;background:transparent!important;color:#b46726!important;cursor:grab!important;font-size:17px!important;line-height:20px}.sheet-drag:active{cursor:grabbing!important}.sheet-drag:focus-visible{outline:2px solid #f58220;outline-offset:1px}.sheet-drop-target{box-shadow:inset 3px 0 #f58220;background:#ffe1c6}.customer-sheet .sheet-add-button{color:#d86b13;border-color:#f58220}.sheet-group{position:relative;white-space:nowrap}.customer-sheet .sheet-group-drag{display:inline-flex;align-items:center;gap:8px;border:0;background:transparent;color:#924e10;cursor:grab;padding:0 2px;font-size:17px;line-height:18px}.sheet-group-drag span{font-size:12px}.sheet-group-drag:active{cursor:grabbing}.sheet-group-drag:focus-visible{outline:2px solid #f58220;outline-offset:2px}.sheet-price-group{border:1px solid #f58220!important}
+
+.sheet-controls{position:sticky;top:var(--quote-sheet-sticky-top,0px);z-index:10;padding:4px 0;background:#fafbfc;border-bottom:1px solid #dfe5e9}
+.sheet-display-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-bottom:4px;border-bottom:1px solid #e5e9ed}
+.customer-sheet .sheet-photo-button{min-width:142px;min-height:44px;padding:8px 22px;border-color:#7c3aed;background:#7c3aed;color:#fff;font-size:16px;font-weight:750}
+.customer-sheet .sheet-photo-button:hover:not(:disabled){background:#6d28d9;border-color:#6d28d9}
+.customer-sheet .sheet-photo-button:disabled{background:#ede9fe;border-color:#ddd6fe;color:#8b7dad}
+.sheet-photo-button:focus-visible{outline:2px solid #5b21b6;outline-offset:2px}
+.sheet-edit-help{margin:8px 0;color:#72808a;font-size:12px;line-height:1.5}
+.sheet-price>span{margin-right:3px}
+.sheet-editor-scroll td input{height:24px}
+@media(min-width:1200px){.sheet-metadata label{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px;white-space:nowrap}}
+@media(max-width:1100px){.sheet-metadata{grid-template-columns:repeat(2,minmax(0,1fr))}.sheet-row-tools .sheet-actions{flex:1 1 100%;justify-content:flex-end}}
+@media(max-width:850px){.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:8px}.sheet-pages{gap:8px}.sheet-controls{position:static}.sheet-photos{margin-left:0}.sheet-actions{margin-left:0}.sheet-row-tools .sheet-actions{justify-content:flex-start}}
+@media(max-width:480px){.sheet-metadata{grid-template-columns:minmax(0,1fr)}.sheet-visibility{gap:10px}}
 </style>

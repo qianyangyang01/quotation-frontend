@@ -139,7 +139,7 @@ const commonQuoteRows = ref<QuotationMatrixRow[]>([])
 // Keep draft identities independently of whether a hidden matrix has calculated prices.
 const modeSelections = ref<Record<'common' | 'specified' | 'template', DraftChannelSelection[]>>({ common: [], specified: [], template: [] })
 const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
-const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('common')
+const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('template')
 const templateWorkbench = ref<InstanceType<typeof QuotationTemplateMatrix> | null>(null)
 function createTemplateFromCurrentMode() {
   const mode = quoteMatrixMode.value
@@ -1191,7 +1191,7 @@ async function resetLocalDraft() {
   commissionThreshold.value = '1'
   selectedCustomerGrade.value = (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   quoteMode.value = 'single'
-  quoteMatrixMode.value = 'common'
+  quoteMatrixMode.value = 'template'
   customQuoteQuantity.value = 3
   selectedQuoteRegions.value = {}
   products.value = [emptyQuotationProduct()]
