@@ -13,6 +13,20 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PurchaseProductRepository extends JpaRepository<PurchaseProduct, UUID> {
+    // Project only matching metadata; avoid loading product images and large source payloads.
+    @Query(value="""
+        SELECT jsonb_build_object('sku',sku,'version',version,'catalogState',catalog_state,
+          'quotationOwner',payload->'quotationOwner','weightG',payload->'weightG',
+          'taxPoint',payload->'taxPoint','invoiceType',payload->'invoiceType',
+          'purchasePriceCny',payload->'purchasePriceCny','taxIncludedPriceCny',payload->'taxIncludedPriceCny',
+          'tier2PriceCny',payload->'tier2PriceCny','tier3PriceCny',payload->'tier3PriceCny',
+          'minOrderQty',payload->'minOrderQty','singleFreightCny',payload->'singleFreightCny',
+          'freeShipping',payload->'freeShipping','dataSource',payload->'dataSource',
+          'sourceSheet',payload->'sourceSheet','sourceRow',payload->'sourceRow')::text
+        FROM purchase_product WHERE sku IN (:skus) ORDER BY sku
+        """,nativeQuery=true)
+    List<String> salesCatalog(@Param("skus") Collection<String> skus);
+
     // A single database snapshot without loading image/notes/tier payloads into Hibernate.
     @Query(value="""
         SELECT jsonb_build_object('sku',sku,'category',payload->'category',

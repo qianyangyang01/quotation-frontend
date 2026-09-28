@@ -65,6 +65,8 @@ management:
         enabled: true
 
 app:
+  purchase-sales:
+    source: ${APP_PURCHASE_SALES_SOURCE:}
   shimo:
     worker-enabled: ${APP_SHIMO_WORKER_ENABLED:false}
     token: ${APP_SHIMO_TOKEN:}

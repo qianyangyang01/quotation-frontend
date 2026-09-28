@@ -5,6 +5,7 @@ dist/
 outputs/
 tmp/
 artifacts/performance/
+backend/src/main/resources/purchase-sales-*.json
 
 *.log
 .env

@@ -6,6 +6,7 @@ import { normalizePurchaseRecord } from '@/data/purchaseStore'
 
 const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn()}))
 vi.mock('@/services/purchaseHistory',async original=>({...await original<object>(),updatePurchaseProduct:mocks.update,loadPurchaseHistory:mocks.history}))
+vi.mock('./PurchaseSalesPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseProductPage:mocks.page,loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save}))
 let app:App
 const row=(sku:string)=>normalizePurchaseRecord({sku,weightG:100,minOrderQty:1,purchasePriceCny:10,_version:5})

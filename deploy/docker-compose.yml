@@ -79,6 +79,7 @@ services:
       APP_STORAGE_SECRET_KEY: ${QUOTATION_MINIO_SECRET_KEY}
       APP_STORAGE_BUCKET: ${QUOTATION_STORAGE_BUCKET:-quotation-assets}
       APP_LOGISTICS_PARSER_URL: http://quotation-parser:8090
+      APP_PURCHASE_SALES_SOURCE: ${QUOTATION_SALES_SOURCE:-}
       APP_LOGISTICS_RECONCILE_INTERRUPTED: "true"
       APP_SHIMO_WORKER_ENABLED: ${QUOTATION_SHIMO_WORKER_ENABLED:-false}
       APP_SHIMO_TOKEN: ${QUOTATION_SHIMO_TOKEN:-}
@@ -93,6 +94,8 @@ services:
       APP_LOGISTICS_RESUME_ON_START: ${QUOTATION_LOGISTICS_RESUME_ON_START:-true}
       JAVA_TOOL_OPTIONS: -Xmx768m -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC
     expose: ["8088"]
+    volumes:
+      - ${QUOTATION_SALES_DATA_DIR:-/srv/ahmln-data/quotation-app/data-releases/purchase-sales/current}:/app/purchase-sales:ro
     networks: [quotation-internal, ahmln-edge]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8088/actuator/health/readiness"]

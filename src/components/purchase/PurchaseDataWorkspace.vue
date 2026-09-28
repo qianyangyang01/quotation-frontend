@@ -13,9 +13,15 @@ import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
 import PurchaseHistoryDialog from './PurchaseHistoryDialog.vue'
+import PurchaseSalesPanel from './PurchaseSalesPanel.vue'
 import { updatePurchaseProduct } from '@/services/purchaseHistory'
 
 const historySku = ref('')
+const salesRefreshKey = ref(0)
+async function editSalesSku(sku: string) {
+  try { openEditor(await loadPurchaseProduct(sku)) }
+  catch (error) { toast(error instanceof Error ? error.message : '采购资料读取失败') }
+}
 
 const showPasteDialog = ref(false)
 function pasteSaved(counts: PasteSavedCounts) { toast(`采购资料：新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条`); reload() }
@@ -75,7 +81,6 @@ let jobPollTimer = 0
 const filtered = computed(() => records.value)
 const readyCount = computed(() => purchaseStats.value.ready)
 const pendingCount = computed(() => purchaseStats.value.pending)
-const generatedCount = computed(() => purchaseStats.value.generatedSku)
 const tieredCount = computed(() => records.value.filter(item => item.priceTiers.length > 1).length)
 const totalPages = computed(() => Math.max(1, serverTotalPages.value))
 const pageStart = computed(() => totalRecords.value ? (currentPage.value - 1) * pageSize.value : 0)
@@ -121,6 +126,7 @@ function resetFilters() {
 }
 
 async function refreshStats(){
+  salesRefreshKey.value++
   const request=++statsRequest
   statsAbort?.abort();const controller=new AbortController();statsAbort=controller
   try{const stats=await loadPurchaseStats(controller.signal);if(request===statsRequest)purchaseStats.value=stats}
@@ -410,11 +416,11 @@ const detailFields = computed(() => detail.value ? [
   <p class="legacy-import-help"><b>旧数据导入</b> 用于以前未标准化的采购表，系统会先在本机过滤 Excel 图片；入库后统一标记“2026旧数据”。无克重、有效价格或1件运费的商品仅可补全资料，不能参与报价。</p>
   <section v-if="asyncUploading" class="upload-status"><div><b>{{ uploadProgress.fileName }} <em :class="{legacy:uploadProgress.profile==='legacy-2026'}">{{ uploadProgress.profile==='legacy-2026' ? '2026旧数据' : '新数据' }}</em></b><span v-if="uploadProgress.removedMediaCount">原始 {{ formatBytes(uploadProgress.originalSize) }} → 无图数据 {{ formatBytes(uploadProgress.size) }} · 已过滤 {{ uploadProgress.removedMediaCount }} 张图片 · 减少 {{ uploadProgress.reductionPercent }}%</span><span v-else>{{ formatBytes(uploadProgress.loaded) }} / {{ formatBytes(uploadProgress.size) }}<template v-if="uploadProgress.bytesPerSecond"> · {{ formatBytes(uploadProgress.bytesPerSecond) }}/s</template></span></div><strong>{{ uploadProgress.stage }} {{ uploadProgress.percent }}%</strong><div class="progress"><i :style="{width:`${uploadProgress.percent}%`}"></i></div><button @click="cancelUpload">取消</button></section>
 
-  <section class="stats">
+  <PurchaseSalesPanel :refresh-key="salesRefreshKey" @edit="editSalesSku" />
+  <section class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
     <article><small>采购资料</small><b>{{ purchaseStats.total }}</b><span>报价服务器数据库</span></article>
     <article><small>可参与报价</small><b>{{ readyCount }}</b><span>关键成本资料完整</span></article>
     <article><small>待补充资料</small><b class="orange">{{ pendingCount }}</b><span>空值显示“暂无数据”</span></article>
-    <article><small>系统生成 SKU</small><b class="orange">{{ generatedCount }}</b><span>修改后才可参与报价</span></article>
   </section>
 
   <section class="toolbar">
