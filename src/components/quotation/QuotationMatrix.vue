@@ -154,7 +154,7 @@ async function applyPresetSelection() {
   pendingPresetVersion = version
   emit('presetStateChange', 'loading')
   let loaded: boolean
-  try { loaded = !props.ensureCountries || await props.ensureCountries((props.presetSelection || []).map(row => row.country)) }
+  try { loaded = !props.presetSelection?.length || !props.ensureCountries || await props.ensureCountries(props.presetSelection.map(row => row.country)) }
   catch { loaded = false }
   if (!loaded) {
     if (request === presetRequest) {
