@@ -22,6 +22,8 @@ describe('customer quotation presentation', () => {
     ['Zone 3', 'AU', 'Zone 3'], ['Australia Zone 4', 'AU', 'Zone 4'], ['A区', 'CA', 'Zone A'],
     ['全国统一', 'GB', ''], ['', 'US', ''], ['非偏远', 'GB', 'Non-remote Area'],
     ['偏远地区', 'CA', 'Remote Area'], ['Northern Ireland', 'GB', 'Northern Ireland'], ['特殊地区', 'CA', null],
+    ['西马', '马来西亚', 'West Malaysia'], ['普货', '美国', 'General Cargo'], ['带电', '美国', 'With Battery'],
+    ['共和国', '捷克', 'Republic'], ['岛', '留尼汪岛', 'Island'],
   ])('translates the explicit region %s without guessing', (region, country, expected) => {
     expect(quoteSheetRegion(region, country)).toBe(expected)
   })
