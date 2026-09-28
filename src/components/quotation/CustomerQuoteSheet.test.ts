@@ -912,6 +912,9 @@ it('moves an average among source rows by drag, buttons and keyboard without cha
   const rows = averageRows(); mount(rows); await settle(); await generateWeighted()
   const id = exposed.capturePrices().averagePlans![0]!.id
   const key = `average:${id}`
+  document.querySelector<HTMLInputElement>('[aria-label="显示尺码规则列"]')!.click(); await settle()
+  const rules = document.querySelector<HTMLTextAreaElement>('[aria-label="尺码规则说明"]')!
+  rules.value = 'S / M / L'; rules.dispatchEvent(new Event('input', { bubbles: true })); await settle()
   await input(`综合报价 ${id} 数量 1`, '4.80')
   const original = exposed.capturePrices().averagePlans
   const keys = () => [...document.querySelectorAll<HTMLElement>('[data-row-handle]')].map(el => el.dataset.rowHandle)
@@ -932,13 +935,16 @@ it('moves an average among source rows by drag, buttons and keyboard without cha
   document.querySelector('.sheet-average-row')!.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true })); await settle()
   const expected = [quoteSheetRowKey(rows[2]!), key, ...rows.slice(0, 2).map(quoteSheetRowKey)]
   expect(keys()).toEqual(expected)
+  expect(document.querySelector('.sheet-size-rules')!.getAttribute('rowspan')).toBe('4')
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="尺码规则说明"]')!.value).toBe('S / M / L')
   expect(exposed.capturePrices().averagePlans).toEqual(original)
   await exposed.copyData(); await settle()
-  const copied = writeText.mock.lastCall![0]
+  const copied = await write.mock.lastCall![0][0].items['text/plain'].text()
   expect(copied.indexOf('5.30')).toBeLessThan(copied.indexOf('4.80'))
   expect(copied.indexOf('4.80')).toBeLessThan(copied.indexOf('5.00'))
   await click('预览报价单')
   expect(render.mock.lastCall![0].rows.map(r => r.key)).toEqual(expected)
+  expect(render.mock.lastCall![0].sizeRules).toBe('S / M / L')
 })
 
 it('keeps a moved average in place through source refresh, hiding and plan edits; deleting it removes the plan only', async () => {
