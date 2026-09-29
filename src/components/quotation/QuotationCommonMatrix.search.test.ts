@@ -27,6 +27,46 @@ async function search(value: string) {
 const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.useRealTimers() })
 
+it('explains missing product data instead of reporting a network failure', async () => {
+  mount({ ensureCountries: vi.fn().mockRejectedValue(new Error('请先查询商品，再加载报价渠道')) })
+  button('美国').click(); await tick()
+  expect(document.body.textContent).toContain('请先查询商品，再加载报价渠道')
+  expect(document.body.textContent).not.toContain('渠道加载失败')
+})
+
+it('removes the old country error when a subsequent product query verifies that country', async () => {
+  const { state } = mount({ countries: countries.map(c => ({ ...c, channelsLoaded: false })), ensureCountries: vi.fn().mockResolvedValue(false) })
+  button('美国').click(); await tick()
+  expect(document.body.textContent).toContain('渠道加载失败')
+  Object.assign(state, { sourcePending: true }); await tick()
+  expect(document.body.textContent).not.toContain('渠道加载失败')
+  Object.assign(state, { sourcePending: false, countries: countries.map(c => ({ ...c, channelsLoaded: true })) }); await tick()
+  expect(document.body.textContent).not.toContain('渠道加载失败')
+  expect(document.querySelector('.quote-rows')?.textContent).toContain('专线A')
+})
+
+it('ignores a superseded country failure once the new product load verifies its channels', async () => {
+  let finish!: (ok: boolean) => void
+  const { state } = mount({ countries: countries.map(c => ({ ...c, channelsLoaded: false })), ensureCountries: vi.fn(() => new Promise<boolean>(resolve => { finish = resolve })) })
+  button('美国').click(); await tick()
+  state.countries = countries.map(c => ({ ...c, channelsLoaded: true })); await tick()
+  finish(false); await tick()
+  expect(document.body.textContent).not.toContain('渠道加载失败')
+  expect(document.body.textContent).not.toContain('正在加载 美国')
+  expect(document.querySelector('.quote-rows')?.textContent).toContain('专线A')
+})
+
+it('keeps a real source failure blocked with a retry action until verified data is available', async () => {
+  const ensureCountries = vi.fn().mockResolvedValue(false)
+  const { state } = mount({ sourceError: '物流资料读取超时', countries: countries.map(c => ({ ...c, channelsLoaded: false })), ensureCountries })
+  button('重新加载').click(); await tick()
+  expect(ensureCountries).toHaveBeenCalledWith(['美国'])
+  expect(document.querySelector('.quote-rows')).toBeNull()
+  state.contextKey = 'unrelated-price-change'; await tick()
+  expect(document.body.textContent).toContain('物流资料读取超时')
+  expect(document.querySelector('.quote-rows')).toBeNull()
+})
+
 it('finds non-common countries by code, loads on click and retains additions after clearing search', async () => {
   vi.useFakeTimers()
   let complete!: (ok: boolean) => void

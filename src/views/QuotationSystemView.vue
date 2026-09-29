@@ -623,10 +623,14 @@ function resetCountryLoads() {
 function ensureCountries(countries: string[]): Promise<boolean> {
   if (!countries.length) return Promise.resolve(true)
   countries.forEach(country => requestedQuoteCountries.add(country))
+  if (draftNeedsQuery.value || (logisticsLoadState.value === 'idle' && !hasQueriedQuotationProduct.value)) {
+    return Promise.reject(new Error('请先查询商品，再加载报价渠道'))
+  }
+  if (productQueryBusy.value) return Promise.reject(new Error('商品资料正在查询，请稍候再加载渠道'))
   // The picker is also the retry entry point after the initial request failed.
   // Start recovery before capturing the generation because it resets the queue.
   // Concurrent pickers then await the same initial load, including their countries.
-  if (['error', 'stale'].includes(logisticsLoadState.value)) void ensureQuoteLogistics(products.value[0])
+  if (['idle', 'error', 'stale'].includes(logisticsLoadState.value)) void ensureQuoteLogistics(products.value[0])
   const generation = countryGeneration
   countryLoads.value += 1
   const task = countryQueue.then(async () => {
@@ -652,13 +656,18 @@ function ensureCountries(countries: string[]): Promise<boolean> {
       logisticsRevision.value = result.revision
       logisticsLoadState.value = result.rules.length ? 'ready' : 'empty'
       return true
-    } catch {
-      if (generation === countryGeneration) countryLoadError.value = '渠道加载失败，请点击添加渠道重试'
+    } catch (error) {
+      if (generation === countryGeneration) countryLoadError.value = channelLoadErrorMessage(error)
       return false
     }
   }).finally(() => { if (generation === countryGeneration) countryLoads.value -= 1 })
   countryQueue = task
   return task
+}
+function channelLoadErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '渠道加载失败，请重试'
+  return error instanceof ApiError && error.requestId && error.requestId !== 'unknown'
+    ? `${message}（请求编号：${error.requestId}）` : message
 }
 function cancelQuoteLogistics() {
   resetCountryLoads()
@@ -730,7 +739,7 @@ async function runQuoteLogistics(p: Product) {
     if (controller.signal.aborted) return
     logisticsRulesGeneration.value += 1
     logisticsLoadState.value = 'error'
-    logisticsLoadError.value = error instanceof Error ? error.message : '物流规则加载失败'
+    logisticsLoadError.value = channelLoadErrorMessage(error)
     p.channel = ''; p.rule = ''; p.selectedChannelKey = ''; p.freight = 0; p.status = '物流规则加载失败'
   } finally {
     if (logisticsRequest === controller) logisticsRequest = null
@@ -1594,7 +1603,7 @@ function quotationCountries(p: Product): QuotationCountrySummary[] {
     const common = option?.enabled && option.stage === 'common'
     // 国家选择器只需要显示可用渠道数量，不应为全球每个国家预先计算四档完整报价。
     // 用户真正选择/打开某个国家时，再由矩阵按需调用 excelQuoteRows。
-    const channelsLoaded = loadedQuoteCountries.value.includes(name)
+    const channelsLoaded = ['ready', 'empty'].includes(logisticsLoadState.value) && loadedQuoteCountries.value.includes(name)
     const channelCount = channelsLoaded ? countryChannelCount(name) : 0
     return {
       name,
@@ -2230,7 +2239,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
           <button type="button" class="save-selection-template" :disabled="!commonQuoteRows.length || logisticsLoadState !== 'ready'" @click="createTemplateFromCurrentMode">将当前清单存为模板</button>
-          <QuotationCommonMatrix :ref="instance => commonMatrix = instance as typeof commonMatrix" :source-pending="logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
+          <QuotationCommonMatrix :ref="instance => commonMatrix = instance as typeof commonMatrix" :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
             :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"

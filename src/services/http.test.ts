@@ -10,6 +10,29 @@ afterEach(() => {
 })
 
 describe('quotation API client', () => {
+  it('bounds a stuck logistics read and allows a new request without refreshing', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { revision: 'r1' } })))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = conditionalGet('/logistics/published/manifest').catch(error => error)
+    await vi.advanceTimersByTimeAsync(30_001)
+    expect(await pending).toMatchObject({ code: 'LOGISTICS_READ_TIMEOUT', requestId: expect.any(String) })
+    expect(vi.getTimerCount()).toBe(0)
+    await expect(conditionalGet('/logistics/published/manifest')).resolves.toMatchObject({ data: { revision: 'r1' } })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('preserves explicit logistics cancellation instead of reporting a timeout', async () => {
+    vi.useFakeTimers()
+    const caller = new AbortController()
+    vi.stubGlobal('fetch', vi.fn((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)))))
+    const pending = conditionalGet('/logistics/published/rules', { signal: caller.signal }).catch(error => error)
+    caller.abort(new DOMException('SKU changed', 'AbortError'))
+    expect(await pending).toMatchObject({ name: 'AbortError', message: 'SKU changed' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it.each(['/quotations', '/quotations/record/resubmit', '/quotation-drafts/mine/state'])('releases a stalled save request for %s and preserves its uncertain outcome', async path => {
     vi.useFakeTimers()
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { headerName: 'X-XSRF-TOKEN', token: 'csrf' } })))

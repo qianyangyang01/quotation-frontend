@@ -109,6 +109,24 @@ function button(text: string) {
   return [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))!
 }
 
+it('explains product prerequisites in the channel picker and unlocks it after verified loading', async () => {
+  let ready = false
+  const state = reactive({ active: true, countries: countries.map(c => ({ ...c, channelsLoaded: false })),
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 7, adoptedCountry: '', adoptedRule: '', adoptedCarrier: '',
+    ensureCountries: vi.fn().mockRejectedValue(new Error('请先查询商品，再加载报价渠道')),
+    quoteRowsForCountry: (country: string) => ready ? [row(country, 1), row(country, 2)] : [row(country, 1)],
+  })
+  mount(Matrix, state); await nextTick(); await nextTick()
+  button('添加渠道').click(); await nextTick(); await nextTick(); await nextTick()
+  expect(document.querySelector('.picker-list')?.textContent).toContain('请先查询商品')
+  expect(document.querySelector<HTMLInputElement>('.picker-list input')!.disabled).toBe(true)
+  ready = true
+  state.contextKey = 'verified-product'
+  state.countries = countries.map(c => ({ ...c, channelsLoaded: true })); await nextTick(); await nextTick()
+  expect(document.querySelector('.picker-list')?.textContent).not.toContain('请先查询商品')
+  expect([...document.querySelectorAll<HTMLInputElement>('.picker-list input')].at(-1)!.disabled).toBe(false)
+})
+
 it('preserves selected channels from both Australian regions when browsing another region and recalculates each scope', async () => {
   const changed = vi.fn()
   const state = reactive({ active: true, countries: [{ ...countries[1]!, quoteRegions: ['澳大利亚1区', '澳大利亚2区'], selectedQuoteRegion: '澳大利亚1区' }],

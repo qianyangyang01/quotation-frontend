@@ -109,12 +109,22 @@ export async function conditionalGet<T>(path: string, options: { etag?: string; 
   const headers = new Headers({ Accept: 'application/json', 'X-Request-Id': crypto.randomUUID() })
   if (account) headers.set('X-Expected-Account', account)
   if (options.etag) headers.set('If-None-Match', options.etag)
-  const response = await fetch(`${API_BASE}${path}`, { method: 'GET', headers, credentials: 'include', signal: options.signal })
-  guardAccount(path, account)
-  if (response.status === 304) return { status: 304, data: null, etag: response.headers.get('ETag') || options.etag || '' }
-  const result = await parseEnvelope<T>(response)
-  guardAccount(path, account)
-  return { status: 200, data: result.data, etag: response.headers.get('ETag') || '' }
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(new DOMException('Logistics read timed out', 'TimeoutError')), 30_000)
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline.signal]) : deadline.signal
+  try {
+    const response = await fetch(`${API_BASE}${path}`, { method: 'GET', headers, credentials: 'include', signal })
+    guardAccount(path, account)
+    if (response.status === 304) return { status: 304, data: null, etag: response.headers.get('ETag') || options.etag || '' }
+    const result = await parseEnvelope<T>(response)
+    guardAccount(path, account)
+    return { status: 200, data: result.data, etag: response.headers.get('ETag') || '' }
+  } catch (error) {
+    if (deadline.signal.aborted && !options.signal?.aborted) {
+      throw new ApiError('物流资料读取超时，请重新加载，当前输入已保留', 0, 'LOGISTICS_READ_TIMEOUT', headers.get('X-Request-Id') || 'unknown')
+    }
+    throw error
+  } finally { clearTimeout(timer) }
 }
 
 export const api = {

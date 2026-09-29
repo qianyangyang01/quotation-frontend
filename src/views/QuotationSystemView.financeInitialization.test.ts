@@ -249,6 +249,17 @@ describe('quotation finance initialization for an employee', () => {
     expect(state.customQuoteQuantity).toBe(7)
   })
 
+  it('does not label an unqueried product as a failed country request, and retains the chosen country for the query', async () => {
+    await mountPage(); resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    await expect(state.ensureCountries(['以色列'])).rejects.toThrow('请先查询商品')
+    expect(loadPublishedLogisticsRules).not.toHaveBeenCalled()
+    state.products[0]!.sku = 'READY'
+    expect(await state.ensureCountries(['以色列'])).toBe(true)
+    expect(vi.mocked(loadPublishedLogisticsRules).mock.lastCall?.[0].countries).toContain('以色列')
+    expect(state.countryLoads).toBe(0)
+  })
+
   it('does not loop or accept channels when the picker recovery also fails', async () => {
     await mountPage(); resolveFinance(financeResponse())
     await vi.waitFor(() => expect(state.draftReady).toBe(true))

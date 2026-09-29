@@ -216,8 +216,9 @@ async function selectCountry(country: string) {
   countryError.value = ''
   try {
     if (props.ensureCountries && !await props.ensureCountries([country])) throw new Error('渠道加载失败')
-  } catch {
-    if (request === countryRequest) countryError.value = '渠道加载失败，请重试'
+  } catch (error) {
+    if (request === countryRequest) countryError.value = error instanceof Error && error.message !== '渠道加载失败'
+      ? error.message : '渠道加载失败，请重试'
   } finally { if (request === countryRequest) countryLoading.value = false }
 }
 function runGlobalSearch() {
@@ -283,6 +284,14 @@ const channelCountLabel = computed(() => channelQuery.value || search.value.trim
   : `共 ${rows.value.length} 条渠道`)
 const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const activeSummary = computed(() => props.countries.find(country => country.name === activeCountry.value))
+// A product query can supersede a country request. Verified parent data is the
+// authority; an old local failure must not hide newly loaded channels.
+watch([activeCountry, () => activeSummary.value?.channelsLoaded, () => props.sourcePending, () => props.sourceError], () => {
+  if (activeSummary.value?.channelsLoaded !== true || props.sourcePending || props.sourceError) return
+  countryRequest += 1
+  countryError.value = ''
+  countryLoading.value = false
+})
 
 watch([activeCountry, pageSize, sortMode, channelQuery, search], () => { page.value = 1 })
 watch(pageCount, count => { if (page.value > count) page.value = count })
@@ -306,8 +315,8 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
     <div v-else-if="!searchLoading" class="empty-countries">{{ search.trim() ? '没有匹配的国家或授权渠道，请更换关键词。' : '暂未配置常用国家，可搜索全部国家或渠道。' }}</div>
     <div v-if="searchLoading" class="search-feedback" role="status">正在搜索全部渠道…</div>
     <div v-if="searchError" class="search-feedback" role="alert">{{ searchError }} <button @click="runGlobalSearch">重试搜索</button></div>
-    <div v-if="sourcePending" class="search-feedback" role="status">正在读取物流规则与财务设置，请稍候…</div><div v-else-if="sourceError" class="search-feedback" role="alert">{{ sourceError }}</div><div v-else-if="countryLoading" class="search-feedback" role="status">正在加载 {{ activeCountry }} 的渠道…</div>
-    <div v-if="countryError" class="search-feedback" role="alert">{{ countryError }} <button @click="selectCountry(activeCountry)">重新加载</button></div>
+    <div v-if="sourcePending" class="search-feedback" role="status">正在读取物流规则与财务设置，请稍候…</div><div v-else-if="sourceError" class="search-feedback" role="alert">{{ sourceError }} <button v-if="activeCountry" @click="selectCountry(activeCountry)">重新加载</button></div><div v-else-if="countryLoading" class="search-feedback" role="status">正在加载 {{ activeCountry }} 的渠道…</div>
+    <div v-if="countryError && !sourcePending && !sourceError" class="search-feedback" role="alert">{{ countryError }} <button @click="selectCountry(activeCountry)">重新加载</button></div>
 
     <template v-if="activeCountry && !sourcePending && !sourceError && !countryLoading && !countryError">
       <div class="country-summary">

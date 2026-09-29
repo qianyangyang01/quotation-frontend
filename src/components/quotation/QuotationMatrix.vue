@@ -48,7 +48,7 @@ const selectedChannelKeys = ref<Record<string, string[]>>({})
 const showCountryPicker = ref(false)
 const countrySearch = ref('')
 const channelLoading = ref(false)
-const channelError = ref(false)
+const channelError = ref('')
 // Local, non-persistent diagnostics: ensureCountries and Vue DOM completion.
 // These exclude browser automation overhead and do not claim paint timing.
 const channelLoadTiming = ref<{ ensureMs: number; domMs: number } | null>(null)
@@ -300,25 +300,29 @@ async function openChannelPicker(country: string) {
   pendingChannelKeys.value = []
   channelPage.value = 1
   channelLoading.value = true
-  channelError.value = false
+  channelError.value = ''
   let ok: boolean
+  let failure = '加载失败，点击重试'
   try { ok = !props.ensureCountries || await props.ensureCountries([country]) }
-  catch { ok = false }
+  catch (error) { ok = false; if (error instanceof Error) failure = error.message }
   if (request !== channelPickerRequest || channelPickerCountry.value !== country) return
   const ensureMs = Math.round(performance.now() - started)
   channelLoading.value = false
-  channelError.value = !ok
+  channelError.value = ok ? '' : failure
   pickerRegion.value = countrySummary(country)?.quoteRegions?.[0] || ''
   await nextTick()
   if (ok && request === channelPickerRequest && channelPickerCountry.value === country) {
     channelLoadTiming.value = { ensureMs, domMs: Math.round(performance.now() - started) }
   }
 }
+watch([() => countrySummary(channelPickerCountry.value)?.channelsLoaded, channelLoading], ([loaded, loading]) => {
+  if (loaded === true && !loading) channelError.value = ''
+})
 onBeforeUnmount(() => { channelPickerRequest++ })
 function closeChannelPicker() {
   channelPickerRequest++
   channelLoading.value = false
-  channelError.value = false
+  channelError.value = ''
   replacement.value = null
   channelPickerCountry.value = ''
   pendingChannelKeys.value = []
@@ -451,7 +455,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
       <label v-if="countrySummary(channelPickerCountry)?.quoteRegions?.length" class="quote-region-select">新增方案区域<select v-model="pickerRegion" aria-label="新增方案区域"><option v-for="region in countrySummary(channelPickerCountry)?.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label><label class="dialog-search">⌕<input v-model="channelSearch" placeholder="搜索渠道名称、物流商或渠道代码"></label>
       <div class="channel-tools"><nav><button v-for="filter in ['全部','系统推荐','最低价','最快','普货','带电']" :key="filter" :class="{ active:channelFilter===filter }" @click="channelFilter=filter">{{ filter }}</button></nav><button class="recommended-add" @click="selectRecommended">＋ 添加系统推荐3条</button></div>
       <div class="picker-head"><span></span><span>物流渠道</span><span>物流商</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价</span><span>2{{ unitLabel || '件' }}报价</span><span>3{{ unitLabel || '件' }}报价</span><span class="custom-quote-head">{{ customQuantity }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>推荐理由</span></div>
-      <div class="picker-list"><label v-for="row in pagedPickerRows" :key="rowKey(row)" :class="{ selected:pendingChannelKeys.includes(rowKey(row)), disabled:isAlreadyAdded(row) }"><input type="checkbox" :checked="pendingChannelKeys.includes(rowKey(row))" :disabled="isAlreadyAdded(row) || !hasAnyQuotationPrice(row) || channelLoading || channelError" @change="togglePending(row)"><span><span class="channel-name-line"><QuoteChannelName :row="row" /><QuoteTaxMeta v-if="row.available !== false" :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · {{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></span><b>{{ row.carrier }}</b><b>{{ row.eta }}</b><span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span><em v-if="isAlreadyAdded(row)" class="added">已添加</em><em v-else-if="reason(row)">{{ reason(row) }}</em><i v-else>—</i></label><p v-if="channelLoading">正在加载渠道…</p><p v-else-if="channelError" @click="openChannelPicker(channelPickerCountry)">加载失败，点击重试</p><p v-else-if="!pagedPickerRows.length">当前物流属性、重量及授权条件下没有匹配的可用渠道</p></div>
+      <div class="picker-list"><label v-for="row in pagedPickerRows" :key="rowKey(row)" :class="{ selected:pendingChannelKeys.includes(rowKey(row)), disabled:isAlreadyAdded(row) }"><input type="checkbox" :checked="pendingChannelKeys.includes(rowKey(row))" :disabled="isAlreadyAdded(row) || !hasAnyQuotationPrice(row) || channelLoading || !!channelError" @change="togglePending(row)"><span><span class="channel-name-line"><QuoteChannelName :row="row" /><QuoteTaxMeta v-if="row.available !== false" :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · {{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></span><b>{{ row.carrier }}</b><b>{{ row.eta }}</b><span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span><em v-if="isAlreadyAdded(row)" class="added">已添加</em><em v-else-if="reason(row)">{{ reason(row) }}</em><i v-else>—</i></label><p v-if="channelLoading">正在加载渠道…</p><p v-else-if="channelError" @click="openChannelPicker(channelPickerCountry)">{{ channelError }}<template v-if="channelError !== '加载失败，点击重试'"> · 点击重试</template></p><p v-else-if="!pagedPickerRows.length">当前物流属性、重量及授权条件下没有匹配的可用渠道</p></div>
       <div class="picker-pagination"><span>共 {{ filteredPickerRows.length }} 条</span><button :disabled="channelPage<=1" @click="channelPage--">上一页</button><b>{{ channelPage }} / {{ channelPageCount }}</b><button :disabled="channelPage>=channelPageCount" @click="channelPage++">下一页</button></div>
       <footer><b>已选择 <em>{{ pendingChannelKeys.length }}</em> 条渠道</b><span><button @click="closeChannelPicker">取消</button><button class="batch-add" :disabled="!pendingChannelKeys.length" @click="addPendingChannels">批量添加渠道（{{ pendingChannelKeys.length }}）</button></span></footer>
     </section>
