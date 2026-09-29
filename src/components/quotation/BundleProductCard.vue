@@ -12,7 +12,8 @@ const rowDomesticFreight = (item: BundleQuoteItem) => productDecimal(item.purcha
 const purchasePricingLabel = (item: BundleQuoteItem) => {
   const tierLabel = item.purchaseTierLabel || '阶梯'
   if (item.purchaseZeroTaxPointAdjustment) return `${tierLabel} · 采购票点为0 · 原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = ¥${item.purchaseUnitPrice.toFixed(2)}`
-  if (item.purchaseDataSource === 'legacy_2026') return item.purchasePriceBasis === 'tax_included' ? `2026旧数据 · 优先采用含票价 ¥${item.purchaseUnitPrice.toFixed(2)}` : `2026旧数据 · 含票价为空，采用报价 ¥${item.purchaseUnitPrice.toFixed(2)}`
+  if (item.purchasePriceSource === 'legacy-tax-point') return `2026旧数据 · 原始报价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} ×（1 + ${item.purchaseInvoiceRatePercent}%）= ¥${item.purchaseUnitPrice.toFixed(2)}`
+  if (item.purchasePriceSource === 'legacy-final-price') return `2026旧数据 · 沿用含票采购价 ¥${item.purchaseUnitPrice.toFixed(2)}，不重复加点 · 采购票点 ${item.purchaseInvoiceRatePercent}%`
   if (!item.purchaseInvoiceTaxApplied) return `${tierLabel}原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} · 旧草稿沿用原规则`
   if (item.purchaseInvoiceRatePercent <= 0 && Math.abs(item.purchaseUnitPrice - item.purchaseBaseUnitPrice) > 0.001) return `${tierLabel} · 票点暂无数据 · 使用含票价 ¥${item.purchaseUnitPrice.toFixed(2)}`
   if (item.purchaseInvoiceRatePercent <= 0) return `${tierLabel}原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} · 未配置采购票率`

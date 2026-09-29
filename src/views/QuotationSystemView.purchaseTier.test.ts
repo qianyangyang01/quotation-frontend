@@ -284,3 +284,24 @@ it('restores a withdrawn quotation containing a SKU but no product snapshot with
   expect(state.products[0]?.purchaseBaseUnitPrice).toBe(13.8)
   expect(host.textContent).not.toContain('primaryChannelKey')
 })
+
+it.each(['single', 'bundle'] as const)('recalculates the legacy 6.80/1%% case in the %s editor and after draft restoration', async mode => {
+  purchaseOverride = {
+    dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included', sourceQuotedPriceCny: 6.8,
+    purchasePriceCny: 6.8, taxIncludedPriceCny: 6.8, taxPoint: .01, invoiceType: '普票',
+    minOrderQty: 1, tier2MinQty: null, tier2PriceCny: null, tier3MinQty: null, tier3PriceCny: null, singleFreightCny: 1,
+  }
+  await mount(mode)
+  const check = () => {
+    const item = mode === 'single' ? state.products[0]! : state.bundleItems[0]!
+    expect(item).toMatchObject({ purchaseBaseUnitPrice: 6.8, purchaseInvoiceRatePercent: 1, purchaseInvoiceTaxApplied: true, purchasePriceSource: 'legacy-tax-point' })
+    expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(6.87)
+    expect(host.textContent).toContain('原始报价 ¥6.80 ×（1 + 1%）')
+    expect(host.textContent).not.toContain('优先采用含票价 ¥6.80')
+  }
+  check()
+  const draft = state.draftPayload()
+  await state.applyDraftPayload(draft, undefined, { restoreQuotation: true })
+  await nextTick()
+  check()
+})

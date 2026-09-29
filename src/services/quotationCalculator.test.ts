@@ -155,8 +155,53 @@ describe('quotation purchase tiers', () => {
       baseUnitPriceCny: 6.18,
       effectiveUnitPriceCny: 6.18,
       invoiceMultiplier: 1,
+      invoiceRatePercent: 3,
       priceSource: 'legacy-final-price',
     })
+  })
+})
+
+describe('legacy purchase tax reconciliation', () => {
+  const az = normalizePurchaseRecord({
+    sku: 'AZ2601758', dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included',
+    purchasePriceCny: 6.8, sourceQuotedPriceCny: 6.8, taxIncludedPriceCny: 6.8,
+    taxPoint: .01, invoiceType: '普票', minOrderQty: 1, weightG: 14, singleFreightCny: 1,
+  })
+
+  it.each([true, false])('adds the confirmed 1%% when the legacy included price equals the original (old draft flag %s)', flag => {
+    expect(purchasePriceBreakdown(az, '10', flag)).toMatchObject({
+      baseUnitPriceCny: 6.8, taxPoint: .01, invoiceRatePercent: 1, invoiceMultiplier: 1.01,
+      effectiveUnitPriceCny: 6.87, invoiceTaxApplied: true, priceSource: 'legacy-tax-point',
+    })
+    expect(purchasePriceForMonthlySales(az, '100+', flag)).toBe(6.87)
+  })
+
+  it('charges the fallback 1% for zero and the actual confirmed rate for positive tax points', () => {
+    expect(purchasePriceBreakdown({ ...az, taxPoint: 0 }, '10')).toMatchObject({ effectiveUnitPriceCny: 6.87, invoiceRatePercent: 1, priceSource: 'zero-tax-point' })
+    expect(purchasePriceForMonthlySales({ ...az, taxPoint: .08 }, '10')).toBe(7.34)
+    expect(purchasePriceForMonthlySales({ ...az, sourceQuotedPriceCny: null, purchasePriceBasis: 'quoted' }, '10')).toBe(6.87)
+  })
+
+  it('preserves separately supplied included prices and missing-original records without hiding their tax point', () => {
+    for (const price of [6.5, 6.87, 7]) {
+      const record = normalizePurchaseRecord({ ...az, purchasePriceCny: price, taxIncludedPriceCny: price })
+      expect(purchasePriceBreakdown(record, '10')).toMatchObject({ effectiveUnitPriceCny: price, invoiceRatePercent: 1, invoiceMultiplier: 1, priceSource: 'legacy-final-price' })
+    }
+    expect(purchasePriceBreakdown({ ...az, sourceQuotedPriceCny: null }, '10')).toMatchObject({ effectiveUnitPriceCny: 6.8, invoiceRatePercent: 1, priceSource: 'legacy-final-price' })
+    expect(missingPurchaseTaxPointSkus([az.sku], [{ ...az, taxPoint: null }])).toEqual([az.sku])
+  })
+
+  it('reconciles the reported combination without taxing domestic freight or changing purchase records', () => {
+    const fz = normalizePurchaseRecord({ sku: 'FZ2500491', purchasePriceCny: 6.9, minOrderQty: 3, taxPoint: .08, invoiceType: '不开票', freight10Cny: 8 })
+    const purchases = [fz, az], before = JSON.stringify(purchases)
+    const items = [
+      { sku: fz.sku, quantityPerSet: 2, purchaseUnitPrice: 7.45, purchaseFreightPerUnit: .8, weightKg: .035, customWeightKg: null },
+      { sku: az.sku, quantityPerSet: 1, purchaseUnitPrice: 6.8, purchaseFreightPerUnit: 1, weightKg: .014, customWeightKg: null },
+    ]
+    expect(bundlePurchaseCost(items, purchases, '10')).toBe(21.77)
+    expect(bundlePurchaseCost(items, purchases, '10', 3)).toBe(65.31)
+    expect(bundleDomesticFreight(items)).toBe(2.6)
+    expect(JSON.stringify(purchases)).toBe(before)
   })
 })
 

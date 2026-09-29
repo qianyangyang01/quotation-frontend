@@ -11,7 +11,10 @@ import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
-import { normalizePurchaseTier } from '@/services/quotationCalculator'
+import { normalizePurchaseTier, purchasePriceBreakdown } from '@/services/quotationCalculator'
+import { normalizePurchaseRecord } from '@/data/purchaseStore'
+import { normalizeQuotationRecord } from '@/data/quotationRecords'
+import { quotationProductCostSnapshot } from '@/data/quotationProductCostSnapshot'
 
 // Compile the production loop and ref binding, and mount BOTH real child components.
 // A mocked capturePrices object hides Vue's ref-in-v-for array behavior.
@@ -128,17 +131,30 @@ it.each([
   }
   const run=new Function(...Object.keys(context),ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn save')(...Object.values(context))
   if (mode === 'bundle') Object.assign(context.bundleItems.value[0]!, { purchaseTier: '100' })
+  // Exercise calculator -> actual save() payload -> saved cost snapshot for the
+  // reported legacy-price case, in both single and bundle modes.
+  const pricing = purchasePriceBreakdown(normalizePurchaseRecord({
+    sku: 'SKU-A', dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included',
+    sourceQuotedPriceCny: 6.8, purchasePriceCny: 6.8, taxIncludedPriceCny: 6.8, taxPoint: .01, invoiceType: '普票',
+  }), '10')
+  Object.assign(mode === 'single' ? context.products.value[0]! : context.bundleItems.value[0]!, {
+    purchaseBaseUnitPrice: pricing.baseUnitPriceCny, purchaseInvoiceRatePercent: pricing.invoiceRatePercent,
+    purchaseInvoiceTaxApplied: pricing.invoiceTaxApplied,
+    ...(mode === 'single' ? { purchase: pricing.effectiveUnitPriceCny } : { purchaseUnitPrice: pricing.effectiveUnitPriceCny }),
+  })
   await run()
   expect(createQuotationRecord).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
-    purchaseUnitPriceCny:mode==='single'?2:undefined, domesticFreightPerUnitCny:mode==='single'?(grade==='A'?.21:0):undefined,
-    bundleItems: mode === 'bundle' ? [expect.objectContaining({ sku: 'SKU-A', purchaseTier: '100' }), expect.objectContaining({ sku: 'SKU-B', purchaseTier: '10' })] : undefined,
+    purchaseUnitPriceCny:mode==='single'?6.87:undefined, purchaseInvoiceRatePercent:mode==='single'?1:undefined, domesticFreightPerUnitCny:mode==='single'?(grade==='A'?.21:0):undefined,
+    bundleItems: mode === 'bundle' ? [expect.objectContaining({ sku: 'SKU-A', purchaseTier: '100', purchaseUnitPriceCny: 6.87, purchaseInvoiceRatePercent: 1 }), expect.objectContaining({ sku: 'SKU-B', purchaseTier: '10' })] : undefined,
     weightSnapshot: expect.objectContaining({items:mode==='single'
       ? [expect.objectContaining({sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14,weightSource:manual?'manual':'purchase',purchaseWeightKg:manual?.12:.14})]
       : [expect.objectContaining({sku:'SKU-A',quantityPerSet:2,baseWeightKg:.14,weightSource:'manual',purchaseWeightKg:.12}),expect.objectContaining({sku:'SKU-B',quantityPerSet:1,baseWeightKg:.05,weightSource:'purchase',purchaseWeightKg:.05})]}),
     customerQuote:{rowOrder:['option:option-a'],sizeRules:'S–XXL',sizeRulesEnabled:true,averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))
+  const saved = normalizeQuotationRecord({ ...createQuotationRecord.mock.calls[0]![0], id: 'saved-tax', no: 'QT-TAX' })!
+  expect(quotationProductCostSnapshot(saved).items[0]).toMatchObject({ base: 6.8, purchase: 6.87, rate: 1 })
   expect(resetLocalDraft).toHaveBeenCalledExactlyOnceWith({ name: 'QA', selectedCustomerId: '' })
   expect(toast).toHaveBeenCalledWith(expect.stringContaining('报价已保存：QA-SAVE-REF'))
 })

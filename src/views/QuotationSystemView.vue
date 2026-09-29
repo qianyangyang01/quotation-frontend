@@ -313,6 +313,7 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
     purchaseInvoiceType: pricing?.invoiceType || '',
     purchaseInvoiceRatePercent: pricing?.invoiceRatePercent || 0,
     purchaseZeroTaxPointAdjustment: pricing?.priceSource === 'zero-tax-point',
+    purchasePriceSource: pricing?.priceSource,
     purchaseInvoiceTaxApplied: pricing?.invoiceTaxApplied ?? invoiceTaxApplied,
     purchaseDataSource: record?.dataSource || 'standard',
     purchasePriceBasis: record?.purchasePriceBasis || '',
@@ -394,6 +395,7 @@ function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, 
   p.purchaseInvoiceType = pricing.invoiceType
   p.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
   p.purchaseZeroTaxPointAdjustment = pricing.priceSource === 'zero-tax-point'
+  p.purchasePriceSource = pricing.priceSource
   p.purchaseInvoiceTaxApplied = pricing.invoiceTaxApplied
   p.purchaseDataSource = record.dataSource
   p.purchasePriceBasis = record.purchasePriceBasis
@@ -408,6 +410,7 @@ function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProdu
   item.purchaseInvoiceType = pricing.invoiceType
   item.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
   item.purchaseZeroTaxPointAdjustment = pricing.priceSource === 'zero-tax-point'
+  item.purchasePriceSource = pricing.priceSource
   item.purchaseInvoiceTaxApplied = pricing.invoiceTaxApplied
   item.purchaseDataSource = record.dataSource
   item.purchasePriceBasis = record.purchasePriceBasis

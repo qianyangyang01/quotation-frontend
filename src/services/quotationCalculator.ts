@@ -63,7 +63,7 @@ export type PurchasePriceBreakdown = {
   invoiceRatePercent: number
   invoiceMultiplier: number
   invoiceTaxApplied: boolean
-  priceSource: 'zero-tax-point' | 'tier-tax-point' | 'tax-included-price' | 'untaxed-tier' | 'legacy-invoice-type' | 'legacy-final-price'
+  priceSource: 'zero-tax-point' | 'tier-tax-point' | 'tax-included-price' | 'untaxed-tier' | 'legacy-invoice-type' | 'legacy-final-price' | 'legacy-tax-point'
   effectiveUnitPriceCny: number
 }
 
@@ -88,7 +88,12 @@ export function missingPurchaseTaxPointSkus(skus: string[], records: PurchasePro
 
 export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true): PurchasePriceBreakdown {
   const { tier } = selectedPurchaseTier(record, estimate)
-  const baseUnitPriceCny = roundCny(tier?.unitPriceCny ?? record.purchasePriceCny ?? 0)
+  const legacy = record.dataSource === 'legacy_2026'
+  // Legacy purchasePriceCny can be an imported tax-included price. An amount
+  // identical to its original quote has no added tax to preserve.
+  const originalPrice = legacy && record.sourceQuotedPriceCny != null && record.sourceQuotedPriceCny > 0
+    ? record.sourceQuotedPriceCny : undefined
+  const baseUnitPriceCny = roundCny(originalPrice ?? tier?.unitPriceCny ?? record.purchasePriceCny ?? 0)
   if (record.taxPoint === 0) {
     return {
       baseUnitPriceCny, invoiceType: record.invoiceType, taxPoint: 0,
@@ -96,16 +101,29 @@ export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: 
       priceSource: 'zero-tax-point', effectiveUnitPriceCny: roundCny(productDecimal(baseUnitPriceCny, 1.01)),
     }
   }
-  if (record.dataSource === 'legacy_2026') {
+  const finalPrice = roundCny(tier?.unitPriceCny ?? record.purchasePriceCny ?? 0)
+  const legacyNeedsTax = record.purchasePriceBasis === 'quoted'
+    || (originalPrice != null && finalPrice === roundCny(originalPrice))
+  if (legacy && record.taxPoint != null && legacyNeedsTax) {
+    const invoiceMultiplier = decimal(record.taxPoint).plus(1).toNumber()
     return {
-      baseUnitPriceCny,
+      baseUnitPriceCny, invoiceType: record.invoiceType, taxPoint: record.taxPoint,
+      invoiceRatePercent: productDecimal(record.taxPoint, 100), invoiceMultiplier, invoiceTaxApplied: true,
+      priceSource: 'legacy-tax-point', effectiveUnitPriceCny: roundCny(productDecimal(baseUnitPriceCny, invoiceMultiplier)),
+    }
+  }
+  if (legacy) {
+    // Preserve separately supplied included prices, including records whose
+    // original quote is unavailable, but never replace their recorded rate by 0.
+    return {
+      baseUnitPriceCny: finalPrice,
       invoiceType: record.invoiceType,
       taxPoint: record.taxPoint,
-      invoiceRatePercent: 0,
+      invoiceRatePercent: record.taxPoint == null ? 0 : productDecimal(record.taxPoint, 100),
       invoiceMultiplier: 1,
       invoiceTaxApplied: true,
       priceSource: 'legacy-final-price',
-      effectiveUnitPriceCny: baseUnitPriceCny,
+      effectiveUnitPriceCny: finalPrice,
     }
   }
   const explicitTaxPoint = record.taxPointExplicit

@@ -2,6 +2,18 @@ import { expect, it } from 'vitest'
 import { normalizeQuotationRecord } from './quotationRecords'
 import { quotationProductCostSnapshot } from './quotationProductCostSnapshot'
 
+it('keeps the reported historical 6.80/0% snapshot unchanged when reading and round-tripping it', () => {
+  const record = normalizeQuotationRecord({ id: 'historical-tax', no: 'QT20260929025458E0FDDC', quoteMode: 'bundle', bundleItems: [
+    { sku: 'FZ2500491', name: 'FZ2500491', effectiveWeightKg: .035, quantityPerSet: 2, purchaseBaseUnitPriceCny: 6.9, purchaseUnitPriceCny: 7.45, purchaseInvoiceRatePercent: 8, domesticFreightPerUnitCny: .8 },
+    { sku: 'AZ2601758', name: 'AZ2601758', effectiveWeightKg: .014, quantityPerSet: 1, purchaseBaseUnitPriceCny: 6.8, purchaseUnitPriceCny: 6.8, purchaseInvoiceRatePercent: 0, domesticFreightPerUnitCny: 1 },
+  ] })!
+  const before = JSON.stringify(record)
+  const snapshot = quotationProductCostSnapshot(normalizeQuotationRecord(JSON.parse(before))!)
+  expect(snapshot.items[1]).toMatchObject({ base: 6.8, purchase: 6.8, rate: 0 })
+  expect(snapshot.rows[0]).toEqual({ quantity: 1, purchase: 21.7, freight: 2.6, total: 24.3 })
+  expect(JSON.stringify(record)).toBe(before)
+})
+
 it('preserves a single saved purchase price and unknown domestic freight without inventing a total', () => {
   const record = normalizeQuotationRecord({ id: 'single', no: 'QT-SINGLE', primarySku: '001', purchaseBaseUnitPriceCny: 10, purchaseUnitPriceCny: 10.6, purchaseInvoiceRatePercent: 6, customQuoteQuantity: 5 })!
   const before = JSON.stringify(record), cost = quotationProductCostSnapshot(record)

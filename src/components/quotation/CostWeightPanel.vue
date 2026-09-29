@@ -29,7 +29,8 @@ function purchasePricingLabel() {
   const product = props.product
   const tierLabel = product.purchaseTierLabel || props.purchaseTierLabel
   if (product.purchaseZeroTaxPointAdjustment) return `${tierLabel} · 采购票点为0 · 原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = 计入成本 ¥${product.purchase.toFixed(2)}`
-  if (product.purchaseDataSource === 'legacy_2026') return product.purchasePriceBasis === 'tax_included' ? `2026旧数据 · 优先采用含票价 ¥${product.purchase.toFixed(2)}，不重复叠加票点` : `2026旧数据 · 含票价为空，采用报价 ¥${product.purchase.toFixed(2)}`
+  if (product.purchasePriceSource === 'legacy-tax-point') return `2026旧数据 · 原始报价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} ×（1 + ${product.purchaseInvoiceRatePercent}%）= 计入成本 ¥${product.purchase.toFixed(2)}`
+  if (product.purchasePriceSource === 'legacy-final-price') return `2026旧数据 · 沿用含票采购价 ¥${product.purchase.toFixed(2)}，不重复加点 · 采购票点 ${product.purchaseInvoiceRatePercent}%`
   if (!product.purchaseInvoiceTaxApplied) return `${tierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} · 旧草稿沿用原规则`
   if (product.purchaseInvoiceRatePercent <= 0 && Math.abs(product.purchase - product.purchaseBaseUnitPrice) > 0.001) return `${tierLabel} · 票点暂无数据 · 使用含票价 ¥${product.purchase.toFixed(2)}`
   if (product.purchaseInvoiceRatePercent <= 0) return `${tierLabel}原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} · 未配置采购票率`
