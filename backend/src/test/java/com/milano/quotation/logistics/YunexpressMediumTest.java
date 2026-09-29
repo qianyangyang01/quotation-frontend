@@ -10,50 +10,68 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import static org.junit.jupiter.api.Assertions.*;
 
-class YunexpressAdditionalTest {
+class YunexpressMediumTest {
     final ObjectMapper mapper=new ObjectMapper();
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));
     CompanyChannelScope directory() throws Exception {
-        var config=(ObjectNode)mapper.readTree(Files.readString(Path.of("../scripts/logistics/yunexpress-additional-company-channels.json")));
-        CompanyChannelService.validate(config.path("entries"));return new CompanyChannelScope(config.put("enabled",true).put("revision",24));
+        var config=(ObjectNode)mapper.readTree(Files.readString(Path.of("../scripts/logistics/yunexpress-medium-company-channels.json")));
+        CompanyChannelService.validate(config.path("entries"));return new CompanyChannelScope(config.put("enabled",true).put("revision",1));
     }
-    byte[] fixture(double rate,double floor,String code,String step,boolean missingWeight) throws Exception {
+    byte[] fixture(String tab,String title,String code,int offset,boolean reordered,String step,boolean missingWeight) throws Exception {
         try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
-            var s=book.createSheet("更新报价");LogisticsSourceParserTest.row(s,2,"云途全球专线挂号（标快带电）","产品代码："+code);
-            LogisticsSourceParserTest.row(s,5,"挂号费(RMB/票)","最低计费重(KG)","国家/地区","重量(KG)","运费(RMB/KG)","参考时效");
-            LogisticsSourceParserTest.row(s,6,25,floor,"加拿大",missingWeight?"":"0<W≤0.15",rate,"5-7工作日");
-            LogisticsSourceParserTest.row(s,7,25,floor,"加拿大","0.15<W≤0.3",rate,"5-7工作日");
-            LogisticsSourceParserTest.row(s,8,27,"","美国","0<W≤0.1",120,"5-8工作日");
-            LogisticsSourceParserTest.row(s,10,"加拿大：起重"+floor+"KG，以"+step+"G为单位进位，包裹按计费重量收费");
-            var other=book.createSheet("云途全球专线挂号（特快带电）");LogisticsSourceParserTest.row(other,0,"国家","重量段","运费/kg","挂号费/票");LogisticsSourceParserTest.row(other,1,"美国","0-1","INVALID","INVALID");
+            book.createSheet("目录");
+            var s=book.createSheet(tab);
+            LogisticsSourceParserTest.row(s,offset,title,"产品代码："+code);
+            String[] headers={"国家/地区","重量(KG)","最低计费重(KG)","运费(RMB/KG)","挂号费(RMB/票)","参考时效"};
+            Object[] data={"美国",missingWeight?"":"0<W≤2",0.1,155,38,"6-12工作日"};
+            int[] order=reordered?new int[]{4,2,5,0,3,1}:new int[]{0,1,2,3,4,5};
+            var h=s.createRow(offset+2);var r=s.createRow(offset+3);
+            for(int i=0;i<order.length;i++) {
+                h.createCell(i+2).setCellValue(headers[order[i]]);
+                var v=data[order[i]];if(v instanceof Number n)r.createCell(i+2).setCellValue(n.doubleValue());else r.createCell(i+2).setCellValue(v.toString());
+            }
+            LogisticsSourceParserTest.row(s,offset+5,"所有国家：起重为0.1KG，不足0.1KG的按0.1KG计费，以"+step+"G为单位进位");
             return LogisticsSourceParserTest.bytes(book);
         }
     }
-    @Test void updatesPricesAndMinimaByHeadersAndBlocksChangedCodesOrRounding() throws Exception {
-        var old=parser.parse(fixture(98,.05,"BKZXR","1",false),"云途旧价格.xlsx",directory()).path("channels").get(0);
-        var next=parser.parse(fixture(101,.08,"BKZXR","1",false),"云途新价格.xlsx",directory()).path("channels").get(0);
-        assertTrue(old.path("quoteReady").asBoolean(),old.toPrettyString());assertTrue(next.path("quoteReady").asBoolean(),next.toPrettyString());
-        assertEquals(old.path("companyChannelId"),next.path("companyChannelId"));assertNotEquals(old.path("contentHash"),next.path("contentHash"));
-        var computed=new LogisticsBillingEngine(mapper).calculate(next.path("rows"),mapper.createObjectNode().put("country","CA").put("weightKg",.080001));
-        assertEquals(.081,computed.path("chargeWeightKg").asDouble());assertEquals(33.18,computed.path("total").asDouble());
-        for(var bad:List.of(fixture(98,.05,"BKPHR","1",false),fixture(98,.05,"BKZXR","2",false),fixture(98,.05,"BKZXR","1",true))) {
-            var c=parser.parse(bad,"云途.xlsx",directory()).path("channels").get(0);assertTrue(c.path("errors").asInt()>0);assertFalse(c.path("quoteReady").asBoolean());
+    @Test void findsTitlesAndProductCodesAfterSheetRenameRowAndColumnMoves() throws Exception {
+        for(boolean codeOnly:List.of(false,true))for(boolean reordered:List.of(false,true)) {
+            var result=parser.parse(fixture("九月更新",codeOnly?"云途物流":"云途中包专线挂号（特惠普货）","ZBZXRPH",28,reordered,"1",false),"云途报价.xlsx",directory());
+            assertEquals(1,result.path("channels").size(),result.toPrettyString());
+            var c=result.path("channels").get(0);assertTrue(c.path("quoteReady").asBoolean(),c.toPrettyString());
+            assertEquals("33a7e612-1e5a-460c-b792-af0cb512b671",c.path("companyChannelId").asText());
+            assertEquals("普货",c.path("logisticsAttribute").asText());
+            var row=c.path("rows").get(0);assertEquals("per-kg-1g",row.path("pricingModel").asText());
+            assertEquals(155,row.path("pricePerKg").asDouble());assertEquals(38,row.path("registrationFee").asDouble());
+            assertEquals(.1,row.path("minChargeWeightKg").asDouble());
+            var billed=new LogisticsBillingEngine(mapper).calculate(c.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",.100001));
+            assertEquals(.101,billed.path("chargeWeightKg").asDouble());assertEquals(53.66,billed.path("total").asDouble());
         }
     }
-    @Test @EnabledIfSystemProperty(named="yunexpress.source",matches=".+")
-    void reconcilesFourRealChannels() throws Exception {
-        var path=Path.of(System.getProperty("yunexpress.source"));var result=parser.parse(Files.readAllBytes(path),path.getFileName().toString(),directory());
-        Files.createDirectories(Path.of("target/yunexpress-additional"));Files.writeString(Path.of("target/yunexpress-additional/parsed.json"),result.toPrettyString());
-        assertEquals(4,result.path("channels").size());
-        var counts=Map.of("BKZXR",66,"BKPHR",65,"DHZXR",39,"DHZXRPH",33);var cases=mapper.createArrayNode();
+    @Test void blocksConflictingIdentityMissingWeightAndChangedRounding() throws Exception {
+        for(var bytes:List.of(
+            fixture("云途中包专线挂号（特惠普货）","云途中包专线挂号（特惠普货）","ZBZXRDD",1,false,"1",false),
+            fixture("更新","云途中包专线挂号（特惠普货）","ZBZXRPH",1,false,"2",false),
+            fixture("更新","云途中包专线挂号（特惠普货）","ZBZXRPH",1,true,"1",true))) {
+            var result=parser.parse(bytes,"云途报价.xlsx",directory());
+            assertFalse(result.path("channels").isEmpty()&&result.path("sheets").isEmpty());
+            for(var c:result.path("channels"))assertFalse(c.path("quoteReady").asBoolean(),c.toPrettyString());
+        }
+    }
+    @Test @EnabledIfSystemProperty(named="yunexpress.medium.source",matches=".+")
+    void reconcilesBothRealChannels() throws Exception {
+        var path=Path.of(System.getProperty("yunexpress.medium.source"));var result=parser.parse(Files.readAllBytes(path),path.getFileName().toString(),directory());
+        Files.createDirectories(Path.of("target/yunexpress-medium"));Files.writeString(Path.of("target/yunexpress-medium/parsed.json"),result.toPrettyString());
+        assertEquals(2,result.path("channels").size());
+        var counts=Map.of("ZBZXRDD",42,"ZBZXRPH",42);var cases=mapper.createArrayNode();
         for(var c:result.path("channels")){
             assertEquals(0,c.path("errors").asInt(),c.path("issues").toString());assertTrue(c.path("quoteReady").asBoolean(),c.path("blockingReasons").toString());
             assertEquals(counts.get(YunexpressAdditionalRules.named(c.path("channelName").asText()).code()),c.path("rows").size());
         }
-        assertEquals(609,result.path("priceCellsParsed").asInt()); // 406 prices plus 203 explicit rounding-column reads.
-        try(var reader=new LogisticsSheetReader(Files.readAllBytes(path),path.getFileName().toString(),name->YunexpressAdditionalRules.named(name)==null||!counts.containsKey(YunexpressAdditionalRules.named(name).code()))) {
+        assertEquals(252,result.path("priceCellsParsed").asInt());
+        try(var reader=new LogisticsSheetReader(Files.readAllBytes(path),path.getFileName().toString(),name->!name.matches("云途中包专线挂号[（(]特惠(?:带电|普货)[）)]"))) {
             while(reader.hasNext()) {
-                var sheet=reader.next();var product=YunexpressAdditionalRules.named(sheet.getSheetName());if(product==null||!counts.containsKey(product.code()))continue;
+                var sheet=reader.next();var product=YunexpressAdditionalRules.named(sheet.getSheetName());if(product==null||!product.code().startsWith("ZB"))continue;
                 var c=result.path("channels").valueStream().filter(v->v.path("channelName").asText().equals(product.name())).findFirst().orElseThrow();
                 var firsts=new HashSet<String>();var format=new org.apache.poi.ss.usermodel.DataFormatter(Locale.ROOT);
                 for(var row:c.path("rows")) {
@@ -80,7 +98,7 @@ class YunexpressAdditionalTest {
                 }
             }
         }
-        var evidence=mapper.createObjectNode();evidence.set("channels",result.path("channels"));evidence.set("cases",cases);Files.writeString(Path.of("target/yunexpress-additional/billing-cases.json"),evidence.toPrettyString());
+        var evidence=mapper.createObjectNode();evidence.set("channels",result.path("channels"));evidence.set("cases",cases);Files.writeString(Path.of("target/yunexpress-medium/billing-cases.json"),evidence.toPrettyString());
         var jdbc=org.mockito.Mockito.mock(org.springframework.jdbc.core.simple.JdbcClient.class,org.mockito.Mockito.RETURNS_DEEP_STUBS);
         var dataset=UUID.randomUUID();var records=new ArrayList<ObjectNode>();
         for(var c:result.path("channels"))records.add(mapper.createObjectNode().put("provider","云途").put("channel",c.path("channelName").asText())
@@ -88,7 +106,7 @@ class YunexpressAdditionalTest {
         org.mockito.Mockito.when(jdbc.sql(org.mockito.ArgumentMatchers.anyString()).param("dataset",dataset).param("version",null)
             .query(org.mockito.ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<ObjectNode>>any()).list()).thenReturn(records);
         var exported=new LogisticsExportService(jdbc,mapper).prices(dataset,null,"","","",null,false);
-        var restored=parser.parse(exported,"云途标准导出.xlsx",directory());assertEquals(4,restored.path("channels").size());
+        var restored=parser.parse(exported,"云途标准导出.xlsx",directory());assertEquals(2,restored.path("channels").size());
         for(var c:restored.path("channels")) {
             assertTrue(c.path("quoteReady").asBoolean(),c.path("issues").toString());
             var original=result.path("channels").valueStream().filter(v->v.path("companyChannelId").equals(c.path("companyChannelId"))).findFirst().orElseThrow();

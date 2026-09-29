@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="sheet-titles-2026.09.23-v2";
+    public static final String VERSION="yunexpress-medium-2026.09.29-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -671,8 +671,13 @@ public class LogisticsSourceParser {
     }
 
     private YunexpressAdditionalRules.Product yunexpressAdditional(Source source) {
+        var identity=source.titleIdentities.computeIfAbsent("云途",p->titleIdentity(source,p));
+        if(identity.decision()!=null&&identity.decision().accepted()&&identity.decision().entry()!=null) {
+            var matched=YunexpressAdditionalRules.named(identity.decision().entry().path("channelName").asText());
+            if(matched!=null)return matched;
+        }
         var product=YunexpressAdditionalRules.named(source.sheet.getSheetName());if(product!=null)return product;
-        for(int r=0;r<=Math.min(20,source.lastContentRow);r++) {
+        for(int r=0;r<=Math.min(39,source.lastContentRow);r++) {
             if(detect(source,r,"云途")!=null)break;
             for(var text:source.rowTexts(r)){product=YunexpressAdditionalRules.named(text);if(product!=null)return product;}
         }
@@ -924,7 +929,10 @@ public class LogisticsSourceParser {
             c.put("sourceNotes",String.join("\n",allNotes));
             if(yunexpress!=null) {
                 var codePattern=Pattern.compile("产品代码[:：]\\s*([A-Z0-9]+)");var codes=new HashSet<String>();
-                for(int i=0;i<=Math.min(20,source.lastContentRow);i++)for(var text:source.rowTexts(i)){var match=codePattern.matcher(text);if(match.find())codes.add(match.group(1));}
+                for(int i=0;i<=Math.min(39,source.lastContentRow);i++) {
+                    if(detect(source,i,"云途")!=null)break;
+                    for(var text:source.rowTexts(i)){var match=codePattern.matcher(text);if(match.find())codes.add(match.group(1));}
+                }
                 if(!codes.equals(Set.of(yunexpress.code())))issue(c,0,"产品代码","云途渠道标题与产品代码不一致或缺失，禁止混入其他渠道","error");
                 var stepPattern=Pattern.compile(yunexpress.large()?"所有国家[^\\n]*以1[Gg]为单位进位":"加拿大[^\\n]*以1[Gg]为单位进位");
                 var step=stepPattern.matcher(String.join("\n",allNotes));boolean hasStep=step.find();String evidence=hasStep?step.group():"";

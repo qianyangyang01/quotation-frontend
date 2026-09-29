@@ -1,0 +1,6 @@
+{
+  "entries": [
+    {"id":"2bbfdac0-0be8-4bc2-9947-8b5b8307bb9e","providerName":"云途","providerAliases":[],"channelName":"云途中包专线挂号（特惠带电）","aliases":[],"productCodes":["ZBZXRDD"],"logisticsAttribute":"带电","enabled":true},
+    {"id":"33a7e612-1e5a-460c-b792-af0cb512b671","providerName":"云途","providerAliases":[],"channelName":"云途中包专线挂号（特惠普货）","aliases":[],"productCodes":["ZBZXRPH"],"logisticsAttribute":"普货","enabled":true}
+  ]
+}

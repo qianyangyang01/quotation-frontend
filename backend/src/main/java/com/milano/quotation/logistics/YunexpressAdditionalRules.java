@@ -8,7 +8,9 @@ final class YunexpressAdditionalRules {
         new Product("云途全球专线挂号（标快带电）","BKZXR",false),
         new Product("云途全球专线挂号（标快普货）","BKPHR",false),
         new Product("云途大货18000专线挂号（特惠带电）","DHZXR",true),
-        new Product("云途大货18000专线挂号（特惠普货）","DHZXRPH",true));
+        new Product("云途大货18000专线挂号（特惠普货）","DHZXRPH",true),
+        new Product("云途中包专线挂号（特惠带电）","ZBZXRDD",true),
+        new Product("云途中包专线挂号（特惠普货）","ZBZXRPH",true));
     private YunexpressAdditionalRules() {}
     static Product named(String name){return PRODUCTS.stream().filter(p->CompanyChannelScope.normalize(p.name).equals(CompanyChannelScope.normalize(name))).findFirst().orElse(null);}
 }
