@@ -25,8 +25,8 @@ describe('saved record customer table copying', () => {
     const lines = customerQuoteSheetTsv(sheet).split('\r\n').map(row => row.split('\t'))
     expect(lines).toEqual([
       ['No.', 'SKU', '1 set (USD)', '2 sets (USD)', '3 sets (USD)', '7 sets (USD)', 'Country / Zone', 'Logistics Provider', 'Shipping Time', 'Processing Time'],
-      ['1', '—', '$13.00', '—', '$0.00', '$55.68', 'New Zealand', 'SFYD Express', '7-12 workingdays', '1-2 workingdays'],
-      ['2', '—', '$13.00', '—', '$0.00', '$55.68', 'New Zealand', 'SFYD Express', '9-15 workingdays', '1-2 workingdays'],
+      ['1', '—', '$13.00', '—', '$0.00', '$55.68', 'New Zealand', 'SFYD Express', '7-12 working days', '1-2 working days'],
+      ['2', '—', '$13.00', '—', '$0.00', '$55.68', 'New Zealand', 'SFYD Express', '9-15 working days', '1-2 working days'],
     ])
     expect(source.rows[0].channelKey).not.toBe(source.rows[1].channelKey)
     expect(JSON.stringify(saved)).toBe(before)

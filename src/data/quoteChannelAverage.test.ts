@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { applyAveragePlans, averageScope, averagePrices, averagePlanIssues, mapAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, quoteSheetRowKey, quoteSheetTextTable, type QuoteSheetSourceRow } from './customerQuoteSheet'
 
-const sources: QuoteSheetSourceRow[] = ['SDH', 'SF', '燕文'].map((carrier, i) => ({ country: '美国', quoteRegion: '全国统一', carrier, transport: '普货', channelKey: String(i), rule: '', ruleId: i, channelCode: String(i), eta: '7-12 workingdays', quote1: [5, 5.25, 5.3][i]!, quote2: [5.95, 6.25, 6.45][i]!, quote3: [7, 7, 7.45][i]!, quoteCustom: null }))
+const sources: QuoteSheetSourceRow[] = ['SDH', 'SF', '燕文'].map((carrier, i) => ({ country: '美国', quoteRegion: '全国统一', carrier, transport: '普货', channelKey: String(i), rule: '', ruleId: i, channelCode: String(i), eta: '7-12 working days', quote1: [5, 5.25, 5.3][i]!, quote2: [5.95, 6.25, 6.45][i]!, quote3: [7, 7, 7.45][i]!, quoteCustom: null }))
 const plan = (): AveragePlan => ({ id: 'plan-1', mode: 'weighted', display: 'details', provider: 'Combined Shipping', shippingTime: '7-12 workingdays', quantities: [1, 2, 3], members: sources.map((row, i) => ({ optionId: quoteSheetRowKey(row), weight: [50, 30, 20][i]!, sourcePrices: [row.quote1, row.quote2, row.quote3] })), systemPrices: [5.14, 6.14, 7.09], prices: [5.14, 6.14, 7.09] })
 describe('channel average snapshot', () => {
   it('lists every selected zone on a cross-zone summary instead of inheriting only the first zone', () => {

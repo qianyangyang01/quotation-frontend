@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import { quoteSheetCountryCode, quoteSheetRowKey, type CustomerQuoteSheet, type CustomerQuoteSheetRow, type QuoteSheetSourceRow } from './customerQuoteSheet'
+import { formatShippingTime, quoteSheetCountryCode, quoteSheetRowKey, type CustomerQuoteSheet, type CustomerQuoteSheetRow, type QuoteSheetSourceRow } from './customerQuoteSheet'
 
 export type AveragePlan = {
   id: string; mode: 'equal' | 'weighted'; display: 'summary' | 'details'
@@ -78,7 +78,7 @@ export function applyAveragePlans(sheet: CustomerQuoteSheet, plans: AveragePlan[
     const summary: CustomerQuoteSheetRow = {
       ...first, key: `average:${plan.id}`, number: 'AVG', averageId: plan.id, provider: plan.provider,
       region: [...new Set(sourceRows.filter(row => keys.has(row.key)).map(row => row.region).filter(Boolean))].join(' / '),
-      shippingTime: plan.shippingTime || 'To be confirmed', processingTime: '1-2 workingdays',
+      shippingTime: formatShippingTime(plan.shippingTime || 'To be confirmed'), processingTime: '1-2 working days',
       prices: quantities.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null),
       sourceDescription: `${plan.mode === 'equal' ? '普通平均' : '加权平均'} · ${plan.members.length} 条渠道 · 系统报价为计算基准`,
     }

@@ -65,7 +65,7 @@ export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColu
 }
 export function quoteSheetCell(row: CustomerQuoteSheetRow, key: ReturnType<typeof quoteSheetColumns>[number]['key']) {
   if (key === 'country') return [row.country, row.region].filter(Boolean).join(' · ')
-  if (key === 'shippingTime' || key === 'processingTime') return formatShippingTime(row[key] ?? (key === 'processingTime' ? '1-2 workingdays' : '—'))
+  if (key === 'shippingTime' || key === 'processingTime') return formatShippingTime(row[key] ?? (key === 'processingTime' ? '1-2 working days' : '—'))
   return String(row[key] ?? '—')
 }
 export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: number) => number | null
@@ -161,7 +161,7 @@ export function formatShippingTime(value: string) {
   if (/^(?:[-—]\s*[-~～]|\d+\s*[-~～]\s*[-—])/.test(text)) return '—'
   return text.replace(/[～~–—]/g, '-').replace(/\s*-\s*/g, '-')
     .replace(/(?:个)?工作日/g, ' working days').replace(/(?:个)?自然日|天|日/g, ' days')
-    .replace(/\b(?:working\s*days?|business\s+days?|days?)\b/gi, 'workingdays')
+    .replace(/\b(?:working\s*days?|business\s+days?|days?)\b/gi, 'working days')
     .replace(/\s+/g, ' ').trim()
 }
 export function quoteSheetCountryCode(country: string, catalog: QuoteSheetCountry[]) {
@@ -266,8 +266,8 @@ export function buildCustomerQuoteSheet(input: {
     if (visible('provider') && !provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
     if (visible('provider') && /[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)
     const shippingTime = formatShippingTime(input.edits.shippingTimes[key] ?? row.eta)
-    if (visible('shippingTime') && /[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 workingdays`)
-    const processingTime = formatShippingTime(fields.processingTime ?? '1-2 workingdays')
+    if (visible('shippingTime') && /[^\x20-\x7e—]/.test(shippingTime)) tableIssues.push(`请将第 ${index + 1} 行运输时效填写为英文，例如 6-12 working days`)
+    const processingTime = formatShippingTime(fields.processingTime ?? '1-2 working days')
     if (visible('processingTime') && /[^\x20-\x7e—]/.test(processingTime)) tableIssues.push(`第 ${index + 1} 行处理时间请填写英文`)
     const number = fields.number === undefined ? index + 1 : Number(fields.number)
     if (!validQuoteSheetQuantity(number)) tableIssues.push(`第 ${index + 1} 行序号须为正整数`)

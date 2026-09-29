@@ -220,13 +220,13 @@ it('hides rows from preview and clipboard while preserving all saved prices and 
 it('binds time edits to the visible route after hiding and reordering', async () => {
   const state = mount([{ ...row('one', '4PX'), eta: '2-3 days' }, { ...row('two'), eta: '7-9 days' }, row('three', 'SDH')])
   await hideRowAt(1)
-  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('7-9 workingdays')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('7-9 working days')
   await input('第 1 行运输时效', '10-12 days')
   state.rows.reverse(); await settle()
   expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(2)
   await click('恢复全部')
   expect(document.querySelector<HTMLInputElement>('[aria-label="第 2 行运输时效"]')!.value).toBe('10-12 days')
-  expect(document.querySelector<HTMLInputElement>('[aria-label="第 3 行运输时效"]')!.value).toBe('2-3 workingdays')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="第 3 行运输时效"]')!.value).toBe('2-3 working days')
 })
 
 it('allows all rows to be hidden but disables empty exports until a row is restored', async () => {
@@ -393,7 +393,7 @@ it('previews the formerly blocked carriers and copies the exact preview blob and
   await click('复制报价数据')
   const cells = writeText.mock.calls[0][0].split('\r\n').map((line: string) => line.split('\t'))
   expect(cells).toHaveLength(3); expect(cells.every((line: string[]) => line.length === 10)).toBe(true)
-  expect(cells[2]).toEqual(['2', 'SKU-001', '$10.80', '$16.35', '$21.90', '$30.85', 'United States', 'SDH Express', '8-12 workingdays', '1-2 workingdays'])
+  expect(cells[2]).toEqual(['2', 'SKU-001', '$10.80', '$16.35', '$21.90', '$30.85', 'United States', 'SDH Express', '8-12 working days', '1-2 working days'])
   expect(writeText.mock.calls[0][0]).not.toMatch(/内部|全国统一/)
   expect(JSON.stringify(state.rows)).toBe(original)
 })
@@ -402,11 +402,11 @@ it('previews and copies a saved missing-ETA route, supports a local supplement a
   const state = mount([{ ...row('legacy', '极通环球'), eta: '该物流暂无时效说明' }])
   expect(document.querySelector<HTMLInputElement>('[aria-label="第 1 行运输时效"]')!.value).toBe('')
   await click('预览报价单'); expect(render.mock.lastCall![0].rows[0]!.shippingTime).toBe('—')
-  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 workingdays')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 working days')
   await click('编辑报价单'); await input('第 1 行运输时效', '10-15 days')
-  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t10-15 workingdays')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('JITO\t10-15 working days')
   await click('恢复渠道时效'); await click('复制报价数据')
-  expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 workingdays')
+  expect(writeText.mock.lastCall![0]).toContain('JITO\t—\t1-2 working days')
   expect(state.rows[0]!.eta).toBe('该物流暂无时效说明')
 })
 
@@ -437,11 +437,11 @@ it('invalidates previews and binds time edits to route identity through reorder 
   state.rows.reverse(); await settle()
   expect(revoke).toHaveBeenCalledWith('blob:quote'); expect(button('复制报价图片').disabled).toBe(true)
   await click('复制报价数据')
-  expect(writeText.mock.lastCall![0].split('\r\n')[2]).toContain('15-20 workingdays')
+  expect(writeText.mock.lastCall![0].split('\r\n')[2]).toContain('15-20 working days')
   state.contextKey = 'product-2'; await settle(); await click('复制报价数据')
-  expect(writeText.mock.lastCall![0]).not.toContain('15-20 workingdays')
+  expect(writeText.mock.lastCall![0]).not.toContain('15-20 working days')
   state.rows[0]!.eta = '3～5 天'; state.rows[0]!.quote1 = 99.5; await settle(); await click('复制报价数据')
-  expect(writeText.mock.lastCall![0]).toContain('3-5 workingdays\t1-2 workingdays'); expect(writeText.mock.lastCall![0]).toContain('$99.50')
+  expect(writeText.mock.lastCall![0]).toContain('3-5 working days\t1-2 working days'); expect(writeText.mock.lastCall![0]).toContain('$99.50')
 })
 
 it('clears temporary provider names when switching quotation context', async () => {
@@ -506,7 +506,7 @@ it('adds inline quantity columns, calculates by original route identity and copi
   await click('预览报价单'); await click('复制报价数据')
   const snapshot = render.mock.lastCall![0]
   expect(snapshot.quantityLabels).toEqual(['1 pc', '2 pcs', '3 pcs', '5 pcs', '8 pcs'])
-  expect(snapshot.rows[0]).toMatchObject({ country: 'Canada', provider: 'Custom Carrier', processingTime: '3-4 workingdays', prices: [10.8,16.35,21.9,30.85,27.5] })
+  expect(snapshot.rows[0]).toMatchObject({ country: 'Canada', provider: 'Custom Carrier', processingTime: '3-4 working days', prices: [10.8,16.35,21.9,30.85,27.5] })
   expect(snapshot.rows[1].prices[4]).toBeNull()
   const cells = writeText.mock.lastCall![0].split('\r\n').map((line: string) => line.split('\t'))
   expect(cells.every((cells: string[]) => cells.length === 11)).toBe(true)
@@ -646,7 +646,7 @@ it('rejects a burst of repeated previews and only accepts the newest of reversed
   jobs[1].reject(new Error('old failure')); jobs[0].finish([png()]); await settle()
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
   expect(document.querySelector('[role="alert"]')).toBeNull()
-  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('2-3 workingdays')
+  await click('复制报价数据'); expect(writeText.mock.lastCall![0]).toContain('2-3 working days')
 })
 
 it('does not allocate image URLs when an unmounted render finishes', async () => {
@@ -905,7 +905,7 @@ async function generateWeighted() {
     checkbox.click(); await settle()
     await input(`${carrier} · 内部渠道 权重`, weight!)
   }
-  await input('综合报价运输时效', '7-12 workingdays')
+  await input('综合报价运输时效', '7-12 working days')
   await click('生成平均行')
 }
 const averageRows = () => ['SDH', '顺丰', '燕文'].map((carrier, i) => ({ ...row(String(i), carrier), quote1: [5,5.25,5.3][i]!, quote2: [5.95,6.25,6.45][i]!, quote3: [7,7,7.45][i]!, quoteCustom: [7,7,7.45][i]! }))
