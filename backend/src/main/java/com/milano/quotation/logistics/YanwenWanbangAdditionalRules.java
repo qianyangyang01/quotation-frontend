@@ -6,6 +6,8 @@ import java.util.List;
 final class YanwenWanbangAdditionalRules {
     record Product(String provider,String name,String alias,String code) {}
     static final List<Product> PRODUCTS=List.of(
+        new Product("燕文","燕文专线快递-普货","","440"),
+        new Product("燕文","燕文专线快递-特货","","557"),
         new Product("燕文","燕文精品服装专线-普货","","1667"),
         new Product("燕文","燕文大货专线追踪-特货","","1558"),
         new Product("燕文","燕文大货专线追踪-普货","","1557"),

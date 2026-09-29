@@ -1,0 +1,4 @@
+{"entries":[
+  {"id":"5602fa22-7edf-4dcb-936a-abf5fc895440","providerName":"燕文","providerAliases":[],"channelName":"燕文专线快递-普货","aliases":[],"productCodes":["440"],"logisticsAttribute":"普货","enabled":true},
+  {"id":"5602fa22-7edf-4dcb-936a-abf5fc895557","providerName":"燕文","providerAliases":[],"channelName":"燕文专线快递-特货","aliases":[],"productCodes":["557"],"logisticsAttribute":"带电","enabled":true}
+]}
