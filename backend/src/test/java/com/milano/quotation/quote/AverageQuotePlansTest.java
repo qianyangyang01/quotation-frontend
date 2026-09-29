@@ -28,6 +28,41 @@ class AverageQuotePlansTest {
     ObjectNode member(ObjectNode r) { return (ObjectNode) plan(r).path("members").get(0); }
     ObjectNode patch(ObjectNode r) { return mapper.createObjectNode().set("customerQuote", r.path("customerQuote").deepCopy()); }
 
+    @Test void savesInterleavedRowOrderThroughRoundTripWithoutChangingPricesReviewOrOriginalSheet() {
+        var r = record();
+        ((ObjectNode) r.path("customerQuote")).putArray("rowOrder").add("average:p").add("option:c").add("option:a").add("option:b");
+        CustomerQuotePrices.initialize(r);
+        r = (ObjectNode) mapper.readTree(r.toString());
+        assertEquals(r.path("customerQuote").path("rowOrder"), r.path("sheetQuote").path("rowOrder"));
+        assertFalse(r.path("systemQuantityQuotes").has("rowOrder"));
+        var before = r.deepCopy(); var p = patch(r);
+        ((ObjectNode) p.path("customerQuote")).putArray("rowOrder").add("option:a").add("average:p").add("option:c").add("option:b");
+        CustomerQuotePrices.preparePatch(r, p);
+        assertFalse(QuotationFinanceReview.pricesChanged(r, p));
+        QuotationConfirmation.prepare(r, p); assertFalse(p.has("quoteConfirmed"));
+        assertEquals(before, r);
+        assertEquals(r.path("customerQuote").path("rows"), p.path("customerQuote").path("rows"));
+        assertEquals(plan(r), plan(p));
+        var oldClient = patch(r); ((ObjectNode) oldClient.path("customerQuote")).remove("rowOrder");
+        CustomerQuotePrices.preparePatch(r, oldClient);
+        assertEquals(r.path("customerQuote"), oldClient.path("customerQuote"));
+        var removed = patch(r); ((ObjectNode) removed.path("customerQuote")).remove("rowOrder");
+        ((ObjectNode) removed.path("customerQuote")).putArray("averagePlans");
+        CustomerQuotePrices.preparePatch(r, removed);
+        assertEquals("[\"option:c\",\"option:a\",\"option:b\"]", removed.path("customerQuote").path("rowOrder").toString());
+    }
+
+    @Test void rejectsDuplicateForeignAndMalformedRowOrdersAndKeepsLegacyDefault() {
+        var legacy = record(); CustomerQuotePrices.initialize(legacy);
+        assertFalse(legacy.path("customerQuote").has("rowOrder"));
+        for (var json : new String[]{"null", "{}", "[1]", "[\"option:foreign\"]", "[\"average:foreign\"]", "[\"option:a\",\"option:a\"]"}) {
+            var r = record(); ((ObjectNode) r.path("customerQuote")).set("rowOrder", mapper.readTree(json));
+            assertThrows(RuntimeException.class, () -> CustomerQuotePrices.initialize(r));
+            var p = patch(legacy); ((ObjectNode) p.path("customerQuote")).set("rowOrder", mapper.readTree(json));
+            assertThrows(RuntimeException.class, () -> CustomerQuotePrices.preparePatch(legacy, p));
+        }
+    }
+
     @Test void persistsCanonicalWeightedAndEqualSnapshotsWithIndependentTiers() {
         var r = record(); CustomerQuotePrices.initialize(r);
         var restored = (ObjectNode) mapper.readTree(r.toString());

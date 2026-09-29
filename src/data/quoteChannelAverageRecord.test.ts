@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { normalizeQuotationRecord } from './quotationRecords'
-import { priceComparison, recordCustomerPrices } from './customerQuotePrices'
+import { normalizeCustomerPrices, priceComparison, recordCustomerPrices } from './customerQuotePrices'
 import { customerPriceRevision } from './customerPriceRevision'
 import { quotationRecordQuoteOnlyLayout } from './quotationRecordQuoteOnlyLayout'
 import { quotationRecordCopyLayout } from './quotationRecordCopyLayout'
@@ -15,6 +15,28 @@ function record() {
       members: [{ optionId: 'a', weight: 1, sourcePrices: [5] }, { optionId: 'b', weight: 1, sourcePrices: [5.2] }], systemPrices: [5.1], prices: [4.9] },
   ] } })!
 }
+it('retains interleaved saved order in customer copy and cloned price edits, including hidden sources', () => {
+  const r = record()
+  r.customerQuote!.averagePlans![0]!.display = 'details'
+  r.customerQuote!.rowOrder = ['option:b', 'average:p', 'option:a']
+  const saved = normalizeQuotationRecord(JSON.parse(JSON.stringify(r)))!
+  const before = JSON.stringify(saved)
+  for (const layout of [quotationRecordQuoteOnlyLayout(saved)]) {
+    for (const output of [layout.text, layout.html]) {
+      expect(output.indexOf('顺丰｜B')).toBeLessThan(output.indexOf('Combined Shipping'))
+      expect(output.indexOf('Combined Shipping')).toBeLessThan(output.indexOf('SDH｜A'))
+    }
+  }
+  const draft = recordCustomerPrices(saved); draft.rowOrder!.reverse()
+  expect(JSON.stringify(saved)).toBe(before)
+  saved.customerQuote!.hiddenOptionIds = ['b']
+  const visible = quotationRecordQuoteOnlyLayout(saved, 'visible')
+  expect(visible.text).not.toContain('顺丰｜B')
+  expect(visible.text.indexOf('Combined Shipping')).toBeLessThan(visible.text.indexOf('SDH｜A'))
+  for (const rowOrder of [null, {}, [1], ['option:foreign'], ['average:foreign'], ['option:a', 'option:a']]) {
+    expect(normalizeCustomerPrices({ ...r.customerQuote, rowOrder })).toBeUndefined()
+  }
+})
 it('clones the full plan and shows its price difference and readable revision history', () => {
   const r = record(), before = JSON.stringify(r.customerQuote)
   const draft = recordCustomerPrices(r); draft.averagePlans![0]!.prices[0] = 4.8

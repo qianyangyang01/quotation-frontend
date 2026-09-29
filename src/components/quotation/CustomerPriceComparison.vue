@@ -30,7 +30,7 @@ function buildDraft() {
     if (!/^\d+(?:\.\d{1,2})?$/.test(text) || Number(text) > 999999999.99) throw new Error('综合报价须为非负美元金额，最多两位小数')
     return Number(text)
   }) }))
-  return { ...(draft.value.sizeRules !== undefined ? { sizeRules: draft.value.sizeRules, sizeRulesEnabled: draft.value.sizeRulesEnabled } : {}), averagePlans, hiddenOptionIds: draft.value.hiddenOptionIds, ...(draft.value.contact ? { contact: { ...draft.value.contact } } : {}), quantities:[...draft.value.quantities], rows:draft.value.rows.map(row=>({optionId:row.optionId,prices:draft.value.quantities.map(q=>{
+  return { ...(draft.value.rowOrder ? { rowOrder: [...draft.value.rowOrder] } : {}), ...(draft.value.sizeRules !== undefined ? { sizeRules: draft.value.sizeRules, sizeRulesEnabled: draft.value.sizeRulesEnabled } : {}), averagePlans, hiddenOptionIds: draft.value.hiddenOptionIds, ...(draft.value.contact ? { contact: { ...draft.value.contact } } : {}), quantities:[...draft.value.quantities], rows:draft.value.rows.map(row=>({optionId:row.optionId,prices:draft.value.quantities.map(q=>{
     const text=inputs.value[key(row.optionId,q)].trim()
     if (!text) return null
     if (!/^\d+(?:\.\d{1,2})?$/.test(text) || Number(text)>999999999.99) throw new Error('客户价格须为非负美元金额，最多两位小数；留空表示未报价')

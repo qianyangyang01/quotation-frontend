@@ -13,6 +13,7 @@ import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import QuoteAveragePanel from './QuoteAveragePanel.vue'
 import { applyAveragePlans, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
+import { restoreQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
 import { releaseQuotePhotos, MAX_QUOTE_PHOTOS, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
 import QuotePhotoPicker from './QuotePhotoPicker.vue'
@@ -125,7 +126,14 @@ function initialHiddenRows() {
 const hiddenRowKeys = ref(initialHiddenRows())
 watch(() => JSON.stringify(props.initialQuote?.hiddenOptionIds), () => { hiddenRowKeys.value = initialHiddenRows() })
 const showHiddenRows = ref(false)
-const rowOrder = ref<string[]>([])
+function initialRowOrder() {
+  return restoreQuoteRowOrder(props.initialQuote?.rowOrder, id => {
+    const row = props.rows.find(row => row.channelKey === id)
+    return row ? quoteSheetRowKey(row) : undefined
+  })
+}
+const rowOrder = ref<string[]>(initialRowOrder())
+watch(() => JSON.stringify(props.initialQuote?.rowOrder), () => { rowOrder.value = initialRowOrder() })
 const draggedRow = ref<string | null>(null)
 const rowDropTarget = ref<string | null>(null)
 const rowControlsDisabled = computed(() => copying.value || props.removalDisabled || props.sourcePending)
@@ -272,7 +280,7 @@ function restoreAllRows() {
 }
 watch(() => JSON.stringify([layoutUserId.value, props.skus, props.resetKey ?? props.contextKey, props.bundle]), () => {
   hiddenRowKeys.value = initialHiddenRows()
-  rowOrder.value = []
+  rowOrder.value = initialRowOrder()
   endRowDrag()
   showHiddenRows.value = false
 }, { flush: 'sync' })
@@ -574,7 +582,7 @@ function capturePrices(): CapturedSheetPrices {
   if (allRowsSheet.value.priceIssues?.length) throw new Error(allRowsSheet.value.priceIssues.join('；'))
   const system = systemSheet.value
   if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
-  return { averagePlans: cloneAveragePlans(averagePlans.value).map(plan => ({ ...plan, quantities: [...quantities.value], prices: quantities.value.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null), systemPrices: quantities.value.map(q => plan.systemPrices[plan.quantities.indexOf(q)] ?? null), members: plan.members.map(m => ({...m, sourcePrices: quantities.value.map(q => m.sourcePrices[plan.quantities.indexOf(q)] ?? null)})) })), sizeRules: edits.value.sizeRules, sizeRulesEnabled: edits.value.sizeRulesEnabled, hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
+  return { rowOrderKeys: orderedRowsSheet.value.rows.map(row => row.key), averagePlans: cloneAveragePlans(averagePlans.value).map(plan => ({ ...plan, quantities: [...quantities.value], prices: quantities.value.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null), systemPrices: quantities.value.map(q => plan.systemPrices[plan.quantities.indexOf(q)] ?? null), members: plan.members.map(m => ({...m, sourcePrices: quantities.value.map(q => m.sourcePrices[plan.quantities.indexOf(q)] ?? null)})) })), sizeRules: edits.value.sizeRules, sizeRulesEnabled: edits.value.sizeRulesEnabled, hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
 }
 defineExpose({ preview, copyData, invalidate, copying, capturePrices })
 onBeforeUnmount(() => {

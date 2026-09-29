@@ -6,6 +6,7 @@ import { renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/custo
 import type { QuoteSheetPriceCalculator, QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
+import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import type { CustomerPriceSnapshot } from '@/data/customerQuotePrices'
 import { authState, type AuthUser } from '@/data/authStore'
 
@@ -1224,4 +1225,33 @@ it('restores saved notes and switch state, but starts a new product with the swi
   state.initialQuote=undefined;state.recordMode=false;state.contextKey='new-product';await settle()
   expect(document.querySelector('.sheet-size-rules')).toBeNull()
   expect(exposed.capturePrices().sizeRules).toBeUndefined()
+})
+
+it('persists average row position through capture, reopen, preview, copying and record reset', async () => {
+  const rows = averageRows()
+  mount(rows); await settle(); await generateWeighted()
+  for (const index of [4, 3, 2]) {
+    document.querySelector<HTMLButtonElement>('[aria-label="上移第 ' + index + ' 行"]')!.click()
+    await settle()
+  }
+  const position = () => [...document.querySelectorAll('.sheet-editor tbody tr')].findIndex(tr => tr.classList.contains('sheet-average-row'))
+  const movedPosition = position()
+  expect(movedPosition).toBe(0)
+  const saved = exposed.capturePrices()
+  const ids = (key: string) => rows.find(row => quoteSheetRowKey(row) === key)?.channelKey
+  const initialQuote = { rowOrder: captureQuoteRowOrder(saved.rowOrderKeys, ids), quantities: saved.quantities, rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.prices })), averagePlans: mapAveragePlans(saved.averagePlans, ids) }
+  const system = { quantities: saved.quantities, rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.systemPrices })) }
+  app.unmount(); document.body.innerHTML = ''
+  const state = mount(rows, undefined, initialQuote, true); state.initialSystemQuote = system; await settle()
+  const reopenedPosition = position()
+  expect(exposed.capturePrices().averagePlans).toEqual(saved.averagePlans)
+  expect(exposed.capturePrices().rows).toEqual(saved.rows)
+
+  expect(reopenedPosition).toBe(movedPosition)
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows[0]!.key).toBe(saved.rowOrderKeys![0])
+  await click('复制报价数据')
+  expect(writeText.mock.lastCall![0].indexOf('Combined Shipping')).toBeLessThan(writeText.mock.lastCall![0].indexOf('SDH'))
+  state.initialQuote = undefined; state.recordMode = false; state.contextKey = 'another-record'; await settle()
+  expect(exposed.capturePrices().rowOrderKeys).not.toContain(saved.rowOrderKeys![0])
 })

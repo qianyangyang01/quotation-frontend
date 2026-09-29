@@ -37,6 +37,35 @@ class QuotationWorkflowIntegrationTest {
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
+    @Test void savesAverageRowOrderAndReadsItBackWithoutRewritingInitialPrices() throws Exception {
+        var session = authenticatedSession();
+        var input = new AverageQuotePlansTest().record();
+        input.remove("id"); input.remove("quoteConfirmed");
+        input.put("customerName", "QA row order").put("quoteMode", "single").put("primarySku", "QA-ROW-ORDER")
+            .put("productCategory", "其他").put("logisticsAttribute", "普货").put("customerGrade", "A级客户")
+            .put("monthlySalesEstimate", "10").put("systemQuoteUsd", 5).put("systemQuoteCny", 33.5).put("exchangeRate", 6.7);
+        ((tools.jackson.databind.node.ObjectNode) input.path("customerQuote")).putArray("rowOrder")
+            .add("option:c").add("average:p").add("option:a").add("option:b");
+        var created = mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key", "qa-average-order")
+            .contentType("application/json").content(input.toString())).andExpect(status().isOk()).andReturn();
+        var saved = mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
+        var id = saved.path("id").asText();
+        var read = mvc.perform(get("/api/v1/quotations/{id}", id).session(session)).andExpect(status().isOk()).andReturn();
+        var restored = mapper.readTree(read.getResponse().getContentAsByteArray()).path("data");
+        org.junit.jupiter.api.Assertions.assertEquals(input.path("customerQuote").path("rowOrder"), restored.path("customerQuote").path("rowOrder"));
+        org.junit.jupiter.api.Assertions.assertEquals(restored.path("customerQuote"), restored.path("sheetQuote"));
+        var prices = (tools.jackson.databind.node.ObjectNode) restored.path("customerQuote").deepCopy();
+        prices.putArray("rowOrder").add("average:p").add("option:b").add("option:a").add("option:c");
+        var patch = mapper.createObjectNode().put("_version", restored.path("_version").asLong()).set("customerQuote", prices);
+        mvc.perform(patch("/api/v1/quotations/{id}", id).session(session).with(csrf()).header("If-Match", restored.path("_version").asLong())
+            .contentType("application/json").content(patch.toString())).andExpect(status().isOk());
+        var finalRead = mvc.perform(get("/api/v1/quotations/{id}", id).session(session)).andExpect(status().isOk()).andReturn();
+        var finalRecord = mapper.readTree(finalRead.getResponse().getContentAsByteArray()).path("data");
+        org.junit.jupiter.api.Assertions.assertEquals(prices.path("rowOrder"), finalRecord.path("customerQuote").path("rowOrder"));
+        for (var field : new String[]{"sheetQuote", "systemQuantityQuotes", "quoteOptions"})
+            org.junit.jupiter.api.Assertions.assertEquals(restored.path(field), finalRecord.path(field));
+    }
+
     @Test void savesFractionalGramSnapshotIdempotentlyWithoutChangingEarlierQuote() throws Exception {
         var session=authenticatedSession();
         var earlier=PackagingWeightTest.valid();

@@ -91,6 +91,22 @@ final class CustomerQuotePrices {
         }
         return clean;
     }
+    private static void rowOrder(ObjectNode record, ObjectNode customer, JsonNode value, boolean retainExisting) {
+        if (value.isMissingNode()) return;
+        if (!value.isArray()) throw AppException.unprocessable("报价行顺序格式错误");
+        var allowed = new HashSet<String>();
+        options(record).keySet().forEach(id -> allowed.add("option:" + id));
+        customer.path("averagePlans").forEach(plan -> allowed.add("average:" + plan.path("id").asText()));
+        var seen = new HashSet<String>();
+        var saved = customer.putArray("rowOrder");
+        for (var id : value) {
+            // Older clients may delete a plan without sending the new presentation field.
+            if (retainExisting && id.isTextual() && !allowed.contains(id.asText())) continue;
+            if (!id.isTextual() || !allowed.contains(id.asText()) || !seen.add(id.asText()))
+                throw AppException.unprocessable("报价行顺序须对应不重复的原报价渠道或综合方案");
+            saved.add(id.asText());
+        }
+    }
     static JsonNode originalPrice(ObjectNode record, JsonNode option, long quantity) {
         var field = quantity == 1 ? "quote1Usd" : quantity == 2 ? "quote2Usd" : quantity == 3 ? "quote3Usd" :
             quantity == record.path("customQuoteQuantity").asLong(0) ? "quoteCustomUsd" : null;
@@ -119,6 +135,7 @@ final class CustomerQuotePrices {
         }
         payload.set("systemQuantityQuotes",system);
         if (payload.path("customerQuote").has("averagePlans")) customer.set("averagePlans", AverageQuotePlans.validate(payload, customer, payload.path("customerQuote").path("averagePlans")));
+        rowOrder(payload, customer, payload.path("customerQuote").path("rowOrder"), false);
         payload.set("sheetQuote",customer.deepCopy()); payload.set("customerQuote",customer);
     }
     static void preparePatch(ObjectNode current, ObjectNode patch) {
@@ -151,6 +168,13 @@ final class CustomerQuotePrices {
                 if (plans.isMissingNode()) plans = current.path("sheetQuote").path("averagePlans");
             }
             if (!plans.isMissingNode()) customer.set("averagePlans", AverageQuotePlans.validate(current, customer, plans));
+            var order = patch.path("customerQuote").path("rowOrder");
+            var retainOrder = order.isMissingNode();
+            if (retainOrder) {
+                order = current.path("customerQuote").path("rowOrder");
+                if (order.isMissingNode()) order = current.path("sheetQuote").path("rowOrder");
+            }
+            rowOrder(current, customer, order, retainOrder);
             patch.set("customerQuote", customer);
         }
     }

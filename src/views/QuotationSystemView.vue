@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import "@/styles/quotationCompact.css"
 import { loadCustomerOperationSettings, resolveCustomerOperation, customerOperationFeeForQuantity, addCustomerOperationFee, CUSTOMER_OPERATION_FEES_UPDATED } from '@/data/customerOperationFees'
@@ -2085,7 +2086,7 @@ async function save() {
   // Persist the preview order in the option array, so reopening and copying use the same sequence.
   const previewOrder = new Map(captured.rows.map((row, index) => [row.key, index]))
   quoteOptions.sort((a, b) => previewOrder.get(a.quoteSheetKey)! - previewOrder.get(b.quoteSheetKey)!)
-  const snapshot = captured ? { averagePlans: mapAveragePlans(captured.averagePlans, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), hiddenOptionIds: quoteOptions.filter(option => captured.hiddenRowKeys?.includes(option.quoteSheetKey)).map(option => option.id), sizeRules: captured.sizeRules, sizeRulesEnabled: captured.sizeRulesEnabled, contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
+  const snapshot = captured ? { rowOrder: captureQuoteRowOrder(captured.rowOrderKeys, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), averagePlans: mapAveragePlans(captured.averagePlans, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), hiddenOptionIds: quoteOptions.filter(option => captured.hiddenRowKeys?.includes(option.quoteSheetKey)).map(option => option.id), sizeRules: captured.sizeRules, sizeRulesEnabled: captured.sizeRulesEnabled, contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
     const row = captured!.rows.find(row => row.key === option.quoteSheetKey)
     return { optionId: option.id, prices: row!.prices }
   }) } : undefined

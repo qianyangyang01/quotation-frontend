@@ -27,12 +27,13 @@ it('saves only customer prices with the expected version and renders the final c
 })
 it('preserves the quotation contact when editing prices from the comparison panel',async()=>{
   const {state}=mount()
-  state.record={...record(),_version:3,customerQuote:{...record().customerQuote!,hiddenOptionIds:['yanwen'],contact:{agent:'Vivian',whatsapp:'+111'}}};await settle()
+  state.record={...record(),_version:3,customerQuote:{...record().customerQuote!,rowOrder:['option:yanwen'],hiddenOptionIds:['yanwen'],contact:{agent:'Vivian',whatsapp:'+111'}}};await settle()
   button('编辑客户报价').click();await settle()
   update.mockImplementation(async(_id,patch)=>({...state.record,customerQuote:patch.customerQuote,_version:4}))
   button('保存客户报价').click();await settle()
   expect(update.mock.lastCall![1].customerQuote?.contact).toEqual({agent:'Vivian',whatsapp:'+111'})
   expect(update.mock.lastCall![1].customerQuote?.hiddenOptionIds).toEqual(['yanwen'])
+  expect(update.mock.lastCall![1].customerQuote?.rowOrder).toEqual(['option:yanwen'])
 })
 it('blocks repeat saves and does not apply a late response to another record',async()=>{
   const {state,saved}=mount();let finish!:(value:QuotationRecord)=>void

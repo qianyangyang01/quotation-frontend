@@ -38,6 +38,26 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('retains an interleaved average when saving a record and reopening it', async () => {
+  const state = mount(); state.canEdit = true
+  state.record.quoteOptions!.push({ ...state.record.quoteOptions![0]!, id: 'b', channel: 'second' })
+  state.record.customerQuote = { quantities: [1, 2, 3, 5], rows: ['a', 'b'].map(optionId => ({ optionId, prices: [6.2, 8.3, 10.95, 15.9] })),
+    averagePlans: [{ id: 'p', mode: 'equal', display: 'details', provider: 'Combined Shipping', shippingTime: '', quantities: [1, 2, 3, 5],
+      members: ['a', 'b'].map(optionId => ({ optionId, weight: 1, sourcePrices: [6.2, 8.3, 10.95, 15.9] })), systemPrices: [6.2, 8.3, 10.95, 15.9], prices: [6, 8, 10, 15] }] }
+  state.record.customerQuote.rowOrder = ['option:a', 'average:p', 'option:b']
+  const originalPrices = JSON.stringify(state.record.customerQuote.rows)
+  await settle(); footerButton('复制报价图片').click(); await settle()
+  ;[...document.querySelectorAll('button')].find(button => button.textContent === '编辑报价单')!.click(); await settle()
+  vi.mocked(updateQuotationRecord).mockImplementation(async (_id, patch) => normalizeQuotationRecord(JSON.parse(JSON.stringify({ ...state.record, ...patch, _version: 2 })))!)
+  ;[...document.querySelectorAll('button')].find(button => button.textContent === '保存客户报价')!.click(); await settle()
+  expect(state.record.customerQuote!.rowOrder).toEqual(['option:a', 'average:p', 'option:b'])
+  expect(JSON.stringify(state.record.customerQuote!.rows)).toBe(originalPrices)
+  state.record = normalizeQuotationRecord(JSON.parse(JSON.stringify(state.record)))!; await settle()
+  footerButton('复制报价图片').click(); await settle()
+  expect(render.mock.lastCall![0].rows[1]!.key).toBe('average:p')
+  expect(render.mock.lastCall![0].rows[1]!.prices).toEqual([6, 8, 10, 15])
+})
+
 it('reopens saved hidden rows and selects either version for images and both data copy paths without writes', async () => {
   const state = mount()
   state.record.quoteOptions!.push({ ...state.record.quoteOptions![0]!, id: 'b', channel: '隐藏渠道', country: '加拿大', countryCode: 'CA' })

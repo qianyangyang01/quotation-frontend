@@ -1,3 +1,4 @@
+import { orderQuoteRows } from './quoteSheetRowOrder'
 import { savedSystemPrice, recordQuoteSheetVersion } from './customerQuotePrices'
 import { averageSelectedRegions } from './quoteChannelAverage'
 import { customerGradeDisplayLabel } from './financeChannelPolicies'
@@ -74,18 +75,20 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version:
     { kind: 'header', cells: header },
   ]
   const summaryMembers = new Set(plans.filter(p => version !== 'full' && p.display === 'summary').flatMap(p => p.members.map(m => m.optionId)))
+  const routeRows: { identity: string; kind: 'route'; cells: string[] }[] = []
   for (const option of options.filter(option => !summaryMembers.has(option.id))) {
     const country = quotationRecordCopyCountry(option.country, option.quoteRegion)
     const prices = quantities.map(quantity => {
       const value = price(option, quantity)
       return value == null || !Number.isFinite(value) ? '未报价' : value.toFixed(2)
     })
-    rows.push({ kind: 'route', cells: [country, [option.carrier, option.channel].filter(Boolean).join('｜'), ...prices, option.eta || '未保存'] })
+    routeRows.push({ identity: `option:${option.id}`, kind: 'route', cells: [country, [option.carrier, option.channel].filter(Boolean).join('｜'), ...prices, option.eta || '未保存'] })
   }
   for (const plan of plans) {
     const first = record.quoteOptions?.find(option => option.id === plan.members[0]?.optionId)
-    rows.push({kind: 'route', cells: [first ? quotationRecordCopyCountry(first.country, averageSelectedRegions(plan, record.quoteOptions)) : '综合方案', plan.provider + '（综合报价）', ...quantities.map(q => { const p = plan.prices[plan.quantities.indexOf(q)]; return p == null ? '未报价' : p.toFixed(2) }), plan.shippingTime || 'To be confirmed']})
+    routeRows.push({identity: `average:${plan.id}`, kind: 'route', cells: [first ? quotationRecordCopyCountry(first.country, averageSelectedRegions(plan, record.quoteOptions)) : '综合方案', plan.provider + '（综合报价）', ...quantities.map(q => { const p = plan.prices[plan.quantities.indexOf(q)]; return p == null ? '未报价' : p.toFixed(2) }), plan.shippingTime || 'To be confirmed']})
   }
+  rows.push(...orderQuoteRows(routeRows, snapshot?.rowOrder, row => row.identity))
   if (!options.length) rows.push({ kind: 'note', cells: ['未保存国家与物流渠道报价'] })
   rows.push({ kind: 'note', cells: ['各数量价格为整单报价；未报价项不补算。'] })
   rows.push({ kind: 'note', cells: [summary.note] })

@@ -8,6 +8,7 @@ import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vu
 import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams } from '@/data/quotationWeightSnapshot'
 import { parseCommissionThreshold } from '@/services/quotationCommission'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
+import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { normalizePurchaseTier } from '@/services/quotationCalculator'
@@ -111,7 +112,7 @@ it.each([
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
-  const context={ mapAveragePlans, normalizePurchaseTier,
+  const context={ captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
@@ -135,7 +136,7 @@ it.each([
     weightSnapshot: expect.objectContaining({items:mode==='single'
       ? [expect.objectContaining({sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14,weightSource:manual?'manual':'purchase',purchaseWeightKg:manual?.12:.14})]
       : [expect.objectContaining({sku:'SKU-A',quantityPerSet:2,baseWeightKg:.14,weightSource:'manual',purchaseWeightKg:.12}),expect.objectContaining({sku:'SKU-B',quantityPerSet:1,baseWeightKg:.05,weightSource:'purchase',purchaseWeightKg:.05})]}),
-    customerQuote:{sizeRules:'S–XXL',sizeRulesEnabled:true,averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
+    customerQuote:{rowOrder:['option:option-a'],sizeRules:'S–XXL',sizeRulesEnabled:true,averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))
   expect(resetLocalDraft).toHaveBeenCalledExactlyOnceWith({ name: 'QA', selectedCustomerId: '' })
