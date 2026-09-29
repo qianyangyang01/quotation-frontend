@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="yunexpress-medium-2026.09.29-v1";
+    public static final String VERSION="wanbang-yunexpress-medium-2026.09.29-v2";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -695,7 +695,7 @@ public class LogisticsSourceParser {
 
     private YanwenWanbangAdditionalRules.Product yanwenWanbangAdditional(Source source,String provider) {
         var product=YanwenWanbangAdditionalRules.named(provider,source.sheet.getSheetName());if(product!=null)return product;
-        for(int r=0;r<=Math.min(20,source.lastContentRow);r++) {
+        for(int r=0;r<=source.lastContentRow;r++) {
             if(detect(source,r,provider)!=null)break;
             for(var text:source.rowTexts(r)){product=YanwenWanbangAdditionalRules.named(provider,text);if(product!=null)return product;}
         }
@@ -811,6 +811,11 @@ public class LogisticsSourceParser {
             if(target==null)continue;
             var additional=YanwenWanbangAdditionalRules.named(provider,target.path("channelName").asText());
             if(additional!=null&&!additional.code().equals(productCode))issue(target,r+1,"产品代码","渠道名称与原表产品代码不一致或缺失，禁止混入其他产品","error");
+            if(additional!=null&&Set.of("WBSLMP","WBSLMPPH").contains(additional.code())) {
+                if(columns.weight>=0&&weightColumnRank(source.text(columns.headerRow,columns.weight))==1)
+                    issue(target,r+1,"重量段","中包专线缺少计价重量段，不能以重量限制代替","error");
+                if(columns.fee<0)issue(target,r+1,"操作费","中包专线缺少操作费列，禁止按零费用导入","error");
+            }
             if(jitongBattery&&productCode.isBlank())issue(target,r+1,"产品代码","定制纯电缺少明确的JT-HQ-MDCD产品代码","error");
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg");
             for(var label:columns.blockingFeeHeaders)pending(row,"未知价格附加费“"+label+"”未映射到公斤价或每票费");

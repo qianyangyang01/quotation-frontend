@@ -239,7 +239,8 @@ function defaultCountryRule(attribute: string, country: string): FinanceCountryC
 }
 
 // New shipment attributes require an explicit finance policy; never inherit general cargo permissions.
-const defaultPolicies: FinanceChannelPolicy[] = financeLogisticsAttributeOptions.filter(attribute => attribute !== '化妆品' && attribute !== '保健品' && attribute !== '服装').map(attribute => ({
+// New picker options require explicit finance authorization; keep only legacy fallbacks here.
+const defaultPolicies: FinanceChannelPolicy[] = ['普货', '带电', '纯电', '粉末', '非液体化妆品', '带磁', '微敏感'].map(attribute => ({
   id: attribute,
   category: attribute,
   countryRules: [defaultCountryRule(attribute, '美国')],

@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class LogisticsAttributesTest {
     private final ObjectMapper mapper = new ObjectMapper();
     @Test void keepsNewAttributesDistinctInPublishedRuleFiltering() {
-        for (var attribute : new String[]{"化妆品", "保健品"}) {
+        for (var attribute : new String[]{"化妆品", "保健品", "以色列自提", "以色列到门"}) {
             var row = mapper.createObjectNode().put("allowedMarks", "非液体化妆品");
             assertFalse(LogisticsQueryService.eligible(row, attribute));
             row.put("allowedMarks", attribute);
@@ -19,7 +19,7 @@ class LogisticsAttributesTest {
         }
     }
     @Test void quotationSubmissionRequiresItsOwnAttributeCountryAndChannelPolicy() {
-        for (var attribute : new String[]{"化妆品", "保健品"}) {
+        for (var attribute : new String[]{"化妆品", "保健品", "以色列自提", "以色列到门"}) {
             var policies = mapper.createArrayNode();
             var policy = policies.addObject().put("category", "普货").put("enabled", true);
             policy.putArray("countryRules").addObject().put("country", "美国").putArray("allowedChannels").add("1::测试物流::C1");

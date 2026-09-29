@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "id": "c5d61ac4-2bcd-45af-9aa2-a936d9d47a31",
+      "providerName": "万邦",
+      "providerAliases": [],
+      "channelName": "万邦中包专线挂号含电",
+      "aliases": ["万邦中包专线含电", "万邦速达中包专线含电报价表(RMB)"],
+      "productCodes": ["WBSLMP"],
+      "logisticsAttribute": "带电",
+      "enabled": true
+    },
+    {
+      "id": "c5d61ac4-2bcd-45af-9aa2-a936d9d47a32",
+      "providerName": "万邦",
+      "providerAliases": [],
+      "channelName": "万邦中包专线挂号普货",
+      "aliases": ["万邦中包专线普货", "万邦速达中包专线挂号普货报价表(RMB)"],
+      "productCodes": ["WBSLMPPH"],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-export const logisticsAttributeOptions = ['普货', '化妆品', '保健品', '带电', '纯电', '服装', '粉末', '非液体化妆品', '带磁', '微敏感'] as const
+export const logisticsAttributeOptions = ['普货', '化妆品', '保健品', '带电', '纯电', '服装', '香水', '大货普货', '大货带电', '以色列自提', '以色列到门', '粉末', '非液体化妆品', '带磁', '微敏感'] as const
 
 export function normalizeLogisticsAttribute(value: string) {
   const name = value.trim()

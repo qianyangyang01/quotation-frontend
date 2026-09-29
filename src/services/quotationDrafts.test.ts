@@ -23,7 +23,7 @@ describe('quotation draft repository', () => {
     expect((await loadQuotationDraft()).payload?.selectedCustomerGrade).toBe('NEW')
   })
 
-  it.each(['化妆品', '保健品', '非液体化妆品'])('preserves %s independently of product category and selected regions', async logisticsAttribute => {
+  it.each(['化妆品', '保健品', '非液体化妆品', '以色列自提', '以色列到门'])('preserves %s independently of product category and selected regions', async logisticsAttribute => {
     const draft = { ...payload, productCategory: '服装', logisticsAttribute,
       templateSelections: [{ country: '澳大利亚', channelKey: 'channel-1', quoteRegion: '澳大利亚3区' }, { country: '澳大利亚', channelKey: 'channel-1', quoteRegion: '澳大利亚4区' }] }
     mockedApi.put.mockResolvedValue({ exists: true, payload: draft, version: 1 })

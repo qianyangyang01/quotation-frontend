@@ -6,7 +6,7 @@ it('normalizes only the pure battery alias and keeps clothing separate', () => {
   expect(normalizeLogisticsAttribute(' 纯电池 ')).toBe('纯电')
   expect(normalizeLogisticsAttribute('液体')).toBe('液体')
   expect(normalizeLogisticsAttribute('服装')).toBe('服装')
-  expect(selectableLogisticsAttributes(['纯电池', '纯电', '液体', '定制'])).toEqual(['普货', '化妆品', '保健品', '带电', '纯电', '服装', '粉末', '非液体化妆品', '带磁', '微敏感', '定制'])
+  expect(selectableLogisticsAttributes(['纯电池', '纯电', '液体', '定制'])).toEqual(['普货', '化妆品', '保健品', '带电', '纯电', '服装', '香水', '大货普货', '大货带电', '以色列自提', '以色列到门', '粉末', '非液体化妆品', '带磁', '微敏感', '定制'])
 })
 it('preserves policy identity without converting liquid policies to clothing', () => {
   const source = [{ id:'old', category:'纯电池', countryRules:[], enabled:true, updatedAt:'' }, { id:'liquid', category:'液体', countryRules:[], enabled:true, updatedAt:'' }]
