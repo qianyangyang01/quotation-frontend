@@ -504,7 +504,7 @@ function formatTime(value: string) {
             <p v-if="selectionState === 'loading'">正在加载所选清单，完成后才能保存。</p>
             <p v-else-if="selectionState === 'error'">清单加载失败，请关闭此窗口后重新应用模板或重新选择清单。</p>
             <template v-else>
-              <p>保存以下国家、区域和渠道。要保存常用或指定模式的选择，请使用该模式下的“将当前清单存为模板”。</p>
+              <p>保存以下国家、区域和渠道。要保存快速报价的选择，请在快速报价中使用“将当前清单存为模板”。</p>
               <QuotationTemplateDetails :items="creationItems" />
             </template>
           </div>

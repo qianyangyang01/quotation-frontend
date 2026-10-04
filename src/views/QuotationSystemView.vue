@@ -1851,7 +1851,7 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
   if (specialPackagingError.value) { toast(specialPackagingError.value); return }
   if (commissionError.value) { toast(commissionError.value); return }
   if (!rows.length) {
-    toast('请先添加需要复制的指定报价渠道')
+    toast('请先添加需要复制的报价渠道')
     return
   }
   const unit = quoteMode.value === 'bundle' ? '套' : '件'
@@ -1893,7 +1893,7 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
     textarea.remove()
   }
   const countryCount = new Set(rows.map(row => row.country)).size
-  toast(`已复制 ${countryCount} 个国家、${rows.length} 条指定报价，打开 Excel 后按 Ctrl+V 粘贴`)
+  toast(`已复制 ${countryCount} 个国家、${rows.length} 条渠道报价，打开 Excel 后按 Ctrl+V 粘贴`)
 }
 function useLogistics(p: Product, option: { country: string; quoteRegion?: string; channelKey: string; rule: string; carrier: string; freight: number }) {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
