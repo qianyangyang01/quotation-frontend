@@ -38,6 +38,9 @@ afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
 it('sorts the complete result before pagination and restores source order without changing saved selection', async () => {
   const rows = Array.from({ length: 10 }, (_, index) => row(`渠道${10 - index}`, 10 - index))
   const { changed } = await setup(rows)
+  expect([...document.querySelectorAll<HTMLSelectElement>('[aria-label="渠道价格排序依据"] option')].map(option => option.value)).toEqual(['quote1', 'quote2', 'quote3'])
+  expect(document.querySelector('.picker-head .custom-quote-head')).toBeNull()
+  expect(document.querySelector('.picker-list .custom-price')).toBeNull()
   const callsBefore = changed.mock.calls.length
   button('下一页').click(); await tick()
   button('价格从低到高').click(); await tick()
@@ -66,8 +69,6 @@ it('uses the chosen quantity and keeps checked identities when sorting, filterin
   expect([...document.querySelectorAll<HTMLInputElement>('.picker-list input')].map(input => input.checked)).toEqual([false, true])
   await selectField('quote3')
   expect(visibleNames()).toEqual(['渠道A', '渠道B'])
-  await selectField('quoteCustom')
-  expect(visibleNames()).toEqual(['渠道B', '渠道A'])
   const search = document.querySelector<HTMLInputElement>('.channel-dialog .dialog-search input')!
   search.value = '渠道A'; search.dispatchEvent(new Event('input', { bubbles: true })); await tick()
   expect(visibleNames()).toEqual(['渠道A'])
