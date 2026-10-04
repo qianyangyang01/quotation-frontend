@@ -245,7 +245,7 @@ public class LogisticsImportService {
                 if(System.nanoTime()-lastProgress>1_000_000_000L){save(id,lease,"processing","staging",payload);lastProgress=System.nanoTime();}
                 ObjectNode outcome;
                 try {outcome=tx.execute(status->{guard.writable(dataset);var owner=jdbc.sql("select lease_id from logistics_import_batch where id=:id and status='processing' for update").param("id",id).query(UUID.class).optional();if(owner.isEmpty()||!owner.get().equals(lease))throw AppException.conflict("导入执行权已转移，请刷新批次");return importChannel(dataset,channel,actor,payload.path("replaceDrafts").asBoolean());});}
-                catch(Exception e){log.warn("Logistics import {} channel staging failed",id,e);outcome=mapper.createObjectNode().put("providerName",channel.path("providerName").asText()).put("channelName",channel.path("channelName").asText()).put("status","blocked").put("message",safe(e));outcome.put("sourceFileIndex",channel.path("sourceFileIndex").asInt()).put("priceRows",channel.path("rows").size()).put("errors",1).put("pricingReady",false);}
+                catch(Exception e){log.warn("Logistics import {} channel staging failed",id,e);outcome=failedChannelOutcome(channel,e,payload.path("replaceDrafts").asBoolean());}
                 results.add(outcome);completed++;payload.put("processedChannels",completed).put("progress",60+Math.round(completed*40.0/Math.max(1,grouped.size())));
             }
             payload.remove("currentFileName");payload.remove("currentChannelName");payload.put("progress",100).put("elapsedMs",(System.nanoTime()-start)/1_000_000).put("stagingMs",(System.nanoTime()-stagingStart)/1_000_000);LogisticsReadiness.applyBatch(payload);
@@ -257,6 +257,18 @@ public class LogisticsImportService {
             cleanupParsedFiles(id,payload);save(id,lease,finalStatus,finalPhase,payload);
             log.info("Completed logistics import batch={} files={} channels={} elapsedMs={} status={}",id,payload.path("files").size(),grouped.size(),payload.path("elapsedMs").asLong(),finalStatus);
         } catch(Exception e){log.error("Logistics import {} batch processing failed",id,e);payload.put("error",safe(e));save(id,lease,"failed","failed",payload);}
+    }
+    static ObjectNode failedChannelOutcome(ObjectNode channel,Exception failure,boolean replaceDrafts) {
+        int errors=channel.path("errors").asInt();
+        var message=safe(failure);
+        if(replaceDrafts&&errors>0&&message.contains("渠道已有不同的待审核版本"))
+            message="本次数据有 "+errors+" 个校验错误，暂不能替换旧草稿；旧草稿已保留，请先修正下方问题后重新导入";
+        var outcome=channel.objectNode().put("providerName",channel.path("providerName").asText())
+            .put("channelName",channel.path("channelName").asText()).put("status","blocked").put("message",message)
+            .put("sourceFileIndex",channel.path("sourceFileIndex").asInt()).put("priceRows",channel.path("rows").size())
+            .put("errors",Math.max(1,errors)).put("pricingReady",false);
+        outcome.set("issues",channel.path("issues").deepCopy());
+        return outcome;
     }
     static void validateFiles(List<MultipartFile> files){
         if(files.isEmpty()||files.size()>MAX_FILES)throw AppException.unprocessable("每批请选择1至30个文件");

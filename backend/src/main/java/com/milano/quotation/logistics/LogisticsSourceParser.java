@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="wanbang-yanwen-express-2026.09.29-v3";
+    public static final String VERSION="yanwen-october-layout-2026.10.04-v1";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -718,14 +718,14 @@ public class LogisticsSourceParser {
         boolean zhengzhou=provider.equals("燕文")&&zhengzhouEpacket(source);
         if(zhengzhou)section="中邮郑州线下E邮宝";
         var yanwenEta=provider.equals("燕文")?yanwenEtaExtractor(source):null;
-        int auxiliary=-1;boolean example=false,reference=false;
+        int auxiliary=-1;boolean example=false,reference=false,yanwenNotes=false;
         var allNotes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
             var rowText=String.join("|",source.rowTexts(r).stream().filter(value->!value.isBlank()).toList());
             if(rowText.isBlank()&&source.width(r)>0)rowText=String.join("|",source.resolvedTexts(r));
             if(rowText.isBlank())continue;
-            if(yanwenWanbang!=null&&provider.equals("燕文")&&source.rowTexts(r).stream().anyMatch(t->clean(t).matches("价格使用说明[:：]?|国家维度具体要求[:：]?"))) {
-                columns=null;continue;
+            if(provider.equals("燕文")&&source.rowTexts(r).stream().anyMatch(t->clean(t).matches("价格使用说明[:：]?|国家维度具体要求[:：]?"))) {
+                columns=null;yanwenNotes=true;continue;
             }
             if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
             if(reference){if(detect(source,r,provider)!=null)reference=false;else{source.referenceRows.add(r);continue;}}
@@ -745,13 +745,13 @@ public class LogisticsSourceParser {
                     if(header.rate>=0&&header.country>=0&&header.firstPrice<0&&header.nextPrice<0)kilogramColumns=header;
                     else if(kilogramColumns!=null&&(header.firstPrice>=0||header.nextPrice>=0))firstNextCountry=countryCode(source.text(r,kilogramColumns.country));
                 }
-                columns=header;recognized=true;auxiliary=-1;example=false;continue;
+                columns=header;recognized=true;auxiliary=-1;example=false;yanwenNotes=false;continue;
             }
             if(columns==null)for(var text:source.rowTexts(r))if(text.length()>20)allNotes.add(text);
             if(example){if(source.rowEmpty(r))example=false;else source.exampleRows.add(r);continue;}
             if(auxiliary>=0){source.auxiliaryRows.put(r,auxiliary);continue;}
             if(provider.equals("顺丰") && source.text(r,1).matches(".*[①②③④].*专线.*"))section=source.text(r,1).replaceAll("^[①②③④\\s]+","").trim();
-            if(columns==null) continue;
+            if(columns==null) {if(yanwenNotes)source.referenceRows.add(r);continue;}
             if(jitongBattery&&kilogramColumns!=null&&!firstNextCountry.isBlank()) {
                 var destination=countryCode(source.text(r,kilogramColumns.country));
                 if(supportedCountryCode(destination)&&!destination.equals(firstNextCountry)) {columns=kilogramColumns;firstNextCountry="";}
@@ -900,7 +900,7 @@ public class LogisticsSourceParser {
             if(columns.eta>=0) {
                 var rawEta=source.text(r,columns.eta);
                 if(provider.equals("燕文")&&!rawEta.isBlank()) {
-                    var eta=parseEta(rawEta,source.address(r,columns.eta));
+                    var eta=parseEtaCell(rawEta,source.address(r,columns.eta),source.text(columns.headerRow,columns.eta));
                     if(eta==null)issue(target,r+1,"参考时效","燕文价格行时效必须是明确的起止天数："+rawEta,"error");
                     else applyEta(row,eta,"row");
                 } else {
@@ -1186,11 +1186,20 @@ public class LogisticsSourceParser {
         return false;
     }
     private String zhengzhouProductCode(Source source) {
+        var codes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
             if(isPriceHeader(source,r))break;
-            for(int c=0;c<source.width(r)-1;c++)if(clean(source.text(r,c)).equals("产品号"))return source.text(r,c+1).trim();
+            for(int c=0;c<source.width(r);c++) {
+                var text=source.text(r,c).trim();
+                var inline=Pattern.compile("^产品(?:编号|代码|号)\\s*[:：]\\s*([A-Za-z0-9_-]+)(?:\\s.*)?$",Pattern.DOTALL).matcher(text);
+                if(inline.matches())codes.add(inline.group(1));
+                else if(clean(text).matches("产品(?:编号|代码|号)[:：]?")) {
+                    var adjacent=source.text(r,c+1).trim();
+                    if(adjacent.matches("[A-Za-z0-9_-]+"))codes.add(adjacent);
+                }
+            }
         }
-        return "";
+        return codes.size()==1?codes.iterator().next():"";
     }
     private YanwenEtaExtractor yanwenEtaExtractor(Source source) {
         var index=new YanwenEtaExtractor();
@@ -1207,7 +1216,7 @@ public class LogisticsSourceParser {
                 var rawCode=clean(source.text(r,code)).toUpperCase(Locale.ROOT);
                 var rawEta=source.text(r,eta);
                 if(!rawCode.matches("[A-Z]{2}(?:-[0-9]+)?")||rawEta.isBlank())continue;
-                var parsed=parseEta(rawEta,source.address(r,eta));
+                var parsed=parseEtaCell(rawEta,source.address(r,eta),source.text(header,eta));
                 if(parsed==null)index.invalidCountries.add(rawCode);else index.put(index.countries,index.conflictingCountries,rawCode,parsed);
             }
         }
@@ -1236,6 +1245,13 @@ public class LogisticsSourceParser {
             found=next;
         }
         return found;
+    }
+    private EtaReference parseEtaCell(String text,String cell,String header) {
+        var parsed=parseEta(text,cell);
+        if(parsed!=null)return parsed;
+        if(!header.matches("(?s).*(工作日|天).*")||!text.trim().matches("[0-9]{1,3}\\s*[-—–~～至]\\s*[0-9]{1,3}"))return null;
+        var withUnit=parseEta(text+"天",cell);
+        return withUnit==null?null:new EtaReference(withUnit.min,withUnit.max,text,cell);
     }
     private static void applyEta(ObjectNode row,EtaReference eta,String scope) {
         row.put("etaMinDays",eta.min).put("etaMaxDays",eta.max).put("etaSource",scope.equals("row")?"source-row":"reference-"+scope)
