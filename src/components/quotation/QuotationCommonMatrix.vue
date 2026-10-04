@@ -13,6 +13,7 @@ import QuoteTaxLegend from './QuoteTaxLegend.vue'
 const props = withDefaults(defineProps<{
   unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
+  autoLoadCountry?: boolean
   sourcePending?: boolean
   sourceError?: string
   ensureCountries?: (countries: string[]) => Promise<boolean>
@@ -284,6 +285,11 @@ const channelCountLabel = computed(() => channelQuery.value || search.value.trim
   : `共 ${rows.value.length} 条渠道`)
 const pagedRows = computed(() => filteredRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const activeSummary = computed(() => props.countries.find(country => country.name === activeCountry.value))
+watch([() => props.active, () => props.autoLoadCountry, activeCountry, () => props.sourcePending], () => {
+  if (!props.autoLoadCountry || props.active === false || props.sourcePending || props.sourceError
+    || !activeCountry.value || activeSummary.value?.channelsLoaded !== false || countryLoading.value) return
+  void selectCountry(activeCountry.value)
+})
 // A product query can supersede a country request. Verified parent data is the
 // authority; an old local failure must not hide newly loaded channels.
 watch([activeCountry, () => activeSummary.value?.channelsLoaded, () => props.sourcePending, () => props.sourceError], () => {

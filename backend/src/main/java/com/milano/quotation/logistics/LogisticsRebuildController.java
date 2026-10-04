@@ -88,7 +88,7 @@ public class LogisticsRebuildController {
         var result=datasets.create(body.path("name").asText(),actor);idempotency.save(actor,"logistics-dataset-create",key,body,result);
         audit.record("logistics.dataset-create","logistics-dataset",result.path("id").asText(),"success",Map.of("actor",actor));return ApiResponse.ok(result);
     }
-    @GetMapping("/datasets/{id}/workspace") public ApiResponse<?> workspace(@PathVariable UUID id){return ApiResponse.ok(datasets.workspace(id));}
+    @GetMapping("/datasets/{id}/workspace") public ApiResponse<?> workspace(@PathVariable UUID id){return ApiResponse.ok(datasets.workspaceSummary(id));}
     @GetMapping("/datasets/{id}/prices") public ApiResponse<?> pricesPage(@PathVariable UUID id,@RequestParam(defaultValue="0")int page,@RequestParam(defaultValue="50")int size,
             @RequestParam(defaultValue="")String query,@RequestParam(defaultValue="")String country,@RequestParam(defaultValue="")String attribute){return ApiResponse.ok(datasets.prices(id,page,size,query,country,attribute));}
     @PostMapping("/datasets/{id}/preview") public ApiResponse<?> preview(@PathVariable UUID id,@RequestBody ObjectNode input){return ApiResponse.ok(datasets.preview(id,mappings(input)));}

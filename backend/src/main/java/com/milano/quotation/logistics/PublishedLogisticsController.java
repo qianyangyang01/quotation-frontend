@@ -26,10 +26,10 @@ public class PublishedLogisticsController {
     ResponseEntity<ApiResponse<LogisticsQueryService.PublishedManifest>> manifest(
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         var revision = queries.manifestRevision();
-        var etag = quote(revision.revision());
-        if (etag.equals(ifNoneMatch)) return ResponseEntity.status(304).eTag(revision.revision()).build();
+        var etag = weakEtag(revision.revision());
+        if (matches(ifNoneMatch, etag)) return ResponseEntity.status(304).eTag(etag).varyBy("Accept-Encoding").build();
         var manifest = queries.manifest(revision);
-        return ResponseEntity.ok().eTag(manifest.revision()).cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(manifest));
+        return ResponseEntity.ok().eTag(etag).varyBy("Accept-Encoding").cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(manifest));
     }
 
     @GetMapping("/rules")
@@ -41,9 +41,9 @@ public class PublishedLogisticsController {
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         var result = queries.publishedRules(revision, attribute, countries, channelCodes);
         var etagValue = sha256(result.revision() + "|" + attribute + "|" + String.join(",", countries) + "|" + String.join(",", channelCodes == null ? List.of() : channelCodes));
-        var etag = quote(etagValue);
-        if (etag.equals(ifNoneMatch)) return ResponseEntity.status(304).eTag(etagValue).build();
-        return ResponseEntity.ok().eTag(etagValue).cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(result));
+        var etag = weakEtag(etagValue);
+        if (matches(ifNoneMatch, etag)) return ResponseEntity.status(304).eTag(etag).varyBy("Accept-Encoding").build();
+        return ResponseEntity.ok().eTag(etag).varyBy("Accept-Encoding").cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(result));
     }
 
     @GetMapping("/catalog")
@@ -52,12 +52,24 @@ public class PublishedLogisticsController {
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         var result = queries.publishedCatalog(revision);
         var etagValue = sha256(result.revision() + "|catalog");
-        var etag = quote(etagValue);
-        if (etag.equals(ifNoneMatch)) return ResponseEntity.status(304).eTag(etagValue).build();
-        return ResponseEntity.ok().eTag(etagValue).cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(result));
+        var etag = weakEtag(etagValue);
+        if (matches(ifNoneMatch, etag)) return ResponseEntity.status(304).eTag(etag).varyBy("Accept-Encoding").build();
+        return ResponseEntity.ok().eTag(etag).varyBy("Accept-Encoding").cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(ApiResponse.ok(result));
     }
 
-    private static String quote(String value) { return "\"" + value + "\""; }
+    // The revision identifies equivalent content, not gzip/identity wire bytes.
+    // Strong ETags disable Tomcat compression. GET uses weak comparison and
+    // accepts old strong validators so existing browser caches remain useful.
+    private static String weakEtag(String value) { return "W/\"" + value + "\""; }
+    private static boolean matches(String header, String etag) {
+        if (header == null) return false;
+        var opaque = etag.substring(2);
+        for (var candidate : header.split(",")) {
+            var value = candidate.trim();
+            if (value.equals("*") || value.equals(opaque) || value.equals(etag)) return true;
+        }
+        return false;
+    }
     private static String sha256(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (Exception exception) { throw new IllegalStateException("无法生成物流响应版本", exception); }

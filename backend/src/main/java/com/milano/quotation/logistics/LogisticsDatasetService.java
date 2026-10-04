@@ -112,16 +112,27 @@ public class LogisticsDatasetService {
     }
     @Transactional(readOnly=true)
     public ObjectNode workspace(UUID id) {
+        return workspace(id, false);
+    }
+    /** The UI loads full review evidence through the version detail endpoint. */
+    @Transactional(readOnly=true)
+    public ObjectNode workspaceSummary(UUID id) {
+        return workspace(id, true);
+    }
+    private ObjectNode workspace(UUID id, boolean summaryOnly) {
         var out=mapper.createObjectNode(); out.set("dataset",dataset(id));
         out.set("providers",array(jdbc.sql("select (payload || jsonb_build_object('id',id,'datasetId',dataset_id,'_version',version))::text from logistics_provider where dataset_id=:id order by payload->>'name'").param("id",id).query(String.class).list()));
         out.set("channels",channelViews(id));
-        out.set("versions",array(jdbc.sql("""
-                select (v.workspace_payload || jsonb_build_object(
+        var versionPayload = summaryOnly ? """
+                jsonb_build_object('fileName',v.workspace_payload->'fileName',
+                  'importedAt',v.workspace_payload->'importedAt','publishedAt',v.workspace_payload->'publishedAt',
+                  'pricingReady',v.workspace_payload->'pricingReady','errors',v.workspace_payload->'errors',
+                  'summary',v.workspace_payload->'summary')
+                """ : "v.workspace_payload";
+        out.set("versions",array(jdbc.sql("select (" + versionPayload + """
+                 || jsonb_build_object(
                 'id',v.id,'channelId',v.channel_id,'status',v.status,'versionNumber',v.version_number,'quoteReady',logistics_version_quote_ready(v.id),
-                'rowCount',v.row_count,'issueCount',v.issue_count,'countryCount',(
-                    select count(distinct coalesce(nullif(price->>'countryCode',''),price->>'areaName'))
-                    from jsonb_array_elements(case when jsonb_typeof(v.payload->'rows')='array' then v.payload->'rows' else '[]'::jsonb end) price
-                )))::text
+                'rowCount',v.row_count,'issueCount',v.issue_count,'countryCount',v.country_count))::text
                 from logistics_version v join logistics_channel c on c.id=v.channel_id
                 where c.dataset_id=:id order by v.created_at desc,v.id
                 """).param("id",id).query(String.class).list()));

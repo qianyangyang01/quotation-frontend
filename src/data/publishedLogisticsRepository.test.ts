@@ -109,7 +109,7 @@ describe('published logistics version cache', () => {
     expect(logistics.logisticsRules).toHaveLength(0)
   })
 
-  it('queries only common and currently selected quote countries', async () => {
+  it('queries the current and selected countries without downloading all common countries', async () => {
     const repository = await import('./publishedLogisticsRepository')
     const rareCountries = Array.from({ length: 140 }, (_, index) => ({ country: `国家${index}`, enabled: true, stage: 'rare' }))
 
@@ -120,8 +120,49 @@ describe('published logistics version cache', () => {
       { country: '法国', enabled: false, stage: 'common' },
     ], '澳大利亚', ['美国'])
 
-    expect(countries).toEqual(['澳大利亚', '美国', '英国'])
+    expect(countries).toEqual(['澳大利亚', '美国'])
     expect(countries).not.toContain('国家0')
+    expect(repository.buildQuoteLogisticsCountryQuery([
+      { country: '法国', enabled: false, stage: 'common' },
+      { country: '美国', enabled: true, stage: 'common' },
+      { country: '英国', enabled: true, stage: 'common' },
+    ])).toEqual(['美国'])
+  })
+
+  it('reuses country slices across overlapping selections and remembers empty countries', async () => {
+    const repository = await import('./publishedLogisticsRepository')
+    const gb = { ...rule.prices[0]!, areaName: '英国', countryCode: 'GB' }
+    const options = { manifestResult: { manifest: manifest('r1'), verified: true }, apply: false }
+    conditionalGet.mockResolvedValueOnce({ status: 200, data: { revision: 'r1', rules: [rule] } })
+    await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }, options)
+    conditionalGet.mockResolvedValueOnce({ status: 200, data: { revision: 'r1', rules: [{ ...rule, prices: [gb] }] } })
+    const combined = await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国', '英国', '法国'] }, options)
+    const requested = new URL(`https://example.test${conditionalGet.mock.lastCall![0]}`).searchParams.getAll('country')
+    expect(requested).toEqual(['法国', '英国'])
+    expect(combined.rules[0]?.prices).toHaveLength(2)
+    const subset = await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['英国', '法国'] }, options)
+    expect(subset.source).toBe('cache')
+    expect(subset.rules[0]?.prices.map(row => row.countryCode)).toEqual(['GB'])
+    expect((await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['法国'] }, options)).rules).toEqual([])
+    expect(conditionalGet).toHaveBeenCalledTimes(2)
+    conditionalGet.mockResolvedValueOnce({ status: 200, data: { revision: 'r1', rules: [] } })
+    await repository.loadPublishedLogisticsRules({ attribute: '带电', countries: ['英国'] }, options)
+    expect(conditionalGet).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not let invalidated in-flight rules populate the country cache or displayed quote', async () => {
+    const repository = await import('./publishedLogisticsRepository')
+    const logistics = await import('./logistics')
+    let finish!: (value: unknown) => void
+    conditionalGet.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] },
+      { manifestResult: { manifest: manifest('r1'), verified: true } })
+    const rejection = expect(pending).rejects.toThrow('物流规则已失效')
+    await vi.waitFor(() => expect(conditionalGet).toHaveBeenCalledOnce())
+    await repository.invalidatePublishedLogisticsCache(false)
+    finish({ status: 200, data: { revision: 'r1', rules: [rule] } })
+    await rejection
+    expect(logistics.logisticsRules).toEqual([])
   })
 
   it('loads the finance channel catalog through one lightweight request', async () => {

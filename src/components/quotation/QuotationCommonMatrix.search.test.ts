@@ -27,6 +27,19 @@ async function search(value: string) {
 const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.useRealTimers() })
 
+it('loads only the visible country after product readiness and when returning to common mode', async () => {
+  const ensureCountries = vi.fn().mockResolvedValue(true)
+  const { state } = mount({ countries: countries.map(c => ({ ...c, channelsLoaded: false })),
+    ensureCountries, autoLoadCountry: false, sourcePending: true })
+  await tick(); expect(ensureCountries).not.toHaveBeenCalled()
+  Object.assign(state, { autoLoadCountry: true, sourcePending: false }); await tick()
+  expect(ensureCountries).toHaveBeenCalledExactlyOnceWith(['美国'])
+  state.active = false; await tick()
+  state.active = true; await tick()
+  expect(ensureCountries).toHaveBeenCalledTimes(2)
+  expect(ensureCountries).not.toHaveBeenCalledWith(['日本'])
+})
+
 it('explains missing product data instead of reporting a network failure', async () => {
   mount({ ensureCountries: vi.fn().mockRejectedValue(new Error('请先查询商品，再加载报价渠道')) })
   button('美国').click(); await tick()

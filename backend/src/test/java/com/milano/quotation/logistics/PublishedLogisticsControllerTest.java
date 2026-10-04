@@ -31,7 +31,7 @@ class PublishedLogisticsControllerTest {
         var catalogResponse = controller.catalog("revision-1", null);
 
         assertEquals(200, fresh.getStatusCode().value());
-        assertEquals("\"revision-1\"", fresh.getHeaders().getETag());
+        assertEquals("W/\"revision-1\"", fresh.getHeaders().getETag());
         assertNotNull(fresh.getBody());
         assertEquals(304, unchanged.getStatusCode().value());
         verify(service, times(1)).manifest(revision);
@@ -39,5 +39,14 @@ class PublishedLogisticsControllerTest {
         assertNotNull(ruleResponse.getHeaders().getETag());
         assertEquals(200, catalogResponse.getStatusCode().value());
         assertNotNull(catalogResponse.getHeaders().getETag());
+        assertEquals(List.of("Accept-Encoding"), fresh.getHeaders().getVary());
+        assertEquals(304, controller.manifest("\"older\", W/\"revision-1\"").getStatusCode().value());
+        assertEquals(304, controller.manifest("*").getStatusCode().value());
+        assertEquals(200, controller.manifest("W/\"old-revision\"").getStatusCode().value());
+        assertEquals(304, controller.rules("revision-1", "普货", List.of("美国"), null,
+                ruleResponse.getHeaders().getETag()).getStatusCode().value());
+        assertEquals(304, controller.catalog("revision-1",
+                catalogResponse.getHeaders().getETag().substring(2)).getStatusCode().value());
+        assertEquals(true, ruleResponse.getHeaders().getETag().startsWith("W/"));
     }
 }

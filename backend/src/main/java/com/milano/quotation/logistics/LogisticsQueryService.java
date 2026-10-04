@@ -108,7 +108,7 @@ public class LogisticsQueryService {
         }
         var select = "workspace_payload::text as payload, row_count, issue_count, " +
                 "jsonb_array_length(case when jsonb_typeof(payload->'diffRows')='array' then payload->'diffRows' else '[]'::jsonb end) as diff_count, " +
-                "(select count(distinct coalesce(nullif(item->>'countryCode',''), item->>'areaName')) from jsonb_array_elements(case when jsonb_typeof(payload->'rows')='array' then payload->'rows' else '[]'::jsonb end) item) as country_count";
+                "country_count";
         return jsonPage("logistics_version" + where, select, "created_at desc", page, size, params, false);
     }
 

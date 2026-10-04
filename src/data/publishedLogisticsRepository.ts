@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { ApiError, conditionalGet } from '@/services/http'
 import { replaceLogisticsCountryCatalog, replaceLogisticsRules, type LogisticsRule } from './logistics'
+import { countryIdentityMatches } from './countryIdentity'
 
 export interface PublishedLogisticsManifest {
   rebuilding?: boolean
@@ -20,11 +21,9 @@ export function buildQuoteLogisticsCountryQuery(
   currentCountry = '',
   selectedCountries: string[] = [],
 ) {
-  return normalized([
-    ...selectedCountries,
-    ...settings.filter(setting => setting.enabled && setting.stage === 'common').map(setting => setting.country),
-    currentCountry,
-  ])
+  const selected = normalized([...selectedCountries, currentCountry])
+  // Other countries remain visible in the manifest and load when selected.
+  return selected.length ? selected : normalized([settings.find(setting => setting.enabled && setting.stage === 'common')?.country || ''])
 }
 
 export const logisticsRebuilding = ref(false)
@@ -133,6 +132,30 @@ function queryKey(revision: string, query: RuleQuery) {
   return [CACHE_SCHEMA, revision, query.attribute.trim() || '普货', normalized(query.countries).join(','), normalized(query.channelCodes).join(',')].join('|')
 }
 
+function countrySlice(rules: LogisticsRule[], country: string) {
+  return rules.flatMap(rule => {
+    const prices = rule.prices.filter(row => countryIdentityMatches(row.countryCode, row.areaName, country))
+    return prices.length ? [{ ...rule, prices, priceRowCount: prices.length,
+      areaCount: new Set(prices.map(row => row.countryCode || row.areaName)).size,
+      phoneRequired: prices.some(row => row.phoneRequired) }] : []
+  })
+}
+
+function joinCountrySlices(slices: LogisticsRule[][]) {
+  const rules = new Map<number, LogisticsRule>()
+  for (const slice of slices) for (const rule of slice) {
+    const previous = rules.get(rule.id)
+    if (previous && (previous.logisticsVersionId !== rule.logisticsVersionId || previous.logisticsChannelId !== rule.logisticsChannelId)) {
+      throw new Error('物流渠道版本已变化，请重新加载')
+    }
+    const prices = [...(previous?.prices || []), ...rule.prices]
+    rules.set(rule.id, { ...rule, prices, priceRowCount: prices.length,
+      areaCount: new Set(prices.map(row => row.countryCode || row.areaName)).size,
+      phoneRequired: prices.some(row => row.phoneRequired) })
+  }
+  return [...rules.values()].sort((a, b) => a.id - b.id)
+}
+
 async function cachedManifest() {
   if (manifestMemory) return manifestMemory
   manifestMemory = await readStore<StoredManifest>(MANIFEST_STORE, 'current')
@@ -186,35 +209,79 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: {
   apply?: boolean
   manifestResult?: { manifest: PublishedLogisticsManifest; verified: boolean }
 } = {}) {
-  const countries = normalized(query.countries)
   const { manifest, verified } = options.manifestResult || await loadPublishedLogisticsManifest({ signal: options.signal })
+  const countries = normalized(query.countries.map(country => manifest.countries.find(item =>
+    countryIdentityMatches(item.code, item.name, country))?.name || country))
+  const generation = catalogGeneration
+  const checkCurrent = () => {
+    options.signal?.throwIfAborted()
+    if (generation !== catalogGeneration) throw new Error('物流规则已失效，请重新加载')
+  }
   options.signal?.throwIfAborted()
   if (!countries.length) {
     if (options.apply !== false) replaceLogisticsRules([])
     return { revision: manifest.revision, rules: [], source: 'manifest' as const, verified }
   }
-  const key = queryKey(manifest.revision, query)
+  const key = queryKey(manifest.revision, { ...query, countries })
   let cached = rulesMemory.get(key)
   if (!cached) {
     cached = await readStore<StoredRules>(RULE_STORE, key) || undefined
+    checkCurrent()
     if (cached) rulesMemory.set(key, cached)
   }
-  options.signal?.throwIfAborted()
+  checkCurrent()
   if (cached?.revision === manifest.revision) {
     if (options.apply !== false) replaceLogisticsRules(cached.rules)
     return { revision: manifest.revision, rules: cached.rules, source: 'cache' as const, verified }
   }
   const existing = options.signal ? undefined : ruleRequests.get(key)
-  if (existing) return { revision: manifest.revision, rules: await existing, source: 'network' as const, verified }
+  if (existing) {
+    const rules = await existing
+    checkCurrent()
+    if (options.apply !== false) replaceLogisticsRules(rules)
+    return { revision: manifest.revision, rules, source: 'network' as const, verified }
+  }
+  const slices = new Map<string, StoredRules>()
+  if (countries.length > 1) await Promise.all(countries.map(async country => {
+    const countryKey = queryKey(manifest.revision, { ...query, countries: [country] })
+    const value = rulesMemory.get(countryKey) || await readStore<StoredRules>(RULE_STORE, countryKey)
+    if (value?.revision === manifest.revision) slices.set(country, value)
+  }))
+  checkCurrent()
+  // Another caller may have started the same request while these slices were
+  // read from IndexedDB. Recheck before issuing a second network request.
+  const shared = options.signal ? undefined : ruleRequests.get(key)
+  if (shared) {
+    const rules = await shared
+    checkCurrent()
+    if (options.apply !== false) replaceLogisticsRules(rules)
+    return { revision: manifest.revision, rules, source: 'network' as const, verified }
+  }
+  const missing = countries.filter(country => !slices.has(country))
+  if (!missing.length) {
+    const rules = joinCountrySlices(countries.map(country => slices.get(country)!.rules))
+    if (options.apply !== false) replaceLogisticsRules(rules)
+    return { revision: manifest.revision, rules, source: 'cache' as const, verified }
+  }
   const parameters = new URLSearchParams({ revision: manifest.revision, attribute: query.attribute.trim() || '普货' })
-  countries.forEach(country => parameters.append('country', country))
+  missing.forEach(country => parameters.append('country', country))
   normalized(query.channelCodes).forEach(channel => parameters.append('channelCode', channel))
   const request = conditionalGet<{ revision: string; rules: LogisticsRule[] }>(`/logistics/published/rules?${parameters}`, { signal: options.signal })
     .then(response => {
-      options.signal?.throwIfAborted()
+      checkCurrent()
       if (response.status === 304) throw new Error('物流规则缓存不存在，请重新加载')
       if (response.data.revision !== manifest.revision) throw new Error('物流版本已变化，请重新加载')
-      const value: StoredRules = { key, revision: response.data.revision, rules: response.data.rules, storedAt: Date.now() }
+      for (const country of missing) {
+        const countryKey = queryKey(manifest.revision, { ...query, countries: [country] })
+        const slice: StoredRules = { key: countryKey, revision: manifest.revision,
+          rules: countrySlice(response.data.rules, country), storedAt: Date.now() }
+        slices.set(country, slice)
+        rulesMemory.set(countryKey, slice)
+        void writeStore(RULE_STORE, slice)
+      }
+      const rules = missing.length === countries.length ? response.data.rules
+        : joinCountrySlices(countries.map(country => slices.get(country)!.rules))
+      const value: StoredRules = { key, revision: response.data.revision, rules, storedAt: Date.now() }
       rulesMemory.set(key, value)
       void writeStore(RULE_STORE, value)
       if (options.apply !== false) replaceLogisticsRules(value.rules)
