@@ -35,7 +35,7 @@ const oldDraft = { schemaVersion: 2, quoteMode: 'single', customerName: '未完�
 let app: App
 let host: HTMLDivElement
 let state: { flushDraft: () => Promise<void>; persistQuotation: (input: never) => Promise<unknown>; beforeWindowUnload: (event: BeforeUnloadEvent) => void; draftVersion: number; draftReady: boolean; draftStatus: string; reissueSource: string; customerName: string; products: Array<{ sku: string; purchase: number }>; modeSelections: { common: unknown[] }; searchChannelCountries: (query: string) => Promise<string[]>;
-  quoteMatrixMode: 'common' | 'specified' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[]; specifiedQuoteRows: QuotationMatrixRow[] }
+  quoteMatrixMode: 'common' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[] }
 let purchaseFailure = false
 let sourceFailure = false
 beforeEach(() => {
@@ -131,7 +131,7 @@ it('keeps ordinary edits local, warns before leaving, and clears without server 
   expect(await discarded).toBe(true)
   expect(api.put).not.toHaveBeenCalled(); expect(api.delete).not.toHaveBeenCalled()
   state.customerName = '新的输入'; await nextTick()
-  state.quoteMatrixMode = 'specified'; await nextTick()
+  state.quoteMatrixMode = 'common'; await nextTick()
   button('清空重新开始').click()
   await vi.waitFor(() => expect(state.customerName).toBe(''))
   expect(state.quoteMatrixMode).toBe('template')
@@ -231,17 +231,16 @@ it('does not copy inaccessible source records', async () => {
   expect(api.put).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled()
 })
 
-it.each(['common', 'specified'] as const)('saves the selected %s list through the actual page template entry', async mode => {
+it.each(['common'] as const)('saves the selected %s list through the actual page template entry', async mode => {
   await mount(false)
   await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
   state.quoteMatrixMode = mode; await nextTick()
   state.logisticsLoadState = 'ready'; await nextTick()
   const selected = { country: '日本', quoteRegion: '全国统一', rule: '指定普货', carrier: '原物流', transport: '指定普货',
     channelKey: '1::原物流::JP', channelCode: 'JP', ruleId: 1, quote1: 10, taxConfigured: true } as QuotationMatrixRow
-  if (mode === 'common') state.commonQuoteRows = [selected]
-  else state.specifiedQuoteRows = [selected]
+  state.commonQuoteRows = [selected]
   await nextTick()
-  const entry = [...host.querySelectorAll<HTMLButtonElement>('.save-selection-template')][mode === 'common' ? 0 : 1]!
+  const entry = [...host.querySelectorAll<HTMLButtonElement>('.save-selection-template')][0]!
   expect(entry.disabled).toBe(false); entry.click()
   await vi.waitFor(() => expect(host.querySelector('.creation-preview')?.textContent).toContain('指定普货'))
   expect(state.quoteMatrixMode).toBe('template')
@@ -275,4 +274,20 @@ it('refuses to overwrite a withdrawn draft through the reissue dialog', async ()
   button('载入并再次发起').click()
   await vi.waitFor(() => expect(host.textContent).toContain('再次发起不会覆盖它'))
   expect(api.put).not.toHaveBeenCalled()
+})
+
+
+it('offers exactly quick quotation and personal templates and switches both panels', async () => {
+  router.query = { release: 'local' }
+  await mount(false)
+  const modes = [...host.querySelectorAll<HTMLButtonElement>('.matrix-mode-switcher nav button')]
+  expect(modes.map(button => button.querySelector('b')?.textContent)).toEqual(['快速报价', '我的报价模板'])
+  expect(host.textContent).not.toContain('指定国家与渠道报价')
+  expect(host.querySelectorAll('.matrix-mode-panel')).toHaveLength(2)
+  modes[0]!.click(); await nextTick()
+  expect(state.quoteMatrixMode).toBe('common')
+  expect(modes[0]!.getAttribute('aria-pressed')).toBe('true')
+  modes[1]!.click(); await nextTick()
+  expect(state.quoteMatrixMode).toBe('template')
+  expect(modes[1]!.getAttribute('aria-pressed')).toBe('true')
 })

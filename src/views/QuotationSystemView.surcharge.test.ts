@@ -14,7 +14,7 @@ import { calculateFinanceQuoteFees } from '@/data/financeSurchargeSettings'
 // provider-wide surcharge exemptions and fees omitted from any quantity column.
 const source = readFileSync(new URL('./QuotationSystemView.vue', import.meta.url), 'utf8').split('<script setup lang="ts">')[1]!.split('</script>')[0]!
 const parsed = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
-const names = ['taxResult', 'finalSalePrice', 'quantityCostBreakdown', 'excelQuoteRows', 'copySpecifiedQuotes', 'attemptSave', 'save', 'useLogistics']
+const names = ['taxResult', 'finalSalePrice', 'quantityCostBreakdown', 'excelQuoteRows', 'copyQuoteRows', 'attemptSave', 'save', 'useLogistics']
 const bodies = parsed.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text || '')).map(node => node.getText(parsed)).join('\n')
 const js = ts.transpileModule(bodies, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 
@@ -42,7 +42,7 @@ describe('quotation view fee integration', () => {
       selectedGradeCoefficient: () => 1, exchange: { value: { usd: 5 } }, customQuoteQuantity: { value: 10 },
       matchedLogistics: () => ['PAY', 'PAY2', 'FREE'].map(code => ({ rule: '同一规则', carrier: code === 'FREE' ? '豁免商' : '物流商', channel: '同名渠道', channelKey: '1::物流商::' + code })),
     }
-    const run = new Function(...Object.keys(context), js + '\nreturn {excelQuoteRows, finalSalePrice, copySpecifiedQuotes, quantityCostBreakdown}')(...Object.values(context))
+    const run = new Function(...Object.keys(context), js + '\nreturn {excelQuoteRows, finalSalePrice, copyQuoteRows, quantityCostBreakdown}')(...Object.values(context))
     const product = { country: '美国', quantity: 1, purchase: 40, purchaseFreightPerUnit: 5, sku: 'sku', rule: '同一规则', channel: '物流商' }
     const rows = run.excelQuoteRows(product)
     const paid = rows.find((row: { channelKey: string }) => row.channelKey.endsWith('PAY'))
@@ -70,7 +70,7 @@ describe('quotation view fee integration', () => {
     const invalid = run.excelQuoteRows(product)
     expect(invalid.every((row: {quote1: number|null; taxConfigured: boolean}) => row.quote1 === null && !row.taxConfigured)).toBe(true)
     context.commissionError.value = COMMISSION_THRESHOLD_ERROR
-    await run.copySpecifiedQuotes(commissioned)
+    await run.copyQuoteRows(commissioned)
     expect(copied).toBe('')
     context.commissionError.value = ''
     context.commissionThreshold.value = '1'
@@ -79,7 +79,7 @@ describe('quotation view fee integration', () => {
     expect(run.finalSalePrice({ ...product, selectedChannelKey: '1::物流商::PAY' })).toBe(90)
     expect(run.finalSalePrice({ ...product, channel: '豁免商' })).toBe(80)
     expect(rows.find((r: {channelKey: string}) => r.channelKey.endsWith('PAY2')).quoteCustom).toBe(99)
-    await run.copySpecifiedQuotes(rows)
+    await run.copyQuoteRows(rows)
     const table = copied.split('\r\n').map(row => row.split('\t'))
     const surchargeColumn = table[0]!.indexOf('附加费（USD/单）')
     expect(table[1]![surchargeColumn]).toBe('0.00')
@@ -100,7 +100,7 @@ describe('quotation view fee integration', () => {
       calculatePrice: (row: QuoteSheetSourceRow, quantity: number) => run.quantityCostBreakdown(product, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null })
     expect(adjustedSheet.rows.find(row => row.key.includes('::PAY"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 10.25))
     expect(adjustedSheet.rows.find(row => row.key.includes('::FREE"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 8.25))
-    await run.copySpecifiedQuotes(adjusted)
+    await run.copyQuoteRows(adjusted)
     expect(copied.split('\r\n')[2]!.split('\t').slice(-2)).toEqual(['100.25', '501.25'])
 
     // All modes and arbitrary sheet columns select by quoted pieces/sets, once per order.
@@ -115,7 +115,7 @@ describe('quotation view fee integration', () => {
         calculatePrice: (row: QuoteSheetSourceRow, quantity: number) => run.quantityCostBreakdown(product, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteUsd ?? null })
       expect(tierSheet.rows.find(row => row.key.includes('::PAY"'))!.prices).toEqual(quantities.map(q => applyCommissionThreshold(9*q+9+(q===1?.3:q===2?.5:q===3?.7:.8), threshold)))
       expect(run.excelQuoteRows(product)).toEqual(tierRows)
-      await run.copySpecifiedQuotes(tierRows)
+      await run.copyQuoteRows(tierRows)
       expect(copied).toContain(paidTier.quoteCustom.toFixed(2))
     }
     context.customerOperation.value.feesByQuantityUsd = undefined
@@ -150,11 +150,11 @@ describe('quotation view fee integration', () => {
 
 it('blocks calculation and copying immediately when purchase tax points are missing', async () => {
   let blocked = 0
-  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copySpecifiedQuotes, attemptSave, save, useLogistics}')(
+  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copyQuoteRows, attemptSave, save, useLogistics}')(
     { value: '' }, { value: '该商品采购票点为空，请补齐后报价' }, () => { blocked++ }, nextTick)
   expect(run.excelQuoteRows({ country: '加拿大' }, '加拿大', '2区')).toEqual([])
   expect(run.quantityCostBreakdown({ country: '加拿大' }, '渠道', 1, '加拿大', '物流商', '2区')).toBeNull()
-  await run.copySpecifiedQuotes([{ country: '加拿大', quote1: 100 }])
+  await run.copyQuoteRows([{ country: '加拿大', quote1: 100 }])
   await run.attemptSave()
   await run.save()
   run.useLogistics({}, {})
@@ -163,19 +163,19 @@ it('blocks calculation and copying immediately when purchase tax points are miss
 
 it('blocks direct save and copy for an invalid commission before touching a record', async () => {
   let blocked = 0
-  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'commissionError', 'toast', 'nextTick', js + '\nreturn {save, copySpecifiedQuotes}')(
+  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'commissionError', 'toast', 'nextTick', js + '\nreturn {save, copyQuoteRows}')(
     { value: '' }, { value: '' }, { value: COMMISSION_THRESHOLD_ERROR }, () => { blocked++ }, nextTick)
   await run.save()
-  await run.copySpecifiedQuotes([{quote1:6}])
+  await run.copyQuoteRows([{quote1:6}])
   expect(blocked).toBe(2)
 })
 
 it('blocks direct save, copy and recalculation for invalid special packaging', async () => {
   let blocked = 0
-  const run = new Function('purchaseTaxBlockReason', 'specialPackagingError', 'toast', 'nextTick', js + '\nreturn {save, copySpecifiedQuotes, quantityCostBreakdown}')(
+  const run = new Function('purchaseTaxBlockReason', 'specialPackagingError', 'toast', 'nextTick', js + '\nreturn {save, copyQuoteRows, quantityCostBreakdown}')(
     {value:''}, {value:'特殊包装克重无效'}, () => { blocked++ }, nextTick)
   await run.save()
-  await run.copySpecifiedQuotes([{quote1:6}])
+  await run.copyQuoteRows([{quote1:6}])
   expect(run.quantityCostBreakdown({country:'美国'},'QC',1,'美国','4PX','')).toBeNull()
   expect(blocked).toBe(2)
 })

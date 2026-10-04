@@ -427,7 +427,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
 <template>
   <section v-if="active !== false" class="specified-card" :class="{ 'template-compact': variant === 'template' }">
     <header class="specified-head">
-      <div v-if="variant === 'template'"><p>MODE C · TEMPLATE QUOTATION MATRIX</p><h2>报价模板应用清单</h2><span>已按个人模板带出国家与渠道；本次可临时增删，不会改动原模板。</span></div>
+      <div v-if="variant === 'template'"><p>MODE B · TEMPLATE QUOTATION MATRIX</p><h2>报价模板应用清单</h2><span>已按个人模板带出国家与渠道；本次可临时增删，不会改动原模板。</span></div>
       <div v-else><p>MODE B · SPECIFIED QUOTATION</p><h2>指定报价清单</h2><span>美、英、加、澳默认展示，也可按客户要求增加国家和渠道。</span></div>
       <div class="head-actions"><label v-if="variant !== 'template'">自定义数量 <input :value="customQuantity" type="number" min="1" @input="$emit('update:customQuantity',Number(($event.target as HTMLInputElement).value))"> {{ unitLabel || '件' }}</label><button @click="showCountryPicker=true">＋ 添加国家</button></div>
     </header>

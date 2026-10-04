@@ -12,11 +12,11 @@ function harness(mode:string){
   const node=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name)!
   const js=ts.transpile(node.getText(ast),{target:ts.ScriptTarget.ES2022})
   const held={value:[base()]}
-  const state={modeSelections:{value:{}},selectionFromRows:(rows:QuotationMatrixRow[])=>rows.map(row=>({channelKey:row.channelKey})),matrixRowsSignature:quotationRowsSignature,commonQuoteRows:held,specifiedQuoteRows:held,templateQuoteRows:held}
+  const state={modeSelections:{value:{}},selectionFromRows:(rows:QuotationMatrixRow[])=>rows.map(row=>({channelKey:row.channelKey})),matrixRowsSignature:quotationRowsSignature,commonQuoteRows:held,templateQuoteRows:held}
   const run=new Function('state',`with(state){${js};return ${name}}`)(state) as (rows:QuotationMatrixRow[])=>void
   return {held,run}
 }
-for(const mode of ['common','specified','template']) {
+for(const mode of ['common','template']) {
   it.each<Partial<QuotationMatrixRow>>([
     {channelKey:'new'}, {freight:5.01,totalCostCny:50.01,profitCny:10},
     {available:false,availabilityMessage:'属性不支持'}, {quantityMessages:{'3':'体积超限'}},

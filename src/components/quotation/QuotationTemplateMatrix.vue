@@ -403,7 +403,7 @@ function formatTime(value: string) {
   <section class="template-workbench">
     <header class="template-toolbar">
       <div class="template-intro">
-        <p>MODE C · PERSONAL QUOTATION TEMPLATE</p>
+        <p>MODE B · PERSONAL QUOTATION TEMPLATE</p>
         <h2>我的报价模板</h2>
         <span>按业务员账号独立保存常用国家与渠道；应用后可临时调整，不会自动改动原模板。</span>
       </div>

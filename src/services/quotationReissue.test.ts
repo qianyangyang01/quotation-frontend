@@ -48,7 +48,9 @@ describe('reissuing a quotation as new editable inputs', () => {
         rule: '规则甲', eta: '5天', quote1Usd: 10, quote2Usd: 20, quote3Usd: 30, quoteCustomUsd: 80, isPrimary: index === 0,
       })),
     }))
-    expect(payload[`${mode}Selections`]).toHaveLength(2)
+    expect(payload[`${mode === 'specified' ? 'common' : mode}Selections`]).toHaveLength(2)
+    expect(payload.quoteMatrixMode).toBe(mode === 'template' ? 'template' : 'common')
+    expect(payload.specifiedSelections).toEqual([])
     expect(payload.selectedCustomerGrade).toBe('NEW')
     expect(payload.selectedCustomerId).toBe('customer1')
     expect(payload.customQuoteQuantity).toBe(8)
@@ -68,4 +70,22 @@ describe('reissuing a quotation as new editable inputs', () => {
       { sku: 'SKU-B', quantityPerSet: 3, customWeightKg: null, purchaseInvoiceTaxApplied: undefined },
     ])
   })
+})
+
+
+it('reissues a legacy specifiedQuotes record in quick mode without rewriting historical prices or states', () => {
+  const original = record({ matrixMode: 'specified', customQuoteQuantity: 9, specifiedQuotes: [
+    { country: '澳大利亚', quoteRegion: '澳大利亚1区', carrier: '物流甲', channel: '小包', rule: '规则甲', eta: '5天', quote1Usd: 12, quote2Usd: 22, quote3Usd: 32, quoteCustomUsd: 92 },
+    { country: '澳大利亚', quoteRegion: '澳大利亚2区', carrier: '物流甲', channel: '小包', rule: '规则甲', eta: '5天', quote1Usd: 13, quote2Usd: 23, quote3Usd: 33, quoteCustomUsd: 93 },
+  ] })
+  const before = JSON.stringify(original)
+  const next = quotationReissuePayload(original)
+  expect(next.quoteMatrixMode).toBe('common')
+  expect(next.customQuoteQuantity).toBe(9)
+  expect(next.commonSelections.map(item => item.quoteRegion)).toEqual(['澳大利亚1区', '澳大利亚2区'])
+  expect(next.specifiedSelections).toEqual([])
+  expect(next).not.toHaveProperty('quoteOptions')
+  expect(next).not.toHaveProperty('specifiedQuotes')
+  expect(JSON.stringify(original)).toBe(before)
+  expect(original).toMatchObject({ matrixMode: 'specified', status: 'won', quoteConfirmed: true, actualQuoteUsd: 999 })
 })

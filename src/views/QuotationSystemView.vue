@@ -24,7 +24,7 @@ import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydra
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKAGING_ERROR } from '@/data/quotationWeightSnapshot'
-import { draftSelection, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
+import { draftSelection, migrateDraftMatrix, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
 import { applyCommissionThreshold, parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { validateQuotationConditions } from '@/services/quotationValidation'
 import { pendingPurchaseInvoiceSkus, purchaseInvoicePending, PURCHASE_INVOICE_PENDING_MESSAGE } from '@/services/purchaseInvoiceConfirmation'
@@ -37,7 +37,6 @@ import ProductInfoCard from '@/components/quotation/ProductInfoCard.vue'
 import BundleProductCard from '@/components/quotation/BundleProductCard.vue'
 import CostWeightPanel from '@/components/quotation/CostWeightPanel.vue'
 import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vue'
-import QuotationMatrix from '@/components/quotation/QuotationMatrix.vue'
 import type { QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
@@ -136,22 +135,20 @@ const showRule = ref(false)
 const showHistory = ref(false)
 const customQuoteQuantity = ref(3)
 const selectedQuoteRegions = ref<Record<string, string>>({})
-const specifiedQuoteRows = ref<QuotationMatrixRow[]>([])
 const templateQuoteRows = ref<QuotationMatrixRow[]>([])
 const commonQuoteRows = ref<QuotationMatrixRow[]>([])
 // Keep draft identities independently of whether a hidden matrix has calculated prices.
-const modeSelections = ref<Record<'common' | 'specified' | 'template', DraftChannelSelection[]>>({ common: [], specified: [], template: [] })
+const modeSelections = ref<Record<'common' | 'template', DraftChannelSelection[]>>({ common: [], template: [] })
 const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
-const quoteMatrixMode = ref<'common' | 'specified' | 'template'>('template')
+const quoteMatrixMode = ref<'common' | 'template'>('template')
 const commonMatrix = ref<InstanceType<typeof QuotationCommonMatrix> | null>(null)
-const specifiedMatrix = ref<InstanceType<typeof QuotationMatrix> | null>(null)
 const templateWorkbench = ref<InstanceType<typeof QuotationTemplateMatrix> | null>(null)
 function createTemplateFromCurrentMode() {
   const mode = quoteMatrixMode.value
   if (mode === 'template' || !templateWorkbench.value) return
-  const rows = mode === 'common' ? commonQuoteRows.value : specifiedQuoteRows.value
+  const rows = commonQuoteRows.value
   if (!rows.length) return
-  templateWorkbench.value.startFromSelection(rows, mode === 'common' ? '常用国家清单' : '指定国家与渠道清单')
+  templateWorkbench.value.startFromSelection(rows, '快速报价清单')
   quoteMatrixMode.value = 'template'
 }
 const quoteMode = ref<QuotationMode>('single')
@@ -243,7 +240,6 @@ const showDraftLeaveDialog = ref(false)
 const showDraftConflictDialog = ref(false)
 const resolvingDraftConflict = ref(false)
 const restoredCommonSelections = ref<QuotationPresetSelection[]>([])
-const restoredSpecifiedSelections = ref<QuotationPresetSelection[]>([])
 const restoredTemplateSelections = ref<QuotationPresetSelection[]>([])
 const restoredSelectionVersion = ref(0)
 let draftDirty = false
@@ -713,7 +709,7 @@ async function runQuoteLogistics(p: Product) {
     controller.signal.throwIfAborted()
     applyLiveFinance()
     const selectedCountries = [...new Set([...requestedQuoteCountries,
-      ...specifiedQuoteRows.value.map(row => row.country), ...templateQuoteRows.value.map(row => row.country)])]
+      ...templateQuoteRows.value.map(row => row.country)])]
     let countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country, selectedCountries)
     if (!countries.length) {
       financeCountrySettings.value = loadFinanceCountrySettings()
@@ -797,7 +793,7 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
       const p = products.value[0]
       const countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country,
         [...loadedQuoteCountries.value, ...requestedQuoteCountries,
-          ...[...specifiedQuoteRows.value, ...templateQuoteRows.value].map(row => row.country)])
+          ...templateQuoteRows.value.map(row => row.country)])
       const latest = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal, apply: false })
       if (!latest.verified || signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature() || quoteLogisticsBusy()) return false
       if (savedQuoteRows.value.length) {
@@ -934,7 +930,7 @@ function selectionFromRows(rows: QuotationMatrixRow[]): DraftChannelSelection[] 
 }
 function draftPayload(): QuotationDraftPayload {
   const p = products.value[0] || emptyQuotationProduct()
-  const primary = [...commonQuoteRows.value, ...specifiedQuoteRows.value, ...templateQuoteRows.value, ...Object.values(modeSelections.value).flat()]
+  const primary = [...commonQuoteRows.value, ...templateQuoteRows.value, ...Object.values(modeSelections.value).flat()]
     .find(row => row.country === p.country && (p.selectedChannelKey ? row.channelKey === p.selectedChannelKey : row.rule === p.rule && row.carrier === p.channel) && (row.quoteRegion || '') === quoteRegionForCountry(p.country))
   return {
     schemaVersion: 2,
@@ -968,7 +964,7 @@ function draftPayload(): QuotationDraftPayload {
     },
     bundleItems: bundleItems.value.map(item => ({ sku: item.sku, purchaseTier: normalizePurchaseTier(item.purchaseTier, monthlySalesEstimate.value), quantityPerSet: normalizedBundleSets(item.quantityPerSet), customWeightKg: item.customWeightKg == null ? null : Math.max(0, Number(item.customWeightKg) || 0), purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied })),
     commonSelections: modeSelections.value.common,
-    specifiedSelections: modeSelections.value.specified,
+    specifiedSelections: [], // Legacy wire field; new quotes only use common/template.
     templateSelections: modeSelections.value.template,
     activeTemplate: activeTemplateSnapshot.value ? { ...activeTemplateSnapshot.value } : null,
   }
@@ -1039,6 +1035,8 @@ async function recordForDraftSku(sku: string, freshPurchases?: Map<string, Purch
   return record?.quoteReady ? record : undefined
 }
 async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>, options: { restoreQuotation?: boolean } = {}) {
+  const migrated = migrateDraftMatrix(payload)
+  payload = migrated
   draftReady.value = false
   draftNeedsQuery.value = !options.restoreQuotation
   productQueryGeneration += 1
@@ -1055,7 +1053,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   commissionThreshold.value = payload.commissionThreshold === undefined ? '1' : String(payload.commissionThreshold ?? '')
   monthlySalesEstimate.value = ['10', '100', '100+'].includes(payload.monthlySalesEstimate) ? payload.monthlySalesEstimate : '10'
   customQuoteQuantity.value = Math.max(1, Math.floor(Number(payload.customQuoteQuantity) || 1))
-  quoteMatrixMode.value = ['specified', 'template'].includes(payload.quoteMatrixMode) ? payload.quoteMatrixMode : 'common'
+  quoteMatrixMode.value = migrated.quoteMatrixMode
   selectedQuoteRegions.value = Object.fromEntries(Object.entries(payload.selectedQuoteRegions || {})
     .filter(([, region]) => typeof region === 'string')) as Record<string, string>
   const p = reactive(emptyQuotationProduct())
@@ -1080,9 +1078,9 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     if (!bundleItems.value.length) bundleItems.value = [bundleItemFromRecord()]
     selectedQuoteRegions.value = {}
     requestedQuoteCountries.clear()
-    modeSelections.value = { common: [], specified: [], template: [] }
-    commonQuoteRows.value = []; specifiedQuoteRows.value = []; templateQuoteRows.value = []
-    restoredCommonSelections.value = []; restoredSpecifiedSelections.value = []; restoredTemplateSelections.value = []
+    modeSelections.value = { common: [], template: [] }
+    commonQuoteRows.value = []; templateQuoteRows.value = []
+    restoredCommonSelections.value = []; restoredTemplateSelections.value = []
     activeTemplateSnapshot.value = null
     restoredSelectionVersion.value += 1
     draftRestored.value = true
@@ -1125,12 +1123,10 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   } else bundleItems.value = [bundleItemFromRecord()]
   modeSelections.value = {
     common: draftSelection(payload.commonSelections || []),
-    specified: draftSelection(payload.specifiedSelections || []),
     template: draftSelection(payload.templateSelections || []),
   }
   Object.values(modeSelections.value).flat().forEach(selection => requestedQuoteCountries.add(selection.country))
   restoredCommonSelections.value = draftSelection(payload.commonSelections || [])
-  restoredSpecifiedSelections.value = draftSelection(payload.specifiedSelections || [])
   restoredTemplateSelections.value = draftSelection(payload.templateSelections || [])
   activeTemplateSnapshot.value = payload.activeTemplate?.id ? { id: String(payload.activeTemplate.id), name: String(payload.activeTemplate.name || '个人报价模板') } : null
   products.value = [p]
@@ -1165,17 +1161,16 @@ function reconcileRestoredChannels(p: Product) {
       && allowed.has(financeChannelKey(rule.id, relation))))
   }
   let removed = 0
-  for (const mode of ['common', 'specified', 'template'] as const) {
+  for (const mode of ['common', 'template'] as const) {
     const previous = modeSelections.value[mode]
     modeSelections.value[mode] = previous.filter(keep)
     removed += previous.length - modeSelections.value[mode].length
   }
   if (!removed) return
   restoredCommonSelections.value = draftSelection(modeSelections.value.common)
-  restoredSpecifiedSelections.value = draftSelection(modeSelections.value.specified)
   restoredTemplateSelections.value = draftSelection(modeSelections.value.template)
   restoredSelectionVersion.value += 1
-  draftChannelNotice.value = `已按当前物流属性“${p.logisticsAttribute}”移除 ${removed} 个未授权或已停用的旧渠道；可在“添加渠道”中重新选择。`
+  draftChannelNotice.value = `已按当前物流属性“${p.logisticsAttribute}”移除 ${removed} 个未授权或已停用的旧渠道；请重新选择可用渠道。`
 }
 async function establishDraftBaseline(status: 'idle' | 'saved') {
   await nextTick()
@@ -1214,7 +1209,7 @@ async function resetLocalDraft(customer?: LastQuotationCustomer) {
   reissueSource.value = ''
   draftSource.value = undefined
   purchaseQueryError.value = ''
-  modeSelections.value = { common: [], specified: [], template: [] }
+  modeSelections.value = { common: [], template: [] }
   draftReady.value = false
   window.clearTimeout(draftTimer)
   draftError.value = ''
@@ -1233,11 +1228,9 @@ async function resetLocalDraft(customer?: LastQuotationCustomer) {
   products.value = [emptyQuotationProduct()]
   bundleItems.value = [bundleItemFromRecord()]
   commonQuoteRows.value = []
-  specifiedQuoteRows.value = []
   templateQuoteRows.value = []
   activeTemplateSnapshot.value = null
   restoredCommonSelections.value = []
-  restoredSpecifiedSelections.value = []
   restoredTemplateSelections.value = []
   restoredSelectionVersion.value += 1
   showSaveValidation.value = false
@@ -1676,11 +1669,6 @@ async function searchChannelCountries(query: string): Promise<string[]> {
 function activeQuoteRowsForCountry(country: string, region?: string) {
   return region === undefined ? countryQuoteRows(country) : regionalQuoteRows(JSON.stringify([country, region]))
 }
-function updateSpecifiedQuotes(rows: QuotationMatrixRow[]) {
-  modeSelections.value.specified = selectionFromRows(rows)
-  if (matrixRowsSignature(specifiedQuoteRows.value) === matrixRowsSignature(rows)) return
-  specifiedQuoteRows.value = rows
-}
 function updateCommonQuotes(rows: QuotationMatrixRow[]) {
   modeSelections.value.common = selectionFromRows(rows)
   if (matrixRowsSignature(commonQuoteRows.value) === matrixRowsSignature(rows)) return
@@ -1694,9 +1682,7 @@ function updateTemplateQuotes(rows: QuotationMatrixRow[]) {
 function updateActiveTemplate(template: { id: string; name: string } | null) {
   activeTemplateSnapshot.value = template
 }
-const activeMatrixRows = computed(() => quoteMatrixMode.value === 'specified'
-  ? specifiedQuoteRows.value
-  : quoteMatrixMode.value === 'template'
+const activeMatrixRows = computed(() => quoteMatrixMode.value === 'template'
     ? templateQuoteRows.value
     : [])
 /* Legacy single-route snapshot retained for reference only; common quotations now use commonQuoteRows. */
@@ -1761,14 +1747,12 @@ function removePreviewRow(key: string) {
   const row = savedQuoteRows.value.find(row => quoteSheetRowKey(row) === key)
   if (!row) return
   const matrix = quoteMatrixMode.value === 'common' ? commonMatrix.value
-    : quoteMatrixMode.value === 'specified' ? specifiedMatrix.value : templateWorkbench.value
+    : templateWorkbench.value
   matrix?.removeSelection(row)
 }
 const matrixModeLabel = computed(() => quoteMatrixMode.value === 'common'
-  ? '常用国家快速报价'
-  : quoteMatrixMode.value === 'specified'
-    ? '指定国家与渠道报价'
-    : activeTemplateSnapshot.value?.name
+  ? '快速报价'
+  : activeTemplateSnapshot.value?.name
       ? `我的报价模板 · ${activeTemplateSnapshot.value.name}`
       : '我的报价模板')
 const showSaveValidation = ref(false)
@@ -1862,7 +1846,7 @@ function locateValidationIssue(key: string) {
   target?.scrollIntoView({ behavior:'smooth', block:'center' })
   window.setTimeout(() => target?.querySelector<HTMLElement>('input,select,button')?.focus(), 380)
 }
-async function copySpecifiedQuotes(rows: QuotationMatrixRow[]) {
+async function copyQuoteRows(rows: QuotationMatrixRow[]) {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (specialPackagingError.value) { toast(specialPackagingError.value); return }
   if (commissionError.value) { toast(commissionError.value); return }
@@ -2226,13 +2210,10 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <section v-if="!draftNeedsQuery && purchaseTaxBlockReason" class="logistics-load-panel error" role="alert"><span><b>{{ purchaseTaxBlockReason }}</b><small>请在采购数据确认票点和票类型后重新查询商品；已明确票类型的0%票点可以报价。</small></span></section>
         <section v-if="!draftNeedsQuery" class="matrix-workbench">
         <section class="matrix-mode-switcher">
-          <header><div><h2><i class="section-number">03</i>选择报价方式与渠道</h2></div><span>三种模式独立保留，模板按当前业务员账号管理</span></header>
+          <header><div><h2><i class="section-number">03</i>选择报价方式与渠道</h2></div><span>快速报价支持全部国家与授权渠道，模板按当前业务员账号管理</span></header>
           <nav aria-label="报价矩阵分类">
             <button :class="{ active:quoteMatrixMode==='common' }" :aria-pressed="quoteMatrixMode==='common'" @click="quoteMatrixMode='common'">
-              <i>⚡</i><span><b>常用国家快速报价</b><small>日常报价 · 直接比较财务已授权的全部渠道</small></span><em>{{ activeCommonCountryCount }}个国家</em>
-            </button>
-            <button :class="{ active:quoteMatrixMode==='specified' }" :aria-pressed="quoteMatrixMode==='specified'" @click="quoteMatrixMode='specified'">
-              <i>☷</i><span><b>指定国家与渠道报价</b><small>客户指定 · 自选国家并批量添加物流渠道</small></span><em>4国 / {{ specifiedQuoteRows.length }}渠道</em>
+              <i>⚡</i><span><b>快速报价</b><small>日常或指定渠道 · 搜索国家与渠道，加入报价单</small></span><em>{{ activeCommonCountryCount }}个国家</em>
             </button>
             <button :class="{ active:quoteMatrixMode==='template' }" :aria-pressed="quoteMatrixMode==='template'" @click="quoteMatrixMode='template'">
               <i>▦</i><span><b>我的报价模板</b><small>个人常用组合 · 一键载入预设国家与渠道</small></span><em>{{ activeTemplateSnapshot ? `${templateQuoteRows.length}渠道` : '未应用' }}</em>
@@ -2248,18 +2229,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
             :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
-            @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
-          />
-        </div>
-
-        <div v-show="quoteMatrixMode==='specified'" class="matrix-mode-panel">
-          <button type="button" class="save-selection-template" :disabled="!specifiedQuoteRows.length || logisticsLoadState !== 'ready'" @click="createTemplateFromCurrentMode">将当前清单存为模板</button>
-          <QuotationMatrix :ref="instance => specifiedMatrix = instance as typeof specifiedMatrix" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='specified'"
-            :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
-            :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
-            :unit-label="quoteMode === 'bundle' ? '套' : '件'"
-            :preset-selection="restoredSpecifiedSelections" :preset-version="restoredSelectionVersion"
-            @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateSpecifiedQuotes" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
+            @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
           />
         </div>
 
@@ -2271,7 +2241,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :unit-label="quoteMode === 'bundle' ? '套' : '件'"
             :draft-selection="restoredTemplateSelections" :draft-template="activeTemplateSnapshot" :draft-version="restoredSelectionVersion"
             @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateTemplateQuotes" @template-change="updateActiveTemplate"
-            @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copySpecifiedQuotes"
+            @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
           />
         </div>
 
@@ -2361,7 +2331,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 .product-name p{flex-wrap:wrap}.product-name p .shipping-mark{background:#fff0d8;color:#a35e00;font-weight:800}
 .quote-conditions{margin:14px 0 12px;padding:15px 16px;border:1px solid #e0e5e9;border-top:3px solid var(--orange);border-radius:9px;background:#fff;box-shadow:0 8px 24px rgba(25,38,49,.045)}.quote-conditions>header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:13px;padding-bottom:11px;border-bottom:1px solid #edf0f2}.quote-conditions>header>div{display:grid;gap:3px}.quote-conditions>header b{font-size:13px}.quote-conditions>header span{color:#8b959e;font-size:9px}.quote-conditions>header p{display:flex;align-items:center;gap:8px;margin:0}.quote-conditions>header p strong{font-size:11px}.quote-conditions>header p small{padding:3px 7px;border-radius:10px;background:#eef6f1;color:#258155;font-size:8px}.condition-grid{display:grid;grid-template-columns:minmax(250px,1.35fr) repeat(4,minmax(145px,1fr));gap:10px}.condition-grid>label{display:grid;align-content:start;gap:5px;min-width:0;color:#69757f;font-size:9px}.condition-grid select,.condition-grid input{width:100%;height:36px;box-sizing:border-box;border:1px solid #d9e0e5;border-radius:6px;background:#fff;padding:0 9px;color:#26323b;font-size:11px;outline:0}.condition-grid select:focus,.condition-grid input:focus{border-color:#f2a029;box-shadow:0 0 0 3px rgba(255,157,22,.1)}.condition-grid label>small{color:#a16a1c;font-size:8px}.sku-condition>div{position:relative;display:flex}.sku-condition i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#73808a;font-style:normal}.sku-condition input{padding-left:29px}.condition-actions{display:flex;align-items:center;justify-content:flex-end;gap:15px;margin-top:13px;padding-top:12px;border-top:1px solid #edf0f2}.condition-actions span{color:#8b959e;font-size:9px}.condition-actions button{height:36px;min-width:110px;background:#1b2630;color:#fff;font-size:10px}@media(max-width:1180px){.condition-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.sku-condition{grid-column:span 2}}@media(max-width:760px){.quote-conditions>header{align-items:flex-start;flex-direction:column}.quote-conditions>header p{flex-wrap:wrap}.condition-grid{grid-template-columns:1fr 1fr}.sku-condition{grid-column:1/-1}.condition-actions{justify-content:space-between}}@media(max-width:520px){.condition-grid{grid-template-columns:1fr}.sku-condition{grid-column:auto}.condition-actions{align-items:stretch;flex-direction:column}.condition-actions button{width:100%}}
 .quotation-page{width:min(1440px,94vw);display:grid;gap:24px;margin:0 auto;padding:28px 0 72px}.workflow{display:flex;align-items:center;justify-content:center;gap:13px;padding:12px 18px;border:1px solid #e4e9ee;border-radius:10px;background:#fff;box-shadow:0 5px 18px rgba(17,24,39,.035);color:#78848e;font-size:11px}.workflow span{display:flex;align-items:center;gap:7px;white-space:nowrap}.workflow span i{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:#eef2f5;color:#6e7a84;font-size:9px;font-style:normal;font-weight:800}.workflow .active{color:#9e5c00;font-weight:800}.workflow .active i{background:#ff9900;color:#17212b}.workflow b{color:#c5cdd4;font-weight:400}.cost-workbench{display:grid;gap:24px;min-width:0}.modal{font-size:13px}.toast{font-size:12px}@media(max-width:1180px){.workflow{justify-content:flex-start;overflow-x:auto}}@media(max-width:680px){.quotation-page{width:94vw;gap:16px;padding-top:18px}.workflow{display:none}}
-.matrix-mode-switcher{overflow:hidden;border:1px solid #dfe6eb;border-radius:12px;background:#fff;box-shadow:0 10px 28px rgba(20,34,45,.05)}.matrix-mode-switcher>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 21px;border-bottom:1px solid #e5eaee}.matrix-mode-switcher>header p{margin:0 0 4px;color:#d97800;font-size:9px;font-weight:900;letter-spacing:.15em}.matrix-mode-switcher>header h2{margin:0;font-size:19px}.matrix-mode-switcher>header>span{color:#77848e;font-size:10px}.matrix-mode-switcher>nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 18px;background:#f7f9fb}.matrix-mode-switcher>nav button{display:flex;align-items:center;gap:11px;min-height:66px;padding:11px 13px;border:1px solid #dce4e9;border-radius:9px;background:#fff;color:#17232d;text-align:left;cursor:pointer}.matrix-mode-switcher>nav button.active{border-color:#ff9700;background:#fff6e8;box-shadow:inset 3px 0 #ff9700,0 0 0 2px rgba(255,151,0,.06)}.matrix-mode-switcher>nav button>i{width:36px;height:36px;display:grid;place-items:center;flex:0 0 36px;border-radius:9px;background:#f0f3f5;color:#d77900;font-size:16px;font-style:normal}.matrix-mode-switcher>nav button.active>i{background:#ffedd0}.matrix-mode-switcher>nav button>span{display:grid;gap:3px;min-width:0}.matrix-mode-switcher>nav button b{font-size:13px}.matrix-mode-switcher>nav button small{overflow:hidden;color:#77848e;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.matrix-mode-switcher>nav button em{margin-left:auto;padding:5px 8px;border-radius:12px;background:#f0f3f5;color:#65737e;font-size:9px;font-style:normal;white-space:nowrap}.matrix-mode-switcher>nav button.active em{background:#ff9700;color:#fff}.matrix-mode-panel{min-width:0}@media(max-width:1000px){.matrix-mode-switcher>nav{grid-template-columns:1fr 1fr}}@media(max-width:760px){.matrix-mode-switcher>header{align-items:flex-start;flex-direction:column}.matrix-mode-switcher>nav{grid-template-columns:1fr}.matrix-mode-switcher>nav button small{white-space:normal}}
+.matrix-mode-switcher{overflow:hidden;border:1px solid #dfe6eb;border-radius:12px;background:#fff;box-shadow:0 10px 28px rgba(20,34,45,.05)}.matrix-mode-switcher>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 21px;border-bottom:1px solid #e5eaee}.matrix-mode-switcher>header p{margin:0 0 4px;color:#d97800;font-size:9px;font-weight:900;letter-spacing:.15em}.matrix-mode-switcher>header h2{margin:0;font-size:19px}.matrix-mode-switcher>header>span{color:#77848e;font-size:10px}.matrix-mode-switcher>nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:14px 18px;background:#f7f9fb}.matrix-mode-switcher>nav button{display:flex;align-items:center;gap:11px;min-height:66px;padding:11px 13px;border:1px solid #dce4e9;border-radius:9px;background:#fff;color:#17232d;text-align:left;cursor:pointer}.matrix-mode-switcher>nav button.active{border-color:#ff9700;background:#fff6e8;box-shadow:inset 3px 0 #ff9700,0 0 0 2px rgba(255,151,0,.06)}.matrix-mode-switcher>nav button>i{width:36px;height:36px;display:grid;place-items:center;flex:0 0 36px;border-radius:9px;background:#f0f3f5;color:#d77900;font-size:16px;font-style:normal}.matrix-mode-switcher>nav button.active>i{background:#ffedd0}.matrix-mode-switcher>nav button>span{display:grid;gap:3px;min-width:0}.matrix-mode-switcher>nav button b{font-size:13px}.matrix-mode-switcher>nav button small{overflow:hidden;color:#77848e;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.matrix-mode-switcher>nav button em{margin-left:auto;padding:5px 8px;border-radius:12px;background:#f0f3f5;color:#65737e;font-size:9px;font-style:normal;white-space:nowrap}.matrix-mode-switcher>nav button.active em{background:#ff9700;color:#fff}.matrix-mode-panel{min-width:0}@media(max-width:1000px){.matrix-mode-switcher>nav{grid-template-columns:1fr 1fr}}@media(max-width:760px){.matrix-mode-switcher>header{align-items:flex-start;flex-direction:column}.matrix-mode-switcher>nav{grid-template-columns:1fr}.matrix-mode-switcher>nav button small{white-space:normal}}
 .logistics-load-panel{display:flex;align-items:center;gap:12px;padding:14px 17px;border:1px solid #dce6eb;border-left:4px solid #ff9700;border-radius:10px;background:#fff}.logistics-load-panel>i{width:20px;height:20px;flex:0 0 20px;border:3px solid #ffe2b8;border-top-color:#ff9700;border-radius:50%;animation:quote-logistics-spin .8s linear infinite}.logistics-load-panel>span{display:grid;gap:3px}.logistics-load-panel small{color:#77858f;font-size:9px}.logistics-load-panel>button{height:32px;margin-left:auto;padding:0 12px;border:1px solid #df9121;border-radius:6px;background:#fff;color:#a75b00;font-size:9px;font-weight:800}.logistics-load-panel.stale,.logistics-load-panel.empty{border-left-color:#e2a223;background:#fffaf1}.logistics-load-panel.error{border-left-color:#cc5143;background:#fff8f7}.logistics-load-panel:not(.loading)>i{border:0;background:#e69a1a;animation:none}.logistics-load-panel.error>i{background:#cc5143}@keyframes quote-logistics-spin{to{transform:rotate(360deg)}}
 .draft-status-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid #dce5ea;border-left:4px solid #6d8da0;border-radius:9px;background:#fff}.draft-status-bar>i{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#eaf0f4;color:#496575;font-style:normal;font-weight:900}.draft-status-bar>span{display:grid;gap:3px;min-width:0}.draft-status-bar b{font-size:11px}.draft-status-bar small{color:#7d8992;font-size:9px}.draft-status-bar>button{height:30px;margin-left:auto;padding:0 11px;border:1px solid #d5dde2;border-radius:6px;background:#fff;color:#5e6e78;font-size:9px;font-weight:800}.draft-status-bar>button+button{margin-left:0}.draft-status-bar.saved{border-left-color:#2a9360}.draft-status-bar.saved>i{background:#e5f5ec;color:#278657}.draft-status-bar.dirty,.draft-status-bar.saving{border-left-color:#e69a1a}.draft-status-bar.error,.draft-status-bar.conflict{border-left-color:#ce4e43;background:#fff9f8}.draft-status-bar.error>i,.draft-status-bar.conflict>i{background:#ffe9e6;color:#bd4037}.draft-dialog-mask{z-index:140}.draft-dialog{width:min(560px,92vw)}.draft-dialog>p{color:#66747e;line-height:1.7}.draft-dialog>footer{display:flex;justify-content:flex-end;gap:9px;margin-top:24px}.draft-dialog>footer button{height:36px;padding:0 14px;border:1px solid #d7dfe4;border-radius:7px;background:#fff;color:#53616c;font-size:10px;font-weight:800}.draft-dialog>footer button.primary{border-color:#17232d;background:#17232d;color:#fff}.draft-dialog>footer button.danger{border-color:#e5b9b5;color:#bd443b}@media(max-width:680px){.draft-status-bar{align-items:flex-start;flex-wrap:wrap}.draft-status-bar>span{width:calc(100% - 40px)}.draft-status-bar>button{margin-left:36px}.draft-dialog>footer{align-items:stretch;flex-direction:column}}
 .live-data-notice{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 18px;border:1px solid #efc77d;border-radius:10px;background:#fff8ea;color:#784900;font-size:13px}.live-data-notice button{flex-shrink:0;padding:8px 14px;border:1px solid #d99127;border-radius:6px;background:#fff;color:#784900;cursor:pointer}

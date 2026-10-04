@@ -306,7 +306,7 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 <template>
   <section v-if="active !== false" class="common-matrix">
     <header class="common-head">
-      <div><p>MODE A · COMMON COUNTRY QUOTATION</p><h2>常用国家快速报价</h2><span>默认展示常用国家，搜索可查找全部国家及授权渠道，选择国家后查看价格。</span></div>
+      <div><p>MODE A · COMMON COUNTRY QUOTATION</p><h2>快速报价</h2><span>默认展示常用国家，搜索可查找全部国家及授权渠道，选择国家后查看价格。</span></div>
       <div class="common-head-actions">
         <label class="quantity-field">自定义数量<input :value="customQuantity || 1" type="number" min="1" @input="$emit('update:customQuantity',Math.max(1,Number(($event.target as HTMLInputElement).value)||1))"><span>{{ unitLabel || '件' }}</span></label>
         <label class="country-search">⌕<input v-model="search" type="search" aria-label="搜索全部国家或渠道" placeholder="搜索全部国家、代码或物流渠道"></label>

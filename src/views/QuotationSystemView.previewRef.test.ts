@@ -71,7 +71,7 @@ it('offers recovery without remounting the sheet and describes in-progress saves
   expect(document.querySelector('footer')?.textContent).not.toContain('可以保存')
   expect(state.quotationPreview.value).toBe(mounted)
 })
-it.each(['common','specified','template'])('captures original and edited prices through the real %s preview save button',async mode=>{
+it.each(['common','template'])('captures original and edited prices through the real %s preview save button',async mode=>{
   const state=mount(mode);await settle()
   await input('第 1 行第 2 列美元价格','2.70')
   button('新增列').click();await settle();await input('第 5 个价格列数量','8')

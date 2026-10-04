@@ -45,6 +45,7 @@ function financeResponse(disableS = false) {
 }
 
 type PricingState = {
+  quoteMatrixMode: 'common' | 'template'
   ensureCountries: (countries: string[]) => Promise<boolean>
   logisticsLoadState: string
   countryLoads: number
@@ -200,7 +201,8 @@ describe('quotation finance initialization for an employee', () => {
       product:{sku:'RESTORE'}, customerName:'客户', commonSelections:selected, specifiedSelections:selected, templateSelections:selected } as QuotationDraftPayload
     const restoring = state.applyDraftPayload(payload, new Map([['RESTORE', purchase]]), { restoreQuotation: true })
     await vi.waitFor(() => expect(finish).toBeDefined())
-    expect(state.modeSelections[mode]).toHaveLength(2)
+    expect(state.modeSelections[mode === 'specified' ? 'common' : mode]).toHaveLength(2)
+    expect(state.quoteMatrixMode).toBe(mode === 'specified' ? 'common' : mode)
     finish(); await restoring
     await vi.waitFor(() => expect(state.savedQuoteRows.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL']))
     for (const selections of Object.values(state.modeSelections)) expect(selections.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL'])

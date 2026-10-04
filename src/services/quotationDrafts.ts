@@ -1,6 +1,7 @@
 import { api } from './http'
 
 export type DraftQuoteMode = 'single' | 'bundle'
+// Keep specified readable for saved drafts and withdrawn historical quotes.
 export type DraftMatrixMode = 'common' | 'specified' | 'template'
 
 export interface DraftChannelSelection {
@@ -96,4 +97,14 @@ export function draftSelection(input: Array<Partial<DraftChannelSelection>>): Dr
     seen.add(key)
     return [normalized]
   })
+}
+
+/** Adapt editable inputs only; never rewrite a saved quotation or combine inactive mode selections. */
+export function migrateDraftMatrix(payload: QuotationDraftPayload): QuotationDraftPayload & { quoteMatrixMode: 'common' | 'template' } {
+  return {
+    ...payload,
+    quoteMatrixMode: payload.quoteMatrixMode === 'template' ? 'template' : 'common',
+    commonSelections: draftSelection((payload.quoteMatrixMode === 'specified' ? payload.specifiedSelections : payload.commonSelections) || []),
+    specifiedSelections: [],
+  }
 }

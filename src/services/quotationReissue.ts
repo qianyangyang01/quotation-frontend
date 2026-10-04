@@ -11,7 +11,7 @@ export function quotationReissuePayload(record: QuotationRecord): QuotationDraft
     channelKey: 'channelKey' in option ? option.channelKey : undefined,
     rule: option.rule, carrier: option.carrier, transport: option.channel,
   })))
-  const mode = record.matrixMode || 'common'
+  const mode = record.matrixMode === 'template' ? 'template' : 'common'
   const selectedQuoteRegions = Object.fromEntries(selections.filter(item => item.quoteRegion).map(item => [item.country, item.quoteRegion!]))
   if (primary?.country) selectedQuoteRegions[primary.country] = primary.quoteRegion || ''
   return {
@@ -36,7 +36,7 @@ export function quotationReissuePayload(record: QuotationRecord): QuotationDraft
     bundleItems: (record.bundleItems || []).map(item => ({ sku: item.sku, quantityPerSet: item.quantityPerSet,
       purchaseTier: item.purchaseTier,
       customWeightKg: null, purchaseInvoiceTaxApplied: item.purchaseInvoiceTaxApplied })),
-    commonSelections: mode === 'common' ? selections : [], specifiedSelections: mode === 'specified' ? selections : [],
+    commonSelections: mode === 'common' ? selections : [], specifiedSelections: [],
     templateSelections: mode === 'template' ? selections : [],
     activeTemplate: mode === 'template' && record.quotationTemplateId
       ? { id: record.quotationTemplateId, name: record.quotationTemplateName || '个人报价模板' } : null,
