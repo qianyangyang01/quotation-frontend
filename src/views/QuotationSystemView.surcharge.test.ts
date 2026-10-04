@@ -150,8 +150,8 @@ describe('quotation view fee integration', () => {
 
 it('blocks calculation and copying immediately when purchase tax points are missing', async () => {
   let blocked = 0
-  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copyQuoteRows, attemptSave, save, useLogistics}')(
-    { value: '' }, { value: '该商品采购票点为空，请补齐后报价' }, () => { blocked++ }, nextTick)
+  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'templateSaveBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copyQuoteRows, attemptSave, save, useLogistics}')(
+    { value: '' }, { value: '该商品采购票点为空，请补齐后报价' }, { value: '' }, () => { blocked++ }, nextTick)
   expect(run.excelQuoteRows({ country: '加拿大' }, '加拿大', '2区')).toEqual([])
   expect(run.quantityCostBreakdown({ country: '加拿大' }, '渠道', 1, '加拿大', '物流商', '2区')).toBeNull()
   await run.copyQuoteRows([{ country: '加拿大', quote1: 100 }])

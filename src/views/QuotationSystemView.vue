@@ -141,6 +141,9 @@ const commonQuoteRows = ref<QuotationMatrixRow[]>([])
 const modeSelections = ref<Record<'common' | 'template', DraftChannelSelection[]>>({ common: [], template: [] })
 const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
 const quoteMatrixMode = ref<'common' | 'template'>('template')
+const templateSelectionState = ref<'loading' | 'ready' | 'error'>('ready')
+const templateSaveBlockReason = computed(() => quoteMatrixMode.value !== 'template' || templateSelectionState.value === 'ready' ? ''
+  : templateSelectionState.value === 'loading' ? '模板渠道正在加载，请稍候' : '模板渠道加载失败，请先重试加载')
 const commonMatrix = ref<InstanceType<typeof QuotationCommonMatrix> | null>(null)
 const templateWorkbench = ref<InstanceType<typeof QuotationTemplateMatrix> | null>(null)
 function createTemplateFromCurrentMode() {
@@ -1787,7 +1790,7 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : ''))
-const displayedSaveBlockReason = computed(() => specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
+const displayedSaveBlockReason = computed(() => templateSaveBlockReason.value || specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
 const retryingSavePreparation = ref(false)
 const canRetrySavePreparation = computed(() => !draftInitializationFailed.value && Boolean(!financeSettingsAreHydrated() || syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
 async function retrySavePreparation() {
@@ -1807,6 +1810,7 @@ async function retrySavePreparation() {
 }
 const displayedInvalidFields = computed(() => [...new Set([...queryValidationFields.value, ...displayedSaveValidationIssues.value.map(issue => issue.key)])])
 async function attemptSave() {
+  if (templateSaveBlockReason.value) { toast(templateSaveBlockReason.value); return }
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (savingQuotation.value) return
   if (countryLoads.value || countryLoadError.value) { toast(countryLoadError.value || '国家渠道正在加载，请稍候'); return }
@@ -1819,6 +1823,7 @@ async function attemptSave() {
   let submittingQuotation = false
   try {
     if (!await checkLiveVersions(undefined, true)) { toast(syncPending.value || '当前输入或核验状态已变化，请重新确认后保存'); return }
+    if (templateSaveBlockReason.value) { toast(templateSaveBlockReason.value); return }
     if (countryLoads.value || countryLoadError.value) { toast(countryLoadError.value || '国家渠道正在加载，请稍候'); return }
     await flushDraft()
     logisticsLoadState.value = 'ready'
@@ -2235,6 +2240,9 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel">
           <QuotationTemplateMatrix :ref="instance => templateWorkbench = instance as typeof templateWorkbench" :active="quoteMatrixMode==='template'"
+            @selection-state-change="templateSelectionState = $event"
+            :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()"
+            :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()"
             :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unavailable-reason="unavailableTemplateReason" :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"

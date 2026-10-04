@@ -18,6 +18,8 @@ import {
 const props = withDefaults(defineProps<{
   unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
+  sourcePending?: boolean
+  sourceError?: string
   ensureCountries?: (countries: string[]) => Promise<boolean>
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
@@ -40,6 +42,7 @@ const emit = defineEmits<{
   'update:customQuantity': [value: number]
   selectionChange: [rows: QuotationMatrixRow[]]
   templateChange: [template: { id: string; name: string } | null]
+  selectionStateChange: [state: 'loading' | 'ready' | 'error']
   adopt: [row: QuotationMatrixRow]
   copy: [rows: QuotationMatrixRow[]]
   quoteRegionChange: [payload: { country: string; region: string }]
@@ -50,6 +53,9 @@ const owner = computed<QuotationTemplateOwner>(() => ({
   account: props.ownerAccount,
 }))
 const templates = ref<QuotationPersonalTemplate[]>([])
+const templatesLoading = ref(false)
+const templatesError = ref('')
+let templatesRequest = 0
 const selectedTemplateId = ref('')
 const newTemplateMode = ref(false)
 const activeTemplateId = ref('')
@@ -58,6 +64,7 @@ const currentRows = ref<QuotationMatrixRow[]>([])
 const editBase = ref<QuotationPersonalTemplate | null>(null)
 const pendingUpdate = ref<{ base: QuotationPersonalTemplate; items: QuotationTemplateSelectionItem[] } | null>(null)
 const selectionState = ref<'loading' | 'ready' | 'error'>('ready')
+watch(selectionState, state => emit('selectionStateChange', state), { immediate: true, flush: 'sync' })
 const savingTemplate = ref(false)
 const creationSource = ref('模板报价清单')
 const canSaveSelection = computed(() => selectionState.value === 'ready' && !savingTemplate.value && currentRows.value.length > 0)
@@ -117,16 +124,25 @@ function cancelClearConfirmation() {
 }
 
 async function refreshTemplates(preferredId = '') {
-  templates.value = await loadQuotationTemplates(owner.value)
-  if (!templates.value.length) newTemplateMode.value = true
-  const preferred = preferredId || selectedTemplateId.value
-  selectedTemplateId.value = newTemplateMode.value && !preferredId ? '' : templates.value.some(item => item.id === preferred)
-    ? preferred
-    : templates.value[0]?.id || ''
-  if (activeTemplateId.value && !templates.value.some(item => item.id === activeTemplateId.value)) {
-    activeTemplateId.value = ''
-    emit('templateChange', null)
-  }
+  const request = ++templatesRequest
+  templatesLoading.value = true
+  templatesError.value = ''
+  try {
+    const loaded = await loadQuotationTemplates(owner.value)
+    if (request !== templatesRequest) return
+    templates.value = loaded
+    if (!templates.value.length) newTemplateMode.value = true
+    const preferred = preferredId || selectedTemplateId.value
+    selectedTemplateId.value = newTemplateMode.value && !preferredId ? '' : templates.value.some(item => item.id === preferred)
+      ? preferred
+      : templates.value[0]?.id || ''
+    if (activeTemplateId.value && !templates.value.some(item => item.id === activeTemplateId.value)) {
+      activeTemplateId.value = ''
+      emit('templateChange', null)
+    }
+  } catch (error) {
+    if (request === templatesRequest) templatesError.value = `模板列表加载失败：${error instanceof Error ? error.message : '请检查网络后重试'}`
+  } finally { if (request === templatesRequest) templatesLoading.value = false }
 }
 
 function templateItems(rows: QuotationMatrixRow[]): QuotationTemplateSelectionItem[] {
@@ -357,6 +373,8 @@ function onTemplatesUpdated() {
 }
 
 watch(() => [props.ownerName, props.ownerAccount], () => {
+  templates.value = []
+  selectedTemplateId.value = ''
   newTemplateMode.value = false
   editBase.value = null
   pendingUpdate.value = null
@@ -387,6 +405,7 @@ watch(() => props.draftVersion || 0, version => {
 
 onMounted(() => window.addEventListener(QUOTATION_TEMPLATES_UPDATED_EVENT, onTemplatesUpdated))
 onBeforeUnmount(() => {
+  templatesRequest++
   window.removeEventListener(QUOTATION_TEMPLATES_UPDATED_EVENT, onTemplatesUpdated)
   window.clearTimeout(feedbackTimer)
   window.clearTimeout(clearConfirmTimer)
@@ -410,7 +429,7 @@ function formatTime(value: string) {
       <div class="template-actions">
         <label>
           <span>选择个人模板</span>
-          <select v-model="selectedTemplateId" :disabled="savingTemplate" aria-label="选择个人报价模板" @change="changeTemplateSelection">
+          <select v-model="selectedTemplateId" :disabled="savingTemplate || templatesLoading" aria-label="选择个人报价模板" @change="changeTemplateSelection">
             <option value="">新建模板</option>
             <option v-for="template in templates" :key="template.id" :value="template.id">
               {{ template.name }} · {{ new Set(template.items.map(item => item.country)).size }}国 / {{ template.items.length }}渠道
@@ -422,6 +441,9 @@ function formatTime(value: string) {
       </div>
     </header>
 
+    <p v-if="templatesLoading" role="status">正在加载个人模板…</p>
+    <p v-else-if="templatesError" role="alert">{{ templatesError }} <button @click="refreshTemplates()">重新加载模板</button></p>
+
     <div class="template-status">
       <template v-if="activeTemplate">
         <div class="active-template">
@@ -429,7 +451,9 @@ function formatTime(value: string) {
           <span><small>当前已应用</small><b>{{ activeTemplate.name }}</b></span>
           <em>模板已保存：{{ activeTemplateCountryCount }} 个国家 · {{ activeTemplate.items.length }} 条渠道</em>
         </div>
-        <p v-if="currentUnavailableCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ currentUnavailableCount }} 条模板渠道不可用，已保留并标注原因；其余 {{ currentAvailableCount }} 条已正常匹配。</p>
+        <p v-if="selectionState === 'loading'" role="status">正在准备模板渠道，商品资料就绪后继续加载…</p>
+        <p v-else-if="selectionState === 'error'" role="alert">模板渠道尚未加载成功，请按下方提示重试；已保存模板未修改。</p>
+        <p v-else-if="currentUnavailableCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ currentUnavailableCount }} 条模板渠道不可用，已保留并标注原因；其余 {{ currentAvailableCount }} 条已正常匹配。</p>
         <p v-else-if="!currentRows.length" class="cleared-note">本次应用清单为 0 个国家 · 0 条渠道；已保存模板未修改，可随时恢复。</p>
         <p v-else class="matched-note">✓ {{ currentAvailableCount }} 条模板渠道可用；下方增删仅对本次报价生效。</p>
         <div class="status-actions">
@@ -464,7 +488,7 @@ function formatTime(value: string) {
     <QuotationMatrix ref="matrix"
       variant="template"
       :active="active"
-      :countries="countries" :ensure-countries="ensureCountries"
+      :countries="countries" :ensure-countries="ensureCountries" :source-pending="sourcePending" :source-error="sourceError"
       :quote-rows-for-country="quoteRowsForCountry" :unavailable-reason="unavailableReason"
       :context-key="contextKey"
       :custom-quantity="customQuantity"

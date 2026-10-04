@@ -15,6 +15,8 @@ const DEFAULT_COUNTRIES = ['美国', '英国', '加拿大', '澳大利亚']
 const props = withDefaults(defineProps<{
   unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
+  sourcePending?: boolean
+  sourceError?: string
   ensureCountries?: (countries: string[]) => Promise<boolean>
   countries: QuotationCountrySummary[]
   quoteRowsForCountry: (country: string) => QuotationMatrixRow[]
@@ -149,18 +151,21 @@ function resetDefaultSelection() {
 }
 
 let presetRequest = 0
+const presetLoadError = ref('')
 let pendingPresetVersion: number | undefined
 async function applyPresetSelection() {
   const request = ++presetRequest
   const version = props.presetVersion || 0
   pendingPresetVersion = version
+  presetLoadError.value = ''
   emit('presetStateChange', 'loading')
   let loaded: boolean
+  let failure = '模板渠道加载失败，请重试'
   try { loaded = !props.presetSelection?.length || !props.ensureCountries || await props.ensureCountries(props.presetSelection.map(row => row.country)) }
-  catch { loaded = false }
+  catch (error) { loaded = false; if (error instanceof Error) failure = error.message }
   if (!loaded) {
-    if (request === presetRequest) {
-      regionFeedback.value = '模板渠道加载失败，请重新应用模板'
+    if (request === presetRequest && version === (props.presetVersion || 0)) {
+      presetLoadError.value = props.sourceError || failure
       pendingPresetVersion = undefined
       emit('presetStateChange', 'error')
     }
@@ -220,10 +225,16 @@ function resetSelectionForMode() {
 let initialized = false
 let appliedPresetVersion = -1
 watch(
-  [() => props.active, () => props.contextKey, () => props.presetVersion, () => props.variant, () => props.countries],
+  [() => props.active, () => props.contextKey, () => props.presetVersion, () => props.variant, () => props.countries, () => props.sourcePending],
   () => {
-    if (props.active === false) return
     const version = props.presetVersion || 0
+    if (props.sourcePending && props.presetSelection?.length) {
+      if (pendingPresetVersion !== undefined) { presetRequest++; pendingPresetVersion = undefined }
+      presetLoadError.value = ''
+      if (version !== appliedPresetVersion) emit('presetStateChange', 'loading')
+      return
+    }
+    if (props.active === false) return
     if (version !== appliedPresetVersion && (version > 0 || props.variant === 'template')) {
       if (pendingPresetVersion !== version) void applyPresetSelection()
       initialized = true
@@ -328,7 +339,7 @@ async function openChannelPicker(country: string) {
 watch([() => countrySummary(channelPickerCountry.value)?.channelsLoaded, channelLoading], ([loaded, loading]) => {
   if (loaded === true && !loading) channelError.value = ''
 })
-onBeforeUnmount(() => { channelPickerRequest++ })
+onBeforeUnmount(() => { channelPickerRequest++; presetRequest++ })
 function closeChannelPicker() {
   channelPickerRequest++
   channelLoading.value = false
@@ -431,7 +442,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
       <div v-else><p>MODE B · SPECIFIED QUOTATION</p><h2>指定报价清单</h2><span>美、英、加、澳默认展示，也可按客户要求增加国家和渠道。</span></div>
       <div class="head-actions"><label v-if="variant !== 'template'">自定义数量 <input :value="customQuantity" type="number" min="1" @input="$emit('update:customQuantity',Number(($event.target as HTMLInputElement).value))"> {{ unitLabel || '件' }}</label><button @click="showCountryPicker=true">＋ 添加国家</button></div>
     </header>
-    <QuoteTaxLegend /><p v-if="regionFeedback" role="status">{{ regionFeedback }}</p>
+    <QuoteTaxLegend /><p v-if="presetLoadError" role="alert">{{ presetLoadError }} <button :disabled="sourcePending" @click="applyPresetSelection">重试加载模板渠道</button></p><p v-if="regionFeedback" role="status">{{ regionFeedback }}</p>
     <div class="country-card-grid">
       <article v-for="country in selectedCountries" :key="country" class="country-card">
         <header>

@@ -39,7 +39,7 @@ it.each(['draft', 'quotation', 'timeout'])('distinguishes a %s failure during Sa
   const error = stage === 'timeout' ? new ApiError('保存结果尚未确认，当前输入已保留', 0, 'QUOTATION_REQUEST_TIMEOUT', 'save-check')
     : new ApiError(stage === 'draft' ? '草稿已在另一个页面更新' : '汇率已变化', 409, 'CONFLICT', 'save-check')
   const state = {
-    purchaseTaxBlockReason: { value: '' }, savingQuotation: { value: false }, countryLoads: { value: 0 }, countryLoadError: { value: '' },
+    templateSaveBlockReason: { value: '' }, purchaseTaxBlockReason: { value: '' }, savingQuotation: { value: false }, countryLoads: { value: 0 }, countryLoadError: { value: '' },
     showSaveValidation: { value: false }, saveValidationIssues: { value: [] }, checkLiveVersions: vi.fn(async () => true),
     flushDraft: vi.fn(async () => { if (stage === 'draft') throw error }),
     save: vi.fn(async () => { throw error }), logisticsLoadState: { value: 'ready' }, syncPending: { value: '' }, ApiError, toast: vi.fn(),

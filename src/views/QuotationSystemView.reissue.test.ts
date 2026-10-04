@@ -35,7 +35,8 @@ const oldDraft = { schemaVersion: 2, quoteMode: 'single', customerName: '未完�
 let app: App
 let host: HTMLDivElement
 let state: { flushDraft: () => Promise<void>; persistQuotation: (input: never) => Promise<unknown>; beforeWindowUnload: (event: BeforeUnloadEvent) => void; draftVersion: number; draftReady: boolean; draftStatus: string; reissueSource: string; customerName: string; products: Array<{ sku: string; purchase: number }>; modeSelections: { common: unknown[] }; searchChannelCountries: (query: string) => Promise<string[]>;
-  quoteMatrixMode: 'common' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[] }
+  quoteMatrixMode: 'common' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[];
+  templateSelectionState: 'loading' | 'ready' | 'error'; templateSaveBlockReason: string; attemptSave: () => Promise<void> }
 let purchaseFailure = false
 let sourceFailure = false
 beforeEach(() => {
@@ -290,4 +291,19 @@ it('offers exactly quick quotation and personal templates and switches both pane
   modes[1]!.click(); await nextTick()
   expect(state.quoteMatrixMode).toBe('template')
   expect(modes[1]!.getAttribute('aria-pressed')).toBe('true')
+})
+
+it('blocks stale preview submission while the chosen template is loading or failed, without blocking quick mode', async () => {
+  router.query = { release: 'local' }; await mount(false)
+  state.quoteMatrixMode = 'template'
+  for (const status of ['loading', 'error'] as const) {
+    state.templateSelectionState = status; await nextTick()
+    expect(state.templateSaveBlockReason).toContain('模板渠道')
+    await state.attemptSave()
+    expect(api.post).not.toHaveBeenCalled()
+  }
+  state.quoteMatrixMode = 'common'; await nextTick()
+  expect(state.templateSaveBlockReason).toBe('')
+  state.quoteMatrixMode = 'template'; state.templateSelectionState = 'ready'; await nextTick()
+  expect(state.templateSaveBlockReason).toBe('')
 })
