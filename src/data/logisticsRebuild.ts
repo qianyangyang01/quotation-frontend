@@ -137,6 +137,7 @@ export function completedBatchStage(batch: Pick<Batch, 'status' | 'payload'>) {
 }
 
 export function batchComparisonSummary(result: BatchResult) {
+  if (!result.summary) return `${Number(result.priceRows || 0)} 条价格已解析；尚未完成与正式版本的对比，请先处理失败原因`
   const summary = result.summary || {}
   const added = Number(summary.added || 0), removed = Number(summary.removed || 0)
   const rows = Number(result.priceRows ?? added)

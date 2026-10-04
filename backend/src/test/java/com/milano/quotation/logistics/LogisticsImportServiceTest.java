@@ -13,6 +13,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class LogisticsImportServiceTest {
+    @Test void failedReplacementRetainsTheActualValidationIssuesWithoutInventingAComparison(){
+        var mapper=new tools.jackson.databind.ObjectMapper();
+        var input=mapper.createObjectNode().put("providerName","燕文").put("channelName","大货普货").put("errors",34).put("sourceFileIndex",0);
+        input.putArray("rows").addObject();
+        input.putArray("issues").addObject().put("level","error").put("field","产品代码").put("message","产品代码不一致");
+        var result=LogisticsImportService.failedChannelOutcome(input,AppException.conflict("渠道已有不同的待审核版本，请先终止旧草稿或明确替换"),true);
+        org.junit.jupiter.api.Assertions.assertEquals(34,result.path("errors").asInt());
+        org.junit.jupiter.api.Assertions.assertEquals(input.path("issues"),result.path("issues"));
+        org.junit.jupiter.api.Assertions.assertTrue(result.path("message").asText().contains("旧草稿已保留"));
+        org.junit.jupiter.api.Assertions.assertFalse(result.has("summary"));
+    }
     @Test void acceptsMultipleLargeFilesUpToTheExpandedBatchLimit(){
         var files=IntStream.range(0,4).mapToObj(index->file("物流商"+index+".xlsx",90L*1024*1024)).toList();
         assertDoesNotThrow(()->LogisticsImportService.validateFiles(files));

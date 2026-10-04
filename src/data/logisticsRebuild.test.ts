@@ -110,6 +110,7 @@ describe('rebuild pricing safety', () => {
     expect(logisticsAdjustmentStatus(channel, [{ channelId: 'channel-1', status: 'published' }], false)).toBe('published')
   })
   it('explains initial imports and suspicious full replacement summaries', () => {
+    expect(batchComparisonSummary({ providerName: '燕文', channelName: '燕文专线追踪-特货', status: 'blocked', priceRows: 195 })).toContain('尚未完成与正式版本的对比')
     expect(batchComparisonSummary({ providerName: '递四方', channelName: 'OH', status: 'draft', basePublishedVersionId: '', priceRows: 38, summary: { added: 38 } })).toContain('初次导入 38 条价格')
     expect(batchComparisonSummary({ providerName: '递四方', channelName: 'QC', status: 'draft', basePublishedVersionId: 'old', priceRows: 70, summary: { added: 70, removed: 70, price: 0, rule: 0, range: 0 } })).toContain('没有匹配上')
   })
