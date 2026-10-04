@@ -137,6 +137,23 @@ it('saves channel changes made directly inside template mode as independent temp
   )
 })
 
+it('retains a transferred quick selection after save failure and retries without changing existing templates', async () => {
+  await mount()
+  workbench.startFromSelection([row('普货')], '快速报价清单'); await tick()
+  inputName('重试模板'); await tick()
+  api.post.mockRejectedValueOnce(new Error('保存超时'))
+  button('＋ 新建模板').click(); await tick()
+  expect(document.body.textContent).toContain('保存超时')
+  expect(document.querySelector('.creation-preview')?.textContent).toContain('普货')
+  expect(button('＋ 新建模板').disabled).toBe(false)
+  expect(stored).toHaveLength(1)
+  button('＋ 新建模板').click(); await tick()
+  expect(stored.map(template => template.items.map(item => item.channelKey))).toEqual([
+    [row('带电').channelKey], [row('普货').channelKey],
+  ])
+  expect(api.put).not.toHaveBeenCalled()
+})
+
 it('does not overwrite later channel edits when a save response arrives and prevents duplicate submissions', async () => {
   await mount()
   button('管理我的模板').click(); await tick(); inputName('副本'); await tick()
