@@ -43,6 +43,22 @@ public class LogisticsBatchPublishService {
         var published=result.putArray("publishedVersionIds");ids.forEach(published::add);return result;
     }
 
+    /** Read-only projection using the same compatibility decision as final acceptance. */
+    public void applyParserEligibility(UUID batchId,ObjectNode batch){
+        var versions=jdbc.sql("""
+            select v.id::text,coalesce(v.payload->>'parserVersion','') parser_version
+            from logistics_import_batch b cross join lateral jsonb_array_elements(b.payload->'results') r
+            join logistics_version v on v.id::text=r->>'versionId'
+            where b.id=:id and v.status='draft'
+            """).param("id",batchId).query((rs,n)->Map.entry(rs.getString(1),rs.getString(2))).list();
+        var reasons=new HashMap<String,String>();
+        for(var version:versions){var reason=LogisticsParserCompatibility.blockingReason(version.getValue());if(!reason.isEmpty())reasons.put(version.getKey(),reason);}
+        for(var item:batch.path("payload").path("results")){
+            var reason=reasons.get(item.path("versionId").asText());
+            if(reason!=null)((ObjectNode)item).put("pricingReady",false).put("status","blocked").put("message",reason);
+        }
+    }
+
     public ObjectNode publishReady(UUID batchId,ObjectNode input,String actor){
         var batch=jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",batchId).query(String.class).optional().orElseThrow(()->AppException.notFound("导入批次不存在"));
         ObjectNode payload;try{payload=(ObjectNode)mapper.readTree(batch);}catch(Exception e){throw new IllegalStateException(e);}

@@ -109,6 +109,7 @@ public class LogisticsRebuildController {
     @GetMapping("/datasets/{id}/imports") public ApiResponse<?> imports(@PathVariable UUID id){return ApiResponse.ok(imports.list(id));}
     @GetMapping("/imports/{id}") public ApiResponse<?> batch(@PathVariable UUID id){
         var result=imports.get(id);
+        batchPublish.applyParserEligibility(id,result);
         if(!Set.of("queued","processing").contains(result.path("status").asText()))((ObjectNode)result.path("payload")).set("coverage",batchPublish.coverage(id));
         return ApiResponse.ok(result);
     }
