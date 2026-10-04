@@ -32,6 +32,7 @@ public class QuotationReviewService {
         "financeReviewCommentCount", "financeReviewLatestComment");
     private final QuotationReviewRepository reviews;
     private final AuditService audit;
+    @org.springframework.beans.factory.annotation.Autowired private QuotationReviewNotifications notifications;
     public QuotationReviewService(QuotationReviewRepository reviews, AuditService audit) { this.reviews=reviews; this.audit=audit; }
     String currentStatus(QuotationRecordEntity quote) {
         return reviews.findById(quote.id).map(row->row.status).orElseGet(()->legacy(quote.payload).path("financeReviewStatus").asText());
@@ -127,6 +128,8 @@ public class QuotationReviewService {
         current.put("financeReviewStatus",row.status);
         event(current,actor,action,before,row.status,note,quote.version);
         row.state=current;reviews.saveAndFlush(row);
+        if (Set.of("complete","comment").contains(action)) notifications.publish(quote,row,action,note,actor);
+        else notifications.invalidate(quote.id);
         audit.record("quotation.review."+action,"quotation",quote.id.toString(),"success",Map.of("before",before,"after",row.status,"note",note));
     }
     private void requireQuoteVersion(QuotationRecordEntity quote,ObjectNode request) {
@@ -134,6 +137,7 @@ public class QuotationReviewService {
             throw AppException.conflict("报价内容已更新，请重新打开详情核对后审核");
     }
     void contentChanged(QuotationRecordEntity quote, QuotationPrincipal actor) {
+        notifications.invalidate(quote.id);
         var row=state(quote);
         if(row.status.equals("pending")) return;
         var current=(ObjectNode)row.state.deepCopy();var before=row.status;
@@ -147,6 +151,7 @@ public class QuotationReviewService {
         audit.record("quotation.review.content-changed","quotation",quote.id.toString(),"success",Map.of("before",before,"after",row.status));
     }
     void withdrawn(QuotationRecordEntity quote, QuotationPrincipal actor) {
+        notifications.invalidate(quote.id);
         var row=state(quote);var current=(ObjectNode)row.state.deepCopy();var before=row.status;
         preserveLegacyHistory(quote,current);
         VIEW_FIELDS.forEach(current::remove);

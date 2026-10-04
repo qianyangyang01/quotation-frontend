@@ -3,7 +3,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { loadQuotationReviewHistory, reviewQuotationRecord, type QuotationRecord, type QuotationReviewEvent, type QuotationReviewState } from '@/data/quotationRecords'
 
 const props = defineProps<{ record: QuotationRecord; state: QuotationReviewState; account: string; canReview: boolean; busy: boolean }>()
-const emit = defineEmits<{ saved: [record: QuotationRecord] }>()
+const emit = defineEmits<{ saved: [record: QuotationRecord]; viewed: [version: number] }>()
 const dialog = ref<HTMLDialogElement | null>(null)
 const opened = ref(false), loading = ref(false), saving = ref(false)
 const note = ref(''), error = ref(''), loadError = ref('')
@@ -19,12 +19,15 @@ const time = (value: string) => value ? new Date(value).toLocaleString('zh-CN', 
 function close() { if (!saving.value) { dialog.value?.close(); opened.value = false } }
 async function loadHistory() {
   const current = ++generation
+  const displayedVersion = props.state._reviewVersion ?? 0
   loading.value = true; loadError.value = ''
   try {
     const rows = await loadQuotationReviewHistory(props.record.id)
     if (current !== generation) return
     history.value = rows.filter(row => ['comment', 'complete', 'legacy-review'].includes(row.action) && row.note?.trim()
       && !(row.action === 'legacy-review' && row.note === '保留的历史审核结果')).reverse()
+    await nextTick()
+    if(current === generation && opened.value) emit('viewed', displayedVersion)
   } catch { if (current === generation) loadError.value = '审核意见加载失败，请重试' }
   finally { if (current === generation) loading.value = false }
 }
