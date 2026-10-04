@@ -33,7 +33,7 @@ public class LogisticsSourceParser {
     private static final Pattern ETA_RANGE=Pattern.compile("(?<![0-9])([0-9]{1,3})\\s*[-—–~～至]\\s*([0-9]{1,3})\\s*(?:个)?(?:工作日|天)(?![0-9])");
     private static final Pattern ETA_CELL=Pattern.compile("(?i)^(?:(?:参考|全段|全程|预计|运输|派送|签收)?时效\\s*[:：]?\\s*)?"
             +"([0-9]{1,3})(?:\\s*(?:-{1,2}|[—–~～至])\\s*([0-9]{1,3}))?\\s*"
-            +"((?:个)?(?:工作日|自然日|天|日)|(?:business\\s+|working\\s+)?days?)?$");
+            +"((?:个)?(?:工作日|自然日|天|日)|[（(](?:个)?(?:工作日|自然日|天|日)[)）]|(?:business\\s+|working\\s+)?days?)?$");
     private static final List<String> HEADER_FIELDS=List.of("country","countryCode","continent","channel","productCode","minimumWeight","billingStep","weightFrom","weightTo","weightRange","settlementRate","pricePerKg","firstWeightPrice","nextWeightPrice","registrationFee","linehaulPerKg","originRegion","zone","eta","notes");
     private static final Map<String,String> COUNTRIES=countries();
     private final ObjectMapper mapper;
@@ -1200,7 +1200,9 @@ public class LogisticsSourceParser {
     private boolean referenceSection(Source source,int row) {
         // Only a section heading in the first populated cell ends a table. A price-row
         // remark containing these words must never hide that row or subsequent prices.
-        return source.rowTexts(row).stream().filter(t->!t.isBlank()).findFirst()
+        var texts=source.rowTexts(row).stream().filter(t->!t.isBlank()).toList();
+        if(texts.stream().skip(1).anyMatch(t->t.matches("-?[0-9]+(?:\\.[0-9]+)?")||looksRange(t)))return false;
+        return texts.stream().findFirst()
                 .map(LogisticsSourceParser::clean)
                 .map(t->t.matches("(?:价格使用说明|报价使用说明|国家维度具体要求|注意事项说明如下|客户须知|注意事项)[:：]?"))
                 .orElse(false);
@@ -1255,7 +1257,7 @@ public class LogisticsSourceParser {
         // alternative promises or tracking/upload time. Double hyphens occur in Wanbang.
         var match=ETA_CELL.matcher(text.trim());
         if(!match.matches())return null;
-        if(match.group(3)==null&&!header.matches("(?is).*(?:工作日|自然日|天|\\bday[s]?\\b).*"))return null;
+        if(match.group(3)==null&&!header.matches("(?is).*(?:工作日|自然日|天|[（(/]日[)）]?|\\bday[s]?\\b).*"))return null;
         int min=Integer.parseInt(match.group(1)),max=match.group(2)==null?min:Integer.parseInt(match.group(2));
         return min>0&&max>=min?new EtaReference(min,max,text,cell):null;
     }

@@ -48,7 +48,7 @@ class SharedSourceLayoutTest {
         }
     }
 
-    @ParameterizedTest @ValueSource(strings={"5-8天","5—8个工作日","5~8自然日","5至8日","5--8","5-8 working days","全段时效：5-8个工作日"})
+    @ParameterizedTest @ValueSource(strings={"5-8天","5—8个工作日","5~8自然日","5至8日","5--8","5-8 working days","全段时效：5-8个工作日","5-8（工作日）"})
     void acceptsExplicitDayFormats(String eta) throws Exception {
         try(var book=new XSSFWorkbook()) {
             var s=book.createSheet("普货");row(s,0,"国家","重量段","运费/KG","挂号费/票","时效（工作日）");row(s,1,"美国","0-1",55,20,eta);
@@ -107,5 +107,34 @@ class SharedSourceLayoutTest {
         LogisticsImportService.inheritManualEta(incoming,previous);assertFalse(r.has("etaMinDays"));
         r.put("etaMinDays",2).put("etaMaxDays",3).put("etaSource","manual-review").put("pricePerKg",55).put("pricingModel","per-kg");
         LogisticsReadiness.apply(incoming);assertTrue(incoming.path("etaReady").asBoolean());assertEquals("24-48小时",r.path("sourceEtaText").asText());
+    }
+
+    @Test void jisuAndShandianhouShareTheSameReferenceBoundaryProtection() throws Exception {
+        var jisu=new JisuSourceParserTest();
+        try(var book=new XSSFWorkbook(new ByteArrayInputStream(jisu.fixture(63,1)))) {
+            var s=book.getSheetAt(1);row(s,9,"国家维度具体要求");
+            row(s,10,"",99,"美国",99,"22000-22999",JisuSourceRules.CODE,"2026-10-04","化妆品");
+            var c=parser.parse(bytes(book),"JS-更新.xlsx",jisu.directory()).path("channels").get(0);
+            assertEquals(2,c.path("rows").size());assertTrue(c.path("pricingReady").asBoolean());
+            assertEquals(8,c.path("rows").get(0).path("etaMinDays").asInt());
+        }
+        try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("全球专线普货");
+            row(s,0,"国家","产品名称","产品代码","重量(KG)","包裹运费（RMB/KG）","处理费（RMB/票）","时效（工作日）","备注");
+            row(s,1,"美国","美猴专线普货","19221","0.05<W≤0.2",55,20,"5--12","按克计费，50克起重");
+            row(s,2,"国家维度具体要求");row(s,3,"美国","美猴专线普货","19221","22000-22999",99,99,"24-48小时","");
+            var c=parser.parse(bytes(book),"闪电猴.xlsx").path("channels").get(0);
+            assertEquals(1,c.path("rows").size());assertTrue(c.path("pricingReady").asBoolean(),c.path("issues").toString());
+            assertEquals(5,c.path("rows").get(0).path("etaMinDays").asInt());assertEquals(12,c.path("rows").get(0).path("etaMaxDays").asInt());
+        }
+    }
+
+    @Test void aLeadingRemarkCannotHideValidOrMalformedPrices() throws Exception {
+        try(var book=new XSSFWorkbook()) {
+            var s=book.createSheet("普货");row(s,0,"备注","国家","重量段","运费/KG","挂号费/票");
+            row(s,1,"价格使用说明","美国","0-1",55,20);row(s,2,"注意事项","美国","1-2","INVALID",20);
+            var c=parser.parse(bytes(book),"通邮.xlsx").path("channels").get(0);
+            assertEquals(2,c.path("rows").size());assertEquals(55,c.path("rows").get(0).path("pricePerKg").asInt());assertTrue(c.path("errors").asInt()>0);
+        }
     }
 }

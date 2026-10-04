@@ -261,7 +261,7 @@ class LogisticsSourceLayoutRegressionTest {
 
     @Test @EnabledIfSystemProperty(named="logistics.corpusDir",matches=".+")
     void allRealWorkbooksRetainPricesWhenHeadersAndMergedBlocksMove() throws Exception {
-        var expected=Map.ofEntries(Map.entry("4px价格.xlsx",195),Map.entry("7.30花海.xlsx",263),Map.entry("8.12容鼎.xlsx",30),Map.entry("8.17万邦价格.xlsx",247),Map.entry("8.17通邮价格.xlsx",388),Map.entry("8.1云速递价格.xlsx",261),Map.entry("8.24云途价格.xlsx",629),Map.entry("8.24极通环球价格.xls",193),Map.entry("8.24递四方价格.xlsx",195),Map.entry("8.27燕文价格.xlsx",620),Map.entry("8.7顺丰价格.xlsx",223));
+        var expected=Map.ofEntries(Map.entry("4px价格.xlsx",195),Map.entry("7.30花海.xlsx",263),Map.entry("8.12容鼎.xlsx",30),Map.entry("8.17万邦价格.xlsx",247),Map.entry("8.17通邮价格.xlsx",388),Map.entry("8.1云速递价格.xlsx",261),Map.entry("8.24云途价格.xlsx",629),Map.entry("8.24极通环球价格.xls",176),Map.entry("8.24递四方价格.xlsx",195),Map.entry("8.27燕文价格.xlsx",620),Map.entry("8.7顺丰价格.xlsx",223));
         var root=Path.of(System.getProperty("logistics.corpusDir"));
         for(var entry:expected.entrySet()) {
             var path=root.resolve(entry.getKey());var originalBytes=Files.readAllBytes(path);var before=parser.parse(originalBytes,entry.getKey());
