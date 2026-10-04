@@ -58,6 +58,8 @@ const channelSearch = ref('')
 const pickerRegion = ref('')
 const regionFeedback = ref('')
 const channelFilter = ref('系统推荐')
+const channelPriceAscending = ref(false)
+const channelPriceField = ref<'quote1' | 'quote2' | 'quote3' | 'quoteCustom'>('quote1')
 const pendingChannelKeys = ref<string[]>([])
 const channelPage = ref(1)
 const channelPageSize = 8
@@ -268,10 +270,18 @@ const filteredPickerRows = computed(() => {
     return true
   })
 })
-const channelPageCount = computed(() => Math.max(1, Math.ceil(filteredPickerRows.value.length / channelPageSize)))
-const pagedPickerRows = computed(() => filteredPickerRows.value.slice((channelPage.value - 1) * channelPageSize, channelPage.value * channelPageSize))
+const sortedPickerRows = computed(() => {
+  if (!channelPriceAscending.value) return filteredPickerRows.value
+  const price = (row: QuotationMatrixRow) => {
+    const value = row[channelPriceField.value]
+    return typeof value === 'number' && Number.isFinite(value) ? value : Infinity
+  }
+  return [...filteredPickerRows.value].sort((a, b) => price(a) - price(b))
+})
+const channelPageCount = computed(() => Math.max(1, Math.ceil(sortedPickerRows.value.length / channelPageSize)))
+const pagedPickerRows = computed(() => sortedPickerRows.value.slice((channelPage.value - 1) * channelPageSize, channelPage.value * channelPageSize))
 
-watch([channelSearch, channelFilter, pickerRegion], () => { channelPage.value = 1 })
+watch([channelSearch, channelFilter, pickerRegion, channelPriceAscending, channelPriceField, () => props.customQuantity], () => { channelPage.value = 1 })
 
 function addCountry(country: string) {
   if (!country || selectedCountries.value.includes(country)) return
@@ -415,11 +425,11 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
 </script>
 
 <template>
-  <section v-if="active !== false" class="specified-card">
+  <section v-if="active !== false" class="specified-card" :class="{ 'template-compact': variant === 'template' }">
     <header class="specified-head">
       <div v-if="variant === 'template'"><p>MODE C · TEMPLATE QUOTATION MATRIX</p><h2>报价模板应用清单</h2><span>已按个人模板带出国家与渠道；本次可临时增删，不会改动原模板。</span></div>
       <div v-else><p>MODE B · SPECIFIED QUOTATION</p><h2>指定报价清单</h2><span>美、英、加、澳默认展示，也可按客户要求增加国家和渠道。</span></div>
-      <div class="head-actions"><label>自定义数量 <input :value="customQuantity" type="number" min="1" @input="$emit('update:customQuantity',Number(($event.target as HTMLInputElement).value))"> {{ unitLabel || '件' }}</label><button @click="showCountryPicker=true">＋ 添加国家</button></div>
+      <div class="head-actions"><label v-if="variant !== 'template'">自定义数量 <input :value="customQuantity" type="number" min="1" @input="$emit('update:customQuantity',Number(($event.target as HTMLInputElement).value))"> {{ unitLabel || '件' }}</label><button @click="showCountryPicker=true">＋ 添加国家</button></div>
     </header>
     <QuoteTaxLegend /><p v-if="regionFeedback" role="status">{{ regionFeedback }}</p>
     <div class="country-card-grid">
@@ -429,11 +439,11 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
           <div class="country-actions"><button v-if="variant === 'template' || !DEFAULT_COUNTRIES.includes(country)" class="remove-country" @click="removeCountry(country)">移除国家</button><button @click="openChannelPicker(country)">＋ 添加渠道</button></div>
         </header>
         <div v-if="availableRows(country).length" class="country-metrics"><span>最低 <b>{{ formatUsd(recommendedRows(country)[0]?.quote1 ?? null) }}</b> · {{ recommendedRows(country)[0]?.quoteRegion }} · {{ recommendedRows(country)[0]?.carrier }}｜{{ recommendedRows(country)[0]?.transport }}</span><span>最快 <b>{{ fastestRow(availableRows(country))?.eta }}</b> · {{ fastestRow(availableRows(country))?.quoteRegion }} · {{ fastestRow(availableRows(country))?.carrier }}｜{{ fastestRow(availableRows(country))?.transport }}</span></div>
-        <div class="quote-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价</span><span>2{{ unitLabel || '件' }}报价</span><span>3{{ unitLabel || '件' }}报价</span><span class="custom-quote-head">{{ customQuantity }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
+        <div class="quote-head"><span>物流渠道</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价</span><span>2{{ unitLabel || '件' }}报价</span><span>3{{ unitLabel || '件' }}报价</span><span v-if="variant !== 'template'" class="custom-quote-head">{{ customQuantity }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>操作</span></div>
         <div v-if="selectedRows(country).length" class="selected-channels">
           <section v-for="row in selectedRows(country)" :key="rowKey(row)" :class="{ adopted:adoptedCountry===country && (adoptedChannelKey ? adoptedChannelKey===row.channelKey : adoptedRule===row.rule && adoptedCarrier===row.carrier) && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') }">
             <div><span class="channel-name-line"><QuoteChannelName :row="row" /><QuoteTaxMeta v-if="row.available !== false" :row="row" /></span><label v-if="countrySummary(country)?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="row.quoteRegion" :aria-label="country+' '+row.transport+' 报价区域'" @change="handleRowRegion(country,row,$event)"><option v-for="region in countrySummary(country)?.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><QuoteMinimumWeight :weight-kg="row.minChargeWeightKg" /></div><b>{{ row.eta }}</b>
-            <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span>
+            <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span v-if="variant !== 'template'" class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span>
             <div class="row-actions"><button v-if="row.available === false" @click="replaceChannel(country,row)">替换渠道</button><button :disabled="row.available === false || row.quote1 == null" @click="$emit('adopt',row)">{{ adoptedCountry===country && (adoptedChannelKey ? adoptedChannelKey===row.channelKey : adoptedRule===row.rule && adoptedCarrier===row.carrier) && (countrySummary(country)?.selectedQuoteRegion || '')===(row.quoteRegion || '') ? '首选' : '设为首选' }}</button><button @click="removeChannel(country,row)">移出报价单</button></div>
           </section>
         </div>
@@ -454,6 +464,16 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
       <header><div><h2>为{{ channelPickerCountry }}添加物流渠道</h2><p>可搜索并批量选择渠道，价格按当前商品与重量自动试算。</p></div><button @click="closeChannelPicker">×</button></header>
       <label v-if="countrySummary(channelPickerCountry)?.quoteRegions?.length" class="quote-region-select">新增方案区域<select v-model="pickerRegion" aria-label="新增方案区域"><option v-for="region in countrySummary(channelPickerCountry)?.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label><label class="dialog-search">⌕<input v-model="channelSearch" placeholder="搜索渠道名称、物流商或渠道代码"></label>
       <div class="channel-tools"><nav><button v-for="filter in ['全部','系统推荐','最低价','最快','普货','带电']" :key="filter" :class="{ active:channelFilter===filter }" @click="channelFilter=filter">{{ filter }}</button></nav><button class="recommended-add" @click="selectRecommended">＋ 添加系统推荐3条</button></div>
+      <div class="channel-price-sort">
+        <label>排序依据<select v-model="channelPriceField" aria-label="渠道价格排序依据">
+          <option value="quote1">1{{ unitLabel || '件' }}报价</option>
+          <option value="quote2">2{{ unitLabel || '件' }}报价</option>
+          <option value="quote3">3{{ unitLabel || '件' }}报价</option>
+          <option value="quoteCustom">{{ customQuantity }}{{ unitLabel || '件' }}报价（自定义）</option>
+        </select></label>
+        <button type="button" :class="{ active: channelPriceAscending }" :aria-pressed="channelPriceAscending" @click="channelPriceAscending = !channelPriceAscending">价格从低到高 ↑</button>
+        <span v-if="channelPriceAscending">无报价排最后 · 再次点击恢复默认顺序</span>
+      </div>
       <div class="picker-head"><span></span><span>物流渠道</span><span>物流商</span><span>预计时效</span><span>1{{ unitLabel || '件' }}报价</span><span>2{{ unitLabel || '件' }}报价</span><span>3{{ unitLabel || '件' }}报价</span><span class="custom-quote-head">{{ customQuantity }}{{ unitLabel || '件' }}报价<small>自定义</small></span><span>推荐理由</span></div>
       <div class="picker-list"><label v-for="row in pagedPickerRows" :key="rowKey(row)" :class="{ selected:pendingChannelKeys.includes(rowKey(row)), disabled:isAlreadyAdded(row) }"><input type="checkbox" :checked="pendingChannelKeys.includes(rowKey(row))" :disabled="isAlreadyAdded(row) || !hasAnyQuotationPrice(row) || channelLoading || !!channelError" @change="togglePending(row)"><span><span class="channel-name-line"><QuoteChannelName :row="row" /><QuoteTaxMeta v-if="row.available !== false" :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · {{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small></span><b>{{ row.carrier }}</b><b>{{ row.eta }}</b><span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span><span class="custom-price"><b>{{ formatUsd(row.quoteCustom) }}</b><small v-if="row.quoteCustom != null">{{ formatCny(row.quoteCustom) }}</small><QuoteUnavailableReason :price="row.quoteCustom" :message="row.quantityMessages?.[String(customQuantity)] || row.availabilityMessage" /></span><em v-if="isAlreadyAdded(row)" class="added">已添加</em><em v-else-if="reason(row)">{{ reason(row) }}</em><i v-else>—</i></label><p v-if="channelLoading">正在加载渠道…</p><p v-else-if="channelError" @click="openChannelPicker(channelPickerCountry)">{{ channelError }}<template v-if="channelError !== '加载失败，点击重试'"> · 点击重试</template></p><p v-else-if="!pagedPickerRows.length">当前物流属性、重量及授权条件下没有匹配的可用渠道</p></div>
       <div class="picker-pagination"><span>共 {{ filteredPickerRows.length }} 条</span><button :disabled="channelPage<=1" @click="channelPage--">上一页</button><b>{{ channelPage }} / {{ channelPageCount }}</b><button :disabled="channelPage>=channelPageCount" @click="channelPage++">下一页</button></div>
@@ -467,4 +487,17 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
 @media(min-width:1001px){.country-card-grid{grid-template-columns:1fr}.country-card-grid:has(.country-card:nth-child(2)){grid-template-columns:1fr}}
 .quote-region-select{display:flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid #ffbd63;border-radius:6px;background:#fff8eb;color:#a55a00;font-size:8px;font-weight:800;white-space:nowrap}.quote-region-select select{border:0;background:transparent;color:#9b5300;font-size:9px;font-weight:850;outline:0}
 .channel-name-line{display:flex!important;flex-wrap:wrap;align-items:center;gap:7px;min-width:0}.channel-name-line>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.channel-price-sort{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0 24px 10px;font-size:11px;color:#65727c}.channel-price-sort label{display:flex;align-items:center;gap:6px}.channel-price-sort select,.channel-price-sort button{min-height:30px;padding:0 10px;border:1px solid #d7e0e5;border-radius:6px;background:#fff;color:#52616d;font-size:11px}.channel-price-sort button{cursor:pointer;font-weight:800}.channel-price-sort button.active{border-color:#e88900;background:#fff3df;color:#a55a00}.channel-price-sort span{font-size:10px}
+.template-compact .specified-head{padding:12px 14px;gap:10px}
+.template-compact .specified-head h2{font-size:16px}
+.template-compact .country-card-grid{gap:8px;padding:10px 12px}
+.template-compact .country-card>header{padding:6px 10px}
+.template-compact .country-actions button{height:28px;padding:0 9px}
+.template-compact .quote-head,.template-compact .selected-channels section{grid-template-columns:minmax(220px,2fr) minmax(70px,.7fr) repeat(3,minmax(80px,1fr)) 132px}
+.template-compact .quote-head{padding:6px 10px}
+.template-compact .selected-channels section{min-height:44px;padding:6px 10px}
+.template-compact .row-actions{justify-content:flex-end}
+.template-compact .row-actions button{white-space:nowrap}
+@media(max-width:900px) and (min-width:681px){.template-compact .quote-head,.template-compact .selected-channels section{grid-template-columns:minmax(150px,1.7fr) 60px repeat(3,minmax(55px,1fr)) 80px}.template-compact .row-actions{flex-direction:column;align-items:stretch}}
+@media(max-width:680px){.template-compact .head-actions{justify-content:flex-end}.template-compact .selected-channels section{grid-template-columns:repeat(4,minmax(0,1fr))}.template-compact .country-card>header{flex-wrap:wrap}.template-compact .country-actions{margin-left:auto}}
 </style>

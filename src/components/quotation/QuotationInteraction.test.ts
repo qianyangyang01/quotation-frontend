@@ -349,7 +349,15 @@ it.each(['common', 'specified', 'template'].flatMap(mode => ['件', '套'].map(u
   expect(document.body.textContent).not.toContain('不应显示的旧原因')
   state.contextKey = 'v2'; state.customQuantity = 8; await nextTick(); await nextTick()
   expect(document.body.textContent).not.toContain('超过上限3kg')
-  expect(document.body.textContent).toContain('8'+unit+'该重量段暂无运价')
+  if (mode === 'template') {
+    expect(document.querySelector('.head-actions input')).toBeNull()
+    expect(document.querySelector('.quote-head .custom-quote-head')).toBeNull()
+    expect(document.querySelector('.selected-channels .custom-price')).toBeNull()
+    expect(document.body.textContent).not.toContain('8'+unit+'该重量段暂无运价')
+  } else {
+    expect(document.body.textContent).toContain('8'+unit+'该重量段暂无运价')
+  }
+  expect(changed.mock.lastCall?.[0][0].quantityMessages['8']).toBe('8'+unit+'该重量段暂无运价')
   expect(document.body.textContent).not.toContain('5'+unit+'该重量段暂无运价')
   expect(changed.mock.lastCall?.[0][0].quote3).toBe(35)
 })
@@ -397,7 +405,7 @@ it.each(['common','specified','template'])('preserves selected %s rows through l
     expect(saved.channelKey).toBe('1')
     if(status==='ready') {expect(saved.quote1).toBe(10);expect(document.body.textContent).not.toContain('超过上限')}
     else {expect(saved.quote1).toBeNull();expect(saved.quantityMessages['8']).toBe(state.unavailableReason({},8))}
-    if(status==='overweight') expect(document.body.textContent).toContain('8套含包材重量8.000kg')
+    if(status==='overweight') expect(document.body.textContent).toContain(mode === 'template' ? '3套含包材重量3.000kg' : '8套含包材重量8.000kg')
     if(status==='loading'||status==='error') expect(document.body.textContent).not.toContain('超过上限')
   }
 })
