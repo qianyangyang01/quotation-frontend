@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { financeReviewLabel, type QuotationRecord, type QuotationReviewState, type ReviewAction } from '@/data/quotationRecords'
 import QuotationReviewComments from './QuotationReviewComments.vue'
 const props=defineProps<{ record:QuotationRecord; state:QuotationReviewState; account:string; canReview:boolean; admin:boolean; busy:boolean; compact?:boolean }>()
-const emit=defineEmits<{ action:[value:ReviewAction]; open:[]; reload:[]; commentSaved:[record:QuotationRecord] }>()
+const emit=defineEmits<{ action:[value:ReviewAction]; open:[]; reload:[]; commentSaved:[record:QuotationRecord]; viewed:[version:number] }>()
 const note=ref('')
 watch(()=>[props.record.id,props.state.financeReviewStatus,props.state.financeReviewClaimedAccount],()=>{note.value=''})
 const active=computed(()=>props.state.financeReviewStatus==='reviewing')
@@ -18,7 +18,7 @@ const time=(value?:string)=>value?new Date(value).toLocaleString('zh-CN',{timeZo
     <strong class="finance-review" :class="state.financeReviewStatus" role="status">{{ active ? `${state.financeReviewClaimedBy || '其他财务'}审核中` : financeReviewLabel(state.financeReviewStatus) }}</strong>
     <small v-if="active">开始于 {{ time(state.financeReviewStartedAt) }}</small>
     <small v-else-if="state.financeReviewedBy">{{ state.financeReviewedBy }} · {{ time(state.financeReviewedAt) }}</small>
-    <QuotationReviewComments :record="record" :state="state" :account="account" :can-review="canReview && !compact" :busy="busy" @saved="emit('commentSaved', $event)">
+    <QuotationReviewComments :record="record" :state="state" :account="account" :can-review="canReview && !compact" :busy="busy" @saved="emit('commentSaved', $event)" @viewed="emit('viewed',$event)">
       <template v-if="compact && canReview" #default>
         <button v-if="!active" type="button" :disabled="busy" @click="emit('action',{action:'claim'})">{{ state.financeReviewStatus==='pending' ? '开始审核' : '重新审核' }}</button>
         <button v-else type="button" :disabled="busy" @click="emit('open')">{{ own?'继续审核':'查看详情' }}</button>

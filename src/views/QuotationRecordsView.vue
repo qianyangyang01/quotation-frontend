@@ -25,6 +25,7 @@ import { representativePriceDifference } from '@/data/customerQuotePrices'
 import CustomerPriceComparison from '@/components/quotation/CustomerPriceComparison.vue'
 import CustomerPriceRevision from '@/components/quotation/CustomerPriceRevision.vue'
 import { currentAuthUser, hasPermission } from '@/data/authStore'
+import { reviewNotifications as inbox, unreadReview, acknowledgeReview, openReviewInbox, refreshReviewNotifications } from '@/data/reviewNotifications'
 
 import { loadRecordPage, loadFilteredRecords, loadRecord, recentRecordDates } from '@/data/quotationRecordQuery'
 import { quotationDetailsCsv } from '@/data/quotationAnalytics'
@@ -33,6 +34,9 @@ const props = defineProps<{ scope: 'mine' | 'company' }>()
 const route = useRoute()
 const router = useRouter()
 const records = ref<QuotationRecord[]>([])
+const openingReview = ref(false)
+let openGeneration = 0, linkGeneration = 0
+onUnmounted(() => { openGeneration++; linkGeneration++ })
 const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
 const lifecycle = ref<RecordLifecycle>('active')
 const checkedIds = ref<string[]>([])
@@ -310,9 +314,17 @@ onMounted(async () => {
   }, 3000)
   await Promise.allSettled([refresh(),loadPurchaseProducts().then(rows=>{purchaseProducts.value=rows})])
 })
-watch(()=>[route.query.record,props.scope],async()=>{
-  const id=route.query.record;if(props.scope!=='company' || typeof id!=='string')return
-  try{const record=await loadRecord(id);if(props.scope==='company' && route.query.record===id && record)open(record)}catch(error){toast(error instanceof Error?error.message:'报价记录加载失败')}
+watch(()=>[route.query.record,route.query.reviewEvent,route.query.reviewOpen,props.scope,currentAuthUser.value.account],async()=>{
+  const request=++linkGeneration
+  const id=route.query.record;if(typeof id!=='string')return
+  const account=currentAuthUser.value.account
+  try {
+    const record=await loadRecord(id)
+    if(request!==linkGeneration || account!==currentAuthUser.value.account || route.query.record!==id)return
+    if(!record) { toast('报价记录不存在或无权查看');return }
+    if(props.scope==='mine' && record.salespersonAccount!==account) { toast('只能查看本人的报价消息');return }
+    void open(record,true)
+  } catch(error){toast(error instanceof Error?error.message:'报价记录加载失败')}
 },{immediate:true})
 function fillForm(row: QuotationRecord) {
   form.status = row.status === 'lost' ? 'lost' : 'won'
@@ -336,14 +348,32 @@ function availableDealOptions(line: DealLineForm) {
   const used = new Set(form.dealLines.filter(item => item !== line).map(item => item.optionId))
   return recordOptions(selected.value).filter(option => option.available !== false && (option.id === line.optionId || !used.has(option.id)))
 }
-function open(row: QuotationRecord) {
+async function open(row: QuotationRecord, fresh = false) {
   if (reviewSync.isMissing(row.id) || reviewSync.stateFor(row).lifecycleState === 'withdrawn') return
+  const current=++openGeneration, entry=unreadReview(row.id), account=currentAuthUser.value.account
+  if(entry && !fresh) {
+    openingReview.value=true
+    try {
+      const loaded=await loadRecord(row.id)
+      if(current!==openGeneration || currentAuthUser.value.account!==account)return
+      if(!loaded || (loaded.lifecycleState || 'active')!=='active') { toast('该报价状态已变化，请刷新后查看');return }
+      row=loaded
+    } catch { if(current===openGeneration)toast('最新审核结果加载失败，消息仍保留未读，请重新查看');return }
+    finally { if(current===openGeneration)openingReview.value=false }
+  }
   selected.value = row
+  reviewSync.accept(row)
   detailTab.value = 'overview'
   editing.value = false
   fillForm(row)
+  await nextTick()
+  if(entry && current===openGeneration && selected.value?.id===row.id && !editing.value && currentAuthUser.value.account===account && document.visibilityState!=='hidden') await acknowledgeReview(entry,row._reviewVersion??0)
 }
-function closeDrawer() { editing.value = false; selected.value = null }
+function reviewViewed(row: QuotationRecord, version: number) {
+  const entry=unreadReview(row.id)
+  if(entry)void acknowledgeReview(entry,version)
+}
+function closeDrawer() { openGeneration++; linkGeneration++; openingReview.value=false; editing.value = false; selected.value = null }
 function cancelEdit() {
   if (!selected.value) return
   fillForm(selected.value)
@@ -387,10 +417,12 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
       </nav>
       <nav class="review-groups" aria-label="审核分类">
-        <button v-for="group in reviewGroups" :key="group.value" type="button" :class="{ active: filterReviewStatus === group.value }" :aria-pressed="filterReviewStatus === group.value" :disabled="lifecycleBusy" @click="filterReviewStatus = group.value">{{ group.label }}</button>
+        <button v-for="group in reviewGroups" :key="group.value" type="button" :class="{ active: filterReviewStatus === group.value }" :aria-pressed="filterReviewStatus === group.value" :disabled="lifecycleBusy" @click="filterReviewStatus = group.value">{{ group.label }}<b v-if="isMine && inbox.counts[group.value]" class="review-unread-count" :aria-label="`${inbox.counts[group.value]}条未读`">{{ inbox.counts[group.value] }}</b></button>
         <label v-if="canReview&&filterReviewStatus==='reviewing'" class="review-mine"><input v-model="reviewMine" type="checkbox">只看我的</label>
         <small>按审核结果自动分类</small>
       </nav>
+      <section v-if="isMine && inbox.total" class="review-unread-banner" aria-label="未读审核结果"><span>你有 <b>{{ inbox.total }}</b> 条审核消息未查看</span><button type="button" @click="openReviewInbox">查看未读</button></section>
+      <p v-if="isMine && inbox.error" class="review-notification-error" role="alert">{{ inbox.error }} <button @click="refreshReviewNotifications()">重试</button></p>
       <section class="stats review-summary" aria-label="当前筛选统计"><span>{{ reviewGroups.find(group => group.value === filterReviewStatus)?.label }} · 共 <b>{{ summary.total }}</b> 条报价</span><span>其中已成交 <b>{{ won }}</b> 条</span><small>当前筛选范围</small></section>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>
@@ -410,6 +442,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <template v-else-if="!loadError && !dateError"><span aria-hidden="true">✓</span>当前筛选共 {{ total }} 条报价记录</template>
       </div>
       <p v-if="reviewSync.error.value" role="alert">{{ reviewSync.error.value }}</p>
+      <p v-if="openingReview" role="status">正在打开最新审核结果…</p>
       <section v-if="canManageLifecycle" class="lifecycle-toolbar" aria-label="报价记录批量操作">
         <label><input type="checkbox" aria-label="全选本页可操作记录" :checked="allPageChecked" :indeterminate="checkedIds.length>0 && !allPageChecked" :disabled="loading || lifecycleBusy || !selectableRows.length" @change="togglePage">全选本页</label><span>已选 {{ checkedIds.length }} 条</span>
         <div><button v-if="lifecycle==='active'" :disabled="!checkedIds.length || loading || lifecycleBusy" @click="beginLifecycle('archive')">批量归档</button><button v-if="lifecycle!=='trashed'" class="trash-button" :disabled="!checkedIds.length || loading || lifecycleBusy" @click="beginLifecycle('trash')">移入回收站</button><button v-if="lifecycle!=='active'" :disabled="!checkedIds.length || loading || lifecycleBusy" @click="beginLifecycle('restore')">恢复所选记录</button></div>
@@ -454,7 +487,8 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
           <button class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
-            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" />
+            <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>
+            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)" />
             <div class="record-action-buttons">
               <small v-if="row.status !== 'pending'" class="deal-result" :class="row.status">成交结果：{{ quotationDealLabel(row.status) }}</small>
               <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
@@ -488,7 +522,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <span v-if="reviewSync.stateFor(selected).financeReviewStatus==='reviewing' && reviewSync.stateFor(selected).financeReviewStartedAt"> · 开始于 {{ dateTime(reviewSync.stateFor(selected).financeReviewStartedAt) }}</span>
             <span v-else-if="reviewSync.stateFor(selected).financeReviewedAt"> · 审核于 {{ dateTime(reviewSync.stateFor(selected).financeReviewedAt) }}</span>
           </div>
-          <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" /></div>
+          <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @viewed="reviewViewed(selected,$event)" /></div>
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
             <div class="overview-metrics"><article><small>报价国家</small><b>{{ recordCountries(selected).length || 1 }}</b><span>个国家</span></article><article><small>报价渠道</small><b>{{ recordOptions(selected).length || 1 }}</b><span>条渠道</span></article><article><small>1{{ selected.quoteMode==='bundle'?'套':'件' }}报价区间</small><b>{{ hasMultipleOptions(selected) ? quote1UsdRange(selected) : usd(selected.systemQuoteUsd) }}</b><span>{{ hasMultipleOptions(selected) ? quote1CnyRange(selected) : cny(selected.systemQuoteCny) }}</span></article></div>
@@ -532,6 +566,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
+.review-groups>button{position:relative}.review-unread-count{display:inline-grid;place-items:center;min-width:18px;height:18px;margin-left:6px;border-radius:10px;padding:0 3px;background:#ff8b00;color:#fff;font-size:11px}.review-unread-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;margin:14px 0;border:1px solid #f8ddb1;border-radius:9px;background:#fffbf2;color:#a65b00;font-size:13px}.review-unread-banner button{border:1px solid #e5a53f;border-radius:6px;padding:8px 14px;background:#fff;color:#a65b00;cursor:pointer}.record-row-actions .review-unread-link{align-self:flex-start;border:0;background:#fff6e6;color:#b66200;border-radius:5px;padding:5px 8px;font-size:12px;cursor:pointer}.review-notification-error{color:#b63830;font-size:12px}
 .detail-review-comments{margin:0 24px 12px}
 .review-groups{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0;padding:12px;background:#fff;border:1px solid #dfe5eb;border-radius:10px}
 .review-groups button{min-height:42px;padding:9px 24px;border:1px solid transparent;border-radius:7px;background:#f3f6f8;color:#536374;font:inherit;font-weight:600;cursor:pointer}
