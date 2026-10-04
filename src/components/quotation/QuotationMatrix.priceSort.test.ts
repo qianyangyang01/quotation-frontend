@@ -85,3 +85,15 @@ it('reorders after recalculation while leaving the original saved row intact', a
   expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ channelKey: 'saved', quote1: null })])
   expect(state.presetSelection[0]?.quote1).toBe(99)
 })
+
+it('rejects a checked channel that loses every price during recalculation without removing the saved row', async () => {
+  const { state, changed } = await setup([row('渠道A', 10), row('渠道B', 20)])
+  button('价格从低到高').click(); await tick()
+  document.querySelector<HTMLInputElement>('.picker-list input')!.click(); await tick()
+  state.quoteRowsForCountry = () => [row('渠道A', null, { quote2: null, quote3: null, quoteCustom: null }), row('渠道B', 20)]
+  state.contextKey = 'unavailable'; await tick()
+  button('批量添加渠道').click(); await tick()
+  expect(changed.mock.lastCall?.[0].map((item: QuotationMatrixRow) => item.channelKey)).toEqual(['saved'])
+  expect(document.body.textContent).toContain('所选渠道已失效')
+  expect(document.querySelector('.channel-dialog')).toBeNull()
+})

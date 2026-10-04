@@ -165,6 +165,40 @@ describe('published logistics version cache', () => {
     expect(logistics.logisticsRules).toEqual([])
   })
 
+  it('does not cache incompatible country slices after a rejected merge, so retry can recover', async () => {
+    const repository = await import('./publishedLogisticsRepository')
+    const logistics = await import('./logistics')
+    const us = { ...rule, logisticsVersionId: 'v1', logisticsChannelId: 'c1' }
+    const gb = { ...us, prices: [{ areaName: '英国', countryCode: 'GB' }] }
+    const options = { manifestResult: { manifest: manifest('r1'), verified: true } }
+    conditionalGet.mockResolvedValueOnce({ status: 200, data: { revision: 'r1', rules: [us] } })
+    await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'] }, options)
+    conditionalGet.mockResolvedValueOnce({ status: 200, data: { revision: 'r1', rules: [{ ...gb, logisticsVersionId: 'wrong' }] } })
+    await expect(repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国', '英国'] }, options)).rejects.toThrow('渠道版本已变化')
+    expect(logistics.logisticsRules).toEqual([us])
+    conditionalGet.mockResolvedValueOnce({ status: 200, data: { revision: 'r1', rules: [gb] } })
+    const retry = await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国', '英国'] }, options)
+    expect(retry.rules[0]?.prices).toHaveLength(2)
+    expect(conditionalGet).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries failed overlapping loads without dropping already loaded prices or mixing channel filters', async () => {
+    const repository = await import('./publishedLogisticsRepository')
+    const logistics = await import('./logistics')
+    const options = { manifestResult: { manifest: manifest('r1'), verified: true } }
+    conditionalGet.mockResolvedValueOnce({ status: 200, data: { revision: 'r1', rules: [rule] } })
+    await repository.loadPublishedLogisticsRules({ attribute: '普货', countries: ['美国'], channelCodes: ['YT'] }, options)
+    conditionalGet.mockRejectedValueOnce(new Error('offline'))
+    const query = { attribute: '普货', countries: ['美国', '英国'], channelCodes: ['YT'] }
+    await expect(repository.loadPublishedLogisticsRules(query, options)).rejects.toThrow('offline')
+    expect(logistics.logisticsRules).toEqual([rule])
+    conditionalGet.mockResolvedValue({ status: 200, data: { revision: 'r1', rules: [] } })
+    expect((await repository.loadPublishedLogisticsRules(query, options)).rules).toEqual([rule])
+    await repository.loadPublishedLogisticsRules({ ...query, channelCodes: ['OTHER'] }, options)
+    expect(new URL(`https://test.local${conditionalGet.mock.lastCall![0]}`).searchParams.getAll('country')).toHaveLength(2)
+    expect(conditionalGet).toHaveBeenCalledTimes(4)
+  })
+
   it('loads the finance channel catalog through one lightweight request', async () => {
     const countries = Array.from({ length: 140 }, (_, index) => ({ code: `C${index}`, name: `国家${index}` }))
     conditionalGet.mockImplementation((path: string) => {

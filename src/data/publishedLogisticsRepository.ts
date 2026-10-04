@@ -29,7 +29,7 @@ export function buildQuoteLogisticsCountryQuery(
 export const logisticsRebuilding = ref(false)
 const DB_NAME = 'milano-quotation-cache'
 const DB_VERSION = 3
-const CACHE_SCHEMA = 'published-logistics-v5-rounding'
+const CACHE_SCHEMA = 'published-logistics-v6-validated-slices'
 const MANIFEST_STORE = 'logisticsManifest'
 const RULE_STORE = 'publishedRuleQueries'
 const CACHE_EVENT = 'milano:published-logistics-cache'
@@ -276,11 +276,16 @@ export async function loadPublishedLogisticsRules(query: RuleQuery, options: {
         const slice: StoredRules = { key: countryKey, revision: manifest.revision,
           rules: countrySlice(response.data.rules, country), storedAt: Date.now() }
         slices.set(country, slice)
-        rulesMemory.set(countryKey, slice)
-        void writeStore(RULE_STORE, slice)
       }
       const rules = missing.length === countries.length ? response.data.rules
         : joinCountrySlices(countries.map(country => slices.get(country)!.rules))
+      // Validate the complete result before persisting any new country. A failed
+      // merge must not poison subsequent retries with incompatible cached rows.
+      for (const country of missing) {
+        const slice = slices.get(country)!
+        rulesMemory.set(slice.key, slice)
+        void writeStore(RULE_STORE, slice)
+      }
       const value: StoredRules = { key, revision: response.data.revision, rules, storedAt: Date.now() }
       rulesMemory.set(key, value)
       void writeStore(RULE_STORE, value)

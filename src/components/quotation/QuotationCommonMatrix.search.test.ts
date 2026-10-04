@@ -47,6 +47,43 @@ it('explains missing product data instead of reporting a network failure', async
   expect(document.body.textContent).not.toContain('渠道加载失败')
 })
 
+it('loads an initially ready visible country and recovers when a source error clears', async () => {
+  const ensureCountries = vi.fn().mockResolvedValue(true)
+  const { state } = mount({ countries: countries.map(c => ({ ...c, channelsLoaded: false })),
+    ensureCountries, autoLoadCountry: true, sourceError: '' })
+  await tick()
+  expect(ensureCountries).toHaveBeenCalledExactlyOnceWith(['美国'])
+  Object.assign(state, { sourceError: '离线' }); await tick()
+  Object.assign(state, { sourceError: '' }); await tick()
+  expect(ensureCountries).toHaveBeenCalledTimes(2)
+})
+
+it('discards a slow country failure across a new product query and loads the visible country again', async () => {
+  let finish!: (ok: boolean) => void
+  const ensureCountries = vi.fn().mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve }))
+    .mockResolvedValue(true)
+  const { state } = mount({ countries: countries.map(c => ({ ...c, channelsLoaded: false })),
+    ensureCountries, autoLoadCountry: false, sourcePending: false })
+  button('美国').click(); await tick()
+  Object.assign(state, { sourcePending: true, autoLoadCountry: true }); await tick()
+  Object.assign(state, { sourcePending: false }); await tick()
+  expect(ensureCountries).toHaveBeenCalledTimes(2)
+  finish(false); await tick()
+  expect(document.body.textContent).not.toContain('渠道加载失败')
+  expect(document.body.textContent).not.toContain('正在加载 美国')
+})
+
+it('does not automatically loop after a failed load and allows an explicit retry', async () => {
+  const ensureCountries = vi.fn().mockRejectedValueOnce(new Error('网络中断')).mockResolvedValue(true)
+  mount({ countries: countries.map(c => ({ ...c, channelsLoaded: false })), ensureCountries, autoLoadCountry: true })
+  await tick(); await tick()
+  expect(ensureCountries).toHaveBeenCalledTimes(1)
+  expect(document.body.textContent).toContain('网络中断')
+  button('重新加载').click(); await tick()
+  expect(ensureCountries).toHaveBeenCalledTimes(2)
+  expect(document.body.textContent).not.toContain('网络中断')
+})
+
 it('removes the old country error when a subsequent product query verifies that country', async () => {
   const { state } = mount({ countries: countries.map(c => ({ ...c, channelsLoaded: false })), ensureCountries: vi.fn().mockResolvedValue(false) })
   button('美国').click(); await tick()
