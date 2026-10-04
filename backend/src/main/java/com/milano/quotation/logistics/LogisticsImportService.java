@@ -347,7 +347,7 @@ public class LogisticsImportService {
             if(prior!=null&&(prior.path("etaMinDays").asInt()!=row.path("etaMinDays").asInt()||prior.path("etaMaxDays").asInt()!=row.path("etaMaxDays").asInt()))conflict.add(key);
         }
         for(var item:incoming.path("rows")) {
-            var row=(ObjectNode)item;if(row.path("etaMinDays").asInt()>0||row.path("etaMaxDays").asInt()>0)continue;
+            var row=(ObjectNode)item;if(row.path("etaMinDays").asInt()>0||row.path("etaMaxDays").asInt()>0||row.path("sourceEtaStatus").asText().equals("invalid"))continue;
             var key=LogisticsReadiness.routeKey(row);var prior=manual.get(key);if(prior==null||conflict.contains(key))continue;
             row.put("etaMinDays",prior.path("etaMinDays").asInt()).put("etaMaxDays",prior.path("etaMaxDays").asInt())
                 .put("etaSource","manual-review-inherited").put("sourceEtaVersionId",previous.path("id").asText());

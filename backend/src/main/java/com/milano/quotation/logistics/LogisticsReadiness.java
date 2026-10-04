@@ -75,11 +75,11 @@ final class LogisticsReadiness {
             for(var row:entry.getValue()) {
                 int min=row.path("etaMinDays").asInt(),max=row.path("etaMaxDays").asInt();
                 if(min>0&&max>=min)values.add(new Eta(min,max));
-                else if(min>0||max>0)partial.add(row);
+                else if(min>0||max>0||row.path("sourceEtaStatus").asText().equals("invalid"))partial.add(row);
             }
             if(!partial.isEmpty()) {
                 for(var row:entry.getValue()){warn(row,"时效范围不完整，不影响报价");row.put("etaStatus","partial");}
-                for(var row:partial)issue(issues,row,"ETA_PARTIAL","时效","时效最早和最晚天数必须同时填写");
+                for(var row:partial)issue(issues,row,"ETA_PARTIAL","时效",row.path("sourceEtaStatus").asText().equals("invalid")?"原表时效单位或范围不明确，请核对原文":"时效最早和最晚天数必须同时填写");
                 missing.add(routeView(entry.getKey(),entry.getValue().getFirst(),"partial"));
             } else if(values.size()>1) {
                 for(var row:entry.getValue()){warn(row,"同一路线存在冲突时效，不影响报价");row.put("etaStatus","conflict");}

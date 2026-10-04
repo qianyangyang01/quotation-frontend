@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="yanwen-october-layout-2026.10.04-v1";
+    public static final String VERSION="shared-source-layout-2026.10.04-v2";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -31,6 +31,9 @@ public class LogisticsSourceParser {
     private static final Pattern DATE_LABEL=Pattern.compile("(?i)^(?:生效时间|生效日期|生效日|effective\\s*(?:date|from))\\s*[:：]?$");
     private static final Pattern RANGE=Pattern.compile("^([0-9.]+)(<=|<)(?:W|重量)(<=|<)([0-9.]+)$",Pattern.CASE_INSENSITIVE);
     private static final Pattern ETA_RANGE=Pattern.compile("(?<![0-9])([0-9]{1,3})\\s*[-—–~～至]\\s*([0-9]{1,3})\\s*(?:个)?(?:工作日|天)(?![0-9])");
+    private static final Pattern ETA_CELL=Pattern.compile("(?i)^(?:(?:参考|全段|全程|预计|运输|派送|签收)?时效\\s*[:：]?\\s*)?"
+            +"([0-9]{1,3})(?:\\s*(?:-{1,2}|[—–~～至])\\s*([0-9]{1,3}))?\\s*"
+            +"((?:个)?(?:工作日|自然日|天|日)|(?:business\\s+|working\\s+)?days?)?$");
     private static final List<String> HEADER_FIELDS=List.of("country","countryCode","continent","channel","productCode","minimumWeight","billingStep","weightFrom","weightTo","weightRange","settlementRate","pricePerKg","firstWeightPrice","nextWeightPrice","registrationFee","linehaulPerKg","originRegion","zone","eta","notes");
     private static final Map<String,String> COUNTRIES=countries();
     private final ObjectMapper mapper;
@@ -315,8 +318,12 @@ public class LogisticsSourceParser {
         if(header<0||code<0||country<0) {
             issue(target,0,"表头","顺友必须包含国家代码、中文、单价(元/KG)、处理费(元/件)和限重(KG)","error");return true;
         }
-        var previous=new HashMap<String,BigDecimal>();var notes=new LinkedHashSet<String>();
+        var previous=new HashMap<String,BigDecimal>();var notes=new LinkedHashSet<String>();boolean reference=false;
         for(int r=header+1;r<=source.lastContentRow;r++) {
+            if(referenceSection(source,r))reference=true;
+            if(reference&&source.text(r,code).equals("代码")&&source.text(r,rate).equals(source.text(header,rate))
+                    &&source.text(r,fee).equals(source.text(header,fee))&&source.text(r,limit).equals(source.text(header,limit)))reference=false;
+            if(reference){source.referenceRows.add(r);notes.add(String.join(" | ",new LinkedHashSet<>(source.resolvedTexts(r))));continue;}
             String countryCode=source.text(r,code).trim().toUpperCase(Locale.ROOT),label=source.text(r,country);
             if(countryCode.equals("代码")||source.rowEmpty(r))continue;
             boolean priceCandidate=countryCode.matches("[A-Z]{2}");
@@ -609,7 +616,9 @@ public class LogisticsSourceParser {
     private boolean parseQiaojiePiece(Source source,String file,Map<String,ObjectNode> channels) {
         var product=qiaojieProduct(source);Columns columns=null;boolean recognized=false;
         var prior=new HashMap<String,BigDecimal>();var minima=new HashMap<String,BigDecimal>();
+        boolean reference=false;
         for(int r=0;r<=source.lastContentRow;r++) {
+            if(referenceSection(source,r)){columns=null;reference=true;source.referenceRows.add(r);continue;}
             var candidate=new Columns();candidate.headerRow=r;candidate.feeHeaderRow=r;
             for(int col=0;col<Math.min(source.width(r),80);col++) {
                 var text=clean(source.text(r,col));
@@ -626,9 +635,9 @@ public class LogisticsSourceParser {
                 else if(aliases.matches(QiaojieSourceRules.PROVIDER,"notes",text))candidate.notes.add(col);
             }
             if(candidate.country>=0&&candidate.weight>=0&&candidate.rate>=0&&candidate.minimum>=0&&candidate.fee>=0) {
-                columns=candidate;recognized=true;continue;
+                columns=candidate;recognized=true;reference=false;continue;
             }
-            if(columns==null)continue;
+            if(columns==null){if(reference)source.referenceRows.add(r);continue;}
             var point=source.text(r,columns.weight);var amount=source.text(r,columns.rate);
             var code=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(source.text(r,columns.country));
             // Unit lines and footer prose are not price rows; numeric/invalid cells inside a country block are.
@@ -654,7 +663,7 @@ public class LogisticsSourceParser {
                         .put("sourceMinimumWeightCell",source.address(r,columns.minimum)).put("sourceMinimumWeightText","最低计费重(KG)="+minimum);
             }catch(IllegalArgumentException invalid){issue(target,r+1,"重量段/最低计费重","整票渠道须为0.5kg起重及连续0.5kg档位","error");continue;}
             numeric(row,"intervalPrice",source,r,columns.rate,target,false);numeric(row,"registrationFee",source,r,columns.fee,target,false);
-            if(columns.eta>=0){var values=numbers(source.text(r,columns.eta));if(values.size()>=2)row.put("etaMinDays",values.get(0)).put("etaMaxDays",values.get(1));}
+            readRowEta(row,target,source,r,columns);
             var notes=new LinkedHashSet<String>();for(int col:columns.notes)if(!source.text(r,col).isBlank())notes.add(source.text(r,col));
             row.put("notes",String.join("\n",notes));add(target,row,source,r,file);
         }
@@ -718,18 +727,17 @@ public class LogisticsSourceParser {
         boolean zhengzhou=provider.equals("燕文")&&zhengzhouEpacket(source);
         if(zhengzhou)section="中邮郑州线下E邮宝";
         var yanwenEta=provider.equals("燕文")?yanwenEtaExtractor(source):null;
-        int auxiliary=-1;boolean example=false,reference=false,yanwenNotes=false;
+        int auxiliary=-1;boolean example=false,reference=false,sourceNotes=false;
         var allNotes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
             var rowText=String.join("|",source.rowTexts(r).stream().filter(value->!value.isBlank()).toList());
             if(rowText.isBlank()&&source.width(r)>0)rowText=String.join("|",source.resolvedTexts(r));
             if(rowText.isBlank())continue;
-            if(provider.equals("燕文")&&source.rowTexts(r).stream().anyMatch(t->clean(t).matches("价格使用说明[:：]?|国家维度具体要求[:：]?"))) {
-                columns=null;yanwenNotes=true;continue;
+            if(referenceSection(source,r)) {
+                columns=null;sourceNotes=true;source.referenceRows.add(r);continue;
             }
             if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
             if(reference){if(detect(source,r,provider)!=null)reference=false;else{source.referenceRows.add(r);continue;}}
-            if(rowText.matches("(?s).*(注意事项说明如下|客户须知).*")||rowText.matches("^注意事项[:：]?$")){columns=null;continue;}
             if(rowText.contains("试算重量")&&rowText.contains("试算运费")){example=true;columns=null;continue;}
             boolean auxiliaryTitle=source.rowTexts(r).stream().anyMatch(t->t.length()<80&&(t.contains("重派费用表")||t.contains("重派收费")));
             if((auxiliaryTitle||(rowText.length()<160&&rowText.contains("重量")&&rowText.matches("(?s).*(重派费|附加费).*")))&&detect(source,r,provider)==null) {
@@ -745,13 +753,13 @@ public class LogisticsSourceParser {
                     if(header.rate>=0&&header.country>=0&&header.firstPrice<0&&header.nextPrice<0)kilogramColumns=header;
                     else if(kilogramColumns!=null&&(header.firstPrice>=0||header.nextPrice>=0))firstNextCountry=countryCode(source.text(r,kilogramColumns.country));
                 }
-                columns=header;recognized=true;auxiliary=-1;example=false;yanwenNotes=false;continue;
+                columns=header;recognized=true;auxiliary=-1;example=false;sourceNotes=false;continue;
             }
             if(columns==null)for(var text:source.rowTexts(r))if(text.length()>20)allNotes.add(text);
             if(example){if(source.rowEmpty(r))example=false;else source.exampleRows.add(r);continue;}
             if(auxiliary>=0){source.auxiliaryRows.put(r,auxiliary);continue;}
             if(provider.equals("顺丰") && source.text(r,1).matches(".*[①②③④].*专线.*"))section=source.text(r,1).replaceAll("^[①②③④\\s]+","").trim();
-            if(columns==null) {if(yanwenNotes)source.referenceRows.add(r);continue;}
+            if(columns==null) {if(sourceNotes)source.referenceRows.add(r);continue;}
             if(jitongBattery&&kilogramColumns!=null&&!firstNextCountry.isBlank()) {
                 var destination=countryCode(source.text(r,kilogramColumns.country));
                 if(supportedCountryCode(destination)&&!destination.equals(firstNextCountry)) {columns=kilogramColumns;firstNextCountry="";}
@@ -897,19 +905,7 @@ public class LogisticsSourceParser {
             } else if(zhengzhou) {
                 issue(target,r+1,"干线费","郑州线下E邮宝缺少干线费每KG列，不能默认为零","error");
             }
-            if(columns.eta>=0) {
-                var rawEta=source.text(r,columns.eta);
-                if(provider.equals("燕文")&&!rawEta.isBlank()) {
-                    var eta=parseEtaCell(rawEta,source.address(r,columns.eta),source.text(columns.headerRow,columns.eta));
-                    if(eta==null)issue(target,r+1,"参考时效","燕文价格行时效必须是明确的起止天数："+rawEta,"error");
-                    else applyEta(row,eta,"row");
-                } else {
-                    var eta=numbers(rawEta);
-                    if(!eta.isEmpty())row.put("etaMinDays",eta.getFirst());if(eta.size()>1)row.put("etaMaxDays",eta.get(1));
-                    if(eta.size()==1&&rawEta.matches(".*(?:天|日).*"))row.put("etaMaxDays",eta.getFirst());
-                    if(row.path("etaMaxDays").asInt()>0)row.put("etaSource","source-row").put("sourceEtaCell",source.address(r,columns.eta)).put("sourceEtaText",rawEta);
-                }
-            }
+            readRowEta(row,target,source,r,columns);
             if(yanwenEta!=null)yanwenEta.apply(row,target,r+1,sourceContinent);
             var notes=new LinkedHashSet<String>();
             if(provider.equals("极通环球")){notes.add(columns.code>=0?source.text(r,columns.code):"");pending(row,"同表含多个下单产品及附加操作费，价格仅供管理，需人工确认适用产品");}
@@ -935,11 +931,7 @@ public class LogisticsSourceParser {
         for(var c:channels.values()) {
             c.put("sourceNotes",String.join("\n",allNotes));
             if(yunexpress!=null) {
-                var codePattern=Pattern.compile("产品代码[:：]\\s*([A-Z0-9]+)");var codes=new HashSet<String>();
-                for(int i=0;i<=Math.min(39,source.lastContentRow);i++) {
-                    if(detect(source,i,"云途")!=null)break;
-                    for(var text:source.rowTexts(i)){var match=codePattern.matcher(text);if(match.find())codes.add(match.group(1));}
-                }
+                var codes=titleProductCodes(source,"云途");
                 if(!codes.equals(Set.of(yunexpress.code())))issue(c,0,"产品代码","云途渠道标题与产品代码不一致或缺失，禁止混入其他渠道","error");
                 var stepPattern=Pattern.compile(yunexpress.large()?"所有国家[^\\n]*以1[Gg]为单位进位":"加拿大[^\\n]*以1[Gg]为单位进位");
                 var step=stepPattern.matcher(String.join("\n",allNotes));boolean hasStep=step.find();String evidence=hasStep?step.group():"";
@@ -983,7 +975,7 @@ public class LogisticsSourceParser {
             var target=selected(source,provider,name,"",header,channels,sheetFallback);
             if(target==null){for(int r=header+1;r<=source.lastContentRow;r++)source.parsedRows.add(r);continue;}
             for(int r=header+1;r<=source.lastContentRow;r++) {
-                if(source.text(r,0).contains("邮编分区")||source.text(r,0).equals("分区")){for(int i=r;i<=source.lastContentRow;i++)source.referenceRows.add(i);break;}
+                if(referenceSection(source,r)||source.text(r,0).contains("邮编分区")||source.text(r,0).equals("分区")){for(int i=r;i<=source.lastContentRow;i++)source.referenceRows.add(i);break;}
                 var text=source.text(r,0);if(!looksRange(text))continue;
                 var destination=sheetChannel.contains("加拿大")?"加拿大":sheetChannel.contains("澳大利亚")?"澳大利亚":"美国";
                 var row=mapper.createObjectNode().put("areaName",destination).put("zoneName",zone)
@@ -1170,7 +1162,7 @@ public class LogisticsSourceParser {
             candidates.computeIfAbsent(scope,ignored->new ArrayList<>()).add(eta);
         }
         for(var channel:channels.values())for(var item:channel.path("rows")) {
-            var row=(ObjectNode)item;if(row.path("etaMinDays").asInt()>0||row.path("etaMaxDays").asInt()>0)continue;
+            var row=(ObjectNode)item;if(row.path("etaMinDays").asInt()>0||row.path("etaMaxDays").asInt()>0||row.path("sourceEtaStatus").asText().equals("invalid"))continue;
             var references=candidates.getOrDefault(row.path("countryCode").asText(),candidates.getOrDefault("*",List.of()));
             if(references.isEmpty())continue;
             var first=references.getFirst();if(references.stream().anyMatch(e->e.min!=first.min||e.max!=first.max))continue;
@@ -1186,9 +1178,13 @@ public class LogisticsSourceParser {
         return false;
     }
     private String zhengzhouProductCode(Source source) {
+        var codes=titleProductCodes(source,"燕文");
+        return codes.size()==1?codes.iterator().next():"";
+    }
+    private Set<String> titleProductCodes(Source source,String provider) {
         var codes=new LinkedHashSet<String>();
         for(int r=0;r<=source.lastContentRow;r++) {
-            if(isPriceHeader(source,r))break;
+            if(detect(source,r,provider)!=null)break;
             for(int c=0;c<source.width(r);c++) {
                 var text=source.text(r,c).trim();
                 var inline=Pattern.compile("^产品(?:编号|代码|号)\\s*[:：]\\s*([A-Za-z0-9_-]+)(?:\\s.*)?$",Pattern.DOTALL).matcher(text);
@@ -1199,7 +1195,15 @@ public class LogisticsSourceParser {
                 }
             }
         }
-        return codes.size()==1?codes.iterator().next():"";
+        return codes;
+    }
+    private boolean referenceSection(Source source,int row) {
+        // Only a section heading in the first populated cell ends a table. A price-row
+        // remark containing these words must never hide that row or subsequent prices.
+        return source.rowTexts(row).stream().filter(t->!t.isBlank()).findFirst()
+                .map(LogisticsSourceParser::clean)
+                .map(t->t.matches("(?:价格使用说明|报价使用说明|国家维度具体要求|注意事项说明如下|客户须知|注意事项)[:：]?"))
+                .orElse(false);
     }
     private YanwenEtaExtractor yanwenEtaExtractor(Source source) {
         var index=new YanwenEtaExtractor();
@@ -1247,11 +1251,23 @@ public class LogisticsSourceParser {
         return found;
     }
     private EtaReference parseEtaCell(String text,String cell,String header) {
-        var parsed=parseEta(text,cell);
-        if(parsed!=null)return parsed;
-        if(!header.matches("(?s).*(工作日|天).*")||!text.trim().matches("[0-9]{1,3}\\s*[-—–~～至]\\s*[0-9]{1,3}"))return null;
-        var withUnit=parseEta(text+"天",cell);
-        return withUnit==null?null:new EtaReference(withUnit.min,withUnit.max,text,cell);
+        // Match the complete cell, never the first two numbers from a date, hours,
+        // alternative promises or tracking/upload time. Double hyphens occur in Wanbang.
+        var match=ETA_CELL.matcher(text.trim());
+        if(!match.matches())return null;
+        if(match.group(3)==null&&!header.matches("(?is).*(?:工作日|自然日|天|\\bday[s]?\\b).*"))return null;
+        int min=Integer.parseInt(match.group(1)),max=match.group(2)==null?min:Integer.parseInt(match.group(2));
+        return min>0&&max>=min?new EtaReference(min,max,text,cell):null;
+    }
+    private void readRowEta(ObjectNode row,ObjectNode target,Source source,int r,Columns columns) {
+        if(columns.eta<0)return;
+        var text=source.rawText(r,columns.eta);if(text.isBlank()||text.trim().equals("/"))return;
+        var cell=source.address(r,columns.eta);var eta=parseEtaCell(text,cell,source.text(columns.headerRow,columns.eta));
+        if(eta!=null)applyEta(row,eta,"row");
+        else {
+            row.put("sourceEtaStatus","invalid").put("sourceEtaCell",cell).put("sourceEtaText",text);
+            issue(target,r+1,"参考时效","时效单位或范围不明确，保留原文待核对："+text,"warning");
+        }
     }
     private static void applyEta(ObjectNode row,EtaReference eta,String scope) {
         row.put("etaMinDays",eta.min).put("etaMaxDays",eta.max).put("etaSource",scope.equals("row")?"source-row":"reference-"+scope)
@@ -1266,6 +1282,7 @@ public class LogisticsSourceParser {
             if(previous==null)values.put(key,value);else if(previous.min!=value.min||previous.max!=value.max){values.remove(key);conflicts.add(key);}
         }
         void apply(ObjectNode row,ObjectNode channel,int sourceRow,String sourceContinent) {
+            if(row.path("sourceEtaStatus").asText().equals("invalid"))return;
             int existingMin=row.path("etaMinDays").asInt(),existingMax=row.path("etaMaxDays").asInt();
             if(existingMin>0&&existingMax>=existingMin)return;
             if(existingMin>0||existingMax>0){issue(channel,sourceRow,"参考时效","燕文价格行时效不完整，禁止使用参考表覆盖","error");return;}
@@ -1624,6 +1641,7 @@ public class LogisticsSourceParser {
         String numberText(int r,int c){var cell=cell(r,c);if(parsingText(cell).isBlank())return "";return cell!=null&&cell.getCellType()==CellType.NUMERIC?Double.toString(cell.getNumericCellValue()):text(r,c);}
         String parsingText(Cell cell){if(cell==null)return "";return parsing.computeIfAbsent(cell,c->{var value=formatted.computeIfAbsent(c,formatter::formatCellValue).trim();boolean numeric=c.getCellType()==CellType.NUMERIC||(c.getCellType()==CellType.FORMULA&&c.getCachedFormulaResultType()==CellType.NUMERIC);return dateMetadata(value)||(numeric&&DateUtil.isCellDateFormatted(c))?"":value;});}
         String text(int r,int c){return parsingText(cell(r,c));}
+        String rawText(int r,int c){var cell=cell(r,c);return cell==null?"":formatted.computeIfAbsent(cell,formatter::formatCellValue).trim();}
         int width(int r){int width=sheet.getRow(r)==null?0:sheet.getRow(r).getLastCellNum();for(var range:merges.getOrDefault(r,List.of()))width=Math.max(width,range.getLastColumn()+1);return width;}
         String address(int r,int c){var cell=cell(r,c);return cell==null?new CellReference(r,c).formatAsString():cell.getAddress().formatAsString();}
         int mergeEndRow(int r,int c){for(var range:merges.getOrDefault(r,List.of()))if(range.isInRange(r,c))return range.getLastRow();return r;}

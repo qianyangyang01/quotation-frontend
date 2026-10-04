@@ -265,7 +265,7 @@ class LogisticsSourceLayoutRegressionTest {
         var root=Path.of(System.getProperty("logistics.corpusDir"));
         for(var entry:expected.entrySet()) {
             var path=root.resolve(entry.getKey());var originalBytes=Files.readAllBytes(path);var before=parser.parse(originalBytes,entry.getKey());
-            int count=0;for(var c:before.path("channels")){assertEquals(0,c.path("errors").asInt(),entry.getKey()+c.path("issues"));count+=c.path("rows").size();assertEquals(c.path("etaReady").asBoolean()&&c.path("blockingReasons").isEmpty(),c.path("quoteReady").asBoolean(),entry.getKey()+c.path("channelName"));}
+            int count=0;for(var c:before.path("channels")){assertEquals(0,c.path("errors").asInt(),entry.getKey()+c.path("issues"));count+=c.path("rows").size();assertEquals(c.path("pricingReady").asBoolean(),c.path("quoteReady").asBoolean(),entry.getKey()+c.path("channelName"));}
             assertEquals(entry.getValue(),count,entry.getKey());
             try(var book=WorkbookFactory.create(new java.io.ByteArrayInputStream(originalBytes))) {
                 for(var s:book)if(s.getLastRowNum()>0)s.shiftRows(0,s.getLastRowNum(),12);

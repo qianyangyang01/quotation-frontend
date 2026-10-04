@@ -10,7 +10,7 @@ common:
     exact: ["产品名称", "渠道名称", "渠道", "系统下单渠道"]
     contains: ["产品名称"]
   productCode:
-    exact: ["产品代码", "渠道代码", "产品ID"]
+    exact: ["产品代码", "产品编号", "产品号", "渠道代码", "产品ID"]
     contains: ["产品代码"]
   weightFrom:
     contains: ["重量段始", "起重", "最小重量"]
