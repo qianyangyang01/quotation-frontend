@@ -239,8 +239,9 @@ public class LogisticsWorkbookService {
         if(!row.path("originRegion").asText().isBlank()||row.path("sourceOriginRegion").asText().isBlank())return null;
         return identity(row,row.path("sourceOriginRegion").asText());
     }
-    private static String identity(JsonNode row) { return rangeIdentity(row)+"|"+row.path("weightFromKg").asText()+"|"+row.path("weightToKg").asText(); }
-    private static String identity(JsonNode row,String originRegion) { return rangeIdentity(row,originRegion)+"|"+row.path("weightFromKg").asText()+"|"+row.path("weightToKg").asText(); }
+    private static String identity(JsonNode row) { return rangeIdentity(row)+"|"+weightIdentity(row.path("weightFromKg"))+"|"+weightIdentity(row.path("weightToKg")); }
+    private static String identity(JsonNode row,String originRegion) { return rangeIdentity(row,originRegion)+"|"+weightIdentity(row.path("weightFromKg"))+"|"+weightIdentity(row.path("weightToKg")); }
+    private static String weightIdentity(JsonNode value) { return value.isNumber()?value.decimalValue().stripTrailingZeros().toPlainString():value.asText(); }
     private static String rangeIdentity(JsonNode row) {
         return rangeIdentity(row,row.path("originRegion").asText());
     }

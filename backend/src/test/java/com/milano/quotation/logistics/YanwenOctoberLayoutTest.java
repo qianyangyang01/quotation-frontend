@@ -14,6 +14,14 @@ class YanwenOctoberLayoutTest {
     final ObjectMapper mapper=new ObjectMapper();
     final LogisticsSourceParser parser=new LogisticsSourceParser(mapper,new LogisticsWorkbookService(mapper));
 
+    @Test void persistedIntegerAndParsedDecimalBoundsIdentifyTheSamePriceTier() {
+        var old=mapper.createObjectNode().put("countryCode","US").put("areaName","美国").put("weightFromKg",0).put("weightToKg",30).put("pricePerKg",100);
+        var next=old.deepCopy().put("weightFromKg",0.0).put("weightToKg",30.0).put("pricePerKg",110);
+        var diff=new LogisticsWorkbookService(mapper).compare(mapper.createArrayNode().add(next),mapper.createArrayNode().add(old));
+        assertEquals(0,diff.path("summary").path("added").asInt());assertEquals(0,diff.path("summary").path("removed").asInt());
+        assertEquals(1,diff.path("summary").path("price").asInt());assertEquals(0,diff.path("summary").path("range").asInt());
+    }
+
     byte[] fixture(String product,String etaHeader,String eta) throws Exception {
         try(var book=new XSSFWorkbook()) {
             var sheet=book.createSheet("燕文专线快递-普货");
@@ -119,6 +127,8 @@ class YanwenOctoberLayoutTest {
             c.put("basePublishedVersionId",published.path("id").asText()).put("sourceFileIndex",0);
             var comparison=new LogisticsWorkbookService(mapper).compare((tools.jackson.databind.node.ArrayNode)c.path("rows"),(tools.jackson.databind.node.ArrayNode)published.path("payload").path("rows"));
             c.set("summary",comparison.path("summary"));c.set("diffRows",comparison.path("diffRows"));
+            assertEquals(0,comparison.path("summary").path("added").asInt(),c.path("channelName").asText());
+            assertEquals(0,comparison.path("summary").path("removed").asInt(),c.path("channelName").asText());
             item.set("payload",c);
         }
         assertEquals(7,repairs.size());
