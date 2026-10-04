@@ -162,7 +162,8 @@ class FlywayPostgresIntegrationTest {
         seedBusinessMigrationRemoval();
         var finalMigrations = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load().migrate();
-        assertEquals(32, finalMigrations.migrationsExecuted);
+        assertEquals(33, finalMigrations.migrationsExecuted);
+        assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "56".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "54".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "53".equals(item.version)));
         assertEquals(true, finalMigrations.migrations.stream().anyMatch(item -> "52".equals(item.version)));
