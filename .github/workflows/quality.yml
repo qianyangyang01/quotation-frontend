@@ -29,6 +29,10 @@ jobs:
       - name: Install Chinese PDF font
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-wqy-zenhei
       - run: bash deploy/scripts/verify-isolation.sh
+      - name: Load verified MinIO integration-test image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/load-minio-image.sh
       - working-directory: backend
         run: mvn -B verify
       - name: Reject skipped Docker integration tests
