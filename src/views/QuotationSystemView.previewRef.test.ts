@@ -150,7 +150,7 @@ it.each([
     weightSnapshot: expect.objectContaining({items:mode==='single'
       ? [expect.objectContaining({sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14,weightSource:manual?'manual':'purchase',purchaseWeightKg:manual?.12:.14})]
       : [expect.objectContaining({sku:'SKU-A',quantityPerSet:2,baseWeightKg:.14,weightSource:'manual',purchaseWeightKg:.12}),expect.objectContaining({sku:'SKU-B',quantityPerSet:1,baseWeightKg:.05,weightSource:'purchase',purchaseWeightKg:.05})]}),
-    customerQuote:{rowOrder:['option:option-a'],sizeRules:'S–XXL',sizeRulesEnabled:true,averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
+    customerQuote:{photos:[],showPhotos:true,rowOrder:['option:option-a'],sizeRules:'S–XXL',sizeRulesEnabled:true,averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))
   const saved = normalizeQuotationRecord({ ...createQuotationRecord.mock.calls[0]![0], id: 'saved-tax', no: 'QT-TAX' })!
