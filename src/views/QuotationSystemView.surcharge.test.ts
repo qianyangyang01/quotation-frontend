@@ -84,7 +84,13 @@ describe('quotation view fee integration', () => {
     const surchargeColumn = table[0]!.indexOf('附加费（USD/单）')
     expect(table[1]![surchargeColumn]).toBe('0.00')
     expect(table[2]![surchargeColumn]).toBe('2.00')
-    expect(table[2]!.slice(-2)).toEqual(['99.00', '495.00'])
+    expect(table[0]).toHaveLength(15)
+    expect(table.every(row => row.length === table[0]!.length)).toBe(true)
+    expect(table[0]!.slice(-2)).toEqual(mode === 'bundle' ? ['3套（USD）', '3套（CNY）'] : ['3件（USD）', '3件（CNY）'])
+    expect(table[2]!.slice(-2)).toEqual(['36.00', '180.00'])
+    await run.copyQuoteRows([{ ...paid, quantityMessages: { '3': '三件运价提示', '10': '隐藏数量旧提示' } }])
+    expect(copied).toContain('三件运价提示')
+    expect(copied).not.toContain('隐藏数量旧提示')
     // Added sheet columns execute the same live quantity function, including per-order fees.
     const original = JSON.stringify(rows)
     const quantities = [1,2,3,4,5,6,7,8,9,10]
@@ -101,7 +107,7 @@ describe('quotation view fee integration', () => {
     expect(adjustedSheet.rows.find(row => row.key.includes('::PAY"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 10.25))
     expect(adjustedSheet.rows.find(row => row.key.includes('::FREE"'))!.prices).toEqual(quantities.map(quantity => 9 * quantity + 8.25))
     await run.copyQuoteRows(adjusted)
-    expect(copied.split('\r\n')[2]!.split('\t').slice(-2)).toEqual(['100.25', '501.25'])
+    expect(copied.split('\r\n')[2]!.split('\t').slice(-2)).toEqual(['37.25', '186.25'])
 
     // All modes and arbitrary sheet columns select by quoted pieces/sets, once per order.
     context.customerOperation.value.feesByQuantityUsd = { '1': .3, '2': .5, '3': .7, above3: .8 }
@@ -116,7 +122,7 @@ describe('quotation view fee integration', () => {
       expect(tierSheet.rows.find(row => row.key.includes('::PAY"'))!.prices).toEqual(quantities.map(q => applyCommissionThreshold(9*q+9+(q===1?.3:q===2?.5:q===3?.7:.8), threshold)))
       expect(run.excelQuoteRows(product)).toEqual(tierRows)
       await run.copyQuoteRows(tierRows)
-      expect(copied).toContain(paidTier.quoteCustom.toFixed(2))
+      expect(copied.split('\r\n')[2]!.split('\t').slice(-2)).toEqual([paidTier.quote3.toFixed(2), quoteCnyFromUsd(paidTier.quote3, 5).toFixed(2)])
     }
     context.customerOperation.value.feesByQuantityUsd = undefined
     context.commissionThreshold.value = '1'

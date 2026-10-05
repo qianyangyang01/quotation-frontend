@@ -1861,12 +1861,12 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
   }
   const unit = quoteMode.value === 'bundle' ? '套' : '件'
   const values = [
-    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', '附加费属性', '附加费（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（USD）`, `${Math.max(1, customQuoteQuantity.value || 1)}${unit}（CNY）`],
+    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', '附加费属性', '附加费（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`],
     ...rows.map(row => [
       row.country,
       row.quoteRegion || '全国统一',
       row.carrier,
-      row.transport + (row.availabilityMessage ? '（' + row.availabilityMessage + '）' : '') + (row.quantityMessages ? ' ' + Object.values(row.quantityMessages).join('；') : ''),
+      row.transport + (row.availabilityMessage ? '（' + row.availabilityMessage + '）' : '') + (row.quantityMessages ? ' ' + [1, 2, 3].map(quantity => row.quantityMessages?.[String(quantity)]).filter(Boolean).join('；') : ''),
       row.eta,
       row.taxFeeMode === 'no-tax' ? '无关税' : row.taxIncluded ? '免税' : row.taxFeeMode !== 'missing' ? '不免税' : '物流商税务属性待设置',
       row.taxFeeMode === 'fixed-order' ? row.countryFixedTaxUsd.toFixed(2) : '',
@@ -1878,8 +1878,6 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
       row.quote2 == null ? '' : quoteCnyFromUsd(row.quote2, exchange.value.usd).toFixed(2),
       row.quote3 == null ? '' : row.quote3.toFixed(2),
       row.quote3 == null ? '' : quoteCnyFromUsd(row.quote3, exchange.value.usd).toFixed(2),
-      row.quoteCustom == null ? '' : row.quoteCustom.toFixed(2),
-      row.quoteCustom == null ? '' : quoteCnyFromUsd(row.quoteCustom, exchange.value.usd).toFixed(2),
     ]),
   ]
   const excelText = values
@@ -2234,7 +2232,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
             :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
-            @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
+            @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
           />
         </div>
 
