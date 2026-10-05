@@ -145,7 +145,7 @@ async function copyData(mode: 'full' | 'quote' = 'full') {
             <option value="full">完整报价单（全部 {{ record.quoteOptions?.length }} 行）</option>
           </select>
         </label>
-        <fieldset :disabled="saving" style="border:0;padding:0;margin:0"><CustomerQuoteSheet ref="sheet" v-bind="source" :show-all-rows="sheetVersion === 'full'" :context-key="contextKey" :source-pending="false" /></fieldset>
+        <fieldset :disabled="saving" style="border:0;padding:0;margin:0"><CustomerQuoteSheet ref="sheet" v-bind="source" :removal-disabled="saving" :show-all-rows="sheetVersion === 'full'" :context-key="contextKey" :source-pending="false" /></fieldset>
         <footer v-if="canEdit" style="padding:16px 22px;text-align:right"><button type="button" :disabled="saving || sheet?.copying" @click="savePrices">{{ saving?'正在保存…':'保存客户报价' }}</button></footer>
       </dialog>
     </Teleport>

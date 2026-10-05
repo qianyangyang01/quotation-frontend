@@ -702,9 +702,9 @@ onBeforeUnmount(() => {
               </template>
               </template>
               <td class="sheet-row-action"><div class="sheet-row-controls">
-                <button v-if="!recordMode" type="button" class="sheet-row-handle" :data-row-handle="row.key" :draggable="!rowControlsDisabled" :disabled="rowControlsDisabled" :aria-label="`第 ${index + 1} 行排序，上下键移动`" title="拖拽整行排序，也可按上下方向键" @dragstart.stop="startRowDrag(row.key, $event)" @dragend="endRowDrag" @keydown.up.prevent="moveRowByKey(row.key, -1)" @keydown.down.prevent="moveRowByKey(row.key, 1)">⠿</button>
-                <button v-if="!recordMode" type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || index === 0" @click="moveRowByKey(row.key, -1)">↑</button>
-                <button v-if="!recordMode" type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || index === editorSheet.rows.length - 1" @click="moveRowByKey(row.key, 1)">↓</button>
+                <button type="button" class="sheet-row-handle" :data-row-handle="row.key" :draggable="!rowControlsDisabled" :disabled="rowControlsDisabled" :aria-label="`第 ${index + 1} 行排序，上下键移动`" title="拖拽整行排序，也可按上下方向键" @dragstart.stop="startRowDrag(row.key, $event)" @dragend="endRowDrag" @keydown.up.prevent="moveRowByKey(row.key, -1)" @keydown.down.prevent="moveRowByKey(row.key, 1)">⠿</button>
+                <button type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || index === 0" @click="moveRowByKey(row.key, -1)">↑</button>
+                <button type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || index === editorSheet.rows.length - 1" @click="moveRowByKey(row.key, 1)">↓</button>
                 <button v-if="row.averageId" type="button" class="sheet-delete-row" :aria-label="`删除第 ${index + 1} 行综合方案`" title="删除此平均行，同时移除上方对应方案" :disabled="rowControlsDisabled" @click="removeAverage(row.averageId!)">删除</button>
                 <template v-else>
                   <button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button>

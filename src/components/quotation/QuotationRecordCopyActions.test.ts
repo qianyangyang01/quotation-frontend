@@ -38,7 +38,7 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('retains an interleaved average when saving a record and reopening it', async () => {
+it('reorders an average in a saved record and retains its position after saving and reopening', async () => {
   const state = mount(); state.canEdit = true
   state.record.quoteOptions!.push({ ...state.record.quoteOptions![0]!, id: 'b', channel: 'second' })
   state.record.customerQuote = { quantities: [1, 2, 3, 5], rows: ['a', 'b'].map(optionId => ({ optionId, prices: [6.2, 8.3, 10.95, 15.9] })),
@@ -48,14 +48,38 @@ it('retains an interleaved average when saving a record and reopening it', async
   const originalPrices = JSON.stringify(state.record.customerQuote.rows)
   await settle(); footerButton('复制报价图片').click(); await settle()
   ;[...document.querySelectorAll('button')].find(button => button.textContent === '编辑报价单')!.click(); await settle()
+  document.querySelector<HTMLButtonElement>('[aria-label="上移第 2 行"]')!.click(); await settle()
   vi.mocked(updateQuotationRecord).mockImplementation(async (_id, patch) => normalizeQuotationRecord(JSON.parse(JSON.stringify({ ...state.record, ...patch, _version: 2 })))!)
   ;[...document.querySelectorAll('button')].find(button => button.textContent === '保存客户报价')!.click(); await settle()
-  expect(state.record.customerQuote!.rowOrder).toEqual(['option:a', 'average:p', 'option:b'])
+  expect(state.record.customerQuote!.rowOrder).toEqual(['average:p', 'option:a', 'option:b'])
   expect(JSON.stringify(state.record.customerQuote!.rows)).toBe(originalPrices)
   state.record = normalizeQuotationRecord(JSON.parse(JSON.stringify(state.record)))!; await settle()
   footerButton('复制报价图片').click(); await settle()
-  expect(render.mock.lastCall![0].rows[1]!.key).toBe('average:p')
-  expect(render.mock.lastCall![0].rows[1]!.prices).toEqual([6, 8, 10, 15])
+  expect(render.mock.lastCall![0].rows[0]!.key).toBe('average:p')
+  expect(render.mock.lastCall![0].rows[0]!.prices).toEqual([6, 8, 10, 15])
+})
+
+it('drags saved quote rows for preview and copying without changing the historical record', async () => {
+  const state = mount()
+  state.record.quoteOptions!.push({ ...state.record.quoteOptions![0]!, id: 'b', carrier: '燕文', channel: 'second', quote1Usd: 19 })
+  await settle()
+  const original = JSON.stringify(state.record)
+  footerButton('复制报价图片').click(); await settle()
+  ;[...document.querySelectorAll('button')].find(button => button.textContent === '编辑报价单')!.click(); await settle()
+  const handles = document.querySelectorAll<HTMLElement>('[data-row-handle]')
+  expect(handles).toHaveLength(2)
+  const movedKey = handles[1]!.dataset.rowHandle
+  handles[1]!.dispatchEvent(new Event('dragstart', { bubbles: true }))
+  document.querySelector('.sheet-editor tbody tr')!.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }))
+  await settle()
+  expect(document.querySelector('[data-row-handle]')!.getAttribute('data-row-handle')).toBe(movedKey)
+  const sheetButton = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === label)!
+  sheetButton('预览报价单').click(); await settle()
+  expect(render.mock.lastCall![0].rows[0]).toMatchObject({ key: movedKey, prices: [19, 8.3, 10.95, 15.9] })
+  sheetButton('复制报价数据').click(); await settle()
+  expect(writeText.mock.lastCall![0].indexOf('Yanwen')).toBeLessThan(writeText.mock.lastCall![0].indexOf('SDH'))
+  expect(JSON.stringify(state.record)).toBe(original)
+  expect(updateQuotationRecord).not.toHaveBeenCalled()
 })
 
 it('reopens saved hidden rows and selects either version for images and both data copy paths without writes', async () => {
