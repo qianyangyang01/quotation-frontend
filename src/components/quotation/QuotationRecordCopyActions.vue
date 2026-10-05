@@ -84,9 +84,9 @@ async function savePrices() {
   const id=props.record.id, version=props.record._version
   saving.value=true; status.value=undefined
   try {
-    const captured=sheet.value?.capturePrices()
+    const captured=await sheet.value?.captureForSave()
     if (!captured) throw new Error('报价单尚未就绪')
-    const customerQuote={ rowOrder: captureQuoteRowOrder(captured.rowOrderKeys, key => source.value.rows.find(row => quoteSheetRowKey(row) === key)?.channelKey), averagePlans: mapAveragePlans(captured.averagePlans, key => source.value.rows.find(row => quoteSheetRowKey(row) === key)?.channelKey), hiddenOptionIds: source.value.rows.filter(row => captured.hiddenRowKeys?.includes(quoteSheetRowKey(row))).map(row => row.channelKey!), sizeRules:captured.sizeRules, sizeRulesEnabled:captured.sizeRulesEnabled, contact:captured.contact, quantities:captured.quantities, rows:captured.rows.map(row=>{
+    const customerQuote={ photos:captured.photos, showPhotos:captured.showPhotos, rowOrder: captureQuoteRowOrder(captured.rowOrderKeys, key => source.value.rows.find(row => quoteSheetRowKey(row) === key)?.channelKey), averagePlans: mapAveragePlans(captured.averagePlans, key => source.value.rows.find(row => quoteSheetRowKey(row) === key)?.channelKey), hiddenOptionIds: source.value.rows.filter(row => captured.hiddenRowKeys?.includes(quoteSheetRowKey(row))).map(row => row.channelKey!), sizeRules:captured.sizeRules, sizeRulesEnabled:captured.sizeRulesEnabled, contact:captured.contact, quantities:captured.quantities, rows:captured.rows.map(row=>{
       const sourceRow=source.value.rows.find(source=>quoteSheetRowKey(source)===row.key)
       if (!sourceRow) throw new Error('客户报价渠道不匹配')
       return {optionId:sourceRow.channelKey!,prices:row.prices}

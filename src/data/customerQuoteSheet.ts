@@ -21,7 +21,7 @@ export const QUOTE_SHEET_OPTIONAL_COLUMNS = [
   { key: 'processingTime', label: 'Processing Time', name: '处理时间', width: 220 },
 ] as const
 export type QuoteSheetOptionalColumn = typeof QUOTE_SHEET_OPTIONAL_COLUMNS[number]['key']
-export type QuoteSheetEdits = { sizeRules?: string | null; sizeRulesEnabled?: boolean; agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[]; whatsapp?: string; columnOrder?: QuoteSheetColumnKey[]; countryFormat?: QuoteSheetCountryFormat }
+export type QuoteSheetEdits = { showAustraliaZones?: boolean; sizeRules?: string | null; sizeRulesEnabled?: boolean; agent: string; date: string; shippingTimes: Record<string, string>; providerNames?: Record<string, string>; fields?: Record<string, QuoteSheetRowEdits>; title?: string; notes?: string[]; hiddenColumns?: QuoteSheetOptionalColumn[]; whatsapp?: string; columnOrder?: QuoteSheetColumnKey[]; countryFormat?: QuoteSheetCountryFormat }
 export const QUOTE_SHEET_COLUMN_ORDER = ['number', 'product', 'sku', 'sizeRules', 'prices', 'country', 'provider', 'shippingTime', 'processingTime'] as const
 export type QuoteSheetColumnKey = typeof QUOTE_SHEET_COLUMN_ORDER[number]
 export function normalizeQuoteSheetOrder(order: readonly QuoteSheetColumnKey[] = []) {
@@ -257,8 +257,9 @@ export function buildCustomerQuoteSheet(input: {
     const fields = input.edits.fields?.[key] || {}
     const country = formatQuoteSheetCountry(fields.country ?? row.country, input.countries, input.edits.countryFormat)
     const translatedRegion = quoteSheetRegion(row.quoteRegion, row.country, input.countries)
-    const region = fields.region?.trim() ?? translatedRegion ?? ''
-    const regionTranslationRequired = translatedRegion === null || !!translatedRegion
+    const hideRegion = input.edits.showAustraliaZones === false && formatQuoteSheetCountry(row.country, input.countries, 'code') === 'AU'
+    const region = hideRegion ? '' : fields.region?.trim() ?? translatedRegion ?? ''
+    const regionTranslationRequired = !hideRegion && (translatedRegion === null || !!translatedRegion)
     if (visible('country') && (regionTranslationRequired && !region || /[^\x20-\x7e]/.test(region))) tableIssues.push(`第 ${index + 1} 行分区请填写英文，例如 Zone 2：${row.quoteRegion}`)
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
     const provider = fields.provider === undefined ? quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '') : fields.provider.trim()

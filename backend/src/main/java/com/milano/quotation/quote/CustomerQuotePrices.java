@@ -89,6 +89,20 @@ final class CustomerQuotePrices {
             if (!value.path("sizeRulesEnabled").isBoolean()) throw AppException.unprocessable("尺码规则开关格式错误");
             clean.put("sizeRulesEnabled", value.path("sizeRulesEnabled").asBoolean());
         }
+        if (value.has("photos")) {
+            var photos = value.path("photos");
+            if (!photos.isArray() || photos.size()>6) throw AppException.unprocessable("报价单图片最多6张");
+            var savedPhotos = clean.putArray("photos");
+            for (var photo : photos) {
+                if (!photo.path("assetId").isTextual() || !photo.path("assetId").asText().matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}") ||
+                    !photo.path("name").isTextual() || photo.path("name").asText().length()>255) throw AppException.unprocessable("报价单图片须为已上传的图片引用");
+                savedPhotos.addObject().put("assetId",photo.path("assetId").asText()).put("name",photo.path("name").asText());
+            }
+        }
+        if (value.has("showPhotos")) {
+            if (!value.path("showPhotos").isBoolean()) throw AppException.unprocessable("图片显示开关格式错误");
+            clean.put("showPhotos",value.path("showPhotos").asBoolean());
+        }
         return clean;
     }
     private static void rowOrder(ObjectNode record, ObjectNode customer, JsonNode value, boolean retainExisting) {
@@ -121,6 +135,8 @@ final class CustomerQuotePrices {
         system.remove("sizeRulesEnabled");
         system.remove("contact");
         system.remove("hiddenOptionIds");
+        system.remove("photos");
+        system.remove("showPhotos");
         if (!system.path("quantities").equals(customer.path("quantities"))) throw AppException.unprocessable("系统与客户报价数量不一致");
         var opts = options(payload);
         for (var row : system.path("rows")) {
@@ -143,7 +159,7 @@ final class CustomerQuotePrices {
             if (patch.has(field)) throw AppException.unprocessable("系统报价及首次报价单价格不可覆盖");
         if (patch.has("customerQuote")) {
             var customer = validate(current, patch.path("customerQuote"));
-            for (var field : List.of("sizeRules", "sizeRulesEnabled")) {
+            for (var field : List.of("sizeRules", "sizeRulesEnabled", "photos", "showPhotos")) {
                 if (!customer.has(field)) {
                     var previous = current.path("customerQuote").path(field);
                     if (previous.isMissingNode()) previous = current.path("sheetQuote").path(field);

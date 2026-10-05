@@ -2074,9 +2074,9 @@ async function save() {
       domesticFreightPerUnitCny: Math.max(0, item.purchaseFreightPerUnit),
     }
   }) : undefined
-  let captured: ReturnType<NonNullable<typeof quotationPreview.value>['capturePrices']>
+  let captured: Awaited<ReturnType<NonNullable<typeof quotationPreview.value>['captureForSave']>>
   try {
-    captured = quotationPreview.value?.capturePrices()
+    captured = await quotationPreview.value?.captureForSave()
     if (!captured || captured.rows.length!==quoteOptions.length || quoteOptions.some(option=>!captured!.rows.some(row=>row.key===option.quoteSheetKey))) {
       throw new Error('客户报价渠道与保存渠道不一致，请重新预览')
     }
@@ -2085,7 +2085,7 @@ async function save() {
   // Persist the preview order in the option array, so reopening and copying use the same sequence.
   const previewOrder = new Map(captured.rows.map((row, index) => [row.key, index]))
   quoteOptions.sort((a, b) => previewOrder.get(a.quoteSheetKey)! - previewOrder.get(b.quoteSheetKey)!)
-  const snapshot = captured ? { rowOrder: captureQuoteRowOrder(captured.rowOrderKeys, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), averagePlans: mapAveragePlans(captured.averagePlans, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), hiddenOptionIds: quoteOptions.filter(option => captured.hiddenRowKeys?.includes(option.quoteSheetKey)).map(option => option.id), sizeRules: captured.sizeRules, sizeRulesEnabled: captured.sizeRulesEnabled, contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
+  const snapshot = captured ? { photos: captured.photos, showPhotos: captured.showPhotos, rowOrder: captureQuoteRowOrder(captured.rowOrderKeys, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), averagePlans: mapAveragePlans(captured.averagePlans, key => quoteOptions.find(option => option.quoteSheetKey === key)?.id), hiddenOptionIds: quoteOptions.filter(option => captured.hiddenRowKeys?.includes(option.quoteSheetKey)).map(option => option.id), sizeRules: captured.sizeRules, sizeRulesEnabled: captured.sizeRulesEnabled, contact: captured.contact, quantities: captured.quantities, rows: quoteOptions.map(option => {
     const row = captured!.rows.find(row => row.key === option.quoteSheetKey)
     return { optionId: option.id, prices: row!.prices }
   }) } : undefined

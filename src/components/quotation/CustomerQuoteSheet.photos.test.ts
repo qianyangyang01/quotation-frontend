@@ -4,6 +4,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import { loadQuotePhotos, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
 import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
+import { loadSavedQuoteSheetPhotos, saveQuoteSheetPhotos } from '@/services/quoteSheetPhotos'
+import type { CustomerPriceSnapshot } from '@/data/customerQuotePrices'
+vi.mock('@/services/quoteSheetPhotos', () => ({ loadSavedQuoteSheetPhotos: vi.fn(), saveQuoteSheetPhotos: vi.fn() }))
 vi.mock('@/services/quoteLocalPhotos', async original => ({ ...await original<typeof import('@/services/quoteLocalPhotos')>(), loadQuotePhotos:vi.fn() }))
 vi.mock('@/services/customerQuoteSheetRenderer', async original => ({ ...await original<typeof import('@/services/customerQuoteSheetRenderer')>(), renderCustomerQuoteSheet:vi.fn().mockResolvedValue([{blob:new Blob(['png']),width:1536,height:1024,firstRow:1,lastRow:2}]) }))
 let app: App, exposed: InstanceType<typeof CustomerQuoteSheet>
@@ -24,11 +27,11 @@ async function select() {
   input.dispatchEvent(new Event('change')); await settle()
   if (!document.querySelector('[role=alert]')) await confirmPicker()
 }
-function mount(parent: HTMLElement = document.body) {
+function mount(parent: HTMLElement = document.body, initialQuote?: CustomerPriceSnapshot) {
   const row={country:'US',carrier:'4PX',channelKey:'a',ruleId:1,rule:'',channelCode:'a',transport:'',eta:'5-8 days',quote1:1,quote2:2,quote3:3,quoteCustom:5}
   const state=reactive({rows:[row,{...row,channelKey:'b'}],skus:['ONE','TWO'],countries:[],salesperson:'QA',contextKey:'context',resetKey:'account/bundle',customQuantity:5,bundle:true,sourcePending:false})
   const host=document.createElement('div');parent.append(host)
-  app=createApp({render:()=>h(CustomerQuoteSheet,{...state,ref:(vm:unknown)=>{exposed=vm as typeof exposed}})});app.mount(host)
+  app=createApp({render:()=>h(CustomerQuoteSheet,{...state,initialQuote,ref:(vm:unknown)=>{exposed=vm as typeof exposed}})});app.mount(host)
   return state
 }
 beforeEach(()=>{
@@ -37,6 +40,44 @@ beforeEach(()=>{
   vi.stubGlobal('isSecureContext',true);vi.stubGlobal('navigator',{clipboard:{writeText:vi.fn().mockResolvedValue(undefined)}})
 })
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.restoreAllMocks();vi.unstubAllGlobals()})
+it('saves only durable image references with the quote, retaining a hidden image choice', async () => {
+  mount(); await select()
+  const refs=[{assetId:'11111111-2222-3333-4444-555555555555',name:'sample.png'}]
+  vi.mocked(saveQuoteSheetPhotos).mockResolvedValue(refs)
+  const toggle=document.querySelector<HTMLInputElement>('[aria-label="显示商品图片列"]')!
+  toggle.checked=false;toggle.dispatchEvent(new Event('change'));await settle()
+  const captured=await exposed.captureForSave()
+  expect(captured).toMatchObject({photos:refs,showPhotos:false})
+  expect(JSON.stringify(captured)).not.toContain('blob:')
+})
+it('waits for saved images before rendering a record preview', async () => {
+  let finish!: (photos: QuoteLocalPhoto[])=>void
+  vi.mocked(loadSavedQuoteSheetPhotos).mockReturnValue(new Promise(resolve=>{finish=resolve}))
+  mount(document.body,{quantities:[1],rows:[{optionId:'a',prices:[12]},{optionId:'b',prices:[13]}],photos:[{assetId:'11111111-2222-3333-4444-555555555555',name:'saved.png'}]})
+  const pending=exposed.preview();await settle()
+  expect(renderCustomerQuoteSheet).not.toHaveBeenCalled()
+  finish([photo('blob:saved')]);await pending
+  expect(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![2]).toHaveLength(1)
+})
+it('blocks silent image loss on load failure and lets the user retry', async () => {
+  vi.mocked(loadSavedQuoteSheetPhotos).mockRejectedValueOnce(new Error('图片读取失败'))
+  mount(document.body,{quantities:[1],rows:[{optionId:'a',prices:[12]},{optionId:'b',prices:[13]}],photos:[{assetId:'11111111-2222-3333-4444-555555555555',name:'saved.png'}]})
+  await settle();await exposed.preview()
+  expect(renderCustomerQuoteSheet).not.toHaveBeenCalled()
+  await expect(exposed.captureForSave()).rejects.toThrow('图片读取失败')
+  vi.mocked(loadSavedQuoteSheetPhotos).mockResolvedValueOnce([photo('blob:retry')])
+  await click('重试读取图片');await exposed.preview()
+  expect(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![2]).toHaveLength(1)
+})
+it('rejects a save if the quote changes during image upload', async () => {
+  mount();await select()
+  let finish!: (photos: [])=>void
+  vi.mocked(saveQuoteSheetPhotos).mockReturnValue(new Promise(resolve=>{finish=resolve}))
+  const pending=exposed.captureForSave();await settle()
+  const title=document.querySelector<HTMLInputElement>('[aria-label="报价单标题"]')!
+  title.value='changed';title.dispatchEvent(new Event('input'));await settle()
+  finish([]);await expect(pending).rejects.toThrow('报价单已变化')
+})
 it('keeps the picker inside a native quotation modal and restores focus after cancellation', async () => {
   const modal=document.createElement('dialog');modal.setAttribute('open','');document.body.append(modal)
   mount(modal);await settle()

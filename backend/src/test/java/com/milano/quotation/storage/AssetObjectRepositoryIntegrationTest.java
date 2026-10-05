@@ -36,6 +36,17 @@ class AssetObjectRepositoryIntegrationTest {
                 id, name.repeat(64).substring(0, 64), "objects/" + name, "image/png", 1, name + ".png", "published");
     }
 
+    @Test void keepsPhotosReferencedOnlyByHistoricalQuotationSnapshots() {
+        var photo=UUID.randomUUID();var orphan=UUID.randomUUID();
+        insertAsset(photo,"quote-photo");insertAsset(orphan,"quote-orphan");
+        var payload="{\"sheetQuote\":{\"photos\":[{\"assetId\":\""+photo+"\",\"name\":\"saved.png\"}]}}";
+        jdbc.update("insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at,lifecycle_state) values (?,?,?,'pending',?,0,current_timestamp,current_timestamp,'active')",UUID.randomUUID(),"QA-PHOTO-REF","qa",payload);
+        assertEquals(1,assets.retireUnreferenced(List.of(photo,orphan),Instant.now()));
+        assertEquals("published",state(photo));
+        jdbc.update("update asset_object set storage_state='temporary',expires_at=? where id=?",Instant.now().minusSeconds(10),photo);
+        assertEquals(List.of(orphan),assets.findExpiredUnreferenced(Instant.now().plusSeconds(1)).stream().map(asset->asset.id).toList());
+    }
+
     private String state(UUID id) {
         return jdbc.queryForObject("select storage_state from asset_object where id=?", String.class, id);
     }

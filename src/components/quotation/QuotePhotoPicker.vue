@@ -111,7 +111,7 @@ onBeforeUnmount(() => {
             <strong>已选 {{ selected.length }} / {{ MAX_QUOTE_PHOTOS }} 张</strong>
           </div>
           <p id="photo-picker-help">从石墨逐张复制图片，回到此弹窗按 Ctrl+V（Mac：⌘V）即可继续添加，不必关闭弹窗。也可以一次选择多张文件。</p>
-          <p class="photo-picker-note">支持 JPG / PNG / WebP，每张不超过 10MB；图片仅用于本次报价单展示，不上传保存。</p>
+          <p class="photo-picker-note">支持 JPG / PNG / WebP，每张不超过 10MB；保存报价时会一同保存图片，可在报价记录中预览和复制。</p>
           <p v-if="error" class="photo-picker-error" role="alert">{{ error }}</p>
           <p v-if="busy || status" class="photo-picker-status" role="status">{{ busy ? '正在读取图片…' : status }}</p>
           <div v-if="selected.length" class="photo-picker-grid">

@@ -5,6 +5,33 @@ import tools.jackson.databind.node.ObjectNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CustomerQuotePricesTest {
+    @Test void retainsPhotoReferencesThroughSaveReloadAndLegacyPriceUpdates() {
+        var r=record();
+        var value=(ObjectNode)r.path("customerQuote");
+        value.putArray("photos").addObject().put("assetId","11111111-2222-3333-4444-555555555555").put("name","product.png");
+        value.put("showPhotos",false);
+        CustomerQuotePrices.initialize(r);
+        assertEquals(1,r.path("sheetQuote").path("photos").size());
+        assertFalse(r.path("systemQuantityQuotes").has("photos"));
+        var patch=mapper.createObjectNode();
+        var oldClient=(ObjectNode)r.path("customerQuote").deepCopy();oldClient.remove("photos");oldClient.remove("showPhotos");
+        patch.set("customerQuote",oldClient);
+        CustomerQuotePrices.preparePatch(r,patch);
+        assertEquals(r.path("customerQuote"),patch.path("customerQuote"));
+        ((ObjectNode)patch.path("customerQuote")).putArray("photos");
+        CustomerQuotePrices.preparePatch(r,patch);
+        assertTrue(patch.path("customerQuote").path("photos").isEmpty());
+        assertFalse(QuotationFinanceReview.pricesChanged(r,patch));
+        assertEquals(1,r.path("sheetQuote").path("photos").size());
+    }
+    @Test void rejectsLocalOrMalformedPhotoReferences() {
+        var r=record();var value=(ObjectNode)r.path("customerQuote");
+        value.putArray("photos").addObject().put("assetId","blob:local").put("name","photo.png");
+        assertThrows(RuntimeException.class,()->CustomerQuotePrices.validate(r,value));
+        var photos=value.putArray("photos");
+        for(int i=0;i<7;i++)photos.addObject().put("assetId","11111111-2222-3333-4444-555555555555").put("name","photo.png");
+        assertThrows(RuntimeException.class,()->CustomerQuotePrices.validate(r,value));
+    }
     final ObjectMapper mapper=new ObjectMapper();
     @Test void persistsHiddenRoutesWithoutDroppingPricesAndPreservesThemForOldClients() {
         var r = record();

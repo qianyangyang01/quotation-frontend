@@ -1,20 +1,20 @@
-/** Component-owned, memory-only images. Never include these in a draft or record payload. */
-export type QuoteLocalPhoto = { url: string; image: HTMLImageElement; name: string }
+/** Decoded images remain component-owned; only uploaded asset references enter snapshots. */
+export type QuoteLocalPhoto = { url: string; image: HTMLImageElement; name: string; file?: File; assetId?: string }
 export const MAX_QUOTE_PHOTOS = 6
 export const MAX_QUOTE_PHOTO_BYTES = 10 * 1024 * 1024
 export function releaseQuotePhotos(photos: readonly QuoteLocalPhoto[]) {
   photos.forEach(photo => { photo.image.src = ''; URL.revokeObjectURL(photo.url) })
 }
-export async function loadQuotePhotos(files: readonly File[]): Promise<QuoteLocalPhoto[]> {
+export async function loadQuotePhotos(files: readonly File[], storedAsset = false): Promise<QuoteLocalPhoto[]> {
   if (!files.length || files.length > MAX_QUOTE_PHOTOS) throw new Error(`请选择 1–${MAX_QUOTE_PHOTOS} 张商品图片`)
   for (const file of files) {
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('请选择 JPG、PNG 或 WebP 图片')
-    if (!file.size || file.size > MAX_QUOTE_PHOTO_BYTES) throw new Error('每张图片须大于 0 且不超过 10MB')
+    if (!['image/jpeg', 'image/png', 'image/webp', ...(storedAsset ? ['image/gif'] : [])].includes(file.type)) throw new Error('请选择 JPG、PNG 或 WebP 图片')
+    if (!file.size || file.size > MAX_QUOTE_PHOTO_BYTES * (storedAsset ? 2 : 1)) throw new Error(storedAsset ? '已保存图片为空或超过20MB' : '每张图片须大于 0 且不超过 10MB')
   }
   const loaded: QuoteLocalPhoto[] = []
   try {
     for (const file of files) {
-      const photo = { url: URL.createObjectURL(file), image: new Image(), name: file.name }
+      const photo = { url: URL.createObjectURL(file), image: new Image(), name: file.name, file }
       loaded.push(photo)
       await new Promise<void>((resolve, reject) => {
         const done = (error?: Error) => {

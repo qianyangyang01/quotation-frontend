@@ -1,10 +1,11 @@
 import Decimal from 'decimal.js'
+import { validQuoteSheetPhotos, type QuoteSheetPhoto } from './quoteSheetPhotos'
 import { averageSelectedRegions, cloneAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 
 export type QuoteSheetContact = { agent: string; whatsapp: string }
-export type CustomerPriceSnapshot = { rowOrder?: string[]; sizeRules?: string | null; sizeRulesEnabled?: boolean; averagePlans?: AveragePlan[]; hiddenOptionIds?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
-export type CapturedSheetPrices = { rowOrderKeys?: string[]; sizeRules?: string | null; sizeRulesEnabled?: boolean; averagePlans?: AveragePlan[]; hiddenRowKeys?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
+export type CustomerPriceSnapshot = { photos?: QuoteSheetPhoto[]; showPhotos?: boolean; rowOrder?: string[]; sizeRules?: string | null; sizeRulesEnabled?: boolean; averagePlans?: AveragePlan[]; hiddenOptionIds?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ optionId: string; prices: Array<number | null> }> }
+export type CapturedSheetPrices = { photos?: QuoteSheetPhoto[]; showPhotos?: boolean; rowOrderKeys?: string[]; sizeRules?: string | null; sizeRulesEnabled?: boolean; averagePlans?: AveragePlan[]; hiddenRowKeys?: string[]; contact?: QuoteSheetContact; quantities: number[]; rows: Array<{ key: string; prices: Array<number | null>; systemPrices: Array<number | null> }> }
 
 export function recordHiddenOptionIds(record: QuotationRecord): string[] {
   return [...(record.customerQuote?.hiddenOptionIds ?? record.sheetQuote?.hiddenOptionIds ?? [])]
@@ -38,7 +39,7 @@ export function savedSystemPrice(record: QuotationRecord, option: QuotationRecor
 }
 export function recordCustomerPrices(record: QuotationRecord): CustomerPriceSnapshot {
   const saved = record.customerQuote ?? record.sheetQuote
-  if (saved) return { ...(saved.rowOrder ? { rowOrder: [...saved.rowOrder] } : {}), ...(saved.sizeRules !== undefined ? { sizeRules: saved.sizeRules, sizeRulesEnabled: saved.sizeRulesEnabled } : {}), ...(saved.averagePlans ? { averagePlans: cloneAveragePlans(saved.averagePlans) } : {}), hiddenOptionIds: recordHiddenOptionIds(record), ...(saved.contact ? { contact: { ...saved.contact } } : {}), quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  if (saved) return { ...(saved.photos ? { photos: saved.photos.map(photo => ({ ...photo })), showPhotos: saved.showPhotos } : {}), ...(saved.rowOrder ? { rowOrder: [...saved.rowOrder] } : {}), ...(saved.sizeRules !== undefined ? { sizeRules: saved.sizeRules, sizeRulesEnabled: saved.sizeRulesEnabled } : {}), ...(saved.averagePlans ? { averagePlans: cloneAveragePlans(saved.averagePlans) } : {}), hiddenOptionIds: recordHiddenOptionIds(record), ...(saved.contact ? { contact: { ...saved.contact } } : {}), quantities:[...saved.quantities], rows:saved.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
   const quantities = [...new Set([1,2,3,record.customQuoteQuantity || 0])]
   return { quantities, rows: (record.quoteOptions || []).map(option => ({ optionId: option.id, prices: quantities.map(q => savedSystemPrice(record, option, q)) })) }
 }
@@ -48,6 +49,8 @@ export function normalizeCustomerPrices(value: unknown): CustomerPriceSnapshot |
   if (!Array.isArray(v.quantities) || !Array.isArray(v.rows) || !v.quantities.length || v.quantities.length > 10 ||
     v.quantities.some(q=>!Number.isSafeInteger(q)||q<0) || new Set(v.quantities).size !== v.quantities.length ||
     v.rows.some(row=>!row || typeof row.optionId!=='string' || !Array.isArray(row.prices) || row.prices.length!==v.quantities.length || row.prices.some(p=>p!==null && (typeof p!=='number'||!Number.isFinite(p)||p<0)))) return undefined
+  if (v.photos !== undefined && !validQuoteSheetPhotos(v.photos)) return undefined
+  if (v.showPhotos !== undefined && typeof v.showPhotos !== 'boolean') return undefined
   if (v.averagePlans !== undefined && !validAveragePlans(v.averagePlans)) return undefined
   if (v.sizeRules !== undefined && v.sizeRules !== null && (typeof v.sizeRules !== 'string' || v.sizeRules.length > 2000)) return undefined
   if (v.sizeRulesEnabled !== undefined && typeof v.sizeRulesEnabled !== 'boolean') return undefined
@@ -55,7 +58,7 @@ export function normalizeCustomerPrices(value: unknown): CustomerPriceSnapshot |
   if (v.rowOrder !== undefined && (!Array.isArray(v.rowOrder) || new Set(v.rowOrder).size !== v.rowOrder.length || v.rowOrder.some(id => !validRowIds.has(id)))) return undefined
   const contact = normalizeQuoteSheetContact(v.contact)
   const hiddenOptionIds = Array.isArray(v.hiddenOptionIds) ? [...new Set(v.hiddenOptionIds.filter(id => typeof id === 'string' && v.rows.some(row => row.optionId === id)))] : undefined
-  return { ...(v.rowOrder ? { rowOrder: [...v.rowOrder] } : {}), ...(v.sizeRules !== undefined ? { sizeRules: v.sizeRules, sizeRulesEnabled: v.sizeRulesEnabled } : {}), ...(Array.isArray(v.averagePlans) ? { averagePlans: cloneAveragePlans(v.averagePlans) } : {}), ...(hiddenOptionIds ? { hiddenOptionIds } : {}), ...(contact ? { contact } : {}), quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
+  return { ...(v.photos ? { photos: v.photos.map(photo => ({ ...photo })), showPhotos: v.showPhotos } : {}), ...(v.rowOrder ? { rowOrder: [...v.rowOrder] } : {}), ...(v.sizeRules !== undefined ? { sizeRules: v.sizeRules, sizeRulesEnabled: v.sizeRulesEnabled } : {}), ...(Array.isArray(v.averagePlans) ? { averagePlans: cloneAveragePlans(v.averagePlans) } : {}), ...(hiddenOptionIds ? { hiddenOptionIds } : {}), ...(contact ? { contact } : {}), quantities:[...v.quantities], rows:v.rows.map(row=>({optionId:row.optionId,prices:[...row.prices]})) }
 }
 export function priceComparison(record: QuotationRecord, snapshot = recordCustomerPrices(record)) {
   const routeLines = snapshot.rows.flatMap(row => {

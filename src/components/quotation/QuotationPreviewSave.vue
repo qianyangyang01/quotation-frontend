@@ -38,7 +38,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ save: []; retry: []; locateIssue: [key: string]; removeRow: [key: string] }>()
 const customerSheet = ref<InstanceType<typeof CustomerQuoteSheet>>()
-defineExpose({ capturePrices: () => customerSheet.value?.capturePrices() })
+defineExpose({ capturePrices: () => customerSheet.value?.capturePrices(), captureForSave: () => customerSheet.value?.captureForSave() })
 const countryCount = computed(() => new Set(props.rows.map(row => row.country)).size)
 const hasQuoteRows = computed(() => props.rows.length > 0)
 const previewStatus = computed(() => {

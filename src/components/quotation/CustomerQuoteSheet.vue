@@ -19,7 +19,9 @@ import { releaseQuotePhotos, MAX_QUOTE_PHOTOS, type QuoteLocalPhoto } from '@/se
 import QuotePhotoPicker from './QuotePhotoPicker.vue'
 import { MAX_PRICE_EXPRESSION_LENGTH, parseQuotePriceInput } from '@/data/quotePriceExpression'
 import { currentAuthUser } from '@/data/authStore'
-import { loadQuoteSheetColumnOrder, saveQuoteSheetColumnOrder } from '@/data/quoteSheetColumnPreferences'
+import { loadQuoteSheetColumnOrder, saveQuoteSheetColumnOrder, loadQuoteSheetAustraliaZones, saveQuoteSheetAustraliaZones } from '@/data/quoteSheetColumnPreferences'
+import { loadSavedQuoteSheetPhotos, saveQuoteSheetPhotos } from '@/services/quoteSheetPhotos'
+import type { QuoteSheetPhoto } from '@/data/quoteSheetPhotos'
 import { loadQuoteSheetContact, saveQuoteSheetContact } from '@/data/quoteSheetContactPreferences'
 
 const props = defineProps<{
@@ -28,6 +30,7 @@ const props = defineProps<{
   calculatePrice?: QuoteSheetPriceCalculator
   resetKey?: string
   initialQuote?: CustomerPriceSnapshot
+  initialPhotos?: QuoteSheetPhoto[]
   initialSystemQuote?: CustomerPriceSnapshot
   recordMode?: boolean
   canRemoveRows?: boolean
@@ -39,10 +42,15 @@ const emit = defineEmits<{ removeRow: [key: string] }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
 function initialEdits() {
   const contact = props.recordMode ? props.initialQuote?.contact : loadQuoteSheetContact(layoutUserId.value)
-  return { ...newQuoteSheetEdits(props.salesperson), whatsapp: '', sizeRules: props.initialQuote?.sizeRules, sizeRulesEnabled: props.initialQuote?.sizeRulesEnabled ?? typeof props.initialQuote?.sizeRules === 'string', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
+  return { ...newQuoteSheetEdits(props.salesperson), showAustraliaZones: loadQuoteSheetAustraliaZones(layoutUserId.value), whatsapp: '', sizeRules: props.initialQuote?.sizeRules, sizeRulesEnabled: props.initialQuote?.sizeRulesEnabled ?? typeof props.initialQuote?.sizeRules === 'string', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
 }
 const edits = ref<QuoteSheetEdits>(initialEdits())
 const layoutSaveState = ref<'saved' | 'failed' | ''>('')
+const zoneSaveFailed = ref(false)
+function toggleAustraliaZones(event: Event) {
+  edits.value.showAustraliaZones = (event.target as HTMLInputElement).checked
+  zoneSaveFailed.value = !saveQuoteSheetAustraliaZones(layoutUserId.value, edits.value.showAustraliaZones)
+}
 const contactSaveFailed = ref(false)
 function rememberContact(field: 'agent' | 'whatsapp', event: Event) {
   const value = (event.target as HTMLInputElement).value.slice(0, 40)
@@ -51,12 +59,14 @@ function rememberContact(field: 'agent' | 'whatsapp', event: Event) {
 }
 watch(layoutUserId, userId => {
   edits.value.columnOrder = loadQuoteSheetColumnOrder(userId)
+  edits.value.showAustraliaZones = loadQuoteSheetAustraliaZones(userId)
   if (!props.recordMode) {
     const contact = loadQuoteSheetContact(userId)
     edits.value.agent = contact.agent ?? props.salesperson
     edits.value.whatsapp = contact.whatsapp ?? ''
   }
   contactSaveFailed.value = false
+  zoneSaveFailed.value = false
   layoutSaveState.value = ''
 }, { flush: 'sync' })
 onMounted(() => { void preloadQuoteSheetAssets().catch(() => undefined) })
@@ -97,8 +107,44 @@ let disposed = false
 const photos = shallowRef<QuoteLocalPhoto[]>([])
 const showPhotos = ref(true)
 const photoPickerOpen = ref(false)
+const photoLoading = ref(false)
+const photoSaving = ref(false)
+const photoError = ref('')
+let photoLoad: Promise<void> | undefined
+let photoRequest: AbortController | undefined
+let photoLoadGeneration = 0
+async function restoreSavedPhotos() {
+  const token = ++photoLoadGeneration
+  photoRequest?.abort()
+  const controller = new AbortController()
+  photoRequest = controller
+  const saved = props.initialQuote?.photos ?? props.initialPhotos ?? []
+  photoError.value = ''
+  photoLoading.value = saved.length > 0
+  if (!saved.length) return
+  const timer = window.setTimeout(() => controller.abort(), 30000)
+  try {
+    const loaded = await loadSavedQuoteSheetPhotos(saved, controller.signal)
+    if (disposed || token !== photoLoadGeneration) { releaseQuotePhotos(loaded); return }
+    releaseQuotePhotos(photos.value)
+    photos.value = loaded
+    showPhotos.value = props.initialQuote?.showPhotos !== false
+    invalidate()
+  } catch (error) {
+    if (!disposed && token === photoLoadGeneration) photoError.value = error instanceof Error && !controller.signal.aborted ? error.message : '报价单图片读取超时，请重试'
+  } finally {
+    window.clearTimeout(timer)
+    if (token === photoLoadGeneration) photoLoading.value = false
+  }
+}
+function reloadSavedPhotos() { photoLoad = restoreSavedPhotos(); return photoLoad }
+onMounted(reloadSavedPhotos)
 const hasPhotos = computed(() => showPhotos.value && photos.value.length > 0)
 function clearPhotos() {
+  photoLoadGeneration++
+  photoRequest?.abort()
+  photoLoading.value = false
+  photoError.value = ''
   photoPickerOpen.value = false
   releaseQuotePhotos(photos.value)
   photos.value = []
@@ -112,11 +158,12 @@ function confirmPhotos(selected: QuoteLocalPhoto[]) {
   photoPickerOpen.value = false
   invalidate()
 }
-// Keep local photos out of sheet edits and all persisted snapshots. Product/account/record resets clear them.
-watch(() => JSON.stringify([props.skus, props.resetKey ?? props.contextKey, props.bundle]), clearPhotos, { flush: 'sync' })
+watch(() => JSON.stringify([layoutUserId.value, props.skus, props.resetKey ?? props.contextKey, props.bundle, props.initialQuote?.photos, props.initialPhotos, props.initialQuote?.showPhotos]), () => { clearPhotos(); void reloadSavedPhotos() }, { flush: 'post' })
 watch(showPhotos, invalidate, { flush: 'sync' })
 // Also clear before an external navigation is placed in the browser back/forward cache.
 window.addEventListener('pagehide', clearPhotos)
+function restoreAfterNavigation(event: PageTransitionEvent) { if (event.persisted) void reloadSavedPhotos() }
+window.addEventListener('pageshow', restoreAfterNavigation)
 
 // Persist visibility separately; saved prices always include every selected route.
 function initialHiddenRows() {
@@ -503,6 +550,9 @@ function dropColumn(index: number) {
 }
 async function preview() {
   if (disposed || copying.value || props.sourcePending || rendering.value || !sheet.value.rows.length) return
+  await photoLoad
+  if (disposed || copying.value || rendering.value || props.sourcePending || photoLoading.value) return
+  if (photoError.value) { failed.value = true; message.value = photoError.value; return }
   invalidate()
   if (sheet.value.issues.length) {
     failed.value = true
@@ -584,10 +634,26 @@ function capturePrices(): CapturedSheetPrices {
   if (system.priceIssues?.length) throw new Error(system.priceIssues.join('；'))
   return { rowOrderKeys: orderedRowsSheet.value.rows.map(row => row.key), averagePlans: cloneAveragePlans(averagePlans.value).map(plan => ({ ...plan, quantities: [...quantities.value], prices: quantities.value.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null), systemPrices: quantities.value.map(q => plan.systemPrices[plan.quantities.indexOf(q)] ?? null), members: plan.members.map(m => ({...m, sourcePrices: quantities.value.map(q => m.sourcePrices[plan.quantities.indexOf(q)] ?? null)})) })), sizeRules: edits.value.sizeRules, sizeRulesEnabled: edits.value.sizeRulesEnabled, hiddenRowKeys: [...hiddenRowKeys.value], contact: { agent: edits.value.agent, whatsapp: edits.value.whatsapp ?? '' }, quantities:[...quantities.value], rows:allRowsSheet.value.rows.map(row=>({ key:row.key, prices:[...row.prices], systemPrices:[...system.rows.find(original=>original.key===row.key)!.prices] })) }
 }
-defineExpose({ preview, copyData, invalidate, copying, capturePrices })
+async function captureForSave(): Promise<CapturedSheetPrices> {
+  if (photoSaving.value) throw new Error('图片正在保存，请稍后')
+  await photoLoad
+  if (disposed || photoLoading.value || photoError.value) throw new Error(photoError.value || '图片尚未加载完成，请重试')
+  const captured = capturePrices(), token = generation
+  const selected = [...photos.value], visible = showPhotos.value
+  photoSaving.value = true
+  try {
+    const saved = await saveQuoteSheetPhotos(selected)
+    if (disposed || token !== generation) throw new Error('报价单已变化，请重新保存')
+    return { ...captured, photos: saved, showPhotos: visible }
+  } finally { photoSaving.value = false }
+}
+defineExpose({ preview, copyData, invalidate, copying, capturePrices, captureForSave })
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', clearPhotos)
+  window.removeEventListener('pageshow', restoreAfterNavigation)
   disposed = true
+  photoLoadGeneration++
+  photoRequest?.abort()
   releaseQuotePhotos(photos.value)
   generation++
   releaseImages()
@@ -601,6 +667,8 @@ onBeforeUnmount(() => {
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
+    <p v-if="photoLoading || photoSaving" class="sheet-pending" role="status">{{ photoSaving ? '正在保存报价单图片…' : '正在读取报价单图片…' }}</p>
+    <p v-if="photoError" class="sheet-message failed" role="alert">{{ photoError }} <button type="button" @click="reloadSavedPhotos">重试读取图片</button></p>
     <QuotePhotoPicker v-if="photoPickerOpen" :photos="photos" @cancel="photoPickerOpen = false" @confirm="confirmPhotos" />
     <p v-if="sourcePending" class="sheet-pending" role="status">当前报价数据尚未就绪，请完成物流计算后预览。</p>
     <p v-if="!rows.length" class="sheet-empty">请先在上方报价矩阵中选择需要报价的国家与渠道</p>
@@ -623,9 +691,10 @@ onBeforeUnmount(() => {
         <div class="sheet-display-tools">
           <fieldset class="sheet-visibility" :disabled="copying" aria-label="显示列">
             <strong>显示列</strong>
+            <label><input type="checkbox" :checked="edits.showAustraliaZones !== false" aria-label="显示澳大利亚分区" @change="toggleAustraliaZones">澳大利亚分区</label>
             <label v-for="column in QUOTE_SHEET_OPTIONAL_COLUMNS" :key="column.key"><input type="checkbox" :checked="columnVisible(column.key)" :aria-label="`显示${column.name}列`" @change="toggleColumn(column.key)">{{ column.name }}</label>
           </fieldset>
-          <fieldset class="sheet-photos" :disabled="copying || rendering" aria-label="报价单图片">
+          <fieldset class="sheet-photos" :disabled="copying || rendering || photoLoading || photoSaving" aria-label="报价单图片">
             <button class="sheet-photo-button" type="button" @click="photoPickerOpen = true">{{ photos.length ? '管理图片' : '添加图片' }}</button>
             <span>{{ photos.length }} / {{ MAX_QUOTE_PHOTOS }} 张</span>
             <button v-if="photos.length" type="button" @click="clearPhotos">移除图片</button>
@@ -652,6 +721,7 @@ onBeforeUnmount(() => {
         <span v-if="layoutSaveState === 'saved'" role="status">已记住列顺序</span>
         <span v-else-if="layoutSaveState === 'failed'" role="alert">列顺序未能保存，当前调整仅本次有效；请允许浏览器本地存储后重新调整。</span>
       </div>
+      <p v-if="zoneSaveFailed" class="sheet-message failed" role="alert">分区显示偏好未能保存，当前选择仅本次有效；请检查浏览器存储权限。</p>
       </div>
       <template v-if="editing">
       <p v-if="!sheet.rows.length" class="sheet-pending" role="status">所有行已隐藏，请恢复至少一行后再预览或复制。</p>
@@ -688,7 +758,7 @@ onBeforeUnmount(() => {
               <template v-for="group in visibleGroups" :key="group.key">
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
-              <td v-else-if="group.key === 'product' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`临时商品图 ${photoIndex + 1}`"></div></td>
+              <td v-else-if="group.key === 'product' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`报价单商品图 ${photoIndex + 1}`"></div></td>
               <td v-else-if="group.key === 'sizeRules' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-size-rules"><textarea v-model="edits.sizeRules" aria-label="尺码规则说明" placeholder="填写尺码规则或备注说明，支持换行" maxlength="2000" rows="4" :disabled="copying" /><small class="sheet-size-rules-count">{{ edits.sizeRules?.length ?? 0 }} / 2000</small></td>
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
               <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}<small v-if="group.key === 'country' && row.region" class="sheet-zone-label">{{ row.region }}</small></td>
