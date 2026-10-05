@@ -45,6 +45,9 @@ let state: {
   queryBundleItem: (item: BundleQuoteItem, options: { loadLogistics: boolean; announce: boolean }) => Promise<boolean>
   changeQuoteMode: (mode: 'single' | 'bundle') => void
   addBundleItem: () => void
+  removeBundleItem: (id: number) => void
+  hasQueriedQuotationProduct: boolean
+  saveValidationIssues: Array<{ key: string; message: string }>
   financeTaxSettings: FinanceTaxSettings
   financeSurchargeSettings: FinanceTaxSettings
   customerGradeSettings: Array<{ grade: string; coefficient: number }>
@@ -169,6 +172,36 @@ it('keeps 1961 at tier 1 and 1961-1 at tier 2 through quantity changes, requery 
   expect(state.bundlePurchaseCost(1)).toBe(58.65)
   state.addBundleItem()
   expect(state.bundleItems[2]!.purchaseTier).toBe('10')
+})
+
+it('quotes and restores one SKU with three pieces per set through the quantity input', async () => {
+  await mount('bundle')
+  state.removeBundleItem(state.bundleItems[1]!.id)
+  await nextTick()
+  const input = host.querySelector<HTMLInputElement>('.qty input')!
+  input.value = '3'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.dispatchEvent(new Event('change', { bubbles: true }))
+  await nextTick()
+  expect(state.bundleItems).toHaveLength(1)
+  expect(state.hasQueriedQuotationProduct).toBe(true)
+  expect(state.saveValidationIssues.filter(issue => issue.key === 'sku')).toEqual([])
+  expect(state.bundlePurchaseCost(2)).toBe(84.48)
+  expect(state.bundleDomesticFreight(2)).toBe(1.26)
+  expect(state.bundleGoodsWeight(2)).toBeCloseTo(.22338 * 6)
+  const saved = JSON.parse(JSON.stringify(state.draftPayload())) as QuotationDraftPayload
+  expect(saved.bundleItems).toHaveLength(1)
+  expect(saved.bundleItems[0]!.quantityPerSet).toBe(3)
+  state.bundleItems[0]!.quantityPerSet = 1
+  state.updateBundleItemQuantity(state.bundleItems[0]!)
+  await nextTick()
+  expect(state.hasQueriedQuotationProduct).toBe(false)
+  expect(state.saveValidationIssues.some(issue => issue.key === 'sku' && issue.message.includes('至少 2 件'))).toBe(true)
+  await state.applyDraftPayload(saved, undefined, { restoreQuotation: true })
+  await nextTick()
+  expect(state.bundleItems).toHaveLength(1)
+  expect(state.bundleItems[0]!.quantityPerSet).toBe(3)
+  expect(state.hasQueriedQuotationProduct).toBe(true)
 })
 
 it('saves and restores each SKU tier independently in the actual draft payload', async () => {

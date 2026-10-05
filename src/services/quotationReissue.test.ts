@@ -29,6 +29,18 @@ describe('reissuing a quotation as new editable inputs', () => {
     expect(JSON.stringify(original)).toBe(before)
   })
 
+  it('keeps a three-piece same-SKU set on reissue without changing the historical snapshot', () => {
+    const original = record({ quoteMode: 'bundle', bundleItems: [
+      { sku: 'SKU-A', name: 'A', quantityPerSet: 3, effectiveWeightKg: .2, purchaseUnitPriceCny: 12, domesticFreightPerUnitCny: 1.5 },
+    ] })
+    const before = JSON.stringify(original)
+    const payload = quotationReissuePayload(original)
+    expect(payload.quoteMode).toBe('bundle')
+    expect(payload.bundleItems).toHaveLength(1)
+    expect(payload.bundleItems[0]).toMatchObject({ sku: 'SKU-A', quantityPerSet: 3 })
+    expect(JSON.stringify(original)).toBe(before)
+  })
+
   it('copies a legacy record without copying its identity, deal, approval or prices', () => {
     const original = record()
     const before = JSON.stringify(original)

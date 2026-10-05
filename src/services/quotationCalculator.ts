@@ -249,7 +249,10 @@ export function usdPriceFromCny(cny: number, usdCny: number) {
   return decimal(Math.max(0, Number(cny) || 0)).toDecimalPlaces(2).div(rate).toNumber()
 }
 
-export function hasQuotationProduct(mode: 'single' | 'bundle', primarySku: string, bundleSkus: string[]) {
+export function hasQuotationProduct(mode: 'single' | 'bundle', primarySku: string, bundleItems: Array<{ sku: string; quantityPerSet: number }>) {
   if (mode === 'single') return Boolean(primarySku.trim())
-  return new Set(bundleSkus.map(sku => sku.trim().toUpperCase()).filter(Boolean)).size >= 2
+  const items = bundleItems.filter(item => item.sku.trim())
+  if (!items.length || items.some(item => !Number.isSafeInteger(item.quantityPerSet) || item.quantityPerSet <= 0)) return false
+  if (new Set(items.map(item => item.sku.trim().toUpperCase())).size !== items.length) return false
+  return items.length >= 2 || items[0]!.quantityPerSet >= 2
 }

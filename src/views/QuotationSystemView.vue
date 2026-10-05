@@ -1769,8 +1769,8 @@ const saveValidationIssues = computed(() => {
   else if (!financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: financeSettingsAreLoading() ? '财务设置正在读取，请稍候' : financeSettingsLoadError() ? `财务设置读取失败：${financeSettingsLoadError()}；请重试读取` : '财务设置尚未完整加载，请重试读取后保存' })
   const labels: Record<string, string> = { customerName:'客户名称', quoteMode:'报价模式', sku:'商品 SKU', productCategory:'产品品类', logisticsAttribute:'物流属性', customerGrade:'客户等级', monthlySalesEstimate:'采购阶梯', commissionThreshold:'佣金阈值' }
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
-  const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku))
-  if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请至少查询并加入两个不同的有效 SKU' : '请输入 SKU 并查询商品' })
+  const hasSku = hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value)
+  if (!hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请查询有效 SKU，每套合计至少 2 件；同款成套只需一行 SKU，将单套数量设为 2 或以上' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.some(row => row.available !== false && row.quote1 != null)) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
   if (savedQuoteRows.value.some(row => row.available !== false && !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message: savedQuoteRows.value.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请到对应财务模块补齐' })
@@ -1783,7 +1783,7 @@ const saveValidationIssues = computed(() => {
   return issues
 })
 const displayedSaveValidationIssues = computed(() => showSaveValidation.value ? saveValidationIssues.value : [])
-const hasQueriedQuotationProduct = computed(() => hasQuotationProduct(quoteMode.value, products.value[0]?.sku || '', bundleItems.value.map(item => item.sku)))
+const hasQueriedQuotationProduct = computed(() => hasQuotationProduct(quoteMode.value, products.value[0]?.sku || '', bundleItems.value))
 const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠道正在加载，请稍候' : countryLoadError.value || (logisticsLoadState.value === 'loading' ? '物流规则正在加载，请稍候'
   : hasQueriedQuotationProduct.value && logisticsLoadState.value === 'idle' ? '请先加载当前商品的物流规则'
   : logisticsLoadState.value === 'stale' ? '无法确认物流正式版本，暂不能保存'
@@ -2049,7 +2049,7 @@ async function save() {
   const customer = customerName.value.trim()
   const selectedMatrixRows = savedQuoteRows.value
   if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
-  if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value.map(item => item.sku)) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
+  if (!hasQuotationProduct(quoteMode.value, p?.sku || '', bundleItems.value) || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
   if (selectedMatrixRows.some(row => row.available !== false && !row.taxConfigured)) { toast(selectedMatrixRows.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null

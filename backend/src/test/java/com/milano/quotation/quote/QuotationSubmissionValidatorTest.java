@@ -92,6 +92,42 @@ class QuotationSubmissionValidatorTest {
         assertDoesNotThrow(() -> validator.validate(input));
     }
 
+    @Test void acceptsMultiplePiecesOfOneSkuAcrossMatrixModes() {
+        for (var mode : new String[]{"common", "template"}) {
+            for (int quantity : new int[]{2, 3, 10}) {
+                var input = valid().put("quoteMode", "bundle").put("matrixMode", mode);
+                addBundleItem(input, "SKU-1", quantity, 0.2, 12, 1.5);
+                assertDoesNotThrow(() -> validator.validate(input));
+                assertEquals(quantity, input.path("bundleItems").get(0).path("quantityPerSet").asInt());
+            }
+        }
+    }
+
+    @Test void rejectsEmptySinglePieceAndFractionalSameSkuBundles() {
+        var empty = valid().put("quoteMode", "bundle");
+        assertThrows(FieldValidationException.class, () -> validator.validate(empty));
+        empty.putArray("bundleItems");
+        assertThrows(FieldValidationException.class, () -> validator.validate(empty));
+        for (double quantity : new double[]{-1, 0, 1, 1.5, 2.5}) {
+            var input = valid().put("quoteMode", "bundle");
+            addBundleItem(input, "SKU-1", 1, 0.2, 12, 1.5);
+            var item = (tools.jackson.databind.node.ObjectNode) input.path("bundleItems").get(0);
+            if (quantity == Math.floor(quantity)) item.put("quantityPerSet", (int) quantity);
+            else item.put("quantityPerSet", quantity);
+            assertThrows(FieldValidationException.class, () -> validator.validate(input));
+        }
+    }
+
+    @Test void stillRejectsDuplicateRowsAndMismatchedPrimarySkuForSameSkuSets() {
+        var input = valid().put("quoteMode", "bundle");
+        addBundleItem(input, "SKU-1", 3, 0.2, 12, 1.5);
+        input.put("primarySku", "SKU-2");
+        assertThrows(FieldValidationException.class, () -> validator.validate(input));
+        input.put("primarySku", "SKU-1");
+        addBundleItem(input, "sku-1", 2, 0.2, 12, 1.5);
+        assertThrows(FieldValidationException.class, () -> validator.validate(input));
+    }
+
     @Test void rejectsIncompleteDuplicateAndMismatchedBundles() {
         var input = valid().put("quoteMode", "bundle").put("primarySku", "SKU-2、SKU-1");
         addBundleItem(input, "SKU-1", 0, 0, -1, -2);

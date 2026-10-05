@@ -45,7 +45,7 @@ defineEmits<{
 <template>
   <section class="bundle-card">
     <header>
-      <div><p>02</p><section><h2>组合商品明细</h2><span>每行数量表示一套组合中包含的商品件数，采购阶梯可按 SKU 单独选择</span></section></div>
+      <div><p>02</p><section><h2>组合商品明细</h2><span>支持同款多件或不同 SKU 混搭；同款 3 件一套，只需一行 SKU，单套数量填 3；采购阶梯可按 SKU 单独选择</span></section></div>
       <button type="button" @click="$emit('add')">＋ 添加 SKU</button>
     </header>
 

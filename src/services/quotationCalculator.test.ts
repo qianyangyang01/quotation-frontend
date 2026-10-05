@@ -263,11 +263,34 @@ describe('bundle SKU calculation', () => {
   })
 
   it('recognizes loaded single and bundle products consistently before save', () => {
+    const rows = (skus: string[]) => skus.map(sku => ({ sku, quantityPerSet: 1 }))
     expect(hasQuotationProduct('single', 'SKU-1', [])).toBe(true)
-    expect(hasQuotationProduct('bundle', '', ['SKU-1', 'SKU-2'])).toBe(true)
-    expect(hasQuotationProduct('bundle', '', ['', 'SKU-2'])).toBe(false)
-    expect(hasQuotationProduct('bundle', '', ['sku-2', 'SKU-2'])).toBe(false)
-    expect(hasQuotationProduct('bundle', '', ['', '  '])).toBe(false)
+    expect(hasQuotationProduct('bundle', '', rows(['SKU-1', 'SKU-2']))).toBe(true)
+    expect(hasQuotationProduct('bundle', '', rows(['', 'SKU-2']))).toBe(false)
+    expect(hasQuotationProduct('bundle', '', rows(['sku-2', 'SKU-2']))).toBe(false)
+    expect(hasQuotationProduct('bundle', '', rows(['', '  ']))).toBe(false)
+  })
+
+  it('accepts same-SKU sets and rejects single pieces, duplicate rows and invalid quantities', () => {
+    for (const quantityPerSet of [2, 3, 10]) {
+      expect(hasQuotationProduct('bundle', '', [{ sku: 'SKU-1', quantityPerSet }])).toBe(true)
+    }
+    for (const quantityPerSet of [0, 1, -1, 1.5, NaN, Infinity]) {
+      expect(hasQuotationProduct('bundle', '', [{ sku: 'SKU-1', quantityPerSet }])).toBe(false)
+    }
+    expect(hasQuotationProduct('bundle', '', [{ sku: 'SKU-1', quantityPerSet: 3 }, { sku: '', quantityPerSet: 1 }])).toBe(true)
+    expect(hasQuotationProduct('bundle', '', [{ sku: 'SKU-1', quantityPerSet: 3 }, { sku: 'sku-1', quantityPerSet: 1 }])).toBe(false)
+  })
+
+  it('calculates three identical pieces per set and six pieces for two sets', () => {
+    const items = [{ sku: first.sku, quantityPerSet: 3, purchaseUnitPrice: 20, purchaseFreightPerUnit: 1.5, weightKg: .2, customWeightKg: null }]
+    for (const sets of [1, 2]) {
+      expect(bundlePurchaseCost(items, [first], '10', sets)).toBe(60 * sets)
+      expect(bundleDomesticFreight(items, sets)).toBe(4.5 * sets)
+      expect(bundleBaseWeight(items, sets)).toBeCloseTo(.6 * sets)
+      expect(bundlePackagingWeight(items, sets)).toBeCloseTo(.012 * sets)
+      expect(bundleGoodsWeight(items, sets)).toBeCloseTo(.612 * sets)
+    }
   })
 
   it('preserves a manually selected bundle category across mixed SKU categories', () => {

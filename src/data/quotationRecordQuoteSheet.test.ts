@@ -60,6 +60,20 @@ describe('saved record customer table copying', () => {
 })
 
 
+it('copies a same-SKU three-piece set with set units and unchanged saved prices', () => {
+  const saved = normalizeQuotationRecord({ ...record(), primarySku: 'SKU-A', bundleItems: [
+    { sku: 'SKU-A', name: 'A', quantityPerSet: 3, effectiveWeightKg: .2, purchaseUnitPriceCny: 12, domesticFreightPerUnitCny: 1.5 },
+  ] })!
+  const before = JSON.stringify(saved)
+  const source = quotationRecordQuoteSheetSource(saved)
+  const sheet = buildCustomerQuoteSheet({ ...source, edits: newQuoteSheetEdits('Alex') })
+  expect(source.skus).toEqual(['SKU-A*3'])
+  expect(sheet.quantityLabels.slice(0, 2)).toEqual(['1 set', '2 sets'])
+  expect(sheet.rows[0].prices).toEqual([13, null, 0, 55.678])
+  expect(customerQuoteSheetTsv(sheet)).toContain('SKU-A*3')
+  expect(JSON.stringify(saved)).toBe(before)
+})
+
 it('shows per-set quantities from bundle SKU snapshots without price recalculation', () => {
   const saved = normalizeQuotationRecord({ ...record(), primarySku: 'OLD × 2', bundleItems: [{ sku: 'SKU-A', name: 'A', quantityPerSet: 2, effectiveWeightKg: 0.1, purchaseUnitPriceCny: 10, domesticFreightPerUnitCny: 1 }, { sku: 'SKU-B', name: 'B', quantityPerSet: 1, effectiveWeightKg: 0.2, purchaseUnitPriceCny: 20, domesticFreightPerUnitCny: 2 }] })!
   const source = quotationRecordQuoteSheetSource(saved)

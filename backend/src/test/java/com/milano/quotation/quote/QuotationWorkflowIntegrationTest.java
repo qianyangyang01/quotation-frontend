@@ -37,6 +37,31 @@ class QuotationWorkflowIntegrationTest {
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
+    @Test void savesAndReadsBackThreePiecesOfOneSkuAsABundle() throws Exception {
+        var session = authenticatedSession();
+        var body = """
+                {"customerName":"同款三件套客户","quoteMode":"bundle","primarySku":"SKU-1",
+                 "bundleItems":[{"sku":"SKU-1","name":"商品一","quantityPerSet":3,
+                   "effectiveWeightKg":0.2,"purchaseUnitPriceCny":12,"domesticFreightPerUnitCny":1.5}],
+                 "productCategory":"其他","logisticsAttribute":"普货","customerGrade":"S级客户",
+                 "monthlySalesEstimate":"10","productSummary":"SKU-1 × 3",
+                 "quoteOptions":[{"id":"same-sku-us","country":"美国","carrier":"承运商A","channel":"渠道A"}]}
+                """;
+        var result = mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
+                .header("Idempotency-Key", "same-sku-three-piece").contentType("application/json").content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.quoteMode").value("bundle"))
+                .andExpect(jsonPath("$.data.bundleItems.length()").value(1))
+                .andExpect(jsonPath("$.data.bundleItems[0].quantityPerSet").value(3)).andReturn();
+        var id = mapper.readTree(result.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+        mvc.perform(get("/api/v1/quotations/{id}", id).session(session))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.quoteMode").value("bundle"))
+                .andExpect(jsonPath("$.data.primarySku").value("SKU-1"))
+                .andExpect(jsonPath("$.data.bundleItems.length()").value(1))
+                .andExpect(jsonPath("$.data.bundleItems[0].quantityPerSet").value(3))
+                .andExpect(jsonPath("$.data.bundleItems[0].purchaseUnitPriceCny").value(12))
+                .andExpect(jsonPath("$.data.bundleItems[0].effectiveWeightKg").value(0.2));
+    }
+
     @Test void savesAverageRowOrderAndReadsItBackWithoutRewritingInitialPrices() throws Exception {
         var session = authenticatedSession();
         var input = new AverageQuotePlansTest().record();

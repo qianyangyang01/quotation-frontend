@@ -112,8 +112,8 @@ public class QuotationSubmissionValidator {
             return;
         }
         if (!"bundle".equals(mode)) return;
-        if (!items.isArray() || items.size() < 2) {
-            addOnce(errors, "bundleItems", "组合报价至少需要两个不同商品");
+        if (!items.isArray() || items.isEmpty()) {
+            addOnce(errors, "bundleItems", "组合报价每套至少需要两件商品，可使用同一 SKU");
             return;
         }
 
@@ -132,7 +132,8 @@ public class QuotationSubmissionValidator {
             if (!nonNegativeNumber(item.path("purchaseUnitPriceCny")) || !nonNegativeNumber(item.path("domesticFreightPerUnitCny")))
                 addOnce(errors, "bundleItems", "组合商品成本和国内运费不能为负数");
         }
-        if (unique.size() < 2) addOnce(errors, "bundleItems", "组合报价至少需要两个不同商品");
+        if (items.size() == 1 && items.get(0).path("quantityPerSet").asLong() < 2)
+            addOnce(errors, "bundleItems", "组合报价每套至少需要两件商品，可使用同一 SKU");
         var primarySkus = List.of(input.path("primarySku").asText("").split("[,，、+\\s]+"))
                 .stream().map(QuotationSubmissionValidator::normalizeSku).filter(value -> !value.isEmpty()).toList();
         if (!primarySkus.equals(skus)) addOnce(errors, "primarySku", "组合报价 SKU 必须与商品明细顺序一致");
