@@ -376,7 +376,6 @@ function dimensionSummary(record: PurchaseProductRecord) {
 function isLegacyImportJob(job: PurchaseImportJob) { return job.summary?.importProfile === 'legacy-2026' }
 function jobSourceLabel(job: PurchaseImportJob) { return isLegacyImportJob(job) ? '2026旧数据' : '新数据' }
 function freightDetailFields(record: PurchaseProductRecord) {
-  if (record.dataSource === 'legacy_2026') return [['旧数据单档运费（原表1件运费）', money(record.singleFreightCny)]]
   return [['1件总运费(CNY)', money(record.singleFreightCny)], ['10件总运费(CNY)', money(record.freight10Cny)], ['100件总运费(CNY)', money(record.freight100Cny)]]
 }
 
@@ -559,8 +558,8 @@ const detailFields = computed(() => detail.value ? [
       <label>13. 起订量(件)*<input v-model.number="editor.minOrderQty" type="number" min="1" step="1"></label><label>14. 基准采购单价(CNY/件)*<input v-model.number="editor.purchasePriceCny" type="number" min="0" step="0.01"></label>
       <label v-if="editor.dataSource!=='legacy_2026'">15. 阶梯价2起订量<input v-model.number="editor.tier2MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">16. 阶梯价2(CNY/件)<input v-model.number="editor.tier2PriceCny" type="number" min="0" step="0.01"></label>
       <label v-if="editor.dataSource!=='legacy_2026'">17. 阶梯价3起订量<input v-model.number="editor.tier3MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">18. 阶梯价3(CNY/件)<input v-model.number="editor.tier3PriceCny" type="number" min="0" step="0.01"></label>
-      <label>19. 1件总运费(CNY)<input v-model.number="editor.singleFreightCny" type="number" min="0" step="0.01"></label><label v-if="editor.dataSource!=='legacy_2026'">20. 10件总运费(CNY)<input v-model.number="editor.freight10Cny" type="number" min="0" step="0.01"></label>
-      <label v-if="editor.dataSource!=='legacy_2026'">21. 100件总运费(CNY)<input v-model.number="editor.freight100Cny" type="number" min="0" step="0.01"></label><label>22. 是否包邮<select v-model="editor.freeShipping"><option value="">暂无数据</option><option>是</option><option>否</option></select></label>
+      <label>19. 1件总运费(CNY)<input v-model.number="editor.singleFreightCny" type="number" min="0" step="0.01"></label><label>20. 10件总运费(CNY)<input v-model.number="editor.freight10Cny" type="number" min="0" step="0.01"><small>报价按此金额÷10分摊；旧数据留空时采用1件运费</small></label>
+      <label>21. 100件总运费(CNY)<input v-model.number="editor.freight100Cny" type="number" min="0" step="0.01"></label><label>22. 是否包邮<select v-model="editor.freeShipping"><option value="">暂无数据</option><option>是</option><option>否</option></select></label>
       <label>23. 含票价(CNY/件)<input v-model.number="editor.taxIncludedPriceCny" type="number" min="0" step="0.01"></label><label>24. 票点（8%填写0.08）<input v-model.number="editor.taxPoint" type="number" min="0" max="1" step="0.001"></label><label>25. 票类型<select v-model="editor.invoiceType"><option value="">暂无数据</option><option>普票</option><option>专票</option><option>不开票</option><option>收据</option><option>增值税专用发票</option><option>增值税普通发票</option></select></label>
       <label>26. 是否有货*<select v-model="editor.stockStatus"><option value="">暂无数据</option><option>有货</option><option>无货</option><option>待确认</option><option>定制款</option></select></label><label class="wide">27. 备注<textarea v-model="editor.notes"></textarea></label>
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>

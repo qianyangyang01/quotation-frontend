@@ -295,7 +295,7 @@ public class PurchaseProductService {
     private static Optional<String> referencedSku(String value){if(value==null)return Optional.empty();var sku=value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+","");return sku.isEmpty()||sku.length()>96||!sku.matches("[A-Z0-9._/-]+")?Optional.empty():Optional.of(sku);}
     private static void addReferencedSku(Collection<String> skus,String value){referencedSku(value).ifPresent(skus::add);}
     private static void validatePayload(ObjectNode object) {
-        for (var field : List.of("weightG", "minOrderQty", "purchasePriceCny", "tier2PriceCny", "tier3PriceCny", "taxIncludedPriceCny", "singleFreightCny")) {
+        for (var field : List.of("weightG", "minOrderQty", "purchasePriceCny", "tier2PriceCny", "tier3PriceCny", "taxIncludedPriceCny", "singleFreightCny", "freight10Cny", "freight100Cny")) {
             var value=object.path(field);
             if (object.hasNonNull(field) && (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble()<0)) throw AppException.unprocessable(field+"必须为有效非负数");
         }

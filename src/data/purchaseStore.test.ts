@@ -6,7 +6,30 @@ describe('purchase catalog state', () => {
     expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: 2.1 }))).toBe(.21)
     expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: .01 }))).toBe(.001)
     expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: 0 }))).toBe(0)
-    expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ dataSource: 'legacy_2026', singleFreightCny: 1.7, freight10Cny: 99 }))).toBe(1.7)
+    expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ dataSource: 'legacy_2026', singleFreightCny: 1.7, freight10Cny: 99 }))).toBe(9.9)
+  })
+
+  it.each([
+    { freight10Cny: 5, expected: .5 },
+    { freight10Cny: 0, expected: 0 },
+    { freight10Cny: .01, expected: .001 },
+    { freight10Cny: null, expected: 5 },
+    { freight10Cny: undefined, expected: 5 },
+  ])('uses completed legacy batch freight, including zero, and falls back only when missing: $freight10Cny', ({ freight10Cny, expected }) => {
+    const record = normalizePurchaseRecord({ dataSource: 'legacy_2026', singleFreightCny: 5, freight10Cny })
+    expect(purchaseQuoteFreightUnit(record)).toBe(expected)
+  })
+
+  it.each(['legacy_2026', 'standard'] as const)('keeps free shipping at zero for %s records with freight amounts', dataSource => {
+    expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ dataSource, freeShipping: '是', singleFreightCny: 5, freight10Cny: 5 }))).toBe(0)
+  })
+
+  it.each(['legacy_2026', 'standard'] as const)('blocks negative batch freight from entering %s quotations', dataSource => {
+    const record = normalizePurchaseRecord({ sku: 'YT2600676', dataSource, weightG: 70, minOrderQty: 1,
+      purchasePriceCny: 3.9, singleFreightCny: 5, freight10Cny: -5, freight100Cny: -11.5 })
+    expect(record.quoteReady).toBe(false)
+    expect(record.quotationBlockingReasons).toEqual(expect.arrayContaining(['10件运费无效', '100件运费无效']))
+    expect(findPurchaseProduct([record], record.sku)).toBeUndefined()
   })
 
   it('preserves explicit image removal while still accepting old image-only records', () => {

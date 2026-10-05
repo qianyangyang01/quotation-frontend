@@ -47,13 +47,15 @@ let state: {
   addBundleItem: () => void
   financeTaxSettings: FinanceTaxSettings
   financeSurchargeSettings: FinanceTaxSettings
+  customerGradeSettings: Array<{ grade: string; coefficient: number }>
+  exchange: { usd: number; eurUsd: number }
   bundleGoodsWeight: (sets?: number) => number
   quantityCostBreakdown: (product: QuotationProduct, rule: string, sets: number, country: string, provider: string, region: string, channelKey: string) => { freight: number; cost: number; quoteUsd: number; quoteCny: number; tax: { configured: boolean; surchargeUsd: number } } | null
 }
 beforeEach(() => { vi.clearAllMocks(); clearFinanceSettingsCache(); purchaseOverride = {} })
 afterEach(() => { app?.unmount(); app = undefined; host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache(); replaceLogisticsRules([]) })
 
-async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<string | undefined> = [], secondSku = 'SINGLE', omitProductSnapshot = false) {
+async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<string | undefined> = [], secondSku = 'SINGLE', omitProductSnapshot = false, sku = record.sku) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return {
       'country-classification': { value: [], _version: 1 }, 'channel-policies': { value: [{id:'普货',category:'普货',enabled:true,countryRules:[{country:'美国',allowedChannels:['1::测试::A']}]}], _version: 1 },
@@ -65,15 +67,15 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<st
     if (path === '/quotation-readiness') return { ready: true, missing: [] }
     if (path === '/quotation-templates') return []
     if (path === '/quotation-drafts/mine/state') return { exists: true, version: 1, sourceQuote: { id: 'withdrawn', no: 'QT-WITHDRAWN', version: 1 }, payload: {
-      schemaVersion: 2, quoteMode: mode, customerName: '阶梯回归', skuSearch: record.sku,
+      schemaVersion: 2, quoteMode: mode, customerName: '阶梯回归', skuSearch: sku,
       selectedCustomerGrade: 'S', monthlySalesEstimate: estimate, logisticsAttribute: '普货',
-      ...(omitProductSnapshot ? {} : { product: { sku: record.sku, quantity: 1, purchaseInvoiceTaxApplied: true } }),
+      ...(omitProductSnapshot ? {} : { product: { sku, quantity: 1, purchaseInvoiceTaxApplied: true } }),
       bundleItems: [
-        { sku: record.sku, purchaseTier: tiers[0], quantityPerSet: 2, purchaseInvoiceTaxApplied: true },
+        { sku, purchaseTier: tiers[0], quantityPerSet: 2, purchaseInvoiceTaxApplied: true },
         { sku: secondSku, purchaseTier: tiers[1], quantityPerSet: 1, purchaseInvoiceTaxApplied: true },
       ],
     } }
-    if (path === `/purchase-products/${record.sku}`) return { ...record, ...purchaseOverride }
+    if (path === `/purchase-products/${sku}`) return { ...record, ...purchaseOverride, sku }
     if (path === '/purchase-products/BK2601961') return { ...record, sku: 'BK2601961', purchasePriceCny: 20, tier2PriceCny: 18 }
     if (path === '/purchase-products/SINGLE') return { sku: 'SINGLE', category: '宠物用品', weightG: 100, minOrderQty: 100, purchasePriceCny: 20, taxPoint: .02, freight10Cny: 5 }
     throw new Error(`Unexpected API: ${path}`)
@@ -283,6 +285,60 @@ it('restores a withdrawn quotation containing a SKU but no product snapshot with
   expect(state.products[0]?.sku).toBe(record.sku)
   expect(state.products[0]?.purchaseBaseUnitPrice).toBe(13.8)
   expect(host.textContent).not.toContain('primaryChannelKey')
+})
+
+it.each(['single', 'bundle'] as const)('refreshes legacy domestic freight from current batch data in the %s editor and restored drafts', async mode => {
+  purchaseOverride = { dataSource: 'legacy_2026', singleFreightCny: 5, freight10Cny: null }
+  await mount(mode)
+  const freight = () => mode === 'single' ? state.products[0]!.purchaseFreightPerUnit : state.bundleItems[0]!.purchaseFreightPerUnit
+  expect(freight()).toBe(5)
+  const draft = state.draftPayload()
+  purchaseOverride.freight10Cny = 5
+  await state.applyDraftPayload(draft, undefined, { restoreQuotation: true })
+  expect(freight()).toBe(.5)
+  if (mode === 'bundle') expect(state.bundleDomesticFreight(10)).toBe(15) // 2 legacy items + 1 standard item per set.
+  purchaseOverride.freight10Cny = 0
+  if (mode === 'single') await state.queryProduct()
+  else await state.queryBundleItems()
+  expect(freight()).toBe(0)
+})
+
+it('quotes ten YT2600676 items to NL at $21.90 using the recorded five-yuan batch freight', async () => {
+  // Production inputs observed 2026-10-05; this regression does not access production.
+  purchaseOverride = {
+    dataSource: 'legacy_2026', category: '袜子', weightG: 70, minOrderQty: 1,
+    purchasePriceCny: 3.61, sourceQuotedPriceCny: 3.9, purchasePriceBasis: 'tax_included',
+    taxIncludedPriceCny: 3.61, taxPoint: 0, invoiceType: '普票',
+    singleFreightCny: 5, freight10Cny: 5, freight100Cny: 11.5,
+    tier2MinQty: null, tier2PriceCny: null, tier3MinQty: null, tier3PriceCny: null,
+  }
+  await mount('single', '10', [], 'SINGLE', false, 'YT2600676')
+  state.customerGradeSettings.find(row => row.grade === 'S')!.coefficient = 1.21605
+  state.exchange = { usd: 6.7, eurUsd: 1.16 }
+  const name = '云途欧洲专线（特惠普货）-CHC'
+  const channelKey = '593::云途::C-f79790fa71c225481346'
+  replaceLogisticsRules([{
+    id: 593, name, billingVerified: true, status: '启用',
+    relations: [{ carrier: '云途', channel: name, channelCode: 'C-f79790fa71c225481346' }],
+    prices: [{ areaName: '荷兰', countryCode: 'NL', weightFromKg: 0, weightToKg: 1, pricingModel: 'per-kg',
+      quoteReady: true, pricePerKg: 59, registrationFee: 23, minChargeWeightKg: 0,
+      startWeightKg: 0, firstWeightKg: 0, firstWeightPrice: 0, nextWeightKg: 0, nextWeightPrice: 0,
+      intervalPrice: 0, surcharge: 0, fuelSurchargeRate: 0, volumetric: false, zoneName: '', prohibitedMarks: '', allowedMarks: '' }],
+  } as LogisticsRule])
+  state.financeTaxSettings = {
+    countries: [{ country: '欧盟', selected: true, enabled: true, fixedFeeUsd: 3.51, sortOrder: 1,
+      channelRules: [{ key: channelKey, mode: 'weight', perKg: 1.5, amount: .6, currency: 'EUR' }] }],
+    providers: [], updatedAt: 'test',
+  }
+  state.financeSurchargeSettings = { countries: [], providers: [], updatedAt: 'test' }
+  const product = state.products[0]!
+  expect(product).toMatchObject({ sku: 'YT2600676', purchase: 3.94, purchaseFreightPerUnit: .5 })
+  const quote = () => state.quantityCostBreakdown(product, name, 10, '荷兰', '云途', '', channelKey)
+  // Goods 39.40 + domestic 5 + international (0.72 * 59 + 23) = 109.88 CNY.
+  // S coefficient 1.21605 / 6.7 + duty 1.95 USD, rounded upward to 0.05 USD.
+  expect(quote()).toMatchObject({ cost: 109.88, freight: 65.48, quoteUsd: 21.9, tax: { configured: true } })
+  product.purchaseFreightPerUnit = 5
+  expect(quote()?.quoteUsd).toBe(30.1) // Reproduces the reported screenshot with the old freight selection.
 })
 
 it.each(['single', 'bundle'] as const)('recalculates the legacy 6.80/1%% case in the %s editor and after draft restoration', async mode => {

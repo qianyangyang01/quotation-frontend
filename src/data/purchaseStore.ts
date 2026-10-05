@@ -96,7 +96,11 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const derivedMissing = [reservedSku || skuOrigin === 'system' || !sku ? '正式SKU' : '', weightG == null || weightG <= 0 ? (dataSource === 'legacy_2026' ? '克重' : '重量') : '', !hasPrice ? '有效价格' : '', dataSource === 'legacy_2026' && (base.singleFreightCny == null || base.singleFreightCny < 0) ? '1件运费' : '', dataSource !== 'legacy_2026' && (minOrderQty == null || minOrderQty <= 0) ? '起订量' : ''].filter(Boolean)
   // These reasons describe the current fields, not permanent validation errors.
   // Reusing a normalized empty form or an old API payload must not retain them.
-  const quotationBlockingReasons = derivedMissing
+  const invalidBatchFreight = [
+    [base.freight10Cny, '10件运费无效'], [base.freight100Cny, '100件运费无效'],
+  ] as const
+  const quotationBlockingReasons = [...derivedMissing, ...invalidBatchFreight
+    .filter(([amount]) => amount != null && amount < 0).map(([, reason]) => reason)]
   const quoteReady = catalogState === 'ready' && quotationBlockingReasons.length === 0
   const missing = quotationBlockingReasons
   const status = catalogState === 'pending_template' ? (dataSource === 'legacy_2026' ? `关键信息待补全（不可报价）${missing.length ? `：${missing.join('、')}` : ''}` : '模板待补全（不可报价）') : catalogState === 'disabled' ? '已停用' : skuOrigin === 'system' ? '系统生成SKU，待修改' : quoteReady ? '资料完整' : dataSource === 'legacy_2026' ? `关键信息待补全（不可报价）${missing.length ? `：${missing.join('、')}` : ''}` : `待补充${missing.length ? `：${missing.join('、')}` : ''}`
@@ -173,7 +177,7 @@ export function purchaseUnitPrice(record: PurchaseProductRecord, quantity: numbe
 export function purchaseFreightChoices(record: PurchaseProductRecord) {
   if (record.freeShipping === '是') return (record.dataSource === 'legacy_2026' ? [1] : [1, 10, 100]).map(quantity => ({ quantity, totalFreightCny: 0, unitFreightCny: 0 }))
   return [{ quantity: 1, totalFreightCny: record.singleFreightCny }, { quantity: 10, totalFreightCny: record.freight10Cny }, { quantity: 100, totalFreightCny: record.freight100Cny }]
-    .filter((item): item is { quantity: number; totalFreightCny: number } => item.totalFreightCny != null)
+    .filter((item): item is { quantity: number; totalFreightCny: number } => item.totalFreightCny != null && Number.isFinite(item.totalFreightCny) && item.totalFreightCny >= 0)
     .map(item => ({ ...item, unitFreightCny: decimal(item.totalFreightCny).div(item.quantity).toNumber() }))
 }
 
@@ -182,7 +186,11 @@ export function purchaseFreightUnit(record: PurchaseProductRecord, batchQuantity
 }
 export function purchaseQuoteFreightUnit(record: PurchaseProductRecord) {
   const choices = purchaseFreightChoices(record)
-  return (record.dataSource === 'legacy_2026' ? choices.find(item => item.quantity === 1) : choices.find(item => item.quantity === 10))?.unitFreightCny ?? 0
+  // Updated legacy records can supply batch freight too; only fall back to
+  // their original single-piece rate when the ten-piece tier is absent.
+  return choices.find(item => item.quantity === 10)?.unitFreightCny
+    ?? (record.dataSource === 'legacy_2026' ? choices.find(item => item.quantity === 1)?.unitFreightCny : undefined)
+    ?? 0
 }
 export function purchaseSourceLabel(record: Pick<PurchaseProductRecord, 'dataSource'>) { return record.dataSource === 'legacy_2026' ? '2026旧数据' : '新数据' }
 export function purchaseQuoteBlockingMessage(record: PurchaseProductRecord) {

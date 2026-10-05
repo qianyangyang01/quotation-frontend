@@ -111,6 +111,32 @@ class PurchaseProductServiceTest {
     private tools.jackson.databind.node.ObjectNode pasted(String sku) {
         return JsonNodeFactory.instance.objectNode().put("sku",sku).put("weightG",50).put("minOrderQty",1).put("purchasePriceCny",9.24).put("singleFreightCny",3.5).put("freight10Cny",3.5).put("taxPoint",0.08);
     }
+    @Test void rejectsInvalidBatchFreightBeforeAnyPurchaseWrite() {
+        for (var field : List.of("freight10Cny", "freight100Cny")) {
+            for (var invalid : List.of(
+                    JsonNodeFactory.instance.numberNode(-1), JsonNodeFactory.instance.numberNode(Double.NaN),
+                    JsonNodeFactory.instance.numberNode(Double.POSITIVE_INFINITY), JsonNodeFactory.instance.textNode("待确认"))) {
+                var input = pasted("FREIGHT-INVALID").put("dataSource", "legacy_2026");
+                input.set(field, invalid);
+                assertTrue(assertThrows(AppException.class, () -> service.upsert(input)).getMessage().contains(field));
+            }
+        }
+        assertTrue(rows.isEmpty());
+        verify(products, never()).saveAndFlush(any());
+    }
+
+    @Test void preservesLegacyBatchFreightZeroAndMissingValuesWhenSaving() {
+        for (var amount : List.of(0.0, 5.0)) {
+            var input = pasted("FREIGHT-" + (int) amount.doubleValue()).put("dataSource", "legacy_2026")
+                    .put("freight10Cny", amount).put("freight100Cny", 11.5);
+            var saved = service.upsert(input);
+            assertEquals(amount, saved.path("freight10Cny").asDouble());
+            assertEquals(11.5, saved.path("freight100Cny").asDouble());
+        }
+        var input = pasted("FREIGHT-MISSING").put("dataSource", "legacy_2026");
+        input.remove("freight10Cny");
+        assertFalse(service.upsert(input).hasNonNull("freight10Cny"));
+    }
     @Test void pastedRowsValidateBeforeWritingAndNeverOverwriteExistingSku() {
         var invalid=pasted("P-2"); invalid.remove("freight10Cny");
         assertThrows(AppException.class,()->service.createPasted(List.of(pasted("P-1"),invalid)));

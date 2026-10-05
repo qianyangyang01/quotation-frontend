@@ -29,6 +29,7 @@ const finance = {
 const source = { id: 'original', no: 'QT-OLD', customerName: '原客户', primarySku: 'BK100', quoteMode: 'single',
   logisticsAttribute: '普货', customerGrade: '新客户', country: '日本', carrier: '原物流', rule: '原规则', channel: '原渠道',
   quoteConfirmed: true, status: 'won', customQuoteQuantity: 8, purchaseUnitPriceCny: 999,
+  domesticFreightPerUnitCny: 5, systemQuoteUsd: 30.1,
   quoteOptions: [{ id: 'option', country: '日本', channelKey: '1::原物流::JP', carrier: '原物流', rule: '原规则', channel: '原渠道', isPrimary: true }],
 }
 const oldDraft = { schemaVersion: 2, quoteMode: 'single', customerName: '未完成客户', skuSearch: '', logisticsAttribute: '普货' }
@@ -38,11 +39,12 @@ let state: { flushDraft: () => Promise<void>; persistQuotation: (input: never) =
   quoteMatrixMode: 'common' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[];
   templateSelectionState: 'loading' | 'ready' | 'error'; templateSaveBlockReason: string; attemptSave: () => Promise<void> }
 let purchaseFailure = false
+let purchaseOverride: Record<string, unknown> = {}
 let sourceFailure = false
 beforeEach(() => {
   clearFinanceSettingsCache(); vi.clearAllMocks(); localStorage.clear()
   authState.current = { id: 'employee-a', account: 'A', name: '业务员 A', role: 'employee', status: 'enabled', mustChangePassword: false, passwordUpdatedAt: '' }
-  purchaseFailure = false; sourceFailure = false; router.query = { reissue: 'original', release: 'local' }
+  purchaseFailure = false; purchaseOverride = {}; sourceFailure = false; router.query = { reissue: 'original', release: 'local' }
 })
 afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks(); localStorage.clear(); authState.current = null })
 async function mount(existing: boolean, withdrawn = false) {
@@ -54,7 +56,7 @@ async function mount(existing: boolean, withdrawn = false) {
     if (path === '/quotation-drafts/mine/state') return { exists: existing, version: existing ? 7 : -1, payload: existing ? oldDraft : null, ...(withdrawn ? { sourceQuote: { id: 'original', no: 'QT-OLD', version: 8 } } : {}) }
     if (path === '/purchase-products/BK100') {
       if (purchaseFailure) throw new Error('采购资料读取失败')
-      return { sku: 'BK100', category: '日用品', catalogState: 'ready', weightG: 50, minOrderQty: 1, purchasePriceCny: 12, singleFreightCny: 0, taxPoint: 0 }
+      return { sku: 'BK100', category: '日用品', catalogState: 'ready', weightG: 50, minOrderQty: 1, purchasePriceCny: 12, singleFreightCny: 0, taxPoint: 0, ...purchaseOverride }
     }
     throw new Error(`Unexpected API: ${path}`)
   })
@@ -69,6 +71,18 @@ async function mount(existing: boolean, withdrawn = false) {
   await vi.waitFor(() => expect(state.draftReady || state.draftStatus === 'error').toBe(true))
 }
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
+
+it('uses current legacy batch freight on explicit reissue and preserves the original quotation snapshot', async () => {
+  purchaseOverride = { dataSource: 'legacy_2026', invoiceType: '普票', singleFreightCny: 5, freight10Cny: 5 }
+  const original = JSON.stringify(source)
+  await mount(false)
+  await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
+  expect(state.products[0]).toMatchObject({ purchaseFreightPerUnit: .5 })
+  expect(JSON.stringify(source)).toBe(original)
+  expect(api.post).not.toHaveBeenCalled()
+  expect(api.patch).not.toHaveBeenCalled()
+  expect(api.put).not.toHaveBeenCalled()
+})
 
 it('reissues in memory, reads current purchase data and removes unavailable source channels without creating a record', async () => {
   rememberQuotationCustomer('employee-a', { name: '上次提交客户', selectedCustomerId: '' })

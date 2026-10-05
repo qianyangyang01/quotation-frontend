@@ -17,6 +17,25 @@ async function search(text:string){const input=document.querySelector('.toolbar 
 beforeEach(()=>{vi.useFakeTimers();mocks.page.mockResolvedValue(page('INITIAL'));mocks.stats.mockResolvedValue({total:1,ready:1,pending:0,generatedSku:0})})
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers()})
 
+it('shows and saves legacy batch freight in both procurement details and the editor', async () => {
+  const legacy = normalizePurchaseRecord({ ...row('YT2600676'), dataSource: 'legacy_2026', singleFreightCny: 5, freight10Cny: 5, freight100Cny: 11.5 })
+  mocks.page.mockResolvedValue({ ...page(legacy.sku), items: [legacy] })
+  await mount()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b => b.textContent === '查看详情')!.click(); await flush()
+  expect(document.querySelector('.detail-modal')?.textContent).toContain('10件总运费(CNY)')
+  expect(document.querySelector('.detail-modal')?.textContent).toContain('100件总运费(CNY)')
+  document.querySelector<HTMLButtonElement>('.detail-modal .close')!.click(); await flush()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b => b.textContent === '编辑')!.click(); await flush()
+  const field = Array.from(document.querySelectorAll('.editor-modal label')).find(l => l.textContent?.includes('10件总运费(CNY)'))!
+  const input = field.querySelector('input')!
+  expect(input.value).toBe('5')
+  expect(field.textContent).toContain('÷10分摊')
+  input.value = '0'; input.dispatchEvent(new Event('input', { bubbles: true })); await nextTick()
+  mocks.update.mockResolvedValueOnce({ ...legacy, freight10Cny: 0 })
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b => b.textContent === '保存资料')!.click(); await flush()
+  expect(mocks.update).toHaveBeenCalledWith('YT2600676', expect.objectContaining({ freight10Cny: 0, freight100Cny: 11.5, _version: 5 }))
+})
+
 it('aborts superseded searches immediately and never applies their late results or repeats statistics',async()=>{
   await mount()
   let resolveOld!:(value:ReturnType<typeof page>)=>void

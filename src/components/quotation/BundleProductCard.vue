@@ -71,7 +71,7 @@ defineEmits<{
     <div class="summary-grid">
       <div><span>单套采购成本</span><b>¥{{ purchaseCost.toFixed(2) }}</b><small>各 SKU 按各自所选阶梯价及采购票点计算</small></div>
       <div><span>单套含包材重量（g）</span><b>{{ specialPackagingError ? '—' : grams(totalWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></div>
-      <div><span>单套国内运费</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>标准数据采用10件运费平摊；2026旧数据采用唯一单档运费</small></div>
+      <div><span>单套国内运费</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>采用10件总运费平摊；旧数据未填10件运费时采用1件运费；包邮为0</small></div>
     </div>
   </section>
 </template>
