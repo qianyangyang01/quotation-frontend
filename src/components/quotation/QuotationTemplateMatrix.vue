@@ -596,5 +596,31 @@ function formatTime(value: string) {
 .manager-actions button{white-space:nowrap;cursor:pointer}
 .manager-actions .details-toggle{border-color:#cad8e2;color:#365b73;background:#f3f7fa}
 .manager-actions .details-toggle[aria-expanded="true"]{border-color:#64869c;background:#eaf2f7}
+.template-workbench{font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif}
+.template-workbench :is(button,input,select){font-family:inherit}
+.template-toolbar{flex-wrap:wrap}
+.template-actions{flex:1 1 640px;flex-wrap:wrap;width:640px;max-width:100%;gap:10px}
+.template-actions label{flex:1 1 320px;min-width:0;color:#475569;font-size:13px;font-weight:600}
+.template-actions select{width:100%;min-width:0;height:44px;box-sizing:border-box;padding:0 12px;border-color:#94a3b8;color:#17232d;font-size:15px;font-weight:700;line-height:1.5}
+.template-actions select option{font-size:15px;font-weight:600}
+.template-actions select:focus-visible{outline:2px solid #b86500;outline-offset:2px}
+.template-actions button,.template-status button{min-height:44px;height:auto;padding:9px 14px;font-size:14px;font-weight:700;line-height:1.5}
+.template-status{flex-wrap:wrap}
+.status-actions{flex-wrap:wrap}
+.active-template b,.empty-template b{font-size:15px}
+.active-template small,.empty-template small,.active-template em,.template-status>p{font-size:13px;line-height:1.6}
+.active-template small,.empty-template small{color:#526170}
+.new-template-name{min-width:0;font-size:13px;color:#475569}
+.new-template-name input{height:44px;font-size:15px}
+.template-intro span,.template-manager>header span,.create-template>div span,.create-template label,.template-name>span,.template-name>small,.template-country-tags span,.manager-empty span,.template-manager>footer{color:#526170;font-size:13px;line-height:1.6}
+.create-template>div b,.template-name>b{font-size:15px}
+.template-name>em{font-size:12px}
+.create-template input,.template-name>input{min-width:0;height:40px;font-size:14px}
+.create-template button,.template-name>button,.manager-actions button,.template-manager>footer button{height:auto;min-height:38px;padding:7px 10px;font-size:13px;line-height:1.5}
+.manager-list article{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+.manager-actions{grid-column:1/-1;flex-wrap:wrap}
+.template-feedback{font-size:14px;line-height:1.6}
+@media(max-width:1050px){.manager-list article{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:680px){.template-actions label{flex:auto}.status-actions button{min-height:44px}}
 @media(max-width:680px){.status-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.status-actions button{height:auto;min-height:38px;padding:7px 9px}.status-actions .update{grid-column:1/-1}}
 </style>
