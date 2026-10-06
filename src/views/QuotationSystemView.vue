@@ -2230,6 +2230,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
+          <button type="button" class="save-selection-template" :disabled="!commonQuoteRows.length || logisticsLoadState !== 'ready'" @click="createTemplateFromCurrentMode">将当前清单存为模板</button>
           <QuotationCommonMatrix :ref="instance => commonMatrix = instance as typeof commonMatrix" :auto-load-country="hasQueriedQuotationProduct && !draftNeedsQuery && ['ready', 'empty'].includes(logisticsLoadState)" :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
             :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
@@ -2237,9 +2238,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
             :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
             @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
-          >
-            <template #toolbar-actions><button type="button" class="save-selection-template" :disabled="!commonQuoteRows.length || logisticsLoadState !== 'ready'" @click="createTemplateFromCurrentMode">将当前清单存为模板</button></template>
-          </QuotationCommonMatrix>
+          />
         </div>
 
         <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel">

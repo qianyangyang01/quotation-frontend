@@ -443,7 +443,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
       <div class="head-actions"><label v-if="variant !== 'template'">自定义数量 <input :value="customQuantity" type="number" min="1" @input="$emit('update:customQuantity',Number(($event.target as HTMLInputElement).value))"> {{ unitLabel || '件' }}</label><button @click="showCountryPicker=true">＋ 添加国家</button></div>
     </header>
     <QuoteTaxLegend /><p v-if="presetLoadError" role="alert">{{ presetLoadError }} <button :disabled="sourcePending" @click="applyPresetSelection">重试加载模板渠道</button></p><p v-if="regionFeedback" role="status">{{ regionFeedback }}</p>
-    <div v-if="selectedCountries.length" class="country-card-grid">
+    <div class="country-card-grid">
       <article v-for="country in selectedCountries" :key="country" class="country-card">
         <header>
           <div class="country-name"><i>{{ countryFlag(countrySummary(country)?.code || '') }}</i><b>{{ country }}</b><em>{{ countrySummary(country)?.code }}</em><span>{{ selectedRows(country).length }} 条已选 · {{ availableRows(country).length }} 条可用</span></div>
@@ -462,8 +462,7 @@ function formatCny(value: number | null) { return value == null ? '—' : `¥${q
       </article>
     </div>
 
-    <p v-if="variant === 'template' && !selectedCountries.length" class="template-empty-state">尚未添加国家与渠道</p>
-    <button v-if="variant !== 'template'" class="add-country-empty" @click="showCountryPicker=true"><b>还需要报价其他国家？</b><span>＋ 添加其他国家</span></button>
+    <button class="add-country-empty" @click="showCountryPicker=true"><b>{{ variant === 'template' ? '本次还需要临时增加其他国家？' : '还需要报价其他国家？' }}</b><span>＋ 添加其他国家</span></button>
     <footer><span v-if="variant === 'template'">本次应用 {{ selectedCountries.length }} 个国家 · {{ allSelectedRows.length }} 条模板渠道（临时调整不会修改模板）</span><span v-else>共 {{ selectedCountries.length }} 个国家 · {{ allSelectedRows.length }} 条指定渠道</span><button class="copy" :disabled="!allSelectedRows.length" @click="$emit('copy',allSelectedRows)">▦ 复制表格数据</button></footer>
   </section>
 

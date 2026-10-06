@@ -421,6 +421,10 @@ function formatTime(value: string) {
 <template>
   <section class="template-workbench">
     <header class="template-toolbar">
+      <div class="template-intro">
+        <p>MODE B · PERSONAL QUOTATION TEMPLATE</p>
+        <h2>我的报价模板</h2>
+      </div>
       <div class="template-actions">
         <label>
           <span>选择个人模板</span>
@@ -432,18 +436,14 @@ function formatTime(value: string) {
           </select>
         </label>
         <button class="apply" :disabled="!selectedTemplate || savingTemplate" @click="applyTemplate()">⚡ 一键应用</button>
-        <span class="template-state-badge">{{ activeTemplate ? '已应用' : newTemplateMode ? '新建中' : '未应用' }}</span>
-        <label v-if="newTemplateMode && !activeTemplate" class="new-template-name">模板名称<input v-model="createName" :disabled="savingTemplate" maxlength="40" placeholder="输入模板名称"></label>
-        <button class="template-manager-button" @click="showManager = true">⚙ 管理我的模板</button>
-        <button v-if="activeTemplate" class="update" :disabled="!canUpdateTemplate" @click="updateActiveFromCurrent">更新模板“{{ activeTemplate.name }}”</button>
-        <button v-else class="save-new-template" :disabled="savingTemplate || (newTemplateMode && (!canSaveSelection || !createName.trim()))" @click="newTemplateMode ? createFromCurrent() : (showManager = true)">{{ savingTemplate ? '保存中…' : '保存' }}</button>
+        <button @click="showManager = true">⚙ 管理我的模板</button>
       </div>
     </header>
 
     <p v-if="templatesLoading" role="status">正在加载个人模板…</p>
     <p v-else-if="templatesError" role="alert">{{ templatesError }} <button @click="refreshTemplates()">重新加载模板</button></p>
 
-    <div v-if="activeTemplate" class="template-status">
+    <div class="template-status">
       <template v-if="activeTemplate">
         <div class="active-template">
           <i>✓</i>
@@ -458,7 +458,13 @@ function formatTime(value: string) {
         <div class="status-actions">
           <button @click="applyTemplate(activeTemplate)">恢复模板已保存清单</button>
           <button class="clear" :class="{ confirming: pendingClear }" @click="clearCurrentSelection">{{ pendingClear ? '确认清空清单' : '清空本次清单' }}</button>
+          <button class="update" :disabled="!canUpdateTemplate" @click="updateActiveFromCurrent">更新模板“{{ activeTemplate.name }}”</button>
         </div>
+      </template>
+      <template v-else>
+        <div class="empty-template"><i>☆</i><span><b>{{ newTemplateMode ? '新建模板' : '尚未应用个人模板' }}</b><small v-if="newTemplateMode">在下方添加国家与渠道，填写模板名称后保存。</small></span></div>
+        <label v-if="newTemplateMode" class="new-template-name">模板名称<input v-model="createName" :disabled="savingTemplate" maxlength="40" placeholder="输入模板名称"></label>
+        <button class="save-new-template" :disabled="savingTemplate || (newTemplateMode && (!canSaveSelection || !createName.trim()))" @click="newTemplateMode ? createFromCurrent() : (showManager = true)">{{ savingTemplate ? '保存中…' : '保存' }}</button>
       </template>
     </div>
 
