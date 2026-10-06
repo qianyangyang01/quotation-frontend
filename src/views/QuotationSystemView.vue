@@ -305,7 +305,7 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
     supplier: record?.quotationOwner || '',
     image: record?.image || '',
     physicalImage: record?.physicalImage || '',
-    stockStatus: record?.stockStatus || '待确认',
+    stockStatus: record?.stockStatus ?? '',
     quantityPerSet,
     purchaseUnitPrice: pricing?.effectiveUnitPriceCny || 0,
     purchaseBaseUnitPrice: pricing?.baseUnitPriceCny || 0,
@@ -422,7 +422,7 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceT
   p.supplier = record.quotationOwner || '待补充'
   p.image = record.image
   p.physicalImage = record.physicalImage
-  p.stockStatus = record.stockStatus || '待确认'
+  p.stockStatus = record.stockStatus ?? ''
   applyProductPurchasePricing(p, record, invoiceTaxApplied)
   p.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record)
   p.netWeight = record.weightKg || 0
@@ -528,7 +528,7 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   item.supplier = record.quotationOwner || '待补充'
   item.image = record.image
   item.physicalImage = record.physicalImage
-  item.stockStatus = record.stockStatus || '待确认'
+  item.stockStatus = record.stockStatus ?? ''
   if (!draftNeedsQuery.value) item.customWeightKg = null
   item.weightKg = record.weightKg || 0
   applyBundlePurchasePricing(item, record, true)
@@ -2194,7 +2194,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode"
           @update:sku-search="skuSearch=$event" @update:customer-name="typeCustomerName" @select-customer="selectFinanceCustomer" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade"
-          @query="queryProduct" @query-bundle="queryBundleItems" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
+          @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
         <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ quoteMode === 'bundle' ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
@@ -2209,7 +2209,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           <BundleProductCard
             :items="bundleItems" :purchase-cost="bundlePurchaseCost(1)"
             :base-weight="bundleBaseWeight(1)" :packaging-weight="bundlePackagingWeight(1)" :total-weight="bundleGoodsWeight(1)" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" :domestic-freight="bundleDomesticFreight(1)"
-            @add="addBundleItem" @remove="removeBundleItem" @query="queryBundleItem"
+            @add="addBundleItem" @remove="removeBundleItem" @query="queryBundleItem" @query-all="queryBundleItems"
             @quantity-change="updateBundleItemQuantity" @weight-change="updateBundleItemWeight"
             @tier-change="changeBundleItemTier"
           />

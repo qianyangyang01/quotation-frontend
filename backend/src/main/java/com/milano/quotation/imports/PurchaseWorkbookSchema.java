@@ -4,8 +4,8 @@ import java.util.*;
 
 /** Position-independent header mapping shared by text and embedded-image imports. */
 final class PurchaseWorkbookSchema {
-    static final List<String> LEGACY_HEADERS=List.of("SKU*","类别*","产品图片（嵌入本格）","实物图（嵌入本格）","报价人*","报价日期*","尺码","颜色","克重(g)*","长(cm)*","宽(cm)*","高(cm)*","起订量(件)*","基准采购单价(CNY/件)*","阶梯价2起订量","阶梯价2(CNY/件)","阶梯价3起订量","阶梯价3(CNY/件)","1件总运费(CNY)","10件总运费(CNY)","100件总运费(CNY)","是否包邮","含票价(CNY/件)","票类型","是否有货*","备注","工厂信息","货源链接1","货源链接2","货源链接3","相似货源","审核备注");
-    static final List<String> INTERNATIONAL_HEADERS=List.of("实物图（嵌入本格）","报价日期*","报价人*","备注","SKU*","产品图片（嵌入本格）","克重(g)*","尺码","颜色","材质","长(cm)*","宽(cm)*","高(cm)*","起订量(件)*","基准采购单价(CNY/件)*","阶梯价2起订量","阶梯价2(CNY/件)","阶梯价3起订量","阶梯价3(CNY/件)","1件总运费(CNY)","10件总运费(CNY)","100件总运费(CNY)","是否包邮","含票价(CNY/件)","票点","票类型","类别","是否有货*","工厂信息","审核备注","货源链接1","货源链接2","货源链接3","相似货源");
+    static final List<String> LEGACY_HEADERS=List.of("SKU*","类别*","产品图片（嵌入本格）","实物图（嵌入本格）","报价人*","报价日期*","尺码","颜色","克重(g)*","长(cm)*","宽(cm)*","高(cm)*","起订量(件)*","基准采购单价(CNY/件)*","阶梯价2起订量","阶梯价2(CNY/件)","阶梯价3起订量","阶梯价3(CNY/件)","1件总运费(CNY)","10件总运费(CNY)","100件总运费(CNY)","是否包邮","含票价(CNY/件)","票类型","是否有货","备注","工厂信息","货源链接1","货源链接2","货源链接3","相似货源","审核备注");
+    static final List<String> INTERNATIONAL_HEADERS=List.of("实物图（嵌入本格）","报价日期*","报价人*","备注","SKU*","产品图片（嵌入本格）","克重(g)*","尺码","颜色","材质","长(cm)*","宽(cm)*","高(cm)*","起订量(件)*","基准采购单价(CNY/件)*","阶梯价2起订量","阶梯价2(CNY/件)","阶梯价3起订量","阶梯价3(CNY/件)","1件总运费(CNY)","10件总运费(CNY)","100件总运费(CNY)","是否包邮","含票价(CNY/件)","票点","票类型","类别","是否有货","工厂信息","审核备注","货源链接1","货源链接2","货源链接3","相似货源");
     enum Version{LEGACY,INTERNATIONAL}
     enum Field { SKU,PRODUCT_IMAGE,PHYSICAL_IMAGE,CATEGORY,OWNER,DATE,SIZE,COLOR,MATERIAL,WEIGHT,LENGTH,WIDTH,HEIGHT,MOQ,BASE_PRICE,TIER2_QTY,TIER2_PRICE,TIER3_QTY,TIER3_PRICE,FREIGHT1,FREIGHT10,FREIGHT100,FREE_SHIPPING,TAX_INCLUDED_PRICE,TAX_POINT,INVOICE_TYPE,STOCK,NOTES,FACTORY,AUDIT_NOTES,LINK1,LINK2,LINK3,SIMILAR }
     private static final Map<Field,List<String>> ALIASES=aliases();

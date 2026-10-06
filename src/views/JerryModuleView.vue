@@ -1180,7 +1180,7 @@ function saveEditor() {
         <label data-source-field>报价日期<input v-model="productForm.quotationDate" type="date"></label>
         <label class="wide" data-source-field>备注<textarea v-model="productForm.notes" rows="3"></textarea></label>
         <label class="wide" data-source-field>产品图片<div class="image-upload-row"><img v-if="productForm.image" :src="productForm.image" alt="当前商品图片"><input type="file" accept="image/*" @change="handleProductImage"><button v-if="productForm.image" type="button" @click.prevent="productForm.image=''">移除图片</button></div></label>
-        <label data-source-field>是否有货<select v-model="productForm.stockStatus"><option value="有货">有货</option><option value="无货">无货</option><option value="待确认">待确认</option></select></label>
+        <label data-source-field>是否有货（选填）<input v-model="productForm.stockStatus" list="jerry-stock-options" placeholder="可留空，也可填写库存或交期说明"><datalist id="jerry-stock-options"><option value="有货" /><option value="无货" /><option value="待确认" /><option value="定制款" /></datalist></label>
         <label data-source-field>克重/g（原始说明）<textarea v-model="productForm.weightDescription" rows="2" placeholder="保留原表中的重量说明"></textarea></label>
         <label data-source-field>克重/g（数值）<input v-model.number="productForm.weightG" type="number" min="0" step="1"></label>
         <label data-source-field>尺码<textarea v-model="productForm.size" rows="2"></textarea></label>

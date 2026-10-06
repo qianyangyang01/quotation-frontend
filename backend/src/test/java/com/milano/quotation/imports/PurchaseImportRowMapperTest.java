@@ -77,5 +77,18 @@ class PurchaseImportRowMapperTest {
         var fuzzyWeight=mapper.mapLegacy2026("TASK",1,"陈晨",5,values,schema);
         assertEquals(5,fuzzyWeight.payload().path("weightG").asInt());
     }
+    @Test void optionalStockNotesDoNotWarnOrBlockQuotationAndOldHeadersRemainSupported() {
+        for (var stock : java.util.List.of("", "少量现货", "定制款，7天交货", "无货")) {
+            var input = values("STOCK-260001"); input[24] = stock;
+            var headers = PurchaseWorkbookSchema.LEGACY_HEADERS.toArray(String[]::new);
+            headers[24] = "是否有货*";
+            var schema = PurchaseWorkbookSchema.identifyOrNull(headers, 1);
+            assertNotNull(schema);
+            var row = mapper.map("采购", 2, input, schema);
+            assertEquals(stock, row.payload().path("stockStatus").asText());
+            assertTrue(row.payload().path("quoteReady").asBoolean());
+            assertTrue(row.warnings().stream().noneMatch(w -> w.contains("库存") || w.contains("是否有货")));
+        }
+    }
     private static String[] values(String sku){var v=new String[32];java.util.Arrays.fill(v,"");v[0]=sku;v[1]="运动内衣";v[4]="采购员";v[5]="2026-08-24";v[8]="350";v[9]="23.1";v[10]="23.1";v[11]="5.6";v[12]="1";v[13]="65.61";v[24]="有货";return v;}
 }

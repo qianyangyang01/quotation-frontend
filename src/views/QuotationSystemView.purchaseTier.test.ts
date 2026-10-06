@@ -102,6 +102,38 @@ async function selectTier(value: string) {
   await nextTick()
 }
 
+it.each(['', '少量现货，7天补货', '无货'])('keeps optional stock notes in single and bundle quotations without changing costs: %s', async stockStatus => {
+  purchaseOverride = { stockStatus }
+  await mount('single')
+  expect(state.products[0]!.stockStatus).toBe(stockStatus)
+  expect(state.products[0]!.purchase).toBe(14.08)
+  expect(state.purchaseQueryError).toBe('')
+  state.changeQuoteMode('bundle'); await nextTick()
+  state.bundleItems[0]!.sku = record.sku
+  expect(await state.queryBundleItem(state.bundleItems[0]!, { loadLogistics: false, announce: false })).toBe(true)
+  await nextTick()
+  expect(state.bundleItems[0]!.stockStatus).toBe(stockStatus)
+  expect(state.bundleItems[0]!.purchaseUnitPrice).toBe(14.08)
+  if (stockStatus) expect(host.textContent).toContain(stockStatus)
+})
+
+it('queries every bundle SKU from the detail toolbar and retains row queries and add action', async () => {
+  await mount('bundle')
+  expect(host.querySelector('.condition-card')?.textContent).not.toContain('查询全部 SKU')
+  const buttons = Array.from(host.querySelectorAll<HTMLButtonElement>('.bundle-actions button'))
+  expect(buttons.map(button => button.textContent)).toEqual(['＋ 添加 SKU', '查询全部 SKU'])
+  const get = vi.mocked(api.get); get.mockClear()
+  buttons[1]!.click()
+  await vi.waitFor(() => expect(get.mock.calls.filter(([path]) => String(path).startsWith('/purchase-products/'))).toHaveLength(2))
+  await vi.waitFor(() => expect(state.bundleItems.every(item => item.status === '采购资料已加载')).toBe(true))
+  get.mockClear()
+  host.querySelector<HTMLButtonElement>('[aria-label="查询第1行 SKU"]')!.click()
+  await vi.waitFor(() => expect(get.mock.calls.filter(([path]) => String(path).startsWith('/purchase-products/'))).toHaveLength(1))
+  const count = state.bundleItems.length
+  buttons[0]!.click(); await nextTick()
+  expect(state.bundleItems).toHaveLength(count + 1)
+})
+
 it('updates the single SKU cost and quotation immediately when selecting tier 2 or tier 3', async () => {
   await mount('single')
   const product = state.products[0]!

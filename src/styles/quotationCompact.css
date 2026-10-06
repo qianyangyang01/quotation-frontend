@@ -29,7 +29,8 @@
 .jerry-app .quotation-page .condition-card > header b { white-space: nowrap; }
 .jerry-app .quotation-page .condition-card > header b i { background: #f99013; color: white; font-size: 12px; }
 .jerry-app .quotation-page .condition-grid, .jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: minmax(150px,1.25fr) minmax(140px,1.15fr) minmax(165px,1.35fr) minmax(110px,1fr) minmax(110px,1fr) minmax(100px,.9fr) minmax(95px,.7fr) 110px; margin: 0; padding: 12px 14px; gap: 10px; align-items: start; }
-.jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: minmax(180px,1.4fr) minmax(150px,1.2fr) repeat(3,minmax(120px,1fr)) minmax(100px,.8fr) 130px; }
+.jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: minmax(220px,1.4fr) minmax(180px,1.05fr) minmax(160px,1fr) minmax(160px,1fr) minmax(150px,.85fr); gap: 18px; padding-top: 16px; padding-bottom: 16px; }
+.jerry-app .quotation-page .condition-grid.bundle > label { grid-column: auto; grid-row: auto; }
 .jerry-app .quotation-page .condition-grid label { grid-column: auto; grid-row: auto; font-size: 12px; line-height: 18px; grid-template-rows: 18px 36px; grid-auto-rows: auto; align-content: start; gap: 6px; margin: 0; max-width: none; min-width: 0; }
 .jerry-app .quotation-page .condition-grid input, .jerry-app .quotation-page .condition-grid select { width: 100%; height: 36px; font-size: 13px; }
 .jerry-app .quotation-page .condition-grid small { font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }

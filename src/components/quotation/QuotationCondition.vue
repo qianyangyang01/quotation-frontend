@@ -5,7 +5,7 @@ import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
 import type { QuotationMode } from './types'
 
 withDefaults(defineProps<{ commissionThreshold: string; commissionError?: string; financePending?: boolean; financeError?: string; mode: QuotationMode; skuSearch: string; customerName: string; selectedCustomerId?: string; customers?: CustomerOperationFee[]; operationMessage?: string; monthlySalesEstimate: string; attributes: string[]; logisticsAttribute: string; grades: Array<{ grade: string }>; grade: string; coefficient: number; salesperson: string; invalidFields?: string[] }>(), { invalidFields: () => [], customers: () => [], selectedCustomerId: '', operationMessage: '' })
-defineEmits<{ 'update:commissionThreshold': [value: string]; 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value: string]; 'update:customerName': [value: string]; 'selectCustomer': [id: string]; 'update:monthlySalesEstimate': [value: string]; query: []; queryBundle: []; 'update:logisticsAttribute': [value: string]; 'update:grade': [value: string] }>()
+defineEmits<{ 'update:commissionThreshold': [value: string]; 'update:mode': [value: QuotationMode]; 'update:skuSearch': [value: string]; 'update:customerName': [value: string]; 'selectCustomer': [id: string]; 'update:monthlySalesEstimate': [value: string]; query: []; 'update:logisticsAttribute': [value: string]; 'update:grade': [value: string] }>()
 </script>
 
 <template>
@@ -24,7 +24,7 @@ defineEmits<{ 'update:commissionThreshold': [value: string]; 'update:mode': [val
       <input aria-label="佣金阈值" inputmode="decimal" type="text" :value="commissionThreshold" :aria-invalid="!!commissionError" aria-describedby="commission-help" @input="$emit('update:commissionThreshold', ($event.target as HTMLInputElement).value)">
       <small id="commission-help" :class="{ 'field-error': commissionError }">{{ commissionError || '最终报价 ÷ 此值，默认1不调整；例如0.95' }}</small>
     </label>
-    <footer><span>{{ mode === 'bundle' ? '可一次查询全部组合 SKU，也可在组合明细中逐行查询。' : '查询后将刷新商品成本、重量及下方渠道报价矩阵。' }}</span><button v-if="mode === 'single'" type="button" @click="$emit('query')">查询商品</button><button v-else type="button" @click="$emit('queryBundle')">查询全部 SKU</button></footer>
+    <footer v-if="mode === 'single'"><span>查询后将刷新商品成本、重量及下方渠道报价矩阵。</span><button type="button" @click="$emit('query')">查询商品</button></footer>
     </div>
   </section>
 </template>

@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { findPurchaseProduct, normalizePurchaseRecord, purchaseQuoteFreightUnit, purchaseQuoteBlockingMessage, purchaseSourceLabel, purchaseUnitPrice } from './purchaseStore'
 
 describe('purchase catalog state', () => {
+  it.each(['', '少量现货', '定制款，7天交货', '无货'])('preserves optional stock notes through reload without affecting quote eligibility: %s', stockStatus => {
+    for (const dataSource of ['standard', 'legacy_2026'] as const) {
+      const record = normalizePurchaseRecord({ sku: 'STOCK-260001', dataSource, stockStatus, weightG: 100, minOrderQty: 1, purchasePriceCny: 12, singleFreightCny: 0, taxPoint: 0 })
+      expect(record.stockStatus).toBe(stockStatus)
+      expect(normalizePurchaseRecord(record).stockStatus).toBe(stockStatus)
+      expect(record.quoteReady).toBe(true)
+      expect(record.quotationBlockingReasons).toEqual([])
+      expect(findPurchaseProduct([record], record.sku)).toBe(record)
+      expect(normalizePurchaseRecord({ ...record, weightG: null }).quoteReady).toBe(false)
+    }
+  })
   it('splits domestic freight exactly without rounding away sub-cent unit costs', () => {
     expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: 2.1 }))).toBe(.21)
     expect(purchaseQuoteFreightUnit(normalizePurchaseRecord({ freight10Cny: .01 }))).toBe(.001)

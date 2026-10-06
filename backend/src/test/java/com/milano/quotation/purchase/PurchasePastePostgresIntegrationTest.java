@@ -61,6 +61,39 @@ class PurchasePastePostgresIntegrationTest {
     }
     long historyCount(String sku) { return products.history(sku, PageRequest.of(0, 20)).getTotalElements(); }
 
+    @Test void customStockNotesRoundTripWithAuditAndBlankPastePreservesExistingNote() {
+        var sku = sku();
+        var initial = full(sku).put("stockStatus", "定制款，7天交货");
+        paste.confirm(confirmation(List.of(initial)));
+        var before = products.get(sku);
+        assertEquals("定制款，7天交货", before.path("stockStatus").asText());
+        assertTrue(before.path("quoteReady").asBoolean());
+        var update = mapper.createObjectNode().put("sku", sku).put("stockStatus", "少量现货");
+        var preview = paste.preview(List.of(update)).rows().getFirst();
+        assertEquals("update", preview.action());
+        assertEquals(1, preview.changes().size());
+        paste.confirm(confirmation(List.of(update)));
+        var after = products.get(sku);
+        assertEquals("少量现货", after.path("stockStatus").asText());
+        assertTrue(after.path("quoteReady").asBoolean());
+        assertEquals(before.path("purchasePriceCny"), after.path("purchasePriceCny"));
+        var history = products.history(sku, PageRequest.of(0, 1)).getContent().getFirst();
+        assertEquals("采购粘贴更新", history.operation());
+        assertEquals("stockStatus", history.changes().get(0).path("field").asText());
+        assertEquals("定制款，7天交货", history.changes().get(0).path("before").asText());
+        assertEquals("少量现货", history.changes().get(0).path("after").asText());
+        long historyBefore = historyCount(sku);
+        var blank = mapper.createObjectNode().put("sku", sku).put("stockStatus", " ");
+        paste.confirm(confirmation(List.of(blank)));
+        assertEquals("少量现货", products.get(sku).path("stockStatus").asText());
+        assertEquals(historyBefore, historyCount(sku));
+        for (var status : List.of("", "无货")) {
+            var another = sku();
+            paste.confirm(confirmation(List.of(full(another).put("stockStatus", status))));
+            assertTrue(products.get(another).path("quoteReady").asBoolean());
+        }
+    }
+
     @Test void sparseUpdatePreservesIdentityImagesSourceAndCatalogAndUsesServerActor() throws Exception {
         var sku = sku();
         var initial = (ObjectNode) products.upsert(full(sku).put("notes", "旧备注").put("productImage", "/old.png").put("sourceSheet", "原表").put("sourceRow", 88));

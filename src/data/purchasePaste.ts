@@ -9,7 +9,7 @@ export const PURCHASE_PASTE_COLUMNS = [
   ['阶梯价3起订量', 'tier3MinQty'], ['阶梯价3(CNY/件)', 'tier3PriceCny'], ['1件总运费(CNY)', 'singleFreightCny'],
   ['10件总运费(CNY)', 'freight10Cny'], ['100件总运费(CNY)', 'freight100Cny'], ['是否包邮', 'freeShipping'],
   ['含票价(CNY/件)', 'taxIncludedPriceCny'], ['票点*', 'taxPoint'], ['票类型', 'invoiceType'], ['类别', 'category'],
-  ['是否有货*', 'stockStatus'], ['工厂信息', 'factoryInfo'], ['审核备注', 'auditNotes'],
+  ['是否有货', 'stockStatus'], ['工厂信息', 'factoryInfo'], ['审核备注', 'auditNotes'],
   ['货源链接1', 'sourceLink1'], ['货源链接2', 'sourceLink2'], ['货源链接3', 'sourceLink3'], ['相似货源', 'similarSource'],
 ] as const
 export const PURCHASE_PASTE_LIMIT = 100
@@ -107,7 +107,6 @@ export function validatePurchasePaste(grid: string[][], sparse = false): PasteCh
     if (!sparse && data.freeShipping !== '是') for (const field of ['singleFreightCny', 'freight10Cny']) if (data[field] == null) issue(field, '未包邮时须填写运费；免运费请明确填0或选择包邮')
     if (data.stockStatus === '有') data.stockStatus = '有货'
     if (data.stockStatus === '无') data.stockStatus = '无货'
-    if (!['', '有货', '无货', '待确认', '定制款'].includes(String(data.stockStatus || ''))) issue('stockStatus', '请填写有/有货、无/无货、待确认或定制款')
     if (data.quotationDate) {
       const date = String(data.quotationDate).replace(/[./]/g, '-'); const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date)
       const canonical = match ? `${match[1]}-${match[2]!.padStart(2, '0')}-${match[3]!.padStart(2, '0')}` : ''

@@ -386,7 +386,7 @@ const detailFields = computed(() => detail.value ? [
   ['起订量(件)*', value(detail.value.minOrderQty, ' 件')], ['基准采购单价(CNY/件)*', money(detail.value.purchasePriceCny)], ['阶梯价2起订量', value(detail.value.tier2MinQty, ' 件')], ['阶梯价2(CNY/件)', money(detail.value.tier2PriceCny)],
   ['阶梯价3起订量', value(detail.value.tier3MinQty, ' 件')], ['阶梯价3(CNY/件)', money(detail.value.tier3PriceCny)], ...freightDetailFields(detail.value),
   ['是否包邮', detail.value.freeShipping], ['含票价(CNY/件)', money(detail.value.taxIncludedPriceCny)], ['票点', detail.value.taxPoint == null ? '暂无数据' : `${(detail.value.taxPoint * 100).toFixed(2).replace(/\.00$/, '')}%`], ['票类型', detail.value.invoiceType],
-  ['是否有货*', detail.value.stockStatus], ['备注', detail.value.notes], ['工厂信息', detail.value.factoryInfo], ['货源链接1', detail.value.sourceLink1], ['货源链接2', detail.value.sourceLink2], ['货源链接3', detail.value.sourceLink3],
+  ['是否有货', detail.value.stockStatus], ['备注', detail.value.notes], ['工厂信息', detail.value.factoryInfo], ['货源链接1', detail.value.sourceLink1], ['货源链接2', detail.value.sourceLink2], ['货源链接3', detail.value.sourceLink3],
   ['相似货源', detail.value.similarSource], ['审核备注', detail.value.auditNotes],
 ] : [])
 </script>
@@ -561,7 +561,7 @@ const detailFields = computed(() => detail.value ? [
       <label>19. 1件总运费(CNY)<input v-model.number="editor.singleFreightCny" type="number" min="0" step="0.01"></label><label>20. 10件总运费(CNY)<input v-model.number="editor.freight10Cny" type="number" min="0" step="0.01"><small>报价按此金额÷10分摊；旧数据留空时采用1件运费</small></label>
       <label>21. 100件总运费(CNY)<input v-model.number="editor.freight100Cny" type="number" min="0" step="0.01"></label><label>22. 是否包邮<select v-model="editor.freeShipping"><option value="">暂无数据</option><option>是</option><option>否</option></select></label>
       <label>23. 含票价(CNY/件)<input v-model.number="editor.taxIncludedPriceCny" type="number" min="0" step="0.01"></label><label>24. 票点（8%填写0.08）<input v-model.number="editor.taxPoint" type="number" min="0" max="1" step="0.001"></label><label>25. 票类型<select v-model="editor.invoiceType"><option value="">暂无数据</option><option>普票</option><option>专票</option><option>不开票</option><option>收据</option><option>增值税专用发票</option><option>增值税普通发票</option></select></label>
-      <label>26. 是否有货*<select v-model="editor.stockStatus"><option value="">暂无数据</option><option>有货</option><option>无货</option><option>待确认</option><option>定制款</option></select></label><label class="wide">27. 备注<textarea v-model="editor.notes"></textarea></label>
+      <label>26. 是否有货（选填）<input v-model="editor.stockStatus" list="purchase-stock-options" placeholder="可留空，或填写现货、预订、交期等说明"><datalist id="purchase-stock-options"><option value="有货" /><option value="无货" /><option value="待确认" /><option value="定制款" /></datalist><small>仅供参考，不影响报价资格</small></label><label class="wide">27. 备注<textarea v-model="editor.notes"></textarea></label>
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>
     </div>

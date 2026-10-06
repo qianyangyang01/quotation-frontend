@@ -2,7 +2,8 @@ import { api } from '@/services/http'
 import { decimal } from '@/services/quotationDecimal'
 
 export type PurchasePriceTier = { minQty: number; maxQty: number | null; unitPriceCny: number; source: string }
-export type PurchaseStockStatus = '有货' | '无货' | '待确认' | '定制款' | ''
+// Optional procurement note; never determines quotation eligibility.
+export type PurchaseStockStatus = string
 export type PurchaseSkuOrigin = 'imported' | 'manual' | 'system'
 export type PurchaseCatalogState = 'pending_template' | 'ready' | 'disabled'
 export type PurchaseDataSource = 'standard' | 'legacy_2026'
@@ -83,7 +84,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     freeShipping: input.freeShipping === '是' || input.freeShipping === '否' ? input.freeShipping : '' as '' | '是' | '否',
     taxIncludedPriceCny: numberOrNull(input.taxIncludedPriceCny ?? input.taxIncludedPrice), taxPoint: taxPointOrNull(input.taxPoint), taxPointExplicit,
     invoiceType: String(input.invoiceType || input.taxDifference || '').trim(),
-    stockStatus: input.stockStatus === '有货' || input.stockStatus === '无货' || input.stockStatus === '待确认' || input.stockStatus === '定制款' ? input.stockStatus : '' as PurchaseStockStatus,
+    stockStatus: String(input.stockStatus ?? '').trim(),
     notes: String(input.notes || '').trim(), factoryInfo: String(input.factoryInfo || input.packagingInfo || '').trim(),
     sourceLink1: String(input.sourceLink1 || sourceLinks[0] || '').trim(), sourceLink2: String(input.sourceLink2 || sourceLinks[1] || '').trim(),
     sourceLink3: String(input.sourceLink3 || sourceLinks[2] || '').trim(), similarSource: String(input.similarSource || sourceLinks[3] || '').trim(),

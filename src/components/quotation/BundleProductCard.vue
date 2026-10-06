@@ -36,6 +36,7 @@ defineEmits<{
   add: []
   remove: [id: number]
   query: [item: BundleQuoteItem]
+  queryAll: []
   quantityChange: [item: BundleQuoteItem]
   tierChange: [item: BundleQuoteItem, value: string]
   weightChange: [item: BundleQuoteItem]
@@ -46,15 +47,19 @@ defineEmits<{
   <section class="bundle-card">
     <header>
       <div><p>02</p><section><h2>组合商品明细</h2><span>支持同款多件或不同 SKU 混搭；同款 3 件一套，只需一行 SKU，单套数量填 3；采购阶梯可按 SKU 单独选择</span></section></div>
-      <button type="button" @click="$emit('add')">＋ 添加 SKU</button>
+      <div class="bundle-actions">
+        <button type="button" @click="$emit('add')">＋ 添加 SKU</button>
+        <button class="query-all" type="button" @click="$emit('queryAll')">查询全部 SKU</button>
+      </div>
     </header>
 
+    <div class="bundle-table">
     <div class="table-head"><span>商品信息 / SKU</span><span>单套数量</span><span>采购单价</span><span>单件重量（可自定义）</span><span>单套国内运费</span><span>操作</span></div>
     <div class="bundle-rows">
       <article v-for="(item,index) in items" :key="item.id">
         <div class="product-cell">
           <QuotationProductImage class="thumb" :physical-image="item.physicalImage" :product-image="item.image" :alt="`${item.name || item.sku}商品图`" :fallback-text="String(index + 1)" />
-          <div><label><input v-model.trim="item.sku" placeholder="输入 SKU" @keyup.enter="$emit('query',item)"><button type="button" @click="$emit('query',item)">查询</button></label><b>{{ item.name || '等待查询采购资料' }} <em v-if="item.status==='采购资料已加载'" class="source-badge" :class="{legacy:item.purchaseDataSource==='legacy_2026'}">{{ item.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据' }}</em></b><small>{{ item.supplier || '—' }} · {{ item.status || '待查询' }} · 库存：<em :class="{ out:item.stockStatus==='无货', pending:item.stockStatus==='待确认' }">{{ item.stockStatus }}</em></small></div>
+          <div><label><input v-model.trim="item.sku" :aria-label="`第${index + 1}行 SKU`" placeholder="输入 SKU" @keyup.enter="$emit('query',item)"><button type="button" :aria-label="`查询第${index + 1}行 SKU`" @click="$emit('query',item)">查询</button></label><b>{{ item.name || '等待查询采购资料' }} <em v-if="item.status==='采购资料已加载'" class="source-badge" :class="{legacy:item.purchaseDataSource==='legacy_2026'}">{{ item.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据' }}</em></b><small>{{ item.supplier || '—' }} · {{ item.status || '待查询' }} · 库存：<em :class="{ out:item.stockStatus==='无货', pending:item.stockStatus==='待确认' }">{{ item.stockStatus }}</em></small></div>
         </div>
         <label class="qty"><input v-model.number="item.quantityPerSet" type="number" min="1" step="1" @change="$emit('quantityChange',item)"><span>件/套</span></label>
         <div class="purchase-price">
@@ -67,6 +72,7 @@ defineEmits<{
       </article>
     </div>
 
+    </div>
     <SpecialPackagingInput :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
     <div class="summary-grid">
       <div><span>单套采购成本</span><b>¥{{ purchaseCost.toFixed(2) }}</b><small>各 SKU 按各自所选阶梯价及采购票点计算</small></div>
@@ -91,4 +97,19 @@ defineEmits<{
 .purchase-tier{box-sizing:border-box;height:34px;max-width:100%;padding:0 8px;border:1px solid #d9e0e5;border-radius:6px;background:#fff;color:#17232d;font-size:11px;cursor:pointer}
 .purchase-tier:hover{border-color:#ff9900}
 .purchase-tier:focus-visible{outline:2px solid #ff9900;outline-offset:2px}
+.bundle-card{overflow:hidden}
+.bundle-card>header{gap:16px;flex-wrap:wrap}
+.bundle-card>header>div:first-child{flex:1;min-width:260px}
+.bundle-card>header .bundle-actions{flex:0 0 auto;gap:12px}
+.bundle-actions button{height:38px;white-space:nowrap;cursor:pointer}
+.bundle-actions .query-all{background:#ed8300;border-color:#ed8300;color:#fff;min-width:148px}
+.bundle-actions button:focus-visible,.product-cell label button:focus-visible{outline:2px solid #ed8300;outline-offset:2px}
+.bundle-table{overflow-x:auto}
+.table-head,.bundle-rows article{min-width:1060px;grid-template-columns:minmax(360px,2.8fr) minmax(105px,.65fr) minmax(190px,1fr) minmax(150px,.85fr) minmax(125px,.7fr) 60px;gap:18px}
+.product-cell>div:last-child{flex:1}
+.product-cell label{width:100%;max-width:440px;gap:8px}
+.product-cell label input{width:0;flex:1;min-width:0;height:38px;font-size:12px;border-radius:6px}
+.product-cell label button{flex:0 0 72px;height:38px;border:1px solid #d9e0e5;border-radius:6px;background:#fff;color:#26323b;font-size:12px;font-weight:700;cursor:pointer}
+.product-cell label button:hover{border-color:#ed8300;color:#bb6800}
+@media(max-width:600px){.bundle-card>header .bundle-actions{width:100%;justify-content:flex-end}.bundle-actions button{flex:1}.summary-grid{min-width:0;grid-template-columns:1fr}}
 </style>

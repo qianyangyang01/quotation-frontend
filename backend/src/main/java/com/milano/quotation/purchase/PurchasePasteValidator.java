@@ -36,7 +36,7 @@ final class PurchasePasteValidator {
         if (!free.equals("是") && (!row.hasNonNull("singleFreightCny") || (!legacy && !row.hasNonNull("freight10Cny")))) fail(prefix, legacy ? "未包邮时须填写1件总运费" : "未包邮时须填写1件及10件总运费");
         if (!row.hasNonNull("taxPoint")) fail(prefix, "请填写票点；无票点请明确填0%");
         if (row.hasNonNull("taxPoint") && row.path("taxPoint").asDouble() > 1) fail(prefix, "票点须在0%至100%之间");
-        if (!List.of("", "有货", "无货", "待确认", "定制款").contains(row.path("stockStatus").asText(""))) fail(prefix, "是否有货内容不合法");
+        if (row.hasNonNull("stockStatus") && !row.path("stockStatus").isTextual()) fail(prefix, "是否有货请填写文字说明");
         var date = row.path("quotationDate").asText("");
         if (!date.isBlank()) try { if (!java.time.LocalDate.parse(date).toString().equals(date)) fail(prefix, "报价日期格式不合法"); } catch (java.time.DateTimeException error) { fail(prefix, "报价日期格式不合法"); }
     }

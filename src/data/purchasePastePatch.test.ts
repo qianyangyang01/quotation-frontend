@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { emptyPurchasePasteRow, validatePurchasePaste } from './purchasePaste'
 
 describe('sparse purchase paste', () => {
+  it('keeps custom stock notes and omits blank stock cells from updates', () => {
+    const row = Object.assign(emptyPurchasePasteRow(), { 3: 'AB-C', 25: '定制款，7天交货' })
+    const result = validatePurchasePaste([row], true)
+    expect(result.canSave).toBe(true)
+    expect(result.records).toEqual([{ sku: 'AB-C', sourceRow: 1, stockStatus: '定制款，7天交货' }])
+    row[25] = ' '
+    expect(validatePurchasePaste([row], true).records[0]).not.toHaveProperty('stockStatus')
+  })
   it('omits blank fields, normalizes identifiers and preserves explicit zero', () => {
     const row = Object.assign(emptyPurchasePasteRow(), { 3: ' ab-c /1 ', 12: '0', 22: '0%' })
     const result = validatePurchasePaste([row], true)

@@ -1,12 +1,12 @@
 import JSZip from 'jszip'
-import { normalizePurchaseRecord, type PurchaseProductRecord, type PurchaseStockStatus } from './purchaseStore'
+import { normalizePurchaseRecord, type PurchaseProductRecord } from './purchaseStore'
 
 export const PURCHASE_WORKBOOK_HEADERS = [
   'SKU*', '类别*', '产品图片（嵌入本格）', '实物图（嵌入本格）', '报价人*', '报价日期*', '尺码', '颜色',
   '克重(g)*', '长(cm)*', '宽(cm)*', '高(cm)*', '起订量(件)*', '基准采购单价(CNY/件)*',
   '阶梯价2起订量', '阶梯价2(CNY/件)', '阶梯价3起订量', '阶梯价3(CNY/件)',
   '1件总运费(CNY)', '10件总运费(CNY)', '100件总运费(CNY)', '是否包邮', '含票价(CNY/件)', '票类型',
-  '是否有货*', '备注', '工厂信息', '货源链接1', '货源链接2', '货源链接3', '相似货源', '审核备注',
+  '是否有货', '备注', '工厂信息', '货源链接1', '货源链接2', '货源链接3', '相似货源', '审核备注',
 ] as const
 
 export type PurchaseImportIssue = { sourceSheet?: string; row: number; field: string; message: string; level: 'error' | 'warning' | 'skipped' }
@@ -202,7 +202,10 @@ export async function parsePurchaseWorkbook(file: File, existing: PurchaseProduc
     for (let value = index + 1; value > 0; value = Math.floor((value - 1) / 26)) result = String.fromCharCode(65 + (value - 1) % 26) + result
     return result
   }
-  const mismatch = PURCHASE_WORKBOOK_HEADERS.map((header, index) => String(headers[index] ?? '').trim() === header ? '' : `${columnName(index)}列应为“${header}”`).filter(Boolean)
+  const mismatch = PURCHASE_WORKBOOK_HEADERS.map((header, index) => {
+    const actual = String(headers[index] ?? '').trim()
+    return actual === header || (header === '是否有货' && actual === '是否有货*') ? '' : `${columnName(index)}列应为“${header}”`
+  }).filter(Boolean)
   if (mismatch.length) throw new Error(`模板列头不匹配：${mismatch.slice(0, 4).join('；')}${mismatch.length > 4 ? '…' : ''}`)
   const images = await readImages(zip, sheetPath, sheet)
   const issues: PurchaseImportIssue[] = []
@@ -250,7 +253,7 @@ export async function parsePurchaseWorkbook(file: File, existing: PurchaseProduc
       singleFreightCny: readNumber(18, '1件总运费(CNY)'), freight10Cny: readNumber(19, '10件总运费(CNY)'), freight100Cny: readNumber(20, '100件总运费(CNY)'),
       freeShipping: choice(values[21], ['是', '否'] as const, row, '是否包邮', issues), taxIncludedPriceCny: readNumber(22, '含票价(CNY/件)'),
       invoiceType: choice(values[23], ['普票1%', '普票3%', '普票6%', '专票13%', '增值税专用发票', '增值税普通发票', '收据', '不开票'] as const, row, '票类型', issues),
-      stockStatus: choice(values[24], ['有货', '无货', '待确认'] as const, row, '是否有货*', issues) as PurchaseStockStatus,
+      stockStatus: String(values[24] ?? '').trim(),
       notes: String(values[25] ?? '').trim(), factoryInfo: String(values[26] ?? '').trim(), sourceLink1, sourceLink2, sourceLink3, similarSource,
       auditNotes: String(values[31] ?? '').trim(), importWarnings: recordWarnings,
     })

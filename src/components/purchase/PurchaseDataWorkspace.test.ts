@@ -17,6 +17,22 @@ async function search(text:string){const input=document.querySelector('.toolbar 
 beforeEach(()=>{vi.useFakeTimers();mocks.page.mockResolvedValue(page('INITIAL'));mocks.stats.mockResolvedValue({total:1,ready:1,pending:0,generatedSku:0})})
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers()})
 
+it.each(['少量现货，7天补货', ''])('edits and saves optional stock notes without affecting quotation eligibility: %s', async stockStatus => {
+  const product = normalizePurchaseRecord({ ...row('STOCK-260001'), stockStatus: '需预订' })
+  mocks.page.mockResolvedValue({ ...page(product.sku), items: [product] })
+  await mount()
+  expect(document.querySelector('table')?.textContent).toContain('需预订')
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b => b.textContent === '编辑')!.click(); await flush()
+  const field = Array.from(document.querySelectorAll('.editor-modal label')).find(l => l.textContent?.includes('是否有货'))!
+  expect(field.textContent).toContain('选填')
+  const input = field.querySelector('input')!
+  expect(input.value).toBe('需预订')
+  input.value = stockStatus; input.dispatchEvent(new Event('input', { bubbles: true })); await nextTick()
+  mocks.update.mockResolvedValueOnce({ ...product, stockStatus })
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b => b.textContent === '保存资料')!.click(); await flush()
+  expect(mocks.update).toHaveBeenCalledWith(product.sku, expect.objectContaining({ stockStatus, quoteReady: true, _version: 5 }))
+})
+
 it('shows and saves legacy batch freight in both procurement details and the editor', async () => {
   const legacy = normalizePurchaseRecord({ ...row('YT2600676'), dataSource: 'legacy_2026', singleFreightCny: 5, freight10Cny: 5, freight100Cny: 11.5 })
   mocks.page.mockResolvedValue({ ...page(legacy.sku), items: [legacy] })

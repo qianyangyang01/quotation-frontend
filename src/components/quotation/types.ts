@@ -8,7 +8,7 @@ export type QuotationProduct = {
   supplier: string
   image: string
   physicalImage: string
-  stockStatus: '有货' | '无货' | '待确认' | '定制款'
+  stockStatus: string
   /** 本次报价由业务员统一选择，不从采购资料继承。 */
   logisticsAttribute: string
   quantity: number
@@ -59,7 +59,7 @@ export type BundleQuoteItem = {
   supplier: string
   image: string
   physicalImage: string
-  stockStatus: '有货' | '无货' | '待确认' | '定制款'
+  stockStatus: string
   quantityPerSet: number
   purchaseUnitPrice: number
   purchaseBaseUnitPrice: number
