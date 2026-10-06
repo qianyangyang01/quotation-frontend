@@ -313,10 +313,10 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 <template>
   <section v-if="active !== false" class="common-matrix">
     <header class="common-head">
-      <div><p>MODE A · COMMON COUNTRY QUOTATION</p><h2>快速报价</h2><span>默认展示常用国家，搜索可查找全部国家及授权渠道，选择国家后查看价格。</span></div>
       <div class="common-head-actions">
         <label class="country-search">⌕<input v-model="search" type="search" aria-label="搜索全部国家或渠道" placeholder="搜索全部国家、代码或物流渠道"></label>
       </div>
+      <slot name="toolbar-actions" />
     </header>
 
     <div v-if="filteredCountries.length" class="country-grid">

@@ -420,53 +420,56 @@ function formatTime(value: string) {
 
 <template>
   <section class="template-workbench">
-    <header class="template-toolbar">
-      <div class="template-intro">
-        <p>MODE B · PERSONAL QUOTATION TEMPLATE</p>
-        <h2>我的报价模板</h2>
+    <section class="template-controls" aria-label="个人模板操作">
+      <header class="template-toolbar">
+        <div class="template-intro">
+          <p>MODE B · PERSONAL QUOTATION TEMPLATE</p>
+          <h2>我的报价模板</h2>
+        </div>
+        <div class="template-actions">
+          <label>
+            <span>选择个人模板</span>
+            <select v-model="selectedTemplateId" :disabled="savingTemplate || templatesLoading" aria-label="选择个人报价模板" @change="changeTemplateSelection">
+              <option value="">新建模板</option>
+              <option v-for="template in templates" :key="template.id" :value="template.id">
+                {{ template.name }} · {{ new Set(template.items.map(item => item.country)).size }}国 / {{ template.items.length }}渠道
+              </option>
+            </select>
+          </label>
+          <button class="apply" :disabled="!selectedTemplate || savingTemplate" @click="applyTemplate()">⚡ 一键应用</button>
+          <button @click="showManager = true">⚙ 管理我的模板</button>
+          <div v-if="activeTemplate" class="status-actions">
+            <button @click="applyTemplate(activeTemplate)">恢复模板已保存清单</button>
+            <button class="clear" :class="{ confirming: pendingClear }" @click="clearCurrentSelection">{{ pendingClear ? '确认清空清单' : '清空本次清单' }}</button>
+            <button class="update" :disabled="!canUpdateTemplate" @click="updateActiveFromCurrent">更新模板“{{ activeTemplate.name }}”</button>
+          </div>
+          <template v-else>
+            <span class="template-state">{{ newTemplateMode ? '新建模板' : '尚未应用' }}</span>
+            <label v-if="newTemplateMode" class="new-template-name">模板名称<input v-model="createName" :disabled="savingTemplate" maxlength="40" placeholder="输入模板名称"></label>
+            <button class="save-new-template" :disabled="savingTemplate || (newTemplateMode && (!canSaveSelection || !createName.trim()))" @click="newTemplateMode ? createFromCurrent() : (showManager = true)">{{ savingTemplate ? '保存中…' : '保存' }}</button>
+          </template>
+        </div>
+      </header>
+  
+      <div v-if="activeTemplate" class="template-status">
+        <template v-if="activeTemplate">
+          <div class="active-template">
+            <i>✓</i>
+            <span><small>当前已应用</small><b>{{ activeTemplate.name }}</b></span>
+            <em>模板已保存：{{ activeTemplateCountryCount }} 个国家 · {{ activeTemplate.items.length }} 条渠道</em>
+          </div>
+          <p v-if="selectionState === 'loading'" role="status">正在准备模板渠道，商品资料就绪后继续加载…</p>
+          <p v-else-if="selectionState === 'error'" role="alert">模板渠道尚未加载成功，请按下方提示重试；已保存模板未修改。</p>
+          <p v-else-if="currentUnavailableCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ currentUnavailableCount }} 条模板渠道不可用，已保留并标注原因；其余 {{ currentAvailableCount }} 条已正常匹配。</p>
+          <p v-else-if="!currentRows.length" class="cleared-note">本次应用清单为 0 个国家 · 0 条渠道；已保存模板未修改，可随时恢复。</p>
+          <p v-else class="matched-note">✓ {{ currentAvailableCount }} 条模板渠道可用；下方增删仅对本次报价生效。</p>
+        </template>
       </div>
-      <div class="template-actions">
-        <label>
-          <span>选择个人模板</span>
-          <select v-model="selectedTemplateId" :disabled="savingTemplate || templatesLoading" aria-label="选择个人报价模板" @change="changeTemplateSelection">
-            <option value="">新建模板</option>
-            <option v-for="template in templates" :key="template.id" :value="template.id">
-              {{ template.name }} · {{ new Set(template.items.map(item => item.country)).size }}国 / {{ template.items.length }}渠道
-            </option>
-          </select>
-        </label>
-        <button class="apply" :disabled="!selectedTemplate || savingTemplate" @click="applyTemplate()">⚡ 一键应用</button>
-        <button @click="showManager = true">⚙ 管理我的模板</button>
-      </div>
-    </header>
+      <p v-else-if="newTemplateMode" class="new-template-help">在下方添加国家与渠道，填写模板名称后保存。</p>
+    </section>
 
     <p v-if="templatesLoading" role="status">正在加载个人模板…</p>
     <p v-else-if="templatesError" role="alert">{{ templatesError }} <button @click="refreshTemplates()">重新加载模板</button></p>
-
-    <div class="template-status">
-      <template v-if="activeTemplate">
-        <div class="active-template">
-          <i>✓</i>
-          <span><small>当前已应用</small><b>{{ activeTemplate.name }}</b></span>
-          <em>模板已保存：{{ activeTemplateCountryCount }} 个国家 · {{ activeTemplate.items.length }} 条渠道</em>
-        </div>
-        <p v-if="selectionState === 'loading'" role="status">正在准备模板渠道，商品资料就绪后继续加载…</p>
-        <p v-else-if="selectionState === 'error'" role="alert">模板渠道尚未加载成功，请按下方提示重试；已保存模板未修改。</p>
-        <p v-else-if="currentUnavailableCount" class="missing-warning">⚠ 当前商品或物流属性下有 {{ currentUnavailableCount }} 条模板渠道不可用，已保留并标注原因；其余 {{ currentAvailableCount }} 条已正常匹配。</p>
-        <p v-else-if="!currentRows.length" class="cleared-note">本次应用清单为 0 个国家 · 0 条渠道；已保存模板未修改，可随时恢复。</p>
-        <p v-else class="matched-note">✓ {{ currentAvailableCount }} 条模板渠道可用；下方增删仅对本次报价生效。</p>
-        <div class="status-actions">
-          <button @click="applyTemplate(activeTemplate)">恢复模板已保存清单</button>
-          <button class="clear" :class="{ confirming: pendingClear }" @click="clearCurrentSelection">{{ pendingClear ? '确认清空清单' : '清空本次清单' }}</button>
-          <button class="update" :disabled="!canUpdateTemplate" @click="updateActiveFromCurrent">更新模板“{{ activeTemplate.name }}”</button>
-        </div>
-      </template>
-      <template v-else>
-        <div class="empty-template"><i>☆</i><span><b>{{ newTemplateMode ? '新建模板' : '尚未应用个人模板' }}</b><small v-if="newTemplateMode">在下方添加国家与渠道，填写模板名称后保存。</small></span></div>
-        <label v-if="newTemplateMode" class="new-template-name">模板名称<input v-model="createName" :disabled="savingTemplate" maxlength="40" placeholder="输入模板名称"></label>
-        <button class="save-new-template" :disabled="savingTemplate || (newTemplateMode && (!canSaveSelection || !createName.trim()))" @click="newTemplateMode ? createFromCurrent() : (showManager = true)">{{ savingTemplate ? '保存中…' : '保存' }}</button>
-      </template>
-    </div>
 
     <p v-if="activeTemplate && updateBlockReason" class="template-conflict" role="status">{{ updateBlockReason }}</p>
 

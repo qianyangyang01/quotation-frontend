@@ -30,13 +30,14 @@
 .jerry-app .quotation-page .condition-card > header b i { background: #f99013; color: white; font-size: 12px; }
 .jerry-app .quotation-page .condition-grid, .jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: minmax(150px,1.25fr) minmax(140px,1.15fr) minmax(165px,1.35fr) minmax(110px,1fr) minmax(110px,1fr) minmax(100px,.9fr) minmax(95px,.7fr) 110px; margin: 0; padding: 12px 14px; gap: 10px; align-items: start; }
 .jerry-app .quotation-page .condition-grid.bundle { grid-template-columns: minmax(180px,1.4fr) minmax(150px,1.2fr) repeat(3,minmax(120px,1fr)) minmax(100px,.8fr) 130px; }
-.jerry-app .quotation-page .condition-grid label { grid-column: auto; grid-row: auto; font-size: 12px; gap: 6px; margin: 0; max-width: none; min-width: 0; }
+.jerry-app .quotation-page .condition-grid label { grid-column: auto; grid-row: auto; font-size: 12px; line-height: 18px; grid-template-rows: 18px 36px; grid-auto-rows: auto; align-content: start; gap: 6px; margin: 0; max-width: none; min-width: 0; }
 .jerry-app .quotation-page .condition-grid input, .jerry-app .quotation-page .condition-grid select { width: 100%; height: 36px; font-size: 13px; }
 .jerry-app .quotation-page .condition-grid small { font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
-.jerry-app .quotation-page .condition-grid footer { border: 0; padding: 22px 0 0; margin: 0; display: flex; flex-direction: column-reverse; align-items: stretch; gap: 6px; }
+.jerry-app .quotation-page .condition-grid footer { border: 0; padding: 24px 0 0; margin: 0; display: flex; flex-direction: column-reverse; align-items: stretch; gap: 6px; }
 .jerry-app .quotation-page .condition-grid footer button { background: #ed8300; color: white; height: 36px; min-width: 0; width: 100%; font-size: 13px; }
 .jerry-app .quotation-page .condition-grid footer span { display: none; }
-.jerry-app .quotation-page .condition-grid .customer-picker .entry input { box-sizing: border-box; }
+.jerry-app .quotation-page .condition-grid .customer-picker .entry { height: 36px; box-sizing: border-box; }
+.jerry-app .quotation-page .condition-grid .customer-picker .entry input { height: 34px; box-sizing: border-box; }
 .jerry-app .quotation-page .condition-grid .customer-picker .options { min-width: 240px; max-width: min(360px,85vw); }
 
 .jerry-app .quotation-page .cost-workbench { gap: 0; }
@@ -54,22 +55,30 @@
 .jerry-app .quotation-page .cost-workbench .product-card .info p { gap: 5px; }
 .jerry-app .quotation-page .cost-workbench .product-card .state { margin-left: auto; padding: 0; background: transparent; gap: 3px 6px; }
 .jerry-app .quotation-page .cost-workbench .product-card .state small { display: none; }
-.jerry-app .quotation-page .cost-metrics { display: grid; grid-template-columns: repeat(2,minmax(105px,1fr)) minmax(170px,1.35fr) repeat(2,minmax(115px,1fr)) repeat(2,minmax(165px,1.2fr)); align-items: start; gap: 10px; padding: 12px 14px 8px; }
-.jerry-app .quotation-page .cost-metrics.manual { grid-template-columns: repeat(2,minmax(95px,1fr)) minmax(150px,1.3fr) repeat(3,minmax(95px,1fr)) repeat(2,minmax(145px,1.2fr)); }
+.jerry-app .quotation-page .cost-metrics { display: grid; grid-template-columns: repeat(2,minmax(125px,1fr)) minmax(170px,1.35fr) repeat(2,minmax(125px,1fr)) repeat(2,minmax(165px,1.2fr)); align-items: start; gap: 10px; padding: 12px 14px 8px; }
+.jerry-app .quotation-page .cost-metrics.manual { grid-template-columns: repeat(2,minmax(125px,1fr)) minmax(150px,1.3fr) repeat(3,minmax(125px,1fr)) repeat(2,minmax(145px,1.2fr)); }
 .jerry-app .quotation-page .cost-metrics .fields, .jerry-app .quotation-page .cost-metrics .highlights { display: contents; }
-.jerry-app .quotation-page .cost-metrics label { min-width: 0; gap: 6px; font-size: 12px; }
+.jerry-app .quotation-page .cost-metrics label { min-width: 0; gap: 6px; font-size: 12px; line-height: 18px; grid-template-rows: 18px 36px; align-content: start; }
 .jerry-app .quotation-page .cost-metrics input, .jerry-app .quotation-page .cost-metrics select { height: 36px; min-width: 0; font-size: 13px; }
 .jerry-app .quotation-page .cost-metrics .special-packaging { margin: 0; padding: 0; border: 0; background: transparent; min-width: 0; }
 .jerry-app .quotation-page .cost-metrics .special-packaging label { display: grid; width: 100%; color: #697580; }
 .jerry-app .quotation-page .cost-metrics .special-packaging input { width: 100%; }
-.jerry-app .quotation-page .cost-metrics .highlights p { padding: 7px 10px; gap: 3px; background: #f2f7fc; min-width: 0; }
-.jerry-app .quotation-page .cost-metrics .highlights b { font-size: 20px; }
+.jerry-app .quotation-page .cost-metrics .highlights p { padding: 0; gap: 6px; grid-template-rows: 18px 36px; grid-auto-rows: auto; align-content: start; background: transparent; min-width: 0; }
+.jerry-app .quotation-page .cost-metrics .highlights p > span { font-size: 12px; line-height: 18px; color: #697580; }
+.jerry-app .quotation-page .cost-metrics .highlights b { display: flex; align-items: center; box-sizing: border-box; height: 36px; padding: 0 10px; border: 1px solid #dbe2e7; border-radius: 7px; background: #f2f7fc; font-size: 20px; line-height: 1.2; }
 .jerry-app .quotation-page .cost-metrics .highlights small { font-size: 10px; color: #6b7d90; line-height: 1.4; }
 .jerry-app .quotation-page .cost-notes { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 18px; padding: 0 14px 10px; color: #657a91; }
 .jerry-app .quotation-page .cost-notes small { font-size: 11px !important; line-height: 1.5; font-weight: 400; }
 .jerry-app .quotation-page .cost-workbench .volumetric-card { margin: 0 14px 12px; padding: 10px; }
 .jerry-app .quotation-page .cost-workbench .volumetric-card .dimensions { gap: 10px; margin-top: 8px; }
 .jerry-app .quotation-page .cost-workbench .volumetric-card input { height: 34px; }
+.jerry-app .quotation-page .cost-workbench .volumetric-card .dimensions label { grid-template-rows: 18px 34px; align-content: start; line-height: 18px; }
+.jerry-app .quotation-page .cost-workbench .weight-comparison p { grid-template-rows: 18px minmax(36px,auto) auto; align-content: start; }
+.jerry-app .quotation-page .cost-workbench .weight-comparison p > span { line-height: 18px; }
+.jerry-app .quotation-page .cost-workbench .weight-comparison p > b { display: flex; align-items: center; }
+.jerry-app .quotation-page .cost-workbench .bundle-card .summary-grid > div { grid-template-rows: 18px 28px auto; align-content: start; }
+.jerry-app .quotation-page .cost-workbench .bundle-card .summary-grid span { line-height: 18px; }
+.jerry-app .quotation-page .cost-workbench .bundle-card .summary-grid b { display: flex; align-items: center; }
 
 .jerry-app .quotation-page .matrix-workbench { border: 1px solid #bbded0; border-radius: 8px; background: white; min-width: 0; }
 .jerry-app .quotation-page .matrix-mode-switcher { border: 0; border-radius: 8px 8px 0 0; box-shadow: none; background: var(--quote-green); }
@@ -178,4 +187,34 @@
   .jerry-app .quotation-page .cost-metrics, .jerry-app .quotation-page .cost-metrics.manual { grid-template-columns: 1fr; }
   .jerry-app .quotation-page .preview-info dl { grid-template-columns: 1fr; }
   .jerry-app .quotation-page .draft-status-bar > button { margin-left: 0; }
+}
+
+/* Only consolidate the two quotation toolbars; keep the matrices unchanged. */
+.jerry-app .quotation-page .matrix-mode-panel .common-head { padding: 8px 14px; align-items: center; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.jerry-app .quotation-page .common-head .save-selection-template { margin: 0 0 0 auto; min-height: 36px; padding: 6px 12px; font-size: 13px; }
+.jerry-app .quotation-page .common-head-actions .country-search { width: 310px; max-width: 100%; }
+.jerry-app .quotation-page .template-controls { border: 1px solid #dfe6eb; border-radius: 10px; background: #fff; overflow: hidden; }
+.jerry-app .quotation-page .template-controls .template-toolbar { padding: 8px 14px; border: 0; border-radius: 0; box-shadow: none; flex-direction: row; align-items: center; gap: 10px; }
+.jerry-app .quotation-page .template-controls .template-intro { flex: 0 0 auto; }
+.jerry-app .quotation-page .template-controls .template-actions { flex: 1; width: auto; align-items: center; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.jerry-app .quotation-page .template-controls .template-actions label { display: flex; align-items: center; flex: 0 1 auto; width: auto; max-width: 100%; gap: 8px; }
+.jerry-app .quotation-page .template-controls .template-actions label > span { white-space: nowrap; }
+.jerry-app .quotation-page .template-controls .template-actions select { width: 270px; max-width: 100%; height: 38px; }
+.jerry-app .quotation-page .template-controls .template-actions button { min-height: 38px; height: auto; padding: 6px 11px; font-size: 14px; }
+.jerry-app .quotation-page .template-controls .status-actions { display: flex; width: auto; flex-wrap: wrap; margin-left: 0; gap: 8px; }
+.jerry-app .quotation-page .template-controls .status-actions button { flex: 0 1 auto; }
+.jerry-app .quotation-page .template-controls .template-state { padding: 3px 8px; border-radius: 12px; background: #f1f5f7; color: #526170; font-size: 13px; }
+.jerry-app .quotation-page .template-controls .save-new-template { margin-left: auto; border-color: #e7a13b; color: #ae6100; }
+.jerry-app .quotation-page .template-controls .new-template-name { flex-wrap: wrap; }
+.jerry-app .quotation-page .template-controls .new-template-name input { height: 38px; width: 190px; max-width: 100%; box-sizing: border-box; }
+.jerry-app .quotation-page .template-controls .template-status { min-height: 0; margin: 0; padding: 6px 14px; border: 0; border-top: 1px solid #edf0f2; border-radius: 0; gap: 8px 12px; background: #fbfcfd; }
+.jerry-app .quotation-page .template-controls .active-template { flex-wrap: wrap; }
+.jerry-app .quotation-page .template-controls .active-template > i { width: 22px; height: 22px; }
+.jerry-app .quotation-page .template-controls .active-template > span { display: flex; align-items: baseline; gap: 6px; }
+.jerry-app .quotation-page .template-controls .active-template em { padding: 2px 7px; }
+.jerry-app .quotation-page .template-controls .new-template-help { margin: 0; padding: 0 14px 7px; color: #526170; font-size: 13px; }
+@media (max-width: 680px) {
+  .jerry-app .quotation-page .template-controls .template-actions label { flex-wrap: wrap; }
+  .jerry-app .quotation-page .common-head-actions { width: 100%; }
+  .jerry-app .quotation-page .common-head-actions .country-search { width: 100%; }
 }
