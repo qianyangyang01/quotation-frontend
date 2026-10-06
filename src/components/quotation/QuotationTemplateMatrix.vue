@@ -450,7 +450,7 @@ function formatTime(value: string) {
           </template>
         </div>
       </header>
-  
+
       <div v-if="activeTemplate" class="template-status">
         <template v-if="activeTemplate">
           <div class="active-template">
