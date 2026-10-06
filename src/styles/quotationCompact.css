@@ -179,3 +179,89 @@
   .jerry-app .quotation-page .preview-info dl { grid-template-columns: 1fr; }
   .jerry-app .quotation-page .draft-status-bar > button { margin-left: 0; }
 }
+
+/* Section 03: keep controls together and spend vertical space on quote rows. */
+.jerry-app .quotation-page .matrix-mode-switcher { display: flex; align-items: center; flex-wrap: wrap; }
+.jerry-app .quotation-page .matrix-mode-switcher > header { border: 0; padding: 8px 14px; }
+.jerry-app .quotation-page .matrix-mode-switcher > header > span,
+.jerry-app .quotation-page .matrix-mode-switcher > nav small { display: none; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav { display: flex; flex: 0 1 auto; flex-wrap: wrap; padding: 6px 10px; }
+.jerry-app .quotation-page .matrix-mode-switcher > nav button { min-height: 36px; padding: 4px 10px; }
+.jerry-app .quotation-page .matrix-mode-panel .common-head { padding: 8px 14px; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; }
+.jerry-app .quotation-page .common-head .save-selection-template { margin: 0 0 0 auto; min-height: 34px; padding: 6px 12px; font-size: 13px; }
+.jerry-app .quotation-page .common-head-actions .country-search { width: 310px; max-width: 100%; height: 34px; }
+.jerry-app .quotation-page .country-search input { font-size: 13px; }
+.jerry-app .quotation-page .matrix-mode-panel .country-grid { display: flex; flex-wrap: wrap; padding: 7px 14px; gap: 6px; }
+.jerry-app .quotation-page .matrix-mode-panel .country-grid button { min-height: 34px; padding: 5px 12px; gap: 7px; }
+.jerry-app .quotation-page .country-grid i { font-size: 13px; font-weight: 700; }
+.jerry-app .quotation-page .country-grid b { font-size: 13px; }
+.jerry-app .quotation-page .country-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 7px 14px; border-bottom: 1px solid #e5eaed; }
+.jerry-app .quotation-page .country-tools .country-title { flex-wrap: wrap; gap: 6px; }
+.jerry-app .quotation-page .country-tools .country-title > b { font-size: 14px; }
+.jerry-app .quotation-page .country-tools .country-title > span { padding: 3px 6px; font-size: 11px; }
+.jerry-app .quotation-page .country-tools .sort-toolbar { flex: 1; min-width: 0; flex-direction: row; align-items: center; padding: 0; border: 0; gap: 8px; }
+.jerry-app .quotation-page .country-tools .channel-filter { gap: 6px; }
+.jerry-app .quotation-page .country-tools .channel-search { width: 250px; min-height: 34px; }
+.jerry-app .quotation-page .country-tools .channel-search input { font-size: 12px; }
+.jerry-app .quotation-page .country-tools .sort-toolbar nav { width: auto; flex-wrap: wrap; gap: 5px; margin-left: auto; }
+.jerry-app .quotation-page .country-tools .sort-toolbar button { height: 32px; padding: 0 10px; font-size: 12px; }
+.jerry-app .quotation-page .copy-country { min-height: 32px; padding: 5px 10px; border: 1px solid #53a66f; border-radius: 6px; background: #fff; color: #227644; font-size: 12px; cursor: pointer; }
+.jerry-app .quotation-page .copy-country:disabled { opacity: .45; cursor: not-allowed; }
+.jerry-app .quotation-page .channel-legend { display: flex; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #e5eaed; background: #fafcfd; }
+.jerry-app .quotation-page .matrix-workbench .tax-legend { flex-wrap: wrap; padding: 5px 14px; gap: 8px 14px; font-size: 11px; }
+.jerry-app .quotation-page .channel-legend .tax-legend { border: 0; }
+.jerry-app .quotation-page .channel-highlights { display: flex; flex-wrap: wrap; gap: 16px; margin-left: auto; padding: 5px 14px; color: #687681; font-size: 12px; }
+.jerry-app .quotation-page .channel-highlights b { color: #a65b00; }
+.jerry-app .quotation-page .common-matrix .table-head { padding: 7px 14px; font-size: 12px; }
+.jerry-app .quotation-page .common-matrix .table-head small { font-size: 10px; }
+.jerry-app .quotation-page .common-matrix .quote-rows article { min-height: 54px; padding: 7px 14px; font-size: 13px; }
+.jerry-app .quotation-page .common-matrix .quote-rows small { font-size: 11px; }
+.jerry-app .quotation-page .common-matrix .empty-rows { padding: 22px 14px; font-size: 12px; }
+.jerry-app .quotation-page .common-matrix > footer { padding: 6px 14px; font-size: 11px; }
+.jerry-app .quotation-page .matrix-mode-panel .template-workbench { gap: 0; }
+.jerry-app .quotation-page .matrix-mode-panel .template-toolbar { padding: 8px 14px; border: 0; border-bottom: 1px solid #e5eaed; border-radius: 0; box-shadow: none; }
+.jerry-app .quotation-page .template-actions { width: 100%; flex: 1; align-items: center; flex-direction: row; gap: 8px; }
+.jerry-app .quotation-page .template-actions label { display: flex; align-items: center; flex: 0 1 auto; width: auto; gap: 8px; }
+.jerry-app .quotation-page .template-actions label > span { white-space: nowrap; }
+.jerry-app .quotation-page .template-actions select { width: 270px; max-width: 100%; height: 36px; }
+.jerry-app .quotation-page .template-actions button,
+.jerry-app .quotation-page .template-status button { min-height: 34px; padding: 5px 11px; font-size: 13px; }
+.jerry-app .quotation-page .template-actions .template-manager-button { margin-left: auto; }
+.jerry-app .quotation-page .template-actions .update,
+.jerry-app .quotation-page .template-actions .save-new-template { border-color: #e7a13b; color: #ae6100; }
+.jerry-app .quotation-page .template-state-badge { padding: 3px 7px; border-radius: 12px; background: #eef3f6; color: #526572; font-size: 12px; white-space: nowrap; }
+.jerry-app .quotation-page .template-actions .new-template-name { flex-wrap: wrap; }
+.jerry-app .quotation-page .new-template-name input { width: 180px; max-width: 100%; height: 34px; box-sizing: border-box; }
+.jerry-app .quotation-page .matrix-mode-panel .template-status { min-height: 0; padding: 7px 14px; border: 0; border-bottom: 1px solid #e5eaed; border-radius: 0; gap: 6px 12px; }
+.jerry-app .quotation-page .active-template { flex-wrap: wrap; gap: 6px; }
+.jerry-app .quotation-page .active-template > i { width: 22px; height: 22px; }
+.jerry-app .quotation-page .active-template > span { display: flex; align-items: baseline; gap: 6px; }
+.jerry-app .quotation-page .active-template b { font-size: 13px; }
+.jerry-app .quotation-page .active-template small,
+.jerry-app .quotation-page .active-template em,
+.jerry-app .quotation-page .template-status > p { font-size: 12px; }
+.jerry-app .quotation-page .template-status .status-actions { display: flex; width: auto; flex-wrap: wrap; margin-left: auto; }
+.jerry-app .quotation-page .template-compact > .specified-head { padding: 7px 14px; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.jerry-app .quotation-page .template-compact .head-actions { width: auto; }
+.jerry-app .quotation-page .template-compact .specified-head h2 { margin: 0; font-size: 14px; }
+.jerry-app .quotation-page .template-compact .head-actions button { height: 32px; font-size: 12px; }
+.jerry-app .quotation-page .template-empty-state { margin: 0; padding: 22px 14px; text-align: center; color: #687681; font-size: 12px; }
+.jerry-app .quotation-page .template-compact > footer { padding: 6px 14px; }
+.jerry-app .quotation-page .template-compact > footer button { height: 32px; font-size: 12px; }
+@media (max-width: 680px) {
+  .jerry-app .quotation-page .common-head-actions { width: 100%; }
+  .jerry-app .quotation-page .common-head-actions .country-search { width: 100%; }
+  .jerry-app .quotation-page .template-actions label { flex-wrap: wrap; max-width: 100%; }
+  .jerry-app .quotation-page .template-actions .template-manager-button { margin-left: 0; }
+  .jerry-app .quotation-page .country-tools .channel-filter { width: 100%; }
+  .jerry-app .quotation-page .country-tools .channel-search { flex: 1; }
+}
+.jerry-app .quotation-page .common-matrix .selection-actions button { font-size: 12px; min-height: 28px; }
+.jerry-app .quotation-page .common-matrix > footer button,
+.jerry-app .quotation-page .common-matrix > footer select { font-size: 11px; }
+.jerry-app .quotation-page .template-compact .quote-head { font-size: 11px; }
+.jerry-app .quotation-page .template-compact .selected-channels section { min-height: 52px; font-size: 13px; }
+.jerry-app .quotation-page .template-compact .selected-channels small { font-size: 11px; }
+.jerry-app .quotation-page .template-compact .country-metrics { font-size: 11px; }
+.jerry-app .quotation-page .template-compact .row-actions { flex-wrap: wrap; }
+.jerry-app .quotation-page .template-compact .row-actions button { font-size: 11px; }

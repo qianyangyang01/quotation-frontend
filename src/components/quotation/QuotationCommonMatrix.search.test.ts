@@ -130,7 +130,7 @@ it('finds non-common countries by code, loads on click and retains additions aft
   complete(true); await tick(); button('加入报价单').click(); await tick()
   expect(changed.mock.lastCall?.[0]).toEqual([expect.objectContaining({ country: '日本', channelKey: 'A' })])
   await search(''); state.contextKey = 'b'; await tick()
-  expect(document.querySelector('.country-summary')!.textContent).toContain('日本')
+  expect(document.querySelector('.country-title')!.textContent).toContain('日本')
   expect(document.querySelector('.country-grid')!.textContent).toContain('日本')
   button('已加入').click(); await tick(); expect(changed.mock.lastCall?.[0]).toEqual([])
 })
