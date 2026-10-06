@@ -424,7 +424,6 @@ function formatTime(value: string) {
       <div class="template-intro">
         <p>MODE B · PERSONAL QUOTATION TEMPLATE</p>
         <h2>我的报价模板</h2>
-        <span>按业务员账号独立保存常用国家与渠道；应用后可临时调整，不会自动改动原模板。</span>
       </div>
       <div class="template-actions">
         <label>
@@ -463,7 +462,7 @@ function formatTime(value: string) {
         </div>
       </template>
       <template v-else>
-        <div class="empty-template"><i>☆</i><span><b>{{ newTemplateMode ? '新建模板' : '尚未应用个人模板' }}</b><small>{{ newTemplateMode ? '在下方添加国家与渠道，填写模板名称后保存。' : '选择“新建模板”可清空当前清单，自定义添加国家与渠道。' }}</small></span></div>
+        <div class="empty-template"><i>☆</i><span><b>{{ newTemplateMode ? '新建模板' : '尚未应用个人模板' }}</b><small v-if="newTemplateMode">在下方添加国家与渠道，填写模板名称后保存。</small></span></div>
         <label v-if="newTemplateMode" class="new-template-name">模板名称<input v-model="createName" :disabled="savingTemplate" maxlength="40" placeholder="输入模板名称"></label>
         <button class="save-new-template" :disabled="savingTemplate || (newTemplateMode && (!canSaveSelection || !createName.trim()))" @click="newTemplateMode ? createFromCurrent() : (showManager = true)">{{ savingTemplate ? '保存中…' : '保存' }}</button>
       </template>
@@ -599,8 +598,8 @@ function formatTime(value: string) {
 .template-workbench{font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif}
 .template-workbench :is(button,input,select){font-family:inherit}
 .template-toolbar{flex-wrap:wrap}
-.template-actions{flex:1 1 640px;flex-wrap:wrap;width:640px;max-width:100%;gap:10px}
-.template-actions label{flex:1 1 320px;min-width:0;color:#475569;font-size:13px;font-weight:600}
+.template-actions{flex:0 1 auto;flex-wrap:wrap;width:auto;max-width:100%;gap:10px}
+.template-actions label{flex:0 1 270px;width:270px;max-width:100%;min-width:0;color:#475569;font-size:13px;font-weight:600}
 .template-actions select{width:100%;min-width:0;height:44px;box-sizing:border-box;padding:0 12px;border-color:#94a3b8;color:#17232d;font-size:15px;font-weight:700;line-height:1.5}
 .template-actions select option{font-size:15px;font-weight:600}
 .template-actions select:focus-visible{outline:2px solid #b86500;outline-offset:2px}
@@ -621,6 +620,6 @@ function formatTime(value: string) {
 .manager-actions{grid-column:1/-1;flex-wrap:wrap}
 .template-feedback{font-size:14px;line-height:1.6}
 @media(max-width:1050px){.manager-list article{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:680px){.template-actions label{flex:auto}.status-actions button{min-height:44px}}
+@media(max-width:680px){.template-actions{width:100%}.template-actions label{flex:auto;width:100%}.status-actions button{min-height:44px}}
 @media(max-width:680px){.status-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.status-actions button{height:auto;min-height:38px;padding:7px 9px}.status-actions .update{grid-column:1/-1}}
 </style>
