@@ -10,6 +10,12 @@ const record = (overrides: Partial<QuotationRecord> = {}) => normalizeQuotationR
 })!
 
 describe('reissuing a quotation as new editable inputs', () => {
+  it('starts a new ordinary quotation without copying priority or changing the original', () => {
+    const original=record({priorityProcessing:true,financeReviewStatus:'pending'})
+    const before=JSON.stringify(original)
+    expect(quotationReissuePayload(original).priorityProcessing).not.toBe(true)
+    expect(JSON.stringify(original)).toBe(before)
+  })
   it('preserves commission and extra packaging inputs from the current production record', () => {
     const payload = quotationReissuePayload(record({ commissionThreshold: 0.95,
       weightSnapshot: buildQuotationWeightSnapshot([{ sku: 'SKU-A', quantityPerSet: 1, baseWeightKg: 0.05 }], 25, [1, 2]),

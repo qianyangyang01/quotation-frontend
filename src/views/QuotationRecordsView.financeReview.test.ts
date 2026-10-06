@@ -38,8 +38,8 @@ it.each([['employee','mine'],['super_admin','company']] as const)('uses the same
   expect(badges).toEqual(labels.flatMap(label=>[label,label]))
   expect(document.querySelector('[aria-label="处理状态"]')).toBeNull()
   expect(document.querySelector('.records')?.textContent).not.toMatch(/待处理|已处理|报价待确认/)
-  expect(document.querySelector('.stats')?.textContent).toContain('共 10 条报价')
-  expect(document.querySelector('.stats')?.textContent).toContain('其中已成交 2 条')
+  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('共 10 条')
+  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('已成交 2 条')
   expect([...document.querySelectorAll('[aria-label="成交结果"] option')].map(el=>el.getAttribute('value'))).toEqual(['','won','lost'])
   document.querySelectorAll<HTMLButtonElement>('.difference-cell')[6]!.click();await flush()
   const detail=document.querySelector('.detail-review-status')!.textContent

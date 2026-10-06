@@ -26,6 +26,13 @@ class QuotationWithdrawalPostgresTest extends QuotationFinanceReviewIntegrationT
         r.add("spring.jpa.defer-datasource-initialization",()->"false");r.add("spring.flyway.enabled",()->"true");
     }
     @Autowired QuotationDraftRepository drafts;
+    @Test void withdrawalEndsPriorityAndResubmissionUsesExplicitNewChoice() throws Exception {
+        var q=record();priority(q,employee,true,0).andExpect(status().isOk());withdraw(q);
+        assertFalse(reviews.findById(q.id).orElseThrow().state.path("priorityProcessing").asBoolean());
+        var body=resubmission(q);((ObjectNode)body.path("quotation")).put("priorityProcessing",true);
+        command(q,"resubmit",body,"priority-resubmit-"+q.id,employee).andExpect(status().isOk()).andExpect(jsonPath("$.data.priorityProcessing").value(true));
+        assertFalse(records.findById(q.id).orElseThrow().payload.has("priorityProcessing"));
+    }
     @Autowired org.springframework.jdbc.core.simple.JdbcClient jdbc;
     ObjectNode draft() {return mapper.createObjectNode().put("schemaVersion",2).put("customerName","撤回草稿").put("quoteMode","single").put("skuSearch","");}
     ObjectNode withdrawal(QuotationRecordEntity q) {var b=mapper.createObjectNode().put("_version",q.version);b.set("draft",draft());return b;}

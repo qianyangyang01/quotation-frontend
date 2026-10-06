@@ -115,7 +115,7 @@ it.each([
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
-  const context={ captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
+  const context={ priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
@@ -143,6 +143,7 @@ it.each([
     ...(mode === 'single' ? { purchase: pricing.effectiveUnitPriceCny } : { purchaseUnitPrice: pricing.effectiveUnitPriceCny }),
   })
   await run()
+  expect(createQuotationRecord.mock.calls[0]?.[0].priorityProcessing).toBe(mode==='bundle')
   expect(createQuotationRecord).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
     purchaseUnitPriceCny:mode==='single'?6.87:undefined, purchaseInvoiceRatePercent:mode==='single'?1:undefined, domesticFreightPerUnitCny:mode==='single'?(grade==='A'?.21:0):undefined,

@@ -158,6 +158,7 @@ const quoteMode = ref<QuotationMode>('single')
 const route = useRoute()
 const router = useRouter()
 const pendingReissue = shallowRef<Awaited<ReturnType<typeof loadRecord>>>(null)
+const priorityProcessing = ref(false)
 const reissueSource = ref('')
 const reissueBusy = ref(false)
 const reissueError = ref('')
@@ -937,6 +938,7 @@ function draftPayload(): QuotationDraftPayload {
     .find(row => row.country === p.country && (p.selectedChannelKey ? row.channelKey === p.selectedChannelKey : row.rule === p.rule && row.carrier === p.channel) && (row.quoteRegion || '') === quoteRegionForCountry(p.country))
   return {
     schemaVersion: 2,
+    priorityProcessing: priorityProcessing.value,
     customerName: customerName.value,
     selectedCustomerId: selectedCustomerId.value,
     quoteMode: quoteMode.value,
@@ -1040,6 +1042,7 @@ async function recordForDraftSku(sku: string, freshPurchases?: Map<string, Purch
 async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>, options: { restoreQuotation?: boolean } = {}) {
   const migrated = migrateDraftMatrix(payload)
   payload = migrated
+  priorityProcessing.value = payload.priorityProcessing === true
   draftReady.value = false
   draftNeedsQuery.value = !options.restoreQuotation
   productQueryGeneration += 1
@@ -1206,6 +1209,7 @@ async function loadAndRestoreDraft() {
   return state.sourceQuote ? state : { exists: false, payload: null, version: -1, updatedAt: null }
 }
 async function resetLocalDraft(customer?: LastQuotationCustomer) {
+  priorityProcessing.value = false
   submitOrdinaryQuotation = quotationSubmitter()
   draftNeedsQuery.value = false
   draftChannelNotice.value = ''
@@ -2091,6 +2095,7 @@ async function save() {
   }) } : undefined
   const systemQuantityQuotes = captured ? { quantities:captured.quantities, rows:quoteOptions.map(option=>({ optionId:option.id, prices:captured!.rows.find(row=>row.key===option.quoteSheetKey)!.systemPrices })) } : undefined
   const record = await persistQuotation({
+    priorityProcessing: priorityProcessing.value,
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
     weightSnapshot: buildQuotationWeightSnapshot(quoteMode.value === 'bundle'
@@ -2254,7 +2259,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
-        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" v-if="!draftNeedsQuery"
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
           :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"

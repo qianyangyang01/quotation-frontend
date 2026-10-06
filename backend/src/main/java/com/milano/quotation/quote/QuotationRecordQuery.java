@@ -15,7 +15,8 @@ public class QuotationRecordQuery {
     private final ObjectMapper mapper;
     @org.springframework.beans.factory.annotation.Autowired private QuotationCountryIndex countryIndex;
     public QuotationRecordQuery(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc=jdbc; this.mapper=mapper; }
-    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine, String product, String customer, String channel, String optionScale, String priceDifference) {
+    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine, String product, String customer, String channel, String optionScale, String priceDifference, boolean priorityOnly) {
+        public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer,String reviewStatus,boolean reviewMine,String product,String customer,String channel,String optionScale,String priceDifference) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,false); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer,String reviewStatus,boolean reviewMine) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,reviewStatus,reviewMine,null,null,null,null,null); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,null,false); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate) { this(q,status,country,category,startDate,endDate,"active",null); }
@@ -38,7 +39,9 @@ public class QuotationRecordQuery {
             params.put("confirmedIds","{"+String.join(",",countrySnapshot.confirmedIds().stream().map(UUID::toString).toList())+"}");
             confirmed="(id=ANY(CAST(:confirmedIds AS uuid[])))";
         }
+        var priority="(lifecycle_state='active' and exists(select 1 from quotation_review pr where pr.id=quotation_record.id and pr.status in ('pending','reviewing') and pr.state->>'priorityProcessing'='true'))";
         var where=new StringBuilder(" where lifecycle_state=:lifecycle");
+        if(filters.priorityOnly()) where.append(" and "+priority);
         if(owner!=null) { where.append(" and owner_account=:owner");params.put("owner",owner); }
         var zone=ZoneId.of("Asia/Shanghai");
         if(filters.startDate()!=null) { where.append(" and created_at>=:start");params.put("start",java.sql.Timestamp.from(filters.startDate().atStartOfDay(zone).toInstant())); }
@@ -72,7 +75,8 @@ public class QuotationRecordQuery {
         var summary=jdbc.queryForObject("select count(*) total,count(*) filter(where status in ('pending','lost') and not "+confirmed+") pending,count(*) filter(where status in ('pending','lost') and "+confirmed+") processed,count(*) filter(where status='won') won,count(*) filter(where status='lost') lost from quotation_record"+where,params,(rs,n)->new Summary(rs.getLong("pending"),rs.getLong("won"),rs.getLong("lost"),rs.getLong("total"),rs.getLong("processed")));
         int safeSize=Math.max(1,Math.min(100,size)); int pages=(int)Math.ceil((double)summary.total()/safeSize); int safePage=Math.max(0,Math.min(page,Math.max(0,pages-1)));
         params.put("limit",safeSize);params.put("offset",(long)safePage*safeSize);
-        var items=jdbc.query("select id,payload,version,lifecycle_state from quotation_record"+where+" order by created_at desc,id desc limit :limit offset :offset",params,(rs,n)->{var payload=(tools.jackson.databind.node.ObjectNode)mapper.readTree(rs.getString("payload"));payload.put("id",rs.getObject("id",UUID.class).toString());payload.put("_version",rs.getLong("version"));payload.put("lifecycleState",rs.getString("lifecycle_state"));return (JsonNode)payload;});
+        var order=" order by "+priority+" desc,case when "+priority+" then created_at end asc,created_at desc,id desc";
+        var items=jdbc.query("select id,payload,version,lifecycle_state from quotation_record"+where+order+" limit :limit offset :offset",params,(rs,n)->{var payload=(tools.jackson.databind.node.ObjectNode)mapper.readTree(rs.getString("payload"));payload.put("id",rs.getObject("id",UUID.class).toString());payload.put("_version",rs.getLong("version"));payload.put("lifecycleState",rs.getString("lifecycle_state"));return (JsonNode)payload;});
         if(!items.isEmpty()) {
             var reviewRows=jdbc.query("select id,state,version from quotation_review where id in (:ids)",Map.of("ids",items.stream().map(p->UUID.fromString(p.path("id").asText())).toList()),
                 (rs,n)->Map.entry(rs.getObject("id",UUID.class),Map.entry(mapper.readTree(rs.getString("state")),rs.getLong("version"))));

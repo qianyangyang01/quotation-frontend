@@ -28,7 +28,7 @@ beforeEach(()=>{
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.useRealTimers();vi.clearAllMocks()})
 it('requires reviewed selection and reason, sends versions only after confirmation, then reloads',async()=>{
   await mount()
-  expect(button('移入回收站').disabled).toBe(true)
+  expect(button('移入回收站')).toBeUndefined()
   document.querySelector<HTMLInputElement>('.lifecycle-checkbox')!.click();await flush()
   button('移入回收站').click();await flush()
   expect(document.querySelector('dialog')?.textContent).toContain('QT-TEST')

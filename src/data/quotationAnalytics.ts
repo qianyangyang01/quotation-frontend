@@ -163,7 +163,7 @@ function csvCell(value: string | number) {
 
 export function quotationDetailsCsv(records: QuotationRecord[], purchases: AnalyticsPurchase[], options: { includeReview?: boolean } = {}) {
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
-  const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '成本(RMB)', '报价(USD)', '报价(RMB)', ...(options.includeReview ? ['审核状态', '审核人', '审核时间', '成交结果'] : [])]
-  const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2), ...(options.includeReview ? [financeReviewLabel(record.financeReviewStatus), record.financeReviewedBy || '', record.financeReviewedAt || '', quotationDealLabel(record.status)] : [])])
+  const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '成本(RMB)', '报价(USD)', '报价(RMB)', ...(options.includeReview ? ['审核状态', '审核人', '审核时间', '成交结果', '优先处理'] : [])]
+  const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2), ...(options.includeReview ? [financeReviewLabel(record.financeReviewStatus), record.financeReviewedBy || '', record.financeReviewedAt || '', quotationDealLabel(record.status), record.priorityProcessing ? '优先' : '普通'] : [])])
   return `\uFEFF${[header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')}`
 }

@@ -49,6 +49,7 @@ public class QuotationSubmissionValidator {
     }
 
     public void validate(ObjectNode input) {
+        if (input.has("priorityProcessing") && !input.path("priorityProcessing").isBoolean()) throw com.milano.quotation.common.AppException.unprocessable("优先处理参数不合法");
         CommissionThreshold.normalize(input);
         PackagingWeight.record(input);
         var errors = new ArrayList<ApiResponse.FieldError>();

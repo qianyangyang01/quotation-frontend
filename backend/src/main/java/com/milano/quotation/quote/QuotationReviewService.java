@@ -52,6 +52,9 @@ public class QuotationReviewService {
         payload.remove("financeReviewLatestComment");
         if (!comments.isEmpty()) payload.set("financeReviewLatestComment", comments.getLast());
         payload.put("_reviewVersion",version);
+        payload.put("priorityProcessing", state.path("priorityProcessing").asBoolean(false)
+            && Set.of("pending", "reviewing").contains(payload.path("financeReviewStatus").asText())
+            && payload.path("lifecycleState").asText("active").equals("active"));
     }
     private static List<JsonNode> comments(JsonNode state) {
         var result = new ArrayList<JsonNode>();
@@ -88,6 +91,34 @@ public class QuotationReviewService {
             var row=new QuotationReviewEntity();row.id=quote.id;row.state=legacy(quote.payload);
             row.status=row.state.path("financeReviewStatus").asText();return reviews.saveAndFlush(row);
         });
+    }
+    /** Priority is review metadata: never dirty the immutable quotation snapshot or its version. */
+    void initializePriority(QuotationRecordEntity quote, JsonNode input, QuotationPrincipal actor) {
+        if (input.path("priorityProcessing").asBoolean(false)) writePriority(quote, state(quote), true, actor, "priority-set");
+    }
+    void changePriority(QuotationRecordEntity quote, ObjectNode request, QuotationPrincipal actor) {
+        requireQuoteVersion(quote, request);
+        var row = state(quote);
+        if (!request.path("_reviewVersion").isIntegralNumber() || request.path("_reviewVersion").asLong(-1) != row.version)
+            throw AppException.conflict("审核或优先状态已变化，请刷新后重试");
+        if (!Set.of("pending", "reviewing").contains(row.status))
+            throw AppException.conflict("审核已完成，不能再设置优先处理");
+        var enabled = request.path("priorityProcessing").asBoolean();
+        writePriority(quote, row, enabled, actor, enabled ? "priority-set" : "priority-cancel");
+    }
+    void clearPriority(QuotationRecordEntity quote, QuotationPrincipal actor) {
+        reviews.findById(quote.id).filter(row -> row.state.path("priorityProcessing").asBoolean(false))
+            .ifPresent(row -> writePriority(quote, row, false, actor, "priority-ended"));
+    }
+    private void writePriority(QuotationRecordEntity quote, QuotationReviewEntity row, boolean enabled, QuotationPrincipal actor, String action) {
+        if (row.state.path("priorityProcessing").asBoolean(false) == enabled) return;
+        var current = (ObjectNode) row.state.deepCopy();
+        preserveLegacyHistory(quote, current);
+        current.put("priorityProcessing", enabled);
+        event(current, actor, action, row.status, row.status, "", quote.version);
+        row.state = current;
+        reviews.saveAndFlush(row);
+        audit.record("quotation." + action, "quotation", quote.id.toString(), "success", Map.of("priorityProcessing", enabled));
     }
     void change(QuotationRecordEntity quote, ObjectNode request, QuotationPrincipal actor) {
         var row=state(quote);var action=request.path("action").asText();
@@ -126,6 +157,10 @@ public class QuotationReviewService {
             current.remove(List.of("financeReviewClaimedAccount","financeReviewClaimedBy","financeReviewStartedAt"));
         }
         current.put("financeReviewStatus",row.status);
+        if (action.equals("complete") && current.path("priorityProcessing").asBoolean(false)) {
+            current.put("priorityProcessing", false);
+            event(current, actor, "priority-ended", before, row.status, "", quote.version);
+        }
         event(current,actor,action,before,row.status,note,quote.version);
         row.state=current;reviews.saveAndFlush(row);
         if (Set.of("complete","comment").contains(action)) notifications.publish(quote,row,action,note,actor);
@@ -151,6 +186,7 @@ public class QuotationReviewService {
         audit.record("quotation.review.content-changed","quotation",quote.id.toString(),"success",Map.of("before",before,"after",row.status));
     }
     void withdrawn(QuotationRecordEntity quote, QuotationPrincipal actor) {
+        clearPriority(quote, actor);
         notifications.invalidate(quote.id);
         var row=state(quote);var current=(ObjectNode)row.state.deepCopy();var before=row.status;
         preserveLegacyHistory(quote,current);

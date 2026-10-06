@@ -66,10 +66,11 @@ public class QuotationController {
         @RequestParam(defaultValue="") String product, @RequestParam(defaultValue="") String customer,
         @RequestParam(defaultValue="") String channel, @RequestParam(defaultValue="") String optionScale,
         @RequestParam(defaultValue="") String priceDifference,
+        @RequestParam(defaultValue="false") boolean priorityOnly,
         @RequestParam(defaultValue="active") String lifecycle,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate, Authentication auth) {
-        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference),page,size));
+        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,priorityOnly),page,size));
     }
     /** Poll only visible records; enforce owner scope on the server. */
     @GetMapping("/review-status")
@@ -89,6 +90,21 @@ public class QuotationController {
         }
         reviews.enrich(result);
         return ApiResponse.ok(result);
+    }
+
+    @PatchMapping("/{id}/priority")
+    @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
+    @Transactional
+    ApiResponse<JsonNode> priority(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
+        var fields = new HashSet<String>(); patch.properties().forEach(entry -> fields.add(entry.getKey()));
+        if (!Set.of("priorityProcessing", "_version", "_reviewVersion").containsAll(fields) || !patch.path("priorityProcessing").isBoolean())
+            throw AppException.unprocessable("优先处理参数不合法");
+        var row = records.lockById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
+        if (!row.ownerAccount.equals(principal(auth).account()))
+            throw new org.springframework.security.access.AccessDeniedException("只能设置自己的报价优先处理");
+        QuotationLifecycleController.assertActive(row);
+        reviews.changePriority(row, patch, principal(auth));
+        return ApiResponse.ok(view(row));
     }
 
     @PatchMapping("/{id}/finance-review")
@@ -139,7 +155,7 @@ public class QuotationController {
         readiness.assertCanCreate(input);
         var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = input.deepCopy();
         logisticsGuard.validate(payload);
-        payload.remove(List.of("customerId", "lifecycleState", "lifecyclePreviousState", "lifecycleChangedAt", "lifecycleChangedBy", "lifecycleChangedAccount", "lifecycleReason"));
+        payload.remove(List.of("priorityProcessing", "customerId", "lifecycleState", "lifecyclePreviousState", "lifecycleChangedAt", "lifecycleChangedBy", "lifecycleChangedAccount", "lifecycleReason"));
         payload.put("id", id.toString()); payload.put("no", no); payload.put("salespersonName", principal.displayName());
         payload.put("salespersonAccount", principal.account()); payload.put("status", "pending");
         payload.put("createdAt", now.toString()); payload.put("updatedAt", now.toString());
@@ -150,6 +166,7 @@ public class QuotationController {
         var row = new QuotationRecordEntity(); row.id = id; row.quoteNo = no; row.ownerAccount = principal.account();
         row.status = "pending";
         row.payload = payload; row.createdAt = now; row.updatedAt = now; records.saveAndFlush(row);
+        reviews.initializePriority(row, input, principal);
         var response = view(row); idempotency.save(principal.account(), "quotation-create", key, body, response);
         audit.record("quotation.create", "quotation", id.toString(), "success", Map.of("quoteNo", no));
         return ApiResponse.ok(response);

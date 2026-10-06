@@ -14,6 +14,7 @@ export interface DraftChannelSelection {
 }
 
 export interface QuotationDraftPayload {
+  priorityProcessing?: boolean
   specialPackagingGrams?: number | null
   commissionThreshold?: number | null
   schemaVersion: 2

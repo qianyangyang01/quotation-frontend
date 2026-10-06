@@ -25,7 +25,7 @@ it('keeps the selected date visible during a pending query and clears it for a c
   await vi.advanceTimersByTimeAsync(250); await flush()
   expect(document.querySelector('.record-feedback-spinner')).not.toBeNull()
   resolveQuery(result(2)); await flush()
-  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('当前筛选共 2 条')
+  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('共 2 条')
   expect(document.querySelector('.record-feedback-spinner')).toBeNull()
   const start = document.querySelector<HTMLInputElement>('[aria-label="开始日期"]')!
   start.value = '2026-09-02'; start.dispatchEvent(new Event('input')); await flush()
@@ -96,7 +96,7 @@ it.each(['mine', 'company'])('filters pending finance reviews and resets paginat
   await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
   expect(query.loadRecordPage.mock.lastCall).toEqual([scope, expect.objectContaining({reviewStatus:'pending'}), 0, 10])
   expect(document.querySelector('[aria-label="报价记录分页"]')!.textContent).toContain('共 3 条')
-  expect(document.querySelector('.stats')!.textContent).toContain('3')
+  expect(document.querySelector('.record-query-feedback')!.textContent).toContain('共 3 条')
 })
 
 it.each(['mine', 'company'])('opens the quotation overview from the detail cell and resets the previous tab for %s', async scope => {

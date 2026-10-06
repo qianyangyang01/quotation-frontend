@@ -100,7 +100,7 @@ describe('customer operation settings on the actual quotation page', () => {
     host.querySelector<HTMLButtonElement>('[aria-label="展开客户列表"]')!.click()
     await nextTick()
     const options = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="option"]'))
-    expect(options.map(option => option.textContent)).toEqual(customers.filter(c => c.enabled).map(c => c.name + operationFeesLabel(c)))
+    expect(options.map(option => option.textContent)).toEqual(customers.filter(c => c.enabled).map(c => c.name + '公司计费' + operationFeesLabel(c)))
     options[0]!.click()
     await nextTick()
     expect(input.value).toBe('BK')

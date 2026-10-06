@@ -86,6 +86,7 @@ public class QuotationLifecycleController {
             revision.put("reason", reason);
             payload.put("updatedAt", now.toString());
             row.lifecycleState = target; row.payload = payload; row.updatedAt = now;
+            if (!target.equals("active")) reviews.clearPriority(row, principal);
             records.saveAndFlush(row);
             audit.record("quotation." + request.action(), "quotation", row.id.toString(), "success",
                     Map.of("batchId", batchId, "quoteNo", row.quoteNo, "before", before, "after", target, "reason", reason));

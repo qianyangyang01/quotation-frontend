@@ -109,7 +109,7 @@ public class QuotationWithdrawalController {
             throw AppException.unprocessable("缺少采购或财务版本信息，请刷新草稿并重新计价");
         var payload=input.deepCopy();validator.validate(payload);validator.validateQuotePricing(payload);readiness.assertCanCreate(payload);
         logistics.validate(payload);
-        payload.remove(List.of("customerId","_version","_reviewVersion","lifecycleState","lifecyclePreviousState","lifecycleChangedAt","lifecycleChangedBy","lifecycleChangedAccount","lifecycleReason",
+        payload.remove(List.of("priorityProcessing","customerId","_version","_reviewVersion","lifecycleState","lifecyclePreviousState","lifecycleChangedAt","lifecycleChangedBy","lifecycleChangedAccount","lifecycleReason",
             "actualQuoteUsd","actualQuoteCny","dealQuantity","dealLines","dealOptionId","dealOptionLabel","closedAt","note","quoteConfirmedAt","quoteConfirmedBy"));
         var now=Instant.now();payload.put("id",id.toString()).put("no",quote.quoteNo).put("salespersonAccount",quote.ownerAccount)
             .put("salespersonName",quote.payload.path("salespersonName").asText(actor.displayName()))
@@ -122,6 +122,7 @@ public class QuotationWithdrawalController {
             .put("editorName",actor.displayName()).put("editorAccount",actor.account()).put("field","quoteRevision").put("fieldLabel","撤回重新编辑")
             .put("before",before.toString()).put("after",after.toString());
         quote.payload=payload;quote.status="pending";quote.lifecycleState="active";quote.updatedAt=now;records.saveAndFlush(quote);
+        reviews.initializePriority(quote, input, actor);
         drafts.delete(draft);drafts.flush();
         var result=payload.deepCopy();result.put("_version",quote.version).put("lifecycleState","active");reviews.enrich(List.of(result));
         idempotency.save(actor.account(),operation,key,body,result);

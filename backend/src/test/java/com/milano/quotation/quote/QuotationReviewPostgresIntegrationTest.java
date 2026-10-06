@@ -13,6 +13,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers(disabledWithoutDocker=true)
 @org.springframework.test.annotation.DirtiesContext(classMode=org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 class QuotationReviewPostgresIntegrationTest extends QuotationFinanceReviewIntegrationTest {
+    @Test void prioritySortingFilteringAndCountsApplyBeforePagination() throws Exception {
+        var old=record();old.createdAt=java.time.Instant.parse("2026-10-01T00:00:00Z");records.saveAndFlush(old);
+        var newer=record();newer.createdAt=java.time.Instant.parse("2026-10-02T00:00:00Z");records.saveAndFlush(newer);
+        var ordinary=record();
+        priority(newer,employee,true,0).andExpect(status().isOk());
+        priority(old,employee,true,0).andExpect(status().isOk());
+        for (var only:java.util.List.of("false","true")) {
+            mvc.perform(get("/api/v1/quotations/search").param("priorityOnly",only).param("size","1").param("page","0").with(employee))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(only.equals("true")?2:3))
+                .andExpect(jsonPath("$.data.items[0].id").value(old.id.toString())).andExpect(jsonPath("$.data.items[0].priorityProcessing").value(true));
+            mvc.perform(get("/api/v1/quotations/search").param("priorityOnly",only).param("size","1").param("page","1").with(employee))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").value(newer.id.toString()));
+        }
+        mvc.perform(get("/api/v1/quotations/search").param("size","1").param("page","2").with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].id").value(ordinary.id.toString()));
+        mvc.perform(get("/api/v1/quotations/search").param("priorityOnly","true").param("scope","company").with(other))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        claim(old);complete(old);
+        mvc.perform(get("/api/v1/quotations/search").param("priorityOnly","true").param("reviewStatus","pending").with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.summary.total").value(1)).andExpect(jsonPath("$.data.items[0].id").value(newer.id.toString()));
+    }
     @Test void searchIncludesSameOpinionForEmployeeAndFinanceWithinTheirScope() throws Exception {
         var r=record();
         action(r,finance,qv(r),rv(r),"comment",null,"建议核实包装重量").andExpect(status().isOk());

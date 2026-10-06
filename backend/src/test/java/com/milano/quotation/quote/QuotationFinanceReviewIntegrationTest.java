@@ -52,6 +52,59 @@ class QuotationFinanceReviewIntegrationTest {
     long qv(QuotationRecordEntity r) {return records.findById(r.id).orElseThrow().version;}
     void claim(QuotationRecordEntity r) throws Exception {action(r,finance,qv(r),rv(r),"claim",null,"").andExpect(status().isOk());}
     void complete(QuotationRecordEntity r) throws Exception {action(r,finance,qv(r),rv(r),"complete","approved","").andExpect(status().isOk());}
+    ResultActions priority(QuotationRecordEntity r, RequestPostProcessor actor, boolean enabled, long version) throws Exception {
+        var body=mapper.createObjectNode().put("priorityProcessing",enabled).put("_version",qv(r)).put("_reviewVersion",version);
+        return mvc.perform(patch("/api/v1/quotations/{id}/priority",r.id).with(actor).with(csrf()).contentType("application/json").content(body.toString()));
+    }
+    @Test void priorityIsOwnerOnlyVersionedAndDoesNotChangeQuoteOrReviewClaim() throws Exception {
+        var r=record();
+        priority(r,other,true,0).andExpect(status().isForbidden());
+        priority(r,finance,true,0).andExpect(status().isForbidden());
+        priority(r,admin,true,0).andExpect(status().isForbidden());
+        priority(r,employee,true,0).andExpect(status().isOk()).andExpect(jsonPath("$.data.priorityProcessing").value(true));
+        var version=rv(r);
+        priority(r,employee,true,version).andExpect(status().isOk());assertEquals(version,rv(r));
+        priority(r,employee,false,0).andExpect(status().isConflict());
+        claim(r);
+        priority(r,employee,false,rv(r)).andExpect(status().isOk()).andExpect(jsonPath("$.data.financeReviewClaimedAccount").value("F"+owner));
+        priority(r,employee,true,rv(r)).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].priorityProcessing").value(true));
+        var after=records.findById(r.id).orElseThrow();
+        assertEquals(r.payload,after.payload);assertEquals(r.version,after.version);assertEquals(r.updatedAt,after.updatedAt);
+        assertEquals(0,view(r).path("financeReviewCommentCount").asInt());
+    }
+    @Test void everyReviewConclusionEndsPriorityWithoutResurrectingOnReReview() throws Exception {
+        for (var result:List.of("approved","rejected","channel-exempt")) {
+            var r=record();priority(r,employee,true,0).andExpect(status().isOk());claim(r);
+            var stale=rv(r);
+            action(r,finance,qv(r),stale,"complete",result,"").andExpect(status().isOk()).andExpect(jsonPath("$.data.priorityProcessing").value(false));
+            priority(r,employee,true,stale).andExpect(status().isConflict());
+            priority(r,employee,true,rv(r)).andExpect(status().isConflict());
+            claim(r);assertFalse(view(r).path("priorityProcessing").asBoolean());
+            assertTrue(reviews.findById(r.id).orElseThrow().state.path("history").toString().contains("priority-ended"));
+        }
+    }
+    @Test void prioritySubmissionIsAtomicAndIdempotent() throws Exception {
+        var input=PackagingWeightTest.valid().put("priorityProcessing",true);var key="priority-"+UUID.randomUUID();
+        var response=mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(input.toString()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.priorityProcessing").value(true)).andReturn();
+        var data=mapper.readTree(response.getResponse().getContentAsString()).path("data");
+        mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(input.toString()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(data.path("id").asText()));
+        var id=UUID.fromString(data.path("id").asText());assertFalse(records.findById(id).orElseThrow().payload.has("priorityProcessing"));
+        assertEquals(1,reviews.findById(id).orElseThrow().state.path("history").size());
+        input.put("priorityProcessing","true");
+        mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key",key+"-invalid").contentType("application/json").content(input.toString())).andExpect(status().isUnprocessableEntity());
+    }
+    @Test void archiveAndRestoreDoNotRestoreOldPriority() throws Exception {
+        var r=record();priority(r,employee,true,0).andExpect(status().isOk());
+        for(var action:List.of("archive","restore")) {
+            var body=mapper.createObjectNode().put("action",action).put("reason","测试清理");body.putArray("items").addObject().put("id",r.id.toString()).put("version",qv(r));
+            mvc.perform(post("/api/v1/quotations/lifecycle").with(employee).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk());
+            assertFalse(view(r).path("priorityProcessing").asBoolean());
+        }
+    }
     void price(QuotationRecordEntity r,double value) throws Exception {
         var current=records.findById(r.id).orElseThrow();var p=mapper.createObjectNode().put("_version",current.version);var prices=(ObjectNode)current.payload.path("customerQuote").deepCopy();
         ((ObjectNode)prices.path("rows").get(0)).putArray("prices").add(value);p.set("customerQuote",prices);
