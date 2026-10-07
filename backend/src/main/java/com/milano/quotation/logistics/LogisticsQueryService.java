@@ -38,7 +38,7 @@ public class LogisticsQueryService {
             "nextWeightKg", "nextWeightPrice", "intervalPrice", "registrationFee", "pricingModel",
             "surcharge", "fuelSurchargeRate", "prohibitGeneralCargo", "volumetric",
             "phoneRequired", "zoneName", "zoneExclude", "weightFromInclusive",
-            "weightToInclusive", "billingStepKg", "sourceSheet", "billingStepBands"
+            "weightToInclusive", "billingStepKg", "sourceSheet", "billingStepBands", "financeFreightDiscount"
     );
     private record RuleCacheKey(String revision, String attribute, List<String> countries, List<String> channels) {}
     private final RevisionQueryCache<PublishedRules> ruleCache = new RevisionQueryCache<>(16, 32L * 1024 * 1024,
@@ -152,7 +152,9 @@ public class LogisticsQueryService {
         // Fingerprint all active published candidates, including currently unready ones.
         // Eligibility is expensive and only needs reevaluation when these inputs change.
         var companyRevision=jdbc.sql("select concat(revision,':',paused,':',enabled) from logistics_company_state where singleton=true").query(String.class).single();
-        var revision = sha256("all-channel-rounding-v1\ncountry-aliases-v1\n" + companyRevision + dataset + "\n" + String.join("\n", revisionParts));
+        var discountRevision = jdbc.sql("select coalesce(payload->'rules','[]'::jsonb)::text from finance_setting where setting_key='freight-discount-settings'")
+                .query(String.class).optional().orElse("{}");
+        var revision = sha256("all-channel-rounding-v1\ncountry-aliases-v1\n" + discountRevision + companyRevision + dataset + "\n" + String.join("\n", revisionParts));
         var publishedChannels = publishedCountCache.get(revision, () -> jdbc.sql("""
                 select count(*) from logistics_channel c
                 join logistics_provider p on p.id=c.provider_id
@@ -338,12 +340,14 @@ public class LogisticsQueryService {
     }
 
     private PublishedRules readPublishedRules(String revision, String attribute, List<String> normalizedCountries, List<String> normalizedChannels) {
+        var discounts = json(jdbc.sql("select payload::text from finance_setting where setting_key='freight-discount-settings'").query(String.class).optional().orElse("{}"));
         var params = new LinkedHashMap<String, Object>();
         var countryVariants = normalizedCountries.stream().flatMap(value -> CountryIdentity.variants(value).stream())
                 .flatMap(value -> java.util.stream.Stream.of(value, value.toLowerCase(Locale.ROOT), value.toUpperCase(Locale.ROOT)))
                 .distinct()
                 .toList();
         params.put("countries", mapper.valueToTree(countryVariants).toString());
+        params.put("discountSourceChannels", mapper.valueToTree(com.milano.quotation.finance.ChannelFreightDiscounts.sourceChannels(discounts)).toString());
         var metadataSql = new StringBuilder("""
                 select c.id::text as channel_id, c.rule_id, c.code as channel_code,
                   c.payload::text as channel_payload, p.payload::text as provider_payload,
@@ -376,7 +380,8 @@ public class LogisticsQueryService {
                 join logistics_provider p on p.id=c.provider_id
                 join logistics_version v on v.id=c.current_version_id and v.status='published'
                 cross join lateral jsonb_path_query(
-                  v.quote_rows,
+                  case when c.id::text in (select jsonb_array_elements_text(cast(:discountSourceChannels as jsonb)))
+                    then v.payload->'rows' else v.quote_rows end,
                   '$[*] ? (@.countryCode == $countries[*] || @.areaName == $countries[*])',
                   jsonb_build_object('countries',cast(:countries as jsonb))) item
                 where coalesce((p.payload->>'enabled')::boolean,true)=true
@@ -401,7 +406,7 @@ public class LogisticsQueryService {
 
         var grouped = new LinkedHashMap<String, ObjectNode>();
         var metadataParams = new LinkedHashMap<>(params);
-        metadataParams.remove("countries");
+        metadataParams.remove("countries"); metadataParams.remove("discountSourceChannels");
         jdbc.sql(metadataSql.toString()).params(metadataParams).query((rs, rowNum) -> {
             var channelId = rs.getString("channel_id");
             var channel = json(rsString(rs, "channel_payload"));
@@ -436,10 +441,14 @@ public class LogisticsQueryService {
             var row = json(rs.getString("row_payload"));
             if (!LogisticsBillingEngine.available(row)) return null;
             if (!eligible(row, attribute)) return null;
-            row = quotePriceRow(row);
             var channelId = rs.getString("channel_id");
             var rule = grouped.get(channelId);
             if (rule == null) return null;
+
+            row = com.milano.quotation.finance.ChannelFreightDiscounts.apply(row,
+                    channelId, discounts);
+            if (!LogisticsBillingEngine.available(row)) return null;
+            row = quotePriceRow(row);
             ((ArrayNode) rule.path("prices")).add(row);
             if (row.path("phoneRequired").asBoolean(false)) rule.put("phoneRequired", true);
             return channelId;

@@ -67,6 +67,7 @@ final class FinanceSettingValidation {
                 var providers = new HashSet<String>();
                 for (var row : body.path("providers")) { object(row); unique(row,"provider",providers); if (!Set.of("exempt","taxable").contains(row.path("mode").asText())) fail("物流商附加费属性不合法"); }
             }
+            case "freight-discount-settings" -> { object(body); ChannelFreightDiscounts.validate(body); }
             case "tax-settings" -> {
                 object(body);
                 if (body.has("rules") && !body.has("countries") && !body.has("providers")) { if (!body.path("rules").isArray()) fail("税费规则必须为列表"); }

@@ -51,11 +51,13 @@ public class LogisticsQuotationGuard {
         if(!scoped&&!revision.equals(quotation.path("logisticsRevision").asText()))throw AppException.conflict("物流版本已更新或缺少版本信息，请重新加载并计价后提交");
         var policies=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='channel-policies' for share").query(String.class).optional().orElse("[]"));
         var taxes=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='tax-settings' for share").query(String.class).optional().orElse("{}"));
+        var discounts=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='freight-discount-settings' for share").query(String.class).optional().orElse("{}"));
         var taxExchange=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='exchange-rate' for share").query(String.class).optional().orElse("{}"));
         var surcharges=mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='surcharge-settings' for share").query(String.class).optional().orElse("{}"));
         var channels=jdbc.sql("""
             select jsonb_build_object('key',concat(c.rule_id,'::',p.payload->>'name','::',c.code),
-                'versionId',v.id,'channelId',c.id,'rows',v.quote_rows,
+                'versionId',v.id,'channelId',c.id,'rows',case when c.id::text in (select jsonb_array_elements_text(cast(:discountSourceChannels as jsonb)))
+                  then v.payload->'rows' else v.quote_rows end,
                 'legacy',exists(select 1 from logistics_billing_acceptance a where a.version_id=v.id and a.kind='legacy' and a.rows_fingerprint=v.rows_fingerprint))::text
             from logistics_channel c join logistics_provider p on p.id=c.provider_id
             join logistics_version v on v.id=c.current_version_id and v.status='published'
@@ -63,26 +65,30 @@ public class LogisticsQuotationGuard {
             and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)
             and logistics_version_quote_ready(v.id)
             and concat(c.rule_id,'::',p.payload->>'name','::',c.code) in (:keys)
-            """).param("id",dataset).param("keys",requestedKeys).query((rs,n)->mapper.readTree(rs.getString(1))).list();
+            """).param("id",dataset).param("keys",requestedKeys).param("discountSourceChannels",mapper.valueToTree(com.milano.quotation.finance.ChannelFreightDiscounts.sourceChannels(discounts)).toString()).query((rs,n)->mapper.readTree(rs.getString(1))).list();
         for(var option:quotation.path("quoteOptions")) {
             if (option.path("available").isBoolean() && !option.path("available").asBoolean()) continue;
             var key=option.path("channelKey").asText();var country=option.path("country").asText();
             var channel=channels.stream().filter(c->c.path("key").asText().equals(key)).findFirst().orElseThrow(()->AppException.conflict("报价渠道已归档、未适配或不存在，请重新选择"));
+            var quoteRows=mapper.createArrayNode();
+            for (var source : channel.path("rows")) quoteRows.add(com.milano.quotation.finance.ChannelFreightDiscounts.apply(source,channel.path("channelId").asText(),discounts));
             validateSurcharge(surcharges, option);
             if (!com.milano.quotation.finance.ChannelTaxRules.validateQuote(taxes, option, taxExchange, quotation.path("customQuoteQuantity").asInt(1))) validateCountryTax(taxes, option);
             boolean countryAvailable=false;
             for(var row:channel.path("rows"))if(CountryIdentity.matches(row.path("countryCode").asText(),row.path("areaName").asText(),country))countryAvailable=true;
             if(!countryAvailable||!allowed(policies,quotation.path("logisticsAttribute").asText(),country,key))throw AppException.unprocessable("渠道不在该国家及货物属性的财务允许范围内");
-            if(scoped||!channel.path("legacy").asBoolean()){
+            if(scoped||!channel.path("legacy").asBoolean()||com.milano.quotation.finance.ChannelFreightDiscounts.matching(discounts,channel.path("channelId").asText())!=null){
                 if((!scoped&&!option.path("logisticsVersionId").asText().equals(channel.path("versionId").asText()))||!option.path("logisticsChannelId").asText().equals(channel.path("channelId").asText()))throw AppException.conflict("缺少当前渠道版本，请重新计价确认");
                 var input=option.path("logisticsInput");
                 if(!input.isObject())throw AppException.unprocessable("缺少重新计价输入");
                 if(!input.path("country").asText().equals(country))throw AppException.unprocessable("计费输入国家与报价国家不一致");
                 var normalized=(ObjectNode)input.deepCopy();normalized.putArray("marks").add(quotation.path("logisticsAttribute").asText());
                 if(normalized.path("zoneName").asText().isBlank()&&!option.path("quoteRegion").asText().isBlank())normalized.put("zoneName",option.path("quoteRegion").asText());
-                var result=new LogisticsBillingEngine(mapper).calculate(channel.path("rows"),normalized);
+                var result=new LogisticsBillingEngine(mapper).calculate(quoteRows,normalized);
                 if(!option.path("freightCny").isNumber()||option.path("freightCny").decimalValue().compareTo(result.path("total").decimalValue())!=0)throw AppException.conflict("物流费用与服务器核算不一致，请重新计价");
-                if(scoped) validateSamples(channel.path("rows"),option,quotation.path("logisticsAttribute").asText(),country);
+                if(scoped) validateSamples(quoteRows,option,quotation.path("logisticsAttribute").asText(),country);
+                var discount=quoteRows.get(result.path("rowIndex").asInt()).path("financeFreightDiscount");
+                if (!discount.isMissingNode()) result.set("financeFreightDiscount",discount.deepCopy());
                 ((ObjectNode)option).set("logisticsCalculation",result);
             }
             ((ObjectNode)option).set("logisticsVersionId",channel.path("versionId"));

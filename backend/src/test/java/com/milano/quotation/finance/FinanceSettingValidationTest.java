@@ -7,6 +7,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class FinanceSettingValidationTest {
     private final JsonMapper mapper = new JsonMapper();
+    @Test void independentFreightDiscountSettingAcceptsCoefficientsAboveOne() {
+        var setting=mapper.readTree("{\"rules\":[{\"channelId\":\"00000000-0000-0000-0000-000000000601\",\"basis\":\"base-excluding-linehaul\",\"enabled\":true,\"defaultFactor\":1.05,\"countries\":{\"AU\":0.97,\"SA\":1.01}}]}");
+        assertDoesNotThrow(()->FinanceSettingValidation.validate("freight-discount-settings",setting));
+        var invalid=mapper.readTree("{\"rules\":[{\"channelId\":\"00000000-0000-0000-0000-000000000601\",\"basis\":\"base-excluding-linehaul\",\"enabled\":true,\"defaultFactor\":0,\"countries\":{}}]}");
+        assertThrows(AppException.class,()->FinanceSettingValidation.validate("freight-discount-settings",invalid));
+    }
     @Test void acceptsIndependentNewCustomerCoefficientAndRejectsInvalidValues() {
         var valid = mapper.readTree("""
             [{"grade":"S","coefficient":1.21605,"enabled":true},{"grade":"NEW","coefficient":1.45678,"enabled":true}]

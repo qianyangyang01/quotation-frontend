@@ -85,6 +85,49 @@ class LogisticsQueryPostgresIntegrationTest {
     }
 
     @Test
+    void financeDiscountRepricesExistingTariffAndInvalidatesCacheWithoutReimport() throws Exception {
+        var mapper=new ObjectMapper();var source=ZhengzhouFinanceDiscountTest.original();
+        var ds=new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword());
+        var db=JdbcClient.create(ds);
+        var tx=new org.springframework.transaction.support.TransactionTemplate(new org.springframework.jdbc.datasource.DataSourceTransactionManager(ds));
+        tx.executeWithoutResult(status->{
+            status.setRollbackOnly();
+            var key="601::燕文::C-44fc48641d26ef2cab34";
+            db.sql("update logistics_provider set payload=jsonb_set(payload,'{name}','\"燕文\"') where id=:id").param("id",providerId).update();
+            db.sql("update logistics_channel set rule_id=601,code='C-44fc48641d26ef2cab34',payload=jsonb_set(payload,'{name}','\"中邮郑州线下E邮宝\"') where id=:id").param("id",channelId).update();
+            db.sql("update logistics_version set payload=cast(:p as jsonb) where id=:id").param("p",source.toString()).param("id",versionId).update();
+            db.sql("update logistics_billing_acceptance set rows_fingerprint=(select rows_fingerprint from logistics_version where id=:id) where version_id=:id").param("id",versionId).update();
+            db.sql("update finance_setting set payload=cast(:p as jsonb) where setting_key='channel-policies'")
+                .param("p","[{\"enabled\":true,\"category\":\"普货\",\"countryRules\":[{\"country\":\"AU\",\"allowedChannels\":[\""+key+"\"]}]}]").update();
+            var sourceBefore=db.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single();
+            var query=new LogisticsQueryService(db,mapper);var before=query.manifestRevision().revision();
+            assertEquals(65,query.publishedRules(before,"普货",List.of("AU"),List.of()).rules().getFirst().path("prices").get(0).path("pricePerKg").asDouble());
+            var settings=ZhengzhouFinanceDiscountTest.settings(); ((tools.jackson.databind.node.ObjectNode)settings.path("rules").get(0)).put("channelId",channelId.toString());
+            com.milano.quotation.finance.ChannelFreightDiscounts.validateBindings(db,settings);
+            db.sql("insert into finance_setting(setting_key,payload,version,updated_at) values('freight-discount-settings',cast(:p as jsonb),0,now()) on conflict(setting_key) do update set payload=excluded.payload,version=finance_setting.version+1").param("p",settings.toString()).update();
+            var after=query.manifestRevision().revision();assertNotEquals(before,after);
+            assertThrows(AppException.class,()->query.publishedRules(before,"普货",List.of("AU"),List.of()));
+            var price=query.publishedRules(after,"普货",List.of("AU"),List.of()).rules().getFirst().path("prices").get(0);
+            assertEquals(63.14,price.path("pricePerKg").asDouble());assertEquals(24.25,price.path("registrationFee").asDouble());
+            assertEquals(.97,price.path("financeFreightDiscount").path("factor").asDouble());
+            var quote=mapper.createObjectNode().put("logisticsRevision",after).put("logisticsAttribute","普货");
+            var option=quote.putArray("quoteOptions").addObject().put("country","AU").put("channelKey",key).put("logisticsChannelId",channelId.toString())
+                .put("logisticsVersionId",versionId.toString()).put("freightCny",87.39);
+            option.putObject("logisticsInput").put("country","AU").put("weightKg",1);
+            var guard=new LogisticsQuotationGuard(db,query,mapper);guard.validate(quote);
+            assertEquals(.97,option.path("logisticsCalculation").path("financeFreightDiscount").path("factor").asDouble());
+            var savedSnapshot=quote.toString();
+            option.put("freightCny",90);assertThrows(AppException.class,()->guard.validate(quote));
+            ((tools.jackson.databind.node.ObjectNode)settings.path("rules").get(0)).put("enabled",false);
+            db.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1 where setting_key='freight-discount-settings'").param("p",settings.toString()).update();
+            assertThrows(AppException.class,()->query.publishedRules(after,"普货",List.of("AU"),List.of()));
+            assertEquals(65,query.publishedRules(null,"普货",List.of("AU"),List.of()).rules().getFirst().path("prices").get(0).path("pricePerKg").asDouble());
+            assertEquals(87.39,mapper.readTree(savedSnapshot).path("quoteOptions").get(0).path("freightCny").asDouble());
+            assertEquals(sourceBefore,db.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
+        });
+    }
+
+    @Test
     void setBasedCompanyScopePreservesBindingsDisablePauseAndUnrestrictedMode() {
         var companyId = UUID.randomUUID();
         var query = new LogisticsQueryService(jdbc, new ObjectMapper());

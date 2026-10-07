@@ -12,6 +12,7 @@ function snapshot(version=1, rate=6.7) {
     'tax-settings': {value:{countries:[],providers:[]},_version:version},
     'surcharge-settings': {value:{countries:[],providers:[]},_version:version},
     'customer-operation-fees': {value:{customers:[]},_version:version},
+    'freight-discount-settings': {value:{},_version:version},
   }
 }
 beforeEach(()=>{vi.resetAllMocks();clearFinanceSettingsCache()})

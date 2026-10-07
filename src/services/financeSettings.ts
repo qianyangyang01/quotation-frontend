@@ -1,13 +1,14 @@
 import { api } from '@/services/http'
 import { ref } from 'vue'
 
-export type FinanceSettingKey = 'country-classification' | 'channel-policies' | 'customer-grades' | 'exchange-rate' | 'tax-settings' | 'surcharge-settings' | 'customer-operation-fees'
+export type FinanceSettingKey = 'country-classification' | 'channel-policies' | 'customer-grades' | 'exchange-rate' | 'tax-settings' | 'surcharge-settings' | 'customer-operation-fees' | 'freight-discount-settings'
 
-const financeSettingKeys: FinanceSettingKey[] = ['country-classification', 'channel-policies', 'customer-grades', 'exchange-rate', 'tax-settings', 'surcharge-settings', 'customer-operation-fees']
+const financeSettingKeys: FinanceSettingKey[] = ['country-classification', 'channel-policies', 'customer-grades', 'exchange-rate', 'tax-settings', 'surcharge-settings', 'customer-operation-fees', 'freight-discount-settings']
 export type FinanceSettingVersions = Partial<Record<FinanceSettingKey, number>>
 const financeSettingLabels: Record<FinanceSettingKey, string> = {
   'country-classification': '国家分类', 'channel-policies': '物流渠道权限', 'customer-grades': '客户等级系数',
   'exchange-rate': '汇率', 'tax-settings': '税费', 'surcharge-settings': '附加费', 'customer-operation-fees': '客户操作费',
+  'freight-discount-settings': '渠道运费折扣',
 }
 const cache = new Map<FinanceSettingKey, unknown>()
 const versions = new Map<FinanceSettingKey, number>()
@@ -79,11 +80,11 @@ export function hydrateFinanceSettings(options: { force?: boolean; signal?: Abor
     const values = await api.get<Partial<Record<FinanceSettingKey, VersionedSetting<unknown>>>>('/finance-settings', { signal: controller.signal, cache: 'no-store' })
     const nextCache = new Map<FinanceSettingKey, unknown>()
     const nextVersions = new Map<FinanceSettingKey, number>()
-    const missing = financeSettingKeys.filter(key => !values[key] && key !== 'surcharge-settings' && key !== 'customer-operation-fees')
+    const missing = financeSettingKeys.filter(key => !values[key] && key !== 'surcharge-settings' && key !== 'customer-operation-fees' && key !== 'freight-discount-settings')
     if (missing.length) throw new Error(`财务设置返回不完整：${missing.join('、')}`)
 
     financeSettingKeys.forEach(key => {
-      const wrapped = values[key] ?? { value: key === 'customer-operation-fees' ? { customers: [] } : { countries: [], providers: [], updatedAt: '尚未保存' }, _version: -1 }
+      const wrapped = values[key] ?? { value: key === 'freight-discount-settings' ? {} : key === 'customer-operation-fees' ? { customers: [] } : { countries: [], providers: [], updatedAt: '尚未保存' }, _version: -1 }
       if (!Object.prototype.hasOwnProperty.call(wrapped, 'value')) throw new Error(`财务设置内容无效：${key}`)
       if (!Number.isFinite(Number(wrapped._version))) throw new Error(`财务设置版本无效：${key}`)
       const normalized = normalizeFinanceSettingValue(key, wrapped.value)

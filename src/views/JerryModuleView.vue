@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import FinanceCountryRuleList from '@/components/finance/FinanceCountryRuleList.vue'
 import ChannelTaxSettings from '@/components/finance/ChannelTaxSettings.vue'
+import FreightDiscountSettings from '@/components/finance/FreightDiscountSettings.vue'
 import CustomerOperationSettings from '@/components/finance/CustomerOperationSettings.vue'
 import { loadCustomerOperationSettings } from '@/data/customerOperationFees'
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
@@ -88,9 +89,9 @@ let financeContextRequest: Promise<boolean> | null = null
 let financeEditorRequestId = 0
 const financeChannelCache = new Map<string, ReturnType<typeof channelsAvailableForCountry>>()
 const financeCarrierCache = new Map<string, Array<{ carrier: string; channels: ReturnType<typeof channelsAvailableForCountry> }>>()
-type FinanceSettingsTab = 'countries' | 'logistics' | 'grades' | 'exchange' | 'taxes' | 'surcharges' | 'customers'
+type FinanceSettingsTab = 'countries' | 'logistics' | 'grades' | 'exchange' | 'taxes' | 'surcharges' | 'customers' | 'freight-discounts'
 const FINANCE_TAB_ORDER_STORAGE_KEY = 'milano.finance-settings-card-order.v1'
-const defaultFinanceTabOrder: FinanceSettingsTab[] = ['countries', 'logistics', 'grades', 'exchange', 'taxes', 'surcharges', 'customers']
+const defaultFinanceTabOrder: FinanceSettingsTab[] = ['countries', 'logistics', 'grades', 'exchange', 'taxes', 'freight-discounts', 'surcharges', 'customers']
 function loadFinanceTabOrder(): FinanceSettingsTab[] {
   if (typeof window === 'undefined') return [...defaultFinanceTabOrder]
   try {
@@ -222,6 +223,7 @@ const financeSummaryCards = computed(() => {
     logistics: { id: 'logistics', icon: '物', label: '物流属性与渠道', value: `${financePolicyCategoryCount.value} 类属性`, description: `${financePolicyCountryCount.value} 个国家 · ${financePolicyChannelCount.value} 项授权` },
     surcharges: { id: 'surcharges', icon: '附', label: '附加费设置', value: financeSurchargeSettings.value.countries.filter(row => row.selected && row.enabled).length, description: '按国家金额 · 物流商独立豁免' },
     taxes: { id: 'taxes', icon: '税', label: '税率设置', value: configuredTaxCountryCount.value, description: `已配置 ${configuredTaxCountryCount.value} 项关税设置` },
+    'freight-discounts': { id: 'freight-discounts', icon: '折', label: '渠道运费折扣', value: '按渠道配置', description: '默认系数 · 国家例外 · 批量维护' },
     grades: { id: 'grades', icon: '级', label: '客户等级系数', value: enabledCustomerGradeCount.value, description: `共 ${customerGradeSettings.value.length} 个等级，${enabledCustomerGradeCount.value} 个已启用` },
     exchange: { id: 'exchange', icon: '汇', label: '汇率设置', value: financeExchangeRate.value.usdCny.toFixed(4), description: `1 USD = ${financeExchangeRate.value.usdCny.toFixed(4)} CNY` },
   }
@@ -1060,6 +1062,7 @@ function saveEditor() {
         </div>
       </section>
       <ChannelTaxSettings v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='taxes'" v-model="financeTaxSettings" :exchange="financeExchangeRate" :saving="taxSaving" @save="saveTaxSettings" />
+      <FreightDiscountSettings v-else-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='freight-discounts'" />
       <section v-else-if="mode!=='members'" class="toolbar"><label><span>⌕</span><input v-model="search" placeholder="搜索当前模块数据"></label><select><option>全部状态</option><option>启用</option><option>草稿</option></select><button @click="search = ''">重置筛选</button><span>共 {{ filteredRows.length }} 条数据</span></section>
 
       <section v-if="mode==='members' && financeSettingsLoadState==='ready' && financeSettingsTab==='logistics'" class="finance-logistics-workspace">
@@ -1072,7 +1075,7 @@ function saveEditor() {
         </div>
       </section>
 
-      <section v-else-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab!=='countries' && financeSettingsTab!=='taxes' && financeSettingsTab!=='surcharges')" class="table-card">
+      <section v-else-if="mode!=='members' || (financeSettingsLoadState==='ready' && financeSettingsTab!=='countries' && financeSettingsTab!=='taxes' && financeSettingsTab!=='surcharges' && financeSettingsTab!=='freight-discounts')" class="table-card">
         <table v-if="mode === 'products'" class="product-table">
           <colgroup><col class="product-main-col"><col class="product-price-col"><col class="product-weight-col"><col class="product-freight-col"><col class="product-spec-col"><col class="product-status-col"><col class="product-actions-col"></colgroup>
           <thead><tr><th>商品 / SKU</th><th>采购价格（CNY）</th><th>重量与起订量</th><th>国内运费档位（CNY）</th><th>规格信息</th><th>资料状态</th><th>操作</th></tr></thead>

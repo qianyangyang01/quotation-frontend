@@ -52,4 +52,12 @@ class FinanceQuotationVersionsPostgresTest {
             assertEquals(409,assertThrows(AppException.class,()->tx.executeWithoutResult(s->FinanceQuotationVersions.validate(jdbc,quote()))).status().value());
         }
     }
+    @Test void olderClientWithoutDiscountVersionIsAcceptedOnlyBeforeFirstDiscountPublish() {
+        var old=quote();((ObjectNode)old.path("financeVersions")).remove("freight-discount-settings");
+        assertEquals(409,assertThrows(AppException.class,()->FinanceQuotationVersions.validate(jdbc,old)).status().value());
+        jdbc.sql("delete from finance_setting where setting_key='freight-discount-settings'").update();
+        assertDoesNotThrow(()->FinanceQuotationVersions.validate(jdbc,old));
+        var current=quote();((ObjectNode)current.path("financeVersions")).put("freight-discount-settings",-1);
+        assertDoesNotThrow(()->FinanceQuotationVersions.validate(jdbc,current));
+    }
 }
