@@ -49,6 +49,9 @@
 
 前端语料复验：将环境变量 `ZHENGZHOU_DISCOUNT_CASES` 指向 `backend/target/zhengzhou-discount-cases.json`，运行 `src/data/zhengzhouDiscount.corpus.test.ts`。
 
-## 发布状态
+## 发布与启用要求
 
-当前为本地实现，未提交、推送或部署，生产设置未修改。代码上线后，在独立财务入口保存预填系数即可生效，不需要重新导入物流表。
+发布须基于最新线上版本，通过完整质量门禁、实际运价核验、备份及回滚检查。代码上线后，在独立财务入口保存预填系数即可生效，不需要重新导入物流表。生产启用后回读渠道ID、29个国家系数、其他国家系数1.05及干线费不打折设置；核对历史报价未被重算。
+
+
+生产运价加密核验：以只读导出的目标渠道当前版本作为输入，设置环境变量 ZHENGZHOU_PRODUCTION_SOURCE，运行 ZhengzhouFinanceDiscountTest；逐克核对所有可发重量和边界。将 ZHENGZHOU_PRODUCTION_CASES 指向生成的 backend/target/zhengzhou-production-cases.json，运行 src/data/zhengzhouDiscount.production.test.ts，核对前端与独立十进制公式、后端计算一致。未提供生产导出时该项条件跳过，不得当作生产计价验收。

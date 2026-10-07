@@ -30,7 +30,7 @@ it('renders channel tax workspace and preserves legacy country provider defaults
   expect(errors).not.toHaveBeenCalled()
   expect(document.querySelector('.channel-tax-workspace')?.textContent).toContain('渠道税费设置')
   expect(document.querySelector('.table-card')).toBeNull()
-  expect(document.querySelectorAll('.finance-stats>[role=button]')).toHaveLength(7)
+  expect(document.querySelectorAll('.finance-stats>[role=button]')).toHaveLength(8)
   const open = async (country: string) => { [...document.querySelectorAll<HTMLButtonElement>('.countries nav button')].find(b=>b.textContent===country)!.click(); await nextTick() }
   await open('新西兰')
   expect(document.querySelector('.matrix tbody')?.textContent).toContain('已含税')

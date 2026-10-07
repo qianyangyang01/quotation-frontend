@@ -102,4 +102,42 @@ class ZhengzhouFinanceDiscountTest {
         assertThrows(AppException.class,()->ChannelFreightDiscounts.validate(settings));rules.remove(1);
         ((ObjectNode)rules.get(0)).put("basis","unknown");assertThrows(AppException.class,()->ChannelFreightDiscounts.validate(settings));
     }
+    @Test void readOnlyProductionTariffMatchesIndependentFormulaAtEveryGram() throws Exception {
+        var path=System.getenv("ZHENGZHOU_PRODUCTION_SOURCE");
+        org.junit.jupiter.api.Assumptions.assumeTrue(path!=null&&!path.isBlank(),"Optional release gate uses a read-only production tariff export");
+        var export=mapper.readTree(Files.readString(Path.of(path)).replace("\uFEFF",""));
+        assertTrue(export.path("ready").asBoolean());
+        var channel=(ObjectNode)export.path("channel").deepCopy();var original=channel.path("rows");var before=original.toString();
+        assertEquals(58,original.size());
+        var settings=settings();((ObjectNode)settings.path("rules").get(0)).put("channelId",export.path("channelId").asText());
+        var adjusted=channel.putArray("rows");
+        for(var row:original) {
+            assertEquals("per-kg",row.path("pricingModel").asText());
+            assertEquals(0,row.path("sourcePricePerKg").decimalValue().add(row.path("sourceLinehaulPerKg").decimalValue()).compareTo(row.path("pricePerKg").decimalValue()));
+            adjusted.add(ChannelFreightDiscounts.apply(row,export.path("channelId").asText(),settings));
+        }
+        var evidence=mapper.createObjectNode();evidence.set("channel",channel);evidence.set("settings",settings);
+        evidence.set("sourceVersionId",export.path("versionId"));evidence.set("sourceFingerprint",export.path("rowsFingerprint"));
+        var cases=evidence.putArray("cases");var engine=new LogisticsBillingEngine(mapper);
+        for(var row:original) {
+            var country=row.path("countryCode").asText();var zone=row.path("zoneName").asText();
+            var factors=settings.path("rules").get(0);var factor=factors.path("countries").has(country)?factors.path("countries").path(country).decimalValue():factors.path("defaultFactor").decimalValue();
+            var weights=new java.util.LinkedHashSet<BigDecimal>();weights.add(new BigDecimal(".0005"));
+            var upper=row.path("weightToKg").decimalValue();
+            for(int gram=1;gram<=upper.multiply(new BigDecimal("1000")).intValueExact();gram++) weights.add(BigDecimal.valueOf(gram,3));
+            weights.add(upper.subtract(new BigDecimal(".0001")));
+            for(var weight:weights) {
+                var charge=weight.max(new BigDecimal(".001"));
+                var expected=charge.multiply(row.path("sourcePricePerKg").decimalValue()).add(row.path("registrationFee").decimalValue()).multiply(factor)
+                    .add(charge.multiply(row.path("sourceLinehaulPerKg").decimalValue())).setScale(2,RoundingMode.HALF_UP);
+                var input=mapper.createObjectNode().put("country",country).put("zoneName",zone).put("weightKg",weight);
+                assertEquals(0,expected.compareTo(engine.calculate(adjusted,input).path("total").decimalValue()),input.toString());
+                cases.addArray().add(country).add(zone).add(weight).add(expected);
+            }
+            var overflow=mapper.createObjectNode().put("country",country).put("zoneName",zone).put("weightKg",upper.add(new BigDecimal(".0001")));
+            assertThrows(AppException.class,()->engine.calculate(adjusted,overflow));
+        }
+        assertEquals(before,original.toString());
+        Files.writeString(Path.of("target/zhengzhou-production-cases.json"),evidence.toString());
+    }
 }
