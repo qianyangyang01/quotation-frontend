@@ -42,7 +42,7 @@ import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
 import { type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
 import { logisticsUnavailableReason, isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
-import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, purchaseQuoteFreightLabel, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord, quotationSubmitter } from '@/data/quotationRecords'
 import { cancelQuotation, withdrawalSubmitter } from '@/services/quotationWithdrawal'
 import type { QuotationDraftState } from '@/services/quotationDrafts'
@@ -318,7 +318,8 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
     purchaseDataSource: record?.dataSource || 'standard',
     purchasePriceBasis: record?.purchasePriceBasis || '',
     customWeightKg: null,
-    purchaseFreightPerUnit: record ? purchaseQuoteFreightUnit(record) : 0,
+    purchaseFreightPerUnit: record ? purchaseQuoteFreightUnit(record, purchaseTier) : 0,
+    purchaseFreightLabel: record ? purchaseQuoteFreightLabel(record, purchaseTier) : '',
     weightKg: record?.weightKg || 0,
     status: record ? (record.status === '资料完整' ? '采购资料已加载' : record.status) : '待查询',
   }
@@ -392,6 +393,8 @@ function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, 
   p.purchase = pricing.effectiveUnitPriceCny
   p.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
   p.purchaseTierLabel = calculateMonthlySalesTierLabel(monthlySalesEstimate.value, record)
+  p.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record, monthlySalesEstimate.value)
+  p.purchaseFreightLabel = purchaseQuoteFreightLabel(record, monthlySalesEstimate.value)
   p.purchaseInvoiceType = pricing.invoiceType
   p.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
   p.purchaseZeroTaxPointAdjustment = pricing.priceSource === 'zero-tax-point'
@@ -407,6 +410,8 @@ function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProdu
   item.purchaseUnitPrice = pricing.effectiveUnitPriceCny
   item.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
   item.purchaseTierLabel = calculateMonthlySalesTierLabel(item.purchaseTier, record)
+  item.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record, item.purchaseTier)
+  item.purchaseFreightLabel = purchaseQuoteFreightLabel(record, item.purchaseTier)
   item.purchaseInvoiceType = pricing.invoiceType
   item.purchaseInvoiceRatePercent = pricing.invoiceRatePercent
   item.purchaseZeroTaxPointAdjustment = pricing.priceSource === 'zero-tax-point'
@@ -424,7 +429,6 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceT
   p.physicalImage = record.physicalImage
   p.stockStatus = record.stockStatus ?? ''
   applyProductPurchasePricing(p, record, invoiceTaxApplied)
-  p.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record)
   p.netWeight = record.weightKg || 0
   p.manualWeight = record.weightKg || 0
   p.packageLengthCm = Math.max(0, Number(record.lengthCm) || 0)
@@ -532,7 +536,6 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   if (!draftNeedsQuery.value) item.customWeightKg = null
   item.weightKg = record.weightKg || 0
   applyBundlePurchasePricing(item, record, true)
-  item.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record)
   item.status = record.status === '资料完整' ? '采购资料已加载' : record.status
   if (blockConditionProgress(conditionIssues({ includeSku: false, includeCategory: true }))) {
     item.status = '产品品类待补充'
@@ -601,7 +604,7 @@ function changeMonthlySalesEstimate(p: Product, value: string) {
   const record = findPurchaseProduct(purchaseRecords.value, p.sku)
   if (record) applyProductPurchasePricing(p, record)
   normalizeRule(p, true)
-  toast(`已匹配${monthlySalesTierLabel()}，采购单价与报价已更新`)
+  toast(`已匹配${monthlySalesTierLabel()}，采购单价、国内运费与报价已更新`)
 }
 function availableQuoteCountries(p: Product) {
   return countriesAvailableForCategory(p.logisticsAttribute).map(country => country.name)
@@ -2293,7 +2296,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
           <p>当前特殊包装：{{ specialPackagingGrams || 0 }}g／票，仅增加一次。</p>
           <p>当前佣金阈值：{{ commissionThreshold || '未填写' }}。最终报价＝原最终美元报价 ÷ 佣金阈值，再按0.05美元向上取整；阈值1不调整报价。</p>
-          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每 50g（不足向上取整）增加 1g 普通包材；特殊包装按整票额外增加一次，不随件数或套数增加</span></li><li><b>采购成本</b><span>根据商品数量匹配采购资料中的阶梯采购单价；国内采购运费引用10件总运费的单件分摊金额；旧数据未填10件运费时采用1件运费，包邮为0</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>系统按客户等级计算报价，换算美元并加税费；从财务列表选择客户时再加公司操作费，按1、2、3、3以上件／套选择对应档位，每单一次、不乘数量，再按0.05美元向上取整；随后除以佣金阈值并再次向上取整到0.05美元</span></li></ol>
+          <ol><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每 50g（不足向上取整）增加 1g 普通包材；特殊包装按整票额外增加一次，不随件数或套数增加</span></li><li><b>采购成本</b><span>按所选采购阶梯取价，缺档时沿用已有档位；按实际采用档位的起订量匹配国内运费：不足100件用10件总运费÷10，100件起用100件总运费÷100；旧数据缺少对应批量运费时保留原有回退规则，包邮为0</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>系统按客户等级计算报价，换算美元并加税费；从财务列表选择客户时再加公司操作费，按1、2、3、3以上件／套选择对应档位，每单一次、不乘数量，再按0.05美元向上取整；随后除以佣金阈值并再次向上取整到0.05美元</span></li></ol>
           <p class="modal-tip">美元价格按保存报价时的汇率快照换算，历史报价不会随新汇率自动改变。</p>
         </template>
         <template v-else>

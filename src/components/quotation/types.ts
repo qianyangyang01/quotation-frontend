@@ -23,6 +23,7 @@ export type QuotationProduct = {
   purchaseDataSource?: 'standard' | 'legacy_2026'
   purchasePriceBasis?: 'tax_included' | 'quoted' | ''
   purchaseFreightPerUnit: number
+  purchaseFreightLabel?: string
   netWeight: number
   country: string
   channel: string
@@ -73,6 +74,7 @@ export type BundleQuoteItem = {
   purchasePriceBasis?: 'tax_included' | 'quoted' | ''
   customWeightKg: number | null
   purchaseFreightPerUnit: number
+  purchaseFreightLabel?: string
   weightKg: number
   status: string
 }

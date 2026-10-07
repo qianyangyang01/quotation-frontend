@@ -175,6 +175,15 @@ export function purchaseUnitPrice(record: PurchaseProductRecord, quantity: numbe
   return tier?.unitPriceCny ?? record.purchasePriceCny ?? 0
 }
 
+export function purchaseTierIndex(value: string): number {
+  return value === '100+' ? 2 : value === '100' ? 1 : 0
+}
+
+export function selectedPurchaseTier(record: PurchaseProductRecord, value: string) {
+  const index = Math.min(purchaseTierIndex(value), record.priceTiers.length - 1)
+  return { index, tier: record.priceTiers[index] }
+}
+
 export function purchaseFreightChoices(record: PurchaseProductRecord) {
   if (record.freeShipping === '是') return (record.dataSource === 'legacy_2026' ? [1] : [1, 10, 100]).map(quantity => ({ quantity, totalFreightCny: 0, unitFreightCny: 0 }))
   return [{ quantity: 1, totalFreightCny: record.singleFreightCny }, { quantity: 10, totalFreightCny: record.freight10Cny }, { quantity: 100, totalFreightCny: record.freight100Cny }]
@@ -185,13 +194,25 @@ export function purchaseFreightChoices(record: PurchaseProductRecord) {
 export function purchaseFreightUnit(record: PurchaseProductRecord, batchQuantity: number) {
   return purchaseFreightChoices(record).find(item => item.quantity === batchQuantity)?.unitFreightCny ?? 0
 }
-export function purchaseQuoteFreightUnit(record: PurchaseProductRecord) {
+function purchaseQuoteFreight(record: PurchaseProductRecord, purchaseTier: string) {
+  const minQuantity = selectedPurchaseTier(record, purchaseTier).tier?.minQty ?? record.minOrderQty ?? 1
+  const quantity = minQuantity >= 100 ? 100 : 10
   const choices = purchaseFreightChoices(record)
-  // Updated legacy records can supply batch freight too; only fall back to
-  // their original single-piece rate when the ten-piece tier is absent.
-  return choices.find(item => item.quantity === 10)?.unitFreightCny
-    ?? (record.dataSource === 'legacy_2026' ? choices.find(item => item.quantity === 1)?.unitFreightCny : undefined)
-    ?? 0
+  const choice = choices.find(item => item.quantity === quantity)
+    ?? (record.dataSource === 'legacy_2026'
+      ? choices.find(item => item.quantity === 10) ?? choices.find(item => item.quantity === 1)
+      : undefined)
+  return { minQuantity, quantity, choice }
+}
+export function purchaseQuoteFreightUnit(record: PurchaseProductRecord, purchaseTier = '10') {
+  return purchaseQuoteFreight(record, purchaseTier).choice?.unitFreightCny ?? 0
+}
+export function purchaseQuoteFreightLabel(record: PurchaseProductRecord, purchaseTier: string) {
+  if (record.freeShipping === '是') return '采购包邮，国内运费为0'
+  const { minQuantity, quantity, choice } = purchaseQuoteFreight(record, purchaseTier)
+  if (!choice) return `${quantity}件总运费未配置，暂按0计算`
+  const fallback = choice.quantity !== quantity ? `${quantity}件运费未配置，沿用旧数据${choice.quantity}件档；` : ''
+  return `${fallback}采购${minQuantity}件起，采用${choice.quantity}件总运费 ¥${choice.totalFreightCny.toFixed(2)} ÷ ${choice.quantity}，不计采购票点`
 }
 export function purchaseSourceLabel(record: Pick<PurchaseProductRecord, 'dataSource'>) { return record.dataSource === 'legacy_2026' ? '2026旧数据' : '新数据' }
 export function purchaseQuoteBlockingMessage(record: PurchaseProductRecord) {

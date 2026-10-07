@@ -1,6 +1,6 @@
 import { decimal, sumDecimal, productDecimal } from './quotationDecimal'
 import type { ShipmentDimensions } from '@/data/logistics'
-import { findPurchaseProduct, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { findPurchaseProduct, purchaseTierIndex, selectedPurchaseTier, type PurchaseProductRecord } from '@/data/purchaseStore'
 
 export type MonthlySalesEstimate = '10' | '100' | '100+'
 
@@ -35,15 +35,6 @@ export function normalizedQuoteQuantity(value: number) {
 export function normalizePurchaseTier(value: unknown, fallback = '10'): MonthlySalesEstimate {
   if (value === '10' || value === '100' || value === '100+') return value
   return fallback === '100' || fallback === '100+' ? fallback : '10'
-}
-
-function purchaseTierIndex(value: string): number {
-  return value === '100+' ? 2 : value === '100' ? 1 : 0
-}
-
-function selectedPurchaseTier(record: PurchaseProductRecord, value: string) {
-  const index = Math.min(purchaseTierIndex(value), record.priceTiers.length - 1)
-  return { index, tier: record.priceTiers[index] }
 }
 
 export function monthlySalesTierLabel(value: string, record?: PurchaseProductRecord) {

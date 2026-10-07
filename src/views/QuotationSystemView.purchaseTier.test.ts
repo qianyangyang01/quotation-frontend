@@ -20,7 +20,7 @@ vi.mock('@/data/publishedLogisticsRepository', async original => ({
 const record = {
   sku: 'BK2601961-1', category: '宠物用品', catalogState: 'ready', weightG: 219,
   minOrderQty: 100, purchasePriceCny: 13.8, tier2MinQty: 500, tier2PriceCny: 12.5,
-  tier3MinQty: 1000, tier3PriceCny: 11.5, taxPoint: .02, invoiceType: '普票', freight10Cny: 2.1,
+  tier3MinQty: 1000, tier3PriceCny: 11.5, taxPoint: .02, invoiceType: '普票', freight10Cny: 2.1, freight100Cny: 21,
 }
 let app: App | undefined
 let host: HTMLDivElement
@@ -80,7 +80,7 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<st
     } }
     if (path === `/purchase-products/${sku}`) return { ...record, ...purchaseOverride, sku }
     if (path === '/purchase-products/BK2601961') return { ...record, sku: 'BK2601961', purchasePriceCny: 20, tier2PriceCny: 18 }
-    if (path === '/purchase-products/SINGLE') return { sku: 'SINGLE', category: '宠物用品', weightG: 100, minOrderQty: 100, purchasePriceCny: 20, taxPoint: .02, freight10Cny: 5 }
+    if (path === '/purchase-products/SINGLE') return { sku: 'SINGLE', category: '宠物用品', weightG: 100, minOrderQty: 100, purchasePriceCny: 20, taxPoint: .02, freight10Cny: 5, freight100Cny: 50 }
     throw new Error(`Unexpected API: ${path}`)
   })
   vi.spyOn(api, 'put').mockResolvedValue({ exists: true, version: 2, updatedAt: 'test' })
@@ -158,6 +158,53 @@ it('recalculates a restored tier 2 draft with current purchase tiers and keeps t
   expect(state.products[0]!.purchase).toBe(12.75)
   expect(host.querySelector<HTMLSelectElement>('[data-validation-field="monthlySalesEstimate"] select')!.value).toBe('100')
   expect(host.querySelector('.tier-match')?.textContent).toContain('阶梯价2（500–999件）')
+})
+
+it('matches domestic freight to actual purchase minimums and follows the tier 3 price fallback', async () => {
+  purchaseOverride = { minOrderQty: 1, purchasePriceCny: 45.98,
+    tier2MinQty: 300, tier2PriceCny: 39.5, tier3MinQty: null, tier3PriceCny: null, taxPoint: 0,
+    singleFreightCny: 10, freight10Cny: 12, freight100Cny: 38 }
+  await mount('single', '10', [], 'SINGLE', false, 'BK2602172')
+  const product = state.products[0]!
+  expect(product.purchaseFreightPerUnit).toBe(1.2)
+  const firstPrice = state.salePrice(product)
+  await selectTier('100')
+  expect(product.purchaseFreightPerUnit).toBe(.38)
+  expect(state.salePrice(product)).toBeCloseTo(firstPrice + (39.9 - 46.44 + .38 - 1.2) * 1.2)
+  const before = state.salePrice(product)
+  await selectTier('100+')
+  expect(product.purchase).toBe(39.9)
+  expect(product.purchaseFreightPerUnit).toBe(.38)
+  expect(state.salePrice(product)).toBe(before)
+  expect(host.querySelector('.freight-match')?.textContent).toContain('100件总运费 ¥38.00 ÷ 100')
+  expect(host.querySelector('.tier-match')?.textContent).toContain('阶梯价3未配置，采用阶梯价2')
+  const saved = JSON.parse(JSON.stringify(state.draftPayload())) as QuotationDraftPayload
+  await selectTier('10')
+  expect(product.purchaseFreightPerUnit).toBe(1.2)
+  await state.applyDraftPayload(saved, undefined, { restoreQuotation: true })
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(.38)
+})
+
+it('keeps each bundle freight tier through quantities, requery and draft restoration', async () => {
+  purchaseOverride = { minOrderQty: 1, tier2MinQty: 50, tier3MinQty: 300,
+    singleFreightCny: 10, freight10Cny: 12, freight100Cny: 38 }
+  await mount('bundle', '10', ['100', '10'], 'BK2601961')
+  expect(state.bundleItems.map(item => item.purchaseFreightPerUnit)).toEqual([1.2, .21])
+  await selectBundleTier(0, '100+')
+  expect(state.bundleItems.map(item => item.purchaseFreightPerUnit)).toEqual([.38, .21])
+  expect(state.bundleDomesticFreight(3)).toBe(2.91)
+  expect(host.querySelector('.row-domestic-freight')?.textContent).toContain('100件总运费 ¥38.00 ÷ 100')
+  const first = state.bundleItems[0]!
+  first.quantityPerSet = 3
+  state.updateBundleItemQuantity(first)
+  expect(state.bundleDomesticFreight(5)).toBe(6.75)
+  expect(await state.queryBundleItem(first, { loadLogistics: false, announce: false })).toBe(true)
+  expect(first.purchaseFreightPerUnit).toBe(.38)
+  const saved = JSON.parse(JSON.stringify(state.draftPayload())) as QuotationDraftPayload
+  await selectBundleTier(0, '10')
+  await state.applyDraftPayload(saved, undefined, { restoreQuotation: true })
+  expect(state.bundleItems.map(item => item.purchaseFreightPerUnit)).toEqual([.38, .21])
+  expect(state.bundleDomesticFreight(5)).toBe(6.75)
 })
 
 async function selectBundleTier(index: number, value: string) {
@@ -353,7 +400,7 @@ it('restores a withdrawn quotation containing a SKU but no product snapshot with
 })
 
 it.each(['single', 'bundle'] as const)('refreshes legacy domestic freight from current batch data in the %s editor and restored drafts', async mode => {
-  purchaseOverride = { dataSource: 'legacy_2026', singleFreightCny: 5, freight10Cny: null }
+  purchaseOverride = { dataSource: 'legacy_2026', singleFreightCny: 5, freight10Cny: null, freight100Cny: null }
   await mount(mode)
   const freight = () => mode === 'single' ? state.products[0]!.purchaseFreightPerUnit : state.bundleItems[0]!.purchaseFreightPerUnit
   expect(freight()).toBe(5)
@@ -418,7 +465,7 @@ it.each(['single', 'bundle'] as const)('applies TC2601815 tier tax in the %s edi
     const item = mode === 'single' ? state.products[0]! : state.bundleItems[0]!
     expect(item).toMatchObject({ purchaseBaseUnitPrice: 10, purchaseInvoiceType: '不开票',
       purchaseInvoiceRatePercent: 8, purchaseInvoiceTaxApplied: true, purchasePriceSource: 'legacy-tax-point',
-      purchaseFreightPerUnit: .8 })
+      purchaseFreightPerUnit: .44 })
     expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(10.8)
     expect(host.textContent).toContain('原始报价 ¥10.00 ×（1 + 8%）')
   }

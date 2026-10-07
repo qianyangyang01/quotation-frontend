@@ -47,7 +47,7 @@ function purchasePricingLabel() {
       <label>商品重量（g）<input :value="grams(product.netWeight)" disabled></label>
       <label>重量来源<select v-model="product.weightSource" @change="$emit('weightChange')"><option value="purchase">使用采购表重量</option><option value="manual">业务员指定重量</option></select></label>
       <label v-if="product.weightSource==='manual'">指定重量（g）<input :value="grams(product.manualWeight)" type="number" min="0" step="1" inputmode="numeric" @input="updateManualWeight"></label>
-      <label>国内运费/件（CNY）<input :value="product.purchaseFreightPerUnit.toFixed(2)" disabled></label>
+      <label>国内运费/件（CNY）<input :value="product.purchaseFreightPerUnit.toFixed(2)" disabled><small class="freight-match">{{ product.purchaseFreightLabel }}</small></label>
     </div>
     <SpecialPackagingInput compact :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
     <div class="highlights">
