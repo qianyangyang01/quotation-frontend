@@ -23,7 +23,7 @@ it('exports the saved manual inputs without false procurement or packaging descr
   }
 })
 it('does not count trials as sales or represent shipping services as product SKUs', () => {
-  const rows=['freight-trial','shipping-only','single'].map(quoteMode=>normalizeQuotationRecord({id:quoteMode,no:'QA',quoteMode,primarySku:'SKU-1'})!)
+  const rows=(['freight-trial','shipping-only','single'] as const).map(quoteMode=>normalizeQuotationRecord({id:quoteMode,no:'QA',quoteMode,primarySku:'SKU-1'})!)
   expect(quotationSkus(rows[0]!)).toEqual([]);expect(quotationSkus(rows[1]!)).toEqual([])
   const filtered=filterQuotationRecords(rows,{keyword:'',startDate:'',endDate:'',country:'',salesperson:'',category:''},[])
   expect(filtered.map(r=>r.quoteMode)).toEqual(['shipping-only','single'])
