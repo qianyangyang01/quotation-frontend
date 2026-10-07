@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Decimal from 'decimal.js'
-import { averagePrices, averageScope, averageRegionLabel, australiaAverageZone, type AveragePlan } from '@/data/quoteChannelAverage'
+import { averagePrices, averageScope, australiaAverageZone, type AveragePlan } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey, quoteSheetProviderName, type QuoteSheetSourceRow, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 
 const props = defineProps<{ rows: QuoteSheetSourceRow[]; system: CustomerQuoteSheet; quantities: number[]; plans: AveragePlan[]; disabled: boolean }>()
@@ -11,14 +11,13 @@ const weights = ref<Record<string, string>>({}), chosen = ref<string[]>([])
 const chosenZones = ref<number[]>([])
 const editingId = ref('')
 const provider = ref('Combined Shipping'), shippingTime = ref(''), error = ref('')
-function taxLabel(row: QuoteSheetSourceRow) { return ({ 'no-tax': '无关税', exempt: '免税', 'fixed-order': '按票计税', 'per-item': '按件计税', 'weight-eur': '按重计税', 'weight-order': '按重及票计税', missing: '税费待配置' } as Record<string, string>)[row.taxFeeMode || ''] || '已保存税费口径' }
 function sourceLabel(row: QuoteSheetSourceRow) { return [row.carrier, row.transport, row.quoteRegion === '全国统一' ? '' : row.quoteRegion].filter(Boolean).join(' · ') }
-const groups = computed(() => [...new Map(props.rows.filter(row => row.available !== false).map(row => [averageScope(row), { key: averageScope(row), label: `${row.country} · ${averageRegionLabel(row)} · ${taxLabel(row)}` }])).values()])
+const groups = computed(() => [...new Map(props.rows.map(row => [averageScope(row), { key: averageScope(row), label: row.country }])).values()])
 watch(groups, values => { if (!values.some(g => g.key === scope.value)) { scope.value = values[0]?.key || ''; changeScope() } }, { immediate: true })
 const activeScope = computed(() => scope.value || groups.value[0]?.key || '')
-const candidates = computed(() => props.rows.filter(row => averageScope(row) === activeScope.value && row.available !== false))
+const candidates = computed(() => props.rows.filter(row => averageScope(row) === activeScope.value))
 const zoneChoices = computed(() => candidates.value.some(row => australiaAverageZone(row)) ? [1, 2, 3, 4].map(number => {
-  const keys = candidates.value.filter(row => australiaAverageZone(row) === number).map(quoteSheetRowKey)
+  const keys = candidates.value.filter(row => australiaAverageZone(row) === number && row.available !== false).map(quoteSheetRowKey)
   return { number, keys, checked: chosenZones.value.includes(number) }
 }) : [])
 function toggleZone(number: number, checked: boolean) {
@@ -27,8 +26,7 @@ function toggleZone(number: number, checked: boolean) {
   chosen.value = checked ? [...new Set([...chosen.value, ...keys])] : chosen.value.filter(key => !keys.has(key))
   error.value = ''
 }
-const visibleCandidates = computed(() => candidates.value.filter(row => !australiaAverageZone(row) || chosenZones.value.includes(australiaAverageZone(row)!)))
-const selected = computed(() => visibleCandidates.value.filter(row => chosen.value.includes(quoteSheetRowKey(row))))
+const selected = computed(() => candidates.value.filter(row => row.available !== false && chosen.value.includes(quoteSheetRowKey(row))))
 function changeScope() { chosen.value = []; chosenZones.value = []; weights.value = {}; error.value = '' }
 function distribute() {
   if (!selected.value.length) return
@@ -80,9 +78,9 @@ function generate() {
 
 <template>
   <fieldset class="average-panel" :disabled="disabled" aria-label="渠道平均报价设置">
-    <div class="average-head"><strong>渠道平均报价</strong><select v-model="scope" aria-label="平均报价国家及区域" @change="changeScope"><option value="" disabled>选择国家与区域</option><option v-for="group in groups" :key="group.key" :value="group.key">{{ group.label }}</option></select><span v-if="!scope && groups.length" class="average-hint">当前：{{ groups[0].label }}</span><div class="average-tabs"><button type="button" :aria-pressed="mode === 'equal'" @click="mode = 'equal'">普通平均</button><button type="button" :aria-pressed="mode === 'weighted'" @click="mode = 'weighted'">加权平均</button></div><span v-if="mode === 'weighted'" class="average-total" :class="{ valid: total === 100 }">权重合计 {{ total }}%</span><button v-if="mode === 'weighted'" type="button" @click="distribute">平均分配</button></div>
+    <div class="average-head"><strong>渠道平均报价</strong><select v-model="scope" aria-label="平均报价国家" @change="changeScope"><option value="" disabled>选择国家</option><option v-for="group in groups" :key="group.key" :value="group.key">{{ group.label }}</option></select><span v-if="!scope && groups.length" class="average-hint">当前：{{ groups[0].label }}</span><div class="average-tabs"><button type="button" :aria-pressed="mode === 'equal'" @click="mode = 'equal'">普通平均</button><button type="button" :aria-pressed="mode === 'weighted'" @click="mode = 'weighted'">加权平均</button></div><span v-if="mode === 'weighted'" class="average-total" :class="{ valid: total === 100 }">权重合计 {{ total }}%</span><button v-if="mode === 'weighted'" type="button" @click="distribute">平均分配</button></div>
     <fieldset v-if="zoneChoices.length" class="average-regions" aria-label="澳大利亚平均报价区域选择">
-      <legend>选择参与平均的区域 <span>可多选</span></legend>
+      <legend>按区域批量勾选 <span>也可直接勾选下方渠道</span></legend>
       <div class="average-region-options">
         <label v-for="zone in zoneChoices" :key="zone.number" :class="{ selected: zone.checked, unavailable: !zone.keys.length }">
           <input type="checkbox" :aria-label="`参与平均区域：${zone.number}区`" :checked="zone.checked" :disabled="!zone.keys.length" @change="toggleZone(zone.number, ($event.target as HTMLInputElement).checked)">
@@ -90,8 +88,8 @@ function generate() {
         </label>
       </div>
     </fieldset>
-    <p v-if="zoneChoices.length && !chosenZones.length" class="average-hint">请先勾选上方区域，再选择参与平均的渠道。</p>
-    <div class="average-channels"><div v-for="row in visibleCandidates" :key="quoteSheetRowKey(row)" class="average-channel"><label><input v-model="chosen" type="checkbox" :value="quoteSheetRowKey(row)" :aria-label="`参与平均：${sourceLabel(row)}`"><span>{{ quoteSheetProviderName(row.carrier) || row.carrier }}<small>{{ sourceLabel(row) }}</small></span></label><label v-if="mode === 'weighted' && chosen.includes(quoteSheetRowKey(row))"><input v-model="weights[quoteSheetRowKey(row)]" class="average-weight" type="number" min="0.01" max="100" step="0.01" :aria-label="`${sourceLabel(row)} 权重`">%</label></div></div>
+    <p class="average-selection-count" role="status">已加入 {{ candidates.length }} 条渠道 · 已勾选 {{ selected.length }} 条参与平均</p>
+    <div class="average-channels"><div v-for="row in candidates" :key="quoteSheetRowKey(row)" class="average-channel"><label><input v-model="chosen" type="checkbox" :disabled="row.available === false" :value="quoteSheetRowKey(row)" :aria-label="`参与平均：${sourceLabel(row)}`"><span>{{ quoteSheetProviderName(row.carrier) || row.carrier }}<small>{{ sourceLabel(row) }}<template v-if="row.available === false"> · 暂不可用</template></small></span></label><label v-if="mode === 'weighted' && chosen.includes(quoteSheetRowKey(row))"><input v-model="weights[quoteSheetRowKey(row)]" class="average-weight" type="number" min="0.01" max="100" step="0.01" :aria-label="`${sourceLabel(row)} 权重`">%</label></div></div>
     <div class="average-options"><strong>客户展示</strong><label><input v-model="display" type="radio" value="summary">仅综合报价</label><label><input v-model="display" type="radio" value="details">综合报价＋明细</label><label>方案名称<input v-model="provider" maxlength="80" aria-label="综合报价方案名称"></label><label>运输时效<input v-model="shippingTime" maxlength="80" placeholder="手动确认，例如 7-12 working days" aria-label="综合报价运输时效"></label><button class="average-generate" type="button" :disabled="!!draft.error || !!system.priceIssues?.length" @click="generate">{{ editingId ? '应用修改' : '生成平均行' }}</button><button v-if="editingId" type="button" @click="newPlan">新增方案</button></div>
     <p v-if="draft.error" role="status" class="average-hint">{{ draft.error }}</p><p v-else class="average-result">计算结果：<span v-for="(price, i) in draft.prices" :key="i">{{ quantities[i] }} 数量：${{ price!.toFixed(2) }} </span></p>
     <p v-if="error" role="alert">{{ error }}</p>

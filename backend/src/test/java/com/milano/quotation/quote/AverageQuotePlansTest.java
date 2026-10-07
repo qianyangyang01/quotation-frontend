@@ -75,6 +75,32 @@ class AverageQuotePlansTest {
         CustomerQuotePrices.initialize(equal);
         assertEquals(1, member(equal).path("weight").asDouble());
     }
+    @Test void savesMixedTaxModesAndRegionsInOneCountryAndRestoresImmutableAverageSnapshots() {
+        for (var mode : List.of("equal", "weighted")) {
+            var r = record();
+            ((ObjectNode) r.path("quoteOptions").get(0)).put("taxFeeMode", "fixed-order").put("taxIncluded", false).put("taxConfigured", true);
+            var included = (ObjectNode) r.path("quoteOptions").get(1);
+            included.put("taxFeeMode", "exempt").put("taxIncluded", true).put("taxConfigured", true).put("country", "US");
+            included.remove("countryCode");
+            ((ObjectNode) r.path("quoteOptions").get(2)).put("taxFeeMode", "per-item").put("taxRatePercent", 5).put("quoteRegion", "remote");
+            plan(r).put("mode", mode);
+            if (mode.equals("equal")) {
+                plan(r).set("systemPrices", mapper.readTree("[5.18,6.22,7.15]"));
+                plan(r).set("prices", mapper.readTree("[5.18,6.22,7.15]"));
+            }
+            var sources = r.path("quoteOptions").deepCopy();
+            CustomerQuotePrices.initialize(r);
+            assertEquals(3, plan(r).path("members").size());
+            assertEquals(sources, r.path("quoteOptions"));
+            var restored = (ObjectNode) mapper.readTree(r.toString());
+            var before = restored.deepCopy(); var p = patch(restored);
+            CustomerQuotePrices.preparePatch(restored, p);
+            assertEquals(plan(restored), plan(p));
+            assertEquals(before, restored);
+            assertEquals(restored.path("customerQuote"), restored.path("sheetQuote"));
+            assertFalse(QuotationFinanceReview.pricesChanged(restored, p));
+        }
+    }
     @Test void hidesSourcePresentationWithoutChangingPlanPricesHistoryOrReview() {
         var r = record(); CustomerQuotePrices.initialize(r);
         var original = r.deepCopy(); var p = patch(r);
@@ -101,8 +127,6 @@ class AverageQuotePlansTest {
             r -> ((ObjectNode) r.path("quoteOptions").get(0)).putNull("quote2Usd"),
             r -> ((ObjectNode) r.path("quoteOptions").get(0)).put("available", false),
             r -> ((ObjectNode) r.path("quoteOptions").get(0)).put("countryCode", "GB"),
-            r -> ((ObjectNode) r.path("quoteOptions").get(0)).put("quoteRegion", "remote"),
-            r -> ((ObjectNode) r.path("quoteOptions").get(0)).put("taxRatePercent", 5),
             r -> plan(r).putArray("quantities").add(3).add(2).add(3));
         for (var mutation : mutations) { var r = record(); mutation.accept(r); assertThrows(RuntimeException.class, () -> CustomerQuotePrices.initialize(r)); }
     }
@@ -178,21 +202,21 @@ class AverageQuotePlansTest {
             assertFalse(QuotationFinanceReview.pricesChanged(restored, p));
         }
     }
-    @Test void normalizesAustraliaZoneNamesButRejectsOtherCountriesUnknownZonesAndMixedTaxes() {
+    @Test void allowsAllRegionsAndTaxMetadataWithinOneCountry() {
         var valid = australia(2, 3);
         ((ObjectNode) valid.path("quoteOptions").get(0)).put("quoteRegion", "二区").remove("countryCode");
         ((ObjectNode) valid.path("quoteOptions").get(1)).put("quoteRegion", "澳大利亚（三 区）");
         assertDoesNotThrow(() -> CustomerQuotePrices.initialize(valid));
         List<Consumer<ObjectNode>> changes = List.of(
-            o -> o.put("countryCode", "CA"), o -> o.put("quoteRegion", "5区"),
+            o -> o.put("quoteRegion", "5区"),
             o -> o.put("quoteRegion", "全国统一"), o -> o.put("quoteRegion", ""), o -> o.put("taxIncluded", true));
         for (var change : changes) {
             var r = australia(2, 3); change.accept((ObjectNode) r.path("quoteOptions").get(0));
-            assertThrows(RuntimeException.class, () -> CustomerQuotePrices.initialize(r));
+            assertDoesNotThrow(() -> CustomerQuotePrices.initialize(r));
         }
         var canada = australia(2, 3);
         for (var option : canada.path("quoteOptions")) ((ObjectNode) option).put("country", "加拿大").put("countryCode", "CA");
-        assertThrows(RuntimeException.class, () -> CustomerQuotePrices.initialize(canada));
+        assertDoesNotThrow(() -> CustomerQuotePrices.initialize(canada));
     }
 
 }

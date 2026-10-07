@@ -39,7 +39,7 @@ final class AverageQuotePlans {
                 var optionId = text(member, "optionId", 1000); var option = options.get(optionId);
                 if (option == null || !memberIds.add(optionId) || (option.has("available") && !option.path("available").asBoolean())) throw AppException.unprocessable("综合报价来源渠道不存在、重复或不可用");
                 var nextScope = scope(option);
-                if (scope != null && !scope.equals(nextScope)) throw AppException.unprocessable("综合报价须为相同国家和税费口径；澳大利亚1–4区可自由组合，其他区域须一致");
+                if (scope != null && !scope.equals(nextScope)) throw AppException.unprocessable("综合报价须为相同国家的渠道");
                 scope = nextScope;
                 var weight = amount(member.path("weight"), false);
                 if (weight.signum() <= 0 || weight.compareTo(new BigDecimal("100")) > 0) throw AppException.unprocessable("渠道权重须大于0且不超过100");
@@ -76,17 +76,10 @@ final class AverageQuotePlans {
         return CustomerQuotePrices.originalPrice(record, option, quantity);
     }
     static String scope(JsonNode option) {
-        var key = JsonNodeFactory.instance.arrayNode();
         var country = option.hasNonNull("countryCode") && !option.path("countryCode").asText().isBlank()
             ? option.path("countryCode").asText() : option.path("country").asText();
         boolean australia = country.equalsIgnoreCase("AU") || country.equals("澳大利亚") || country.equalsIgnoreCase("Australia");
-        key.add(australia ? "AU" : country);
-        var region = option.path("quoteRegion").asText("");
-        var zone = region.replaceAll("[（）()\\s]", "").replaceFirst("^澳大利亚", "")
-            .replace("一区", "1区").replace("二区", "2区").replace("三区", "3区").replace("四区", "4区");
-        key.add(australia && zone.matches("[1-4]区") ? "@AU:zones-1-4" : region);
-        for (var field : List.of("taxFeeMode", "taxIncluded", "taxConfigured", "taxRatePercent")) key.add(option.hasNonNull(field) ? option.path(field) : NullNode.instance);
-        return key.toString();
+        return australia ? "AU" : country;
     }
     static String text(JsonNode node, String field, int max) {
         var value = node.path(field);

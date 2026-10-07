@@ -909,6 +909,46 @@ async function generateWeighted() {
   await click('生成平均行')
 }
 const averageRows = () => ['SDH', '顺丰', '燕文'].map((carrier, i) => ({ ...row(String(i), carrier), quote1: [5,5.25,5.3][i]!, quote2: [5.95,6.25,6.45][i]!, quote3: [7,7,7.45][i]!, quoteCustom: [7,7,7.45][i]! }))
+it('lists all three US channels across tax modes and restores the selected average in preview and copy', async () => {
+  const rows: QuoteSheetSourceRow[] = averageRows().map((source, i) => ({ ...source,
+    taxFeeMode: i === 1 ? 'exempt' : 'fixed-order', taxIncluded: i === 1,
+    taxConfigured: true, taxRatePercent: i === 2 ? 5 : null,
+  }))
+  mount(rows); await settle(); await click('渠道平均报价')
+  expect(document.querySelectorAll('[aria-label="平均报价国家"] option:not([disabled])')).toHaveLength(1)
+  expect(document.querySelector('.average-selection-count')?.textContent).toContain('已加入 3 条渠道 · 已勾选 0 条')
+  const channels = [...document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')]
+  expect(channels).toHaveLength(3)
+  for (const channel of channels) { channel.click(); await settle() }
+  expect(document.querySelector('.average-selection-count')?.textContent).toContain('已勾选 3 条')
+  await click('生成平均行')
+  const saved = exposed.capturePrices()
+  expect(saved.averagePlans![0]).toMatchObject({ mode: 'equal', systemPrices: [5.18, 6.22, 7.15, 7.15] })
+  expect(saved.averagePlans![0]!.members).toHaveLength(3)
+  await click('复制报价数据')
+  expect(writeText.mock.lastCall![0]).toContain('5.18')
+  const ids = (key: string) => rows.find(source => quoteSheetRowKey(source) === key)?.channelKey
+  const initialQuote = { quantities: saved.quantities, rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.prices })), averagePlans: mapAveragePlans(saved.averagePlans, ids) }
+  const system = { quantities: saved.quantities, rows: saved.rows.map(r => ({ optionId: ids(r.key)!, prices: r.systemPrices })) }
+  app.unmount(); document.body.innerHTML = ''
+  const state = mount(rows, undefined, initialQuote, true); state.initialSystemQuote = system; await settle()
+  expect(exposed.capturePrices().averagePlans).toEqual(saved.averagePlans)
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows.find(r => r.number === 'AVG')?.prices).toEqual([5.18, 6.22, 7.15, 7.15])
+})
+
+it('shows unavailable sources disabled and excludes other countries from the current average', async () => {
+  const rows = [...averageRows(), { ...row('unavailable'), available: false }, { ...row('uk'), country: '英国' }]
+  mount(rows); await settle(); await click('渠道平均报价')
+  const channels = [...document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')]
+  expect(channels).toHaveLength(4)
+  expect(channels[3]!.disabled).toBe(true)
+  expect(document.querySelector('.average-channels')?.textContent).toContain('暂不可用')
+  for (const channel of channels.slice(0, 2)) { channel.click(); await settle() }
+  await click('生成平均行')
+  expect(exposed.capturePrices().averagePlans![0]!.members.map(m => m.optionId)).toEqual(rows.slice(0, 2).map(quoteSheetRowKey))
+})
+
 it('moves an average among source rows by drag, buttons and keyboard without changing prices, then exports that order', async () => {
   const rows = averageRows(); mount(rows); await settle(); await generateWeighted()
   const id = exposed.capturePrices().averagePlans![0]!.id
@@ -1084,8 +1124,8 @@ it('lets users select arbitrary Australia zones of the same channel and outputs 
   const rows = [1, 2, 3, 4].map(zone => ({ ...row('same-channel'), country: '澳大利亚', quoteRegion: `澳大利亚${zone}区`, quote1: zone * 10, quote2: zone * 20, quote3: zone * 30, quoteCustom: zone * 50 }))
   const before = JSON.stringify(rows)
   mount(rows); await settle(); await click('渠道平均报价')
-  expect(document.querySelector('[aria-label="平均报价国家及区域"]')?.textContent).toContain('1–4区（自由组合）')
-  expect(document.querySelectorAll('.average-channel')).toHaveLength(0)
+  expect(document.querySelector('[aria-label="平均报价国家"]')?.textContent).toContain('澳大利亚')
+  expect(document.querySelectorAll('.average-channel')).toHaveLength(4)
   for (const zone of [1, 4]) {
     document.querySelector<HTMLInputElement>(`input[aria-label="参与平均区域：${zone}区"]`)!.click(); await settle()
   }
@@ -1100,15 +1140,15 @@ it('lets users select arbitrary Australia zones of the same channel and outputs 
   expect(JSON.stringify(rows)).toBe(before)
 })
 
-it('keeps region selection independent of channels and excludes removed regions from generated plans', async () => {
+it('keeps every channel visible while region shortcuts select or deselect its members', async () => {
   mount([{ ...row('a'), country: '澳大利亚', quoteRegion: '澳大利亚1区' }, { ...row('b', '燕文'), country: '澳大利亚', quoteRegion: '澳大利亚1区' }, { ...row('c'), country: '澳大利亚', quoteRegion: '澳大利亚4区' }]); await settle(); await click('渠道平均报价')
   const zone = (n: number) => document.querySelector<HTMLInputElement>(`input[aria-label="参与平均区域：${n}区"]`)!
   const channels = () => [...document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')]
   expect(zone(2).disabled).toBe(true); expect(zone(3).disabled).toBe(true)
-  expect(channels()).toHaveLength(0)
+  expect(channels()).toHaveLength(3)
   zone(1).click(); await settle()
-  expect(channels().map(c => c.checked)).toEqual([true, true])
-  for (const channel of channels()) { channel.click(); await settle() }
+  expect(channels().map(c => c.checked)).toEqual([true, true, false])
+  for (const channel of channels().filter(c => c.checked)) { channel.click(); await settle() }
   expect(zone(1).checked).toBe(true); expect(zone(4).checked).toBe(false)
   expect(button('生成平均行').disabled).toBe(true)
   channels()[0]!.click(); await settle()
@@ -1117,12 +1157,12 @@ it('keeps region selection independent of channels and excludes removed regions 
   await click('生成平均行')
   expect(exposed.capturePrices().averagePlans![0]!.members).toHaveLength(2)
   await click('新增方案')
-  expect(channels()).toHaveLength(0); expect(zone(1).checked).toBe(false)
+  expect(channels()).toHaveLength(3); expect(zone(1).checked).toBe(false)
   document.querySelector<HTMLButtonElement>('button[aria-label="编辑综合方案 Combined Shipping"]')!.click(); await settle()
   expect(zone(1).checked).toBe(true); expect(zone(4).checked).toBe(true)
   expect(channels().map(c => c.checked)).toEqual([true, false, true])
   zone(1).click(); await settle()
-  expect(channels().map(c => c.checked)).toEqual([true])
+  expect(channels().map(c => c.checked)).toEqual([false, false, true])
   expect(zone(1).checked).toBe(false); expect(zone(4).checked).toBe(true)
   expect(button('应用修改').disabled).toBe(true)
 })

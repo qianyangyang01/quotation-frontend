@@ -28,13 +28,16 @@ describe('channel average snapshot', () => {
     p.members[0]!.weight = 50; p.members[0]!.sourcePrices[2] = null
     expect(averagePrices(p.members, 'weighted', 3)).toEqual([5.14, 6.14, null])
   })
-  it('checks source identity, country, region, tax scope and quantity availability', () => {
+  it('checks source identity, country and quantity availability', () => {
     expect(averagePlanIssues(plan(), sources, [3, 1])).toEqual([])
-    for (const change of [{ country: '英国' }, { quoteRegion: '偏远' }, { taxIncluded: true }]) {
-      expect(averagePlanIssues(plan(), [sources[0]!, sources[1]!, { ...sources[2]!, ...change }], [1])).not.toEqual([])
-    }
+    expect(averagePlanIssues(plan(), [sources[0]!, sources[1]!, { ...sources[2]!, country: '英国' }], [1])).not.toEqual([])
     expect(averagePlanIssues(plan(), sources, [50])[0]).toContain('50')
     expect(averagePlanIssues(plan(), sources.slice(1), [1])[0]).toContain('来源渠道')
+  })
+  it('recognizes country aliases without splitting the selected country into multiple groups', () => {
+    for (const country of ['美国', 'US']) {
+      expect(averageScope({ ...sources[0]!, country })).toBe(averageScope(sources[0]!))
+    }
   })
   it('adds the same AVG row to image/text models while retaining source detail in the editor', () => {
     const sheet = buildCustomerQuoteSheet({ rows: sources, countries: [], edits: newQuoteSheetEdits('Demo'), customQuantity: 3, bundle: false, quantities: [3, 1, 2] })
@@ -74,11 +77,12 @@ it('combines any subset of Australia zones while retaining distinct same-channel
   }
   expect(JSON.stringify(rows)).toBe(original)
 })
-it('accepts Australia zone aliases but keeps other countries, unknown zones and tax scopes separate', () => {
+it('groups only by country regardless of zone or tax metadata', () => {
   const row = australiaSources()[0]!, scope = averageScope(row)
   for (const quoteRegion of ['2区', '澳大利亚（三区）', ' 四区 ']) expect(averageScope({ ...row, quoteRegion })).toBe(scope)
-  for (const change of [{ country: '加拿大' }, { quoteRegion: '5区' }, { quoteRegion: '全国统一' }, { quoteRegion: '' }, { taxIncluded: true }]) {
-    expect(averageScope({ ...row, ...change })).not.toBe(scope)
+  for (const change of [{ quoteRegion: '5区' }, { quoteRegion: '全国统一' }, { quoteRegion: '' }, { taxIncluded: true }, { taxConfigured: false }, { taxRatePercent: 5 }, { taxFeeMode: 'exempt' as const }]) {
+    expect(averageScope({ ...row, ...change })).toBe(scope)
   }
-  expect(averageScope({ ...row, country: '加拿大', quoteRegion: '2区' })).not.toBe(averageScope({ ...row, country: '加拿大', quoteRegion: '3区' }))
+  expect(averageScope({ ...row, country: '加拿大' })).not.toBe(scope)
+  expect(averageScope({ ...row, country: '加拿大', quoteRegion: '2区' })).toBe(averageScope({ ...row, country: '加拿大', quoteRegion: '3区' }))
 })
