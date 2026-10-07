@@ -194,6 +194,25 @@ class LogisticsQueryPostgresIntegrationTest {
         }
     }
 
+    @Test
+    void manualModesAlwaysRecalculateLegacyChannelsAndEveryQuantitySample() {
+        var mapper = new ObjectMapper();
+        var query = new LogisticsQueryService(jdbc, mapper);
+        var guard = new LogisticsQuotationGuard(jdbc, query, mapper);
+        for (var mode : List.of("freight-trial", "shipping-only")) {
+            var input = selectedQuotation();
+            input.remove("logisticsSyncScope");
+            input.put("quoteMode", mode).put("logisticsRevision", query.manifestRevision().revision());
+            guard.validate(input);
+            var badFreight = input.deepCopy();
+            ((tools.jackson.databind.node.ObjectNode)badFreight.path("quoteOptions").get(0)).put("freightCny", 72);
+            assertThrows(AppException.class, () -> guard.validate(badFreight));
+            var badSample = input.deepCopy();
+            ((tools.jackson.databind.node.ObjectNode)badSample.path("quoteOptions").get(0).path("logisticsSamples").get(1)).put("total", 127);
+            assertThrows(AppException.class, () -> guard.validate(badSample));
+        }
+    }
+
     private tools.jackson.databind.node.ObjectNode selectedQuotation() {
         var mapper=new ObjectMapper();
         var input=mapper.createObjectNode().put("logisticsSyncScope","selected").put("logisticsAttribute","普货").put("logisticsRevision","older-library");

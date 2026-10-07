@@ -15,6 +15,7 @@ export function quotationReissuePayload(record: QuotationRecord): QuotationDraft
   const selectedQuoteRegions = Object.fromEntries(selections.filter(item => item.quoteRegion).map(item => [item.country, item.quoteRegion!]))
   if (primary?.country) selectedQuoteRegions[primary.country] = primary.quoteRegion || ''
   return {
+    manualPricing: record.manualPricing ? { ...record.manualPricing } : undefined,
     schemaVersion: 2, customerName: record.customerName, selectedCustomerId: record.customerOperation?.id,
     commissionThreshold: record.commissionThreshold ?? 1,
     specialPackagingGrams: record.weightSnapshot?.specialPackagingGrams ?? 0,

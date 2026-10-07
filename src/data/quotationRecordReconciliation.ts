@@ -1,3 +1,4 @@
+import { isManualQuotation, quotationModeLabels } from './quotationModes'
 import Decimal from 'decimal.js'
 import { customerOperationFeeForQuantity, operationFeesLabel } from './customerOperationFees'
 import { financeReviewLabel, quotationDealLabel } from './quotationRecords'
@@ -62,25 +63,27 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     ...(record.systemQuantityQuotes?.quantities ?? []), ...(snapshot?.quantities ?? []),
     ...(record.quoteOptions ?? []).flatMap(option => (option.logisticsSamples ?? []).map(sample => sample.quantity).filter(q => Number.isSafeInteger(q) && q > 0)),
     ...(!record.customQuoteQuantity && record.quoteOptions?.some(option => option.quoteCustomUsd != null) ? [0] : [])])]
+  const manual = isManualQuotation(record.quoteMode)
+  const weightLabel = manual ? '渠道计算重量' : '最终含包材重量'
   const unit = record.quoteMode === 'bundle' ? '套' : '件'
   const sku = record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => item.sku).join('+') : record.primarySku
   const cny = (usd: number | null | undefined) => usd == null || !Number.isFinite(usd) || !(record.exchangeRate > 0) ? missing : money(quoteCnyFromUsd(usd, record.exchangeRate))
   const lines = [
     line(['报价记录对账明细', '使用本条记录已保存的数据；人民币按该记录汇率换算；未保存的字段不补算']),
     line(['报价编号', record.no, '客户', record.customerName, '业务员', record.salespersonName, '账号', record.salespersonAccount]),
-    line(['SKU', sku, '商品', record.productSummary, '报价类型', record.quoteMode === 'bundle' ? '组合报价' : '单品报价', '物流属性', record.logisticsAttribute]),
+    line(['SKU', sku, '商品', record.productSummary, '报价类型', manual ? quotationModeLabels[record.quoteMode] : record.quoteMode === 'bundle' ? '组合报价' : '单品报价', '物流属性', record.logisticsAttribute]),
     line(['客户等级', record.customerGrade, '汇率（CNY/USD）', record.exchangeRate > 0 ? record.exchangeRate : missing, '佣金阈值', record.commissionThreshold ?? 1, '公司操作费（USD/单）', record.customerOperation?.feesByQuantityUsd ? operationFeesLabel(record.customerOperation, unit) : money(record.customerOperation?.feeUsd)]),
     line(['报价模式', record.matrixMode === 'template' ? '模板报价' : record.matrixMode === 'specified' ? '指定国家与渠道' : '常用国家', '模板', record.quotationTemplateName, '创建时间', record.createdAt, '修改时间', record.updatedAt]),
     line(['财务审核', financeReviewLabel(record.financeReviewStatus), '审核人', record.financeReviewedBy, '审核时间', record.financeReviewedAt]),
     line(['成交结果', quotationDealLabel(record.status), '备注', record.note || '', '成交日期', record.closedAt]),
-    line(['采购原价（CNY/件）', money(record.purchaseBaseUnitPriceCny), '计入采购价（CNY/件）', money(record.purchaseUnitPriceCny), '采购发票', record.purchaseInvoiceType, '采购票点（%）', record.purchaseInvoiceRatePercent]),
+    manual ? line(['手填成本（CNY/件）', money(record.manualPricing?.costCny), '手填重量（g/件）', record.manualPricing?.weightGrams, '包材', '不额外增加']) : line(['采购原价（CNY/件）', money(record.purchaseBaseUnitPriceCny), '计入采购价（CNY/件）', money(record.purchaseUnitPriceCny), '采购发票', record.purchaseInvoiceType, '采购票点（%）', record.purchaseInvoiceRatePercent]),
     line(['首选系统价（USD）', money(record.systemQuoteUsd), '首选系统价（CNY快照）', money(record.systemQuoteCny), '首选综合成本（CNY）', money(record.totalCostCny)]),
     line(['成交价（USD）', money(record.actualQuoteUsd), '成交价（CNY快照）', money(record.actualQuoteCny), '成交数量', record.dealQuantity, '成交方案', record.dealOptionLabel]),
     '',
-    line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', '最终含包材重量快照（g）', '重量快照对应数量', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
+    line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', `${weightLabel}快照（g）`, '重量快照对应数量', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
       ...quantities.flatMap(q => {
         const label = q ? `${q}${unit}` : '自定义（数量未保存）'
-        return [`${label}最终含包材重量（g）`, `${label}物流运费（CNY/单）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`, `${label}操作费（USD/单）`]
+        return [`${label}${weightLabel}（g）`, `${label}物流运费（CNY/单）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`, `${label}操作费（USD/单）`]
       })]),
   ]
   for (const [index, option] of (record.quoteOptions ?? []).entries()) {
@@ -95,8 +98,10 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
       }),
     ]))
   }
-  lines.push('', '包材与重量快照')
-  if (record.weightSnapshot) {
+  lines.push('', manual ? '手填重量快照' : '包材与重量快照')
+  if (manual) {
+    lines.push(line(['每件重量（g）', record.manualPricing?.weightGrams, '计费方式', '手填克重乘数量参与渠道计费，不增加包材重量']))
+  } else if (record.weightSnapshot) {
     const w = record.weightSnapshot
     lines.push(line(['普通包材规则','每件每50g加1g，不足向上取整','特殊包装（g/票）',w.specialPackagingGrams,'增加方式','整票一次']))
     lines.push(line(['数量','商品重量（kg）','普通包材（kg）','特殊包装（kg）','整票含包材重量（kg）']))

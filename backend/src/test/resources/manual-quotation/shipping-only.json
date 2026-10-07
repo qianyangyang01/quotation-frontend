@@ -1,0 +1,220 @@
+{
+  "priorityProcessing": false,
+  "financeVersions": {
+    "country-classification": 1,
+    "channel-policies": 1,
+    "customer-grades": 1,
+    "exchange-rate": 1,
+    "tax-settings": 1,
+    "surcharge-settings": 1,
+    "customer-operation-fees": 1,
+    "freight-discount-settings": -1
+  },
+  "customerQuote": {
+    "photos": [],
+    "showPhotos": true,
+    "rowOrder": [
+      "option:美国::全国统一::9910::燕文::TEST"
+    ],
+    "averagePlans": [],
+    "hiddenOptionIds": [],
+    "sizeRulesEnabled": false,
+    "contact": {
+      "agent": "本地验收",
+      "whatsapp": ""
+    },
+    "quantities": [
+      1,
+      2,
+      3,
+      7
+    ],
+    "rows": [
+      {
+        "optionId": "美国::全国统一::9910::燕文::TEST",
+        "prices": [
+          6.5,
+          11.5,
+          16.5,
+          36.5
+        ]
+      }
+    ]
+  },
+  "systemQuantityQuotes": {
+    "quantities": [
+      1,
+      2,
+      3,
+      7
+    ],
+    "rows": [
+      {
+        "optionId": "美国::全国统一::9910::燕文::TEST",
+        "prices": [
+          6.5,
+          11.5,
+          16.5,
+          36.5
+        ]
+      }
+    ]
+  },
+  "manualPricing": {
+    "costCny": 0,
+    "weightGrams": 500
+  },
+  "purchaseVersions": {},
+  "logisticsRevision": "test",
+  "salespersonName": "本地验收",
+  "salespersonAccount": "LOCALQA",
+  "customerName": "示例客户",
+  "quoteMode": "shipping-only",
+  "productSummary": "仅代发货报价",
+  "productImage": "",
+  "primarySku": "",
+  "productCategory": "",
+  "volumetricEnabled": false,
+  "logisticsAttribute": "普货",
+  "country": "美国",
+  "carrier": "燕文",
+  "channel": "测试",
+  "rule": "直接克重",
+  "systemQuoteUsd": 6.5,
+  "systemQuoteCny": 39,
+  "totalCostCny": 30,
+  "customerGrade": "S级客户",
+  "monthlySalesEstimate": "10",
+  "commissionThreshold": 1,
+  "exchangeRate": 6,
+  "matrixMode": "common",
+  "customQuoteQuantity": 3,
+  "quoteOptions": [
+    {
+      "id": "美国::全国统一::9910::燕文::TEST",
+      "quoteSheetKey": "[\"美国\",\"\",\"9910::燕文::TEST\"]",
+      "country": "美国",
+      "quoteRegion": "",
+      "countryCode": "US",
+      "carrier": "燕文",
+      "channel": "测试",
+      "rule": "直接克重",
+      "eta": "该物流暂无时效说明",
+      "channelKey": "9910::燕文::TEST",
+      "ruleId": "9910",
+      "channelCode": "TEST",
+      "quantityMessages": {},
+      "freightCny": 30,
+      "logisticsChannelId": "test-channel",
+      "logisticsVersionId": "test-version",
+      "logisticsSamples": [
+        {
+          "quantity": 1,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 0.5,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 30,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 2,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 1,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 55,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 3,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 1.5,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 80,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 7,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 3.5,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 180,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        }
+      ],
+      "logisticsInput": {
+        "country": "美国",
+        "baseWeightKg": 0.5,
+        "packagingWeightKg": 0,
+        "standardPackagingWeightKg": 0,
+        "specialPackagingWeightKg": 0,
+        "quantity": 1,
+        "weightKg": 0.5,
+        "zoneName": "",
+        "marks": [
+          "普货"
+        ]
+      },
+      "totalCostCny": 80,
+      "profitCny": 16,
+      "quoteCny": 99,
+      "isPrimary": true,
+      "quote1Usd": 6.5,
+      "quote2Usd": 11.5,
+      "quote3Usd": 16.5,
+      "quoteCustomUsd": 16.5,
+      "taxIncluded": false,
+      "taxConfigured": true,
+      "taxRatePercent": null,
+      "countryFixedTaxUsd": 0.3,
+      "taxFeeMode": "fixed-order",
+      "taxCalculations": {},
+      "taxLabel": "关税 $0.30/单",
+      "surchargeEnabled": true,
+      "surchargeConfigured": true,
+      "surchargeExempt": false,
+      "surchargeUsd": 0.2,
+      "surchargeLabel": "附加费 $0.20/单",
+      "tax1Usd": 0.3,
+      "tax2Usd": 0.3,
+      "tax3Usd": 0.3,
+      "taxCustomUsd": 0.3
+    }
+  ],
+  "specifiedQuotes": [
+    {
+      "country": "美国",
+      "carrier": "燕文",
+      "channel": "测试",
+      "rule": "直接克重",
+      "eta": "该物流暂无时效说明",
+      "quote1Usd": 6.5,
+      "quote2Usd": 11.5,
+      "quote3Usd": 16.5,
+      "quoteCustomUsd": 16.5
+    }
+  ]
+}

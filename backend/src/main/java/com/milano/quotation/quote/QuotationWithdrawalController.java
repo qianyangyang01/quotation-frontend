@@ -104,7 +104,7 @@ public class QuotationWithdrawalController {
         var draft=drafts.findById(actor.account()).orElse(null);requireDraft(quote,draft,body);
         if(!(body.path("quotation") instanceof ObjectNode input)||input.toString().length()>4_000_000)throw AppException.unprocessable("报价数据格式错误或过大");
         // This new endpoint has no legacy clients: never fall back to unversioned pricing.
-        if(!input.path("purchaseVersions").isObject()||input.path("purchaseVersions").isEmpty()
+        if((!ManualQuotation.isManual(input) && (!input.path("purchaseVersions").isObject()||input.path("purchaseVersions").isEmpty()))
             ||!input.path("financeVersions").isObject()||input.path("financeVersions").isEmpty())
             throw AppException.unprocessable("缺少采购或财务版本信息，请刷新草稿并重新计价");
         var payload=input.deepCopy();validator.validate(payload);validator.validateQuotePricing(payload);readiness.assertCanCreate(payload);

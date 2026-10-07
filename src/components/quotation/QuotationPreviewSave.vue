@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
   matrixModeLabel: string
   customerName: string
   productName: string
+  quoteMode?: import('@/data/quotationModes').QuotationMode
   sku: string
   skus?: string[]
   customerGrade: string
@@ -85,14 +86,14 @@ const quoteRange = computed(() => {
         <dl>
           <div><dt>客户</dt><dd>{{ customerName || '待填写' }}</dd></div>
           <div><dt>商品</dt><dd>{{ productName || '待查询' }}</dd></div>
-          <div><dt>SKU</dt><dd>{{ sku || '—' }}</dd></div>
+          <div><dt>{{ quoteMode === 'freight-trial' || quoteMode === 'shipping-only' ? '业务类型' : 'SKU' }}</dt><dd>{{ sku || '—' }}</dd></div>
           <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
           <div><dt>客户等级</dt><dd>{{ customerGradeDisplayLabel(customerGrade) }}</dd></div>
         </dl>
       </section>
     </div>
 
-    <CustomerQuoteSheet ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
+    <CustomerQuoteSheet :quote-mode="quoteMode" ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
       :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
 
     <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">

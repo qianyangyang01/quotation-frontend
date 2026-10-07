@@ -11,7 +11,7 @@ afterEach(() => vi.useRealTimers())
 it('automatically retries when an invalid threshold is corrected back to the saved value', () => {
   vi.useFakeTimers()
   const status = {value:'error'}, error = {value:'佣金阈值必须大于0且不超过1'}, flush = vi.fn().mockResolvedValue(undefined)
-  const context = {draftSource:{value:{id:'withdrawn'}},draftReady:{value:true},lastSavedDraftSignature:'saved-0.95',draftDirty:true,draftStatus:status,draftError:error,resolvingDraftConflict:{value:false},draftTimer:0,window:{clearTimeout,setTimeout},flushDraft:flush}
+  const context = { manualMode: { value: false },draftSource:{value:{id:'withdrawn'}},draftReady:{value:true},lastSavedDraftSignature:'saved-0.95',draftDirty:true,draftStatus:status,draftError:error,resolvingDraftConflict:{value:false},draftTimer:0,window:{clearTimeout,setTimeout},flushDraft:flush}
   const mark = new Function(...Object.keys(context), code + '\nreturn markDraftDirty')(...Object.values(context))
   mark('saved-0.95')
   expect(status.value).toBe('dirty')

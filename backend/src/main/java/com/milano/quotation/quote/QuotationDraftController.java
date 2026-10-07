@@ -20,7 +20,7 @@ import java.util.Set;
 public class QuotationDraftController {
     private static final int MAX_DRAFT_BYTES = 1_000_000;
     private static final Set<String> DRAFT_FIELDS = Set.of(
-            "priorityProcessing", "schemaVersion", "customerName", "selectedCustomerId", "quoteMode", "skuSearch", "productCategory",
+            "manualPricing", "priorityProcessing", "schemaVersion", "customerName", "selectedCustomerId", "quoteMode", "skuSearch", "productCategory",
             "logisticsAttribute", "selectedCustomerGrade", "selectedTaxCustomerType",
             "monthlySalesEstimate", "commissionThreshold", "specialPackagingGrams", "customQuoteQuantity", "quoteMatrixMode",
             "selectedQuoteRegions", "product", "bundleItems", "commonSelections",

@@ -1,3 +1,4 @@
+import { isManualQuotation, type QuotationMode } from './quotationModes'
 import type { QuotationMatrixRow } from '@/components/quotation/types'
 import { parseQuotePriceInput } from './quotePriceExpression'
 
@@ -52,7 +53,7 @@ export function quoteSheetGroups(hiddenColumns: readonly QuoteSheetOptionalColum
 export function quoteSheetTextTable(sheet: CustomerQuoteSheet) {
   const groups = quoteSheetGroups(sheet.hiddenColumns, sheet.columnOrder, false, typeof sheet.sizeRules === 'string').filter(column => column.key !== 'product')
   return [
-    groups.flatMap(column => column.key === 'prices' ? sheet.quantityLabels.map(label => `${label} (USD)`) : [column.label]),
+    groups.flatMap(column => column.key === 'prices' ? sheet.quantityLabels.map(label => `${label} (USD)`) : [column.key === 'sku' ? sheet.skuLabel ?? column.label : column.label]),
     ...sheet.rows.map((row, index) => groups.flatMap(column => column.key === 'prices' ? row.prices.map(quoteSheetUsd) : [column.key === 'sizeRules' ? (index === 0 ? sheet.sizeRules ?? '' : '') : quoteSheetCell(row, column.key)])),
   ]
 }
@@ -77,6 +78,7 @@ export type CustomerQuoteSheetRow = {
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {
+  skuLabel?: string
   sizeRules?: string | null
   agent: string; date: string; quantityLabels: string[]; rows: CustomerQuoteSheetRow[]; issues: string[]
   tableIssues?: string[]
@@ -234,6 +236,7 @@ export function quoteSheetUsd(value: number | null) {
 }
 export function buildCustomerQuoteSheet(input: {
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; edits: QuoteSheetEdits
+  quoteMode?: QuotationMode
   customQuantity: number; bundle: boolean; skus?: string[]
   quantities?: number[]; calculatePrice?: QuoteSheetPriceCalculator; legacyCustomIndex?: number
 }): CustomerQuoteSheet {
@@ -300,7 +303,9 @@ export function buildCustomerQuoteSheet(input: {
     sizeRules: input.edits.sizeRulesEnabled === false ? null : input.edits.sizeRules,
     whatsapp: input.edits.whatsapp?.trim() || '',
     columnOrder: normalizeQuoteSheetOrder(input.edits.columnOrder),
-    title: input.edits.title ?? 'JerryFulfillment Quote Sheet', notes: input.edits.notes ?? [...CUSTOMER_QUOTE_NOTES],
+    skuLabel: isManualQuotation(input.quoteMode || '') ? 'Service' : undefined,
+    title: input.edits.title ?? quoteSheetModeDefaults(input.quoteMode).title,
+    notes: input.edits.notes ?? quoteSheetModeDefaults(input.quoteMode).notes,
     agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)], priceIssues: [...new Set(priceIssues)],
     quantityLabels: quantities.map((quantity, index) => isLegacyCustom(quantity, index) || (!input.quantities && index === 3 && !input.customQuantity) ? 'Custom' : `${validQuoteSheetQuantity(quantity) ? quantity : '—'} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
   }
@@ -331,4 +336,15 @@ export function customerQuoteSheetHtml(sheet: CustomerQuoteSheet) {
       if (column === rulesIndex && index > 0) return ''
       return '<td style="white-space:pre-wrap;mso-number-format:\'@\'"' + (column === rulesIndex ? ' rowspan="' + sheet.rows.length + '"' : '') + '>' + text(cell) + '</td>'
     }).join('') + '</tr>').join('') + '</tbody></table>'
+}
+
+export function quoteSheetModeDefaults(mode?: QuotationMode) {
+  const title = mode === 'shipping-only' ? 'JerryFulfillment Shipping Quote' : mode === 'freight-trial' ? 'JerryFulfillment Freight Trial' : 'JerryFulfillment Quote Sheet'
+  const notes: string[] = [...CUSTOMER_QUOTE_NOTES]
+  if (mode === 'shipping-only') {
+    notes[0] = notes[0]!.replace('All prices include product cost, shipping cost and handling cost.', 'Shipping service only. Product value is excluded. Prices include applicable shipping and handling charges.')
+    notes[2] = 'Quotation is based on the supplied shipping weight. Changes in actual shipment weight may change the shipping charge.'
+  }
+  if (mode === 'freight-trial') notes.unshift('Trial estimate based on the supplied total cost and weight. Please confirm all inputs before ordering.')
+  return { title, notes }
 }

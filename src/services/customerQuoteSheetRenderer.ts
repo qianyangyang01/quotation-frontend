@@ -203,7 +203,7 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     context.drawImage(header, 548, 0, 1, 90, 22, 179, right - 22, tableTop - 179)
     context.fillStyle = '#ffffff'
     cells.forEach((column, index) => {
-      if (column.key !== 'prices') centered(context, column.key === 'processingTime' ? 'Processing\nTime' : column.label, columns[index], columns[index + 1], 179, tableTop - 179, true)
+      if (column.key !== 'prices') centered(context, column.key === 'processingTime' ? 'Processing\nTime' : column.key === 'sku' ? sheet.skuLabel ?? column.label : column.label, columns[index], columns[index + 1], 179, tableTop - 179, true)
     })
     // Fit the group label even when only one quantity column remains.
     font(context, true, 22)

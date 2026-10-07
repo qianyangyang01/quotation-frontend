@@ -37,6 +37,29 @@ class QuotationWorkflowIntegrationTest {
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
+    @Test void savesAndReadsBackBothManualModesWithoutPurchaseSnapshots() throws Exception {
+        var session = authenticatedSession();
+        for (var mode : java.util.List.of("freight-trial", "shipping-only")) {
+            var body = (tools.jackson.databind.node.ObjectNode) mapper.readTree(getClass().getResourceAsStream("/manual-quotation/" + mode + ".json"));
+            var result = mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
+                    .header("Idempotency-Key", "manual-" + mode).contentType("application/json").content(body.toString()))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.quoteMode").value(mode)).andReturn();
+            var id = mapper.readTree(result.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+            mvc.perform(get("/api/v1/quotations/{id}", id).session(session))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.quoteMode").value(mode))
+                    .andExpect(jsonPath("$.data.systemQuantityQuotes.quantities[3]").value(7))
+                    .andExpect(jsonPath("$.data.systemQuantityQuotes.rows[0].prices[3]").value("shipping-only".equals(mode) ? 36.5 : 78.5))
+                    .andExpect(jsonPath("$.data.manualPricing.weightGrams").value(500))
+                    .andExpect(jsonPath("$.data.manualPricing.costCny").value("shipping-only".equals(mode) ? 0 : 30))
+                    .andExpect(jsonPath("$.data.primarySku").value(""))
+                    .andExpect(jsonPath("$.data.weightSnapshot").doesNotExist())
+                    .andExpect(jsonPath("$.data.quoteOptions[0].totalCostCny").value("shipping-only".equals(mode) ? 80 : 170));
+            mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
+                    .header("Idempotency-Key", "manual-" + mode).contentType("application/json").content(body.toString()))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value(id));
+        }
+    }
+
     @Test void savesAndReadsBackThreePiecesOfOneSkuAsABundle() throws Exception {
         var session = authenticatedSession();
         var body = """

@@ -22,7 +22,7 @@ it.each(['single', 'bundle'])('uses the parcel minimum in the live %s quote whil
   const items = [item, { ...item, sku: 'B' }]
   const taxResult = vi.fn((_country: string, _provider: string, cny: number, _rule: string, _channel: string, _weightKg: number) => ({ totalUsd: roundQuoteUsd(usdPriceFromCny(cny, 6.7) + .3) }))
   let special = 0
-  const context = { specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' }, logisticsRuleForChannel: () => rule, normalizedBundleSets: (n: number) => n,
+  const context = { manualMode: { value: false }, specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' }, logisticsRuleForChannel: () => rule, normalizedBundleSets: (n: number) => n,
     quoteMode: { value: mode }, bundleGoodsWeight: (n: number) => bundleGoodsWeight(items, n, special), singleActualWeight: (p:typeof product,n:number)=>singleActualWeight(p,n,special), calculateLogisticsFee,
     bundlePurchaseCost: (n: number) => productDecimal(100.44, n), bundleDomesticFreight: (n: number) => productDecimal(.5, n),
     findPurchaseProduct: () => null, purchaseRecords: { value: [] }, purchasePriceForMonthlySales: () => 100.44,

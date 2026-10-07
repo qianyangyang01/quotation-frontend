@@ -38,7 +38,7 @@ public class QuotationAnalyticsController {
         for(int start=0;start<changed.size();start+=500){
             jdbc.sql("""
             SELECT q.id,(coalesce((SELECT jsonb_object_agg(key,value) FROM jsonb_each(q.payload)
-              WHERE key=ANY(ARRAY['primarySku','customerName','productSummary','salespersonName','salespersonAccount',
+              WHERE key=ANY(ARRAY['quoteMode','manualPricing','primarySku','customerName','productSummary','salespersonName','salespersonAccount',
                 'country','systemQuoteUsd','systemQuoteCny','totalCostCny','exchangeRate','no','status','createdAt','updatedAt'])), '{}'::jsonb)
               || jsonb_build_object('id',q.id,
                 'quoteOptions',coalesce((SELECT jsonb_agg(jsonb_build_object('country',option->'country'))

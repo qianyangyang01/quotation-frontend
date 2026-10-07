@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
-  buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
+  quoteSheetModeDefaults, buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
   quoteSheetRowKey, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
   MAX_QUOTE_SHEET_COLUMNS, validQuoteSheetQuantity, QUOTE_SHEET_OPTIONAL_COLUMNS, quoteSheetGroups, quoteSheetTextTable, normalizeQuoteSheetOrder,
   type QuoteSheetOptionalColumn, type QuoteSheetColumnKey, type QuoteSheetEdits,
@@ -36,13 +36,14 @@ const props = defineProps<{
   canRemoveRows?: boolean
   removalDisabled?: boolean
   showAllRows?: boolean
+  quoteMode?: import('@/data/quotationModes').QuotationMode
   skus?: string[]
 }>()
 const emit = defineEmits<{ removeRow: [key: string] }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
 function initialEdits() {
   const contact = props.recordMode ? props.initialQuote?.contact : loadQuoteSheetContact(layoutUserId.value)
-  return { ...newQuoteSheetEdits(props.salesperson), showAustraliaZones: loadQuoteSheetAustraliaZones(layoutUserId.value), whatsapp: '', sizeRules: props.initialQuote?.sizeRules, sizeRulesEnabled: props.initialQuote?.sizeRulesEnabled ?? typeof props.initialQuote?.sizeRules === 'string', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
+  return { ...newQuoteSheetEdits(props.salesperson), ...quoteSheetModeDefaults(props.quoteMode), showAustraliaZones: loadQuoteSheetAustraliaZones(layoutUserId.value), whatsapp: '', sizeRules: props.initialQuote?.sizeRules, sizeRulesEnabled: props.initialQuote?.sizeRulesEnabled ?? typeof props.initialQuote?.sizeRules === 'string', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
 }
 const edits = ref<QuoteSheetEdits>(initialEdits())
 const layoutSaveState = ref<'saved' | 'failed' | ''>('')
@@ -228,7 +229,7 @@ function removeRow(key: string) {
   emit('removeRow', key)
 }
 function buildSheet(rows: QuoteSheetSourceRow[]) { return buildCustomerQuoteSheet({
-  rows, countries: props.countries, edits: edits.value, skus: props.skus,
+  rows, quoteMode: props.quoteMode, countries: props.countries, edits: edits.value, skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle,
   quantities: quantities.value, calculatePrice: props.sourcePending ? undefined : cachedSystemPrice,
   legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom),
@@ -253,7 +254,7 @@ function withAverageErrors(value: ReturnType<typeof applyAveragePlans>) {
   const errors = Object.values(averagePriceErrors.value)
   return { ...value, issues: [...value.issues, ...errors], tableIssues: [...(value.tableIssues ?? []), ...errors], priceIssues: [...(value.priceIssues ?? []), ...errors] }
 }
-const systemSheet = computed(() => buildCustomerQuoteSheet({ rows: props.rows, countries: props.countries, edits: newQuoteSheetEdits(props.salesperson), skus: props.skus,
+const systemSheet = computed(() => buildCustomerQuoteSheet({ rows: props.rows, quoteMode: props.quoteMode, countries: props.countries, edits: newQuoteSheetEdits(props.salesperson), skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle, quantities: quantities.value,
   calculatePrice: props.recordMode ? (row, quantity) => {
     const saved = props.initialSystemQuote
@@ -348,7 +349,7 @@ const missingProviders = computed(() => !columnVisible('provider') ? [] : [...ne
   .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
 const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
 
-const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value, typeof sheet.value.sizeRules === 'string'))
+const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value, typeof sheet.value.sizeRules === 'string').map(group => group.key === 'sku' ? { ...group, label: sheet.value.skuLabel ?? group.label } : group))
 const textTable = computed(() => quoteSheetTextTable(sheet.value))
 const sizeRulesTextIndex = computed(() => textTable.value[0].indexOf('Size Rules'))
 const groupNames: Record<QuoteSheetColumnKey, string> = { sizeRules: '尺码规则', number: '序号', sku: 'SKU', product: '商品图片', prices: '价格整组', country: '国家', provider: '物流商', shippingTime: '运输时效', processingTime: '处理时间' }

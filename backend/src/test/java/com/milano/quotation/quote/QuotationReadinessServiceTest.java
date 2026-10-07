@@ -74,6 +74,26 @@ class QuotationReadinessServiceTest {
         assertFalse(service.snapshot().path("ready").asBoolean());
     }
 
+    @Test
+    void manualQuotesRequireLogisticsAndFinanceButNeverProcurementReadiness() {
+        acceptsCompletePurchaseLogisticsAndFinanceState();
+        clearInvocations(products);
+        when(products.readyCount()).thenReturn(0L);
+        for (var mode : List.of("freight-trial", "shipping-only")) {
+            var quote = JsonNodeFactory.instance.objectNode().put("quoteMode", mode);
+            assertDoesNotThrow(() -> service.assertCanCreate(quote));
+            verify(products, never()).notQuoteReadyLocked(anyCollection());
+            verify(products, never()).assertQuotationVersions(any());
+            verify(products, never()).assertQuotationTaxPoints(any());
+        }
+        var quote = JsonNodeFactory.instance.objectNode().put("quoteMode", "shipping-only");
+        when(logistics.publishedChannelCount()).thenReturn(0L);
+        assertThrows(AppException.class, () -> service.assertCanCreate(quote));
+        when(logistics.publishedChannelCount()).thenReturn(1L);
+        when(finance.findById("exchange-rate")).thenReturn(Optional.empty());
+        assertThrows(AppException.class, () -> service.assertCanCreate(quote));
+    }
+
     private void setting(String key, tools.jackson.databind.JsonNode payload) {
         var row = mock(FinanceSetting.class);
         row.payload = payload;

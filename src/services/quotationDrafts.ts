@@ -1,6 +1,6 @@
 import { api } from './http'
 
-export type DraftQuoteMode = 'single' | 'bundle'
+export type DraftQuoteMode = import('@/data/quotationModes').QuotationMode
 // Keep specified readable for saved drafts and withdrawn historical quotes.
 export type DraftMatrixMode = 'common' | 'specified' | 'template'
 
@@ -14,6 +14,7 @@ export interface DraftChannelSelection {
 }
 
 export interface QuotationDraftPayload {
+  manualPricing?: { costCny: number | null; weightGrams: number | null }
   priorityProcessing?: boolean
   specialPackagingGrams?: number | null
   commissionThreshold?: number | null

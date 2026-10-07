@@ -26,7 +26,7 @@ describe('quotation view fee integration', () => {
       updatedAt: 'test',
     }
     let copied = ''
-    const context = { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperationFeeForQuantity, customerOperation: { value: { configured: true, feeUsd: 0, feesByQuantityUsd: undefined as OperationFeesByQuantity | undefined, get snapshot() { return { id: 'client', name: 'Client', feeUsd: this.feeUsd, feesByQuantityUsd: this.feesByQuantityUsd } }, message: '' } },
+    const context = { manualMode: { value: false }, applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperationFeeForQuantity, customerOperation: { value: { configured: true, feeUsd: 0, feesByQuantityUsd: undefined as OperationFeesByQuantity | undefined, get snapshot() { return { id: 'client', name: 'Client', feeUsd: this.feeUsd, feesByQuantityUsd: this.feesByQuantityUsd } }, message: '' } },
       products: { value: [] }, chargeWeight: () => 1,
       specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,

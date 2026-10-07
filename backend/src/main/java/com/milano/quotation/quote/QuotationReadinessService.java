@@ -56,6 +56,13 @@ public class QuotationReadinessService {
         var state = snapshot();
         var reasons = new ArrayList<String>();
         state.path("missing").forEach(item -> reasons.add(item.asText()));
+        if (ManualQuotation.isManual(quotation)) {
+            reasons.clear();
+            if (!state.path("logistics").path("ready").asBoolean()) reasons.add("至少需要1个已审核发布的物流渠道");
+            if (!state.path("finance").path("ready").asBoolean()) reasons.add("财务配置尚未完整保存");
+            if (!reasons.isEmpty()) throw AppException.unprocessable("报价业务尚未就绪：" + String.join("；", reasons));
+            return;
+        }
         var skuText = quotation.path("primarySku").asText("").trim();
         if (skuText.isEmpty()) {
             reasons.add("报价必须选择正式采购商品");

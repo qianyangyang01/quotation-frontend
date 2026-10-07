@@ -47,7 +47,7 @@ export type QuotationProduct = {
   status: string
 }
 
-export type QuotationMode = 'single' | 'bundle'
+export type { QuotationMode } from '@/data/quotationModes'
 
 export { quotationProductCategories, type QuotationProductCategory } from '@/data/productCategories'
 

@@ -13,13 +13,13 @@ import java.util.Set;
 
 @Component
 public class QuotationSubmissionValidator {
-    private static final Set<String> MODES = Set.of("single", "bundle");
+    private static final Set<String> MODES = Set.of("single", "bundle", "freight-trial", "shipping-only");
     private static final Set<String> GRADES = Set.of("S级客户", "A级客户", "B级客户", "C级客户", "D级客户", "E级客户", "新客户");
     private static final Set<String> SALES = Set.of("10", "100", "100+");
 
     // Called after idempotency lookup: old successful retries retain their original snapshot.
     public void validateQuotePricing(ObjectNode input) {
-        PackagingWeight.requireCurrentCalculatedQuote(input);
+        if (!ManualQuotation.isManual(input)) PackagingWeight.requireCurrentCalculatedQuote(input);
         var errors = new ArrayList<ApiResponse.FieldError>();
         checkUsd(errors, input, "", "systemQuoteUsd");
         checkConversion(errors, input, "", "systemQuoteUsd", "systemQuoteCny", input.path("exchangeRate"));
@@ -51,16 +51,17 @@ public class QuotationSubmissionValidator {
     public void validate(ObjectNode input) {
         if (input.has("priorityProcessing") && !input.path("priorityProcessing").isBoolean()) throw com.milano.quotation.common.AppException.unprocessable("优先处理参数不合法");
         CommissionThreshold.normalize(input);
-        PackagingWeight.record(input);
+        ManualQuotation.validate(input);
+        if (!ManualQuotation.isManual(input)) PackagingWeight.record(input);
         var errors = new ArrayList<ApiResponse.FieldError>();
         required(errors, input, "customerName", "客户名称不能为空", 120);
         oneOf(errors, input, "quoteMode", MODES, "报价模式不合法");
-        required(errors, input, "primarySku", "请选择正式采购商品", 2000);
-        required(errors, input, "productCategory", "请选择有效的产品品类", 120);
+        if (!ManualQuotation.isManual(input)) required(errors, input, "primarySku", "请选择正式采购商品", 2000);
+        if (!ManualQuotation.isManual(input)) required(errors, input, "productCategory", "请选择有效的产品品类", 120);
         required(errors, input, "logisticsAttribute", "物流属性不能为空", 60);
         if("液体".equals(input.path("logisticsAttribute").asText().trim()))errors.add(new ApiResponse.FieldError("logisticsAttribute", "液体属性已停用，请重新选择物流属性并计价"));
         oneOf(errors, input, "customerGrade", GRADES, "客户等级不合法");
-        oneOf(errors, input, "monthlySalesEstimate", SALES, "预估月销量不合法");
+        if (!ManualQuotation.isManual(input)) oneOf(errors, input, "monthlySalesEstimate", SALES, "预估月销量不合法");
         validateBundle(errors, input);
         if (!input.path("quoteOptions").isArray() || input.path("quoteOptions").isEmpty()) {
             errors.add(new ApiResponse.FieldError("quoteOptions", "请至少选择一条报价渠道"));

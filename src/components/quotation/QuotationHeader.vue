@@ -6,7 +6,7 @@ defineEmits<{ showRule: [] }>()
 <template>
   <section class="quotation-header">
     <div class="heading">
-      <h1>产品报价工作台</h1>
+      <h1>报价工作台</h1>
     </div>
     <div class="header-meta">
       <dl><div><dt>报价模式</dt><dd>{{ modeLabel }}</dd></div><div><dt>当前币种</dt><dd>USD</dd></div><div><dt>报价状态</dt><dd class="ready"><i></i>{{ status }}</dd></div></dl>

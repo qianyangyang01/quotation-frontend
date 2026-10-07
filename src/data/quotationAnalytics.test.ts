@@ -55,7 +55,7 @@ describe('quotation overview conversion metrics', () => {
     expect(csv).not.toContain('预计毛利')
     expect(csv).not.toContain('毛利率')
     expect(csv.split('\r\n')[0]).toContain('报价(RMB)')
-    expect(csv.split('\r\n')[0]!.split(',')).toHaveLength(11)
+    expect(csv.split('\r\n')[0]!.split(',')).toHaveLength(12)
     expect(csv.split('\r\n')[0]).not.toContain('审核状态')
   })
 })

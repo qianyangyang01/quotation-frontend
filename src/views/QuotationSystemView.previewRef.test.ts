@@ -115,13 +115,13 @@ it.each([
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
-  const context={ priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
+  const context = { manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
     products:{value:[{sku:'SKU-A',quantity:1,name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:grade==='A'?.21:0,netWeight:manual?.12:.14,weightSource:manual?'manual':'purchase'}]},
     customerOperation:{value:{configured:true,snapshot:undefined}},customerName:{value:'QA'},productCategory:{value:'日用品'},savedQuoteRows:{value:state.previewProps.rows.map(row=>({...row,taxConfigured:true}))},
-    hasQuotationProduct:()=>true,quoteMode:{value:mode},bundleItems:{value:mode==='bundle'?[{sku:'SKU-A',quantityPerSet:2,weightKg:.12,customWeightKg:.14,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21},{sku:'SKU-B',quantityPerSet:1,weightKg:.05,customWeightKg:null,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21}]:[]},normalizedBundleSets:(n:number)=>n,quoteMatrixMode:{value:'template'},activeTemplateSnapshot:{value:{id:'template-a',name:'QA'}},
+    quotationHasInputs:()=>true,draftSignature:()=>'stable',hasQuotationProduct:()=>true,quoteMode:{value:mode},bundleItems:{value:mode==='bundle'?[{sku:'SKU-A',quantityPerSet:2,weightKg:.12,customWeightKg:.14,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21},{sku:'SKU-B',quantityPerSet:1,weightKg:.05,customWeightKg:null,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21}]:[]},normalizedBundleSets:(n:number)=>n,quoteMatrixMode:{value:'template'},activeTemplateSnapshot:{value:{id:'template-a',name:'QA'}},
     buildQuoteOptions:()=>[{id:'option-a',quoteSheetKey:quoteSheetRowKey(state.previewProps.rows[0]!)}],
     selectedQuoteSummary:()=>({systemQuoteUsd:2,systemQuoteCny:13.4,totalCostCny:10}),
     activePurchaseSkus:()=>[],logisticsRevision:{value:'revision-a'},currentSalespersonName:{value:'QA'},currentSalespersonAccount:{value:'QA'},
