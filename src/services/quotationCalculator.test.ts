@@ -162,6 +162,40 @@ describe('quotation purchase tiers', () => {
 })
 
 describe('legacy purchase tax reconciliation', () => {
+  const tc = normalizePurchaseRecord({
+    sku: 'TC2601815', dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included',
+    purchasePriceCny: 16.2, sourceQuotedPriceCny: 15, taxIncludedPriceCny: 16.2,
+    minOrderQty: 3, tier2MinQty: 100, tier2PriceCny: 10,
+    taxPoint: .08, invoiceType: '不开票', weightG: 75, singleFreightCny: 4, freight10Cny: 8,
+  })
+
+  it.each([true, false])('adds TC2601815 tier tax despite no invoice (draft flag %s)', flag => {
+    expect(purchasePriceForMonthlySales(tc, '10', flag)).toBe(16.2)
+    for (const estimate of ['100', '100+']) {
+      expect(purchasePriceBreakdown(tc, estimate, flag)).toMatchObject({
+        baseUnitPriceCny: 10, invoiceType: '不开票', invoiceRatePercent: 8,
+        invoiceMultiplier: 1.08, invoiceTaxApplied: true,
+        effectiveUnitPriceCny: 10.8, priceSource: 'legacy-tax-point',
+      })
+    }
+    const items = [{ sku: tc.sku, purchaseTier: '100+', quantityPerSet: 2,
+      purchaseInvoiceTaxApplied: flag, purchaseUnitPrice: 10, purchaseFreightPerUnit: .8,
+      weightKg: .075, customWeightKg: null }]
+    expect(bundlePurchaseCost(items, [tc], '10', 3)).toBe(64.8)
+  })
+
+  it('uses each quoted tier rather than the original base for zero, sparse and equal-price tiers', () => {
+    expect(purchasePriceForMonthlySales({ ...tc, taxPoint: 0 }, '100+')).toBe(10.1)
+    const sparse = normalizePurchaseRecord({ ...tc, tier2MinQty: null, tier2PriceCny: null,
+      tier3MinQty: 500, tier3PriceCny: 16.2 })
+    expect(purchasePriceForMonthlySales(sparse, '100+')).toBe(17.5)
+    const zero = normalizePurchaseRecord({ ...tc, tier2PriceCny: 0 })
+    expect(purchasePriceForMonthlySales(zero, '100')).toBe(0)
+    const third = normalizePurchaseRecord({ ...tc, tier3MinQty: 500, tier3PriceCny: 9 })
+    expect(purchasePriceForMonthlySales(third, '100+')).toBe(9.72)
+    expect(purchasePriceForMonthlySales({ ...tc, sourceQuotedPriceCny: null }, '100')).toBe(10.8)
+  })
+
   const az = normalizePurchaseRecord({
     sku: 'AZ2601758', dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included',
     purchasePriceCny: 6.8, sourceQuotedPriceCny: 6.8, taxIncludedPriceCny: 6.8,

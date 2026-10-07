@@ -89,9 +89,12 @@ export function missingPurchaseTaxPointSkus(skus: string[], records: PurchasePro
 export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: string, invoiceTaxApplied = true): PurchasePriceBreakdown {
   const { tier } = selectedPurchaseTier(record, estimate)
   const legacy = record.dataSource === 'legacy_2026'
+  // The imported included price and original quote describe only the base price.
+  // Optional tiers are quoted prices, even when they equal the included base.
+  const legacyQuotedTier = legacy && (tier?.source === '阶梯价2' || tier?.source === '阶梯价3')
   // Legacy purchasePriceCny can be an imported tax-included price. An amount
   // identical to its original quote has no added tax to preserve.
-  const originalPrice = legacy && record.sourceQuotedPriceCny != null && record.sourceQuotedPriceCny > 0
+  const originalPrice = legacy && !legacyQuotedTier && record.sourceQuotedPriceCny != null && record.sourceQuotedPriceCny > 0
     ? record.sourceQuotedPriceCny : undefined
   const baseUnitPriceCny = roundCny(originalPrice ?? tier?.unitPriceCny ?? record.purchasePriceCny ?? 0)
   if (record.taxPoint === 0) {
@@ -102,7 +105,7 @@ export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: 
     }
   }
   const finalPrice = roundCny(tier?.unitPriceCny ?? record.purchasePriceCny ?? 0)
-  const legacyNeedsTax = record.purchasePriceBasis === 'quoted'
+  const legacyNeedsTax = legacyQuotedTier || record.purchasePriceBasis === 'quoted'
     || (originalPrice != null && finalPrice === roundCny(originalPrice))
   if (legacy && record.taxPoint != null && legacyNeedsTax) {
     const invoiceMultiplier = decimal(record.taxPoint).plus(1).toNumber()

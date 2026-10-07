@@ -2,6 +2,17 @@ import { expect, it } from 'vitest'
 import { normalizeQuotationRecord } from './quotationRecords'
 import { quotationProductCostSnapshot } from './quotationProductCostSnapshot'
 
+it.each([10, 10.8])('retains TC2601815 saved purchase price %s without recalculating historical tax', purchase => {
+  const record = normalizeQuotationRecord({ id: 'tc-tax', no: 'QT-TC', quoteMode: 'single', primarySku: 'TC2601815',
+    purchaseBaseUnitPriceCny: 10, purchaseUnitPriceCny: purchase, purchaseInvoiceType: '不开票',
+    purchaseInvoiceRatePercent: 8, purchaseInvoiceTaxApplied: true, domesticFreightPerUnitCny: .8 })!
+  const before = JSON.stringify(record)
+  const snapshot = quotationProductCostSnapshot(normalizeQuotationRecord(JSON.parse(before))!)
+  expect(snapshot.items[0]).toMatchObject({ base: 10, purchase, invoice: '不开票', rate: 8 })
+  expect(snapshot.rows.map(row => row.total)).toEqual(purchase === 10 ? [10.8, 21.6, 32.4] : [11.6, 23.2, 34.8])
+  expect(JSON.stringify(record)).toBe(before)
+})
+
 it('keeps the reported historical 6.80/0% snapshot unchanged when reading and round-tripping it', () => {
   const record = normalizeQuotationRecord({ id: 'historical-tax', no: 'QT20260929025458E0FDDC', quoteMode: 'bundle', bundleItems: [
     { sku: 'FZ2500491', name: 'FZ2500491', effectiveWeightKg: .035, quantityPerSet: 2, purchaseBaseUnitPriceCny: 6.9, purchaseUnitPriceCny: 7.45, purchaseInvoiceRatePercent: 8, domesticFreightPerUnitCny: .8 },
