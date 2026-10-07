@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { computed, ref, watch } from 'vue'
 import { channelsAvailableForCountry } from '@/data/financeChannelPolicies'
 import { EU_MEMBER_STATES, EU_TAX_GROUP, isEuCountry } from '@/data/europeanUnion'
@@ -189,7 +190,7 @@ async function importFile(event: Event) {
             </div>
             <div v-if="expandedProviders.includes(group.name)" :id="`tax-provider-${index}`">
               <p class="group-hint">勾选物流商可选择本组{{ query.trim() ? '全部匹配' : '全部' }}渠道，跨本组分页生效</p>
-              <div class="table-scroll"><table><thead><tr><th><span class="sr-only">选择渠道</span></th><th>渠道名称</th><th>收费方式</th><th>原币金额</th><th>折合美元</th><th>操作</th></tr></thead><tbody><tr v-for="row in visibleRows(group)" :key="row.key"><td><input type="checkbox" :aria-label="`选择${row.carrier}${row.channel}`" :checked="selected.includes(row.key)" :disabled="saving" @change="toggle(row.key)"></td><td>{{ row.channel }}</td><td><span class="badge" :class="view(row).mode">{{ view(row).name }}</span></td><td>{{ view(row).amount }}</td><td>{{ view(row).usd }}</td><td><button class="text-button" :disabled="saving" :aria-label="`编辑${row.carrier}${row.channel}税费`" @click="edit(row.key)">编辑</button></td></tr></tbody></table></div>
+              <div class="table-scroll"><table><thead><tr><th><span class="sr-only">选择渠道</span></th><th>渠道名称</th><th>收费方式</th><th>原币金额</th><th>折合美元</th><th>操作</th></tr></thead><tbody><tr v-for="row in visibleRows(group)" :key="row.key"><td><input type="checkbox" :aria-label="`选择${row.carrier}${row.channel}`" :checked="selected.includes(row.key)" :disabled="saving" @change="toggle(row.key)"></td><td>{{ row.channel }} <ChannelCoverageBadge :name="row.channel" /></td><td><span class="badge" :class="view(row).mode">{{ view(row).name }}</span></td><td>{{ view(row).amount }}</td><td>{{ view(row).usd }}</td><td><button class="text-button" :disabled="saving" :aria-label="`编辑${row.carrier}${row.channel}税费`" @click="edit(row.key)">编辑</button></td></tr></tbody></table></div>
               <nav v-if="groupPages(group) > 1" class="group-pagination" :aria-label="`${group.name}渠道分页`"><span>共 {{ group.rows.length }} 条渠道</span><button :disabled="groupPage(group) <= 1" :aria-label="`${group.name}上一页`" @click="providerPages[group.name] = groupPage(group) - 1">‹</button><span>{{ groupPage(group) }} / {{ groupPages(group) }}</span><button :disabled="groupPage(group) >= groupPages(group)" :aria-label="`${group.name}下一页`" @click="providerPages[group.name] = groupPage(group) + 1">›</button></nav>
             </div>
           </section>

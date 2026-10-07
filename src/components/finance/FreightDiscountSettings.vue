@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { computed, onMounted, ref } from 'vue'
 import { loadFreightDiscountChannels, loadFreightDiscountSettings, newFreightDiscountRule, saveFreightDiscountSettings, ZHENGZHOU_CHANNEL_CODE, ZHENGZHOU_DISCOUNT_COUNTRIES, type FreightDiscountChannel, type FreightDiscountRule } from '@/data/freightDiscountSettings'
 
@@ -88,7 +89,7 @@ async function save() {
         <p class="hint">{{ loading ? '正在读取渠道…' : `共 ${visibleChannels.length} 个渠道` }}</p>
         <nav aria-label="渠道列表">
           <button v-for="channel in visibleChannels" :key="channel.channelId" :aria-pressed="selected === channel.channelId" :disabled="saving" @click="select(channel.channelId)">
-            <strong>{{ channel.channelName }}</strong><span>{{ channel.providerName }} <small>{{ dirty(channel.channelId) ? '· 未保存' : original(channel.channelId)?.enabled ? '· 已启用' : original(channel.channelId) ? '· 已停用' : '· 未配置' }}</small></span>
+            <strong>{{ channel.channelName }} <ChannelCoverageBadge :name="channel.channelName" /></strong><span>{{ channel.providerName }} <small>{{ dirty(channel.channelId) ? '· 未保存' : original(channel.channelId)?.enabled ? '· 已启用' : original(channel.channelId) ? '· 已停用' : '· 未配置' }}</small></span>
           </button>
           <p v-if="!loading && !visibleChannels.length" class="hint">没有匹配的渠道</p>
         </nav>

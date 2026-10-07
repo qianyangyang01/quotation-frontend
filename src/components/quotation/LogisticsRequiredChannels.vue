@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { computed, ref, watch } from 'vue'
 import { logisticsRebuild, type RequiredChannels } from '@/data/logisticsRebuild'
 import { idempotencyKey } from '@/services/http'
@@ -43,7 +44,7 @@ async function save() {
       <p v-if="state.confirmedBy">最近保存：{{ state.confirmedBy }} · {{ state.confirmedAt }}</p>
       <details v-for="group in groups" :key="group.name"><summary>{{ group.name }} · {{ group.channels.length }} 个渠道</summary>
         <div class="scroll"><table><thead><tr><th>必用</th><th>渠道</th><th>国家 / 分区</th><th>价格行</th><th>价格与报价状态</th></tr></thead><tbody>
-          <tr v-for="channel in group.channels" :key="channel.id"><td><input v-model="selected" type="checkbox" :value="channel.id" :disabled="!preparing || busy || channel.archived" :aria-label="`必用渠道 ${group.name} ${channel.name}`" @change="changed"></td><td>{{ channel.name }}</td><td><details><summary>{{ channel.countries.length }} 个国家 · {{ channel.zones.length }} 个分区标记</summary><p>{{ channel.countries.join('、') }}</p><p>{{ channel.zones.join('；') || '无分区' }}</p></details></td><td>{{ channel.priceRows }}</td><td><b>{{ channelStatus(channel) }}</b><details v-if="channel.pendingReasons.length"><summary>原表规则核对项</summary><p v-for="reason in channel.pendingReasons" :key="reason">{{ reason }}</p></details></td></tr>
+          <tr v-for="channel in group.channels" :key="channel.id"><td><input v-model="selected" type="checkbox" :value="channel.id" :disabled="!preparing || busy || channel.archived" :aria-label="`必用渠道 ${group.name} ${channel.name}`" @change="changed"></td><td>{{ channel.name }} <ChannelCoverageBadge :name="channel.name" /></td><td><details><summary>{{ channel.countries.length }} 个国家 · {{ channel.zones.length }} 个分区标记</summary><p>{{ channel.countries.join('、') }}</p><p>{{ channel.zones.join('；') || '无分区' }}</p></details></td><td>{{ channel.priceRows }}</td><td><b>{{ channelStatus(channel) }}</b><details v-if="channel.pendingReasons.length"><summary>原表规则核对项</summary><p v-for="reason in channel.pendingReasons" :key="reason">{{ reason }}</p></details></td></tr>
         </tbody></table></div>
       </details>
       <template v-if="preparing"><label>清单核对备注 <span class="required">必填</span><textarea v-model="note" maxlength="1000" placeholder="例如：已核对本次日常必用渠道，确认作为上线前验收范围。" aria-describedby="required-channel-note-tip" @input="noteChanged" /></label><p id="required-channel-note-tip" class="form-tip" :class="{ warning: dirty && !canSave }">{{ saveHelp }}</p><label><input v-model="confirmed" type="checkbox" :disabled="selected.length === 0 || busy" @change="confirmationChanged">我已核对并确认这些是上线前必须可用的渠道</label><button :disabled="!canSave" :title="canSave ? '' : saveHelp" @click="save">{{ busy ? '保存中…' : dirty ? '保存必用清单' : '已保存' }}</button></template>

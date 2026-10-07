@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { computed, ref } from 'vue'
 
 export type ChannelTag = { key: string; name: string; ruleName: string }
@@ -15,7 +16,7 @@ const visibleChannels = computed(() => expanded.value ? props.channels : props.c
       <button v-if="channels.length > 4" type="button" @click="expanded = !expanded">{{ expanded ? '收起 ↑' : `展开更多 ↓` }}</button>
     </header>
     <div class="channel-tags">
-      <span v-for="channel in visibleChannels" :key="channel.key" :title="channel.ruleName">{{ channel.name }}</span>
+      <span v-for="channel in visibleChannels" :key="channel.key" :title="channel.ruleName">{{ channel.name }} <ChannelCoverageBadge :name="channel.name" /></span>
       <button v-if="!expanded && channels.length > 4" type="button" @click="expanded = true">+{{ channels.length - 4 }}</button>
     </div>
   </article>

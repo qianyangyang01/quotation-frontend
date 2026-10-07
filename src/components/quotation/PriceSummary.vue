@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
 import { computed, ref } from 'vue'
@@ -134,7 +135,7 @@ function isPrimary(row: QuotationMatrixRow) {
           <details v-for="(group,index) in groupedOptions" :key="group.country" :open="index===0 || group.rows.some(isPrimary)">
             <summary><span><b>{{ group.country }}</b><small>{{ group.rows.length }} 条渠道</small></span><i>⌄</i></summary>
             <article v-for="row in group.rows" :key="rowKey(row)" :class="{ primary:isPrimary(row) }">
-              <span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">首选</em></span>
+              <span><span class="channel-name-line"><b>{{ row.carrier }}｜{{ row.transport }}</b><ChannelCoverageBadge :name="row.transport" /><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="row.quoteRegion"> · {{ row.quoteRegion }}</template></small><em v-if="isPrimary(row)">首选</em></span>
               <strong>{{ row.eta }}</strong>
               <span class="quote"><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span>
               <span class="quote"><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { computed, ref, watch } from 'vue'
 import { updateQuotationRecord, type QuotationRecord } from '@/data/quotationRecords'
 import { loadRecord } from '@/data/quotationRecordQuery'
@@ -70,7 +71,7 @@ const history=computed(()=>props.record.revisions.filter(item=>item.field==='cus
     <p v-if="error" role="alert">{{ error }} <button v-if="conflict" type="button" :disabled="saving" @click="reload">重新加载记录（放弃未保存修改）</button></p>
     <div class="price-table-scroll"><table><thead><tr><th>国家 / 渠道</th><th>数量</th><th>系统报价</th><th>最终客户报价</th><th>较系统差额</th><th>调整幅度</th></tr></thead><tbody>
       <tr v-for="line in visible" :key="key(line.option.id,line.quantity)" :class="{changed:line.changed}">
-        <td><b>{{ line.option.country }} · {{ line.option.carrier }}</b><small>{{ line.option.quoteRegion }} · {{ line.option.channel }}</small></td>
+        <td><b>{{ line.option.country }} · {{ line.option.carrier }}</b><small>{{ line.option.quoteRegion }} · {{ line.option.channel }}</small><ChannelCoverageBadge :name="line.option.channel" /></td>
         <td>{{ line.quantity || '自定义' }}{{ line.quantity ? record.quoteMode==='bundle'?'套':'件' : '' }}</td><td>{{ usd(line.system) }}</td>
         <td class="customer-price"><template v-if="editing"><input v-model="inputs[key(line.option.id,line.quantity)]" :aria-label="`${line.option.id} ${line.quantity}客户报价`" :disabled="saving" inputmode="decimal" maxlength="15" placeholder="未报价"><button type="button" :disabled="saving" @click="restore(line.option.id,line.quantity,line.system)">恢复系统价</button></template><template v-else><b>{{ usd(line.customer) }}</b><small>{{ line.recordEdited?'记录修改':line.changed?'报价单修改':'与系统一致' }}</small></template></td>
         <td>{{ line.system==null ? '无系统基准' : line.customer==null ? '未报价' : signed(line.difference) }}</td><td>{{ signed(line.percent,'%') }}</td>
