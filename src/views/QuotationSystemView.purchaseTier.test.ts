@@ -406,6 +406,28 @@ it('quotes ten YT2600676 items to NL at $21.90 using the recorded five-yuan batc
   expect(quote()?.quoteUsd).toBe(30.1) // Reproduces the reported screenshot with the old freight selection.
 })
 
+it.each(['single', 'bundle'] as const)('applies TC2601815 tier tax in the %s editor and restored drafts', async mode => {
+  purchaseOverride = {
+    dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included', sourceQuotedPriceCny: 15,
+    purchasePriceCny: 16.2, taxIncludedPriceCny: 16.2, taxPoint: .08, invoiceType: '不开票',
+    minOrderQty: 3, tier2MinQty: 100, tier2PriceCny: 10, tier3MinQty: null, tier3PriceCny: null,
+    singleFreightCny: 4, freight10Cny: 8, freight100Cny: 44,
+  }
+  await mount(mode, '100+', ['100+'], 'SINGLE', false, 'TC2601815')
+  const check = () => {
+    const item = mode === 'single' ? state.products[0]! : state.bundleItems[0]!
+    expect(item).toMatchObject({ purchaseBaseUnitPrice: 10, purchaseInvoiceType: '不开票',
+      purchaseInvoiceRatePercent: 8, purchaseInvoiceTaxApplied: true, purchasePriceSource: 'legacy-tax-point',
+      purchaseFreightPerUnit: .8 })
+    expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(10.8)
+    expect(host.textContent).toContain('原始报价 ¥10.00 ×（1 + 8%）')
+  }
+  check()
+  await state.applyDraftPayload(state.draftPayload(), undefined, { restoreQuotation: true })
+  await nextTick()
+  check()
+})
+
 it.each(['single', 'bundle'] as const)('recalculates the legacy 6.80/1%% case in the %s editor and after draft restoration', async mode => {
   purchaseOverride = {
     dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included', sourceQuotedPriceCny: 6.8,
