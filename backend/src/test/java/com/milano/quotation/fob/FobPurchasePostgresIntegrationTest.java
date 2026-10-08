@@ -39,6 +39,7 @@ class FobPurchasePostgresIntegrationTest {
     @Autowired PurchaseProductRepository ordinary;
     @Autowired ObjectMapper mapper;
     @Autowired WebApplicationContext context;
+    @Autowired org.springframework.jdbc.core.simple.JdbcClient jdbc;
     MockMvc mvc;
     @BeforeEach void setup() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
     String sku() { return "FB-" + UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT); }
@@ -108,5 +109,51 @@ class FobPurchasePostgresIntegrationTest {
         mvc.perform(post("/api/v1/fob-purchase-products/paste/preview").with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk()).andExpect(jsonPath("$.data.canSave").value(true));
         mvc.perform(get("/api/v1/fob-purchase-products/"+sku)).andExpect(status().isOk()).andExpect(jsonPath("$.data.parsed.priceTiers.length()").value(5));
         mvc.perform(get("/api/v1/fob-purchase-products/"+sku+"/history").with(user("SALES").authorities(()->"PERM_quote"))).andExpect(status().isForbidden());
+    }
+    @Test void reversedConcurrentNewBatchesHaveOneWinnerAndOneRecoverableConflict() throws Exception {
+        String a=sku(), b=sku();
+        var first=mapper.writeValueAsString(confirmation(List.of(row(a),row(b))));
+        var second=mapper.writeValueAsString(confirmation(List.of(row(b),row(a))));
+        // Isolated PostgreSQL fault fixture: overlap the two insert transactions deterministically.
+        jdbc.sql("create function fob_slow_insert() returns trigger language plpgsql as $$ begin perform pg_sleep(0.2); return NEW; end $$").update();
+        jdbc.sql("create trigger fob_slow_insert before insert on fob_purchase_product for each row execute function fob_slow_insert()").update();
+        try (var pool=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var start=new java.util.concurrent.CountDownLatch(1);
+            var tasks=new ArrayList<java.util.concurrent.Future<Integer>>();
+            for(String body:List.of(first,second)) tasks.add(pool.submit(()->{
+                start.await();
+                return mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").with(csrf())
+                    .with(user("FOBRACE").roles("SUPER_ADMIN")).contentType("application/json").content(body))
+                    .andReturn().getResponse().getStatus();
+            }));
+            start.countDown();
+            var statuses=new ArrayList<Integer>();for(var task:tasks) statuses.add(task.get(20,java.util.concurrent.TimeUnit.SECONDS));
+            Collections.sort(statuses);assertEquals(List.of(200,409),statuses);
+            assertEquals(1,service.history(a).size());assertEquals(1,service.history(b).size());
+            assertEquals(2,service.confirm(confirmation(List.of(row(a),row(b)))).unchanged());
+        } finally {
+            jdbc.sql("drop trigger fob_slow_insert on fob_purchase_product").update();
+            jdbc.sql("drop function fob_slow_insert()").update();
+        }
+    }
+    @Test void concurrentUpdatesOfOnePreviewCannotLoseTheWinningPriceOrPartiallyCreateCompanionRows() throws Exception {
+        String sku=sku();service.confirm(confirmation(List.of(row(sku))));
+        var bodies=new ArrayList<String>();var companions=new ArrayList<String>();
+        for(int i=0;i<8;i++) {
+            String companion=sku();companions.add(companion);
+            bodies.add(mapper.writeValueAsString(confirmation(List.of(row(sku).put("priceRaw",String.valueOf(20+i)),row(companion)))));
+        }
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            var start=new java.util.concurrent.CountDownLatch(1);var tasks=new ArrayList<java.util.concurrent.Future<Integer>>();
+            for(String body:bodies)tasks.add(pool.submit(()->{start.await();return mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm")
+                .with(csrf()).with(user("FOBUPDATE").roles("SUPER_ADMIN")).contentType("application/json").content(body)).andReturn().getResponse().getStatus();}));
+            start.countDown();int winner=-1;
+            for(int i=0;i<tasks.size();i++) {int status=tasks.get(i).get(20,java.util.concurrent.TimeUnit.SECONDS);
+                if(status==200){assertEquals(-1,winner);winner=i;}else assertEquals(409,status);
+            }
+            assertTrue(winner>=0);assertEquals(20+winner,service.get(sku).path("parsed").path("priceTiers").get(0).path("unitPriceCny").asInt());
+            for(int i=0;i<companions.size();i++)assertEquals(i==winner,repository.existsById(companions.get(i)));
+            assertEquals(2,service.history(sku).size());
+        }
     }
 }

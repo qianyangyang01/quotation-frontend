@@ -55,7 +55,10 @@ public class FobPurchaseService {
         var preview = prepare(batch, existing);
         if (!preview.canSave) throw AppException.unprocessable("存在待修正的FOB资料，本批次未保存");
         int added = 0, updated = 0, unchanged = 0;
-        for (var row : preview.rows) {
+        // Existing rows are locked in SKU order. New rows must use the same deterministic
+        // order too: reverse-order overlapping inserts otherwise deadlock on unique keys.
+        // Keep the user's original row order in the preview and source-row diagnostics.
+        for (var row : preview.rows.stream().sorted(Comparator.comparing(PreviewRow::sku)).toList()) {
             if (row.action.equals("unchanged")) { unchanged++; continue; }
             var current = existing.get(row.sku);
             JsonNode before = current == null ? NullNode.getInstance() : current.payload.deepCopy();

@@ -9,6 +9,28 @@ const product = (): FobQuoteProduct => ({ sku: 'KJ2600788', category: '', weight
   priceTiers: [{ minQty: 10, maxQty: null, unitPriceCny: 7.2, unit: '件' }], freight: { quantity: 100, totalFreightCny: 0, unitFreightCny: 0, estimated: false, basis: '包邮' } } })
 const standard = () => normalizePurchaseRecord({ sku: 'PF2600053', dataSource: 'standard', catalogState: 'ready', minOrderQty: 1, purchasePriceCny: 16, tier2MinQty: 100, tier2PriceCny: 13.8, tier3MinQty: 300, tier3PriceCny: 13, freight100Cny: 30, weightG: 80, taxPoint: .02 })
 beforeEach(() => vi.clearAllMocks())
+it('keeps 2000 deterministic quantity boundaries consistent with customer sheet ranges and integer-cent calculations', () => {
+  const policy = { scope: 'single-price', calculation: 'before-coefficient' } as const
+  for (let i = 1; i <= 2000; i++) {
+    const p = product(), cents = (i * 7919) % 100000 + 1, freightHundredCents = (i * 37) % 10000
+    p.parsed.minOrderQty = i % 20 + 1; p.parsed.orderMultiple = i % 7 + 1
+    p.parsed.priceTiers = [{ minQty: p.parsed.minOrderQty, maxQty: null, unitPriceCny: cents / 100, unit: '件' }]
+    p.parsed.freight.unitFreightCny = freightHundredCents / 10000
+    const tiers = fobTierQuotes(p, 6.7), sheet = fobSheetRows(p, 6.7, policy)
+    const first = Math.ceil(p.parsed.minOrderQty / p.parsed.orderMultiple) * p.parsed.orderMultiple
+    for (const quantity of [first, first + p.parsed.orderMultiple, 1000 * p.parsed.orderMultiple]) {
+      const quote = fobQuantityQuote(p, tiers, String(quantity), 6.7, policy)
+      const match = sheet.filter(r => quantity >= r.minQty && (r.maxQty == null || quantity <= r.maxQty))
+      expect(match).toHaveLength(1)
+      expect([match[0]!.declaredUsd, match[0]!.undeclaredUsd]).toEqual([quote.declaredUsd, quote.undeclaredUsd])
+      // Independent rational arithmetic, retaining 1/10000 yuan through tax and freight.
+      const cost = BigInt(cents * 110 + freightHundredCents)
+      const extra = cost * BigInt(quantity) < 2000000n ? 20000n : 0n
+      const usdCents = ((cost + extra) * 1140n * 2n + 670000n) / (2n * 670000n)
+      expect(quote.declaredUsd).toBe(`${usdCents / 100n}.${String(usdCents % 100n).padStart(2, '0')}`)
+    }
+  }
+})
 it('shows final customer prices on each side of the surcharge boundary, respecting finite ranges and multiples', () => {
   const p = product(), policy = { scope: 'single-price', calculation: 'before-coefficient' } as const
   expect(fobSheetRows(p,6.7,policy)).toEqual([

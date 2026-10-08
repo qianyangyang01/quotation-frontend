@@ -16,6 +16,18 @@ function mount(financeError=''){const host=document.createElement('div');documen
 async function sku(value:string){const input=document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!;input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await tick()}
 async function query(){document.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks();authState.current=null;authState.permissions=[]})
+it('keeps only the latest result after a burst of twenty queries resolving in reverse order',async()=>{
+  mount()
+  const pending:Array<{resolve:(p:FobQuoteProduct)=>void;reject:(e:Error)=>void}>=[]
+  vi.mocked(loadFobQuoteProduct).mockImplementation(()=>new Promise((resolve,reject)=>pending.push({resolve,reject})))
+  for(let i=0;i<20;i++){await sku(`BURST-${i}`);await query()}
+  pending[19]!.resolve({...sample(),sku:'BURST-19'});await tick()
+  for(let i=18;i>=0;i--){if(i%2)pending[i]!.reject(new Error('旧请求超时'));else pending[i]!.resolve({...sample(),sku:`BURST-${i}`});await tick()}
+  expect(document.querySelector('.fob-sku')!.textContent).toBe('BURST-19')
+  expect(document.body.textContent).not.toContain('旧请求超时')
+  expect(document.querySelectorAll('.fob-card tbody tr')).toHaveLength(5)
+  for(const call of vi.mocked(loadFobQuoteProduct).mock.calls.slice(0,-1))expect(call[2]!.aborted).toBe(true)
+})
 it.each(['super_admin','finance','employee'] as const)('shows the same tier prices and quantity quote for %s',async role=>{
   authState.current={id:role,account:role,name:role,role,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=[...roleDefinitions.find(r=>r.key===role)!.permissions]
   mount();vi.mocked(loadFobQuoteProduct).mockResolvedValue(sample());await sku('PF2600053');await query()
