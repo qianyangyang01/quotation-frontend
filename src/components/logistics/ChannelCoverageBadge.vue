@@ -5,9 +5,9 @@ defineProps<{ name?: string | null }>()
 
 <template>
   <mark
-    v-if="name?.trim() && !name.includes('商派')"
+    v-if="name?.trim() && !/商派|精品/.test(name)"
     class="channel-coverage-badge"
-    title="按渠道名称默认标记：不含“商派”的渠道显示全邮编"
+    title="按渠道名称默认标记：不含“商派”或“精品”的渠道显示全邮编"
   >全邮编</mark>
 </template>
 
