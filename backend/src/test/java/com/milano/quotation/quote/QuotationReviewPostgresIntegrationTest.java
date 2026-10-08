@@ -57,6 +57,9 @@ class QuotationReviewPostgresIntegrationTest extends QuotationFinanceReviewInteg
         mvc.perform(get("/api/v1/quotations/search").param("scope","company").param("spotCheck","checked").with(other))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
         mvc.perform(get("/api/v1/quotations/search").param("spotCheck","invalid").with(employee)).andExpect(status().isUnprocessableEntity());
+        setSpotCheck(checked,admin,false,rv(checked)).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/quotations/search").param("spotCheck","checked").with(employee)).andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        mvc.perform(get("/api/v1/quotations/search").param("spotCheck","unchecked").with(employee)).andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(2));
     }
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) {

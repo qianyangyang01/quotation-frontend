@@ -219,11 +219,12 @@ async function confirmMutation() {
 }
 
 async function markSpotChecked(row: QuotationRecord) {
-  if (!canSpotCheck.value || !isActive(row) || reviewSync.stateFor(row).spotChecked || spotCheckBusy.value.has(row.id) || lifecycleBusy.value || mutationBusy.value) return
+  if (!canSpotCheck.value || !isActive(row) || spotCheckBusy.value.has(row.id) || lifecycleBusy.value || mutationBusy.value) return
   const account = currentAuthUser.value.account
+  const state = reviewSync.stateFor(row), checked = !state.spotChecked
   spotCheckBusy.value.add(row.id)
   try {
-    const saved = await markQuotationSpotChecked(row)
+    const saved = await markQuotationSpotChecked(state, checked)
     if (account !== currentAuthUser.value.account) return
     const live = reviewSync.stateFor(row)
     if ((live._version ?? -1) > (saved._version ?? -1) || ((live._version ?? -1) === (saved._version ?? -1) && (live._reviewVersion ?? 0) > (saved._reviewVersion ?? 0))) { void reviewSync.poll(); return }
@@ -231,7 +232,7 @@ async function markSpotChecked(row: QuotationRecord) {
     records.value = records.value.map(item => item.id === saved.id ? saved : item)
     if (!editing.value && selected.value?.id === saved.id && selected.value._version === saved._version
       && (selected.value._reviewVersion ?? 0) === (saved._reviewVersion ?? 0) - 1) selected.value = saved
-    toast('已标记已抽检，员工端将同步显示')
+    toast(checked ? '已标记已抽检，员工端将同步显示' : '已取消抽检标记，员工端将同步更新')
     if (spotCheckFilter.value) await refresh(true)
   } catch (error) {
     if (account !== currentAuthUser.value.account) return

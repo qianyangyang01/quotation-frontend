@@ -416,9 +416,9 @@ export async function setQuotationPriority(row: QuotationReviewState, priorityPr
     priorityProcessing, _version: row._version, _reviewVersion: row._reviewVersion ?? 0,
   }))!
 }
-export async function markQuotationSpotChecked(row: QuotationReviewState) {
+export async function markQuotationSpotChecked(row: QuotationReviewState, spotChecked = true) {
   if (row._version == null) throw new Error('报价版本缺失，请刷新后重试')
-  return normalizeQuotationRecord(await api.patch<QuotationRecord>(`/quotations/${encodeURIComponent(row.id)}/spot-check`, { _version: row._version }))!
+  return normalizeQuotationRecord(await api.patch<QuotationRecord>(`/quotations/${encodeURIComponent(row.id)}/spot-check`, { _version: row._version, _reviewVersion: row._reviewVersion ?? 0, spotChecked }))!
 }
 export interface ReviewAction { action:'claim'|'cancel'|'release'|'complete'|'comment'; financeReviewStatus?:'approved'|'rejected'|'channel-exempt'; note?:string }
 export interface QuotationReviewEvent { id:string; action:string; before:string; after:string; actorAccount:string; actorName:string; at:string; note:string; quoteVersion:number }

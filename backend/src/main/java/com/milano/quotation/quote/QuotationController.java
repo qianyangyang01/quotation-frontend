@@ -113,7 +113,7 @@ public class QuotationController {
     @Transactional
     ApiResponse<JsonNode> spotCheck(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
         var fields = new HashSet<String>(); patch.properties().forEach(entry -> fields.add(entry.getKey()));
-        if (!Set.of("_version").containsAll(fields)) throw AppException.unprocessable("抽检标记参数不合法");
+        if (!Set.of("_version", "_reviewVersion", "spotChecked").containsAll(fields)) throw AppException.unprocessable("抽检标记参数不合法");
         var row = records.lockById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
         QuotationLifecycleController.assertActive(row);
         reviews.markSpotChecked(row, patch, principal(auth));

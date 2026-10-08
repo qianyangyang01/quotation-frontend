@@ -11,8 +11,8 @@ const description = computed(() => [
 
 <template>
   <div v-if="state.spotChecked || canMark" class="spot-check" :class="{ detail }" @click.stop>
-    <span v-if="state.spotChecked" class="spot-check-badge" :title="description" :aria-label="`已抽检${description ? '，' + description : ''}`">✓ 已抽检</span>
-    <button v-else class="spot-check-button" type="button" :disabled="busy" @click="$emit('mark')">{{ busy ? '正在标记…' : '标记已抽检' }}</button>
+    <button v-if="canMark" class="spot-check-button" :class="{ 'spot-check-badge': state.spotChecked }" type="button" :disabled="busy" :title="state.spotChecked ? `${description} · 再次点击取消抽检标记` : '标记已抽检'" :aria-label="state.spotChecked ? '已抽检，点击取消抽检标记' : '标记已抽检'" @click="$emit('mark')">{{ busy ? (state.spotChecked ? '正在取消…' : '正在标记…') : (state.spotChecked ? '✓ 已抽检' : '标记已抽检') }}</button>
+    <span v-else-if="state.spotChecked" class="spot-check-badge" :title="description" :aria-label="`已抽检${description ? '，' + description : ''}`">✓ 已抽检</span>
     <small v-if="detail && state.spotChecked">{{ description }}</small>
   </div>
 </template>

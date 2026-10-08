@@ -22,10 +22,26 @@ afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;
 it('marks once without a remark and renders the authoritative marker without changing the review conclusion',async()=>{
   await mount('super_admin');let resolve!:(value:QuotationRecord)=>void;mocks.patch.mockImplementation(()=>new Promise<QuotationRecord>(r=>{resolve=r}))
   const button=document.querySelector<HTMLButtonElement>('.spot-check-button')!;button.click();await flush();button.click()
-  expect(button.disabled).toBe(true);expect(mocks.patch).toHaveBeenCalledOnce();expect(mocks.patch).toHaveBeenCalledWith('/quotations/one/spot-check',{_version:5})
+  expect(button.disabled).toBe(true);expect(mocks.patch).toHaveBeenCalledOnce();expect(mocks.patch).toHaveBeenCalledWith('/quotations/one/spot-check',{_version:5,_reviewVersion:2,spotChecked:true})
   expect(document.querySelector('textarea')).toBeNull();const pageCalls=mocks.page.mock.calls.length;await vi.advanceTimersByTimeAsync(3000);expect(mocks.page).toHaveBeenCalledTimes(pageCalls);resolve(marked());await flush()
   expect(document.querySelector('.spot-check-badge')?.textContent).toContain('已抽检');expect(document.querySelector('.spot-check-badge')?.getAttribute('title')).toContain('管理员')
-  expect(document.querySelector('.finance-review')?.textContent).toBe('审核通过');expect(document.querySelector('.spot-check-button')).toBeNull()
+  expect(document.querySelector('.finance-review')?.textContent).toBe('审核通过');expect(document.querySelector('.spot-check-button')?.getAttribute('aria-label')).toContain('点击取消')
+})
+it('lets an admin click the purple marker again to cancel without changing the review conclusion',async()=>{
+  await mount('super_admin',[marked()]);mocks.patch.mockResolvedValue(row({spotChecked:false,_reviewVersion:4}))
+  document.querySelector<HTMLButtonElement>('.spot-check-badge')!.click();await flush()
+  expect(mocks.patch).toHaveBeenCalledWith('/quotations/one/spot-check',{_version:5,_reviewVersion:3,spotChecked:false})
+  expect(document.querySelector('.spot-check-badge')).toBeNull();expect(document.querySelector('.spot-check-button')?.textContent).toContain('标记已抽检')
+  expect(document.querySelector('.finance-review')?.textContent).toBe('审核通过');expect(document.body.textContent).toContain('已取消抽检标记')
+  mocks.patch.mockResolvedValue(row({spotChecked:true,spotCheckedBy:'管理员',_reviewVersion:5}));document.querySelector<HTMLButtonElement>('.spot-check-button')!.click();await flush()
+  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/one/spot-check',{_version:5,_reviewVersion:4,spotChecked:true})
+  expect(document.querySelector('.spot-check-badge')).not.toBeNull()
+})
+it('keeps the marker on a failed cancellation and uses the latest polled review version',async()=>{
+  await mount('super_admin',[marked()]);mocks.get.mockResolvedValue([row({spotChecked:true,_reviewVersion:8})]);await vi.advanceTimersByTimeAsync(3000);await flush()
+  mocks.patch.mockRejectedValue(new Error('抽检或审核状态已变化'));document.querySelector<HTMLButtonElement>('.spot-check-badge')!.click();await flush()
+  expect(mocks.patch).toHaveBeenCalledWith('/quotations/one/spot-check',{_version:5,_reviewVersion:8,spotChecked:false})
+  expect(document.querySelector('.spot-check-badge')).not.toBeNull();expect(document.body.textContent).toContain('抽检或审核状态已变化')
 })
 it.each(['employee','finance'] as const)('shows marks but no marking control to %s',async role=>{
   await mount(role,[marked(),row({id:'two'})]);expect(document.querySelectorAll('.spot-check-badge')).toHaveLength(1);expect(document.querySelector('.spot-check-button')).toBeNull();expect(mocks.patch).not.toHaveBeenCalled()
@@ -33,6 +49,8 @@ it.each(['employee','finance'] as const)('shows marks but no marking control to 
 it('automatically synchronizes the admin mark into the employee list within the next poll',async()=>{
   await mount('employee');expect(document.querySelector('.spot-check-badge')).toBeNull();mocks.get.mockResolvedValue([marked()]);await vi.advanceTimersByTimeAsync(3000);await flush()
   expect(document.querySelector('.spot-check-badge')?.textContent).toContain('已抽检');expect(document.querySelector('.spot-check-button')).toBeNull();expect(document.querySelector('.finance-review')?.textContent).toBe('审核通过')
+  mocks.get.mockResolvedValue([row({spotChecked:false,_reviewVersion:4})]);await vi.advanceTimersByTimeAsync(3000);await flush()
+  expect(document.querySelector('.spot-check-badge')).toBeNull();expect(document.querySelector('.spot-check-button')).toBeNull();expect(document.querySelector('.finance-review')?.textContent).toBe('审核通过')
 })
 it('does not optimistically mark failed writes, and excludes archived records from actions',async()=>{
   await mount('super_admin',[row(),row({id:'archive',lifecycleState:'archived'})]);expect(document.querySelectorAll('.spot-check-button')).toHaveLength(1)

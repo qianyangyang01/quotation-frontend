@@ -106,6 +106,14 @@ class QuotationRoleConsistencyPostgresIntegrationTest {
         mvc.perform(get(path).session(sessions.get("employee2"))).andExpect(status().isForbidden());
         assertTrue(read("employee2","/api/v1/quotations/review-status?ids="+r.id).isEmpty());
         assertTrue(read("employee2","/api/v1/quotations/search?scope=company&spotCheck=checked").path("items").isEmpty());
+        var cancel=mapper.createObjectNode().put("_version",r.version).put("_reviewVersion",marked.path("_reviewVersion").asLong()).put("spotChecked",false);
+        for(String role:List.of("employee","finance","purchase","logistics"))
+            mvc.perform(patch(path+"/spot-check").session(sessions.get(role)).with(csrf()).contentType("application/json").content(cancel.toString())).andExpect(status().isForbidden());
+        mvc.perform(patch(path+"/spot-check").session(sessions.get("super_admin")).with(csrf()).contentType("application/json").content(cancel.toString())).andExpect(status().isOk());
+        var cancelled=read("super_admin",path);assertFalse(cancelled.path("spotChecked").asBoolean());assertFalse(cancelled.has("spotCheckedAt"));
+        for(String role:List.of("employee","finance")) {
+            assertEquals(cancelled,read(role,path));assertFalse(read(role,"/api/v1/quotations/review-status?ids="+r.id).get(0).path("spotChecked").asBoolean());
+        }
         var stored=records.findById(r.id).orElseThrow();assertEquals(original.payload,stored.payload);assertEquals(original.version,stored.version);assertEquals(original.updatedAt,stored.updatedAt);
     }
     @Test void existingSessionsRecheckRoleChangesDisabledAccountsAndCrossTabAccountIdentity() throws Exception {

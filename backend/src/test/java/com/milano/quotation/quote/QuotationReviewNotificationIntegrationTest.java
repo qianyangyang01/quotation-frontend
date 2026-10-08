@@ -38,6 +38,8 @@ class QuotationReviewNotificationIntegrationTest extends QuotationFinanceReviewI
         assertEquals(before.eventId,after.eventId);assertEquals(before.reviewVersion,after.reviewVersion);
         assertEquals(1,inbox.inbox(owner,0).total());read(r.id,before.eventId);assertEquals(0,inbox.inbox(owner,0).total());
         assertTrue(view(r).path("spotChecked").asBoolean());
+        setSpotCheck(r,admin,false,rv(r)).andExpect(status().isOk());assertFalse(view(r).path("spotChecked").asBoolean());
+        var cancelled=notifications.findById(r.id).orElseThrow();assertEquals(before.eventId,cancelled.eventId);assertEquals(before.reviewVersion,cancelled.reviewVersion);assertEquals(0,inbox.inbox(owner,0).total());
     }
     @Test void deliveryIsPrivateAndReadingPreservesEveryBusinessAndReviewField() throws Exception {
         var r=record();claim(r);complete(r);

@@ -59,6 +59,40 @@ class QuotationFinanceReviewIntegrationTest {
     ResultActions spotCheck(QuotationRecordEntity r, RequestPostProcessor actor, long version) throws Exception {
         return mvc.perform(patch("/api/v1/quotations/{id}/spot-check",r.id).with(actor).with(csrf()).contentType("application/json").content(mapper.createObjectNode().put("_version",version).toString()));
     }
+    ResultActions setSpotCheck(QuotationRecordEntity r, RequestPostProcessor actor, boolean checked, long reviewVersion) throws Exception {
+        return mvc.perform(patch("/api/v1/quotations/{id}/spot-check",r.id).with(actor).with(csrf()).contentType("application/json")
+            .content(mapper.createObjectNode().put("_version",qv(r)).put("_reviewVersion",reviewVersion).put("spotChecked",checked).toString()));
+    }
+    @Test void cancellationIsAdminOnlySyncedAuditedAndPreservesApprovedHistoricalQuote() throws Exception {
+        var r=record();claim(r);complete(r);var stored=records.findById(r.id).orElseThrow();var before=view(r);
+        setSpotCheck(r,admin,true,rv(r)).andExpect(status().isOk());long markedVersion=rv(r);
+        for(var actor:List.of(employee,other,finance,purchase))setSpotCheck(r,actor,false,markedVersion).andExpect(status().isForbidden());
+        setSpotCheck(r,admin,false,markedVersion).andExpect(status().isOk()).andExpect(jsonPath("$.data.spotChecked").value(false))
+            .andExpect(jsonPath("$.data.spotCheckedAt").doesNotExist()).andExpect(jsonPath("$.data.spotCheckedBy").doesNotExist()).andExpect(jsonPath("$.data.spotCheckedAccount").doesNotExist());
+        var cancelled=view(r);assertFalse(cancelled.path("spotChecked").asBoolean());assertEquals(before.path("financeReviewStatus"),cancelled.path("financeReviewStatus"));assertEquals(before.path("financeReviewedAt"),cancelled.path("financeReviewedAt"));
+        mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(employee)).andExpect(status().isOk()).andExpect(jsonPath("$.data[0].spotChecked").value(false));
+        var snapshot=records.findById(r.id).orElseThrow();assertEquals(stored.payload,snapshot.payload);assertEquals(stored.version,snapshot.version);assertEquals(stored.updatedAt,snapshot.updatedAt);
+        long cancelledVersion=rv(r);setSpotCheck(r,admin,false,markedVersion).andExpect(status().isOk());assertEquals(cancelledVersion,rv(r));
+        var history=reviews.findById(r.id).orElseThrow().state.path("history");assertEquals("spot-check-cancel",history.get(history.size()-1).path("action").asText());assertEquals("A"+owner,history.get(history.size()-1).path("actorAccount").asText());
+        setSpotCheck(r,admin,true,rv(r)).andExpect(status().isOk());setSpotCheck(r,admin,false,markedVersion).andExpect(status().isConflict());assertTrue(view(r).path("spotChecked").asBoolean());
+    }
+    @Test void cancellationRejectsMalformedStateAndStaleReviewWithoutReleasingClaim() throws Exception {
+        var r=record();spotCheck(r,admin,qv(r)).andExpect(status().isOk());long old=rv(r);claim(r);
+        setSpotCheck(r,admin,false,old).andExpect(status().isConflict());setSpotCheck(r,admin,false,rv(r)).andExpect(status().isOk());
+        assertEquals("reviewing",view(r).path("financeReviewStatus").asText());assertEquals("F"+owner,view(r).path("financeReviewClaimedAccount").asText());
+        for(String body:List.of("{\"_version\":0,\"spotChecked\":false}","{\"_version\":0,\"spotChecked\":\"false\",\"_reviewVersion\":0}","{\"_version\":0,\"spotChecked\":null,\"_reviewVersion\":0}"))
+            mvc.perform(patch("/api/v1/quotations/{id}/spot-check",r.id).with(admin).with(csrf()).contentType("application/json").content(body)).andExpect(status().isUnprocessableEntity());
+    }
+    @Test void simultaneousCancellationsAreIdempotentAndDoNotToggleBack() throws Exception {
+        var r=record();spotCheck(r,admin,qv(r)).andExpect(status().isOk());long version=rv(r);
+        try(var pool=Executors.newFixedThreadPool(8)) {
+            var start=new CountDownLatch(1);var tasks=new ArrayList<Future<Integer>>();
+            for(int i=0;i<8;i++)tasks.add(pool.submit(()->{start.await();return setSpotCheck(r,admin,false,version).andReturn().getResponse().getStatus();}));
+            start.countDown();for(var task:tasks)assertEquals(200,task.get(20,TimeUnit.SECONDS));
+        }
+        assertFalse(view(r).path("spotChecked").asBoolean());assertEquals(version+1,rv(r));
+        assertEquals(1,java.util.stream.StreamSupport.stream(reviews.findById(r.id).orElseThrow().state.path("history").spliterator(),false).filter(e->e.path("action").asText().equals("spot-check-cancel")).count());
+    }
     @Test void spotCheckIsAdminOnlyAndVisibleToTheOwnerWithoutChangingTheSnapshot() throws Exception {
         var r=record();claim(r);complete(r);
         var before=view(r);var stored=records.findById(r.id).orElseThrow();

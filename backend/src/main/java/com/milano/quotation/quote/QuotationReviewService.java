@@ -124,20 +124,30 @@ public class QuotationReviewService {
         reviews.saveAndFlush(row);
         audit.record("quotation." + action, "quotation", quote.id.toString(), "success", Map.of("priorityProcessing", enabled));
     }
-    /** A one-way audit marker; review transitions and price edits never clear it or change the quote snapshot. */
+    /** Explicit target state prevents retries from toggling twice; neither action changes the quote snapshot. */
     void markSpotChecked(QuotationRecordEntity quote, ObjectNode request, QuotationPrincipal actor) {
         if (!actor.roleKey().equals("super_admin")) throw new AccessDeniedException("只有管理员可以标记已抽检");
         requireQuoteVersion(quote, request);
+        boolean explicit = request.has("spotChecked");
+        if (explicit && (!request.path("spotChecked").isBoolean() || !request.path("_reviewVersion").isIntegralNumber()
+                || !request.path("_reviewVersion").canConvertToLong() || request.path("_reviewVersion").asLong() < 0))
+            throw AppException.unprocessable("请提供有效的抽检状态和审核版本");
+        // Older clients only support marking. Preserve their idempotent request contract.
+        boolean checked = !explicit || request.path("spotChecked").asBoolean();
         var row = state(quote);
-        if (row.state.path("spotChecked").asBoolean(false)) return;
+        if (row.state.path("spotChecked").asBoolean(false) == checked) return;
+        if (explicit && request.path("_reviewVersion").asLong() != row.version)
+            throw AppException.conflict("抽检或审核状态已变化，请刷新后重试");
         var current = (ObjectNode) row.state.deepCopy();
         preserveLegacyHistory(quote, current);
-        current.put("spotChecked", true).put("spotCheckedAt", Instant.now().toString())
+        if (checked) current.put("spotChecked", true).put("spotCheckedAt", Instant.now().toString())
             .put("spotCheckedBy", actor.displayName()).put("spotCheckedAccount", actor.account());
-        event(current, actor, "spot-check", row.status, row.status, "", quote.version);
+        else { SPOT_CHECK_FIELDS.forEach(current::remove); current.put("spotChecked", false); }
+        String action = checked ? "spot-check" : "spot-check-cancel";
+        event(current, actor, action, row.status, row.status, "", quote.version);
         row.state = current;
         reviews.saveAndFlush(row);
-        audit.record("quotation.spot-check", "quotation", quote.id.toString(), "success", Map.of("spotChecked", true));
+        audit.record("quotation." + action, "quotation", quote.id.toString(), "success", Map.of("spotChecked", checked));
     }
     void change(QuotationRecordEntity quote, ObjectNode request, QuotationPrincipal actor) {
         var row=state(quote);var action=request.path("action").asText();
