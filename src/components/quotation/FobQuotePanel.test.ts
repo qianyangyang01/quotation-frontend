@@ -15,11 +15,14 @@ function mount(financeError=''){const host=document.createElement('div');documen
 async function sku(value:string){const input=document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!;input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await tick()}
 async function query(){document.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks()})
-it('opens SKU query, renders all five tiers and copies the actual quantity quote',async()=>{
+it('keeps SKU query inline before and after loading, renders all five tiers and copies the actual quantity quote',async()=>{
   const writeText=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true})
-  mount();expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  mount();expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.querySelector('.fob-card form[aria-label="FOB查询"]')).not.toBeNull()
   vi.mocked(loadFobQuoteProduct).mockResolvedValue(sample());await sku('PF2600053');await query()
   expect(document.querySelector('[role="dialog"]')).toBeNull();expect(document.querySelectorAll('.fob-card tbody tr')).toHaveLength(5)
+  expect(document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')?.value).toBe('PF2600053')
+  expect(document.querySelector('.fob-card form[aria-label="FOB查询"]')).not.toBeNull()
   expect(document.querySelectorAll('[aria-label="FOB报价单预览"] tbody tr')).toHaveLength(5)
   expect(document.body.textContent).toContain('FOB数据');expect(document.body.textContent).toContain('报关 $2.99/件')
   const input=document.querySelector<HTMLInputElement>('[aria-label="FOB报价数量"]')!;input.value='100';input.dispatchEvent(new Event('input',{bubbles:true}));await tick()
@@ -48,7 +51,8 @@ it('discards late results when the SKU changes and keeps errors visible on a fai
   mount();let finish!:(p:FobQuoteProduct)=>void
   vi.mocked(loadFobQuoteProduct).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
   await sku('PF2600053');await query();await sku('PF2600054');finish(sample());await tick()
-  expect(document.querySelectorAll('tbody tr')).toHaveLength(0);expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  expect(document.querySelectorAll('tbody tr')).toHaveLength(0);expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.querySelector('.fob-card form[aria-label="FOB查询"]')).not.toBeNull()
   vi.mocked(loadFobQuoteProduct).mockRejectedValueOnce(new Error('运费缺失'));await query()
   expect(document.body.textContent).toContain('运费缺失');expect(document.querySelectorAll('tbody tr')).toHaveLength(0)
 })
