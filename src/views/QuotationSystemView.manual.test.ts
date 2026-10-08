@@ -3,7 +3,7 @@ import { createApp, nextTick, type App } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import View from './QuotationSystemView.vue'
 import { api } from '@/services/http'
-import { clearFinanceSettingsCache } from '@/services/financeSettings'
+import { clearFinanceSettingsCache, hydrateFinanceSettings } from '@/services/financeSettings'
 import { replaceLogisticsRules, type LogisticsRule } from '@/data/logistics'
 import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import type { QuotationMode, QuotationProduct, QuotationMatrixRow } from '@/components/quotation/types'
@@ -12,6 +12,7 @@ import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import { quotationReissuePayload } from '@/services/quotationReissue'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
 import { quoteSheetModeDefaults } from '@/data/customerQuoteSheet'
+import { authState } from '@/data/authStore'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async original => ({ ...await original<typeof import('@/services/quotationSync')>(), startQuotationSync: vi.fn(() => vi.fn()) }))
@@ -43,6 +44,7 @@ let state: {
   save: () => Promise<void>; commissionThreshold: string; saveValidationIssues: Array<{key: string}>
 }
 beforeEach(async () => {
+  authState.current = {id:'test-admin',name:'管理员',account:'ADMIN',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''}
   vi.clearAllMocks(); clearFinanceSettingsCache()
   vi.mocked(loadPublishedLogisticsRules).mockImplementation(async () => { replaceLogisticsRules([rule]); return { verified: true, revision: 'test', rules: [rule] } as never })
   vi.spyOn(api, 'get').mockImplementation(async path => {
@@ -66,7 +68,37 @@ beforeEach(async () => {
   const input = host.querySelector<HTMLInputElement>('.customer-field input')!
   input.value = '手填回归'; input.dispatchEvent(new Event('input', {bubbles:true})); await nextTick()
 })
-afterEach(() => { app?.unmount(); host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache(); replaceLogisticsRules([]) })
+afterEach(() => { app?.unmount(); host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache(); replaceLogisticsRules([]); authState.current=null })
+it.each(['employee','finance','purchase','logistics'] as const)('does not expose or activate FOB for %s, and preserves ordinary quotations',async role=>{
+  authState.current!.role=role;await nextTick()
+  const before=state.draftPayload()
+  expect(host.querySelector('option[value="fob"]')).toBeNull()
+  state.changeQuoteMode('fob' as QuotationMode);await nextTick()
+  expect(host.querySelector('.fob-card')).toBeNull()
+  expect(state.draftPayload()).toEqual(before)
+  expect([...host.querySelectorAll('.mode-field option')].map(o=>(o as HTMLOptionElement).value)).toEqual(['single','bundle','freight-trial','shipping-only'])
+})
+it('switches to FOB through the existing dropdown without exposing or saving channel quotations', async () => {
+  const before = state.draftPayload()
+  const post = vi.spyOn(api,'post').mockResolvedValue({} as never)
+  clearFinanceSettingsCache()
+  const selector = host.querySelector<HTMLSelectElement>('[aria-label="报价模式"]')!
+  selector.value='fob'; selector.dispatchEvent(new Event('change',{bubbles:true})); await nextTick()
+  expect(document.querySelector('[aria-label="FOB查询SKU"]')).not.toBeNull()
+  expect(host.querySelector('.matrix-workbench')).toBeNull()
+  expect(host.querySelector('.logistics-field')).toBeNull()
+  expect(host.querySelector('.commission-field')).toBeNull()
+  expect(host.querySelector('.customer-field')).toBeNull()
+  expect(host.querySelector('.fob-card')).not.toBeNull()
+  expect(host.querySelector('.fob-parameters')?.textContent).toContain('0 CNY/USD')
+  await hydrateFinanceSettings(); await nextTick()
+  expect(host.querySelector('.fob-parameters')?.textContent).toContain('6 CNY/USD')
+  await state.save();expect(post).not.toHaveBeenCalled()
+  expect(state.draftPayload()).toEqual(before)
+  selector.value='single';selector.dispatchEvent(new Event('change',{bubbles:true}));await nextTick()
+  expect(document.querySelector('[aria-label="FOB查询SKU"]')).toBeNull()
+  expect(host.querySelector('.fob-card')).toBeNull();expect(host.querySelector('.sku-field')).not.toBeNull()
+})
 async function query(mode: QuotationMode) {
   state.changeQuoteMode(mode); state.manualCost = '30'; state.manualWeightGrams = '500'
   // Residue from the SKU editor must never leak into manual calculation.
@@ -76,9 +108,9 @@ async function query(mode: QuotationMode) {
 }
 function quote(q: number) { return state.quantityCostBreakdown(state.products[0]!, rule.name, q, '美国', '燕文', '', '9910::燕文::TEST') }
 
-it('offers four modes, hides SKU/tier and directly computes manual cost and grams at every quantity', async () => {
+it('offers five modes, hides SKU/tier and directly computes manual cost and grams at every quantity', async () => {
   await query('freight-trial')
-  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','组合 SKU 报价','运费试算','仅代发货报价'])
+  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','组合 SKU 报价','运费试算','仅代发货报价','FOB（批发）报价'])
   expect(host.querySelector('.sku-field')).toBeNull(); expect(host.querySelector('.sales-field')).toBeNull()
   expect(host.querySelector('.manual-quote-panel')?.textContent).toContain('查询试算')
   expect(state.chargeWeight(state.products[0]!)).toBe(.5)

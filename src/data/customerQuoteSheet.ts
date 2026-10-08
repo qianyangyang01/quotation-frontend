@@ -49,12 +49,17 @@ export function quoteSheetGroups(hiddenColumns: readonly QuoteSheetOptionalColum
     return column ? [column] : []
   })
 }
+// FOB adds an explicit range column; ordinary and historical layouts stay unchanged.
+export function quoteSheetRenderGroups(hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], order?: readonly QuoteSheetColumnKey[], withPhotos = false, withSizeRules = false, withQuantityRange = false) {
+  return quoteSheetGroups(hiddenColumns, order, withPhotos, withSizeRules).flatMap<{ key: QuoteSheetColumnKey | 'quantityRange'; label: string; width: number }>(column => column.key === 'sku' && withQuantityRange
+    ? [column, { key: 'quantityRange' as const, label: 'Quantity', width: 240 }] : [column])
+}
 /** Shared by the accessible preview and spreadsheet clipboard. Photos are image-only. */
 export function quoteSheetTextTable(sheet: CustomerQuoteSheet) {
-  const groups = quoteSheetGroups(sheet.hiddenColumns, sheet.columnOrder, false, typeof sheet.sizeRules === 'string').filter(column => column.key !== 'product')
+  const groups = quoteSheetRenderGroups(sheet.hiddenColumns, sheet.columnOrder, false, typeof sheet.sizeRules === 'string', sheet.showQuantityRange).filter(column => column.key !== 'product')
   return [
     groups.flatMap(column => column.key === 'prices' ? sheet.quantityLabels.map(label => `${label} (USD)`) : [column.key === 'sku' ? sheet.skuLabel ?? column.label : column.label]),
-    ...sheet.rows.map((row, index) => groups.flatMap(column => column.key === 'prices' ? row.prices.map(quoteSheetUsd) : [column.key === 'sizeRules' ? (index === 0 ? sheet.sizeRules ?? '' : '') : quoteSheetCell(row, column.key)])),
+    ...sheet.rows.map((row, index) => groups.flatMap(column => column.key === 'product' ? [] : column.key === 'prices' ? row.prices.map(quoteSheetUsd) : [column.key === 'sizeRules' ? (index === 0 ? sheet.sizeRules ?? '' : '') : quoteSheetCell(row, column.key)])),
   ]
 }
 export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColumn[] = []) {
@@ -64,7 +69,7 @@ export function quoteSheetColumns(hiddenColumns: readonly QuoteSheetOptionalColu
     ...QUOTE_SHEET_OPTIONAL_COLUMNS.filter(column => !hiddenColumns.includes(column.key)),
   ]
 }
-export function quoteSheetCell(row: CustomerQuoteSheetRow, key: ReturnType<typeof quoteSheetColumns>[number]['key']) {
+export function quoteSheetCell(row: CustomerQuoteSheetRow, key: ReturnType<typeof quoteSheetColumns>[number]['key'] | 'quantityRange') {
   if (key === 'country') return [row.country, row.region].filter(Boolean).join(' · ')
   if (key === 'shippingTime' || key === 'processingTime') return formatShippingTime(row[key] ?? (key === 'processingTime' ? '1-2 working days' : '—'))
   return String(row[key] ?? '—')
@@ -73,11 +78,14 @@ export type QuoteSheetPriceCalculator = (row: QuoteSheetSourceRow, quantity: num
 export const MAX_QUOTE_SHEET_COLUMNS = 10
 export function validQuoteSheetQuantity(value: number) { return Number.isSafeInteger(value) && value > 0 }
 export type CustomerQuoteSheetRow = {
+  quantityRange?: string
   region?: string; regionTranslationRequired?: boolean
   key: string; number: number | string; averageId?: string; sku?: string; country: string; provider: string; shippingTime: string; processingTime?: string
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {
+  showQuantityRange?: boolean
+  priceGroupLabel?: string
   skuLabel?: string
   sizeRules?: string | null
   agent: string; date: string; quantityLabels: string[]; rows: CustomerQuoteSheetRow[]; issues: string[]

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
+import FobQuotePanel from '@/components/quotation/FobQuotePanel.vue'
+import { FOB_SMALL_ORDER_POLICY } from '@/services/fobQuotation'
+import { canUseFob } from '@/data/fobAccess'
 import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import "@/styles/quotationCompact.css"
@@ -22,7 +25,7 @@ import { loadLastQuotationCustomer, rememberQuotationCustomer, type LastQuotatio
 import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
 import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountryLoader'
-import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydrated, financeSettingsAreLoading, financeSettingsLoadError, hydrateFinanceSettings, type FinanceSettingVersions } from '@/services/financeSettings'
+import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydrated, financeSettingsAreLoading, financeSettingsLoadError, hydrateFinanceSettings, readFinanceSetting, type FinanceSettingVersions } from '@/services/financeSettings'
 import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKAGING_ERROR } from '@/data/quotationWeightSnapshot'
@@ -157,6 +160,17 @@ function createTemplateFromCurrentMode() {
   quoteMatrixMode.value = 'template'
 }
 const quoteMode = ref<QuotationMode>('single')
+// FOB is a separate calculation workspace; it never serializes into a channel quotation or its draft.
+const fobActive = ref(false)
+watch(canUseFob, allowed => { if (!allowed) fobActive.value = false })
+const fobPanel = ref<InstanceType<typeof FobQuotePanel> | null>(null)
+const fobStatus = ref('待查询SKU')
+const fobRate = computed(() => financeSettingsAreHydrated() ? Number(readFinanceSetting<{ usdCny?: number }>('exchange-rate')?.usdCny) || 0 : 0)
+const fobSmallOrderPolicy = FOB_SMALL_ORDER_POLICY
+async function retryFobFinance() {
+  try { await hydrateFinanceSettings({ force: true }) }
+  catch (e) { toast(e instanceof Error ? e.message : '财务汇率读取失败') }
+}
 const manualCost = ref('')
 const manualWeightGrams = ref('')
 const manualQueried = ref(false)
@@ -621,8 +635,15 @@ function updateBundleItemWeight(item: BundleQuoteItem) {
   } else item.customWeightKg = null
   normalizeRule(products.value[0], true)
 }
-function changeQuoteMode(mode: QuotationMode) {
+function changeQuoteMode(mode: QuotationMode | 'fob') {
+  if (mode === 'fob' && !canUseFob.value) return
   if (savingQuotation.value || syncRefreshing.value) return
+  if (mode === 'fob') {
+    productQueryGeneration++; productQueryAbort?.abort(); productQueryBusy.value = false
+    cancelQuoteLogistics(); purchaseInvoiceNotice.value = []; fobActive.value = true
+    fobStatus.value = '待查询SKU'; return
+  }
+  if (fobActive.value) { fobActive.value = false; draftNeedsQuery.value = true }
   const manualTransition = manualMode.value || isManualQuotation(mode)
   productQueryGeneration += 1; productQueryAbort?.abort(); productQueryBusy.value = false
   quoteMode.value = mode
@@ -1417,7 +1438,7 @@ onMounted(async () => {
   catch { toast('报价工作区读取失败，请检查网络后重试') }
   if (viewDisposed) return
   stopLiveSync = startQuotationSync(async signal => {
-    if (!draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
+    if (fobActive.value || !draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
     await checkLiveVersions(signal)
     if (!signal.aborted && !activePurchaseSkus().length && syncPending.value) {
       await reloadLiveConfiguration(); syncPending.value = ''
@@ -1872,6 +1893,7 @@ async function retrySavePreparation() {
 }
 const displayedInvalidFields = computed(() => [...new Set([...queryValidationFields.value, ...displayedSaveValidationIssues.value.map(issue => issue.key)])])
 async function attemptSave() {
+  if (fobActive.value) return
   if (templateSaveBlockReason.value) { toast(templateSaveBlockReason.value); return }
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (savingQuotation.value) return
@@ -2100,6 +2122,7 @@ async function persistQuotation(input: Parameters<typeof createQuotationRecord>[
   return record
 }
 async function save() {
+  if (fobActive.value) return
   await nextTick() // Capture the editor only after recalculated parent props reach it.
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (specialPackagingError.value) { toast(specialPackagingError.value); return }
@@ -2227,15 +2250,16 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 <template>
   <div class="jerry-app">
 
-    <main class="quotation-page" :inert="syncRefreshing || undefined">
-      <p v-if="logisticsRebuilding" role="status" class="notice">物流价格正在重建，新报价提交已暂停；请等待基准审核完成。</p>
-      <section v-if="syncPending || syncError || syncRefreshing" class="live-data-notice" role="status">
+    <main class="quotation-page" :inert="(!fobActive && syncRefreshing) || undefined">
+      <p v-if="!fobActive && logisticsRebuilding" role="status" class="notice">物流价格正在重建，新报价提交已暂停；请等待基准审核完成。</p>
+      <section v-if="!fobActive && (syncPending || syncError || syncRefreshing)" class="live-data-notice" role="status">
         <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}；请核对并更新报价。` : `同步暂不可用：${syncError}` }}</span>
         <button type="button" :disabled="syncRefreshing || savingQuotation || retryingSavePreparation || financeSettingsAreLoading()" @click="retrySavePreparation">{{ syncRefreshing ? '更新中…' : retryingSavePreparation ? '核验中…' : syncPending ? '更新报价' : '重试核验' }}</button>
       </section>
-      <QuotationHeader :salesperson="selectedSalesperson" :rate="exchange.usd" :status="products[0]?.status || '待查询'" :mode-label="quotationModeLabels[quoteMode]" @show-rule="showRule=true" />
+      <QuotationHeader :salesperson="selectedSalesperson" :rate="fobActive ? fobRate : exchange.usd" :status="fobActive ? fobStatus : products[0]?.status || '待查询'" :mode-label="fobActive ? 'FOB（批发）报价' : quotationModeLabels[quoteMode]" @show-rule="fobActive ? fobPanel?.openRules() : showRule=true" />
 
 
+      <template v-if="!fobActive">
       <section v-if="!draftSource" class="draft-status-bar" aria-live="polite">
         <span><b>{{ draftInitializationFailed ? `报价工作区读取失败：${draftError}` : !draftReady ? '正在加载报价工作区…' : '报价仅在点击“保存报价”后保存' }}</b><small>当前输入不会自动保存；提交成功后会记住客户名称。</small></span>
         <button v-if="draftInitializationFailed" type="button" @click="retryDraftInitialization">重试读取</button>
@@ -2251,11 +2275,12 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       <section v-if="draftChannelNotice" class="live-data-notice" role="status">{{ draftChannelNotice }}</section>
       <section v-if="draftSource" class="draft-status-bar"><span><b>撤回重新编辑 · 报价 {{ draftSource.no }}</b><small>原审核已终止。价格按当前资料重新计算，提交后保留原单号并重新待审核。</small></span></section>
       <section v-if="reissueSource" class="draft-status-bar"><span><b>再次发起 · 原报价 {{ reissueSource }}</b><small>已带入原报价条件，可修改 SKU、物流属性和渠道；价格按当前资料重新计算，保存后生成新的报价单。</small></span></section>
+      </template>
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
           :commission-threshold="commissionThreshold" :commission-error="commissionError" @update:commission-threshold="commissionThreshold=$event"
-          :mode="quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="displayedInvalidFields"
+          :mode="fobActive ? 'fob' : quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="fobActive ? [] : displayedInvalidFields"
           :finance-pending="!financeSettingsAreHydrated()" :finance-error="financeSettingsLoadError()"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
@@ -2264,6 +2289,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
+        <FobQuotePanel v-if="fobActive" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
+        <template v-else>
         <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ manualMode ? (quoteMode === 'shipping-only' ? '查询代发报价' : '查询试算') : quoteMode === 'bundle' ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
         <section v-if="!draftNeedsQuery && (manualMode ? manualQueried : p.sku) && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">
           <i></i><span><b>{{ logisticsLoadState === 'loading' ? '正在按商品条件加载物流规则' : logisticsLoadState === 'stale' ? '当前显示缓存物流规则' : logisticsLoadState === 'empty' ? '没有匹配的已发布物流渠道' : logisticsLoadState === 'error' ? '物流规则加载失败' : '物流规则待加载' }}</b><small>{{ logisticsLoadState === 'loading' ? '页面其他内容可继续查看，完成后将自动计算最低报价渠道' : logisticsLoadState === 'stale' ? '网络恢复并确认正式版本后才能保存报价' : logisticsLoadState === 'idle' ? '点击重新加载，按当前商品条件获取正式物流规则' : logisticsLoadError || p.status }}</small></span><button v-if="logisticsLoadState !== 'loading'" type="button" @click="retryQuoteLogistics">重新加载</button>
@@ -2343,6 +2370,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
           :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy() || financeSettingsAreLoading()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave" @remove-row="removePreviewRow"
         />
+        </template>
       </template>
     </main>
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { buildCustomerQuoteSheet, newQuoteSheetEdits, type QuoteSheetColumnKey } from '@/data/customerQuoteSheet'
+import { buildCustomerQuoteSheet, newQuoteSheetEdits, quoteSheetTextTable, type QuoteSheetColumnKey } from '@/data/customerQuoteSheet'
 import { quoteSheetLayout, renderCustomerQuoteSheet } from './customerQuoteSheetRenderer'
 
 const pages: Array<{ text: Array<[string,number,number]>, pictures: unknown[][] }> = []
@@ -24,6 +24,19 @@ beforeEach(()=>{
   }})
 })
 afterEach(()=>vi.unstubAllGlobals())
+it('uses the existing brand and table renderer for FOB ranges without logistics columns or costs',async()=>{
+  const sheet=data()
+  sheet.showQuantityRange=true;sheet.priceGroupLabel='FOB Unit Price (USD)'
+  sheet.quantityLabels=['With declaration','Without declaration'];sheet.hiddenColumns=['country','provider','shippingTime','processingTime']
+  sheet.rows[0].quantityRange='200–209 pcs';sheet.rows[0].prices=[1.37,1.39]
+  sheet.notes=['Unit prices in USD. International shipping excluded.']
+  await renderCustomerQuoteSheet(sheet)
+  const text=pages[0].text.map(call=>call[0])
+  expect(text).toEqual(expect.arrayContaining(['Quantity','200–209 pcs','FOB Unit Price (USD)','With declaration','Without declaration','$1.37','$1.39']))
+  expect(text).not.toContain('Country / Zone');expect(text).not.toContain('Logistics Provider')
+  expect(pages[0].pictures.length).toBeGreaterThanOrEqual(2)
+  expect(quoteSheetTextTable(sheet)[0]).toEqual(['No.','SKU','Quantity','With declaration (USD)','Without declaration (USD)'])
+})
 
 it('draws the contact on every page and aligns moved prices, fixed columns and the merged product cell',async()=>{
   const order:QuoteSheetColumnKey[]=['prices','sku','country','provider','number','shippingTime','processingTime','product']

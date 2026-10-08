@@ -12,6 +12,8 @@ import { preparePurchaseWorkbookTextOnly } from '@/services/purchaseWorkbookText
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
+import FobPasteDialog from './FobPasteDialog.vue'
+import { canUseFob } from '@/data/fobAccess'
 import PurchaseHistoryDialog from './PurchaseHistoryDialog.vue'
 import PurchaseSalesPanel from './PurchaseSalesPanel.vue'
 import { updatePurchaseProduct } from '@/services/purchaseHistory'
@@ -24,6 +26,8 @@ async function editSalesSku(sku: string) {
 }
 
 const showPasteDialog = ref(false)
+const showFobPasteDialog = ref(false)
+function fobPasteSaved(counts: PasteSavedCounts) { toast(`FOB资料：新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条`) }
 function pasteSaved(counts: PasteSavedCounts) { toast(`采购资料：新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条`); reload() }
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
@@ -393,6 +397,7 @@ const detailFields = computed(() => detail.value ? [
 
 <template>
   <PurchasePasteDialog v-if="showPasteDialog" @close="showPasteDialog=false" @saved="pasteSaved" />
+  <FobPasteDialog v-if="canUseFob && showFobPasteDialog" @close="showFobPasteDialog=false" @saved="fobPasteSaved" />
   <PurchaseHistoryDialog v-if="historySku" :sku="historySku" @close="historySku=''" />
   <section class="purchase-heading">
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
@@ -400,6 +405,7 @@ const detailFields = computed(() => detail.value ? [
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
       <button class="outline" :class="{ active:showSupplierRecords }" @click="showSupplierRecords=true">供应商</button>
       <button class="new-import" @click="showPasteDialog=true">粘贴新增</button>
+      <button v-if="canUseFob" class="new-import" @click="showFobPasteDialog=true">FOB 粘贴更新</button>
       <button class="new-import" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='standard' ? `${uploadProgress.percent}%` : '新数据导入' }}</button>
       <button class="legacy-import" :disabled="asyncUploading" @click="legacyFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='legacy-2026' ? `${uploadProgress.percent}%` : '旧数据导入' }}</button>
       <button class="outline" @click="showTaskCenter=true">导入任务</button>

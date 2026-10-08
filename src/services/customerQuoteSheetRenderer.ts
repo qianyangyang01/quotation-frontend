@@ -1,22 +1,22 @@
 import brandUrl from '@/assets/quote-sheet/brand.png'
 import headerUrl from '@/assets/quote-sheet/table-header.png'
 import notesUrl from '@/assets/quote-sheet/notes.png'
-import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, quoteSheetGroups, quoteSheetCell, type QuoteSheetColumnKey, type QuoteSheetOptionalColumn, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, quoteSheetRenderGroups, quoteSheetCell, type QuoteSheetColumnKey, type QuoteSheetOptionalColumn, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { withQuoteSheetCopyLock } from './customerQuoteSheetCopyLock'
 import type { QuoteLocalPhoto } from './quoteLocalPhotos'
 
 export const QUOTE_SHEET_WIDTH = 1536
 export const QUOTE_SHEET_ROWS_PER_IMAGE = 24
 export type QuoteSheetImage = { blob: Blob; width: number; height: number; firstRow: number; lastRow: number }
-export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], withPhotos = false, order?: readonly QuoteSheetColumnKey[], withSizeRules = false) {
+export function quoteSheetLayout(priceColumns: number, hiddenColumns: readonly QuoteSheetOptionalColumn[] = [], withPhotos = false, order?: readonly QuoteSheetColumnKey[], withSizeRules = false, withQuantityRange = false) {
   if (!Number.isInteger(priceColumns) || priceColumns < 1 || priceColumns > MAX_QUOTE_SHEET_COLUMNS) throw new Error('价格列须为 1–10 列')
-  const groups = quoteSheetGroups(hiddenColumns, order, withPhotos, withSizeRules)
+  const groups = quoteSheetRenderGroups(hiddenColumns, order, withPhotos, withSizeRules, withQuantityRange)
   const fixedColumns = groups.filter(column => column.key !== 'prices')
   const fixedWidth = fixedColumns.reduce((sum, column) => sum + column.width, 0)
   const width = Math.max(QUOTE_SHEET_WIDTH, 22 + fixedWidth + priceColumns * 144 + 21)
   const right = width - 21
   const priceWidth = (right - 22 - fixedWidth) / priceColumns
-  const cells = groups.flatMap<{ key: QuoteSheetColumnKey; label: string; width: number; priceIndex: number }>(column => column.key === 'prices'
+  const cells = groups.flatMap<{ key: QuoteSheetColumnKey | 'quantityRange'; label: string; width: number; priceIndex: number }>(column => column.key === 'prices'
     ? Array.from({ length: priceColumns }, (_, priceIndex) => ({ ...column, width: priceWidth, priceIndex }))
     : [{ ...column, priceIndex: -1 }])
   const columns = [22]
@@ -113,7 +113,7 @@ function exportBlob(canvas: HTMLCanvasElement) {
 export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCancelled: () => boolean = () => false, photos: readonly QuoteLocalPhoto[] = []): Promise<QuoteSheetImage[]> {
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
-  const { width, right, columns, cells, priceIndex } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0, sheet.columnOrder, typeof sheet.sizeRules === 'string')
+  const { width, right, columns, cells, priceIndex } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0, sheet.columnOrder, typeof sheet.sizeRules === 'string', sheet.showQuantityRange)
   const priceStart = columns[priceIndex]
   const priceEnd = columns[priceIndex + sheet.quantityLabels.length]
   const valuesFor = (row: CustomerQuoteSheet['rows'][number]) => cells.map(column => column.key === 'product' || column.key === 'sizeRules' ? '' : column.key === 'prices' ? quoteSheetUsd(row.prices[column.priceIndex]) : quoteSheetCell(row, column.key))
@@ -207,9 +207,10 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
     })
     // Fit the group label even when only one quantity column remains.
     font(context, true, 22)
-    context.font = `700 ${Math.min(22, 22 * (priceEnd - priceStart - 16) / context.measureText('Quote by Quantity (USD)').width)}px Arial, sans-serif`
+    const priceGroupLabel = sheet.priceGroupLabel ?? 'Quote by Quantity (USD)'
+    context.font = `700 ${Math.min(22, 22 * (priceEnd - priceStart - 16) / context.measureText(priceGroupLabel).width)}px Arial, sans-serif`
     context.textAlign = 'center'
-    context.fillText('Quote by Quantity (USD)', (priceStart + priceEnd) / 2, 202)
+    context.fillText(priceGroupLabel, (priceStart + priceEnd) / 2, 202)
     sheet.quantityLabels.forEach((label, index) => {
       centered(context, label, columns[index + priceIndex], columns[index + priceIndex + 1], 225, quantityHeaderHeight, true)
     })

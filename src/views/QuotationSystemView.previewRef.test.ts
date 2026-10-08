@@ -115,7 +115,7 @@ it.each([
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
-  const context = { manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
+  const context = { fobActive: {value:false}, manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,

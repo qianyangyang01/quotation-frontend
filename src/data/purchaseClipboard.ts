@@ -14,7 +14,7 @@ function cellText(node: Node): string {
 }
 
 /** Parse into an inert template; copied markup is never mounted or executed. */
-export function parsePurchaseHtmlTable(html: string): string[][] | null {
+export function parsePurchaseHtmlTable(html: string, maxRows = PURCHASE_PASTE_LIMIT): string[][] | null {
   if (!html.trim()) return null
   if (html.length > MAX_CLIPBOARD_LENGTH) throw new Error('粘贴内容过大，每次最多100行')
   const template = document.createElement('template')
@@ -24,7 +24,7 @@ export function parsePurchaseHtmlTable(html: string): string[][] | null {
   if (tables.length !== 1 || tables[0]!.querySelector('table')) throw new Error('请每次复制一个连续的表格区域；本次未写入')
   const table = tables[0]!
   const sourceRows = Array.from(table.rows)
-  if (sourceRows.length > PURCHASE_PASTE_LIMIT) throw new Error('每次最多100行，请分批复制')
+  if (sourceRows.length > maxRows) throw new Error('每次最多100行，请分批复制')
   const rows = sourceRows.map(tr => {
     const cells = Array.from(tr.cells)
     const values: string[] = []
