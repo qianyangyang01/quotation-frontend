@@ -5,6 +5,7 @@ import Panel from './FobQuotePanel.vue'
 import { FOB_SMALL_ORDER_POLICY, loadFobQuoteProduct, type FobQuoteProduct } from '@/services/fobQuotation'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
+import { authState, roleDefinitions } from '@/data/authStore'
 vi.mock('@/services/customerQuoteSheetClipboard', () => ({ copyQuoteSheetData: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@/services/customerQuoteSheetRenderer', () => ({ renderCustomerQuoteSheet: vi.fn().mockResolvedValue([]), copyQuoteSheetImage: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@/services/fobQuotation', async original => ({ ...await original<typeof import('@/services/fobQuotation')>(), loadFobQuoteProduct: vi.fn() }))
@@ -14,7 +15,14 @@ const sample=():FobQuoteProduct=>({sku:'PF2600053',category:'文胸',weight:'80'
 function mount(financeError=''){const host=document.createElement('div');document.body.append(host);app=createApp(Panel,{rate:6.7,policy:FOB_SMALL_ORDER_POLICY,financeError});app.mount(host)}
 async function sku(value:string){const input=document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!;input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await tick()}
 async function query(){document.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick()}
-afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks()})
+afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks();authState.current=null;authState.permissions=[]})
+it.each(['super_admin','finance','employee'] as const)('shows the same tier prices and quantity quote for %s',async role=>{
+  authState.current={id:role,account:role,name:role,role,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=[...roleDefinitions.find(r=>r.key===role)!.permissions]
+  mount();vi.mocked(loadFobQuoteProduct).mockResolvedValue(sample());await sku('PF2600053');await query()
+  expect(Array.from(document.querySelectorAll('.fob-card tbody tr')).map(row=>Array.from(row.querySelectorAll('td')).slice(-2).map(cell=>cell.textContent))).toEqual([['2.99','3.05'],['2.58','2.63'],['2.43','2.48'],['2.43','2.48'],['2.40','2.44']])
+  const quantity=document.querySelector<HTMLInputElement>('[aria-label="FOB报价数量"]')!;quantity.value='100';quantity.dispatchEvent(new Event('input'));await tick()
+  expect(document.querySelector('.final-quote')!.textContent).toContain('报关 $2.58/件');expect(document.querySelector('.final-quote')!.textContent).toContain('不报关 $2.63/件')
+})
 it('keeps SKU query inline before and after loading, renders all five tiers and copies the actual quantity quote',async()=>{
   const writeText=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true})
   mount();expect(document.querySelector('[role="dialog"]')).toBeNull()

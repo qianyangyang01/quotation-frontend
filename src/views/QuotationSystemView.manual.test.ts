@@ -12,7 +12,7 @@ import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import { quotationReissuePayload } from '@/services/quotationReissue'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
 import { quoteSheetModeDefaults } from '@/data/customerQuoteSheet'
-import { authState } from '@/data/authStore'
+import { authState, roleDefinitions } from '@/data/authStore'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async original => ({ ...await original<typeof import('@/services/quotationSync')>(), startQuotationSync: vi.fn(() => vi.fn()) }))
@@ -45,6 +45,7 @@ let state: {
 }
 beforeEach(async () => {
   authState.current = {id:'test-admin',name:'管理员',account:'ADMIN',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''}
+  authState.permissions = [...roleDefinitions.find(r => r.key === 'super_admin')!.permissions]
   vi.clearAllMocks(); clearFinanceSettingsCache()
   vi.mocked(loadPublishedLogisticsRules).mockImplementation(async () => { replaceLogisticsRules([rule]); return { verified: true, revision: 'test', rules: [rule] } as never })
   vi.spyOn(api, 'get').mockImplementation(async path => {
@@ -68,9 +69,9 @@ beforeEach(async () => {
   const input = host.querySelector<HTMLInputElement>('.customer-field input')!
   input.value = '手填回归'; input.dispatchEvent(new Event('input', {bubbles:true})); await nextTick()
 })
-afterEach(() => { app?.unmount(); host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache(); replaceLogisticsRules([]); authState.current=null })
-it.each(['employee','finance','purchase','logistics'] as const)('does not expose or activate FOB for %s, and preserves ordinary quotations',async role=>{
-  authState.current!.role=role;await nextTick()
+afterEach(() => { app?.unmount(); host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache(); replaceLogisticsRules([]); authState.current=null; authState.permissions=[] })
+it.each(['purchase','logistics'] as const)('does not expose or activate FOB without quote permission for %s, and preserves ordinary quotations',async role=>{
+  authState.current!.role=role;authState.permissions=[...roleDefinitions.find(r=>r.key===role)!.permissions];await nextTick()
   const before=state.draftPayload()
   expect(host.querySelector('option[value="fob"]')).toBeNull()
   state.changeQuoteMode('fob' as QuotationMode);await nextTick()
@@ -78,7 +79,8 @@ it.each(['employee','finance','purchase','logistics'] as const)('does not expose
   expect(state.draftPayload()).toEqual(before)
   expect([...host.querySelectorAll('.mode-field option')].map(o=>(o as HTMLOptionElement).value)).toEqual(['single','bundle','freight-trial','shipping-only'])
 })
-it('switches to FOB through the existing dropdown without exposing or saving channel quotations', async () => {
+it.each(['super_admin','employee','finance'] as const)('opens FOB for %s without exposing or saving channel quotations', async role => {
+  authState.current!.role=role;authState.permissions=[...roleDefinitions.find(r=>r.key===role)!.permissions];await nextTick()
   const before = state.draftPayload()
   const post = vi.spyOn(api,'post').mockResolvedValue({} as never)
   clearFinanceSettingsCache()
@@ -98,6 +100,19 @@ it('switches to FOB through the existing dropdown without exposing or saving cha
   selector.value='single';selector.dispatchEvent(new Event('change',{bubbles:true}));await nextTick()
   expect(document.querySelector('[aria-label="FOB查询SKU"]')).toBeNull()
   expect(host.querySelector('.fob-card')).toBeNull();expect(host.querySelector('.sku-field')).not.toBeNull()
+})
+it('removes an open FOB workspace when the current account loses quote access', async () => {
+  authState.current!.role='employee';authState.permissions=['quote','myRecords'];await nextTick()
+  state.changeQuoteMode('fob' as QuotationMode);await nextTick();expect(host.querySelector('.fob-card')).not.toBeNull()
+  authState.current!.role='purchase';authState.permissions=['purchase'];await nextTick()
+  expect(host.querySelector('.fob-card')).toBeNull();expect(host.querySelector('option[value="fob"]')).toBeNull()
+})
+it('clears the previous account FOB input when switching between two quote-enabled accounts',async()=>{
+  state.changeQuoteMode('fob' as QuotationMode);await nextTick()
+  const input=host.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!
+  input.value='PF2600054';input.dispatchEvent(new Event('input'));await nextTick()
+  authState.current={...authState.current!,id:'employee-two',account:'EMPLOYEE2',role:'employee'};authState.permissions=['quote','myRecords'];await nextTick()
+  expect(host.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!.value).toBe('')
 })
 async function query(mode: QuotationMode) {
   state.changeQuoteMode(mode); state.manualCost = '30'; state.manualWeightGrams = '500'

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import PurchaseDataWorkspace from './PurchaseDataWorkspace.vue'
 import { normalizePurchaseRecord } from '@/data/purchaseStore'
+import { authState, roleDefinitions } from '@/data/authStore'
 
 const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn()}))
 vi.mock('@/services/purchaseHistory',async original=>({...await original<object>(),updatePurchaseProduct:mocks.update,loadPurchaseHistory:mocks.history}))
@@ -15,7 +16,14 @@ async function flush(){await Promise.resolve();await nextTick();await Promise.re
 async function mount(){const host=document.createElement('div');document.body.append(host);app=createApp(PurchaseDataWorkspace);app.mount(host);await flush()}
 async function search(text:string){const input=document.querySelector('.toolbar input') as HTMLInputElement;input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()}
 beforeEach(()=>{vi.useFakeTimers();mocks.page.mockResolvedValue(page('INITIAL'));mocks.stats.mockResolvedValue({total:1,ready:1,pending:0,generatedSku:0})})
-afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers()})
+afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers();authState.current=null;authState.permissions=[]})
+
+it.each(roleDefinitions)('keeps FOB paste maintenance admin-only for $name',async role=>{
+  authState.current={id:role.key,account:role.key,name:role.name,role:role.key,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=[...role.permissions]
+  await mount()
+  const paste=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='FOB 粘贴更新')
+  expect(!!paste).toBe(role.key==='super_admin')
+})
 
 it.each(['少量现货，7天补货', ''])('edits and saves optional stock notes without affecting quotation eligibility: %s', async stockStatus => {
   const product = normalizePurchaseRecord({ ...row('STOCK-260001'), stockStatus: '需预订' })

@@ -1,5 +1,6 @@
 import { computed } from 'vue'
-import { currentAuthUser } from './authStore'
+import { currentAuthUser, hasPermission } from './authStore'
 
-// Admin-only pilot. General quote/purchase/finance permissions do not grant FOB access.
-export const canUseFob = computed(() => currentAuthUser.value.status === 'enabled' && currentAuthUser.value.role === 'super_admin')
+// Quote access and source maintenance are separate capabilities.
+export const canMaintainFob = computed(() => currentAuthUser.value.status === 'enabled' && currentAuthUser.value.role === 'super_admin')
+export const canUseFob = computed(() => canMaintainFob.value || hasPermission('quote'))

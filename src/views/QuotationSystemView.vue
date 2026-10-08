@@ -2289,7 +2289,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
-        <FobQuotePanel v-if="fobActive" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
+        <FobQuotePanel v-if="fobActive" :key="currentAuthUser.id" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
         <template v-else>
         <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ manualMode ? (quoteMode === 'shipping-only' ? '查询代发报价' : '查询试算') : quoteMode === 'bundle' ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
         <section v-if="!draftNeedsQuery && (manualMode ? manualQueried : p.sku) && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">

@@ -15,7 +15,7 @@ public class FobPurchaseController {
     public ApiResponse<FobPurchaseService.Preview> preview(@RequestBody List<JsonNode> input) { return ApiResponse.ok(service.preview(input)); }
     @PostMapping("/paste/confirm") @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ApiResponse<FobPurchaseService.Result> confirm(@RequestBody FobPurchaseService.Confirmation input) { return ApiResponse.ok(service.confirm(input)); }
-    @GetMapping("/{sku}") @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @GetMapping("/{sku}") @PreAuthorize("hasRole('SUPER_ADMIN') or hasAuthority('PERM_quote')")
     public ApiResponse<JsonNode> get(@PathVariable String sku) { return ApiResponse.ok(service.get(sku)); }
     @GetMapping("/{sku}/history") @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ApiResponse<List<FobPurchaseService.History>> history(@PathVariable String sku) { return ApiResponse.ok(service.history(sku)); }
