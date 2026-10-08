@@ -32,6 +32,13 @@ class QuotationReviewNotificationIntegrationTest extends QuotationFinanceReviewI
         mvc.perform(post("/api/v1/review-notifications/read-batch").with(employee).with(csrf()).contentType("application/json").content(body)).andExpect(status().isUnprocessableEntity());
         mvc.perform(post("/api/v1/review-notifications/read-batch").with(purchase).with(csrf()).contentType("application/json").content("{\"eventIds\":[\""+UUID.randomUUID()+"\"]}")).andExpect(status().isForbidden());
     }
+    @Test void spotChecksDoNotGenerateOrConsumeReviewNotifications() throws Exception {
+        var r=record();claim(r);complete(r);var before=notifications.findById(r.id).orElseThrow();
+        spotCheck(r,admin,qv(r)).andExpect(status().isOk());var after=notifications.findById(r.id).orElseThrow();
+        assertEquals(before.eventId,after.eventId);assertEquals(before.reviewVersion,after.reviewVersion);
+        assertEquals(1,inbox.inbox(owner,0).total());read(r.id,before.eventId);assertEquals(0,inbox.inbox(owner,0).total());
+        assertTrue(view(r).path("spotChecked").asBoolean());
+    }
     @Test void deliveryIsPrivateAndReadingPreservesEveryBusinessAndReviewField() throws Exception {
         var r=record();claim(r);complete(r);
         var before=view(r);var history=reviews.findById(r.id).orElseThrow().state.deepCopy();

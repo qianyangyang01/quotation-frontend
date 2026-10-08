@@ -67,10 +67,11 @@ public class QuotationController {
         @RequestParam(defaultValue="") String channel, @RequestParam(defaultValue="") String optionScale,
         @RequestParam(defaultValue="") String priceDifference,
         @RequestParam(defaultValue="false") boolean priorityOnly,
+        @RequestParam(defaultValue="") String spotCheck,
         @RequestParam(defaultValue="active") String lifecycle,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate, Authentication auth) {
-        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,priorityOnly),page,size));
+        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,priorityOnly,spotCheck),page,size));
     }
     /** Poll only visible records; enforce owner scope on the server. */
     @GetMapping("/review-status")
@@ -104,6 +105,18 @@ public class QuotationController {
             throw new org.springframework.security.access.AccessDeniedException("只能设置自己的报价优先处理");
         QuotationLifecycleController.assertActive(row);
         reviews.changePriority(row, patch, principal(auth));
+        return ApiResponse.ok(view(row));
+    }
+
+    @PatchMapping("/{id}/spot-check")
+    @PreAuthorize("hasRole('SUPER_ADMIN') and hasAuthority('PERM_allRecords')")
+    @Transactional
+    ApiResponse<JsonNode> spotCheck(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
+        var fields = new HashSet<String>(); patch.properties().forEach(entry -> fields.add(entry.getKey()));
+        if (!Set.of("_version").containsAll(fields)) throw AppException.unprocessable("抽检标记参数不合法");
+        var row = records.lockById(id).orElseThrow(() -> AppException.notFound("报价记录不存在"));
+        QuotationLifecycleController.assertActive(row);
+        reviews.markSpotChecked(row, patch, principal(auth));
         return ApiResponse.ok(view(row));
     }
 
@@ -154,6 +167,7 @@ public class QuotationController {
         submissionValidator.validateQuotePricing(input);
         readiness.assertCanCreate(input);
         var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = input.deepCopy();
+        QuotationReviewService.SPOT_CHECK_FIELDS.forEach(payload::remove);
         logisticsGuard.validate(payload);
         payload.remove(List.of("priorityProcessing", "customerId", "lifecycleState", "lifecyclePreviousState", "lifecycleChangedAt", "lifecycleChangedBy", "lifecycleChangedAccount", "lifecycleReason"));
         payload.put("id", id.toString()); payload.put("no", no); payload.put("salespersonName", principal.displayName());

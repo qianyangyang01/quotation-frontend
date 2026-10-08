@@ -438,13 +438,14 @@ const detailFields = computed(() => detail.value ? [
     <div v-if="loading" class="empty">正在读取采购数据…</div>
     <div v-else-if="!filtered.length" class="empty"><b>暂无采购数据</b><span>当前模板请选择“新数据导入”，历史采购表请选择“旧数据导入”。</span></div>
     <table v-else>
+      <colgroup><col class="col-product"><col class="col-price"><col class="col-weight"><col class="col-freight"><col class="col-description"><col class="col-status"><col class="col-actions"></colgroup>
       <thead><tr><th>类别 / SKU</th><th>采购阶梯价格</th><th>重量与尺寸</th><th>国内运费</th><th>尺码 / 颜色</th><th>资料状态</th><th>操作</th></tr></thead>
       <tbody><tr v-for="record in pagedRecords" :key="record.sku">
         <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ record.category || '暂无数据' }}</b><small class="product-sku">{{ record.sku }}</small><em class="source-badge" :class="{legacy:record.dataSource==='legacy_2026'}">{{ purchaseSourceLabel(record) }}</em><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
         <td><div v-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
-        <td><b>{{ value(record.weightG,' g') }}</b><small>{{ dimensionSummary(record) }}</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
-        <td><template v-if="purchaseFreightChoices(record).length"><small v-for="choice in purchaseFreightChoices(record)" :key="choice.quantity">{{ choice.quantity }}件 {{ unitFreight(record,choice.quantity) }}</small></template><small v-else>暂无数据</small></td>
-        <td><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small><small>实物图：{{ record.physicalImage ? '已上传' : '暂无数据' }}</small></td>
+        <td class="weight-cell"><b>{{ value(record.weightG,' g') }}</b><small>{{ dimensionSummary(record) }}</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
+        <td class="freight-cell"><template v-if="purchaseFreightChoices(record).length"><small v-for="choice in purchaseFreightChoices(record)" :key="choice.quantity">{{ choice.quantity }}件 {{ unitFreight(record,choice.quantity) }}</small></template><small v-else>暂无数据</small></td>
+        <td class="description-cell"><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small><small>实物图：{{ record.physicalImage ? '已上传' : '暂无数据' }}</small></td>
         <td><em :class="{ ready:record.quoteReady, warn:!record.quoteReady }">{{ record.status }}</em><small>库存：{{ record.stockStatus || '暂无数据' }}</small><small v-if="!record.quoteReady" class="quote-blocked">{{ purchaseQuoteBlockingMessage(record) }}</small></td>
         <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button><button @click="historySku=record.sku">修改记录</button><button v-if="record.catalogState!=='disabled'" @click="requestCatalogState(record,'disabled')">停用</button><button v-else @click="requestCatalogState(record,'ready')">启用</button><button class="danger-link" @click="requestDelete(record)">删除</button></td>
       </tr></tbody>
@@ -598,4 +599,12 @@ const detailFields = computed(() => detail.value ? [
 .job-pagination{display:flex;align-items:center;justify-content:space-between;gap:5px;padding:12px 8px;background:white;font-size:11px}.job-pagination button{padding:5px;border:1px solid #dce3e8;border-radius:5px;background:white;color:#617182}.archived-task-note{padding:12px;border-radius:7px;background:#f0f4f8;color:#52667c;font-size:12px}.task-removal-mask{z-index:1300}
 .task-center-grid{height:min(650px,calc(100vh - 235px));min-height:350px}.job-list{display:flex;flex-direction:column;overflow:hidden}.job-list-items{flex:1;min-height:0;overflow:auto}.job-detail{min-width:0;overflow:auto}.job-list-tabs,.job-list-meta,.job-pagination{flex-shrink:0}.job-select:focus-visible,.job-maintenance:focus-visible{outline:2px solid #d78a23;outline-offset:-2px}@media(max-width:900px){.task-center-grid{height:auto}.job-list{height:260px;max-height:260px}.job-detail{max-height:60vh}}
 .heading-actions .new-import{border-color:#2f8b63;background:#f1faf5;color:#1d714d}.product span .source-badge{background:#e7f6ed;color:#17794f}.product span .source-badge.legacy{background:#eee8ff;color:#5f42a8}.append-import-help{border-color:#cfe6d9;background:#f4fbf7;color:#557266}.append-import-help>b{color:#236646}.upload-status em,.job-select em,.task-source-badge{background:#e7f6ed;color:#17794f}.upload-status em.legacy,.job-select em.legacy,.task-source-badge.legacy{background:#eee8ff;color:#5f42a8}
+.table-card table{table-layout:fixed;min-width:1380px}
+.col-product{width:220px}.col-price{width:220px}.col-weight{width:130px}.col-freight{width:225px}.col-status{width:120px}.col-actions{width:245px}
+.table-card th{white-space:nowrap}
+.table-card td{line-height:1.5;overflow-wrap:anywhere}
+.table-card .product{min-width:0}.product span{min-width:0}
+.weight-cell>b,.weight-cell>small:last-child,.freight-cell>small,.table-card td>em.ready{white-space:nowrap}
+.table-card .description-cell{overflow-wrap:anywhere;word-break:normal}
+.table-card .actions{white-space:normal}.actions button{white-space:nowrap;line-height:1.8}
 </style>

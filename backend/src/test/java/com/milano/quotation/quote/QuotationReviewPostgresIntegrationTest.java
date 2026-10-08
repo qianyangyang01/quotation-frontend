@@ -48,6 +48,16 @@ class QuotationReviewPostgresIntegrationTest extends QuotationFinanceReviewInteg
         mvc.perform(get("/api/v1/quotations/search").param("scope","company").param("q",r.quoteNo).with(other))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
     }
+    @Test void spotCheckFiltersCountAndPaginateWithinEmployeeScope() throws Exception {
+        var checked=record();var unchecked=record();spotCheck(checked,admin,qv(checked)).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/quotations/search").param("spotCheck","checked").param("size","1").with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1)).andExpect(jsonPath("$.data.items[0].id").value(checked.id.toString())).andExpect(jsonPath("$.data.items[0].spotChecked").value(true));
+        mvc.perform(get("/api/v1/quotations/search").param("spotCheck","unchecked").with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.summary.total").value(1)).andExpect(jsonPath("$.data.items[0].id").value(unchecked.id.toString()));
+        mvc.perform(get("/api/v1/quotations/search").param("scope","company").param("spotCheck","checked").with(other))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        mvc.perform(get("/api/v1/quotations/search").param("spotCheck","invalid").with(employee)).andExpect(status().isUnprocessableEntity());
+    }
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url",postgres::getJdbcUrl);r.add("spring.datasource.username",postgres::getUsername);r.add("spring.datasource.password",postgres::getPassword);

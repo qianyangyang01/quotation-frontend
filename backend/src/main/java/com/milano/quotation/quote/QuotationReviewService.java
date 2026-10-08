@@ -27,6 +27,7 @@ interface QuotationReviewRepository extends JpaRepository<QuotationReviewEntity,
 /** All writes lock the quotation first, including price edits. Claiming never dirties its payload/version. */
 @Service
 public class QuotationReviewService {
+    static final Set<String> SPOT_CHECK_FIELDS = Set.of("spotChecked", "spotCheckedAt", "spotCheckedBy", "spotCheckedAccount");
     static final Set<String> VIEW_FIELDS = Set.of("financeReviewStatus", "financeReviewedAt", "financeReviewedBy", "financeReviewedAccount",
         "financeReviewStartedAt", "financeReviewClaimedBy", "financeReviewClaimedAccount", "financeReviewNote",
         "financeReviewCommentCount", "financeReviewLatestComment");
@@ -45,6 +46,9 @@ public class QuotationReviewService {
         return state;
     }
     static void overlay(ObjectNode payload, JsonNode state, long version) {
+        SPOT_CHECK_FIELDS.forEach(payload::remove);
+        payload.put("spotChecked", state.path("spotChecked").asBoolean(false));
+        for (var key : SPOT_CHECK_FIELDS) if (state.has(key)) payload.set(key, state.get(key));
         VIEW_FIELDS.forEach(payload::remove);
         for (var key:VIEW_FIELDS) if(state.has(key)) payload.set(key,state.get(key));
         var comments = comments(state);
@@ -119,6 +123,21 @@ public class QuotationReviewService {
         row.state = current;
         reviews.saveAndFlush(row);
         audit.record("quotation." + action, "quotation", quote.id.toString(), "success", Map.of("priorityProcessing", enabled));
+    }
+    /** A one-way audit marker; review transitions and price edits never clear it or change the quote snapshot. */
+    void markSpotChecked(QuotationRecordEntity quote, ObjectNode request, QuotationPrincipal actor) {
+        if (!actor.roleKey().equals("super_admin")) throw new AccessDeniedException("只有管理员可以标记已抽检");
+        requireQuoteVersion(quote, request);
+        var row = state(quote);
+        if (row.state.path("spotChecked").asBoolean(false)) return;
+        var current = (ObjectNode) row.state.deepCopy();
+        preserveLegacyHistory(quote, current);
+        current.put("spotChecked", true).put("spotCheckedAt", Instant.now().toString())
+            .put("spotCheckedBy", actor.displayName()).put("spotCheckedAccount", actor.account());
+        event(current, actor, "spot-check", row.status, row.status, "", quote.version);
+        row.state = current;
+        reviews.saveAndFlush(row);
+        audit.record("quotation.spot-check", "quotation", quote.id.toString(), "success", Map.of("spotChecked", true));
     }
     void change(QuotationRecordEntity quote, ObjectNode request, QuotationPrincipal actor) {
         var row=state(quote);var action=request.path("action").asText();

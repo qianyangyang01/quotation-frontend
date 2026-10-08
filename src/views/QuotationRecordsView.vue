@@ -5,7 +5,8 @@ import QuotationLifecycleDialog from '@/components/quotation/QuotationLifecycleD
 import { changeQuotationLifecycle, lifecycleLabel, lifecycleProtection, type RecordLifecycle, type LifecycleAction } from '@/data/quotationLifecycle'
 import { operationFeesLabel } from '@/data/customerOperationFees'
 import { useQuotationReviewSync } from '@/composables/useQuotationReviewSync'
-import { setQuotationPriority, reviewQuotationRecord, financeReviewLabel, quotationDealLabel, type ReviewAction } from '@/data/quotationRecords'
+import { markQuotationSpotChecked, setQuotationPriority, reviewQuotationRecord, financeReviewLabel, quotationDealLabel, type ReviewAction } from '@/data/quotationRecords'
+import QuotationSpotCheck from '@/components/quotation/QuotationSpotCheck.vue'
 import QuotationReviewPanel from '@/components/quotation/QuotationReviewPanel.vue'
 import QuotationReviewButton from '@/components/quotation/QuotationReviewButton.vue'
 import QuotationReviewComments from '@/components/quotation/QuotationReviewComments.vue'
@@ -98,6 +99,9 @@ const reviewGroups = [
   { value: '', label: '全部' },
 ] as const
 const filterReviewStatus = ref<typeof reviewGroups[number]['value']>('pending')
+const spotCheckFilter = ref<'' | 'checked' | 'unchecked'>('')
+const spotCheckBusy = ref(new Set<string>())
+const canSpotCheck = computed(() => currentAuthUser.value.role === 'super_admin' && hasPermission('allRecords'))
 const priorityOnly = ref(false)
 const priorityBusy = ref(new Set<string>())
 const reviewMine = ref(false)
@@ -116,7 +120,7 @@ const activeDatePreset = computed(() => {
 })
 const total=ref(0);const totalPages=ref(0);const loading=ref(false);const loadError=ref('');const exporting=ref(false)
 const summary=ref<{pending:number;won:number;lost:number;total:number;processed?:number}>({pending:0,won:0,lost:0,total:0});const countries=ref<string[]>([])
-const filters=computed(()=>({priorityOnly:priorityOnly.value,lifecycle:lifecycle.value,product:filterProduct.value.trim(),customer:filterCustomer.value.trim(),channel:filterChannel.value.trim(),optionScale:filterOptionScale.value,priceDifference:filterPriceDifference.value,status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
+const filters=computed(()=>({spotCheck:spotCheckFilter.value,priorityOnly:priorityOnly.value,lifecycle:lifecycle.value,product:filterProduct.value.trim(),customer:filterCustomer.value.trim(),channel:filterChannel.value.trim(),optionScale:filterOptionScale.value,priceDifference:filterPriceDifference.value,status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
 const dateError=computed(()=>startDate.value && endDate.value && startDate.value>endDate.value ? '开始日期不能晚于结束日期' : '')
 let requestId=0;let refreshTimer:ReturnType<typeof setTimeout>|undefined
 async function refresh(silent = false) {
@@ -132,7 +136,7 @@ async function refresh(silent = false) {
   } catch(error) {if(id===requestId){records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};loadError.value=error instanceof Error?error.message:'加载失败，请重试'}}
   finally {if(id===requestId)loading.value=false}
 }
-function resetFilters(){priorityOnly.value=false;filterProduct.value='';filterCustomer.value='';filterChannel.value='';filterOptionScale.value='';filterPriceDifference.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
+function resetFilters(){spotCheckFilter.value='';priorityOnly.value=false;filterProduct.value='';filterCustomer.value='';filterChannel.value='';filterOptionScale.value='';filterPriceDifference.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
 function recent(days:number){const dates=recentRecordDates(days);startDate.value=dates.startDate;endDate.value=dates.endDate}
 function changePage(next:number){if(loading.value)return;page.value=next;void refresh()}
 async function exportRecords(){
@@ -214,6 +218,27 @@ async function confirmMutation() {
   finally { mutationBusy.value = false }
 }
 
+async function markSpotChecked(row: QuotationRecord) {
+  if (!canSpotCheck.value || !isActive(row) || reviewSync.stateFor(row).spotChecked || spotCheckBusy.value.has(row.id) || lifecycleBusy.value || mutationBusy.value) return
+  const account = currentAuthUser.value.account
+  spotCheckBusy.value.add(row.id)
+  try {
+    const saved = await markQuotationSpotChecked(row)
+    if (account !== currentAuthUser.value.account) return
+    const live = reviewSync.stateFor(row)
+    if ((live._version ?? -1) > (saved._version ?? -1) || ((live._version ?? -1) === (saved._version ?? -1) && (live._reviewVersion ?? 0) > (saved._reviewVersion ?? 0))) { void reviewSync.poll(); return }
+    reviewSync.accept(saved)
+    records.value = records.value.map(item => item.id === saved.id ? saved : item)
+    if (!editing.value && selected.value?.id === saved.id && selected.value._version === saved._version
+      && (selected.value._reviewVersion ?? 0) === (saved._reviewVersion ?? 0) - 1) selected.value = saved
+    toast('已标记已抽检，员工端将同步显示')
+    if (spotCheckFilter.value) await refresh(true)
+  } catch (error) {
+    if (account !== currentAuthUser.value.account) return
+    toast(error instanceof Error ? error.message : '抽检标记失败，请重试')
+    void reviewSync.poll()
+  } finally { spotCheckBusy.value.delete(row.id) }
+}
 const reviewing = ref(new Set<string>())
 function commentSaved(saved: QuotationRecord) {
   const row = records.value.find(item => item.id === saved.id) || (selected.value?.id === saved.id ? selected.value : undefined)
@@ -338,7 +363,7 @@ let filteredSyncBusy = false
 onUnmounted(() => clearInterval(filteredSyncTimer))
 onMounted(async () => {
   filteredSyncTimer = setInterval(async () => {
-    if ((!reviewFiltered.value && lifecycle.value !== 'active' && !priorityOnly.value) || loading.value || filteredSyncBusy || priorityBusy.value.size > 0 || document.visibilityState === 'hidden') return
+    if ((!reviewFiltered.value && lifecycle.value !== 'active' && !priorityOnly.value && !spotCheckFilter.value) || loading.value || filteredSyncBusy || priorityBusy.value.size > 0 || spotCheckBusy.value.size > 0 || document.visibilityState === 'hidden') return
     filteredSyncBusy = true
     try { await refresh(true) } finally { filteredSyncBusy = false }
   }, 3000)
@@ -479,6 +504,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <button v-if="lifecycle==='active'" :disabled="loading || lifecycleBusy" @click="beginLifecycle('archive')">批量归档</button><button v-if="lifecycle!=='trashed'" class="trash-button" :disabled="loading || lifecycleBusy" @click="beginLifecycle('trash')">移入回收站</button><button v-if="lifecycle!=='active'" :disabled="loading || lifecycleBusy" @click="beginLifecycle('restore')">恢复所选记录</button><button :disabled="lifecycleBusy" @click="checkedIds=[]">取消选择</button>
         </div>
         <div class="priority-filters" role="group" aria-label="优先处理筛选"><b>优先处理</b><button type="button" :aria-pressed="!priorityOnly" @click="priorityOnly=false">全部</button><button type="button" :aria-pressed="priorityOnly" @click="priorityOnly=true">只看优先</button></div>
+        <label class="spot-check-filter">抽检<select v-model="spotCheckFilter" aria-label="抽检筛选"><option value="">全部</option><option value="unchecked">未抽检</option><option value="checked">已抽检</option></select></label>
         <small class="priority-sort-hint">优先在前 <span tabindex="0" role="img" aria-label="优先单按提交时间从早到晚，普通单按提交时间从晚到早" title="优先单按提交时间从早到晚，普通单按提交时间从晚到早">ⓘ</span></small>
       </section>
       <section class="records quote-record-table" :aria-busy="loading">
@@ -521,7 +547,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <button class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
             <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>
-            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)" />
+            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)"><template #inspection><QuotationSpotCheck :state="reviewSync.stateFor(row)" :can-mark="canSpotCheck && isActive(row)" :busy="spotCheckBusy.has(row.id) || lifecycleBusy || mutationBusy" @mark="markSpotChecked(row)" /></template></QuotationReviewPanel>
             <div class="record-action-buttons"><button v-if="canSetPriority(row)" type="button" class="priority-action" :disabled="priorityBusy.has(row.id)||lifecycleBusy||mutationBusy" :aria-label="(priorityFor(row)?'取消优先':'设为优先')+' '+row.no" @click="togglePriority(row)">{{ priorityBusy.has(row.id) ? '正在保存…' : priorityFor(row) ? '取消优先' : '设为优先' }}</button>
               <small v-if="row.status !== 'pending'" class="deal-result" :class="row.status">成交结果：{{ quotationDealLabel(row.status) }}</small>
               <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
@@ -555,6 +581,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <span v-if="reviewSync.stateFor(selected).financeReviewStatus==='reviewing' && reviewSync.stateFor(selected).financeReviewStartedAt"> · 开始于 {{ dateTime(reviewSync.stateFor(selected).financeReviewStartedAt) }}</span>
             <span v-else-if="reviewSync.stateFor(selected).financeReviewedAt"> · 审核于 {{ dateTime(reviewSync.stateFor(selected).financeReviewedAt) }}</span>
           </div>
+          <QuotationSpotCheck :state="reviewSync.stateFor(selected)" :can-mark="canSpotCheck && isActive(selected)" :busy="spotCheckBusy.has(selected.id) || lifecycleBusy || mutationBusy" detail @mark="markSpotChecked(selected)" />
           <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @viewed="reviewViewed(selected,$event)" /></div>
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <section v-if="detailTab==='overview'" class="overview-panel">
@@ -739,4 +766,8 @@ main{width:min(1680px,calc(100% - 48px))}
 
 <style scoped>
 .record-mutation-buttons button{flex:1;padding:8px;border:1px solid #d5dce3;background:#fff;border-radius:6px;cursor:pointer;color:#52606d}.record-mutation-buttons button:first-child{color:#b52b25;border-color:#efb0ac}.mutation-overlay{position:fixed;inset:0;z-index:1200;background:#0006;display:flex;align-items:center;justify-content:center}.mutation-dialog{max-width:480px;margin:20px;padding:24px;background:white;border-radius:12px;line-height:1.7}.mutation-dialog footer{display:flex;justify-content:flex-end;gap:12px}.mutation-dialog button{padding:8px 16px;cursor:pointer}.mutation-dialog [role=alert]{color:#b52b25}
+</style>
+
+<style scoped>
+.spot-check-filter{display:flex;align-items:center;gap:8px;white-space:nowrap}.spot-check-filter select{height:34px;min-width:100px;padding:0 9px;border:1px solid #d7c8ef;border-radius:6px;background:#f7f3fc;color:#7952a3;font:inherit}.spot-check-filter select:focus-visible{outline:2px solid #9870c5;outline-offset:2px}
 </style>

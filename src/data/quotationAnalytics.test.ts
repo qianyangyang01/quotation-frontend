@@ -74,3 +74,13 @@ it('exports review conclusions and deal results independently from legacy confir
   expect(csv).not.toMatch(/待处理|已处理|处理状态/)
   expect(JSON.stringify(rows)).toBe(before)
 })
+
+it('exports inspection metadata with internal review columns only and preserves the source snapshot', () => {
+  const marked = normalizeQuotationRecord({id:'checked',no:'QT-CHECKED',spotChecked:true,spotCheckedBy:'管理员',spotCheckedAt:'2026-10-08T08:00:00Z'})!
+  const before = JSON.stringify(marked)
+  const csv = quotationDetailsCsv([marked], [], {includeReview:true})
+  expect(csv).toContain('抽检标记,抽检人,抽检时间')
+  expect(csv).toContain('已抽检,管理员,2026-10-08T08:00:00Z')
+  expect(quotationDetailsCsv([marked], [])).not.toContain('抽检')
+  expect(JSON.stringify(marked)).toBe(before)
+})

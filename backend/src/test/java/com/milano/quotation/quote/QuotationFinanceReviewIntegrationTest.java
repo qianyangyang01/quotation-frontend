@@ -56,6 +56,40 @@ class QuotationFinanceReviewIntegrationTest {
         var body=mapper.createObjectNode().put("priorityProcessing",enabled).put("_version",qv(r)).put("_reviewVersion",version);
         return mvc.perform(patch("/api/v1/quotations/{id}/priority",r.id).with(actor).with(csrf()).contentType("application/json").content(body.toString()));
     }
+    ResultActions spotCheck(QuotationRecordEntity r, RequestPostProcessor actor, long version) throws Exception {
+        return mvc.perform(patch("/api/v1/quotations/{id}/spot-check",r.id).with(actor).with(csrf()).contentType("application/json").content(mapper.createObjectNode().put("_version",version).toString()));
+    }
+    @Test void spotCheckIsAdminOnlyAndVisibleToTheOwnerWithoutChangingTheSnapshot() throws Exception {
+        var r=record();claim(r);complete(r);
+        var before=view(r);var stored=records.findById(r.id).orElseThrow();
+        for (var actor:List.of(employee,other,finance,purchase)) spotCheck(r,actor,qv(r)).andExpect(status().isForbidden());
+        spotCheck(r,admin,qv(r)).andExpect(status().isOk()).andExpect(jsonPath("$.data.spotChecked").value(true))
+            .andExpect(jsonPath("$.data.spotCheckedBy").value("A"+owner)).andExpect(jsonPath("$.data.spotCheckedAt").isNotEmpty());
+        var after=view(r);assertEquals("approved",after.path("financeReviewStatus").asText());
+        assertEquals(before.path("financeReviewedAt"),after.path("financeReviewedAt"));
+        var snapshot=records.findById(r.id).orElseThrow();assertEquals(stored.payload,snapshot.payload);assertEquals(stored.version,snapshot.version);assertEquals(stored.updatedAt,snapshot.updatedAt);
+        mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(employee))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].spotChecked").value(true)).andExpect(jsonPath("$.data[0].spotCheckedAccount").value("A"+owner));
+        mvc.perform(get("/api/v1/quotations").with(employee)).andExpect(status().isOk()).andExpect(jsonPath("$.data.items[0].spotChecked").value(true));
+        mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(other)).andExpect(status().isOk()).andExpect(jsonPath("$.data").isEmpty());
+        mvc.perform(get("/api/v1/quotations/{id}",r.id).with(other)).andExpect(status().isForbidden());
+        long revision=rv(r);spotCheck(r,admin,qv(r)).andExpect(status().isOk());assertEquals(revision,rv(r));assertEquals(after.path("spotCheckedAt"),view(r).path("spotCheckedAt"));
+        assertEquals(1,java.util.stream.StreamSupport.stream(reviews.findById(r.id).orElseThrow().state.path("history").spliterator(),false).filter(e->e.path("action").asText().equals("spot-check")).count());
+    }
+    @Test void spotCheckPersistsAcrossReviewAndPriceChangesAndDoesNotPropagateToOtherQuotes() throws Exception {
+        var r=record();var another=record();spotCheck(r,admin,qv(r)).andExpect(status().isOk());
+        claim(r);complete(r);price(r,7.5);assertTrue(view(r).path("spotChecked").asBoolean());assertFalse(view(another).path("spotChecked").asBoolean());
+        claim(r);assertTrue(view(r).path("spotChecked").asBoolean());assertEquals("reviewing",view(r).path("financeReviewStatus").asText());
+    }
+    @Test void staleAndInactiveSpotChecksAreRejectedAndCreationCannotForgeTheMark() throws Exception {
+        var r=record();spotCheck(r,admin,qv(r)+1).andExpect(status().isConflict());assertFalse(view(r).path("spotChecked").asBoolean());
+        r.lifecycleState="archived";records.saveAndFlush(r);spotCheck(r,admin,qv(r)).andExpect(status().isConflict());
+        var input=PackagingWeightTest.valid().put("spotChecked",true).put("spotCheckedBy","伪造管理员").put("spotCheckedAt","2026-10-08T00:00:00Z");
+        var result=mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key","spot-"+UUID.randomUUID()).contentType("application/json").content(input.toString()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.spotChecked").value(false)).andExpect(jsonPath("$.data.spotCheckedBy").doesNotExist()).andReturn();
+        var id=UUID.fromString(mapper.readTree(result.getResponse().getContentAsString()).path("data").path("id").asText());
+        assertFalse(records.findById(id).orElseThrow().payload.has("spotChecked"));
+    }
     @Test void priorityIsOwnerOnlyVersionedAndDoesNotChangeQuoteOrReviewClaim() throws Exception {
         var r=record();
         priority(r,other,true,0).andExpect(status().isForbidden());

@@ -16,6 +16,7 @@ const time=(value?:string)=>value?new Date(value).toLocaleString('zh-CN',{timeZo
 <template>
   <section class="review-panel" :class="{compact}" @click.stop>
     <strong class="finance-review" :class="state.financeReviewStatus" role="status">{{ active ? `${state.financeReviewClaimedBy || '其他财务'}审核中` : financeReviewLabel(state.financeReviewStatus) }}</strong>
+    <slot name="inspection" />
     <small v-if="active">开始于 {{ time(state.financeReviewStartedAt) }}</small>
     <small v-else-if="state.financeReviewedBy">{{ state.financeReviewedBy }} · {{ time(state.financeReviewedAt) }}</small>
     <QuotationReviewComments :record="record" :state="state" :account="account" :can-review="canReview && !compact" :busy="busy" @saved="emit('commentSaved', $event)" @viewed="emit('viewed',$event)">
