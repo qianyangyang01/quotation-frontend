@@ -63,6 +63,23 @@ describe('published logistics version cache', () => {
     expect(conditionalGet.mock.calls.filter(([path]) => String(path).includes('/rules'))).toHaveLength(1)
   })
 
+  it('reuses a concurrently validated manifest for the rules request', async () => {
+    conditionalGet.mockImplementation((path: string) => Promise.resolve(path.includes('/manifest')
+      ? { status: 200, data: manifest('r-parallel'), etag: '"r-parallel"' }
+      : { status: 200, data: { revision: 'r-parallel', rules: [rule] }, etag: '"rules-parallel"' }))
+    const repository = await import('./publishedLogisticsRepository')
+
+    const manifestResult = await repository.loadPublishedLogisticsManifest()
+    const result = await repository.loadPublishedLogisticsRules(
+      { attribute: '普货', countries: ['美国'] },
+      { manifestResult },
+    )
+
+    expect(result).toMatchObject({ revision: 'r-parallel', source: 'network', verified: true })
+    expect(conditionalGet.mock.calls.filter(([path]) => String(path).includes('/manifest'))).toHaveLength(1)
+    expect(conditionalGet.mock.calls.filter(([path]) => String(path).includes('/rules'))).toHaveLength(1)
+  })
+
   it('treats a manifest without quote countries as an empty business result', async () => {
     conditionalGet.mockResolvedValue({
       status: 200,

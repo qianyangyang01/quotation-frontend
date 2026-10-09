@@ -14,3 +14,16 @@ describe('country provider taxes', () => {
     expect(calculateFinanceQuoteTax(settings, '新西兰', 'P', 10).taxUsd).toBe(1.5)
   })
 })
+
+it('applies one duty to all quantities and independent surcharge combinations', async () => {
+ const { calculateFinanceQuoteFees } = await import('./financeSurchargeSettings')
+ for (const taxExempt of [true,false]) for (const feeExempt of [true,false]) {
+  const setting=(amount:number,exempt:boolean)=>({countries:[{country:'美国',selected:true,enabled:true,fixedFeeUsd:amount,sortOrder:1,providers:[{provider:'P',selected:true,mode:exempt?'exempt' as const:'taxable' as const,channels:[]}]}],providers:[],updatedAt:''})
+  for (const quantity of [1,2,3,10]) for(const key of ['1::P::A','2::P::B']) {
+   const r=calculateFinanceQuoteFees(setting(0.3,taxExempt),setting(1.5,feeExempt),'美国','P',10*quantity,key)
+   expect(r.taxUsd).toBe(taxExempt?0:0.3)
+   expect(r.surchargeUsd).toBe(feeExempt?0:1.5)
+   expect(r.totalUsd).toBe(Number((10*quantity+(taxExempt?0:0.3)+(feeExempt?0:1.5)).toFixed(2)))
+  }
+ }
+})

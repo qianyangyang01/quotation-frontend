@@ -50,4 +50,19 @@ class LogisticsCountryTaxGuardTest {
   o.put("taxIncluded",true).put("taxFeeMode","exempt").put("countryFixedTaxUsd",0);
   assertThrows(AppException.class,()->LogisticsQuotationGuard.validateCountryTax(settings,o));
  }
+ @Test void independentlyChecksCountriesChannelsAndMissingProviders() {
+  var m=new JsonMapper();
+  var settings=m.readTree("""
+  {"countries":[{"country":"美国","selected":true,"enabled":true,"fixedFeeUsd":0.3,"providers":[{"provider":"P","selected":true,"mode":"exempt"}]},{"country":"新西兰","selected":true,"enabled":true,"fixedFeeUsd":1.5,"providers":[{"provider":"P","selected":true,"mode":"taxable"}]}]}
+  """);
+  for(var key:new String[]{"1::P::A","2::P::B"}) {
+   var o=m.createObjectNode().put("country","美国").put("channelKey",key).put("taxConfigured",true).put("taxIncluded",true).put("taxFeeMode","exempt").put("countryFixedTaxUsd",0);
+   assertDoesNotThrow(()->LogisticsQuotationGuard.validateCountryTax(settings,o));
+   o.put("country","新西兰"); assertThrows(AppException.class,()->LogisticsQuotationGuard.validateCountryTax(settings,o));
+   o.put("taxIncluded",false).put("taxFeeMode","fixed-order").put("countryFixedTaxUsd",1.5);
+   assertDoesNotThrow(()->LogisticsQuotationGuard.validateCountryTax(settings,o));
+   o.put("channelKey","1::未知::A");assertThrows(AppException.class,()->LogisticsQuotationGuard.validateCountryTax(settings,o));
+  }
+ }
+
 }
