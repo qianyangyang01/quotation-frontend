@@ -37,14 +37,13 @@ it('quotes and copies a one-yuan small-order surcharge and removes it at the exi
   mount();vi.mocked(loadFobQuoteProduct).mockResolvedValue(p);await sku(p.sku);await query()
   const quantity=document.querySelector<HTMLInputElement>('[aria-label="FOB报价数量"]')!
   quantity.value='25';quantity.dispatchEvent(new Event('input',{bubbles:true}));await tick()
-  expect(document.querySelector('.final-quote')!.textContent).toContain('每件已加1元')
-  expect(document.querySelector('.final-quote')!.textContent).toContain('报关 $1.52/件')
-  expect(document.querySelector('.final-quote')!.textContent).toContain('不报关 $1.55/件')
+  expect(document.querySelector('.quantity-status')!.textContent).toContain('最终价已含每件1元小额订单加价')
+  expect([...document.querySelectorAll('.current-price')].map(cell=>cell.textContent)).toEqual(['报关 $1.52/件','不报关 $1.55/件'])
   expect(document.body.textContent).toContain('不足200元时，每件加1元')
   Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='复制当前数量报价')!.click();await tick()
   expect(writeText).toHaveBeenCalledWith(expect.stringContaining('已含每件1元小额订单加价'))
   quantity.value='26';quantity.dispatchEvent(new Event('input',{bubbles:true}));await tick()
-  expect(document.querySelector('.final-quote')!.textContent).toContain('无小额订单加价')
+  expect(document.querySelector('.quantity-status')!.textContent).toContain('无小额订单加价')
   expect(document.querySelector('.final-quote')!.textContent).toContain('报关 $1.35/件')
 })
 it('keeps only the latest result after a burst of twenty queries resolving in reverse order',async()=>{
@@ -62,9 +61,12 @@ it('keeps only the latest result after a burst of twenty queries resolving in re
 it.each(['super_admin','finance','employee'] as const)('shows the same tier prices and quantity quote for %s',async role=>{
   authState.current={id:role,account:role,name:role,role,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=[...roleDefinitions.find(r=>r.key===role)!.permissions]
   mount();vi.mocked(loadFobQuoteProduct).mockResolvedValue(sample());await sku('PF2600053');await query()
-  expect(Array.from(document.querySelectorAll('.fob-card tbody tr')).map(row=>Array.from(row.querySelectorAll('td')).slice(-2).map(cell=>cell.textContent))).toEqual([['2.99','3.05'],['2.58','2.63'],['2.43','2.48'],['2.43','2.48'],['2.40','2.44']])
+  expect(Array.from(document.querySelectorAll('.fob-card tbody tr')).map(row=>Array.from(row.querySelectorAll('.quote-price')).map(cell=>cell.textContent))).toEqual([['2.99','3.05'],['2.58','2.63'],['2.43','2.48'],['2.43','2.48'],['2.40','2.44']])
+  expect(document.querySelector('.current-price')?.getAttribute('rowspan')).toBe('5')
   const quantity=document.querySelector<HTMLInputElement>('[aria-label="FOB报价数量"]')!;quantity.value='100';quantity.dispatchEvent(new Event('input'));await tick()
-  expect(document.querySelector('.final-quote')!.textContent).toContain('报关 $2.58/件');expect(document.querySelector('.final-quote')!.textContent).toContain('不报关 $2.63/件')
+  expect([...document.querySelectorAll('.current-price')].map(cell=>cell.textContent)).toEqual(['报关 $2.58/件','不报关 $2.63/件'])
+  expect(document.querySelector('.current-heading')!.textContent).toContain('100件 · 对外报价请用此处')
+  expect(document.querySelector('.selected')!.textContent).toContain('阶梯2当前档')
 })
 it('keeps SKU query inline before and after loading, renders all five tiers and copies the actual quantity quote',async()=>{
   const writeText=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true})
