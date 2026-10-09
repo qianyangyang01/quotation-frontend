@@ -39,21 +39,29 @@ public final class FobSourceParser {
         String purchaseUnit = units.isEmpty() ? "件" : units.iterator().next();
         var tiers = new ArrayList<Tier>();
         BigDecimal base = null;
+        Integer freeShippingFrom = null;
         for (String line : prices.split("[;,\\n]+")) {
             line = line.trim();
             if (line.isBlank() || line.matches("单价:?")) continue;
             if (line.matches("(?:简装.*一包|不含税运)")) { notices.add(line); continue; }
             var m = PRICE.matcher(line);
             StringBuilder rest = new StringBuilder(); int end = 0;
+            Integer lineMinimum = null;
             while (m.find()) {
                 rest.append(line, end, m.start()); end = m.end();
                 String spec = m.group(1);
                 var ns = Pattern.compile("\\d+").matcher(spec); ns.find(); int low = integer(ns.group());
                 Integer high = spec.contains("-") && ns.find() ? integer(ns.group()) : null;
                 tiers.add(new Tier(low, high, amount(m.group(2)), purchaseUnit));
+                lineMinimum = lineMinimum == null ? low : Math.min(lineMinimum, low);
             }
             rest.append(line.substring(end));
+            if (line.endsWith("包邮")) {
+                if (lineMinimum == null || !rest.toString().trim().matches("(?:元)?包邮")) fail("采购价中的包邮条件无法对应具体阶梯，请核对原文");
+                freeShippingFrom = freeShippingFrom == null ? lineMinimum : Math.min(freeShippingFrom, lineMinimum);
+            }
             String residual = rest.toString().replaceAll("单价|单件|外套|文胸\\+短裤|元|人民币|[¥￥:]", "");
+            if (line.endsWith("包邮")) residual = residual.replace("包邮", "");
             residual = residual.replaceAll("/[件双套盒条个瓶张]", "");
             residual = residual.trim();
             if (!residual.isBlank()) {
@@ -78,13 +86,20 @@ public final class FobSourceParser {
             effective.add(new Tier(Math.max(t.minQty, minimum), high, t.unitPriceCny, t.unit));
         }
         if (effective.isEmpty() || effective.getFirst().minQty > minimum) fail("起订量对应的采购价格缺失");
+        if (effective.size() > 100) fail("采购阶梯超过100档，请核对原文后精简重复描述");
         if (effective.getLast().maxQty != null) notices.add("采购价格只明确到" + effective.getLast().maxQty + "，更大数量暂无有效价格");
-        return new Parsed(minimum, multiple, List.copyOf(effective), freight(freight, effective, notices), notices);
+        var shipping = freight(freight, effective, notices);
+        if (freeShippingFrom != null) {
+            if (shipping.quantity < freeShippingFrom || shipping.totalFreightCny.signum() != 0)
+                fail("采购阶梯注明包邮，但运费原文未明确同一批量包邮；请统一确认，不能忽略阶梯运费条件");
+            notices.add("采购价原文注明" + freeShippingFrom + "起包邮，已与运费原文核对；原文完整保留");
+        }
+        return new Parsed(minimum, multiple, List.copyOf(effective), shipping, notices);
     }
 
     private static Freight freight(String raw, List<Tier> tiers, List<String> notices) {
         if (raw.isBlank()) fail("缺少运费原文");
-        boolean estimated = raw.matches("(?s).*(预计|预拍|预估|大概|大约|左右|约).*" );
+        boolean estimated = raw.matches("(?s).*(预计|预拍|试拍|预估|大概|大约|左右|约).*" );
         if (raw.matches("(?:包邮|免运费|0)(?:[;。\\s]*)")) return new Freight(100, BigDecimal.ZERO, BigDecimal.ZERO, false, "包邮");
         if (raw.matches("(?s).*(另加|另计|续重|首重|每公斤|每千克|到付|议价).*")) fail("运费包含附加计费条件，请明确批量总运费");
         var free = Pattern.compile("(\\d+)\\s*元\\s*(?:以上|起)\\s*包邮").matcher(raw);
@@ -125,7 +140,14 @@ public final class FobSourceParser {
                 chosen.getKey() + "件总运费 " + chosen.getValue().toPlainString() + " ÷ " + chosen.getKey());
     }
 
-    private static String clean(String s) { return s == null ? "" : s.trim().replace('\r', '\n').replace('：', ':').replace('；', ';').replace('，', ',').replace('—', '-').replace('–', '-').replace(">=", "≥"); }
+    private static String clean(String s) {
+        if (s == null) return "";
+        if (s.length() > 10000) fail("单元格内容过长，请每格控制在10000字以内");
+        return java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKC).trim()
+                .replace("\r\n", "\n").replace('\r', '\n').replace('\u00a0', ' ').replace("\u200b", "")
+                .replace('：', ':').replace('；', ';').replace('，', ',').replace('—', '-').replace('–', '-').replace('～', '-').replace('~', '-')
+                .replace(">=", "≥").replaceAll("(?<=\\d)\\s*(?:至|到|-)\\s*(?=\\d)", "-");
+    }
     private static int integer(String s) {
         try { int value = Integer.parseInt(s); if (value <= 0 || value > 100_000_000) fail("数量须为有效正整数"); return value; }
         catch (NumberFormatException e) { throw new IllegalArgumentException("数量超出有效范围"); }

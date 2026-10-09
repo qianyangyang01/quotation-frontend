@@ -2,9 +2,36 @@ package com.milano.quotation.fob;
 
 import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FobSourceParserTest {
+    @Test void preservesAllFiveTiersFromPastedPf2600049AndEstimatedFreight() {
+        var p = FobSourceParser.parse("1", "单件：23.99单价\n100起单价19.5\n300单价19.5\n500单价19\n1000单价19", "一件运费：4\t10件运费：11\t100件预拍运费：74");
+        assertEquals(List.of(1, 100, 300, 500, 1000), p.priceTiers().stream().map(FobSourceParser.Tier::minQty).toList());
+        assertEquals(List.of("23.99", "19.5", "19.5", "19", "19"), p.priceTiers().stream().map(t -> t.unitPriceCny().toPlainString()).toList());
+        assertEquals(new BigDecimal("0.74"), p.freight().unitFreightCny()); assertTrue(p.freight().estimated());
+    }
+    @Test void supportsFullWidthAndRangeSeparatorsWithoutGuessingAmbiguousConditions() {
+        for (String range : List.of("１～９９", "1至99", "1到99", "1—99", "1–99", "1 - 99")) {
+            var p = FobSourceParser.parse("１", range + "件单价２３．９９；１００件以上单价１９．５", "１００件总运费：７４");
+            assertEquals(2, p.priceTiers().size()); assertEquals(99, p.priceTiers().getFirst().maxQty());
+            assertEquals(new BigDecimal("23.99"), p.priceTiers().getFirst().unitPriceCny());
+        }
+        for (String value : List.of("单价10;100件9美元", "单价10;100件9-10", "单价10;100件8;100件9", "单价10;100件-5", "单价10;100件8另加包装费1", "单价10;100件8元每箱20件"))
+            assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("1", value, "包邮"), value);
+        assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("1", "1".repeat(10001), "包邮"));
+        String tooMany = java.util.stream.IntStream.rangeClosed(1, 101).mapToObj(i -> i + "件单价1").collect(java.util.stream.Collectors.joining(";"));
+        assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("1", tooMany, "包邮"));
+        assertTrue(FobSourceParser.parse("1", "12", "试拍1件3/10件5/100件74").freight().estimated());
+    }
+    @Test void crossChecksShippingInPriceTextInsteadOfSilentlyDroppingConditions() {
+        var p = FobSourceParser.parse("3", "单价：7.62；100件以上6.5包邮；500件以上6包邮；", "预拍一件运费：3.5；50元以上包邮");
+        assertEquals(3, p.priceTiers().size()); assertEquals(BigDecimal.ZERO, p.freight().unitFreightCny());
+        assertTrue(p.notices().stream().anyMatch(n -> n.contains("已与运费原文核对")));
+        assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("1", "单价8;100件6包邮", "100件30"));
+        assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("1", "单价8;500件6包邮", "100件0"));
+    }
     @Test void preservesFiveTiersIncludingEqualPricesAndHonorsMoq() {
         var p = FobSourceParser.parse("2", "单价16\n100起单价13.8元\n300单价13元\n500单价13元\n1000单价12.8元", "包邮");
         assertEquals(5, p.priceTiers().size()); assertEquals(2, p.priceTiers().getFirst().minQty());

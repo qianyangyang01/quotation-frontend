@@ -98,6 +98,7 @@ public class FobPurchaseService {
             merged.put("verificationStatus", "pending");
             FIELDS.keySet().forEach(field -> { if (patch.has(field)) merged.set(field, patch.get(field).deepCopy()); });
             var issues = new ArrayList<String>(); var notices = new ArrayList<String>();
+            if (batch.conflicts.contains(sku)) issues.add("同批SKU存在不同内容：" + sku + "，请核对重复行并仅保留本次适用的一条；不会自动覆盖或丢弃冲突内容");
             // Derived lists are rebuilt from the complete merged source, never merged by tier index.
             merged.remove("parsed");
             try {
@@ -133,12 +134,11 @@ public class FobPurchaseService {
     }
     private Batch inputs(List<JsonNode> input) {
         if (input == null || input.isEmpty() || input.size() > 100) throw AppException.unprocessable("FOB粘贴每次须为1至100行");
-        var rows = new LinkedHashMap<String, ObjectNode>(); var skipped = new ArrayList<Skipped>();
+        var rows = new LinkedHashMap<String, ObjectNode>(); var skipped = new ArrayList<Skipped>(); var conflicts = new HashSet<String>();
         for (int i = 0; i < input.size(); i++) {
             var node = input.get(i); int row = i + 1;
             if (node == null || !node.isObject() || !node.path("sku").isTextual()) throw AppException.unprocessable("第" + row + "行缺少SKU");
             var sku = normalizeSku(node.path("sku").asText());
-            if (rows.containsKey(sku)) { skipped.add(new Skipped(row, sku)); continue; }
             var patch = mapper.createObjectNode().put("sku", sku).put("sourceRow", row);
             for (var field : node.properties()) {
                 var name = field.getKey(); var value = field.getValue();
@@ -149,12 +149,16 @@ public class FobPurchaseService {
                 String text = value.asText().replace("\r\n", "\n").trim();
                 if (!text.isBlank()) patch.put(name, text);
             }
-            rows.put(sku, patch);
+            if (rows.containsKey(sku)) {
+                var previous = rows.get(sku);
+                if (FIELDS.keySet().stream().allMatch(field -> previous.path(field).equals(patch.path(field)))) skipped.add(new Skipped(row, sku));
+                else conflicts.add(sku);
+            } else rows.put(sku, patch);
         }
-        return new Batch(rows, skipped);
+        return new Batch(rows, skipped, conflicts);
     }
     private static String normalizeSku(String sku) {
-        String normalized = sku == null ? "" : sku.toUpperCase(Locale.ROOT).replaceAll("\\s+", "");
+        String normalized = sku == null ? "" : java.text.Normalizer.normalize(sku, java.text.Normalizer.Form.NFKC).toUpperCase(Locale.ROOT).replaceAll("[\\s\\u200b]+", "");
         if (!normalized.matches("[A-Z0-9._/-]{1,96}") || normalized.matches("^(TESTP|TEST|DEMO|MOCK|AUTO-).*$")) throw AppException.unprocessable("请填写有效的正式SKU");
         return normalized;
     }
@@ -162,7 +166,7 @@ public class FobPurchaseService {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(mapper.writeValueAsString(batch.rows).getBytes(StandardCharsets.UTF_8))); }
         catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }
-    private record Batch(LinkedHashMap<String, ObjectNode> rows, List<Skipped> skipped) {}
+    private record Batch(LinkedHashMap<String, ObjectNode> rows, List<Skipped> skipped, Set<String> conflicts) {}
     public record Expected(String sku, Long version, Instant updatedAt) {}
     public record Skipped(int sourceRow, String sku) {}
     public record Change(String field, String label, String before, String after) {}

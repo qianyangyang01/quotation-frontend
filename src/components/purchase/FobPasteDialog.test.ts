@@ -32,3 +32,15 @@ it('requires a new preview after conflicts and never retries saving automaticall
   expect(document.querySelector('[aria-label="第1行 SKU"]')).not.toBeNull();expect(document.body.textContent).toContain('重新预览')
   expect(service.confirmFobPaste).toHaveBeenCalledTimes(1)
 })
+it('filters pictures from complete pasted rows and submits only source text for tier parsing',async()=>{
+  mount()
+  const event = new Event('paste',{bubbles:true,cancelable:true})
+  const html = '<table><tr><td>实物图</td><td>产品图片</td><td>SKU</td><td>起订量</td><td>单价</td><td>运费原文</td></tr><tr><td><img src="file:///D:/sample.png"></td><td><img src="https://example.com/product.png"></td><td>PF2600049</td><td>1</td><td>单件：23.99单价<br>100起单价19.5<br>300单价19.5<br>500单价19<br>1000单价19</td><td>一件运费：4\t10件运费：11\t100件预拍运费：74</td></tr></table>'
+  Object.defineProperty(event,'clipboardData',{value:{getData:(type:string)=>type==='text/html'?html:'',files:[new File(['picture'],'picture.png',{type:'image/png'})]}})
+  document.querySelector('.paste-target')!.dispatchEvent(event);await tick()
+  expect(document.body.textContent).toContain('自动过滤图片')
+  expect(document.querySelectorAll('img')).toHaveLength(0)
+  vi.mocked(service.previewFobPaste).mockResolvedValueOnce(preview());button('预览识别与变更').click();await tick()
+  expect(service.previewFobPaste).toHaveBeenCalledWith([{sku:'PF2600049',moqRaw:'1',priceRaw:'单件：23.99单价\n100起单价19.5\n300单价19.5\n500单价19\n1000单价19',freightRaw:'一件运费：4\t10件运费：11\t100件预拍运费：74'}])
+  expect(service.confirmFobPaste).not.toHaveBeenCalled()
+})

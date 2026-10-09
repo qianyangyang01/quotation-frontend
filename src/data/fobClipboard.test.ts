@@ -26,6 +26,22 @@ describe('FOB original spreadsheet clipboard', () => {
     const html = '<table><tr><td>SKU</td><td>单价</td><td>运费/试拍或议价</td></tr><tr><td>PF2600053</td><td>单价16<br>100单价13.8<img src="invalid"></td><td>包邮</td></tr></table>'
     expect(readFobClipboard(data('broken plain text',html))[0]!.priceRaw).toBe('单价16\n100单价13.8')
   })
+  it('strips embedded image bytes and image-only leading cells without shifting text or reading URLs', () => {
+    const cells = original('PF2600049')
+    cells[13] = '单件：23.99单价\n100起单价19.5\n300单价19.5\n500单价19\n1000单价19'
+    cells[15] = '一件运费：4\t10件运费：11\t100件预拍运费：74'
+    const html = '<table><tr>' + cells.map((value, i) => `<td>${i < 2 ? `<img src="${i ? 'file:///D:/product.png' : 'data:image/png;base64,' + 'A'.repeat(2100000)}">` : value.replace(/\n/g, '<br>')}</td>`).join('') + '</tr></table>'
+    const result = readFobClipboard(data('', html))
+    expect(result[0]).toMatchObject({sku:'PF2600049',priceRaw:cells[13],freightRaw:cells[15]})
+    expect(JSON.stringify(result)).not.toContain('data:image')
+    expect(JSON.stringify(result)).not.toContain('product.png')
+  })
+  it('normalizes full-width SKU/header but rejects ambiguous duplicate headers and merged cells', () => {
+    expect(readFobClipboard(data('ＳＫＵ＊\t单价\r\nｐｆ２６０００４９\t23.99'))[0]).toEqual({sku:'PF2600049',priceRaw:'23.99'})
+    expect(readFobClipboard(data('SKU\t单价\tconstructor\r\nPF2600049\t23.99\t忽略'))[0]).toEqual({sku:'PF2600049',priceRaw:'23.99'})
+    expect(() => readFobClipboard(data('SKU\t单价\t采购价格原文\r\nPF2600049\t23.99\t19'))).toThrow('出现多次')
+    expect(() => readFobClipboard(data('', '<table><tr><td>SKU</td><td>单价</td></tr><tr><td rowspan="2">PF2600049</td><td>23.99</td></tr></table>'))).toThrow('合并')
+  })
   it('accepts 100 rows with header and rejects 101 products or unframed data', () => {
     const html = '<table><tr><td>SKU</td><td>单价</td></tr>' + Array.from({length:100},(_,i)=>`<tr><td>PF${i}</td><td>12</td></tr>`).join('') + '</table>'
     expect(readFobClipboard(data('',html))).toHaveLength(100)

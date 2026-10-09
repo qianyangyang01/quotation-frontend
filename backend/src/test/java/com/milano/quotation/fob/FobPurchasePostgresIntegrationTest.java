@@ -48,6 +48,30 @@ class FobPurchasePostgresIntegrationTest {
     FobPurchaseService.Confirmation confirmation(List<JsonNode> rows) {
         var p = service.preview(rows); return new FobPurchaseService.Confirmation(rows, p.rows().stream().map(FobPurchaseService.PreviewRow::expected).toList(),p.digest());
     }
+    @Test void privateWorkbookCorpusPreviewKeepsSourceConflictsAndNeverWritesRecords() throws Exception {
+        String source = System.getenv("FOB_CORPUS_PATH");
+        Assumptions.assumeTrue(source != null && !source.isBlank(), "Private source workbook is not stored in Git");
+        var input = mapper.readTree(java.nio.file.Files.readString(java.nio.file.Path.of(source)));
+        assertEquals(317, input.size());
+        long before = repository.count(), ordinaryBefore = ordinary.count();
+        var report = mapper.createArrayNode(); int ready = 0;
+        for (int start = 0; start < input.size(); start += 100) {
+            var batch = new ArrayList<JsonNode>();
+            for (int i = start; i < Math.min(input.size(), start + 100); i++) {
+                var row = (ObjectNode) input.get(i).deepCopy(); row.remove("sourceRow"); batch.add(row);
+            }
+            var preview = service.preview(batch);
+            for (var row : preview.rows()) {
+                var item = report.addObject().put("sku", row.sku()).put("sourceRow", input.get(start + row.sourceRow() - 1).path("sourceRow").asInt());
+                item.set("issues", mapper.valueToTree(row.issues())); item.set("notices", mapper.valueToTree(row.notices()));
+                if (row.issues().isEmpty()) ready++;
+            }
+        }
+        assertEquals(290, ready);
+        assertEquals(before, repository.count()); assertEquals(ordinaryBefore, ordinary.count());
+        assertTrue(report.valueStream().anyMatch(row -> row.path("sku").asText().equals("PF2600270") && row.path("issues").toString().contains("同批SKU")));
+        java.nio.file.Files.writeString(java.nio.file.Path.of(source).resolveSibling("backend-preview.json"), mapper.writeValueAsString(report));
+    }
     @Test void batchCreateUpdateNoopAndSparsePreservationWithFullTierReplacementAndAudit() {
         String a = sku(), b = sku(); long ordinaryBefore = ordinary.count();
         List<JsonNode> rows = List.of(row(a),row(b)); var p = service.preview(rows);
@@ -84,8 +108,15 @@ class FobPurchasePostgresIntegrationTest {
         var changed = new FobPurchaseService.Confirmation(List.of(row(a).put("priceRaw","25")),approved.expected(),approved.digest());
         assertThrows(AppException.class,()->service.confirm(changed)); assertFalse(repository.existsById(a));
     }
-    @Test void sameBatchDuplicatesKeepFirstAndBatchLimitIsEnforced() {
-        String a = sku(); List<JsonNode> rows = List.of(row(a),row(a).put("priceRaw","999"));
+    @Test void identicalDuplicatesAreSkippedButConflictsBlockTheEntireBatch() {
+        String conflict = sku(), other = sku();
+        List<JsonNode> conflicting = List.of(row(conflict), row(conflict).put("priceRaw", "999"), row(other));
+        var preview = service.preview(conflicting);
+        assertFalse(preview.canSave()); assertTrue(preview.rows().getFirst().issues().getFirst().contains("同批SKU"));
+        assertThrows(AppException.class, () -> service.confirm(confirmation(conflicting)));
+        assertFalse(repository.existsById(conflict)); assertFalse(repository.existsById(other));
+        assertTrue(service.history(conflict).isEmpty());
+        String a = sku(); List<JsonNode> rows = List.of(row(a),row(a));
         var result = service.confirm(confirmation(rows)); assertEquals(1,result.added()); assertEquals(1,result.skipped());
         assertEquals(16,service.get(a).path("parsed").path("priceTiers").get(0).path("unitPriceCny").asInt());
         assertThrows(AppException.class,()->service.preview(Collections.nCopies(101,row(sku()))));

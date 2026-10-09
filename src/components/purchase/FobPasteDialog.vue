@@ -68,8 +68,8 @@ function close() {
   <Teleport to="body">
     <div class="fob-overlay" @keydown.esc.stop.prevent="close">
       <section class="fob-dialog" role="dialog" aria-modal="true" aria-labelledby="fob-paste-title">
-        <header><div><h2 id="fob-paste-title">FOB 粘贴更新</h2><p>直接复制国际站批发采购表中的一行或多行。已有SKU更新，空白保留原值。</p></div><button :disabled="busy" aria-label="关闭FOB粘贴" @click="close">×</button></header>
-        <div class="instructions">支持原表整行、从SKU至运费列的连续区域，或带表头的部分列。最多100行，可分次追加。单元格内的多档采购价会完整保留；图片不会通过文字粘贴导入。</div>
+        <header><div><h2 id="fob-paste-title">FOB 粘贴新增/更新</h2><p>直接复制国际站批发采购表中的一行或多行。已有FOB SKU更新，空白保留原值。</p></div><button :disabled="busy" aria-label="关闭FOB粘贴" @click="close">×</button></header>
+        <div class="instructions">与采购粘贴新增一致，自动过滤图片，只导入文字。支持原表整行、从SKU至运费列的连续区域，或带表头的部分列。最多100行，可分次追加；单元格内的多档采购价自动解析并完整保留原文。</div>
         <div class="fob-content">
           <template v-if="!pending">
             <textarea class="paste-target" aria-label="FOB表格粘贴区域" placeholder="点击这里，按 Ctrl + V 粘贴 Excel/WPS 商品行" :disabled="busy" @paste="paste" @input="($event.target as HTMLTextAreaElement).value=''" />
@@ -78,7 +78,7 @@ function close() {
           </template>
           <section v-else aria-label="FOB识别和变更预览">
             <h3>新增 {{ counts.added }} 条 · 更新 {{ counts.updated }} 条 · 无变化 {{ counts.unchanged }} 条</h3>
-            <p v-if="pending.preview.skipped.length" class="warning">同批重复保留第一条，跳过：{{ pending.preview.skipped.map(r => `第${r.sourceRow}行 ${r.sku}`).join('、') }}</p>
+            <p v-if="pending.preview.skipped.length" class="warning">同批内容完全相同的重复行已跳过：{{ pending.preview.skipped.map(r => `第${r.sourceRow}行 ${r.sku}`).join('、') }}</p>
             <article v-for="row in pending.preview.rows" :key="row.sku" :class="{ invalid: row.issues.length }">
               <h4>第{{ row.sourceRow }}行 · {{ row.sku }} · {{ row.action === 'create' ? '新增' : row.action === 'update' ? '更新' : '无变化' }} <span class="fob-source">FOB数据</span></h4>
               <p v-for="issue in row.issues" :key="issue" class="error">{{ issue }}</p>
