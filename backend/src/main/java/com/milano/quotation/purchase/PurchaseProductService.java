@@ -283,7 +283,7 @@ public class PurchaseProductService {
         var link=new PurchaseProductImage();link.id=UUID.randomUUID();link.productId=productId;link.assetId=assetId;link.imageType=type;link.sortOrder=0;images.save(link);
     }
 
-    private JsonNode view(PurchaseProduct row) {
+    JsonNode view(PurchaseProduct row) {
         var object = (ObjectNode) row.payload.deepCopy(); object.put("sku", row.sku); object.put("_version", row.version);
         applyDerivedState(object,row.catalogState,row.quoteReady);object.put("_updatedAt", row.updatedAt.toString()); return object;
     }

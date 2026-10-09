@@ -4,11 +4,14 @@ import { createApp, nextTick, type App } from 'vue'
 import PurchaseDataWorkspace from './PurchaseDataWorkspace.vue'
 import { normalizePurchaseRecord } from '@/data/purchaseStore'
 import { authState, roleDefinitions } from '@/data/authStore'
+import type { FobCatalogRecord } from '@/services/purchaseCatalog'
 
-const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn()}))
+const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn(),fob:vi.fn(),fobHistory:vi.fn()}))
+vi.mock('@/services/fobPurchase',async original=>({...await original<object>(),loadFobRecord:mocks.fob,loadFobHistory:mocks.fobHistory}))
 vi.mock('@/services/purchaseHistory',async original=>({...await original<object>(),updatePurchaseProduct:mocks.update,loadPurchaseHistory:mocks.history}))
 vi.mock('./PurchaseSalesPanel.vue', () => ({ default: { template: '<section />' } }))
-vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseProductPage:mocks.page,loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save}))
+vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save}))
+vi.mock('@/services/purchaseCatalog',()=>({loadPurchaseCatalogPage:mocks.page}))
 let app:App
 const row=(sku:string)=>normalizePurchaseRecord({sku,weightG:100,minOrderQty:1,purchasePriceCny:10,_version:5})
 const page=(sku:string)=>({items:[row(sku)],total:1,totalPages:1,page:0,size:10})
@@ -17,6 +20,36 @@ async function mount(){const host=document.createElement('div');document.body.ap
 async function search(text:string){const input=document.querySelector('.toolbar input') as HTMLInputElement;input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()}
 beforeEach(()=>{vi.useFakeTimers();mocks.page.mockResolvedValue(page('INITIAL'));mocks.stats.mockResolvedValue({total:1,ready:1,pending:0,generatedSku:0})})
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers();authState.current=null;authState.permissions=[]})
+
+const fobRow=(sku:string):FobCatalogRecord=>({sku,dataSource:'fob',category:'鞋',weightRaw:'110',priceRaw:'1件23.99;100件19.5;300件19.5;500件19;1000件19',freightRaw:'100件预拍74',
+  parsed:{minOrderQty:1,orderMultiple:1,priceTiers:[1,100,300,500,1000].map((minQty,i)=>({minQty,maxQty:[99,299,499,999,null][i]!,unitPriceCny:[23.99,19.5,19.5,19,19][i]!,unit:'件'})),freight:{quantity:100,totalFreightCny:74,unitFreightCny:0.74,estimated:true,basis:'100件总运费74÷100'}}})
+it('shows both sources for the same SKU, retains five FOB tiers, and routes actions by source',async()=>{
+  authState.current={id:'buyer',account:'buyer',name:'采购',role:'purchase',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['purchase']
+  const fob=fobRow('FL2600088'),ordinary=normalizePurchaseRecord({...row(fob.sku),dataSource:'legacy_2026',singleFreightCny:5})
+  mocks.page.mockResolvedValue({items:[ordinary,fob],total:2,totalPages:1,page:0,size:10});mocks.fob.mockResolvedValue(fob);mocks.fobHistory.mockResolvedValue([])
+  await mount()
+  const normal=document.querySelector('tr[data-source="legacy_2026"]')!,fo=document.querySelector('tr[data-source="fob"]')!
+  expect(normal.textContent).toContain('2026旧数据');expect(fo.textContent).toContain('FOB数据');expect(fo.textContent).toContain('第5档')
+  expect(fo.textContent).toContain('预估/预拍');expect(fo.textContent).not.toContain('删除');expect(fo.textContent).not.toContain('停用')
+  fo.querySelector<HTMLButtonElement>('button')!.click();await flush()
+  expect(document.querySelector('[aria-labelledby="fob-detail-title"]')?.textContent).toContain('FOB资料详情')
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭FOB详情"]')!.click();await flush()
+  Array.from(fo.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent==='粘贴更新 / 修改记录')!.click();await flush();await flush()
+  expect(mocks.fob).toHaveBeenCalledWith(fob.sku);expect(mocks.fobHistory).toHaveBeenCalledWith(fob.sku)
+  expect(document.querySelector<HTMLDetailsElement>('details.lookup')?.open).toBe(true)
+  expect(mocks.update).not.toHaveBeenCalled();expect(mocks.save).not.toHaveBeenCalled()
+})
+
+it('does not overwrite a FOB row when creating the ordinary product with the same SKU',async()=>{
+  mocks.page.mockResolvedValue({items:[fobRow('PAIR-1')],total:1,totalPages:1,page:0,size:10})
+  await mount();Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.includes('新增采购资料'))!.click();await flush()
+  const input=Array.from(document.querySelectorAll('.form-grid label')).find(l=>l.textContent?.includes('SKU'))!.querySelector('input')!
+  input.value='PAIR-1';input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick();mocks.save.mockResolvedValueOnce([row('PAIR-1')])
+  Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='保存资料')!.click();await flush()
+  expect(mocks.save).toHaveBeenCalledTimes(1)
+  expect(document.querySelectorAll('tr[data-sku="PAIR-1"]')).toHaveLength(2)
+  expect(document.querySelector('tr[data-source="fob"]')?.textContent).toContain('第5档')
+})
 
 it.each(roleDefinitions)('allows FOB paste maintenance for procurement and administrators: $name',async role=>{
   authState.current={id:role.key,account:role.key,name:role.name,role:role.key,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=[...role.permissions]
@@ -87,6 +120,13 @@ it('renders the page even when the independent statistics request fails',async()
   await mount()
   expect(document.querySelector('table')?.textContent).toContain('INITIAL')
   expect(document.body.textContent).toContain('统计不可用')
+})
+
+it('does not present old SKU results as matches after a failed combined search',async()=>{
+  await mount();mocks.page.mockRejectedValueOnce(new Error('查询失败'))
+  await search('DIFFERENT-SKU');await vi.advanceTimersByTimeAsync(250);await flush()
+  expect(document.querySelector('table')).toBeNull();expect(document.body.textContent).toContain('查询失败')
+  expect(document.body.textContent).not.toContain('INITIAL')
 })
 
 it('reloads the last available page after concurrent deletions shrink the page count',async()=>{

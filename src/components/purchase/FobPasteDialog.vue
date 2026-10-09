@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { FOB_COLUMNS, readFobClipboard, type FobPatch } from '@/data/fobClipboard'
 import { previewFobPaste, confirmFobPaste, loadFobRecord, loadFobHistory, type FobPreview, type FobRecord, type FobHistory } from '@/services/fobPurchase'
 import type { PasteSavedCounts } from '@/services/purchasePaste'
 
+const props = defineProps<{ initialSku?: string }>()
 const emit = defineEmits<{ close: []; saved: [counts: PasteSavedCounts] }>()
 const rows = ref<FobPatch[]>([])
 const pending = ref<{ rows: FobPatch[]; preview: FobPreview } | null>(null)
 const busy = ref(false), message = ref(''), confirmClose = ref(false), lookupSku = ref('')
 const savedRecord = ref<FobRecord | null>(null), history = ref<FobHistory[]>([])
+onMounted(() => { if (props.initialSku) { lookupSku.value = props.initialSku; void lookup() } })
 const counts = computed(() => ({ added: pending.value?.preview.rows.filter(r => r.action === 'create').length || 0,
   updated: pending.value?.preview.rows.filter(r => r.action === 'update').length || 0,
   unchanged: pending.value?.preview.rows.filter(r => r.action === 'unchanged').length || 0 }))
@@ -91,7 +93,7 @@ function close() {
               <p v-else>原文无变化，相同内容不重复生成修改记录。</p>
             </article>
           </section>
-          <details v-if="!pending" class="lookup"><summary>查询已保存的FOB资料与更新记录</summary><div><input v-model="lookupSku" aria-label="查询已保存FOB SKU" placeholder="输入 SKU" :disabled="busy" @keyup.enter="lookup"><button :disabled="busy || !lookupSku.trim()" @click="lookup">查询已存资料</button></div><article v-if="savedRecord"><h4>{{ savedRecord.sku }} · {{ savedRecord.updatedAt }} <span class="fob-source">FOB数据</span></h4><p>采购价原文</p><pre>{{ savedRecord.priceRaw }}</pre><p>运费原文</p><pre>{{ savedRecord.freightRaw }}</pre><p v-if="savedRecord.parsed">已保存 {{ savedRecord.parsed.priceTiers.length }} 档 · {{ savedRecord.parsed.freight.basis }}＝¥{{ savedRecord.parsed.freight.unitFreightCny }}/单位</p><details v-for="item in history" :key="item.createdAt"><summary>{{ item.createdAt }} · {{ item.actorAccount }}</summary><p v-for="(c,i) in item.changes" :key="i">{{ c.label }}：{{ c.before || '（空）' }} → {{ c.after }}</p></details></article></details>
+          <details v-if="!pending" class="lookup" :open="!!initialSku"><summary>查询已保存的FOB资料与更新记录</summary><div><input v-model="lookupSku" aria-label="查询已保存FOB SKU" placeholder="输入 SKU" :disabled="busy" @keyup.enter="lookup"><button :disabled="busy || !lookupSku.trim()" @click="lookup">查询已存资料</button></div><article v-if="savedRecord"><h4>{{ savedRecord.sku }} · {{ savedRecord.updatedAt }} <span class="fob-source">FOB数据</span></h4><p>采购价原文</p><pre>{{ savedRecord.priceRaw }}</pre><p>运费原文</p><pre>{{ savedRecord.freightRaw }}</pre><p v-if="savedRecord.parsed">已保存 {{ savedRecord.parsed.priceTiers.length }} 档 · {{ savedRecord.parsed.freight.basis }}＝¥{{ savedRecord.parsed.freight.unitFreightCny }}/单位</p><details v-for="item in history" :key="item.createdAt"><summary>{{ item.createdAt }} · {{ item.actorAccount }}</summary><p v-for="(c,i) in item.changes" :key="i">{{ c.label }}：{{ c.before || '（空）' }} → {{ c.after }}</p></details></article></details>
         </div>
         <p v-if="message" class="message" role="status">{{ message }}</p>
         <footer><span>本批次 {{ rows.length }} 行 · 确认后统一保存</span><div><button :disabled="busy" @click="close">{{ pending ? '返回编辑' : '关闭' }}</button><button v-if="pending" class="primary" :disabled="busy || !pending.preview.canSave" @click="save">{{ busy ? '正在保存…' : '确认全部保存' }}</button><button v-else class="primary" :disabled="busy || !rows.length" @click="preview">{{ busy ? '正在校验…' : '预览识别与变更' }}</button></div></footer>

@@ -43,6 +43,54 @@ class FobPurchasePostgresIntegrationTest {
     MockMvc mvc;
     @BeforeEach void setup() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
     String sku() { return "FB-" + UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT); }
+    void catalogPair(String sku) {
+        service.confirm(confirmation(List.of(row(sku))));
+        jdbc.sql("""
+            insert into purchase_product(id,sku,payload,version,created_at,updated_at,catalog_state,quote_ready)
+            values(:id,:sku,cast(:payload as jsonb),3,now(),now(),'ready',true)
+            """).param("id",UUID.randomUUID()).param("sku",sku)
+                .param("payload","{\"sku\":\""+sku+"\",\"dataSource\":\"legacy_2026\",\"purchasePriceCny\":21.5,\"weightG\":80,\"singleFreightCny\":4}")
+                .update();
+    }
+    JsonNode catalog(String query,int page,int size) throws Exception {
+        return mapper.readTree(mvc.perform(get("/api/v1/purchase-catalog").param("q",query).param("page",String.valueOf(page)).param("size",String.valueOf(size)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+    }
+    @Test void combinedCatalogKeepsBothSourcesAllTiersAndStablePaginationWithoutWrites() throws Exception {
+        String sku=sku();catalogPair(sku);
+        var before=service.get(sku);long normalCount=ordinary.count(),fobCount=repository.count();
+        var page=catalog(" "+sku.toLowerCase(Locale.ROOT)+" ",0,10);
+        assertEquals(2,page.path("total").asInt());assertEquals(2,page.path("items").size());
+        var records=new HashMap<String,JsonNode>();for(var item:page.path("items")) records.put(item.path("dataSource").asText(),item);
+        assertEquals(Set.of("legacy_2026","fob"),records.keySet());
+        assertEquals(21.5,records.get("legacy_2026").path("purchasePriceCny").asDouble());
+        assertEquals(5,records.get("fob").path("parsed").path("priceTiers").size());
+        assertEquals(3,records.get("legacy_2026").path("_version").asInt());
+        var first=catalog(sku,0,1);var second=catalog(sku,1,1);var empty=catalog(sku,2,1);
+        assertEquals(2,first.path("totalPages").asInt());assertEquals(2,empty.path("total").asInt());assertTrue(empty.path("items").isEmpty());
+        assertNotEquals(first.path("items").get(0).path("dataSource"),second.path("items").get(0).path("dataSource"));
+        assertEquals(before,service.get(sku));assertEquals(normalCount,ordinary.count());assertEquals(fobCount,repository.count());
+    }
+    @Test void combinedCatalogFindsFobOnlyRowsAndMatchesBothStoresOnPartialSearch() throws Exception {
+        String sku=sku();catalogPair(sku);String only=sku+"-ONLY";service.confirm(confirmation(List.of(row(only))));
+        assertEquals(1,catalog(only,0,10).path("total").asInt());
+        assertEquals("fob",catalog(only,0,10).path("items").get(0).path("dataSource").asText());
+        assertEquals(2,catalog(sku,0,10).path("total").asInt(),"Exact SKU takes precedence over prefixed SKUs");
+        assertEquals(3,catalog(sku.substring(0,sku.length()-1),0,10).path("total").asInt());
+        assertEquals(0,catalog(sku+"-MISSING",0,10).path("total").asInt());
+        assertTrue(catalog("",0,10).path("total").asLong()>=3);
+    }
+    @Test void combinedCatalogCannotBypassFobOrProcurementReadPermissions() throws Exception {
+        String sku=sku();catalogPair(sku);
+        mvc.perform(get("/api/v1/purchase-catalog").param("q",sku).with(user("buyer").authorities(
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_PURCHASE"),new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_purchase"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(2));
+        mvc.perform(get("/api/v1/purchase-catalog").param("q",sku).with(user("custom").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_purchase"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1)).andExpect(jsonPath("$.data.items[0].dataSource").value("legacy_2026"));
+        mvc.perform(get("/api/v1/purchase-catalog").with(user("employee").authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_quote"))))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/purchase-catalog").with(anonymous())).andExpect(status().isUnauthorized());
+    }
     ObjectNode row(String sku) { return mapper.createObjectNode().put("sku",sku).put("weightRaw","80").put("moqRaw","1")
             .put("priceRaw","单价16;100起单价13.8;300单价13;500单价13;1000单价12.8").put("freightRaw","100件30;200件40").put("notes","保留备注"); }
     FobPurchaseService.Confirmation confirmation(List<JsonNode> rows) {

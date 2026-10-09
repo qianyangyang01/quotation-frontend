@@ -2,7 +2,7 @@
 import ShimoSyncPanel from './ShimoSyncPanel.vue'
 import type { PasteSavedCounts } from '@/services/purchasePaste'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { deletePurchaseProduct, loadPurchaseDeletionCheck, loadPurchaseProduct, loadPurchaseProductPage, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseFreightChoices, purchaseQuoteBlockingMessage, purchaseSourceLabel, setPurchaseProductCatalogState, upsertPurchaseProducts, type PurchaseDeletionCheck, type PurchaseProductRecord } from '@/data/purchaseStore'
+import { deletePurchaseProduct, loadPurchaseDeletionCheck, loadPurchaseProduct, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseFreightChoices, purchaseQuoteBlockingMessage, purchaseSourceLabel, setPurchaseProductCatalogState, upsertPurchaseProducts, type PurchaseDeletionCheck, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { cancelPurchaseImportJob, confirmPurchaseImportJob, createPurchaseImportJob, loadPurchaseImportDuplicateGroups, loadPurchaseImportJob, loadPurchaseImportJobs, loadPurchaseImportRows, purchaseImportErrorsUrl, retryPurchaseImportJob, rollbackPurchaseImportJob, uploadPurchaseImagePart, type PurchaseImportDuplicateGroup, type PurchaseImportJob, type PurchaseImportProfile, type PurchaseImportRowView } from '@/services/purchaseAsyncImports'
 import { didPurchaseImportDataChange, shouldPollPurchaseImportJobs, shouldRefreshPurchaseImportDetails } from '@/services/purchaseImportPolling'
 import { purchaseImportConfirmationState } from '@/services/purchaseImportConfirmation'
@@ -13,6 +13,9 @@ import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
 import FobPasteDialog from './FobPasteDialog.vue'
+import FobCatalogRow from './FobCatalogRow.vue'
+import FobCatalogDetail from './FobCatalogDetail.vue'
+import { loadPurchaseCatalogPage, type PurchaseCatalogRecord, type FobCatalogRecord } from '@/services/purchaseCatalog'
 import { canMaintainFob } from '@/data/fobAccess'
 import PurchaseHistoryDialog from './PurchaseHistoryDialog.vue'
 import PurchaseSalesPanel from './PurchaseSalesPanel.vue'
@@ -27,11 +30,14 @@ async function editSalesSku(sku: string) {
 
 const showPasteDialog = ref(false)
 const showFobPasteDialog = ref(false)
-function fobPasteSaved(counts: PasteSavedCounts) { toast(`FOB资料：新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条`) }
+const fobLookupSku = ref('')
+const fobDetail = ref<FobCatalogRecord | null>(null)
+function openFob(sku = '') { fobLookupSku.value = sku; showFobPasteDialog.value = true }
+function fobPasteSaved(counts: PasteSavedCounts) { toast(`FOB资料：新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条`); void reload() }
 function pasteSaved(counts: PasteSavedCounts) { toast(`采购资料：新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条`); reload() }
 
 const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.xlsx'
-const records = ref<PurchaseProductRecord[]>([])
+const records = ref<PurchaseCatalogRecord[]>([])
 const loading = ref(true)
 const search = ref('')
 const detail = ref<PurchaseProductRecord | null>(null)
@@ -85,7 +91,7 @@ let jobPollTimer = 0
 const filtered = computed(() => records.value)
 const readyCount = computed(() => purchaseStats.value.ready)
 const pendingCount = computed(() => purchaseStats.value.pending)
-const tieredCount = computed(() => records.value.filter(item => item.priceTiers.length > 1).length)
+const tieredCount = computed(() => records.value.filter(item => (item.dataSource === 'fob' ? item.parsed?.priceTiers.length ?? 0 : item.priceTiers.length) > 1).length)
 const totalPages = computed(() => Math.max(1, serverTotalPages.value))
 const pageStart = computed(() => totalRecords.value ? (currentPage.value - 1) * pageSize.value : 0)
 const pageEnd = computed(() => Math.min(pageStart.value + records.value.length, totalRecords.value))
@@ -152,12 +158,12 @@ async function readPage(refreshStatistics:boolean) {
   loading.value = true
   if(refreshStatistics)void refreshStats()
   try {
-    const page=await loadPurchaseProductPage(search.value.trim(),currentPage.value-1,pageSize.value,controller.signal)
+    const page=await loadPurchaseCatalogPage(search.value.trim(),currentPage.value-1,pageSize.value,controller.signal)
     if(request!==pageRequest)return
     if(currentPage.value>Math.max(1,page.totalPages)){currentPage.value=Math.max(1,page.totalPages);void reload(false);return}
     records.value=page.items;totalRecords.value=page.total;serverTotalPages.value=page.totalPages
   }
-  catch (error) { if(!controller.signal.aborted&&request===pageRequest)toast(error instanceof Error ? error.message : '采购数据读取失败') }
+  catch (error) { if(!controller.signal.aborted&&request===pageRequest){records.value=[];totalRecords.value=0;serverTotalPages.value=1;toast(error instanceof Error ? error.message : '采购数据读取失败')} }
   finally { if(request===pageRequest)loading.value = false }
 }
 onMounted(() => { void reload();statsTimer=window.setInterval(()=>{if(!document.hidden)void refreshStats()},60000) })
@@ -316,7 +322,7 @@ async function saveEditor() {
   if (!editor.value||editorSaving.value) return
   const sku = editor.value.sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!sku) { toast('请填写 SKU'); return }
-  if (records.value.some(item => item.sku === sku && item.sku !== editingOriginalSku.value)) { toast(`SKU ${sku} 已存在`); return }
+  if (records.value.some(item => item.dataSource !== 'fob' && item.sku === sku && item.sku !== editingOriginalSku.value)) { toast(`SKU ${sku} 已存在`); return }
   const wasGenerated = editor.value.skuOrigin === 'system'
   const pendingTemplate = editor.value.catalogState === 'pending_template' && Boolean(editingOriginalSku.value)
   if (pendingTemplate && sku !== editingOriginalSku.value) { toast('模板SKU转正式请使用“确认转正式”按钮'); return }
@@ -332,7 +338,7 @@ async function saveEditor() {
     if(saved&&!search.value.trim()&&currentPage.value===1&&!renamed){
       // The server response contains the authoritative version, readiness and costs.
       window.clearTimeout(searchTimer);invalidatePage();loading.value=false
-      records.value=[saved,...records.value.filter(item=>item.sku!==saved.sku)].slice(0,pageSize.value)
+      records.value=[saved,...records.value.filter(item=>item.dataSource==='fob'||item.sku!==saved.sku)].slice(0,pageSize.value)
       if(isNew)totalRecords.value++
       serverTotalPages.value=Math.ceil(totalRecords.value/pageSize.value)
       void refreshStats()
@@ -397,7 +403,8 @@ const detailFields = computed(() => detail.value ? [
 
 <template>
   <PurchasePasteDialog v-if="showPasteDialog" @close="showPasteDialog=false" @saved="pasteSaved" />
-  <FobPasteDialog v-if="canMaintainFob && showFobPasteDialog" @close="showFobPasteDialog=false" @saved="fobPasteSaved" />
+  <FobCatalogDetail v-if="fobDetail" :record="fobDetail" @close="fobDetail=null" />
+  <FobPasteDialog v-if="canMaintainFob && showFobPasteDialog" :initial-sku="fobLookupSku" @close="showFobPasteDialog=false" @saved="fobPasteSaved" />
   <PurchaseHistoryDialog v-if="historySku" :sku="historySku" @close="historySku=''" />
   <section class="purchase-heading">
     <div><p>PURCHASE DATA CENTER</p><h1>采购资料维护</h1><span>按标准 Excel 模板批量导入并维护采购商品资料。</span></div>
@@ -405,7 +412,7 @@ const detailFields = computed(() => detail.value ? [
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
       <button class="outline" :class="{ active:showSupplierRecords }" @click="showSupplierRecords=true">供应商</button>
       <button class="new-import" @click="showPasteDialog=true">粘贴新增</button>
-      <button v-if="canMaintainFob" class="new-import" @click="showFobPasteDialog=true">FOB 粘贴更新</button>
+      <button v-if="canMaintainFob" class="new-import" @click="openFob()">FOB 粘贴更新</button>
       <button class="new-import" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='standard' ? `${uploadProgress.percent}%` : '新数据导入' }}</button>
       <button class="legacy-import" :disabled="asyncUploading" @click="legacyFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='legacy-2026' ? `${uploadProgress.percent}%` : '旧数据导入' }}</button>
       <button class="outline" @click="showTaskCenter=true">导入任务</button>
@@ -423,15 +430,15 @@ const detailFields = computed(() => detail.value ? [
 
   <PurchaseSalesPanel :refresh-key="salesRefreshKey" @edit="editSalesSku" />
   <section class="stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-    <article><small>采购资料</small><b>{{ purchaseStats.total }}</b><span>报价服务器数据库</span></article>
-    <article><small>可参与报价</small><b>{{ readyCount }}</b><span>关键成本资料完整</span></article>
-    <article><small>待补充资料</small><b class="orange">{{ pendingCount }}</b><span>空值显示“暂无数据”</span></article>
+    <article><small>普通采购资料</small><b>{{ purchaseStats.total }}</b><span>新数据 / 2026旧数据</span></article>
+    <article><small>普通采购可报价</small><b>{{ readyCount }}</b><span>关键成本资料完整</span></article>
+    <article><small>普通采购待补充</small><b class="orange">{{ pendingCount }}</b><span>空值显示“暂无数据”</span></article>
   </section>
 
   <section class="toolbar">
-    <label>⌕ <input v-model="search" placeholder="搜索 SKU、类别、报价人、尺码、颜色或工厂"></label>
+    <label>⌕ <input v-model="search" aria-label="搜索普通采购与FOB资料" placeholder="搜索 SKU、类别、报价人、尺码、颜色或工厂"></label>
     <button @click="resetFilters">重置筛选</button>
-    <span>共 {{ totalRecords }} 条 · 当前页 {{ tieredCount }} 条含阶梯价<span v-if="totalRecords"> · 当前 {{ pageStart + 1 }}–{{ pageEnd }} 条</span></span>
+    <span>普通采购与FOB · 共 {{ totalRecords }} 条 · 当前页 {{ tieredCount }} 条含阶梯价<span v-if="totalRecords"> · 当前 {{ pageStart + 1 }}–{{ pageEnd }} 条</span></span>
   </section>
 
   <section class="table-card">
@@ -440,7 +447,9 @@ const detailFields = computed(() => detail.value ? [
     <table v-else>
       <colgroup><col class="col-product"><col class="col-price"><col class="col-weight"><col class="col-freight"><col class="col-description"><col class="col-status"><col class="col-actions"></colgroup>
       <thead><tr><th>类别 / SKU</th><th>采购阶梯价格</th><th>重量与尺寸</th><th>国内运费</th><th>尺码 / 颜色</th><th>资料状态</th><th>操作</th></tr></thead>
-      <tbody><tr v-for="record in pagedRecords" :key="record.sku">
+      <tbody><template v-for="record in pagedRecords" :key="`${record.dataSource}:${record.sku}`">
+      <FobCatalogRow v-if="record.dataSource==='fob'" :record="record" :can-maintain="canMaintainFob" @detail="fobDetail=record" @maintain="openFob(record.sku)" />
+      <tr v-else :data-sku="record.sku" :data-source="record.dataSource">
         <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ record.category || '暂无数据' }}</b><small class="product-sku">{{ record.sku }}</small><em class="source-badge" :class="{legacy:record.dataSource==='legacy_2026'}">{{ purchaseSourceLabel(record) }}</em><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
         <td><div v-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
         <td class="weight-cell"><b>{{ value(record.weightG,' g') }}</b><small>{{ dimensionSummary(record) }}</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
@@ -448,7 +457,7 @@ const detailFields = computed(() => detail.value ? [
         <td class="description-cell"><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small><small>实物图：{{ record.physicalImage ? '已上传' : '暂无数据' }}</small></td>
         <td><em :class="{ ready:record.quoteReady, warn:!record.quoteReady }">{{ record.status }}</em><small>库存：{{ record.stockStatus || '暂无数据' }}</small><small v-if="!record.quoteReady" class="quote-blocked">{{ purchaseQuoteBlockingMessage(record) }}</small></td>
         <td class="actions"><button @click="detail=record">查看详情</button><button @click="openEditor(record)">编辑</button><button @click="historySku=record.sku">修改记录</button><button v-if="record.catalogState!=='disabled'" @click="requestCatalogState(record,'disabled')">停用</button><button v-else @click="requestCatalogState(record,'ready')">启用</button><button class="danger-link" @click="requestDelete(record)">删除</button></td>
-      </tr></tbody>
+      </tr></template></tbody>
     </table>
     <footer v-if="totalRecords" class="pagination" aria-label="采购资料分页">
       <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
