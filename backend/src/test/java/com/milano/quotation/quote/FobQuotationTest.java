@@ -16,10 +16,18 @@ class FobQuotationTest {
                "priceTiers":[{"minQty":1,"maxQty":null,"unitPriceCny":7.2,"unit":"件"}]}},
            "sheet":{"title":"JerryFulfillment Quote Sheet","agent":"销售","date":"9 Oct 2026","whatsapp":"","columnOrder":["number","sku","prices"],
              "quantityLabels":["With declaration","Without declaration"],"notes":["编辑后的说明"],"rows":[
-              {"key":"FOB-SAVE-0","prices":[1.69,1.72]},{"key":"FOB-SAVE-1","prices":[1.35,1.37]}]}}}
+              {"key":"FOB-SAVE-0","prices":[1.52,1.55]},{"key":"FOB-SAVE-1","prices":[1.35,1.37]}]}}}
           """);
     }
     static ObjectNode calculate(ObjectNode input) {return FobQuotation.calculate(input,(ObjectNode)input.path("fob").path("product"),new BigDecimal("6.7"));}
+    @Test void newQuotesRejectStaleTwoYuanSurchargePrices() {
+        var in=input();
+        ((ObjectNode)in.at("/fob/sheet/rows/0")).putArray("prices").add(1.69).add(1.72);
+        assertThrows(RuntimeException.class,()->calculate(in));
+        var out=calculate(input());
+        assertEquals("1.52",out.at("/fob/ranges/0/declaredUsd").asText());
+        assertEquals("1.55",out.at("/fob/ranges/0/undeclaredUsd").asText());
+    }
     @Test void savesExactSurchargeRangesAndCurrentPriceIndependentOfChannelRules() {
         var out=calculate(input());
         assertEquals("fob",out.path("quoteMode").asText());assertTrue(out.path("quoteOptions").isEmpty());assertFalse(out.has("country"));
@@ -31,7 +39,7 @@ class FobQuotationTest {
         var in=input();var sheet=(ObjectNode)in.at("/fob/sheet");
         sheet.putArray("columnOrder").add("prices").add("sku").add("number");
         sheet.putArray("quantityLabels").add("Without declaration").add("With declaration");
-        var rows=sheet.putArray("rows");rows.addObject().put("key","FOB-SAVE-1").putArray("prices").add(1.37).add(1.35);rows.addObject().put("key","FOB-SAVE-0").putArray("prices").add(1.72).add(1.69);
+        var rows=sheet.putArray("rows");rows.addObject().put("key","FOB-SAVE-1").putArray("prices").add(1.37).add(1.35);rows.addObject().put("key","FOB-SAVE-0").putArray("prices").add(1.55).add(1.52);
         var out=calculate(in);assertEquals("26+ pcs",out.at("/fob/sheet/rows/0/quantityRange").asText());assertEquals(1.37,out.at("/fob/sheet/rows/0/prices/0").asDouble());
     }
     @Test void rejectsForgedPricesMissingRowsDuplicateRowsInvalidQuantityAndPolicy() {
@@ -43,7 +51,7 @@ class FobQuotationTest {
     }
     @Test void quantityOnlyRetainsSmallOrderFeeAndMultipleConstraints() {
         var in=input();((ObjectNode)in.path("fob")).put("quantity",2).put("displayMode","quantity");((ArrayNode)in.at("/fob/sheet/rows")).remove(1);
-        var out=calculate(in);assertEquals("1.69",out.at("/fob/current/declaredUsd").asText());assertEquals(1,out.at("/fob/ranges").size());
+        var out=calculate(in);assertEquals("1.52",out.at("/fob/current/declaredUsd").asText());assertEquals(1,out.at("/fob/ranges").size());
         ((ObjectNode)in.at("/fob/product/parsed")).put("orderMultiple",10);assertThrows(RuntimeException.class,()->calculate(in));
     }
     @Test void newProcurementHasIndependentTierAndHundredPieceFreightMapping() {

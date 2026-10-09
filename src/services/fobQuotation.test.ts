@@ -25,7 +25,7 @@ it('keeps 2000 deterministic quantity boundaries consistent with customer sheet 
       expect([match[0]!.declaredUsd, match[0]!.undeclaredUsd]).toEqual([quote.declaredUsd, quote.undeclaredUsd])
       // Independent rational arithmetic, retaining 1/10000 yuan through tax and freight.
       const cost = BigInt(cents * 110 + freightHundredCents)
-      const extra = cost * BigInt(quantity) < 2000000n ? 20000n : 0n
+      const extra = cost * BigInt(quantity) < 2000000n ? 10000n : 0n
       const usdCents = ((cost + extra) * 1140n * 2n + 670000n) / (2n * 670000n)
       expect(quote.declaredUsd).toBe(`${usdCents / 100n}.${String(usdCents % 100n).padStart(2, '0')}`)
     }
@@ -34,13 +34,13 @@ it('keeps 2000 deterministic quantity boundaries consistent with customer sheet 
 it('shows final customer prices on each side of the surcharge boundary, respecting finite ranges and multiples', () => {
   const p = product(), policy = { scope: 'single-price', calculation: 'before-coefficient' } as const
   expect(fobSheetRows(p,6.7,policy)).toEqual([
-    {minQty:10,maxQty:25,unit:'件',declaredUsd:'1.69',undeclaredUsd:'1.72'},
+    {minQty:10,maxQty:25,unit:'件',declaredUsd:'1.52',undeclaredUsd:'1.55'},
     {minQty:26,maxQty:null,unit:'件',declaredUsd:'1.35',undeclaredUsd:'1.37'},
   ])
   p.parsed.orderMultiple=10;p.parsed.priceTiers[0]!.maxQty=39
   expect(fobSheetRows(p,6.7,policy).map(r=>[r.minQty,r.maxQty])).toEqual([[10,20],[30,30]])
   p.parsed.priceTiers[0]!.maxQty=20
-  expect(fobSheetRows(p,6.7,policy)).toEqual([{minQty:10,maxQty:20,unit:'件',declaredUsd:'1.69',undeclaredUsd:'1.72'}])
+  expect(fobSheetRows(p,6.7,policy)).toEqual([{minQty:10,maxQty:20,unit:'件',declaredUsd:'1.52',undeclaredUsd:'1.55'}])
   expect(()=>fobSheetRows(p,6.7,null)).toThrow('尚未确认')
 })
 it('matches the user single-price example with ceiling threshold and two quote types', () => {
@@ -48,8 +48,8 @@ it('matches the user single-price example with ceiling threshold and two quote t
   expect(rows[0]).toMatchObject({ taxIncludedCny: 7.92, costCny: 7.92, declaredUsd: '1.35', undeclaredUsd: '1.37', thresholdQty: 26 })
   const policy = { scope: 'single-price', calculation: 'before-coefficient' } as const
   expect(fobQuantityQuote(p, rows, '26', 6.7, policy)).toMatchObject({ extraCny: 0, declaredUsd: '1.35' })
-  expect(fobQuantityQuote(p, rows, '25', 6.7, policy)).toMatchObject({ extraCny: 2, declaredUsd: '1.69', undeclaredUsd: '1.72' })
-  expect(fobQuantityQuote(p, rows, '25', 6.7, { ...policy, calculation: 'after-coefficient' }).declaredUsd).toBe('1.65')
+  expect(fobQuantityQuote(p, rows, '25', 6.7, policy)).toMatchObject({ extraCny: 1, declaredUsd: '1.52', undeclaredUsd: '1.55' })
+  expect(fobQuantityQuote(p, rows, '25', 6.7, { ...policy, calculation: 'after-coefficient' }).declaredUsd).toBe('1.50')
   expect(() => fobQuantityQuote(p, rows, '9', 6.7, policy)).toThrow('起订量')
 })
 it('keeps every procurement tier and shares bulk freight, with no 0.05 rounding', () => {
@@ -61,7 +61,7 @@ it('keeps every procurement tier and shares bulk freight, with no 0.05 rounding'
   expect(rows[0]?.costCny).toBe(9.579)
   expect(fobQuantityQuote(p,rows,'200',6.7,{scope:'single-price',calculation:'before-coefficient'}).row.purchaseCny).toBe(7.13)
   expect(fobQuantityQuote(p,rows,'1',6.7,{scope:'single-price',calculation:'before-coefficient'}).extraCny).toBe(0)
-  expect(fobQuantityQuote(p,rows,'1',6.7,{scope:'all',calculation:'before-coefficient'}).extraCny).toBe(2)
+  expect(fobQuantityQuote(p,rows,'1',6.7,{scope:'all',calculation:'before-coefficient'}).extraCny).toBe(1)
   p.parsed.priceTiers = [16,13.8,13,13,12.8].map((v,i) => ({ minQty: [1,100,300,500,1000][i]!, maxQty:[99,299,499,999,null][i]!, unit:'件', unitPriceCny:v }))
   expect(fobTierQuotes(p,6.7)).toHaveLength(5)
 })
@@ -84,7 +84,7 @@ it('does not charge the surcharge at exactly 200 and uses unrounded costs for th
   expect(fobQuantityQuote(p,rows,'20',6.7,{scope:'all',calculation:'before-coefficient'}).extraCny).toBe(0)
   p.parsed.freight.unitFreightCny=9.99999;rows=fobTierQuotes(p,6.7)
   expect(rows[0]?.thresholdQty).toBe(21)
-  expect(fobQuantityQuote(p,rows,'20',6.7,{scope:'all',calculation:'before-coefficient'}).extraCny).toBe(2)
+  expect(fobQuantityQuote(p,rows,'20',6.7,{scope:'all',calculation:'before-coefficient'}).extraCny).toBe(1)
 })
 it('uses standard untaxed tiers and explicit hundred-piece freight without importing its tax point', () => {
   const p = fromStandardPurchase(standard()), rows = fobTierQuotes(p,6.7)

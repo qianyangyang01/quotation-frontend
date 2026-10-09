@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
-import { fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
+import { FOB_SMALL_ORDER_EXTRA_CNY, fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
 
 const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {sku:string;source:FobSourceMode;customer:string;quantity:number} }>()
 const emit = defineEmits<{ status: [value: string]; retryFinance: [] }>()
@@ -38,7 +38,7 @@ const selected = computed(() => {
   catch (e) { return { result: null, error: e instanceof Error ? e.message : '数量无效' } }
 })
 const policyText = computed(() => !props.policy ? '不足200元的加价口径待确认；基础阶梯价可查看，低于门槛的最终报价暂不生成。'
-  : `${props.policy.scope === 'single-price' ? '仅单一采购价商品' : '所有商品'}：数量×对应成本价不足200元时，每件加2元，${props.policy.calculation === 'before-coefficient' ? '加在成本上后乘系数' : '在乘系数后加收'}，再除以汇率。`)
+  : `${props.policy.scope === 'single-price' ? '仅单一采购价商品' : '所有商品'}：数量×对应成本价不足200元时，每件加${FOB_SMALL_ORDER_EXTRA_CNY}元，${props.policy.calculation === 'before-coefficient' ? '加在成本上后乘系数' : '在乘系数后加收'}，再除以汇率。`)
 function openQuery() { skuInput.value?.focus(); skuInput.value?.select() }
 async function openRules() { rulesOpen.value = true; await nextTick(); rulesElement.value?.scrollIntoView?.({ block: 'nearest' }) }
 defineExpose({ openQuery, openRules })
@@ -46,7 +46,7 @@ function quantityRange(min: number, max: number | null, unit: string) { return m
 async function copy() {
   if (!product.value || !selected.value.result) return
   const p = product.value, quote = selected.value.result
-  const text = `FOB（批发）报价\nSKU\t数量\t报关 USD/${quote.row.unit}\t不报关 USD/${quote.row.unit}\n${p.sku}\t${quote.quantity}\t${quote.declaredUsd}\t${quote.undeclaredUsd}\n汇率：${props.rate} CNY/USD；${quote.extraCny ? '已含每件2元小额订单加价' : '无小额订单加价'}`
+  const text = `FOB（批发）报价\nSKU\t数量\t报关 USD/${quote.row.unit}\t不报关 USD/${quote.row.unit}\n${p.sku}\t${quote.quantity}\t${quote.declaredUsd}\t${quote.undeclaredUsd}\n汇率：${props.rate} CNY/USD；${quote.extraCny ? `已含每件${quote.extraCny}元小额订单加价` : '无小额订单加价'}`
   try { await navigator.clipboard.writeText(text); copied.value = '已复制当前数量的两种报价' }
   catch { copied.value = '复制失败，请选择表格内容手动复制' }
 }
@@ -70,7 +70,7 @@ async function copy() {
       <p v-for="notice in product.notices" :key="notice" class="notice">{{ notice }}</p>
       <div class="quantity-quote">
         <div class="quantity-controls"><label>报价数量 <input v-model="quantity" aria-label="FOB报价数量" inputmode="numeric" placeholder="填写件数"></label><span class="quantity-minimum">起订量 {{ product.parsed.minOrderQty }}<template v-if="product.parsed.orderMultiple > 1"> · 按 {{ product.parsed.orderMultiple }} 的倍数下单</template></span></div>
-        <div v-if="selected.result" class="final-quote"><span>{{ selected.result.quantity }}{{ selected.result.row.unit }} · {{ selected.result.extraCny ? '每件已加2元' : '无小额订单加价' }}</span><strong>报关 ${{ selected.result.declaredUsd }}/{{ selected.result.row.unit }}</strong><strong>不报关 ${{ selected.result.undeclaredUsd }}/{{ selected.result.row.unit }}</strong></div>
+        <div v-if="selected.result" class="final-quote"><span>{{ selected.result.quantity }}{{ selected.result.row.unit }} · {{ selected.result.extraCny ? `每件已加${selected.result.extraCny}元` : '无小额订单加价' }}</span><strong>报关 ${{ selected.result.declaredUsd }}/{{ selected.result.row.unit }}</strong><strong>不报关 ${{ selected.result.undeclaredUsd }}/{{ selected.result.row.unit }}</strong></div>
         <button type="button" :disabled="!selected.result" @click="copy">复制当前数量报价</button>
       </div>
       <p v-if="selected.error" class="error" role="alert">{{ selected.error }}</p>

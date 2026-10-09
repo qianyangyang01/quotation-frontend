@@ -85,7 +85,7 @@ public class FobQuotation {
     }
     static String price(BigDecimal cost,int extra,String factor,BigDecimal rate) {return cost.add(BigDecimal.valueOf(extra)).multiply(new BigDecimal(factor)).divide(rate,2,RoundingMode.HALF_UP).toPlainString();}
     static ObjectNode quote(JsonNode row,long min,Long max,BigDecimal rate,boolean single) {
-        var cost=amount(row.path("costCny"));int extra=single && cost.multiply(BigDecimal.valueOf(min)).compareTo(BigDecimal.valueOf(200))<0?2:0;
+        var cost=amount(row.path("costCny"));int extra=single && cost.multiply(BigDecimal.valueOf(min)).compareTo(BigDecimal.valueOf(200))<0?1:0;
         var out=object().put("minQty",min).put("unit",row.path("unit").asText()).put("declaredUsd",price(cost,extra,"1.14",rate)).put("undeclaredUsd",price(cost,extra,"1.1628",rate));
         if(max==null)out.putNull("maxQty");else out.put("maxQty",max);return out;
     }

@@ -16,6 +16,23 @@ function mount(financeError=''){const host=document.createElement('div');documen
 async function sku(value:string){const input=document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!;input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await tick()}
 async function query(){document.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks();authState.current=null;authState.permissions=[]})
+it('quotes and copies a one-yuan small-order surcharge and removes it at the existing threshold',async()=>{
+  const writeText=vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true})
+  const p=sample();p.parsed.priceTiers=[{minQty:1,maxQty:null,unitPriceCny:7.2,unit:'件'}]
+  mount();vi.mocked(loadFobQuoteProduct).mockResolvedValue(p);await sku(p.sku);await query()
+  const quantity=document.querySelector<HTMLInputElement>('[aria-label="FOB报价数量"]')!
+  quantity.value='25';quantity.dispatchEvent(new Event('input',{bubbles:true}));await tick()
+  expect(document.querySelector('.final-quote')!.textContent).toContain('每件已加1元')
+  expect(document.querySelector('.final-quote')!.textContent).toContain('报关 $1.52/件')
+  expect(document.querySelector('.final-quote')!.textContent).toContain('不报关 $1.55/件')
+  expect(document.body.textContent).toContain('不足200元时，每件加1元')
+  Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='复制当前数量报价')!.click();await tick()
+  expect(writeText).toHaveBeenCalledWith(expect.stringContaining('已含每件1元小额订单加价'))
+  quantity.value='26';quantity.dispatchEvent(new Event('input',{bubbles:true}));await tick()
+  expect(document.querySelector('.final-quote')!.textContent).toContain('无小额订单加价')
+  expect(document.querySelector('.final-quote')!.textContent).toContain('报关 $1.35/件')
+})
 it('keeps only the latest result after a burst of twenty queries resolving in reverse order',async()=>{
   mount()
   const pending:Array<{resolve:(p:FobQuoteProduct)=>void;reject:(e:Error)=>void}>=[]

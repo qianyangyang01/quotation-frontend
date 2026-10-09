@@ -5,7 +5,7 @@ import { loadPurchaseProduct, type PurchaseProductRecord } from '@/data/purchase
 
 export type FobSourceMode = 'auto' | 'fob' | 'standard'
 export type FobSmallOrderPolicy = { scope: 'single-price' | 'all'; calculation: 'before-coefficient' | 'after-coefficient' }
-// Local review default, pending business confirmation of the two small-order details.
+export const FOB_SMALL_ORDER_EXTRA_CNY = 1
 export const FOB_SMALL_ORDER_POLICY: FobSmallOrderPolicy = { scope: 'single-price', calculation: 'before-coefficient' }
 export interface FobQuoteProduct {
   sku: string; category: string; weight: string; source: 'fob' | 'standard'; updatedAt?: string
@@ -69,7 +69,7 @@ export function fobQuantityQuote(product: FobQuoteProduct, rows: FobQuoteRow[], 
   if (!Number.isFinite(rate) || rate <= 0) throw new Error('美元汇率必须大于0')
   const below = decimal(row.costCny).times(count).lt(200)
   if (below && policy == null) throw new Error('不足200元的加价规则尚未确认，暂不生成此数量的最终报价')
-  const extra = below && (policy?.scope === 'all' || rows.length === 1) ? 2 : 0
+  const extra = below && (policy?.scope === 'all' || rows.length === 1) ? FOB_SMALL_ORDER_EXTRA_CNY : 0
   const price = (factor: string) => {
     const amount = policy?.calculation === 'before-coefficient' ? decimal(row.costCny).plus(extra).times(factor) : decimal(row.costCny).times(factor).plus(extra)
     return amount.div(rate).toFixed(2)
