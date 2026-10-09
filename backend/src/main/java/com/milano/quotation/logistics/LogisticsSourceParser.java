@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="shared-source-layout-2026.10.04-v2";
+    public static final String VERSION="shared-source-layout-2026.10.09-v3";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -867,7 +867,7 @@ public class LogisticsSourceParser {
             try { var range=parseRange(parseWeight.contains("以内")?parseWeight:parseWeight.replaceAll("[（(].*$","")); row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo); }
             catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
             row.put("sourceWeightRange",weight);
-            if(provider.equals("顺丰"))sfPrice(row,source,r,columns,target);
+            if(provider.equals("顺丰")){if(columns.weight>=0)row.put("sourceWeightCell",source.address(r,columns.weight));sfPrice(row,source,r,columns,target);}
             else numeric(row,"pricePerKg",source,r,columns.rate,target,false);
             numeric(row,"registrationFee",source,r,columns.fee,target,false);
             row.put("sourceFeeLabel",columns.fee>=0?source.text(columns.feeHeaderRow,columns.fee):"");
@@ -1318,7 +1318,7 @@ public class LogisticsSourceParser {
                     if(sf&&cell.getColumnIndex()==2) {
                         var countryText=source.text(sheetRow.getRowNum(),1);
                         for(var country:COUNTRIES.entrySet())if(countryText.contains(country.getKey())) {
-                            scopedNotes.computeIfAbsent(country.getValue(),k->new StringBuilder()).append(text.replace('\n',' ')).append('\n');
+                            scopedNotes.computeIfAbsent(country.getValue(),k->new StringBuilder()).append(text).append('\n');
                             scopedCells.computeIfAbsent(country.getValue(),k->new LinkedHashSet<>()).add(cell.getAddress().formatAsString());
                         }
                     }
@@ -1340,10 +1340,13 @@ public class LogisticsSourceParser {
                 }
             }
             if(sf) {
+                var country=row.path("countryCode").asText();
+                var countryNotes=scopedNotes.getOrDefault(country,new StringBuilder()).toString();
+                var countryCells=String.join(",",scopedCells.getOrDefault(country,Set.of()));
+                if(SfWeightBandRules.hasScopedBands(countryNotes)&&SfWeightBandRules.apply(row,countryNotes,countryCells))continue;
                 // Generic notes contain a flattened copy of all countries' footer rules.
                 LogisticsMinimumWeight.applyNotes(row,row.path("notes").asText().split("\\[表级规则\\]",2)[0],"");
-                var country=row.path("countryCode").asText();
-                LogisticsMinimumWeight.applyNotes(row,scopedNotes.getOrDefault(country,new StringBuilder()).toString(),String.join(",",scopedCells.getOrDefault(country,Set.of())));
+                LogisticsMinimumWeight.applyNotes(row,countryNotes,countryCells);
                 continue;
             }
             LogisticsMinimumWeight.applyNotes(row,row.path("notes").asText(),"");

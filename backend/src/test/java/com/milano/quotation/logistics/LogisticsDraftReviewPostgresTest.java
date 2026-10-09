@@ -72,6 +72,37 @@ class LogisticsDraftReviewPostgresTest {
         assertTrue(after.path("correctionHistory").get(0).path("changes").isEmpty());
     }
 
+    @Test void revalidatesSfWeightBandsInExistingDraftAndSynchronizesTheBatch() {
+        var id=legacyDraft(true,false);var initial=review.load(id,false);
+        var retryBatch=UUID.randomUUID();
+        jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) select :retry,dataset_id,requested_by,request_key||'-retry',status,phase,payload from logistics_import_batch where id=:original")
+                .param("retry",retryBatch).param("original",UUID.fromString(initial.path("batchId").asText())).update();
+        jdbc.sql("delete from logistics_import_batch where id=:id").param("id",UUID.fromString(initial.path("batchId").asText())).update();
+        var payload=mapper.createObjectNode().put("providerName","顺丰").put("channelName","国际电商专递-CD")
+                .put("batchId",initial.path("batchId").asText()).put("templateStatus","known").put("errors",0);
+        payload.putArray("issues");var rows=payload.putArray("rows");
+        for(boolean upper:new boolean[]{false,true}) {
+            int source=upper?109:108;
+            var row=new SfWeightBandRulesTest().row(upper).put("rowKey","th-"+source).put("sourceRow",source)
+                    .put("sourceSheet","国际电商专递-CD").put("notes",SfWeightBandRulesTest.FOOTER)
+                    .put("blockingReason","最低计费重量说明冲突，需核对").put("pendingReason","最低计费重量说明冲突，需核对")
+                    .put("weightFromInclusive",true).put("weightToInclusive",true).put("pricingModel","per-kg")
+                    .put("pricePerKg",23).put("registrationFee",upper?10:14).put("currency","CNY").put("areaName","泰国");
+            row.putObject("rawValues").put("K"+source,row.path("sourceWeightRange").asText());rows.add(row);
+        }
+        jdbc.sql("update logistics_version set payload=cast(:p as jsonb) where id=:id").param("p",payload.toString()).param("id",id).update();
+        var before=review.load(id,false);var after=review.patch(id,revalidation(before),"SF-REVIEWER");
+        assertTrue(after.path("pricingReady").asBoolean(),after.path("blockingReasons").toString());
+        assertEquals(.1,after.path("rows").get(0).path("minChargeWeightKg").asDouble());
+        assertEquals(1,after.path("rows").get(1).path("minChargeWeightKg").asDouble());
+        assertEquals(2,after.path("correctionHistory").get(0).path("pricingRuleCorrections").size());
+        var batch=mapper.readTree(jdbc.sql("select payload::text from logistics_import_batch where id=:id")
+                .param("id",retryBatch).query(String.class).single());
+        assertTrue(batch.path("results").get(0).path("pricingReady").asBoolean());
+        assertThrows(AppException.class,()->review.patch(id,revalidation(before),"STALE"));
+        assertFalse(review.patch(id,revalidation(after),"SF-REVIEWER").path("correctionHistory").get(1).has("pricingRuleCorrections"));
+    }
+
     @Test void revalidatesSavedSfNoDiscountPricesFromOriginalWorkbookAndAuditsTheRepair()throws Exception {
         var id=legacyDraft(true,false);var before=review.load(id,false);
         var payload=LogisticsSfDraftRepairTest.draft();payload.put("batchId",before.path("batchId").asText()).put("sourceFileIndex",0);

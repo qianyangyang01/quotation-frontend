@@ -64,6 +64,7 @@ public class LogisticsDraftReviewService {
         }
         clearConfirmedShandianhouBoundaries(payload);
         var pricingRuleCorrections=sfRepair.repair(payload);
+        pricingRuleCorrections.addAll(SfWeightBandRules.repairDraft(payload));
         var preserved=mapper.createArrayNode();for(var issue:payload.path("issues"))if(!isEditableIssue(issue,rows))preserved.add(issue.deepCopy());
         var generated=workbooks.validateEditableRows(rows);preserved.addAll(generated);payload.set("issues",preserved);
         payload.put("errors",count(preserved,"error"));
@@ -117,8 +118,13 @@ public class LogisticsDraftReviewService {
         return false;
     }
     private static int count(ArrayNode issues,String level){int count=0;for(var issue:issues)if(level.equals(issue.path("level").asText()))count++;return count;}
-    private void syncBatch(ObjectNode version){var batchId=version.path("batchId").asText();if(batchId.isBlank())return;UUID id;try{id=UUID.fromString(batchId);}catch(Exception ignored){return;}
-        var raw=jdbc.sql("select payload::text from logistics_import_batch where id=:id for update").param("id",id).query(String.class).optional();if(raw.isEmpty())return;
-        try{var payload=(ObjectNode)mapper.readTree(raw.get());for(var value:payload.withArray("results"))if(version.path("id").asText().equals(value.path("versionId").asText())){var item=(ObjectNode)value;item.put("errors",version.path("errors").asInt()).put("pricingReady",version.path("pricingReady").asBoolean()).put("etaReady",version.path("etaReady").asBoolean()).put("etaMissingCount",version.path("etaMissingCount").asInt());item.set("issues",version.path("issues").deepCopy());item.set("summary",version.path("summary").deepCopy());item.set("missingEtaRoutes",version.path("missingEtaRoutes").deepCopy());item.set("blockingReasons",version.path("blockingReasons").deepCopy());item.set("pendingReasons",version.path("blockingReasons").deepCopy());item.put("status",version.path("errors").asInt()>0?"blocked":"draft");item.set("reviewWarnings",version.path("reviewWarnings").deepCopy());break;}LogisticsReadiness.applyBatch(payload);
+    private void syncBatch(ObjectNode version){
+        // Reimports can reuse a draft after its original batch has been removed.
+        var reference=mapper.createArrayNode();reference.addObject().put("versionId",version.path("id").asText());
+        var batches=jdbc.sql("select id,payload::text from logistics_import_batch where payload->'results' @> cast(:reference as jsonb) order by id for update")
+                .param("reference",reference.toString()).query((rs,n)->Map.entry(rs.getObject("id",UUID.class),rs.getString("payload"))).list();
+        for(var batch:batches){var id=batch.getKey();
+        try{var payload=(ObjectNode)mapper.readTree(batch.getValue());for(var value:payload.withArray("results"))if(version.path("id").asText().equals(value.path("versionId").asText())){var item=(ObjectNode)value;item.put("errors",version.path("errors").asInt()).put("pricingReady",version.path("pricingReady").asBoolean()).put("etaReady",version.path("etaReady").asBoolean()).put("etaMissingCount",version.path("etaMissingCount").asInt());item.set("issues",version.path("issues").deepCopy());item.set("summary",version.path("summary").deepCopy());item.set("missingEtaRoutes",version.path("missingEtaRoutes").deepCopy());item.set("blockingReasons",version.path("blockingReasons").deepCopy());item.set("pendingReasons",version.path("blockingReasons").deepCopy());item.put("status",version.path("errors").asInt()>0?"blocked":"draft");item.set("reviewWarnings",version.path("reviewWarnings").deepCopy());break;}LogisticsReadiness.applyBatch(payload);
             jdbc.sql("update logistics_import_batch set payload=cast(:payload as jsonb),updated_at=now() where id=:id").param("payload",payload.toString()).param("id",id).update();}catch(Exception e){throw new IllegalStateException(e);}}
+    }
 }
