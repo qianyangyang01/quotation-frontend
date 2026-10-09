@@ -53,6 +53,53 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('shows the missing quantity reason only in the editor, never in preview or customer exports', async () => {
+  const reason = '3件含包材重量1.377kg，超过上限1kg'
+  mount([{ ...row('italy', '云途'), country: 'IT', quote3: null, quantityMessages: { '3': reason } }])
+  await settle()
+  const cell = document.querySelector('[aria-label="第 1 行第 3 列美元价格"]')!.closest('td')!
+  expect(cell.querySelector('.sheet-price-reason')?.textContent).toBe(reason)
+  expect(document.querySelectorAll('.sheet-price-reason')).toHaveLength(1)
+  await click('预览报价单')
+  expect(render.mock.lastCall![0].rows[0].prices[2]).toBeNull()
+  expect(JSON.stringify(render.mock.lastCall![0])).not.toContain(reason)
+  await click('复制报价数据')
+  expect(writeText.mock.lastCall![0]).not.toContain(reason)
+  expect(writeText.mock.lastCall![0]).toContain('—')
+  expect(JSON.stringify(exposed.capturePrices())).not.toContain(reason)
+})
+
+it('updates missing price guidance during loading, manual edits and price recovery', async () => {
+  const reason = '3件含包材重量1.377kg，超过上限1kg'
+  const state = mount([{ ...row(), quote3: null, quantityMessages: { '3': reason } }])
+  state.sourcePending = true; await settle()
+  expect(document.querySelector('.sheet-price-reason')?.textContent).toBe('报价正在计算，请稍候')
+  state.sourcePending = false; await settle()
+  expect(document.querySelector('.sheet-price-reason')?.textContent).toBe(reason)
+  await input('第 1 行第 3 列美元价格', '30')
+  expect(document.querySelector('.sheet-price-reason')).toBeNull()
+  await input('第 1 行第 3 列美元价格', 'bad')
+  expect(document.querySelector('.sheet-price-error')).not.toBeNull()
+  expect(document.querySelector('.sheet-price-reason')).toBeNull()
+  state.rows[0]!.quote3 = 30; await settle()
+  expect(document.querySelector('.sheet-price-reason')).toBeNull()
+  await input('第 1 行第 3 列美元价格', '')
+  expect(document.querySelector('.sheet-price-reason')?.textContent).toBe('客户报价未填写')
+  await input('第 1 行第 3 列美元价格', '0')
+  expect(document.querySelector('.sheet-price-reason')).toBeNull()
+})
+
+it('uses saved unavailability messages and an honest fallback for legacy missing prices', async () => {
+  mount([
+    { ...row('disabled'), quote3: null, available: false, availabilityMessage: '渠道停用或资料不存在' },
+    { ...row('legacy'), quote3: null },
+  ], undefined, undefined, true)
+  await settle()
+  const message = (index: number) => document.querySelector(`[aria-label="第 ${index} 行第 3 列美元价格"]`)!.closest('td')!.querySelector('.sheet-price-reason')?.textContent
+  expect(message(1)).toBe('渠道停用或资料不存在')
+  expect(message(2)).toBe('原报价未保存该数量的价格或缺价原因')
+})
+
 it('keeps the English zone when switching country format, previewing and copying a saved quote', async () => {
   const source = { ...row(), country: '澳大利亚', quoteRegion: '澳大利亚2区' }
   mount([source], undefined, undefined, true)

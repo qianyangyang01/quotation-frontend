@@ -14,6 +14,19 @@ const record = () => normalizeQuotationRecord({
 })!
 
 describe('saved record customer table copying', () => {
+  it('passes saved missing price reasons to the editor without adding them to customer output', () => {
+    const saved = record()
+    const reason = '2件含包材重量1.200kg，超过上限1kg'
+    saved.quoteOptions![0]!.quantityMessages = { '2': reason }
+    saved.quoteOptions![0]!.availabilityMessage = '渠道停用或资料不存在'
+    const before = JSON.stringify(saved)
+    const source = quotationRecordQuoteSheetSource(saved)
+    expect(source.rows[0]!.quantityMessages).toEqual({ '2': reason })
+    expect(source.rows[0]!.availabilityMessage).toBe('渠道停用或资料不存在')
+    const sheet = buildCustomerQuoteSheet({ ...source, edits: newQuoteSheetEdits(source.salesperson) })
+    expect(JSON.stringify(sheet)).not.toContain(reason)
+    expect(JSON.stringify(saved)).toBe(before)
+  })
   it.each(['common', 'specified', 'template'] as const)('uses all saved routes and original USD tiers for %s mode', mode => {
     const saved = record()
     saved.matrixMode = mode

@@ -11,6 +11,7 @@ export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
   const rows: QuoteSheetSourceRow[] = options.map(option => ({
     country: String(('countryCode' in option && option.countryCode) || option.country),
     quoteRegion: option.quoteRegion,
+    ...('id' in option ? { availabilityMessage: (option as QuotationRecordQuoteOption).availabilityMessage, quantityMessages: (option as QuotationRecordQuoteOption).quantityMessages } : {}),
     ...('id' in option ? { available: (option as QuotationRecordQuoteOption).available, taxFeeMode: (option as QuotationRecordQuoteOption).taxFeeMode, taxIncluded: (option as QuotationRecordQuoteOption).taxIncluded, taxConfigured: (option as QuotationRecordQuoteOption).taxConfigured, taxRatePercent: (option as QuotationRecordQuoteOption).taxRatePercent } : {}),
     // The saved option id also distinguishes historical routes without channel keys.
     channelKey: 'id' in option ? String(option.id) : JSON.stringify([option.country, option.quoteRegion, option.carrier, option.channel, option.rule]),
