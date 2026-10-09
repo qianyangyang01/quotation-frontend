@@ -158,6 +158,7 @@ async function copy(asImage: boolean) {
 </template>
 
 <style scoped>
+.customer-sheet .sheet-save>button.sheet-primary{min-width:148px;min-height:44px;padding:10px 22px;font-size:16px;line-height:1.4;font-weight:700}
 .sheet-edit-fieldset{margin:0;padding:0;border:0;min-width:0}.sheet-save,.drag-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0;font-size:12px}.sheet-save input{min-width:200px}.sheet-save [role=alert]{color:#b73126}.sheet-save [role=status]{color:#287a4d}.fob-layout-editor{overflow:auto;padding:8px 0}.drag-tools [draggable=true]{cursor:grab}
 
 .sheet-notes-editor{margin-top:5px;font-size:12px}.sheet-notes-editor summary{cursor:pointer;color:#925013}.sheet-notes-editor label{display:flex;gap:12px;margin:6px 0}.sheet-notes-editor textarea{box-sizing:border-box;width:100%;min-height:64px;resize:vertical;border:1px solid #ccd4db;padding:6px;font:inherit;line-height:1.6}
