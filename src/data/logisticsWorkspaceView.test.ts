@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LogisticsChannelRecord, LogisticsChannelVersionRecord, LogisticsWorkspaceState } from './logisticsRepository'
-import { LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE, logisticsChannelRows, logisticsProviderRows, logisticsRuleDetailColumns, logisticsRuleTabs, logisticsWorkspaceLoadPlan, logisticsWorkspaceSummary, matchesLogisticsProviderScope, paginateLogisticsProviderChannels } from './logisticsWorkspaceView'
+import { formatLogisticsDateTime, LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE, logisticsChannelRows, logisticsProviderRows, logisticsRuleDetailColumns, logisticsRuleTabs, logisticsWorkspaceLoadPlan, logisticsWorkspaceSummary, matchesLogisticsProviderScope, paginateLogisticsProviderChannels } from './logisticsWorkspaceView'
 
 function channel(id: string, providerId: string, currentVersionId = ''): LogisticsChannelRecord {
   return { id, providerId, currentVersionId, ruleId: Number(id), name: `渠道${id}`, code: `CODE-${id}`, type: '专线', logisticsAttribute: '普货', enabled: true, createdAt: '', updatedAt: '', _version: 1, archived: false, archivedAt: '', archivedBy: '', archiveReason: '' }
@@ -23,6 +23,15 @@ function workspace(): LogisticsWorkspaceState {
 }
 
 describe('logistics workspace published views', () => {
+  it('shows server publication instants in Beijing time including midnight and year rollover', () => {
+    expect(formatLogisticsDateTime('2026-10-09T05:07:27.541152957Z')).toBe('2026-10-09 13:07:27')
+    expect(formatLogisticsDateTime('2026-10-09T13:07:27+08:00')).toBe('2026-10-09 13:07:27')
+    expect(formatLogisticsDateTime('2026-12-31T16:00:00Z')).toBe('2027-01-01 00:00:00')
+    expect(formatLogisticsDateTime('2026-10-09 13:07:27')).toBe('2026-10-09 13:07:27')
+    expect(formatLogisticsDateTime()).toBe('—')
+    expect(formatLogisticsDateTime('invalidZ')).toBe('—')
+  })
+
   it('keeps the base screen independent from price pages and legacy import history', () => {
     expect(logisticsWorkspaceLoadPlan('imports')).toEqual({ workspace: true, pricePage: false, importHistory: false })
     expect(logisticsWorkspaceLoadPlan('history')).toEqual({ workspace: true, pricePage: false, importHistory: false })

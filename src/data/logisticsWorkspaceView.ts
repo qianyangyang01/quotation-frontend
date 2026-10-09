@@ -11,6 +11,21 @@ export const logisticsRuleDetailColumns = ['国家区域', '重量范围', '计�
 export type LogisticsWorkspaceTab = 'prices' | 'imports' | 'history'
 export const LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE = 8
 
+const logisticsDateTime = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+})
+
+export function formatLogisticsDateTime(value?: string) {
+  if (!value?.trim()) return '—'
+  // Old display strings have no timezone; preserve them instead of guessing an instant.
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return value.replace('T', ' ')
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return '—'
+  const parts = Object.fromEntries(logisticsDateTime.formatToParts(date).map(part => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
+}
+
 export function logisticsWorkspaceLoadPlan(tab: LogisticsWorkspaceTab) {
   return {
     workspace: true,
