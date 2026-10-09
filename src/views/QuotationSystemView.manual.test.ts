@@ -125,7 +125,7 @@ function quote(q: number) { return state.quantityCostBreakdown(state.products[0]
 
 it('offers five modes, hides SKU/tier and directly computes manual cost and grams at every quantity', async () => {
   await query('freight-trial')
-  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','组合 SKU 报价','运费试算','仅代发货报价','FOB（批发）报价'])
+  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','组合 SKU 报价','报价试算','仅代发货报价','FOB（批发）报价'])
   expect(host.querySelector('.sku-field')).toBeNull(); expect(host.querySelector('.sales-field')).toBeNull()
   expect(host.querySelector('.manual-quote-panel')?.textContent).toContain('查询试算')
   expect(state.chargeWeight(state.products[0]!)).toBe(.5)
@@ -171,7 +171,7 @@ it.each(['freight-trial','shipping-only'] as const)('round-trips %s conditions a
   const record=normalizeQuotationRecord({ id:'manual-record',no:'Q-MANUAL',quoteMode:mode,customerName:'手填回归',customerGrade:'S级客户',logisticsAttribute:'普货',manualPricing:draft.manualPricing,quoteOptions:options } as never)!
   expect(record.quoteMode).toBe(mode); expect(record.manualPricing?.weightGrams).toBe(500)
   const source=quotationRecordQuoteSheetSource(record)
-  expect(source.quoteMode).toBe(mode); expect(source.skus).toEqual([mode==='freight-trial'?'运费试算':'仅代发货报价'])
+  expect(source.quoteMode).toBe(mode); expect(source.skus).toEqual([mode==='freight-trial'?'报价试算':'仅代发货报价'])
   const payload=quotationReissuePayload(record)
   expect(payload.manualPricing).toEqual(draft.manualPricing)
   await state.applyDraftPayload(payload,undefined,{restoreQuotation:true})

@@ -15,7 +15,7 @@ it('exports the saved manual inputs without false procurement or packaging descr
   for(const quoteMode of ['freight-trial','shipping-only'] as const){
     const record=normalizeQuotationRecord({id:quoteMode,no:'LOCAL-QA',quoteMode,manualPricing:{costCny:quoteMode==='shipping-only'?0:30,weightGrams:500}})!
     const before=JSON.stringify(record),tsv=quotationRecordReconciliationTsv(record)
-    expect(tsv).toContain(quoteMode==='freight-trial'?'运费试算':'仅代发货报价')
+    expect(tsv).toContain(quoteMode==='freight-trial'?'报价试算':'仅代发货报价')
     expect(tsv).toContain('手填重量（g/件）\t500')
     expect(tsv).toContain('不增加包材重量')
     expect(tsv).not.toContain('旧记录未保存');expect(tsv).not.toContain('采购原价')
