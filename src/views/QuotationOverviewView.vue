@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { canViewPurchaseCost, canViewFullPricing } from '@/data/quotationVisibility'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import DateFilter from '@/components/DateFilter.vue'
 import {
@@ -116,7 +117,7 @@ function resetFilters() {
 function exportDetails() {
   if (!recordsReady.value || !purchasesReady.value) { toast('报价与采购类别尚未完整加载，请稍后重试'); return }
   if (!detailRows.value.length) { toast('当前筛选条件下没有可导出的报价明细'); return }
-  const blob = new Blob([quotationDetailsCsv(detailRows.value, purchases.value)], { type: 'text/csv;charset=utf-8' })
+  const blob = new Blob([quotationDetailsCsv(detailRows.value, purchases.value, { includeCost: canViewFullPricing.value })], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -189,9 +190,9 @@ onMounted(() => {
           <div><button :class="{active:categoryMode==='all'}" @click="categoryMode='all'">全部</button><button :class="{active:categoryMode==='volume'}" @click="categoryMode='volume'">高报价量</button></div>
           <label>排序<select v-model="categorySort"><option value="amount">报价金额降序</option><option value="quotes">报价次数降序</option><option value="sku">SKU 数量降序</option></select></label>
         </div>
-        <div class="table-scroll"><table><thead><tr><th>品类名称</th><th>SKU 总数</th><th>已报价 SKU</th><th>采购均价</th><th>报价次数</th><th>报价金额</th></tr></thead><tbody>
-          <tr v-for="row in pagedCategories" :key="row.category"><td><b>{{ row.category }}</b><small>{{ row.skus.slice(0,3).join(' · ') || '报价记录品类' }}</small></td><td>{{ row.skuCount }}</td><td>{{ row.quotedSkuCount }}</td><td>{{ row.averagePurchasePriceCny == null ? '—' : moneyCny(row.averagePurchasePriceCny) }}</td><td>{{ row.quotationCount }}</td><td><b>{{ moneyUsd(row.quoteUsd) }}</b><small>{{ moneyCny(row.quoteCny) }}</small></td></tr>
-          <tr v-if="!pagedCategories.length"><td colspan="6" class="empty">没有找到匹配的产品品类</td></tr>
+        <div class="table-scroll"><table><thead><tr><th>品类名称</th><th>SKU 总数</th><th>已报价 SKU</th><th v-if="canViewPurchaseCost">采购均价</th><th>报价次数</th><th>报价金额</th></tr></thead><tbody>
+          <tr v-for="row in pagedCategories" :key="row.category"><td><b>{{ row.category }}</b><small>{{ row.skus.slice(0,3).join(' · ') || '报价记录品类' }}</small></td><td>{{ row.skuCount }}</td><td>{{ row.quotedSkuCount }}</td><td v-if="canViewPurchaseCost">{{ row.averagePurchasePriceCny == null ? '—' : moneyCny(row.averagePurchasePriceCny) }}</td><td>{{ row.quotationCount }}</td><td><b>{{ moneyUsd(row.quoteUsd) }}</b><small>{{ moneyCny(row.quoteCny) }}</small></td></tr>
+          <tr v-if="!pagedCategories.length"><td :colspan="canViewPurchaseCost ? 6 : 5" class="empty">没有找到匹配的产品品类</td></tr>
         </tbody></table></div>
         <footer class="pagination"><span>共 {{ categoryRows.length }} 条</span><label>每页 <select v-model.number="categoryPageSize"><option :value="8">8</option><option :value="20">20</option><option :value="50">50</option></select> 条</label><button :disabled="categoryPage===1" @click="categoryPage--">‹</button><b>{{ categoryPage }} / {{ categoryPageCount }} 页</b><button :disabled="categoryPage===categoryPageCount" @click="categoryPage++">›</button></footer>
       </section>

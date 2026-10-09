@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { createApp, h, nextTick, reactive } from 'vue'
-import { expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it } from 'vitest'
+import { setPricingTestPermissions, clearPricingTestPermissions } from '@/test/pricingPermissions'
+beforeEach(() => setPricingTestPermissions())
+afterEach(clearPricingTestPermissions)
 import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import QuotationProductCostTrace from './QuotationProductCostTrace.vue'
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { canViewPurchaseCost, canViewPricingFactors, canViewFullPricing } from '@/data/quotationVisibility'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
 import { FOB_SMALL_ORDER_EXTRA_CNY, fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
@@ -40,7 +41,7 @@ const selected = computed(() => {
 const policyText = computed(() => !props.policy ? '不足200元的加价口径待确认；基础阶梯价可查看，低于门槛的最终报价暂不生成。'
   : `${props.policy.scope === 'single-price' ? '仅单一采购价商品' : '所有商品'}：数量×对应成本价不足200元时，每件加${FOB_SMALL_ORDER_EXTRA_CNY}元，${props.policy.calculation === 'before-coefficient' ? '加在成本上后乘系数' : '在乘系数后加收'}，再除以汇率。`)
 function openQuery() { skuInput.value?.focus(); skuInput.value?.select() }
-async function openRules() { rulesOpen.value = true; await nextTick(); rulesElement.value?.scrollIntoView?.({ block: 'nearest' }) }
+async function openRules() { if (!canViewFullPricing.value) return; rulesOpen.value = true; await nextTick(); rulesElement.value?.scrollIntoView?.({ block: 'nearest' }) }
 defineExpose({ openQuery, openRules })
 function quantityRange(min: number, max: number | null, unit: string) { return max == null ? `${min}${unit}起` : `${min}—${max}${unit}` }
 async function copy() {
@@ -62,22 +63,22 @@ async function copy() {
     </form>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="product" class="product-summary"><strong class="fob-sku">{{ product.sku }}</strong> · {{ product.category || '未分类' }} · 克重：{{ product.weight }}<span class="source">{{ product.source === 'fob' ? 'FOB数据 · 待验证' : '新采购资料' }}</span></p>
-    <div class="fob-parameters"><span>票点 <b>10%</b></span><span>汇率 <b>{{ rate }} CNY/USD</b></span><span>报关 <b>×1.14</b></span><span>不报关 <b>×1.1628</b></span></div>
+    <div class="fob-parameters"><span v-if="canViewPurchaseCost">票点 <b>10%</b></span><span>汇率 <b>{{ rate }} CNY/USD</b></span><span v-if="canViewPricingFactors">报关 <b>×1.14</b></span><span v-if="canViewPricingFactors">不报关 <b>×1.1628</b></span></div>
     <p v-if="calculation.error" class="error" role="alert">{{ calculation.error }} <button v-if="financeError" type="button" :disabled="financePending" @click="emit('retryFinance')">重新读取财务汇率</button></p>
     <template v-if="product && !calculation.error">
-      <div class="fob-table-wrap"><table><thead><tr><th>采购阶梯</th><th>数量区间</th><th>不含票 ¥/单位</th><th>含票价 ¥/单位</th><th>国内运费 ¥/单位</th><th>成本价 ¥/单位</th><th class="quote-price">报关 $/单位</th><th class="quote-price">不报关 $/单位</th></tr></thead><tbody><tr v-for="(row,i) in calculation.rows" :key="i" :class="{ selected: selected.result?.row === row }"><td>阶梯{{ i + 1 }}</td><td>{{ quantityRange(row.minQty,row.maxQty,row.unit) }}</td><td>{{ row.purchaseCny }}</td><td>{{ row.taxIncludedCny }}</td><td>{{ row.freightCny }}</td><td>{{ row.costCny }}</td><td class="quote-price">{{ row.declaredUsd }}</td><td class="quote-price">{{ row.undeclaredUsd }}</td></tr></tbody></table></div>
-      <p class="help">上表为基础阶梯报价，未含不足200元的加价；输入实际数量查看最终报价。运费统一采用：{{ product.parsed.freight.basis }}。</p>
-      <p v-for="notice in product.notices" :key="notice" class="notice">{{ notice }}</p>
+      <div class="fob-table-wrap"><table><thead><tr><th>采购阶梯</th><th>数量区间</th><template v-if="canViewPurchaseCost"><th>不含票 ¥/单位</th><th>含票价 ¥/单位</th><th>国内运费 ¥/单位</th><th>成本价 ¥/单位</th></template><th class="quote-price">报关 $/单位</th><th class="quote-price">不报关 $/单位</th></tr></thead><tbody><tr v-for="(row,i) in calculation.rows" :key="i" :class="{ selected: selected.result?.row === row }"><td>阶梯{{ i + 1 }}</td><td>{{ quantityRange(row.minQty,row.maxQty,row.unit) }}</td><template v-if="canViewPurchaseCost"><td>{{ row.purchaseCny }}</td><td>{{ row.taxIncludedCny }}</td><td>{{ row.freightCny }}</td><td>{{ row.costCny }}</td></template><td class="quote-price">{{ row.declaredUsd }}</td><td class="quote-price">{{ row.undeclaredUsd }}</td></tr></tbody></table></div>
+      <p class="help">上表为基础阶梯报价，输入实际数量查看最终报价。<template v-if="canViewPurchaseCost">不足200元时按小额订单规则加价；运费统一采用：{{ product.parsed.freight.basis }}。</template></p>
+      <template v-if="canViewPurchaseCost"><p v-for="notice in product.notices" :key="notice" class="notice">{{ notice }}</p></template>
       <div class="quantity-quote">
         <div class="quantity-controls"><label>报价数量 <input v-model="quantity" aria-label="FOB报价数量" inputmode="numeric" placeholder="填写件数"></label><span class="quantity-minimum">起订量 {{ product.parsed.minOrderQty }}<template v-if="product.parsed.orderMultiple > 1"> · 按 {{ product.parsed.orderMultiple }} 的倍数下单</template></span></div>
         <div v-if="selected.result" class="final-quote"><span>{{ selected.result.quantity }}{{ selected.result.row.unit }} · {{ selected.result.extraCny ? `每件已加${selected.result.extraCny}元` : '无小额订单加价' }}</span><strong>报关 ${{ selected.result.declaredUsd }}/{{ selected.result.row.unit }}</strong><strong>不报关 ${{ selected.result.undeclaredUsd }}/{{ selected.result.row.unit }}</strong></div>
         <button type="button" :disabled="!selected.result" @click="copy">复制当前数量报价</button>
       </div>
       <p v-if="selected.error" class="error" role="alert">{{ selected.error }}</p>
-      <p v-if="calculation.rows.length === 1" class="help">按本档成本达到200元且满足起订量及下单倍数的最低数量：{{ calculation.rows[0]?.thresholdQty ?? '本档成本或数量范围无法达到金额门槛' }}<template v-if="calculation.rows[0]?.thresholdQty != null">{{ calculation.rows[0]?.unit }}</template>。</p>
+      <p v-if="canViewPurchaseCost && calculation.rows.length === 1" class="help">按本档成本达到200元且满足起订量及下单倍数的最低数量：{{ calculation.rows[0]?.thresholdQty ?? '本档成本或数量范围无法达到金额门槛' }}<template v-if="calculation.rows[0]?.thresholdQty != null">{{ calculation.rows[0]?.unit }}</template>。</p>
       <p v-if="copied" role="status" class="help">{{ copied }}</p>
     </template>
-    <details ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p>含票价＝不含票采购价×1.1；成本价＝含票价＋批量均摊运费；报关＝成本价×1.14÷汇率；不报关＝成本价×1.14×1.02÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
+    <details v-if="canViewFullPricing" ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p>含票价＝不含票采购价×1.1；成本价＝含票价＋批量均摊运费；报关＝成本价×1.14÷汇率；不报关＝成本价×1.14×1.02÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
   </section>
   <FobQuoteSheet v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { canViewPurchaseCost, canViewFullPricing } from '@/data/quotationVisibility'
 import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -110,9 +111,9 @@ async function copyData(mode: 'full' | 'quote' = 'full') {
     const latest = props.refreshRecord ? await props.refreshRecord(props.record.id) : props.record
     if (context !== contextKey.value) return
     if (!latest) throw new Error('报价记录已不可用，请刷新后重试')
-    const layout = mode === 'quote' ? quotationRecordQuoteOnlyLayout(latest, sheetVersion.value) : quotationRecordCopyLayout(latest, sheetVersion.value)
+    const layout = mode === 'quote' ? quotationRecordQuoteOnlyLayout(latest, sheetVersion.value, { includeCost: canViewPurchaseCost.value }) : quotationRecordCopyLayout(latest, sheetVersion.value, { includeDetails: canViewFullPricing.value, includeCost: canViewPurchaseCost.value })
     await copyQuotationText(layout.text, layout.html)
-    if (context === contextKey.value) status.value = { message: (mode === 'quote' ? '已复制报价单（含物流渠道），可直接粘贴到 Excel' : '已复制完整对账明细（横向报价表），可直接粘贴到 Excel') + (hiddenCount.value ? `；${sheetVersion.value === 'full' ? '完整报价单' : '隐藏行后的报价单'}` : ''), failed: false }
+    if (context === contextKey.value) status.value = { message: (mode === 'quote' || !canViewFullPricing.value ? '已复制报价单（含物流渠道），可直接粘贴到 Excel' : '已复制完整对账明细（横向报价表），可直接粘贴到 Excel') + (hiddenCount.value ? `；${sheetVersion.value === 'full' ? '完整报价单' : '隐藏行后的报价单'}` : ''), failed: false }
   }
   catch (error) { if (context === contextKey.value) status.value = { message: error instanceof Error ? error.message : '复制失败，请重试', failed: true } }
   finally { copyingData.value = false }
@@ -122,7 +123,7 @@ async function copyData(mode: 'full' | 'quote' = 'full') {
 <template>
   <div class="record-copy-actions">
     <div class="record-copy-buttons">
-      <button type="button" :disabled="copyingData" title="复制客户、客户等级、SKU、成本与重量摘要、国家、物流商与渠道、各数量报价及预计时效" @click="copyData('quote')">{{ copyingData && copyMode === 'quote' ? '正在复制…' : '仅复制报价单' }}</button>
+      <button type="button" :disabled="copyingData" :title="canViewPurchaseCost ? '复制客户、客户等级、SKU、成本与重量摘要、国家、物流商与渠道、各数量报价及预计时效' : '复制客户、SKU、重量、渠道及最终报价'" @click="copyData('quote')">{{ copyingData && copyMode === 'quote' ? '正在复制…' : '仅复制报价单' }}</button>
       <div ref="imageChoice" class="record-image-choice" @keydown.esc.stop.prevent="closeImageMenu" @focusout="!imageChoice?.contains($event.relatedTarget as Node) && (imageMenuOpen = false)">
         <button ref="imageButton" class="copy-image" type="button" aria-label="复制报价图片" :aria-haspopup="hiddenCount ? 'menu' : undefined" :aria-expanded="hiddenCount ? imageMenuOpen : undefined" :disabled="copyingData || saving" @click="imageAction">复制报价图片<span v-if="hiddenCount" aria-hidden="true" class="image-choice-arrow">▾</span></button>
         <div v-if="imageMenuOpen" class="record-image-menu" role="menu" aria-label="报价图片版本" @keydown.down.prevent="moveImageChoice(1)" @keydown.up.prevent="moveImageChoice(-1)">
@@ -130,7 +131,7 @@ async function copyData(mode: 'full' | 'quote' = 'full') {
           <button type="button" role="menuitem" @click="chooseImageVersion('visible')"><strong>隐藏行后的报价单</strong><small>隐藏 {{ hiddenCount }} 行</small></button>
         </div>
       </div>
-      <button type="button" :disabled="copyingData" title="复制横向报价表：国家与分区、运输及实际有报价的数量，附产品成本、运费与税费明细；粘贴到 Excel 可保留排版" @click="copyData('full')">{{ copyingData && copyMode === 'full' ? '正在复制…' : '复制报价数据' }}</button>
+      <button type="button" :disabled="copyingData" :title="canViewFullPricing ? '复制报价及成本、运费、税费对账明细' : '复制客户报价数据，可粘贴到 Excel'" @click="copyData('full')">{{ copyingData && copyMode === 'full' ? '正在复制…' : '复制报价数据' }}</button>
       <slot />
     </div>
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>

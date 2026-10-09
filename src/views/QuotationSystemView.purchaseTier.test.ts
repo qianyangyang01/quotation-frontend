@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { createApp, nextTick, type App } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { setPricingTestPermissions, clearPricingTestPermissions } from '@/test/pricingPermissions'
+beforeEach(() => setPricingTestPermissions())
+afterEach(clearPricingTestPermissions)
 import View from './QuotationSystemView.vue'
 import type { BundleQuoteItem, QuotationProduct } from '@/components/quotation/types'
 import { api } from '@/services/http'

@@ -52,7 +52,7 @@ describe('customer operation settings on the actual quotation page', () => {
     vi.restoreAllMocks()
     clearFinanceSettingsCache()
     localStorage.clear()
-    authState.current = null
+    authState.current = null; authState.permissions = []
   })
 
   async function mountWithDraft(customerName: string, selectedCustomerId = '', specialPackagingGrams?: number, withdrawn = true) {
@@ -83,6 +83,7 @@ describe('customer operation settings on the actual quotation page', () => {
   })
 
   it.each([undefined,10])('restores packaging from the withdrawn quotation draft and retains it when autosaving: %s', async grams => {
+    authState.permissions = ['quote', 'purchase', 'logistics', 'finance']
     await mountWithDraft('包材草稿','',grams)
     const put=vi.spyOn(api,'put').mockResolvedValue({exists:true,version:2,updatedAt:'2026-09-18T04:00:00Z'})
     const ruleButton=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('计算规则'))!

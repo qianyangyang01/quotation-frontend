@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { createApp, nextTick } from 'vue'
-import { expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it } from 'vitest'
+import { setPricingTestPermissions, clearPricingTestPermissions } from '@/test/pricingPermissions'
+beforeEach(() => setPricingTestPermissions())
+afterEach(clearPricingTestPermissions)
 import CostWeightPanel from './CostWeightPanel.vue'
 import type { QuotationProduct } from './types'
 import { singleActualWeight } from '@/services/quotationCalculator'

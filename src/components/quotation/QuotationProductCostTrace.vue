@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import type { QuotationRecord } from '@/data/quotationRecords'
 import { quotationProductCostSnapshot, snapshotMoney } from '@/data/quotationProductCostSnapshot'
 const props = defineProps<{ record: QuotationRecord }>()
@@ -7,7 +8,7 @@ const snapshot = computed(() => quotationProductCostSnapshot(props.record))
 </script>
 
 <template>
-  <section class="product-cost-trace">
+  <section v-if="canViewPurchaseCost" class="product-cost-trace">
     <h3>产品成本快照</h3>
     <p>按保存时的采购单价和商品数量展示，金额单位：人民币。计入采购价沿用保存时的票点处理结果。</p>
     <div class="scroll"><table>

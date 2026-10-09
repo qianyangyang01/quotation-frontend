@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
 import FobQuotePanel from '@/components/quotation/FobQuotePanel.vue'
@@ -1999,7 +2000,7 @@ function useLogistics(p: Product, option: { country: string; quoteRegion?: strin
   p.freight = option.freight
   p.manualFreight = false
   p.status = '已试算'
-  toast(`已采用“${option.rule}”，运费 ¥${option.freight.toFixed(2)}`)
+  toast(canViewLogisticsCost.value ? `已采用“${option.rule}”，运费 ¥${option.freight.toFixed(2)}` : `已采用“${option.rule}”`)
 }
 function logisticsSamplesFor(row: QuotationMatrixRow, p: Product, extraQuantities: number[] = []) {
   const quantities = [...new Set([...extraQuantities, 1, 2, 3, Math.max(1, customQuoteQuantity.value || 1), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)])]
@@ -2389,10 +2390,10 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button type="button" class="primary" autofocus @click="purchaseInvoiceNotice=[]">我知道了</button>
       </section>
     </div>
-    <div v-if="showRule || showHistory" class="modal-mask" @click.self="showRule = showHistory = false">
+    <div v-if="(showRule && canViewFullPricing) || showHistory" class="modal-mask" @click.self="showRule = showHistory = false">
       <section class="modal">
         <button class="modal-close" @click="showRule = showHistory = false">×</button>
-        <template v-if="showRule">
+        <template v-if="showRule && canViewFullPricing">
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
           <p v-if="!manualMode">当前特殊包装：{{ specialPackagingGrams || 0 }}g／票，仅增加一次。</p>
           <p>当前佣金阈值：{{ commissionThreshold || '未填写' }}。最终报价＝原最终美元报价 ÷ 佣金阈值，再按0.05美元向上取整；阈值1不调整报价。</p>

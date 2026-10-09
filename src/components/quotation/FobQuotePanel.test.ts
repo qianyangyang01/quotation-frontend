@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { createApp, nextTick, type App } from 'vue'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { setPricingTestPermissions } from '@/test/pricingPermissions'
+beforeEach(() => setPricingTestPermissions())
 import Panel from './FobQuotePanel.vue'
 import { FOB_SMALL_ORDER_POLICY, loadFobQuoteProduct, type FobQuoteProduct } from '@/services/fobQuotation'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
@@ -16,6 +18,18 @@ function mount(financeError=''){const host=document.createElement('div');documen
 async function sku(value:string){const input=document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!;input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await tick()}
 async function query(){document.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks();authState.current=null;authState.permissions=[]})
+it('keeps employee FOB quoting available while hiding purchase values, notices and pricing factors',async()=>{
+  setPricingTestPermissions(['quote','myRecords'])
+  const product=sample();product.parsed.priceTiers=[{minQty:1,maxQty:null,unitPriceCny:731.29,unit:'件'}]
+  product.parsed.freight.unitFreightCny=12.37;product.parsed.freight.basis='采购运费12.37';product.notices=['原价731.29']
+  const before=JSON.stringify(product)
+  vi.mocked(loadFobQuoteProduct).mockResolvedValue(product);mount();await sku(product.sku);await query()
+  expect(document.querySelector('.final-quote')).not.toBeNull()
+  expect(document.querySelector('[aria-label="FOB报价数量"]')).not.toBeNull()
+  expect(Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='保存FOB报价')).toBe(true)
+  for(const secret of ['731.29','12.37','×1.14','×1.1628','成本价','FOB计算规则'])expect(document.body.innerHTML).not.toContain(secret)
+  expect(JSON.stringify(product)).toBe(before)
+})
 it('quotes and copies a one-yuan small-order surcharge and removes it at the existing threshold',async()=>{
   const writeText=vi.fn().mockResolvedValue(undefined)
   Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true})

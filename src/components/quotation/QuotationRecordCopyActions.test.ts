@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { setPricingTestPermissions, clearPricingTestPermissions } from '@/test/pricingPermissions'
+beforeEach(() => setPricingTestPermissions())
+afterEach(clearPricingTestPermissions)
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import CopyActions from './QuotationRecordCopyActions.vue'
 import { normalizeQuotationRecord, updateQuotationRecord, type QuotationRecord } from '@/data/quotationRecords'
@@ -37,6 +40,24 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:quote'); vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('copies only permitted fields for employees and rechecks permissions when copying again', async () => {
+  const state = mount()
+  state.record.purchaseUnitPriceCny = 731.29
+  state.record.domesticFreightPerUnitCny = 12.37
+  state.record.quoteOptions![0]!.freightCny = 83.46
+  await settle()
+  footerButton('复制报价数据').click(); await settle()
+  expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('731.29'))
+  setPricingTestPermissions(['quote', 'myRecords']); await settle()
+  for (const label of ['复制报价数据', '仅复制报价单']) {
+    footerButton(label).click(); await settle()
+    const text = String(writeText.mock.lastCall?.[0])
+    for (const secret of ['731.29', '12.37', '83.46', '产品成本', '物流运费']) expect(text).not.toContain(secret)
+    expect(text).toContain('闪电猴')
+    expect(text).toContain('6.20')
+  }
+})
 
 it('reorders an average in a saved record and retains its position after saving and reopening', async () => {
   const state = mount(); state.canEdit = true

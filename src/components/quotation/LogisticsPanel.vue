@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { canViewLogisticsCost } from '@/data/quotationVisibility'
 import type { QuotationProduct } from './types'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
 defineProps<{ product: QuotationProduct; rules: string[]; grade: string; coefficient: number; exchangeRate: number }>()
@@ -14,7 +15,7 @@ function usdFromCny(value: number, rate: number) { return rate > 0 ? (value / ra
       <label class="wide">运费规则<select v-model="product.rule" @change="$emit('ruleChange')"><option v-if="!rules.length" value="">当前条件无可用规则</option><option v-for="rule in rules" :key="rule">{{ rule }}</option></select></label>
       <label>客户等级<input :value="customerGradeLabel(grade)" disabled></label>
     </div>
-    <footer><div class="freight-summary"><span>国际运费</span><label class="freight-cny"><em>CNY ¥</em><input v-model.number="product.freight" disabled type="number"></label><strong>USD ${{ usdFromCny(product.freight, exchangeRate) }}</strong><button @click="$emit('calculate')">运费试算</button></div></footer>
+    <footer v-if="canViewLogisticsCost"><div class="freight-summary"><span>国际运费</span><label class="freight-cny"><em>CNY ¥</em><input v-model.number="product.freight" disabled type="number"></label><strong>USD ${{ usdFromCny(product.freight, exchangeRate) }}</strong><button @click="$emit('calculate')">运费试算</button></div></footer>
   </section>
 </template>
 

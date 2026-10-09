@@ -20,7 +20,7 @@ const grams = (value: unknown) => {
 }
 
 /** Only the requested summary fields; all values use saved, matching-quantity data. */
-function costWeightSummary(record: QuotationRecord, unit: string) {
+function costWeightSummary(record: QuotationRecord, unit: string, includeCost: boolean) {
   const options = record.quoteOptions ?? []
   const matching = options.filter(option => option.country === record.country && option.carrier === record.carrier && option.channel === record.channel && option.rule === record.rule)
   const selected = options.find(option => option.isPrimary) ?? (matching.length === 1 ? matching[0] : options.length === 1 ? options[0] : undefined)
@@ -35,7 +35,7 @@ function costWeightSummary(record: QuotationRecord, unit: string) {
     : `基础 ${grams(input?.baseWeightKg)}g + 包材合计 ${grams(input?.packagingWeightKg)}g（普通包材、特殊包装明细未保存）`
   return {
     rows: [
-      [`总成本价（CNY/1${unit}）`, snapshotMoney(cost?.total), `商品成本 ${snapshotMoney(cost?.purchase)} + 国内运费 ${snapshotMoney(cost?.freight)}（CNY，不含国际运费）`],
+      ...(includeCost ? [[`总成本价（CNY/1${unit}）`, snapshotMoney(cost?.total), `商品成本 ${snapshotMoney(cost?.purchase)} + 国内运费 ${snapshotMoney(cost?.freight)}（CNY，不含国际运费）`]] : []),
       [`含包材重量（g/1${unit}）`, grams(finalWeight), weightDetails],
     ],
     note: record.weightSnapshot
@@ -45,7 +45,7 @@ function costWeightSummary(record: QuotationRecord, unit: string) {
 }
 
 /** Quotation table with the explicitly requested saved cost and weight summary. */
-export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version: 'full' | 'visible' = 'full'): { text: string; html: string } {
+export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version: 'full' | 'visible' = 'full', visibility: { includeCost?: boolean } = {}): { text: string; html: string } {
   const snapshot = record.customerQuote ?? record.sheetQuote
   const plans = snapshot?.averagePlans ?? []
   const options = recordQuoteSheetVersion(record, version).quoteOptions ?? []
@@ -64,7 +64,7 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version:
     return value != null && Number.isFinite(value)
   }))).sort((a, b) => (a || Infinity) - (b || Infinity))
   const unit = record.quoteMode === 'bundle' ? '套' : '件'
-  const summary = costWeightSummary(record, unit)
+  const summary = costWeightSummary(record, unit, visibility.includeCost !== false)
   const sku = record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') : record.primarySku
   const header = ['国家', '物流渠道', ...quantities.map(q => q ? `${q}${unit}` : '自定义（数量未保存）'), '预计时效']
   const rows: { kind: 'metadata' | 'header' | 'route' | 'note'; cells: string[] }[] = [

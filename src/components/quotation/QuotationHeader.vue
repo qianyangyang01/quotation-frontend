@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { canViewFullPricing } from '@/data/quotationVisibility'
 defineProps<{ salesperson: string; rate: number; status: string; modeLabel: string }>()
 defineEmits<{ showRule: [] }>()
 </script>
@@ -10,7 +11,7 @@ defineEmits<{ showRule: [] }>()
     </div>
     <div class="header-meta">
       <dl><div><dt>报价模式</dt><dd>{{ modeLabel }}</dd></div><div><dt>当前币种</dt><dd>USD</dd></div><div><dt>报价状态</dt><dd class="ready"><i></i>{{ status }}</dd></div></dl>
-      <div class="actions"><button class="rule" @click="$emit('showRule')">计算规则</button></div>
+      <div v-if="canViewFullPricing" class="actions"><button class="rule" @click="$emit('showRule')">计算规则</button></div>
       <small>报价人：{{ salesperson }} · 财务汇率 {{ rate }}</small>
     </div>
   </section>
