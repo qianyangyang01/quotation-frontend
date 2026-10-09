@@ -65,12 +65,14 @@ it('exports review conclusions and deal results independently from legacy confir
     normalizeQuotationRecord({id:'a',no:'QT-A',quoteConfirmed:true,financeReviewStatus:'pending',status:'pending'})!,
     normalizeQuotationRecord({id:'b',no:'QT-B',quoteConfirmed:false,financeReviewStatus:'approved',financeReviewedBy:'管理员',financeReviewedAt:'2026-09-27T02:00:00Z',status:'won'})!,
     normalizeQuotationRecord({id:'c',no:'QT-C',quoteConfirmed:true,financeReviewStatus:'channel-exempt',status:'lost'})!,
+    normalizeQuotationRecord({id:'d',no:'QT-D',financeReviewStatus:'logistics-exempt',status:'pending'})!,
   ]
   const before=JSON.stringify(rows), csv=quotationDetailsCsv(rows,[],{includeReview:true})
   expect(csv.split('\r\n')[0]).toContain('审核状态,审核人,审核时间,成交结果')
   expect(csv).toContain('待审核,,,未标记成交')
   expect(csv).toContain('审核通过,管理员,2026-09-27T02:00:00Z,已成交')
   expect(csv).toContain('同渠道免审,,,未成交')
+  expect(csv).toContain('物流免审-采购已审,,,未标记成交')
   expect(csv).not.toMatch(/待处理|已处理|处理状态/)
   expect(JSON.stringify(rows)).toBe(before)
 })

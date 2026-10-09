@@ -12,6 +12,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class QuotationReviewNotificationIntegrationTest extends QuotationFinanceReviewIntegrationTest {
     @Autowired QuotationReviewNotificationRepository notifications;
     @Autowired QuotationReviewNotifications inbox;
+    @Test void logisticsExemptionIsPersistedDeliveredAndInvalidatedWithoutChangingSnapshots() throws Exception {
+        var r=record();claim(r);long claimed=rv(r);
+        action(r,finance,qv(r),claimed,"complete","logistics-exempt","采购价格已核对").andExpect(status().isOk());
+        var event=notifications.findById(r.id).orElseThrow();
+        assertEquals("logistics-exempt",event.status);
+        assertEquals(1L,inbox.inbox(owner,0).counts().get("logistics-exempt"));
+        mvc.perform(get("/api/v1/review-notifications").with(employee)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items[0].status").value("logistics-exempt"))
+            .andExpect(jsonPath("$.data.items[0].note").value("采购价格已核对"));
+        action(r,finance,qv(r),claimed,"complete","logistics-exempt","").andExpect(status().isConflict());
+        assertEquals(event.eventId,notifications.findById(r.id).orElseThrow().eventId);
+        read(r.id,event.eventId);assertEquals(0,inbox.inbox(owner,0).total());
+        assertEquals("logistics-exempt",view(r).path("financeReviewStatus").asText());
+        assertEquals(r.payload,records.findById(r.id).orElseThrow().payload);
+        price(r,7);assertEquals("pending",view(r).path("financeReviewStatus").asText());
+        assertTrue(notifications.findById(r.id).orElseThrow().obsolete);
+    }
     @Test void bulkReadIsScopedVersionSafeAndPreservesQuoteHistory() throws Exception {
         var a=record();claim(a);complete(a);var first=notifications.findById(a.id).orElseThrow().eventId;
         var b=record();claim(b);complete(b);var second=notifications.findById(b.id).orElseThrow().eventId;

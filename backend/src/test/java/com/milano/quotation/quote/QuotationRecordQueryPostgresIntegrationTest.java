@@ -102,5 +102,22 @@ class QuotationRecordQueryPostgresIntegrationTest {
         assertEquals(100,query.search("ME",pendingReviewFilters,0,100).total());
         assertEquals(100,query.search("ME",combinedPending,0,100).total());
         assertEquals(1,query.search(null,new QuotationRecordQuery.Filters("","won","","",date,date,"active","F1","channel-exempt",false),0,100).total());
+        // The new conclusion is distinct from channel exemption, including legacy payload fallback.
+        jdbc.getJdbcTemplate().execute("insert into quotation_review select id,'logistics-exempt',null,jsonb_build_object('financeReviewStatus','logistics-exempt','financeReviewedBy','管理员'),2 from quotation_record where quote_no in ('Q-6','Q-7')");
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"financeReviewStatus\":\"logistics-exempt\"}'::jsonb where quote_no='Q-8'");
+        jdbc.getJdbcTemplate().execute("update quotation_review set status='logistics-exempt',state=jsonb_build_object('financeReviewStatus','logistics-exempt') where id=(select id from quotation_record where quote_no='OTHER')");
+        var logisticsFilters=new QuotationRecordQuery.Filters("","","","",date,date,"active","F1","logistics-exempt",false);
+        var firstLogistics=query.search("ME",logisticsFilters,0,2);
+        var lastLogistics=query.search("ME",logisticsFilters,1,2);
+        assertEquals(3,firstLogistics.total());assertEquals(3,firstLogistics.summary().pending());
+        assertEquals(2,firstLogistics.items().size());assertEquals(1,lastLogistics.items().size());
+        assertTrue(firstLogistics.items().stream().allMatch(p->p.path("financeReviewStatus").asText().equals("logistics-exempt")));
+        assertTrue(firstLogistics.items().stream().noneMatch(lastLogistics.items()::contains));
+        assertEquals(4,query.search(null,logisticsFilters,0,100).total());
+        assertEquals(3,query.search("ME",new QuotationRecordQuery.Filters("","finance-logistics-exempt","","",date,date),0,100).total());
+        assertEquals(97,query.search("ME",pendingReviewFilters,0,100).total());
+        assertEquals(97,query.search("ME",combinedPending,0,100).total());
+        assertEquals(1,query.search("ME",exemptFilters,0,100).total());
+        assertEquals(1,query.search(null,new QuotationRecordQuery.Filters("","won","","",date,date,"active","F1","logistics-exempt",false),0,100).total());
     }
 }

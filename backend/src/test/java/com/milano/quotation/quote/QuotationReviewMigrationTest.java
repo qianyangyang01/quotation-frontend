@@ -25,6 +25,12 @@ class QuotationReviewMigrationTest {
         assertEquals(before,jdbc.queryForList("select * from quotation_record order by id"));
         assertEquals(reviewsBefore,jdbc.queryForList("select * from quotation_review order by id"));
         jdbc.execute("insert into quotation_review values(md5('won')::uuid,'channel-exempt',null,'{\"financeReviewStatus\":\"channel-exempt\"}',0)");
+        var beforeNewConclusion=jdbc.queryForList("select * from quotation_review order by id");
+        try(var resource=getClass().getResourceAsStream("/db/migration/V59__quotation_logistics_exempt_review.sql")){assertNotNull(resource);jdbc.execute(new String(resource.readAllBytes(),StandardCharsets.UTF_8));}
+        assertEquals(before,jdbc.queryForList("select * from quotation_record order by id"));
+        assertEquals(beforeNewConclusion,jdbc.queryForList("select * from quotation_review order by id"));
+        jdbc.execute("update quotation_review set status='logistics-exempt',state='{\"financeReviewStatus\":\"logistics-exempt\"}' where id=md5('won')::uuid");
+        assertEquals("logistics-exempt",jdbc.queryForObject("select status from quotation_review where id=md5('won')::uuid",String.class));
         assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->jdbc.execute("update quotation_review set status='invalid' where id=md5('won')::uuid"));
         assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->jdbc.execute("update quotation_review set claimant_account='FINANCE' where id=md5('won')::uuid"));
     }

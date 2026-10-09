@@ -106,5 +106,5 @@ export async function acknowledgeReview(entry: UnreadReview, displayedVersion: n
 export function openReviewInbox() { reviewNotifications.opened = true; reviewNotifications.announcement = ''; void refreshReviewNotifications(0) }
 export function reviewMessageTitle(item: ReviewMessage) {
   if (item.kind === 'comment') return '有新的审核意见'
-  return item.status === 'rejected' ? '报价存在价格异常' : item.status === 'channel-exempt' ? '报价已确认同渠道免审' : '报价审核通过'
+  return item.status === 'rejected' ? '报价存在价格异常' : item.status === 'logistics-exempt' ? '报价已确认物流免审-采购已审' : item.status === 'channel-exempt' ? '报价已确认同渠道免审' : '报价审核通过'
 }

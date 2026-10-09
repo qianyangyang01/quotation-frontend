@@ -23,10 +23,10 @@ function table(text: string) {
   })
 }
 
-it('exports the manual channel exemption label without changing the price snapshot', () => {
-  const row=normalizeQuotationRecord({...record(),financeReviewStatus:'channel-exempt',financeReviewedBy:'管理员'})!
+it.each([['channel-exempt','同渠道免审'],['logistics-exempt','物流免审-采购已审']] as const)('exports %s without changing the price snapshot', (conclusion,label) => {
+  const row=normalizeQuotationRecord({...record(),financeReviewStatus:conclusion,financeReviewedBy:'管理员'})!
   const before=JSON.stringify(row)
-  expect(quotationRecordReconciliationTsv(row)).toContain('同渠道免审')
+  expect(quotationRecordReconciliationTsv(row)).toContain(label)
   expect(JSON.stringify(row)).toBe(before)
 })
 

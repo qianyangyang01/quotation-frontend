@@ -42,7 +42,7 @@ public class QuotationReviewService {
     static ObjectNode legacy(JsonNode payload) {
         var state=JsonNodeFactory.instance.objectNode();
         for (var key:VIEW_FIELDS) if(payload.has(key)) state.set(key,payload.get(key));
-        if(!Set.of("approved","rejected","channel-exempt").contains(state.path("financeReviewStatus").asText())) state.put("financeReviewStatus","pending");
+        if(!Set.of("approved","rejected","channel-exempt","logistics-exempt").contains(state.path("financeReviewStatus").asText())) state.put("financeReviewStatus","pending");
         return state;
     }
     static void overlay(ObjectNode payload, JsonNode state, long version) {
@@ -177,7 +177,7 @@ public class QuotationReviewService {
             if(action.equals("complete")) {
                 requireQuoteVersion(quote,request);
                 var result=request.path("financeReviewStatus").asText();
-                if(!Set.of("approved","rejected","channel-exempt").contains(result)) throw AppException.unprocessable("请选择审核结论");
+                if(!Set.of("approved","rejected","channel-exempt","logistics-exempt").contains(result)) throw AppException.unprocessable("请选择审核结论");
                 if(FobQuotation.isFob(quote.payload) && result.equals("channel-exempt")) throw AppException.unprocessable("FOB报价没有物流渠道，请选择审核通过或价格异常");
                 row.status=result;
                 current.put("financeReviewedBy",actor.displayName()).put("financeReviewedAccount",actor.account()).put("financeReviewedAt",Instant.now().toString());
@@ -234,7 +234,7 @@ public class QuotationReviewService {
         else event.put("quoteVersion",quoteVersion);
     }
     private static void preserveLegacyHistory(QuotationRecordEntity quote,ObjectNode state) {
-        if(state.has("history") || !Set.of("approved","rejected","channel-exempt").contains(state.path("financeReviewStatus").asText()))return;
+        if(state.has("history") || !Set.of("approved","rejected","channel-exempt","logistics-exempt").contains(state.path("financeReviewStatus").asText()))return;
         state.withArray("history").addObject().put("id",quote.id+"-legacy").put("action","legacy-review").put("before","pending")
             .put("after",state.path("financeReviewStatus").asText()).put("actorAccount",state.path("financeReviewedAccount").asText("历史记录未保存"))
             .put("actorName",state.path("financeReviewedBy").asText("历史审核人未保存")).put("at",state.path("financeReviewedAt").asText(""))

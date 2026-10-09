@@ -2,6 +2,8 @@ package com.milano.quotation.quote;
 
 import com.milano.quotation.security.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -143,7 +145,7 @@ class QuotationFinanceReviewIntegrationTest {
         assertEquals(0,view(r).path("financeReviewCommentCount").asInt());
     }
     @Test void everyReviewConclusionEndsPriorityWithoutResurrectingOnReReview() throws Exception {
-        for (var result:List.of("approved","rejected","channel-exempt")) {
+        for (var result:List.of("approved","rejected","channel-exempt","logistics-exempt")) {
             var r=record();priority(r,employee,true,0).andExpect(status().isOk());claim(r);
             var stale=rv(r);
             action(r,finance,qv(r),stale,"complete",result,"").andExpect(status().isOk()).andExpect(jsonPath("$.data.priorityProcessing").value(false));
@@ -178,37 +180,47 @@ class QuotationFinanceReviewIntegrationTest {
         ((ObjectNode)prices.path("rows").get(0)).putArray("prices").add(value);p.set("customerQuote",prices);
         mvc.perform(patch("/api/v1/quotations/{id}",r.id).with(employee).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(p))).andExpect(status().isOk());
     }
-    @Test void manualChannelExemptionPreservesSnapshotAndDoesNotPropagate() throws Exception {
+    @ParameterizedTest @ValueSource(strings={"channel-exempt","logistics-exempt"})
+    void manualChannelExemptionPreservesSnapshotAndDoesNotPropagate(String conclusion) throws Exception {
         var r=record();var sameChannel=record();
         action(r,admin,qv(r),rv(r),"claim",null,"").andExpect(status().isOk());
-        action(r,admin,qv(r),rv(r),"complete","channel-exempt","").andExpect(status().isOk());
+        action(r,admin,qv(r),rv(r),"complete",conclusion,"").andExpect(status().isOk());
         var after=records.findById(r.id).orElseThrow();
         assertEquals(r.payload,after.payload);assertEquals(r.version,after.version);assertEquals(r.updatedAt,after.updatedAt);
-        assertEquals("channel-exempt",view(r).path("financeReviewStatus").asText());
+        assertEquals(conclusion,view(r).path("financeReviewStatus").asText());
         assertEquals("A"+owner,view(r).path("financeReviewedAccount").asText());
         assertFalse(view(r).has("financeReviewClaimedAccount"));
         assertEquals("pending",view(sameChannel).path("financeReviewStatus").asText());
         mvc.perform(get("/api/v1/quotations/review-status").param("ids",r.id.toString()).with(employee))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].financeReviewStatus").value("channel-exempt"));
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].financeReviewStatus").value(conclusion));
         mvc.perform(get("/api/v1/quotations/{id}/review-history",r.id).with(employee))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.data[1].after").value("channel-exempt"));
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data[1].after").value(conclusion));
         lifecycle(r,"trash",qv(r)).andExpect(status().isConflict());
-        var input=PackagingWeightTest.valid();input.put("financeReviewStatus","channel-exempt");
+        var input=PackagingWeightTest.valid();input.put("financeReviewStatus",conclusion);
         mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key",UUID.randomUUID()).contentType("application/json").content(mapper.writeValueAsString(input)))
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.financeReviewStatus").value("pending"));
     }
-    @Test void channelExemptionKeepsPermissionAndVersionGuardsAndPriceEditReset() throws Exception {
+    @Test void fobAllowsPurchaseReviewedWithLogisticsExemptButStillRejectsChannelExemption() throws Exception {
+        var r=record();((ObjectNode)r.payload).put("quoteMode","fob");r=records.saveAndFlush(r);
+        claim(r);
+        action(r,finance,qv(r),rv(r),"complete","channel-exempt","").andExpect(status().isUnprocessableEntity());
+        action(r,finance,qv(r),rv(r),"complete","logistics-exempt","采购已核对").andExpect(status().isOk());
+        assertEquals("logistics-exempt",view(r).path("financeReviewStatus").asText());
+        assertEquals(r.payload,records.findById(r.id).orElseThrow().payload);
+    }
+    @ParameterizedTest @ValueSource(strings={"channel-exempt","logistics-exempt"})
+    void channelExemptionKeepsPermissionAndVersionGuardsAndPriceEditReset(String conclusion) throws Exception {
         var r=record();claim(r);
-        action(r,employee,qv(r),rv(r),"complete","channel-exempt","").andExpect(status().isForbidden());
-        action(r,admin,qv(r),rv(r),"complete","channel-exempt","").andExpect(status().isForbidden());
-        action(r,finance,qv(r)+1,rv(r),"complete","channel-exempt","").andExpect(status().isConflict());
-        action(r,finance,qv(r),rv(r)+1,"complete","channel-exempt","").andExpect(status().isConflict());
-        action(r,finance,qv(r),rv(r),"complete","channel-exempt","").andExpect(status().isOk());
+        action(r,employee,qv(r),rv(r),"complete",conclusion,"").andExpect(status().isForbidden());
+        action(r,admin,qv(r),rv(r),"complete",conclusion,"").andExpect(status().isForbidden());
+        action(r,finance,qv(r)+1,rv(r),"complete",conclusion,"").andExpect(status().isConflict());
+        action(r,finance,qv(r),rv(r)+1,"complete",conclusion,"").andExpect(status().isConflict());
+        action(r,finance,qv(r),rv(r),"complete",conclusion,"").andExpect(status().isOk());
         long version=rv(r);price(r,6.35);assertEquals(version,rv(r));
         price(r,7);assertEquals("pending",view(r).path("financeReviewStatus").asText());
         var history=reviews.findById(r.id).orElseThrow().state.path("history");
-        assertEquals("channel-exempt",history.get(1).path("after").asText());
-        assertEquals("channel-exempt",history.get(2).path("before").asText());
+        assertEquals(conclusion,history.get(1).path("after").asText());
+        assertEquals(conclusion,history.get(2).path("before").asText());
     }
     @Test void preservesBusinessPayloadVersionAndTimes() throws Exception {
         var r=record();claim(r);assertEquals("F"+owner,view(r).path("financeReviewClaimedAccount").asText());complete(r);

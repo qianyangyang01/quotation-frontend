@@ -22,8 +22,8 @@ async function mount(role:'super_admin'|'employee',scope:'mine'|'company') {
 afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;authState.permissions=[];vi.useRealTimers();vi.resetAllMocks()})
 it.each([['employee','mine'],['super_admin','company']] as const)('uses the same review conclusions regardless of legacy business confirmation for %s',async(role,scope)=>{
   vi.useFakeTimers();await mount(role,scope)
-  const states=['pending','reviewing','channel-exempt','approved','rejected'] as const
-  const labels=['待审核','ADMIN审核中','同渠道免审','审核通过','价格异常']
+  const states=['pending','reviewing','channel-exempt','approved','rejected','logistics-exempt'] as const
+  const labels=['待审核','ADMIN审核中','同渠道免审','审核通过','价格异常','物流免审-采购已审']
   const rows=states.flatMap((status,index)=>[false,true].map(confirmed=>({
     ...saved(),id:status+confirmed,no:'QT-'+status+confirmed,quoteConfirmed:confirmed,financeReviewStatus:status,
     financeReviewClaimedBy:status==='reviewing'?'ADMIN':undefined,
@@ -32,13 +32,13 @@ it.each([['employee','mine'],['super_admin','company']] as const)('uses the same
     status:index===3?'won' as const:'pending' as const,
   })))
   mocks.get.mockResolvedValue(rows)
-  mocks.page.mockResolvedValue({items:rows,page:0,size:10,total:10,totalPages:1,summary:{pending:4,processed:4,won:2,lost:0,total:10},countries:[]})
+  mocks.page.mockResolvedValue({items:rows,page:0,size:20,total:12,totalPages:1,summary:{pending:5,processed:5,won:2,lost:0,total:12},countries:[]})
   button('重置').click();await flush();await vi.advanceTimersByTimeAsync(3500);await flush()
   const badges=[...document.querySelectorAll('.records .finance-review')].map(el=>el.textContent)
   expect(badges).toEqual(labels.flatMap(label=>[label,label]))
   expect(document.querySelector('[aria-label="处理状态"]')).toBeNull()
   expect(document.querySelector('.records')?.textContent).not.toMatch(/待处理|已处理|报价待确认/)
-  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('共 10 条')
+  expect(document.querySelector('.record-query-feedback')?.textContent).toContain('共 12 条')
   expect(document.querySelector('.record-query-feedback')?.textContent).toContain('已成交 2 条')
   expect([...document.querySelectorAll('[aria-label="成交结果"] option')].map(el=>el.getAttribute('value'))).toEqual(['','won','lost'])
   document.querySelectorAll<HTMLButtonElement>('.difference-cell')[6]!.click();await flush()
@@ -59,32 +59,32 @@ it('shows a saved price change returning to review without requesting business c
   expect(document.querySelector('.detail-review-status')?.textContent).toContain('待审核')
   expect(document.body.textContent).not.toContain('请核对后确认报价')
 })
-it('manually completes with channel exemption and refreshes the filtered list',async()=>{
+it.each([['channel-exempt','同渠道免审','可报价 · 不再审核'],['logistics-exempt','物流免审-采购已审','可报价 · 仅当前报价']] as const)('manually completes with channel exemption and refreshes the filtered list (%s)',async(conclusion,label,subtitle)=>{
   vi.useFakeTimers();await mount('super_admin','company')
   mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()
   button('审核完成').click();await flush()
-  expect(document.querySelectorAll('.review-results button')).toHaveLength(3)
-  mocks.patch.mockResolvedValue({...saved(),_reviewVersion:2,financeReviewStatus:'channel-exempt',financeReviewedBy:'ADMIN'})
-  button('同渠道免审可报价 · 不再审核').click();await flush()
-  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'channel-exempt',note:'',_version:2,_reviewVersion:1})
-  expect(document.querySelector('.record-drawer .detail-review-status')?.textContent).toContain('同渠道免审')
+  expect(document.querySelectorAll('.review-results button')).toHaveLength(4)
+  mocks.patch.mockResolvedValue({...saved(),_reviewVersion:2,financeReviewStatus:conclusion,financeReviewedBy:'ADMIN'})
+  button(label+subtitle).click();await flush()
+  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:conclusion,note:'',_version:2,_reviewVersion:1})
+  expect(document.querySelector('.record-drawer .detail-review-status')?.textContent).toContain(label)
   expect(button('重新审核')).toBeDefined()
 })
-it('employees see channel exemption from polling without any review action',async()=>{
+it.each([['channel-exempt','同渠道免审'],['logistics-exempt','物流免审-采购已审']] as const)('employees see channel exemption from polling without any review action (%s)',async(conclusion,label)=>{
   vi.useFakeTimers();await mount('employee','mine')
   document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
-  mocks.get.mockResolvedValue([{...saved(),_reviewVersion:2,financeReviewStatus:'channel-exempt',financeReviewedBy:'ADMIN'}])
+  mocks.get.mockResolvedValue([{...saved(),_reviewVersion:2,financeReviewStatus:conclusion,financeReviewedBy:'ADMIN'}])
   await vi.advanceTimersByTimeAsync(3000);await flush()
-  expect(document.querySelector('.record-drawer .detail-review-status')?.textContent).toContain('同渠道免审')
+  expect(document.querySelector('.record-drawer .detail-review-status')?.textContent).toContain(label)
   expect(button('开始审核')).toBeUndefined();expect(button('重新审核')).toBeUndefined()
   expect(document.querySelector('.review-results')).toBeNull()
 })
-it('filters channel exemption independently of deal result',async()=>{
+it.each([['channel-exempt','同渠道免审'],['logistics-exempt','物流免审-采购已审']] as const)('filters channel exemption independently of deal result (%s)',async(conclusion,label)=>{
   vi.useFakeTimers();await mount('super_admin','company')
   button('审核中').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   document.querySelector<HTMLInputElement>('.review-mine input')!.click();await flush()
-  button('同渠道免审').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
-  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({reviewStatus:'channel-exempt',reviewMine:false})
+  button(label).click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  expect(mocks.page.mock.lastCall?.[1]).toMatchObject({reviewStatus:conclusion,reviewMine:false})
   expect(document.querySelector('.review-mine')).toBeNull()
 })
 it('requires claiming before completion and opens the exact returned quotation',async()=>{

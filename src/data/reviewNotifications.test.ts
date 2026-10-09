@@ -5,13 +5,26 @@ const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('@/services/http', () => ({ api: mocks }))
 vi.mock('@/data/authStore', () => ({ currentAuthUser: ref({ account: 'ME' }) }))
 import { currentAuthUser } from '@/data/authStore'
-import { reviewNotifications as inbox, startReviewNotifications, stopReviewNotifications, refreshReviewNotifications, acknowledgeReview, markAllReviewsRead, unreadReview, openReviewInbox, type ReviewInbox } from './reviewNotifications'
+import { reviewNotifications as inbox, startReviewNotifications, stopReviewNotifications, refreshReviewNotifications, acknowledgeReview, markAllReviewsRead, unreadReview, openReviewInbox, reviewMessageTitle, type ReviewInbox } from './reviewNotifications'
 const entry = { recordId: 'quote-1', eventId: 'event-1', reviewVersion: 2, status: 'approved' }
 const result = (eventId = 'event-1'): ReviewInbox => ({ items: [{ ...entry, eventId, kind: 'complete', note: '', actorName: '财务', occurredAt: '2026-10-04T12:00:00Z', quoteNo: 'QT1', customerName: '客户', primarySku: 'SKU' }], unread: [{ ...entry, eventId }], counts: { approved: 1 }, total: 1, page: 0, totalPages: 1 })
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 beforeEach(() => { vi.useFakeTimers(); mocks.get.mockReset(); mocks.post.mockReset(); currentAuthUser.value.account = 'ME'; mocks.get.mockResolvedValue(result()); mocks.post.mockResolvedValue(undefined) })
 afterEach(() => { stopReviewNotifications(); vi.useRealTimers() })
 describe('persistent review inbox', () => {
+  it('uses the specific logistics-exempt title and keeps its unread count independent', async () => {
+    const data = result()
+    data.items[0]!.status = 'logistics-exempt'
+    data.unread[0]!.status = 'logistics-exempt'
+    data.counts = { 'logistics-exempt': 1 }
+    mocks.get.mockResolvedValue(data); startReviewNotifications('ME'); await flush()
+    expect(reviewMessageTitle(inbox.items[0]!)).toBe('报价已确认物流免审-采购已审')
+    expect(reviewMessageTitle({ ...inbox.items[0]!, kind: 'comment' })).toBe('有新的审核意见')
+    expect(unreadReview('quote-1')?.status).toBe('logistics-exempt')
+    mocks.get.mockReturnValue(new Promise(() => {}))
+    void acknowledgeReview(data.unread[0]!, 2); await flush()
+    expect(inbox.counts['logistics-exempt']).toBe(0); expect(inbox.total).toBe(0)
+  })
   it('marks unread events across every page and immediately clears all badges', async () => {
     const all = result(); all.unread = Array.from({ length: 25 }, (_, i) => ({ ...entry, recordId: `q${i}`, eventId: `e${i}` })); all.total=25;all.counts={approved:25};all.totalPages=2
     mocks.get.mockResolvedValue(all);startReviewNotifications('ME');await flush()
