@@ -22,6 +22,7 @@ import java.util.*;
 public class QuotationController {
     private static final Set<String> PATCH_FIELDS = Set.of("status", "dealLines", "dealOptionId", "dealOptionLabel",
             "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerName", "customerQuote", "quoteConfirmed");
+    @org.springframework.beans.factory.annotation.Autowired private FobQuotation fobQuotation;
     private final QuotationRecordRepository records;
     private final QuotationReviewService reviews;
     @org.springframework.beans.factory.annotation.Autowired private QuotationDraftGuard draftGuard;
@@ -68,10 +69,11 @@ public class QuotationController {
         @RequestParam(defaultValue="") String priceDifference,
         @RequestParam(defaultValue="false") boolean priorityOnly,
         @RequestParam(defaultValue="") String spotCheck,
+        @RequestParam(defaultValue="") String quoteMode,
         @RequestParam(defaultValue="active") String lifecycle,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
         @RequestParam(required=false) @org.springframework.format.annotation.DateTimeFormat(iso=org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate, Authentication auth) {
-        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,priorityOnly,spotCheck),page,size));
+        return ApiResponse.ok(recordQuery.search(hasAll(auth)&&scope.equals("company")?null:principal(auth).account(),new QuotationRecordQuery.Filters(q,status,country,category,startDate,endDate,lifecycle,principal(auth).account(),reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,priorityOnly,spotCheck,quoteMode),page,size));
     }
     /** Poll only visible records; enforce owner scope on the server. */
     @GetMapping("/review-status")
@@ -161,19 +163,21 @@ public class QuotationController {
                                  Authentication auth) {
         if (!(body instanceof ObjectNode input) || body.toString().length() > 4_000_000) throw AppException.unprocessable("报价数据格式错误或过大");
         draftGuard.requireOrdinary(principal(auth).account());
-        submissionValidator.validate(input);
+        if (!FobQuotation.isFob(input)) {
+            if (input.has("fob")) throw AppException.unprocessable("普通报价不能携带FOB快照");
+            submissionValidator.validate(input);
+        }
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());
-        submissionValidator.validateQuotePricing(input);
-        readiness.assertCanCreate(input);
-        var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = input.deepCopy();
+        if (!FobQuotation.isFob(input)) { submissionValidator.validateQuotePricing(input); readiness.assertCanCreate(input); }
+        var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = FobQuotation.isFob(input) ? fobQuotation.prepare(input) : input.deepCopy();
         QuotationReviewService.SPOT_CHECK_FIELDS.forEach(payload::remove);
-        logisticsGuard.validate(payload);
+        if (!FobQuotation.isFob(payload)) logisticsGuard.validate(payload);
         payload.remove(List.of("priorityProcessing", "customerId", "lifecycleState", "lifecyclePreviousState", "lifecycleChangedAt", "lifecycleChangedBy", "lifecycleChangedAccount", "lifecycleReason"));
         payload.put("id", id.toString()); payload.put("no", no); payload.put("salespersonName", principal.displayName());
         payload.put("salespersonAccount", principal.account()); payload.put("status", "pending");
         payload.put("createdAt", now.toString()); payload.put("updatedAt", now.toString());
-        CustomerQuotePrices.initialize(payload);
+        if (!FobQuotation.isFob(payload)) CustomerQuotePrices.initialize(payload);
         QuotationFinanceReview.initialize(payload);
         payload.put("quoteConfirmed", false); payload.remove("quoteConfirmedAt"); payload.remove("quoteConfirmedBy");
         if (!payload.has("revisions")) payload.putArray("revisions");
@@ -192,6 +196,8 @@ public class QuotationController {
     ApiResponse<JsonNode> update(@PathVariable UUID id, @RequestBody ObjectNode patch, Authentication auth) {
         var row = mine(id, auth); assertVersion(row, patch.path("_version").asLong(-1));
         QuotationLifecycleController.assertActive(row);
+        if (FobQuotation.isFob(row.payload) && java.util.stream.Stream.of("customerQuote", "quoteConfirmed").anyMatch(patch::has))
+            throw AppException.unprocessable("FOB历史报价单保持原快照，请再次发起新报价");
         submissionValidator.validateUpdate(patch);
         QuotationFinanceReview.rejectDirectPatch(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();

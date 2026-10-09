@@ -62,6 +62,7 @@ export function purchaseCategoryForSkus(skus: string[], purchaseBySku: Map<strin
 }
 
 export function resolveRecordCategory(record: QuotationRecord, purchaseBySku: Map<string, AnalyticsPurchase>) {
+  if(record.quoteMode==='fob')return record.productCategory || record.fob?.product.category || '其他'
   return isManualQuotation(record.quoteMode) ? quotationModeLabels[record.quoteMode] : purchaseCategoryForSkus(quotationSkus(record), purchaseBySku)
 }
 
@@ -165,7 +166,8 @@ function csvCell(value: string | number) {
 
 export function quotationDetailsCsv(records: QuotationRecord[], purchases: AnalyticsPurchase[], options: { includeReview?: boolean } = {}) {
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
-  const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '报价类型', '成本(RMB)', '报价(USD)', '报价(RMB)', ...(options.includeReview ? ['审核状态', '审核人', '审核时间', '成交结果', '优先处理', '抽检标记', '抽检人', '抽检时间'] : [])]
-  const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, quotationModeLabels[record.quoteMode], record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2), ...(options.includeReview ? [financeReviewLabel(record.financeReviewStatus), record.financeReviewedBy || '', record.financeReviewedAt || '', quotationDealLabel(record.status), record.priorityProcessing ? '优先' : '普通', record.spotChecked ? '已抽检' : '未抽检', record.spotCheckedBy || '', record.spotCheckedAt || ''] : [])])
+  const hasFob=records.some(row=>row.quoteMode==='fob')
+  const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '报价类型', '成本(RMB)', '报价(USD)', '报价(RMB)', ...(hasFob ? ['FOB报价数量', 'FOB报关单价(USD)', 'FOB不报关单价(USD)', 'FOB阶梯报价'] : []), ...(options.includeReview ? ['审核状态', '审核人', '审核时间', '成交结果', '优先处理', '抽检标记', '抽检人', '抽检时间'] : [])]
+  const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, quotationModeLabels[record.quoteMode], record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2), ...(hasFob ? [record.fob?.quantity ?? '', record.fob?.current?.declaredUsd ?? '', record.fob?.current?.undeclaredUsd ?? '', record.fob?.ranges?.map(r=>`${r.minQty}${r.maxQty==null?'+':'-'+r.maxQty}${r.unit}: 报关$${r.declaredUsd}/不报关$${r.undeclaredUsd}`).join('；') ?? ''] : []), ...(options.includeReview ? [financeReviewLabel(record.financeReviewStatus), record.financeReviewedBy || '', record.financeReviewedAt || '', quotationDealLabel(record.status), record.priorityProcessing ? '优先' : '普通', record.spotChecked ? '已抽检' : '未抽检', record.spotCheckedBy || '', record.spotCheckedAt || ''] : [])])
   return `\uFEFF${[header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n')}`
 }

@@ -2,15 +2,16 @@ import { decimal } from '@/services/quotationDecimal'
 
 export type QuotationMode = 'single' | 'bundle' | 'freight-trial' | 'shipping-only'
 export type ManualPricing = { costCny: number; weightGrams: number }
-export const quotationModeLabels: Record<QuotationMode, string> = {
-  single: '单品 SKU 报价', bundle: '组合 SKU 报价',
+export type SavedQuotationMode = QuotationMode | 'fob'
+export const quotationModeLabels: Record<SavedQuotationMode, string> = {
+  fob: 'FOB（批发）报价', single: '单品 SKU 报价', bundle: '组合 SKU 报价',
   'freight-trial': '运费试算', 'shipping-only': '仅代发货报价',
 }
 export function isManualQuotation(mode: string): mode is 'freight-trial' | 'shipping-only' {
   return mode === 'freight-trial' || mode === 'shipping-only'
 }
 export function normalizeQuotationMode(mode: unknown): QuotationMode {
-  return typeof mode === 'string' && Object.prototype.hasOwnProperty.call(quotationModeLabels, mode) ? mode as QuotationMode : 'single'
+  return mode !== 'fob' && typeof mode === 'string' && Object.prototype.hasOwnProperty.call(quotationModeLabels, mode) ? mode as QuotationMode : 'single'
 }
 // Reject blank, scientific notation, negative, non-finite and silently rounded input.
 export function manualDecimal(input: unknown, places: number): number | null {

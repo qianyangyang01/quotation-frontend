@@ -72,6 +72,7 @@ public class PurchaseProductService {
         }).toList();
         return new PageImpl<>(content,pageable,rows.isEmpty()?0:rows.getFirst().getTotal());
     }
+    @Transactional public JsonNode getForQuotation(String sku) { return view(locked(sku)); }
     @Transactional(readOnly=true) public JsonNode get(String sku) { return products.findBySku(normalizeSku(sku)).map(this::view).orElseThrow(()->AppException.notFound("商品不存在")); }
     @Transactional(readOnly=true) public boolean exists(String sku) { return products.findBySku(normalizeSku(sku)).isPresent(); }
     @Transactional(readOnly=true) public long readyCount() { return products.countByQuoteReadyTrue(); }

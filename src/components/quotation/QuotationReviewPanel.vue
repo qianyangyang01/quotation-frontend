@@ -33,7 +33,7 @@ const time=(value?:string)=>value?new Date(value).toLocaleString('zh-CN',{timeZo
         <template v-if="own">
           <label>审核意见（选填）<textarea v-model="note" maxlength="500" placeholder="可填写审核意见，不填写也可完成审核" /></label>
           <div class="actions">
-            <button type="button" :disabled="busy||stale||claimChanged" @click="emit('action',{action:'complete',financeReviewStatus:'channel-exempt',note})">同渠道免审 · 可报价</button>
+            <button v-if="record.quoteMode!=='fob'" type="button" :disabled="busy||stale||claimChanged" @click="emit('action',{action:'complete',financeReviewStatus:'channel-exempt',note})">同渠道免审 · 可报价</button>
             <button type="button" class="approve" :disabled="busy||stale||claimChanged" @click="emit('action',{action:'complete',financeReviewStatus:'approved',note})">审核完成 · 可报价</button>
             <button type="button" :disabled="busy||stale||claimChanged" @click="emit('action',{action:'complete',financeReviewStatus:'rejected',note})">审核完成 · 价格有误</button>
             <button type="button" :disabled="busy||claimChanged" @click="emit('action',{action:'cancel'})">取消审核</button>

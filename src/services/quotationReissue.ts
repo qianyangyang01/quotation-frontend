@@ -3,6 +3,7 @@ import { draftSelection, type QuotationDraftPayload } from './quotationDrafts'
 
 /** Copy editable inputs only. Prices, approvals and deal results belong to the original record. */
 export function quotationReissuePayload(record: QuotationRecord): QuotationDraftPayload {
+  if (record.quoteMode === 'fob') throw new Error('FOB请从独立报价工作区再次发起')
   const options: Array<Pick<QuotationRecordQuoteOption, 'country' | 'carrier' | 'channel' | 'rule'> & Partial<QuotationRecordQuoteOption>> = record.quoteOptions?.length ? record.quoteOptions : record.specifiedQuotes?.length
     ? record.specifiedQuotes : [{ country: record.country, carrier: record.carrier, channel: record.channel, rule: record.rule }]
   const primary = record.quoteOptions?.find(option => option.isPrimary) || options[0]

@@ -15,7 +15,8 @@ public class QuotationRecordQuery {
     private final ObjectMapper mapper;
     @org.springframework.beans.factory.annotation.Autowired private QuotationCountryIndex countryIndex;
     public QuotationRecordQuery(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc=jdbc; this.mapper=mapper; }
-    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine, String product, String customer, String channel, String optionScale, String priceDifference, boolean priorityOnly, String spotCheck) {
+    public record Filters(String q, String status, String country, String category, LocalDate startDate, LocalDate endDate, String lifecycle, String reviewer, String reviewStatus, boolean reviewMine, String product, String customer, String channel, String optionScale, String priceDifference, boolean priorityOnly, String spotCheck, String quoteMode) {
+        public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer,String reviewStatus,boolean reviewMine,String product,String customer,String channel,String optionScale,String priceDifference,boolean priorityOnly,String spotCheck) {this(q,status,country,category,startDate,endDate,lifecycle,reviewer,reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,priorityOnly,spotCheck,null);}
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer,String reviewStatus,boolean reviewMine,String product,String customer,String channel,String optionScale,String priceDifference,boolean priorityOnly) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,priorityOnly,null); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer,String reviewStatus,boolean reviewMine,String product,String customer,String channel,String optionScale,String priceDifference) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,reviewStatus,reviewMine,product,customer,channel,optionScale,priceDifference,false); }
         public Filters(String q,String status,String country,String category,LocalDate startDate,LocalDate endDate,String lifecycle,String reviewer,String reviewStatus,boolean reviewMine) { this(q,status,country,category,startDate,endDate,lifecycle,reviewer,reviewStatus,reviewMine,null,null,null,null,null); }
@@ -42,6 +43,10 @@ public class QuotationRecordQuery {
         }
         var priority="(lifecycle_state='active' and exists(select 1 from quotation_review pr where pr.id=quotation_record.id and pr.status in ('pending','reviewing') and pr.state->>'priorityProcessing'='true'))";
         var where=new StringBuilder(" where lifecycle_state=:lifecycle");
+        if(filters.quoteMode()!=null && !filters.quoteMode().isBlank()) {
+            if(!Set.of("single","bundle","freight-trial","shipping-only","fob").contains(filters.quoteMode()))throw AppException.unprocessable("报价类型不合法");
+            params.put("quoteMode",filters.quoteMode());where.append(" and coalesce(nullif(payload->>'quoteMode',''),'single')=:quoteMode");
+        }
         if(filters.priorityOnly()) where.append(" and "+priority);
         if (filters.spotCheck()!=null && !filters.spotCheck().isBlank()) {
             if (!Set.of("checked", "unchecked").contains(filters.spotCheck())) throw AppException.unprocessable("抽检筛选不合法");

@@ -161,6 +161,8 @@ function createTemplateFromCurrentMode() {
 }
 const quoteMode = ref<QuotationMode>('single')
 // FOB is a separate calculation workspace; it never serializes into a channel quotation or its draft.
+const fobKey = ref(0)
+const fobInitial = ref<{sku:string;source:'fob'|'standard';customer:string;quantity:number}>()
 const fobActive = ref(false)
 watch(canUseFob, allowed => { if (!allowed) fobActive.value = false })
 const fobPanel = ref<InstanceType<typeof FobQuotePanel> | null>(null)
@@ -222,6 +224,11 @@ async function applyReissue() {
     await draftSavePromise
     const serverDraft = await loadQuotationDraft()
     if (draftSource.value || serverDraft.sourceQuote) throw new Error('请先完成撤回报价草稿，或放弃编辑并取消报价，再次发起不会覆盖它')
+    if(record.quoteMode==='fob') {
+      if(!record.fob || !canUseFob.value)throw new Error('无法载入FOB报价')
+      fobInitial.value={sku:record.primarySku,source:record.fob.product.source,customer:record.customerName,quantity:record.fob.quantity}
+      fobKey.value++;fobActive.value=true;pendingReissue.value=null;finishReissueRequest();return
+    }
     const payload = quotationReissuePayload(record)
     const skus = isManualQuotation(payload.quoteMode) ? [] : payload.quoteMode === 'bundle' ? payload.bundleItems.map(item => item.sku) : [payload.product.sku]
     const purchases = new Map<string, PurchaseProductRecord | undefined>()
@@ -640,7 +647,7 @@ function changeQuoteMode(mode: QuotationMode | 'fob') {
   if (savingQuotation.value || syncRefreshing.value) return
   if (mode === 'fob') {
     productQueryGeneration++; productQueryAbort?.abort(); productQueryBusy.value = false
-    cancelQuoteLogistics(); purchaseInvoiceNotice.value = []; fobActive.value = true
+    cancelQuoteLogistics(); purchaseInvoiceNotice.value = []; fobInitial.value=undefined; fobKey.value++; fobActive.value = true
     fobStatus.value = '待查询SKU'; return
   }
   if (fobActive.value) { fobActive.value = false; draftNeedsQuery.value = true }
@@ -2289,7 +2296,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
-        <FobQuotePanel v-if="fobActive" :key="currentAuthUser.id" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
+        <FobQuotePanel :initial="fobInitial" v-if="fobActive" :key="currentAuthUser.id + ':' + fobKey" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
         <template v-else>
         <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ manualMode ? (quoteMode === 'shipping-only' ? '查询代发报价' : '查询试算') : quoteMode === 'bundle' ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
         <section v-if="!draftNeedsQuery && (manualMode ? manualQueried : p.sku) && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">

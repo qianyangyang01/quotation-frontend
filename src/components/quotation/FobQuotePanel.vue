@@ -3,15 +3,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
 import { fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
 
-const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string }>()
+const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {sku:string;source:FobSourceMode;customer:string;quantity:number} }>()
 const emit = defineEmits<{ status: [value: string]; retryFinance: [] }>()
-const sku = ref(''), source = ref<FobSourceMode>('auto'), busy = ref(false), error = ref(''), copied = ref('')
+const sku = ref(props.initial?.sku || ''), source = ref<FobSourceMode>(props.initial?.source || 'auto'), busy = ref(false), error = ref(''), copied = ref('')
 const quantity = ref(''), product = ref<FobQuoteProduct | null>(null), skuInput = ref<HTMLInputElement | null>(null)
 const rulesOpen = ref(false), rulesElement = ref<HTMLElement | null>(null)
 let generation = 0, controller: AbortController | undefined
 function invalidate() { generation++; controller?.abort(); busy.value = false; error.value = ''; product.value = null; copied.value = ''; emit('status', '待查询SKU') }
 watch([sku, source], invalidate)
-onMounted(() => skuInput.value?.focus({ preventScroll: true }))
+onMounted(() => {skuInput.value?.focus({ preventScroll: true });if(props.initial)void query()})
 onBeforeUnmount(() => { generation++; controller?.abort() })
 async function query() {
   const normalized = sku.value.trim().toUpperCase().replace(/\s+/g, '')
@@ -21,7 +21,7 @@ async function query() {
   try {
     const loaded = await loadFobQuoteProduct(normalized, source.value, controller.signal)
     if (request !== generation) return
-    product.value = loaded; quantity.value = String(Math.ceil(loaded.parsed.minOrderQty / loaded.parsed.orderMultiple) * loaded.parsed.orderMultiple)
+    product.value = loaded; quantity.value = String(props.initial?.sku === normalized ? props.initial.quantity : Math.ceil(loaded.parsed.minOrderQty / loaded.parsed.orderMultiple) * loaded.parsed.orderMultiple)
     emit('status', '已读取最新采购资料')
   } catch (e) { if (request === generation) { error.value = e instanceof Error ? e.message : '查询失败，请重试'; emit('status', '查询失败') } }
   finally { if (request === generation) busy.value = false }
@@ -76,7 +76,7 @@ async function copy() {
     </template>
     <details ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p>含票价＝不含票采购价×1.1；成本价＝含票价＋批量均摊运费；报关＝成本价×1.14÷汇率；不报关＝成本价×1.14×1.02÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
   </section>
-  <FobQuoteSheet v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" />
+  <FobQuoteSheet v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
 </template>
 
 <style scoped>

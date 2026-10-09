@@ -54,6 +54,7 @@ public class QuotationWithdrawalController {
             return ApiResponse.ok(draftApi.view(draft));
         }
         var quote=owned(id,actor,body);QuotationLifecycleController.assertActive(quote);requireNoDeal(quote);
+        if (FobQuotation.isFob(quote.payload)) throw AppException.unprocessable("FOB报价请通过再次发起生成新报价，原记录保留");
         var existingDraft=drafts.findById(actor.account()).orElse(null);
         if(existingDraft!=null && existingDraft.sourceQuoteId!=null)
             throw AppException.conflict("已有撤回报价，请先完成或放弃现有编辑，再撤回报价");

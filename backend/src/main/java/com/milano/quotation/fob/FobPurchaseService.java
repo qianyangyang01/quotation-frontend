@@ -73,6 +73,11 @@ public class FobPurchaseService {
         repository.flush();
         return new Result(added, updated, unchanged, preview.skipped.size());
     }
+    @Transactional
+    public JsonNode getForQuotation(String sku) {
+        repository.findLocked(List.of(normalizeSku(sku)));
+        return get(sku);
+    }
     @Transactional(readOnly = true)
     public JsonNode get(String sku) {
         var p = repository.findById(normalizeSku(sku)).orElseThrow(() -> new AppException(org.springframework.http.HttpStatus.NOT_FOUND, "FOB_PURCHASE_NOT_FOUND", "未找到该SKU的FOB资料"));

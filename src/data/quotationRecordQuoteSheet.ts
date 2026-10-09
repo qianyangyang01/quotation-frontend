@@ -6,6 +6,7 @@ import { quoteSheetBundleSkus, type QuoteSheetSourceRow } from './customerQuoteS
 
 /** Adapt the saved snapshot only. No current logistics lookup or price recalculation. */
 export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
+  if(record.quoteMode==='fob')throw new Error('FOB报价使用已保存的独立报价单快照')
   const options = record.quoteOptions ?? record.specifiedQuotes ?? []
   const rows: QuoteSheetSourceRow[] = options.map(option => ({
     country: String(('countryCode' in option && option.countryCode) || option.country),

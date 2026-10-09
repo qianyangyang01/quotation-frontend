@@ -47,7 +47,7 @@ function complete(financeReviewStatus: 'approved' | 'rejected' | 'channel-exempt
       <p class="review-context">{{ record.primarySku }} · {{ record.customerName }}<small>{{ record.no }}</small></p>
       <label class="review-note">审核意见（选填）<textarea v-model="note" maxlength="500" rows="3" aria-label="审核意见（选填）" placeholder="有建议时填写，保存后业务员可查看；不填写也可完成审核" /></label>
       <div class="review-results">
-        <button type="button" class="channel-exempt" :disabled="busy || !own || needsReload" @click="complete('channel-exempt')"><b>同渠道免审</b><small>可报价 · 不再审核</small></button>
+        <button v-if="record.quoteMode!=='fob'" type="button" class="channel-exempt" :disabled="busy || !own || needsReload" @click="complete('channel-exempt')"><b>同渠道免审</b><small>可报价 · 不再审核</small></button>
         <button type="button" class="approved" :disabled="busy || !own || needsReload" @click="complete('approved')"><b>审核通过</b><small>可报价</small></button>
         <button type="button" class="rejected" :disabled="busy || !own || needsReload" @click="complete('rejected')"><b>价格异常</b><small>不可报价</small></button>
       </div>

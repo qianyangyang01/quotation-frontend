@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FobRecordDetail from '@/components/quotation/FobRecordDetail.vue'
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { isManualQuotation, quotationModeLabels } from '@/data/quotationModes'
 import QuotationLifecycleDialog from '@/components/quotation/QuotationLifecycleDialog.vue'
@@ -86,6 +87,7 @@ async function confirmLifecycle(reason: string) {
 const filterProduct = ref('')
 const filterCustomer = ref('')
 const filterChannel = ref('')
+const filterQuoteMode = ref<import('@/data/quotationModes').SavedQuotationMode | ''>('')
 const filterOptionScale = ref<'' | 'single' | 'multiple'>('')
 const filterPriceDifference = ref<'' | 'lower' | 'equal' | 'higher' | 'missing'>('')
 const canReview = computed(() => ['super_admin','finance'].includes(currentAuthUser.value.role) && hasPermission('allRecords'))
@@ -120,7 +122,7 @@ const activeDatePreset = computed(() => {
 })
 const total=ref(0);const totalPages=ref(0);const loading=ref(false);const loadError=ref('');const exporting=ref(false)
 const summary=ref<{pending:number;won:number;lost:number;total:number;processed?:number}>({pending:0,won:0,lost:0,total:0});const countries=ref<string[]>([])
-const filters=computed(()=>({spotCheck:spotCheckFilter.value,priorityOnly:priorityOnly.value,lifecycle:lifecycle.value,product:filterProduct.value.trim(),customer:filterCustomer.value.trim(),channel:filterChannel.value.trim(),optionScale:filterOptionScale.value,priceDifference:filterPriceDifference.value,status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
+const filters=computed(()=>({quoteMode:filterQuoteMode.value,spotCheck:spotCheckFilter.value,priorityOnly:priorityOnly.value,lifecycle:lifecycle.value,product:filterProduct.value.trim(),customer:filterCustomer.value.trim(),channel:filterChannel.value.trim(),optionScale:filterOptionScale.value,priceDifference:filterPriceDifference.value,status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
 const dateError=computed(()=>startDate.value && endDate.value && startDate.value>endDate.value ? '开始日期不能晚于结束日期' : '')
 let requestId=0;let refreshTimer:ReturnType<typeof setTimeout>|undefined
 async function refresh(silent = false) {
@@ -136,7 +138,7 @@ async function refresh(silent = false) {
   } catch(error) {if(id===requestId){records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};loadError.value=error instanceof Error?error.message:'加载失败，请重试'}}
   finally {if(id===requestId)loading.value=false}
 }
-function resetFilters(){spotCheckFilter.value='';priorityOnly.value=false;filterProduct.value='';filterCustomer.value='';filterChannel.value='';filterOptionScale.value='';filterPriceDifference.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
+function resetFilters(){filterQuoteMode.value='';spotCheckFilter.value='';priorityOnly.value=false;filterProduct.value='';filterCustomer.value='';filterChannel.value='';filterOptionScale.value='';filterPriceDifference.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
 function recent(days:number){const dates=recentRecordDates(days);startDate.value=dates.startDate;endDate.value=dates.endDate}
 function changePage(next:number){if(loading.value)return;page.value=next;void refresh()}
 async function exportRecords(){
@@ -296,6 +298,7 @@ function recordSku(row: QuotationRecord) {
   return row.quoteMode === 'bundle' ? row.primarySku.replace(/[、,，]/g, '+') : row.primarySku
 }
 function recordCommission(row: QuotationRecord) {
+  if(row.quoteMode==='fob')return 'FOB批发 · 无国际运费'
   const value = row.commissionThreshold === undefined ? 1 : row.commissionThreshold
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1) return '佣金阈值：未保存有效值'
   return `佣金阈值：${value} · ${value < 1 ? '已加佣金' : '未加佣金'}`
@@ -505,6 +508,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <button v-if="lifecycle==='active'" :disabled="loading || lifecycleBusy" @click="beginLifecycle('archive')">批量归档</button><button v-if="lifecycle!=='trashed'" class="trash-button" :disabled="loading || lifecycleBusy" @click="beginLifecycle('trash')">移入回收站</button><button v-if="lifecycle!=='active'" :disabled="loading || lifecycleBusy" @click="beginLifecycle('restore')">恢复所选记录</button><button :disabled="lifecycleBusy" @click="checkedIds=[]">取消选择</button>
         </div>
         <div class="priority-filters" role="group" aria-label="优先处理筛选"><b>优先处理</b><button type="button" :aria-pressed="!priorityOnly" @click="priorityOnly=false">全部</button><button type="button" :aria-pressed="priorityOnly" @click="priorityOnly=true">只看优先</button></div>
+        <label class="spot-check-filter">报价类型<select v-model="filterQuoteMode" aria-label="报价类型筛选"><option value="">全部类型</option><option v-for="(label,key) in quotationModeLabels" :key="key" :value="key">{{ label }}</option></select></label>
         <label class="spot-check-filter">抽检<select v-model="spotCheckFilter" aria-label="抽检筛选"><option value="">全部</option><option value="unchecked">未抽检</option><option value="checked">已抽检</option></select></label>
         <small class="priority-sort-hint">优先在前 <span tabindex="0" role="img" aria-label="优先单按提交时间从早到晚，普通单按提交时间从晚到早" title="优先单按提交时间从早到晚，普通单按提交时间从晚到早">ⓘ</span></small>
       </section>
@@ -544,8 +548,10 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             </div>
           </div>
           <div class="record-customer"><b>{{ row.customerName }}</b><small class="record-customer-grade">客户级别：{{ customerGradeDisplayLabel(row.customerGrade) }}</small></div>
-          <div class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
-          <button class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
+          <div v-if="row.quoteMode==='fob'" class="route-summary"><b>FOB批发报价</b><span>{{ row.fob?.sheet.rows.length || 0 }}档 · 报关 / 不报关</span></div>
+          <div v-else class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
+          <button v-if="row.quoteMode==='fob'" class="difference-cell" @click="open(row)"><b>报关 ${{ row.fob?.current?.declaredUsd }}</b><span>不报关 ${{ row.fob?.current?.undeclaredUsd }} · {{ row.fob?.quantity }}件</span></button>
+          <button v-else class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
             <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>
             <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)"><template #inspection><QuotationSpotCheck :state="reviewSync.stateFor(row)" :can-mark="canSpotCheck && isActive(row)" :busy="spotCheckBusy.has(row.id) || lifecycleBusy || mutationBusy" @mark="markSpotChecked(row)" /></template></QuotationReviewPanel>
@@ -555,7 +561,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             </div>
             <div v-if="canWithdraw(row)" class="record-action-buttons record-mutation-buttons">
               <button type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('cancel', row)">取消</button>
-              <button v-if="hasPermission('quote')" type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('withdraw', row)">撤回重新编辑</button>
+              <button v-if="hasPermission('quote') && row.quoteMode!=='fob'" type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('withdraw', row)">撤回重新编辑</button>
             </div>
           </div>
         </article>
@@ -571,7 +577,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
     <QuotationLifecycleDialog v-if="lifecycleAction" :action="lifecycleAction" :rows="confirmationRows" :busy="lifecycleBusy" :error="lifecycleError" @cancel="lifecycleAction=null" @confirm="confirmLifecycle" />
     <div v-if="selected" class="mask" @click.self="closeDrawer">
       <aside class="record-drawer">
-        <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.productSummary }} · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
+        <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.productSummary }}<template v-if="selected.quoteMode!=='fob'"> · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</template></span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
 
         <p v-if="!isActive(selected)" class="lifecycle-readonly">{{ lifecycleLabel(selected.lifecycleState) }} · {{ selected.lifecycleChangedBy }} · {{ selected.lifecycleReason }}。恢复后可修改。</p>
         <template v-if="!editing">
@@ -584,8 +590,9 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           </div>
           <QuotationSpotCheck :state="reviewSync.stateFor(selected)" :can-mark="canSpotCheck && isActive(selected)" :busy="spotCheckBusy.has(selected.id) || lifecycleBusy || mutationBusy" detail @mark="markSpotChecked(selected)" />
           <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @viewed="reviewViewed(selected,$event)" /></div>
-          <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
-          <section v-if="detailTab==='overview'" class="overview-panel">
+          <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button v-if="selected.quoteMode!=='fob'" :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
+          <FobRecordDetail v-if="selected.quoteMode==='fob' && detailTab!=='history'" :record="selected" />
+          <section v-else-if="detailTab==='overview'" class="overview-panel">
             <div class="overview-metrics"><article><small>报价国家</small><b>{{ recordCountries(selected).length || 1 }}</b><span>个国家</span></article><article><small>报价渠道</small><b>{{ recordOptions(selected).length || 1 }}</b><span>条渠道</span></article><article><small>1{{ selected.quoteMode==='bundle'?'套':'件' }}报价区间</small><b>{{ hasMultipleOptions(selected) ? quote1UsdRange(selected) : usd(selected.systemQuoteUsd) }}</b><span>{{ hasMultipleOptions(selected) ? quote1CnyRange(selected) : cny(selected.systemQuoteCny) }}</span></article></div>
             <article class="primary-plan"><header><b>首选方案</b><span>报价单优先展示</span></header><div><span><strong>{{ primaryOption(selected)?.country || selected.country }} · {{ primaryOption(selected)?.carrier || selected.carrier }}｜{{ primaryOption(selected)?.channel || selected.channel }}</strong><small>渠道编码：{{ primaryOption(selected)?.channelCode || '—' }} · {{ primaryOption(selected)?.eta || selected.rule }}</small></span><b>{{ optionPrice(primaryOption(selected)?.quote1Usd ?? selected.systemQuoteUsd) }}</b></div></article>
             <section v-if="isManualQuotation(selected.quoteMode) && selected.manualPricing" class="snapshot"><span>报价类型</span><b>{{ quotationModeLabels[selected.quoteMode] }}</b><template v-if="selected.quoteMode === 'freight-trial'"><span>手填总成本 / 件</span><b>{{ cny(selected.manualPricing.costCny) }}</b></template><span>直接计费重量 / 件</span><b>{{ selected.manualPricing.weightGrams }} g</b></section>
@@ -600,7 +607,8 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           </section>
           <section v-else class="revision-history detail-history"><header><b>操作 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><QuotationRevisionSnapshot v-else-if="revision.field==='quoteRevision'" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>历史报价确认</b>：{{ revision.after === 'true' ? '业务员已确认报价（历史操作）' : '客户报价变化，历史确认已失效' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>成交结果</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
           <QuotationReviewHistory v-if="detailTab==='history'" :id="selected.id" :version="reviewSync.stateFor(selected)._reviewVersion" :account="currentAuthUser.account" />
-          <footer v-if="detailTab==='overview'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved">
+          <footer v-if="detailTab==='overview' && selected.quoteMode==='fob'" class="drawer-view-footer"><QuotationReviewButton v-if="canReview&&isActive(selected)" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :busy="reviewing.has(selected.id)||lifecycleBusy" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" /></footer>
+          <footer v-if="detailTab==='overview' && selected.quoteMode!=='fob'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved">
             <QuotationReviewButton v-if="canReview&&isActive(selected)" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :busy="reviewing.has(selected.id)||lifecycleBusy" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
           </QuotationRecordCopyActions></footer>
         </template>
