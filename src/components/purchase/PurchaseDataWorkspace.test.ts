@@ -18,11 +18,18 @@ async function search(text:string){const input=document.querySelector('.toolbar 
 beforeEach(()=>{vi.useFakeTimers();mocks.page.mockResolvedValue(page('INITIAL'));mocks.stats.mockResolvedValue({total:1,ready:1,pending:0,generatedSku:0})})
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers();authState.current=null;authState.permissions=[]})
 
-it.each(roleDefinitions)('keeps FOB paste maintenance admin-only for $name',async role=>{
+it.each(roleDefinitions)('allows FOB paste maintenance for procurement and administrators: $name',async role=>{
   authState.current={id:role.key,account:role.key,name:role.name,role:role.key,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=[...role.permissions]
   await mount()
   const paste=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='FOB 粘贴更新')
-  expect(!!paste).toBe(role.key==='super_admin')
+  expect(!!paste).toBe(['super_admin','purchase'].includes(role.key))
+  if(paste){
+    paste.click();await flush()
+    expect(document.querySelector('[aria-labelledby="fob-paste-title"]')).not.toBeNull()
+    authState.current.role='logistics';authState.permissions=['logistics'];await flush()
+    expect(document.querySelector('[aria-labelledby="fob-paste-title"]')).toBeNull()
+    expect(Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='FOB 粘贴更新')).toBe(false)
+  }
 })
 
 it.each(['少量现货，7天补货', ''])('edits and saves optional stock notes without affecting quotation eligibility: %s', async stockStatus => {

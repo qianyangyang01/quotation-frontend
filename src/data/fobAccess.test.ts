@@ -7,7 +7,7 @@ it.each(roleDefinitions)('keeps quotation and FOB maintenance access separate fo
   authState.current = { id:role.key, account:role.key, name:role.name, role:role.key, status:'enabled', mustChangePassword:false, passwordUpdatedAt:'' }
   authState.permissions = [...role.permissions]
   expect(canUseFob.value).toBe(role.permissions.includes('quote'))
-  expect(canMaintainFob.value).toBe(role.key === 'super_admin')
+  expect(canMaintainFob.value).toBe(['super_admin', 'purchase'].includes(role.key))
   authState.current.status = 'disabled'
   expect(canUseFob.value).toBe(false); expect(canMaintainFob.value).toBe(false)
 })

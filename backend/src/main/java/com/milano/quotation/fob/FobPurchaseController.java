@@ -11,12 +11,12 @@ import java.util.List;
 public class FobPurchaseController {
     private final FobPurchaseService service;
     public FobPurchaseController(FobPurchaseService service) { this.service = service; }
-    @PostMapping("/paste/preview") @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @PostMapping("/paste/preview") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE')")
     public ApiResponse<FobPurchaseService.Preview> preview(@RequestBody List<JsonNode> input) { return ApiResponse.ok(service.preview(input)); }
-    @PostMapping("/paste/confirm") @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @PostMapping("/paste/confirm") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE')")
     public ApiResponse<FobPurchaseService.Result> confirm(@RequestBody FobPurchaseService.Confirmation input) { return ApiResponse.ok(service.confirm(input)); }
-    @GetMapping("/{sku}") @PreAuthorize("hasRole('SUPER_ADMIN') or hasAuthority('PERM_quote')")
+    @GetMapping("/{sku}") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE') or hasAuthority('PERM_quote')")
     public ApiResponse<JsonNode> get(@PathVariable String sku) { return ApiResponse.ok(service.get(sku)); }
-    @GetMapping("/{sku}/history") @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @GetMapping("/{sku}/history") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE')")
     public ApiResponse<List<FobPurchaseService.History>> history(@PathVariable String sku) { return ApiResponse.ok(service.history(sku)); }
 }

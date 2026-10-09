@@ -92,11 +92,11 @@ class FobPurchasePostgresIntegrationTest {
         assertThrows(AppException.class,()->service.preview(List.of(row(sku()).put("version",999))));
         assertThrows(AppException.class,()->service.preview(List.of(row(sku()).put("dataSource","standard"))));
     }
-    @Test void quotePermissionAllowsReadButOnlySuperAdminCanWriteOrViewHistoryAndCsrfIsRequired() throws Exception {
+    @Test void quotePermissionAllowsReadButOnlyMaintainersCanWriteOrViewHistoryAndCsrfIsRequired() throws Exception {
         String sku = sku(); String body = mapper.writeValueAsString(List.of(row(sku)));
         mvc.perform(get("/api/v1/fob-purchase-products/"+sku)).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("FOB_PURCHASE_NOT_FOUND"));
         service.confirm(confirmation(List.of(row(sku))));
-        for (String role : List.of("EMPLOYEE", "FINANCE", "PURCHASE", "LOGISTICS")) {
+        for (String role : List.of("EMPLOYEE", "FINANCE", "LOGISTICS")) {
             var nonAdmin = user("OTHER").authorities(()->"ROLE_"+role,()->"PERM_purchase",()->"PERM_quote",()->"PERM_allRecords");
             mvc.perform(get("/api/v1/fob-purchase-products/"+sku).with(nonAdmin)).andExpect(status().isOk()).andExpect(jsonPath("$.data.parsed.priceTiers.length()").value(5));
             mvc.perform(get("/api/v1/fob-purchase-products/"+sku).with(user("NOQUOTE").authorities(()->"ROLE_"+role,()->"PERM_purchase",()->"PERM_allRecords"))).andExpect(status().isForbidden());

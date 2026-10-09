@@ -54,10 +54,13 @@ class QuotationRoleConsistencyPostgresIntegrationTest {
         return mapper.readTree(mvc.perform(get(path).session(sessions.get(role))).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
     }
     void writeFob(String sku,String price) throws Exception {
+        writeFob("super_admin",sku,price);
+    }
+    void writeFob(String role,String sku,String price) throws Exception {
         var rows=mapper.createArrayNode().add(mapper.createObjectNode().put("sku",sku).put("weightRaw","80").put("moqRaw","1").put("priceRaw",price).put("freightRaw","100件18.5;200件40"));
-        var preview=mapper.readTree(mvc.perform(post("/api/v1/fob-purchase-products/paste/preview").session(sessions.get("super_admin")).with(csrf()).contentType("application/json").content(rows.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        var preview=mapper.readTree(mvc.perform(post("/api/v1/fob-purchase-products/paste/preview").session(sessions.get(role)).with(csrf()).contentType("application/json").content(rows.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
         var body=mapper.createObjectNode();body.set("rows",rows);body.putArray("expected").add(preview.path("rows").get(0).path("expected"));body.put("digest",preview.path("digest").asText());
-        mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").session(sessions.get("super_admin")).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").session(sessions.get(role)).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk());
     }
     @Test void actualQuoteRoleSessionsReadIdenticalSourcesAndFreshUpdatesWithoutGainingMaintenance() throws Exception {
         String sku="ROLE-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(),path="/api/v1/fob-purchase-products/"+sku;
@@ -68,25 +71,51 @@ class QuotationRoleConsistencyPostgresIntegrationTest {
             assertEquals(before,read(role,path),role+" FOB source must be identical");
             assertEquals(finance,read(role,"/api/v1/finance-settings"),role+" must share the same rate and finance versions");
         }
-        for(String role:List.of("employee","employee2","finance","purchase","logistics")) {
+        assertEquals(before,read("purchase",path),"Procurement must read the same FOB source");
+        for(String role:List.of("employee","employee2","finance","logistics")) {
             mvc.perform(get(path+"/history").session(sessions.get(role))).andExpect(status().isForbidden());
             for(String action:List.of("preview","confirm"))
                 mvc.perform(post("/api/v1/fob-purchase-products/paste/"+action).session(sessions.get(role)).with(csrf()).contentType("application/json").content(action.equals("preview")?"[]":"{}" )).andExpect(status().isForbidden());
         }
-        for(String role:List.of("purchase","logistics")) mvc.perform(get(path).session(sessions.get(role))).andExpect(status().isForbidden());
+        mvc.perform(get(path).session(sessions.get("logistics"))).andExpect(status().isForbidden());
         mvc.perform(get(path)).andExpect(status().isUnauthorized());
         writeFob(sku,"单价9;200-209件8;210件以上7");
         var updated=read("super_admin",path);assertTrue(updated.path("version").asLong()>before.path("version").asLong());
-        for(String role:List.of("employee","employee2","finance")) assertEquals(updated,read(role,path),role+" must read the newly saved version");
+        for(String role:List.of("employee","employee2","finance","purchase")) assertEquals(updated,read(role,path),role+" must read the newly saved version");
         String ordinary="STANDARD-"+UUID.randomUUID().toString().substring(0,8).toUpperCase();
         var payload=mapper.createObjectNode().put("sku",ordinary).put("dataSource","standard").put("weightG",80).put("minOrderQty",1).put("purchasePriceCny",8.54).put("freight100Cny",18.5);
         payload.putArray("priceTiers").addObject().put("minQty",1).putNull("maxQty").put("unitPriceCny",8.54);
         jdbc.sql("insert into purchase_product(id,sku,payload,catalog_state,quote_ready,version,created_at,updated_at) values(:id,:sku,cast(:payload as jsonb),'ready',true,0,now(),now())").param("id",UUID.randomUUID()).param("sku",ordinary).param("payload",payload.toString()).update();
         var standard=read("super_admin","/api/v1/purchase-products/"+ordinary);
-        for(String role:List.of("employee","employee2","finance")) {
+        for(String role:List.of("employee","employee2","finance","purchase")) {
             mvc.perform(get("/api/v1/fob-purchase-products/"+ordinary).session(sessions.get(role))).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("FOB_PURCHASE_NOT_FOUND"));
             assertEquals(standard,read(role,"/api/v1/purchase-products/"+ordinary),"Standard fallback must use the same purchase data");
         }
+    }
+    @Test void procurementMaintainsSharedFobDataWithAuditCsrfAndConcurrentUpdateProtection() throws Exception {
+        String sku="PURCHASE-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(),path="/api/v1/fob-purchase-products/"+sku;
+        writeFob("purchase",sku,"10");
+        var initial=read("purchase",path);
+        assertEquals(initial,read("super_admin",path));
+        var history=read("purchase",path+"/history");
+        assertEquals(accounts.get("purchase").account,history.get(0).path("actorAccount").asText());
+        assertEquals(history,read("super_admin",path+"/history"));
+        var rows=mapper.createArrayNode().add(mapper.createObjectNode().put("sku",sku).put("priceRaw","12"));
+        mvc.perform(post("/api/v1/fob-purchase-products/paste/preview").session(sessions.get("purchase")).contentType("application/json").content(rows.toString())).andExpect(status().isForbidden());
+        var preview=mapper.readTree(mvc.perform(post("/api/v1/fob-purchase-products/paste/preview").session(sessions.get("purchase")).with(csrf()).contentType("application/json").content(rows.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        var body=mapper.createObjectNode();body.set("rows",rows);body.putArray("expected").add(preview.path("rows").get(0).path("expected"));body.put("digest",preview.path("digest").asText());
+        mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").session(sessions.get("purchase")).contentType("application/json").content(body.toString())).andExpect(status().isForbidden());
+        writeFob(sku,"11");
+        mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").session(sessions.get("purchase")).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isConflict());
+        assertEquals(11,read("purchase",path).path("parsed").path("priceTiers").get(0).path("unitPriceCny").asInt());
+        assertEquals(2,read("purchase",path+"/history").size());
+        writeFob("purchase",sku,"12");
+        var updated=read("purchase",path);
+        for(String role:List.of("super_admin","employee","employee2","finance")) assertEquals(updated,read(role,path),role+" must see procurement's update");
+        assertEquals(accounts.get("purchase").account,read("super_admin",path+"/history").get(0).path("actorAccount").asText());
+        var purchase=users.findById(accounts.get("purchase").id).orElseThrow();purchase.roleKey="logistics";users.saveAndFlush(purchase);
+        mvc.perform(get(path+"/history").session(sessions.get("purchase"))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/fob-purchase-products/paste/preview").session(sessions.get("purchase")).with(csrf()).contentType("application/json").content(rows.toString())).andExpect(status().isForbidden());
     }
     @Test void actualSessionsShareInspectionMetadataButKeepOwnerScopeAndHistoryUnchanged() throws Exception {
         var r=new QuotationRecordEntity();r.id=UUID.randomUUID();r.quoteNo="ROLE-"+r.id.toString().substring(0,30);r.ownerAccount=accounts.get("employee").account;r.status="pending";
@@ -120,7 +149,7 @@ class QuotationRoleConsistencyPostgresIntegrationTest {
         String sku="ROLE-"+UUID.randomUUID().toString().substring(0,8).toUpperCase(),path="/api/v1/fob-purchase-products/"+sku;writeFob(sku,"10");
         read("employee",path);
         mvc.perform(get(path).session(sessions.get("employee")).header("X-Expected-Account",accounts.get("employee2").account)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ACCOUNT_CHANGED"));
-        var employee=users.findById(accounts.get("employee").id).orElseThrow();employee.roleKey="purchase";users.saveAndFlush(employee);
+        var employee=users.findById(accounts.get("employee").id).orElseThrow();employee.roleKey="logistics";users.saveAndFlush(employee);
         mvc.perform(get(path).session(sessions.get("employee"))).andExpect(status().isForbidden());
         var disabled=users.findById(accounts.get("employee2").id).orElseThrow();disabled.status="disabled";users.saveAndFlush(disabled);
         mvc.perform(get(path).session(sessions.get("employee2"))).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("SESSION_REVOKED"));
