@@ -514,6 +514,10 @@ function blockConditionProgress(issues: Array<{ key: string; message: string }>)
   return true
 }
 async function queryProduct() {
+  if (props.batchCapture) {
+    skuSearch.value = props.batchInitialSku || ''
+    if (!skuSearch.value) { toast('请先在上方清单勾选需要报价的 SKU'); return }
+  }
   if (blockConditionProgress(conditionIssues({ includeSku: true, includeCategory: false }))) return
   cancelQuoteLogistics()
   const normalizedSku = skuSearch.value.trim().toUpperCase().replace(/\s+/g, '')
@@ -2364,7 +2368,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
-        <p v-if="batchCapture && queryValidationFields.length" class="batch-query-error" role="alert">{{ conditionIssues({ includeSku: true, includeCategory: false }).map(issue => issue.message).join('；') }}。填写后点击“查询商品”。</p>
+        <p v-if="batchCapture && queryValidationFields.length" class="batch-query-error" role="alert">{{ conditionIssues({ includeSku: true, includeCategory: false }).map(issue => issue.message).join('；') }}。填写后点击“加载渠道”。</p>
         <p v-if="batchCapture && purchaseQueryError" class="batch-query-error" role="alert">{{ purchaseQueryError }}</p>
         <FobQuotePanel :initial="fobInitial" v-if="fobActive" :key="currentAuthUser.id + ':' + fobKey" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
         <template v-else>
