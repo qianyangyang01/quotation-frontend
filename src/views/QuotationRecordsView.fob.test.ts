@@ -31,3 +31,21 @@ it('exports both FOB prices and source category without changing ordinary export
   const csv=quotationDetailsCsv([row()],[]);expect(csv).toContain('FOB不报关单价');expect(csv).toContain('FOB（批发）报价');expect(csv).toContain('内裤');expect(csv).toContain('1.37')
   expect(quotationDetailsCsv([{...row(),quoteMode:'single',fob:undefined}],[])).not.toContain('FOB不报关单价')
 })
+it('keeps the batch review mounted across detail tabs and prevents accidental draft loss',async()=>{
+  vi.useFakeTimers();authState.current={id:'me',name:'ME',account:'ME',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['allRecords','quote','finance','purchase']
+  const batch=row(),item=structuredClone(batch.fob!)
+  batch.fob={...item,schemaVersion:2,items:Array.from({length:25},(_,index)=>({...item,product:{...item.product,sku:`SKU${index}`}}))}
+  batch.financeReviewStatus='reviewing';batch.financeReviewClaimedAccount='ME';batch._reviewVersion=1
+  batch.fobItemReviews=Array.from({length:25},(_,index)=>({index,status:'pending',reason:''}))
+  mocks.page.mockResolvedValue({items:[batch],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});mocks.get.mockResolvedValue([batch])
+  const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope:'company'});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush()
+  expect(document.querySelector('.batch-sku-summary')!.textContent).toContain('25个SKU');expect(document.querySelector('.record-product-title')).toBeNull()
+  document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
+  expect(document.querySelector('.batch-review-active')).not.toBeNull();expect(document.querySelector('.revision-history')).toBeNull();expect(document.querySelector('[aria-label="FOB批量历史报价快照"]')).toBeNull()
+  document.querySelector<HTMLInputElement>('[aria-label="选择审核 SKU0 第1项"]')!.click();await flush()
+  const tab=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('.drawer-tabs button')].find(b=>b.textContent===text)!
+  tab('客户报价单').click();await flush();expect(document.querySelector('[aria-label="FOB批量历史报价快照"]')).not.toBeNull()
+  tab('报价概览').click();await flush();expect(document.querySelector<HTMLInputElement>('[aria-label="选择审核 SKU0 第1项"]')!.checked).toBe(true)
+  const confirm=vi.fn(()=>false);vi.stubGlobal('confirm',confirm)
+  document.querySelector<HTMLButtonElement>('.record-drawer [aria-label="关闭"]')!.click();await flush();expect(confirm).toHaveBeenCalled();expect(document.querySelector('.record-drawer')).not.toBeNull();vi.unstubAllGlobals()
+})

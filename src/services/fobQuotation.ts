@@ -82,7 +82,7 @@ export function fobQuantityQuote(product: FobQuoteProduct, rows: FobQuoteRow[], 
 // Customer-facing rows contain only sale prices. Split at the surcharge boundary
 // so a displayed range always has one valid final price, including order multiples.
 export interface FobSheetRow {
-  minQty: number; maxQty: number | null; unit: string; declaredUsd: string; undeclaredUsd: string
+  minQty: number; maxQty: number | null; unit: string; declaredUsd: string; undeclaredUsd: string; extraCny?: number
 }
 export function fobSheetRows(product: FobQuoteProduct, rate: number, policy: FobSmallOrderPolicy | null): FobSheetRow[] {
   const tiers = fobTierQuotes(product, rate), multiple = product.parsed.orderMultiple

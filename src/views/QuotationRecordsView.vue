@@ -2,6 +2,7 @@
 import { fobBatchDealOptions } from '@/services/fobQuotationRecords'
 import { canViewPurchaseCost, canViewFullPricing } from '@/data/quotationVisibility'
 import FobBatchReviewPanel from '@/components/quotation/FobBatchReviewPanel.vue'
+import BatchSkuSummary from '@/components/quotation/BatchSkuSummary.vue'
 import FobRecordDetail from '@/components/quotation/FobRecordDetail.vue'
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { isManualQuotation, quotationModeLabels } from '@/data/quotationModes'
@@ -247,7 +248,7 @@ async function markSpotChecked(row: QuotationRecord) {
   } finally { spotCheckBusy.value.delete(row.id) }
 }
 const reviewing = ref(new Set<string>())
-function commentSaved(saved: QuotationRecord) {
+function commentSaved(saved: QuotationRecord, message = '审核意见已保存，业务员可查看') {
   const row = records.value.find(item => item.id === saved.id) || (selected.value?.id === saved.id ? selected.value : undefined)
   const live = row && reviewSync.stateFor(row)
   if (live && ((live._version ?? -1) > (saved._version ?? -1)
@@ -260,7 +261,7 @@ function commentSaved(saved: QuotationRecord) {
   if (!editing.value && selected.value?.id === saved.id && selected.value._version === saved._version
       && (selected.value._reviewVersion ?? 0) === (saved._reviewVersion ?? 0) - 1) selected.value = saved
   records.value = records.value.map(row => row.id === saved.id ? saved : row)
-  toast('审核意见已保存，业务员可查看')
+  toast(message)
 }
 async function changeReview(row: QuotationRecord, action: ReviewAction) {
   if (!canReview.value || !isActive(row) || lifecycleBusy.value || reviewing.value.has(row.id)) return
@@ -288,7 +289,8 @@ async function reloadReview(row:QuotationRecord) {
   catch(error) {toast(error instanceof Error?error.message:'详情加载失败，请重试')}
 }
 const editing = ref(false)
-const detailTab = ref<'overview' | 'options' | 'history'>('overview')
+const detailTab = ref<'overview' | 'options' | 'history' | 'sheet'>('overview')
+const batchReviewPanel = ref<InstanceType<typeof FobBatchReviewPanel> | null>(null)
 const notice = ref('')
 const dealLineEditor = ref<HTMLElement | null>(null)
 interface DealLineForm { id: string; optionId: string; unitPriceUsd: string; quantity: string }
@@ -437,7 +439,10 @@ function reviewViewed(row: QuotationRecord, version: number) {
   const entry=unreadReview(row.id)
   if(entry)void acknowledgeReview(entry,version)
 }
-function closeDrawer() { openGeneration++; linkGeneration++; openingReview.value=false; editing.value = false; selected.value = null }
+function closeDrawer() {
+  if (batchReviewPanel.value?.hasUnsavedChanges && !window.confirm('还有未提交的商品选择或审核意见，确定关闭并放弃这些内容吗？')) return
+  openGeneration++; linkGeneration++; openingReview.value=false; editing.value = false; selected.value = null
+}
 function cancelEdit() {
   if (!selected.value) return
   fillForm(selected.value)
@@ -539,12 +544,14 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           </label>
           <div class="record-column-filter record-status-filter"><span>审核状态 / 操作</span><label class="deal-filter">成交结果<select v-model="filterStatus" aria-label="成交结果"><option value="">全部成交结果</option><option value="won">已成交</option><option value="lost">未成交</option></select></label></div>
         </header>
-        <article v-for="row in list" :key="row.id" :class="{'priority-row':priorityFor(row)}">
+        <article v-for="row in list" :key="row.id" :class="{'priority-row':priorityFor(row), 'batch-record-row':row.fob?.schemaVersion===2}">
           <div class="quote-info">
             <input v-if="canManageLifecycle" v-model="checkedIds" type="checkbox" class="lifecycle-checkbox" :value="row.id" :aria-label="'选择报价 ' + row.no" :disabled="loading || lifecycleBusy || !!selectionBlocked(row)" :title="selectionBlocked(row) || '选择此报价'">
             <QuotationProductImage class="quote-record-image" :snapshot-image="row.productImage" :physical-image="recordPurchaseProduct(row)?.physicalImage" :product-image="recordPurchaseProduct(row)?.productImage" :alt="row.productSummary"><template #fallback><PurchaseCategoryBadge :category="recordPurchaseProduct(row)?.category || row.productCategory" /></template></QuotationProductImage>
             <div class="quote-info-copy">
-              <div class="record-product-title"><b class="record-sku" :title="recordSku(row)">{{ recordSku(row) }}</b><strong>{{ row.productSummary }}</strong><em v-if="priorityFor(row)" class="priority-badge">优先处理</em></div>
+              <BatchSkuSummary v-if="row.fob?.schemaVersion===2" :skus="(row.fob.items || []).map(item=>item.product.sku)" />
+              <div v-else class="record-product-title"><b class="record-sku" :title="recordSku(row)">{{ recordSku(row) }}</b><strong>{{ row.productSummary }}</strong><em v-if="priorityFor(row)" class="priority-badge">优先处理</em></div>
+              <em v-if="row.fob?.schemaVersion===2 && priorityFor(row)" class="priority-badge">优先处理</em>
               <div class="record-product-meta"><span class="record-commission" :class="{applied: (row.commissionThreshold ?? 1) > 0 && (row.commissionThreshold ?? 1) < 1}">{{ recordCommission(row) }}</span><small>{{ quotationModeLabels[row.quoteMode] }}<template v-if="!isMine"> · {{ row.salespersonName }}</template></small></div>
               <small class="record-number" :title="row.no">报价单号：{{ row.no }}</small>
               <small>创建于 {{ dateTime(row.createdAt) }}</small>
@@ -581,11 +588,12 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
     </main>
     <QuotationLifecycleDialog v-if="lifecycleAction" :action="lifecycleAction" :rows="confirmationRows" :busy="lifecycleBusy" :error="lifecycleError" @cancel="lifecycleAction=null" @confirm="confirmLifecycle" />
     <div v-if="selected" class="mask" @click.self="closeDrawer">
-      <aside class="record-drawer">
-        <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.productSummary }}<template v-if="selected.quoteMode!=='fob'"> · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</template></span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
+      <aside class="record-drawer" :class="{'batch-review-drawer':selected.fob?.schemaVersion===2 && !editing, 'batch-review-active':selected.fob?.schemaVersion===2 && !editing && detailTab==='overview'}">
+        <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.fob?.schemaVersion===2 ? `FOB批量 · ${selected.fob.items?.length || 0}项 · ${selected.fob.sheet.rows.length}档` : selected.productSummary }}<template v-if="selected.quoteMode!=='fob'"> · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</template></span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
 
         <p v-if="!isActive(selected)" class="lifecycle-readonly">{{ lifecycleLabel(selected.lifecycleState) }} · {{ selected.lifecycleChangedBy }} · {{ selected.lifecycleReason }}。恢复后可修改。</p>
         <template v-if="!editing">
+          <div class="detail-review-tools">
           <div class="detail-review-status" role="status" aria-label="审核状态">
             {{ financeReviewLabel(reviewSync.stateFor(selected).financeReviewStatus) }}<em v-if="priorityFor(selected)" class="priority-badge">优先处理</em>
             <span v-if="reviewSync.stateFor(selected).financeReviewClaimedBy"> · {{ reviewSync.stateFor(selected).financeReviewClaimedBy }}审核中</span>
@@ -595,11 +603,12 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           </div>
           <QuotationSpotCheck :state="reviewSync.stateFor(selected)" :can-mark="canSpotCheck && isActive(selected)" :busy="spotCheckBusy.has(selected.id) || lifecycleBusy || mutationBusy" detail @mark="markSpotChecked(selected)" />
           <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @viewed="reviewViewed(selected,$event)" /></div>
-          <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button v-if="selected.quoteMode!=='fob'" :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
-          <FobBatchReviewPanel v-if="selected.fob?.schemaVersion===2 && detailTab==='overview'" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview && isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
+          </div>
+          <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button v-if="selected.fob?.schemaVersion===2" :class="{active:detailTab==='sheet'}" @click="detailTab='sheet'">客户报价单</button><button v-if="selected.quoteMode!=='fob'" :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
+          <FobBatchReviewPanel v-if="selected.fob?.schemaVersion===2" v-show="detailTab==='overview'" ref="batchReviewPanel" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview && isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved($event, '商品审核结果已保存')" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
           <RouterLink v-if="selected.salespersonAccount===currentAuthUser.account && isActive(selected) && selected.fobItemReviews?.some(i=>i.status==='rejected')" class="reissue-quote" :to="{path:'/quotation',query:{fobCorrection:selected.id}}">处理退回异常项</RouterLink>
-          <FobRecordDetail v-if="selected.quoteMode==='fob' && detailTab!=='history'" :record="selected" :state="reviewSync.stateFor(selected)" @reload="reloadReview(selected)" />
-          <section v-else-if="detailTab==='overview'" class="overview-panel">
+          <FobRecordDetail v-if="selected.quoteMode==='fob' && (selected.fob?.schemaVersion===2 ? detailTab==='sheet' : detailTab!=='history')" :record="selected" :state="reviewSync.stateFor(selected)" @reload="reloadReview(selected)" />
+          <section v-else-if="detailTab==='overview' && selected.quoteMode!=='fob'" class="overview-panel">
             <div class="overview-metrics"><article><small>报价国家</small><b>{{ recordCountries(selected).length || 1 }}</b><span>个国家</span></article><article><small>报价渠道</small><b>{{ recordOptions(selected).length || 1 }}</b><span>条渠道</span></article><article><small>1{{ selected.quoteMode==='bundle'?'套':'件' }}报价区间</small><b>{{ hasMultipleOptions(selected) ? quote1UsdRange(selected) : usd(selected.systemQuoteUsd) }}</b><span>{{ hasMultipleOptions(selected) ? quote1CnyRange(selected) : cny(selected.systemQuoteCny) }}</span></article></div>
             <article class="primary-plan"><header><b>首选方案</b><span>报价单优先展示</span></header><div><span><strong>{{ primaryOption(selected)?.country || selected.country }} · {{ primaryOption(selected)?.carrier || selected.carrier }}｜{{ primaryOption(selected)?.channel || selected.channel }}</strong><small>渠道编码：{{ primaryOption(selected)?.channelCode || '—' }} · {{ primaryOption(selected)?.eta || selected.rule }}</small></span><b>{{ optionPrice(primaryOption(selected)?.quote1Usd ?? selected.systemQuoteUsd) }}</b></div></article>
             <section v-if="isManualQuotation(selected.quoteMode) && selected.manualPricing" class="snapshot"><span>报价类型</span><b>{{ quotationModeLabels[selected.quoteMode] }}</b><template v-if="canViewPurchaseCost && selected.quoteMode === 'freight-trial'"><span>手填总成本 / 件</span><b>{{ cny(selected.manualPricing.costCny) }}</b></template><span>直接计费重量 / 件</span><b>{{ selected.manualPricing.weightGrams }} g</b></section>
@@ -612,7 +621,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <section v-else-if="detailTab==='options'" class="option-detail-panel">
             <CustomerPriceComparison :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved" />
           </section>
-          <section v-else class="revision-history detail-history"><header><b>操作 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><QuotationRevisionSnapshot v-else-if="revision.field==='quoteRevision'" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>历史报价确认</b>：{{ revision.after === 'true' ? '业务员已确认报价（历史操作）' : '客户报价变化，历史确认已失效' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>成交结果</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
+          <section v-else-if="detailTab==='history'" class="revision-history detail-history"><header><b>操作 / 修改记录</b><span>{{ revisionGroups.length }} 次操作</span></header><div v-if="revisionGroups.length"><article v-for="group in revisionGroups" :key="group.id"><time>{{ dateTime(group.changedAt) }}</time><span>{{ group.editorName }} · {{ group.editorAccount }}</span><template v-for="revision in group.changes" :key="revision.id"><CustomerPriceRevision v-if="revision.field==='customerQuote'" :record="selected" :before="revision.before" :after="revision.after" /><QuotationRevisionSnapshot v-else-if="revision.field==='quoteRevision'" :before="revision.before" :after="revision.after" /><p v-else-if="revision.field==='quoteConfirmed'"><b>历史报价确认</b>：{{ revision.after === 'true' ? '业务员已确认报价（历史操作）' : '客户报价变化，历史确认已失效' }}</p><p v-else-if="revision.field==='lifecycleState'"><b>记录分类</b>：{{ lifecycleLabel(revision.before) }} → {{ lifecycleLabel(revision.after) }}<br>原因：{{ revision.reason || '—' }}</p><p v-else-if="revision.field==='financeReviewStatus'"><b>财务审核</b>：{{ financeReviewLabel(revision.before) }} → {{ financeReviewLabel(revision.after) }}</p><p v-else-if="revision.field==='status'"><b>成交结果</b>：{{ statusText(revision.before as QuotationRecordStatus) || revision.before }} → {{ statusText(revision.after as QuotationRecordStatus) || revision.after }}</p><p v-else><b>{{ revision.fieldLabel }}</b>：{{ revision.before || '未填写' }} → {{ revision.after || '未填写' }}</p></template></article></div><p v-else class="history-empty">暂无可追溯的修改记录；旧记录将从下一次修改开始记录。</p></section>
           <QuotationReviewHistory v-if="detailTab==='history'" :id="selected.id" :version="reviewSync.stateFor(selected)._reviewVersion" :account="currentAuthUser.account" />
           <footer v-if="detailTab==='overview' && selected.quoteMode==='fob' && selected.fob?.schemaVersion!==2" class="drawer-view-footer"><QuotationReviewButton v-if="canReview&&isActive(selected)" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :busy="reviewing.has(selected.id)||lifecycleBusy" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" /></footer>
           <footer v-if="detailTab==='overview' && selected.quoteMode!=='fob'" class="drawer-view-footer"><QuotationRecordCopyActions :key="selected.id" :record="selected" :can-edit="canEditPrices(selected)" @saved="pricesSaved">
@@ -789,4 +798,24 @@ main{width:min(1680px,calc(100% - 48px))}
 
 <style scoped>
 .spot-check-filter{display:flex;align-items:center;gap:8px;white-space:nowrap}.spot-check-filter select{height:34px;min-width:100px;padding:0 9px;border:1px solid #d7c8ef;border-radius:6px;background:#f7f3fc;color:#7952a3;font:inherit}.spot-check-filter select:focus-visible{outline:2px solid #9870c5;outline-offset:2px}
+</style>
+
+<style scoped>
+.quote-record-table>article.batch-record-row{align-items:start}
+.batch-record-row .quote-info{align-items:flex-start}
+.batch-record-row .record-row-actions{align-items:stretch;gap:6px}
+.record-drawer.batch-review-drawer{box-sizing:border-box;width:min(1600px,94vw);max-width:none;height:100dvh;max-height:100dvh;padding:18px 24px;gap:0}
+.record-drawer.batch-review-active{overflow:hidden}
+.batch-review-drawer>header{margin-bottom:6px;padding-bottom:10px}
+.batch-review-drawer>header h2{font-size:22px;overflow-wrap:anywhere}
+.batch-review-drawer .detail-review-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.batch-review-drawer .detail-review-tools .detail-review-status{flex:1;min-width:200px}.batch-review-drawer .detail-review-status{margin:4px 0;padding:8px 10px;font-size:12px}
+.batch-review-drawer .detail-review-comments{margin:0;width:auto}
+.batch-review-drawer :deep(.spot-check.detail){padding:0;margin:4px 0}
+.batch-review-drawer .drawer-tabs{margin:0;padding:0;min-height:40px}
+.batch-review-active>.item-review{flex:1 1 0;min-height:0;overflow:hidden;padding-bottom:0}
+.batch-review-active :deep(.review-table-scroll){flex:1 1 0;max-height:none;min-height:70px}
+.batch-review-active :deep(.review-action-dock){flex-shrink:0}
+.batch-review-active :deep(.review-toolbar),.batch-review-active :deep(.review-filters),.batch-review-active :deep(.review-pagination){flex-shrink:0}
+@media(max-width:720px){.batch-review-drawer>header small{display:none}.batch-review-drawer>header h2{margin:0 0 4px}.record-drawer.batch-review-drawer{width:100vw;padding:12px}.batch-review-drawer>header h2{font-size:18px}.batch-review-drawer>header{padding-bottom:4px}.batch-review-active :deep(.review-action-dock){gap:6px}.batch-review-active :deep(.review-note){display:none}.batch-review-drawer .detail-review-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.batch-review-drawer .detail-review-tools .detail-review-status{flex:1;min-width:200px}.batch-review-drawer .detail-review-status{font-size:11px}}
+@media(max-height:650px){.batch-review-drawer>header small,.batch-review-drawer .detail-review-comments{display:none}.batch-review-drawer>header h2{font-size:18px;margin:0}.batch-review-active :deep(.review-note){display:none}.batch-review-active :deep(.item-review){gap:6px}.batch-review-active :deep(.review-action-dock){gap:5px;padding-top:6px}}
 </style>

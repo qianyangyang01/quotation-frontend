@@ -140,7 +140,11 @@ class FobQuotationPostgresIntegrationTest {
         return mvc.perform(post("/api/v1/quotations/"+row.path("id").asText()+"/fob-corrections/"+action).session(sessions.get(role)).with(csrf()).header("Idempotency-Key","test-key-"+key).contentType("application/json").content(body.toString()));
     }
     JsonNode returned(JsonNode row) throws Exception {
-        var claimed=claim(row);var body=versions(claimed).put("action","return").put("approveOthers",true);
+        var claimed=claim(row);var approval=versions(claimed).put("action","approve");
+        approval.putArray("items").addObject().put("index",2);
+        correction("super_admin",row,"review",approval,"selected-approval").andExpect(status().isOk());
+        claimed=claim(read("employee",row.path("id").asText()));
+        var body=versions(claimed).put("action","return").put("approveOthers",false);
         body.putArray("items").addObject().put("index",0).put("reason","采购克重不对，请核实");
         body.withArray("items").addObject().put("index",1).put("reason","采购价格异常，自定义原因");
         correction("super_admin",row,"review",body,"unused").andExpect(status().isOk());return read("employee",row.path("id").asText());
@@ -208,6 +212,34 @@ class FobQuotationPostgresIntegrationTest {
         correction("employee",row,"review",body,"x").andExpect(status().isForbidden());
         var global=versions(claimed).put("action","complete").put("financeReviewStatus","approved");
         mvc.perform(patch("/api/v1/quotations/"+row.path("id").asText()+"/finance-review").session(sessions.get("super_admin")).with(csrf()).contentType("application/json").content(global.toString())).andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test void perItemConclusionsRoundTripWithoutChangingUnselectedOrHistoricalPrices() throws Exception {
+        var original=batchRecord();var raw=originalPayload(original);var claimed=claim(original);
+        var untouched=claimed.at("/fobItemReviews/1").deepCopy();
+        var body=versions(claimed).put("action","approve").put("reviewResult","logistics-exempt").put("note","采购资料已核实");
+        body.putArray("items").addObject().put("index",0);
+        correction("super_admin",original,"review",body,"exempt").andExpect(status().isOk());
+        var saved=read("employee",original.path("id").asText());
+        assertEquals("approved",saved.at("/fobItemReviews/0/status").asText());
+        assertEquals("logistics-exempt",saved.at("/fobItemReviews/0/reviewResult").asText());
+        assertEquals("采购资料已核实",saved.at("/fobItemReviews/0/note").asText());
+        assertEquals(untouched,saved.at("/fobItemReviews/1"));assertEquals("pending",saved.path("financeReviewStatus").asText());
+        assertEquals(saved.path("fobItemReviews"),read("finance",original.path("id").asText()).path("fobItemReviews"));
+        correction("super_admin",original,"review",body,"stale").andExpect(status().isConflict());
+        claimed=claim(saved);body=versions(claimed).put("action","approve").put("reviewResult","channel-exempt");
+        body.putArray("items").addObject().put("index",1);
+        correction("super_admin",original,"review",body,"invalid-channel").andExpect(status().isUnprocessableEntity());
+        body.put("reviewResult","logistics-exempt").put("approveOthers",true);
+        correction("super_admin",original,"review",body,"no-implicit-approval").andExpect(status().isUnprocessableEntity());
+        String longNote="审核意见".repeat(125);
+        body.put("approveOthers",false).put("note",longNote);body.withArray("items").addObject().put("index",2);
+        correction("super_admin",original,"review",body,"remaining").andExpect(status().isOk());
+        saved=read("employee",original.path("id").asText());assertEquals("logistics-exempt",saved.path("financeReviewStatus").asText());
+        assertEquals(longNote,saved.at("/fobItemReviews/1/note").asText());
+        assertEquals(raw,originalPayload(original));
+        var history=jdbc.sql("select state::text from quotation_review where id=cast(:id as uuid)").param("id",original.path("id").asText()).query(String.class).single();
+        assertTrue(history.contains("采购资料已核实"));assertTrue(history.contains("logistics-exempt"));
     }
 
 

@@ -423,7 +423,7 @@ export async function markQuotationSpotChecked(row: QuotationReviewState, spotCh
   return normalizeQuotationRecord(await api.patch<QuotationRecord>(`/quotations/${encodeURIComponent(row.id)}/spot-check`, { _version: row._version, _reviewVersion: row._reviewVersion ?? 0, spotChecked }))!
 }
 export interface ReviewAction { action:'claim'|'cancel'|'release'|'complete'|'comment'; financeReviewStatus?:'approved'|'rejected'|'channel-exempt'|'logistics-exempt'; note?:string }
-export interface QuotationReviewEvent { id:string; action:string; before:string; after:string; actorAccount:string; actorName:string; at:string; note:string; quoteVersion:number; itemChanges?: {index:number;sku:string;status:string;reason:string}[] }
+export interface QuotationReviewEvent { id:string; action:string; before:string; after:string; actorAccount:string; actorName:string; at:string; note:string; quoteVersion:number; itemChanges?: {index:number;sku:string;status:string;reason:string;reviewResult?:string;note?:string}[] }
 export async function loadQuotationReviewHistory(id:string):Promise<QuotationReviewEvent[]> { return api.get('/quotations/'+encodeURIComponent(id)+'/review-history') }
 export async function reviewQuotationRecord(id: string, action: ReviewAction, version?: number, reviewVersion=0) {
   return normalizeQuotationRecord(await api.patch<QuotationRecord>('/quotations/'+encodeURIComponent(id)+'/finance-review', { ...action, _version: version, _reviewVersion: reviewVersion }))!
