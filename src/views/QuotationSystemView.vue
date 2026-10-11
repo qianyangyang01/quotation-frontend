@@ -651,6 +651,11 @@ function updateBundleItemWeight(item: BundleQuoteItem) {
   } else item.customWeightKg = null
   normalizeRule(products.value[0], true)
 }
+async function openBatchQuotation() {
+  if (props.batchCapture || savingQuotation.value || syncRefreshing.value) return
+  try { await router.push('/quotation/batch-single') }
+  catch { toast('批量报价页面打开失败，请重试') }
+}
 function changeQuoteMode(mode: QuotationMode | 'fob') {
   if (props.batchCapture && mode !== 'single') return
   if (mode === 'fob' && !canUseFob.value) return
@@ -2318,7 +2323,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}；请核对并更新报价。` : `同步暂不可用：${syncError}` }}</span>
         <button type="button" :disabled="syncRefreshing || savingQuotation || retryingSavePreparation || financeSettingsAreLoading()" @click="retrySavePreparation">{{ syncRefreshing ? '更新中…' : retryingSavePreparation ? '核验中…' : syncPending ? '更新报价' : '重试核验' }}</button>
       </section>
-      <div v-if="!batchCapture" style="text-align:right;margin-bottom:8px"><RouterLink to="/quotation/batch-single">批量单品 SKU 报价 →</RouterLink></div>
+
       <QuotationHeader :salesperson="selectedSalesperson" :rate="fobActive ? fobRate : exchange.usd" :status="fobActive ? fobStatus : products[0]?.status || '待查询'" :mode-label="fobActive ? 'FOB（批发）报价' : quotationModeLabels[quoteMode]" @show-rule="fobActive ? fobPanel?.openRules() : showRule=true" />
 
 
@@ -2347,7 +2352,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :finance-pending="!financeSettingsAreHydrated()" :finance-error="financeSettingsLoadError()"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
-          @update:mode="changeQuoteMode"
+          @update:mode="changeQuoteMode" @open-batch="openBatchQuotation"
           @update:sku-search="skuSearch=$event" @update:customer-name="typeCustomerName" @select-customer="selectFinanceCustomer" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade"
           @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
