@@ -10,6 +10,10 @@ function handler(name: string, state: Record<string, unknown>) {
   const node = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === name)!
   const js = ts.transpile(node.getText(ast), { target: ts.ScriptTarget.ES2022 })
   state.fobActive ??= {value:false}
+  if (name === 'attemptSave') {
+    state.props ??= { batchCapture: false }
+    state.prepareAndSaveQuotation = handler('prepareAndSaveQuotation', state)
+  }
   return new Function('state', `with(state){ ${js}; return ${name} }`)(state)
 }
 it('never flushes or resolves server draft conflicts for an ordinary quotation', async () => {

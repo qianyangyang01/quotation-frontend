@@ -14,9 +14,9 @@ import { calculateFinanceQuoteFees } from '@/data/financeSurchargeSettings'
 // provider-wide surcharge exemptions and fees omitted from any quantity column.
 const source = readFileSync(new URL('./QuotationSystemView.vue', import.meta.url), 'utf8').split('<script setup lang="ts">')[1]!.split('</script>')[0]!
 const parsed = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
-const names = ['taxResult', 'finalSalePrice', 'quantityCostBreakdown', 'excelQuoteRows', 'copyQuoteRows', 'attemptSave', 'save', 'useLogistics']
+const names = ['taxResult', 'finalSalePrice', 'quantityCostBreakdown', 'excelQuoteRows', 'copyQuoteRows', 'attemptSave', 'prepareAndSaveQuotation', 'save', 'useLogistics']
 const bodies = parsed.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text || '')).map(node => node.getText(parsed)).join('\n')
-const js = 'const fobActive = {value:false};\n' + ts.transpileModule(bodies, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const js = 'const fobActive = {value:false}, savingQuotation = {value:false}, props = {batchCapture:false};\n' + ts.transpileModule(bodies, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 
 describe('quotation view fee integration', () => {
   it.each([['single', false], ['bundle', false], ['single', true], ['bundle', true]] as const)('includes surcharge in %s quantity totals with country scope %s', async (mode, scoped) => {
