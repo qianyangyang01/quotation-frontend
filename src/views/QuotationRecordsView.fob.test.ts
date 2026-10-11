@@ -31,6 +31,17 @@ it('exports both FOB prices and source category without changing ordinary export
   const csv=quotationDetailsCsv([row()],[]);expect(csv).toContain('FOB不报关单价');expect(csv).toContain('FOB（批发）报价');expect(csv).toContain('内裤');expect(csv).toContain('1.37')
   expect(quotationDetailsCsv([{...row(),quoteMode:'single',fob:undefined}],[])).not.toContain('FOB不报关单价')
 })
+it('finds partial returns separately from overall status and exposes a persistent resume link',async()=>{
+  vi.useFakeTimers();authState.current={id:'me',name:'ME',account:'ME',role:'employee',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['myRecords','quote']
+  const batch=row();batch.financeReviewStatus='pending';batch.fobItemReviews=[{index:0,status:'rejected',reason:'请核实'}]
+  mocks.page.mockResolvedValue({items:[batch],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});mocks.get.mockResolvedValue([batch])
+  const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope:'mine'});app.component('RouterLink',{props:['to'],template:'<a :data-target="JSON.stringify(to)"><slot /></a>'});app.mount(host);await flush()
+  const filter=[...document.querySelectorAll<HTMLButtonElement>('.review-groups button')].find(b=>b.textContent==='有退回项')!
+  filter.click();await vi.advanceTimersByTimeAsync(300);await flush()
+  expect(mocks.page.mock.calls.at(-1)?.[1]).toMatchObject({reviewStatus:'returned'})
+  const link=[...document.querySelectorAll('a')].find(a=>a.textContent==='处理1项退回')!
+  expect(JSON.parse(link.dataset.target!)).toEqual({path:'/quotation',query:{fobCorrection:'fob'}})
+})
 it('keeps the batch review mounted across detail tabs and prevents accidental draft loss',async()=>{
   vi.useFakeTimers();authState.current={id:'me',name:'ME',account:'ME',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['allRecords','quote','finance','purchase']
   const batch=row(),item=structuredClone(batch.fob!)

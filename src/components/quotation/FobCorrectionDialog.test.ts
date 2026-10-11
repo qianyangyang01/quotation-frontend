@@ -33,7 +33,7 @@ afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks();clea
 it('prefills returned items only and separates missing source, timeouts and unchanged data; submits successes only',async()=>{
   await mount();expect(loadFobQuoteProduct).not.toHaveBeenCalled();expect(document.querySelectorAll('tbody tr')).toHaveLength(4);expect(document.body.textContent).not.toContain('APPROVED');expect(document.body.textContent).toContain('自定义：请核实采购价格')
   button('重新查询异常项').click();await tick()
-  expect(document.body.textContent).toContain('未找到SKU');expect(document.body.textContent).toContain('不代表SKU不存在');expect(document.body.textContent).toContain('资料、数量和计价参数未变化')
+  expect(document.body.textContent).toContain('未找到SKU');expect(document.body.textContent).toContain('不代表SKU不存在');expect(document.body.textContent).toContain('资料未变化')
   expect(loadFobQuoteProduct).toHaveBeenCalledWith('OK','fob',expect.any(AbortSignal),true)
   expect(button('提交1项').disabled).toBe(false)
   vi.mocked(submitFobCorrections).mockResolvedValue({...record,_reviewVersion:3,fobRevision:1})
@@ -47,6 +47,22 @@ it('keeps the same idempotency key on an uncertain response and invalidates resu
   button('提交1项').click();await tick();button('提交1项').click();await tick()
   const calls=vi.mocked(submitFobCorrections).mock.calls;expect(calls).toHaveLength(2);expect(calls[0]![2]).toBe(calls[1]![2]);expect(calls[0]![1]).toEqual(calls[1]![1])
   props.rate=7;await tick();expect(button('提交0项').disabled).toBe(true);expect(document.body.textContent).toContain('财务参数已变化')
+})
+it('requires explicit confirmation for an unchanged return and clears it on requery',async()=>{
+  await mount();button('重新查询异常项').click();await tick()
+  const confirm=()=>document.querySelector<HTMLInputElement>('[aria-label="UNCHANGED 已核实无误，按原价重新提交审核"]')!
+  expect(confirm().checked).toBe(false);expect(button('提交1项').disabled).toBe(false)
+  confirm().click();await tick();expect(button('提交2项').disabled).toBe(false)
+  confirm().closest('td')!.querySelector('button')!.click();await tick()
+  expect(confirm().checked).toBe(false);expect(button('提交1项').disabled).toBe(false)
+  confirm().click();await tick()
+  vi.mocked(submitFobCorrections).mockResolvedValue({...record,_reviewVersion:3,fobRevision:1})
+  button('提交2项').click();await tick()
+  expect(vi.mocked(submitFobCorrections).mock.calls[0]![1]).toEqual([
+    expect.objectContaining({index:0,confirmUnchanged:false}),expect.objectContaining({index:3,confirmUnchanged:true}),
+  ])
+  expect(document.querySelectorAll('tbody tr')).toHaveLength(2)
+  expect(button('返回报价记录')).toBeTruthy()
 })
 it('does not keep a submit-capable stale record after refresh failure',async()=>{
   await mount();button('重新查询异常项').click();await tick();vi.mocked(api.get).mockRejectedValue(new Error('读取失败'))

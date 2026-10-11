@@ -2326,7 +2326,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
 <template>
   <div class="jerry-app">
-    <FobCorrectionDialog v-if="!batchCapture && typeof route.query.fobCorrection==='string'" :key="String(route.query.fobCorrection)+currentAuthUser.account" :id="String(route.query.fobCorrection)" :rate="fobRate" :policy="fobSmallOrderPolicy" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" @close="router.replace({query:{...route.query,fobCorrection:undefined}})" />
+    <FobCorrectionDialog v-if="!batchCapture && typeof route.query.fobCorrection==='string'" :key="String(route.query.fobCorrection)+currentAuthUser.account" :id="String(route.query.fobCorrection)" :rate="fobRate" :policy="fobSmallOrderPolicy" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" @close="router.push({path: '/quotation/my-records',query:{record:route.query.fobCorrection}})" />
 
     <main class="quotation-page" :inert="(!fobActive && syncRefreshing) || undefined">
       <p v-if="!fobActive && logisticsRebuilding" role="status" class="notice">物流价格正在重建，新报价提交已暂停；请等待基准审核完成。</p>

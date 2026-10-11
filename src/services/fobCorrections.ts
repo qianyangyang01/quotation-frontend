@@ -16,7 +16,7 @@ export function correctionChanged(before: FobQuotationSnapshot, after: FobQuotat
 export async function reviewFobItems(record: QuotationRecord, action: 'return' | 'approve', items: { index: number; reason: string }[], reviewResult: FobReviewResult = 'approved', note = '') {
   return normalizeQuotationRecord(await api.post<QuotationRecord>(`/quotations/${record.id}/fob-corrections/review`, { _version: record._version, _reviewVersion: record._reviewVersion ?? 0, action, items, approveOthers: false, reviewResult: action === 'return' ? 'rejected' : reviewResult, note }))!
 }
-export async function submitFobCorrections(record: QuotationRecord, items: { index: number; snapshot: FobQuotationSnapshot }[], key: string) {
+export async function submitFobCorrections(record: QuotationRecord, items: { index: number; snapshot: FobQuotationSnapshot; confirmUnchanged?: boolean }[], key: string) {
   return normalizeQuotationRecord(await api.post<QuotationRecord>(`/quotations/${record.id}/fob-corrections/submit`, { _version: record._version, _reviewVersion: record._reviewVersion ?? 0, items }, key))!
 }
 export function loadFobRevision(id: string, revision: number) { return api.get<FobQuotationSnapshot>(`/quotations/${id}/fob-corrections/revisions/${revision}`) }

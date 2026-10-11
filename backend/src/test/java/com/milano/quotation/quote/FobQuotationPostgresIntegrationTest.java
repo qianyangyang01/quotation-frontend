@@ -182,6 +182,32 @@ class FobQuotationPostgresIntegrationTest {
         var finalRow=read("employee",row.path("id").asText());assertEquals("approved",finalRow.at("/fobItemReviews/0/status").asText());assertEquals(approved,finalRow.at("/fobItemReviews/2"));assertEquals(raw,originalPayload(original));
         assertEquals(1L,jdbc.sql("select count(*) from audit_log where action='quotation.review.fob-resubmit' and resource_id=:id").param("id",row.path("id").asText()).query(Long.class).single());
     }
+    @Test void confirmedUnchangedReturnCanReenterReviewWithoutChangingPricesOrLosingHistory() throws Exception {
+        var original=batchRecord();var raw=originalPayload(original);var row=returned(original);var body=versions(row);
+        var entry=body.putArray("items").addObject().put("index",0);entry.set("snapshot",row.at("/fob/items/0"));
+        correction("employee",row,"submit",body,"unconfirmed").andExpect(status().isConflict());
+        entry.put("confirmUnchanged","true");correction("employee",row,"submit",body,"malformed").andExpect(status().isUnprocessableEntity());
+        entry.put("confirmUnchanged",true);
+        var forged=body.deepCopy();((ArrayNode)forged.at("/items/0/snapshot/sheet/rows/0/prices")).set(0,DoubleNode.valueOf(.01));
+        correction("employee",row,"submit",forged,"confirmed-tamper").andExpect(status().isConflict());
+        correction("employee2",row,"submit",body,"confirmed-foreign").andExpect(status().isForbidden());
+        correction("employee",row,"submit",body,"confirmed").andExpect(status().isOk());
+        correction("employee",row,"submit",body,"confirmed").andExpect(status().isOk());
+        var updated=read("employee",row.path("id").asText());
+        assertEquals(1,updated.path("fobRevision").asInt());assertEquals("pending",updated.at("/fobItemReviews/0/status").asText());
+        assertEquals(row.at("/fobItemReviews/0/reason"),updated.at("/fobItemReviews/0/reason"));
+        assertEquals(row.at("/fob/items/0/current"),updated.at("/fob/items/0/current"));assertEquals(row.at("/fob/items/0/ranges"),updated.at("/fob/items/0/ranges"));
+        assertEquals(row.at("/fobItemReviews/1"),updated.at("/fobItemReviews/1"));assertEquals(row.at("/fobItemReviews/2"),updated.at("/fobItemReviews/2"));assertEquals(raw,originalPayload(original));
+        var history=jdbc.sql("select state::text from quotation_review where id=cast(:id as uuid)").param("id",row.path("id").asText()).query(String.class).single();
+        assertTrue(history.contains("confirmedUnchanged"));assertTrue(history.contains("按原价重新提交审核"));assertTrue(history.contains("fob-return"));
+        var search=mapper.readTree(mvc.perform(get("/api/v1/quotations/search").param("q",row.path("no").asText()).param("reviewStatus","returned").session(sessions.get("employee"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
+        assertEquals(row.path("id").asText(),search.at("/data/items/0/id").asText());
+        assertEquals("pending",search.at("/data/items/0/financeReviewStatus").asText());
+        correction("employee",row,"submit",body,"stale-confirmed").andExpect(status().isConflict());
+        var claimed=claim(updated);var approval=versions(claimed).put("action","approve");approval.putArray("items").addObject().put("index",0);
+        correction("super_admin",row,"review",approval,"confirmed-approve").andExpect(status().isOk());
+        assertEquals("approved",read("employee",row.path("id").asText()).at("/fobItemReviews/0/status").asText());
+    }
     @Test void correctionRejectsUnchangedTamperedMissingStaleAndForeignRequestsAtomically() throws Exception {
         var original=batchRecord();var raw=originalPayload(original);var row=returned(original);var body=versions(row);
         body.putArray("items").addObject().put("index",0).set("snapshot",row.at("/fob/items/0"));

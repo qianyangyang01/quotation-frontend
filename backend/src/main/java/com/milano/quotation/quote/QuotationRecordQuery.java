@@ -31,7 +31,7 @@ public class QuotationRecordQuery {
         if(filters.startDate()!=null && filters.endDate()!=null && filters.startDate().isAfter(filters.endDate())) throw AppException.unprocessable("开始日期不能晚于结束日期");
         if(filters.status()!=null && !filters.status().isBlank() && !Set.of("pending","won","lost","processed","finance-pending","finance-approved","finance-rejected","finance-channel-exempt","finance-logistics-exempt","finance-reviewing","finance-mine").contains(filters.status())) throw AppException.unprocessable("报价状态不合法");
         var reviewStatus="coalesce((select r.status from quotation_review r where r.id=quotation_record.id),nullif(payload->>'financeReviewStatus',''),'pending')";
-        if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank() && !Set.of("pending","reviewing","approved","rejected","channel-exempt","logistics-exempt").contains(filters.reviewStatus())) throw AppException.unprocessable("审核状态不合法");
+        if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank() && !Set.of("pending","reviewing","approved","rejected","channel-exempt","logistics-exempt","returned").contains(filters.reviewStatus())) throw AppException.unprocessable("审核状态不合法");
         var lifecycle=filters.lifecycle()==null ? "active" : filters.lifecycle();
         if(!Set.of("active","archived","trashed").contains(lifecycle)) throw AppException.unprocessable("记录分类不合法");
         var params=new HashMap<String,Object>(); params.put("lifecycle",lifecycle);
@@ -69,6 +69,7 @@ public class QuotationRecordQuery {
             else { where.append(" and status=:status");params.put("status",filters.status()); } }
         if(filters.reviewStatus()!=null && !filters.reviewStatus().isBlank()) {
             if(filters.reviewStatus().equals("pending")) where.append(" and "+reviewStatus+" not in ('approved','rejected','reviewing','channel-exempt','logistics-exempt')");
+            else if(filters.reviewStatus().equals("returned")) where.append(" and ("+reviewStatus+"='rejected' or exists(select 1 from quotation_review r where r.id=quotation_record.id and r.state->'fobItemReviews' @> '[{\"status\":\"rejected\"}]'::jsonb))");
             else { where.append(" and "+reviewStatus+"=:independentReviewStatus");params.put("independentReviewStatus",filters.reviewStatus()); }
         }
         if(filters.reviewMine()) {

@@ -110,26 +110,29 @@ public class FobBatchCorrections {
         if(row.status.equals("reviewing"))throw AppException.conflict("管理员正在审核，请等待本轮审核结束后提交");
         var current=(ObjectNode)row.state.deepCopy();var previous=snapshot(quote,current);var merged=(ObjectNode)previous.deepCopy();
         var states=itemStates(previous,current);var selected=indexes(body.path("items"),states.size());
-        var changes=JsonNodeFactory.instance.arrayNode();int offset=0;
+        var changes=JsonNodeFactory.instance.arrayNode();int offset=0,confirmedUnchanged=0;
         for(int index:selected) {
             if(!states.get(index).path("status").asText().equals("rejected"))throw AppException.conflict("只能重新提交当前退回的商品，请刷新记录");
-            var old=previous.path("items").get(index);var submitted=body.path("items").get(offset++).path("snapshot");
+            var old=previous.path("items").get(index);var entry=body.path("items").get(offset++);var submitted=entry.path("snapshot");
+            if(entry.has("confirmUnchanged")&&!entry.path("confirmUnchanged").isBoolean())throw AppException.unprocessable("原价复核确认参数无效");
             if(submitted.path("schemaVersion").asInt()!=1 || !submitted.at("/product/sku").equals(old.at("/product/sku"))
                     || !submitted.at("/product/source").equals(old.at("/product/source")) || !submitted.path("displayMode").equals(old.path("displayMode")))
                 throw AppException.unprocessable("不能替换退回商品的SKU、采购来源或报价方式");
             var request=FobQuotation.object().put("quoteMode","fob");request.set("customerName",quote.payload.path("customerName"));request.set("fob",submitted);
             // Validate prices and lock source/finance again at commit time; client totals are never trusted.
             var fresh=pricing.prepare(request).path("fob");
-            if(!sourceChanged(old,fresh))throw AppException.conflict(old.at("/product/sku").asText()+"：资料、数量和计价参数未变化，仍需核实后重新查询");
+            boolean unchanged=!sourceChanged(old,fresh);
+            if(unchanged&&!entry.path("confirmUnchanged").asBoolean(false))throw AppException.conflict(old.at("/product/sku").asText()+"：资料未变化，请勾选已核实无误后按原价重新提交审核");
+            if(unchanged)confirmedUnchanged++;
             ((ArrayNode)merged.path("items")).set(index,fresh);
             ((ObjectNode)states.get(index)).put("status","pending").put("resubmittedAt",Instant.now().toString());
             ((ObjectNode)states.get(index)).remove(List.of("reviewResult","note","reviewedBy","reviewedAt"));
-            changes.addObject().put("index",index).set("snapshot",fresh.deepCopy());
+            changes.addObject().put("index",index).put("confirmedUnchanged",unchanged).set("snapshot",fresh.deepCopy());
         }
         rebuildSheet(merged);
         current.set("fobItemReviews",states);current.set("fobRevisionSnapshot",merged);
         current.put("fobRevision",current.path("fobRevision").asInt(0)+1);
-        finish(quote,row,current,actor,"fob-resubmit",selected.size()+"项重新查询后提交复核",changes,selected);
+        finish(quote,row,current,actor,"fob-resubmit",selected.size()+"项重新查询后提交复核"+(confirmedUnchanged>0?"；其中"+confirmedUnchanged+"项已核实资料无误，按原价重新提交审核":""),changes,selected);
         var result=view(quote,row);idempotency.save(actor.account(),operation,key,body,result);return ApiResponse.ok(result);
     }
     static boolean sourceChanged(JsonNode before,JsonNode after) {

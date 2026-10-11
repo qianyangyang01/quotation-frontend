@@ -103,6 +103,7 @@ const reviewGroups = [
   { value: 'logistics-exempt', label: '物流免审-采购已审' },
   { value: 'approved', label: '审核通过' },
   { value: 'rejected', label: '价格异常' },
+  { value: 'returned', label: '有退回项' },
   { value: '', label: '全部' },
 ] as const
 const filterReviewStatus = ref<typeof reviewGroups[number]['value']>('pending')
@@ -567,7 +568,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div class="record-row-actions">
             <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>
             <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)"><template #inspection><QuotationSpotCheck :state="reviewSync.stateFor(row)" :can-mark="canSpotCheck && isActive(row)" :busy="spotCheckBusy.has(row.id) || lifecycleBusy || mutationBusy" @mark="markSpotChecked(row)" /></template></QuotationReviewPanel>
-            <div class="record-action-buttons"><RouterLink v-if="row.salespersonAccount===currentAuthUser.account && isActive(row) && reviewSync.stateFor(row).fobItemReviews?.some(i=>i.status==='rejected')" class="reissue-quote" :to="{path:'/quotation',query:{fobCorrection:row.id}}">处理{{ reviewSync.stateFor(row).fobItemReviews?.filter(i=>i.status==='rejected').length }}项异常</RouterLink><button v-if="canSetPriority(row)" type="button" class="priority-action" :disabled="priorityBusy.has(row.id)||lifecycleBusy||mutationBusy" :aria-label="(priorityFor(row)?'取消优先':'设为优先')+' '+row.no" @click="togglePriority(row)">{{ priorityBusy.has(row.id) ? '正在保存…' : priorityFor(row) ? '取消优先' : '设为优先' }}</button>
+            <div class="record-action-buttons"><RouterLink v-if="row.salespersonAccount===currentAuthUser.account && isActive(row) && reviewSync.stateFor(row).fobItemReviews?.some(i=>i.status==='rejected')" class="reissue-quote" :to="{path:'/quotation',query:{fobCorrection:row.id}}">处理{{ reviewSync.stateFor(row).fobItemReviews?.filter(i=>i.status==='rejected').length }}项退回</RouterLink><button v-if="canSetPriority(row)" type="button" class="priority-action" :disabled="priorityBusy.has(row.id)||lifecycleBusy||mutationBusy" :aria-label="(priorityFor(row)?'取消优先':'设为优先')+' '+row.no" @click="togglePriority(row)">{{ priorityBusy.has(row.id) ? '正在保存…' : priorityFor(row) ? '取消优先' : '设为优先' }}</button>
               <small v-if="row.status !== 'pending'" class="deal-result" :class="row.status">成交结果：{{ quotationDealLabel(row.status) }}</small>
               <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
             </div>
