@@ -211,6 +211,7 @@ public class QuotationController {
         QuotationFinanceReview.rejectDirectPatch(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
         FobQuotation.validateBatchDeal(current,patch);
+        reviews.validateFobDeal(row,patch);
         CustomerQuotePrices.preparePatch(current, patch);
         QuotationConfirmation.prepare(current, patch);
         if (QuotationFinanceReview.pricesChanged(current, patch)) reviews.contentChanged(row,principal(auth));

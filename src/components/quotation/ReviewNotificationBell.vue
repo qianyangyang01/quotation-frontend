@@ -13,6 +13,7 @@ function escape(event: KeyboardEvent) { if (event.key === 'Escape' && inbox.open
 function wake() { void refreshReviewNotifications() }
 async function view(item: ReviewMessage) {
   inbox.opened = false
+  if(item.kind==='fob-return'){await router.push({path:'/quotation',query:{fobCorrection:item.recordId}});return}
   await router.push({ path: '/quotation/my-records', query: { record: item.recordId, reviewEvent: item.eventId, reviewOpen: crypto.randomUUID() } })
 }
 const time = (at: string) => new Date(at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -34,9 +35,9 @@ onUnmounted(() => { stopReviewNotifications(); document.removeEventListener('poi
       <p v-else-if="!inbox.total && !inbox.error" class="inbox-empty">暂无未读审核消息</p>
       <div class="inbox-messages">
         <article v-for="item in inbox.items" :key="item.eventId">
-          <i :class="{ rejected: item.status === 'rejected', comment: item.kind === 'comment' }" />
+          <i :class="{ rejected: item.status === 'rejected' || item.kind === 'fob-return', comment: item.kind === 'comment' }" />
           <div><b>{{ reviewMessageTitle(item) }}</b><span>{{ item.customerName || '未填写客户' }} · {{ item.primarySku || item.quoteNo }}</span><p v-if="item.note">审核意见：{{ item.note }}</p><small>{{ item.actorName }} · {{ time(item.occurredAt) }}</small></div>
-          <button @click="view(item)">查看报价</button>
+          <button @click="view(item)">{{ item.kind==='fob-return'?'处理异常项':'查看报价' }}</button>
         </article>
       </div>
       <nav v-if="inbox.totalPages > 1" aria-label="审核消息分页"><button :disabled="inbox.loading || !inbox.page" @click="refreshReviewNotifications(inbox.page - 1)">上一页</button><span>{{ inbox.page + 1 }} / {{ inbox.totalPages }}</span><button :disabled="inbox.loading || inbox.page + 1 >= inbox.totalPages" @click="refreshReviewNotifications(inbox.page + 1)">下一页</button></nav>

@@ -56,6 +56,8 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   // Import/export requests have separate, deliberately longer deadlines.
   const bounded = /^\/(quotation-readiness|quotation-drafts\/mine\/state)(?:[?]|$)/.test(path)
     || (method === 'POST' && /^\/quotations(?:\/[^/]+\/resubmit)?$/.test(path))
+    || /^\/quotations\/[^/]+\/fob-corrections(?:\/|$)/.test(path)
+    || path === '/quotations/fob/preview'
   const deadline = bounded ? new AbortController() : undefined
   const timer = deadline ? setTimeout(() => deadline.abort(new DOMException('Quotation request timed out', 'TimeoutError')), 30_000) : undefined
   const signal = deadline ? (init.signal ? AbortSignal.any([init.signal, deadline.signal]) : deadline.signal) : init.signal

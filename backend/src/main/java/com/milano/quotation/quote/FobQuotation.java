@@ -52,6 +52,8 @@ public class FobQuotation {
         var current=source.equals("fob")?fob.getForQuotation(sku):purchases.getForQuotation(sku);
         var timestamp=current.path(source.equals("fob")?"updatedAt":"_updatedAt").asText();
         if (timestamp.isBlank() || !timestamp.equals(product.path("updatedAt").asText())) throw AppException.conflict("采购资料已更新，请重新查询SKU后再保存");
+        if(source.equals("standard") && "是".equals(current.path("freeShipping").asText()))
+            for(var field:List.of("singleFreightCny","freight10Cny","freight100Cny"))if(current.path(field).isNumber()&&current.path(field).asDouble()>0)throw AppException.unprocessable("采购资料冲突：包邮与正数运费同时存在");
         var parsed=source.equals("fob")?current.path("parsed").deepCopy():standard(current);
         var canonical=object().put("sku",sku).put("source",source).put("category",current.path("category").asText())
             .put("weight",source.equals("fob")?current.path("weightRaw").asText("未填写"):current.hasNonNull("weightG")?current.path("weightG").asText()+" g":"未填写").put("updatedAt",timestamp);

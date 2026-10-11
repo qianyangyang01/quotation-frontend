@@ -2,6 +2,7 @@
 import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
+import FobCorrectionDialog from '@/components/quotation/FobCorrectionDialog.vue'
 import FobQuotePanel from '@/components/quotation/FobQuotePanel.vue'
 import { FOB_SMALL_ORDER_POLICY } from '@/services/fobQuotation'
 import { canUseFob } from '@/data/fobAccess'
@@ -2258,6 +2259,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
 <template>
   <div class="jerry-app">
+    <FobCorrectionDialog v-if="typeof route.query.fobCorrection==='string'" :key="String(route.query.fobCorrection)+currentAuthUser.account" :id="String(route.query.fobCorrection)" :rate="fobRate" :policy="fobSmallOrderPolicy" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" @close="router.replace({query:{...route.query,fobCorrection:undefined}})" />
 
     <main class="quotation-page" :inert="(!fobActive && syncRefreshing) || undefined">
       <p v-if="!fobActive && logisticsRebuilding" role="status" class="notice">物流价格正在重建，新报价提交已暂停；请等待基准审核完成。</p>

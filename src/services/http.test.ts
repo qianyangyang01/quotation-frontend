@@ -33,7 +33,7 @@ describe('quotation API client', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it.each(['/quotations', '/quotations/record/resubmit', '/quotation-drafts/mine/state'])('releases a stalled save request for %s and preserves its uncertain outcome', async path => {
+  it.each(['/quotations', '/quotations/record/resubmit', '/quotation-drafts/mine/state', '/quotations/record/fob-corrections/submit', '/quotations/record/fob-corrections/review', '/quotations/fob/preview'])('releases a stalled save request for %s and preserves its uncertain outcome', async path => {
     vi.useFakeTimers()
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { headerName: 'X-XSRF-TOKEN', token: 'csrf' } })))
       .mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason))))

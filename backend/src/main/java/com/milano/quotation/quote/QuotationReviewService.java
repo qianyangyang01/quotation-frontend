@@ -39,6 +39,18 @@ public class QuotationReviewService {
         return reviews.findById(quote.id).map(row->row.status).orElseGet(()->legacy(quote.payload).path("financeReviewStatus").asText());
     }
 
+    void validateFobDeal(QuotationRecordEntity quote, ObjectNode patch) {
+        if(quote.payload.at("/fob/schemaVersion").asInt()!=2 || !patch.has("dealLines"))return;
+        var state=reviews.findById(quote.id).map(row->row.state).orElse(null);
+        if(state==null || !state.path("fobItemReviews").isArray())return;
+        for(var line:patch.path("dealLines")) {
+            var parts=line.path("optionId").asText().split(":");
+            if(parts.length!=3 || !parts[1].matches("\\d{1,3}"))throw AppException.unprocessable("FOB成交商品无效");
+            int index=Integer.parseInt(parts[1]);
+            if(!state.path("fobItemReviews").path(index).path("status").asText().equals("approved"))
+                throw AppException.conflict("退回或待审核的FOB商品不能回填成交，请等待审核通过");
+        }
+    }
     static ObjectNode legacy(JsonNode payload) {
         var state=JsonNodeFactory.instance.objectNode();
         for (var key:VIEW_FIELDS) if(payload.has(key)) state.set(key,payload.get(key));
@@ -46,6 +58,8 @@ public class QuotationReviewService {
         return state;
     }
     static void overlay(ObjectNode payload, JsonNode state, long version) {
+        for (var key : List.of("fobItemReviews", "fobRevision")) { payload.remove(key); if(state.has(key))payload.set(key,state.get(key)); }
+        if(payload.has("fob") && state.has("fobRevisionSnapshot")) payload.set("fob",state.path("fobRevisionSnapshot").deepCopy());
         SPOT_CHECK_FIELDS.forEach(payload::remove);
         payload.put("spotChecked", state.path("spotChecked").asBoolean(false));
         for (var key : SPOT_CHECK_FIELDS) if (state.has(key)) payload.set(key, state.get(key));
@@ -164,6 +178,8 @@ public class QuotationReviewService {
         } else if(action.equals("claim")) {
             if(row.status.equals("reviewing")) throw AppException.conflict("该报价已由"+current.path("financeReviewClaimedBy").asText()+"审核中");
             requireQuoteVersion(quote,request);
+            if(quote.payload.at("/fob/schemaVersion").asInt()==2 && !current.has("fobItemReviews"))
+                current.set("fobItemReviews",FobBatchCorrections.itemStates(FobBatchCorrections.snapshot(quote,current),current));
             VIEW_FIELDS.forEach(current::remove);
             row.status="reviewing";row.claimantAccount=actor.account();
             current.put("financeReviewClaimedAccount",actor.account()).put("financeReviewClaimedBy",actor.displayName())
@@ -175,6 +191,7 @@ public class QuotationReviewService {
                 if(note.isBlank()) throw AppException.unprocessable("请填写解除占用原因");
             } else if(!actor.account().equals(row.claimantAccount)) throw new AccessDeniedException("只有当前审核人可以取消或完成审核");
             if(action.equals("complete")) {
+                if(current.has("fobItemReviews"))throw AppException.unprocessable("批量FOB请打开详情使用逐项审核，避免覆盖已通过项");
                 requireQuoteVersion(quote,request);
                 var result=request.path("financeReviewStatus").asText();
                 if(!Set.of("approved","rejected","channel-exempt","logistics-exempt").contains(result)) throw AppException.unprocessable("请选择审核结论");
@@ -204,13 +221,14 @@ public class QuotationReviewService {
     void contentChanged(QuotationRecordEntity quote, QuotationPrincipal actor) {
         notifications.invalidate(quote.id);
         var row=state(quote);
-        if(row.status.equals("pending")) return;
+        if(row.status.equals("pending") && !row.state.has("fobItemReviews")) return;
         var current=(ObjectNode)row.state.deepCopy();var before=row.status;
         preserveLegacyHistory(quote,current);
         if(!row.status.equals("reviewing")) {
             row.status="pending";row.claimantAccount=null;VIEW_FIELDS.forEach(current::remove);
             current.put("financeReviewStatus","pending");
         }
+        invalidateFobApprovals(current);
         event(current,actor,"content-changed",before,row.status,"报价内容已变化，需重新核对",quote.version+1);
         row.state=current;reviews.saveAndFlush(row);
         audit.record("quotation.review.content-changed","quotation",quote.id.toString(),"success",Map.of("before",before,"after",row.status));
@@ -222,10 +240,17 @@ public class QuotationReviewService {
         preserveLegacyHistory(quote,current);
         VIEW_FIELDS.forEach(current::remove);
         row.status="pending";row.claimantAccount=null;current.put("financeReviewStatus","pending");
+        invalidateFobApprovals(current);
         event(current,actor,"withdraw",before,"pending","报价已撤回，原审核失效",quote.version+1);
         row.state=current;reviews.saveAndFlush(row);
     }
-    private static void event(ObjectNode state,QuotationPrincipal actor,String action,String before,String after,String note,long quoteVersion) {
+    static void invalidateFobApprovals(ObjectNode state) {
+        for(var item:state.path("fobItemReviews"))if(item.path("status").asText().equals("approved")) {
+            ((ObjectNode)item).put("status","pending");
+            ((ObjectNode)item).remove(List.of("reviewedBy","reviewedAt"));
+        }
+    }
+    static void event(ObjectNode state,QuotationPrincipal actor,String action,String before,String after,String note,long quoteVersion) {
         var event=state.withArray("history").addObject().put("id",UUID.randomUUID().toString()).put("action",action).put("before",before).put("after",after)
             .put("actorAccount",actor.account()).put("actorName",actor.displayName()).put("at",Instant.now().toString()).put("note",note);
         // Match JSON deserialization's numeric node type so Hibernate's snapshots remain equal.

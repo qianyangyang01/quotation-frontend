@@ -121,4 +121,123 @@ class FobQuotationPostgresIntegrationTest {
         } finally {executor.shutdownNow();}
     }
 
+
+    ObjectNode batchRecord() throws Exception {
+        var batch=FobBatchQuotationTest.input(3);
+        for(var item:batch.at("/fob/items")) {
+            var p=(ObjectNode)item.path("product").deepCopy();p.put("weightRaw","60 g");
+            jdbc.sql("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values(:sku,cast(:p as jsonb),0,now(),'2026-10-09T00:00:00Z') on conflict(sku) do update set payload=excluded.payload,updated_at=excluded.updated_at")
+                .param("sku",p.path("sku").asText()).param("p",p.toString()).update();
+        }
+        return (ObjectNode)save("employee",UUID.randomUUID().toString(),batch);
+    }
+    ObjectNode versions(JsonNode row) {return mapper.createObjectNode().put("_version",row.path("_version").asLong()).put("_reviewVersion",row.path("_reviewVersion").asLong());}
+    JsonNode claim(JsonNode row) throws Exception {
+        var body=versions(row).put("action","claim");
+        return mapper.readTree(mvc.perform(patch("/api/v1/quotations/"+row.path("id").asText()+"/finance-review").session(sessions.get("super_admin")).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
+    }
+    org.springframework.test.web.servlet.ResultActions correction(String role,JsonNode row,String action,ObjectNode body,String key) throws Exception {
+        return mvc.perform(post("/api/v1/quotations/"+row.path("id").asText()+"/fob-corrections/"+action).session(sessions.get(role)).with(csrf()).header("Idempotency-Key","test-key-"+key).contentType("application/json").content(body.toString()));
+    }
+    JsonNode returned(JsonNode row) throws Exception {
+        var claimed=claim(row);var body=versions(claimed).put("action","return").put("approveOthers",true);
+        body.putArray("items").addObject().put("index",0).put("reason","采购克重不对，请核实");
+        body.withArray("items").addObject().put("index",1).put("reason","采购价格异常，自定义原因");
+        correction("super_admin",row,"review",body,"unused").andExpect(status().isOk());return read("employee",row.path("id").asText());
+    }
+    ObjectNode fresh(JsonNode row,int index) throws Exception {
+        String sku=row.at("/fob/items/"+index+"/product/sku").asText();
+        jdbc.sql("update fob_purchase_product set updated_at='2026-10-11T12:00:00Z',version=version+1 where sku=:sku").param("sku",sku).update();
+        var item=(ObjectNode)row.at("/fob/items/"+index).deepCopy();((ObjectNode)item.path("product")).put("updatedAt","2026-10-11T12:00:00Z");return item;
+    }
+    String originalPayload(JsonNode row) {return jdbc.sql("select payload::text from quotation_record where id=cast(:id as uuid)").param("id",row.path("id").asText()).query(String.class).single();}
+    @Test void itemReturnPartialCorrectionAndReapprovalPreserveOriginalAndOtherAccountsAgree() throws Exception {
+        var original=batchRecord();var raw=originalPayload(original);var row=returned(original);var approved=row.at("/fobItemReviews/2").deepCopy();
+        assertEquals("approved",approved.path("status").asText());assertEquals("采购克重不对，请核实",row.at("/fobItemReviews/0/reason").asText());
+        var inbox=mapper.readTree(mvc.perform(get("/api/v1/review-notifications").session(sessions.get("employee"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
+        assertEquals("fob-return",inbox.at("/data/items/0/kind").asText());
+        var body=versions(row);body.putArray("items").addObject().put("index",0).set("snapshot",fresh(row,0));var key=UUID.randomUUID().toString();
+        correction("employee",row,"submit",body,key).andExpect(status().isOk());
+        correction("employee",row,"submit",body,key).andExpect(status().isOk());
+        var updated=read("employee",row.path("id").asText());
+        assertEquals(1,updated.path("fobRevision").asInt());assertEquals("pending",updated.path("financeReviewStatus").asText());
+        assertEquals("pending",updated.at("/fobItemReviews/0/status").asText());assertEquals("rejected",updated.at("/fobItemReviews/1/status").asText());
+        var queue=mapper.readTree(mvc.perform(get("/api/v1/quotations/search").param("scope","company").param("q",row.path("no").asText()).param("reviewStatus","pending").session(sessions.get("super_admin"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
+        assertEquals(row.path("id").asText(),queue.at("/data/items/0/id").asText());assertEquals(updated.path("fob"),queue.at("/data/items/0/fob"));
+        assertEquals(approved,updated.at("/fobItemReviews/2"));assertEquals(original.at("/fob/items/2"),updated.at("/fob/items/2"));assertEquals(raw,originalPayload(original));
+        var deal=mapper.createObjectNode().put("_version",updated.path("_version").asLong()).put("status","won").put("closedAt","2026-10-11").put("actualQuoteUsd",3.04).put("dealQuantity",2);
+        deal.putArray("dealLines").addObject().put("id","deal").put("optionId","fob:0:declared").put("unitPriceUsd",1.52).put("quantity",2).put("amountUsd",3.04);
+        mvc.perform(patch("/api/v1/quotations/"+row.path("id").asText()).session(sessions.get("employee")).with(csrf()).contentType("application/json").content(deal.toString())).andExpect(status().isConflict());
+        for(String role:List.of("super_admin","finance"))assertEquals(updated.path("fob"),read(role,row.path("id").asText()).path("fob"));
+        var oldVersion=mapper.readTree(mvc.perform(get("/api/v1/quotations/"+row.path("id").asText()+"/fob-corrections/revisions/0").session(sessions.get("employee"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
+        assertEquals(original.path("fob"),oldVersion);
+        var revision=mapper.readTree(mvc.perform(get("/api/v1/quotations/"+row.path("id").asText()+"/fob-corrections/revisions/1").session(sessions.get("finance"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");assertEquals(updated.path("fob"),revision);
+        var claimed=claim(updated);var approval=versions(claimed).put("action","approve");approval.putArray("items").addObject().put("index",1);
+        correction("super_admin",row,"review",approval,"x").andExpect(status().isConflict());
+        ((ObjectNode)approval.at("/items/0")).put("index",0);correction("super_admin",row,"review",approval,"x").andExpect(status().isOk());
+        var finalRow=read("employee",row.path("id").asText());assertEquals("approved",finalRow.at("/fobItemReviews/0/status").asText());assertEquals(approved,finalRow.at("/fobItemReviews/2"));assertEquals(raw,originalPayload(original));
+        assertEquals(1L,jdbc.sql("select count(*) from audit_log where action='quotation.review.fob-resubmit' and resource_id=:id").param("id",row.path("id").asText()).query(Long.class).single());
+    }
+    @Test void correctionRejectsUnchangedTamperedMissingStaleAndForeignRequestsAtomically() throws Exception {
+        var original=batchRecord();var raw=originalPayload(original);var row=returned(original);var body=versions(row);
+        body.putArray("items").addObject().put("index",0).set("snapshot",row.at("/fob/items/0"));
+        correction("employee",row,"submit",body,"unchanged").andExpect(status().isConflict());
+        correction("employee2",row,"submit",body,"foreign").andExpect(status().isForbidden());
+        correction("purchase",row,"submit",body,"purchase").andExpect(status().isForbidden());
+        var newer=fresh(row,0);((ObjectNode)body.at("/items/0")).set("snapshot",newer);
+        var tampered=body.deepCopy();((ArrayNode)tampered.at("/items/0/snapshot/sheet/rows/0/prices")).set(0,DoubleNode.valueOf(.01));
+        correction("employee",row,"submit",tampered,"tamper").andExpect(status().isConflict());
+        var changedSku=body.deepCopy();((ObjectNode)changedSku.at("/items/0/snapshot/product")).put("sku","SKU2");
+        correction("employee",row,"submit",changedSku,"sku").andExpect(status().isUnprocessableEntity());
+        // A good first item followed by a deleted SKU must not persist a partial revision.
+        body.withArray("items").addObject().put("index",1).set("snapshot",row.at("/fob/items/1"));
+        jdbc.sql("delete from fob_purchase_product where sku='SKU1'").update();
+        correction("employee",row,"submit",body,"missing").andExpect(status().isNotFound());
+        var unchanged=read("employee",row.path("id").asText());assertFalse(unchanged.has("fobRevision"));assertEquals(row.path("fobItemReviews"),unchanged.path("fobItemReviews"));assertEquals(raw,originalPayload(original));
+        ((ArrayNode)body.path("items")).remove(1);
+        jdbc.sql("update fob_purchase_product set updated_at='2026-10-11T13:00:00Z',version=version+1 where sku='SKU0'").update();
+        correction("employee",row,"submit",body,"stale-source").andExpect(status().isConflict());
+        body.put("_reviewVersion",999);correction("employee",row,"submit",body,"stale-review").andExpect(status().isConflict());
+    }
+    @Test void itemReviewNeedsClaimAndReasonAndCannotFallBackToGlobalCompletion() throws Exception {
+        var row=batchRecord();var body=versions(row).put("action","return");body.putArray("items").addObject().put("index",0).put("reason","原因");
+        correction("super_admin",row,"review",body,"x").andExpect(status().isConflict());
+        var claimed=claim(row);body=versions(claimed).put("action","return");body.putArray("items").addObject().put("index",0).put("reason","  ");
+        correction("super_admin",row,"review",body,"x").andExpect(status().isUnprocessableEntity());
+        correction("finance",row,"review",body,"x").andExpect(status().isConflict());
+        correction("employee",row,"review",body,"x").andExpect(status().isForbidden());
+        var global=versions(claimed).put("action","complete").put("financeReviewStatus","approved");
+        mvc.perform(patch("/api/v1/quotations/"+row.path("id").asText()+"/finance-review").session(sessions.get("super_admin")).with(csrf()).contentType("application/json").content(global.toString())).andExpect(status().isUnprocessableEntity());
+    }
+
+
+    @Test void concurrentCorrectionRetriesProduceOneRevisionAndSourceFinanceChangesBlockCommit() throws Exception {
+        var row=returned(batchRecord());var body=versions(row);body.putArray("items").addObject().put("index",0).set("snapshot",fresh(row,0));
+        jdbc.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1 where setting_key='exchange-rate'").param("p","{\"usdCny\":7}").update();
+        correction("employee",row,"submit",body,"rate-changed").andExpect(status().isConflict());
+        jdbc.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1 where setting_key='exchange-rate'").param("p","{\"usdCny\":6.7}").update();
+        var executor=java.util.concurrent.Executors.newFixedThreadPool(3);String key=UUID.randomUUID().toString();
+        try {
+            var start=new java.util.concurrent.CountDownLatch(1);var jobs=new ArrayList<java.util.concurrent.Future<Integer>>();
+            for(int i=0;i<3;i++)jobs.add(executor.submit(()->{start.await();return correction("employee",row,"submit",body.deepCopy(),key).andReturn().getResponse().getStatus();}));
+            start.countDown();for(var job:jobs)assertEquals(200,job.get(30,java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(1,read("employee",row.path("id").asText()).path("fobRevision").asInt());
+        } finally {executor.shutdownNow();}
+    }
+
+
+    @Test void revisedProcurementPriceRecalculatesSurchargeBoundaryWithoutChangingOtherSkus() throws Exception {
+        var row=returned(batchRecord());var item=fresh(row,0);
+        jdbc.sql("update fob_purchase_product set payload=jsonb_set(payload,'{parsed,priceTiers,0,unitPriceCny}','8'),version=version+1 where sku='SKU0'").update();
+        ((ObjectNode)item.at("/sheet/rows/0")).putArray("prices").add(1.67).add(1.70);
+        ((ObjectNode)item.at("/sheet/rows/1")).putArray("prices").add(1.50).add(1.53);
+        var body=versions(row);body.putArray("items").addObject().put("index",0).set("snapshot",item);
+        correction("employee",row,"submit",body,"price-update").andExpect(status().isOk());
+        var saved=read("employee",row.path("id").asText());
+        assertEquals("1.50",saved.at("/fob/items/0/current/declaredUsd").asText());
+        assertEquals(23,saved.at("/fob/items/0/ranges/1/minQty").asInt());
+        assertEquals("23+ pcs",saved.at("/fob/sheet/rows/1/quantityRange").asText());
+        assertEquals(row.at("/fob/items/1"),saved.at("/fob/items/1"));assertEquals(row.at("/fob/items/2"),saved.at("/fob/items/2"));
+    }
+
 }

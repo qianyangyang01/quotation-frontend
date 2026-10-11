@@ -1,20 +1,32 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { canViewPurchaseCost, canViewPricingFactors } from '@/data/quotationVisibility'
-import type { QuotationRecord } from '@/data/quotationRecords'
+import type { QuotationRecord, QuotationReviewState } from '@/data/quotationRecords'
+import FobRevisionHistory from './FobRevisionHistory.vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
 import FobBatchSheetExports from './FobBatchSheetExports.vue'
 
-const props = defineProps<{record:QuotationRecord}>()
+const props = defineProps<{record:QuotationRecord; state?:QuotationReviewState}>()
+const emit=defineEmits<{reload:[]}>()
+const stale=computed(()=>props.state && (props.state._reviewVersion!==props.record._reviewVersion || props.state._version!==props.record._version))
+const approvedSheet = computed(() => {
+  const sheet=props.record.fob?.sheet
+  if(!sheet || !props.record.fobItemReviews)return sheet
+  const approved=new Set(props.record.fobItemReviews.filter(s=>s.status==='approved').map(s=>s.index))
+  return {...sheet, rows:sheet.rows.filter(r=>approved.has(Number(r.key.split(':')[0]))).map((r,i)=>({...r,number:i+1}))}
+})
 const tiers = computed(() => props.record.fob?.tiers?.length ? props.record.fob.tiers : [null])
 const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record.fob?.tiers?.[0]?.unit || '单位')
 </script>
 <template>
   <section v-if="record.fob?.schemaVersion===2 && record.fob.items?.length" class="fob-record" aria-label="FOB批量历史报价快照">
-    <h3>FOB批量报价 · {{ record.fob.items.length }}行商品</h3><p>客户：{{ record.customerName }} · 报价人：{{ record.salespersonName }} · 汇率：{{ record.fob.rate }}</p>
+    <h3>FOB批量报价 · {{ record.fob.items.length }}行商品</h3><p>客户：{{ record.customerName }} · 报价人：{{ record.salespersonName }} · 修订 {{ record.fobRevision || 0 }}（各商品按自身保存汇率计价）</p>
     <p>以下为保存时的完整报价快照，采购资料和汇率更新不会改变此报价。</p>
     <details v-if="canViewPurchaseCost"><summary>查看各SKU采购成本快照（内部）</summary><div class="cost-table"><table><thead><tr><th>SKU</th><th>阶梯起订量</th><th>采购价 ¥</th><th>含票价 ¥</th><th>国内运费 ¥</th><th>成本 ¥</th></tr></thead><tbody><template v-for="(item,index) in record.fob.items" :key="index"><tr v-for="tier in item.tiers" :key="tier.minQty"><td>{{ item.product.sku }}</td><td>{{ tier.minQty }}</td><td>{{ tier.purchaseCny }}</td><td>{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td>{{ tier.costCny }}</td></tr></template></tbody></table></div></details>
-    <FobBatchSheetExports :sheet="record.fob.sheet" /><FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="record.fob.sheet" />
+    <FobRevisionHistory v-if="record.fobRevision" :id="record.id" :revision="record.fobRevision" />
+    <p v-if="record.fobItemReviews && record.fobItemReviews.some(i=>i.status!=='approved')" role="status">下方客户报价单仅包含已通过商品；待审核及退回商品不进入导出。</p>
+    <p v-if="stale" role="alert">审核状态已变化，请加载最新记录后生成报价单。<button @click="emit('reload')">加载最新记录</button></p>
+    <template v-else-if="approvedSheet && (!record.fobItemReviews || approvedSheet.rows.length)"><FobBatchSheetExports :sheet="approvedSheet" /><FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="approvedSheet" /></template><p v-else>尚无审核通过商品，暂不能生成对外报价单。</p>
   </section>
   <section v-else-if="record.fob" class="fob-record" aria-label="FOB历史报价快照">
     <div class="fob-meta"><b>FOB（批发）报价 · {{ record.primarySku }}</b><span>客户：{{ record.customerName }}</span><span>报价人：{{ record.salespersonName }}</span><span>采购来源：{{ record.fob.product.source==='fob'?'FOB数据':'新采购资料' }}</span><span>报价数量：{{ record.fob.quantity }}</span><span class="finance-meta">汇率：{{ record.fob.rate }} CNY/USD<template v-if="canViewPurchaseCost"> · 票点10%</template><template v-if="canViewPricingFactors"> · 报关×1.14 · 不报关×1.1628</template></span></div>

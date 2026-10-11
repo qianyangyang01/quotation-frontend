@@ -25,7 +25,7 @@ export async function validateFobQuotation(customerName: string, fob: FobQuotati
 }
 // Deal choices are SKU/declaration choices, never persisted as international logistics channels.
 export function fobBatchDealOptions(record: QuotationRecord): QuotationRecordQuoteOption[] {
-  return (record.fob?.items ?? []).flatMap((item, index) => ['declared', 'undeclared'].map(kind => ({
+  return (record.fob?.items ?? []).flatMap((item, index) => (record.fobItemReviews && record.fobItemReviews[index]?.status !== 'approved' ? [] : ['declared', 'undeclared']).map(kind => ({
     id: `fob:${index}:${kind}`, country: '', carrier: '', channel: `${item.product.sku} · ${kind === 'declared' ? '报关' : '不报关'}`,
     rule: 'FOB', eta: `单位：${item.product.parsed.priceTiers[0]?.unit || '件'}`, quote1Usd: null, quote2Usd: null, quote3Usd: null, quoteCustomUsd: null,
   })))
