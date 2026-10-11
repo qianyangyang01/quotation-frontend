@@ -6,6 +6,8 @@ import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import type { QuoteSheetCountry, QuoteSheetPriceCalculator } from '@/data/customerQuoteSheet'
 
 const props = withDefaults(defineProps<{
+  saveLabel?: string
+  initialQuantities?: number[]
   rows: QuotationMatrixRow[]
   countries: QuoteSheetCountry[]
   salesperson: string
@@ -40,7 +42,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ 'update:priorityProcessing': [value: boolean]; save: []; retry: []; locateIssue: [key: string]; removeRow: [key: string] }>()
 const customerSheet = ref<InstanceType<typeof CustomerQuoteSheet>>()
-defineExpose({ capturePrices: () => customerSheet.value?.capturePrices(), captureForSave: () => customerSheet.value?.captureForSave() })
+defineExpose({ captureSheet: () => customerSheet.value?.captureSheet(), capturePrices: () => customerSheet.value?.capturePrices(), captureForSave: () => customerSheet.value?.captureForSave() })
 const countryCount = computed(() => new Set(props.rows.map(row => row.country)).size)
 const hasQuoteRows = computed(() => props.rows.length > 0)
 const previewStatus = computed(() => {
@@ -93,7 +95,7 @@ const quoteRange = computed(() => {
       </section>
     </div>
 
-    <CustomerQuoteSheet :quote-mode="quoteMode" ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
+    <CustomerQuoteSheet :initial-quote="initialQuantities ? { quantities: initialQuantities, rows: [] } : undefined" :quote-mode="quoteMode" ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
       :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
 
     <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">
@@ -105,7 +107,7 @@ const quoteRange = computed(() => {
       </div>
     </section>
 
-    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? '正在校验并保存…' : `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
+    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? '正在校验并保存…' : saveLabel || `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
   </section>
 </template>
 

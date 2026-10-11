@@ -90,6 +90,12 @@ import {
   usdPriceFromCny as convertCnyToUsd,
 } from '@/services/quotationCalculator'
 
+// Batch workspace reuses the proven calculator, but never enters ordinary persistence.
+const props = defineProps<{ batchCapture?: boolean; batchInitialSku?: string }>()
+const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem] }>()
+let batchCaptured: import('@/services/batchSingleQuotation').BatchSingleItem | undefined
+const batchQuantities = ref<number[]>()
+const batchReady = ref(false)
 const displayGrams = displayWeightGrams
 function ruleSupportsShipment(rule: (typeof logisticsRules)[number], country: string, weightKg: number, logisticsAttribute: string) {
   return rule.status === '启用' && Boolean(findPriceRow(rule, country, weightKg, [logisticsAttribute], quoteRegionForCountry(country)))
@@ -646,6 +652,7 @@ function updateBundleItemWeight(item: BundleQuoteItem) {
   normalizeRule(products.value[0], true)
 }
 function changeQuoteMode(mode: QuotationMode | 'fob') {
+  if (props.batchCapture && mode !== 'single') return
   if (mode === 'fob' && !canUseFob.value) return
   if (savingQuotation.value || syncRefreshing.value) return
   if (mode === 'fob') {
@@ -1338,6 +1345,12 @@ async function initializeQuotationWorkspace() {
     await loadQuotationWorkspaceConfiguration()
     applyLiveFinance()
     readiness.value = await loadQuotationReadiness()
+    if (props.batchCapture) {
+      await resetLocalDraft()
+      skuSearch.value = props.batchInitialSku || ''
+      batchReady.value = true
+      return
+    }
     const reissueId = !reissueHandled && typeof route.query.reissue === 'string' ? route.query.reissue : ''
     const sourceRecord = reissueId ? await loadRecord(reissueId) : null
     if (reissueId && !sourceRecord) throw new Error('原报价不存在或无权读取，请返回报价记录重新选择')
@@ -1472,6 +1485,7 @@ onBeforeUnmount(() => {
   logisticsRequest?.abort()
 })
 onBeforeRouteLeave(async () => {
+  if (props.batchCapture) return true
   window.clearTimeout(draftTimer)
   if (!draftSource.value) {
     if (!draftDirty) return true
@@ -2116,6 +2130,34 @@ function selectedQuoteSummary(quoteOptions: ReturnType<typeof buildQuoteOptions>
 }
 const quotationPreview = ref<InstanceType<typeof QuotationPreviewSave> | null>(null)
 let submitOrdinaryQuotation = quotationSubmitter()
+async function calculateBatchItem(sku: string, conditions: QuotationDraftPayload, quantities: number[]) {
+  if (!props.batchCapture) throw new Error('此操作仅用于批量单品工作区')
+  batchCaptured = undefined
+  notice.value = ''
+  const payload = JSON.parse(JSON.stringify(conditions)) as QuotationDraftPayload
+  payload.quoteMode = 'single'; payload.skuSearch = sku; payload.product.sku = sku
+  payload.product.weightSource = 'purchase'; payload.product.manualWeight = 0
+  payload.product.primaryChannelKey = ''; payload.product.primaryRule = ''; payload.product.primaryCarrier = ''
+  payload.bundleItems = []
+  batchQuantities.value = quantities
+  const purchase = await loadPurchaseProduct(sku)
+  if (!purchase.quoteReady) throw new Error(purchaseQuoteBlockingMessage(purchase) || `${sku}：采购资料不完整`)
+  await applyDraftPayload(payload, new Map([[sku, purchase]]), { restoreQuotation: true })
+  draftReady.value = true
+  const deadline = Date.now() + 45000
+  while (!viewDisposed && Date.now() < deadline) {
+    await nextTick()
+    if (!countryLoads.value && logisticsLoadState.value !== 'loading' && templateSelectionState.value !== 'loading' && !financeSettingsAreLoading()) break
+    await new Promise(resolve => window.setTimeout(resolve, 100))
+  }
+  if (viewDisposed) throw new Error('批量工作区已关闭')
+  if (Date.now() >= deadline) throw new Error('渠道加载超时，请重试该 SKU')
+  await nextTick()
+  await attemptSave()
+  if (!batchCaptured) throw new Error(notice.value || saveValidationIssues.value.map(i => i.message).join('；') || '该 SKU 暂不能报价，请单独核对资料和渠道')
+  return batchCaptured
+}
+defineExpose({ calculateBatchItem, batchReady })
 async function persistQuotation(input: Parameters<typeof createQuotationRecord>[0]) {
   const userId = currentAuthUser.value.id
   const customer = { name: input.customerName, selectedCustomerId: input.customerOperation?.id || '' }
@@ -2193,7 +2235,7 @@ async function save() {
     return { optionId: option.id, prices: row!.prices }
   }) } : undefined
   const systemQuantityQuotes = captured ? { quantities:captured.quantities, rows:quoteOptions.map(option=>({ optionId:option.id, prices:captured!.rows.find(row=>row.key===option.quoteSheetKey)!.systemPrices })) } : undefined
-  const record = await persistQuotation({
+  const input: Parameters<typeof createQuotationRecord>[0] = {
     priorityProcessing: priorityProcessing.value,
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
@@ -2232,7 +2274,16 @@ async function save() {
     customQuoteQuantity: Math.max(1, customQuoteQuantity.value || 1),
     quoteOptions,
     specifiedQuotes: selectedMatrixRows.map(row => ({ country: row.country, quoteRegion: row.quoteRegion, carrier: row.carrier, channel: row.transport, rule: row.rule, eta: row.eta, quote1Usd: row.quote1, quote2Usd: row.quote2, quote3Usd: row.quote3, quoteCustomUsd: row.quoteCustom })),
-  })
+  }
+  if (props.batchCapture) {
+    const sheet = quotationPreview.value?.captureSheet()
+    if (!sheet || sheet.issues.length) { toast(sheet?.issues.join('；') || '报价单尚未准备好'); return }
+    if (captured.averagePlans?.length) { toast('批量单品请使用具体渠道报价，暂不支持渠道平均行'); return }
+    batchCaptured = JSON.parse(JSON.stringify({ input, conditions: draftPayload(), sheet }))
+    emit('batchCaptured', batchCaptured!)
+    return
+  }
+  const record = await persistQuotation(input)
   const countryCount = new Set(selectedMatrixRows.map(row => row.country)).size
   draftVersion.value = -1
   draftUpdatedAt.value = ''
@@ -2267,6 +2318,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}；请核对并更新报价。` : `同步暂不可用：${syncError}` }}</span>
         <button type="button" :disabled="syncRefreshing || savingQuotation || retryingSavePreparation || financeSettingsAreLoading()" @click="retrySavePreparation">{{ syncRefreshing ? '更新中…' : retryingSavePreparation ? '核验中…' : syncPending ? '更新报价' : '重试核验' }}</button>
       </section>
+      <div v-if="!batchCapture" style="text-align:right;margin-bottom:8px"><RouterLink to="/quotation/batch-single">批量单品 SKU 报价 →</RouterLink></div>
       <QuotationHeader :salesperson="selectedSalesperson" :rate="fobActive ? fobRate : exchange.usd" :status="fobActive ? fobStatus : products[0]?.status || '待查询'" :mode-label="fobActive ? 'FOB（批发）报价' : quotationModeLabels[quoteMode]" @show-rule="fobActive ? fobPanel?.openRules() : showRule=true" />
 
 
@@ -2291,7 +2343,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
           :commission-threshold="commissionThreshold" :commission-error="commissionError" @update:commission-threshold="commissionThreshold=$event"
-          :mode="fobActive ? 'fob' : quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="fobActive ? [] : displayedInvalidFields"
+          :single-only="batchCapture" :mode="fobActive ? 'fob' : quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="fobActive ? [] : displayedInvalidFields"
           :finance-pending="!financeSettingsAreHydrated()" :finance-error="financeSettingsLoadError()"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
@@ -2366,7 +2418,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
-        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :save-label="batchCapture ? '应用条件并生成批量报价' : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
           :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"

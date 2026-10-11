@@ -660,7 +660,7 @@ async function captureForSave(): Promise<CapturedSheetPrices> {
     return { ...captured, photos: saved, showPhotos: visible }
   } finally { photoSaving.value = false }
 }
-defineExpose({ preview, copyData, invalidate, copying, capturePrices, captureForSave })
+defineExpose({ captureSheet: () => JSON.parse(JSON.stringify(sheet.value)) as import('@/data/customerQuoteSheet').CustomerQuoteSheet, preview, copyData, invalidate, copying, capturePrices, captureForSave })
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', clearPhotos)
   window.removeEventListener('pageshow', restoreAfterNavigation)

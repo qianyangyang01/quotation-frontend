@@ -94,10 +94,11 @@ it('uses the current mounted preview after product replacement, and blocks inval
 })
 
 it.each([
-  {grade:'A',mode:'single',manual:false},
-  {grade:'NEW',mode:'single',manual:true},
-  {grade:'A',mode:'bundle',manual:true},
-])('passes mounted prices and weight provenance through save: $grade / $mode / manual=$manual',async({grade,mode,manual})=>{
+  {grade:'A',mode:'single',manual:false,batch:false},
+  {grade:'NEW',mode:'single',manual:true,batch:false},
+  {grade:'A',mode:'bundle',manual:true,batch:false},
+  {grade:'A',mode:'single',manual:false,batch:true},
+])('passes mounted prices and weight provenance through save: $grade / $mode / manual=$manual / batch=$batch',async({grade,mode,manual,batch})=>{
   const state=mount('template');await settle()
   await input('报价单署名','Vivian')
   await input('WhatsApp 联系方式','+183 5650 6953')
@@ -109,13 +110,14 @@ it.each([
   await input('第 1 行第 2 列美元价格','2.70')
   button('新增列').click();await settle();await input('第 5 个价格列数量','8')
   await input('第 1 行第 5 列美元价格','8.80')
-  document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 1 行"]')!.click(); await settle()
+  if (!batch) document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 1 行"]')!.click(); await settle()
   const script=source.split('<script setup lang="ts">')[1]!.split('</script>')[0]!
   const ast=ts.createSourceFile('view.ts',script,ts.ScriptTarget.Latest,true)
   const save=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='save')!.getText(ast)
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
-  const context = { fobActive: {value:false}, manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
+  const emit=vi.fn()
+  const context = { props: batch ? {batchCapture:true} : {}, emit, draftPayload:()=>({skuSearch:'SKU-A'}), fobActive: {value:false}, manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
@@ -129,7 +131,7 @@ it.each([
     draftVersion:{value:-1},draftUpdatedAt:{value:''},
     appliedFinanceVersions:{'country-classification':3,'channel-policies':43,'customer-grades':14,'exchange-rate':7,'tax-settings':28,'surcharge-settings':12,'customer-operation-fees':4},
   }
-  const run=new Function(...Object.keys(context),ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn save')(...Object.values(context))
+  const run=new Function(...Object.keys(context),'let batchCaptured;\n'+ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn save')(...Object.values(context))
   if (mode === 'bundle') Object.assign(context.bundleItems.value[0]!, { purchaseTier: '100' })
   // Exercise calculator -> actual save() payload -> saved cost snapshot for the
   // reported legacy-price case, in both single and bundle modes.
@@ -143,6 +145,15 @@ it.each([
     ...(mode === 'single' ? { purchase: pricing.effectiveUnitPriceCny } : { purchaseUnitPrice: pricing.effectiveUnitPriceCny }),
   })
   await run()
+  if (batch) {
+    expect(createQuotationRecord).not.toHaveBeenCalled()
+    expect(resetLocalDraft).not.toHaveBeenCalled()
+    expect(emit).toHaveBeenCalledExactlyOnceWith('batchCaptured',expect.objectContaining({
+      input:expect.objectContaining({quoteMode:'single',primarySku:'SKU-A',customerQuote:expect.objectContaining({quantities:[1,2,3,4,8]})}),
+      conditions:{skuSearch:'SKU-A'},sheet:expect.objectContaining({rows:[expect.objectContaining({sku:'SKU-A',prices:[2,2.7,4,5,8.8]})]}),
+    }))
+    return
+  }
   expect(createQuotationRecord.mock.calls[0]?.[0].priorityProcessing).toBe(mode==='bundle')
   expect(createQuotationRecord).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     commissionThreshold:0.95, systemQuoteUsd:2, financeVersions:context.appliedFinanceVersions,
