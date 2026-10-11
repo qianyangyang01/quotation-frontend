@@ -36,7 +36,7 @@ function mount(mode:string) {
   const products=Vue.ref([{id:1,sku:'SKU-A'}])
   const persisted=vi.fn(),errors:string[]=[]
   const previewProps=Vue.reactive({
-    blockReason:'',saving:false,canRetry:false,retrying:false,
+    blockReason:'',saving:false,canRetry:false,retrying:false,batchSample:false,saveLabel:'',
     rows:[{country:'美国',carrier:'燕文',rule:'rule',ruleId:1,channelKey:'route-a',channelCode:'A',transport:'channel',eta:'6-12 days',quote1:2,quote2:3,quote3:4,quoteCustom:5}],
     countries:[],salesperson:'QA',sourcePending:false,matrixModeLabel:mode,customerName:'QA',productName:'Test',sku:'SKU-A',customerGrade:'A',coefficient:1,customQuantity:4,unitLabel:'件',exchangeRate:6.7,
     primaryCountry:'美国',primaryCarrier:'燕文',primaryRule:'rule',primaryCnyPrice:13.4,primaryUsdPrice:2,
@@ -93,12 +93,23 @@ it('uses the current mounted preview after product replacement, and blocks inval
   expect(state.persisted).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({rows:[expect.objectContaining({prices:[2,3,4,5]})]}))
 })
 
+it('keeps the folded batch sample mounted and captures its prices without presenting it as the finished batch',async()=>{
+  const state=mount('template');state.previewProps.batchSample=true;state.previewProps.saveLabel='生成整批报价 · 20 个 SKU';await settle()
+  expect(document.body.textContent).toContain('样例已准备完成，整批报价尚未生成')
+  expect(document.querySelector<HTMLButtonElement>('.sample-toggle')!.getAttribute('aria-expanded')).toBe('false')
+  expect(state.quotationPreview.value!.capturePrices()).toEqual(expect.objectContaining({quantities:[1,2,3,4]}))
+  button('展开样例报价单').click();await settle();await input('第 1 行第 2 列美元价格','2.70')
+  button('收起样例报价单').click();await settle();button('生成整批报价').click();await settle()
+  expect(state.persisted).toHaveBeenCalledWith(expect.objectContaining({rows:[expect.objectContaining({prices:[2,2.7,4,5]})]}))
+})
+
 it.each([
-  {grade:'A',mode:'single',manual:false,batch:false},
-  {grade:'NEW',mode:'single',manual:true,batch:false},
-  {grade:'A',mode:'bundle',manual:true,batch:false},
-  {grade:'A',mode:'single',manual:false,batch:true},
-])('passes mounted prices and weight provenance through save: $grade / $mode / manual=$manual / batch=$batch',async({grade,mode,manual,batch})=>{
+  {grade:'A',mode:'single',manual:false,batch:false,automatic:false},
+  {grade:'NEW',mode:'single',manual:true,batch:false,automatic:false},
+  {grade:'A',mode:'bundle',manual:true,batch:false,automatic:false},
+  {grade:'A',mode:'single',manual:false,batch:true,automatic:false},
+  {grade:'A',mode:'single',manual:false,batch:true,automatic:true},
+])('passes mounted prices and weight provenance through save: $grade / $mode / manual=$manual / batch=$batch / automatic=$automatic',async({grade,mode,manual,batch,automatic})=>{
   const state=mount('template');await settle()
   await input('报价单署名','Vivian')
   await input('WhatsApp 联系方式','+183 5650 6953')
@@ -131,7 +142,7 @@ it.each([
     draftVersion:{value:-1},draftUpdatedAt:{value:''},
     appliedFinanceVersions:{'country-classification':3,'channel-policies':43,'customer-grades':14,'exchange-rate':7,'tax-settings':28,'surcharge-settings':12,'customer-operation-fees':4},
   }
-  const run=new Function(...Object.keys(context),'let batchCaptured;\n'+ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn save')(...Object.values(context))
+  const run=new Function(...Object.keys(context),`let batchCaptured; const batchCalculationActive = ${automatic};\n`+ts.transpileModule(save,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+'\nreturn async () => { await save(); return batchCaptured }')(...Object.values(context))
   if (mode === 'bundle') Object.assign(context.bundleItems.value[0]!, { purchaseTier: '100' })
   // Exercise calculator -> actual save() payload -> saved cost snapshot for the
   // reported legacy-price case, in both single and bundle modes.
@@ -144,14 +155,16 @@ it.each([
     purchaseInvoiceTaxApplied: pricing.invoiceTaxApplied,
     ...(mode === 'single' ? { purchase: pricing.effectiveUnitPriceCny } : { purchaseUnitPrice: pricing.effectiveUnitPriceCny }),
   })
-  await run()
+  const captured = await run()
   if (batch) {
     expect(createQuotationRecord).not.toHaveBeenCalled()
     expect(resetLocalDraft).not.toHaveBeenCalled()
-    expect(emit).toHaveBeenCalledExactlyOnceWith('batchCaptured',expect.objectContaining({
+    expect(captured).toEqual(expect.objectContaining({
       input:expect.objectContaining({quoteMode:'single',primarySku:'SKU-A',customerQuote:expect.objectContaining({quantities:[1,2,3,4,8]})}),
       conditions:{skuSearch:'SKU-A'},sheet:expect.objectContaining({rows:[expect.objectContaining({sku:'SKU-A',prices:[2,2.7,4,5,8.8]})]}),
     }))
+    if (automatic) expect(emit).not.toHaveBeenCalled()
+    else expect(emit).toHaveBeenCalledExactlyOnceWith('batchCaptured',captured)
     return
   }
   expect(createQuotationRecord.mock.calls[0]?.[0].priorityProcessing).toBe(mode==='bundle')
