@@ -5,6 +5,7 @@ import { hasPermission } from '@/data/authStore'
 import { idempotencyKey } from '@/services/http'
 import { loadBatchSingleRecord, loadBatchSingleRecords, mergeBatchSingle, parseBatchSingleSkus, saveBatchSingle, type BatchSingleDocument, type BatchSingleItem, type BatchSingleLine } from '@/services/batchSingleQuotation'
 import BatchSingleSheet from '@/components/quotation/BatchSingleSheet.vue'
+import BatchSingleRecordDetail from '@/components/quotation/BatchSingleRecordDetail.vue'
 
 const route = useRoute()
 onMounted(() => { if (route.query.records) void history() })
@@ -85,10 +86,10 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
       <header><h2>批量报价记录</h2><button @click="historyOpen=false; historyGeneration++">关闭记录</button></header>
       <select v-if="hasPermission('allRecords')" v-model="scope" @change="page=0; history()"><option value="mine">我的批量报价</option><option value="company">全部批量报价</option></select>
       <p v-if="historyBusy" role="status">正在读取…</p>
-      <table v-else><thead><tr><th>报价单号</th><th>客户</th><th>SKU数</th><th>报价人</th><th>操作</th></tr></thead><tbody><tr v-for="record in records.items" :key="record.id"><td>{{ record.no }}</td><td>{{ record.customerName }}</td><td>{{ record.skuCount }}</td><td>{{ record.salespersonName }}</td><td><button @click="openRecord(record.id)">查看报价单</button></td></tr></tbody></table>
+      <table v-else><thead><tr><th>报价单号</th><th>客户</th><th>SKU数</th><th>报价人</th><th>保存时间</th><th>操作</th></tr></thead><tbody><tr v-for="record in records.items" :key="record.id"><td>{{ record.no }}</td><td>{{ record.customerName }}</td><td>{{ record.skuCount }}</td><td>{{ record.salespersonName }}</td><td>{{ new Date(record.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</td><td><button class="primary" @click="openRecord(record.id)">查看 SKU 明细</button></td></tr></tbody></table>
       <p v-if="!historyBusy && !records.total">暂无批量报价记录</p>
       <div class="actions"><button :disabled="page===0 || historyBusy" @click="page--; history()">上一页</button><span>共 {{ records.total }} 张 · 第 {{ page+1 }} 页</span><button :disabled="(page+1)*20>=records.total || historyBusy" @click="page++; history()">下一页</button></div>
-      <section v-if="historyDocument"><h3>{{ historyDocument.no }} · {{ historyDocument.customerName }}</h3><p>保存时的历史快照</p><BatchSingleSheet :sheet="historyDocument.sheet" /></section>
+      <BatchSingleRecordDetail v-if="historyDocument" :document="historyDocument" @close="historyDocument=undefined" />
     </section>
     <template v-if="hasPermission('quote')">
       <section class="card">
