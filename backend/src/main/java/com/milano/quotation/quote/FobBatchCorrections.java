@@ -35,7 +35,10 @@ public class FobBatchCorrections {
         if(state.path("fobItemReviews").isArray()) return (ArrayNode)state.path("fobItemReviews").deepCopy();
         var result=JsonNodeFactory.instance.arrayNode();
         String initial=Set.of("approved","logistics-exempt").contains(state.path("financeReviewStatus").asText())?"approved":"pending";
-        for(int i=0;i<snapshot.path("items").size();i++) result.addObject().put("index",i).put("status",initial).put("reason","");
+        for(int i=0;i<snapshot.path("items").size();i++) {
+            var item=result.addObject().put("index",i).put("status",initial).put("reason","");
+            if(initial.equals("approved"))item.put("reviewResult",state.path("financeReviewStatus").asText());
+        }
         return result;
     }
     private QuotationRecordEntity lock(UUID id) {
@@ -76,20 +79,22 @@ public class FobBatchCorrections {
         var selected=indexes(body.path("items"),items.size());var action=body.path("action").asText();
         if(!Set.of("return","approve").contains(action))throw AppException.unprocessable("请选择退回或审核通过");
         if(body.has("approveOthers")&&!body.path("approveOthers").isBoolean())throw AppException.unprocessable("审核参数无效");
+        if(body.path("approveOthers").asBoolean(false))throw AppException.unprocessable("仅处理所选商品，请刷新页面后明确选择要审核的SKU");
+        String result=body.path("reviewResult").asText(action.equals("return")?"rejected":"approved");
+        if(!Set.of("approved","logistics-exempt","rejected").contains(result))throw AppException.unprocessable("FOB无国际物流渠道，同渠道免审不适用，请选择有效审核结果");
+        if(action.equals("return")!=result.equals("rejected"))throw AppException.unprocessable("价格异常请填写原因并退回所选商品");
+        String reviewNote=body.has("note")?FobQuotation.text(body.path("note"),500,false).trim():"";
         int offset=0;
         for(int index:selected) {
             var item=(ObjectNode)items.get(index);var entry=body.path("items").get(offset++);
             if(action.equals("approve")&&item.path("status").asText().equals("rejected"))throw AppException.conflict("退回项必须由业务员重新查询提交后再审核");
             String reason=action.equals("return")?FobQuotation.text(entry.path("reason"),500,true).trim():"";
-            item.put("status",action.equals("return")?"rejected":"approved").put("reason",reason)
+            item.put("status",action.equals("return")?"rejected":"approved").put("reviewResult",result).put("note",reviewNote).put("reason",reason)
                 .put("reviewedBy",actor.displayName()).put("reviewedAt",Instant.now().toString());
         }
-        if(action.equals("return")&&body.path("approveOthers").asBoolean(false)) for(int i=0;i<items.size();i++) {
-            var item=(ObjectNode)items.get(i);
-            if(!selected.contains(i)&&item.path("status").asText().equals("pending"))item.put("status","approved").put("reviewedBy",actor.displayName()).put("reviewedAt",Instant.now().toString());
-        }
         current.set("fobItemReviews",items);
-        finish(quote,row,current,actor,action.equals("return")?"fob-return":"fob-approve",selected.size()+"项"+(action.equals("return")?"已退回，请查看各SKU自定义原因":"审核通过"),null,selected);
+        String conclusion=result.equals("logistics-exempt")?"物流免审-采购已审":action.equals("return")?"价格异常，已退回，请查看各SKU原因":"审核通过";
+        finish(quote,row,current,actor,action.equals("return")?"fob-return":"fob-approve",selected.size()+"项"+conclusion+(reviewNote.isEmpty()?"":"；"+reviewNote),null,selected);
         return ApiResponse.ok(view(quote,row));
     }
     @PostMapping("/submit")
@@ -118,6 +123,7 @@ public class FobBatchCorrections {
             if(!sourceChanged(old,fresh))throw AppException.conflict(old.at("/product/sku").asText()+"：资料、数量和计价参数未变化，仍需核实后重新查询");
             ((ArrayNode)merged.path("items")).set(index,fresh);
             ((ObjectNode)states.get(index)).put("status","pending").put("resubmittedAt",Instant.now().toString());
+            ((ObjectNode)states.get(index)).remove(List.of("reviewResult","note","reviewedBy","reviewedAt"));
             changes.addObject().put("index",index).set("snapshot",fresh.deepCopy());
         }
         rebuildSheet(merged);
@@ -181,7 +187,9 @@ public class FobBatchCorrections {
     private void finish(QuotationRecordEntity quote,QuotationReviewEntity row,ObjectNode current,QuotationPrincipal actor,String action,String note,ArrayNode changes,List<Integer> selected) {
         var states=current.path("fobItemReviews");boolean rejected=false,pending=false;
         for(var item:states){rejected|=item.path("status").asText().equals("rejected");pending|=item.path("status").asText().equals("pending");}
-        String before=row.status;row.status=pending?"pending":rejected?"rejected":"approved";row.claimantAccount=null;
+        boolean allExempt=!states.isEmpty();
+        for(var item:states)allExempt&=item.path("reviewResult").asText().equals("logistics-exempt");
+        String before=row.status;row.status=pending?"pending":rejected?"rejected":allExempt?"logistics-exempt":"approved";row.claimantAccount=null;
         current.remove(List.of("financeReviewClaimedAccount","financeReviewClaimedBy","financeReviewStartedAt"));
         current.put("financeReviewStatus",row.status).put("financeReviewNote",note).put("priorityProcessing",false);
         if(!action.equals("fob-resubmit"))current.put("financeReviewedBy",actor.displayName()).put("financeReviewedAccount",actor.account()).put("financeReviewedAt",Instant.now().toString());
@@ -190,9 +198,14 @@ public class FobBatchCorrections {
         if(changes!=null){var event=(ObjectNode)current.path("history").get(current.path("history").size()-1);event.set("items",changes);event.put("revision",current.path("fobRevision").asInt());}
         var details=((ObjectNode)current.path("history").get(current.path("history").size()-1)).putArray("itemChanges");
         for(int index:selected)details.addObject().put("index",index).put("sku",snapshot(quote,current).path("items").get(index).at("/product/sku").asText())
-            .put("status",states.get(index).path("status").asText()).put("reason",states.get(index).path("reason").asText());
+            .put("status",states.get(index).path("status").asText()).put("reviewResult",states.get(index).path("reviewResult").asText()).put("note",states.get(index).path("note").asText()).put("reason",states.get(index).path("reason").asText());
         row.state=current;reviews.saveAndFlush(row);
-        if(rejected||!pending)notifications.publish(quote,row,rejected?"fob-return":"complete",rejected&&pending?note+"；仍有退回项待处理，已提交项进入待审核列表":note,actor);else notifications.invalidate(quote.id);
+        if(rejected||!pending) {
+            String notificationNote=rejected&&pending?note+"；仍有退回项待处理，已提交项进入待审核列表":note;
+            if(notificationNote.codePointCount(0,notificationNote.length())>500)
+                notificationNote=notificationNote.substring(0,notificationNote.offsetByCodePoints(0,499))+"…";
+            notifications.publish(quote,row,rejected?"fob-return":"complete",notificationNote,actor);
+        } else notifications.invalidate(quote.id);
         audit.record("quotation.review."+action,"quotation",quote.id.toString(),"success",Map.of("note",note,"revision",current.path("fobRevision").asInt()));
     }
     static ObjectNode view(QuotationRecordEntity quote,QuotationReviewEntity row) {

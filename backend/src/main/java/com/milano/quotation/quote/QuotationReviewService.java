@@ -247,7 +247,7 @@ public class QuotationReviewService {
     static void invalidateFobApprovals(ObjectNode state) {
         for(var item:state.path("fobItemReviews"))if(item.path("status").asText().equals("approved")) {
             ((ObjectNode)item).put("status","pending");
-            ((ObjectNode)item).remove(List.of("reviewedBy","reviewedAt"));
+            ((ObjectNode)item).remove(List.of("reviewedBy","reviewedAt","reviewResult","note"));
         }
     }
     static void event(ObjectNode state,QuotationPrincipal actor,String action,String before,String after,String note,long quoteVersion) {

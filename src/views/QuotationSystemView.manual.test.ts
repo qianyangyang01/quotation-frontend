@@ -77,7 +77,7 @@ it.each(['purchase','logistics'] as const)('does not expose or activate FOB with
   state.changeQuoteMode('fob' as QuotationMode);await nextTick()
   expect(host.querySelector('.fob-card')).toBeNull()
   expect(state.draftPayload()).toEqual(before)
-  expect([...host.querySelectorAll('.mode-field option')].map(o=>(o as HTMLOptionElement).value)).toEqual(['single','bundle','freight-trial','shipping-only'])
+  expect([...host.querySelectorAll('.mode-field option')].map(o=>(o as HTMLOptionElement).value)).toEqual(['single','batch-single','bundle','freight-trial','shipping-only'])
 })
 it.each(['super_admin','employee','finance'] as const)('opens FOB for %s without exposing or saving channel quotations', async role => {
   authState.current!.role=role;authState.permissions=[...roleDefinitions.find(r=>r.key===role)!.permissions];await nextTick()
@@ -123,9 +123,9 @@ async function query(mode: QuotationMode) {
 }
 function quote(q: number) { return state.quantityCostBreakdown(state.products[0]!, rule.name, q, '美国', '燕文', '', '9910::燕文::TEST') }
 
-it('offers five modes, hides SKU/tier and directly computes manual cost and grams at every quantity', async () => {
+it('offers existing modes and the independent batch entry, hides SKU/tier and directly computes manual cost and grams at every quantity', async () => {
   await query('freight-trial')
-  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','组合 SKU 报价','报价试算','仅代发货报价','FOB（批发）报价'])
+  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','批量单品 SKU 报价','组合 SKU 报价','报价试算','仅代发货报价','FOB（批发）报价'])
   expect(host.querySelector('.sku-field')).toBeNull(); expect(host.querySelector('.sales-field')).toBeNull()
   expect(host.querySelector('.manual-quote-panel')?.textContent).toContain('查询试算')
   expect(state.chargeWeight(state.products[0]!)).toBe(.5)

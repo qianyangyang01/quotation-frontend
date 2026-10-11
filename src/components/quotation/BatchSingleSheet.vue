@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { customerQuoteSheetTsv, quoteSheetTextTable, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
-const props = defineProps<{ sheet: CustomerQuoteSheet }>()
+const props = defineProps<{ sheet: CustomerQuoteSheet; readOnly?: boolean }>()
 const images = ref<Array<QuoteSheetImage & { url: string }>>([]), busy = ref(false), error = ref('')
 let generation = 0
 function clear() { for (const image of images.value) URL.revokeObjectURL(image.url); images.value = [] }
@@ -22,7 +22,7 @@ onBeforeUnmount(() => { generation++; clear() })
 </script>
 <template>
   <section class="batch-sheet">
-    <div class="toolbar"><button :disabled="busy" @click="preview">{{ busy ? '正在生成…' : '预览报价图片' }}</button><button @click="copy('data')">复制报价数据</button><button v-if="images.length === 1" @click="copy('image')">复制报价图片</button></div>
+    <div v-if="!readOnly" class="toolbar"><button :disabled="busy" @click="preview">{{ busy ? '正在生成…' : '预览报价图片' }}</button><button @click="copy('data')">复制报价数据</button><button v-if="images.length === 1" @click="copy('image')">复制报价图片</button></div>
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="table-scroll"><table><thead><tr><th v-for="(cell,i) in quoteSheetTextTable(sheet)[0]" :key="i">{{ cell }}</th></tr></thead><tbody><tr v-for="(row,i) in quoteSheetTextTable(sheet).slice(1)" :key="i"><td v-for="(cell,j) in row" :key="j">{{ cell }}</td></tr></tbody></table></div>
     <div v-for="(image,i) in images" :key="image.url" class="image"><a :href="image.url" :download="`批量单品报价-${i+1}.png`">下载第 {{ i+1 }} 页高清图片</a><img :src="image.url" :alt="`合并报价单第${i+1}页`"></div>

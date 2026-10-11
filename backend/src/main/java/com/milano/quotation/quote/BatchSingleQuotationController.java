@@ -19,9 +19,9 @@ import java.util.*;
 @RequestMapping("/api/v1/batch-single-quotations")
 public class BatchSingleQuotationController {
     private final JdbcClient jdbc; private final JsonMapper mapper; private final BatchSingleQuotation batch;
-    private final IdempotencyService idempotency; private final AuditService audit;
-    public BatchSingleQuotationController(JdbcClient jdbc, JsonMapper mapper, BatchSingleQuotation batch, IdempotencyService idempotency, AuditService audit) {
-        this.jdbc=jdbc; this.mapper=mapper; this.batch=batch; this.idempotency=idempotency; this.audit=audit;
+    private final IdempotencyService idempotency; private final AuditService audit; private final BatchSingleReview review;
+    public BatchSingleQuotationController(JdbcClient jdbc, JsonMapper mapper, BatchSingleQuotation batch, IdempotencyService idempotency, AuditService audit, BatchSingleReview review) {
+        this.jdbc=jdbc; this.mapper=mapper; this.batch=batch; this.idempotency=idempotency; this.audit=audit; this.review=review;
     }
     @PostMapping
     @PreAuthorize("hasAuthority('PERM_quote')")
@@ -36,16 +36,17 @@ public class BatchSingleQuotationController {
         payload.put("id",id.toString()).put("no",no).put("createdAt",now.toString()).put("salespersonName",user.displayName());
         jdbc.sql("insert into batch_single_quotation(id,quote_no,owner_account,created_at,payload) values(:id,:no,:owner,:created,cast(:payload as jsonb))")
             .param("id",id).param("no",no).param("owner",user.account()).param("created",java.sql.Timestamp.from(now)).param("payload",payload.toString()).update();
-        idempotency.save(user.account(),"batch-single-create",key,body,payload);
+        var result=BatchSingleReview.decorate(payload,user.account(),BatchSingleReview.initial(payload),0);
+        idempotency.save(user.account(),"batch-single-create",key,body,result);
         audit.record("batch-single.create","batch-single-quotation",id.toString(),"success",Map.of("quoteNo",no,"skuCount",payload.path("items").size()));
-        return ApiResponse.ok(payload);
+        return ApiResponse.ok(result);
     }
     @GetMapping
     @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
     @Transactional(readOnly=true)
     public ApiResponse<Map<String,Object>> list(@RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="mine") String scope, Authentication auth) {
         var user=(QuotationPrincipal)auth.getPrincipal(); boolean all=hasAll(auth)&&"company".equals(scope);
-        var rows=jdbc.sql("select jsonb_build_object('id',id,'no',quote_no,'customerName',payload->>'customerName','skuCount',jsonb_array_length(payload->'items'),'createdAt',created_at,'salespersonName',payload->>'salespersonName')::text from batch_single_quotation where (:all or owner_account=:owner) order by created_at desc,id desc limit 20 offset :offset")
+        var rows=jdbc.sql("select jsonb_build_object('id',b.id,'no',b.quote_no,'customerName',b.payload->>'customerName','skuCount',jsonb_array_length(b.payload->'items'),'createdAt',b.created_at,'salespersonName',b.payload->>'salespersonName','reviewStatus',coalesce(r.state->>'status','pending'),'revision',coalesce(r.state->'revision','0'::jsonb))::text from batch_single_quotation b left join batch_single_review r on r.record_id=b.id where (:all or b.owner_account=:owner) order by b.created_at desc,b.id desc limit 20 offset :offset")
             .param("all",all).param("owner",user.account()).param("offset",Math.max(0L,(long)page)*20).query((rs,n)->mapper.readTree(rs.getString(1))).list();
         var total=jdbc.sql("select count(*) from batch_single_quotation where (:all or owner_account=:owner)").param("all",all).param("owner",user.account()).query(Long.class).single();
         return ApiResponse.ok(Map.of("items",rows,"total",total));
@@ -55,7 +56,7 @@ public class BatchSingleQuotationController {
     @Transactional(readOnly=true)
     public ApiResponse<JsonNode> get(@PathVariable UUID id, Authentication auth) {
         var user=(QuotationPrincipal)auth.getPrincipal();
-        var result=jdbc.sql("select payload::text from batch_single_quotation where id=:id and (:all or owner_account=:owner)").param("id",id).param("all",hasAll(auth)).param("owner",user.account()).query((rs,n)->mapper.readTree(rs.getString(1))).optional().orElseThrow(()->AppException.notFound("批量报价不存在或无权查看"));
+        var result=review.view(id,user);
         return ApiResponse.ok(result);
     }
     private static boolean hasAll(Authentication auth) { return auth.getAuthorities().stream().anyMatch(a->a.getAuthority().equals("PERM_allRecords")); }

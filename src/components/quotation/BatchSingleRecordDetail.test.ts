@@ -16,7 +16,7 @@ it('paginates by SKU, searches all pages, and leaves the saved snapshot unchange
  const query=document.querySelector<HTMLInputElement>('input')!;query.value='SKU1';query.dispatchEvent(new Event('input'));await nextTick();expect(document.querySelectorAll('.sku-group')).toHaveLength(10);expect(document.body.textContent).toContain('1 / 2');expect(JSON.stringify(record)).toBe(before)
 })
 it('hides internal cost and exchange-rate values from staff without pricing permissions',async()=>{
- await mount();expect(document.body.textContent).not.toContain('8.30');expect(document.body.textContent).not.toContain('保存汇率');button('查看完整客户报价单').click();await nextTick();expect(document.querySelector('[data-sheet]')).not.toBeNull()
+ await mount();expect(document.body.textContent).not.toContain('8.30');expect(document.body.textContent).not.toContain('保存汇率');button('查看完整客户报价单').click();await nextTick();expect(document.querySelector('[data-sheet]')).toBeNull();expect(document.body.textContent).toContain('暂无已审核SKU')
 })
 it('shows authorized cost snapshots and restores scroll and focus after closing',async()=>{
  const focus=document.createElement('button');document.body.append(focus);focus.focus();document.body.style.overflow='auto';const {close}=await mount(['purchase','finance']);expect(document.body.textContent).toContain('8.30');expect(document.body.textContent).toContain('保存汇率 6.7');expect(document.body.style.overflow).toBe('hidden');document.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));expect(close).toHaveBeenCalledOnce();app!.unmount();app=undefined;expect(document.body.style.overflow).toBe('auto');expect(document.activeElement).toBe(focus)
