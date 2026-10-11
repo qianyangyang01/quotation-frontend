@@ -24,7 +24,7 @@ it.each(['employee','super_admin'] as const)('shows the same FOB snapshot and fi
   const select=document.querySelector<HTMLSelectElement>('[aria-label="报价类型筛选"]')!;select.value='fob';select.dispatchEvent(new Event('change',{bubbles:true}));await vi.advanceTimersByTimeAsync(300);await flush()
   expect(mocks.page.mock.calls.at(-1)?.[1]).toMatchObject({quoteMode:'fob'})
   document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
-  expect(document.querySelector('[aria-label="FOB历史报价快照"]')).not.toBeNull();expect(document.querySelector('.record-drawer')?.textContent).not.toContain('首选方案')
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="FOB历史报价快照"]')).not.toBeNull());expect(document.querySelector('.record-drawer')?.textContent).not.toContain('首选方案')
   expect(document.querySelector('.record-drawer')?.textContent).toContain('原始说明');expect(document.querySelector('.record-drawer')?.textContent).not.toContain('保存FOB报价')
 })
 it('exports both FOB prices and source category without changing ordinary export columns',()=>{
@@ -53,6 +53,7 @@ it('keeps the batch review mounted across detail tabs and prevents accidental dr
   expect(document.querySelector('.batch-sku-summary')!.textContent).toContain('25个SKU');expect(document.querySelector('.record-product-title')).toBeNull()
   document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
   expect(document.querySelector('.batch-review-active')).not.toBeNull();expect(document.querySelector('.revision-history')).toBeNull();expect(document.querySelector('[aria-label="FOB批量历史报价快照"]')).toBeNull()
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="选择审核 SKU0 第1项"]')).not.toBeNull());
   document.querySelector<HTMLInputElement>('[aria-label="选择审核 SKU0 第1项"]')!.click();await flush()
   const tab=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>('.drawer-tabs button')].find(b=>b.textContent===text)!
   tab('客户报价单').click();await flush();expect(document.querySelector('[aria-label="FOB批量历史报价快照"]')).not.toBeNull()

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { fobBatchDealOptions } from '@/services/fobQuotationRecords'
 import { canViewPurchaseCost, canViewFullPricing } from '@/data/quotationVisibility'
-import FobBatchReviewPanel from '@/components/quotation/FobBatchReviewPanel.vue'
+import QuotationFeatureBoundary from '@/components/quotation/QuotationFeatureBoundary.vue'
 import BatchSkuSummary from '@/components/quotation/BatchSkuSummary.vue'
-import FobRecordDetail from '@/components/quotation/FobRecordDetail.vue'
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { isManualQuotation, quotationModeLabels } from '@/data/quotationModes'
 import QuotationLifecycleDialog from '@/components/quotation/QuotationLifecycleDialog.vue'
@@ -19,7 +18,7 @@ import QuotationReviewHistory from '@/components/quotation/QuotationReviewHistor
 import QuotationRevisionSnapshot from '@/components/quotation/QuotationRevisionSnapshot.vue'
 import QuotationWeightTrace from '@/components/quotation/QuotationWeightTrace.vue'
 import QuotationProductCostTrace from '@/components/quotation/QuotationProductCostTrace.vue'
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { defineAsyncComponent, computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { cancelQuotation, withdrawQuotation, withdrawalBlocked } from '@/services/quotationWithdrawal'
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
@@ -37,6 +36,9 @@ import { reviewNotifications as inbox, unreadReview, acknowledgeReview, openRevi
 
 import { loadRecordPage, loadFilteredRecords, loadRecord, recentRecordDates } from '@/data/quotationRecordQuery'
 import { quotationDetailsCsv } from '@/data/quotationAnalytics'
+
+const FobBatchReviewPanel = defineAsyncComponent(() => import('@/components/quotation/FobBatchReviewPanel.vue'))
+const FobRecordDetail = defineAsyncComponent(() => import('@/components/quotation/FobRecordDetail.vue'))
 
 const props = defineProps<{ scope: 'mine' | 'company' }>()
 const route = useRoute()
@@ -606,9 +608,13 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @viewed="reviewViewed(selected,$event)" /></div>
           </div>
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button v-if="selected.fob?.schemaVersion===2" :class="{active:detailTab==='sheet'}" @click="detailTab='sheet'">客户报价单</button><button v-if="selected.quoteMode!=='fob'" :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
-          <FobBatchReviewPanel v-if="selected.fob?.schemaVersion===2" v-show="detailTab==='overview'" ref="batchReviewPanel" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview && isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved($event, '商品审核结果已保存')" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
+          <QuotationFeatureBoundary v-if="selected.fob?.schemaVersion===2" :active="detailTab==='overview'" :key="selected.id" label="FOB逐项审核" @close="closeDrawer">
+            <FobBatchReviewPanel v-show="detailTab==='overview'" ref="batchReviewPanel" :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview && isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved($event, '商品审核结果已保存')" @action="changeReview(selected,$event)" @reload="reloadReview(selected)" />
+          </QuotationFeatureBoundary>
           <RouterLink v-if="selected.salespersonAccount===currentAuthUser.account && isActive(selected) && selected.fobItemReviews?.some(i=>i.status==='rejected')" class="reissue-quote" :to="{path:'/quotation',query:{fobCorrection:selected.id}}">处理退回异常项</RouterLink>
-          <FobRecordDetail v-if="selected.quoteMode==='fob' && (selected.fob?.schemaVersion===2 ? detailTab==='sheet' : detailTab!=='history')" :record="selected" :state="reviewSync.stateFor(selected)" @reload="reloadReview(selected)" />
+          <QuotationFeatureBoundary v-if="selected.quoteMode==='fob' && (selected.fob?.schemaVersion===2 ? detailTab==='sheet' : detailTab!=='history')" :key="selected.id" label="FOB报价详情" @close="closeDrawer">
+            <FobRecordDetail :record="selected" :state="reviewSync.stateFor(selected)" @reload="reloadReview(selected)" />
+          </QuotationFeatureBoundary>
           <section v-else-if="detailTab==='overview' && selected.quoteMode!=='fob'" class="overview-panel">
             <div class="overview-metrics"><article><small>报价国家</small><b>{{ recordCountries(selected).length || 1 }}</b><span>个国家</span></article><article><small>报价渠道</small><b>{{ recordOptions(selected).length || 1 }}</b><span>条渠道</span></article><article><small>1{{ selected.quoteMode==='bundle'?'套':'件' }}报价区间</small><b>{{ hasMultipleOptions(selected) ? quote1UsdRange(selected) : usd(selected.systemQuoteUsd) }}</b><span>{{ hasMultipleOptions(selected) ? quote1CnyRange(selected) : cny(selected.systemQuoteCny) }}</span></article></div>
             <article class="primary-plan"><header><b>首选方案</b><span>报价单优先展示</span></header><div><span><strong>{{ primaryOption(selected)?.country || selected.country }} · {{ primaryOption(selected)?.carrier || selected.carrier }}｜{{ primaryOption(selected)?.channel || selected.channel }}</strong><small>渠道编码：{{ primaryOption(selected)?.channelCode || '—' }} · {{ primaryOption(selected)?.eta || selected.rule }}</small></span><b>{{ optionPrice(primaryOption(selected)?.quote1Usd ?? selected.systemQuoteUsd) }}</b></div></article>
@@ -631,7 +637,9 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         </template>
 
         <template v-else>
-          <FobRecordDetail v-if="selected.fob?.schemaVersion===2" :record="selected" :state="reviewSync.stateFor(selected)" @reload="reloadReview(selected)" />
+          <QuotationFeatureBoundary v-if="selected.fob?.schemaVersion===2" :key="selected.id" label="FOB报价详情" @close="closeDrawer">
+            <FobRecordDetail :record="selected" :state="reviewSync.stateFor(selected)" @reload="reloadReview(selected)" />
+          </QuotationFeatureBoundary>
           <template v-else>
           <section v-if="isManualQuotation(selected.quoteMode) && selected.manualPricing" class="snapshot"><span>报价类型</span><b>{{ quotationModeLabels[selected.quoteMode] }}</b><template v-if="canViewPurchaseCost && selected.quoteMode === 'freight-trial'"><span>手填总成本 / 件</span><b>{{ cny(selected.manualPricing.costCny) }}</b></template><span>直接计费重量 / 件</span><b>{{ selected.manualPricing.weightGrams }} g</b></section>
             <QuotationWeightTrace v-else :snapshot="selected.weightSnapshot" :bundle="selected.quoteMode === 'bundle'" />

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { canViewPurchaseCost, canViewPricingFactors, canViewFullPricing } from '@/data/quotationVisibility'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
-import FobBatchQuoteDialog from './FobBatchQuoteDialog.vue'
+import QuotationFeatureBoundary from './QuotationFeatureBoundary.vue'
 import type { FobBatchMode } from '@/services/fobBatchQuotation'
 import { FOB_SMALL_ORDER_EXTRA_CNY, fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
+
+const FobBatchQuoteDialog = defineAsyncComponent(() => import('./FobBatchQuoteDialog.vue'))
 
 const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {sku:string;source:FobSourceMode;customer:string;quantity:number;batch?:{text:string;mode:FobBatchMode;customer:string;sources?:FobSourceMode[]}} }>()
 const batchOpen = ref(!!props.initial?.batch)
@@ -103,7 +105,9 @@ async function copy() {
     <details v-if="canViewFullPricing" ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p>含票价＝不含票采购价×1.1；成本价＝含票价＋批量均摊运费；报关＝成本价×1.14÷汇率；不报关＝成本价×1.14×1.02÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
   </section>
   <FobQuoteSheet v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
-  <FobBatchQuoteDialog v-if="batchOpen" :rate="rate" :policy="policy" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
+  <QuotationFeatureBoundary v-if="batchOpen" label="FOB批量报价" @close="batchOpen=false">
+  <FobBatchQuoteDialog :rate="rate" :policy="policy" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
+  </QuotationFeatureBoundary>
 </template>
 
 <style scoped>

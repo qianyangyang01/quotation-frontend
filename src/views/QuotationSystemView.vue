@@ -2,7 +2,7 @@
 import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
-import FobCorrectionDialog from '@/components/quotation/FobCorrectionDialog.vue'
+import QuotationFeatureBoundary from '@/components/quotation/QuotationFeatureBoundary.vue'
 import FobQuotePanel from '@/components/quotation/FobQuotePanel.vue'
 import { FOB_SMALL_ORDER_POLICY } from '@/services/fobQuotation'
 import { canUseFob } from '@/data/fobAccess'
@@ -18,7 +18,7 @@ import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotat
 import { normalizeLogisticsAttribute, selectableLogisticsAttributes } from '@/data/logisticsAttributes'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { calculateFinanceQuoteFees, FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
-import { computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { defineAsyncComponent, computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { loadRecord } from '@/data/quotationRecordQuery'
 import { quotationReissuePayload } from '@/services/quotationReissue'
@@ -91,6 +91,8 @@ import {
 } from '@/services/quotationCalculator'
 
 // Batch workspace reuses the proven calculator, but never enters ordinary persistence.
+const FobCorrectionDialog = defineAsyncComponent(() => import('@/components/quotation/FobCorrectionDialog.vue'))
+
 const props = defineProps<{ batchCapture?: boolean; batchInitialSku?: string; batchSize?: number }>()
 const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean] }>()
 let batchCalculationActive = false
@@ -1089,6 +1091,7 @@ function markDraftDirty(signature = draftSignature()) {
   draftTimer = window.setTimeout(() => { void flushDraft().catch(() => undefined) }, 800)
 }
 async function flushDraft() {
+  if (props.batchCapture) return
   if (!draftSource.value) return
   if (draftStatus.value === 'conflict' || resolvingDraftConflict.value) throw new Error('草稿版本冲突，请先处理冲突；当前输入已保留')
   if (!draftReady.value || (!draftDirty && draftSignature() === lastSavedDraftSignature)) return
@@ -2187,6 +2190,7 @@ function primeBatchProduct(purchase: PurchaseProductRecord) {
 }
 defineExpose({ calculateBatchItem, batchReady, primeBatchProduct })
 async function persistQuotation(input: Parameters<typeof createQuotationRecord>[0]) {
+  if (props.batchCapture) throw new Error('批量报价只能通过批量报价单保存')
   const userId = currentAuthUser.value.id
   const customer = { name: input.customerName, selectedCustomerId: input.customerOperation?.id || '' }
   let record: Awaited<ReturnType<typeof createQuotationRecord>>
@@ -2338,7 +2342,9 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
 <template>
   <div class="jerry-app">
-    <FobCorrectionDialog v-if="!batchCapture && typeof route.query.fobCorrection==='string'" :key="String(route.query.fobCorrection)+currentAuthUser.account" :id="String(route.query.fobCorrection)" :rate="fobRate" :policy="fobSmallOrderPolicy" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" @close="router.push({path: '/quotation/my-records',query:{record:route.query.fobCorrection}})" />
+    <QuotationFeatureBoundary v-if="!batchCapture && typeof route.query.fobCorrection==='string'" :key="String(route.query.fobCorrection)+currentAuthUser.account" label="FOB退回修正" @close="router.push({path: '/quotation/my-records',query:{record:route.query.fobCorrection}})">
+      <FobCorrectionDialog :key="String(route.query.fobCorrection)+currentAuthUser.account" :id="String(route.query.fobCorrection)" :rate="fobRate" :policy="fobSmallOrderPolicy" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" @close="router.push({path: '/quotation/my-records',query:{record:route.query.fobCorrection}})" />
+    </QuotationFeatureBoundary>
 
     <main class="quotation-page" :inert="(!fobActive && syncRefreshing) || undefined">
       <p v-if="!fobActive && logisticsRebuilding" role="status" class="notice">物流价格正在重建，新报价提交已暂停；请等待基准审核完成。</p>

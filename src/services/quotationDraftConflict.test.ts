@@ -9,6 +9,7 @@ const ast = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
 function handler(name: string, state: Record<string, unknown>) {
   const node = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === name)!
   const js = ts.transpile(node.getText(ast), { target: ts.ScriptTarget.ES2022 })
+  state.props ??= { batchCapture: false }
   state.fobActive ??= {value:false}
   if (name === 'attemptSave') {
     state.props ??= { batchCapture: false }

@@ -47,7 +47,7 @@ beforeEach(() => {
   purchaseFailure = false; purchaseOverride = {}; sourceFailure = false; router.query = { reissue: 'original', release: 'local' }
 })
 afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks(); localStorage.clear(); authState.current = null })
-async function mount(existing: boolean, withdrawn = false) {
+async function mount(existing: boolean, withdrawn = false, batchCapture = false) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return finance
     if (path === '/quotation-readiness') return { ready: true, missing: [] }
@@ -65,7 +65,7 @@ async function mount(existing: boolean, withdrawn = false) {
   vi.spyOn(api, 'post').mockRejectedValue(new Error('Unexpected quotation creation'))
   vi.spyOn(api, 'patch').mockRejectedValue(new Error('Unexpected original update'))
   host = document.createElement('div'); document.body.append(host)
-  app = createApp(View)
+  app = createApp(View, { batchCapture })
   const vm = app.mount(host)
   state = (vm.$ as unknown as { setupState: typeof state }).setupState
   await vi.waitFor(() => expect(state.draftReady || state.draftStatus === 'error').toBe(true))
@@ -320,4 +320,21 @@ it('blocks stale preview submission while the chosen template is loading or fail
   expect(state.templateSaveBlockReason).toBe('')
   state.quoteMatrixMode = 'template'; state.templateSelectionState = 'ready'; await nextTick()
   expect(state.templateSaveBlockReason).toBe('')
+})
+
+
+it('keeps a batch calculator out of ordinary reissue, withdrawal drafts and persistence', async () => {
+  rememberQuotationCustomer('employee-a', { name: '普通客户', selectedCustomerId: '' })
+  await mount(true, true, true)
+  expect(vi.mocked(api.get).mock.calls.some(([path]) => String(path).startsWith('/quotation-drafts') || path === '/quotations/original')).toBe(false)
+  expect(state.customerName).toBe('')
+  state.customerName = '批量客户'
+  await nextTick()
+  await state.flushDraft()
+  await expect(state.persistQuotation({ customerName: '批量客户' } as never)).rejects.toThrow('批量报价只能通过批量报价单保存')
+  expect(api.post).not.toHaveBeenCalled()
+  expect(api.put).not.toHaveBeenCalled()
+  expect(api.patch).not.toHaveBeenCalled()
+  expect(api.delete).not.toHaveBeenCalled()
+  expect(loadLastQuotationCustomer('employee-a')?.name).toBe('普通客户')
 })
