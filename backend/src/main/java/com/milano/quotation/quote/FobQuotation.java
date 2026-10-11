@@ -39,6 +39,7 @@ public class FobQuotation {
     public ObjectNode prepare(ObjectNode request) {
         if(request.has("priorityProcessing")&&!request.path("priorityProcessing").isBoolean())throw AppException.unprocessable("优先处理参数无效");
         var snapshot=request.path("fob");
+        if(snapshot.path("schemaVersion").asInt()==2)return prepareBatch(request);
         if(snapshot.path("schemaVersion").asInt()!=1)throw AppException.unprocessable("FOB报价快照版本无效");
         var product=snapshot.path("product");
         var sku=text(product.path("sku"),96,true);
@@ -59,6 +60,82 @@ public class FobQuotation {
         // Full source is retained for audit; future source changes never reprice this snapshot.
         ((ObjectNode)result.path("fob")).set("sourceSnapshot",current.deepCopy());
         return result;
+    }
+    // All products are validated in the enclosing quotation-create transaction. No partial records.
+    ObjectNode prepareBatch(ObjectNode request) {
+        var input=request.path("fob");var entries=input.path("items");
+        if(!entries.isArray()||entries.isEmpty()||entries.size()>100)throw AppException.unprocessable("批量FOB报价须包含1–100行商品");
+        var results=new ArrayList<ObjectNode>();var unique=new HashSet<String>();
+        for(var entry:entries) {
+            if(entry.path("schemaVersion").asInt()!=1)throw AppException.unprocessable("批量报价不能嵌套批量快照");
+            if(!entry.path("rate").equals(input.path("rate"))||!entry.path("policy").equals(input.path("policy"))||!entry.path("displayMode").equals(input.path("displayMode")))throw AppException.unprocessable("批量报价必须使用相同汇率、规则和展示方式");
+            var identity=entry.at("/product/sku").asText()+":"+("tiers".equals(entry.path("displayMode").asText())?"tiers":entry.path("quantity").asText());
+            if(!unique.add(identity))throw AppException.unprocessable("批量报价中存在重复SKU和数量范围");
+            var child=object().put("quoteMode","fob");child.set("customerName",request.path("customerName"));child.set("fob",entry.deepCopy());
+            try {
+                var result=prepare(child);var raw=result.at("/fob/sourceSnapshot");
+                if("standard".equals(entry.at("/product/source").asText()) && "是".equals(raw.path("freeShipping").asText())) {
+                    for(var field:List.of("singleFreightCny","freight10Cny","freight100Cny"))if(raw.path(field).isNumber()&&raw.path(field).asDouble()>0)throw AppException.unprocessable("采购资料冲突：包邮与正数运费同时存在");
+                }
+                results.add(result);
+            } catch(AppException e) { throw new AppException(e.status(),e.code(),entry.at("/product/sku").asText()+"："+e.getMessage()); }
+        }
+        return combineBatch(request,results);
+    }
+    static ObjectNode combineBatch(ObjectNode request,List<ObjectNode> results) {
+        var input=request.path("fob");var sheetInput=input.path("sheet");var first=results.get(0).path("fob");
+        if(!sheetInput.isObject())throw AppException.unprocessable("缺少合并报价单");
+        // Reuse the single-sheet metadata contract. Row prices are verified against every canonical item below.
+        var metadata=(ObjectNode)sheetInput.deepCopy();metadata.set("rows",first.at("/sheet/rows"));
+        var sheet=validateSheet(metadata,(ArrayNode)first.path("ranges"),first.at("/product/sku").asText());
+        var expected=new LinkedHashMap<String,ObjectNode>();var items=JsonNodeFactory.instance.arrayNode();
+        for(int i=0;i<results.size();i++) {
+            var item=(ObjectNode)results.get(i).path("fob");items.add(item);
+            if(!item.at("/sheet/quantityLabels").equals(sheet.path("quantityLabels")))throw AppException.unprocessable("合并报价单价格列顺序不一致");
+            for(var row:item.at("/sheet/rows")) {var copy=(ObjectNode)row.deepCopy();var key=i+":"+row.path("key").asText();copy.put("key",key);expected.put(key,copy);}
+        }
+        var submitted=sheetInput.path("rows");
+        if(!submitted.isArray()||submitted.size()!=expected.size()||submitted.size()>2000)throw AppException.conflict("合并报价单商品或阶梯已变化，请重新生成（最多2000行阶梯）");
+        var rows=sheet.putArray("rows");
+        for(var row:submitted) {
+            var canonical=expected.remove(row.path("key").asText());
+            if(canonical==null)throw AppException.unprocessable("合并报价单包含重复或未知商品行");
+            var prices=row.path("prices");if(!prices.isArray()||prices.size()!=2)throw AppException.unprocessable("合并报价单价格无效");
+            for(int j=0;j<2;j++)if(amount(prices.get(j)).compareTo(amount(canonical.path("prices").get(j)))!=0)throw AppException.conflict("合并报价价格与当前资料不一致，请重新查询");
+            canonical.put("number",rows.size()+1);rows.add(canonical);
+        }
+        sheet.put("priceGroupLabel","FOB Final Unit Price (USD)");
+        sheet.put("fobBatch",true).put("customerName",request.path("customerName").asText().equals("预览客户")?"":request.path("customerName").asText());
+        var snapshot=(ObjectNode)first.deepCopy();snapshot.put("schemaVersion",2);snapshot.set("items",items);snapshot.set("sheet",sheet);
+        // A batch has multiple alternative unit prices, so it has no meaningful single system price.
+        snapshot.remove(List.of("current","tiers","ranges","sourceSnapshot"));
+        var payload=results.get(0).deepCopy();payload.set("fob",snapshot);
+        var skus=new LinkedHashSet<String>();for(var item:items)skus.add(item.at("/product/sku").asText());
+        payload.put("primarySku",String.join(", ",skus));
+        var categories=new HashSet<String>();for(var item:items)categories.add(item.at("/product/category").asText("其他"));
+        payload.put("productCategory",categories.size()==1?categories.iterator().next():"多品类");
+        payload.put("productSummary","FOB批量 · "+skus.size()+"个SKU · "+String.join(" / ",skus));
+        payload.putNull("systemQuoteUsd").putNull("systemQuoteCny").putNull("totalCostCny");
+        return payload;
+    }
+    static void validateBatchDeal(ObjectNode current,ObjectNode patch) {
+        if(current.at("/fob/schemaVersion").asInt()!=2 || !patch.has("dealLines"))return;
+        var items=current.at("/fob/items");var seen=new HashSet<String>();var total=BigDecimal.ZERO;long quantity=0;
+        for(var line:patch.path("dealLines")) {
+            var id=line.path("optionId").asText();var match=java.util.regex.Pattern.compile("fob:(\\d{1,3}):(declared|undeclared)").matcher(id);
+            if(!match.matches()||Integer.parseInt(match.group(1))>=items.size()||!seen.add(id))throw AppException.unprocessable("FOB成交商品不存在或重复");
+            var item=items.get(Integer.parseInt(match.group(1)));long count=count(line.path("quantity"));
+            var price=amount(line.path("unitPriceUsd"));var amount=price.multiply(BigDecimal.valueOf(count)).setScale(2,RoundingMode.HALF_UP);
+            if(amount.compareTo(amount(line.path("amountUsd")))!=0)throw AppException.unprocessable("FOB成交金额与单价、数量不一致");
+            total=total.add(amount);quantity=Math.addExact(quantity,count);
+            ((ObjectNode)line).put("optionLabel",item.at("/product/sku").asText()+" · "+(match.group(2).equals("declared")?"报关":"不报关")).put("country","").put("carrier","").put("channel","");
+        }
+        if("won".equals(patch.path("status").asText(current.path("status").asText()))&&seen.isEmpty())throw AppException.unprocessable("请填写FOB成交商品明细");
+        if(!seen.isEmpty()) {
+            if(total.compareTo(amount(patch.path("actualQuoteUsd")))!=0||quantity!=count(patch.path("dealQuantity")))throw AppException.unprocessable("FOB成交总额或总数量不一致");
+            var cny=total.multiply(amount(current.path("exchangeRate"))).setScale(2,RoundingMode.HALF_UP);
+            patch.put("actualQuoteCny",cny);
+        }
     }
     BigDecimal currentRate() {
         var values=jdbc.sql("select payload from finance_setting where setting_key='exchange-rate' for share")

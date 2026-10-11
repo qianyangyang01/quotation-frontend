@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fobBatchDealOptions } from '@/services/fobQuotationRecords'
 import { canViewPurchaseCost, canViewFullPricing } from '@/data/quotationVisibility'
 import FobRecordDetail from '@/components/quotation/FobRecordDetail.vue'
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
@@ -305,8 +306,9 @@ function recordCommission(row: QuotationRecord) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > 1) return '佣金阈值：未保存有效值'
   return `佣金阈值：${value} · ${value < 1 ? '已加佣金' : '未加佣金'}`
 }
+function dealOptions(row: QuotationRecord) { return row.fob?.schemaVersion===2 ? fobBatchDealOptions(row) : recordOptions(row) }
 function recordOptions(row: QuotationRecord) { return row.quoteOptions || [] }
-function optionLabel(option: QuotationRecordQuoteOption) { return `${option.country}${option.quoteRegion ? `（${option.quoteRegion}）` : ''} · ${option.channel}${option.carrier && option.carrier !== option.channel ? ` · ${option.carrier}` : ''}` }
+function optionLabel(option: QuotationRecordQuoteOption) { if(option.id.startsWith('fob:'))return option.channel;return `${option.country}${option.quoteRegion ? `（${option.quoteRegion}）` : ''} · ${option.channel}${option.carrier && option.carrier !== option.channel ? ` · ${option.carrier}` : ''}` }
 function recordCountries(row: QuotationRecord) { return [...new Set(recordOptions(row).map(option => option.country).filter(country => country && country !== '—'))] }
 function hasMultipleOptions(row: QuotationRecord) { return recordOptions(row).length > 1 }
 function primaryOption(row: QuotationRecord) { return recordOptions(row).find(option => option.isPrimary) || recordOptions(row)[0] }
@@ -390,15 +392,15 @@ watch(()=>[route.query.record,route.query.reviewEvent,route.query.reviewOpen,pro
 function fillForm(row: QuotationRecord) {
   form.status = row.status === 'lost' ? 'lost' : 'won'
   form.dealLines = (row.dealLines || []).map(line => ({ id: line.id, optionId: line.optionId, unitPriceUsd: line.unitPriceUsd.toFixed(2), quantity: String(line.quantity) }))
-  if (!form.dealLines.length && recordOptions(row).length === 1 && recordOptions(row)[0].available !== false) form.dealLines.push({ id: `draft-${Date.now()}`, optionId: recordOptions(row)[0].id, unitPriceUsd: '', quantity: '' })
+  if (!form.dealLines.length && dealOptions(row).length === 1 && dealOptions(row)[0].available !== false) form.dealLines.push({ id: `draft-${Date.now()}`, optionId: dealOptions(row)[0].id, unitPriceUsd: '', quantity: '' })
   form.date = row.closedAt || new Date().toISOString().slice(0, 10)
   form.note = row.note || ''
 }
 async function addDealLine() {
   if (!selected.value) return
   const used = new Set(form.dealLines.map(line => line.optionId))
-  const option = recordOptions(selected.value).find(item => item.available !== false && !used.has(item.id))
-  if (!option) { toast('报价单中的渠道已经全部添加'); return }
+  const option = dealOptions(selected.value).find(item => item.available !== false && !used.has(item.id))
+  if (!option) { toast('报价单中的成交选项已经全部添加'); return }
   form.dealLines.push({ id: `draft-${Date.now()}-${form.dealLines.length}`, optionId: option.id, unitPriceUsd: '', quantity: '' })
   await nextTick()
   dealLineEditor.value?.querySelector('article:last-of-type')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -407,7 +409,7 @@ function removeDealLine(index: number) { form.dealLines.splice(index, 1) }
 function availableDealOptions(line: DealLineForm) {
   if (!selected.value) return []
   const used = new Set(form.dealLines.filter(item => item !== line).map(item => item.optionId))
-  return recordOptions(selected.value).filter(option => option.available !== false && (option.id === line.optionId || !used.has(option.id)))
+  return dealOptions(selected.value).filter(option => option.available !== false && (option.id === line.optionId || !used.has(option.id)))
 }
 async function open(row: QuotationRecord, fresh = false) {
   if (reviewSync.isMissing(row.id) || reviewSync.stateFor(row).lifecycleState === 'withdrawn') return
@@ -442,14 +444,14 @@ function cancelEdit() {
 }
 async function submit() {
   if (!selected.value) return
-  const options = recordOptions(selected.value)
+  const options = dealOptions(selected.value)
   if (form.status === 'won' && !form.dealLines.length) { toast('请至少添加一条成交方案'); return }
   const dealLines: QuotationRecordDealLine[] = []
   for (const [index, line] of form.dealLines.entries()) {
     const option = options.find(item => item.id === line.optionId)
     const unitPriceUsd = Number(line.unitPriceUsd)
     const quantity = Number(line.quantity)
-    if (!option) { toast(`请选择第 ${index + 1} 条成交方案的国家和物流渠道`); return }
+    if (!option) { toast(`请选择第 ${index + 1} 条成交方案`); return }
     if (!(unitPriceUsd > 0)) { toast(`请填写第 ${index + 1} 条成交方案的有效成交单价`); return }
     if (!Number.isInteger(quantity) || quantity <= 0) { toast(`请填写第 ${index + 1} 条成交方案的正整数成交数量`); return }
     dealLines.push({ id: line.id.startsWith('draft-') ? `deal-${Date.now()}-${index}` : line.id, optionId: option.id, optionLabel: optionLabel(option), country: option.country, carrier: option.carrier, channel: option.channel, unitPriceUsd, quantity, amountUsd: Number((unitPriceUsd * quantity).toFixed(2)) })
@@ -552,7 +554,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <div class="record-customer"><b>{{ row.customerName }}</b><small class="record-customer-grade">客户级别：{{ customerGradeDisplayLabel(row.customerGrade) }}</small></div>
           <div v-if="row.quoteMode==='fob'" class="route-summary"><b>FOB批发报价</b><span>{{ row.fob?.sheet.rows.length || 0 }}档 · 报关 / 不报关</span></div>
           <div v-else class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
-          <button v-if="row.quoteMode==='fob'" class="difference-cell" @click="open(row)"><b>报关 ${{ row.fob?.current?.declaredUsd }}</b><span>不报关 ${{ row.fob?.current?.undeclaredUsd }} · {{ row.fob?.quantity }}件</span></button>
+          <button v-if="row.quoteMode==='fob'" class="difference-cell" @click="open(row)"><template v-if="row.fob?.schemaVersion===2"><b>FOB批量 · {{ row.fob.items?.length }}行商品</b><span>查看各商品最终报价</span></template><template v-else><b>报关 ${{ row.fob?.current?.declaredUsd }}</b><span>不报关 ${{ row.fob?.current?.undeclaredUsd }} · {{ row.fob?.quantity }}件</span></template></button>
           <button v-else class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
             <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>
@@ -616,12 +618,15 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         </template>
 
         <template v-else>
+          <FobRecordDetail v-if="selected.fob?.schemaVersion===2" :record="selected" />
+          <template v-else>
           <section v-if="isManualQuotation(selected.quoteMode) && selected.manualPricing" class="snapshot"><span>报价类型</span><b>{{ quotationModeLabels[selected.quoteMode] }}</b><template v-if="canViewPurchaseCost && selected.quoteMode === 'freight-trial'"><span>手填总成本 / 件</span><b>{{ cny(selected.manualPricing.costCny) }}</b></template><span>直接计费重量 / 件</span><b>{{ selected.manualPricing.weightGrams }} g</b></section>
             <QuotationWeightTrace v-else :snapshot="selected.weightSnapshot" :bundle="selected.quoteMode === 'bundle'" />
           <QuotationProductCostTrace v-if="!isManualQuotation(selected.quoteMode)" :record="selected" />
           <section class="snapshot"><span>报价单号</span><b>{{ selected.no }}</b><span>客户</span><b>{{ selected.customerName }}</b><span>{{ hasMultipleOptions(selected) ? `1${selected.quoteMode==='bundle'?'套':'件'}报价区间` : '系统报价' }}</span><b>{{ hasMultipleOptions(selected) ? `${quote1UsdRange(selected)} / ${quote1CnyRange(selected)}` : `${usd(selected.systemQuoteUsd)} / ${cny(selected.systemQuoteCny)}` }}</b><span>佣金设置</span><b>{{ recordCommission(selected) }}</b><span>首选报价渠道</span><b>{{ selected.country }} · {{ selected.carrier }}｜{{ selected.channel }}</b><span>创建时间</span><b>{{ dateTime(selected.createdAt) }}</b><span>最后修改</span><b>{{ dateTime(selected.updatedAt) }}</b></section>
           <section v-if="recordOptions(selected).length" class="specified-snapshot"><header><b>{{ selected.matrixMode === 'template' ? '模板报价清单' : hasMultipleOptions(selected) ? '多国家渠道报价清单' : '报价方案' }}</b><span>{{ selectedOptionGroups.length }} 个国家 · {{ recordOptions(selected).length }} 条渠道</span></header><div class="option-table-head"><span>物流商 / 渠道</span><span>预计时效</span><span>1{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>2{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>3{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>{{ selected.customQuoteQuantity || '自定义' }}{{ selected.quoteMode==='bundle'?'套':'件' }}</span></div><div class="country-option-groups"><details v-for="(group,index) in selectedOptionGroups" :key="group.country" :open="index===0 || group.options.some(option=>option.isPrimary || selectedDealOptionIds.has(option.id))"><summary><span><b>{{ group.countryCode || '' }} {{ group.country }}</b><small>{{ group.options.length }} 条渠道</small></span><i>⌄</i></summary><article v-for="option in group.options" :key="option.id" :class="{ primary:option.isPrimary, deal:selectedDealOptionIds.has(option.id) }"><span><b>{{ option.carrier }}｜{{ option.channel }} <ChannelCoverageBadge :name="option.channel" /></b><small v-if="option.available === false">{{ option.availabilityMessage }}</small><small v-for="message in option.quantityMessages" :key="message">{{ message }}</small><small>渠道编码：{{ option.channelCode || '—' }} · 计费规则：{{ option.rule }}<template v-if="option.quoteRegion"> · {{ option.quoteRegion }}</template></small><em v-if="option.isPrimary">首选</em><em v-if="selectedDealOptionIds.has(option.id)" class="deal-badge">已成交</em></span><b>{{ option.eta }}</b><em>{{ optionPrice(option.quote1Usd) }}</em><em>{{ optionPrice(option.quote2Usd) }}</em><em>{{ optionPrice(option.quote3Usd) }}</em><em class="custom-option-price">{{ optionPrice(option.quoteCustomUsd) }}</em></article></details></div></section>
-          <template v-if="isMine && isActive(selected)"><label class="result">成交结果 <span><label><input v-model="form.status" type="radio" value="won"> 已成交</label><label><input v-model="form.status" type="radio" value="lost"> 未成交</label></span></label><section v-if="form.status==='won'" ref="dealLineEditor" class="deal-line-editor"><header><div><b>成交方案明细</b><span>每个渠道分别填写成交单价和数量</span></div><button type="button" @click="addDealLine">＋ 添加成交方案</button></header><div class="deal-line-head"><span>成交国家与渠道</span><span>成交单价</span><span>数量</span><span>成交金额</span><span>操作</span></div><article v-for="(line,index) in form.dealLines" :key="line.id"><select v-model="line.optionId"><option value="">请选择成交国家和物流渠道</option><option v-for="option in availableDealOptions(line)" :key="option.id" :value="option.id">{{ optionLabel(option) }} · {{ option.eta }}</option></select><label><i>$</i><input v-model="line.unitPriceUsd" type="number" min="0.01" step="0.01"></label><label><input v-model="line.quantity" type="number" min="1" step="1"><i>{{ selected.quoteMode==='bundle'?'套':'件' }}</i></label><strong>{{ usd((Number(line.unitPriceUsd)||0)*(Number(line.quantity)||0)) }}</strong><button type="button" @click="removeDealLine(index)">删除</button></article><div v-if="!form.dealLines.length" class="deal-line-empty">尚未添加成交方案，请点击右上角“＋ 添加成交方案”</div><footer><span>成交渠道 <b>{{ form.dealLines.length }}</b> 条</span><span>成交总数量 <b>{{ formDealTotalQuantity }}</b>{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>成交总金额 <strong>{{ usd(formDealTotalUsd) }}</strong></span></footer></section><label>成交结果日期<input v-model="form.date" type="date"></label><label>备注 / 未成交原因<textarea v-model="form.note" maxlength="200"></textarea></label><footer><button @click="cancelEdit">取消</button><button class="primary" @click="submit">保存修改</button></footer></template>
+          </template>
+          <template v-if="isMine && isActive(selected)"><label class="result">成交结果 <span><label><input v-model="form.status" type="radio" value="won"> 已成交</label><label><input v-model="form.status" type="radio" value="lost"> 未成交</label></span></label><section v-if="form.status==='won'" ref="dealLineEditor" class="deal-line-editor"><header><div><b>成交方案明细</b><span>{{ selected.fob?.schemaVersion===2 ? '按实际成交SKU及报关方式填写，未成交商品不添加' : '每个渠道分别填写成交单价和数量' }}</span></div><button type="button" @click="addDealLine">＋ 添加成交方案</button></header><div class="deal-line-head"><span>{{ selected.fob?.schemaVersion===2 ? '成交SKU / 报关方式' : '成交国家与渠道' }}</span><span>成交单价</span><span>数量</span><span>成交金额</span><span>操作</span></div><article v-for="(line,index) in form.dealLines" :key="line.id"><select v-model="line.optionId"><option value="">请选择成交选项</option><option v-for="option in availableDealOptions(line)" :key="option.id" :value="option.id">{{ optionLabel(option) }} · {{ option.eta }}</option></select><label><i>$</i><input v-model="line.unitPriceUsd" type="number" min="0.01" step="0.01"></label><label><input v-model="line.quantity" type="number" min="1" step="1"><i>{{ selected.quoteMode==='bundle'?'套':'件' }}</i></label><strong>{{ usd((Number(line.unitPriceUsd)||0)*(Number(line.quantity)||0)) }}</strong><button type="button" @click="removeDealLine(index)">删除</button></article><div v-if="!form.dealLines.length" class="deal-line-empty">尚未添加成交方案，请点击右上角“＋ 添加成交方案”</div><footer><span>成交渠道 <b>{{ form.dealLines.length }}</b> 条</span><span>成交总数量 <b>{{ formDealTotalQuantity }}</b>{{ selected.quoteMode==='bundle'?'套':'件' }}</span><span>成交总金额 <strong>{{ usd(formDealTotalUsd) }}</strong></span></footer></section><label>成交结果日期<input v-model="form.date" type="date"></label><label>备注 / 未成交原因<textarea v-model="form.note" maxlength="200"></textarea></label><footer><button @click="cancelEdit">取消</button><button class="primary" @click="submit">保存修改</button></footer></template>
         </template>
       </aside>
     </div>

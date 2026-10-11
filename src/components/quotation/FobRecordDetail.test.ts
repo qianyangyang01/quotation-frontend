@@ -30,6 +30,16 @@ async function mount(record = savedRecord()) {
 }
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; clearPricingTestPermissions() })
 
+it.each([false,true])('shows the whole batch snapshot and preserves cost permissions (%s)',async purchase=>{
+  setPricingTestPermissions(purchase?['quote','purchase']:['quote'])
+  const record=savedRecord(),item=record.fob!
+  record.fob={...item,schemaVersion:2,items:[item,{...item,product:{...item.product,sku:'SECOND'}}]}
+  const before=JSON.stringify(record),host=await mount(record)
+  expect(host.textContent).toContain('2行商品');expect(host.querySelector('[data-saved-sheet]')).not.toBeNull()
+  expect(host.textContent?.includes('采购成本快照')).toBe(purchase);expect(host.textContent).not.toContain('此历史快照未保存本次数量')
+  expect(JSON.stringify(record)).toBe(before)
+})
+
 it.each([false, true])('keeps permitted costs visible and distinguishes final columns (purchase permission: %s)', async purchase => {
   setPricingTestPermissions(purchase ? ['quote', 'purchase'] : ['quote'])
   const record = savedRecord(), original = JSON.stringify(record)

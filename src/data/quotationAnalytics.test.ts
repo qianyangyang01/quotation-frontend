@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildSalespersonRanking, quotationDetailsCsv, quotationSkus } from './quotationAnalytics'
+import { buildDashboardSummary, buildSalespersonRanking, quotationDetailsCsv, quotationSkus } from './quotationAnalytics'
+import { fobBatchSnapshot, parseFobBatch } from '@/services/fobBatchQuotation'
+import { FOB_SMALL_ORDER_POLICY, type FobQuoteProduct } from '@/services/fobQuotation'
 import { normalizeQuotationRecord, type QuotationRecord } from './quotationRecords'
 
 function record(input: Partial<QuotationRecord> & Pick<QuotationRecord, 'id' | 'salespersonName' | 'salespersonAccount' | 'customerName' | 'primarySku' | 'status' | 'createdAt'>): QuotationRecord {
@@ -24,6 +26,15 @@ function record(input: Partial<QuotationRecord> & Pick<QuotationRecord, 'id' | '
 }
 
 describe('quotation overview conversion metrics', () => {
+  it('counts every batch SKU but only actually won SKUs and excludes ambiguous aggregate prices',()=>{
+    const product=(sku:string):FobQuoteProduct=>({sku,source:'fob',category:'日用品',weight:'',notices:[],parsed:{minOrderQty:1,orderMultiple:1,priceTiers:[{minQty:1,maxQty:null,unitPriceCny:10,unit:'件'}],freight:{quantity:100,totalFreightCny:0,unitFreightCny:0,basis:'包邮',estimated:false}}})
+    const fob=fobBatchSnapshot(parseFobBatch('FIRST 20\nSECOND 20').map(l=>({...l,product:product(l.sku)})),'quantity',6.7,FOB_SMALL_ORDER_POLICY,{title:'批量报价',agent:'业务员',date:'2026-10-11',whatsapp:''})
+    const row=record({id:'batch',quoteMode:'fob',fob,primarySku:'FIRST',customerName:'客户',salespersonName:'业务员',salespersonAccount:'SALE',status:'won',createdAt:'2026-10-11',systemQuoteUsd:999,systemQuoteCny:999})
+    row.dealLines=[{id:'x',optionId:'fob:1:declared',optionLabel:'SECOND',country:'',carrier:'',channel:'',unitPriceUsd:2,quantity:10,amountUsd:20}]
+    expect(quotationSkus(row)).toEqual(['FIRST','SECOND']);expect(buildDashboardSummary([row])).toMatchObject({quotationCount:1,quotedSkuCount:2,quoteUsd:0,quoteCny:0})
+    expect(buildSalespersonRanking([row])[0]).toMatchObject({quotedProductCount:2,wonProductCount:1,conversionRate:50})
+    const csv=quotationDetailsCsv([row],[],{includeCost:false});expect(csv).toContain('逐商品查看');expect(csv).toContain('SECOND 20 pcs');expect(csv).not.toContain('999.00')
+  })
   const rows = [
     record({ id: 'a-1', salespersonName: '甲', salespersonAccount: 'a', customerName: '客户A', primarySku: 'SKU1, SKU1, SKU2', status: 'won', createdAt: '2026-08-01T00:00:00Z' }),
     record({ id: 'a-2', salespersonName: '甲', salespersonAccount: 'a', customerName: '客户A', primarySku: 'SKU1', status: 'pending', createdAt: '2026-08-02T00:00:00Z' }),

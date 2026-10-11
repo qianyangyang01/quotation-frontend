@@ -84,6 +84,7 @@ export type CustomerQuoteSheetRow = {
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {
+  fobBatch?: boolean; customerName?: string
   showQuantityRange?: boolean
   priceGroupLabel?: string
   skuLabel?: string

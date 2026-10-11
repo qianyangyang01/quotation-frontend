@@ -29,14 +29,16 @@ export function fromStandardPurchase(record: PurchaseProductRecord): FobQuotePro
       freight: { quantity: 100, totalFreightCny: total, unitFreightCny: decimal(total).div(100).toNumber(), estimated: false, basis: record.freeShipping === '是' ? '包邮' : `100件总运费 ${total} ÷ 100` },
     } }
 }
-export async function loadFobQuoteProduct(sku: string, source: FobSourceMode, signal?: AbortSignal): Promise<FobQuoteProduct> {
+export async function loadFobQuoteProduct(sku: string, source: FobSourceMode, signal?: AbortSignal, strictFreight = false): Promise<FobQuoteProduct> {
   const normalized = sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!/^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(normalized)) throw new Error('请填写有效SKU')
   if (source !== 'standard') {
     try { return fromFobRecord(await loadFobRecord(normalized, signal)) }
     catch (e) { if (source === 'fob' || !(e instanceof ApiError) || e.status !== 404 || e.code !== 'FOB_PURCHASE_NOT_FOUND') throw e }
   }
-  return fromStandardPurchase(await loadPurchaseProduct(normalized, signal))
+  const record = await loadPurchaseProduct(normalized, signal)
+  if (strictFreight && record.freeShipping === '是' && [record.singleFreightCny, record.freight10Cny, record.freight100Cny].some(v => v != null && v > 0)) throw new Error('采购资料冲突：已选包邮但填写了正数运费，请先核对采购资料')
+  return fromStandardPurchase(record)
 }
 export interface FobQuoteRow {
   minQty: number; maxQty: number | null; unit: string; purchaseCny: number; taxIncludedCny: number; freightCny: number; costCny: number

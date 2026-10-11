@@ -156,6 +156,15 @@ public class QuotationController {
         return ApiResponse.ok(view(row));
     }
 
+    @PostMapping("/fob/preview")
+    @PreAuthorize("hasAuthority('PERM_quote')")
+    @Transactional
+    ApiResponse<JsonNode> previewFob(@RequestBody JsonNode body) {
+        if (!(body instanceof ObjectNode input) || body.toString().length()>4_000_000 || !FobQuotation.isFob(input)) throw AppException.unprocessable("FOB预览数据格式错误或过大");
+        // Only calculate and validate current source versions; no records, audit entries or drafts are written.
+        return ApiResponse.ok(fobQuotation.prepare(input).path("fob"));
+    }
+
     @PostMapping
     @PreAuthorize("hasAuthority('PERM_quote')")
     @Transactional
@@ -201,6 +210,7 @@ public class QuotationController {
         submissionValidator.validateUpdate(patch);
         QuotationFinanceReview.rejectDirectPatch(patch);
         var current = (ObjectNode) row.payload.deepCopy(); current.remove("customerId"); var revisions = current.withArray("revisions"); var now = Instant.now();
+        FobQuotation.validateBatchDeal(current,patch);
         CustomerQuotePrices.preparePatch(current, patch);
         QuotationConfirmation.prepare(current, patch);
         if (QuotationFinanceReview.pricesChanged(current, patch)) reviews.contentChanged(row,principal(auth));

@@ -1,4 +1,5 @@
 import brandUrl from '@/assets/quote-sheet/brand.png'
+import { renderFobBatchSheet } from './fobBatchSheetRenderer'
 import headerUrl from '@/assets/quote-sheet/table-header.png'
 import notesUrl from '@/assets/quote-sheet/notes.png'
 import { CUSTOMER_QUOTE_NOTES, MAX_QUOTE_SHEET_COLUMNS, quoteSheetUsd, quoteSheetRenderGroups, quoteSheetCell, type QuoteSheetColumnKey, type QuoteSheetOptionalColumn, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
@@ -111,6 +112,7 @@ function exportBlob(canvas: HTMLCanvasElement) {
 
 /** No uploads, storage, downloads, or business writes: results live only in browser memory. */
 export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCancelled: () => boolean = () => false, photos: readonly QuoteLocalPhoto[] = []): Promise<QuoteSheetImage[]> {
+  if (sheet.fobBatch) return renderFobBatchSheet(sheet,isCancelled)
   if (sheet.issues.length) throw new Error(sheet.issues.join('；'))
   if (!sheet.rows.length) throw new Error('请先选择报价渠道')
   const { width, right, columns, cells, priceIndex } = quoteSheetLayout(sheet.quantityLabels.length, sheet.hiddenColumns, photos.length > 0, sheet.columnOrder, typeof sheet.sizeRules === 'string', sheet.showQuantityRange)

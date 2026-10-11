@@ -163,7 +163,7 @@ function createTemplateFromCurrentMode() {
 const quoteMode = ref<QuotationMode>('single')
 // FOB is a separate calculation workspace; it never serializes into a channel quotation or its draft.
 const fobKey = ref(0)
-const fobInitial = ref<{sku:string;source:'fob'|'standard';customer:string;quantity:number}>()
+const fobInitial = ref<{sku:string;source:'fob'|'standard';customer:string;quantity:number;batch?:{text:string;mode:'tiers'|'quantity';customer:string;sources:('fob'|'standard')[]}}>()
 const fobActive = ref(false)
 watch(canUseFob, allowed => { if (!allowed) fobActive.value = false })
 const fobPanel = ref<InstanceType<typeof FobQuotePanel> | null>(null)
@@ -228,6 +228,7 @@ async function applyReissue() {
     if(record.quoteMode==='fob') {
       if(!record.fob || !canUseFob.value)throw new Error('无法载入FOB报价')
       fobInitial.value={sku:record.primarySku,source:record.fob.product.source,customer:record.customerName,quantity:record.fob.quantity}
+      if(record.fob.schemaVersion===2 && record.fob.items?.length)fobInitial.value.batch={text:record.fob.items.map(item=>`${item.product.sku}\t${item.quantity}`).join('\n'),mode:record.fob.displayMode,customer:record.customerName,sources:record.fob.items.map(item=>item.product.source)}
       fobKey.value++;fobActive.value=true;pendingReissue.value=null;finishReissueRequest();return
     }
     const payload = quotationReissuePayload(record)

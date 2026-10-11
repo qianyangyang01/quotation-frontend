@@ -81,6 +81,33 @@ class FobQuotationPostgresIntegrationTest {
         forged.put("quoteMode","single");mvc.perform(post("/api/v1/quotations").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(forged.toString())).andExpect(status().isUnprocessableEntity());
         assertEquals(before,jdbc.sql("select count(*) from quotation_record").query(Long.class).single());
     }
+    @Test void batchPreviewSaveSearchOwnershipDealAndSnapshotRoundTrip() throws Exception {
+        var batch=FobBatchQuotationTest.input(20);
+        for(var item:batch.at("/fob/items")) {
+            var p=(ObjectNode)item.path("product").deepCopy();p.put("weightRaw","60 g");
+            jdbc.sql("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values(:sku,cast(:p as jsonb),0,now(),'2026-10-09T00:00:00Z') on conflict(sku) do update set payload=excluded.payload,updated_at=excluded.updated_at")
+                .param("sku",p.path("sku").asText()).param("p",p.toString()).update();
+        }
+        long before=jdbc.sql("select count(*) from quotation_record").query(Long.class).single();
+        mvc.perform(post("/api/v1/quotations/fob/preview").session(sessions.get("employee")).with(csrf()).contentType("application/json").content(batch.toString())).andExpect(status().isOk());
+        assertEquals(before,jdbc.sql("select count(*) from quotation_record").query(Long.class).single());
+        mvc.perform(post("/api/v1/quotations/fob/preview").session(sessions.get("purchase")).with(csrf()).contentType("application/json").content(batch.toString())).andExpect(status().isForbidden());
+        var key=UUID.randomUUID().toString();var saved=save("employee",key,batch);var id=saved.path("id").asText();var snapshot=saved.path("fob");
+        assertEquals(20,snapshot.path("items").size());assertEquals(id,save("employee",key,batch).path("id").asText());
+        assertEquals(before+1,jdbc.sql("select count(*) from quotation_record").query(Long.class).single());
+        assertEquals(snapshot,read("finance",id).path("fob"));
+        mvc.perform(get("/api/v1/quotations/"+id).session(sessions.get("employee2"))).andExpect(status().isForbidden());
+        var search=mvc.perform(get("/api/v1/quotations/search").param("q","SKU19").param("quoteMode","fob").session(sessions.get("employee"))).andExpect(status().isOk()).andReturn();
+        assertEquals(id,mapper.readTree(search.getResponse().getContentAsByteArray()).at("/data/items/0/id").asText());
+        var deal=mapper.createObjectNode().put("_version",saved.path("_version").asLong()).put("status","won").put("closedAt","2026-10-11").put("actualQuoteUsd",3.04).put("actualQuoteCny",20.368).put("dealQuantity",2);
+        deal.putArray("dealLines").addObject().put("id","batch-deal").put("optionId","fob:19:declared").put("unitPriceUsd",1.52).put("quantity",2).put("amountUsd",3.04);
+        mvc.perform(patch("/api/v1/quotations/"+id).session(sessions.get("employee")).with(csrf()).contentType("application/json").content(deal.toString())).andExpect(status().isOk());
+        var updated=read("employee",id);assertEquals(snapshot,updated.path("fob"));assertEquals("SKU19 · 报关",updated.at("/dealLines/0/optionLabel").asText());
+        jdbc.sql("update fob_purchase_product set updated_at=now(),version=version+1 where sku='SKU19'").update();
+        mvc.perform(post("/api/v1/quotations").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(batch.toString())).andExpect(status().isConflict());
+        assertEquals(before+1,jdbc.sql("select count(*) from quotation_record").query(Long.class).single());assertEquals(snapshot,read("employee",id).path("fob"));
+    }
+
     @Test void concurrentRetriesProduceOneRecordAndOneAuditEntry() throws Exception {
         String key=UUID.randomUUID().toString();
         var executor=java.util.concurrent.Executors.newFixedThreadPool(6);

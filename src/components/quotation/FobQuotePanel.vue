@@ -2,9 +2,12 @@
 import { canViewPurchaseCost, canViewPricingFactors, canViewFullPricing } from '@/data/quotationVisibility'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
+import FobBatchQuoteDialog from './FobBatchQuoteDialog.vue'
+import type { FobBatchMode } from '@/services/fobBatchQuotation'
 import { FOB_SMALL_ORDER_EXTRA_CNY, fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
 
-const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {sku:string;source:FobSourceMode;customer:string;quantity:number} }>()
+const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {sku:string;source:FobSourceMode;customer:string;quantity:number;batch?:{text:string;mode:FobBatchMode;customer:string;sources?:FobSourceMode[]}} }>()
+const batchOpen = ref(!!props.initial?.batch)
 const emit = defineEmits<{ status: [value: string]; retryFinance: [] }>()
 const sku = ref(props.initial?.sku || ''), source = ref<FobSourceMode>(props.initial?.source || 'auto'), busy = ref(false), error = ref(''), copied = ref('')
 const quantity = ref(''), product = ref<FobQuoteProduct | null>(null), skuInput = ref<HTMLInputElement | null>(null)
@@ -12,7 +15,7 @@ const rulesOpen = ref(false), rulesElement = ref<HTMLElement | null>(null)
 let generation = 0, controller: AbortController | undefined
 function invalidate() { generation++; controller?.abort(); busy.value = false; error.value = ''; product.value = null; copied.value = ''; emit('status', '待查询SKU') }
 watch([sku, source], invalidate)
-onMounted(() => {skuInput.value?.focus({ preventScroll: true });if(props.initial)void query()})
+onMounted(() => {skuInput.value?.focus({ preventScroll: true });if(props.initial && !props.initial.batch)void query()})
 onBeforeUnmount(() => { generation++; controller?.abort() })
 async function query() {
   const normalized = sku.value.trim().toUpperCase().replace(/\s+/g, '')
@@ -60,6 +63,7 @@ async function copy() {
       <label class="query-sku">SKU<input ref="skuInput" v-model="sku" aria-label="FOB查询SKU" placeholder="输入SKU，例如 PF2600053" autocomplete="off"></label>
       <label class="query-source">采购数据来源<select v-model="source" aria-label="FOB采购数据来源"><option value="auto">自动：优先FOB资料，其次新采购数据</option><option value="fob">FOB数据（粘贴更新）</option><option value="standard">系统新采购数据</option></select></label>
       <button type="submit" class="query-submit" :disabled="busy || !sku.trim()">{{ busy ? '查询中…' : '查询报价' }}</button>
+      <button type="button" @click="batchOpen=true">批量粘贴报价</button>
     </form>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="product" class="product-summary"><strong class="fob-sku">{{ product.sku }}</strong> · {{ product.category || '未分类' }} · 克重：{{ product.weight }}<span class="source">{{ product.source === 'fob' ? 'FOB数据 · 待验证' : '新采购资料' }}</span></p>
@@ -99,6 +103,7 @@ async function copy() {
     <details v-if="canViewFullPricing" ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p>含票价＝不含票采购价×1.1；成本价＝含票价＋批量均摊运费；报关＝成本价×1.14÷汇率；不报关＝成本价×1.14×1.02÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
   </section>
   <FobQuoteSheet v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
+  <FobBatchQuoteDialog v-if="batchOpen" :rate="rate" :policy="policy" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
 </template>
 
 <style scoped>

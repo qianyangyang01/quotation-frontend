@@ -3,13 +3,20 @@ import { computed } from 'vue'
 import { canViewPurchaseCost, canViewPricingFactors } from '@/data/quotationVisibility'
 import type { QuotationRecord } from '@/data/quotationRecords'
 import FobQuoteSheet from './FobQuoteSheet.vue'
+import FobBatchSheetExports from './FobBatchSheetExports.vue'
 
 const props = defineProps<{record:QuotationRecord}>()
 const tiers = computed(() => props.record.fob?.tiers?.length ? props.record.fob.tiers : [null])
 const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record.fob?.tiers?.[0]?.unit || '单位')
 </script>
 <template>
-  <section v-if="record.fob" class="fob-record" aria-label="FOB历史报价快照">
+  <section v-if="record.fob?.schemaVersion===2 && record.fob.items?.length" class="fob-record" aria-label="FOB批量历史报价快照">
+    <h3>FOB批量报价 · {{ record.fob.items.length }}行商品</h3><p>客户：{{ record.customerName }} · 报价人：{{ record.salespersonName }} · 汇率：{{ record.fob.rate }}</p>
+    <p>以下为保存时的完整报价快照，采购资料和汇率更新不会改变此报价。</p>
+    <details v-if="canViewPurchaseCost"><summary>查看各SKU采购成本快照（内部）</summary><div class="cost-table"><table><thead><tr><th>SKU</th><th>阶梯起订量</th><th>采购价 ¥</th><th>含票价 ¥</th><th>国内运费 ¥</th><th>成本 ¥</th></tr></thead><tbody><template v-for="(item,index) in record.fob.items" :key="index"><tr v-for="tier in item.tiers" :key="tier.minQty"><td>{{ item.product.sku }}</td><td>{{ tier.minQty }}</td><td>{{ tier.purchaseCny }}</td><td>{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td>{{ tier.costCny }}</td></tr></template></tbody></table></div></details>
+    <FobBatchSheetExports :sheet="record.fob.sheet" /><FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="record.fob.sheet" />
+  </section>
+  <section v-else-if="record.fob" class="fob-record" aria-label="FOB历史报价快照">
     <div class="fob-meta"><b>FOB（批发）报价 · {{ record.primarySku }}</b><span>客户：{{ record.customerName }}</span><span>报价人：{{ record.salespersonName }}</span><span>采购来源：{{ record.fob.product.source==='fob'?'FOB数据':'新采购资料' }}</span><span>报价数量：{{ record.fob.quantity }}</span><span class="finance-meta">汇率：{{ record.fob.rate }} CNY/USD<template v-if="canViewPurchaseCost"> · 票点10%</template><template v-if="canViewPricingFactors"> · 报关×1.14 · 不报关×1.1628</template></span></div>
     <p>以下为保存时的报价快照；采购资料和汇率更新不会改变此报价。</p>
     <div class="cost-table">

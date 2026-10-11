@@ -8,7 +8,7 @@ import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { formatQuoteDate, localQuoteDate, quoteSheetTextTable, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 
-const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string }>()
+const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string; previewOnly?: boolean }>()
 const customer = ref(props.initialCustomer || ''), saving = ref(false), savedNo = ref(''), saveError = ref('')
 const columns = ref<QuoteSheetColumnKey[]>(['number','sku','prices']), priceOrder = ref([0,1]), rowOrder = ref<string[]>([])
 const drag = ref<{kind:'row'|'column'|'price'; index:number} | null>(null)
@@ -110,7 +110,7 @@ async function copy(asImage: boolean) {
 
 <template>
   <section class="customer-sheet" aria-label="FOB客户报价单">
-    <div class="sheet-toolbar"><h3>{{ savedSheet ? '已保存客户报价单' : '客户报价单' }}</h3></div>
+    <div class="sheet-toolbar"><h3>{{ previewOnly ? '客户报价单预览' : savedSheet ? '已保存客户报价单' : '客户报价单' }}</h3></div>
     <div v-if="!savedSheet" class="sheet-save"><label>客户名称 <input v-model="customer" aria-label="FOB客户名称" maxlength="120" :disabled="saving" placeholder="填写客户名称"></label><button class="sheet-primary" type="button" :disabled="saving || !policy || !!sheet.issues.length || !sheet.rows.length || !!savedNo" @click="save">{{ saving ? '正在保存…' : savedNo ? '已保存' : '保存FOB报价' }}</button><span v-if="savedNo" role="status">已保存：{{ savedNo }}，可在我的报价记录查看</span><span v-if="saveError" role="alert">{{ saveError }}</span></div>
     <fieldset :disabled="saving" class="sheet-edit-fieldset">
     <div class="sheet-editor">

@@ -169,7 +169,7 @@ onMounted(() => {
       <section class="kpis">
         <article><i class="blue">▤</i><span><small>报价单数</small><b>{{ summary.quotationCount }}</b><em>当前筛选范围</em></span></article>
         <article><i class="violet">◇</i><span><small>报价 SKU</small><b>{{ summary.quotedSkuCount }}</b><em>去重后的商品数量</em></span></article>
-        <article><i class="green">$</i><span><small>报价金额</small><b>{{ moneyUsd(summary.quoteUsd) }}</b><em>{{ moneyCny(summary.quoteCny) }}</em></span></article>
+        <article><i class="green">$</i><span><small>报价金额（不含FOB批量单）</small><b>{{ moneyUsd(summary.quoteUsd) }}</b><em>{{ moneyCny(summary.quoteCny) }}</em></span></article>
       </section>
 
       <section class="ranking-section">

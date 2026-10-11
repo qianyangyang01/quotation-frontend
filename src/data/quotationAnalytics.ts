@@ -47,6 +47,7 @@ const invalidSkuValues = new Set(['—', '-', '--', '暂无数据', '无', 'N/A'
 
 export function quotationSkus(record: QuotationRecord) {
   if (isManualQuotation(record.quoteMode)) return []
+  if(record.fob?.schemaVersion===2)return [...new Set(record.fob.items?.map(i=>i.product.sku) ?? [])]
   return [...new Set(record.primarySku.split(/[、,+\s]+/)
     .map(value => value.trim().toUpperCase())
     .filter(value => Boolean(value) && !invalidSkuValues.has(value)))]
@@ -87,8 +88,8 @@ export function buildDashboardSummary(records: QuotationRecord[]): DashboardSumm
   return {
     quotationCount: records.length,
     quotedSkuCount: new Set(records.flatMap(quotationSkus)).size,
-    quoteUsd: round(records.reduce((sum, record) => sum + record.systemQuoteUsd, 0)),
-    quoteCny: round(records.reduce((sum, record) => sum + record.systemQuoteCny, 0)),
+    quoteUsd: round(records.reduce((sum, record) => sum + (record.fob?.schemaVersion===2 ? 0 : record.systemQuoteUsd), 0)),
+    quoteCny: round(records.reduce((sum, record) => sum + (record.fob?.schemaVersion===2 ? 0 : record.systemQuoteCny), 0)),
   }
 }
 
@@ -102,7 +103,11 @@ export function buildSalespersonRanking(records: QuotationRecord[]): Salesperson
   }
   return [...groups.entries()].map(([key, rows]) => {
     const quotedProductCount = rows.reduce((sum, row) => sum + quotationSkus(row).length, 0)
-    const wonProductCount = rows.reduce((sum, row) => sum + (row.status === 'won' ? quotationSkus(row).length : 0), 0)
+    const wonProductCount = rows.reduce((sum, row) => {
+      if(row.status!=='won')return sum
+      if(row.fob?.schemaVersion!==2)return sum+quotationSkus(row).length
+      return sum+new Set((row.dealLines ?? []).flatMap(line=>{const match=/^fob:(\d+):(declared|undeclared)$/.exec(line.optionId);const item=match?row.fob?.items?.[Number(match[1])]:undefined;return item?[item.product.sku]:[]})).size
+    }, 0)
     return {
       key,
       name: rows[0]?.salespersonName || '未指定业务员',
@@ -152,8 +157,8 @@ export function buildCategoryPerformance(records: QuotationRecord[], purchases: 
       quotedSkuCount: quotedSkus.size,
       averagePurchasePriceCny: purchasePrices.length ? round(purchasePrices.reduce((sum, value) => sum + value, 0) / purchasePrices.length) : null,
       quotationCount: rows.length,
-      quoteUsd: round(rows.reduce((sum, row) => sum + row.systemQuoteUsd, 0)),
-      quoteCny: round(rows.reduce((sum, row) => sum + row.systemQuoteCny, 0)),
+      quoteUsd: round(rows.reduce((sum, row) => sum + (row.fob?.schemaVersion===2 ? 0 : row.systemQuoteUsd), 0)),
+      quoteCny: round(rows.reduce((sum, row) => sum + (row.fob?.schemaVersion===2 ? 0 : row.systemQuoteCny), 0)),
       skus: [...new Set(products.map(item => item.sku.toUpperCase()))],
     }
   }).sort((a, b) => b.quoteCny - a.quoteCny || b.quotationCount - a.quotationCount || a.category.localeCompare(b.category, 'zh-CN'))
@@ -168,7 +173,7 @@ export function quotationDetailsCsv(records: QuotationRecord[], purchases: Analy
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
   const hasFob=records.some(row=>row.quoteMode==='fob')
   const header = ['报价编号', '报价时间', '客户名称', '业务员', '业务员账号', '国家', '产品品类', '主SKU', '报价类型', '成本(RMB)', '报价(USD)', '报价(RMB)', ...(hasFob ? ['FOB报价数量', 'FOB报关单价(USD)', 'FOB不报关单价(USD)', 'FOB阶梯报价'] : []), ...(options.includeReview ? ['审核状态', '审核人', '审核时间', '成交结果', '优先处理', '抽检标记', '抽检人', '抽检时间'] : [])]
-  const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, quotationModeLabels[record.quoteMode], record.totalCostCny.toFixed(2), record.systemQuoteUsd.toFixed(2), record.systemQuoteCny.toFixed(2), ...(hasFob ? [record.fob?.quantity ?? '', record.fob?.current?.declaredUsd ?? '', record.fob?.current?.undeclaredUsd ?? '', record.fob?.ranges?.map(r=>`${r.minQty}${r.maxQty==null?'+':'-'+r.maxQty}${r.unit}: 报关$${r.declaredUsd}/不报关$${r.undeclaredUsd}`).join('；') ?? ''] : []), ...(options.includeReview ? [financeReviewLabel(record.financeReviewStatus), record.financeReviewedBy || '', record.financeReviewedAt || '', quotationDealLabel(record.status), record.priorityProcessing ? '优先' : '普通', record.spotChecked ? '已抽检' : '未抽检', record.spotCheckedBy || '', record.spotCheckedAt || ''] : [])])
+  const rows = records.map(record => [record.no, record.createdAt, record.customerName, record.salespersonName, record.salespersonAccount, recordCountries(record).join('、'), resolveRecordCategory(record, purchaseBySku), record.primarySku, quotationModeLabels[record.quoteMode], record.fob?.schemaVersion===2?'逐商品查看':record.totalCostCny.toFixed(2), record.fob?.schemaVersion===2?'逐商品查看':record.systemQuoteUsd.toFixed(2), record.fob?.schemaVersion===2?'逐商品查看':record.systemQuoteCny.toFixed(2), ...(hasFob ? [record.fob?.schemaVersion===2?'各商品数量见明细':record.fob?.quantity ?? '', record.fob?.current?.declaredUsd ?? '', record.fob?.current?.undeclaredUsd ?? '', record.fob?.schemaVersion===2?record.fob.sheet.rows.map(r=>`${r.sku} ${r.quantityRange}: 报关${r.prices[0]}/不报关${r.prices[1]}`).join('；'):record.fob?.ranges?.map(r=>`${r.minQty}${r.maxQty==null?'+':'-'+r.maxQty}${r.unit}: 报关$${r.declaredUsd}/不报关$${r.undeclaredUsd}`).join('；') ?? ''] : []), ...(options.includeReview ? [financeReviewLabel(record.financeReviewStatus), record.financeReviewedBy || '', record.financeReviewedAt || '', quotationDealLabel(record.status), record.priorityProcessing ? '优先' : '普通', record.spotChecked ? '已抽检' : '未抽检', record.spotCheckedBy || '', record.spotCheckedAt || ''] : [])])
   const visibleRows = options.includeCost === false ? [header, ...rows].map(row => row.filter((_, index) => index !== header.indexOf('成本(RMB)'))) : [header, ...rows]
   return `\uFEFF${visibleRows.map(row => row.map(csvCell).join(',')).join('\r\n')}`
 }
