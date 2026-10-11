@@ -6,6 +6,7 @@ import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import type { QuoteSheetCountry, QuoteSheetPriceCalculator } from '@/data/customerQuoteSheet'
 
 const props = withDefaults(defineProps<{
+  batchSample?: boolean
   saveLabel?: string
   initialQuantities?: number[]
   rows: QuotationMatrixRow[]
@@ -41,25 +42,26 @@ const props = withDefaults(defineProps<{
 }>(), { blockReason: '', saving: false, retrying: false, canRetry: false, validationIssues: () => [] })
 
 const emit = defineEmits<{ 'update:priorityProcessing': [value: boolean]; save: []; retry: []; locateIssue: [key: string]; removeRow: [key: string] }>()
+const sampleExpanded = ref(false)
 const customerSheet = ref<InstanceType<typeof CustomerQuoteSheet>>()
 defineExpose({ captureSheet: () => customerSheet.value?.captureSheet(), capturePrices: () => customerSheet.value?.capturePrices(), captureForSave: () => customerSheet.value?.captureForSave() })
 const countryCount = computed(() => new Set(props.rows.map(row => row.country)).size)
 const hasQuoteRows = computed(() => props.rows.length > 0)
 const previewStatus = computed(() => {
-  if (props.saving) return '正在校验并保存报价…'
+  if (props.saving) return props.batchSample ? '正在校验整批报价条件…' : '正在校验并保存报价…'
   if (props.retrying) return '正在重新检查报价…'
   if (props.blockReason) return props.blockReason
   if (props.validationIssues.length) return `暂时无法保存，还需完成 ${props.validationIssues.length} 项`
   if (!hasQuoteRows.value) return '请先选择报价渠道'
-  return '报价方案已准备完成'
+  return props.batchSample ? '样例已准备完成，整批报价尚未生成' : '报价方案已准备完成'
 })
 const footerStatus = computed(() => {
-  if (props.saving) return '正在校验并保存报价，请稍候'
+  if (props.saving) return props.batchSample ? '正在校验公共条件，请稍候' : '正在校验并保存报价，请稍候'
   if (props.retrying) return '正在重新检查报价，请稍候'
   if (props.blockReason) return props.blockReason
   if (props.validationIssues.length) return `缺少 ${props.validationIssues.length} 项必填内容，请按上方提示补充`
   if (!hasQuoteRows.value) return '请先在上方报价矩阵中加入至少一条渠道'
-  return '所有已选渠道均已完成报价计算，可以保存'
+  return props.batchSample ? '当前仅为样例价格，点击生成整批报价后查看全部 SKU' : '所有已选渠道均已完成报价计算，可以保存'
 })
 const quoteRange = computed(() => {
   const prices = props.rows.map(row => row.quote1).filter((value): value is number => value != null && Number.isFinite(value)).sort((a, b) => a - b)
@@ -71,12 +73,12 @@ const quoteRange = computed(() => {
 <template>
   <section class="quote-preview" aria-labelledby="quotation-preview-title">
     <header class="preview-head">
-      <div><h2 id="quotation-preview-title"><i class="section-number">04</i>报价单预览与保存</h2></div>
+      <div><h2 id="quotation-preview-title"><i class="section-number">04</i>{{ batchSample ? '样例预览与整批生成' : '报价单预览与保存' }}</h2></div>
       <em :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ previewStatus }}</em>
     </header>
 
     <div class="preview-kpis">
-      <article><i>▤</i><span><b>1</b><small>张报价单</small></span></article>
+      <article><i>▤</i><span><b>1</b><small>{{ batchSample ? '个样例 SKU' : '张报价单' }}</small></span></article>
       <article><i>◎</i><span><b>{{ countryCount }}</b><small>个国家</small></span></article>
       <article><i>⌘</i><span><b>{{ rows.length }}</b><small>条渠道</small></span></article>
       <article class="range"><i>$</i><span><small>1{{ unitLabel }}报价范围</small><b>{{ quoteRange }}</b></span></article>
@@ -95,8 +97,11 @@ const quoteRange = computed(() => {
       </section>
     </div>
 
+    <button v-if="batchSample" type="button" class="sample-toggle" :aria-expanded="sampleExpanded" @click="sampleExpanded = !sampleExpanded">{{ sampleExpanded ? '收起' : '展开' }}样例报价单 · {{ sku }}</button>
+    <div v-show="!batchSample || sampleExpanded">
     <CustomerQuoteSheet :initial-quote="initialQuantities ? { quantities: initialQuantities, rows: [] } : undefined" :quote-mode="quoteMode" ref="customerSheet" can-remove-rows :removal-disabled="saving || retrying" @remove-row="emit('removeRow', $event)" :rows="rows" :skus="skus ?? [sku]" :countries="countries" :salesperson="salesperson"
       :context-key="contextKey" :source-pending="sourcePending" :custom-quantity="customQuantity" :bundle="unitLabel === '套'" :calculate-price="calculatePrice" :reset-key="resetKey" />
+    </div>
 
     <section v-if="validationIssues.length" class="validation-summary" aria-live="polite">
       <header><span><i>!</i><b>暂时无法保存报价</b></span><em>请完成以下 {{ validationIssues.length }} 项必填内容</em></header>
@@ -107,11 +112,12 @@ const quoteRange = computed(() => {
       </div>
     </section>
 
-    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? '正在校验并保存…' : saveLabel || `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
+    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? (batchSample ? '正在校验条件…' : '正在校验并保存…') : saveLabel || `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
   </section>
 </template>
 
 <style scoped>
+.sample-toggle{margin:8px 22px;padding:9px 13px;border:1px solid #d8e1e9;border-radius:6px;background:#fff;color:#5e728a;cursor:pointer}
 .priority-control{display:flex;align-items:center;gap:7px;white-space:nowrap;font-size:13px;font-weight:700;color:#9a580b}.priority-control input{width:16px;height:16px;accent-color:#f39800}
 .quote-preview{overflow:clip;border:1px solid #dfe6eb;border-top:3px solid #ff9700;border-radius:13px;background:#fff;box-shadow:0 13px 32px rgba(20,34,45,.07);color:#17232d}.preview-head{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:20px 22px;border-bottom:1px solid #e5eaee}.preview-head p{margin:0 0 4px;color:#d87500;font-size:9px;font-weight:900;letter-spacing:.15em}.preview-head h2{margin:0 0 5px;font-size:21px}.preview-head span{color:#7c8993;font-size:10px}.preview-head>em{display:flex;align-items:center;gap:7px;color:#188253;font-size:10px;font-style:normal}.preview-head>em i,.quote-preview footer>span i{width:8px;height:8px;border-radius:50%;background:#25ad6c}.preview-head>em.warning,.quote-preview footer>span.warning{color:#b16a00}.preview-head>em.warning i,.quote-preview footer>span.warning i{background:#e8a31d}.preview-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;padding:17px 22px;background:#f6f8fa}.preview-kpis article{display:flex;align-items:center;gap:12px;min-height:55px;padding:10px 13px;border:1px solid #e2e8ec;border-radius:9px;background:#fff}.preview-kpis article>i{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:#eef2ff;color:#3e61d4;font-style:normal;font-weight:900}.preview-kpis span{display:grid;gap:2px}.preview-kpis b{font-size:18px}.preview-kpis small{color:#7e8a94;font-size:9px}.preview-kpis .range>i{background:#fff0d7;color:#d47400}.preview-kpis .range small{order:-1}.preview-kpis .range b{font-size:15px}.preview-info{padding:18px 22px}.preview-info>section{padding:15px 17px;border:1px solid #e1e7eb;border-radius:9px}.preview-info h3{margin:0;font-size:13px}.preview-info dl{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 22px;margin:14px 0 0}.preview-info dl div{display:flex;gap:8px}.preview-info dt{min-width:60px;color:#81909a;font-size:9px}.preview-info dd{margin:0;font-size:10px;font-weight:750}.quote-preview footer{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:18px;padding:15px 22px;border-top:1px solid #e2e7ea;background:#fafbfc}.quote-preview footer>span{display:flex;align-items:center;gap:8px;color:#188253;font-size:9px}.quote-preview footer>div{display:flex;gap:9px}.quote-preview footer button{height:38px;padding:0 16px;border-radius:7px;font-size:10px;font-weight:800}.quote-preview footer .outline{border:1px solid #6fb58d;background:#fff;color:#25774c}.quote-preview footer .dark{border:1px solid #243440;background:#fff;color:#243440}.quote-preview footer .save{min-width:190px;border:0;background:#ff9700;color:#17232d}.quote-preview footer button:disabled{border-color:#dce2e6;background:#e9edef;color:#9aa4ab;cursor:not-allowed}@media(max-width:900px){.preview-kpis{grid-template-columns:1fr 1fr}.preview-info dl{grid-template-columns:1fr 1fr}.quote-preview footer{align-items:stretch;flex-direction:column}.quote-preview footer>div{display:grid;grid-template-columns:1fr 1fr}.quote-preview footer .save{grid-column:1/-1}}@media(max-width:560px){.preview-kpis{grid-template-columns:1fr}.preview-info dl{grid-template-columns:1fr}.quote-preview footer>div{grid-template-columns:1fr}.quote-preview footer .save{grid-column:auto}}
 .validation-summary{margin:18px 22px 0;border:1px solid #f1b45c;border-radius:9px;background:#fffaf1;overflow:hidden}.validation-summary>header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:11px 14px;border-bottom:1px solid #f4d8ae}.validation-summary>header span{display:flex;align-items:center;gap:8px}.validation-summary>header i{width:20px;height:20px;display:grid;place-items:center;border-radius:50%;background:#f09100;color:#fff;font-size:11px;font-style:normal;font-weight:900}.validation-summary>header b{color:#8f4e00;font-size:12px}.validation-summary>header em{color:#a16b29;font-size:9px;font-style:normal}.validation-summary>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px}.validation-summary button{display:grid;grid-template-columns:25px 1fr auto;align-items:center;gap:8px;min-width:0;padding:9px 10px;border:1px solid #ecd9bd;border-radius:7px;background:#fff;text-align:left;cursor:pointer}.validation-summary button:hover{border-color:#f09a18;background:#fffdf9}.validation-summary button>i{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:#fff0d8;color:#c56a00;font-size:9px;font-style:normal;font-weight:850}.validation-summary button>span{display:grid;gap:2px;min-width:0}.validation-summary button b{font-size:10px}.validation-summary button small{overflow:hidden;color:#8b6a42;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.validation-summary button>em{color:#d17100;font-size:9px;font-style:normal;font-weight:800;white-space:nowrap}@media(max-width:700px){.validation-summary>div{grid-template-columns:1fr}.validation-summary>header{align-items:flex-start;flex-direction:column;gap:5px}}
