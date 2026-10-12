@@ -197,8 +197,24 @@ public class FobQuotation {
         if(selected==null)throw AppException.unprocessable("此数量没有有效采购价");
         var current=quote(selected,quantity,quantity,rate,tiers.size()==1);
         if(mode.equals("quantity")){ranges.removeAll();ranges.add(current);}
+        // A batch may request several quantities for the same SKU; retain them in one single-SKU record.
+        if(input.has("quantities")) {
+            var quantities=input.path("quantities");
+            if(!mode.equals("quantity") || !quantities.isArray() || quantities.isEmpty() || quantities.size()>100
+                || quantities.get(0).asLong()!=quantity) throw AppException.unprocessable("FOB数量列表无效");
+            var seen=new HashSet<Long>(); ranges.removeAll();
+            for(var value:quantities) {
+                long q=count(value);
+                if(q<moq || q%multiple!=0 || !seen.add(q)) throw AppException.unprocessable("FOB数量重复或不满足起订量及下单倍数");
+                JsonNode tier=null;
+                for(var row:rows) if(q>=row.path("minQty").asLong() && (row.path("maxQty").isNull() || q<=row.path("maxQty").asLong())) tier=row;
+                if(tier==null) throw AppException.unprocessable("此数量没有有效采购价");
+                ranges.add(quote(tier,q,q,rate,tiers.size()==1));
+            }
+        }
         var sheet=validateSheet(input.path("sheet"),ranges,product.path("sku").asText());
         var snapshot=object().put("schemaVersion",1).put("rate",rate).put("quantity",quantity).put("displayMode",mode);
+        if(input.has("quantities")) snapshot.set("quantities",input.path("quantities").deepCopy());
         snapshot.set("product",product);snapshot.set("policy",input.path("policy").deepCopy());snapshot.set("tiers",rows);snapshot.set("ranges",ranges);snapshot.set("current",current);snapshot.set("sheet",sheet);
         var payload=object().put("quoteMode","fob").put("customerName",text(request.path("customerName"),120,true).trim()).put("primarySku",product.path("sku").asText())
             .put("productCategory",product.path("category").asText()).put("productSummary",product.path("sku").asText()+" · FOB批发报价")

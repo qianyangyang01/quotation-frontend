@@ -90,7 +90,8 @@ async function confirmLifecycle(reason: string) {
     lifecycleError.value = error instanceof Error ? error.message : '操作失败，请刷新后重新选择'
   } finally { lifecycleBusy.value = false }
 }
-const filterProduct = ref('')
+const filterProduct = ref(typeof route.query.batch === 'string' ? route.query.batch : '')
+watch(() => route.query.batch, batch => { if (typeof batch === 'string') { filterProduct.value = batch; filterReviewStatus.value = '' } })
 const filterCustomer = ref('')
 const filterChannel = ref('')
 const filterQuoteMode = ref<import('@/data/quotationModes').SavedQuotationMode | ''>('')
@@ -108,7 +109,7 @@ const reviewGroups = [
   { value: 'returned', label: '有退回项' },
   { value: '', label: '全部' },
 ] as const
-const filterReviewStatus = ref<typeof reviewGroups[number]['value']>('pending')
+const filterReviewStatus = ref<typeof reviewGroups[number]['value']>(typeof route.query.batch === 'string' ? '' : 'pending')
 const spotCheckFilter = ref<'' | 'checked' | 'unchecked'>('')
 const spotCheckBusy = ref(new Set<string>())
 const canSpotCheck = computed(() => currentAuthUser.value.role === 'super_admin' && hasPermission('allRecords'))
@@ -483,10 +484,10 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
 <template>
   <div class="app">
-    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><RouterLink to="/quotation/batch-single?records=1">批量单品报价记录</RouterLink><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
+    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <nav class="lifecycle-tabs" aria-label="报价记录分类">
         <button v-for="state in (['active','archived','trashed'] as const)" :key="state" :class="{active:lifecycle===state}" :aria-current="lifecycle===state ? 'page' : undefined" :disabled="lifecycleBusy" @click="lifecycle=state">{{ lifecycleLabel(state) }}</button>
-        <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
+        <RouterLink class="legacy-batch-link" to="/quotation/batch-single?records=1">历史批量记录</RouterLink><small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
       </nav>
       <nav class="review-groups" aria-label="审核分类">
         <button v-for="group in reviewGroups" :key="group.value" type="button" :class="{ active: filterReviewStatus === group.value }" :aria-pressed="filterReviewStatus === group.value" :disabled="lifecycleBusy" @click="filterReviewStatus = group.value">{{ group.label }}<b v-if="isMine && inbox.counts[group.value]" class="review-unread-count" :aria-label="`${inbox.counts[group.value]}条未读`">{{ inbox.counts[group.value] }}</b></button>
@@ -529,7 +530,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <header class="record-column-filters" aria-label="报价记录列筛选">
           <div class="record-column-filter">
             <label for="record-product-filter">报价单 / 商品</label>
-            <input id="record-product-filter" v-model="filterProduct" type="search" placeholder="搜索报价单号 / SKU / 商品 / 业务员">
+            <input id="record-product-filter" v-model="filterProduct" type="search" placeholder="搜索报价单号 / SKU / 商品 / 业务员 / 批次号">
             <select v-model="filterCategory" aria-label="产品品类"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select>
           </div>
           <label class="record-column-filter">客户<input v-model="filterCustomer" type="search" aria-label="客户" placeholder="搜索客户名称"></label>
@@ -557,7 +558,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
               <em v-if="row.fob?.schemaVersion===2 && priorityFor(row)" class="priority-badge">优先处理</em>
               <div class="record-product-meta"><span class="record-commission" :class="{applied: (row.commissionThreshold ?? 1) > 0 && (row.commissionThreshold ?? 1) < 1}">{{ recordCommission(row) }}</span><small>{{ quotationModeLabels[row.quoteMode] }}<template v-if="!isMine"> · {{ row.salespersonName }}</template></small></div>
               <small class="record-number" :title="row.no">报价单号：{{ row.no }}</small>
-              <small>创建于 {{ dateTime(row.createdAt) }}</small>
+              <small v-if="row.quotationBatch">批次：<button class="batch-reference" @click="filterProduct=row.quotationBatch.no; filterReviewStatus=''">{{ row.quotationBatch.no }}</button> · {{ row.quotationBatch.index }}/{{ row.quotationBatch.count }}</small><small>创建于 {{ dateTime(row.createdAt) }}</small>
               <small v-if="row.lifecycleChangedAt" class="lifecycle-metadata">{{ lifecycleLabel(row.lifecycleState) }} · {{ row.lifecycleChangedBy }} · {{ dateTime(row.lifecycleChangedAt) }}<br>原因：{{ row.lifecycleReason }}</small>
               <small v-if="lifecycle==='active' && selectionBlocked(row)" class="lifecycle-lock">批量清理限制：{{ selectionBlocked(row) }}</small>
             </div>
@@ -665,6 +666,10 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
+.legacy-batch-link{font-size:12px;color:#6b7c89;text-decoration:none;align-self:center}.batch-reference{border:0;background:none;padding:0;color:#477294;font:inherit;cursor:pointer}
+
+
+
 .priority-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.priority-filters button,.priority-action{padding:6px 12px;border:1px solid #e6c17d;border-radius:6px;background:white;color:#955a06;cursor:pointer}.priority-filters button[aria-pressed=true]{background:#ffedcd;border-color:#ee970c;font-weight:700}.priority-badge{display:inline-block;padding:3px 7px;border-radius:5px;background:#f39800;color:#fff;font-size:12px;font-style:normal;white-space:nowrap}.quote-record-table>article.priority-row{background:#fffaf0;border-left:3px solid #f39800}.priority-action:disabled{opacity:.5;cursor:wait}
 
 .review-groups>button{position:relative}.review-unread-count{display:inline-grid;place-items:center;min-width:18px;height:18px;margin-left:6px;border-radius:10px;padding:0 3px;background:#ff8b00;color:#fff;font-size:11px}.review-unread-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;margin:14px 0;border:1px solid #f8ddb1;border-radius:9px;background:#fffbf2;color:#a65b00;font-size:13px}.review-unread-banner button{border:1px solid #e5a53f;border-radius:6px;padding:8px 14px;background:#fff;color:#a65b00;cursor:pointer}.record-row-actions .review-unread-link{align-self:flex-start;border:0;background:#fff6e6;color:#b66200;border-radius:5px;padding:5px 8px;font-size:12px;cursor:pointer}.review-notification-error{color:#b63830;font-size:12px}
@@ -802,14 +807,17 @@ main{width:min(1680px,calc(100% - 48px))}
 </style>
 
 <style scoped>
+
 .record-mutation-buttons button{flex:1;padding:8px;border:1px solid #d5dce3;background:#fff;border-radius:6px;cursor:pointer;color:#52606d}.record-mutation-buttons button:first-child{color:#b52b25;border-color:#efb0ac}.mutation-overlay{position:fixed;inset:0;z-index:1200;background:#0006;display:flex;align-items:center;justify-content:center}.mutation-dialog{max-width:480px;margin:20px;padding:24px;background:white;border-radius:12px;line-height:1.7}.mutation-dialog footer{display:flex;justify-content:flex-end;gap:12px}.mutation-dialog button{padding:8px 16px;cursor:pointer}.mutation-dialog [role=alert]{color:#b52b25}
 </style>
 
 <style scoped>
+
 .spot-check-filter{display:flex;align-items:center;gap:8px;white-space:nowrap}.spot-check-filter select{height:34px;min-width:100px;padding:0 9px;border:1px solid #d7c8ef;border-radius:6px;background:#f7f3fc;color:#7952a3;font:inherit}.spot-check-filter select:focus-visible{outline:2px solid #9870c5;outline-offset:2px}
 </style>
 
 <style scoped>
+
 .quote-record-table>article.batch-record-row{align-items:start}
 .batch-record-row .quote-info{align-items:flex-start}
 .batch-record-row .record-row-actions{align-items:stretch;gap:6px}

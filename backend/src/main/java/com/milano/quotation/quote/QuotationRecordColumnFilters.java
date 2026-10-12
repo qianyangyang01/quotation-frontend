@@ -22,7 +22,7 @@ final class QuotationRecordColumnFilters {
         validate(filters.optionScale(), Set.of("single", "multiple"), "报价规模不合法");
         validate(filters.priceDifference(), Set.of("lower", "equal", "higher", "missing"), "报价差异不合法");
         text(where, params, "product", filters.product(), """
-            concat_ws(' ',quote_no,payload->>'primarySku',payload->>'productSummary',payload->>'salespersonName',
+            concat_ws(' ',quote_no,payload->'quotationBatch'->>'no',payload->>'primarySku',payload->>'productSummary',payload->>'salespersonName',
               (select string_agg(concat_ws(' ',b->>'sku',b->>'name'),' ') from jsonb_array_elements(
                 case when jsonb_typeof(payload->'bundleItems')='array' then payload->'bundleItems' else '[]'::jsonb end) b))
             """);

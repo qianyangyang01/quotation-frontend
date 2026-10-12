@@ -6,13 +6,14 @@ import { normalizeQuotationRecord } from '@/data/quotationRecords'
 const query=vi.hoisted(()=>({loadRecordPage:vi.fn(),loadFilteredRecords:vi.fn(),loadRecord:vi.fn(),recentRecordDates:(days:number)=>({startDate:days===1?'2026-09-10':days===30?'2026-08-12':'2026-09-04',endDate:'2026-09-10'})}))
 vi.mock('@/data/quotationRecordQuery',()=>query)
 vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([])}))
-vi.mock('vue-router',()=>({useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined) }), useRoute:()=>({query:{}})}))
+const route=vi.hoisted(()=>({query:{} as Record<string,string>}))
+vi.mock('vue-router',()=>({useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined) }), useRoute:()=>route}))
 let app:App
 const result=(total:number,page=0)=>({items:[],page,size:10,total,totalPages:Math.ceil(total/10),summary:{pending:total,won:0,lost:0,total},countries:['美国']})
 const flush=async()=>{await nextTick();await Promise.resolve();await nextTick()}
 const button=(text:string)=>Array.from(document.querySelectorAll('button')).find(b=>b.textContent===text)!
 async function mount(scope='mine'){const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush()}
-afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.useRealTimers();vi.resetAllMocks()})
+afterEach(()=>{app?.unmount();document.body.innerHTML='';route.query={};vi.useRealTimers();vi.resetAllMocks()})
 it('keeps the selected date visible during a pending query and clears it for a custom range', async () => {
   vi.useFakeTimers(); query.loadRecordPage.mockResolvedValue(result(35)); await mount()
   const selected = () => document.querySelector('.record-date-filters [aria-pressed="true"]')?.textContent
@@ -146,4 +147,12 @@ it.each(['mine', 'company'])('keeps review groups separate and exports the selec
     expect(query.loadFilteredRecords).toHaveBeenCalledWith(scope, expect.objectContaining({ reviewStatus: 'approved' }))
     expect(download).toHaveBeenCalledOnce()
   } finally { download.mockRestore(); objectUrl.mockRestore() }
+})
+
+it('opens a saved batch in the original list with all review states and no central batch entry',async()=>{
+ vi.useFakeTimers();route.query={batch:'BQT-14'};query.loadRecordPage.mockResolvedValue(result(14));await mount();
+ expect(query.loadRecordPage).toHaveBeenCalledWith('mine',expect.objectContaining({product:'BQT-14',reviewStatus:''}),0,10);
+ expect(document.querySelector<HTMLInputElement>('#record-product-filter')?.value).toBe('BQT-14');
+ expect(document.querySelector('.heading')?.textContent).not.toContain('批量单品报价记录');
+ expect(document.body.textContent).toContain('历史批量记录');
 })

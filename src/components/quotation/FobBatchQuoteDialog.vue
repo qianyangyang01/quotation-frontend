@@ -4,7 +4,8 @@ import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import { localQuoteDate } from '@/data/customerQuoteSheet'
 import { fobQuantityQuote, fobSheetRows, fobTierQuotes, loadFobQuoteProduct, type FobSourceMode, type FobSmallOrderPolicy } from '@/services/fobQuotation'
 import { fobBatchIssue, fobBatchLookupError, fobBatchSnapshot, parseFobBatch, type FobBatchLine, type FobBatchMode } from '@/services/fobBatchQuotation'
-import { saveFobQuotation, validateFobQuotation, type FobQuotationSnapshot } from '@/services/fobQuotationRecords'
+import { validateFobQuotation, type FobQuotationSnapshot } from '@/services/fobQuotationRecords'
+import { saveQuotationBatch } from '@/services/quotationBatchSubmission'
 import { idempotencyKey } from '@/services/http'
 import FobQuoteSheet from './FobQuoteSheet.vue'
 import FobBatchSheetExports from './FobBatchSheetExports.vue'
@@ -15,6 +16,7 @@ const dialog = ref<HTMLDialogElement>(), paste = ref(props.initial?.text || ''),
 const lines = ref<FobBatchLine[]>([]), busy = ref(false), error = ref(''), preview = ref<FobQuotationSnapshot>(), saving = ref(false), savedNo = ref(''), querying = ref(0)
 const customer = ref(props.initial?.customer || ''), title = ref('JerryFulfillment Quote Sheet'), agent = ref(props.salesperson || ''), date = ref(localQuoteDate()), whatsapp = ref('')
 const filter = ref('all'), stale = ref(false), saveKey = ref('')
+const savedCount = ref(0)
 const originalSources = ref(props.initial?.sources)
 watch(paste,()=>{originalSources.value=undefined})
 watch(customer,()=>{if(preview.value)preview.value.sheet.customerName=customer.value.trim()})
@@ -84,7 +86,7 @@ async function save() {
   if (!customer.value.trim()) { error.value = '请填写客户名称'; return }
   if (financeIssue.value || previewChanged.value || stale.value) { error.value = '资料或财务参数已变化，请返回核对并重新查询后生成'; return }
   saving.value = true
-  try { const record = await saveFobQuotation(customer.value.trim(), preview.value, saveKey.value); savedNo.value = record.no }
+  try { const result = await saveQuotationBatch({ kind: 'fob', customerName: customer.value.trim(), fob: preview.value }, saveKey.value); savedNo.value = result.batchNo; savedCount.value = result.records.length }
   catch (e) { error.value = e instanceof Error ? e.message : '保存失败，请重试'; if (error.value.includes('变化') || error.value.includes('更新') || error.value.includes('不一致')) stale.value = true }
   finally { saving.value = false }
 }
@@ -124,8 +126,8 @@ onBeforeUnmount(() => { cancelQueries(); restoreFocus?.focus() })
       <footer><div><b>已选 {{ selected.length }} 行有效商品</b><p>{{ invalid.length }}行待处理、{{ valid.length-selected.length }}行未选择不会进入报价单；异常继续保留在清单中。</p></div><button class="primary" :disabled="saving || busy || !selected.length || !!financeIssue" @click="generate">{{ saving ? '正在校验最新价格…' : `生成${selected.length}行商品报价单` }}</button></footer>
     </template>
     <template v-else>
-      <div class="preview-toolbar"><button :disabled="saving" @click="discardPreview">返回核对 / 修改</button><b>{{ preview.items?.length }}行商品 · {{ new Set(preview.items?.map(i=>i.product.sku)).size }}个SKU</b><label>客户名称<input v-model="customer" maxlength="120" :disabled="saving || !!savedNo" @input="saveKey=idempotencyKey('fob-batch')"></label><button class="primary" :disabled="saving || !!savedNo || stale || previewChanged || !!financeIssue" @click="save">{{ saving?'正在保存…':savedNo?'已保存':'保存合并报价单' }}</button></div>
-      <p v-if="savedNo" role="status">已保存：{{ savedNo }}。可在报价记录中查看整张报价单。</p>
+      <div class="preview-toolbar"><button :disabled="saving" @click="discardPreview">返回核对 / 修改</button><b>{{ preview.items?.length }}行商品 · {{ new Set(preview.items?.map(i=>i.product.sku)).size }}个SKU</b><label>客户名称<input v-model="customer" maxlength="120" :disabled="saving || !!savedNo" @input="saveKey=idempotencyKey('fob-batch')"></label><button class="primary" :disabled="saving || !!savedNo || stale || previewChanged || !!financeIssue" @click="save">{{ saving?'正在保存…':savedNo?'已保存':`保存 ${new Set(preview.items?.map(i=>i.product.sku)).size} 条FOB报价记录` }}</button></div>
+      <p v-if="savedNo" role="status">已生成 {{ savedCount }} 条独立FOB报价记录，按原流程逐条审核。批次：{{ savedNo }}。<RouterLink :to="{ path: '/quotation/my-records', query: { batch: savedNo } }">查看本批报价记录</RouterLink></p>
       <p v-if="stale || previewChanged" class="error" role="alert">资料或价格已变化，请返回核对并重新查询后生成，当前预览不可用于报价。</p>
       <template v-else><FobBatchSheetExports :sheet="preview.sheet" /><FobQuoteSheet :product="preview.product" :rate="preview.rate" :quantity="String(preview.quantity)" :policy="preview.policy" :saved-sheet="preview.sheet" :preview-only="!savedNo" /></template>
     </template>

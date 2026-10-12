@@ -243,6 +243,7 @@ async function applyReissue() {
     if(record.quoteMode==='fob') {
       if(!record.fob || !canUseFob.value)throw new Error('无法载入FOB报价')
       fobInitial.value={sku:record.primarySku,source:record.fob.product.source,customer:record.customerName,quantity:record.fob.quantity}
+      if(record.fob.quantities?.length)fobInitial.value.batch={text:record.fob.quantities.map(q=>`${record.primarySku}\t${q}`).join('\n'),mode:'quantity',customer:record.customerName,sources:record.fob.quantities.map(()=>record.fob!.product.source)}
       if(record.fob.schemaVersion===2 && record.fob.items?.length)fobInitial.value.batch={text:record.fob.items.map(item=>`${item.product.sku}\t${item.quantity}`).join('\n'),mode:record.fob.displayMode,customer:record.customerName,sources:record.fob.items.map(item=>item.product.source)}
       fobKey.value++;fobActive.value=true;pendingReissue.value=null;finishReissueRequest();return
     }

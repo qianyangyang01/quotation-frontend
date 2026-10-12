@@ -23,6 +23,7 @@ public class QuotationController {
     private static final Set<String> PATCH_FIELDS = Set.of("status", "dealLines", "dealOptionId", "dealOptionLabel",
             "actualQuoteUsd", "actualQuoteCny", "dealQuantity", "closedAt", "note", "customerName", "customerQuote", "quoteConfirmed");
     @org.springframework.beans.factory.annotation.Autowired private FobQuotation fobQuotation;
+    @org.springframework.beans.factory.annotation.Autowired private BatchQuotationSubmission batchSubmission;
     private final QuotationRecordRepository records;
     private final QuotationReviewService reviews;
     @org.springframework.beans.factory.annotation.Autowired private QuotationDraftGuard draftGuard;
@@ -179,7 +180,41 @@ public class QuotationController {
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());
         if (!FobQuotation.isFob(input)) { submissionValidator.validateQuotePricing(input); readiness.assertCanCreate(input); }
-        var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id); var payload = FobQuotation.isFob(input) ? fobQuotation.prepare(input) : input.deepCopy();
+        var payload = FobQuotation.isFob(input) ? fobQuotation.prepare(input) : input.deepCopy();
+        payload.remove("quotationBatch");
+        var response = persistPrepared(payload, input, principal);
+        idempotency.save(principal.account(), "quotation-create", key, body, response);
+        return ApiResponse.ok(response);
+    }
+
+    /** One transaction and retry key; every SKU enters the existing single-record review workflow. */
+    @PostMapping("/batch")
+    @PreAuthorize("hasAuthority('PERM_quote')")
+    @Transactional(timeout=120)
+    ApiResponse<JsonNode> createBatch(@RequestBody JsonNode body, @RequestHeader("Idempotency-Key") String key, Authentication auth) {
+        if (!body.isObject() || body.toString().length() > 4_000_000) throw AppException.unprocessable("批量报价数据格式错误或过大");
+        var principal = principal(auth);
+        draftGuard.requireOrdinary(principal.account());
+        var existing = idempotency.existing(principal.account(), "quotation-batch-create", key, body);
+        if (existing.isPresent()) return ApiResponse.ok(existing.get());
+        var inputs = batchSubmission.prepare(body);
+        var batchId = UUID.randomUUID(); var batchNo = "B" + quoteNo(Instant.now(), batchId);
+        var result = JsonNodeFactory.instance.objectNode().put("batchId", batchId.toString()).put("batchNo", batchNo);
+        var saved = result.putArray("records");
+        for (int i = 0; i < inputs.size(); i++) {
+            var input = inputs.get(i);
+            input.set("quotationBatch", JsonNodeFactory.instance.objectNode().put("id", batchId.toString()).put("no", batchNo).put("index", i + 1).put("count", inputs.size()));
+            var record = persistPrepared(input.deepCopy(), input, principal);
+            saved.addObject().put("id", record.path("id").asText()).put("no", record.path("no").asText())
+                .put("primarySku", record.path("primarySku").asText()).put("quoteMode", record.path("quoteMode").asText());
+        }
+        idempotency.save(principal.account(), "quotation-batch-create", key, body, result);
+        audit.record("quotation.batch-create", "quotation-batch", batchId.toString(), "success", Map.of("batchNo", batchNo, "skuCount", inputs.size()));
+        return ApiResponse.ok(result);
+    }
+
+    private JsonNode persistPrepared(ObjectNode payload, ObjectNode input, QuotationPrincipal principal) {
+        var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id);
         QuotationReviewService.SPOT_CHECK_FIELDS.forEach(payload::remove);
         if (!FobQuotation.isFob(payload)) logisticsGuard.validate(payload);
         payload.remove(List.of("priorityProcessing", "customerId", "lifecycleState", "lifecyclePreviousState", "lifecycleChangedAt", "lifecycleChangedBy", "lifecycleChangedAccount", "lifecycleReason"));
@@ -194,9 +229,9 @@ public class QuotationController {
         row.status = "pending";
         row.payload = payload; row.createdAt = now; row.updatedAt = now; records.saveAndFlush(row);
         reviews.initializePriority(row, input, principal);
-        var response = view(row); idempotency.save(principal.account(), "quotation-create", key, body, response);
+        var response = view(row);
         audit.record("quotation.create", "quotation", id.toString(), "success", Map.of("quoteNo", no));
-        return ApiResponse.ok(response);
+        return response;
     }
 
     @PatchMapping("/{id}")

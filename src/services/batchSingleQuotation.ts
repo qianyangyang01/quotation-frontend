@@ -2,6 +2,7 @@ import type { createQuotationRecord } from '@/data/quotationRecords'
 import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import type { QuotationDraftPayload } from './quotationDrafts'
 import { request } from './http'
+import { saveQuotationBatch, type QuotationBatchResult } from './quotationBatchSubmission'
 
 export interface BatchSingleItem {
   input: Parameters<typeof createQuotationRecord>[0]
@@ -9,6 +10,7 @@ export interface BatchSingleItem {
   sheet: CustomerQuoteSheet
 }
 export interface BatchSingleDocument {
+  createdRecords?: QuotationBatchResult['records']
   schemaVersion: 1
   customerName: string
   items: Array<Pick<BatchSingleItem, 'input' | 'sheet'>>
@@ -72,8 +74,9 @@ export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument 
   if (sheet.rows.length > 500) throw new Error('合并报价最多500条渠道明细，请减少 SKU 或渠道')
   return JSON.parse(JSON.stringify({ schemaVersion: 1, customerName: first.input.customerName, items, sheet }))
 }
-export function saveBatchSingle(document: BatchSingleDocument, key: string) {
-  return request<BatchSingleDocument>('/batch-single-quotations', { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify(document) })
+export async function saveBatchSingle(document: BatchSingleDocument, key: string): Promise<BatchSingleDocument> {
+  const result = await saveQuotationBatch({ kind: 'single', document }, key)
+  return { ...document, no: result.batchNo, createdRecords: result.records }
 }
 export function loadBatchSingleRecords(page = 0, scope = 'mine') {
   return request<{ items: Array<{ id: string; no: string; customerName: string; skuCount: number; createdAt: string; salespersonName: string; reviewStatus?: string; revision?: number }>; total: number }>('/batch-single-quotations?page=' + page + '&scope=' + scope, { signal: AbortSignal.timeout(20000) })

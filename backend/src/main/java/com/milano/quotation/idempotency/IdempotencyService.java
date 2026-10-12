@@ -34,7 +34,8 @@ public class IdempotencyService {
         for(var row:records.findByAccount(account)) {
             if(!row.operation.startsWith("quotation-"))continue;
             var response=row.responseBody;
-            if(id.toString().equals(response.path("id").asText()) || id.toString().equals(response.path("sourceQuote").path("id").asText())) {
+            boolean inBatch=false;for(var item:response.path("records"))if(id.toString().equals(item.path("id").asText()))inBatch=true;
+            if(inBatch || id.toString().equals(response.path("id").asText()) || id.toString().equals(response.path("sourceQuote").path("id").asText())) {
                 row.responseStatus=410;row.responseBody=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();records.save(row);
             }
         }

@@ -81,7 +81,7 @@ public class QuotationRecordQuery {
         if(filters.country()!=null && !filters.country().isBlank()) { where.append(" and (payload->>'country'=:country or exists(select 1 from "+options+" o where o->>'country'=:country))");params.put("country",filters.country()); }
         QuotationRecordColumnFilters.append(where, params, filters);
         if(filters.q()!=null && !filters.q().isBlank()) {
-            where.append(" and position(:q in lower(concat_ws(' ',quote_no,payload->>'customerName',payload->>'primarySku',payload->>'productCategory',payload->>'country',payload->>'carrier',payload->>'channel',payload->>'salespersonName',(select string_agg(concat_ws(' ',o->>'country',o->>'carrier',o->>'channel',o->>'rule'),' ') from "+options+" o))))>0");
+            where.append(" and position(:q in lower(concat_ws(' ',quote_no,payload->'quotationBatch'->>'no',payload->>'customerName',payload->>'primarySku',payload->>'productCategory',payload->>'country',payload->>'carrier',payload->>'channel',payload->>'salespersonName',(select string_agg(concat_ws(' ',o->>'country',o->>'carrier',o->>'channel',o->>'rule'),' ') from "+options+" o))))>0");
             params.put("q",filters.q().trim().toLowerCase(Locale.ROOT));
         }
         var summary=jdbc.queryForObject("select count(*) total,count(*) filter(where status in ('pending','lost') and not "+confirmed+") pending,count(*) filter(where status in ('pending','lost') and "+confirmed+") processed,count(*) filter(where status='won') won,count(*) filter(where status='lost') lost from quotation_record"+where,params,(rs,n)->new Summary(rs.getLong("pending"),rs.getLong("won"),rs.getLong("lost"),rs.getLong("total"),rs.getLong("processed")));

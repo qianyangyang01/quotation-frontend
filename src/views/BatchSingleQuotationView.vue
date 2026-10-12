@@ -203,10 +203,10 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
 </script>
 <template>
   <main class="batch-page">
-    <header><div><h1>批量单品 SKU 报价</h1><p>多个 SKU 独立计价，合并生成一张客户报价单</p></div><nav><RouterLink to="/quotation">返回普通报价</RouterLink><button v-if="hasPermission('myRecords') || hasPermission('allRecords')" @click="history">批量报价记录</button></nav></header>
+    <header><div><h1>批量单品 SKU 报价</h1><p>多个 SKU 独立计价，合并生成一张客户报价单</p></div><nav><RouterLink to="/quotation">返回普通报价</RouterLink><RouterLink v-if="hasPermission('myRecords') || hasPermission('allRecords')" to="/quotation/my-records">报价记录</RouterLink><button v-if="hasPermission('myRecords') || hasPermission('allRecords')" @click="history">历史批量记录</button></nav></header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <section v-if="historyOpen" class="card">
-      <header><h2>批量报价记录</h2><button @click="historyOpen=false; historyGeneration++">关闭记录</button></header>
+      <header><h2>历史批量记录</h2><button @click="historyOpen=false; historyGeneration++">关闭记录</button></header>
       <select v-if="hasPermission('allRecords')" v-model="scope" @change="page=0; history()"><option value="mine">我的批量报价</option><option value="company">全部批量报价</option></select>
       <p v-if="historyBusy" role="status">正在读取…</p>
       <table v-else><thead><tr><th>报价单号</th><th>客户</th><th>SKU数</th><th>报价人</th><th>保存时间</th><th>审核状态</th><th>操作</th></tr></thead><tbody><tr v-for="record in records.items" :key="record.id"><td>{{ record.no }}</td><td>{{ record.customerName }}</td><td>{{ record.skuCount }}</td><td>{{ record.salespersonName }}</td><td>{{ new Date(record.createdAt).toLocaleString('zh-CN', { hour12: false }) }}</td><td>{{ batchReviewLabels[record.reviewStatus || 'pending'] }}<small v-if="record.revision"> · 修订 {{ record.revision }}</small></td><td><button class="primary" @click="openRecord(record.id)">查看 SKU 明细</button></td></tr></tbody></table>
@@ -218,7 +218,7 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
       <section class="card input-card">
         <header><h2>01 批量录入 SKU</h2><span>每行一个 SKU · 最多 50 个</span></header>
         <div class="input-row"><textarea v-if="!active || inputExpanded" v-model="text" :disabled="active || running || saving" placeholder="从 Excel 粘贴 SKU，每行一个" aria-label="批量SKU清单" rows="3" /><div v-else class="input-summary"><b>{{ lines.length }} 个 SKU</b><span>{{ lines.slice(0,3).map(line => line.sku).join(' / ') }}{{ lines.length>3?' / …':'' }}</span></div><div class="input-buttons"><button v-if="active" :disabled="locked" @click="inputExpanded=!inputExpanded">{{ inputExpanded ? '收起清单' : '查看输入清单' }}</button><button v-if="!correction" class="primary" :disabled="locked || !!saved" @click="prepare">{{ running ? '处理中…' : active ? '重新查询 SKU' : '查询 SKU' }}</button><button v-if="active" :disabled="locked" @click="reset">重新录入</button></div></div>
-        <p class="input-hint">先查询商品资料，再设置客户和渠道生成整批报价。保存后可在“批量报价记录”查看。</p>
+        <p class="input-hint">先查询商品资料，再设置客户和渠道生成整批报价。一次保存，每个 SKU 生成一条独立记录，在“报价记录”按原流程审核。</p>
       </section>
       <section v-if="lines.length" class="card readiness-card">
         <div class="readiness-summary"><div><h2>查询结果</h2><p>共 {{ lines.length }} 个 SKU · 可继续报价 {{ readyLines.length }} 个 · 异常 {{ followupLines.length }} 个</p><p v-if="followupLines.length">资料异常的 SKU 已默认不勾选，可报价的 SKU 直接继续报价。</p></div><button v-if="followupLines.length" :disabled="locked" @click="copyFollowup">复制异常 SKU</button></div>
@@ -242,9 +242,9 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
             <div v-if="unfinished.length" class="pending-panel"><strong>{{ unfinished.length }} 个 SKU 待处理，当前只展示成功结果，尚不能整批保存</strong><ul><li v-for="line in unfinished" :key="line.sku"><b>{{ line.sku }}</b><span>{{ line.error || '尚未计算' }}</span></li></ul><button :disabled="locked || !seed || engineFailed" @click="retryUnfinished">{{ stopped ? '继续处理未完成项' : '仅重试失败 / 未完成项' }}</button><p>也可展开上方 SKU 处理清单，明确取消选入待处理项后保存其余商品。</p></div>
             <div v-if="partial && (!combined || saved)" class="quote-meta"><strong>{{ (saved?.sheet || partial.sheet).title || 'JerryFulfillment Quote Sheet' }}</strong><span>客户：{{ partial.customerName }}</span><span>By Agent：{{ (saved?.sheet || partial.sheet).agent }}</span><span>Date：{{ (saved?.sheet || partial.sheet).date }}</span></div>
             <div v-if="combined && !saved" :inert="saving || undefined"><BatchSingleSheetEditor :key="JSON.stringify(combined)" ref="sheetEditor" :document="combined" :calculate-item="calculateSheetItem" @busy="sheetBusy=$event" /></div><BatchSingleSheet v-else-if="partial" :sheet="saved?.sheet || partial.sheet" :photos="saved?.items[0]?.input.customerQuote?.showPhotos === false ? [] : saved?.items[0]?.input.customerQuote?.photos" :read-only="!combined" paginated />
-            <p v-if="saved" class="success" role="status">已保存：{{ saved.no }}，包含 {{ saved.items.length }} 个 SKU</p>
+            <p v-if="saved" class="success" role="status"><template v-if="saved.createdRecords">已生成 {{ saved.createdRecords.length }} 条独立报价记录，按原流程逐条审核。批次：{{ saved.no }}。<RouterLink :to="{ path: '/quotation/my-records', query: { batch: saved.no } }">查看本批报价记录</RouterLink></template><template v-else>已保存历史批次修正：{{ saved.no }}</template></p>
           </div>
-          <footer class="result-footer"><span :class="{ success: combined }">{{ combined ? '所有选中 SKU 已完成，核对后可保存为 1 张报价单' : '请先处理失败或未完成的 SKU' }}</span><div><button :disabled="locked" @click="goToConditions">修改条件 / 重新生成</button><button class="primary" :disabled="!combined || locked || !!saved" @click="save">{{ saving ? '正在校验并保存…' : saved ? '已保存' : correction ? '提交修正并重新审核' : `保存 1 张报价单 · ${selected.length}个 SKU` }}</button></div></footer>
+          <footer class="result-footer"><span :class="{ success: combined }">{{ combined ? '所有选中 SKU 已完成，核对后一次保存为独立报价记录' : '请先处理失败或未完成的 SKU' }}</span><div><button :disabled="locked" @click="goToConditions">修改条件 / 重新生成</button><button class="primary" :disabled="!combined || locked || !!saved" @click="save">{{ saving ? '正在校验并保存…' : saved ? '已保存' : correction ? '提交修正并重新审核' : `保存 ${selected.length} 条报价记录` }}</button></div></footer>
         </section>
       </div>
     </template>

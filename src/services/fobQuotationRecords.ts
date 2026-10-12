@@ -9,6 +9,7 @@ export interface FobQuotationSnapshot {
   product: FobQuoteProduct
   rate: number
   quantity: number
+  quantities?: number[]
   policy: FobSmallOrderPolicy
   displayMode: 'tiers' | 'quantity'
   sheet: CustomerQuoteSheet

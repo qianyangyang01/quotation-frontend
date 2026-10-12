@@ -29,8 +29,8 @@ const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record
     <template v-else-if="approvedSheet && (!record.fobItemReviews || approvedSheet.rows.length)"><FobBatchSheetExports :sheet="approvedSheet" /><FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="approvedSheet" /></template><p v-else>尚无审核通过商品，暂不能生成对外报价单。</p>
   </section>
   <section v-else-if="record.fob" class="fob-record" aria-label="FOB历史报价快照">
-    <div class="fob-meta"><b>FOB（批发）报价 · {{ record.primarySku }}</b><span>客户：{{ record.customerName }}</span><span>报价人：{{ record.salespersonName }}</span><span>采购来源：{{ record.fob.product.source==='fob'?'FOB数据':'新采购资料' }}</span><span>报价数量：{{ record.fob.quantity }}</span><span class="finance-meta">汇率：{{ record.fob.rate }} CNY/USD<template v-if="canViewPurchaseCost"> · 票点10%</template><template v-if="canViewPricingFactors"> · 报关×1.14 · 不报关×1.1628</template></span></div>
-    <p>以下为保存时的报价快照；采购资料和汇率更新不会改变此报价。</p>
+    <div class="fob-meta"><b>FOB（批发）报价 · {{ record.primarySku }}</b><span>客户：{{ record.customerName }}</span><span>报价人：{{ record.salespersonName }}</span><span>采购来源：{{ record.fob.product.source==='fob'?'FOB数据':'新采购资料' }}</span><span>报价数量：{{ record.fob.quantities?.join(' / ') || record.fob.quantity }}</span><span class="finance-meta">汇率：{{ record.fob.rate }} CNY/USD<template v-if="canViewPurchaseCost"> · 票点10%</template><template v-if="canViewPricingFactors"> · 报关×1.14 · 不报关×1.1628</template></span></div>
+    <p>以下为保存时的报价快照；采购资料和汇率更新不会改变此报价。<template v-if="record.fob.quantities?.length">同一 SKU 的 {{ record.fob.quantities.length }} 个数量档合并在本条记录审核，各档最终价格见下方客户报价单。</template></p>
     <div class="cost-table">
       <table aria-label="FOB基础价格与本次数量最终单价">
         <thead>
