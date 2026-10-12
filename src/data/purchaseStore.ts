@@ -13,6 +13,7 @@ export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageC
 export type PurchaseProductRecord = {
   sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number; _updatedAt?: string
   dataSource: PurchaseDataSource; purchasePriceBasis: PurchasePriceBasis; sourceQuotedPriceCny: number | null
+  legacyPriceMode?: 'auto_tax'
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
   size: string; color: string; weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null
   minOrderQty: number | null; purchasePriceCny: number | null
@@ -76,6 +77,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version), _updatedAt: input._updatedAt == null ? undefined : String(input._updatedAt),
     dataSource, purchasePriceBasis: input.purchasePriceBasis === 'tax_included' || input.purchasePriceBasis === 'quoted' ? input.purchasePriceBasis : '' as PurchasePriceBasis,
     sourceQuotedPriceCny: numberOrNull(input.sourceQuotedPriceCny),
+    ...(dataSource === 'legacy_2026' && input.legacyPriceMode === 'auto_tax' ? { legacyPriceMode: 'auto_tax' as const } : {}),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
     size: String(input.size || '').trim(), color, weightG, lengthCm: numberOrNull(input.lengthCm), widthCm: numberOrNull(input.widthCm), heightCm: numberOrNull(input.heightCm),
     minOrderQty, purchasePriceCny, tier2MinQty: numberOrNull(input.tier2MinQty), tier2PriceCny: numberOrNull(input.tier2PriceCny),

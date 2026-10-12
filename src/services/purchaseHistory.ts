@@ -14,6 +14,7 @@ export async function updatePurchaseProduct(originalSku: string, record: Purchas
 }
 export function historyValue(field: string, value: string | number | null) {
   if (value == null || value === '') return '暂无数据'
+  if (field === 'legacyPriceMode' && value === 'auto_tax') return '未税单价×（1＋票点）自动计算'
   if (field === 'catalogState') return ({ ready: '正式目录', pending_template: '待补全目录', disabled: '已停用' } as Record<string, string>)[String(value)] || String(value)
   if (field === 'taxPoint' && typeof value === 'number') return `${Number((value * 100).toFixed(6))}%`
   return String(value)

@@ -24,6 +24,7 @@ public class PurchaseHistoryService {
             {"quotationOwner","报价人"},{"quotationDate","报价日期"},{"size","尺码"},{"color","颜色"},{"material","材质"},
             {"weightG","克重(g)"},{"lengthCm","长(cm)"},{"widthCm","宽(cm)"},{"heightCm","高(cm)"},
             {"minOrderQty","起订量(件)"},{"purchasePriceCny","基准采购单价(CNY/件)"},
+            {"sourceQuotedPriceCny","未税采购单价(CNY/件)"},{"legacyPriceMode","含票价计算方式"},
             {"tier2MinQty","阶梯价2起订量"},{"tier2PriceCny","阶梯价2(CNY/件)"},{"tier3MinQty","阶梯价3起订量"},{"tier3PriceCny","阶梯价3(CNY/件)"},
             {"singleFreightCny","1件总运费(CNY)"},{"freight10Cny","10件总运费(CNY)"},{"freight100Cny","100件总运费(CNY)"},
             {"freeShipping","是否包邮"},{"taxIncludedPriceCny","含票价(CNY/件)"},{"taxPoint","票点"},{"invoiceType","票类型"},

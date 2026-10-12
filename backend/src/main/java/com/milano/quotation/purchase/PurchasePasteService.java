@@ -92,12 +92,22 @@ public class PurchasePasteService {
                 merged.put("_version", current.version);
                 merged.put("catalogState", current.catalogState);
             }
+            // Once explicitly maintained as untaxed + rate, all later sparse updates
+            // (including synchronization) must retain that same price contract.
+            if ("auto_tax".equals(merged.path("legacyPriceMode").asText())) {
+                if (patch.has("purchasePriceCny")) merged.set("sourceQuotedPriceCny", patch.get("purchasePriceCny").deepCopy());
+                if (patch.has("taxIncludedPriceCny") && !patch.has("purchasePriceCny") && !patch.has("taxPoint"))
+                    throw AppException.unprocessable("第" + sourceRow + "行：含票价已自动计算，请修改未税采购单价或票点");
+            }
             PurchaseProductService.normalizeLegacyPrice(merged);
             PurchasePasteValidator.validateValues(merged, sourceRow, "legacy_2026".equals(merged.path("dataSource").asText()));
             var notices = new ArrayList<String>();
             if (patch.has("purchasePriceCny") && patch.get("purchasePriceCny").decimalValue().compareTo(merged.path("purchasePriceCny").decimalValue()) != 0)
-                notices.add("旧数据按原有价格规则计算：本次填写采购单价 " + patch.get("purchasePriceCny").asText()
-                        + "，最终生效采购单价 " + merged.path("purchasePriceCny").asText() + "；如需调整，请同时核对含票价。");
+                notices.add("auto_tax".equals(merged.path("legacyPriceMode").asText())
+                        ? "未税采购单价 " + merged.path("sourceQuotedPriceCny").asText() + " ×（1＋票点 "
+                            + merged.path("taxPoint").asText() + "）＝含票价 " + merged.path("purchasePriceCny").asText()
+                        : "旧数据按原有价格规则计算：本次填写采购单价 " + patch.get("purchasePriceCny").asText()
+                            + "，最终生效采购单价 " + merged.path("purchasePriceCny").asText() + "；如需调整，请在编辑资料中维护未税单价和票点。");
             var changes = PurchaseHistoryService.changes(current == null ? null : current.payload, merged);
             var expectation = new Expected(sku, current == null ? null : current.id,
                     current == null ? null : current.version, current == null ? null : current.updatedAt);

@@ -14,12 +14,68 @@ vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<o
 vi.mock('@/services/purchaseCatalog',()=>({loadPurchaseCatalogPage:mocks.page}))
 let app:App
 const row=(sku:string)=>normalizePurchaseRecord({sku,weightG:100,minOrderQty:1,purchasePriceCny:10,_version:5})
+const legacyPriceRow=()=>normalizePurchaseRecord({...row('FL2600293-2'),dataSource:'legacy_2026',
+  purchasePriceBasis:'tax_included',sourceQuotedPriceCny:110,purchasePriceCny:121,taxIncludedPriceCny:121,taxPoint:.1,singleFreightCny:5})
+async function openLegacyEditor(product=legacyPriceRow()){
+  mocks.page.mockResolvedValue({...page(product.sku),items:[product]})
+  await mount()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click()
+  await flush()
+}
+async function setPriceField(label:string,value:string){
+  const input=document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+  input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()
+}
+function editorSave(){Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='保存资料')!.click()}
 const page=(sku:string)=>({items:[row(sku)],total:1,totalPages:1,page:0,size:10})
 async function flush(){await Promise.resolve();await nextTick();await Promise.resolve();await nextTick()}
 async function mount(){const host=document.createElement('div');document.body.append(host);app=createApp(PurchaseDataWorkspace);app.mount(host);await flush()}
 async function search(text:string){const input=document.querySelector('.toolbar input') as HTMLInputElement;input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()}
 beforeEach(()=>{vi.useFakeTimers();mocks.page.mockResolvedValue(page('INITIAL'));mocks.stats.mockResolvedValue({total:1,ready:1,pending:0,generatedSku:0})})
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers();authState.current=null;authState.permissions=[]})
+
+it('edits legacy untaxed price and rate with a read-only included preview, then reads saved values back',async()=>{
+  await openLegacyEditor()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('110')
+  const included=document.querySelector<HTMLInputElement>('[aria-label="含票价（自动计算）"]')!
+  expect(included.readOnly).toBe(true);expect(included.value).toBe('121.00')
+  await setPriceField('未税采购单价','100');expect(included.value).toBe('110.00')
+  await setPriceField('采购票点','0.08');expect(included.value).toBe('108.00')
+  mocks.update.mockImplementationOnce(async(_sku,input)=>normalizePurchaseRecord({...input,_version:6}))
+  editorSave();await flush()
+  expect(mocks.update).toHaveBeenCalledWith('FL2600293-2',expect.objectContaining({
+    sourceQuotedPriceCny:100,taxPoint:.08,taxIncludedPriceCny:108,purchasePriceCny:108,legacyPriceMode:'auto_tax',_version:5}))
+  expect(document.querySelector('table')?.textContent).toContain('¥108.00/件')
+  expect(document.querySelector('.purchase-tiers')?.textContent).toContain('含票价')
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click();await flush()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('100')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="含票价（自动计算）"]')!.value).toBe('108.00')
+})
+
+it('does not reprice legacy data when only unrelated fields are saved',async()=>{
+  const product=normalizePurchaseRecord({...legacyPriceRow(),taxIncludedPriceCny:125,purchasePriceCny:125})
+  await openLegacyEditor(product)
+  const notes=document.querySelector<HTMLTextAreaElement>('.editor-modal textarea')!
+  notes.value='更新备注';notes.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()
+  mocks.update.mockResolvedValueOnce(product);editorSave();await flush()
+  expect(mocks.update.mock.calls[0]![1]).toMatchObject({sourceQuotedPriceCny:110,purchasePriceCny:125,taxIncludedPriceCny:125,notes:'更新备注'})
+  expect(mocks.update.mock.calls[0]![1].legacyPriceMode).toBeUndefined()
+})
+
+it('requires confirmation of missing untaxed input before a rate change and never guesses from included price',async()=>{
+  await openLegacyEditor(normalizePurchaseRecord({...legacyPriceRow(),sourceQuotedPriceCny:null}))
+  expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('')
+  expect(document.querySelector('.editor-modal')?.textContent).toContain('未税单价待确认')
+  await setPriceField('采购票点','0.08');editorSave();await flush()
+  expect(mocks.update).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('请填写大于0的未税采购单价')
+})
+
+it.each(['','-0.1','1.1'])('blocks invalid legacy rate %s without overwriting the saved record',async rate=>{
+  await openLegacyEditor();await setPriceField('采购票点',rate);editorSave();await flush()
+  expect(mocks.update).not.toHaveBeenCalled()
+  expect(document.querySelector('table')?.textContent).toContain('¥121.00/件')
+})
 
 const fobRow=(sku:string):FobCatalogRecord=>({sku,dataSource:'fob',category:'鞋',weightRaw:'110',priceRaw:'1件23.99;100件19.5;300件19.5;500件19;1000件19',freightRaw:'100件预拍74',
   parsed:{minOrderQty:1,orderMultiple:1,priceTiers:[1,100,300,500,1000].map((minQty,i)=>({minQty,maxQty:[99,299,499,999,null][i]!,unitPriceCny:[23.99,19.5,19.5,19,19][i]!,unit:'件'})),freight:{quantity:100,totalFreightCny:74,unitFreightCny:0.74,estimated:true,basis:'100件总运费74÷100'}}})

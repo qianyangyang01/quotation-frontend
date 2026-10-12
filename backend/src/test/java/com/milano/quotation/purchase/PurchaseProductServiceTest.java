@@ -20,6 +20,58 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void legacyAutoTaxIgnoresStaleIncludedPriceAndPersistsUntaxedPriceAndRateChanges() {
+        var input = pasted("FL2600293-2").put("dataSource", "legacy_2026").put("legacyPriceMode", "auto_tax")
+                .put("sourceQuotedPriceCny", 100).put("taxPoint", .1)
+                .put("purchasePriceCny", 121).put("taxIncludedPriceCny", 121);
+        var saved = service.upsert(input);
+        assertEquals(100, saved.path("sourceQuotedPriceCny").asDouble());
+        assertEquals(110, saved.path("purchasePriceCny").asDouble());
+        assertEquals(110, saved.path("taxIncludedPriceCny").asDouble());
+        assertEquals("tax_included", saved.path("purchasePriceBasis").asText());
+        var next = (tools.jackson.databind.node.ObjectNode) saved.deepCopy();
+        next.put("taxPoint", .08).put("taxIncludedPriceCny", 999);
+        var repriced = service.upsert(next);
+        assertEquals(108, repriced.path("purchasePriceCny").asDouble());
+        assertEquals(108, service.get("FL2600293-2").path("taxIncludedPriceCny").asDouble());
+        next = (tools.jackson.databind.node.ObjectNode) repriced.deepCopy();
+        next.put("taxPoint", 0);
+        var zero = service.upsert(next);
+        assertEquals(100, zero.path("taxIncludedPriceCny").asDouble()); // 1% is a quotation adjustment.
+        next = (tools.jackson.databind.node.ObjectNode) zero.deepCopy();
+        next.put("sourceQuotedPriceCny", 1.005);
+        assertEquals(1.01, service.upsert(next).path("taxIncludedPriceCny").asDouble());
+    }
+
+    @Test void legacyAutoTaxRejectsMissingInvalidInputsAndStaleVersions() {
+        var input = pasted("AUTO-TAX").put("dataSource", "legacy_2026").put("legacyPriceMode", "auto_tax")
+                .put("sourceQuotedPriceCny", 110).put("taxPoint", .1);
+        for (var invalid : List.of(input.deepCopy().putNull("sourceQuotedPriceCny"),
+                input.deepCopy().put("sourceQuotedPriceCny", 0), input.deepCopy().put("sourceQuotedPriceCny", -1),
+                input.deepCopy().putNull("taxPoint"), input.deepCopy().put("taxPoint", ""),
+                input.deepCopy().put("taxPoint", -.01), input.deepCopy().put("taxPoint", 1.01))) {
+            assertEquals(422, assertThrows(AppException.class, () -> service.upsert(invalid)).status().value());
+        }
+        verify(products, never()).saveAndFlush(any());
+        var saved = service.upsert(input);
+        var stale = (tools.jackson.databind.node.ObjectNode) saved.deepCopy();
+        var oldClient = stale.deepCopy();
+        oldClient.remove("legacyPriceMode");
+        assertEquals(409, assertThrows(AppException.class, () -> service.upsert(oldClient)).status().value());
+        stale.put("_version", -1).put("sourceQuotedPriceCny", 100);
+        assertEquals(409, assertThrows(AppException.class, () -> service.upsert(stale)).status().value());
+        assertEquals(121, service.get("AUTO-TAX").path("purchasePriceCny").asDouble());
+    }
+
+    @Test void autoTaxHistoryIncludesUntaxedInputAndRateEvenIfIncludedPriceStaysEqual() {
+        var before = pasted("HISTORY").put("sourceQuotedPriceCny", 100).put("taxPoint", .1).put("taxIncludedPriceCny", 110);
+        var after = before.deepCopy().put("sourceQuotedPriceCny", 110).put("taxPoint", 0).put("legacyPriceMode", "auto_tax");
+        var changes = PurchaseHistoryService.changes(before, after);
+        assertTrue(changes.stream().anyMatch(c -> c.field().equals("sourceQuotedPriceCny") && c.label().equals("未税采购单价(CNY/件)")));
+        assertTrue(changes.stream().anyMatch(c -> c.field().equals("taxPoint")));
+        assertTrue(changes.stream().anyMatch(c -> c.field().equals("legacyPriceMode")));
+    }
+
     @Test void pastedTaxPointMustBeExplicitAndInvalidBatchNeverWrites() {
         var absent = pasted("P-MISSING"); absent.remove("taxPoint");
         for (var invalid : List.of(absent, pasted("P-NULL").putNull("taxPoint"),

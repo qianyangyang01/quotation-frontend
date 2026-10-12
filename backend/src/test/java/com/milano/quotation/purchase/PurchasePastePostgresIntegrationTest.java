@@ -61,6 +61,43 @@ class PurchasePastePostgresIntegrationTest {
     }
     long historyCount(String sku) { return products.history(sku, PageRequest.of(0, 20)).getTotalElements(); }
 
+    @Test void legacyEditorAndSparseUpdatesShareAutomaticPricingAndAudit() throws Exception {
+        var sku = sku();
+        var original = products.upsert(full(sku).put("dataSource", "legacy_2026")
+                .put("purchasePriceBasis", "tax_included").put("sourceQuotedPriceCny", 110)
+                .put("purchasePriceCny", 121).put("taxIncludedPriceCny", 121).put("taxPoint", .1));
+        var edited = (ObjectNode) original.deepCopy();
+        edited.put("legacyPriceMode", "auto_tax").put("sourceQuotedPriceCny", 100);
+        mvc.perform(post("/api/v1/purchase-products/" + sku + "/maintenance").with(csrf())
+                .contentType("application/json").content(mapper.writeValueAsString(edited)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.purchasePriceCny").value(110))
+                .andExpect(jsonPath("$.data.sourceQuotedPriceCny").value(100));
+        assertEquals(110, products.get(sku).path("taxIncludedPriceCny").asDouble());
+        var audit = products.history(sku, PageRequest.of(0, 1)).getContent().getFirst();
+        assertTrue(audit.changes().toString().contains("sourceQuotedPriceCny"));
+        assertTrue(audit.changes().toString().contains("taxIncludedPriceCny"));
+
+        List<JsonNode> patch = List.of(patch(sku, 80).put("taxPoint", .08).put("taxIncludedPriceCny", 999));
+        var preview = paste.preview(patch).rows().getFirst();
+        assertEquals(86.4, preview.effective().path("purchasePriceCny").asDouble());
+        assertTrue(preview.notices().getFirst().contains("未税采购单价"));
+        paste.confirm(confirmation(patch));
+        assertEquals(80, products.get(sku).path("sourceQuotedPriceCny").asDouble());
+        assertEquals(86.4, products.get(sku).path("taxIncludedPriceCny").asDouble());
+        assertEquals(1, paste.confirm(confirmation(patch)).unchanged().size());
+        assertThrows(AppException.class, () -> paste.preview(List.of(mapper.createObjectNode().put("sku", sku).put("taxIncludedPriceCny", 123))));
+        var rateOnly = List.<JsonNode>of(mapper.createObjectNode().put("sku", sku).put("taxPoint", 0));
+        paste.confirm(confirmation(rateOnly));
+        assertEquals(80, products.get(sku).path("purchasePriceCny").asDouble());
+
+        // No-change reads and non-pricing edits retain the established amount.
+        var unrelated = (ObjectNode) products.get(sku).deepCopy();
+        unrelated.put("notes", "只改备注");
+        products.update(sku, unrelated);
+        assertEquals(80, products.get(sku).path("purchasePriceCny").asDouble());
+        assertEquals(409, assertThrows(AppException.class, () -> products.update(sku, unrelated)).status().value());
+    }
+
     @Test void customStockNotesRoundTripWithAuditAndBlankPastePreservesExistingNote() {
         var sku = sku();
         var initial = full(sku).put("stockStatus", "定制款，7天交货");

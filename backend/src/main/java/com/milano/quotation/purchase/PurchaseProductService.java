@@ -172,9 +172,13 @@ public class PurchaseProductService {
         object.put("image",object.path("productImage").asText(""));
         validatePayload(object);
         object.put("sku", sku);
-        normalizeLegacyPrice(object);
         var existing=originalSku==null?products.findBySku(sku):Optional.of(locked(originalSku));
         if(existing.isPresent()&&requireVersionForExisting&&(!object.has("_version")||object.path("_version").asLong(-1)!=existing.get().version))throw AppException.conflict("商品 "+sku+" 已被其他用户修改，请刷新后重试");
+        if (requireVersionForExisting && operation == null && existing.isPresent()
+                && "auto_tax".equals(existing.get().payload.path("legacyPriceMode").asText())
+                && !"auto_tax".equals(object.path("legacyPriceMode").asText()))
+            throw AppException.conflict("采购价格规则已更新，请刷新页面后重新编辑未税单价和票点");
+        normalizeLegacyPrice(object);
         if(originalSku!=null&&!originalSku.equals(sku)) {
             if(products.findBySku(sku).isPresent())throw AppException.conflict("目标SKU已存在："+sku);
             var current=existing.orElseThrow();
@@ -340,6 +344,20 @@ public class PurchaseProductService {
     }
     static void normalizeLegacyPrice(ObjectNode object){
         if(!"legacy_2026".equals(object.path("dataSource").asText()))return;
+        if ("auto_tax".equals(object.path("legacyPriceMode").asText())) {
+            var price = object.path("sourceQuotedPriceCny");
+            var rate = object.path("taxPoint");
+            if (!price.isNumber() || !Double.isFinite(price.asDouble()) || price.decimalValue().signum() <= 0
+                    || !rate.isNumber() || !Double.isFinite(rate.asDouble()) || rate.decimalValue().signum() < 0
+                    || rate.decimalValue().compareTo(java.math.BigDecimal.ONE) > 0)
+                throw AppException.unprocessable("请填写大于0的未税采购单价和0～1之间的票点（0票点请明确填写0）");
+            var included = price.decimalValue().multiply(java.math.BigDecimal.ONE.add(rate.decimalValue()))
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+            object.put("taxIncludedPriceCny", included);
+            object.put("purchasePriceCny", included);
+            object.put("purchasePriceBasis", "tax_included");
+            return;
+        }
         if(positive(object,"taxIncludedPriceCny")){
             object.set("purchasePriceCny",object.get("taxIncludedPriceCny").deepCopy());object.put("purchasePriceBasis","tax_included");return;
         }

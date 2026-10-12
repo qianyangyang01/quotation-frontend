@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ShimoSyncPanel from './ShimoSyncPanel.vue'
+import { legacyUntaxedUnitPrice, legacyAutoTaxPrice, withLegacyAutoTax } from '@/data/legacyPurchasePricing'
 import type { PasteSavedCounts } from '@/services/purchasePaste'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { deletePurchaseProduct, loadPurchaseDeletionCheck, loadPurchaseProduct, loadPurchaseStats, normalizePurchaseRecord, promotePurchaseProduct, purchaseFreightChoices, purchaseQuoteBlockingMessage, purchaseSourceLabel, setPurchaseProductCatalogState, upsertPurchaseProducts, type PurchaseDeletionCheck, type PurchaseProductRecord } from '@/data/purchaseStore'
@@ -294,7 +295,22 @@ function emptyRecord() {
 function openEditor(record?: PurchaseProductRecord) {
   editingOriginalSku.value = record?.sku || ''
   editor.value = record ? normalizePurchaseRecord(JSON.parse(JSON.stringify(record)) as PurchaseProductRecord) : emptyRecord()
+  legacyEditorUnitPrice.value = legacyUntaxedUnitPrice(editor.value)
+  legacyEditorPricingDirty.value = false
   detail.value = null
+}
+const legacyEditorUnitPrice = ref<number | string | null>(null)
+const legacyEditorPricingDirty = ref(false)
+const legacyEditorIncludedPrice = computed(() => {
+  if (!editor.value) return null
+  return legacyEditorPricingDirty.value
+    ? legacyAutoTaxPrice(legacyEditorUnitPrice.value, editor.value.taxPoint)
+    : editor.value.taxIncludedPriceCny
+})
+function editorRecordForSave() {
+  const record = editor.value!
+  return record.dataSource === 'legacy_2026' && legacyEditorPricingDirty.value
+    ? withLegacyAutoTax(record, legacyEditorUnitPrice.value) : record
 }
 function requestCatalogState(record:PurchaseProductRecord,state:'ready'|'disabled'){detail.value=null;catalogAction.value={record,state}}
 async function executeCatalogState(){
@@ -326,7 +342,10 @@ async function saveEditor() {
   const wasGenerated = editor.value.skuOrigin === 'system'
   const pendingTemplate = editor.value.catalogState === 'pending_template' && Boolean(editingOriginalSku.value)
   if (pendingTemplate && sku !== editingOriginalSku.value) { toast('模板SKU转正式请使用“确认转正式”按钮'); return }
-  const record = normalizePurchaseRecord({ ...editor.value, sku, skuOrigin: wasGenerated && sku.startsWith('AUTO-') ? 'system' : 'manual' })
+  let prepared: PurchaseProductRecord
+  try { prepared = editorRecordForSave() }
+  catch (error) { toast(error instanceof Error ? error.message : '采购价格无效'); return }
+  const record = normalizePurchaseRecord({ ...prepared, sku, skuOrigin: wasGenerated && sku.startsWith('AUTO-') ? 'system' : 'manual' })
   const isNew=!editingOriginalSku.value
   const renamed=Boolean(editingOriginalSku.value&&editingOriginalSku.value!==sku)
   editorSaving.value=true
@@ -354,7 +373,7 @@ async function promoteEditor() {
   const targetSku = editor.value.sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!targetSku || /^(TESTP|TEST|DEMO|MOCK)/i.test(targetSku) || targetSku.startsWith('AUTO-')) { toast('请先把SKU修改为非 TEST/DEMO/AUTO 的真实业务SKU'); return }
   try {
-    const pending = normalizePurchaseRecord({ ...editor.value, sku: editingOriginalSku.value, catalogState: 'pending_template' })
+    const pending = normalizePurchaseRecord({ ...editorRecordForSave(), sku: editingOriginalSku.value, catalogState: 'pending_template' })
     await upsertPurchaseProducts([pending])
     const refreshed = await loadPurchaseProduct(editingOriginalSku.value)
     await promotePurchaseProduct(editingOriginalSku.value, targetSku, refreshed._version ?? -1)
@@ -393,7 +412,7 @@ const detailFields = computed(() => detail.value ? [
   ['数据来源', purchaseSourceLabel(detail.value)], ['来源工作表', detail.value.sourceSheet], ['SKU*', detail.value.sku], ['类别', detail.value.category], ['产品图片（嵌入本格）', detail.value.productImage ? '已上传' : '暂无数据'], ['实物图（嵌入本格）', detail.value.physicalImage ? '已上传' : '暂无数据'],
   ['报价人*', detail.value.quotationOwner], ['报价日期*', detail.value.quotationDate], ['尺码', detail.value.size], ['颜色', detail.value.color], ['材质', detail.value.material],
   ['克重(g)*', value(detail.value.weightG, ' g')], ['长(cm)', value(detail.value.lengthCm, ' cm')], ['宽(cm)', value(detail.value.widthCm, ' cm')], ['高(cm)', value(detail.value.heightCm, ' cm')],
-  ['起订量(件)*', value(detail.value.minOrderQty, ' 件')], ['基准采购单价(CNY/件)*', money(detail.value.purchasePriceCny)], ['阶梯价2起订量', value(detail.value.tier2MinQty, ' 件')], ['阶梯价2(CNY/件)', money(detail.value.tier2PriceCny)],
+  ['起订量(件)*', value(detail.value.minOrderQty, ' 件')], [detail.value.dataSource==='legacy_2026' ? '未税采购单价(CNY/件)*' : '基准采购单价(CNY/件)*', money(detail.value.dataSource==='legacy_2026' ? legacyUntaxedUnitPrice(detail.value) : detail.value.purchasePriceCny)], ['阶梯价2起订量', value(detail.value.tier2MinQty, ' 件')], ['阶梯价2(CNY/件)', money(detail.value.tier2PriceCny)],
   ['阶梯价3起订量', value(detail.value.tier3MinQty, ' 件')], ['阶梯价3(CNY/件)', money(detail.value.tier3PriceCny)], ...freightDetailFields(detail.value),
   ['是否包邮', detail.value.freeShipping], ['含票价(CNY/件)', money(detail.value.taxIncludedPriceCny)], ['票点', detail.value.taxPoint == null ? '暂无数据' : `${(detail.value.taxPoint * 100).toFixed(2).replace(/\.00$/, '')}%`], ['票类型', detail.value.invoiceType],
   ['是否有货', detail.value.stockStatus], ['备注', detail.value.notes], ['工厂信息', detail.value.factoryInfo], ['货源链接1', detail.value.sourceLink1], ['货源链接2', detail.value.sourceLink2], ['货源链接3', detail.value.sourceLink3],
@@ -451,7 +470,7 @@ const detailFields = computed(() => detail.value ? [
       <FobCatalogRow v-if="record.dataSource==='fob'" :record="record" :can-maintain="canMaintainFob" @detail="fobDetail=record" @maintain="openFob(record.sku)" />
       <tr v-else :data-sku="record.sku" :data-source="record.dataSource">
         <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ record.category || '暂无数据' }}</b><small class="product-sku">{{ record.sku }}</small><em class="source-badge" :class="{legacy:record.dataSource==='legacy_2026'}">{{ purchaseSourceLabel(record) }}</em><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
-        <td><div v-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
+        <td><div v-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}{{ record.legacyPriceMode==='auto_tax' && index===0 ? ' · 含票价' : '' }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
         <td class="weight-cell"><b>{{ value(record.weightG,' g') }}</b><small>{{ dimensionSummary(record) }}</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
         <td class="freight-cell"><template v-if="purchaseFreightChoices(record).length"><small v-for="choice in purchaseFreightChoices(record)" :key="choice.quantity">{{ choice.quantity }}件 {{ unitFreight(record,choice.quantity) }}</small></template><small v-else>暂无数据</small></td>
         <td class="description-cell"><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small><small>实物图：{{ record.physicalImage ? '已上传' : '暂无数据' }}</small></td>
@@ -571,12 +590,16 @@ const detailFields = computed(() => detail.value ? [
       <label>7. 尺码<input v-model="editor.size"></label><label>8. 颜色<input v-model="editor.color"></label><label>9. 材质<input v-model="editor.material"></label>
       <label>9. 克重(g)*<input v-model.number="editor.weightG" type="number" min="0" step="0.01"></label><label>10. 长(cm)<input v-model.number="editor.lengthCm" type="number" min="0" step="0.01"></label>
       <label>11. 宽(cm)<input v-model.number="editor.widthCm" type="number" min="0" step="0.01"></label><label>12. 高(cm)<input v-model.number="editor.heightCm" type="number" min="0" step="0.01"></label>
-      <label>13. 起订量(件)*<input v-model.number="editor.minOrderQty" type="number" min="1" step="1"></label><label>14. 基准采购单价(CNY/件)*<input v-model.number="editor.purchasePriceCny" type="number" min="0" step="0.01"></label>
+      <label>13. 起订量(件)*<input v-model.number="editor.minOrderQty" type="number" min="1" step="1"></label>
+      <label v-if="editor.dataSource==='legacy_2026'">14. 未税采购单价(CNY/件)*<input v-model.number="legacyEditorUnitPrice" aria-label="未税采购单价" type="number" min="0.01" step="0.01" @input="legacyEditorPricingDirty=true"><small v-if="legacyEditorUnitPrice==null">未税单价待确认，请按供应商报价补充；不会将现有含票价当作未税价。</small></label>
+      <label v-else>14. 基准采购单价(CNY/件)*<input v-model.number="editor.purchasePriceCny" type="number" min="0" step="0.01"></label>
       <label v-if="editor.dataSource!=='legacy_2026'">15. 阶梯价2起订量<input v-model.number="editor.tier2MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">16. 阶梯价2(CNY/件)<input v-model.number="editor.tier2PriceCny" type="number" min="0" step="0.01"></label>
       <label v-if="editor.dataSource!=='legacy_2026'">17. 阶梯价3起订量<input v-model.number="editor.tier3MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">18. 阶梯价3(CNY/件)<input v-model.number="editor.tier3PriceCny" type="number" min="0" step="0.01"></label>
       <label>19. 1件总运费(CNY)<input v-model.number="editor.singleFreightCny" type="number" min="0" step="0.01"></label><label>20. 10件总运费(CNY)<input v-model.number="editor.freight10Cny" type="number" min="0" step="0.01"><small>报价按此金额÷10分摊；旧数据留空时采用1件运费</small></label>
       <label>21. 100件总运费(CNY)<input v-model.number="editor.freight100Cny" type="number" min="0" step="0.01"></label><label>22. 是否包邮<select v-model="editor.freeShipping"><option value="">暂无数据</option><option>是</option><option>否</option></select></label>
-      <label>23. 含票价(CNY/件)<input v-model.number="editor.taxIncludedPriceCny" type="number" min="0" step="0.01"></label><label>24. 票点（8%填写0.08）<input v-model.number="editor.taxPoint" type="number" min="0" max="1" step="0.001"></label><label>25. 票类型<select v-model="editor.invoiceType"><option value="">暂无数据</option><option>普票</option><option>专票</option><option>不开票</option><option>收据</option><option>增值税专用发票</option><option>增值税普通发票</option></select></label>
+      <label v-if="editor.dataSource==='legacy_2026'">23. 含票价(CNY/件，自动计算)<input :value="legacyEditorIncludedPrice?.toFixed(2) ?? ''" aria-label="含票价（自动计算）" type="text" readonly placeholder="待补齐未税单价和票点"><small>未税单价 ×（1＋票点），国内运费另计；报价不重复加票点。</small><small v-if="!legacyEditorPricingDirty && editor.legacyPriceMode!=='auto_tax'">当前保留原含票价；修改未税单价或票点后自动重算。</small><small v-if="editor.taxPoint===0">0票点时含票价等于未税价；报价另按现有规则加成1%。</small></label>
+      <label v-else>23. 含票价(CNY/件)<input v-model.number="editor.taxIncludedPriceCny" type="number" min="0" step="0.01"></label>
+      <label>24. 票点（8%填写0.08）<input v-model.number="editor.taxPoint" aria-label="采购票点" type="number" min="0" max="1" step="0.001" @input="legacyEditorPricingDirty=true"></label><label>25. 票类型<select v-model="editor.invoiceType"><option value="">暂无数据</option><option>普票</option><option>专票</option><option>不开票</option><option>收据</option><option>增值税专用发票</option><option>增值税普通发票</option></select></label>
       <label>26. 是否有货（选填）<input v-model="editor.stockStatus" list="purchase-stock-options" placeholder="可留空，或填写现货、预订、交期等说明"><datalist id="purchase-stock-options"><option value="有货" /><option value="无货" /><option value="待确认" /><option value="定制款" /></datalist><small>仅供参考，不影响报价资格</small></label><label class="wide">27. 备注<textarea v-model="editor.notes"></textarea></label>
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>

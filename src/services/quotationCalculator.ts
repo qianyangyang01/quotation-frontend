@@ -97,7 +97,7 @@ export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: 
   }
   const finalPrice = roundCny(tier?.unitPriceCny ?? record.purchasePriceCny ?? 0)
   const legacyNeedsTax = legacyQuotedTier || record.purchasePriceBasis === 'quoted'
-    || (originalPrice != null && finalPrice === roundCny(originalPrice))
+    || (record.legacyPriceMode !== 'auto_tax' && originalPrice != null && finalPrice === roundCny(originalPrice))
   if (legacy && record.taxPoint != null && legacyNeedsTax) {
     const invoiceMultiplier = decimal(record.taxPoint).plus(1).toNumber()
     return {
