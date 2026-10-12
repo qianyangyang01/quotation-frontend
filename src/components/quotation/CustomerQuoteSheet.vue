@@ -44,6 +44,7 @@ const props = defineProps<{
   hideBackToTop?: boolean
   quantityHelp?: string
   preservePricesWhilePending?: boolean
+  batchAverage?: boolean
 }>()
 const emit = defineEmits<{ removeRow: [key: string]; quantitiesChange: [quantities: number[]] }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
@@ -297,6 +298,25 @@ function addAverage(plan: AveragePlan) {
   averageNotice.value = ''
   invalidate()
 }
+function addBatchAverages(plans: AveragePlan[]) {
+  const keys = new Set(plans.map(plan => `average:${plan.id}`))
+  const rows = orderedRowsSheet.value.rows.filter(row => !keys.has(row.key))
+  const pending = new Map<string, string[]>()
+  for (const plan of plans) {
+    const sku = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)?.sku
+    if (sku) pending.set(sku, [...(pending.get(sku) ?? []), `average:${plan.id}`])
+    for (const key of Object.keys(averageInputs.value)) if (key.startsWith(plan.id + ':')) delete averageInputs.value[key]
+    for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(plan.id + ':')) delete averagePriceErrors.value[key]
+  }
+  rowOrder.value = rows.flatMap(row => {
+    const before = pending.get(row.sku ?? '') ?? []
+    pending.delete(row.sku ?? '')
+    return [...before, row.key]
+  })
+  averagePlans.value = [...averagePlans.value.filter(plan => !keys.has(`average:${plan.id}`)), ...plans]
+  averageNotice.value = `已为 ${plans.length} 个 SKU 生成平均行，分别放在各 SKU 的第一行`
+  invalidate()
+}
 function removeAverage(id: string) { for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(id + ':')) delete averagePriceErrors.value[key]; averagePlans.value = averagePlans.value.filter(plan => plan.id !== id); invalidate() }
 function sourceFor(key: string) { return props.rows.find(row => quoteSheetRowKey(row) === key)! }
 function compactSourceLabel(key: string) {
@@ -339,6 +359,10 @@ const rowSearch = ref(''), rowPage = ref(0), rowPageSize = ref(12)
 const filteredEditorRows = computed(() => editorSheet.value.rows.filter(row => !props.paginated || (row.sku || '').toUpperCase().includes(rowSearch.value.trim().toUpperCase())))
 const rowPageCount = computed(() => Math.max(1, Math.ceil(filteredEditorRows.value.length / rowPageSize.value)))
 const displayedEditorRows = computed(() => props.paginated ? filteredEditorRows.value.slice(rowPage.value * rowPageSize.value, (rowPage.value + 1) * rowPageSize.value) : editorSheet.value.rows)
+const skuTones = computed(() => new Map([...new Set(props.rows.map(row => row.sku))].map((sku, index) => [sku, index % 2])))
+function batchRowClass(row: { sku?: string; averageId?: string }) {
+  return props.batchAverage ? (skuTones.value.get(row.sku) === 1 ? 'sheet-sku-green' : 'sheet-sku-blue') : ''
+}
 watch([rowSearch, rowPageSize], () => { rowPage.value = 0 })
 watch(rowPageCount, count => { rowPage.value = Math.min(rowPage.value, count - 1) })
 const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
@@ -704,7 +728,7 @@ onBeforeUnmount(() => {
     <QuoteBackToTop v-if="!hideBackToTop" />
     <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
-    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" /></div>
+    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :batch="batchAverage" :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @add-batch="addBatchAverages" @remove="removeAverage" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
     <p v-if="photoLoading || photoSaving" class="sheet-pending" role="status">{{ photoSaving ? '正在保存报价单图片…' : '正在读取报价单图片…' }}</p>
     <p v-if="photoError" class="sheet-message failed" role="alert">{{ photoError }} <button type="button" @click="reloadSavedPhotos">重试读取图片</button></p>
@@ -793,7 +817,7 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in displayedEditorRows" :key="row.key" :class="{ 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
+            <tr v-for="(row, index) in displayedEditorRows" :key="row.key" :class="{ [batchRowClass(row)]: batchAverage, 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
               <template v-for="group in visibleGroups" :key="group.key">
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
@@ -888,4 +912,12 @@ onBeforeUnmount(() => {
 @media(max-width:1100px){.sheet-metadata{grid-template-columns:repeat(2,minmax(0,1fr))}.sheet-row-tools .sheet-actions{flex:1 1 100%;justify-content:flex-end}}
 @media(max-width:850px){.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:8px}.sheet-pages{gap:8px}.sheet-controls{position:static}.sheet-photos{margin-left:0}.sheet-actions{margin-left:0}.sheet-row-tools .sheet-actions{justify-content:flex-start}}
 @media(max-width:480px){.sheet-metadata{grid-template-columns:minmax(0,1fr)}.sheet-visibility{gap:10px}}
+.sheet-editor tr.sheet-sku-blue td{background:#f3f7fc!important}
+.sheet-editor tr.sheet-sku-green td{background:#f1f8f4!important}
+.sheet-editor tr.sheet-sku-blue.sheet-average-row td{background:#dceafb!important;border-top:2px solid #799dc7!important;border-bottom:1px solid #bdd2ec!important;color:#284c74}
+.sheet-editor tr.sheet-sku-green.sheet-average-row td{background:#dceee3!important;border-top:2px solid #79a58a!important;border-bottom:1px solid #bed8c9!important;color:#2c6342}
+.sheet-editor tr.sheet-sku-blue.sheet-average-row input{color:#284c74!important}
+.sheet-editor tr.sheet-sku-green.sheet-average-row input{color:#2c6342!important}
+.sheet-editor tr.sheet-sku-blue .sheet-sku{border-left:3px solid #799dc7!important;font-weight:600}
+.sheet-editor tr.sheet-sku-green .sheet-sku{border-left:3px solid #79a58a!important;font-weight:600}
 </style>

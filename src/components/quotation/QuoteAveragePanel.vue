@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Decimal from 'decimal.js'
+import { batchAveragePlans } from '@/data/batchQuoteAverage'
 import { averagePrices, averageScope, australiaAverageZone, type AveragePlan } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey, quoteSheetProviderName, type QuoteSheetSourceRow, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 
-const props = defineProps<{ rows: QuoteSheetSourceRow[]; system: CustomerQuoteSheet; quantities: number[]; plans: AveragePlan[]; disabled: boolean }>()
-const emit = defineEmits<{ add: [plan: AveragePlan]; remove: [id: string] }>()
+const props = defineProps<{ rows: QuoteSheetSourceRow[]; system: CustomerQuoteSheet; quantities: number[]; plans: AveragePlan[]; disabled: boolean; batch?: boolean }>()
+const emit = defineEmits<{ add: [plan: AveragePlan]; addBatch: [plans: AveragePlan[]]; remove: [id: string] }>()
 const scope = ref(''), mode = ref<'equal' | 'weighted'>('equal'), display = ref<'summary' | 'details'>('details')
 const weights = ref<Record<string, string>>({}), chosen = ref<string[]>([])
 const chosenZones = ref<number[]>([])
@@ -27,7 +28,7 @@ function toggleZone(number: number, checked: boolean) {
   error.value = ''
 }
 const selected = computed(() => candidates.value.filter(row => row.available !== false && chosen.value.includes(quoteSheetRowKey(row))))
-function changeScope() { chosen.value = []; chosenZones.value = []; weights.value = {}; error.value = '' }
+function changeScope() { editingId.value = ''; chosen.value = []; chosenZones.value = []; weights.value = {}; error.value = '' }
 function distribute() {
   if (!selected.value.length) return
   const count = selected.value.length, cents = Math.floor(10000 / count)
@@ -62,7 +63,7 @@ function remove(id: string) { if (editingId.value === id) newPlan(); emit('remov
 function generate() {
   error.value = draft.value.error
   if (error.value || props.disabled) return
-  if (!editingId.value && props.plans.length >= 20) { error.value = '每张报价单最多 20 个综合方案'; return }
+  if (!props.batch && !editingId.value && props.plans.length >= 20) { error.value = '每张报价单最多 20 个综合方案'; return }
   if (!provider.value.trim() || /[^\x20-\x7e]/.test(provider.value) || /[^\x20-\x7e]/.test(shippingTime.value)) { error.value = '方案名称和运输时效请填写英文'; return }
   const id = editingId.value || crypto.randomUUID()
   const old = props.plans.find(plan => plan.id === id)
@@ -71,7 +72,13 @@ function generate() {
     return previous && (mode.value === 'equal' || previous.weight === member.weight) && props.quantities.every((q, i) => previous.sourcePrices[old.quantities.indexOf(q)] === member.sourcePrices[i])
   })
   const prices = sameCalculation ? props.quantities.map(q => old!.prices[old!.quantities.indexOf(q)] ?? null) : [...draft.value.prices]
-  emit('add', { id, mode: mode.value, display: display.value, provider: provider.value.trim(), shippingTime: shippingTime.value.trim(), quantities: [...props.quantities], members: draft.value.members, systemPrices: draft.value.prices, prices })
+  const plan: AveragePlan = { id, mode: mode.value, display: display.value, provider: provider.value.trim(), shippingTime: shippingTime.value.trim(), quantities: [...props.quantities], members: draft.value.members, systemPrices: draft.value.prices, prices }
+  if (props.batch && !editingId.value) {
+    try { emit('addBatch', batchAveragePlans(plan, props.rows, props.system, props.plans)) }
+    catch (e) { error.value = (e as Error).message }
+    return
+  }
+  emit('add', plan)
   editingId.value = id
 }
 </script>
@@ -88,7 +95,7 @@ function generate() {
         </label>
       </div>
     </fieldset>
-    <p class="average-selection-count" role="status">已加入 {{ candidates.length }} 条渠道 · 已勾选 {{ selected.length }} 条参与平均</p>
+    <p v-if="batch" class="average-hint">渠道与权重应用到整批 SKU，各自计算平均价；平均行置于每个 SKU 的第一行。</p><p class="average-selection-count" role="status">已加入 {{ candidates.length }} 条渠道 · 已勾选 {{ selected.length }} 条参与平均</p>
     <div class="average-channels"><div v-for="row in candidates" :key="quoteSheetRowKey(row)" class="average-channel"><label><input v-model="chosen" type="checkbox" :disabled="row.available === false" :value="quoteSheetRowKey(row)" :aria-label="`参与平均：${sourceLabel(row)}`"><span>{{ quoteSheetProviderName(row.carrier) || row.carrier }}<small>{{ sourceLabel(row) }}<template v-if="row.available === false"> · 暂不可用</template></small></span></label><label v-if="mode === 'weighted' && chosen.includes(quoteSheetRowKey(row))"><input v-model="weights[quoteSheetRowKey(row)]" class="average-weight" type="number" min="0.01" max="100" step="0.01" :aria-label="`${sourceLabel(row)} 权重`">%</label></div></div>
     <div class="average-options"><strong>客户展示</strong><label><input v-model="display" type="radio" value="summary">仅综合报价</label><label><input v-model="display" type="radio" value="details">综合报价＋明细</label><label>方案名称<input v-model="provider" maxlength="80" aria-label="综合报价方案名称"></label><label>运输时效<input v-model="shippingTime" maxlength="80" placeholder="手动确认，例如 7-12 working days" aria-label="综合报价运输时效"></label><button class="average-generate" type="button" :disabled="!!draft.error || !!system.priceIssues?.length" @click="generate">{{ editingId ? '应用修改' : '生成平均行' }}</button><button v-if="editingId" type="button" @click="newPlan">新增方案</button></div>
     <p v-if="draft.error" role="status" class="average-hint">{{ draft.error }}</p><p v-else class="average-result">计算结果：<span v-for="(price, i) in draft.prices" :key="i">{{ quantities[i] }} 数量：${{ price!.toFixed(2) }} </span></p>

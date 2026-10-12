@@ -15,8 +15,7 @@ export function item(sku:string):BatchSingleItem {
  const snapshot={quantities:[1,2,3],rows:options.map(option=>({optionId:option.id,prices:[option.quote1Usd,option.quote2Usd,option.quote3Usd]}))}
  return {input:{quoteMode:'single',primarySku:sku,customerName:'客户',customerGrade:'S',exchangeRate:6.7,commissionThreshold:1,quoteOptions:options,customerQuote:snapshot,systemQuantityQuotes:snapshot,weightSnapshot:buildQuotationWeightSnapshot([{sku,quantityPerSet:1,baseWeightKg:0.1}],0,[1,2,3])},conditions:{},sheet:{agent:'QA',date:'12 Oct 2026',quantityLabels:['1 pc','2 pcs','3 pcs'],issues:[],rows:options.map((option,i)=>({key:option.id,sku,number:i+1,country:'United States',provider:'4PX',shippingTime:'7-12 working days',prices:snapshot.rows[i]!.prices,sourceDescription:''}))}} as unknown as BatchSingleItem
 }
-async function mount(calculateItem?: (sku:string,q:number[])=>Promise<BatchSingleItem>) {
- const documentInput=mergeBatchSingle([item('SKU-A'),item('SKU-B')])
+async function mount(calculateItem?: (sku:string,q:number[])=>Promise<BatchSingleItem>, documentInput=mergeBatchSingle([item('SKU-A'),item('SKU-B')])) {
  const host=document.createElement('div');document.body.append(host);app=createApp(Editor,{document:documentInput,calculateItem});editor=app.mount(host) as unknown as typeof editor;await nextTick();return documentInput
 }
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.restoreAllMocks()})
@@ -60,7 +59,7 @@ it('blocks save after quantity lookup failure and supports a retry without clear
  await expect(editor.capture()).rejects.toThrow('SKU-B 渠道查询超时')
  expect(button('重试数量计算')).toBeTruthy()
 })
-it('averages channels within one SKU and restores its saved average plan',async()=>{
+it('generates a summary for every SKU in one click and keeps saved ownership isolated',async()=>{
  await mount();button('渠道平均报价').click();await nextTick()
  expect(document.querySelectorAll('[aria-label="平均报价国家"] option')).toHaveLength(3)
  const members=[...document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')]
@@ -69,12 +68,66 @@ it('averages channels within one SKU and restores its saved average plan',async(
  button('生成平均行').click();await nextTick()
  const saved=await editor.capture()
  expect(saved.items[0]!.input.customerQuote!.averagePlans).toHaveLength(1)
- expect(saved.items[1]!.input.customerQuote!.averagePlans).toHaveLength(0)
+ expect(saved.items[1]!.input.customerQuote!.averagePlans).toHaveLength(1)
+ expect(saved.items[1]!.sheet.rows).toHaveLength(1)
  expect(saved.items[0]!.sheet.rows).toHaveLength(1)
  expect(saved.items[0]!.sheet.rows[0]!.prices[0]).toBe(5.5)
  expect(saved.items[0]!.input.customerQuote!.averagePlans![0]!.members.map(member=>member.optionId)).toEqual(['a','b'])
  const restored=batchSheetEditorSource(saved)
  expect(restored.initialQuote.averagePlans![0]!.members.every(member=>member.optionId.includes('SKU-A'))).toBe(true)
+})
+
+async function generateAverages() {
+ button('渠道平均报价').click();await nextTick()
+ for(const member of document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')) {member.click();await nextTick()}
+ button('生成平均行').click();await nextTick()
+}
+it('uses each SKU price, puts averages first, and preserves order and colors after reopening',async()=>{
+ const a=item('SKU-A'),b=item('SKU-B')
+ b.input.systemQuantityQuotes=JSON.parse(JSON.stringify(b.input.systemQuantityQuotes))
+ b.input.systemQuantityQuotes!.rows.forEach(row=>{row.prices=row.prices.map(price=>price! * 2)})
+ b.input.quoteOptions!.forEach(option=>{option.quote1Usd! *= 2;option.quote2Usd! *= 2;option.quote3Usd! *= 2})
+ const input=mergeBatchSingle([a,b]),before=JSON.stringify(input)
+ await mount(undefined,input);await generateAverages()
+ const saved=await editor.capture()
+ expect(saved.items.map(item=>item.sheet.rows[0]!.prices)).toEqual([[5.5,10.5,15.5],[11,21,31]])
+ expect(saved.sheet.rows.map(row=>[row.sku,!!row.averageId])).toEqual([
+  ['SKU-A',true],['SKU-A',false],['SKU-A',false],['SKU-B',true],['SKU-B',false],['SKU-B',false],
+ ])
+ expect(saved.items.every(item=>item.input.customerQuote!.rowOrder![0]!.startsWith('average:'))).toBe(true)
+ expect(JSON.stringify(input)).toBe(before)
+ app.unmount();document.body.innerHTML='';await mount(undefined,saved)
+ const rows=[...document.querySelectorAll('.sheet-editor tbody tr')]
+ expect(rows.map(row=>row.classList.contains('sheet-average-row'))).toEqual([true,false,false,true,false,false])
+ expect(rows.slice(0,3).every(row=>row.classList.contains('sheet-sku-blue'))).toBe(true)
+ expect(rows.slice(3).every(row=>row.classList.contains('sheet-sku-green'))).toBe(true)
+ const reopened=await editor.capture()
+ expect(reopened.sheet.rows.map(row=>[row.sku,row.prices])).toEqual(saved.sheet.rows.map(row=>[row.sku,row.prices]))
+})
+it('generates all 50 SKUs despite pagination and filtering and does not duplicate repeat generations',async()=>{
+ await mount(undefined,mergeBatchSingle(Array.from({length:50},(_,i)=>item(`SKU-${i}`))))
+ const search=document.querySelector<HTMLInputElement>('[aria-label="搜索报价单 SKU"]')!
+ search.value='SKU-49';search.dispatchEvent(new Event('input'));await nextTick()
+ await generateAverages()
+ expect(document.querySelectorAll('.sheet-editor tbody tr')).toHaveLength(3)
+ const first=await editor.capture()
+ expect(first.sheet.rows).toHaveLength(150)
+ expect(first.items.every(item=>item.input.customerQuote!.averagePlans!.length===1 && !!item.sheet.rows[0]!.averageId)).toBe(true)
+ button('生成平均行').click();await nextTick()
+ const repeated=await editor.capture()
+ expect(repeated.items.map(item=>item.input.customerQuote!.averagePlans)).toEqual(first.items.map(item=>item.input.customerQuote!.averagePlans))
+ expect(repeated.sheet.rows).toHaveLength(150)
+})
+it('reports a missing route and does not leave a partially generated batch',async()=>{
+ const a=item('SKU-A'),b=item('SKU-B')
+ b.input.quoteOptions=b.input.quoteOptions!.slice(0,1)
+ b.input.customerQuote!.rows=b.input.customerQuote!.rows.slice(0,1)
+ b.sheet.rows=b.sheet.rows.slice(0,1)
+ await mount(undefined,mergeBatchSingle([a,b]));await generateAverages()
+ expect(document.body.textContent).toContain('SKU-B 缺少所选渠道')
+ expect(document.querySelectorAll('.sheet-average-row')).toHaveLength(0)
+ const saved=await editor.capture()
+ expect(saved.items.every(item=>!item.input.customerQuote!.averagePlans!.length)).toBe(true)
 })
 
 it('rejects a changed pricing basis instead of mixing new purchase prices with the existing sheet', async () => {
