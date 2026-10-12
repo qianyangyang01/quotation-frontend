@@ -14,6 +14,19 @@ import type { BundleQuoteItem, QuotationProduct } from './types'
 
 let app: App | undefined
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; clearPricingTestPermissions() })
+
+it('does not leak the new legacy untaxed price or ticket point after permission revocation',async()=>{
+  setPricingTestPermissions()
+  const display={label:'未税单价',unitPrice:110,effectiveUnitPrice:121,detail:'票点 10% · 含票价 ¥121.00/件',range:'2件起订'}
+  const host=document.createElement('div');document.body.append(host)
+  app=createApp({render:()=>h('div',[
+    h(CostWeightPanel,{product:{...product,purchaseDataSource:'legacy_2026',purchase:121,purchaseDisplay:display},baseWeight:.2,packagingWeight:.004,chargeWeight:.204,domesticFreight:0,purchaseTierLabel:''}),
+    h(BundleProductCard,{items:[{...bundle,purchaseDataSource:'legacy_2026',purchaseUnitPrice:121,purchaseDisplay:display}],purchaseCost:121,baseWeight:.2,packagingWeight:.004,totalWeight:.204,domesticFreight:0}),
+  ])});app.mount(host);await nextTick()
+  expect(host.innerHTML).toContain('110.00');expect(host.innerHTML).toContain('121.00')
+  authState.permissions=['quote'];await nextTick()
+  for(const value of ['110.00','121.00','票点 10%','未税单价'])expect(host.innerHTML).not.toContain(value)
+})
 const product = { sku: 'SECRET-SKU', netWeight: .2, quantity: 1, purchase: 731.29, purchaseBaseUnitPrice: 700,
   purchaseFreightPerUnit: 12.37, purchaseInvoiceRatePercent: 6, purchaseInvoiceTaxApplied: true,
   weightSource: 'purchase', freight: 83.46, country: '美国', channel: '专线', rule: '普货' } as QuotationProduct

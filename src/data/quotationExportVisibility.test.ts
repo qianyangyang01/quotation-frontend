@@ -7,6 +7,7 @@ import { quotationRecordQuoteOnlyLayout } from './quotationRecordQuoteOnlyLayout
 
 it('omits confidential columns and values from CSV and both clipboard formats, preserving snapshots', () => {
   const record = normalizeQuotationRecord({ id: 'private', no: 'QT-PRIVATE', primarySku: 'SKU-1', customerName: '客户甲', customerGrade: 'S',
+    createdAt: '2026-10-12T00:00:00.000Z', updatedAt: '2026-10-12T00:00:00.000Z',
     purchaseUnitPriceCny: 731.29, domesticFreightPerUnitCny: 12.37, totalCostCny: 827.12, systemQuoteUsd: 150, systemQuoteCny: 1000,
     quoteOptions: [{ id: 'a', country: '美国', carrier: '顺丰', channel: '专线', rule: '普货', quote1Usd: 150, quote2Usd: null, quote3Usd: null, quoteCustomUsd: null,
       freightCny: 83.46, totalCostCny: 827.12, profitCny: 172.88, eta: '5-8天' }] })!

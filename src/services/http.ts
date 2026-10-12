@@ -55,7 +55,9 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   // Bound every network stage that can hold quotation initialization/submission open.
   // Import/export requests have separate, deliberately longer deadlines.
   const batchMutation = method === 'POST' && /^\/batch-single-quotations(?:\/[^/]+\/(?:corrections|review))?$/.test(path)
-  const bounded = batchMutation || /^\/(quotation-readiness|quotation-drafts\/mine\/state)(?:[?]|$)/.test(path)
+  const purchaseMutation = (method === 'PUT' && path === '/purchase-products/batch')
+    || (method === 'POST' && /^\/purchase-products\/[^/]+\/(?:maintenance|promote)$/.test(path))
+  const bounded = purchaseMutation || batchMutation || /^\/(quotation-readiness|quotation-drafts\/mine\/state)(?:[?]|$)/.test(path)
     || (method === 'POST' && /^\/quotations(?:\/[^/]+\/resubmit)?$/.test(path))
     || /^\/quotations\/[^/]+\/fob-corrections(?:\/|$)/.test(path)
     || path === '/quotations/fob/preview'
@@ -79,9 +81,10 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     return result.data
   } catch (error) {
     if (deadline?.signal.aborted && !init.signal?.aborted) {
-      const message = method === 'GET' ? '报价资料读取超时，请检查网络后重试，当前输入已保留。'
+      const message = purchaseMutation ? '请求超时，保存结果尚未确认，当前输入已保留。请先重新查询采购资料，核对后再重试。'
+        : method === 'GET' ? '报价资料读取超时，请检查网络后重试，当前输入已保留。'
         : '请求超时，保存结果尚未确认，当前输入已保留。请先查看报价记录；如需重试，请保持内容不变，勿刷新页面。'
-      throw new ApiError(message, 0, 'QUOTATION_REQUEST_TIMEOUT', headers.get('X-Request-Id') || 'unknown')
+      throw new ApiError(message, 0, purchaseMutation ? 'PURCHASE_REQUEST_TIMEOUT' : 'QUOTATION_REQUEST_TIMEOUT', headers.get('X-Request-Id') || 'unknown')
     }
     throw error
   } finally {
