@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="shared-source-layout-2026.10.09-v3";
+    public static final String VERSION="shared-source-layout-2026.10.12-v4";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -739,8 +739,7 @@ public class LogisticsSourceParser {
             if(rowText.contains("邮编分区")||rowText.contains("对应邮编"))reference=true;
             if(reference){if(detect(source,r,provider)!=null)reference=false;else{source.referenceRows.add(r);continue;}}
             if(rowText.contains("试算重量")&&rowText.contains("试算运费")){example=true;columns=null;continue;}
-            boolean auxiliaryTitle=source.rowTexts(r).stream().anyMatch(t->t.length()<80&&(t.contains("重派费用表")||t.contains("重派收费")));
-            if((auxiliaryTitle||(rowText.length()<160&&rowText.contains("重量")&&rowText.matches("(?s).*(重派费|附加费).*")))&&detect(source,r,provider)==null) {
+            if(source.auxiliaryHeading(r)&&detect(source,r,provider)==null) {
                 if(!rowText.matches("(?s).*(运费/kg|运费/KG|结算运费|首重).*")){auxiliary=r;example=false;columns=null;continue;}
             }
             if(provider.equals("极通环球")) {
@@ -1654,10 +1653,20 @@ public class LogisticsSourceParser {
         boolean rowEmpty(int r){return rowTexts(r).stream().allMatch(String::isBlank);}
         List<String> rowTexts(int r){var row=sheet.getRow(r);if(row==null)return List.of();var values=new ArrayList<String>();for(var c:row)values.add(parsingText(c));return values;}
         ObjectNode rawRow(int r){var result=mapper.createObjectNode();var row=sheet.getRow(r);if(row!=null)for(var c:row){var v=formatted.computeIfAbsent(c,formatter::formatCellValue);if(!v.isBlank())result.put(c.getAddress().formatAsString(),v);}return result;}
+        boolean auxiliaryHeading(int r){
+            // Fee words in a price row's remarks do not start a new table. Require a
+            // standalone title or separate weight/fee column labels, not joined prose.
+            var values=rowTexts(r).stream().map(LogisticsSourceParser::clean).filter(t->!t.isBlank()).toList();
+            if(values.size()==1&&values.get(0).matches("[^:：;；。0-9]{0,30}重派(?:费用表|收费(?:表|标准)?)[：:]?"))return true;
+            boolean weight=values.stream().anyMatch(t->t.matches("(?i)(?:计费)?重量(?:段|区间|范围)?(?:\\((?:kg|g|公斤|克)\\))?"));
+            boolean fee=values.stream().anyMatch(t->t.matches("(?:重派费(?:用)?|附加费|操作费)(?:\\([^)]{1,24}\\)|[/／].{1,16})?"));
+            return weight&&fee;
+        }
         int auxiliaryHeader(int r){
             for(int h=r-1;h>=Math.max(0,r-15);h--){
+                if(parsedRows.contains(h))continue;
                 var text=String.join("|",rowTexts(h));
-                if(text.contains("重量")&&text.matches("(?s).*(重派费|附加费|操作费).*")) {
+                if(auxiliaryHeading(h)) {
                     if(text.matches("(?s).*(运费|首重|结算).*"))return -1;
                     return h;
                 }
