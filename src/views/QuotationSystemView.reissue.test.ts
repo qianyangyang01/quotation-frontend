@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createApp, nextTick, type App } from 'vue'
+import { createApp, nextTick, h, reactive, type App } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import View from './QuotationSystemView.vue'
 import { onBeforeRouteLeave } from 'vue-router'
@@ -7,6 +7,7 @@ import { api } from '@/services/http'
 import { clearFinanceSettingsCache } from '@/services/financeSettings'
 import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import type { QuotationMatrixRow } from '@/components/quotation/types'
+import type { QuotationDraftPayload } from '@/services/quotationDrafts'
 import { authState } from '@/data/authStore'
 import { loadLastQuotationCustomer, rememberQuotationCustomer } from '@/data/lastQuotationCustomer'
 
@@ -35,9 +36,10 @@ const source = { id: 'original', no: 'QT-OLD', customerName: '原客户', primar
 const oldDraft = { schemaVersion: 2, quoteMode: 'single', customerName: '未完成客户', skuSearch: '', logisticsAttribute: '普货' }
 let app: App
 let host: HTMLDivElement
-let state: { flushDraft: () => Promise<void>; persistQuotation: (input: never) => Promise<unknown>; beforeWindowUnload: (event: BeforeUnloadEvent) => void; draftVersion: number; draftReady: boolean; draftStatus: string; reissueSource: string; customerName: string; products: Array<{ sku: string; purchase: number }>; modeSelections: { common: unknown[] }; searchChannelCountries: (query: string) => Promise<string[]>;
+let state: { flushDraft: () => Promise<void>; persistQuotation: (input: never) => Promise<unknown>; beforeWindowUnload: (event: BeforeUnloadEvent) => void; draftVersion: number; draftReady: boolean; draftStatus: string; reissueSource: string; customerName: string; products: Array<{ sku: string; purchase: number }>; batchSampleSku: string; batchSampleError: string; displayedSaveBlockReason: string; selectBatchSample: (sku: string) => Promise<void>; restoreBatchSample: () => Promise<void>; modeSelections: { common: unknown[] }; searchChannelCountries: (query: string) => Promise<string[]>;
   quoteMatrixMode: 'common' | 'template'; logisticsLoadState: string; commonQuoteRows: QuotationMatrixRow[];
-  templateSelectionState: 'loading' | 'ready' | 'error'; templateSaveBlockReason: string; attemptSave: () => Promise<void> }
+  draftPayload: () => QuotationDraftPayload; calculateBatchItem: (sku: string, conditions: QuotationDraftPayload, quantities: number[]) => Promise<unknown>; templateSelectionState: 'loading' | 'ready' | 'error'; templateSaveBlockReason: string; attemptSave: () => Promise<void> }
+let batchProps = reactive({ batchCapture: false, batchSkus: ['BK100', 'BK200'], batchSize: 2 })
 let purchaseFailure = false
 let purchaseOverride: Record<string, unknown> = {}
 let sourceFailure = false
@@ -54,9 +56,9 @@ async function mount(existing: boolean, withdrawn = false, batchCapture = false)
     if (path === '/quotation-templates') return []
     if (path === '/quotations/original') { if (sourceFailure) throw new Error('无权读取原报价'); return source }
     if (path === '/quotation-drafts/mine/state') return { exists: existing, version: existing ? 7 : -1, payload: existing ? oldDraft : null, ...(withdrawn ? { sourceQuote: { id: 'original', no: 'QT-OLD', version: 8 } } : {}) }
-    if (path === '/purchase-products/BK100') {
+    if (path === '/purchase-products/BK100' || path === '/purchase-products/BK200') {
       if (purchaseFailure) throw new Error('采购资料读取失败')
-      return { sku: 'BK100', category: '日用品', catalogState: 'ready', weightG: 50, minOrderQty: 1, purchasePriceCny: 12, singleFreightCny: 0, taxPoint: 0, ...purchaseOverride }
+      return { sku: path.endsWith('BK200') ? 'BK200' : 'BK100', category: '日用品', catalogState: 'ready', weightG: 50, minOrderQty: 1, purchasePriceCny: 12, singleFreightCny: 0, taxPoint: 0, ...purchaseOverride }
     }
     throw new Error(`Unexpected API: ${path}`)
   })
@@ -65,9 +67,10 @@ async function mount(existing: boolean, withdrawn = false, batchCapture = false)
   vi.spyOn(api, 'post').mockRejectedValue(new Error('Unexpected quotation creation'))
   vi.spyOn(api, 'patch').mockRejectedValue(new Error('Unexpected original update'))
   host = document.createElement('div'); document.body.append(host)
-  app = createApp(View, { batchCapture })
+  batchProps = reactive({ batchCapture, batchSkus: ['BK100', 'BK200'], batchSize: 2 })
+  app = createApp({ render: () => h(View, batchProps) })
   const vm = app.mount(host)
-  state = (vm.$ as unknown as { setupState: typeof state }).setupState
+  state = (vm.$.subTree.component as unknown as { setupState: typeof state }).setupState
   await vi.waitFor(() => expect(state.draftReady || state.draftStatus === 'error').toBe(true))
 }
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
@@ -337,4 +340,70 @@ it('keeps a batch calculator out of ordinary reissue, withdrawal drafts and pers
   expect(api.patch).not.toHaveBeenCalled()
   expect(api.delete).not.toHaveBeenCalled()
   expect(loadLastQuotationCustomer('employee-a')?.name).toBe('普通客户')
+})
+
+ it('does not wait for an inactive restored template when calculating the next quick-mode batch SKU', async () => {
+  await mount(false, false, true)
+  purchaseOverride = { invoiceType: '普票' }
+  state.quoteMatrixMode = 'common'
+  state.templateSelectionState = 'loading'
+  await nextTick()
+  const result = state.calculateBatchItem('BK100', state.draftPayload(), [1, 2, 3]).catch(error => error)
+  let settled = false
+  void result.then(() => { settled = true })
+  await vi.waitFor(() => expect(settled).toBe(true), { timeout: 1500 })
+  expect(state.templateSelectionState).toBe('loading')
+  // The real restore path finishes and reaches save validation (fixture has no routes).
+  expect(loadPublishedLogisticsRules).toHaveBeenCalled()
+  expect(await result).toBeInstanceOf(Error)
+  expect((await result as Error).message).not.toContain('超时')
+  expect(api.post).not.toHaveBeenCalled()
+ })
+
+
+it('switches batch samples without changing public conditions or persisting, then restores the chosen sample after calculations', async () => {
+  await mount(false, false, true)
+  purchaseOverride = { invoiceType: '普票' }
+  state.customerName = '批量测试客户'
+  await state.selectBatchSample('BK200')
+  expect(state.batchSampleSku).toBe('BK200')
+  expect(state.products[0]?.sku).toBe('BK200')
+  expect(host.textContent).toContain('选择公共报价渠道')
+  expect(host.querySelector('[aria-label="当前样例 SKU"]')).not.toBeNull()
+  const conditions = state.draftPayload()
+  await state.calculateBatchItem('BK100', conditions, [1, 2, 3]).catch(() => undefined)
+  expect(state.products[0]?.sku).toBe('BK100')
+  expect(state.batchSampleSku).toBe('BK200')
+  await state.restoreBatchSample()
+  expect(state.products[0]?.sku).toBe('BK200')
+  expect(state.customerName).toBe('批量测试客户')
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled()
+})
+
+it('blocks stale sample prices on failure, retries and replaces a deselected sample', async () => {
+  await mount(false, false, true)
+  purchaseOverride = { invoiceType: '普票' }
+  await state.selectBatchSample('BK100')
+  purchaseFailure = true
+  await state.selectBatchSample('BK200')
+  expect(state.batchSampleError).toContain('加载失败')
+  expect(state.displayedSaveBlockReason).toContain('加载失败')
+  purchaseFailure = false
+  await state.selectBatchSample('BK200')
+  expect(state.batchSampleError).toBe('')
+  expect(state.products[0]?.sku).toBe('BK200')
+  batchProps.batchSkus = ['BK100']
+  await vi.waitFor(() => expect(state.products[0]?.sku).toBe('BK100'))
+  batchProps.batchSkus = []
+  await nextTick()
+  expect(state.displayedSaveBlockReason).toContain('请先勾选')
+})
+
+it('does not enable sample switching or batch labels for ordinary quotation', async () => {
+  await mount(false)
+  expect(host.querySelector('[aria-label="当前样例 SKU"]')).toBeNull()
+  expect(host.textContent).not.toContain('选择公共报价渠道')
+  const sku = state.products[0]?.sku
+  await state.selectBatchSample('BK200')
+  expect(state.products[0]?.sku).toBe(sku)
 })

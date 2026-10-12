@@ -2,7 +2,10 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { customerQuoteSheetTsv, quoteSheetTextTable, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
-const props = defineProps<{ sheet: CustomerQuoteSheet; readOnly?: boolean; paginated?: boolean }>()
+import { loadSavedQuoteSheetPhotos } from '@/services/quoteSheetPhotos'
+import { releaseQuotePhotos } from '@/services/quoteLocalPhotos'
+import type { QuoteSheetPhoto } from '@/data/quoteSheetPhotos'
+const props = defineProps<{ sheet: CustomerQuoteSheet; photos?: QuoteSheetPhoto[]; readOnly?: boolean; paginated?: boolean }>()
 const search = ref(''), page = ref(0), pageSize = ref(12)
 const filtered = computed(() => props.sheet.rows.filter(row => !props.paginated || (row.sku || '').toUpperCase().includes(search.value.trim().toUpperCase())))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
@@ -15,9 +18,11 @@ function clear() { for (const image of images.value) URL.revokeObjectURL(image.u
 watch(() => props.sheet, () => { generation++; clear(); error.value = ''; busy.value = false })
 async function preview() {
   const token = ++generation; busy.value = true; error.value = ''; clear()
-  try { const result = await renderCustomerQuoteSheet(props.sheet, () => token !== generation); if (token === generation) images.value = result.map(image => ({ ...image, url: URL.createObjectURL(image.blob) })) }
+  const controller = new AbortController(), timer = window.setTimeout(() => controller.abort(), 30000)
+  let photos: Awaited<ReturnType<typeof loadSavedQuoteSheetPhotos>> = []
+  try { photos = props.photos?.length ? await loadSavedQuoteSheetPhotos(props.photos, controller.signal) : []; if (token !== generation) return; const result = photos.length ? await renderCustomerQuoteSheet(props.sheet, () => token !== generation, photos) : await renderCustomerQuoteSheet(props.sheet, () => token !== generation); if (token === generation) images.value = result.map(image => ({ ...image, url: URL.createObjectURL(image.blob) })) }
   catch (e) { if (token === generation) error.value = e instanceof Error ? e.message : '图片生成失败，可先复制报价数据' }
-  finally { if (token === generation) busy.value = false }
+  finally { window.clearTimeout(timer); releaseQuotePhotos(photos); if (token === generation) busy.value = false }
 }
 async function copy(kind: 'data' | 'image') {
   error.value = ''

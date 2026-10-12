@@ -29,8 +29,8 @@ public class BatchSingleQuotation {
                 throw AppException.unprocessable("批量商品与报价单格式错误");
             var input = original.deepCopy(); var sku = input.path("primarySku").asText().trim().toUpperCase(Locale.ROOT);
             if (!"single".equals(input.path("quoteMode").asText()) || !sku.matches("[A-Z0-9][A-Z0-9._/-]{0,95}") || !seen.add(sku)
-                || input.has("fob") || input.has("batchSingle") || input.path("customerQuote").path("averagePlans").size() > 0)
-                throw AppException.unprocessable("仅允许不重复的单品 SKU 及具体渠道报价");
+                || input.has("fob") || input.has("batchSingle"))
+                throw AppException.unprocessable("仅允许不重复的单品 SKU 报价");
             input.put("primarySku", sku);
             if (input.path("quoteOptions").size() > 100) throw AppException.unprocessable("每个 SKU 最多100条渠道");
             if (firstInput == null) firstInput = input;
@@ -54,7 +54,24 @@ public class BatchSingleQuotation {
             var savedItem = items.addObject(); savedItem.set("input", input); savedItem.set("sheet", sheet);
             itemIndex++;
         }
-        if (!request.path("sheet").equals(merged)) throw AppException.unprocessable("合并报价单与逐 SKU 快照不一致，请重新生成");
+        // The shared editor permits moving rows across SKU groups. Accept only a permutation
+        // of the independently validated item rows, never caller-supplied prices or extra rows.
+        if (!(request.path("sheet") instanceof ObjectNode requestedSheet)) throw AppException.unprocessable("合并报价单格式错误");
+        var expectedMeta = merged.deepCopy(); expectedMeta.remove("rows");
+        var requestedMeta = requestedSheet.deepCopy(); requestedMeta.remove("rows");
+        if (!expectedMeta.equals(requestedMeta) || !requestedSheet.path("rows").isArray() || requestedSheet.path("rows").size() != mergedRows.size())
+            throw AppException.unprocessable("合并报价单与逐 SKU 快照不一致，请重新生成");
+        var expectedRows = new HashMap<String, ObjectNode>();
+        for (var row : mergedRows) expectedRows.put(row.path("key").asText(), (ObjectNode) row);
+        var ordered = JsonNodeFactory.instance.arrayNode();
+        for (var row : requestedSheet.path("rows")) {
+            var expected = expectedRows.remove(row.path("key").asText());
+            if (expected == null) throw AppException.unprocessable("合并报价单包含重复或未知渠道");
+            expected.put("number", ordered.size() + 1);
+            if (!expected.equals(row)) throw AppException.unprocessable("合并报价单与逐 SKU 快照不一致，请重新生成");
+            ordered.add(expected);
+        }
+        merged.set("rows", ordered);
         out.put("customerName", firstInput.path("customerName").asText().trim()); out.set("sheet", merged);
         return out;
     }
@@ -71,6 +88,11 @@ public class BatchSingleQuotation {
         }
         var options = new HashMap<String, JsonNode>(); var prices = new HashMap<String, JsonNode>();
         var hidden = new HashSet<String>(); input.path("customerQuote").path("hiddenOptionIds").forEach(id -> hidden.add(id.asText()));
+        var averages = new HashMap<String, JsonNode>();
+        for (var plan : input.path("customerQuote").path("averagePlans")) {
+            averages.put("average:" + plan.path("id").asText(), plan);
+            if ("summary".equals(plan.path("display").asText())) plan.path("members").forEach(member -> hidden.add(member.path("optionId").asText()));
+        }
         for (var option : input.path("quoteOptions")) {
             if (!hidden.contains(option.path("id").asText())) {
                 var key = option.path("quoteSheetKey").asText();
@@ -78,10 +100,16 @@ public class BatchSingleQuotation {
             }
         }
         input.path("customerQuote").path("rows").forEach(row -> prices.put(row.path("optionId").asText(), row.path("prices")));
-        if (sheet.path("rows").size() != options.size()) throw AppException.unprocessable(sku + "：报价单渠道不完整");
+        if (sheet.path("rows").size() != options.size() + averages.size()) throw AppException.unprocessable(sku + "：报价单渠道不完整");
         var seen = new HashSet<String>();
         for (var row : sheet.path("rows")) {
             var key = row.path("key").asText(); var option = options.get(key);
+            var average = averages.get(key);
+            if (average != null) {
+                if (!seen.add(key) || !sku.equals(row.path("sku").asText()) || !average.path("id").equals(row.path("averageId"))
+                    || !samePrices(row.path("prices"), average.path("prices"))) throw AppException.unprocessable(sku + "：综合报价与保存快照不一致");
+                continue;
+            }
             if (!row.isObject() || option == null || !seen.add(key) || !sku.equals(row.path("sku").asText())
                 || !samePrices(row.path("prices"), prices.get(option.path("id").asText())))
                 throw AppException.unprocessable(sku + "：报价单价格或 SKU 与保存快照不一致");

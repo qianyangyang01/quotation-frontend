@@ -178,3 +178,18 @@ it('shows loading or network failure instead of a finance-authorization warning 
   Object.assign(state,{sourceError:''});await tick()
   expect(document.body.textContent).toContain('请检查财务授权')
 })
+
+
+it('labels batch prices as samples without changing ordinary channel actions', async () => {
+  const { state } = mount({ batchSample: true })
+  button('美国').click(); await tick()
+  expect(document.body.textContent).toContain('样例1件价')
+  expect(document.body.textContent).toContain('当前样例最低价')
+  button('选用此渠道').click(); await tick()
+  expect(document.body.textContent).toContain('已选用')
+  Object.assign(state, { batchSample: false }); await tick()
+  expect(document.body.textContent).not.toContain('样例1件价')
+  expect(document.body.textContent).toContain('1件报价')
+  expect(document.body.textContent).toContain('已加入')
+  expect(document.body.textContent).toContain('加入报价单')
+})

@@ -53,6 +53,17 @@ class BatchSingleQuotationPostgresIntegrationTest {
     JsonNode save(String key,ObjectNode body) throws Exception {
         return mapper.readTree(mvc.perform(post("/api/v1/batch-single-quotations").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(body.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
     }
+    @Test void editedPresentationAndAverageSnapshotSurviveDatabaseReadback() throws Exception {
+        var input=BatchSingleQuotationTest.averagedInput();
+        for(var node:List.of((ObjectNode)input.path("sheet"),(ObjectNode)input.at("/items/0/sheet"))) {
+            node.put("title","Edited quote").put("whatsapp","+86 10000000000").put("sizeRules","Size S / M");
+            node.putArray("hiddenColumns").add("processingTime");
+        }
+        var saved=save(UUID.randomUUID().toString(),input);
+        var read=mapper.readTree(mvc.perform(get("/api/v1/batch-single-quotations/"+saved.path("id").asText()).session(sessions.get("employee"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
+        assertEquals(saved,read);assertEquals("Edited quote",read.at("/sheet/title").asText());
+        assertEquals("plan",read.at("/items/0/input/customerQuote/averagePlans/0/id").asText());
+    }
     @Test void oneDocumentRoundTripOwnerIsolationIdempotencyAndNoOrdinaryWrites() throws Exception {
         long before=jdbc.sql("select count(*) from quotation_record").query(Long.class).single();
         var input=BatchSingleQuotationTest.input(3);var key=UUID.randomUUID().toString();var result=save(key,input);var id=result.path("id").asText();

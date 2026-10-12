@@ -93,12 +93,17 @@ import {
 // Batch workspace reuses the proven calculator, but never enters ordinary persistence.
 const FobCorrectionDialog = defineAsyncComponent(() => import('@/components/quotation/FobCorrectionDialog.vue'))
 
-const props = defineProps<{ batchCapture?: boolean; batchInitialSku?: string; batchSize?: number }>()
-const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean] }>()
+const props = defineProps<{ batchCapture?: boolean; batchInitialSku?: string; batchSize?: number; batchSkus?: string[] }>()
+const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean]; batchSampleBusy: [value: boolean] }>()
 let batchCalculationActive = false
 let batchCaptured: import('@/services/batchSingleQuotation').BatchSingleItem | undefined
 const batchQuantities = ref<number[]>()
 const batchReady = ref(false)
+const batchSampleSku = ref('')
+const batchSampleSwitching = ref(false)
+const batchSampleError = ref('')
+let batchReturnConditions: QuotationDraftPayload | undefined
+const batchSampleBlock = computed(() => !props.batchCapture || batchCalculationActive ? '' : batchSampleSwitching.value ? '正在切换样例，请稍候' : batchSampleError.value || (!props.batchSkus?.length ? '请先勾选需要报价的 SKU' : props.batchSkus.includes(batchSampleSku.value) ? '' : '当前样例未选入，请选择一个已勾选的 SKU'))
 const displayGrams = displayWeightGrams
 function ruleSupportsShipment(rule: (typeof logisticsRules)[number], country: string, weightKg: number, logisticsAttribute: string) {
   return rule.status === '启用' && Boolean(findPriceRow(rule, country, weightKg, [logisticsAttribute], quoteRegionForCountry(country)))
@@ -1910,7 +1915,7 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : ''))
-const displayedSaveBlockReason = computed(() => templateSaveBlockReason.value || specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
+const displayedSaveBlockReason = computed(() => batchSampleBlock.value || templateSaveBlockReason.value || specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
 const retryingSavePreparation = ref(false)
 const canRetrySavePreparation = computed(() => !draftInitializationFailed.value && Boolean(!financeSettingsAreHydrated() || syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
 async function retrySavePreparation() {
@@ -2153,6 +2158,7 @@ let submitOrdinaryQuotation = quotationSubmitter()
 async function calculateBatchItem(sku: string, conditions: QuotationDraftPayload, quantities: number[]) {
   if (!props.batchCapture) throw new Error('此操作仅用于批量单品工作区')
   if (batchCalculationActive) throw new Error('上一项 SKU 尚未结束，请稍候')
+  batchReturnConditions = JSON.parse(JSON.stringify(conditions))
   batchCalculationActive = true
   try {
     batchCaptured = undefined
@@ -2170,7 +2176,9 @@ async function calculateBatchItem(sku: string, conditions: QuotationDraftPayload
     const deadline = Date.now() + 45000
     while (!viewDisposed && Date.now() < deadline) {
       await nextTick()
-      if (!countryLoads.value && logisticsLoadState.value !== 'loading' && templateSelectionState.value !== 'loading' && !financeSettingsAreLoading()) break
+      // In quick mode the inactive template keeps a pending restored selection.
+      // Only the chosen matrix may block this SKU; waiting on the hidden one times out.
+      if (!countryLoads.value && logisticsLoadState.value !== 'loading' && (quoteMatrixMode.value !== 'template' || templateSelectionState.value !== 'loading') && !financeSettingsAreLoading()) break
       await new Promise(resolve => window.setTimeout(resolve, 100))
     }
     if (viewDisposed) throw new Error('批量工作区已关闭')
@@ -2183,12 +2191,44 @@ async function calculateBatchItem(sku: string, conditions: QuotationDraftPayload
 }
 function primeBatchProduct(purchase: PurchaseProductRecord) {
   if (!props.batchCapture || !batchReady.value) return
+  batchSampleSku.value = purchase.sku
+  batchSampleError.value = ''
+  batchReturnConditions = undefined
   rememberPurchase(purchase)
   skuSearch.value = purchase.sku
   applyPurchaseRecord(products.value[0], purchase)
   products.value[0].status = '采购资料已查询，请设置客户与渠道条件'
 }
-defineExpose({ calculateBatchItem, batchReady, primeBatchProduct })
+async function selectBatchSample(sku: string, restore = false) {
+  if (!props.batchCapture || batchSampleSwitching.value || batchCalculationActive || savingQuotation.value) return
+  if (!props.batchSkus?.includes(sku)) return
+  if (!restore && sku === batchSampleSku.value && products.value[0]?.sku === sku && !batchSampleError.value) return
+  const payload = JSON.parse(JSON.stringify(restore && batchReturnConditions ? batchReturnConditions : draftPayload())) as QuotationDraftPayload
+  batchSampleSku.value = sku
+  batchSampleSwitching.value = true; batchSampleError.value = ''
+  emit('batchSampleBusy', true)
+  try {
+    const purchase = await loadPurchaseProduct(sku)
+    if (viewDisposed) return
+    if (!purchase.quoteReady) throw new Error(purchaseQuoteBlockingMessage(purchase) || '采购资料不完整')
+    payload.quoteMode = 'single'; payload.skuSearch = sku; payload.product.sku = sku
+    payload.product.weightSource = 'purchase'; payload.product.manualWeight = 0
+    payload.product.primaryChannelKey = ''; payload.product.primaryRule = ''; payload.product.primaryCarrier = ''; payload.bundleItems = []
+    await applyDraftPayload(payload, new Map([[sku, purchase]]), { restoreQuotation: true })
+    draftReady.value = true
+    batchReturnConditions = undefined
+  } catch (error) {
+    batchSampleError.value = `样例 ${sku} 加载失败：${error instanceof Error ? error.message : '请重试'}`
+  } finally { batchSampleSwitching.value = false; emit('batchSampleBusy', false) }
+}
+async function restoreBatchSample() {
+  const sku = props.batchSkus?.includes(batchSampleSku.value) ? batchSampleSku.value : props.batchSkus?.[0]
+  if (sku) await selectBatchSample(sku, true)
+}
+watch(() => props.batchSkus, skus => {
+  if (props.batchCapture && batchSampleSku.value && skus?.length && !skus.includes(batchSampleSku.value) && !batchCalculationActive) void selectBatchSample(skus[0]!)
+})
+defineExpose({ calculateBatchItem, batchReady, primeBatchProduct, restoreBatchSample })
 async function persistQuotation(input: Parameters<typeof createQuotationRecord>[0]) {
   if (props.batchCapture) throw new Error('批量报价只能通过批量报价单保存')
   const userId = currentAuthUser.value.id
@@ -2310,7 +2350,6 @@ async function save() {
   if (props.batchCapture) {
     const sheet = quotationPreview.value?.captureSheet()
     if (!sheet || sheet.issues.length) { toast(sheet?.issues.join('；') || '报价单尚未准备好'); return }
-    if (captured.averagePlans?.length) { toast('批量单品请使用具体渠道报价，暂不支持渠道平均行'); return }
     batchCaptured = JSON.parse(JSON.stringify({ input, conditions: draftPayload(), sheet }))
     if (!batchCalculationActive) emit('batchCaptured', batchCaptured!)
     return
@@ -2412,8 +2451,13 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <section v-if="!draftNeedsQuery && purchaseTaxBlockReason" class="logistics-load-panel error" role="alert"><span><b>{{ purchaseTaxBlockReason }}</b><small>请在采购数据确认票点和票类型后重新查询商品；已明确票类型的0%票点可以报价。</small></span></section>
         <section v-if="!draftNeedsQuery && (!manualMode || manualQueried)" class="matrix-workbench">
         <section class="matrix-mode-switcher">
-          <header><div><h2><i class="section-number">03</i>选择报价方式与渠道</h2></div><span>快速报价支持全部国家与授权渠道，模板按当前业务员账号管理</span></header>
-          <nav aria-label="报价矩阵分类">
+          <header><div><h2><i class="section-number">03</i>{{ batchCapture ? '选择公共报价渠道' : '选择报价方式与渠道' }}</h2></div><span>快速报价支持全部国家与授权渠道，模板按当前业务员账号管理</span></header>
+          <div v-if="batchCapture" class="batch-sample-bar">
+            <div><strong>已选 {{ batchSize || 0 }} 个 SKU</strong><label>当前样例 SKU <select aria-label="当前样例 SKU" :value="batchSampleSku" :disabled="batchSampleSwitching || savingQuotation || !batchSkus?.length" @change="selectBatchSample(($event.target as HTMLSelectElement).value)"><option v-for="sku in batchSkus" :key="sku" :value="sku">{{ sku }}</option></select></label><span>{{ batchSampleSwitching ? '正在读取样例…' : '切换仅影响样例预览' }}</span></div>
+            <p>下方价格仅为当前样例；所选渠道应用于全部已选 SKU，生成时逐项计算。</p>
+            <p v-if="batchSampleError" role="alert">{{ batchSampleError }} <button type="button" :disabled="batchSampleSwitching" @click="selectBatchSample(batchSampleSku)">重试样例</button></p>
+          </div>
+          <nav aria-label="报价矩阵分类" :inert="batchSampleSwitching || undefined">
             <button :class="{ active:quoteMatrixMode==='common' }" :aria-pressed="quoteMatrixMode==='common'" @click="quoteMatrixMode='common'">
               <i>⚡</i><span><b>快速报价</b><small>日常或指定渠道 · 搜索国家与渠道，加入报价单</small></span><em>{{ activeCommonCountryCount }}个国家</em>
             </button>
@@ -2423,8 +2467,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           </nav>
         </section>
 
-        <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel">
-          <QuotationCommonMatrix :ref="instance => commonMatrix = instance as typeof commonMatrix" :auto-load-country="hasQueriedQuotationProduct && !draftNeedsQuery && ['ready', 'empty'].includes(logisticsLoadState)" :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
+        <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel" :inert="batchSampleSwitching || undefined">
+          <QuotationCommonMatrix :batch-sample="batchCapture" :ref="instance => commonMatrix = instance as typeof commonMatrix" :auto-load-country="hasQueriedQuotationProduct && !draftNeedsQuery && ['ready', 'empty'].includes(logisticsLoadState)" :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
             :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
@@ -2436,8 +2480,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           </QuotationCommonMatrix>
         </div>
 
-        <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel">
-          <QuotationTemplateMatrix :ref="instance => templateWorkbench = instance as typeof templateWorkbench" :active="quoteMatrixMode==='template'"
+        <div v-show="quoteMatrixMode==='template'" class="matrix-mode-panel" :inert="batchSampleSwitching || undefined">
+          <QuotationTemplateMatrix :batch-sample="batchCapture" :ref="instance => templateWorkbench = instance as typeof templateWorkbench" :active="quoteMatrixMode==='template'"
             @selection-state-change="templateSelectionState = $event"
             :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()"
             :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()"
@@ -2454,7 +2498,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
-        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :batch-sample="batchCapture" :save-label="batchCapture ? `生成整批报价 · ${batchSize || 1} 个 SKU` : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :batch-sample="batchCapture" :batch-size="batchSize" :save-label="batchCapture ? `生成 ${batchSize || 0} 个 SKU 报价` : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
           :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"
@@ -2525,6 +2569,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 </template>
 
 <style scoped>
+.batch-sample-bar{padding:14px 20px;background:#eef7fc;border-bottom:1px solid #dbeaf4;color:#355b74}.batch-sample-bar>div{display:flex;align-items:center;flex-wrap:wrap;gap:12px 24px}.batch-sample-bar strong{font-size:14px;color:#123c57}.batch-sample-bar label{display:flex;align-items:center;gap:10px;font-size:12px}.batch-sample-bar select{min-width:160px;max-width:100%;padding:7px 12px;border:1px solid #c5dce9;border-radius:6px;background:white;color:#173b53}.batch-sample-bar span,.batch-sample-bar p{font-size:12px;color:#668296}.batch-sample-bar p{margin:10px 0 0}.batch-sample-bar [role="alert"]{color:#b5472c}.batch-sample-bar button{border:1px solid #c5dce9;border-radius:5px;background:white;padding:4px 10px;cursor:pointer}
+
 .batch-query-error{padding:10px 14px;background:#fff3ed;border:1px solid #efc6b4;border-radius:6px;color:#a63322;font-size:13px}
 .save-selection-template{display:block;margin:10px 0 10px auto;padding:9px 14px;border:1px solid #e7a13b;border-radius:7px;background:#fff6e7;color:#9b5900;font-weight:700;cursor:pointer}.save-selection-template:disabled{opacity:.45;cursor:not-allowed}
 :global(body){margin:0}.jerry-app{--orange:#ff9d16;--ink:#17212b;--muted:#77818c;--line:#e4e8eb;min-height:100vh;background:#f4f6f8;color:var(--ink);font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif}.topbar{height:68px;display:flex;align-items:center;padding:0 4vw;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}.brand{display:flex;align-items:center;gap:11px;margin-right:56px}.brand>span{width:39px;height:39px;display:grid;place-items:center;border-radius:10px;background:var(--orange);color:#171b20;font-size:21px;font-weight:950}.brand strong,.brand small,.top-actions small{display:block}.brand strong{font-size:17px}.brand small{font-size:8px;letter-spacing:.18em;color:#9199a2}.topbar nav{display:flex;align-items:center;gap:32px;height:100%}.topbar nav a{height:100%;display:flex;align-items:center;position:relative;color:#66717c;font-size:13px}.topbar nav a.active{color:var(--ink);font-weight:850}.topbar nav a.active:after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--orange)}.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px}.top-actions small{color:#949da6}.icon-btn{border:0;background:none;color:var(--orange)}.avatar{width:35px;height:35px;display:grid;place-items:center;border-radius:50%;background:#1b2630;color:#fff;font-size:10px}.page{width:min(1560px,94vw);margin:auto;padding:34px 0 70px}.hero{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:24px}.hero p{margin:0 0 8px;color:#dc7b00;font-size:10px;font-weight:900;letter-spacing:.2em}.hero h1{margin:0 0 7px;font-size:30px}.hero>div>span{color:var(--muted);font-size:13px}.hero-stats{display:flex;align-items:center;gap:24px}.hero-stats>div{display:grid;gap:4px}.hero-stats small{color:#98a0a8;font-size:9px}.hero-stats b{font-size:12px}.hero-stats em{color:#9da5ad;font-size:9px;font-style:normal}.primary,.dark{height:40px;padding:0 20px;border:0;border-radius:7px;background:var(--orange);font-weight:850}.notice{display:grid;grid-template-columns:30px 1fr auto;gap:12px;align-items:center;padding:15px 18px;background:#fff8e9;border:1px solid #f2ddb8;border-radius:8px}.notice-icon{width:25px;height:25px;display:grid;place-items:center;border-radius:50%;background:var(--orange);font-weight:900}.notice b{font-size:12px}.notice p{display:inline;margin-left:12px;color:#776f61;font-size:11px}.notice button{border:0;background:none;color:#b36900;font-size:11px}.member-bar{display:flex;align-items:center;gap:18px;margin-top:14px;padding:12px 16px;background:#fff;border:1px solid var(--line);border-radius:8px}.member-bar>div{display:flex;align-items:center;gap:10px}.member-bar small{color:#929ba4}.member-bar select{min-width:190px;height:34px;border:1px solid #dce1e5;border-radius:6px;padding:0 10px}.member-bar>span{color:#87919b;font-size:11px}.member-bar .outline:first-of-type{margin-left:auto}.outline,.soft{height:36px;border:1px solid #dce1e5;border-radius:6px;background:#fff;padding:0 13px;font-size:11px}.toolbar{display:flex;align-items:center;gap:9px;margin:20px 0 11px}.search{width:270px;height:39px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#fff;border:1px solid #dce1e5;border-radius:7px}.search input{width:100%;border:0;outline:0;font-size:11px}.toolbar>select{height:39px;border:1px solid #dce1e5;border-radius:7px;background:#fff;padding:0 12px}.batch{height:39px;display:flex;align-items:center;background:#fff;border:1px solid #dce1e5;border-radius:7px;overflow:hidden;font-size:10px}.batch>span{padding:0 10px;color:#737d86}.batch input{width:42px;height:100%;border:0;border-left:1px solid #e5e8eb;text-align:center;outline:0}.batch i{font-style:normal}.batch button{height:100%;border:0;margin-left:6px;background:#f0f3f5;font-size:10px}.toolbar .dark{margin-left:auto;background:#1b2630;color:#fff}.quote-list{background:#fff;border:1px solid var(--line);border-radius:9px;overflow:hidden;box-shadow:0 14px 35px rgba(27,38,48,.05)}.list-head{height:47px;display:flex;align-items:center;gap:18px;padding:0 18px;background:#fafbfc;border-bottom:1px solid var(--line);color:#69747e;font-size:11px}.list-head label{color:#26313a;font-weight:700}.list-head button{margin-left:auto;border:0;background:none;color:#c97600}.list-head div{margin-left:6px}.list-head div i,.status i{width:7px;height:7px;display:inline-block;border-radius:50%;background:#23ad6a;margin-right:7px}.product{border-left:3px solid transparent;border-bottom:1px solid var(--line)}.product.selected{border-left-color:var(--orange)}.product-head{min-height:70px;display:grid;grid-template-columns:18px 42px minmax(260px,1fr) auto auto auto;gap:12px;align-items:center;padding:10px 16px}.thumb{width:40px;height:40px;display:grid;place-items:center;overflow:hidden;border-radius:8px;background:linear-gradient(135deg,#eaf0f2,#cddfe0);color:#447374;font-weight:900}.thumb img{width:100%;height:100%;object-fit:cover}.product-name>input{width:100%;border:0;outline:0;background:transparent;font-weight:800}.product-name p{display:flex;gap:7px;margin:6px 0 0}.product-name code,.product-name p span{padding:3px 7px;border-radius:4px;background:#f1f3f5;color:#76818a;font-size:9px}.status{font-size:10px;color:#218a59}.status.warning{color:#b97400}.status.warning i{background:#e6a11c}.plain{height:31px;border:1px solid #e0e4e7;border-radius:5px;background:#fff;color:#66727c;font-size:10px}.remove{border:0;background:none;color:#9aa2a9;font-size:20px}.pricing{display:grid;grid-template-columns:1fr 1fr 276px;margin:0 16px 16px;border:1px solid var(--line);border-radius:7px;overflow:hidden}.panel{padding:16px}.panel+.panel{border-left:1px solid var(--line)}.panel h3{display:flex;align-items:center;gap:8px;margin:0 0 13px;font-size:11px}.panel h3 b{width:22px;height:22px;display:grid;place-items:center;border-radius:5px;background:#eef1f3;color:#6d7881;font-size:9px}.field-grid{display:grid;gap:9px}.field-grid.three{grid-template-columns:repeat(3,1fr)}.field-grid.two{grid-template-columns:repeat(2,1fr)}.field-grid .wide{grid-column:1/-1}.field-grid label{display:grid;gap:5px;color:#7b858e;font-size:9px}.field-grid input,.field-grid select{width:100%;height:33px;border:1px solid #dde2e5;border-radius:5px;padding:0 8px;background:#fff;color:#263039;font-size:11px;outline:0}.field-grid input:focus,.field-grid select:focus{border-color:#f2a029;box-shadow:0 0 0 3px rgba(255,157,22,.1)}.suffix{display:flex}.suffix input{border-radius:5px 0 0 5px}.suffix span{width:31px;height:33px;display:grid;place-items:center;border:1px solid #dde2e5;border-left:0;border-radius:0 5px 5px 0;background:#f4f6f7}.weight-summary{display:flex;align-items:center;gap:9px;margin-top:11px;padding:8px 10px;background:#f7f9fa;border-radius:5px;font-size:9px}.weight-summary b{font-size:12px}.weight-summary small{margin-left:auto;color:#98a0a8}.freight-row{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px dashed #dfe3e6;font-size:9px}.freight-row>div{display:flex;align-items:center}.freight-row>div span{margin-right:7px;color:#727d86}.freight-row>div input{width:70px;height:31px;border:1px solid #dce1e5;padding:0 7px}.freight-row button{height:31px;border:0;background:#1b2630;color:#fff;font-size:9px}.result{padding:18px;background:#1b2630;color:#fff}.result header{display:flex;justify-content:space-between}.result header span{font-size:10px}.result header small{max-width:145px;color:#9fa9b2;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.result>strong{display:block;margin:7px 0 14px;color:#ffad38;font-size:24px}.currencies{display:grid;grid-template-columns:1fr 1fr;gap:6px}.currencies p{display:grid;gap:2px;margin:0;padding:8px;background:#27333e;border-radius:5px}.currencies span{color:#9fa9b2;font-size:8px}.currencies b{font-size:11px}.result dl{margin:12px 0 0;padding:10px 0;border-top:1px solid #37434d;border-bottom:1px solid #37434d}.result dl div{display:flex;justify-content:space-between;margin:4px 0}.result dt{color:#9fa9b2;font-size:9px}.result dd{margin:0;font-size:10px}.green{color:#58d896}.result footer{margin-top:12px}.result footer>div{display:flex;align-items:center;justify-content:space-between;color:#aab2ba;font-size:9px}.member-margin{display:flex}.member-margin input{width:35px;height:25px;border:0;border-radius:4px 0 0 4px;text-align:center}.member-margin i{width:22px;height:25px;display:grid;place-items:center;background:#3a4650;font-style:normal}.result footer p{display:flex;justify-content:space-between;margin:10px 0 0;color:#b9c0c6;font-size:9px}.result footer p b{color:#fff;font-size:13px}.empty{padding:70px;text-align:center;color:#929ba4}.modal-mask{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:rgba(18,25,32,.5);backdrop-filter:blur(4px)}.modal{position:relative;width:min(540px,92vw);padding:32px;background:#fff;border-radius:12px;box-shadow:0 24px 70px rgba(0,0,0,.25)}.modal-close{position:absolute;right:18px;top:16px;border:0;background:none;font-size:22px}.modal>small{color:#da7b00;font-weight:800;letter-spacing:.18em}.modal h2{margin:8px 0 22px}.modal ol{display:grid;gap:10px;padding:0;list-style:none}.modal li{display:grid;grid-template-columns:90px 1fr;padding:12px;background:#f6f8f9;border-radius:6px;font-size:11px}.modal li span{color:#6e7881}.modal-tip{padding:12px;background:#fff7e8;color:#746b5d;font-size:10px;line-height:1.6}.history p{display:grid;grid-template-columns:1fr auto;gap:5px;padding:12px 0;margin:0;border-bottom:1px solid var(--line)}.history span{color:#d97900;font-weight:800}.history small{grid-column:1/-1;color:#929ba4}.toast{position:fixed;right:24px;bottom:24px;z-index:120;padding:13px 18px;border-radius:8px;background:#1b2630;color:#fff;box-shadow:0 12px 30px rgba(0,0,0,.2);font-size:11px}.toast-enter-active,.toast-leave-active{transition:.2s}.toast-enter-from,.toast-leave-to{opacity:0;transform:translateY(8px)}

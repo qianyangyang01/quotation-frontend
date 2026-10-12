@@ -7,6 +7,7 @@ import type { QuoteSheetCountry, QuoteSheetPriceCalculator } from '@/data/custom
 
 const props = withDefaults(defineProps<{
   batchSample?: boolean
+  batchSize?: number
   saveLabel?: string
   initialQuantities?: number[]
   rows: QuotationMatrixRow[]
@@ -81,7 +82,7 @@ const quoteRange = computed(() => {
       <article><i>▤</i><span><b>1</b><small>{{ batchSample ? '个样例 SKU' : '张报价单' }}</small></span></article>
       <article><i>◎</i><span><b>{{ countryCount }}</b><small>个国家</small></span></article>
       <article><i>⌘</i><span><b>{{ rows.length }}</b><small>条渠道</small></span></article>
-      <article class="range"><i>$</i><span><small>1{{ unitLabel }}报价范围</small><b>{{ quoteRange }}</b></span></article>
+      <article class="range"><i>$</i><span><small>{{ batchSample ? '样例 ' : '' }}1{{ unitLabel }}报价范围</small><b>{{ quoteRange }}</b></span></article>
     </div>
 
     <div class="preview-info">
@@ -112,7 +113,7 @@ const quoteRange = computed(() => {
       </div>
     </section>
 
-    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? (batchSample ? '正在校验条件…' : '正在校验并保存…') : saveLabel || `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
+    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i><strong v-if="batchSample">{{ batchSize || 0 }} 个 SKU × {{ rows.length }} 条公共渠道 · </strong>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? (batchSample ? '正在校验条件…' : '正在校验并保存…') : saveLabel || `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
   </section>
 </template>
 

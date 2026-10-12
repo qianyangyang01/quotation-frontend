@@ -54,12 +54,13 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const method = String(init.method || 'GET').toUpperCase()
   // Bound every network stage that can hold quotation initialization/submission open.
   // Import/export requests have separate, deliberately longer deadlines.
-  const bounded = /^\/(quotation-readiness|quotation-drafts\/mine\/state)(?:[?]|$)/.test(path)
+  const batchMutation = method === 'POST' && /^\/batch-single-quotations(?:\/[^/]+\/(?:corrections|review))?$/.test(path)
+  const bounded = batchMutation || /^\/(quotation-readiness|quotation-drafts\/mine\/state)(?:[?]|$)/.test(path)
     || (method === 'POST' && /^\/quotations(?:\/[^/]+\/resubmit)?$/.test(path))
     || /^\/quotations\/[^/]+\/fob-corrections(?:\/|$)/.test(path)
     || path === '/quotations/fob/preview'
   const deadline = bounded ? new AbortController() : undefined
-  const timer = deadline ? setTimeout(() => deadline.abort(new DOMException('Quotation request timed out', 'TimeoutError')), 30_000) : undefined
+  const timer = deadline ? setTimeout(() => deadline.abort(new DOMException('Quotation request timed out', 'TimeoutError')), batchMutation ? 120_000 : 30_000) : undefined
   const signal = deadline ? (init.signal ? AbortSignal.any([init.signal, deadline.signal]) : deadline.signal) : init.signal
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')

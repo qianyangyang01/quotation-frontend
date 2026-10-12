@@ -12,7 +12,7 @@ const chosenZones = ref<number[]>([])
 const editingId = ref('')
 const provider = ref('Combined Shipping'), shippingTime = ref(''), error = ref('')
 function sourceLabel(row: QuoteSheetSourceRow) { return [row.carrier, row.transport, row.quoteRegion === '全国统一' ? '' : row.quoteRegion].filter(Boolean).join(' · ') }
-const groups = computed(() => [...new Map(props.rows.map(row => [averageScope(row), { key: averageScope(row), label: row.country }])).values()])
+const groups = computed(() => [...new Map(props.rows.map(row => [averageScope(row), { key: averageScope(row), label: [row.sku, row.country].filter(Boolean).join(' · ') }])).values()])
 watch(groups, values => { if (!values.some(g => g.key === scope.value)) { scope.value = values[0]?.key || ''; changeScope() } }, { immediate: true })
 const activeScope = computed(() => scope.value || groups.value[0]?.key || '')
 const candidates = computed(() => props.rows.filter(row => averageScope(row) === activeScope.value))

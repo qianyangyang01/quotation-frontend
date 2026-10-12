@@ -8,6 +8,36 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class BatchSingleQuotationTest {
+    @Test void preservesCrossSkuRowOrderButRejectsDuplicatedOrTamperedRows() {
+        var request=input(3);var rows=(ArrayNode)request.at("/sheet/rows");
+        var last=rows.remove(2);rows.insert(0,last);
+        for(int i=0;i<rows.size();i++)((ObjectNode)rows.get(i)).put("number",i+1);
+        assertEquals("SKU2",service().prepare(request).at("/sheet/rows/0/sku").asText());
+        rows.set(1,rows.get(0).deepCopy());
+        assertThrows(AppException.class,()->service().prepare(request));
+    }
+    static ObjectNode averagedInput() {
+        var request=input(1);var in=(ObjectNode)request.at("/items/0/input");
+        var options=(ArrayNode)in.path("quoteOptions");((ObjectNode)options.get(0)).put("country","US");
+        options.add(((ObjectNode)options.get(0)).deepCopy().put("id","second").put("quoteSheetKey","second-channel"));
+        var customer=(ObjectNode)in.path("customerQuote");
+        customer.withArray("rows").add(((ObjectNode)customer.at("/rows/0")).deepCopy().put("optionId","second"));
+        var plan=customer.putArray("averagePlans").addObject().put("id","plan").put("mode","equal").put("display","summary").put("provider","Combined Shipping").put("shippingTime","7-12 working days");
+        plan.set("quantities",customer.path("quantities").deepCopy());plan.set("prices",customer.at("/rows/0/prices").deepCopy());plan.set("systemPrices",plan.path("prices").deepCopy());
+        var members=plan.putArray("members");for(var id:java.util.List.of("option","second")){var member=members.addObject().put("optionId",id).put("weight",1);member.set("sourcePrices",plan.path("prices").deepCopy());}
+        var row=(ObjectNode)request.at("/items/0/sheet/rows/0");row.put("key","average:plan").put("averageId","plan").put("provider","Combined Shipping");
+        var merged=(ObjectNode)request.path("sheet");merged.putArray("rows").add(row.deepCopy().put("key","0:average:plan"));
+        return request;
+    }
+    @Test void validatesAverageSourcesAndVisibleSummaryAgainstCustomerSnapshot() {
+        var request=averagedInput();var result=service().prepare(request);
+        assertEquals(1,result.at("/sheet/rows").size());assertEquals(2,result.at("/items/0/input/customerQuote/rows").size());
+        assertEquals("plan",result.at("/sheet/rows/0/averageId").asText());
+        ((ArrayNode)request.at("/items/0/input/customerQuote/averagePlans/0/members/0/sourcePrices")).set(0,IntNode.valueOf(100));
+        var wrongSource=request;assertThrows(AppException.class,()->service().prepare(wrongSource));
+        request=averagedInput();((ArrayNode)request.at("/items/0/sheet/rows/0/prices")).set(0,IntNode.valueOf(2));
+        var tampered=request;assertThrows(AppException.class,()->service().prepare(tampered));
+    }
     static ObjectNode input(int count) {
         var root=JsonNodeFactory.instance.objectNode().put("schemaVersion",1).put("customerName","客户A");
         var items=root.putArray("items"); ObjectNode merged=null;

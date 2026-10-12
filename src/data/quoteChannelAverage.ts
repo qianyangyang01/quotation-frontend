@@ -36,7 +36,7 @@ export function australiaAverageZone(row: QuoteSheetSourceRow) {
   return averageCountry(row) === 'AU' && /^[1-4]区$/.test(region) ? Number(region[0]) : undefined
 }
 export function averageScope(row: QuoteSheetSourceRow) {
-  return JSON.stringify([averageCountry(row)])
+  return JSON.stringify(row.sku ? [row.sku, averageCountry(row)] : [averageCountry(row)])
 }
 export function averagePrices(members: AveragePlan['members'], mode: AveragePlan['mode'], count: number) {
   if (members.length < 2) throw new Error('请至少选择两条渠道')

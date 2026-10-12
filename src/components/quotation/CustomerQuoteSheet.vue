@@ -39,14 +39,32 @@ const props = defineProps<{
   showAllRows?: boolean
   quoteMode?: import('@/data/quotationModes').QuotationMode
   skus?: string[]
+  initialSheet?: import('@/data/customerQuoteSheet').CustomerQuoteSheet
+  paginated?: boolean
+  quantityHelp?: string
+  preservePricesWhilePending?: boolean
 }>()
-const emit = defineEmits<{ removeRow: [key: string] }>()
+const emit = defineEmits<{ removeRow: [key: string]; quantitiesChange: [quantities: number[]] }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
 function initialEdits() {
   const contact = props.recordMode ? props.initialQuote?.contact : loadQuoteSheetContact(layoutUserId.value)
   return { ...newQuoteSheetEdits(props.salesperson), ...quoteSheetModeDefaults(props.quoteMode), showAustraliaZones: loadQuoteSheetAustraliaZones(layoutUserId.value), whatsapp: '', sizeRules: props.initialQuote?.sizeRules, sizeRulesEnabled: props.initialQuote?.sizeRulesEnabled ?? typeof props.initialQuote?.sizeRules === 'string', ...contact, columnOrder: loadQuoteSheetColumnOrder(layoutUserId.value) }
 }
-const edits = ref<QuoteSheetEdits>(initialEdits())
+function restoredEdits() {
+  const result = initialEdits() as QuoteSheetEdits
+  const sheet = props.initialSheet
+  if (!sheet) return result
+  const date = /^(\d{1,2}) ([A-Za-z]{3}) (\d{4})$/.exec(sheet.date)
+  const month = date ? ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(date[2]!) + 1 : 0
+  Object.assign(result, { title: sheet.title, notes: sheet.notes, agent: sheet.agent, whatsapp: sheet.whatsapp, hiddenColumns: sheet.hiddenColumns, columnOrder: sheet.columnOrder, sizeRules: sheet.sizeRules, sizeRulesEnabled: typeof sheet.sizeRules === 'string', ...(date && month ? { date: `${date[3]}-${String(month).padStart(2,'0')}-${date[1]!.padStart(2,'0')}` } : {}) })
+  for (const row of sheet.rows.filter(row => !row.averageId)) {
+    result.fields ||= {}
+    result.fields[row.key] = { number: String(row.number), country: row.country, region: row.region, provider: row.provider, processingTime: row.processingTime }
+    result.shippingTimes[row.key] = row.shippingTime
+  }
+  return result
+}
+const edits = ref<QuoteSheetEdits>(restoredEdits())
 const layoutSaveState = ref<'saved' | 'failed' | ''>('')
 const zoneSaveFailed = ref(false)
 function toggleAustraliaZones(event: Event) {
@@ -85,7 +103,7 @@ function loadSavedPrices() {
     const source = props.rows.find(row=>row.channelKey===saved.optionId)
     if (!source) continue
     edits.value.fields ||= {}
-    edits.value.fields[quoteSheetRowKey(source)] = { prices:Object.fromEntries(props.initialQuote!.quantities.map((q,index)=>[String(q), saved.prices[index]==null ? '' : saved.prices[index]!.toFixed(2)])) }
+    edits.value.fields[quoteSheetRowKey(source)] = { ...edits.value.fields[quoteSheetRowKey(source)], prices:Object.fromEntries(props.initialQuote!.quantities.map((q,index)=>[String(q), saved.prices[index]==null ? '' : saved.prices[index]!.toFixed(2)])) }
   }
 }
 loadSavedPrices()
@@ -95,6 +113,7 @@ const dropTarget = ref<number | null>(null)
 const draggedGroup = ref<QuoteSheetColumnKey | null>(null)
 const groupDropTarget = ref<QuoteSheetColumnKey | null>(null)
 const quantities = computed(() => columns.value.map(column => Number(column.quantity)))
+watch(quantities, value => { if (value.every(validQuoteSheetQuantity) && new Set(value).size === value.length) emit('quantitiesChange', value) })
 const editing = ref(true)
 const rendering = ref(false)
 const copying = ref(false)
@@ -315,6 +334,12 @@ function orderSheetRows(value: ReturnType<typeof applyAveragePlans>) {
 const orderedRowsSheet = computed(() => orderSheetRows(applyAveragePlans(allRowsSheet.value, averagePlans.value, props.rows, quantities.value, true)))
 const sheet = computed(() => withAverageErrors(orderSheetRows(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, props.showAllRows, allRowsSheet.value.rows))))
 const editorSheet = computed(() => orderSheetRows(applyAveragePlans(buildSheet(visibleSourceRows.value), averagePlans.value, props.rows, quantities.value, true, allRowsSheet.value.rows)))
+const rowSearch = ref(''), rowPage = ref(0), rowPageSize = ref(12)
+const filteredEditorRows = computed(() => editorSheet.value.rows.filter(row => !props.paginated || (row.sku || '').toUpperCase().includes(rowSearch.value.trim().toUpperCase())))
+const rowPageCount = computed(() => Math.max(1, Math.ceil(filteredEditorRows.value.length / rowPageSize.value)))
+const displayedEditorRows = computed(() => props.paginated ? filteredEditorRows.value.slice(rowPage.value * rowPageSize.value, (rowPage.value + 1) * rowPageSize.value) : editorSheet.value.rows)
+watch([rowSearch, rowPageSize], () => { rowPage.value = 0 })
+watch(rowPageCount, count => { rowPage.value = Math.min(rowPage.value, count - 1) })
 const hiddenRows = computed(() => allRowsSheet.value.rows.filter(row => hiddenRowKeys.value.has(row.key)))
 function hideRow(key: string) {
   if (copying.value || props.showAllRows) return
@@ -503,7 +528,7 @@ watch(() => new Map(props.rows.map(row => [quoteSheetRowKey(row), JSON.stringify
   clearPriceEdits()
   loadSavedPrices()
 })
-watch(() => props.sourcePending, value => { if (value) clearPriceEdits() })
+watch(() => props.sourcePending, value => { if (value && !props.preservePricesWhilePending) clearPriceEdits() })
 async function toggleSizeRules(event: Event) {
   if (copying.value) return
   edits.value.sizeRulesEnabled = (event.target as HTMLInputElement).checked
@@ -698,7 +723,7 @@ onBeforeUnmount(() => {
         <p class="sheet-edit-help">英文名补填：以下物流商尚无英文显示名，请填写后预览或复制。同一物流商的全部渠道共用此名称，仅当前页面有效。</p>
         <div class="sheet-metadata"><label v-for="provider in missingProviders" :key="provider.key">{{ provider.name }} · English name<input :value="edits.providerNames?.[provider.key] || ''" :aria-label="`${provider.name}英文名`" autocomplete="off" placeholder="Enter English name" maxlength="80" :disabled="copying" @input="updateProviderName(provider.key, $event)"></label></div>
       </div>
-      <p v-if="!calculatePrice" class="sheet-edit-help">历史记录仅带出已保存数量的价格；新增数量没有历史价格时，请手动填写。</p>
+      <p v-if="quantityHelp || !calculatePrice" class="sheet-edit-help">{{ quantityHelp || '历史记录仅带出已保存数量的价格；新增数量没有历史价格时，请手动填写。' }}</p>
       </template>
       <div class="sheet-controls">
         <div class="sheet-display-tools">
@@ -738,7 +763,7 @@ onBeforeUnmount(() => {
       </div>
       <template v-if="editing">
       <p v-if="!sheet.rows.length" class="sheet-pending" role="status">所有行已隐藏，请恢复至少一行后再预览或复制。</p>
-      <div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
+      <div v-if="paginated" class="sheet-row-tools"><input v-model="rowSearch" type="search" placeholder="搜索 SKU" aria-label="搜索报价单 SKU"><span>共 {{ editorSheet.rows.length }} 行 · 搜索与分页仅影响屏幕显示，保存、复制和图片包含全部明细</span><button :disabled="rowPage===0" @click="rowPage--">上一页</button><span>{{ rowPage+1 }} / {{ rowPageCount }}</span><button :disabled="rowPage+1>=rowPageCount" @click="rowPage++">下一页</button><select v-model.number="rowPageSize" aria-label="每页报价明细数"><option :value="12">12 行</option><option :value="30">30 行</option><option :value="60">60 行</option></select></div><div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
         <table>
           <thead>
             <tr>
@@ -767,12 +792,12 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in editorSheet.rows" :key="row.key" :class="{ 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
+            <tr v-for="(row, index) in displayedEditorRows" :key="row.key" :class="{ 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
               <template v-for="group in visibleGroups" :key="group.key">
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
-              <td v-else-if="group.key === 'product' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`报价单商品图 ${photoIndex + 1}`"></div></td>
-              <td v-else-if="group.key === 'sizeRules' && index === 0" :rowspan="editorSheet.rows.length" class="sheet-size-rules"><textarea v-model="edits.sizeRules" aria-label="尺码规则说明" placeholder="填写尺码规则或备注说明，支持换行" maxlength="2000" rows="4" :disabled="copying" /><small class="sheet-size-rules-count">{{ edits.sizeRules?.length ?? 0 }} / 2000</small></td>
+              <td v-else-if="group.key === 'product' && index === 0" :rowspan="displayedEditorRows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`报价单商品图 ${photoIndex + 1}`"></div></td>
+              <td v-else-if="group.key === 'sizeRules' && index === 0" :rowspan="displayedEditorRows.length" class="sheet-size-rules"><textarea v-model="edits.sizeRules" aria-label="尺码规则说明" placeholder="填写尺码规则或备注说明，支持换行" maxlength="2000" rows="4" :disabled="copying" /><small class="sheet-size-rules-count">{{ edits.sizeRules?.length ?? 0 }} / 2000</small></td>
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
               <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}<small v-if="group.key === 'country' && row.region" class="sheet-zone-label">{{ row.region }}</small></td>
               <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"><div v-if="row.region || row.regionTranslationRequired"><input class="sheet-zone-label" :value="edits.fields?.[row.key]?.region ?? row.region" :aria-label="`第 ${index + 1} 行英文分区`" placeholder="English zone" maxlength="80" :disabled="copying" @input="updateField(row.key, 'region', $event)"></div></td>
@@ -786,8 +811,8 @@ onBeforeUnmount(() => {
               </template>
               <td class="sheet-row-action"><div class="sheet-row-controls">
                 <button type="button" class="sheet-row-handle" :data-row-handle="row.key" :draggable="!rowControlsDisabled" :disabled="rowControlsDisabled" :aria-label="`第 ${index + 1} 行排序，上下键移动`" title="拖拽整行排序，也可按上下方向键" @dragstart.stop="startRowDrag(row.key, $event)" @dragend="endRowDrag" @keydown.up.prevent="moveRowByKey(row.key, -1)" @keydown.down.prevent="moveRowByKey(row.key, 1)">⠿</button>
-                <button type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || index === 0" @click="moveRowByKey(row.key, -1)">↑</button>
-                <button type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || index === editorSheet.rows.length - 1" @click="moveRowByKey(row.key, 1)">↓</button>
+                <button type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || editorSheet.rows[0]?.key === row.key" @click="moveRowByKey(row.key, -1)">↑</button>
+                <button type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || editorSheet.rows.at(-1)?.key === row.key" @click="moveRowByKey(row.key, 1)">↓</button>
                 <button v-if="row.averageId" type="button" class="sheet-delete-row" :aria-label="`删除第 ${index + 1} 行综合方案`" title="删除此平均行，同时移除上方对应方案" :disabled="rowControlsDisabled" @click="removeAverage(row.averageId!)">删除</button>
                 <template v-else>
                   <button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button>

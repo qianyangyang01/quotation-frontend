@@ -16,6 +16,7 @@ import {
 } from '@/data/quotationTemplates'
 
 const props = withDefaults(defineProps<{
+  batchSample?: boolean
   unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
   sourcePending?: boolean
@@ -487,7 +488,7 @@ function formatTime(value: string) {
       </section>
     </div>
 
-    <QuotationMatrix ref="matrix"
+    <QuotationMatrix ref="matrix" :batch-sample="batchSample"
       variant="template"
       :active="active"
       :countries="countries" :ensure-countries="ensureCountries" :source-pending="sourcePending" :source-error="sourceError"

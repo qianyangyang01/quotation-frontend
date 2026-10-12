@@ -11,7 +11,7 @@ export function quoteSheetBundleSkus(items: ReadonlyArray<{ sku: string; quantit
 /** Customer-facing source model. Only explicit numeric snapshots are captured for record saving. */
 export type QuoteSheetSourceRow = Pick<QuotationMatrixRow,
   'country' | 'quoteRegion' | 'channelKey' | 'ruleId' | 'channelCode' | 'rule' | 'carrier' | 'transport' | 'eta' |
-  'quote1' | 'quote2' | 'quote3' | 'quoteCustom' | 'available' | 'availabilityMessage' | 'quantityMessages'> & { taxFeeMode?: string; taxIncluded?: boolean; taxConfigured?: boolean; taxRatePercent?: number | null }
+  'quote1' | 'quote2' | 'quote3' | 'quoteCustom' | 'available' | 'availabilityMessage' | 'quantityMessages'> & { sku?: string; taxFeeMode?: string; taxIncluded?: boolean; taxConfigured?: boolean; taxRatePercent?: number | null }
 export type QuoteSheetCountry = { name: string; code: string }
 export type QuoteSheetCountryFormat = 'name' | 'code'
 export type QuoteSheetRowEdits = { number?: string; country?: string; region?: string; provider?: string; processingTime?: string; prices?: Record<string, string> }
@@ -302,7 +302,7 @@ export function buildCustomerQuoteSheet(input: {
       return value != null && Number.isFinite(value) && value >= 0 ? value : null
     })
     return {
-      key, number, sku, country: country || '—', region, regionTranslationRequired, provider: provider || '—', shippingTime, processingTime, prices,
+      key, number, sku: row.sku || sku, country: country || '—', region, regionTranslationRequired, provider: provider || '—', shippingTime, processingTime, prices,
       sourceDescription: [row.country, row.quoteRegion, row.carrier, row.transport, row.channelCode].filter(Boolean).join(' · '),
     }
   })
