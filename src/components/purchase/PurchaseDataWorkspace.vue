@@ -294,6 +294,7 @@ function emptyRecord() {
   return normalizePurchaseRecord({ sourceRow: Date.now(), sku: '', skuOrigin: 'manual', catalogState: 'ready', stockStatus: '待确认', quotationDate: new Date().toISOString().slice(0, 10), importWarnings: [] })
 }
 function openEditor(record?: PurchaseProductRecord) {
+  if (editorSaving.value) return
   editingOriginalSku.value = record?.sku || ''
   editor.value = record ? normalizePurchaseRecord(JSON.parse(JSON.stringify(record)) as PurchaseProductRecord) : emptyRecord()
   legacyEditorUnitPrice.value = legacyUntaxedUnitPrice(editor.value)
@@ -369,10 +370,11 @@ async function saveEditor() {
 }
 
 async function promoteEditor() {
-  if (!editor.value || editor.value.catalogState !== 'pending_template' || !editingOriginalSku.value) return
+  if (!editor.value || editorSaving.value || editor.value.catalogState !== 'pending_template' || !editingOriginalSku.value) return
   const legacy = editor.value.dataSource === 'legacy_2026'
   const targetSku = editor.value.sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!targetSku || /^(TESTP|TEST|DEMO|MOCK)/i.test(targetSku) || targetSku.startsWith('AUTO-')) { toast('请先把SKU修改为非 TEST/DEMO/AUTO 的真实业务SKU'); return }
+  editorSaving.value = true
   try {
     const pending = normalizePurchaseRecord({ ...editorRecordForSave(), sku: editingOriginalSku.value, catalogState: 'pending_template' })
     await upsertPurchaseProducts([pending])
@@ -382,6 +384,7 @@ async function promoteEditor() {
     await reload()
     toast(legacy ? `${targetSku} 已确认可参与报价` : `${targetSku} 已确认转为正式商品`)
   } catch (error) { toast(error instanceof Error ? error.message : '模板商品转正式失败') }
+  finally { editorSaving.value = false }
 }
 
 function handleImage(event: Event, field: 'productImage' | 'physicalImage') {
@@ -580,10 +583,10 @@ const detailFields = computed(() => detail.value ? [
   </section></div>
 
   <div v-if="editor" class="mask"><section class="modal editor-modal">
-    <button class="close" @click="editor=null">×</button><small>PURCHASE DATA EDITOR</small><h2>{{ editingOriginalSku ? '编辑采购资料' : '新增采购资料' }}</h2><p>字段顺序与标准 Excel 模板一致；空字段保存后显示“暂无数据”。</p>
+    <button :disabled="editorSaving" class="close" @click="editor=null">×</button><small>PURCHASE DATA EDITOR</small><h2>{{ editingOriginalSku ? '编辑采购资料' : '新增采购资料' }}</h2><p>字段顺序与标准 Excel 模板一致；空字段保存后显示“暂无数据”。</p>
     <div v-if="editor.skuOrigin==='system'" class="generated-warning">系统生成 SKU 必须修改成真实 SKU 后，才可以参与报价。</div>
     <div v-else-if="editor.catalogState==='pending_template'" class="generated-warning">{{ editor.dataSource==='legacy_2026' ? '请补全克重、有效价格和旧数据单档运费，再点击“确认可参与报价”。类别、尺寸和图片为空不阻断报价。' : '当前是模板待补全目录。保存不会解除锁定；改成真实业务SKU并点击“确认转正式”后才可参与报价。' }}</div>
-    <div class="form-grid">
+    <fieldset class="form-grid" :disabled="editorSaving">
       <label>1. SKU*<input v-model="editor.sku" :class="{ alert:editor.skuOrigin==='system' }"></label><label>2. 类别*<input v-model="editor.category"></label>
       <label class="wide">3. 产品图片（嵌入本格）<div class="upload"><img v-if="editor.productImage" :src="editor.productImage"><input type="file" accept="image/*" @change="handleImage($event,'productImage')"><button v-if="editor.productImage" @click.prevent="editor.productImage=''">移除</button></div></label>
       <label class="wide">4. 实物图（嵌入本格）<div class="upload"><img v-if="editor.physicalImage" :src="editor.physicalImage"><input type="file" accept="image/*" @change="handleImage($event,'physicalImage')"><button v-if="editor.physicalImage" @click.prevent="editor.physicalImage=''">移除</button></div></label>
@@ -604,8 +607,8 @@ const detailFields = computed(() => detail.value ? [
       <label>26. 是否有货（选填）<input v-model="editor.stockStatus" list="purchase-stock-options" placeholder="可留空，或填写现货、预订、交期等说明"><datalist id="purchase-stock-options"><option value="有货" /><option value="无货" /><option value="待确认" /><option value="定制款" /></datalist><small>仅供参考，不影响报价资格</small></label><label class="wide">27. 备注<textarea v-model="editor.notes"></textarea></label>
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>
-    </div>
-    <footer><button v-if="editingOriginalSku" @click="historySku=editingOriginalSku">修改记录</button><button @click="editor=null">取消</button><button :disabled="editorSaving" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存资料' }}</button><button v-if="editor.catalogState==='pending_template'" class="primary" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
+    </fieldset>
+    <footer><button :disabled="editorSaving" v-if="editingOriginalSku" @click="historySku=editingOriginalSku">修改记录</button><button :disabled="editorSaving" @click="editor=null">取消</button><button :disabled="editorSaving" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存资料' }}</button><button v-if="editor.catalogState==='pending_template'" class="primary" :disabled="editorSaving" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
   </section></div>
 
   <div v-if="previewImage" class="image-preview" @click.self="previewImage=null"><button @click="previewImage=null">×</button><figure><img :src="previewImage.src"><figcaption>{{ previewImage.title }}</figcaption></figure></div>
@@ -640,4 +643,11 @@ const detailFields = computed(() => detail.value ? [
 .weight-cell>b,.weight-cell>small:last-child,.freight-cell>small,.table-card td>em.ready{white-space:nowrap}
 .table-card .description-cell{overflow-wrap:anywhere;word-break:normal}
 .table-card .actions{white-space:normal}.actions button{white-space:nowrap;line-height:1.8}
+</style>
+
+<style scoped>
+fieldset.form-grid{border:0;margin:17px 0 0;min-width:0;padding:0 7px 0 0}
+.editor-modal{max-width:100%}
+.editor-modal button:disabled{cursor:wait;opacity:.6}
+@media(max-width:600px){.editor-modal{padding:16px}.editor-modal footer{flex-wrap:wrap}}
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatLegacyPurchaseUnitPrice } from '@/services/legacyPurchaseDisplay'
 import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import SpecialPackagingInput from './SpecialPackagingInput.vue'
 import { displayWeightGrams, gramsToKg, sumDecimal, decimal } from "@/services/quotationDecimal"
@@ -46,7 +47,7 @@ function purchasePricingLabel() {
     <header><div><i>02</i><span><b>{{ canViewPurchaseCost ? '成本与重量' : '商品与重量' }}</b><small>商品资料与计费重量</small></span></div><slot name="product" /><em :class="{legacy:product.status==='采购资料已加载'&&product.purchaseDataSource==='legacy_2026'}">{{ product.status==='采购资料已加载' ? (product.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据') : '采购资料' }}</em></header>
     <div class="cost-metrics" :class="{ manual:product.weightSource==='manual' }">
     <div class="fields">
-      <label v-if="canViewPurchaseCost">{{ purchaseDisplay ? `${purchaseDisplay.label}（CNY/件）` : '计入成本单价（CNY）' }}<input :value="purchaseDisplay ? purchaseDisplay.unitPrice.toFixed(2) : product.purchase" disabled><small v-if="purchaseDisplay" class="legacy-price-note">{{ purchaseDisplay.detail }}</small></label>
+      <label v-if="canViewPurchaseCost">{{ purchaseDisplay ? `${purchaseDisplay.label}（CNY/件）` : '计入成本单价（CNY）' }}<input :value="purchaseDisplay ? formatLegacyPurchaseUnitPrice(purchaseDisplay.unitPrice) : product.purchase" disabled><small v-if="purchaseDisplay" class="legacy-price-note">{{ purchaseDisplay.detail }}</small></label>
       <label>商品重量（g）<input :value="grams(product.netWeight)" disabled></label>
       <label>重量来源<select v-model="product.weightSource" @change="$emit('weightChange')"><option value="purchase">使用采购表重量</option><option value="manual">业务员指定重量</option></select></label>
       <label v-if="product.weightSource==='manual'">指定重量（g）<input :value="grams(product.manualWeight)" type="number" min="0" step="1" inputmode="numeric" @input="updateManualWeight"></label>

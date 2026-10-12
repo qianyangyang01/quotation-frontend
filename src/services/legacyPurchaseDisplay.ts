@@ -1,6 +1,13 @@
 import { legacyUntaxedUnitPrice } from '@/data/legacyPurchasePricing'
 import { selectedPurchaseTier, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { purchasePriceBreakdown } from './quotationCalculator'
+import { decimal } from './quotationDecimal'
+
+/** Preserve the supplier's fractional-cent quote; only derived costs round to cents. */
+export function formatLegacyPurchaseUnitPrice(value: number): string {
+  const amount = decimal(value)
+  return amount.toFixed(Math.max(2, amount.decimalPlaces()))
+}
 
 /** Presentation only: never feed these amounts back into quotation calculations. */
 export type LegacyPurchaseDisplay = {

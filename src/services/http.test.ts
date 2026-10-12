@@ -10,6 +10,29 @@ afterEach(() => {
 })
 
 describe('quotation API client', () => {
+  it.each(['/purchase-products/batch', '/purchase-products/FL2600293-2/maintenance', '/purchase-products/FL2600293-2/promote'])('bounds procurement mutation %s and requires readback before retry', async path => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { headerName: 'X-CSRF', token: 'csrf' } })))
+      .mockImplementation((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = request(path, { method: path.endsWith('/batch') ? 'PUT' : 'POST', body: '{}' }).catch(error => error)
+    await vi.advanceTimersByTimeAsync(30_001)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(await pending).toMatchObject({ code: 'PURCHASE_REQUEST_TIMEOUT', message: expect.stringContaining('重新查询采购资料') })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('bounds procurement CSRF preparation without sending a late mutation', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = api.post('/purchase-products/SKU/maintenance', {}).catch(error => error)
+    await vi.advanceTimersByTimeAsync(30_001)
+    expect(await pending).toMatchObject({ code: 'PURCHASE_REQUEST_TIMEOUT' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('bounds a stuck logistics read and allows a new request without refreshing', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn().mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))))

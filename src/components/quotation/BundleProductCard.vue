@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatLegacyPurchaseUnitPrice } from '@/services/legacyPurchaseDisplay'
 import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import SpecialPackagingInput from './SpecialPackagingInput.vue'
 import { displayWeightGrams, gramsToKg, sumDecimal, productDecimal } from "@/services/quotationDecimal"
@@ -67,7 +68,7 @@ defineEmits<{
         </div>
         <label class="qty"><input v-model.number="item.quantityPerSet" type="number" min="1" step="1" @change="$emit('quantityChange',item)"><span>件/套</span></label>
         <div class="purchase-price" :class="{ 'legacy-price': !!purchaseDisplay(item) }">
-          <div class="purchase-tier-price"><select class="purchase-tier" :aria-label="(item.sku || `第${index + 1}行`) + '采购阶梯'" :value="item.purchaseTier || '10'" @change="$emit('tierChange', item, ($event.target as HTMLSelectElement).value)"><option value="10">阶梯价1</option><option value="100">阶梯价2</option><option value="100+">阶梯价3</option></select><b v-if="canViewPurchaseCost">{{ purchaseDisplay(item)?.label }} ¥{{ (purchaseDisplay(item)?.unitPrice ?? item.purchaseUnitPrice).toFixed(2) }}</b></div>
+          <div class="purchase-tier-price"><select class="purchase-tier" :aria-label="(item.sku || `第${index + 1}行`) + '采购阶梯'" :value="item.purchaseTier || '10'" @change="$emit('tierChange', item, ($event.target as HTMLSelectElement).value)"><option value="10">阶梯价1</option><option value="100">阶梯价2</option><option value="100+">阶梯价3</option></select><b v-if="canViewPurchaseCost">{{ purchaseDisplay(item)?.label }} ¥{{ purchaseDisplay(item) ? formatLegacyPurchaseUnitPrice(purchaseDisplay(item)!.unitPrice) : item.purchaseUnitPrice.toFixed(2) }}</b></div>
           <small v-if="canViewPurchaseCost">{{ purchasePricingLabel(item) }}</small>
         </div>
         <label class="custom-weight"><input :value="grams(effectiveWeightKg(item))" type="number" min="0" step="1" @input="item.customWeightKg=gramsToKg(Number(($event.target as HTMLInputElement).value)||0);$emit('weightChange',item)"><span>g</span><small>{{ item.customWeightKg == null ? '采购' : '自定义' }} {{ grams(effectiveWeightKg(item)) }}g + 包材 {{ grams(packagingWeightKg(effectiveWeightKg(item))) }}g = {{ grams(packagedWeightKg(item)) }}g</small><button v-if="item.customWeightKg != null" type="button" @click="item.customWeightKg=null;$emit('weightChange',item)">恢复</button></label>

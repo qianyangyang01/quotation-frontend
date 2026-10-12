@@ -6,11 +6,11 @@ import { normalizePurchaseRecord } from '@/data/purchaseStore'
 import { authState, roleDefinitions } from '@/data/authStore'
 import type { FobCatalogRecord } from '@/services/purchaseCatalog'
 
-const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn(),fob:vi.fn(),fobHistory:vi.fn()}))
+const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn(),fob:vi.fn(),fobHistory:vi.fn(),load:vi.fn(),promote:vi.fn()}))
 vi.mock('@/services/fobPurchase',async original=>({...await original<object>(),loadFobRecord:mocks.fob,loadFobHistory:mocks.fobHistory}))
 vi.mock('@/services/purchaseHistory',async original=>({...await original<object>(),updatePurchaseProduct:mocks.update,loadPurchaseHistory:mocks.history}))
 vi.mock('./PurchaseSalesPanel.vue', () => ({ default: { template: '<section />' } }))
-vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save}))
+vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save,loadPurchaseProduct:mocks.load,promotePurchaseProduct:mocks.promote}))
 vi.mock('@/services/purchaseCatalog',()=>({loadPurchaseCatalogPage:mocks.page}))
 let app:App
 const row=(sku:string)=>normalizePurchaseRecord({sku,weightG:100,minOrderQty:1,purchasePriceCny:10,_version:5})
@@ -64,12 +64,67 @@ it('does not reprice legacy data when only unrelated fields are saved',async()=>
   expect(mocks.update.mock.calls[0]![1].legacyPriceMode).toBeUndefined()
 })
 
+it('locks the entire editor during a slow save and ignores repeated save clicks',async()=>{
+  await openLegacyEditor()
+  await setPriceField('未税采购单价','100')
+  let finish!:(value:ReturnType<typeof legacyPriceRow>)=>void
+  mocks.update.mockReturnValueOnce(new Promise(resolve=>{finish=resolve}))
+  editorSave();await flush()
+  const saving=Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='保存中…')!
+  saving.click();await flush()
+  expect(mocks.update).toHaveBeenCalledTimes(1)
+  expect(document.querySelector<HTMLFieldSetElement>('.editor-modal fieldset')?.disabled).toBe(true)
+  const cancel=Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='取消')!
+  expect(cancel.disabled).toBe(true)
+  expect(document.querySelector<HTMLButtonElement>('.editor-modal .close')!.disabled).toBe(true)
+  cancel.click();await flush();expect(document.querySelector('.editor-modal')).not.toBeNull()
+  finish(normalizePurchaseRecord({...legacyPriceRow(),sourceQuotedPriceCny:100,purchasePriceCny:110,taxIncludedPriceCny:110,_version:6}))
+  await flush();expect(document.querySelector('.editor-modal')).toBeNull()
+})
+
+it.each(['网络连接已断开','商品已被其他用户修改，请刷新后重试','登录状态已失效'])('retains unsaved price and unlocks the editor after %s',async message=>{
+  await openLegacyEditor();await setPriceField('未税采购单价','100')
+  mocks.update.mockRejectedValueOnce(new Error(message))
+  editorSave();await flush()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('100')
+  expect(document.querySelector('.legacy-purchase-prices b')?.textContent).toBe('未税单价 ¥110.00/件')
+  expect(document.querySelector<HTMLFieldSetElement>('.editor-modal fieldset')?.disabled).toBe(false)
+  expect(document.body.textContent).toContain(message)
+  expect(mocks.update).toHaveBeenCalledTimes(1)
+})
+
+it('cancel discards unsaved prices and readonly included-price tampering is not submitted',async()=>{
+  await openLegacyEditor();await setPriceField('未税采购单价','100')
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='取消')!.click();await flush()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click();await flush()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('110')
+  await setPriceField('含票价（自动计算）','999')
+  mocks.update.mockResolvedValueOnce(legacyPriceRow());editorSave();await flush()
+  expect(mocks.update).toHaveBeenCalledWith('FL2600293-2',expect.objectContaining({sourceQuotedPriceCny:110,purchasePriceCny:121,taxIncludedPriceCny:121}))
+})
+
 it('labels included-only legacy data without guessing an untaxed price',async()=>{
   await openLegacyEditor(normalizePurchaseRecord({...legacyPriceRow(),sourceQuotedPriceCny:null}))
   const prices=document.querySelector('.legacy-purchase-prices')!
   expect(prices.querySelector('b')?.textContent).toBe('含票价 ¥121.00/件')
   expect(prices.textContent).toContain('未税单价待确认')
   expect(prices.textContent).not.toContain('第1档')
+})
+
+it('does not round a fractional-cent source quote into a different displayed untaxed price',async()=>{
+  await openLegacyEditor(normalizePurchaseRecord({...legacyPriceRow(),sourceQuotedPriceCny:1.005,purchasePriceCny:1.11,taxIncludedPriceCny:1.11}))
+  expect(document.querySelector('.legacy-purchase-prices b')?.textContent).toBe('未税单价 ¥1.005/件')
+})
+
+it('a lost save response followed by retry cannot silently overwrite a committed price',async()=>{
+  await openLegacyEditor();await setPriceField('未税采购单价','100')
+  mocks.update.mockRejectedValueOnce(new Error('网络连接已断开'))
+    .mockRejectedValueOnce(new Error('商品已被其他用户修改，请刷新后重试'))
+  editorSave();await flush();editorSave();await flush()
+  expect(mocks.update.mock.calls.map(call=>call[1]._version)).toEqual([5,5])
+  expect(mocks.update.mock.calls.map(call=>call[1].purchasePriceCny)).toEqual([110,110])
+  expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('100')
+  expect(document.body.textContent).toContain('请刷新后重试')
 })
 
 it('preserves real tier ranges while displaying their own untaxed prices',async()=>{
@@ -254,4 +309,33 @@ it('opens product history from list and editor and saves existing products atomi
   Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='保存资料')!.click();await flush()
   expect(mocks.update).toHaveBeenCalledWith('INITIAL',expect.objectContaining({sku:'INITIAL',_version:5}))
   expect(mocks.save).not.toHaveBeenCalled()
+})
+
+it('serializes promotion with save and restores editing after a promotion failure',async()=>{
+  const product=normalizePurchaseRecord({...legacyPriceRow(),catalogState:'pending_template'})
+  await openLegacyEditor(product)
+  let reject!:(error:Error)=>void
+  mocks.save.mockReturnValueOnce(new Promise((_,failure)=>{reject=failure}))
+  const promote=Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='确认可参与报价')!
+  promote.click();promote.click();await flush()
+  const save=Array.from(document.querySelectorAll<HTMLButtonElement>('.editor-modal button')).find(b=>b.textContent==='保存中…')!
+  save.click();await flush()
+  expect(mocks.save).toHaveBeenCalledTimes(1);expect(mocks.update).not.toHaveBeenCalled()
+  expect(promote.disabled).toBe(true)
+  reject(new Error('网络断开'));await flush()
+  expect(document.querySelector<HTMLFieldSetElement>('.editor-modal fieldset')?.disabled).toBe(false)
+  expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('110')
+  mocks.save.mockResolvedValueOnce([product]);mocks.load.mockResolvedValueOnce({...product,_version:6});mocks.promote.mockResolvedValueOnce(product)
+  promote.click();await flush();await flush()
+  expect(mocks.promote).toHaveBeenCalledWith(product.sku,product.sku,6)
+  expect(document.querySelector('.editor-modal')).toBeNull()
+})
+it.each(['','0','-1','1e309'])('blocks abnormal unit-price input %s without a save request',async price=>{
+  await openLegacyEditor();await setPriceField('未税采购单价',price);editorSave();await flush()
+  expect(mocks.update).not.toHaveBeenCalled()
+})
+it('rejects typing 10 instead of 0.10 for the ticket point',async()=>{
+  await openLegacyEditor();await setPriceField('采购票点','10');editorSave();await flush()
+  expect(mocks.update).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('0～1')
 })

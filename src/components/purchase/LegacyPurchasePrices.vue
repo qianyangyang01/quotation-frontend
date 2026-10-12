@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { PurchaseProductRecord } from '@/data/purchaseStore'
-import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
+import { legacyPurchaseDisplay, formatLegacyPurchaseUnitPrice } from '@/services/legacyPurchaseDisplay'
 const props = defineProps<{ record: PurchaseProductRecord }>()
 const prices = computed(() => (props.record.priceTiers.length ? props.record.priceTiers.map((_, i) => ['10', '100', '100+'][i]!) : ['10'])
   .map(tier => legacyPurchaseDisplay(props.record, tier)).filter(price => price != null))
@@ -9,7 +9,7 @@ const prices = computed(() => (props.record.priceTiers.length ? props.record.pri
 <template>
   <div v-if="prices.length" class="legacy-purchase-prices">
     <div v-for="(price, index) in prices" :key="index">
-      <b>{{ price.label }} ¥{{ price.unitPrice.toFixed(2) }}/件</b>
+      <b>{{ price.label }} ¥{{ formatLegacyPurchaseUnitPrice(price.unitPrice) }}/件</b>
       <small>{{ price.range }}</small>
       <small>{{ price.detail }}</small>
     </div>

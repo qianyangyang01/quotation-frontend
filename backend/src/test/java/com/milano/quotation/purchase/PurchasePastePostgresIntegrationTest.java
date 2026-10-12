@@ -98,6 +98,75 @@ class PurchasePastePostgresIntegrationTest {
         assertEquals(409, assertThrows(AppException.class, () -> products.update(sku, unrelated)).status().value());
     }
 
+    @Test void autoTaxMaintenanceRejectsReplayPermissionLossCsrfAndInvalidInputsWithoutWrites() throws Exception {
+        var sku = sku();
+        var original = products.upsert(full(sku).put("dataSource", "legacy_2026").put("legacyPriceMode", "auto_tax")
+                .put("sourceQuotedPriceCny", 110).put("taxPoint", .1));
+        var edit = (ObjectNode) original.deepCopy();
+        edit.put("sourceQuotedPriceCny", 100).put("taxIncludedPriceCny", 999);
+        var endpoint = "/api/v1/purchase-products/" + sku + "/maintenance";
+        mvc.perform(post(endpoint).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(edit)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.purchasePriceCny").value(110));
+        var saved = products.get(sku);
+        var auditCount = historyCount(sku);
+        mvc.perform(post(endpoint).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(edit)))
+                .andExpect(status().isConflict());
+        mvc.perform(post(endpoint).contentType("application/json").content(mapper.writeValueAsString(saved)))
+                .andExpect(status().isForbidden());
+        mvc.perform(post(endpoint).with(csrf()).with(user("SALES").authorities(() -> "PERM_quote"))
+                .contentType("application/json").content(mapper.writeValueAsString(saved))).andExpect(status().isForbidden());
+        var oldClient = (ObjectNode) saved.deepCopy(); oldClient.remove("legacyPriceMode");
+        mvc.perform(post(endpoint).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(oldClient)))
+                .andExpect(status().isConflict());
+        for (var invalid : List.of(((ObjectNode)saved.deepCopy()).putNull("sourceQuotedPriceCny"),
+                ((ObjectNode)saved.deepCopy()).put("sourceQuotedPriceCny", -1),
+                ((ObjectNode)saved.deepCopy()).put("sourceQuotedPriceCny", true),
+                ((ObjectNode)saved.deepCopy()).putNull("taxPoint"),
+                ((ObjectNode)saved.deepCopy()).put("taxPoint", 10),
+                ((ObjectNode)saved.deepCopy()).put("taxPoint", "0.1"))) {
+            mvc.perform(post(endpoint).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(invalid)))
+                    .andExpect(status().isUnprocessableEntity());
+        }
+        assertEquals(saved, products.get(sku));
+        assertEquals(auditCount, historyCount(sku));
+    }
+
+    @Test void twoAutoTaxEditorsHaveOneWinnerAndCannotAlterSavedQuotationSnapshot() throws Exception {
+        var sku = sku();
+        var original = products.upsert(full(sku).put("dataSource", "legacy_2026").put("legacyPriceMode", "auto_tax")
+                .put("sourceQuotedPriceCny", 110).put("taxPoint", .1));
+        var id = UUID.randomUUID();
+        var payload = mapper.createObjectNode().put("primarySku",sku).put("purchaseUnitPriceCny",121)
+                .put("systemQuote",200).put("customerQuote",210).put("freight",10)
+                .put("financeReviewStatus","approved").put("dealStatus","won");
+        jdbc.update("insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at,lifecycle_state) values(?,?,?,'processed',cast(? as jsonb),3,now(),now(),'active')",
+                id,"AUTO-QA-"+id.toString().substring(0,8),"PASTEBUYER",payload.toString());
+        var history = jdbc.queryForMap("select * from quotation_record where id=?",id);
+        var gate = new CountDownLatch(1);
+        var edits = List.of(((ObjectNode)original.deepCopy()).put("sourceQuotedPriceCny",100),
+                ((ObjectNode)original.deepCopy()).put("sourceQuotedPriceCny",90));
+        long initialAudit = historyCount(sku);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var attempts = edits.stream().map(edit -> pool.submit(() -> {
+                gate.await();
+                try { products.update(sku,edit); return true; }
+                catch (AppException conflict) { assertEquals(409,conflict.status().value()); return false; }
+            })).toList();
+            gate.countDown();
+            assertNotEquals(attempts.get(0).get(20,TimeUnit.SECONDS),attempts.get(1).get(20,TimeUnit.SECONDS));
+        }
+        assertEquals(initialAudit+1,historyCount(sku));
+        var winner=products.get(sku);
+        double expected=winner.path("sourceQuotedPriceCny").asDouble()==100?110:99;
+        assertEquals(expected,winner.path("purchasePriceCny").asDouble());
+        for(int i=0;i<3;i++) {
+            var retry=(ObjectNode)products.get(sku).deepCopy();
+            products.update(sku,retry);
+            assertEquals(expected,products.get(sku).path("taxIncludedPriceCny").asDouble());
+        }
+        assertEquals(history,jdbc.queryForMap("select * from quotation_record where id=?",id));
+    }
+
     @Test void customStockNotesRoundTripWithAuditAndBlankPastePreservesExistingNote() {
         var sku = sku();
         var initial = full(sku).put("stockStatus", "定制款，7天交货");

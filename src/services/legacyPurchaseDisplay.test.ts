@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { normalizePurchaseRecord } from '@/data/purchaseStore'
-import { legacyPurchaseDisplay } from './legacyPurchaseDisplay'
+import { legacyPurchaseDisplay, formatLegacyPurchaseUnitPrice } from './legacyPurchaseDisplay'
 import { bundlePurchaseCost, purchasePriceBreakdown } from './quotationCalculator'
 
 const record = (overrides = {}) => normalizePurchaseRecord({
@@ -8,6 +8,10 @@ const record = (overrides = {}) => normalizePurchaseRecord({
   purchasePriceBasis: 'tax_included', sourceQuotedPriceCny: 110,
   purchasePriceCny: 121, taxIncludedPriceCny: 121, taxPoint: .1,
   minOrderQty: 2, weightG: 135, singleFreightCny: 5, ...overrides,
+})
+
+it.each([[110,'110.00'],[1.005,'1.005'],[1.234567,'1.234567'],[0.0000001,'0.0000001']])('preserves the exact source quote %s in display', (value, text) => {
+  expect(formatLegacyPurchaseUnitPrice(Number(value))).toBe(text)
 })
 
 it.each([
