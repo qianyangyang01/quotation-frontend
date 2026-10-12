@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import QuotationCopyScope from './QuotationCopyScope.vue'
+import QuotationBatchCopy from './QuotationBatchCopy.vue'
+import type { QuotationRecord } from '@/data/quotationRecords'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { idempotencyKey } from '@/services/http'
 import { saveFobQuotation } from '@/services/fobQuotationRecords'
@@ -8,7 +11,8 @@ import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { formatQuoteDate, localQuoteDate, quoteSheetTextTable, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 
-const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string; previewOnly?: boolean }>()
+const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string; previewOnly?: boolean; batchRecord?: QuotationRecord }>()
+const batchCopy = ref<InstanceType<typeof QuotationBatchCopy>>()
 const customer = ref(props.initialCustomer || ''), saving = ref(false), savedNo = ref(''), saveError = ref('')
 const columns = ref<QuoteSheetColumnKey[]>(['number','sku','prices']), priceOrder = ref([0,1]), rowOrder = ref<string[]>([])
 const drag = ref<{kind:'row'|'column'|'price'; index:number} | null>(null)
@@ -124,8 +128,12 @@ async function copy(asImage: boolean) {
         <label v-if="!savedSheet">展示范围 <select v-model="mode" aria-label="FOB报价单展示范围" :disabled="copying"><option value="tiers">全部阶梯</option><option value="quantity">当前数量</option></select></label>
         <div class="sheet-actions">
           <button v-if="!savedSheet" class="sheet-primary" type="button" :disabled="copying" @click="editing = !editing">{{ editing ? '预览报价单' : '编辑报价单' }}</button>
-          <button type="button" :disabled="!currentImage || copying || rendering" @click="copy(true)">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
-          <button type="button" :disabled="!sheet.rows.length || !!sheet.issues.length || copying || rendering" @click="copy(false)">复制报价数据</button>
+          <QuotationCopyScope :count="batchRecord?.quotationBatch?.count" label="复制报价图片" :disabled="copying || rendering || batchCopy?.busy" @current="copy(true)" @batch="batchCopy?.run('image')">
+          <button type="button" :disabled="!currentImage || copying || rendering || batchCopy?.busy" @click="copy(true)">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
+          </QuotationCopyScope>
+          <QuotationCopyScope :count="batchRecord?.quotationBatch?.count" label="复制报价数据" :disabled="copying || rendering || batchCopy?.busy" @current="copy(false)" @batch="batchCopy?.run('full')">
+          <button type="button" :disabled="!sheet.rows.length || !!sheet.issues.length || copying || rendering || batchCopy?.busy" @click="copy(false)">复制报价数据</button>
+          </QuotationCopyScope>
         </div>
       </div>
       <div v-if="editing && !savedSheet" class="fob-layout-editor">
@@ -153,6 +161,7 @@ async function copy(asImage: boolean) {
       </details>
     </div>
     </fieldset>
+    <QuotationBatchCopy v-if="batchRecord?.quotationBatch" ref="batchCopy" :record="batchRecord" />
     <p v-if="message" class="sheet-message" role="status">{{ message }}</p>
   </section>
 </template>

@@ -11,10 +11,14 @@ import { quotationRecordCopyLayout } from '@/data/quotationRecordCopyLayout'
 import { quotationRecordQuoteOnlyLayout } from '@/data/quotationRecordQuoteOnlyLayout'
 import { copyQuotationText } from '@/services/customerQuoteSheetClipboard'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
+import QuotationCopyScope from './QuotationCopyScope.vue'
+import QuotationBatchCopy from './QuotationBatchCopy.vue'
 
 const props = defineProps<{ record: QuotationRecord; canEdit?:boolean; refreshRecord?: (id: string) => Promise<QuotationRecord | null> }>()
 const emit=defineEmits<{saved:[record:QuotationRecord]}>()
 const saving=ref(false)
+const batchCopy = ref<InstanceType<typeof QuotationBatchCopy>>()
+const busy = computed(() => copyingData.value || saving.value || batchCopy.value?.busy || sheet.value?.copying)
 const source = computed(() => quotationRecordQuoteSheetSource(props.record))
 const contextKey = computed(() => `record:${props.record.id}:${props.record._version ?? ''}:${props.record.updatedAt}`)
 const sheet = ref<InstanceType<typeof CustomerQuoteSheet> | null>(null)
@@ -123,17 +127,24 @@ async function copyData(mode: 'full' | 'quote' = 'full') {
 <template>
   <div class="record-copy-actions">
     <div class="record-copy-buttons">
-      <button type="button" :disabled="copyingData" :title="canViewPurchaseCost ? '复制客户、客户等级、SKU、成本与重量摘要、国家、物流商与渠道、各数量报价及预计时效' : '复制客户、SKU、重量、渠道及最终报价'" @click="copyData('quote')">{{ copyingData && copyMode === 'quote' ? '正在复制…' : '仅复制报价单' }}</button>
+      <QuotationCopyScope :count="record.quotationBatch?.count" label="仅复制报价单" :disabled="busy" @current="copyData('quote')" @batch="batchCopy?.run('quote')">
+      <button type="button" :disabled="busy" :title="canViewPurchaseCost ? '复制客户、客户等级、SKU、成本与重量摘要、国家、物流商与渠道、各数量报价及预计时效' : '复制客户、SKU、重量、渠道及最终报价'" @click="copyData('quote')">{{ copyingData && copyMode === 'quote' ? '正在复制…' : '仅复制报价单' }}</button>
+      </QuotationCopyScope>
       <div ref="imageChoice" class="record-image-choice" @keydown.esc.stop.prevent="closeImageMenu" @focusout="!imageChoice?.contains($event.relatedTarget as Node) && (imageMenuOpen = false)">
-        <button ref="imageButton" class="copy-image" type="button" aria-label="复制报价图片" :aria-haspopup="hiddenCount ? 'menu' : undefined" :aria-expanded="hiddenCount ? imageMenuOpen : undefined" :disabled="copyingData || saving" @click="imageAction">复制报价图片<span v-if="hiddenCount" aria-hidden="true" class="image-choice-arrow">▾</span></button>
+      <QuotationCopyScope :count="record.quotationBatch?.count" label="复制报价图片" :disabled="busy" primary @current="imageAction" @batch="batchCopy?.run('image')">
+        <button ref="imageButton" class="copy-image" type="button" aria-label="复制报价图片" :aria-haspopup="hiddenCount ? 'menu' : undefined" :aria-expanded="hiddenCount ? imageMenuOpen : undefined" :disabled="busy" @click="imageAction">复制报价图片<span v-if="hiddenCount" aria-hidden="true" class="image-choice-arrow">▾</span></button>
+      </QuotationCopyScope>
         <div v-if="imageMenuOpen" class="record-image-menu" role="menu" aria-label="报价图片版本" @keydown.down.prevent="moveImageChoice(1)" @keydown.up.prevent="moveImageChoice(-1)">
           <button type="button" role="menuitem" @click="chooseImageVersion('full')"><strong>完整报价单</strong><small>全部 {{ record.quoteOptions?.length }} 行</small></button>
           <button type="button" role="menuitem" @click="chooseImageVersion('visible')"><strong>隐藏行后的报价单</strong><small>隐藏 {{ hiddenCount }} 行</small></button>
         </div>
       </div>
-      <button type="button" :disabled="copyingData" :title="canViewFullPricing ? '复制报价及成本、运费、税费对账明细' : '复制客户报价数据，可粘贴到 Excel'" @click="copyData('full')">{{ copyingData && copyMode === 'full' ? '正在复制…' : '复制报价数据' }}</button>
+      <QuotationCopyScope :count="record.quotationBatch?.count" label="复制报价数据" :disabled="busy" @current="copyData('full')" @batch="batchCopy?.run('full')">
+      <button type="button" :disabled="busy" :title="canViewFullPricing ? '复制报价及成本、运费、税费对账明细' : '复制客户报价数据，可粘贴到 Excel'" @click="copyData('full')">{{ copyingData && copyMode === 'full' ? '正在复制…' : '复制报价数据' }}</button>
+      </QuotationCopyScope>
       <slot />
     </div>
+    <QuotationBatchCopy v-if="record.quotationBatch" ref="batchCopy" :record="record" :version="sheetVersion" />
     <p v-if="status" role="status" :class="{ failed: status.failed }">{{ status.message }}</p>
     <button v-if="status?.failed" type="button" class="record-edit-retry" :disabled="copyingData" @click="copyData(copyMode)">{{ copyMode === 'quote' ? '重新复制报价单' : '重新复制对账明细' }}</button>
     <Teleport to="body">

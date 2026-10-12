@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.UUID;
 
 interface QuotationRecordRepository extends JpaRepository<QuotationRecordEntity,UUID>{
+    @org.springframework.data.jpa.repository.Query(value="select * from quotation_record where payload->'quotationBatch'->>'id' = :batchId and owner_account = :owner order by (payload->'quotationBatch'->>'index')::integer", nativeQuery=true)
+    List<QuotationRecordEntity> findBatch(@org.springframework.data.repository.query.Param("batchId") String batchId, @org.springframework.data.repository.query.Param("owner") String owner);
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("select r from QuotationRecordEntity r where r.id = :id")
     java.util.Optional<QuotationRecordEntity> lockById(@org.springframework.data.repository.query.Param("id") UUID id);

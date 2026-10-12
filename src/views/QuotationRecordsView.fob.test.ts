@@ -17,30 +17,37 @@ const row=()=>normalizeQuotationRecord({id:'fob',no:'QT-FOB',quoteMode:'fob',pri
 afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;authState.permissions=[];vi.useRealTimers();vi.clearAllMocks()})
 it.each(['employee','super_admin'] as const)('shows the same FOB snapshot and filter for %s without channel-specific actions',async role=>{
   vi.useFakeTimers();authState.current={id:'me',name:'ME',account:'ME',role,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=role==='employee'?['myRecords','quote']:['allRecords','quote']
-  mocks.page.mockResolvedValue({items:[row()],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});mocks.get.mockResolvedValue([row()])
+  const single=row();single.quotationBatch={id:'batch-1',no:'QB-001',index:1,count:14}
+  mocks.page.mockResolvedValue({items:[single],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});mocks.get.mockResolvedValue([single])
   const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope:role==='employee'?'mine':'company'});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush()
   expect(document.querySelector('.route-summary')?.textContent).toContain('FOB批发报价');expect(document.querySelector('.route-summary')?.textContent).not.toContain('1国')
+  expect(document.querySelector('.quote-record-table')?.textContent).not.toContain('QB-001')
+  expect(document.querySelector('.review-groups')?.textContent).not.toContain('有退回项')
+  expect(document.querySelector('.records-more')).toBeNull()
+  expect(document.querySelector('.lifecycle-tabs')?.textContent).not.toContain('历史批量记录')
   expect(document.querySelector('.difference-cell')?.textContent).toContain('1.37')
   const select=document.querySelector<HTMLSelectElement>('[aria-label="报价类型筛选"]')!;select.value='fob';select.dispatchEvent(new Event('change',{bubbles:true}));await vi.advanceTimersByTimeAsync(300);await flush()
   expect(mocks.page.mock.calls.at(-1)?.[1]).toMatchObject({quoteMode:'fob'})
   document.querySelector<HTMLButtonElement>('.difference-cell')!.click();await flush()
   await vi.waitFor(() => expect(document.querySelector('[aria-label="FOB历史报价快照"]')).not.toBeNull());expect(document.querySelector('.record-drawer')?.textContent).not.toContain('首选方案')
   expect(document.querySelector('.record-drawer')?.textContent).toContain('原始说明');expect(document.querySelector('.record-drawer')?.textContent).not.toContain('保存FOB报价')
+  expect(document.querySelector('.batch-review-active')).toBeNull()
+  document.querySelector<HTMLButtonElement>('.detail-batch-reference .batch-reference')!.click();await vi.advanceTimersByTimeAsync(300);await flush()
+  expect(mocks.page.mock.calls.at(-1)?.[1]).toMatchObject({product:'QB-001',reviewStatus:''})
 })
 it('exports both FOB prices and source category without changing ordinary export columns',()=>{
   const csv=quotationDetailsCsv([row()],[]);expect(csv).toContain('FOB不报关单价');expect(csv).toContain('FOB（批发）报价');expect(csv).toContain('内裤');expect(csv).toContain('1.37')
   expect(quotationDetailsCsv([{...row(),quoteMode:'single',fob:undefined}],[])).not.toContain('FOB不报关单价')
 })
-it('finds partial returns separately from overall status and exposes a persistent resume link',async()=>{
+it('preserves the existing record correction link without a separate history menu',async()=>{
   vi.useFakeTimers();authState.current={id:'me',name:'ME',account:'ME',role:'employee',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['myRecords','quote']
   const batch=row();batch.financeReviewStatus='pending';batch.fobItemReviews=[{index:0,status:'rejected',reason:'请核实'}]
   mocks.page.mockResolvedValue({items:[batch],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});mocks.get.mockResolvedValue([batch])
   const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope:'mine'});app.component('RouterLink',{props:['to'],template:'<a :data-target="JSON.stringify(to)"><slot /></a>'});app.mount(host);await flush()
-  const filter=[...document.querySelectorAll<HTMLButtonElement>('.review-groups button')].find(b=>b.textContent==='有退回项')!
-  filter.click();await vi.advanceTimersByTimeAsync(300);await flush()
-  expect(mocks.page.mock.calls.at(-1)?.[1]).toMatchObject({reviewStatus:'returned'})
   const link=[...document.querySelectorAll('a')].find(a=>a.textContent==='处理1项退回')!
   expect(JSON.parse(link.dataset.target!)).toEqual({path:'/quotation',query:{fobCorrection:'fob'}})
+  expect(mocks.page.mock.calls.at(-1)?.[1]).toMatchObject({reviewStatus:'pending'})
+  expect(document.querySelector('.legacy-return-filter')).toBeNull()
 })
 it('keeps the batch review mounted across detail tabs and prevents accidental draft loss',async()=>{
   vi.useFakeTimers();authState.current={id:'me',name:'ME',account:'ME',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['allRecords','quote','finance','purchase']

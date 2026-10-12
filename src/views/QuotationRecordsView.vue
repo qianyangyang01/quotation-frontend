@@ -106,7 +106,6 @@ const reviewGroups = [
   { value: 'logistics-exempt', label: '物流免审-采购已审' },
   { value: 'approved', label: '审核通过' },
   { value: 'rejected', label: '价格异常' },
-  { value: 'returned', label: '有退回项' },
   { value: '', label: '全部' },
 ] as const
 const filterReviewStatus = ref<typeof reviewGroups[number]['value']>(typeof route.query.batch === 'string' ? '' : 'pending')
@@ -487,7 +486,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
     <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
       <nav class="lifecycle-tabs" aria-label="报价记录分类">
         <button v-for="state in (['active','archived','trashed'] as const)" :key="state" :class="{active:lifecycle===state}" :aria-current="lifecycle===state ? 'page' : undefined" :disabled="lifecycleBusy" @click="lifecycle=state">{{ lifecycleLabel(state) }}</button>
-        <RouterLink class="legacy-batch-link" to="/quotation/batch-single?records=1">历史批量记录</RouterLink><small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
+        <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
       </nav>
       <nav class="review-groups" aria-label="审核分类">
         <button v-for="group in reviewGroups" :key="group.value" type="button" :class="{ active: filterReviewStatus === group.value }" :aria-pressed="filterReviewStatus === group.value" :disabled="lifecycleBusy" @click="filterReviewStatus = group.value">{{ group.label }}<b v-if="isMine && inbox.counts[group.value]" class="review-unread-count" :aria-label="`${inbox.counts[group.value]}条未读`">{{ inbox.counts[group.value] }}</b></button>
@@ -558,7 +557,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
               <em v-if="row.fob?.schemaVersion===2 && priorityFor(row)" class="priority-badge">优先处理</em>
               <div class="record-product-meta"><span class="record-commission" :class="{applied: (row.commissionThreshold ?? 1) > 0 && (row.commissionThreshold ?? 1) < 1}">{{ recordCommission(row) }}</span><small>{{ quotationModeLabels[row.quoteMode] }}<template v-if="!isMine"> · {{ row.salespersonName }}</template></small></div>
               <small class="record-number" :title="row.no">报价单号：{{ row.no }}</small>
-              <small v-if="row.quotationBatch">批次：<button class="batch-reference" @click="filterProduct=row.quotationBatch.no; filterReviewStatus=''">{{ row.quotationBatch.no }}</button> · {{ row.quotationBatch.index }}/{{ row.quotationBatch.count }}</small><small>创建于 {{ dateTime(row.createdAt) }}</small>
+              <small>创建于 {{ dateTime(row.createdAt) }}</small>
               <small v-if="row.lifecycleChangedAt" class="lifecycle-metadata">{{ lifecycleLabel(row.lifecycleState) }} · {{ row.lifecycleChangedBy }} · {{ dateTime(row.lifecycleChangedAt) }}<br>原因：{{ row.lifecycleReason }}</small>
               <small v-if="lifecycle==='active' && selectionBlocked(row)" class="lifecycle-lock">批量清理限制：{{ selectionBlocked(row) }}</small>
             </div>
@@ -597,6 +596,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
         <p v-if="!isActive(selected)" class="lifecycle-readonly">{{ lifecycleLabel(selected.lifecycleState) }} · {{ selected.lifecycleChangedBy }} · {{ selected.lifecycleReason }}。恢复后可修改。</p>
         <template v-if="!editing">
+          <p v-if="selected.quotationBatch" class="detail-batch-reference">提交批次：<button class="batch-reference" @click="filterProduct=selected.quotationBatch.no; filterReviewStatus=''">{{ selected.quotationBatch.no }} · 查看同批记录</button>（{{ selected.quotationBatch.index }}/{{ selected.quotationBatch.count }}）</p>
           <div class="detail-review-tools">
           <div class="detail-review-status" role="status" aria-label="审核状态">
             {{ financeReviewLabel(reviewSync.stateFor(selected).financeReviewStatus) }}<em v-if="priorityFor(selected)" class="priority-badge">优先处理</em>
@@ -666,7 +666,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
-.legacy-batch-link{font-size:12px;color:#6b7c89;text-decoration:none;align-self:center}.batch-reference{border:0;background:none;padding:0;color:#477294;font:inherit;cursor:pointer}
+.detail-batch-reference{margin:0 24px 12px;color:#788590;font-size:12px}.batch-reference{border:0;background:none;padding:0;color:#477294;font:inherit;cursor:pointer}
 
 
 

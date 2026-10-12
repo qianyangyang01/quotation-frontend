@@ -60,7 +60,7 @@ const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record
     </div>
     <div class="price-notes"><p v-if="record.fob.current">对外报价请以右侧「本次最终单价」为准，单位：美元/{{ quoteUnit }}。</p><p v-if="canViewPurchaseCost">国内运费依据：{{ record.fob.product.parsed.freight.basis }}</p></div>
     <p v-if="!record.fob.current" class="missing-final" role="alert">此历史快照未保存本次数量的最终单价，请核对下方已保存客户报价单；基础阶梯单价不可直接作为最终报价。</p>
-    <FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="record.fob.sheet" />
+    <FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="record.fob.sheet" :batch-record="record" />
   </section>
   <p v-else role="alert">此FOB报价缺少完整快照，无法还原报价单，请联系管理员核查。</p>
 </template>

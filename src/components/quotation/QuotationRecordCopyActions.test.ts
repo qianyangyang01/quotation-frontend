@@ -7,6 +7,8 @@ import { createApp, h, nextTick, reactive, type App } from 'vue'
 import CopyActions from './QuotationRecordCopyActions.vue'
 import { normalizeQuotationRecord, updateQuotationRecord, type QuotationRecord } from '@/data/quotationRecords'
 import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
+import { loadQuotationBatchRecords } from '@/services/quotationBatchCopy'
+vi.mock('@/services/quotationBatchCopy', async original => ({ ...await original<typeof import('@/services/quotationBatchCopy')>(), loadQuotationBatchRecords: vi.fn() }))
 
 vi.mock('@/services/customerQuoteSheetRenderer', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/customerQuoteSheetRenderer')>(), renderCustomerQuoteSheet: vi.fn(),
@@ -33,11 +35,72 @@ async function openImageVersion(label = '隐藏行后的报价单') {
   choice.click(); await settle()
 }
 beforeEach(() => {
+  vi.mocked(loadQuotationBatchRecords).mockReset()
   vi.mocked(updateQuotationRecord).mockReset()
   writeText.mockReset().mockResolvedValue(undefined)
   render.mockReset().mockResolvedValue([{ blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow: 1, lastRow: 1 }])
   vi.stubGlobal('isSecureContext', true); vi.stubGlobal('navigator', { clipboard: { writeText } })
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:quote'); vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+})
+
+function batchMembers() {
+  return [record('one'), record('two')].map((row, index) => ({ ...row, primarySku: `SKU-${index + 1}`, quotationBatch: { id: 'batch', no: 'B1', index: index + 1, count: 2 } }))
+}
+async function chooseBatch(label: string) {
+  footerButton(`${label}范围`).click(); await settle()
+  const menu = document.querySelector(`[role="menu"][aria-label="${label}范围"]`)!
+  ;[...menu.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('复制本批全部记录'))!.click()
+  await settle()
+}
+it('keeps ordinary buttons unchanged and exposes all three scopes on any batch member', async () => {
+  const state = mount()
+  expect(document.querySelectorAll('.scope-arrow')).toHaveLength(0)
+  const members = batchMembers(); state.record = members[1]!; await settle()
+  expect(document.querySelectorAll('.scope-arrow')).toHaveLength(3)
+  footerButton('复制报价数据').click(); await settle()
+  expect(loadQuotationBatchRecords).not.toHaveBeenCalled()
+  expect(writeText.mock.lastCall![0]).toContain('SKU-2')
+  expect(writeText.mock.lastCall![0]).not.toContain('SKU-1')
+  vi.mocked(loadQuotationBatchRecords).mockResolvedValue(members)
+  await chooseBatch('复制报价数据')
+  expect(loadQuotationBatchRecords).toHaveBeenCalledWith(state.record)
+  expect(writeText.mock.lastCall![0]).toContain('SKU-1')
+  expect(writeText.mock.lastCall![0]).toContain('SKU-2')
+  expect(document.body.textContent).toContain('已复制本批全部 2 条记录')
+})
+it('copies quote-only batch without privileged costs and retries the batch after a failure', async () => {
+  const state = mount(), members = batchMembers(); state.record = members[0]!; await settle()
+  members.forEach(row => row.purchaseUnitPriceCny = 789.12)
+  setPricingTestPermissions(['quote', 'myRecords'])
+  vi.mocked(loadQuotationBatchRecords).mockRejectedValueOnce(new Error('本批记录读取失败')).mockResolvedValue(members)
+  await chooseBatch('仅复制报价单')
+  expect(writeText).not.toHaveBeenCalled()
+  footerButton('重试整批复制').click(); await settle()
+  expect(writeText.mock.lastCall![0]).toContain('SKU-2')
+  expect(writeText.mock.lastCall![0]).not.toContain('789.12')
+})
+it('renders a combined batch image using saved customer prices without saving changes', async () => {
+  const state = mount(), members = batchMembers(); state.record = members[1]!; await settle()
+  members[0]!.customerQuote = { quantities: [1], rows: [{ optionId: 'a', prices: [123.45] }] }
+  members[1]!.customerQuote = { quantities: [1], rows: [{ optionId: 'a', prices: [234.56] }] }
+  const before = JSON.stringify(members)
+  vi.mocked(loadQuotationBatchRecords).mockResolvedValue(members)
+  await chooseBatch('复制报价图片'); await settle()
+  expect(document.querySelector<HTMLDialogElement>('[aria-label="本批全部报价图片"]')!.open).toBe(true)
+  const combined = render.mock.lastCall![0]
+  expect(combined.rows.map(row => row.sku)).toEqual(['SKU-1', 'SKU-2'])
+  expect(combined.rows.map(row => row.prices)).toEqual([[123.45], [234.56]])
+  expect(JSON.stringify(members)).toBe(before)
+  expect(updateQuotationRecord).not.toHaveBeenCalled()
+})
+it('does not copy a late batch response after switching records', async () => {
+  const state = mount(), members = batchMembers(); state.record = members[0]!; await settle()
+  let resolve!: (value: QuotationRecord[]) => void
+  vi.mocked(loadQuotationBatchRecords).mockReturnValue(new Promise(done => resolve = done))
+  await chooseBatch('复制报价数据')
+  state.record = members[1]!; await settle()
+  resolve(members); await settle()
+  expect(writeText).not.toHaveBeenCalled()
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 

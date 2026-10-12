@@ -99,6 +99,24 @@ class BatchIndependentQuotationPostgresIntegrationTest {
         }
         assertEquals(before+2,count("quotation_record"));
     }
+    @Test void copiesWholeBatchFromAnyMemberWithOwnerProtectionAndNoHistoryWrites() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(14));
+        var last=result.path("records").get(13).path("id").asText();
+        var first=result.path("records").get(0).path("id").asText();
+        jdbc.sql("update quotation_record set lifecycle_state='archived' where id=cast(:id as uuid)").param("id",first).update();
+        var before=jdbc.sql("select payload::text from quotation_record where payload->'quotationBatch'->>'id'=:id order by id").param("id",result.path("batchId").asText()).query(String.class).list();
+        for(var role:List.of("employee","finance")) {
+            var response=mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get(role))).andExpect(status().isOk()).andReturn();
+            var members=mapper.readTree(response.getResponse().getContentAsByteArray()).path("data");
+            assertEquals(14,members.size());assertEquals(first,members.get(0).path("id").asText());
+            assertEquals(last,members.get(13).path("id").asText());assertEquals("archived",members.get(0).path("lifecycleState").asText());
+        }
+        mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get("employee2"))).andExpect(status().isForbidden());
+        assertEquals(before,jdbc.sql("select payload::text from quotation_record where payload->'quotationBatch'->>'id'=:id order by id").param("id",result.path("batchId").asText()).query(String.class).list());
+        jdbc.sql("update quotation_record set lifecycle_state='withdrawn' where id=cast(:id as uuid)").param("id",first).update();
+        mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get("employee"))).andExpect(status().isConflict());
+    }
+
     void seedFob(ObjectNode body) {
         jdbc.sql("insert into finance_setting(setting_key,payload,version,updated_at) values('exchange-rate','{\"usdCny\":6.7}'::jsonb,0,now()) on conflict(setting_key) do update set payload=excluded.payload").update();
         for(var item:body.at("/fob/items")) {
