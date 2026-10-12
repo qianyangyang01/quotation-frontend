@@ -43,6 +43,8 @@ async function run(kind: BatchCopyKind) {
         return { ...sheet, customerName: record.customerName }
       })
       combined.value = mergeSavedBatchSheets(captured)
+      // Individual FOB snapshots omit the batch flag; restore it only on this temporary merged image.
+      if (members[0]?.quoteMode === 'fob') combined.value.fobBatch = true
       await nextTick()
       if (token !== generation) return
       dialog.value?.showModal()

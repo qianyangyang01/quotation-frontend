@@ -32,7 +32,11 @@ it('offers whole batch copy on a later FOB record and preserves all saved quanti
     button(`复制报价${kind}范围`).click(); await settle()
     ;[...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent?.includes('复制本批'))!.click(); await settle()
     if (kind === '数据') { expect(writeText.mock.lastCall![0]).toContain('A'); expect(writeText.mock.lastCall![0]).toContain('6 pcs') }
-    else expect(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![0].rows).toHaveLength(4)
+    else {
+      const sheet = vi.mocked(renderCustomerQuoteSheet).mock.lastCall![0]
+      expect(sheet.rows).toHaveLength(4)
+      expect(sheet.fobBatch).toBe(true)
+    }
   }
   expect(JSON.stringify(records)).toBe(before)
 })
