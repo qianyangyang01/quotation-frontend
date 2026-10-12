@@ -6,6 +6,8 @@ import BatchSkuSummary from '@/components/quotation/BatchSkuSummary.vue'
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { isManualQuotation, quotationModeLabels } from '@/data/quotationModes'
 import QuotationLifecycleDialog from '@/components/quotation/QuotationLifecycleDialog.vue'
+import QuotationRecordMenu from '@/components/quotation/QuotationRecordMenu.vue'
+import { loadQuotationBatchRecords } from '@/services/quotationBatchCopy'
 import { changeQuotationLifecycle, lifecycleLabel, lifecycleProtection, type RecordLifecycle, type LifecycleAction } from '@/data/quotationLifecycle'
 import { operationFeesLabel } from '@/data/customerOperationFees'
 import { useQuotationReviewSync } from '@/composables/useQuotationReviewSync'
@@ -54,8 +56,11 @@ const lifecycleAction = ref<LifecycleAction | null>(null)
 const confirmationRows = ref<QuotationRecord[]>([])
 const lifecycleBusy = ref(false)
 const lifecycleError = ref('')
+const lifecycleBatch = ref<QuotationRecord | null>(null)
+const lifecycleBlocked = ref<string[]>([])
 const lifecycleAdmin = computed(() => currentAuthUser.value.role === 'super_admin' && hasPermission('allRecords'))
 const canManageLifecycle = computed(() => lifecycleAdmin.value || props.scope === 'mine')
+function canTrashBatch(row: QuotationRecord) { return !!row.quotationBatch && canManageLifecycle.value && lifecycle.value !== 'trashed' && (lifecycleAdmin.value || row.salespersonAccount === currentAuthUser.value.account) }
 function isActive(row: QuotationRecord) { return !reviewSync.isMissing(row.id) && (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') === 'active' }
 function selectionBlocked(row: QuotationRecord) {
   if (!canManageLifecycle.value || (!lifecycleAdmin.value && row.salespersonAccount !== currentAuthUser.value.account)) return '只能处理自己的报价记录'
@@ -73,16 +78,39 @@ function beginLifecycle(action: LifecycleAction) {
   if (!rows.length) return
   const blocked = rows.map(row => selectionBlocked(row) || (action === 'trash' ? lifecycleProtection({...row,...reviewSync.stateFor(row)}) : '')).find(Boolean)
   if (blocked) { toast(blocked); return }
+  lifecycleBatch.value = null; lifecycleBlocked.value = []
   confirmationRows.value = rows.map(row => ({...row}))
   lifecycleError.value = ''; lifecycleAction.value = action
 }
+async function beginRecordTrash(row: QuotationRecord, wholeBatch = false) {
+  if (lifecycleBusy.value || loading.value || !canManageLifecycle.value) return
+  const account = currentAuthUser.value.account, context = requestId
+  lifecycleBusy.value = true
+  try {
+    const rows = wholeBatch ? await loadQuotationBatchRecords(row, 'trash') : [row]
+    if (account !== currentAuthUser.value.account || context !== requestId) return
+    confirmationRows.value = rows.map(item => ({ ...item }))
+    lifecycleBatch.value = wholeBatch ? row : null
+    lifecycleBlocked.value = rows.flatMap(item => {
+      const reason = (!lifecycleAdmin.value && item.salespersonAccount !== account ? '只能处理自己的报价记录' : '')
+        || (item._version == null ? '记录版本缺失，请刷新' : '') || lifecycleProtection(item)
+      return reason ? [`${item.no} · ${item.primarySku}：${reason}`] : []
+    })
+    lifecycleError.value = ''; lifecycleAction.value = 'trash'
+  } catch (error) {
+    if (account === currentAuthUser.value.account && context === requestId) toast(error instanceof Error ? error.message : '加载本批报价失败，请重试')
+  } finally { lifecycleBusy.value = false }
+}
 async function confirmLifecycle(reason: string) {
-  if (!lifecycleAction.value || lifecycleBusy.value || !reason.trim()) return
+  if (!lifecycleAction.value || lifecycleBusy.value || lifecycleBlocked.value.length || !reason.trim()) return
   lifecycleBusy.value = true; lifecycleError.value = ''
   const account = currentAuthUser.value.account
   try {
-    const result = await changeQuotationLifecycle(lifecycleAction.value, reason, confirmationRows.value)
+    const result = lifecycleBatch.value
+      ? await changeQuotationLifecycle(lifecycleAction.value, reason, confirmationRows.value, lifecycleBatch.value.id)
+      : await changeQuotationLifecycle(lifecycleAction.value, reason, confirmationRows.value)
     if (account !== currentAuthUser.value.account) return
+    if (lifecycleAction.value === 'trash') confirmationRows.value.forEach(row => reviewSync.accept({ ...row, _version: row._version! + 1, lifecycleState: 'trashed' }))
     lifecycleAction.value = null; checkedIds.value = []; selected.value = null
     toast('已处理 ' + result.changed + ' 条报价记录')
     await refresh()
@@ -569,15 +597,30 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <button v-else class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
             <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>
-            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)"><template #inspection><QuotationSpotCheck :state="reviewSync.stateFor(row)" :can-mark="canSpotCheck && isActive(row)" :busy="spotCheckBusy.has(row.id) || lifecycleBusy || mutationBusy" @mark="markSpotChecked(row)" /></template></QuotationReviewPanel>
-            <div class="record-action-buttons"><RouterLink v-if="row.salespersonAccount===currentAuthUser.account && isActive(row) && reviewSync.stateFor(row).fobItemReviews?.some(i=>i.status==='rejected')" class="reissue-quote" :to="{path:'/quotation',query:{fobCorrection:row.id}}">处理{{ reviewSync.stateFor(row).fobItemReviews?.filter(i=>i.status==='rejected').length }}项退回</RouterLink><button v-if="canSetPriority(row)" type="button" class="priority-action" :disabled="priorityBusy.has(row.id)||lifecycleBusy||mutationBusy" :aria-label="(priorityFor(row)?'取消优先':'设为优先')+' '+row.no" @click="togglePriority(row)">{{ priorityBusy.has(row.id) ? '正在保存…' : priorityFor(row) ? '取消优先' : '设为优先' }}</button>
-              <small v-if="row.status !== 'pending'" class="deal-result" :class="row.status">成交结果：{{ quotationDealLabel(row.status) }}</small>
-              <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
-            </div>
-            <div v-if="canWithdraw(row)" class="record-action-buttons record-mutation-buttons">
-              <button type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('cancel', row)">取消</button>
-              <button v-if="hasPermission('quote') && row.quoteMode!=='fob'" type="button" :disabled="mutationBusy || lifecycleBusy" @click.stop="beginMutation('withdraw', row)">撤回重新编辑</button>
-            </div>
+            <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)">
+              <template #inspection><QuotationSpotCheck :state="reviewSync.stateFor(row)" :can-mark="false" /></template>
+              <template #actions>
+                <QuotationRecordMenu v-if="(canSpotCheck && isActive(row)) || canSetPriority(row) || (hasPermission('quote') && isActive(row)) || canWithdraw(row) || canTrashBatch(row)" :label="'更多操作 ' + row.no" :disabled="loading || lifecycleBusy || mutationBusy">
+                  <div v-if="(canSpotCheck && isActive(row)) || canSetPriority(row) || (hasPermission('quote') && isActive(row))" class="menu-group">
+                    <small class="menu-heading">报价操作</small>
+                    <QuotationSpotCheck v-if="canSpotCheck && isActive(row)" :state="reviewSync.stateFor(row)" :can-mark="true" :busy="spotCheckBusy.has(row.id) || lifecycleBusy || mutationBusy" @mark="markSpotChecked(row)" />
+                    <button v-if="canSetPriority(row)" type="button" class="priority-action" :disabled="priorityBusy.has(row.id)||lifecycleBusy||mutationBusy" :aria-label="(priorityFor(row)?'取消优先':'设为优先')+' '+row.no" @click="togglePriority(row)">{{ priorityBusy.has(row.id) ? '正在保存…' : priorityFor(row) ? '取消优先' : '设为优先' }}</button>
+                    <RouterLink v-if="hasPermission('quote') && isActive(row)" class="reissue-quote" :to="{ path: '/quotation', query: { reissue: row.id } }">再次发起</RouterLink>
+                  </div>
+                  <div v-if="canWithdraw(row) || canTrashBatch(row)" class="menu-group">
+                    <small class="menu-heading">记录管理</small>
+                    <button v-if="canWithdraw(row) && hasPermission('quote') && row.quoteMode!=='fob'" type="button" :disabled="mutationBusy || lifecycleBusy" @click="beginMutation('withdraw', row)">撤回重新编辑</button>
+                    <template v-if="row.quotationBatch && canTrashBatch(row)">
+                      <button type="button" :disabled="loading || lifecycleBusy || mutationBusy" @click="beginRecordTrash(row)">移入回收站 <small class="batch-count">当前 1 条</small></button>
+                      <button type="button" :disabled="loading || lifecycleBusy || mutationBusy" @click="beginRecordTrash(row, true)">整批移入回收站 <small class="batch-count">{{ row.quotationBatch.count }} 条</small></button>
+                    </template>
+                  </div>
+                  <div v-if="canWithdraw(row)" class="menu-group"><button type="button" class="danger" :disabled="mutationBusy || lifecycleBusy" @click="beginMutation('cancel', row)">取消报价 <small class="batch-count">永久取消</small></button></div>
+                </QuotationRecordMenu>
+              </template>
+            </QuotationReviewPanel>
+            <RouterLink v-if="row.salespersonAccount===currentAuthUser.account && isActive(row) && reviewSync.stateFor(row).fobItemReviews?.some(i=>i.status==='rejected')" class="reissue-quote" :to="{path:'/quotation',query:{fobCorrection:row.id}}">处理{{ reviewSync.stateFor(row).fobItemReviews?.filter(i=>i.status==='rejected').length }}项退回</RouterLink>
+            <small v-if="row.status !== 'pending'" class="deal-result" :class="row.status">成交结果：{{ quotationDealLabel(row.status) }}</small>
           </div>
         </article>
         <div v-if="!loading && !loadError && !dateError && !list.length" class="empty"><b>暂无报价记录</b><span>当前筛选范围内没有记录，可以调整日期或重置筛选。</span><RouterLink v-if="isMine" to="/quotation">去新建报价</RouterLink></div>
@@ -589,7 +632,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <button :disabled="loading || page+1>=totalPages || !!dateError" @click="changePage(page+1)">下一页</button>
       </nav>
     </main>
-    <QuotationLifecycleDialog v-if="lifecycleAction" :action="lifecycleAction" :rows="confirmationRows" :busy="lifecycleBusy" :error="lifecycleError" @cancel="lifecycleAction=null" @confirm="confirmLifecycle" />
+    <QuotationLifecycleDialog v-if="lifecycleAction" :action="lifecycleAction" :rows="confirmationRows" :busy="lifecycleBusy" :error="lifecycleError" :batch-no="lifecycleBatch?.quotationBatch?.no" :blocked="lifecycleBlocked" @cancel="lifecycleAction=null" @confirm="confirmLifecycle" />
     <div v-if="selected" class="mask" @click.self="closeDrawer">
       <aside class="record-drawer" :class="{'batch-review-drawer':selected.fob?.schemaVersion===2 && !editing, 'batch-review-active':selected.fob?.schemaVersion===2 && !editing && detailTab==='overview'}">
         <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.fob?.schemaVersion===2 ? `FOB批量 · ${selected.fob.items?.length || 0}项 · ${selected.fob.sheet.rows.length}档` : selected.productSummary }}<template v-if="selected.quoteMode!=='fob'"> · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</template></span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
@@ -728,7 +771,7 @@ main{width:min(1680px,calc(100% - 48px))}
 }
 .quote-record-table>header{font-size:14px;font-weight:600;color:#52616d}
 .quote-record-table>header span:last-child{text-align:left}
-.quote-record-table>article{min-height:0;font-size:16px;line-height:1.45}
+.quote-record-table>article{min-height:0;padding-block:18px;font-size:16px;line-height:1.45}
 .quote-record-table>article+article{border-top:2px solid #cbd5df}
 .quote-record-table>article>div{gap:8px}
 .quote-record-table .quote-info{display:flex!important;align-items:center;justify-content:flex-start;gap:12px;min-width:0}
@@ -750,7 +793,19 @@ main{width:min(1680px,calc(100% - 48px))}
 .quote-record-table .difference-cell{box-sizing:border-box;min-width:0;width:100%;padding:10px 12px!important;gap:5px;align-content:center}
 .quote-record-table .difference-cell b{font-size:14px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
 .quote-record-table .difference-cell span{font-size:13px;line-height:1.5}
-.quote-record-table .record-row-actions{gap:7px}
+.quote-record-table .record-row-actions{gap:8px;width:100%;max-width:210px;box-sizing:border-box;justify-self:center;align-self:center;padding:10px;border:1px solid #f0dfc3;border-left:4px solid #f39800;border-radius:10px;background:#fffcf6}
+.quote-record-table .record-row-actions :deep(.review-panel.compact){gap:7px}
+.quote-record-table .record-row-actions :deep(.review-status-line){width:100%;justify-content:center;min-height:20px;gap:6px}
+.quote-record-table .record-row-actions :deep(.finance-review.pending){display:inline-flex;align-items:center;gap:7px;width:auto;min-height:0;background:transparent;padding:0;font-size:13px;color:#825416;font-weight:700}
+.quote-record-table .record-row-actions :deep(.finance-review.pending::before){content:'';width:8px;height:8px;flex-shrink:0;border-radius:50%;background:#ed950d;box-shadow:0 0 0 3px #ffedcb}
+.quote-record-table .record-row-actions :deep(.comment-actions){gap:8px;align-items:center}
+.quote-record-table .record-row-actions :deep(.compact-review-primary){display:inline-flex;align-items:center;justify-content:center;flex:1;height:34px;padding:0 14px;border:1px solid #e38a04;border-radius:7px;background:#f39800;color:#fff;font-size:13px;font-weight:700;text-align:center;box-shadow:0 3px 7px #dc8b001a}
+.quote-record-table .record-row-actions :deep(.compact-review-primary:hover:not(:disabled)){background:#e88d00;border-color:#d48000}
+.quote-record-table .record-row-actions :deep(.record-more-trigger){display:inline-flex;align-items:center;justify-content:center;position:relative;min-width:72px;height:34px;padding:0 18px;border:1px solid #dce3e9;background:#fff;color:#596776;font-size:13px;font-weight:500;text-align:center}
+.quote-record-table .record-row-actions :deep(.record-more-trigger:hover:not(:disabled)){background:#f4f7fa}
+.quote-record-table .record-row-actions :deep(.record-more-trigger span){position:absolute;right:6px;top:50%;transform:translateY(-50%);margin-left:0}
+.quote-record-table .record-row-actions :deep(.comment-entry){flex-basis:100%}
+@media(min-width:1050px){.quote-record-table>header,.quote-record-table>article{min-width:0;grid-template-columns:minmax(210px,1.4fr) minmax(110px,.8fr) minmax(135px,.8fr) minmax(150px,.9fr) minmax(210px,.95fr);gap:16px}}
 .quote-record-table .finance-review{width:100%;min-height:38px;font-size:14px;line-height:1.4;padding:7px 9px}
 .quote-record-table strong.finance-review{white-space:normal;font-weight:600}
 .quote-record-table .record-row-actions>small{font-size:12px}

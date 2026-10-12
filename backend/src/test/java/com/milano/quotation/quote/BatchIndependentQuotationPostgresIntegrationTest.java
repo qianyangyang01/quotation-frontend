@@ -125,6 +125,69 @@ class BatchIndependentQuotationPostgresIntegrationTest {
                 .param("sku",source.path("sku").asText()).param("p",source.toString()).update();
         }
     }
+    ObjectNode trashRequest(JsonNode result) throws Exception {
+        var request=mapper.createObjectNode().put("action","trash").put("reason","本批不再需要");
+        var items=request.putArray("items");
+        for(var saved:result.path("records")) {
+            var row=read(saved.path("id").asText());items.addObject().put("id",row.path("id").asText()).put("version",row.path("_version").asLong());
+        }
+        return request;
+    }
+    org.springframework.test.web.servlet.ResultActions trash(String role,String member,ObjectNode request) throws Exception {
+        return mvc.perform(post("/api/v1/quotations/lifecycle/batch/"+member).session(sessions.get(role)).with(csrf()).contentType("application/json").content(request.toString()));
+    }
+    @Test void wholeBatchTrashFromLastMemberHidesBothQueuesAndBlocksStaleReviewWithoutChangingPrices() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(14));var request=trashRequest(result);
+        var first=read(result.at("/records/0/id").asText());var last=result.at("/records/13/id").asText();
+        trash("employee",last,request).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(14));
+        for(String role:List.of("employee","finance","super_admin")) {
+            for(String reviewFilter:List.of("","pending","reviewing")) {
+                mvc.perform(get("/api/v1/quotations/search").session(sessions.get(role)).param("scope",role.equals("employee")?"mine":"company")
+                    .param("product",result.path("batchNo").asText()).param("reviewStatus",reviewFilter)).andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+            }
+            mvc.perform(get("/api/v1/quotations/search").session(sessions.get(role)).param("scope",role.equals("employee")?"mine":"company")
+                .param("product",result.path("batchNo").asText()).param("lifecycle","trashed")).andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(14));
+        }
+        for(String action:List.of("claim","complete","comment")) {
+            mvc.perform(patch("/api/v1/quotations/"+first.path("id").asText()+"/finance-review").session(sessions.get("finance")).with(csrf()).contentType("application/json")
+                .content(mapper.createObjectNode().put("action",action).put("_version",first.path("_version").asLong()).put("_reviewVersion",0).put("financeReviewStatus","approved").toString()))
+                .andExpect(status().isConflict()).andExpect(content().string(org.hamcrest.Matchers.containsString("回收站")));
+        }
+        var after=read(first.path("id").asText());assertEquals(first.path("customerQuote"),after.path("customerQuote"));assertEquals(first.path("systemQuoteUsd"),after.path("systemQuoteUsd"));
+        mvc.perform(get("/api/v1/quotations/review-status").param("ids",first.path("id").asText()).session(sessions.get("finance")))
+            .andExpect(jsonPath("$.data[0].lifecycleState").value("trashed"));
+        trash("employee",last,request).andExpect(status().isConflict());
+    }
+    @Test void incompleteForeignAndStaleBatchRequestsNeverPartiallyTrash() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(3));var request=trashRequest(result);var first=result.at("/records/0/id").asText();
+        trash("employee2",first,request).andExpect(status().isForbidden());trash("finance",first,request).andExpect(status().isForbidden());
+        var partial=request.deepCopy();((ArrayNode)partial.path("items")).remove(2);trash("employee",first,partial).andExpect(status().isConflict());
+        var stale=request.deepCopy();((ObjectNode)stale.at("/items/2")).put("version",999);trash("employee",first,stale).andExpect(status().isConflict());
+        var other=save(UUID.randomUUID().toString(),ordinary(1));var mixed=request.deepCopy();((ArrayNode)mixed.path("items")).set(2,trashRequest(other).at("/items/0"));
+        trash("super_admin",first,mixed).andExpect(status().isConflict());
+        for(var row:result.path("records"))assertEquals("active",read(row.path("id").asText()).path("lifecycleState").asText());
+    }
+    @Test void claimAfterConfirmationBlocksWholeBatchAndFobBatchCanBeTrashed() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(2));var request=trashRequest(result);var first=result.at("/records/0/id").asText();
+        review(read(result.at("/records/1/id").asText()),"claim","pending");
+        trash("employee",first,request).andExpect(status().isConflict());assertEquals("active",read(first).path("lifecycleState").asText());
+        var fob=BatchQuotationSubmissionTest.request(FobBatchQuotationTest.input(2));seedFob(fob);var saved=save(UUID.randomUUID().toString(),fob);
+        trash("super_admin",saved.at("/records/1/id").asText(),trashRequest(saved)).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(2));
+    }
+    @Test void concurrentReviewAndWholeBatchTrashHaveOnlyOneWinner() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(3));var request=trashRequest(result);
+        var first=read(result.at("/records/0/id").asText());var last=result.at("/records/2/id").asText();
+        var reviewBody=mapper.createObjectNode().put("action","claim").put("_version",first.path("_version").asLong()).put("_reviewVersion",first.path("_reviewVersion").asLong());
+        var start=new java.util.concurrent.CountDownLatch(1);
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var cleanup=pool.submit(()->{start.await();return trash("employee",last,request).andReturn().getResponse().getStatus();});
+            var claim=pool.submit(()->{start.await();return mvc.perform(patch("/api/v1/quotations/"+first.path("id").asText()+"/finance-review")
+                .session(sessions.get("finance")).with(csrf()).contentType("application/json").content(reviewBody.toString())).andReturn().getResponse().getStatus();});
+            start.countDown();int cleanupStatus=cleanup.get(30,java.util.concurrent.TimeUnit.SECONDS),claimStatus=claim.get(30,java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue(cleanupStatus==200&&claimStatus==409 || cleanupStatus==409&&claimStatus==200);
+            for(var row:result.path("records"))assertEquals(cleanupStatus==200?"trashed":"active",read(row.path("id").asText()).path("lifecycleState").asText());
+        }
+    }
     @Test void fobFourteenRecordsAreSchemaOneAndUseOrdinaryFinanceReview() throws Exception {
         var body=BatchQuotationSubmissionTest.request(FobBatchQuotationTest.input(14));seedFob(body);var key=UUID.randomUUID().toString();
         var result=save(key,body);assertEquals(14,result.path("records").size());

@@ -23,7 +23,8 @@ beforeEach(() => { vi.useFakeTimers(); mock.cancel.mockResolvedValue({ cancelled
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.clearAllMocks(); vi.useRealTimers() })
 it('requires explicit permanent cancellation confirmation even during review', async () => {
   await mount(); expect(button('撤回重新编辑')).toBeDefined()
-  button('取消').click(); await flush(); expect(mock.cancel).not.toHaveBeenCalled()
+  document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
+  document.querySelector<HTMLButtonElement>('.record-more-panel .danger')!.click(); await flush(); expect(mock.cancel).not.toHaveBeenCalled()
   expect(document.querySelector('[role=dialog]')?.textContent).toContain('永久删除')
   mock.page.mockResolvedValue({ items: [], total: 0, page: 0, totalPages: 0, summary: { pending: 0, won: 0, total: 0 }, countries: [] })
   button('确认永久取消').click(); button('确认永久取消').click(); await flush()
@@ -32,6 +33,7 @@ it('requires explicit permanent cancellation confirmation even during review', a
 })
 it('leaves the record and dialog intact on draft conflict and navigates only after withdrawal succeeds', async () => {
   await mount(); mock.withdraw.mockRejectedValueOnce(new Error('已有草稿，请先完成或放弃'))
+  document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
   button('撤回重新编辑').click(); await flush(); button('确认撤回并编辑').click(); await flush()
   expect(document.querySelector('[role=alert]')?.textContent).toContain('已有草稿')
   expect(mock.push).not.toHaveBeenCalled(); expect(document.querySelector('.record-customer')).not.toBeNull()

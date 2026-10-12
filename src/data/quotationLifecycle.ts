@@ -10,8 +10,8 @@ export function lifecycleProtection(row: QuotationRecord) {
   if (row.financeReviewStatus && row.financeReviewStatus !== 'pending') return '已审核记录，需管理员单独核实'
   return ''
 }
-export async function changeQuotationLifecycle(action: LifecycleAction, reason: string, rows: QuotationRecord[]) {
-  return api.post<{ changed: number }>('/quotations/lifecycle', {
+export async function changeQuotationLifecycle(action: LifecycleAction, reason: string, rows: QuotationRecord[], batchMemberId?: string) {
+  return api.post<{ changed: number }>(batchMemberId ? `/quotations/lifecycle/batch/${encodeURIComponent(batchMemberId)}` : '/quotations/lifecycle', {
     action, reason: reason.trim(), items: rows.map(row => ({ id: row.id, version: row._version })),
   })
 }

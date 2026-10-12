@@ -22,6 +22,7 @@ afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;
 it('sets priority once with live versions and no reason, then shows the returned flag',async()=>{
   const saved=row({priorityProcessing:true,_reviewVersion:3});await mount([row()])
   let resolve!:(value:QuotationRecord)=>void;mocks.patch.mockImplementation(()=>new Promise<QuotationRecord>(r=>{resolve=r}))
+  document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
   const button=document.querySelector<HTMLButtonElement>('.priority-action')!;button.click();await flush();button.click()
   expect(button.disabled).toBe(true);expect(mocks.patch).toHaveBeenCalledOnce()
   expect(mocks.patch).toHaveBeenCalledWith('/quotations/one/priority',{priorityProcessing:true,_version:5,_reviewVersion:2})
@@ -38,6 +39,7 @@ it('limits actions to owned active pending/reviewing records',async()=>{
 it('keeps the prior mark on a conflict and polls authoritative state',async()=>{
   await mount([row({priorityProcessing:true})]);const calls=mocks.get.mock.calls.length
   mocks.patch.mockRejectedValue(new Error('审核已完成，请刷新'))
+  document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
   document.querySelector<HTMLButtonElement>('.priority-action')!.click();await flush()
   expect(document.body.textContent).toContain('审核已完成，请刷新')
   expect(mocks.get.mock.calls.length).toBeGreaterThan(calls)

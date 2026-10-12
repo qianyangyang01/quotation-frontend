@@ -167,8 +167,8 @@ public class QuotationController {
         var batch=row.payload.path("quotationBatch");
         if(batch.path("id").asText().isBlank()) throw AppException.unprocessable("此记录不属于批量报价");
         var members=records.findBatch(batch.path("id").asText(),row.ownerAccount);
-        if(members.size()!=batch.path("count").asInt() || members.isEmpty()) throw AppException.conflict("批次记录不完整，未复制任何数据，请刷新后重试");
-        if(members.stream().anyMatch(r->!Set.of("active","archived").contains(r.lifecycleState))) throw AppException.conflict("本批包含已撤回或回收站记录，暂不能整批复制，请恢复记录或复制当前一条");
+        if(members.size()!=batch.path("count").asInt() || members.isEmpty()) throw AppException.conflict("批次记录不完整，无法整批操作，请刷新后重试");
+        if(members.stream().anyMatch(r->!Set.of("active","archived").contains(r.lifecycleState))) throw AppException.conflict("本批包含已撤回或回收站记录，无法整批操作，请先恢复记录或单独处理");
         var payloads=members.stream().map(this::rawView).toList();reviews.enrich(payloads);
         return ApiResponse.ok(payloads);
     }

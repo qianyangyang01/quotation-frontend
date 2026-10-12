@@ -27,9 +27,10 @@ it('marks once without a remark and renders the authoritative marker without cha
   expect(document.querySelector('.spot-check-badge')?.textContent).toContain('已抽检');expect(document.querySelector('.spot-check-badge')?.getAttribute('title')).toContain('管理员')
   expect(document.querySelector('.finance-review')?.textContent).toBe('审核通过');expect(document.querySelector('.spot-check-button')?.getAttribute('aria-label')).toContain('点击取消')
 })
-it('lets an admin click the purple marker again to cancel without changing the review conclusion',async()=>{
+it('lets an admin cancel the marker through more actions without changing the review conclusion',async()=>{
   await mount('super_admin',[marked()]);mocks.patch.mockResolvedValue(row({spotChecked:false,_reviewVersion:4}))
-  document.querySelector<HTMLButtonElement>('.spot-check-badge')!.click();await flush()
+  document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
+  document.querySelector<HTMLButtonElement>('button.spot-check-badge')!.click();await flush()
   expect(mocks.patch).toHaveBeenCalledWith('/quotations/one/spot-check',{_version:5,_reviewVersion:3,spotChecked:false})
   expect(document.querySelector('.spot-check-badge')).toBeNull();expect(document.querySelector('.spot-check-button')?.textContent).toContain('标记已抽检')
   expect(document.querySelector('.finance-review')?.textContent).toBe('审核通过');expect(document.body.textContent).toContain('已取消抽检标记')
@@ -39,7 +40,8 @@ it('lets an admin click the purple marker again to cancel without changing the r
 })
 it('keeps the marker on a failed cancellation and uses the latest polled review version',async()=>{
   await mount('super_admin',[marked()]);mocks.get.mockResolvedValue([row({spotChecked:true,_reviewVersion:8})]);await vi.advanceTimersByTimeAsync(3000);await flush()
-  mocks.patch.mockRejectedValue(new Error('抽检或审核状态已变化'));document.querySelector<HTMLButtonElement>('.spot-check-badge')!.click();await flush()
+  document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
+  mocks.patch.mockRejectedValue(new Error('抽检或审核状态已变化'));document.querySelector<HTMLButtonElement>('button.spot-check-badge')!.click();await flush()
   expect(mocks.patch).toHaveBeenCalledWith('/quotations/one/spot-check',{_version:5,_reviewVersion:8,spotChecked:false})
   expect(document.querySelector('.spot-check-badge')).not.toBeNull();expect(document.body.textContent).toContain('抽检或审核状态已变化')
 })

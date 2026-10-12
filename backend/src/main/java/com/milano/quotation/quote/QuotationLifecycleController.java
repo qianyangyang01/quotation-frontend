@@ -30,6 +30,18 @@ public class QuotationLifecycleController {
     @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
     @Transactional
     public ApiResponse<Result> change(@RequestBody Request request, Authentication auth) {
+        return change(request, auth, null);
+    }
+
+    @PostMapping("/batch/{id}")
+    @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
+    @Transactional
+    public ApiResponse<Result> trashBatch(@PathVariable UUID id, @RequestBody Request request, Authentication auth) {
+        if (!"trash".equals(request.action())) throw AppException.unprocessable("整批操作仅支持移入回收站");
+        return change(request, auth, id);
+    }
+
+    private ApiResponse<Result> change(Request request, Authentication auth, UUID batchMemberId) {
         if (request.action() == null || !Set.of("archive", "trash", "restore").contains(request.action()))
             throw AppException.unprocessable("清理操作不合法");
         var reason = request.reason() == null ? "" : request.reason().trim();
@@ -59,9 +71,30 @@ public class QuotationLifecycleController {
             } else {
                 if (row.lifecycleState.equals("trashed") || request.action().equals("archive") && !row.lifecycleState.equals("active"))
                     throw AppException.conflict("所选记录状态已变化，请刷新");
-                if (protectedRecord(row)) throw AppException.conflict("包含已成交、已有成交明细或审核中/已审核记录，本次未执行；请管理员单独核实");
+                if (protectedRecord(row)) throw AppException.conflict(row.quoteNo + "：已成交、已有成交明细或审核中/已审核，本次整组未执行；请管理员单独核实");
             }
             rows.add(row);
+        }
+        // All quote locks are acquired in UUID order, shared with review writes. Never trust
+        // the browser's visible page as the complete batch, or load stale entities before locking.
+        if (batchMemberId != null) {
+            var source = rows.stream().filter(row -> row.id.equals(batchMemberId)).findFirst()
+                    .orElseThrow(() -> AppException.conflict("本批记录不完整，本次未执行，请重新打开确认"));
+            var batch = source.payload.path("quotationBatch");
+            var id = batch.path("id").asText();
+            int count = batch.path("count").asInt();
+            if (id.isBlank() || count != rows.size()) throw AppException.conflict("本批记录不完整，本次未执行，请重新打开确认");
+            var members = records.findBatch(id, source.ownerAccount);
+            var indices = new HashSet<Integer>();
+            if (members.size() != rows.size() || !versions.keySet().equals(new HashSet<>(members.stream().map(row -> row.id).toList())))
+                throw AppException.conflict("本批记录已变化，本次未执行，请重新打开确认");
+            for (var row : rows) {
+                var metadata = row.payload.path("quotationBatch");
+                int index = metadata.path("index").asInt();
+                if (!source.ownerAccount.equals(row.ownerAccount) || !id.equals(metadata.path("id").asText())
+                        || metadata.path("count").asInt() != count || index < 1 || index > count || !indices.add(index))
+                    throw AppException.conflict("本批记录不完整，本次未执行，请重新打开确认");
+            }
         }
         var now = Instant.now();
         var batchId = UUID.randomUUID().toString();
@@ -102,6 +135,7 @@ public class QuotationLifecycleController {
                 || !review.isBlank() && !review.equals("pending");
     }
     static void assertActive(QuotationRecordEntity row) {
+        if (row.lifecycleState.equals("trashed")) throw AppException.conflict("报价已移入回收站，无法审核或修改，请刷新页面");
         if (!row.lifecycleState.equals("active")) throw AppException.conflict("报价已撤回、归档或移入回收站，请刷新后处理");
     }
 }

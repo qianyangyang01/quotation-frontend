@@ -15,14 +15,14 @@ const time=(value?:string)=>value?new Date(value).toLocaleString('zh-CN',{timeZo
 
 <template>
   <section class="review-panel" :class="{compact}" @click.stop>
-    <strong class="finance-review" :class="state.financeReviewStatus" role="status">{{ active ? `${state.financeReviewClaimedBy || '其他财务'}审核中` : financeReviewLabel(state.financeReviewStatus) }}</strong>
-    <slot name="inspection" />
+    <div class="review-status-line"><strong class="finance-review" :class="state.financeReviewStatus" role="status">{{ active ? `${state.financeReviewClaimedBy || '其他财务'}审核中` : financeReviewLabel(state.financeReviewStatus) }}</strong><slot name="inspection" /></div>
     <small v-if="active">开始于 {{ time(state.financeReviewStartedAt) }}</small>
     <small v-else-if="state.financeReviewedBy">{{ state.financeReviewedBy }} · {{ time(state.financeReviewedAt) }}</small>
     <QuotationReviewComments :record="record" :state="state" :account="account" :can-review="canReview && !compact" :busy="busy" @saved="emit('commentSaved', $event)" @viewed="emit('viewed',$event)">
-      <template v-if="compact && canReview" #default>
-        <button v-if="!active" type="button" :disabled="busy" @click="emit('action',{action:'claim'})">{{ state.financeReviewStatus==='pending' ? '开始审核' : '重新审核' }}</button>
-        <button v-else type="button" :disabled="busy" @click="emit('open')">{{ own?'继续审核':'查看详情' }}</button>
+      <template v-if="compact" #default>
+        <button v-if="canReview && !active" class="compact-review-primary" type="button" :disabled="busy" @click="emit('action',{action:'claim'})">{{ state.financeReviewStatus==='pending' ? '开始审核' : '重新审核' }}</button>
+        <button v-else type="button" :class="{'compact-review-primary':canReview && own}" :disabled="busy" @click="emit('open')">{{ canReview && own?'继续审核':'查看详情' }}</button>
+        <slot name="actions" />
       </template>
     </QuotationReviewComments>
     <template v-if="canReview && !compact">
@@ -52,5 +52,8 @@ const time=(value?:string)=>value?new Date(value).toLocaleString('zh-CN',{timeZo
 </template>
 
 <style scoped>
+.compact .review-status-line{width:100%;justify-content:center}
+.compact button.compact-review-primary{display:inline-flex;align-items:center;justify-content:center;text-align:center}
+.review-status-line{display:flex;align-items:center;flex-wrap:wrap;gap:6px}.compact .review-status-line .finance-review{width:auto;padding:3px 8px;font-size:12px;border:0;border-radius:5px}.compact .finance-review.pending{color:#956209;background:#fff3d9}.compact button.compact-review-primary{background:#078347;border-color:#078347;color:#fff}.compact :deep(.comment-actions){gap:8px}.compact :deep(.comment-entry){border:0;background:transparent;padding:3px 0;font-size:12px;color:#718096}.compact small{font-size:11px;color:#8894a0}
 .review-panel{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0;color:#566376;font-size:13px}.review-panel.compact{width:100%;gap:6px}.finance-review{display:block;box-sizing:border-box;padding:7px 9px;border:1px solid #d9e1e7;border-radius:6px;background:#f7f9fb;font-size:13px;line-height:1.5;white-space:normal}.compact .finance-review{width:100%}.finance-review.reviewing{color:#916000;background:#fff6db;border-color:#ebcc78}.finance-review.logistics-exempt{color:#5e429a;background:#f5f0ff;border-color:#c9b5eb}.finance-review.channel-exempt{color:#17659b;background:#edf6ff;border-color:#9bc8e8}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}button{cursor:pointer;border:1px solid #d7dee7;border-radius:6px;background:white;padding:7px 10px;font-size:13px;color:#374151}button:disabled{opacity:.5;cursor:not-allowed}.approve{background:#078347;color:white;border-color:#078347}.actions{display:flex;flex-wrap:wrap;gap:8px}label{display:flex;flex-direction:column;gap:5px;width:100%}textarea{box-sizing:border-box;width:100%;min-height:60px;border:1px solid #d7dee7;border-radius:6px;padding:8px;font:inherit}small{line-height:1.5;overflow-wrap:anywhere}.changed{color:#b15b09}p{margin:0;line-height:1.6;white-space:pre-wrap}
 </style>

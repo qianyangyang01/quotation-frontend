@@ -5,7 +5,7 @@ import { quotationRecordCopyLayout } from '@/data/quotationRecordCopyLayout'
 import { quotationRecordQuoteOnlyLayout } from '@/data/quotationRecordQuoteOnlyLayout'
 
 export type BatchCopyKind = 'quote' | 'full' | 'image'
-export async function loadQuotationBatchRecords(record: QuotationRecord): Promise<QuotationRecord[]> {
+export async function loadQuotationBatchRecords(record: QuotationRecord, purpose: 'copy' | 'trash' = 'copy'): Promise<QuotationRecord[]> {
   const raw = await request<Partial<QuotationRecord>[]>(`/quotations/${encodeURIComponent(record.id)}/batch-records`, { signal: AbortSignal.timeout(30000) })
   const records = raw.map(normalizeQuotationRecord)
   const batch = record.quotationBatch
@@ -13,7 +13,7 @@ export async function loadQuotationBatchRecords(record: QuotationRecord): Promis
     || new Set(records.map(row => row?.id)).size !== batch.count || !records.some(row => row?.id === record.id)
     || new Set(records.map(row => row?.quotationBatch?.index)).size !== batch.count
     || records.some(row => !Number.isInteger(row?.quotationBatch?.index) || row!.quotationBatch!.index < 1 || row!.quotationBatch!.index > batch.count)) {
-    throw new Error('批次记录不完整或已变化，未复制任何数据，请刷新后重试')
+    throw new Error(purpose === 'copy' ? '批次记录不完整或已变化，未复制任何数据，请刷新后重试' : '批次记录不完整或已变化，本次未移入任何记录，请刷新后重试')
   }
   return (records as QuotationRecord[]).sort((a, b) => a.quotationBatch!.index - b.quotationBatch!.index)
 }

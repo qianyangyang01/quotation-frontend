@@ -6,6 +6,8 @@ import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import { currentAuthUser } from '@/data/authStore'
 const query=vi.hoisted(()=>({loadRecordPage:vi.fn(),loadFilteredRecords:vi.fn(),loadRecord:vi.fn(),recentRecordDates:()=>({startDate:'2026-09-23',endDate:'2026-09-23'})}))
 const change=vi.hoisted(()=>vi.fn())
+const batchLoad=vi.hoisted(()=>vi.fn())
+vi.mock('@/services/quotationBatchCopy',async original=>({...await original<typeof import('@/services/quotationBatchCopy')>(),loadQuotationBatchRecords:batchLoad}))
 vi.mock('@/data/quotationRecordQuery',()=>query)
 vi.mock('@/data/quotationLifecycle',async importOriginal=>({...await importOriginal<typeof import('@/data/quotationLifecycle')>(),changeQuotationLifecycle:change}))
 vi.mock('@/data/purchaseStore',()=>({loadPurchaseProducts:()=>Promise.resolve([])}))
@@ -83,4 +85,46 @@ it('does not grant finance company-wide cleanup and prevents employees restoring
   currentAuthUser.value.role='employee';query.loadRecordPage.mockResolvedValue(result([{...normal(),lifecycleState:'trashed',lifecycleChangedAccount:'ADMIN'}]))
   await mount('mine');button('回收站').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   expect(document.querySelector<HTMLInputElement>('.lifecycle-checkbox')!.disabled).toBe(true)
+})
+
+const batchRows=()=>Array.from({length:14},(_,index)=>({...normal(),id:`batch-${index}`,no:`QT-${index}`,quotationBatch:{id:'batch',no:'QB-14',index:index+1,count:14}}))
+async function openBatchTrash(){
+  document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
+  const item=Array.from(document.querySelectorAll<HTMLButtonElement>('.record-more-panel button')).find(b=>b.textContent?.includes('整批移入回收站'))!
+  item.click();await flush()
+}
+function reason(text='整批不再需要'){
+  const input=document.querySelector<HTMLTextAreaElement>('#lifecycle-reason')!;input.value=text;input.dispatchEvent(new Event('input'))
+}
+it.each(['single','fob'] as const)('loads all batch members from any visible %s record and confirms the entire batch',async quoteMode=>{
+  const rows=batchRows().map(row=>({...row,quoteMode}));query.loadRecordPage.mockResolvedValue(result([rows[9]!]));batchLoad.mockResolvedValue(rows)
+  await mount('mine');await openBatchTrash()
+  expect(batchLoad).toHaveBeenCalledWith(expect.objectContaining({id:'batch-9'}),'trash')
+  expect(document.querySelectorAll('dialog tbody tr')).toHaveLength(14)
+  expect(document.querySelector('dialog')?.textContent).toContain('QB-14')
+  expect(change).not.toHaveBeenCalled();reason();await flush()
+  query.loadRecordPage.mockResolvedValue(result([]));change.mockResolvedValue({changed:14});button('确认移入').click();await flush()
+  expect(change).toHaveBeenCalledWith('trash','整批不再需要',rows,'batch-9')
+  expect(document.querySelectorAll('.record-row')).toHaveLength(0)
+})
+it('lists protected off-page batch members and blocks the entire batch',async()=>{
+  const rows=batchRows();rows[12]!.financeReviewStatus='reviewing';rows[13]!.status='won'
+  query.loadRecordPage.mockResolvedValue(result([rows[0]!]));batchLoad.mockResolvedValue(rows)
+  await mount();await openBatchTrash();reason();await flush()
+  expect(document.querySelector('dialog [role=alert]')?.textContent).toContain('QT-12')
+  expect(document.querySelector('dialog [role=alert]')?.textContent).toContain('QT-13')
+  expect(button('确认移入').disabled).toBe(true);expect(change).not.toHaveBeenCalled()
+})
+it('keeps current-only action independent and retains the confirmation after a batch conflict',async()=>{
+  const rows=batchRows();query.loadRecordPage.mockResolvedValue(result([rows[5]!]));batchLoad.mockResolvedValue(rows)
+  await mount();document.querySelector<HTMLButtonElement>('.record-more-trigger')!.click();await flush()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.record-more-panel button')).find(b=>b.textContent?.includes('当前 1 条'))!.click();await flush();reason();await flush();button('确认移入').click();await flush()
+  expect(batchLoad).not.toHaveBeenCalled();expect(change).toHaveBeenCalledWith('trash','整批不再需要',[rows[5]])
+  await openBatchTrash();reason();await flush();change.mockRejectedValue(new Error('QT-12：正在审核，本次整组未执行'))
+  button('确认移入').click();await flush()
+  expect(document.querySelector('dialog [role=alert]')?.textContent).toContain('QT-12')
+})
+it('does not show a batch confirmation or submit when complete batch loading fails',async()=>{
+  query.loadRecordPage.mockResolvedValue(result([batchRows()[0]!]));batchLoad.mockRejectedValue(new Error('批次记录不完整'))
+  await mount();await openBatchTrash();expect(document.querySelector('dialog')).toBeNull();expect(change).not.toHaveBeenCalled()
 })

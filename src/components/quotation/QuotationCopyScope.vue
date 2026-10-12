@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-const props = defineProps<{ count?: number; label: string; disabled?: boolean; primary?: boolean }>()
+const props = withDefaults(defineProps<{ count?: number; label: string; disabled?: boolean; primary?: boolean; currentLabel?: string; batchLabel?: string }>(), { currentLabel: '复制当前记录', batchLabel: '复制本批全部记录' })
 const emit = defineEmits<{ current: []; batch: [] }>()
 const root = ref<HTMLElement>(), arrow = ref<HTMLButtonElement>(), open = ref(false)
 function close(focus = false) { open.value = false; if (focus) arrow.value?.focus() }
@@ -19,8 +19,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
     <slot />
     <button v-if="count" ref="arrow" class="scope-arrow" type="button" :aria-label="`${label}范围`" aria-haspopup="menu" :aria-expanded="open" :disabled="disabled" @click="toggle">▾</button>
     <div v-if="open" class="scope-menu" role="menu" :aria-label="`${label}范围`" @keydown.down.prevent="move(1)" @keydown.up.prevent="move(-1)">
-      <button type="button" role="menuitem" @click="close(true); emit('current')"><span>复制当前记录</span><small>1 条</small></button>
-      <button type="button" role="menuitem" @click="close(true); emit('batch')"><span>复制本批全部记录</span><small>{{ count }} 条</small></button>
+      <button type="button" role="menuitem" @click="close(true); emit('current')"><span>{{ currentLabel }}</span><small>1 条</small></button>
+      <button type="button" role="menuitem" @click="close(true); emit('batch')"><span>{{ batchLabel }}</span><small>{{ count }} 条</small></button>
       <p>同次提交的全部记录，不受分页限制</p>
     </div>
   </div>
