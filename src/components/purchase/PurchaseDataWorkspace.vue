@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LegacyPurchasePrices from './LegacyPurchasePrices.vue'
 import ShimoSyncPanel from './ShimoSyncPanel.vue'
 import { legacyUntaxedUnitPrice, legacyAutoTaxPrice, withLegacyAutoTax } from '@/data/legacyPurchasePricing'
 import type { PasteSavedCounts } from '@/services/purchasePaste'
@@ -470,7 +471,7 @@ const detailFields = computed(() => detail.value ? [
       <FobCatalogRow v-if="record.dataSource==='fob'" :record="record" :can-maintain="canMaintainFob" @detail="fobDetail=record" @maintain="openFob(record.sku)" />
       <tr v-else :data-sku="record.sku" :data-source="record.dataSource">
         <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ record.category || '暂无数据' }}</b><small class="product-sku">{{ record.sku }}</small><em class="source-badge" :class="{legacy:record.dataSource==='legacy_2026'}">{{ purchaseSourceLabel(record) }}</em><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
-        <td><div v-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}{{ record.legacyPriceMode==='auto_tax' && index===0 ? ' · 含票价' : '' }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
+        <td><LegacyPurchasePrices v-if="record.dataSource==='legacy_2026'" :record="record" /><div v-else-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
         <td class="weight-cell"><b>{{ value(record.weightG,' g') }}</b><small>{{ dimensionSummary(record) }}</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
         <td class="freight-cell"><template v-if="purchaseFreightChoices(record).length"><small v-for="choice in purchaseFreightChoices(record)" :key="choice.quantity">{{ choice.quantity }}件 {{ unitFreight(record,choice.quantity) }}</small></template><small v-else>暂无数据</small></td>
         <td class="description-cell"><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small><small>实物图：{{ record.physicalImage ? '已上传' : '暂无数据' }}</small></td>

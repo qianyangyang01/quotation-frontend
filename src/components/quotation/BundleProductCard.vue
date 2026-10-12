@@ -10,7 +10,10 @@ const grams = displayWeightGrams
 const effectiveWeightKg = (item: BundleQuoteItem) => item.customWeightKg == null ? item.weightKg : item.customWeightKg
 const packagedWeightKg = (item: BundleQuoteItem) => sumDecimal(effectiveWeightKg(item), packagingWeightKg(effectiveWeightKg(item)))
 const rowDomesticFreight = (item: BundleQuoteItem) => productDecimal(item.purchaseFreightPerUnit, Math.max(1, Math.floor(Number(item.quantityPerSet) || 1)))
+const purchaseDisplay = (item: BundleQuoteItem) => item.purchaseDataSource === 'legacy_2026' && item.purchaseDisplay?.effectiveUnitPrice === item.purchaseUnitPrice ? item.purchaseDisplay : undefined
 const purchasePricingLabel = (item: BundleQuoteItem) => {
+  const display = purchaseDisplay(item)
+  if (display) return `${display.range} · ${display.detail}`
   const tierLabel = item.purchaseTierLabel || '阶梯'
   if (item.purchaseZeroTaxPointAdjustment) return `${tierLabel} · 采购票点为0 · 原价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = ¥${item.purchaseUnitPrice.toFixed(2)}`
   if (item.purchasePriceSource === 'legacy-tax-point') return `2026旧数据 · 原始报价 ¥${item.purchaseBaseUnitPrice.toFixed(2)} ×（1 + ${item.purchaseInvoiceRatePercent}%）= ¥${item.purchaseUnitPrice.toFixed(2)}`
@@ -63,8 +66,8 @@ defineEmits<{
           <div><label><input v-model.trim="item.sku" :aria-label="`第${index + 1}行 SKU`" placeholder="输入 SKU" @keyup.enter="$emit('query',item)"><button type="button" :aria-label="`查询第${index + 1}行 SKU`" @click="$emit('query',item)">查询</button></label><b>{{ item.name || '等待查询采购资料' }} <em v-if="item.status==='采购资料已加载'" class="source-badge" :class="{legacy:item.purchaseDataSource==='legacy_2026'}">{{ item.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据' }}</em></b><small>{{ item.supplier || '—' }} · {{ item.status || '待查询' }} · 库存：<em :class="{ out:item.stockStatus==='无货', pending:item.stockStatus==='待确认' }">{{ item.stockStatus }}</em></small></div>
         </div>
         <label class="qty"><input v-model.number="item.quantityPerSet" type="number" min="1" step="1" @change="$emit('quantityChange',item)"><span>件/套</span></label>
-        <div class="purchase-price">
-          <div class="purchase-tier-price"><select class="purchase-tier" :aria-label="(item.sku || `第${index + 1}行`) + '采购阶梯'" :value="item.purchaseTier || '10'" @change="$emit('tierChange', item, ($event.target as HTMLSelectElement).value)"><option value="10">阶梯价1</option><option value="100">阶梯价2</option><option value="100+">阶梯价3</option></select><b v-if="canViewPurchaseCost">¥{{ item.purchaseUnitPrice.toFixed(2) }}</b></div>
+        <div class="purchase-price" :class="{ 'legacy-price': !!purchaseDisplay(item) }">
+          <div class="purchase-tier-price"><select class="purchase-tier" :aria-label="(item.sku || `第${index + 1}行`) + '采购阶梯'" :value="item.purchaseTier || '10'" @change="$emit('tierChange', item, ($event.target as HTMLSelectElement).value)"><option value="10">阶梯价1</option><option value="100">阶梯价2</option><option value="100+">阶梯价3</option></select><b v-if="canViewPurchaseCost">{{ purchaseDisplay(item)?.label }} ¥{{ (purchaseDisplay(item)?.unitPrice ?? item.purchaseUnitPrice).toFixed(2) }}</b></div>
           <small v-if="canViewPurchaseCost">{{ purchasePricingLabel(item) }}</small>
         </div>
         <label class="custom-weight"><input :value="grams(effectiveWeightKg(item))" type="number" min="0" step="1" @input="item.customWeightKg=gramsToKg(Number(($event.target as HTMLInputElement).value)||0);$emit('weightChange',item)"><span>g</span><small>{{ item.customWeightKg == null ? '采购' : '自定义' }} {{ grams(effectiveWeightKg(item)) }}g + 包材 {{ grams(packagingWeightKg(effectiveWeightKg(item))) }}g = {{ grams(packagedWeightKg(item)) }}g</small><button v-if="item.customWeightKg != null" type="button" @click="item.customWeightKg=null;$emit('weightChange',item)">恢复</button></label>
@@ -115,4 +118,8 @@ defineEmits<{
 .product-cell label button{flex:0 0 72px;height:38px;border:1px solid #d9e0e5;border-radius:6px;background:#fff;color:#26323b;font-size:12px;font-weight:700;cursor:pointer}
 .product-cell label button:hover{border-color:#ed8300;color:#bb6800}
 @media(max-width:600px){.bundle-card>header .bundle-actions{width:100%;justify-content:flex-end}.bundle-actions button{flex:1}.summary-grid{min-width:0;grid-template-columns:1fr}}
+</style>
+
+<style scoped>
+.legacy-price small{font-size:10px;line-height:1.5}
 </style>

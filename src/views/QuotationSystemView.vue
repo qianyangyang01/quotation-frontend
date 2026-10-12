@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
 import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
@@ -376,6 +377,7 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
     quantityPerSet,
     purchaseUnitPrice: pricing?.effectiveUnitPriceCny || 0,
     purchaseBaseUnitPrice: pricing?.baseUnitPriceCny || 0,
+    purchaseDisplay: record ? legacyPurchaseDisplay(record, purchaseTier) : undefined,
     purchaseTierLabel: record ? calculateMonthlySalesTierLabel(purchaseTier, record) : '',
     purchaseInvoiceType: pricing?.invoiceType || '',
     purchaseInvoiceRatePercent: pricing?.invoiceRatePercent || 0,
@@ -459,6 +461,7 @@ function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, 
   const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
   p.purchase = pricing.effectiveUnitPriceCny
   p.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
+  p.purchaseDisplay = legacyPurchaseDisplay(record, monthlySalesEstimate.value)
   p.purchaseTierLabel = calculateMonthlySalesTierLabel(monthlySalesEstimate.value, record)
   p.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record, monthlySalesEstimate.value)
   p.purchaseFreightLabel = purchaseQuoteFreightLabel(record, monthlySalesEstimate.value)
@@ -476,6 +479,7 @@ function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProdu
   const pricing = calculatePurchasePriceBreakdown(record, item.purchaseTier, effectiveInvoiceTaxApplied)
   item.purchaseUnitPrice = pricing.effectiveUnitPriceCny
   item.purchaseBaseUnitPrice = pricing.baseUnitPriceCny
+  item.purchaseDisplay = legacyPurchaseDisplay(record, item.purchaseTier)
   item.purchaseTierLabel = calculateMonthlySalesTierLabel(item.purchaseTier, record)
   item.purchaseFreightPerUnit = purchaseQuoteFreightUnit(record, item.purchaseTier)
   item.purchaseFreightLabel = purchaseQuoteFreightLabel(record, item.purchaseTier)

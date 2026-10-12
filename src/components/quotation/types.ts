@@ -1,5 +1,6 @@
 import type { FinanceTaxCalculation } from '@/data/channelTaxRules'
 import type { PurchasePriceBreakdown } from '@/services/quotationCalculator'
+import type { LegacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
 export type QuotationProduct = {
   id: number
   selected: boolean
@@ -14,6 +15,7 @@ export type QuotationProduct = {
   quantity: number
   purchase: number
   purchaseBaseUnitPrice: number
+  purchaseDisplay?: LegacyPurchaseDisplay
   purchaseTierLabel?: string
   purchaseInvoiceType: string
   purchaseZeroTaxPointAdjustment?: boolean
@@ -64,6 +66,7 @@ export type BundleQuoteItem = {
   quantityPerSet: number
   purchaseUnitPrice: number
   purchaseBaseUnitPrice: number
+  purchaseDisplay?: LegacyPurchaseDisplay
   purchaseTierLabel?: string
   purchaseInvoiceType: string
   purchaseZeroTaxPointAdjustment?: boolean

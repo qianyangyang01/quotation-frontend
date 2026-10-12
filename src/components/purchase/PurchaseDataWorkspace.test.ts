@@ -46,7 +46,9 @@ it('edits legacy untaxed price and rate with a read-only included preview, then 
   expect(mocks.update).toHaveBeenCalledWith('FL2600293-2',expect.objectContaining({
     sourceQuotedPriceCny:100,taxPoint:.08,taxIncludedPriceCny:108,purchasePriceCny:108,legacyPriceMode:'auto_tax',_version:5}))
   expect(document.querySelector('table')?.textContent).toContain('¥108.00/件')
-  expect(document.querySelector('.purchase-tiers')?.textContent).toContain('含票价')
+  expect(document.querySelector('.legacy-purchase-prices b')?.textContent).toBe('未税单价 ¥100.00/件')
+  expect(document.querySelector('.legacy-purchase-prices')?.textContent).toContain('含票价 ¥108.00/件')
+  expect(document.querySelector('.legacy-purchase-prices')?.textContent).not.toContain('第1档')
   Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click();await flush()
   expect(document.querySelector<HTMLInputElement>('[aria-label="未税采购单价"]')!.value).toBe('100')
   expect(document.querySelector<HTMLInputElement>('[aria-label="含票价（自动计算）"]')!.value).toBe('108.00')
@@ -60,6 +62,23 @@ it('does not reprice legacy data when only unrelated fields are saved',async()=>
   mocks.update.mockResolvedValueOnce(product);editorSave();await flush()
   expect(mocks.update.mock.calls[0]![1]).toMatchObject({sourceQuotedPriceCny:110,purchasePriceCny:125,taxIncludedPriceCny:125,notes:'更新备注'})
   expect(mocks.update.mock.calls[0]![1].legacyPriceMode).toBeUndefined()
+})
+
+it('labels included-only legacy data without guessing an untaxed price',async()=>{
+  await openLegacyEditor(normalizePurchaseRecord({...legacyPriceRow(),sourceQuotedPriceCny:null}))
+  const prices=document.querySelector('.legacy-purchase-prices')!
+  expect(prices.querySelector('b')?.textContent).toBe('含票价 ¥121.00/件')
+  expect(prices.textContent).toContain('未税单价待确认')
+  expect(prices.textContent).not.toContain('第1档')
+})
+
+it('preserves real tier ranges while displaying their own untaxed prices',async()=>{
+  await openLegacyEditor(normalizePurchaseRecord({...legacyPriceRow(),minOrderQty:2,tier2MinQty:100,tier2PriceCny:100}))
+  const prices=document.querySelector('.legacy-purchase-prices')!
+  expect([...prices.querySelectorAll('b')].map(b=>b.textContent)).toEqual(['未税单价 ¥110.00/件','未税单价 ¥100.00/件'])
+  expect(prices.textContent).toContain('第1档 · 2–99件')
+  expect(prices.textContent).toContain('第2档 · 100件起订')
+  expect(prices.textContent).toContain('含票价 ¥110.00/件')
 })
 
 it('requires confirmation of missing untaxed input before a rate change and never guesses from included price',async()=>{

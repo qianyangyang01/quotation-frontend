@@ -470,7 +470,7 @@ it.each(['single', 'bundle'] as const)('applies TC2601815 tier tax in the %s edi
       purchaseInvoiceRatePercent: 8, purchaseInvoiceTaxApplied: true, purchasePriceSource: 'legacy-tax-point',
       purchaseFreightPerUnit: .44 })
     expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(10.8)
-    expect(host.textContent).toContain('原始报价 ¥10.00 ×（1 + 8%）')
+    expect(host.textContent).toContain('票点 8% · 含票价 ¥10.80/件')
   }
   check()
   await state.applyDraftPayload(state.draftPayload(), undefined, { restoreQuotation: true })
@@ -489,7 +489,7 @@ it.each(['single', 'bundle'] as const)('recalculates the legacy 6.80/1%% case in
     const item = mode === 'single' ? state.products[0]! : state.bundleItems[0]!
     expect(item).toMatchObject({ purchaseBaseUnitPrice: 6.8, purchaseInvoiceRatePercent: 1, purchaseInvoiceTaxApplied: true, purchasePriceSource: 'legacy-tax-point' })
     expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(6.87)
-    expect(host.textContent).toContain('原始报价 ¥6.80 ×（1 + 1%）')
+    expect(host.textContent).toContain('票点 1% · 含票价 ¥6.87/件')
     expect(host.textContent).not.toContain('优先采用含票价 ¥6.80')
   }
   check()
@@ -497,4 +497,39 @@ it.each(['single', 'bundle'] as const)('recalculates the legacy 6.80/1%% case in
   await state.applyDraftPayload(draft, undefined, { restoreQuotation: true })
   await nextTick()
   check()
+})
+
+it.each(['single', 'bundle'] as const)('shows 110 untaxed but calculates 121 exactly once in %s and restored drafts', async mode => {
+  purchaseOverride = {
+    dataSource: 'legacy_2026', legacyPriceMode: 'auto_tax', purchasePriceBasis: 'tax_included',
+    sourceQuotedPriceCny: 110, purchasePriceCny: 121, taxIncludedPriceCny: 121, taxPoint: .1,
+    minOrderQty: 2, tier2MinQty: 100, tier2PriceCny: 100, tier3MinQty: null, tier3PriceCny: null, singleFreightCny: 5,
+  }
+  await mount(mode)
+  const check = () => {
+    const item = mode === 'single' ? state.products[0]! : state.bundleItems[0]!
+    expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(121)
+    expect(item.purchaseBaseUnitPrice).toBe(121) // Existing persisted cost semantics stay intact.
+    expect(item.purchaseDisplay).toMatchObject({ label: '未税单价', unitPrice: 110, effectiveUnitPrice: 121 })
+    expect(host.textContent).toContain('票点 10% · 含票价 ¥121.00/件')
+    if (mode === 'single') {
+      const field = Array.from(host.querySelectorAll('label')).find(label => label.textContent?.includes('未税单价（CNY/件）'))
+      expect(field?.querySelector('input')?.value).toBe('110.00')
+    } else {
+      expect(host.querySelector('.purchase-tier-price b')?.textContent).toContain('未税单价 ¥110.00')
+      expect(state.bundlePurchaseCost(3)).toBe(787.2) // (2 × 121 + 20.40) × 3
+    }
+  }
+  check()
+  await state.applyDraftPayload(state.draftPayload(), undefined, { restoreQuotation: true })
+  await nextTick()
+  check()
+  if (mode === 'single') await selectTier('100')
+  else {
+    const select = host.querySelector<HTMLSelectElement>('.purchase-tier')!
+    select.value = '100'; select.dispatchEvent(new Event('change', { bubbles: true })); await nextTick()
+  }
+  const item = mode === 'single' ? state.products[0]! : state.bundleItems[0]!
+  expect(item.purchaseDisplay).toMatchObject({ unitPrice: 100, effectiveUnitPrice: 110 })
+  expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(110)
 })

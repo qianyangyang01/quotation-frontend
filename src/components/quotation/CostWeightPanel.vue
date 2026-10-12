@@ -7,6 +7,7 @@ import type { QuotationProduct } from './types'
 const props = defineProps<{ specialPackagingGrams?: string; specialPackagingWeight?: number; specialPackagingError?: string; product: QuotationProduct; baseWeight: number; packagingWeight: number; chargeWeight: number; domesticFreight: number; purchaseTierLabel: string }>()
 const emit = defineEmits<{ weightChange: []; 'update:specialPackagingGrams': [value: string] }>()
 
+const purchaseDisplay = computed(() => props.product.purchaseDataSource === 'legacy_2026' && props.product.purchaseDisplay?.effectiveUnitPrice === props.product.purchase ? props.product.purchaseDisplay : undefined)
 const grams = displayWeightGrams
 const productCost = computed(() => decimal(props.product.purchase).times(props.product.quantity))
 const totalCost = computed(() => productCost.value.plus(props.domesticFreight))
@@ -27,6 +28,7 @@ function updateDivisor(event: Event) {
   emit('weightChange')
 }
 function purchasePricingLabel() {
+  if (purchaseDisplay.value) return purchaseDisplay.value.range
   const product = props.product
   const tierLabel = product.purchaseTierLabel || props.purchaseTierLabel
   if (product.purchaseZeroTaxPointAdjustment) return `${tierLabel} · 采购票点为0 · 原价 ¥${product.purchaseBaseUnitPrice.toFixed(2)} × 1.01 = 计入成本 ¥${product.purchase.toFixed(2)}`
@@ -44,7 +46,7 @@ function purchasePricingLabel() {
     <header><div><i>02</i><span><b>{{ canViewPurchaseCost ? '成本与重量' : '商品与重量' }}</b><small>商品资料与计费重量</small></span></div><slot name="product" /><em :class="{legacy:product.status==='采购资料已加载'&&product.purchaseDataSource==='legacy_2026'}">{{ product.status==='采购资料已加载' ? (product.purchaseDataSource==='legacy_2026' ? '2026旧数据' : '新数据') : '采购资料' }}</em></header>
     <div class="cost-metrics" :class="{ manual:product.weightSource==='manual' }">
     <div class="fields">
-      <label v-if="canViewPurchaseCost">计入成本单价（CNY）<input v-model.number="product.purchase" disabled></label>
+      <label v-if="canViewPurchaseCost">{{ purchaseDisplay ? `${purchaseDisplay.label}（CNY/件）` : '计入成本单价（CNY）' }}<input :value="purchaseDisplay ? purchaseDisplay.unitPrice.toFixed(2) : product.purchase" disabled><small v-if="purchaseDisplay" class="legacy-price-note">{{ purchaseDisplay.detail }}</small></label>
       <label>商品重量（g）<input :value="grams(product.netWeight)" disabled></label>
       <label>重量来源<select v-model="product.weightSource" @change="$emit('weightChange')"><option value="purchase">使用采购表重量</option><option value="manual">业务员指定重量</option></select></label>
       <label v-if="product.weightSource==='manual'">指定重量（g）<input :value="grams(product.manualWeight)" type="number" min="0" step="1" inputmode="numeric" @input="updateManualWeight"></label>
@@ -84,4 +86,8 @@ function purchasePricingLabel() {
 .module-card{padding:20px;border:1px solid #e3e8ed;border-radius:12px;background:#fff;box-shadow:0 7px 22px rgba(17,24,39,.04)}header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}header>div{display:flex;align-items:center;gap:10px}header i{width:29px;height:29px;display:grid;place-items:center;border-radius:8px;background:#eef2f5;color:#6c7883;font-size:10px;font-style:normal}header span{display:grid;gap:2px}header b{font-size:16px}header small{color:#909aa4;font-size:10px}header em{padding:4px 8px;border-radius:12px;background:#eef6f8;color:#547981;font-size:9px;font-style:normal}.fields{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}.fields label,.dimensions label{display:grid;gap:6px;color:#697580;font-size:11px}.fields input,.fields select,.dimensions input{width:100%;height:40px;box-sizing:border-box;border:1px solid #dbe2e7;border-radius:7px;background:#fff;padding:0 10px;color:#26323b;font-size:13px}.fields input:disabled,.dimensions input:disabled{background:#f4f6f8;color:#687580}.volumetric-card{margin-top:18px;padding:14px;border:1px solid #f2c778;border-radius:9px;background:#fffaf0}.volumetric-title{display:flex;align-items:center;gap:10px}.volumetric-title .check{width:18px;height:18px;display:grid;place-items:center;border-radius:5px;background:#ff9700;color:#fff;font-size:12px;font-weight:900}.volumetric-title>span:nth-child(2){display:grid;gap:2px}.volumetric-title b{font-size:12px}.volumetric-title small{color:#8b744e;font-size:9px}.volumetric-title em{margin-left:auto;padding:4px 8px;border-radius:12px;background:#fff1d7;color:#a76800;font-size:9px;font-style:normal}.dimensions{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}.weight-comparison{display:grid;grid-template-columns:1fr auto 1.4fr 1fr 1.2fr;align-items:stretch;gap:10px;margin-top:12px}.weight-comparison p{display:grid;gap:3px;margin:0;padding:11px 12px;border:1px solid #eadfc9;border-radius:8px;background:#fff}.weight-comparison span,.weight-comparison small{color:#8c7957;font-size:9px}.weight-comparison b{font-size:13px}.weight-comparison i{align-self:center;color:#a38d67;font-size:9px;font-style:normal}.weight-comparison .charge-result{border-color:#f2b54b;background:#fff3dc}.charge-result b{color:#d97900;font-size:16px}.highlights{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:18px}.highlights p{display:grid;gap:4px;margin:0;padding:13px;border-radius:8px;background:#f6f8fa}.highlights span{color:#7d8993;font-size:10px}.highlights b{font-size:15px}.highlights small{color:#a0a9b1;font-size:9px}@media(max-width:900px){.weight-comparison{grid-template-columns:1fr 1fr}.weight-comparison i{display:none}.dimensions{grid-template-columns:1fr 1fr}}@media(max-width:620px){.fields,.highlights,.dimensions,.weight-comparison{grid-template-columns:1fr}.volumetric-title{align-items:flex-start}.volumetric-title em{white-space:nowrap}}
 .tier-match{color:#b76800!important;font-size:9px!important;font-weight:800}
 header em{background:#e7f6ed;color:#17794f}header em.legacy{background:#eee8ff;color:#5f42a8}
+</style>
+
+<style scoped>
+.legacy-price-note{font-size:11px;line-height:1.5;color:#697580}
 </style>
