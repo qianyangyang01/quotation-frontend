@@ -878,7 +878,14 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     // Validate every finance setting against the values actually applied to this page.
     // Older servers lack financeVersions; use a full refresh as a compatibility fallback.
     let latestFinanceVersions = result.financeVersions
-    if (beforeSave || !latestFinanceVersions) {
+    // Batch rows share finance settings, but each row still checks server versions.
+    // Do not download the same full settings again when both snapshots match.
+    const reuseBatchFinance = props.batchCapture && batchCalculationActive && financeSettingsAreHydrated()
+      && latestFinanceVersions && Object.keys(appliedFinanceVersions).length > 0
+      && Object.keys(appliedFinanceVersions).every(key => Object.prototype.hasOwnProperty.call(latestFinanceVersions, key))
+      && !changedFinanceSettings(appliedFinanceVersions, latestFinanceVersions).length
+      && !changedFinanceSettings(appliedFinanceVersions, financeSettingVersions()).length
+    if ((beforeSave && !reuseBatchFinance) || !latestFinanceVersions) {
       await hydrateFinanceSettings({ force: true, signal })
       latestFinanceVersions = financeSettingVersions()
     }
@@ -1152,13 +1159,23 @@ async function recordForDraftSku(sku: string, freshPurchases?: Map<string, Purch
 async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>, options: { restoreQuotation?: boolean } = {}) {
   const migrated = migrateDraftMatrix(payload)
   payload = migrated
+  // During batch generation only, keep the already loaded common rule slice.
+  // Weight and purchase costs are recalculated below; save preparation still
+  // validates every SKU and its selected logistics against the server.
+  const reuseBatchLogistics = props.batchCapture && batchCalculationActive && options.restoreQuotation
+    && logisticsLoadState.value === 'ready' && !countryLoads.value && !countryLoadError.value
+    && !syncPending.value && !syncError.value && !logisticsRebuilding.value
+    && products.value[0]?.logisticsAttribute === normalizeLogisticsAttribute(payload.logisticsAttribute || '')
+    && [...(payload.commonSelections || []), ...(payload.templateSelections || [])]
+      .every(selection => loadedQuoteCountries.value.includes(selection.country))
+    && (!payload.product?.primaryCountry || loadedQuoteCountries.value.includes(payload.product.primaryCountry))
   priorityProcessing.value = payload.priorityProcessing === true
   draftReady.value = false
   draftNeedsQuery.value = !options.restoreQuotation
   productQueryGeneration += 1
   productQueryAbort?.abort()
   productQueryBusy.value = false
-  cancelQuoteLogistics()
+  if (!reuseBatchLogistics) cancelQuoteLogistics()
   draftChannelNotice.value = ''
   quoteMode.value = normalizeQuotationMode(payload.quoteMode)
   manualQueried.value = false
@@ -1254,7 +1271,10 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     ? bundleItems.value.some(item => Boolean(item.sku))
     : Boolean(p.sku)
   if (hasRestoredProduct && (manualMode.value || productCategory.value)) {
-    await ensureQuoteLogistics(p)
+    if (reuseBatchLogistics) {
+      reconcileRestoredChannels(p)
+      normalizeRule(p, true)
+    } else await ensureQuoteLogistics(p)
     const primaryRows = productState?.primaryCountry ? countryQuoteRows(productState.primaryCountry).filter(row => sameQuotationRegion(payload.selectedQuoteRegions?.[productState.primaryCountry!] || '', row.quoteRegion || '')) : []
     const primary = primaryRows.find(row => productState?.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
       || (!productState?.primaryChannelKey ? primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier) : undefined)
@@ -1484,7 +1504,7 @@ onMounted(async () => {
   catch { toast('报价工作区读取失败，请检查网络后重试') }
   if (viewDisposed) return
   stopLiveSync = startQuotationSync(async signal => {
-    if (fobActive.value || !draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
+    if (fobActive.value || batchCalculationActive || !draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
     await checkLiveVersions(signal)
     if (!signal.aborted && !activePurchaseSkus().length && syncPending.value) {
       await reloadLiveConfiguration(); syncPending.value = ''

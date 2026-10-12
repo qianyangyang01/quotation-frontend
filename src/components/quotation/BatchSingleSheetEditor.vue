@@ -62,7 +62,7 @@ defineExpose({ capture })
   <div class="batch-sheet-editor">
     <p v-if="busy" role="status">正在按各 SKU 的成本与重量计算新增数量…</p>
     <p v-if="error" role="alert">{{ error }} <button @click="quantitiesChanged(requested)">重试数量计算</button></p>
-    <CustomerQuoteSheet ref="editor" :rows="source.rows" :countries="[]" :salesperson="original.sheet.agent" context-key="batch-sheet" :custom-quantity="0" :bundle="false" :source-pending="sourcePending" :initial-quote="source.initialQuote" :initial-system-quote="system" :initial-sheet="source.initialSheet" record-mode paginated preserve-prices-while-pending quote-mode="single" :quantity-help="calculateItem ? '新增数量会按各 SKU 分别计算；可编辑客户报价、图片、行列和渠道平均报价。' : undefined" @quantities-change="quantitiesChanged" />
+    <CustomerQuoteSheet ref="editor" :rows="source.rows" :countries="[]" :salesperson="original.sheet.agent" context-key="batch-sheet" :custom-quantity="0" :bundle="false" :source-pending="sourcePending" :initial-quote="source.initialQuote" :initial-system-quote="system" :initial-sheet="source.initialSheet" record-mode paginated hide-back-to-top preserve-prices-while-pending quote-mode="single" :quantity-help="calculateItem ? '新增数量会按各 SKU 分别计算；可编辑客户报价、图片、行列和渠道平均报价。' : undefined" @quantities-change="quantitiesChanged" />
   </div>
 </template>
 <style scoped>

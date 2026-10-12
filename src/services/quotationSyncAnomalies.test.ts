@@ -6,7 +6,7 @@ import { changedFinanceSettings, type FinanceSettingVersions } from './financeSe
 const source=readFileSync(new URL('../views/QuotationSystemView.vue',import.meta.url),'utf8').split('<script setup lang="ts">')[1]!.split('</script>')[0]!
 const ast=ts.createSourceFile('view.ts',source,ts.ScriptTarget.Latest,true)
 function setup(){
-  const state={liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
+  const state={props:{batchCapture:false},batchCalculationActive:false,financeSettingsAreHydrated:()=>true,liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
     selectedCustomerId:{value:''},customerName:{value:'甲'},customerOperation:{value:{snapshot:{id:'a',name:'甲',feeUsd:1}}},
     hydrateFinanceSettings:vi.fn(async()=>{}),loadCustomerOperationSettings:()=>({}),resolveCustomerOperation:vi.fn(()=>({configured:true,snapshot:{id:'a',name:'甲',feeUsd:1}})),
     appliedFinanceVersions:{} as FinanceSettingVersions,financeSettingVersions:vi.fn<()=>FinanceSettingVersions>(()=>({})),changedFinanceSettings,
@@ -22,6 +22,35 @@ function setup(){
 }
 it('accepts unchanged purchases and selected channel validation',async()=>{
   const {state,run}=setup();await run(undefined,true);expect(state.syncPending.value).toBe('')
+})
+function batchSetup() {
+  const result=setup(), {state}=result
+  state.props.batchCapture=true;state.batchCalculationActive=true
+  state.appliedFinanceVersions={'exchange-rate':1}
+  state.financeSettingVersions.mockReturnValue({'exchange-rate':1})
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:{'exchange-rate':1}})
+  return result
+}
+it('reuses batch finance only after server verification and still validates each selected channel',async()=>{
+  const {state,run}=batchSetup()
+  expect(await run(undefined,true)).toBe(true)
+  expect(state.hydrateFinanceSettings).not.toHaveBeenCalled()
+  expect(state.checkSelectedLogistics).toHaveBeenCalledOnce()
+  state.checkSelectedLogistics.mockRejectedValueOnce(new ApiError('运费已变更',409,'ERROR','test'))
+  expect(await run(undefined,true)).toBe(false)
+  expect(state.syncPending.value).toContain('运费已变更')
+})
+it.each(['ordinary','sample','not-hydrated','missing-versions','changed-server','changed-cache'] as const)('does not reuse batch finance for %s',async scenario=>{
+  const {state,run}=batchSetup()
+  if(scenario==='ordinary')state.props.batchCapture=false
+  if(scenario==='sample')state.batchCalculationActive=false
+  if(scenario==='not-hydrated')state.financeSettingsAreHydrated=()=>false
+  if(scenario==='missing-versions')state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1'})
+  if(scenario==='changed-server')state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:{'exchange-rate':2}})
+  if(scenario==='changed-cache')state.financeSettingVersions.mockReturnValue({'exchange-rate':2})
+  const accepted=await run(undefined,true)
+  expect(state.hydrateFinanceSettings).toHaveBeenCalledOnce()
+  if(scenario.startsWith('changed'))expect(accepted).toBe(false)
 })
 it('requires refreshing a repaired purchase before an employee can save the old quote',async()=>{
   const {state,run}=setup()

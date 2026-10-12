@@ -41,6 +41,7 @@ const props = defineProps<{
   skus?: string[]
   initialSheet?: import('@/data/customerQuoteSheet').CustomerQuoteSheet
   paginated?: boolean
+  hideBackToTop?: boolean
   quantityHelp?: string
   preservePricesWhilePending?: boolean
 }>()
@@ -700,7 +701,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="customer-sheet" aria-labelledby="customer-sheet-title">
-    <QuoteBackToTop />
+    <QuoteBackToTop v-if="!hideBackToTop" />
     <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @remove="removeAverage" /></div>
