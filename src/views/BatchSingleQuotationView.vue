@@ -206,11 +206,6 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
   <main class="batch-page">
     <header class="page-heading">
       <div><h1>批量单品 SKU 报价</h1><p>多个 SKU 独立计价，合并生成一张客户报价单</p></div>
-      <nav class="page-actions" aria-label="批量报价页面入口">
-        <RouterLink to="/quotation"><svg class="entry-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 19-7-7 7-7M5 12h14" /></svg>返回普通报价</RouterLink>
-        <RouterLink v-if="hasPermission('myRecords') || hasPermission('allRecords')" to="/quotation/my-records">报价记录</RouterLink>
-        <button v-if="hasPermission('myRecords') || hasPermission('allRecords')" class="history-entry" @click="history"><svg class="entry-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7.4M3 4v7h7M12 7v5l3 2" /></svg>历史批量记录</button>
-      </nav>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <section v-if="historyOpen" class="card">
@@ -271,13 +266,6 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
 /* Keep the existing light/orange theme local to the batch entry controls. */
 .page-heading { margin: 2px 0 26px; }
 .page-heading > div > p { margin: 12px 0 0; color: #748399; }
-.page-actions { justify-content: flex-end; gap: 10px; }
-.page-actions a,
-.page-actions .history-entry { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 8px 12px; box-sizing: border-box; border-radius: 6px; font: inherit; font-size: 12px; text-decoration: none; white-space: nowrap; }
-.page-actions a { color: #566b87; }
-.page-actions a:hover { background: #edf1f5; color: #304d6d; }
-.page-actions .history-entry { border: 1px solid #f1dcb8; background: #fff6e8; color: #a75e00; }
-.page-actions .history-entry:hover { background: #ffefd5; }
 .entry-icon { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .card.input-card { padding: 0; border-color: #dfe5ed; overflow: visible; }
 .input-heading { justify-content: flex-start; gap: 14px; padding: 15px 20px; border-bottom: 1px solid #f1dcb8; border-radius: 9px 9px 0 0; background: #fff6e8; }
@@ -302,14 +290,13 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
 .input-count.over-limit { color: #b23d27; }
 @media (max-width: 700px) {
   .page-heading { gap: 14px; margin-bottom: 20px; }
-  .page-actions { justify-content: flex-start; gap: 4px; }
   .input-heading { padding: 14px; gap: 8px 14px; }
   .input-body { padding: 14px; }
   .input-row { flex-wrap: wrap; gap: 12px; }
   .input-row textarea { flex-basis: 100%; font-size: 16px; }
   .input-summary { flex-basis: 100%; }
   .input-buttons { margin-left: auto; max-width: 100%; justify-content: flex-end; }
-  .input-buttons button, .page-actions a, .page-actions .history-entry { min-height: 44px; }
+  .input-buttons button { min-height: 44px; }
   .input-footer { flex-wrap: wrap; gap: 8px; }
   .input-count { margin-left: auto; }
 }
