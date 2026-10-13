@@ -944,7 +944,7 @@ onBeforeUnmount(() => {
 .sheet-quiet .sheet-editor th{background:#fff8f1;color:#39424e}
 .sheet-quiet .sheet-editor tr.sheet-average-row td{background:#f1f3f5!important;color:#29313d;border-top:1px solid #dfe3e8!important;border-bottom:1px solid #e4e7eb!important;font-weight:600}
 .sheet-quiet .sheet-editor tr.sheet-average-row input{color:#29313d!important}
-.sheet-quiet .sheet-editor tr.sheet-sku-start td{border-top:7px solid #fafbfc!important}
+.sheet-quiet .sheet-editor tr.sheet-sku-start td{border-top:10px solid #eef1f4!important;box-shadow:inset 0 2px 0 #9ca6b3}
 .sheet-quiet .sheet-sku{font-weight:600}
 .sheet-quiet .sheet-price-group{border-color:#e4e7eb!important}
 .sheet-quiet .sheet-quantity{border-bottom-color:#e4e7eb!important}
