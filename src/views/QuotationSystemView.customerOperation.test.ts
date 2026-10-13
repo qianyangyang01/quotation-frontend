@@ -67,7 +67,7 @@ describe('customer operation settings on the actual quotation page', () => {
       }
       throw new Error(`Unexpected request: ${path}`)
     })
-    app = createApp(QuotationSystemView)
+    app = createApp(QuotationSystemView, { resumeQuoteId: withdrawn ? 'withdrawn' : undefined })
     app.mount(host)
     expect(readFinanceSetting('customer-operation-fees')).toBeUndefined()
     resolveFinance(financeResponse)

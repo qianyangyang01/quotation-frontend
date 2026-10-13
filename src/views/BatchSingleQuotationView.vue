@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, onErrorCaptured, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { currentAuthUser, hasPermission } from '@/data/authStore'
 import { idempotencyKey } from '@/services/http'
 import { batchReviewLabels, correctBatchSingle, loadBatchSingleRecord, loadBatchSingleRecords, mergeBatchSingle, parseBatchSingleSkus, saveBatchSingle, type BatchSingleDocument, type BatchSingleItem, type BatchSingleLine } from '@/services/batchSingleQuotation'
@@ -200,7 +200,11 @@ async function beginCorrection(index: number) {
 }
 async function reset() { generation++; active.value = false; running.value = false; saving.value = false; validating.value = false; generating.value = false; stopping.value = false; stopped.value = false; seed.value = undefined; await nextTick(); lines.value = []; correction.value = undefined; inputExpanded.value = true; progress.value = ''; processingPage.value = 0; saved.value = undefined; error.value = ''; engineFailed.value = false; followupMessage.value = ''; sheetBusy.value = false }
 watch(() => currentAuthUser.value.account, () => { historyGeneration++; historyOpen.value = false; historyDocument.value = undefined; records.value = { items: [], total: 0 }; void reset() })
-onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
+const unsavedBatch = computed(() => !saved.value && !!(text.value.trim() || active.value))
+onBeforeRouteLeave(() => !locked.value && (!unsavedBatch.value || window.confirm('当前批量报价尚未保存，离开将丢失本批内容。建议先保存本批报价，再处理小铃铛中的待办。确定离开？')))
+function beforeUnload(event: BeforeUnloadEvent) { if (unsavedBatch.value || locked.value) { event.preventDefault(); event.returnValue = '' } }
+onMounted(() => window.addEventListener('beforeunload', beforeUnload))
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload); disposed = true; generation++; historyGeneration++ })
 </script>
 <template>
   <main class="batch-page">

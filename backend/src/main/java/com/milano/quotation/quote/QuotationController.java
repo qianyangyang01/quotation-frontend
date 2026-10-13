@@ -193,7 +193,9 @@ public class QuotationController {
     ApiResponse<JsonNode> create(@RequestBody JsonNode body, @RequestHeader("Idempotency-Key") String key,
                                  Authentication auth) {
         if (!(body instanceof ObjectNode input) || body.toString().length() > 4_000_000) throw AppException.unprocessable("报价数据格式错误或过大");
-        draftGuard.requireOrdinary(principal(auth).account());
+        // New records are independent of the account's withdrawn edit. Keep the
+        // account lock, but never consume or overwrite that draft here.
+        draftGuard.lock(principal(auth).account());
         if (!FobQuotation.isFob(input)) {
             if (input.has("fob")) throw AppException.unprocessable("普通报价不能携带FOB快照");
             submissionValidator.validate(input);
@@ -215,7 +217,7 @@ public class QuotationController {
     ApiResponse<JsonNode> createBatch(@RequestBody JsonNode body, @RequestHeader("Idempotency-Key") String key, Authentication auth) {
         if (!body.isObject() || body.toString().length() > 4_000_000) throw AppException.unprocessable("批量报价数据格式错误或过大");
         var principal = principal(auth);
-        draftGuard.requireOrdinary(principal.account());
+        draftGuard.lock(principal.account());
         var existing = idempotency.existing(principal.account(), "quotation-batch-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());
         var inputs = batchSubmission.prepare(body);

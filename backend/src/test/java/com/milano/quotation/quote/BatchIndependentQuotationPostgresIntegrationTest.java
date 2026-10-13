@@ -178,12 +178,20 @@ class BatchIndependentQuotationPostgresIntegrationTest {
         withdrawal.set("draft",mapper.createObjectNode().put("schemaVersion",2).put("customerName","撤回草稿").put("quoteMode","single").put("skuSearch",""));
         var response=mvc.perform(post("/api/v1/quotations/"+id+"/withdraw").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(withdrawal.toString())).andExpect(status().isOk()).andReturn();
         var draft=mapper.readTree(response.getResponse().getContentAsByteArray()).path("data");
+        var siblingBefore=storedRecord(last);
+        var draftBefore=jdbc.sql("select row_to_json(d)::text from quotation_draft d where source_quote_id=cast(:id as uuid)").param("id",id).query(String.class).single();
+        assertEquals(20,save(UUID.randomUUID().toString(),ordinary(20)).path("records").size());
+        var fob=BatchQuotationSubmissionTest.request(FobBatchQuotationTest.input(20));seedFob(fob);
+        assertEquals(20,save(UUID.randomUUID().toString(),fob).path("records").size());
+        assertEquals(siblingBefore,storedRecord(last));
+        assertEquals(draftBefore,jdbc.sql("select row_to_json(d)::text from quotation_draft d where source_quote_id=cast(:id as uuid)").param("id",id).query(String.class).single());
         var input=PackagingWeightTest.valid().put("customerName","重新编辑客户");
         input.putObject("purchaseVersions").put(input.path("primarySku").asText(),"0:test");input.putObject("financeVersions").put("exchange-rate",0);
         input.putObject("quotationBatch").put("id","forged").put("count",1).put("index",1);
         var request=mapper.createObjectNode().put("_version",draft.path("sourceQuote").path("version").asLong()).put("draftVersion",draft.path("version").asLong());request.set("quotation",input);
         mvc.perform(post("/api/v1/quotations/"+id+"/resubmit").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(request.toString())).andExpect(status().isOk());
         assertEquals(first.path("quotationBatch"),read(id).path("quotationBatch"));
+        assertEquals(siblingBefore,storedRecord(last));
         trash("employee",last,trashPreview(last)).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(2));
     }
     @Test void skippedMemberRestoreOrRemainingReviewAfterPreviewStillRejectsWholeOperation() throws Exception {

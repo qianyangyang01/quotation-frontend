@@ -60,7 +60,7 @@ describe('customer grades on a cold quotation page', () => {
       }
       throw new Error(`Unexpected request: ${path}`)
     })
-    app = createApp(QuotationSystemView)
+    app = createApp(QuotationSystemView, { resumeQuoteId: draftGrade ? 'withdrawn' : undefined })
     app.mount(host)
     const selector = () => host.querySelector<HTMLSelectElement>('[data-validation-field="customerGrade"] select')!
     expect(Array.from(selector().options).some(option => option.value === 'NEW')).toBe(false)

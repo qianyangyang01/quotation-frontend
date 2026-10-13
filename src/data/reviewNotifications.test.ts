@@ -12,6 +12,22 @@ const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() 
 beforeEach(() => { vi.useFakeTimers(); mocks.get.mockReset(); mocks.post.mockReset(); currentAuthUser.value.account = 'ME'; mocks.get.mockResolvedValue(result()); mocks.post.mockResolvedValue(undefined) })
 afterEach(() => { stopReviewNotifications(); vi.useRealTimers() })
 describe('persistent review inbox', () => {
+  it('keeps a withdrawn task after bulk read and clears it only on completion or account change', async () => {
+    const task = { recordId: 'withdrawn', quoteNo: 'Q1', customerName: '客户', primarySku: 'SKU', batchNo: 'B1', withdrawnAt: '2026-10-13T02:30:00Z' }
+    mocks.get.mockResolvedValue({ ...result(), withdrawnEdit: task })
+    startReviewNotifications('ME'); await flush()
+    mocks.get.mockResolvedValue({ items: [], unread: [], counts: {}, total: 0, page: 0, totalPages: 0, withdrawnEdit: task })
+    await markAllReviewsRead(); await flush()
+    expect(inbox.total).toBe(0)
+    expect(inbox.withdrawnEdit).toEqual(task)
+    mocks.get.mockResolvedValue({ ...result(), withdrawnEdit: null })
+    await refreshReviewNotifications()
+    expect(inbox.withdrawnEdit).toBeNull()
+    mocks.get.mockResolvedValue({ ...result(), withdrawnEdit: task })
+    await refreshReviewNotifications()
+    stopReviewNotifications()
+    expect(inbox.withdrawnEdit).toBeNull()
+  })
   it('uses the specific logistics-exempt title and keeps its unread count independent', async () => {
     const data = result()
     data.items[0]!.status = 'logistics-exempt'

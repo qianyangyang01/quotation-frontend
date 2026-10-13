@@ -94,6 +94,17 @@ public class QuotationDraftController {
         });
     }
     private ObjectNode emptyView(){var result=JsonNodeFactory.instance.objectNode();result.put("exists",false);result.set("payload",NullNode.instance);result.put("version",-1);result.set("updatedAt",NullNode.instance);return result;}
-    ObjectNode view(QuotationDraftEntity row){var result=JsonNodeFactory.instance.objectNode();result.put("exists",true);result.set("payload",row.payload.deepCopy());result.put("version",row.version);result.put("updatedAt",row.updatedAt.toString());if(row.sourceQuoteId!=null){var quote=records.findById(row.sourceQuoteId).orElseThrow();result.putObject("sourceQuote").put("id",row.sourceQuoteId.toString()).put("no",quote.quoteNo).put("version",row.sourceQuoteVersion);}return result;}
+    ObjectNode view(QuotationDraftEntity row){
+        var result=JsonNodeFactory.instance.objectNode();result.put("exists",true);result.set("payload",row.payload.deepCopy());
+        result.put("version",row.version);result.put("updatedAt",row.updatedAt.toString());
+        if(row.sourceQuoteId!=null){
+            var quote=records.findById(row.sourceQuoteId).orElseThrow();
+            var source=result.putObject("sourceQuote").put("id",row.sourceQuoteId.toString()).put("no",quote.quoteNo).put("version",row.sourceQuoteVersion)
+                .put("customerName",quote.payload.path("customerName").asText(""))
+                .put("primarySku",quote.payload.path("primarySku").asText(""));
+            if(quote.payload.path("quotationBatch").isObject())source.set("quotationBatch",quote.payload.path("quotationBatch").deepCopy());
+        }
+        return result;
+    }
     private static String account(Authentication auth){return ((QuotationPrincipal)auth.getPrincipal()).account();}
 }

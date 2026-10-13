@@ -28,6 +28,32 @@ class QuotationWithdrawalPostgresTest extends QuotationFinanceReviewIntegrationT
         r.add("spring.jpa.defer-datasource-initialization",()->"false");r.add("spring.flyway.enabled",()->"true");
     }
     @Autowired QuotationDraftRepository drafts;
+    @Test void pendingEditIsDiscoverableAndIndependentCreatesPreserveDraftAndOriginal() throws Exception {
+        var q=record();
+        ((ObjectNode)q.payload).putObject("quotationBatch").put("id",UUID.randomUUID().toString()).put("no","B-DEMO").put("index",2).put("count",3);
+        q=records.saveAndFlush(q);withdraw(q);
+        var original=records.findById(q.id).orElseThrow().payload.deepCopy();
+        var d=drafts.findById(owner).orElseThrow();var draftBefore=d.payload.deepCopy();var version=d.version;
+        mvc.perform(get("/api/v1/review-notifications").with(employee)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.withdrawnEdit.recordId").value(q.id.toString()))
+            .andExpect(jsonPath("$.data.withdrawnEdit.batchNo").value("B-DEMO"));
+        mvc.perform(get("/api/v1/review-notifications").with(other)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.withdrawnEdit").isEmpty());
+        mvc.perform(get("/api/v1/quotation-drafts/mine/state").with(employee)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.sourceQuote.quotationBatch.index").value(2));
+        mvc.perform(post("/api/v1/review-notifications/read-batch").with(employee).with(csrf())
+            .contentType("application/json").content("{\"eventIds\":[\""+UUID.randomUUID()+"\"]}")).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/review-notifications").with(employee)).andExpect(jsonPath("$.data.withdrawnEdit.recordId").value(q.id.toString()));
+        var input=resubmission(q).path("quotation");
+        mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key","independent-"+q.id)
+            .contentType("application/json").content(input.toString())).andExpect(status().isOk());
+        assertEquals(draftBefore,drafts.findById(owner).orElseThrow().payload);
+        assertEquals(version,drafts.findById(owner).orElseThrow().version);
+        assertEquals(original,records.findById(q.id).orElseThrow().payload);
+        command(q,"resubmit",resubmission(q),"finish-"+q.id,employee).andExpect(status().isOk());
+        assertEquals("B-DEMO",records.findById(q.id).orElseThrow().payload.path("quotationBatch").path("no").asText());
+        mvc.perform(get("/api/v1/review-notifications").with(employee)).andExpect(jsonPath("$.data.withdrawnEdit").isEmpty());
+    }
     @Test void withdrawalEndsPriorityAndResubmissionUsesExplicitNewChoice() throws Exception {
         var q=record();priority(q,employee,true,0).andExpect(status().isOk());withdraw(q);
         assertFalse(reviews.findById(q.id).orElseThrow().state.path("priorityProcessing").asBoolean());

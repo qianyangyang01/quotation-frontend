@@ -135,7 +135,7 @@ describe('quotation finance initialization for an employee', () => {
     if (options.warm) {
       await hydrateFinanceSettings()
     }
-    app = createApp(QuotationSystemView)
+    app = createApp(QuotationSystemView, { resumeQuoteId: options.grade || options.attribute ? 'withdrawn' : undefined })
     const vm = app.mount(host)
     // Exercise the mounted page's real calculation functions and reactive state.
     state = (vm.$ as unknown as { setupState: PricingState }).setupState

@@ -4,8 +4,9 @@ import { currentAuthUser } from '@/data/authStore'
 
 export interface UnreadReview { recordId: string; eventId: string; reviewVersion: number; status: string }
 export interface ReviewMessage extends UnreadReview { kind: string; note: string; actorName: string; occurredAt: string; quoteNo: string; customerName: string; primarySku: string }
-export interface ReviewInbox { items: ReviewMessage[]; unread: UnreadReview[]; counts: Record<string, number>; total: number; page: number; totalPages: number }
-const empty = (): ReviewInbox => ({ items: [], unread: [], counts: {}, total: 0, page: 0, totalPages: 0 })
+export interface WithdrawnEdit { recordId: string; quoteNo: string; customerName: string; primarySku: string; batchNo: string; withdrawnAt: string }
+export interface ReviewInbox { items: ReviewMessage[]; unread: UnreadReview[]; counts: Record<string, number>; total: number; page: number; totalPages: number; withdrawnEdit?: WithdrawnEdit | null }
+const empty = (): ReviewInbox => ({ items: [], unread: [], counts: {}, total: 0, page: 0, totalPages: 0, withdrawnEdit: null })
 export const reviewNotifications = reactive({ ...empty(), account: '', opened: false, loading: false, markingAll: false, error: '', announcement: '' })
 let batchGeneration = 0
 let generation = 0
@@ -42,7 +43,7 @@ export async function refreshReviewNotifications(page = reviewNotifications.page
     if (generation !== current || currentAuthUser.value.account !== account) return
     const newCount = result.unread.filter(item => !previous.has(item.eventId)).length
     if (initialized && newCount) reviewNotifications.announcement = `你有 ${newCount} 条新的审核消息`
-    Object.assign(reviewNotifications, result, { error: '' }); initialized = true
+    Object.assign(reviewNotifications, result, { withdrawnEdit: result.withdrawnEdit || null, error: '' }); initialized = true
   } catch {
     if (generation === current) reviewNotifications.error = '审核消息同步失败，请重试'
   } finally {

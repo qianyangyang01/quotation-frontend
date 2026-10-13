@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { createApp, nextTick, type App } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import View from './BatchSingleQuotationView.vue'
 import { loadPurchaseProduct } from '@/data/purchaseStore'
@@ -10,12 +11,26 @@ import { setPricingTestPermissions, clearPricingTestPermissions } from '@/test/p
 const { prime, calculate, item } = vi.hoisted(() => {
  const item = (sku: string) => ({ input: { quoteMode:'single',primarySku:sku,customerName:'客户',customerGrade:'S',exchangeRate:6.68,commissionThreshold:1,quoteOptions:[{id:'option',quoteSheetKey:'channel',country:'US',carrier:'4PX',channel:'TEST',rule:'TEST',eta:'7-12 working days',quote1Usd:5,quote2Usd:10,quote3Usd:15,quoteCustomUsd:null}],systemQuantityQuotes:{quantities:[1],rows:[{optionId:'option',prices:[5]}]},customerQuote:{quantities:[1],rows:[{optionId:'option',prices:[5]}]} }, conditions:{customerName:'客户'}, sheet:{agent:'QA',date:'12 Oct 2026',quantityLabels:['1 pc'],issues:[],rows:[{key:'channel',sku,prices:[5],number:1,country:'US',provider:'4PX'}]} });return { prime:vi.fn(), calculate:vi.fn(async(sku:string)=>item(sku)), item }
 })
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), RouterLink: { template: '<a><slot /></a>' } }))
+vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn(), useRoute: () => ({ query: {} }), RouterLink: { template: '<a><slot /></a>' } }))
 vi.mock('@/services/customerQuoteSheetRenderer', async original => ({ ...await original<typeof import('@/services/customerQuoteSheetRenderer')>(), preloadQuoteSheetAssets: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/data/purchaseStore', () => ({ loadPurchaseProduct: vi.fn(), purchaseQuoteBlockingMessage: () => '采购资料不完整' }))
 vi.mock('@/services/batchSingleQuotation', async importOriginal => ({ ...await importOriginal<typeof import('@/services/batchSingleQuotation')>(), saveBatchSingle: vi.fn() }))
 vi.mock('./QuotationSystemView.vue', () => ({ __esModule: true, default: { setup(_: unknown, { expose }: { expose: (value: unknown) => void }) { expose({ batchReady: true, primeBatchProduct: prime, restoreBatchSample: vi.fn(), calculateBatchItem: calculate }); return { first:item('SKU0') } }, template: '<div data-engine><button @click="$emit(\'batch-captured\', first)">应用条件并生成批量报价</button><button @click="$emit(\'batch-preparing\', true)">模拟校验中</button><button @click="$emit(\'batch-preparing\', false)">模拟校验失败</button></div>' } }))
 let app: App
+it('protects an unsaved batch when following a notification and lets the user stay', async () => {
+  await mount(2)
+  const confirm = vi.fn().mockReturnValue(false)
+  vi.stubGlobal('confirm', confirm)
+  try {
+    const leave = vi.mocked(onBeforeRouteLeave).mock.calls.at(-1)![0]
+    expect(await leave.call(undefined as never, {} as never, {} as never, vi.fn())).toBe(false)
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('当前批量报价尚未保存'))
+    expect(document.body.textContent).toContain('SKU0')
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+  } finally { vi.unstubAllGlobals() }
+})
 const button = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text)!
 beforeEach(() => { setPricingTestPermissions(['quote']); vi.clearAllMocks(); calculate.mockImplementation(async sku => item(sku)); vi.mocked(loadPurchaseProduct).mockImplementation(async sku => ({ sku, quoteReady: true }) as never); vi.mocked(saveBatchSingle).mockImplementation(async document => ({ ...document, no: 'BATCH-TEST', createdRecords: document.items.map((item,i)=>({id:String(i),no:'QT'+i,primarySku:item.input.primarySku,quoteMode:'single' as const})) })) })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.unstubAllGlobals(); clearPricingTestPermissions() })

@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/quotation/overview', name: 'quotation-overview', component: routeView('/quotation/overview'), meta: { title: '报价情况预览', permission: 'allRecords' } },
     { path: '/quotation/batch-single', name: 'quotation-batch-single', component: routeView('/quotation/batch-single'), meta: { title: '批量单品报价', permissions: ['quote', 'myRecords', 'allRecords'] } },
     { path: '/quotation', name: 'quotation', component: routeView('/quotation'), meta: { title: '我的报价', permission: 'quote' } },
+    { path: '/quotation/withdrawn-edit', name: 'quotation-withdrawn-edit', component: routeView('/quotation/withdrawn-edit'), meta: { title: '撤回报价编辑', permission: 'quote', permissions: ['myRecords', 'allRecords'] } },
     { path: '/quotation/products', name: 'quotation-products', component: routeView('/quotation/products'), props: { mode: 'products' }, meta: { title: '采购', permission: 'purchase' } },
     { path: '/quotation/suppliers', redirect: '/quotation/products' },
     { path: '/quotation/logistics', name: 'quotation-logistics', component: routeView('/quotation/logistics'), meta: { title: '物流', permission: 'logistics' } },

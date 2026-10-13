@@ -44,8 +44,10 @@ interface QuotationReviewNotificationRepository extends JpaRepository<QuotationR
 @Service
 class QuotationReviewNotifications {
     private final QuotationReviewNotificationRepository notifications;
-    QuotationReviewNotifications(QuotationReviewNotificationRepository notifications) {
-        this.notifications=notifications;
+    private final QuotationDraftRepository drafts;
+    private final QuotationRecordRepository records;
+    QuotationReviewNotifications(QuotationReviewNotificationRepository notifications, QuotationDraftRepository drafts, QuotationRecordRepository records) {
+        this.notifications=notifications; this.drafts=drafts; this.records=records;
     }
     // Caller holds the quotation lock. Review changes and delivery commit or roll back together.
     void publish(QuotationRecordEntity quote, QuotationReviewEntity review, String action, String note, QuotationPrincipal actor) {
@@ -62,7 +64,8 @@ class QuotationReviewNotifications {
     record Unread(UUID recordId, UUID eventId, long reviewVersion, String status) {}
     record Message(UUID recordId, UUID eventId, long reviewVersion, String kind, String status, String note,
                    String actorName, Instant occurredAt, String quoteNo, String customerName, String primarySku) {}
-    record Inbox(List<Message> items, List<Unread> unread, Map<String,Long> counts, int total, int page, int totalPages) {}
+    record WithdrawnEdit(UUID recordId, String quoteNo, String customerName, String primarySku, String batchNo, Instant withdrawnAt) {}
+    record Inbox(List<Message> items, List<Unread> unread, Map<String,Long> counts, int total, int page, int totalPages, WithdrawnEdit withdrawnEdit) {}
     @Transactional(readOnly=true, isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Inbox inbox(String account, int page) {
         var rows=notifications.unread(account);
@@ -71,7 +74,14 @@ class QuotationReviewNotifications {
         var counts=new HashMap<String,Long>();
         rows.forEach(n->counts.merge(n.status,1L,Long::sum));
         var items=visible.stream().map(n->new Message(n.recordId,n.eventId,n.reviewVersion,n.kind,n.status,n.note,n.actorName,n.occurredAt,n.quoteNo,n.customerName,n.primarySku)).toList();
-        return new Inbox(items,rows.stream().map(n->new Unread(n.recordId,n.eventId,n.reviewVersion,n.status)).toList(),counts,rows.size(),safePage,pages);
+        // A pending edit is a live task, not an unread message: marking messages
+        // read must never hide it. Scope both the draft and record to the owner.
+        var withdrawn=drafts.findById(account).filter(d->d.sourceQuoteId!=null)
+            .flatMap(d->records.findById(d.sourceQuoteId))
+            .filter(q->account.equals(q.ownerAccount) && "withdrawn".equals(q.lifecycleState))
+            .map(q->new WithdrawnEdit(q.id,q.quoteNo,q.payload.path("customerName").asText(""),
+                q.payload.path("primarySku").asText(""),q.payload.path("quotationBatch").path("no").asText(""),q.updatedAt)).orElse(null);
+        return new Inbox(items,rows.stream().map(n->new Unread(n.recordId,n.eventId,n.reviewVersion,n.status)).toList(),counts,rows.size(),safePage,pages,withdrawn);
     }
     @Transactional public void acknowledge(String account, UUID id, UUID event) {
         // A stale acknowledgement cannot consume a newer message; other accounts are always a no-op.

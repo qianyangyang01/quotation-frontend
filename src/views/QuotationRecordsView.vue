@@ -254,13 +254,14 @@ async function confirmMutation() {
     if (operation.action === 'cancel') await cancelQuotation(operation.row.id, operation.row._version!)
     else await withdrawQuotation(operation.row)
     if (account !== currentAuthUser.value.account) return
+    void refreshReviewNotifications()
     if (operation.action === 'cancel') reviewSync.markMissing(operation.row.id)
     else reviewSync.accept({ ...operation.row, _version: operation.row._version! + 1, lifecycleState: 'withdrawn' })
     ++requestId
     selected.value = null; checkedIds.value = checkedIds.value.filter(id => id !== operation.row.id)
     records.value = records.value.filter(row => row.id !== operation.row.id)
     mutationDialog.value = null
-    if (operation.action === 'withdraw') await router.push('/quotation')
+    if (operation.action === 'withdraw') await router.push({ path: '/quotation/withdrawn-edit', query: { record: operation.row.id } })
     else { toast('报价已永久取消'); await refresh() }
   } catch (error) { mutationError.value = error instanceof Error ? error.message : '操作失败，请重试'; void reviewSync.poll() }
   finally { mutationBusy.value = false }
@@ -532,6 +533,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <small>按审核结果自动分类</small>
       </nav>
       <section v-if="isMine && inbox.total" class="review-unread-banner" aria-label="未读审核结果"><span>你有 <b>{{ inbox.total }}</b> 条审核消息未查看</span><button type="button" @click="openReviewInbox">查看未读</button></section>
+      <section v-if="isMine && inbox.withdrawnEdit && hasPermission('quote')" class="review-unread-banner" aria-label="撤回待编辑"><span>撤回待编辑：{{ inbox.withdrawnEdit.primarySku || inbox.withdrawnEdit.quoteNo }} · {{ inbox.withdrawnEdit.customerName }}<template v-if="inbox.withdrawnEdit.batchNo"> · 所属批次 {{ inbox.withdrawnEdit.batchNo }}</template></span><RouterLink :to="{ path: '/quotation/withdrawn-edit', query: { record: inbox.withdrawnEdit.recordId } }">继续编辑该报价</RouterLink></section>
       <p v-if="isMine && inbox.error" class="review-notification-error" role="alert">{{ inbox.error }} <button @click="refreshReviewNotifications()">重试</button></p>
       <section class="record-date-filters" aria-label="报价时间筛选">
         <label>开始日期<input v-model="startDate" type="date" aria-label="开始日期" :max="endDate || undefined"></label>

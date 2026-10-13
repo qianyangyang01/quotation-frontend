@@ -54,7 +54,7 @@ export interface QuotationDraftPayload {
 }
 
 export interface QuotationDraftState {
-  sourceQuote?: { id: string; no: string; version: number }
+  sourceQuote?: { id: string; no: string; version: number; customerName?: string; primarySku?: string; quotationBatch?: { id: string; no: string; index: number; count: number } }
   exists: boolean
   payload: QuotationDraftPayload | null
   version: number

@@ -88,7 +88,7 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<st
   })
   vi.spyOn(api, 'put').mockResolvedValue({ exists: true, version: 2, updatedAt: 'test' })
   host = document.createElement('div'); document.body.append(host)
-  app = createApp(View)
+  app = createApp(View, { resumeQuoteId: 'withdrawn' })
   const vm = app.mount(host)
   state = (vm.$ as unknown as { setupState: typeof state }).setupState
   await vi.waitFor(() => expect(state.draftReady).toBe(true))

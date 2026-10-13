@@ -49,7 +49,7 @@ beforeEach(() => {
   purchaseFailure = false; purchaseOverride = {}; sourceFailure = false; router.query = { reissue: 'original', release: 'local' }
 })
 afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks(); localStorage.clear(); authState.current = null })
-async function mount(existing: boolean, withdrawn = false, batchCapture = false) {
+async function mount(existing: boolean, withdrawn = false, batchCapture = false, resumeQuoteId = withdrawn ? 'original' : undefined) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return finance
     if (path === '/quotation-readiness') return { ready: true, missing: [] }
@@ -68,7 +68,7 @@ async function mount(existing: boolean, withdrawn = false, batchCapture = false)
   vi.spyOn(api, 'patch').mockRejectedValue(new Error('Unexpected original update'))
   host = document.createElement('div'); document.body.append(host)
   batchProps = reactive({ batchCapture, batchSkus: ['BK100', 'BK200'], batchSize: 2 })
-  app = createApp({ render: () => h(View, batchProps) })
+  app = createApp({ render: () => h(View, { ...batchProps, resumeQuoteId }) })
   const vm = app.mount(host)
   state = (vm.$.subTree.component as unknown as { setupState: typeof state }).setupState
   await vi.waitFor(() => expect(state.draftReady || state.draftStatus === 'error').toBe(true))
@@ -274,7 +274,7 @@ it.each(['common'] as const)('saves the selected %s list through the actual page
 it('restores the original quotation identity and explicitly cancels it when abandoning a withdrawn draft', async () => {
   router.query = { release: 'local' }
   await mount(true, true)
-  expect(host.textContent).toContain('撤回重新编辑 · 报价 QT-OLD')
+  expect(host.textContent).toContain('撤回编辑 · QT-OLD')
   const confirm = vi.fn().mockReturnValue(false)
   Object.defineProperty(window, 'confirm', { configurable: true, value: confirm })
   button('放弃编辑并取消报价').click(); await nextTick()
@@ -285,13 +285,42 @@ it('restores the original quotation identity and explicitly cancels it when aban
   button('放弃编辑并取消报价').click()
   await vi.waitFor(() => expect(api.post).toHaveBeenCalledWith('/quotations/original/cancel', { _version: 8, draftVersion: 7 }, 'cancel:original:8:7'))
   expect(api.post).toHaveBeenCalledTimes(1)
-  await vi.waitFor(() => expect(host.textContent).not.toContain('撤回重新编辑 · 报价 QT-OLD'))
+  await vi.waitFor(() => expect(host.textContent).not.toContain('撤回编辑 · QT-OLD'))
 })
 it('refuses to overwrite a withdrawn draft through the reissue dialog', async () => {
   await mount(true, true)
   button('载入并再次发起').click()
-  await vi.waitFor(() => expect(host.textContent).toContain('再次发起不会覆盖它'))
+  await vi.waitFor(() => expect(host.textContent).toContain('当前正在编辑撤回报价'))
   expect(api.put).not.toHaveBeenCalled()
+})
+
+it('allows an independent new quotation without restoring or changing the pending withdrawn edit', async () => {
+  router.query = {}
+  await mount(true, true, false, '')
+  expect(state.customerName).toBe('')
+  expect(host.textContent).not.toContain('撤回编辑 ·')
+  vi.mocked(api.post).mockResolvedValue({ id: 'new', no: 'QT-NEW' })
+  await state.persistQuotation({ customerName: '新客户' } as never)
+  expect(api.post).toHaveBeenCalledWith('/quotations', expect.objectContaining({ customerName: '新客户' }), expect.any(String))
+  expect(api.put).not.toHaveBeenCalled()
+  expect(api.delete).not.toHaveBeenCalled()
+})
+
+it('refuses a stale notification link rather than restoring a different withdrawn record', async () => {
+  router.query = {}
+  await mount(true, true, false, 'different-record')
+  expect(state.draftStatus).toBe('error')
+  expect(host.textContent).toContain('该撤回编辑已结束或关联已变化')
+  expect(state.customerName).toBe('')
+  expect(api.put).not.toHaveBeenCalled()
+  expect(api.post).not.toHaveBeenCalled()
+})
+
+it('reissues independently while a different quotation remains withdrawn on the server', async () => {
+  await mount(true, true, false, '')
+  await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
+  expect(api.put).not.toHaveBeenCalled()
+  expect(api.delete).not.toHaveBeenCalled()
 })
 
 

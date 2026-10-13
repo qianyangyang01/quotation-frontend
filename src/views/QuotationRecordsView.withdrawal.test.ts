@@ -37,7 +37,7 @@ it('leaves the record and dialog intact on draft conflict and navigates only aft
   button('撤回重新编辑').click(); await flush(); button('确认撤回并编辑').click(); await flush()
   expect(document.querySelector('[role=alert]')?.textContent).toContain('已有草稿')
   expect(mock.push).not.toHaveBeenCalled(); expect(document.querySelector('.record-customer')).not.toBeNull()
-  button('确认撤回并编辑').click(); await flush(); expect(mock.push).toHaveBeenCalledExactlyOnceWith('/quotation')
+  button('确认撤回并编辑').click(); await flush(); expect(mock.push).toHaveBeenCalledExactlyOnceWith({ path: '/quotation/withdrawn-edit', query: { record: 'one' } })
 })
 it('does not expose owner commands on another owner or deal record', async () => {
   await mount([{ ...row(), salespersonAccount: 'OTHER' }, { ...row(), id: 'deal', status: 'won' }, { ...row(), id: 'details', dealQuantity: 1 }])

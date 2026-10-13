@@ -11,6 +11,7 @@ export const routeViewLoaders: Record<string, RouteViewLoader> = {
   '/quotation/overview': () => import('@/views/QuotationOverviewView.vue'),
   '/quotation/batch-single': () => import('@/views/BatchSingleQuotationView.vue'),
   '/quotation': () => import('@/views/QuotationSystemView.vue'),
+  '/quotation/withdrawn-edit': () => import('@/views/WithdrawnQuotationView.vue'),
   '/quotation/products': () => import('@/views/PurchaseWorkspaceView.vue'),
   '/quotation/logistics': () => import('@/views/LogisticsWorkspaceView.vue'),
   '/quotation/members': financeModuleView,

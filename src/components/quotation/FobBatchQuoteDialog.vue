@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import { localQuoteDate } from '@/data/customerQuoteSheet'
 import { fobQuantityQuote, fobSheetRows, fobTierQuotes, loadFobQuoteProduct, type FobSourceMode, type FobSmallOrderPolicy } from '@/services/fobQuotation'
@@ -95,12 +96,16 @@ function exportIssues() {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })), a = document.createElement('a')
   a.href = url; a.download = 'FOB报价异常清单.txt'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
-function close() { if (!saving.value) { cancelQueries(); dialog.value?.close(); emit('close') } }
-onMounted(async () => { restoreFocus = document.activeElement as HTMLElement; dialog.value?.showModal(); await nextTick(); if (props.initial) void query(true) })
-onBeforeUnmount(() => { cancelQueries(); restoreFocus?.focus() })
+const hasUnsavedBatch = computed(() => !savedNo.value && !!(paste.value.trim() || lines.value.length || preview.value))
+function mayLeave() { return !saving.value && (!hasUnsavedBatch.value || window.confirm('当前批量报价尚未保存，离开将丢失本批内容。建议先保存本批报价，再处理小铃铛中的待办。确定离开？')) }
+function beforeUnload(event: BeforeUnloadEvent) { if (hasUnsavedBatch.value || saving.value) { event.preventDefault(); event.returnValue = '' } }
+onBeforeRouteLeave(mayLeave)
+function close() { if (mayLeave()) { cancelQueries(); dialog.value?.close(); emit('close') } }
+onMounted(async () => { restoreFocus = document.activeElement as HTMLElement; dialog.value?.show(); window.addEventListener('beforeunload', beforeUnload); await nextTick(); if (props.initial) void query(true) })
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload); cancelQueries(); restoreFocus?.focus() })
 </script>
 <template>
-  <dialog ref="dialog" class="batch-dialog" aria-label="批量粘贴报价" @cancel.prevent="close">
+  <dialog ref="dialog" class="batch-dialog" aria-label="批量粘贴报价" @cancel.prevent="close" @keydown.esc.stop.prevent="close">
     <header><div><h2>批量粘贴报价</h2><p>粘贴SKU清单，核对异常后合并生成一份FOB报价单</p></div><button type="button" aria-label="关闭批量报价" :disabled="saving" @click="close">×</button></header>
     <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="financeIssue" role="alert" class="error">{{ financeIssue }}</p>
     <fieldset :disabled="saving" class="batch-fieldset">
@@ -135,6 +140,7 @@ onBeforeUnmount(() => { cancelQueries(); restoreFocus?.focus() })
   </dialog>
 </template>
 <style scoped>
+.batch-dialog[open]{position:fixed;inset:88px 16px 16px;margin:0 auto;max-height:calc(100dvh - 104px);z-index:25;box-shadow:0 12px 40px #152a4133}@media(max-width:1100px){.batch-dialog[open]{top:126px;max-height:calc(100dvh - 142px)}}
 .batch-fieldset{border:0;margin:0;padding:0;min-width:0}.price{background:#eef6ff;color:#1c629a;min-width:92px}.price b{font-size:17px}.price small{display:block;font-size:10px;font-weight:400;color:#617d94}.price div+div{margin-top:8px}
 .batch-dialog{box-sizing:border-box;width:min(1420px,96vw);max-height:94vh;border:1px solid #dbe5ee;border-radius:12px;padding:20px;color:#233b50;background:#fff;overflow:auto}.batch-dialog::backdrop{background:#152a4166}header,footer,.preview-toolbar,.summary,.filters{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h2{margin:0;font-size:21px}p{font-size:12px;line-height:1.6;color:#708092}button,input,select,textarea{font:inherit;box-sizing:border-box;border:1px solid #ccd9e5;border-radius:6px;padding:8px;color:#29465d;background:white}button{cursor:pointer;font-size:13px}button:disabled{opacity:.5;cursor:not-allowed}button.primary{background:#f58b15;border-color:#f58b15;color:white;font-weight:700;padding:11px 18px}header>button{font-size:24px}.batch-body{display:grid;grid-template-columns:270px minmax(0,1fr);gap:18px;margin-top:16px}aside{background:#f6f9fc;border:1px solid #e1e9f0;padding:14px;border-radius:8px}aside textarea{width:100%;height:260px;resize:vertical;line-height:1.8}label{display:grid;gap:6px;font-size:12px}aside label,aside button{margin-top:12px;width:100%}.summary{justify-content:flex-start;padding:12px;background:#f0f6fc;border-radius:6px}.filters{justify-content:flex-start;margin:12px 0}.active{color:#1764a4;background:#eef6ff}.result-scroll{overflow:auto;max-height:520px}table{border-collapse:collapse;width:100%;font-size:12px}td,th{border:1px solid #dce5ed;padding:8px;text-align:left}th{background:#f1f6fa}td input:not([type=checkbox]){width:100%;min-width:72px}td:nth-child(3){min-width:155px}td:nth-child(4){width:95px}.warning{color:#a55b08}.success{color:#17805a}.error{padding:12px;background:#fff0ed;color:#a83324}.invalid{background:#fffaf1}.metadata{display:flex;flex-wrap:wrap;gap:12px;border-top:1px solid #e2e9ef;padding:16px 0;margin-top:16px}.metadata label{flex:1;min-width:145px}.metadata input{width:100%}footer{position:sticky;bottom:-20px;background:#fff;padding:16px 0;border-top:1px solid #e1e7ed;z-index:1}.preview-toolbar{justify-content:flex-start;margin:16px 0}summary{cursor:pointer;color:#71879b}details table{margin-top:8px}@media(max-width:760px){.batch-body{grid-template-columns:1fr}aside textarea{height:150px}.batch-dialog{padding:12px}footer{bottom:-12px}}
 </style>

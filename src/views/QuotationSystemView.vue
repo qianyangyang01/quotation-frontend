@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { refreshReviewNotifications } from '@/data/reviewNotifications'
 import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
 import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
@@ -94,7 +95,7 @@ import {
 // Batch workspace reuses the proven calculator, but never enters ordinary persistence.
 const FobCorrectionDialog = defineAsyncComponent(() => import('@/components/quotation/FobCorrectionDialog.vue'))
 
-const props = defineProps<{ batchCapture?: boolean; batchInitialSku?: string; batchSize?: number; batchSkus?: string[] }>()
+const props = defineProps<{ resumeQuoteId?: string; batchCapture?: boolean; batchInitialSku?: string; batchSize?: number; batchSkus?: string[] }>()
 const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean]; batchSampleBusy: [value: boolean] }>()
 let batchCalculationActive = false
 let batchCaptured: import('@/services/batchSingleQuotation').BatchSingleItem | undefined
@@ -239,8 +240,7 @@ async function applyReissue() {
   try {
     window.clearTimeout(draftTimer)
     await draftSavePromise
-    const serverDraft = await loadQuotationDraft()
-    if (draftSource.value || serverDraft.sourceQuote) throw new Error('请先完成撤回报价草稿，或放弃编辑并取消报价，再次发起不会覆盖它')
+    if (draftSource.value) throw new Error('当前正在编辑撤回报价，请返回我的报价后再次发起')
     if(record.quoteMode==='fob') {
       if(!record.fob || !canUseFob.value)throw new Error('无法载入FOB报价')
       fobInitial.value={sku:record.primarySku,source:record.fob.product.source,customer:record.customerName,quantity:record.fob.quantity}
@@ -669,11 +669,12 @@ function updateBundleItemWeight(item: BundleQuoteItem) {
   normalizeRule(products.value[0], true)
 }
 async function openBatchQuotation() {
-  if (props.batchCapture || savingQuotation.value || syncRefreshing.value) return
+  if (props.resumeQuoteId || props.batchCapture || savingQuotation.value || syncRefreshing.value) return
   try { await router.push('/quotation/batch-single') }
   catch { toast('批量报价页面打开失败，请重试') }
 }
 function changeQuoteMode(mode: QuotationMode | 'fob') {
+  if (props.resumeQuoteId && (!draftSource.value || draftSource.value.quotationBatch)) return
   if (props.batchCapture && mode !== 'single') return
   if (mode === 'fob' && !canUseFob.value) return
   if (savingQuotation.value || syncRefreshing.value) return
@@ -1324,6 +1325,12 @@ async function loadAndRestoreDraft() {
   draftStatus.value = 'loading'
   draftInitializationFailed.value = false
   const state = await loadQuotationDraft()
+  if (props.resumeQuoteId && (!state.exists || !state.payload || state.sourceQuote?.id !== props.resumeQuoteId)) {
+    throw new Error('该撤回编辑已结束或关联已变化，请从小铃铛重新选择待办')
+  }
+  // A new quotation must not silently become a resubmission of another record.
+  // Only the dedicated, record-specific entry can restore the withdrawn draft.
+  if (!props.resumeQuoteId) state.sourceQuote = undefined
   draftSource.value = state.sourceQuote
   draftVersion.value = state.sourceQuote ? state.version : -1
   draftUpdatedAt.value = state.sourceQuote ? state.updatedAt || '' : ''
@@ -1432,6 +1439,10 @@ async function clearDraft() {
     draftUpdatedAt.value = ''
     await resetLocalDraft()
     toast('已清空当前内容，可以开始新的报价')
+    if (source) {
+      void refreshReviewNotifications()
+      await router.replace('/quotation')
+    }
   } finally { clearingDraft.value = false }
 }
 async function reloadServerDraftAfterConflict() {
@@ -1443,6 +1454,7 @@ async function reloadServerDraftAfterConflict() {
     await draftSavePromise?.catch(() => undefined)
     const signature = draftSignature()
     const state = await loadQuotationDraft()
+    if (props.resumeQuoteId && state.sourceQuote && state.sourceQuote.id !== props.resumeQuoteId) throw new Error('撤回草稿已关联另一条报价，当前输入已保留，请从小铃铛重新选择')
     if (signature !== draftSignature()) throw new Error('读取期间内容已修改，已保留当前输入，请重新选择')
     draftReady.value = false
     draftSource.value = state.sourceQuote
@@ -2379,12 +2391,17 @@ async function save() {
     if (!batchCalculationActive) emit('batchCaptured', batchCaptured!)
     return
   }
+  const editedSource = draftSource.value
   const record = await persistQuotation(input)
   const countryCount = new Set(selectedMatrixRows.map(row => row.country)).size
   draftVersion.value = -1
   draftUpdatedAt.value = ''
   await resetLocalDraft({ name: customer, selectedCustomerId: record.customerOperation?.id || '' })
   toast(`报价已保存：${record.no}（1 张报价单 · ${countryCount} 个国家 · ${selectedMatrixRows.length} 条渠道）`)
+  if (editedSource) {
+    void refreshReviewNotifications()
+    await router.replace({ path: '/quotation/my-records', query: editedSource.quotationBatch ? { batch: editedSource.quotationBatch.no } : { record: editedSource.id } })
+  }
 }
 function toast(message: string) {
   notice.value = message
@@ -2428,20 +2445,20 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       </section>
       <section v-else class="draft-status-bar" :class="draftStatus" aria-live="polite">
         <i>{{ draftStatus === 'saved' ? '✓' : draftStatus === 'error' || draftStatus === 'conflict' ? '!' : '↻' }}</i>
-        <span><b>{{ draftStatusText }}</b><small>切换模块后返回“我的报价”可继续录入；正式报价保存成功后自动清除草稿。</small></span>
+        <span><b>{{ draftStatusText }}</b><small>切换模块后，可从小铃铛继续编辑该报价；重新提交成功后自动移除待办。</small></span>
         <button v-if="draftStatus === 'conflict'" type="button" @click="showDraftConflictDialog=true">处理草稿冲突</button><button v-if="draftStatus === 'error'" type="button" @click="draftInitializationFailed ? retryDraftInitialization() : flushDraft()">{{ draftInitializationFailed ? '重试读取' : '重试保存' }}</button>
         <button v-if="draftVersion >= 0 || draftDirty" type="button" :disabled="clearingDraft || savingQuotation" @click="clearDraft">{{ draftSource ? '放弃编辑并取消报价' : '清空重新开始' }}</button>
       </section>
 
       <section v-if="draftChannelNotice" class="live-data-notice" role="status">{{ draftChannelNotice }}</section>
-      <section v-if="draftSource" class="draft-status-bar"><span><b>撤回重新编辑 · 报价 {{ draftSource.no }}</b><small>原审核已终止。价格按当前资料重新计算，提交后保留原单号并重新待审核。</small></span></section>
+      <section v-if="draftSource" class="draft-status-bar withdrawn-context"><span><b>撤回编辑 · {{ draftSource.primarySku || draftSource.no }}</b><small>客户：{{ draftSource.customerName || customerName }} · 报价单号：{{ draftSource.no }}<template v-if="draftSource.quotationBatch"> · 所属批次：{{ draftSource.quotationBatch.no }}（第 {{ draftSource.quotationBatch.index }} / {{ draftSource.quotationBatch.count }} 条）</template></small><small>{{ draftSource.quotationBatch ? '仅编辑并重新审核该单品，保留原批次关联；同批其他报价保持原状态。' : '提交后保留原单号并重新待审核。' }}</small></span><RouterLink v-if="draftSource.quotationBatch" :to="{ path: '/quotation/my-records', query: { batch: draftSource.quotationBatch.no } }">返回所属批次</RouterLink></section>
       <section v-if="reissueSource" class="draft-status-bar"><span><b>再次发起 · 原报价 {{ reissueSource }}</b><small>已带入原报价条件，可修改 SKU、物流属性和渠道；价格按当前资料重新计算，保存后生成新的报价单。</small></span></section>
       </template>
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
           :commission-threshold="commissionThreshold" :commission-error="commissionError" @update:commission-threshold="commissionThreshold=$event"
-          :single-only="batchCapture" :mode="fobActive ? 'fob' : quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="fobActive ? [] : displayedInvalidFields"
+          :lock-mode="!!resumeQuoteId && (!draftSource || !!draftSource.quotationBatch)" :single-only="batchCapture" :mode="fobActive ? 'fob' : quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="fobActive ? [] : displayedInvalidFields"
           :finance-pending="!financeSettingsAreHydrated()" :finance-error="financeSettingsLoadError()"
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
@@ -2523,7 +2540,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
-        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :batch-sample="batchCapture" :batch-size="batchSize" :save-label="batchCapture ? `生成 ${batchSize || 0} 个 SKU 报价` : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :batch-sample="batchCapture" :batch-size="batchSize" :save-label="batchCapture ? `生成 ${batchSize || 0} 个 SKU 报价` : draftSource ? '保存并重新提交审核' : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
           :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"
