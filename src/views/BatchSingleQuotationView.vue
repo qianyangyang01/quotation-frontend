@@ -203,7 +203,7 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
 </script>
 <template>
   <main class="batch-page">
-    <header><div><h1>批量单品 SKU 报价</h1><p>多个 SKU 独立计价，合并生成一张客户报价单</p></div><nav><RouterLink to="/quotation">返回普通报价</RouterLink><RouterLink v-if="hasPermission('myRecords') || hasPermission('allRecords')" to="/quotation/my-records">报价记录</RouterLink><button v-if="hasPermission('myRecords') || hasPermission('allRecords')" @click="history">历史批量记录</button></nav></header>
+    <header><div><h1>批量单品 SKU 报价</h1><p>多个 SKU 独立计价，合并生成一张客户报价单</p></div></header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <section v-if="historyOpen" class="card">
       <header><h2>历史批量记录</h2><button @click="historyOpen=false; historyGeneration++">关闭记录</button></header>

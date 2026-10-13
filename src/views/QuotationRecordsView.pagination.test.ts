@@ -154,5 +154,5 @@ it('opens a saved batch in the original list with all review states and no centr
  expect(query.loadRecordPage).toHaveBeenCalledWith('mine',expect.objectContaining({product:'BQT-14',reviewStatus:''}),0,10);
  expect(document.querySelector<HTMLInputElement>('#record-product-filter')?.value).toBe('BQT-14');
  expect(document.querySelector('.heading')?.textContent).not.toContain('批量单品报价记录');
- expect(document.body.textContent).not.toContain('历史批量记录');
+ expect(document.querySelector('.lifecycle-tabs')?.textContent).not.toContain('历史批量记录');
 })

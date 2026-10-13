@@ -511,7 +511,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
 <template>
   <div class="app">
-    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><RouterLink v-if="isMine" to="/quotation">＋ 新建报价</RouterLink></header>
+    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><div class="heading-actions"><RouterLink v-if="isMine" class="primary" to="/quotation">＋ 新建报价</RouterLink><QuotationRecordMenu v-if="hasPermission('myRecords') || hasPermission('allRecords')" label="报价记录更多入口"><RouterLink :to="{ path: '/quotation/batch-single', query: { records: '1' } }">历史批量记录</RouterLink></QuotationRecordMenu></div></header>
       <nav class="lifecycle-tabs" aria-label="报价记录分类">
         <button v-for="state in (['active','archived','trashed'] as const)" :key="state" :class="{active:lifecycle===state}" :aria-current="lifecycle===state ? 'page' : undefined" :disabled="lifecycleBusy" @click="lifecycle=state">{{ lifecycleLabel(state) }}</button>
         <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
@@ -709,6 +709,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 </template>
 
 <style scoped>
+.heading-actions{display:flex;align-items:center;gap:10px}
 .detail-batch-reference{margin:0 24px 12px;color:#788590;font-size:12px}.batch-reference{border:0;background:none;padding:0;color:#477294;font:inherit;cursor:pointer}
 
 
