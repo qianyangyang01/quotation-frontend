@@ -204,12 +204,14 @@ it('keeps exception rows available when clipboard access fails', async () => {
 it('preserves edited prices and reuses the same idempotency key after an uncertain save failure', async () => {
  await mount(2);button('应用条件并生成批量报价').click()
  await vi.waitFor(()=>expect(document.body.textContent).toContain('2个成功'))
- const price=document.querySelector<HTMLInputElement>('[aria-label="第 1 行第 1 列美元价格"]')!
+ document.querySelector<HTMLButtonElement>('button[aria-label="第 1 行第 1 列美元价格"]')!.click();await nextTick()
+ const price=document.querySelector<HTMLInputElement>('input[aria-label="第 1 行第 1 列美元价格"]')!
  price.value='9.95';price.dispatchEvent(new Event('input'));await nextTick()
+ price.blur();await nextTick()
  vi.mocked(saveBatchSingle).mockRejectedValueOnce(new Error('保存结果尚未确认'))
  button('保存 2 条报价记录').click()
  await vi.waitFor(()=>expect(document.body.textContent).toContain('保存结果尚未确认'))
- expect(price.value).toBe('9.95')
+ expect(document.querySelector('button[aria-label="第 1 行第 1 列美元价格"]')!.textContent).toBe('9.95')
  button('保存 2 条报价记录').click()
  await vi.waitFor(()=>expect(saveBatchSingle).toHaveBeenCalledTimes(2))
  const [first,retry]=vi.mocked(saveBatchSingle).mock.calls
