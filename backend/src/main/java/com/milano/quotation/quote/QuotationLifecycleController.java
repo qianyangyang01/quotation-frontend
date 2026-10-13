@@ -62,6 +62,12 @@ public class QuotationLifecycleController {
             var row = records.lockById(entry.getKey()).orElseThrow(() -> AppException.notFound("所选报价记录不存在，请刷新"));
             if (!admin && !row.ownerAccount.equals(principal.account())) throw new AccessDeniedException("只能处理自己的报价记录");
             if (row.version != entry.getValue()) throw AppException.conflict("所选报价已变更，本次未执行，请刷新后重新选择");
+            // Keep skipped members locked and version-checked so a concurrent restore cannot
+            // silently change the confirmed scope. They are removed only after full batch validation.
+            if (batchMemberId != null && Set.of("withdrawn", "trashed").contains(row.lifecycleState)) {
+                rows.add(row);
+                continue;
+            }
             if (row.lifecycleState.equals("withdrawn")) throw AppException.conflict("报价已撤回，请从报价草稿继续编辑");
             if (request.action().equals("restore")) {
                 if (row.lifecycleState.equals("active")) throw AppException.conflict("所选记录已在当前记录中，请刷新");
@@ -95,6 +101,8 @@ public class QuotationLifecycleController {
                         || metadata.path("count").asInt() != count || index < 1 || index > count || !indices.add(index))
                     throw AppException.conflict("本批记录不完整，本次未执行，请重新打开确认");
             }
+            rows.removeIf(row -> Set.of("withdrawn", "trashed").contains(row.lifecycleState));
+            if (rows.isEmpty()) throw AppException.conflict("本批已无可移入回收站的记录，请刷新列表");
         }
         var now = Instant.now();
         var batchId = UUID.randomUUID().toString();

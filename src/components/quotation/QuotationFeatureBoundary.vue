@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { onErrorCaptured, ref } from 'vue'
+import { isPageResourceError } from '@/router/navigationRecovery'
 
 withDefaults(defineProps<{ label: string; active?: boolean }>(), { active: true })
 const emit = defineEmits<{ close: [] }>()
 const failed = ref(false)
-onErrorCaptured(() => {
+const resourceFailed = ref(false)
+function reloadPage() { window.location.reload() }
+onErrorCaptured(error => {
+  resourceFailed.value = isPageResourceError(error)
   failed.value = true
   return false
 })
@@ -12,7 +16,11 @@ onErrorCaptured(() => {
 
 <template>
   <section v-if="failed" v-show="active" class="feature-error" role="alert">
-    <p>{{ label }}暂时无法使用，请关闭后重新打开。其他报价功能可继续使用。</p>
+    <template v-if="resourceFailed">
+      <p>{{ label }}加载失败，可能是页面版本已更新或网络中断。请先保留未保存的内容，再刷新整个页面；仅关闭后重新打开无法恢复旧版文件。</p>
+      <button type="button" @click="reloadPage">刷新页面</button>
+    </template>
+    <p v-else>{{ label }}暂时无法使用，请关闭后重新打开。其他报价功能可继续使用。</p>
     <button type="button" @click="emit('close')">关闭当前功能</button>
   </section>
   <slot v-else />

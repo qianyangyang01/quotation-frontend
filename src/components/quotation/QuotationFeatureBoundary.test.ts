@@ -4,7 +4,25 @@ import { afterEach, expect, it, vi } from 'vitest'
 import Boundary from './QuotationFeatureBoundary.vue'
 
 let app: App
-afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
+afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.restoreAllMocks() })
+
+it.each([
+  'Failed to fetch dynamically imported module: /assets/FobRecordDetail-old.js',
+  'Unable to preload CSS for /assets/old.css',
+])('offers explicit page refresh for resource failure without losing unsaved work: %s', async message => {
+  const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {})
+  const AsyncChild = defineAsyncComponent(() => Promise.reject(new TypeError(message)))
+  app = createApp({ render: () => h('main', [
+    h('input', { value: '未保存的报价内容' }),
+    h(Boundary, { label: 'FOB报价详情' }, () => h(AsyncChild)),
+  ]) })
+  app.mount(document.body.appendChild(document.createElement('div')))
+  await vi.waitFor(() => expect(document.querySelector('[role=alert]')?.textContent).toContain('刷新整个页面'))
+  expect(document.querySelector('input')?.value).toBe('未保存的报价内容')
+  expect(reload).not.toHaveBeenCalled()
+  Array.from(document.querySelectorAll('button')).find(button => button.textContent === '刷新页面')!.click()
+  expect(reload).toHaveBeenCalledTimes(1)
+})
 
 it.each(['load', 'setup', 'render', 'mounted'] as const)('contains a %s failure and preserves the surrounding quotation input', async phase => {
   const open = ref(false), broken = ref(true), customer = ref('普通报价客户')

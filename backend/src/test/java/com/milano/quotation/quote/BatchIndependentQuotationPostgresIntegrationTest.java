@@ -136,6 +136,76 @@ class BatchIndependentQuotationPostgresIntegrationTest {
     org.springframework.test.web.servlet.ResultActions trash(String role,String member,ObjectNode request) throws Exception {
         return mvc.perform(post("/api/v1/quotations/lifecycle/batch/"+member).session(sessions.get(role)).with(csrf()).contentType("application/json").content(request.toString()));
     }
+    ObjectNode trashPreview(String member) throws Exception {
+        var response=mvc.perform(get("/api/v1/quotations/"+member+"/batch-records").param("purpose","trash").session(sessions.get("employee"))).andExpect(status().isOk()).andReturn();
+        var request=mapper.createObjectNode().put("action","trash").put("reason","清理剩余记录");var items=request.putArray("items");
+        for(var row:mapper.readTree(response.getResponse().getContentAsByteArray()).path("data")) items.addObject().put("id",row.path("id").asText()).put("version",row.path("_version").asLong());
+        return request;
+    }
+    String storedRecord(String id) {
+        return jdbc.sql("select row_to_json(q)::text from quotation_record q where id=cast(:id as uuid)").param("id",id).query(String.class).single();
+    }
+    @Test void withdrawnDraftAndPreviouslyTrashedRecordStayUnchangedWhileRemainingBatchIsTrashed() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(4));var first=read(result.at("/records/0/id").asText());
+        var withdrawn=first.path("id").asText();var recycled=result.at("/records/1/id").asText();var last=result.at("/records/3/id").asText();
+        var body=mapper.createObjectNode().put("_version",first.path("_version").asLong());
+        body.set("draft",mapper.createObjectNode().put("schemaVersion",2).put("customerName","撤回草稿").put("quoteMode","single").put("skuSearch",""));
+        mvc.perform(post("/api/v1/quotations/"+withdrawn+"/withdraw").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(body.toString())).andExpect(status().isOk());
+        jdbc.sql("update quotation_record set lifecycle_state='trashed' where id=cast(:id as uuid)").param("id",recycled).update();
+        jdbc.sql("update quotation_record set lifecycle_state='archived' where id=cast(:id as uuid)").param("id",result.at("/records/2/id").asText()).update();
+        var skippedBefore=List.of(storedRecord(withdrawn),storedRecord(recycled));
+        var draftBefore=jdbc.sql("select row_to_json(d)::text from quotation_draft d where source_quote_id=cast(:id as uuid)").param("id",withdrawn).query(String.class).single();
+        var before=read(last);var request=trashPreview(last);assertEquals(4,request.path("items").size());
+        mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get("employee"))).andExpect(status().isConflict());
+        mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").param("purpose","trash").session(sessions.get("employee2"))).andExpect(status().isForbidden());
+        trash("employee",last,request).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(2));
+        assertEquals(skippedBefore,List.of(storedRecord(withdrawn),storedRecord(recycled)));
+        assertEquals(draftBefore,jdbc.sql("select row_to_json(d)::text from quotation_draft d where source_quote_id=cast(:id as uuid)").param("id",withdrawn).query(String.class).single());
+        var after=read(last);assertEquals("trashed",after.path("lifecycleState").asText());assertEquals(before.path("customerQuote"),after.path("customerQuote"));assertEquals(before.path("systemQuoteUsd"),after.path("systemQuoteUsd"));
+        assertEquals("archived",read(result.at("/records/2/id").asText()).path("lifecyclePreviousState").asText());
+    }
+    @Test void fobBatchSkipsRecycledMemberAndPreservesItsSnapshot() throws Exception {
+        var body=BatchQuotationSubmissionTest.request(FobBatchQuotationTest.input(3));seedFob(body);var result=save(UUID.randomUUID().toString(),body);
+        var first=result.at("/records/0/id").asText();var last=result.at("/records/2/id").asText();
+        jdbc.sql("update quotation_record set lifecycle_state='trashed' where id=cast(:id as uuid)").param("id",first).update();
+        var skipped=storedRecord(first);var snapshot=read(last).path("fob");
+        trash("employee",last,trashPreview(last)).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(2));
+        assertEquals(skipped,storedRecord(first));assertEquals(snapshot,read(last).path("fob"));assertEquals("trashed",read(last).path("lifecycleState").asText());
+    }
+    @Test void resubmissionPreservesServerBatchMembershipAndDoesNotBreakRemainingCleanup() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(2));var first=read(result.at("/records/0/id").asText());var last=result.at("/records/1/id").asText();
+        var id=first.path("id").asText();var withdrawal=mapper.createObjectNode().put("_version",first.path("_version").asLong());
+        withdrawal.set("draft",mapper.createObjectNode().put("schemaVersion",2).put("customerName","撤回草稿").put("quoteMode","single").put("skuSearch",""));
+        var response=mvc.perform(post("/api/v1/quotations/"+id+"/withdraw").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(withdrawal.toString())).andExpect(status().isOk()).andReturn();
+        var draft=mapper.readTree(response.getResponse().getContentAsByteArray()).path("data");
+        var input=PackagingWeightTest.valid().put("customerName","重新编辑客户");
+        input.putObject("purchaseVersions").put(input.path("primarySku").asText(),"0:test");input.putObject("financeVersions").put("exchange-rate",0);
+        input.putObject("quotationBatch").put("id","forged").put("count",1).put("index",1);
+        var request=mapper.createObjectNode().put("_version",draft.path("sourceQuote").path("version").asLong()).put("draftVersion",draft.path("version").asLong());request.set("quotation",input);
+        mvc.perform(post("/api/v1/quotations/"+id+"/resubmit").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(request.toString())).andExpect(status().isOk());
+        assertEquals(first.path("quotationBatch"),read(id).path("quotationBatch"));
+        trash("employee",last,trashPreview(last)).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(2));
+    }
+    @Test void skippedMemberRestoreOrRemainingReviewAfterPreviewStillRejectsWholeOperation() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(3));var first=result.at("/records/0/id").asText();var last=result.at("/records/2/id").asText();
+        jdbc.sql("update quotation_record set lifecycle_state='trashed' where id=cast(:id as uuid)").param("id",first).update();
+        var request=trashPreview(last);var partial=request.deepCopy();((ArrayNode)partial.path("items")).remove(0);
+        trash("employee",last,partial).andExpect(status().isConflict());
+        jdbc.sql("update quotation_record set lifecycle_state='active',version=version+1 where id=cast(:id as uuid)").param("id",first).update();
+        trash("employee",last,request).andExpect(status().isConflict()).andExpect(content().string(org.hamcrest.Matchers.containsString("所选报价已变更")));
+        assertEquals("active",read(first).path("lifecycleState").asText());
+        jdbc.sql("update quotation_record set lifecycle_state='trashed',version=version+1 where id=cast(:id as uuid)").param("id",first).update();
+        request=trashPreview(last);
+        review(read(last),"claim","pending");trash("employee",last,request).andExpect(status().isConflict());
+        assertEquals("active",read(result.at("/records/1/id").asText()).path("lifecycleState").asText());
+    }
+    @Test void emptyRemainingBatchNeverWritesHistory() throws Exception {
+        var result=save(UUID.randomUUID().toString(),ordinary(2));var first=result.at("/records/0/id").asText();var last=result.at("/records/1/id").asText();
+        jdbc.sql("update quotation_record set lifecycle_state='trashed' where payload->'quotationBatch'->>'id'=:id").param("id",result.path("batchId").asText()).update();
+        var before=List.of(storedRecord(first),storedRecord(last));
+        trash("employee",last,trashPreview(last)).andExpect(status().isConflict());
+        assertEquals(before,List.of(storedRecord(first),storedRecord(last)));
+    }
     @Test void wholeBatchTrashFromLastMemberHidesBothQueuesAndBlocksStaleReviewWithoutChangingPrices() throws Exception {
         var result=save(UUID.randomUUID().toString(),ordinary(14));var request=trashRequest(result);
         var first=read(result.at("/records/0/id").asText());var last=result.at("/records/13/id").asText();

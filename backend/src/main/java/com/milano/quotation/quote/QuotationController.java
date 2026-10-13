@@ -161,14 +161,15 @@ public class QuotationController {
     @GetMapping("/{id}/batch-records")
     @PreAuthorize("hasAnyAuthority('PERM_myRecords','PERM_allRecords')")
     @Transactional(readOnly=true, isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
-    ApiResponse<List<JsonNode>> batchRecords(@PathVariable UUID id, Authentication auth) {
+    ApiResponse<List<JsonNode>> batchRecords(@PathVariable UUID id, @RequestParam(defaultValue="copy") String purpose, Authentication auth) {
+        if (!Set.of("copy", "trash").contains(purpose)) throw AppException.unprocessable("批次查询用途不合法");
         var row=records.findById(id).orElseThrow(()->AppException.notFound("报价记录不存在"));
         if(!hasAll(auth)&&!row.ownerAccount.equals(principal(auth).account())) throw new org.springframework.security.access.AccessDeniedException("forbidden");
         var batch=row.payload.path("quotationBatch");
         if(batch.path("id").asText().isBlank()) throw AppException.unprocessable("此记录不属于批量报价");
         var members=records.findBatch(batch.path("id").asText(),row.ownerAccount);
         if(members.size()!=batch.path("count").asInt() || members.isEmpty()) throw AppException.conflict("批次记录不完整，无法整批操作，请刷新后重试");
-        if(members.stream().anyMatch(r->!Set.of("active","archived").contains(r.lifecycleState))) throw AppException.conflict("本批包含已撤回或回收站记录，无法整批操作，请先恢复记录或单独处理");
+        if(purpose.equals("copy") && members.stream().anyMatch(r->!Set.of("active","archived").contains(r.lifecycleState))) throw AppException.conflict("本批包含已撤回或回收站记录，无法整批复制，请先恢复记录或单独处理");
         var payloads=members.stream().map(this::rawView).toList();reviews.enrich(payloads);
         return ApiResponse.ok(payloads);
     }

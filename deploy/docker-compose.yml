@@ -127,6 +127,8 @@ services:
     depends_on:
       quotation-backend: { condition: service_healthy }
     expose: ["80"]
+    volumes:
+      - quotation-frontend-assets:/usr/share/nginx/html/assets
     networks: [ahmln-edge]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
@@ -145,6 +147,7 @@ networks:
     external: true
 
 volumes:
+  quotation-frontend-assets: { name: "${QUOTATION_FRONTEND_ASSETS_VOLUME:-quotation-frontend-assets}" }
   quotation-postgres-data: { name: "${QUOTATION_POSTGRES_VOLUME:-quotation-postgres-data}" }
   quotation-redis-data: { name: "${QUOTATION_REDIS_VOLUME:-quotation-redis-data}" }
   quotation-minio-data: { name: "${QUOTATION_MINIO_VOLUME:-quotation-minio-data}" }

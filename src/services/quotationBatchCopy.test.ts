@@ -23,6 +23,23 @@ it.each(['missing', 'wrong-batch', 'duplicate', 'trashed', 'wrong-index'])('refu
   vi.mocked(request).mockResolvedValue(rows)
   await expect(loadQuotationBatchRecords(record(8))).rejects.toThrow('未复制任何数据')
 })
+it.each(['single', 'fob'] as const)('loads withdrawn and recycled %s members for trash scope validation without allowing partial copy', async quoteMode => {
+  const rows = Array.from({ length: 14 }, (_, i) => ({ ...record(i + 1), quoteMode }))
+  rows[0]!.lifecycleState = 'withdrawn'; rows[1]!.lifecycleState = 'trashed'
+  vi.mocked(request).mockResolvedValue(rows)
+  expect(await loadQuotationBatchRecords(rows[7]!, 'trash')).toEqual(rows)
+  expect(request).toHaveBeenCalledWith('/quotations/r8/batch-records?purpose=trash', expect.any(Object))
+  await expect(loadQuotationBatchRecords(rows[7]!)).rejects.toThrow('未复制任何数据')
+  vi.mocked(request).mockResolvedValue(rows.slice(1))
+  await expect(loadQuotationBatchRecords(rows[7]!, 'trash')).rejects.toThrow('本次未移入任何记录')
+})
+it('allows trash validation after a member changes quotation mode during re-edit, while copy still checks compatibility', async () => {
+  const rows = Array.from({ length: 14 }, (_, i) => record(i + 1))
+  rows[0]!.quoteMode = 'bundle'
+  vi.mocked(request).mockResolvedValue(rows)
+  expect(await loadQuotationBatchRecords(rows[7]!, 'trash')).toEqual(rows)
+  await expect(loadQuotationBatchRecords(rows[7]!)).rejects.toThrow('未复制任何数据')
+})
 it('preserves saved prices and field permissions and generates one valid clipboard document', () => {
   const rows = [record(1), record(2)], before = JSON.stringify(rows)
   const layout = batchRecordCopyLayout(rows, 'full', 'visible', { includeCost: false, includeDetails: false })

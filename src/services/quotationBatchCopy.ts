@@ -6,10 +6,11 @@ import { quotationRecordQuoteOnlyLayout } from '@/data/quotationRecordQuoteOnlyL
 
 export type BatchCopyKind = 'quote' | 'full' | 'image'
 export async function loadQuotationBatchRecords(record: QuotationRecord, purpose: 'copy' | 'trash' = 'copy'): Promise<QuotationRecord[]> {
-  const raw = await request<Partial<QuotationRecord>[]>(`/quotations/${encodeURIComponent(record.id)}/batch-records`, { signal: AbortSignal.timeout(30000) })
+  const raw = await request<Partial<QuotationRecord>[]>(`/quotations/${encodeURIComponent(record.id)}/batch-records${purpose === 'trash' ? '?purpose=trash' : ''}`, { signal: AbortSignal.timeout(30000) })
   const records = raw.map(normalizeQuotationRecord)
   const batch = record.quotationBatch
-  if (!batch || records.length !== batch.count || records.some(row => !row || row.quotationBatch?.id !== batch.id || row.quoteMode !== record.quoteMode || row.quotationBatch.count !== batch.count || !['active', 'archived'].includes(row.lifecycleState ?? 'active'))
+  const allowedStates = purpose === 'trash' ? ['active', 'archived', 'withdrawn', 'trashed'] : ['active', 'archived']
+  if (!batch || records.length !== batch.count || raw.some(row => !allowedStates.includes(row.lifecycleState ?? 'active')) || records.some(row => !row || row.quotationBatch?.id !== batch.id || (purpose === 'copy' && row.quoteMode !== record.quoteMode) || row.quotationBatch.count !== batch.count)
     || new Set(records.map(row => row?.id)).size !== batch.count || !records.some(row => row?.id === record.id)
     || new Set(records.map(row => row?.quotationBatch?.index)).size !== batch.count
     || records.some(row => !Number.isInteger(row?.quotationBatch?.index) || row!.quotationBatch!.index < 1 || row!.quotationBatch!.index > batch.count)) {

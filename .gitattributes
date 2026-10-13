@@ -7,3 +7,7 @@ backend/src/main/resources/logistics-repairs/additional-company-channels-2026092
 backend/src/main/resources/logistics-repairs/sunyou-company-channels-20260922.json text eol=lf
 backend/src/main/resources/logistics-rules/rounding-notes-20260923.json text eol=lf
 backend/src/main/resources/logistics-rules/rounding-projection-v48.sql text eol=lf
+deploy/frontend/*.sh text eol=lf
+deploy/scripts/retain-frontend-assets.sh text eol=lf
+deploy/scripts/release-version.sh text eol=lf
+deploy/scripts/rollback.sh text eol=lf

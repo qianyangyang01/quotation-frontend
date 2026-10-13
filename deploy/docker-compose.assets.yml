@@ -1,0 +1,7 @@
+# Also apply this overlay when rolling back to a release from before asset retention.
+services:
+  quotation-frontend:
+    volumes:
+      - quotation-frontend-assets:/usr/share/nginx/html/assets
+volumes:
+  quotation-frontend-assets: { name: "${QUOTATION_FRONTEND_ASSETS_VOLUME:-quotation-frontend-assets}" }

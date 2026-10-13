@@ -58,6 +58,9 @@ const lifecycleBusy = ref(false)
 const lifecycleError = ref('')
 const lifecycleBatch = ref<QuotationRecord | null>(null)
 const lifecycleBlocked = ref<string[]>([])
+const lifecycleLoadFailure = ref<{ row: QuotationRecord; message: string } | null>(null)
+const lifecycleSkipped = computed(() => lifecycleBatch.value ? confirmationRows.value.filter(row => row.lifecycleState === 'withdrawn' || row.lifecycleState === 'trashed') : [])
+const lifecycleTargets = computed(() => confirmationRows.value.filter(row => !lifecycleSkipped.value.includes(row)))
 const lifecycleAdmin = computed(() => currentAuthUser.value.role === 'super_admin' && hasPermission('allRecords'))
 const canManageLifecycle = computed(() => lifecycleAdmin.value || props.scope === 'mine')
 function canTrashBatch(row: QuotationRecord) { return !!row.quotationBatch && canManageLifecycle.value && lifecycle.value !== 'trashed' && (lifecycleAdmin.value || row.salespersonAccount === currentAuthUser.value.account) }
@@ -85,6 +88,7 @@ function beginLifecycle(action: LifecycleAction) {
 async function beginRecordTrash(row: QuotationRecord, wholeBatch = false) {
   if (lifecycleBusy.value || loading.value || !canManageLifecycle.value) return
   const account = currentAuthUser.value.account, context = requestId
+  lifecycleLoadFailure.value = null
   lifecycleBusy.value = true
   try {
     const rows = wholeBatch ? await loadQuotationBatchRecords(row, 'trash') : [row]
@@ -92,17 +96,22 @@ async function beginRecordTrash(row: QuotationRecord, wholeBatch = false) {
     confirmationRows.value = rows.map(item => ({ ...item }))
     lifecycleBatch.value = wholeBatch ? row : null
     lifecycleBlocked.value = rows.flatMap(item => {
+      if (wholeBatch && (item.lifecycleState === 'withdrawn' || item.lifecycleState === 'trashed')) return []
       const reason = (!lifecycleAdmin.value && item.salespersonAccount !== account ? '只能处理自己的报价记录' : '')
         || (item._version == null ? '记录版本缺失，请刷新' : '') || lifecycleProtection(item)
       return reason ? [`${item.no} · ${item.primarySku}：${reason}`] : []
     })
     lifecycleError.value = ''; lifecycleAction.value = 'trash'
   } catch (error) {
-    if (account === currentAuthUser.value.account && context === requestId) toast(error instanceof Error ? error.message : '加载本批报价失败，请重试')
+    if (account === currentAuthUser.value.account && context === requestId) {
+      confirmationRows.value = []
+      lifecycleAction.value = null
+      lifecycleLoadFailure.value = { row, message: error instanceof Error ? error.message : '加载本批报价失败，请重试' }
+    }
   } finally { lifecycleBusy.value = false }
 }
 async function confirmLifecycle(reason: string) {
-  if (!lifecycleAction.value || lifecycleBusy.value || lifecycleBlocked.value.length || !reason.trim()) return
+  if (!lifecycleAction.value || lifecycleBusy.value || lifecycleBlocked.value.length || !lifecycleTargets.value.length || !reason.trim()) return
   lifecycleBusy.value = true; lifecycleError.value = ''
   const account = currentAuthUser.value.account
   try {
@@ -110,7 +119,7 @@ async function confirmLifecycle(reason: string) {
       ? await changeQuotationLifecycle(lifecycleAction.value, reason, confirmationRows.value, lifecycleBatch.value.id)
       : await changeQuotationLifecycle(lifecycleAction.value, reason, confirmationRows.value)
     if (account !== currentAuthUser.value.account) return
-    if (lifecycleAction.value === 'trash') confirmationRows.value.forEach(row => reviewSync.accept({ ...row, _version: row._version! + 1, lifecycleState: 'trashed' }))
+    if (lifecycleAction.value === 'trash') lifecycleTargets.value.forEach(row => reviewSync.accept({ ...row, _version: row._version! + 1, lifecycleState: 'trashed' }))
     lifecycleAction.value = null; checkedIds.value = []; selected.value = null
     toast('已处理 ' + result.changed + ' 条报价记录')
     await refresh()
@@ -189,6 +198,7 @@ async function exportRecords(){
 }
 watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{checkedIds.value=[];lifecycleAction.value=null;mutationDialog.value=null;mutationError.value='';++requestId;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
 onUnmounted(()=>{++requestId;clearTimeout(refreshTimer)})
+watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{lifecycleLoadFailure.value=null})
 const selected = ref<QuotationRecord | null>(null)
 const reviewSync = useQuotationReviewSync(records, selected, computed(() => currentAuthUser.value.account))
 const observedRecords = computed(() => [...records.value, ...(selected.value ? [selected.value] : [])])
@@ -511,7 +521,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 
 <template>
   <div class="app">
-    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><div class="heading-actions"><RouterLink v-if="isMine" class="primary" to="/quotation">＋ 新建报价</RouterLink><QuotationRecordMenu v-if="hasPermission('myRecords') || hasPermission('allRecords')" label="报价记录更多入口"><RouterLink :to="{ path: '/quotation/batch-single', query: { records: '1' } }">历史批量记录</RouterLink></QuotationRecordMenu></div></header>
+    <main><header class="heading"><div><p>QUOTATION FOLLOW-UP</p><h1>{{ title }}</h1><span>{{ isMine ? '查看客户报价、审核状态与成交结果' : '查看全体业务员的报价、审核状态与成交结果' }}</span></div><div v-if="isMine" class="heading-actions"><RouterLink class="primary" to="/quotation">＋ 新建报价</RouterLink></div></header>
       <nav class="lifecycle-tabs" aria-label="报价记录分类">
         <button v-for="state in (['active','archived','trashed'] as const)" :key="state" :class="{active:lifecycle===state}" :aria-current="lifecycle===state ? 'page' : undefined" :disabled="lifecycleBusy" @click="lifecycle=state">{{ lifecycleLabel(state) }}</button>
         <small>{{ lifecycle==='trashed' ? '回收站记录不计入业务统计，可恢复' : lifecycle==='archived' ? '已归档记录仍计入历史统计' : '测试、误操作记录可移入回收站' }}</small>
@@ -632,7 +642,8 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <button :disabled="loading || page+1>=totalPages || !!dateError" @click="changePage(page+1)">下一页</button>
       </nav>
     </main>
-    <QuotationLifecycleDialog v-if="lifecycleAction" :action="lifecycleAction" :rows="confirmationRows" :busy="lifecycleBusy" :error="lifecycleError" :batch-no="lifecycleBatch?.quotationBatch?.no" :blocked="lifecycleBlocked" @cancel="lifecycleAction=null" @confirm="confirmLifecycle" />
+    <QuotationLifecycleDialog v-if="lifecycleAction" :action="lifecycleAction" :rows="lifecycleTargets" :skipped="lifecycleSkipped" :busy="lifecycleBusy" :error="lifecycleError" :batch-no="lifecycleBatch?.quotationBatch?.no" :blocked="lifecycleBlocked" @cancel="lifecycleAction=null" @confirm="confirmLifecycle" />
+    <QuotationLifecycleDialog v-if="lifecycleLoadFailure" action="trash" :rows="[]" :busy="lifecycleBusy" :error="lifecycleLoadFailure.message" :batch-no="lifecycleLoadFailure.row.quotationBatch?.no" loading-failed @cancel="lifecycleLoadFailure=null" @retry="beginRecordTrash(lifecycleLoadFailure.row, true)" />
     <div v-if="selected" class="mask" @click.self="closeDrawer">
       <aside class="record-drawer" :class="{'batch-review-drawer':selected.fob?.schemaVersion===2 && !editing, 'batch-review-active':selected.fob?.schemaVersion===2 && !editing && detailTab==='overview'}">
         <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.fob?.schemaVersion===2 ? `FOB批量 · ${selected.fob.items?.length || 0}项 · ${selected.fob.sheet.rows.length}档` : selected.productSummary }}<template v-if="selected.quoteMode!=='fob'"> · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</template></span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>

@@ -64,6 +64,7 @@ else
 fi
 mkdir -p "$release_deploy_dir"
 cp "$deploy_dir/docker-compose.yml" "$release_deploy_dir/docker-compose.yml"
+cp "$deploy_dir/docker-compose.assets.yml" "$release_deploy_dir/docker-compose.assets.yml"
 cp "$deploy_dir/README.md" "$release_deploy_dir/README.md"
 cp -R "$deploy_dir/scripts" "$release_deploy_dir/scripts"
 cp -R "$deploy_dir/nginx" "$release_deploy_dir/nginx"
@@ -80,6 +81,7 @@ if [[ -n "$existing_containers" ]]; then
     exit 1
   fi
 fi
+bash "$release_deploy_dir/scripts/retain-frontend-assets.sh" "quotation-frontend:$release"
 docker compose --project-name quotation-prod --env-file "$release_deploy_dir/.env" -f "$release_deploy_dir/docker-compose.yml" up -d --remove-orphans
 bash "$release_deploy_dir/scripts/container-healthcheck.sh" "$release_deploy_dir"
 

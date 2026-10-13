@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-defineProps<{ label: string; disabled?: boolean }>()
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+const props = defineProps<{ label: string; disabled?: boolean }>()
 const trigger = ref<HTMLButtonElement>(), panel = ref<HTMLDivElement>(), expanded = ref(false)
 function close() { panel.value?.hidePopover?.(); expanded.value = false }
+watch(() => props.disabled, disabled => { if (disabled) close() })
 function position() {
   if (!trigger.value || !panel.value) return
   const anchor = trigger.value.getBoundingClientRect(), height = panel.value.offsetHeight

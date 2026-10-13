@@ -112,6 +112,9 @@ public class QuotationWithdrawalController {
         logistics.validate(payload);
         payload.remove(List.of("priorityProcessing","customerId","_version","_reviewVersion","lifecycleState","lifecyclePreviousState","lifecycleChangedAt","lifecycleChangedBy","lifecycleChangedAccount","lifecycleReason",
             "actualQuoteUsd","actualQuoteCny","dealQuantity","dealLines","dealOptionId","dealOptionLabel","closedAt","note","quoteConfirmedAt","quoteConfirmedBy"));
+        // Batch membership belongs to the saved record, never to a re-edit request.
+        payload.remove("quotationBatch");
+        if (quote.payload.path("quotationBatch").isObject()) payload.set("quotationBatch", quote.payload.path("quotationBatch").deepCopy());
         var now=Instant.now();payload.put("id",id.toString()).put("no",quote.quoteNo).put("salespersonAccount",quote.ownerAccount)
             .put("salespersonName",quote.payload.path("salespersonName").asText(actor.displayName()))
             .put("createdAt",quote.createdAt.toString()).put("updatedAt",now.toString()).put("status","pending").put("quoteConfirmed",false);
