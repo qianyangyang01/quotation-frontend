@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
+import QuoteSheetEditableText from './QuoteSheetEditableText.vue'
 import {
   quoteSheetModeDefaults, buildCustomerQuoteSheet, CUSTOMER_QUOTE_NOTES, formatShippingTime, newQuoteSheetEdits,
   quoteSheetRowKey, reconcileQuoteSheetEdits, quoteSheetProviderKey, quoteSheetProviderName,
@@ -359,9 +360,35 @@ const rowSearch = ref(''), rowPage = ref(0), rowPageSize = ref(12)
 const filteredEditorRows = computed(() => editorSheet.value.rows.filter(row => !props.paginated || (row.sku || '').toUpperCase().includes(rowSearch.value.trim().toUpperCase())))
 const rowPageCount = computed(() => Math.max(1, Math.ceil(filteredEditorRows.value.length / rowPageSize.value)))
 const displayedEditorRows = computed(() => props.paginated ? filteredEditorRows.value.slice(rowPage.value * rowPageSize.value, (rowPage.value + 1) * rowPageSize.value) : editorSheet.value.rows)
-const skuTones = computed(() => new Map([...new Set(props.rows.map(row => row.sku))].map((sku, index) => [sku, index % 2])))
-function batchRowClass(row: { sku?: string; averageId?: string }) {
-  return props.batchAverage ? (skuTones.value.get(row.sku) === 1 ? 'sheet-sku-green' : 'sheet-sku-blue') : ''
+const activeCell = ref<string | null>(null)
+provide('quote-sheet-active-cell', activeCell)
+watch(() => [layoutUserId.value, props.contextKey, props.resetKey, props.sourcePending, quantities.value.join(',')], () => { activeCell.value = null })
+let cancelCellEdit = () => {}
+function restoreCellValue(values: Record<string, string>, key: string, previous: string | undefined) {
+  if (previous === undefined) delete values[key]
+  else values[key] = previous
+}
+function beginCellEdit(row: { key: string; averageId?: string }, field: 'price' | 'shippingTime' | Exclude<keyof QuoteSheetRowEdits, 'prices'>, quantity = 0) {
+  if (row.averageId) {
+    const plan = averagePlans.value.find(plan => plan.id === row.averageId)!
+    const index = plan.quantities.indexOf(quantity), price = plan.prices[index] ?? null
+    const key = row.averageId + ':' + quantity, raw = averageInputs.value[key], error = averagePriceErrors.value[key], notice = averageNotice.value
+    cancelCellEdit = () => {
+      plan.prices[index] = price
+      restoreCellValue(averageInputs.value, key, raw)
+      restoreCellValue(averagePriceErrors.value, key, error)
+      averageNotice.value = notice
+    }
+  } else if (field === 'price') {
+    const previous = edits.value.fields?.[row.key]?.prices?.[String(quantity)]
+    cancelCellEdit = () => { const prices = edits.value.fields?.[row.key]?.prices; if (prices) restoreCellValue(prices, String(quantity), previous) }
+  } else if (field === 'shippingTime') {
+    const previous = edits.value.shippingTimes[row.key]
+    cancelCellEdit = () => restoreCellValue(edits.value.shippingTimes, row.key, previous)
+  } else {
+    const previous = edits.value.fields?.[row.key]?.[field]
+    cancelCellEdit = () => { const fields = edits.value.fields?.[row.key]; if (fields) { if (previous === undefined) delete fields[field]; else fields[field] = previous } }
+  }
 }
 watch([rowSearch, rowPageSize], () => { rowPage.value = 0 })
 watch(rowPageCount, count => { rowPage.value = Math.min(rowPage.value, count - 1) })
@@ -724,7 +751,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="customer-sheet" aria-labelledby="customer-sheet-title">
+  <section class="customer-sheet" :class="{ 'sheet-quiet': batchAverage }" aria-labelledby="customer-sheet-title">
     <QuoteBackToTop v-if="!hideBackToTop" />
     <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
@@ -788,7 +815,7 @@ onBeforeUnmount(() => {
       </div>
       <template v-if="editing">
       <p v-if="!sheet.rows.length" class="sheet-pending" role="status">所有行已隐藏，请恢复至少一行后再预览或复制。</p>
-      <div v-if="paginated" class="sheet-row-tools"><input v-model="rowSearch" type="search" placeholder="搜索 SKU" aria-label="搜索报价单 SKU"><span>共 {{ editorSheet.rows.length }} 行 · 搜索与分页仅影响屏幕显示，保存、复制和图片包含全部明细</span><button :disabled="rowPage===0" @click="rowPage--">上一页</button><span>{{ rowPage+1 }} / {{ rowPageCount }}</span><button :disabled="rowPage+1>=rowPageCount" @click="rowPage++">下一页</button><select v-model.number="rowPageSize" aria-label="每页报价明细数"><option :value="12">12 行</option><option :value="30">30 行</option><option :value="60">60 行</option></select></div><div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
+      <div v-if="paginated" class="sheet-row-tools"><input v-model="rowSearch" type="search" placeholder="搜索 SKU" aria-label="搜索报价单 SKU"><span v-if="batchAverage" class="sheet-inline-help">点击文本即可编辑</span><span>共 {{ editorSheet.rows.length }} 行 · 搜索与分页仅影响屏幕显示，保存、复制和图片包含全部明细</span><button :disabled="rowPage===0" @click="rowPage--">上一页</button><span>{{ rowPage+1 }} / {{ rowPageCount }}</span><button :disabled="rowPage+1>=rowPageCount" @click="rowPage++">下一页</button><select v-model.number="rowPageSize" aria-label="每页报价明细数"><option :value="12">12 行</option><option :value="30">30 行</option><option :value="60">60 行</option></select></div><div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
         <table>
           <thead>
             <tr>
@@ -817,21 +844,21 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in displayedEditorRows" :key="row.key" :class="{ [batchRowClass(row)]: batchAverage, 'sheet-sku-start': batchAverage && index > 0 && row.sku !== displayedEditorRows[index - 1]?.sku, 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
+            <tr v-for="(row, index) in displayedEditorRows" :key="row.key" :class="{ 'sheet-sku-start': batchAverage && index > 0 && row.sku !== displayedEditorRows[index - 1]?.sku, 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
               <template v-for="group in visibleGroups" :key="group.key">
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
-              <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
+              <td v-else-if="group.key === 'number'"><QuoteSheetEditableText class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'number')" @cancel="cancelCellEdit()" /></td>
               <td v-else-if="group.key === 'product' && index === 0" :rowspan="displayedEditorRows.length" class="sheet-photo-cell"><div class="sheet-photo-grid" :class="{ 'sheet-photo-grid-many': photos.length > 2 }"><img v-for="(photo, photoIndex) in photos" :key="photo.url" :src="photo.url" :alt="`报价单商品图 ${photoIndex + 1}`"></div></td>
               <td v-else-if="group.key === 'sizeRules' && index === 0" :rowspan="displayedEditorRows.length" class="sheet-size-rules"><textarea v-model="edits.sizeRules" aria-label="尺码规则说明" placeholder="填写尺码规则或备注说明，支持换行" maxlength="2000" rows="4" :disabled="copying" /><small class="sheet-size-rules-count">{{ edits.sizeRules?.length ?? 0 }} / 2000</small></td>
               <td v-else-if="group.key === 'sku'" class="sheet-sku">{{ row.sku }}</td>
               <td v-else-if="row.averageId && ['country', 'provider', 'shippingTime', 'processingTime'].includes(group.key)">{{ row[group.key as 'country' | 'provider' | 'shippingTime' | 'processingTime'] }}<small v-if="group.key === 'country' && row.region" class="sheet-zone-label">{{ row.region }}</small></td>
-              <td v-else-if="group.key === 'country'"><input class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)"><div v-if="row.region || row.regionTranslationRequired"><input class="sheet-zone-label" :value="edits.fields?.[row.key]?.region ?? row.region" :aria-label="`第 ${index + 1} 行英文分区`" placeholder="English zone" maxlength="80" :disabled="copying" @input="updateField(row.key, 'region', $event)"></div></td>
-              <td v-else-if="group.key === 'provider'"><input class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)"><small class="sheet-source" :title="row.sourceDescription">{{ compactSourceLabel(row.key) }}</small><ChannelCoverageBadge :name="sourceFor(row.key)?.transport" /></td>
-              <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><input :value="edits.shippingTimes[row.key]?.replace(/\bworkingdays\b/gi, 'working days') ?? (formatShippingTime(sourceFor(row.key).eta) === '—' ? '' : formatShippingTime(sourceFor(row.key).eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 working days" maxlength="80" :disabled="copying" @input="updateShippingTime(sourceFor(row.key), $event)"><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(sourceFor(row.key))">恢复渠道时效</button></td>
-              <td v-else-if="group.key === 'processingTime'"><input class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime?.replace(/\bworkingdays\b/gi, 'working days') ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)"></td>
-              <template v-else-if="group.key === 'prices' && row.averageId"><td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="averageInputs[row.averageId + ':' + quantities[priceIndex]] ?? (price == null ? '' : price.toFixed(2))" :aria-label="'综合报价 ' + row.averageId + ' 数量 ' + quantities[priceIndex]" placeholder="客户报价" :disabled="copying || sourcePending" @input="changeAveragePrice(row.averageId!, quantities[priceIndex], $event)"></td></template>
+              <td v-else-if="group.key === 'country'"><QuoteSheetEditableText class="sheet-country" :value="edits.fields?.[row.key]?.country ?? row.country" :aria-label="`第 ${index + 1} 行国家`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'country', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'country')" @cancel="cancelCellEdit()" /><div v-if="row.region || row.regionTranslationRequired"><QuoteSheetEditableText class="sheet-zone-label" :value="edits.fields?.[row.key]?.region ?? row.region" :aria-label="`第 ${index + 1} 行英文分区`" placeholder="English zone" maxlength="80" :disabled="copying" @input="updateField(row.key, 'region', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'region')" @cancel="cancelCellEdit()" /></div></td>
+              <td v-else-if="group.key === 'provider'"><QuoteSheetEditableText class="sheet-provider" :value="edits.fields?.[row.key]?.provider ?? row.provider" :aria-label="`第 ${index + 1} 行物流商`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'provider', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'provider')" @cancel="cancelCellEdit()" /><small class="sheet-source" :title="row.sourceDescription">{{ compactSourceLabel(row.key) }}</small><ChannelCoverageBadge :name="sourceFor(row.key)?.transport" /></td>
+              <td v-else-if="group.key === 'shippingTime'" class="sheet-time"><QuoteSheetEditableText :value="edits.shippingTimes[row.key]?.replace(/\bworkingdays\b/gi, 'working days') ?? (formatShippingTime(sourceFor(row.key).eta) === '—' ? '' : formatShippingTime(sourceFor(row.key).eta))" :aria-label="`第 ${index + 1} 行运输时效`" placeholder="例如 6-12 working days" maxlength="80" :disabled="copying" @input="updateShippingTime(sourceFor(row.key), $event)" :inline="batchAverage" @start="beginCellEdit(row, 'shippingTime')" @cancel="cancelCellEdit()" /><button v-if="row.key in edits.shippingTimes" type="button" :disabled="copying" @click="restoreShippingTime(sourceFor(row.key))">恢复渠道时效</button></td>
+              <td v-else-if="group.key === 'processingTime'"><QuoteSheetEditableText class="sheet-processing" :value="edits.fields?.[row.key]?.processingTime?.replace(/\bworkingdays\b/gi, 'working days') ?? row.processingTime" :aria-label="`第 ${index + 1} 行处理时间`" maxlength="80" :disabled="copying" @input="updateField(row.key, 'processingTime', $event)" :inline="batchAverage" @start="beginCellEdit(row, 'processingTime')" @cancel="cancelCellEdit()" /></td>
+              <template v-else-if="group.key === 'prices' && row.averageId"><td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><QuoteSheetEditableText :value="averageInputs[row.averageId + ':' + quantities[priceIndex]] ?? (price == null ? '' : price.toFixed(2))" :aria-label="'综合报价 ' + row.averageId + ' 数量 ' + quantities[priceIndex]" placeholder="客户报价" :disabled="copying || sourcePending" @input="changeAveragePrice(row.averageId!, quantities[priceIndex], $event)" :inline="batchAverage" @start="beginCellEdit(row, 'price', quantities[priceIndex])" @cancel="cancelCellEdit()" amount :aria-invalid="Boolean(averagePriceErrors[row.averageId + ':' + quantities[priceIndex]])" /></td></template>
               <template v-else-if="group.key === 'prices'">
-              <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><input :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" :aria-invalid="Boolean(priceInputError(row.key, quantities[priceIndex]))" inputmode="text" placeholder="金额或算式" :maxlength="MAX_PRICE_EXPRESSION_LENGTH" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)" @blur="confirmPrice(row.key, quantities[priceIndex], $event)" @keydown.enter.prevent="confirmPrice(row.key, quantities[priceIndex], $event)"><small v-if="priceInputError(row.key, quantities[priceIndex])" class="sheet-price-error">{{ priceInputError(row.key, quantities[priceIndex]) }}</small><small v-else-if="missingPriceReason(row.key, quantities[priceIndex], price)" class="sheet-price-reason">{{ missingPriceReason(row.key, quantities[priceIndex], price) }}</small></td>
+              <td v-for="(price, priceIndex) in row.prices" :key="columns[priceIndex].id" class="sheet-price"><span>$</span><QuoteSheetEditableText :value="edits.fields?.[row.key]?.prices?.[String(quantities[priceIndex])] ?? (price == null ? '' : price.toFixed(2))" :aria-label="`第 ${index + 1} 行第 ${priceIndex + 1} 列美元价格`" :aria-invalid="Boolean(priceInputError(row.key, quantities[priceIndex]))" inputmode="text" placeholder="金额或算式" :maxlength="MAX_PRICE_EXPRESSION_LENGTH" :disabled="copying || sourcePending || quantities.filter(value => value === quantities[priceIndex]).length !== 1 || (!validQuoteSheetQuantity(quantities[priceIndex]) && !columns[priceIndex].legacyCustom)" @input="updatePrice(row.key, quantities[priceIndex], $event)" @blur="confirmPrice(row.key, quantities[priceIndex], $event)" @keydown.enter.prevent="confirmPrice(row.key, quantities[priceIndex], $event)" :inline="batchAverage" amount @start="beginCellEdit(row, 'price', quantities[priceIndex])" @cancel="cancelCellEdit()" /><small v-if="priceInputError(row.key, quantities[priceIndex])" class="sheet-price-error">{{ priceInputError(row.key, quantities[priceIndex]) }}</small><small v-else-if="missingPriceReason(row.key, quantities[priceIndex], price)" class="sheet-price-reason">{{ missingPriceReason(row.key, quantities[priceIndex], price) }}</small></td>
               </template>
               </template>
               <td class="sheet-row-action"><div class="sheet-row-controls">
@@ -912,13 +939,39 @@ onBeforeUnmount(() => {
 @media(max-width:1100px){.sheet-metadata{grid-template-columns:repeat(2,minmax(0,1fr))}.sheet-row-tools .sheet-actions{flex:1 1 100%;justify-content:flex-end}}
 @media(max-width:850px){.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:8px}.sheet-pages{gap:8px}.sheet-controls{position:static}.sheet-photos{margin-left:0}.sheet-actions{margin-left:0}.sheet-row-tools .sheet-actions{justify-content:flex-start}}
 @media(max-width:480px){.sheet-metadata{grid-template-columns:minmax(0,1fr)}.sheet-visibility{gap:10px}}
-.sheet-editor tr.sheet-sku-blue td{background:#dceaff!important}
-.sheet-editor tr.sheet-sku-green td{background:#d9f0e2!important}
-.sheet-editor tr.sheet-sku-blue.sheet-average-row td{background:#c9deff!important;border-top:2px solid #5084ce!important;border-bottom:1px solid #a8c5ec!important;color:#284c74}
-.sheet-editor tr.sheet-sku-green.sheet-average-row td{background:#c1e4ce!important;border-top:2px solid #3d9765!important;border-bottom:1px solid #9bcdaf!important;color:#2c6342}
-.sheet-editor tr.sheet-sku-blue.sheet-average-row input{color:#284c74!important}
-.sheet-editor tr.sheet-sku-green.sheet-average-row input{color:#2c6342!important}
-.sheet-editor tr.sheet-sku-blue td.sheet-sku{background:#c9deff!important;border-left:4px solid #5084ce!important;font-weight:600}
-.sheet-editor tr.sheet-sku-green td.sheet-sku{background:#c1e4ce!important;border-left:4px solid #3d9765!important;font-weight:600}
-.customer-sheet .sheet-editor tr.sheet-sku-start td{border-top:4px solid #fff!important}
+/* Neutral grouping in the batch editor; orange highlights actions and focus. */
+.sheet-quiet .sheet-editor td{background:#fff;color:#29313d;border-color:#edf0f2}
+.sheet-quiet .sheet-editor th{background:#fff8f1;color:#39424e}
+.sheet-quiet .sheet-editor tr.sheet-average-row td{background:#f1f3f5!important;color:#29313d;border-top:1px solid #dfe3e8!important;border-bottom:1px solid #e4e7eb!important;font-weight:600}
+.sheet-quiet .sheet-editor tr.sheet-average-row input{color:#29313d!important}
+.sheet-quiet .sheet-editor tr.sheet-sku-start td{border-top:7px solid #fafbfc!important}
+.sheet-quiet .sheet-sku{font-weight:600}
+.sheet-quiet .sheet-price-group{border-color:#e4e7eb!important}
+.sheet-quiet .sheet-quantity{border-bottom-color:#e4e7eb!important}
+.sheet-quiet .sheet-group-drag,.sheet-quiet .sheet-drag{color:#65707d!important}
+.sheet-quiet .sheet-row-action{box-shadow:none}
+.sheet-quiet .sheet-row-controls button{border-color:transparent;background:transparent;color:#77818d}
+.sheet-quiet .sheet-row-controls button:disabled{color:#c8ced5;background:transparent;border-color:transparent}
+.sheet-quiet .sheet-row-controls .sheet-delete-row{color:#c44a43;border-color:transparent}
+.sheet-quiet .sheet-row-controls button:hover:not(:disabled){color:#29313d;background:#edf0f3;border-color:transparent}
+.sheet-quiet .sheet-photo-button{min-height:34px;min-width:110px;padding:6px 16px;background:#fff;border-color:#d7dce1;color:#39424e;font-size:13px;font-weight:600}
+.sheet-quiet .sheet-photo-button:hover:not(:disabled){background:#f1f3f5;border-color:#b9c1cb}
+.sheet-quiet .sheet-photo-button:disabled{background:#f5f6f7;border-color:#e0e4e8;color:#a0a8b2}
+.sheet-quiet .sheet-row-tools>button,.sheet-quiet .sheet-add-button{color:#596473;border-color:#d7dce1}
+.sheet-quiet .sheet-country-format button{border-color:#d7dce1;color:#65707d}
+.sheet-quiet .sheet-country-format button[aria-pressed="true"]{background:#e9edf1;color:#29313d}
+.sheet-quiet :deep(.channel-coverage-badge){background:#f1f3f5;border-color:#dfe3e8;color:#76818d;font-weight:400}
+.sheet-quiet .sheet-zone-label{background:transparent;color:#697483;border-color:transparent!important}
+.sheet-quiet .sheet-time>button:not(.sheet-cell-text){color:#77818d;visibility:hidden}
+.sheet-quiet .sheet-time:hover>button,.sheet-quiet .sheet-time:focus-within>button{visibility:visible}
+.sheet-quiet .sheet-inline-help{color:#89929e;font-size:11px}
+.sheet-quiet .sheet-cell-text{display:inline-block;min-height:24px;max-width:100%;padding:2px 5px;border:1px solid transparent;border-radius:3px;background:transparent;color:inherit;font:inherit;line-height:20px;text-align:center;white-space:normal;overflow-wrap:anywhere;cursor:text}
+.sheet-quiet .sheet-price .sheet-cell-text{width:76px;white-space:nowrap}
+.sheet-quiet .sheet-time .sheet-cell-text{display:inline-block;width:136px;margin:0;font-size:12px;color:inherit}
+.sheet-quiet .sheet-cell-text:hover:not(:disabled){background:#edf0f3;border-color:transparent}
+.sheet-quiet .sheet-cell-text:focus-visible{outline:2px solid #f58220;outline-offset:1px}
+.sheet-quiet .sheet-cell-text:disabled{background:transparent;border-color:transparent;color:#89929e;cursor:default}
+.sheet-quiet .sheet-cell-input{background:#fff;border:1px solid #f58220!important;outline:1px solid #f58220}
+.sheet-quiet .sheet-cell-text[aria-invalid="true"]{color:#b42318;border-color:#b42318}
+.sheet-quiet .sheet-source{color:#929aa4}
 </style>

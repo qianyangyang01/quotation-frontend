@@ -22,6 +22,7 @@ afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.restoreAllMocks()})
 it('restores tools and keeps same-channel price edits, hidden rows, order and metadata isolated by SKU',async()=>{
  const input=await mount(),before=JSON.stringify(input)
  expect(button('添加图片')).toBeTruthy();expect(button('渠道平均报价')).toBeTruthy();expect(button('＋ 新增列')).toBeTruthy()
+ document.querySelector<HTMLButtonElement>('.sheet-price .sheet-cell-text')!.click();await nextTick();await nextTick()
  const prices=[...document.querySelectorAll<HTMLInputElement>('.sheet-price input')]
  prices[0]!.value='8+2';prices[0]!.dispatchEvent(new Event('input'));await nextTick()
  const title=document.querySelector<HTMLInputElement>('[aria-label="报价单标题"]')!;title.value='Custom Quote';title.dispatchEvent(new Event('input'))
@@ -82,7 +83,7 @@ async function generateAverages() {
  for(const member of document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')) {member.click();await nextTick()}
  button('生成平均行').click();await nextTick()
 }
-it('uses each SKU price, puts averages first, and preserves order and colors after reopening',async()=>{
+it('uses each SKU price, puts averages first, and preserves order and SKU boundaries after reopening',async()=>{
  const a=item('SKU-A'),b=item('SKU-B')
  b.input.systemQuantityQuotes=JSON.parse(JSON.stringify(b.input.systemQuantityQuotes))
  b.input.systemQuantityQuotes!.rows.forEach(row=>{row.prices=row.prices.map(price=>price! * 2)})
@@ -99,8 +100,7 @@ it('uses each SKU price, puts averages first, and preserves order and colors aft
  app.unmount();document.body.innerHTML='';await mount(undefined,saved)
  const rows=[...document.querySelectorAll('.sheet-editor tbody tr')]
  expect(rows.map(row=>row.classList.contains('sheet-average-row'))).toEqual([true,false,false,true,false,false])
- expect(rows.slice(0,3).every(row=>row.classList.contains('sheet-sku-blue'))).toBe(true)
- expect(rows.slice(3).every(row=>row.classList.contains('sheet-sku-green'))).toBe(true)
+ expect(rows.map(row=>row.classList.contains('sheet-sku-start'))).toEqual([false,false,false,true,false,false])
  const reopened=await editor.capture()
  expect(reopened.sheet.rows.map(row=>[row.sku,row.prices])).toEqual(saved.sheet.rows.map(row=>[row.sku,row.prices]))
 })
@@ -142,7 +142,7 @@ it('actually retries a failed quantity calculation and preserves prior customer 
  const calculate=vi.fn(async(sku:string,quantities:number[])=>{const fresh=item(sku);fresh.input.systemQuantityQuotes={quantities,rows:fresh.input.quoteOptions!.map(option=>({optionId:option.id,prices:quantities.map(q=>q*5)}))};return fresh})
  calculate.mockRejectedValueOnce(new Error('临时断网'))
  await mount(calculate)
- const price=document.querySelector<HTMLInputElement>('[aria-label="第 1 行第 1 列美元价格"]')!
+ const price=await openCell('第 1 行第 1 列美元价格')
  price.value='9.95';price.dispatchEvent(new Event('input'));await nextTick()
  button('＋ 新增列').click();await nextTick()
  const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input')].at(-1)!
@@ -175,4 +175,49 @@ it('serializes rapid quantity edits and captures only the final requested quanti
  const saved=await editor.capture()
  expect(saved.items.every(row=>JSON.stringify(row.input.customerQuote!.quantities)==='[1,2,3,9]')).toBe(true)
  expect(saved.items[0]!.input.customerQuote!.rows[0]!.prices.at(-1)).toBe(45)
+})
+async function openCell(label:string) {
+ const trigger=document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!
+ trigger.click();await nextTick();await nextTick()
+ return document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+}
+async function typeCell(field:HTMLInputElement,value:string) { field.value=value;field.dispatchEvent(new Event('input'));await nextTick() }
+async function keyCell(field:HTMLInputElement,key:string) { field.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));await nextTick();await nextTick() }
+
+it('shows text at rest, confirms a price formula, and cancels only the current cell edit',async()=>{
+ await mount()
+ expect(document.querySelectorAll('.sheet-editor tbody input')).toHaveLength(0)
+ let field=await openCell('第 1 行第 1 列美元价格')
+ await typeCell(field,'8+2');await keyCell(field,'Enter')
+ expect(document.querySelectorAll('.sheet-editor tbody input')).toHaveLength(0)
+ expect(document.querySelector('[aria-label="第 1 行第 1 列美元价格"]')!.textContent).toBe('10.00')
+ const before=await editor.capture()
+ field=await openCell('第 1 行第 1 列美元价格');await typeCell(field,'99');await keyCell(field,'Escape')
+ expect(await editor.capture()).toEqual(before)
+ field=await openCell('第 1 行国家');await typeCell(field,'Canada');await keyCell(field,'Escape')
+ expect(await editor.capture()).toEqual(before)
+ field=await openCell('第 1 行物流商');await typeCell(field,'Custom Carrier');field.blur();await nextTick()
+ const saved=await editor.capture()
+ expect(saved.sheet.rows[0]!.provider).toBe('Custom Carrier')
+ expect(saved.sheet.rows[1]!.provider).toBe('4PX')
+})
+it('cancels an invalid average edit without changing its saved price or leaving validation errors',async()=>{
+ await mount();await generateAverages()
+ const before=await editor.capture()
+ const label=document.querySelector('.sheet-average-row .sheet-cell-text')!.getAttribute('aria-label')!
+ const field=await openCell(label);await typeCell(field,'1/0');await keyCell(field,'Enter')
+ expect(document.querySelector('.sheet-average-row input')).not.toBeNull()
+ await expect(editor.capture()).rejects.toThrow()
+ await keyCell(field,'Escape')
+ expect(await editor.capture()).toEqual(before)
+})
+it('keeps invalid ordinary prices blocked after blur and opens only one editor at a time',async()=>{
+ await mount()
+ const field=await openCell('第 1 行第 1 列美元价格');await typeCell(field,'1/0');field.blur();await nextTick()
+ expect(document.querySelector('[aria-label="第 1 行第 1 列美元价格"]')!.getAttribute('aria-invalid')).toBe('true')
+ await expect(editor.capture()).rejects.toThrow()
+ const fixed=await openCell('第 1 行第 1 列美元价格');await typeCell(fixed,'12.35');await keyCell(fixed,'Enter')
+ await openCell('第 1 行国家');await openCell('第 2 行处理时间')
+ expect(document.querySelectorAll('.sheet-editor tbody input')).toHaveLength(1)
+ const saved=await editor.capture();expect(saved.sheet.rows[0]!.prices[0]).toBe(12.35)
 })
