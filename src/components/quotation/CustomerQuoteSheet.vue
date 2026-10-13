@@ -817,7 +817,7 @@ onBeforeUnmount(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in displayedEditorRows" :key="row.key" :class="{ [batchRowClass(row)]: batchAverage, 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
+            <tr v-for="(row, index) in displayedEditorRows" :key="row.key" :class="{ [batchRowClass(row)]: batchAverage, 'sheet-sku-start': batchAverage && index > 0 && row.sku !== displayedEditorRows[index - 1]?.sku, 'sheet-average-row': row.averageId, 'sheet-row-dragging': draggedRow === row.key, 'sheet-row-drop-target': rowDropTarget === row.key && draggedRow !== row.key }" @dragover="dragOverRow(row.key, $event)" @drop.prevent="dropRow(row.key)">
               <template v-for="group in visibleGroups" :key="group.key">
               <td v-if="group.key === 'number' && row.averageId"><b>AVG</b></td>
               <td v-else-if="group.key === 'number'"><input class="sheet-number" :value="edits.fields?.[row.key]?.number ?? row.number" :aria-label="`第 ${index + 1} 行序号`" :disabled="copying" @input="updateField(row.key, 'number', $event)"></td>
@@ -912,12 +912,13 @@ onBeforeUnmount(() => {
 @media(max-width:1100px){.sheet-metadata{grid-template-columns:repeat(2,minmax(0,1fr))}.sheet-row-tools .sheet-actions{flex:1 1 100%;justify-content:flex-end}}
 @media(max-width:850px){.customer-sheet{margin-left:12px;margin-right:12px}.sheet-editor{padding:8px}.sheet-pages{gap:8px}.sheet-controls{position:static}.sheet-photos{margin-left:0}.sheet-actions{margin-left:0}.sheet-row-tools .sheet-actions{justify-content:flex-start}}
 @media(max-width:480px){.sheet-metadata{grid-template-columns:minmax(0,1fr)}.sheet-visibility{gap:10px}}
-.sheet-editor tr.sheet-sku-blue td{background:#f3f7fc!important}
-.sheet-editor tr.sheet-sku-green td{background:#f1f8f4!important}
-.sheet-editor tr.sheet-sku-blue.sheet-average-row td{background:#dceafb!important;border-top:2px solid #799dc7!important;border-bottom:1px solid #bdd2ec!important;color:#284c74}
-.sheet-editor tr.sheet-sku-green.sheet-average-row td{background:#dceee3!important;border-top:2px solid #79a58a!important;border-bottom:1px solid #bed8c9!important;color:#2c6342}
+.sheet-editor tr.sheet-sku-blue td{background:#dceaff!important}
+.sheet-editor tr.sheet-sku-green td{background:#d9f0e2!important}
+.sheet-editor tr.sheet-sku-blue.sheet-average-row td{background:#c9deff!important;border-top:2px solid #5084ce!important;border-bottom:1px solid #a8c5ec!important;color:#284c74}
+.sheet-editor tr.sheet-sku-green.sheet-average-row td{background:#c1e4ce!important;border-top:2px solid #3d9765!important;border-bottom:1px solid #9bcdaf!important;color:#2c6342}
 .sheet-editor tr.sheet-sku-blue.sheet-average-row input{color:#284c74!important}
 .sheet-editor tr.sheet-sku-green.sheet-average-row input{color:#2c6342!important}
-.sheet-editor tr.sheet-sku-blue .sheet-sku{border-left:3px solid #799dc7!important;font-weight:600}
-.sheet-editor tr.sheet-sku-green .sheet-sku{border-left:3px solid #79a58a!important;font-weight:600}
+.sheet-editor tr.sheet-sku-blue td.sheet-sku{background:#c9deff!important;border-left:4px solid #5084ce!important;font-weight:600}
+.sheet-editor tr.sheet-sku-green td.sheet-sku{background:#c1e4ce!important;border-left:4px solid #3d9765!important;font-weight:600}
+.customer-sheet .sheet-editor tr.sheet-sku-start td{border-top:4px solid #fff!important}
 </style>
