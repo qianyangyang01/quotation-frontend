@@ -18,6 +18,7 @@ onMounted(() => { if (route.query.records) void history() })
 const Workbench = defineAsyncComponent(() => import('./QuotationSystemView.vue'))
 const engine = ref<InstanceType<typeof import('./QuotationSystemView.vue').default>>()
 const text = ref(''), lines = ref<BatchSingleLine[]>([]), error = ref(''), progress = ref(''), active = ref(false)
+const inputSkuCount = computed(() => text.value.split(/\r?\n/).filter(line => line.trim()).length)
 const running = ref(false), saving = ref(false), engineFailed = ref(false), showEditor = ref(true)
 const validating = ref(false), generating = ref(false), stopping = ref(false), stopped = ref(false), currentSku = ref('')
 const seed = ref<BatchSingleItem>(), resultSection = ref<HTMLElement>()
@@ -203,7 +204,14 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
 </script>
 <template>
   <main class="batch-page">
-    <header><div><h1>批量单品 SKU 报价</h1><p>多个 SKU 独立计价，合并生成一张客户报价单</p></div><nav><RouterLink to="/quotation">返回普通报价</RouterLink><RouterLink v-if="hasPermission('myRecords') || hasPermission('allRecords')" to="/quotation/my-records">报价记录</RouterLink><button v-if="hasPermission('myRecords') || hasPermission('allRecords')" @click="history">历史批量记录</button></nav></header>
+    <header class="page-heading">
+      <div><h1>批量单品 SKU 报价</h1><p>多个 SKU 独立计价，合并生成一张客户报价单</p></div>
+      <nav class="page-actions" aria-label="批量报价页面入口">
+        <RouterLink to="/quotation"><svg class="entry-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 19-7-7 7-7M5 12h14" /></svg>返回普通报价</RouterLink>
+        <RouterLink v-if="hasPermission('myRecords') || hasPermission('allRecords')" to="/quotation/my-records">报价记录</RouterLink>
+        <button v-if="hasPermission('myRecords') || hasPermission('allRecords')" class="history-entry" @click="history"><svg class="entry-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7.4M3 4v7h7M12 7v5l3 2" /></svg>历史批量记录</button>
+      </nav>
+    </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <section v-if="historyOpen" class="card">
       <header><h2>历史批量记录</h2><button @click="historyOpen=false; historyGeneration++">关闭记录</button></header>
@@ -216,9 +224,11 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
     </section>
     <template v-if="hasPermission('quote')"><section v-if="correction" class="card correction-summary"><h2>修正退回商品 · {{ correction.document.no }}</h2><p>仅更新 {{ correction.document.items[correction.index]?.input.primarySku }}；保留原客户、等级、佣金和数量列，其余SKU不变。</p><p>退回原因：{{ correction.document.review?.items[correction.index]?.reason }}</p><details><summary>查看修正前报价</summary><BatchSingleSheet :sheet="correction.document.items[correction.index]!.sheet" read-only /></details></section>
       <section class="card input-card">
-        <header><h2>01 批量录入 SKU</h2><span>每行一个 SKU · 最多 50 个</span></header>
-        <div class="input-row"><textarea v-if="!active || inputExpanded" v-model="text" :disabled="active || running || saving" placeholder="从 Excel 粘贴 SKU，每行一个" aria-label="批量SKU清单" rows="3" /><div v-else class="input-summary"><b>{{ lines.length }} 个 SKU</b><span>{{ lines.slice(0,3).map(line => line.sku).join(' / ') }}{{ lines.length>3?' / …':'' }}</span></div><div class="input-buttons"><button v-if="active" :disabled="locked" @click="inputExpanded=!inputExpanded">{{ inputExpanded ? '收起清单' : '查看输入清单' }}</button><button v-if="!correction" class="primary" :disabled="locked || !!saved" @click="prepare">{{ running ? '处理中…' : active ? '重新查询 SKU' : '查询 SKU' }}</button><button v-if="active" :disabled="locked" @click="reset">重新录入</button></div></div>
-        <p class="input-hint">先查询商品资料，再设置客户和渠道生成整批报价。一次保存，每个 SKU 生成一条独立记录，在“报价记录”按原流程审核。</p>
+        <header class="input-heading"><h2><span class="input-step">01</span>批量录入 SKU</h2><span class="input-limit">每行一个 SKU · 最多 50 个</span></header>
+        <div class="input-body">
+          <div class="input-row"><textarea v-if="!active || inputExpanded" v-model="text" :disabled="active || running || saving" placeholder="从 Excel 粘贴 SKU，每行一个" aria-label="批量SKU清单" aria-describedby="batch-input-hint batch-input-count" rows="3" /><div v-else class="input-summary"><b>{{ lines.length }} 个 SKU</b><span>{{ lines.slice(0,3).map(line => line.sku).join(' / ') }}{{ lines.length>3?' / …':'' }}</span></div><div class="input-buttons"><button v-if="active" :disabled="locked" @click="inputExpanded=!inputExpanded">{{ inputExpanded ? '收起清单' : '查看输入清单' }}</button><button v-if="!correction" class="primary query-button" :disabled="locked || !!saved" @click="prepare"><svg class="entry-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="7.5" /><path d="m16 16 5 5" /></svg>{{ running ? '处理中…' : active ? '重新查询 SKU' : '查询 SKU' }}</button><button v-if="active" :disabled="locked" @click="reset">重新录入</button></div></div>
+          <div class="input-footer"><p id="batch-input-hint" class="input-hint">先查询商品资料，再设置客户和渠道生成整批报价。一次保存，每个 SKU 生成一条独立记录，在“报价记录”按原流程审核。</p><span id="batch-input-count" class="input-count" :class="{ 'over-limit': inputSkuCount > 50 }" aria-live="polite">{{ inputSkuCount }} / 50 个</span></div>
+        </div>
       </section>
       <section v-if="lines.length" class="card readiness-card">
         <div class="readiness-summary"><div><h2>查询结果</h2><p>共 {{ lines.length }} 个 SKU · 可继续报价 {{ readyLines.length }} 个 · 异常 {{ followupLines.length }} 个</p><p v-if="followupLines.length">资料异常的 SKU 已默认不勾选，可报价的 SKU 直接继续报价。</p></div><button v-if="followupLines.length" :disabled="locked" @click="copyFollowup">复制异常 SKU</button></div>
@@ -255,7 +265,52 @@ onBeforeUnmount(() => { disposed = true; generation++; historyGeneration++ })
 .card.result-card{padding:0;border-color:#d9d1f4}.result-card .result-heading h2{margin:0;border:0;padding:0}.result-card .result-heading>span.success{color:#16774c}
 .processing-card summary{cursor:pointer;font-size:13px;font-weight:600}.processing-card summary>span{font-weight:400;color:#71869a;margin-left:20px}.processing-card details[open]>summary{margin-bottom:15px}.condition-grid{display:grid;grid-template-columns:1fr .8fr .8fr .8fr .7fr 2fr;gap:20px}.condition-grid small{display:block;color:#8092a5;font-size:12px;margin-bottom:8px}.condition-grid b{font-size:13px;font-weight:500}.result-section{scroll-margin-top:20px}.result-card{padding:0;border-color:#d9d1f4}.result-heading{padding:16px 20px;background:#f3effc}.result-heading h2{margin:0;border:0;padding:0}.result-heading>span{font-size:12px;color:#9a792d}.result-body{padding:0 20px}.result-stats{display:flex;gap:28px;flex-wrap:wrap;border-bottom:1px solid #e5eaf0;padding:18px 0;color:#7c8fa3;font-size:12px}.result-stats b{font-size:22px;color:#18334c;margin-right:5px}.quote-meta{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding-top:18px;font-size:12px;color:#7c8fa3}.quote-meta strong{margin-right:auto;color:#18334c;font-size:15px}.pending-panel{background:#fff8ed;border:1px solid #edd1a4;border-radius:6px;padding:16px;margin-top:16px;font-size:13px;color:#805c2d}.pending-panel ul{max-height:180px;overflow:auto;padding-left:20px}.pending-panel li{padding:5px}.pending-panel li span{margin-left:16px}.result-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;border-top:1px solid #e5eaf0;background:#fcfcfe}.result-footer>span{font-size:12px;color:#8496a8}.result-footer>div{display:flex;gap:10px;flex-wrap:wrap}@media(max-width:900px){.condition-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.result-footer{flex-wrap:wrap}}@media(max-width:600px){.condition-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.result-body{padding:0 12px}.result-stats{gap:14px}.processing-card summary>span{display:block;margin:8px 0}}
 
-.input-card{padding:12px 18px}.input-card header{justify-content:flex-start}.input-card header h2,.processing-card header h2{margin:0}.input-card header span{font-size:12px;color:#738190}.input-card header button{margin-left:auto}.input-row{display:flex;align-items:center;gap:14px;margin-top:10px}.input-row textarea{flex:1;max-width:none;min-width:0;resize:vertical;min-height:64px;max-height:180px}.input-buttons{display:flex;gap:8px;flex-shrink:0}.input-summary{display:flex;gap:14px;align-items:center;flex:1;min-width:0;font-size:13px}.input-summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#657889}.input-hint{margin:8px 0 0}.processing-card header{margin-bottom:10px}.processing-card header p{margin:0;flex:1}.processing-card td,.processing-card th{padding:8px 12px}.editor{scroll-margin-top:16px}@media(max-width:700px){.input-row{flex-wrap:wrap}.input-row textarea{flex-basis:100%}.input-summary{flex-basis:100%}.processing-card header p{flex-basis:100%}.processing-pagination{gap:8px}.input-card header{gap:6px}}
+.processing-card header h2{margin:0}.processing-card header{margin-bottom:10px}.processing-card header p{margin:0;flex:1}.processing-card td,.processing-card th{padding:8px 12px}.editor{scroll-margin-top:16px}@media(max-width:700px){.processing-card header p{flex-basis:100%}.processing-pagination{gap:8px}}
 
 .processing-scroll{max-height:420px;overflow:auto;overscroll-behavior:auto}.processing-scroll th{position:sticky;top:0;z-index:1}.processing-pagination{display:flex;gap:12px;margin-top:12px;font-size:13px}.processing-pagination div{display:flex;align-items:center;gap:12px}.processing-pagination select{padding:8px;border:1px solid #ccd7e3;border-radius:5px}.batch-page{padding:22px;background:#f4f6f8;color:#1b2935;min-height:80vh}header,.actions,nav{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h1{font-size:24px;margin:0}h2{font-size:17px;margin:0 0 12px}p,.actions span{font-size:13px;color:#687786}.card{background:white;border:1px solid #e0e5eb;border-radius:10px;padding:18px;margin:16px 0;overflow:auto}.card h2{border-left:4px solid #f90;padding-left:10px}textarea{width:100%;max-width:650px;padding:10px;box-sizing:border-box;border:1px solid #d0d9e1;border-radius:6px}button{padding:10px 14px;border:1px solid #d2dbe1;border-radius:6px;background:white;cursor:pointer}.primary{background:#ff9400;border-color:#ff9400;color:#17232d;font-weight:700}button:disabled{opacity:.45;cursor:default}table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}th,td{padding:12px;border-bottom:1px solid #e4e8ee}th{background:#eef5fc}.error{color:#b23d27;background:#fff4f0;padding:10px}.success{color:#16774c}.actions{margin-top:12px;justify-content:flex-end}.editor{padding:12px}.editor :deep(.quotation-page){padding:0}.editor :deep(.quotation-page > .draft-status-bar){display:none}@media(max-width:700px){.batch-page{padding:10px}.card{padding:12px}}
+/* Keep the existing light/orange theme local to the batch entry controls. */
+.page-heading { margin: 2px 0 26px; }
+.page-heading > div > p { margin: 12px 0 0; color: #748399; }
+.page-actions { justify-content: flex-end; gap: 10px; }
+.page-actions a,
+.page-actions .history-entry { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 8px 12px; box-sizing: border-box; border-radius: 6px; font: inherit; font-size: 12px; text-decoration: none; white-space: nowrap; }
+.page-actions a { color: #566b87; }
+.page-actions a:hover { background: #edf1f5; color: #304d6d; }
+.page-actions .history-entry { border: 1px solid #f1dcb8; background: #fff6e8; color: #a75e00; }
+.page-actions .history-entry:hover { background: #ffefd5; }
+.entry-icon { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.card.input-card { padding: 0; border-color: #dfe5ed; overflow: visible; }
+.input-heading { justify-content: flex-start; gap: 14px; padding: 15px 20px; border-bottom: 1px solid #f1dcb8; border-radius: 9px 9px 0 0; background: #fff6e8; }
+.input-card .input-heading h2 { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0; border: 0; font-size: 16px; }
+.input-step { display: inline-grid; place-items: center; width: 27px; height: 27px; border-radius: 6px; background: #ff9800; color: #263344; font-size: 12px; font-weight: 600; }
+.input-limit { color: #748399; font-size: 12px; }
+.input-body { padding: 20px; }
+.input-row { display: flex; align-items: center; gap: 16px; }
+.input-row textarea { flex: 1; min-width: 0; max-width: none; height: 96px; min-height: 76px; max-height: 240px; resize: vertical; padding: 13px 15px; border: 1px solid #ccd6e2; border-radius: 7px; background: #fbfcfe; color: #26374d; font: inherit; font-size: 13px; line-height: 1.8; }
+.input-row textarea::placeholder { color: #92a0b0; }
+.input-row textarea:focus-visible { outline: 2px solid #ff9800; outline-offset: 2px; }
+.input-row textarea:disabled { color: #748399; cursor: not-allowed; }
+.input-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+.input-buttons button { font: inherit; font-size: 12px; white-space: nowrap; }
+.input-buttons .query-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 112px; min-height: 42px; background: #ff9800; border-color: #ff9800; color: #263344; font-weight: 500; }
+.input-buttons .query-button:hover:not(:disabled) { background: #f28e00; border-color: #f28e00; }
+.input-summary { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; font-size: 13px; }
+.input-summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #657889; }
+.input-footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 12px; }
+.input-hint { margin: 0; color: #7a899d; font-size: 12px; line-height: 1.65; }
+.input-count { flex-shrink: 0; color: #748399; font-size: 12px; line-height: 1.65; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.input-count.over-limit { color: #b23d27; }
+@media (max-width: 700px) {
+  .page-heading { gap: 14px; margin-bottom: 20px; }
+  .page-actions { justify-content: flex-start; gap: 4px; }
+  .input-heading { padding: 14px; gap: 8px 14px; }
+  .input-body { padding: 14px; }
+  .input-row { flex-wrap: wrap; gap: 12px; }
+  .input-row textarea { flex-basis: 100%; font-size: 16px; }
+  .input-summary { flex-basis: 100%; }
+  .input-buttons { margin-left: auto; max-width: 100%; justify-content: flex-end; }
+  .input-buttons button, .page-actions a, .page-actions .history-entry { min-height: 44px; }
+  .input-footer { flex-wrap: wrap; gap: 8px; }
+  .input-count { margin-left: auto; }
+}
 </style>
