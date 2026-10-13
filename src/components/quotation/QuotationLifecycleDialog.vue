@@ -10,6 +10,8 @@ const dialog = ref<HTMLDialogElement>()
 const input = ref<HTMLTextAreaElement>()
 let previousFocus: HTMLElement | null = null
 const title = computed(() => props.action === 'trash' ? (props.batchNo ? '整批移入回收站' : '移入回收站') : props.action === 'archive' ? '批量归档' : '恢复报价记录')
+const currentBatchCount = computed(() => props.rows.length + (props.skipped?.length ?? 0))
+const originalBatchCount = computed(() => props.rows[0]?.quotationBatch?.count ?? props.skipped?.[0]?.quotationBatch?.count ?? currentBatchCount.value)
 onMounted(() => { previousFocus = document.activeElement as HTMLElement; dialog.value?.showModal(); input.value?.focus() })
 onBeforeUnmount(() => { dialog.value?.close(); previousFocus?.focus() })
 function cancel(event: Event) { event.preventDefault(); if (!props.busy) emit('cancel') }
@@ -28,6 +30,7 @@ function cancel(event: Event) { event.preventDefault(); if (!props.busy) emit('c
       <template v-else>
       <p>本次处理 <b>{{ rows.length }}</b> 条报价，请核对以下明细。</p>
       <p v-if="batchNo">提交批次：{{ batchNo }}（检查本批所有记录，不受分页和筛选条件限制）</p>
+      <p v-if="batchNo && originalBatchCount > currentBatchCount">原批次 {{ originalBatchCount }} 条，当前剩余 {{ currentBatchCount }} 条。本次仅处理下列符合条件的剩余记录。</p>
       <div v-if="skipped?.length" class="lifecycle-skipped"><b>已跳过 {{ skipped.length }} 条，以下记录保持原状态：</b><ul><li v-for="row in skipped" :key="row.id">{{ row.no }} · {{ row.primarySku }}：{{ row.lifecycleState === 'withdrawn' ? '已撤回重新编辑' : '已在回收站' }}</li></ul></div>
       <p v-if="!rows.length" role="alert" class="lifecycle-error">本批已无可移入回收站的记录，请关闭窗口并刷新列表。</p>
       <div class="lifecycle-confirm-rows"><table><thead><tr><th>报价单号 / 客户</th><th>SKU</th><th>{{ action === 'restore' ? '恢复到' : '当前分类' }}</th></tr></thead>

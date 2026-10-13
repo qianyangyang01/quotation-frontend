@@ -31,7 +31,17 @@ it.each(['single', 'fob'] as const)('loads withdrawn and recycled %s members for
   expect(request).toHaveBeenCalledWith('/quotations/r8/batch-records?purpose=trash', expect.any(Object))
   await expect(loadQuotationBatchRecords(rows[7]!)).rejects.toThrow('未复制任何数据')
   vi.mocked(request).mockResolvedValue(rows.slice(1))
-  await expect(loadQuotationBatchRecords(rows[7]!, 'trash')).rejects.toThrow('本次未移入任何记录')
+  expect(await loadQuotationBatchRecords(rows[7]!, 'trash')).toEqual(rows.slice(1))
+})
+it.each(['duplicate', 'duplicate-index', 'foreign', 'wrong-count', 'missing-source', 'empty'])('rejects invalid surviving trash membership: %s', async reason => {
+  const rows = [record(2), record(8), record(14)]
+  if (reason === 'duplicate') rows[0] = rows[1]!
+  if (reason === 'duplicate-index') rows[0]!.quotationBatch!.index = 8
+  if (reason === 'foreign') rows[0]!.quotationBatch!.id = 'other'
+  if (reason === 'wrong-count') rows[0]!.quotationBatch!.count = 13
+  if (reason === 'missing-source') rows.splice(1, 1)
+  vi.mocked(request).mockResolvedValue(reason === 'empty' ? [] : rows)
+  await expect(loadQuotationBatchRecords(record(8), 'trash')).rejects.toThrow('本次未移入任何记录')
 })
 it('allows trash validation after a member changes quotation mode during re-edit, while copy still checks compatibility', async () => {
   const rows = Array.from({ length: 14 }, (_, i) => record(i + 1))

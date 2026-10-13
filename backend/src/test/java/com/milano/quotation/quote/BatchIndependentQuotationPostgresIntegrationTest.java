@@ -199,6 +199,51 @@ class BatchIndependentQuotationPostgresIntegrationTest {
         review(read(last),"claim","pending");trash("employee",last,request).andExpect(status().isConflict());
         assertEquals("active",read(result.at("/records/1/id").asText()).path("lifecycleState").asText());
     }
+    void cancelRecord(String id) throws Exception {
+        var record=read(id);
+        mvc.perform(post("/api/v1/quotations/"+id+"/cancel").session(sessions.get("employee")).with(csrf())
+            .header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json")
+            .content(mapper.createObjectNode().put("_version",record.path("_version").asLong()).toString())).andExpect(status().isOk());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void cancelledMembersDoNotBlockRemainingOrdinaryOrFobBatch(boolean fob) throws Exception {
+        var body=fob?BatchQuotationSubmissionTest.request(FobBatchQuotationTest.input(4)):ordinary(4);
+        if(fob)seedFob(body);
+        var saved=save(UUID.randomUUID().toString(),body);
+        var first=saved.at("/records/0/id").asText();var last=saved.at("/records/3/id").asText();
+        var original=read(last);var unchanged=storedRecord(last);
+        cancelRecord(saved.at("/records/1/id").asText());
+        cancelRecord(saved.at("/records/2/id").asText());
+        assertEquals(unchanged,storedRecord(last)); // No renumbering or rewriting saved snapshots.
+        var preview=trashPreview(last);assertEquals(2,preview.path("items").size());
+        mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get("employee"))).andExpect(status().isConflict());
+        var partial=preview.deepCopy();((ArrayNode)partial.path("items")).remove(0);
+        trash("employee",last,partial).andExpect(status().isConflict());
+        trash("employee2",last,preview).andExpect(status().isForbidden());
+        assertEquals(unchanged,storedRecord(last));
+        trash("employee",last,preview).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(2));
+        assertEquals("trashed",read(first).path("lifecycleState").asText());
+        var after=read(last);assertEquals(original.path("quotationBatch"),after.path("quotationBatch"));
+        assertEquals(original.path("fob"),after.path("fob"));assertEquals(original.path("customerQuote"),after.path("customerQuote"));
+    }
+    @Test void cancellationAfterPreviewRejectsStaleScopeAndRefreshCanTrashLastSurvivor() throws Exception {
+        var saved=save(UUID.randomUUID().toString(),ordinary(3));
+        var first=saved.at("/records/0/id").asText();var second=saved.at("/records/1/id").asText();var last=saved.at("/records/2/id").asText();
+        cancelRecord(first);var preview=trashPreview(last);var unchanged=storedRecord(last);
+        cancelRecord(second);
+        trash("employee",last,preview).andExpect(status().isNotFound());
+        assertEquals(unchanged,storedRecord(last));
+        trash("employee",last,trashPreview(last)).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(1));
+    }
+    @Test void remainingProtectedMemberStillBlocksWholeBatchAfterCancellation() throws Exception {
+        var saved=save(UUID.randomUUID().toString(),ordinary(3));
+        var first=saved.at("/records/0/id").asText();var second=saved.at("/records/1/id").asText();var last=saved.at("/records/2/id").asText();
+        cancelRecord(first);var preview=trashPreview(last);var unchanged=storedRecord(last);
+        review(read(second),"claim","pending");
+        trash("employee",last,preview).andExpect(status().isConflict());
+        assertEquals(unchanged,storedRecord(last));
+    }
     @Test void emptyRemainingBatchNeverWritesHistory() throws Exception {
         var result=save(UUID.randomUUID().toString(),ordinary(2));var first=result.at("/records/0/id").asText();var last=result.at("/records/1/id").asText();
         jdbc.sql("update quotation_record set lifecycle_state='trashed' where payload->'quotationBatch'->>'id'=:id").param("id",result.path("batchId").asText()).update();

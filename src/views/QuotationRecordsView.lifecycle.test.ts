@@ -152,6 +152,18 @@ it.each(['single','fob'] as const)('confirms only remaining %s records while ret
   expect(change).toHaveBeenCalledWith('trash','整批不再需要',rows,'batch-9')
   expect(document.querySelector('.toast')?.textContent).toContain('已处理 12 条报价记录')
 })
+it.each(['single','fob'] as const)('shows original and surviving %s counts after cancellation and confirms only eligible records',async quoteMode=>{
+  const rows=batchRows().slice(1).map(row=>({...row,quoteMode}))
+  rows[0]!.lifecycleState='withdrawn';rows[1]!.lifecycleState='trashed'
+  query.loadRecordPage.mockResolvedValue(result([rows[8]!]));batchLoad.mockResolvedValue(rows)
+  await mount();await openBatchTrash()
+  expect(document.querySelector('dialog')?.textContent).toContain('原批次 14 条，当前剩余 13 条')
+  expect(document.querySelectorAll('dialog tbody tr')).toHaveLength(11)
+  expect(document.querySelector('.lifecycle-skipped')?.textContent).toContain('已跳过 2 条')
+  reason();await flush();change.mockResolvedValue({changed:11});button('确认移入').click();await flush()
+  expect(change).toHaveBeenCalledWith('trash','整批不再需要',rows,'batch-9')
+  expect(document.querySelector('.toast')?.textContent).toContain('已处理 11 条报价记录')
+})
 it('still blocks protected remaining members after skipping withdrawn records',async()=>{
   const rows=batchRows();rows[0]!.lifecycleState='withdrawn';rows[1]!.financeReviewStatus='reviewing'
   query.loadRecordPage.mockResolvedValue(result([rows[9]!]));batchLoad.mockResolvedValue(rows)

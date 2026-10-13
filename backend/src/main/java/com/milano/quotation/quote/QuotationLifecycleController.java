@@ -89,7 +89,9 @@ public class QuotationLifecycleController {
             var batch = source.payload.path("quotationBatch");
             var id = batch.path("id").asText();
             int count = batch.path("count").asInt();
-            if (id.isBlank() || count != rows.size()) throw AppException.conflict("本批记录不完整，本次未执行，请重新打开确认");
+            // Keep original count/index as historical metadata; cancelled members no longer exist.
+            // The database membership check below still requires EVERY surviving record.
+            if (id.isBlank() || count < rows.size()) throw AppException.conflict("本批记录不完整，本次未执行，请重新打开确认");
             var members = records.findBatch(id, source.ownerAccount);
             var indices = new HashSet<Integer>();
             if (members.size() != rows.size() || !versions.keySet().equals(new HashSet<>(members.stream().map(row -> row.id).toList())))

@@ -10,9 +10,9 @@ export async function loadQuotationBatchRecords(record: QuotationRecord, purpose
   const records = raw.map(normalizeQuotationRecord)
   const batch = record.quotationBatch
   const allowedStates = purpose === 'trash' ? ['active', 'archived', 'withdrawn', 'trashed'] : ['active', 'archived']
-  if (!batch || records.length !== batch.count || raw.some(row => !allowedStates.includes(row.lifecycleState ?? 'active')) || records.some(row => !row || row.quotationBatch?.id !== batch.id || (purpose === 'copy' && row.quoteMode !== record.quoteMode) || row.quotationBatch.count !== batch.count)
-    || new Set(records.map(row => row?.id)).size !== batch.count || !records.some(row => row?.id === record.id)
-    || new Set(records.map(row => row?.quotationBatch?.index)).size !== batch.count
+  if (!batch || !records.length || records.length > batch.count || (purpose === 'copy' && records.length !== batch.count) || raw.some(row => !allowedStates.includes(row.lifecycleState ?? 'active')) || records.some(row => !row || row.quotationBatch?.id !== batch.id || (purpose === 'copy' && row.quoteMode !== record.quoteMode) || row.quotationBatch.count !== batch.count)
+    || new Set(records.map(row => row?.id)).size !== records.length || !records.some(row => row?.id === record.id)
+    || new Set(records.map(row => row?.quotationBatch?.index)).size !== records.length
     || records.some(row => !Number.isInteger(row?.quotationBatch?.index) || row!.quotationBatch!.index < 1 || row!.quotationBatch!.index > batch.count)) {
     throw new Error(purpose === 'copy' ? '批次记录不完整或已变化，未复制任何数据，请刷新后重试' : '批次记录不完整或已变化，本次未移入任何记录，请刷新后重试')
   }
