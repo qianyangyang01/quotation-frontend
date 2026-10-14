@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import QuotationMatrix from './QuotationMatrix.vue'
 import QuotationTemplateDetails from './QuotationTemplateDetails.vue'
+import QuotationTemplateSync from './QuotationTemplateSync.vue'
+import { currentAuthUser, hasPermission } from '@/data/authStore'
 import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
 import {
   QUOTATION_TEMPLATES_UPDATED_EVENT,
@@ -75,6 +77,8 @@ const currentUnavailableCount = computed(() => currentRows.value.length - curren
 const presetSelection = ref<QuotationPresetSelection[]>([])
 const presetVersion = ref(0)
 const showManager = ref(false)
+const showSync = ref(false)
+const canSyncTemplates = computed(() => currentAuthUser.value.role === 'super_admin' && hasPermission('quote'))
 const expandedTemplateId = ref('')
 const createName = ref('')
 const createDescription = ref('')
@@ -161,6 +165,7 @@ function templateItems(rows: QuotationMatrixRow[]): QuotationTemplateSelectionIt
 }
 
 function applyTemplate(template = selectedTemplate.value) {
+  if (savingTemplate.value) return
   if (!template) {
     notify('请先选择一个报价模板')
     return
@@ -328,45 +333,88 @@ function startRename(template: QuotationPersonalTemplate) {
 }
 
 async function saveRename(template: QuotationPersonalTemplate) {
+  if (savingTemplate.value) return
   const name = editingName.value.trim()
   if (!name) {
     notify('模板名称不能为空')
     return
   }
-  const updated = await updateQuotationTemplate(owner.value, template.id, { name }, template._version)
-  if (updated && editBase.value?.id === template.id && editBase.value._version === template._version) editBase.value = snapshot(updated)
-  editingId.value = ''
-  editingName.value = ''
-  await refreshTemplates(updated?.id || template.id)
-  if (activeTemplateId.value === template.id && updated) emit('templateChange', { id: updated.id, name: updated.name })
-  notify(`模板已重命名为“${name}”`)
+  const account = owner.value.account
+  savingTemplate.value = true
+  try {
+    const updated = await updateQuotationTemplate(owner.value, template.id, { name }, template._version)
+    if (owner.value.account !== account) return
+    if (updated && editBase.value?.id === template.id && editBase.value._version === template._version) editBase.value = snapshot(updated)
+    editingId.value = ''
+    editingName.value = ''
+    await refreshTemplates(updated?.id || template.id)
+    if (owner.value.account !== account) return
+    if (activeTemplateId.value === template.id && updated) emit('templateChange', { id: updated.id, name: updated.name })
+    notify(`模板已重命名为“${name}”`)
+  } catch (error) { if (owner.value.account === account) notify(error instanceof Error ? error.message : '重命名失败，请重试') }
+  finally { savingTemplate.value = false }
 }
 
 async function copyTemplate(template: QuotationPersonalTemplate) {
-  const copied = await copyQuotationTemplate(owner.value, template.id)
-  if (!copied) {
-    notify('模板复制失败，请刷新后重试')
-    return
-  }
-  await refreshTemplates(copied.id)
-  notify(`已复制为“${copied.name}”`)
+  if (savingTemplate.value) return
+  const account = owner.value.account
+  savingTemplate.value = true
+  try {
+    const copied = await copyQuotationTemplate(owner.value, template.id)
+    if (owner.value.account !== account) return
+    if (!copied) {
+      notify('模板复制失败，请刷新后重试')
+      return
+    }
+    await refreshTemplates(copied.id)
+    if (owner.value.account !== account) return
+    notify(`已复制为“${copied.name}”`)
+  } catch (error) { if (owner.value.account === account) notify(error instanceof Error ? error.message : '复制失败，请重试') }
+  finally { savingTemplate.value = false }
 }
 
 async function removeTemplate(template: QuotationPersonalTemplate) {
+  if (savingTemplate.value) return
   if (pendingDeleteId.value !== template.id) {
     pendingDeleteId.value = template.id
     notify(`再次点击“确认删除”将删除模板“${template.name}”`)
     return
   }
   const wasActive = activeTemplateId.value === template.id
-  await deleteQuotationTemplate(owner.value, template.id)
-  pendingDeleteId.value = ''
-  await refreshTemplates()
-  if (wasActive) {
-    activeTemplateId.value = ''
-    emit('templateChange', null)
-  }
-  notify(`模板“${template.name}”已删除；当前临时报价清单仍保留`)
+  const account = owner.value.account
+  savingTemplate.value = true
+  try {
+    await deleteQuotationTemplate(owner.value, template.id)
+    if (owner.value.account !== account) return
+    pendingDeleteId.value = ''
+    await refreshTemplates()
+    if (owner.value.account !== account) return
+    if (wasActive) {
+      activeTemplateId.value = ''
+      emit('templateChange', null)
+    }
+    notify(`模板“${template.name}”已删除；当前临时报价清单仍保留`)
+  } catch (error) { if (owner.value.account === account) notify(error instanceof Error ? error.message : '删除失败，请重试') }
+  finally { savingTemplate.value = false }
+}
+
+async function removeTemplateChannel(template: QuotationPersonalTemplate, index: number) {
+  if (savingTemplate.value || template.items.length <= 1 || index < 0 || index >= template.items.length) return
+  if (template._version == null) { notify('请重新加载模板后再移除渠道'); return }
+  const account = owner.value.account
+  const removed = template.items[index]!
+  savingTemplate.value = true
+  try {
+    const updated = await updateQuotationTemplate(owner.value, template.id,
+      { items: template.items.filter((_, i) => i !== index) }, template._version, true)
+    if (owner.value.account !== account) return
+    templates.value = templates.value.map(item => item.id === updated.id ? updated : item)
+    // Keep the quote's editable rows and editBase intact. The version mismatch prevents
+    // an older applied quote from silently restoring the channel that was just removed.
+    notify(`已从模板“${updated.name}”移除${removed.country}的“${removed.transport || removed.rule}”`)
+  } catch (error) {
+    if (owner.value.account === account) notify(error instanceof Error ? error.message : '移除结果未确认，请刷新模板核对后重试')
+  } finally { savingTemplate.value = false }
 }
 
 function onTemplatesUpdated() {
@@ -374,6 +422,8 @@ function onTemplatesUpdated() {
 }
 
 watch(() => [props.ownerName, props.ownerAccount], () => {
+  showSync.value = false
+  showManager.value = false
   templates.value = []
   selectedTemplateId.value = ''
   newTemplateMode.value = false
@@ -439,6 +489,7 @@ function formatTime(value: string) {
           </label>
           <button class="apply" :disabled="!selectedTemplate || savingTemplate" @click="applyTemplate()">⚡ 一键应用</button>
           <button @click="showManager = true">⚙ 管理我的模板</button>
+          <button v-if="canSyncTemplates" class="sync-templates" :disabled="savingTemplate" @click="showSync = true">同步模板</button>
           <div v-if="activeTemplate" class="status-actions">
             <button @click="applyTemplate(activeTemplate)">恢复模板已保存清单</button>
             <button class="clear" :class="{ confirming: pendingClear }" @click="clearCurrentSelection">{{ pendingClear ? '确认清空清单' : '清空本次清单' }}</button>
@@ -511,11 +562,13 @@ function formatTime(value: string) {
       @copy="$emit('copy', $event)"
     />
 
-    <div v-if="showManager" class="manager-mask" @click.self="showManager = false">
+    <QuotationTemplateSync v-if="showSync && canSyncTemplates" @close="showSync = false" @synced="refreshTemplates()" />
+
+    <div v-if="showManager" class="manager-mask" @click.self="!savingTemplate && (showManager = false)">
       <section class="template-manager" role="dialog" aria-modal="true" aria-label="管理我的报价模板">
         <header>
           <div><p>PERSONAL TEMPLATE MANAGER</p><h2>管理我的报价模板</h2><span>{{ ownerName }}（{{ ownerAccount }}）的模板仅本人可见</span></div>
-          <button aria-label="关闭" @click="showManager = false">×</button>
+          <button aria-label="关闭" :disabled="savingTemplate" @click="showManager = false">×</button>
         </header>
 
         <div class="create-template">
@@ -539,7 +592,7 @@ function formatTime(value: string) {
             <div class="template-name">
               <template v-if="editingId === template.id">
                 <input v-model="editingName" maxlength="40" @keyup.enter="saveRename(template)">
-                <button @click="saveRename(template)">保存</button>
+                <button :disabled="savingTemplate" @click="saveRename(template)">保存</button>
                 <button @click="editingId = ''">取消</button>
               </template>
               <template v-else>
@@ -560,16 +613,18 @@ function formatTime(value: string) {
                 :aria-controls="`template-details-${template.id}`"
                 @click="expandedTemplateId = expandedTemplateId === template.id ? '' : template.id"
               >{{ expandedTemplateId === template.id ? '收起明细' : '明细' }}</button>
-              <button class="use" @click="applyTemplate(template)">一键应用</button>
-              <button @click="startRename(template)">重命名</button>
-              <button @click="copyTemplate(template)">复制</button>
-              <button class="danger" @click="removeTemplate(template)">{{ pendingDeleteId === template.id ? '确认删除' : '删除' }}</button>
+              <button class="use" :disabled="savingTemplate" @click="applyTemplate(template)">一键应用</button>
+              <button :disabled="savingTemplate" @click="startRename(template)">重命名</button>
+              <button :disabled="savingTemplate" @click="copyTemplate(template)">复制</button>
+              <button class="danger" :disabled="savingTemplate" @click="removeTemplate(template)">{{ pendingDeleteId === template.id ? '确认删除' : '删除' }}</button>
             </div>
             <QuotationTemplateDetails
               v-if="expandedTemplateId === template.id"
               :id="`template-details-${template.id}`"
               class="template-details"
               :items="template.items"
+              removable :busy="savingTemplate"
+              @remove="removeTemplateChannel(template, $event)"
             />
           </article>
           <div v-if="!templates.length" class="manager-empty"><i>☆</i><b>还没有个人报价模板</b><span>先在下方选择需要长期复用的国家和渠道，再回到这里新建。</span></div>
@@ -578,7 +633,8 @@ function formatTime(value: string) {
         <footer>
           <p v-if="feedback">{{ feedback }}</p>
           <span v-else>模板以渠道稳定标识保存，价格会按每次报价的商品、重量与客户等级重新计算。</span>
-          <button @click="showManager = false">完成</button>
+          <button :disabled="savingTemplate || templatesLoading" @click="refreshTemplates()">刷新模板</button>
+          <button :disabled="savingTemplate" @click="showManager = false">完成</button>
         </footer>
       </section>
     </div>

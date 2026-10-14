@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import type { QuotationTemplateSelectionItem } from '@/data/quotationTemplates'
 
-const props = defineProps<{ items: QuotationTemplateSelectionItem[] }>()
+const props = defineProps<{ items: QuotationTemplateSelectionItem[]; removable?: boolean; busy?: boolean }>()
+const emit = defineEmits<{ remove: [index: number] }>()
 
 const countryGroups = computed(() => {
   const groups = new Map<string, QuotationTemplateSelectionItem[]>()
@@ -20,11 +21,16 @@ const countryGroups = computed(() => {
     <header class="details-heading">
       <b>国家与渠道明细</b>
       <span>{{ countryGroups.length }} 个国家 · {{ items.length }} 条渠道</span>
+      <span v-if="removable">移除后立即保存 · 至少保留1条渠道</span>
     </header>
     <div v-for="group in countryGroups" :key="group.country" class="country-group">
       <h3>{{ group.country }}<span>{{ group.items.length }} 条渠道</span></h3>
       <ul>
         <li v-for="(item, index) in group.items" :key="index">
+          <button v-if="removable" class="remove-channel" :disabled="busy || items.length <= 1"
+            :title="items.length <= 1 ? '模板至少保留一条渠道' : '立即从此模板移除，历史报价不变'"
+            :aria-label="`移除${item.country} ${item.transport || item.rule} ${item.quoteRegion || ''}`"
+            @click="emit('remove', props.items.indexOf(item))">移除</button>
           <div class="channel-name">
             <strong>{{ item.transport || item.rule || item.channelCode || '未命名渠道' }}</strong>
             <span v-if="item.channelCode" class="channel-code">{{ item.channelCode }}</span>
@@ -58,5 +64,6 @@ const countryGroups = computed(() => {
 .channel-code{color:#73818c;font-size:10px}
 .channel-meta{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:5px;color:#657681;font-size:10px;line-height:1.6}
 .empty-details{margin:8px 0;color:#73818c;font-size:11px}
+.remove-channel{float:right;margin:0 0 6px 14px;padding:6px 12px;border:1px solid #edc8c2;border-radius:5px;background:#fff;color:#b74b3c;font:inherit;font-size:12px;cursor:pointer}.remove-channel:disabled{opacity:.45;cursor:not-allowed}.country-group li::after{content:'';display:block;clear:both}
 @media(max-width:680px){.country-group{grid-template-columns:minmax(0,1fr)}.country-group h3{flex-direction:row;align-items:center;flex-wrap:wrap}.country-group ul{border-left:0;border-top:1px solid #e1e8ed}.channel-meta{flex-direction:column}}
 </style>

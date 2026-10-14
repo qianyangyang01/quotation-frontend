@@ -46,6 +46,42 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
 
+it('immediately removes only the selected region from the saved template while preserving applied quote rows', async () => {
+  stored[0]!._version = 3
+  stored[0]!.items = ['1区', '2区'].map(region => ({ ...row('带电', region), countryCode: 'US' }))
+  api.put.mockImplementation(async (_path, patch) => {
+    stored[0] = { ...stored[0]!, items: structuredClone(patch.items), _version: 4 }
+    return structuredClone(stored[0])
+  })
+  await mount(); button('管理我的模板').click(); await tick(); button('明细').click(); await tick()
+  const before = document.querySelector('.selected-channels')?.textContent
+  expect(before).toContain('带电')
+  document.querySelector<HTMLButtonElement>('.manager-list article .remove-channel')!.click(); await tick()
+  expect(api.put).toHaveBeenCalledWith('/quotation-templates/battery', expect.objectContaining({
+    _version: 3, items: [expect.objectContaining({ quoteRegion: '2区' })],
+    _confirmedUpdate: { templateId: 'battery', baseVersion: 3, source: 'template-channel-confirmation' },
+  }))
+  expect(document.querySelector('.manager-list article .details-heading')?.textContent).toContain('1 条渠道')
+  expect(document.querySelector<HTMLButtonElement>('.manager-list article .remove-channel')?.disabled).toBe(true)
+  expect(document.querySelector('.selected-channels')?.textContent).toBe(before)
+  expect(button('更新模板').disabled).toBe(true)
+  expect(document.body.textContent).toContain('模板已被修改')
+})
+
+it('retains channels on removal conflict and prevents a second removal while saving', async () => {
+  stored[0]!._version = 3
+  stored[0]!.items.push({ ...row('普货'), countryCode: 'US' })
+  let reject!: (e: Error) => void
+  api.put.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+  await mount(); button('管理我的模板').click(); await tick(); button('明细').click(); await tick()
+  document.querySelector<HTMLButtonElement>('.manager-list article .remove-channel')!.click(); await tick()
+  expect([...document.querySelectorAll<HTMLButtonElement>('.remove-channel')].every(b => b.disabled)).toBe(true)
+  reject(new Error('报价模板已被其他页面修改')); await tick()
+  expect(document.querySelectorAll('.manager-list article .remove-channel')).toHaveLength(2)
+  expect(document.body.textContent).toContain('报价模板已被其他页面修改')
+  expect(api.put).toHaveBeenCalledTimes(1)
+})
+
 it('starts a blank template from the dropdown and saves a separate template inline', async () => {
   await mount()
   const select = document.querySelector<HTMLSelectElement>('[aria-label="选择个人报价模板"]')!

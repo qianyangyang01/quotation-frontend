@@ -17,5 +17,10 @@ interface QuotationRecordRepository extends JpaRepository<QuotationRecordEntity,
     List<QuotationRecordEntity> findByOwnerAccountOrderByCreatedAtDesc(String ownerAccount);
     org.springframework.data.domain.Page<QuotationRecordEntity> findByOwnerAccount(String ownerAccount, org.springframework.data.domain.Pageable pageable);
 }
-interface QuotationTemplateRepository extends JpaRepository<QuotationTemplateEntity,UUID>{List<QuotationTemplateEntity> findByOwnerAccountOrderByUpdatedAtDesc(String ownerAccount);}
+interface QuotationTemplateRepository extends JpaRepository<QuotationTemplateEntity,UUID>{
+    List<QuotationTemplateEntity> findByOwnerAccountOrderByUpdatedAtDesc(String ownerAccount);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_READ)
+    @org.springframework.data.jpa.repository.Query("select t from QuotationTemplateEntity t where t.id in :ids order by t.id")
+    List<QuotationTemplateEntity> lockSources(@org.springframework.data.repository.query.Param("ids") java.util.Collection<UUID> ids);
+}
 interface QuotationDraftRepository extends JpaRepository<QuotationDraftEntity,String>{}
