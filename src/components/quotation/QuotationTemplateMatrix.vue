@@ -413,7 +413,7 @@ async function removeTemplateChannel(template: QuotationPersonalTemplate, index:
     // an older applied quote from silently restoring the channel that was just removed.
     notify(`已从模板“${updated.name}”移除${removed.country}的“${removed.transport || removed.rule}”`)
   } catch (error) {
-    if (owner.value.account === account) notify(error instanceof Error ? error.message : '移除结果未确认，请刷新模板核对后重试')
+    if (owner.value.account === account) notify(error instanceof Error ? error.message : '移除结果未确认，请刷新页面核对后重试')
   } finally { savingTemplate.value = false }
 }
 
@@ -633,7 +633,6 @@ function formatTime(value: string) {
         <footer>
           <p v-if="feedback">{{ feedback }}</p>
           <span v-else>模板以渠道稳定标识保存，价格会按每次报价的商品、重量与客户等级重新计算。</span>
-          <button :disabled="savingTemplate || templatesLoading" @click="refreshTemplates()">刷新模板</button>
           <button :disabled="savingTemplate" @click="showManager = false">完成</button>
         </footer>
       </section>
