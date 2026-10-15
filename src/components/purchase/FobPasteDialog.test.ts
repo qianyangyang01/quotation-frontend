@@ -24,6 +24,7 @@ it('blocks ambiguous rows and preserves editable sources after returning',async(
   mount();await paste();vi.mocked(service.previewFobPaste).mockResolvedValueOnce(preview(false));button('预览识别与变更').click();await tick()
   expect(button('确认全部保存').disabled).toBe(true);button('返回编辑').click();await tick()
   expect((document.querySelector('[aria-label="第1行 采购价格原文"]') as HTMLTextAreaElement).value).toBe('16')
+  expect(document.body.textContent).not.toContain('标红行存在待修正资料')
   expect(service.confirmFobPaste).not.toHaveBeenCalled()
 })
 it('requires a new preview after conflicts and never retries saving automatically',async()=>{

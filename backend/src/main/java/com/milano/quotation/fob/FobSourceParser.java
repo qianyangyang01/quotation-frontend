@@ -10,7 +10,7 @@ public final class FobSourceParser {
     private static final String NUM = "\\d+(?:\\.\\d+)?";
     private static final String UNIT = "[件双套盒条个瓶张]";
     private static final Pattern PRICE = Pattern.compile("(≥\\d+|\\d+-\\d+|\\d+" + UNIT + "(?:以上|起批|起)?|\\d+(?:以上|起批|起)|\\d+(?=单价|价格))\\s*(?:" + UNIT + ")?\\s*(?:单价|价格)?\\s*:?\\s*[¥￥]?(" + NUM + ")");
-    private static final Pattern FREIGHT = Pattern.compile("(\\d+)\\s*(?:" + UNIT + ")?\\s*(以上|以内|内)?\\s*(?:(?:预拍|试拍|预计|预估|大概|总|发物流|运费|运价|大约|约)\\s*)*:?\\s*(包邮|免运费|" + NUM + ")");
+    private static final Pattern FREIGHT = Pattern.compile("(\\d+)\\s*(?:" + UNIT + ")?\\s*(以上|以内|内)?\\s*(?:(?:预拍|试拍|预计|预估|大概|总|发物流|运费|运价|运|大约|约)\\s*)*:?\\s*(包邮|免运费|" + NUM + ")");
     public record Tier(int minQty, Integer maxQty, BigDecimal unitPriceCny, String unit) {}
     public record Freight(int quantity, BigDecimal totalFreightCny, BigDecimal unitFreightCny, boolean estimated, String basis) {}
     public record Parsed(int minOrderQty, int orderMultiple, List<Tier> priceTiers, Freight freight, List<String> notices) {}
@@ -28,6 +28,11 @@ public final class FobSourceParser {
         if (prices.isBlank()) fail("缺少采购价格原文");
         if (Pattern.compile("版费|打样|协议价|批发价|独立包装|线下|更新|\\d{4}\\.").matcher(prices).find())
             fail("采购价格含额外费用、不同方案或更新说明，请先明确本次适用的数量与单价");
+        // Normalize the label only; retain membership conditions and competing prices for validation.
+        if (prices.contains("会员价")) {
+            prices = prices.replace("会员价", "单价");
+            notices.add("按原文会员价识别采购价格，请确认本次采购适用会员价；原文完整保留");
+        }
         prices = prices.replaceAll(",\\s*(?=单价|价格)", " ");
         // Suppliers sometimes put the price before its quantity on separate lines.
         prices = prices.replaceAll("(?m)^\\s*(" + NUM + ")\\s*\\n\\s*((?:≥)?\\d+(?:-\\d+)?" + UNIT + "(?:起批|以上)?)", "$2:$1");
@@ -120,7 +125,7 @@ public final class FobSourceParser {
         StringBuilder residual = new StringBuilder(); int end = 0;
         while (matcher.find()) {
             residual.append(raw, end, matcher.start()); end = matcher.end();
-            if (!Pattern.compile(UNIT + "|运费|运价|以上|内|:|\\s").matcher(matcher.group()).find()) fail("运费数量和金额之间缺少明确分隔");
+            if (!Pattern.compile(UNIT + "|运费|运价|运|以上|内|:|\\s").matcher(matcher.group()).find()) fail("运费数量和金额之间缺少明确分隔");
             int qty = integer(matcher.group(1)); String value = matcher.group(3);
             BigDecimal fee = value.equals("包邮") || value.equals("免运费") ? BigDecimal.ZERO : amount(value);
             var previous = batches.putIfAbsent(qty, fee);

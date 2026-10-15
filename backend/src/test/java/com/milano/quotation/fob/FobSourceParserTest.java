@@ -6,6 +6,29 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FobSourceParserTest {
+    @Test void acceptsMemberPricesAndAbbreviatedFreightFromTc2600009Rows() {
+        for (String price : List.of("会员价：71.25", "会员价80.75")) {
+            var p = FobSourceParser.parse("1", price, "1个运5；10个运费32；100个运费302");
+            assertEquals(1, p.minOrderQty());
+            assertEquals(1, p.priceTiers().size());
+            assertEquals(new BigDecimal(price.contains("71.25") ? "71.25" : "80.75"), p.priceTiers().getFirst().unitPriceCny());
+            assertEquals(100, p.freight().quantity());
+            assertEquals(new BigDecimal("302"), p.freight().totalFreightCny());
+            assertEquals(new BigDecimal("3.02"), p.freight().unitFreightCny());
+            assertTrue(p.notices().stream().anyMatch(n -> n.contains("会员价")));
+        }
+        var tiers = FobSourceParser.parse("1", "会员价：71.25；100件会员价70", "1个运：5；10个运32；100个运：302");
+        assertEquals(2, tiers.priceTiers().size());
+        assertEquals(new BigDecimal("70"), tiers.priceTiers().getLast().unitPriceCny().setScale(0));
+        assertEquals(new BigDecimal("3.02"), tiers.freight().unitFreightCny());
+        assertEquals(new BigDecimal("3.02"), FobSourceParser.parse("1", "71.25", "1运5；10运32；100运302").freight().unitFreightCny());
+    }
+    @Test void memberPriceAndFreightAliasesDoNotDiscardConditionsOrCompetingPrices() {
+        for (String price : List.of("会员价71.25需开通会员", "普通价80；会员价71.25", "单价80；会员价71.25", "会员价71.25另加包装费1"))
+            assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("1", price, "100个运302"), price);
+        for (String freight : List.of("1个运5；100个运302；偏远地区加收10", "100个运302-350", "100个运-302", "100个运302；100个运303", "1个运5；10个运32", "100个运302；运送条件待确认"))
+            assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("1", "会员价71.25", freight), freight);
+    }
     @Test void preservesAllFiveTiersFromPastedPf2600049AndEstimatedFreight() {
         var p = FobSourceParser.parse("1", "单件：23.99单价\n100起单价19.5\n300单价19.5\n500单价19\n1000单价19", "一件运费：4\t10件运费：11\t100件预拍运费：74");
         assertEquals(List.of(1, 100, 300, 500, 1000), p.priceTiers().stream().map(FobSourceParser.Tier::minQty).toList());

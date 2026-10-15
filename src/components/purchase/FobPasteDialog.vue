@@ -60,7 +60,7 @@ async function lookup() {
 }
 function close() {
   if (busy.value) return
-  if (pending.value) { pending.value = null; return }
+  if (pending.value) { pending.value = null; message.value = ''; return }
   if (rows.value.length) { confirmClose.value = true; return }
   emit('close')
 }
