@@ -10,6 +10,14 @@ const fixture = () => ({ id:'record', no:'BQS-TEST', customerName:'客户', shee
 async function mount(permissions: Parameters<typeof setPricingTestPermissions>[0]=['quote','myRecords']) { setPricingTestPermissions(permissions); const host=document.createElement('div');document.body.append(host); const record=fixture(),before=JSON.stringify(record),close=vi.fn(); app=createApp(Detail,{document:record,onClose:close});app.mount(host);await nextTick();return {record,before,close} }
 const button=(label:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.includes(label))!
 afterEach(()=>{app?.unmount();document.body.innerHTML='';clearPricingTestPermissions()})
+it('shows a rejected item classification even when its optional explanation is empty',async()=>{
+ setPricingTestPermissions(['quote','myRecords']);const record=fixture()
+ record.review={status:'rejected',revision:0,history:[],items:[{index:0,status:'rejected',reason:'',priceException:{category:'channel-price',recordedAt:'2026-10-15T00:00:00Z',targets:[]}}]}
+ const before=JSON.stringify(record),host=document.createElement('div');document.body.append(host)
+ app=createApp(Detail,{document:record});app.mount(host);await nextTick()
+ expect(document.querySelector('.sku-group')?.textContent).toContain('渠道价格异常')
+ expect(JSON.stringify(record)).toBe(before)
+})
 it('paginates by SKU, searches all pages, and leaves the saved snapshot unchanged',async()=>{
  const {record,before}=await mount();expect(document.querySelectorAll('.sku-group')).toHaveLength(10);expect(document.body.textContent).toContain('12.30')
  button('下一页').click();await nextTick();button('下一页').click();await nextTick();expect(document.querySelectorAll('.sku-group')).toHaveLength(1)
