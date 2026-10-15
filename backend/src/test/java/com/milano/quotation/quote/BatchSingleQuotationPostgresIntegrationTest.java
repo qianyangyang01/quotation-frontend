@@ -125,7 +125,7 @@ class BatchSingleQuotationPostgresIntegrationTest {
         mutate("employee",row,"corrections",correction,key).andExpect(status().isOk()).andExpect(jsonPath("$.data.review.revision").value(1));
         assertEquals("pending",revised.at("/review/items/0/status").asText());assertEquals(returned.at("/review/items/2"),revised.at("/review/items/2"));
         assertEquals(returned.at("/items/1"),revised.at("/items/1"));assertEquals(returned.at("/items/2"),revised.at("/items/2"));
-        assertTrue(revised.at("/review/history").toString().contains("采购价格需核实"));
+        assertTrue(revised.at("/review/history").toString().contains("\"category\":\"purchase-price\""));
         assertEquals(original,jdbc.sql("select payload::text from batch_single_quotation where id=cast(:id as uuid)").param("id",id).query(String.class).single());
         var originalView=mapper.readTree(mvc.perform(get("/api/v1/batch-single-quotations/"+id+"/original").session(sessions.get("employee"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");assertEquals(mapper.readTree(original),originalView);
         mutate("employee",row,"corrections",correction,"stale-correction").andExpect(status().isConflict());

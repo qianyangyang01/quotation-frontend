@@ -26,12 +26,12 @@ class QuotationReviewNotificationMigrationTest {
                 (md5('3')::uuid,'pending','{"financeReviewStatus":"pending"}'::jsonb,6)
                 """);
             String quoteBefore,reviewBefore;
-            try(var r=s.executeQuery("select md5(string_agg(row_to_json(q)::text,'' order by id)) from quotation_record q")){r.next();quoteBefore=r.getString(1);}
+            try(var r=s.executeQuery("select md5(string_agg((to_jsonb(q)-'product_search_text')::text,'' order by id)) from quotation_record q")){r.next();quoteBefore=r.getString(1);}
             try(var r=s.executeQuery("select md5(string_agg(row_to_json(q)::text,'' order by id)) from quotation_review q")){r.next();reviewBefore=r.getString(1);}
             Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
             try(var r=s.executeQuery("select count(*) from quotation_review_notification")){r.next();assertEquals(2,r.getInt(1));}
             try(var r=s.executeQuery("select status,review_version,read_event_id,note from quotation_review_notification where record_id=md5('2')::uuid")){r.next();assertEquals("rejected",r.getString(1));assertEquals(5,r.getLong(2));assertNull(r.getObject(3));assertEquals("请核对成本",r.getString(4));}
-            try(var r=s.executeQuery("select md5(string_agg(row_to_json(q)::text,'' order by id)) from quotation_record q")){r.next();assertEquals(quoteBefore,r.getString(1));}
+            try(var r=s.executeQuery("select md5(string_agg((to_jsonb(q)-'product_search_text')::text,'' order by id)) from quotation_record q")){r.next();assertEquals(quoteBefore,r.getString(1));}
             try(var r=s.executeQuery("select md5(string_agg(row_to_json(q)::text,'' order by id)) from quotation_review q")){r.next();assertEquals(reviewBefore,r.getString(1));}
         }
     }
