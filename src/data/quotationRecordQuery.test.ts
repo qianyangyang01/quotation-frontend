@@ -5,6 +5,12 @@ vi.mock('@/services/http',()=>({api:{get}}))
 afterEach(()=>vi.resetAllMocks())
 const row=(id:number)=>({id:String(id),no:'Q-'+id,createdAt:'2026-09-10T00:00:00Z'})
 describe('record query',()=>{
+  it('passes cancellation through to the list request',async()=>{
+    get.mockResolvedValue({items:[],page:0,size:10,total:0,totalPages:0})
+    const controller=new AbortController()
+    await loadRecordPage('company',{},0,10,controller.signal)
+    expect(get.mock.lastCall?.[1]).toEqual({signal:controller.signal})
+  })
   it('encodes all filters and keeps backend page totals',async()=>{
     get.mockResolvedValue({items:[row(1)],page:2,size:30,total:70,totalPages:3})
     expect((await loadRecordPage('mine',{q:'客户 & SKU',product:'SKU+1',customer:'客户 & 100%',channel:'专线',optionScale:'multiple',priceDifference:'lower',startDate:'2026-09-01',endDate:'2026-09-10',country:'法国',status:'won',category:'服装'},2,30)).total).toBe(70)

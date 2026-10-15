@@ -3,10 +3,10 @@ import { normalizeQuotationRecord, type QuotationRecord } from './quotationRecor
 
 export interface RecordFilters { quoteMode?: import('./quotationModes').SavedQuotationMode | '';  spotCheck?: '' | 'checked' | 'unchecked'; priorityOnly?: boolean; lifecycle?: 'active' | 'archived' | 'trashed'; q?: string; product?: string; customer?: string; channel?: string; optionScale?: '' | 'single' | 'multiple'; priceDifference?: '' | 'lower' | 'equal' | 'higher' | 'missing'; status?: string; reviewStatus?: string; reviewMine?: boolean; country?: string; category?: string; startDate?: string; endDate?: string }
 export interface RecordPage { items: QuotationRecord[]; page: number; size: number; total: number; totalPages: number; summary: { processed?: number; pending: number; won: number; lost: number; total: number }; countries: string[] }
-export async function loadRecordPage(scope: 'mine' | 'company', filters: RecordFilters, page=0, size=10): Promise<RecordPage> {
+export async function loadRecordPage(scope: 'mine' | 'company', filters: RecordFilters, page=0, size=10, signal?: AbortSignal): Promise<RecordPage> {
   const query=new URLSearchParams({scope,page:String(page),size:String(size)})
   for(const [key,value] of Object.entries(filters)) if(value) query.set(key,String(value))
-  const result=await api.get<RecordPage>(`/quotations/search?${query}`)
+  const result=await api.get<RecordPage>(`/quotations/search?${query}`, { signal })
   return {...result,items:result.items.map(normalizeQuotationRecord).filter((row): row is QuotationRecord=>!!row)}
 }
 export async function loadFilteredRecords(scope: 'mine' | 'company', filters: RecordFilters) {

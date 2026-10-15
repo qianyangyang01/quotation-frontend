@@ -21,11 +21,12 @@ final class QuotationRecordColumnFilters {
     static void append(StringBuilder where, Map<String,Object> params, QuotationRecordQuery.Filters filters) {
         validate(filters.optionScale(), Set.of("single", "multiple"), "报价规模不合法");
         validate(filters.priceDifference(), Set.of("lower", "equal", "higher", "missing"), "报价差异不合法");
-        text(where, params, "product", filters.product(), """
-            concat_ws(' ',quote_no,payload->'quotationBatch'->>'no',payload->>'primarySku',payload->>'productSummary',payload->>'salespersonName',
-              (select string_agg(concat_ws(' ',b->>'sku',b->>'name'),' ') from jsonb_array_elements(
-                case when jsonb_typeof(payload->'bundleItems')='array' then payload->'bundleItems' else '[]'::jsonb end) b))
-            """);
+        if (present(filters.product())) {
+            // Literal substring matching, including %, _ and backslashes; pg_trgm can index LIKE.
+            where.append(" and product_search_text like :product");
+            params.put("product", "%" + filters.product().trim().toLowerCase(Locale.ROOT)
+                .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%");
+        }
         text(where, params, "customer", filters.customer(), "coalesce(payload->>'customerName','')");
         text(where, params, "channel", filters.channel(), "concat_ws(' ',payload->>'carrier',payload->>'channel',payload->>'rule',"
             + "(select string_agg(concat_ws(' ',o->>'carrier',o->>'channel',o->>'channelCode',o->>'rule'),' ') from jsonb_array_elements("+OPTIONS+") o))");

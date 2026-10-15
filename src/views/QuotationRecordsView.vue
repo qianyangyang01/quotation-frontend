@@ -171,18 +171,41 @@ const summary=ref<{pending:number;won:number;lost:number;total:number;processed?
 const filters=computed(()=>({quoteMode:filterQuoteMode.value,spotCheck:spotCheckFilter.value,priorityOnly:priorityOnly.value,lifecycle:lifecycle.value,product:filterProduct.value.trim(),customer:filterCustomer.value.trim(),channel:filterChannel.value.trim(),optionScale:filterOptionScale.value,priceDifference:filterPriceDifference.value,status:filterStatus.value,reviewStatus:filterReviewStatus.value,reviewMine:reviewMine.value&&canReview.value&&filterReviewStatus.value==='reviewing',country:filterCountry.value,category:filterCategory.value,startDate:startDate.value,endDate:endDate.value}))
 const dateError=computed(()=>startDate.value && endDate.value && startDate.value>endDate.value ? '开始日期不能晚于结束日期' : '')
 let requestId=0;let refreshTimer:ReturnType<typeof setTimeout>|undefined
+let listController: AbortController | undefined
+let listInFlight = false, listRefreshQueued = false, refreshAfterReview = false, disposed = false
+function invalidateListRequest() {
+  ++requestId; listController?.abort(); listInFlight = false; listRefreshQueued = false; loading.value = false
+}
 async function refresh(silent = false) {
+  if (disposed) return
+  if (silent && reviewing.value.size) { refreshAfterReview = true; return }
+  if (silent && listInFlight) { listRefreshQueued = true; return }
+  listRefreshQueued = false
+  listController?.abort()
+  const controller = new AbortController()
+  listController = controller
   const id=++requestId
   if (!silent) checkedIds.value=[]
-  if(dateError.value) { loading.value=false;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};return }
+  if(dateError.value) { listInFlight=false;loading.value=false;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};return }
   if (!silent) loading.value=true;loadError.value=''
+  listInFlight = true
   try {
-    const result=await loadRecordPage(props.scope,{...filters.value},page.value,pageSize.value)
+    const result=await loadRecordPage(props.scope,{...filters.value},page.value,pageSize.value,controller.signal)
     if(id!==requestId)return
     records.value=result.items;total.value=result.total;totalPages.value=result.totalPages;page.value=result.page;summary.value=result.summary;countries.value=result.countries
     checkedIds.value=checkedIds.value.filter(id=>records.value.some(row=>row.id===id&&!selectionBlocked(row)))
-  } catch(error) {if(id===requestId){records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};loadError.value=error instanceof Error?error.message:'加载失败，请重试'}}
-  finally {if(id===requestId)loading.value=false}
+  } catch(error) {
+    if(id===requestId && !controller.signal.aborted) {
+      if (!silent) { records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0} }
+      loadError.value=(silent ? '列表刷新失败，已保存的操作不受影响。' : '')+(error instanceof Error?error.message:'加载失败，请重试')
+    }
+  }
+  finally {
+    if(id===requestId){
+      loading.value=false;listInFlight=false
+      if (listRefreshQueued) { listRefreshQueued=false;void refresh(true) }
+    }
+  }
 }
 function resetFilters(){filterQuoteMode.value='';spotCheckFilter.value='';priorityOnly.value=false;filterProduct.value='';filterCustomer.value='';filterChannel.value='';filterOptionScale.value='';filterPriceDifference.value='';filterStatus.value='';reviewMine.value=false;filterCountry.value='';filterCategory.value='';startDate.value='';endDate.value=''}
 function recent(days:number){const dates=recentRecordDates(days);startDate.value=dates.startDate;endDate.value=dates.endDate}
@@ -197,12 +220,21 @@ async function exportRecords(){
     toast('已导出当前筛选范围全部 '+rows.length+' 条记录')
   }catch(error){toast(error instanceof Error?error.message:'导出失败，请重试')}finally{exporting.value=false}
 }
-watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{checkedIds.value=[];lifecycleAction.value=null;mutationDialog.value=null;mutationError.value='';++requestId;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
-onUnmounted(()=>{++requestId;clearTimeout(refreshTimer)})
+watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{checkedIds.value=[];lifecycleAction.value=null;mutationDialog.value=null;mutationError.value='';invalidateListRequest();refreshAfterReview=false;page.value=0;records.value=[];total.value=0;totalPages.value=0;summary.value={pending:0,won:0,lost:0,total:0};selected.value=null;loading.value=true;clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void refresh(),250)})
+onUnmounted(()=>{disposed=true;invalidateListRequest();clearTimeout(refreshTimer)})
 watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{lifecycleLoadFailure.value=null})
 const selected = ref<QuotationRecord | null>(null)
 const reviewSync = useQuotationReviewSync(records, selected, computed(() => currentAuthUser.value.account))
 const observedRecords = computed(() => [...records.value, ...(selected.value ? [selected.value] : [])])
+// Keep the light status poll fast; reload full rows only when membership/order/content changes.
+const listStateChanged = computed(() => records.value.some(row => {
+  const live = reviewSync.stateFor(row)
+  return (live._version ?? 0) > (row._version ?? 0)
+    || (live.financeReviewStatus || 'pending') !== (row.financeReviewStatus || 'pending')
+    || live.financeReviewClaimedAccount !== row.financeReviewClaimedAccount
+    || !!live.priorityProcessing !== !!row.priorityProcessing || !!live.spotChecked !== !!row.spotChecked
+}))
+watch(listStateChanged, changed => { if (changed) void refresh(true) })
 watch(() => observedRecords.value.map(row => reviewSync.isMissing(row.id) ? 'missing' : reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active').join(','), () => {
   const changed = (row: QuotationRecord) => reviewSync.isMissing(row.id) || (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') !== (row.lifecycleState || 'active')
   if (observedRecords.value.some(changed)) {
@@ -291,6 +323,7 @@ async function markSpotChecked(row: QuotationRecord) {
   } finally { spotCheckBusy.value.delete(row.id) }
 }
 const reviewing = ref(new Set<string>())
+const reviewFeedback = ref<{ id: string; version?: number; reviewVersion?: number; message: string } | null>(null)
 function commentSaved(saved: QuotationRecord, message = '审核意见已保存，业务员可查看') {
   const row = records.value.find(item => item.id === saved.id) || (selected.value?.id === saved.id ? selected.value : undefined)
   const live = row && reviewSync.stateFor(row)
@@ -309,22 +342,36 @@ function commentSaved(saved: QuotationRecord, message = '审核意见已保存�
 async function changeReview(row: QuotationRecord, action: ReviewAction) {
   if (!canReview.value || !isActive(row) || lifecycleBusy.value || reviewing.value.has(row.id)) return
   const account = currentAuthUser.value.account
+  invalidateListRequest()
+  reviewFeedback.value = null
   reviewing.value.add(row.id)
+  let savedReview = false
   try {
     const saved = await reviewQuotationRecord(row.id, action, row._version, action.action==='claim'?reviewSync.stateFor(row)._reviewVersion:row._reviewVersion)
-    if (account !== currentAuthUser.value.account) return
-    if (!isActive(row) || (reviewSync.stateFor(row)._version ?? -1) > (saved._version ?? -1)) return
+    if (disposed || account !== currentAuthUser.value.account) return
+    invalidateListRequest()
+    savedReview = true
+    const live = reviewSync.stateFor(row)
+    if (!isActive(row) || (live._version ?? -1) > (saved._version ?? -1)
+      || ((live._version ?? -1) === (saved._version ?? -1) && (live._reviewVersion ?? 0) > (saved._reviewVersion ?? 0))) return
     reviewSync.accept(saved)
     records.value = records.value.map(item => item.id === saved.id ? saved : item)
     if (action.action==='claim') open(saved)
     else if (selected.value?.id === saved.id && !editing.value) selected.value = saved
+    if (action.action === 'complete') reviewFeedback.value = { id: saved.id, version: saved._version, reviewVersion: saved._reviewVersion, message: '审核已完成 · ' + financeReviewLabel(saved.financeReviewStatus) }
     toast(action.action==='claim'?'已开始审核，其他财务可看到你的占用':action.action==='complete'?'审核结果已保存':'已取消占用，其他财务可以开始审核')
-    if (reviewFiltered.value) await refresh(true)
   } catch (error) {
     if (account !== currentAuthUser.value.account) return
     toast(error instanceof Error ? error.message : '审核操作失败，请重试')
     void reviewSync.poll()
-  } finally { reviewing.value.delete(row.id) }
+  } finally {
+    reviewing.value.delete(row.id)
+    // Saving is complete. Refresh failures must neither block the button nor look like save failures.
+    if (account === currentAuthUser.value.account && (savedReview || refreshAfterReview)) {
+      refreshAfterReview = false
+      void refresh(true)
+    }
+  }
 }
 async function reloadReview(row:QuotationRecord) {
   const account=currentAuthUser.value.account
@@ -417,10 +464,10 @@ let filteredSyncBusy = false
 onUnmounted(() => clearInterval(filteredSyncTimer))
 onMounted(async () => {
   filteredSyncTimer = setInterval(async () => {
-    if ((!reviewFiltered.value && lifecycle.value !== 'active' && !priorityOnly.value && !spotCheckFilter.value) || loading.value || filteredSyncBusy || priorityBusy.value.size > 0 || spotCheckBusy.value.size > 0 || document.visibilityState === 'hidden') return
+    if ((!reviewFiltered.value && lifecycle.value !== 'active' && !priorityOnly.value && !spotCheckFilter.value) || loading.value || filteredSyncBusy || reviewing.value.size > 0 || priorityBusy.value.size > 0 || spotCheckBusy.value.size > 0 || document.visibilityState === 'hidden') return
     filteredSyncBusy = true
     try { await refresh(true) } finally { filteredSyncBusy = false }
-  }, 3000)
+  }, 30000)
   await Promise.allSettled([refresh(),loadPurchaseProducts().then(rows=>{purchaseProducts.value=rows})])
 })
 watch(()=>[route.query.record,route.query.reviewEvent,route.query.reviewOpen,props.scope,currentAuthUser.value.account],async()=>{
@@ -655,6 +702,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <template v-if="!editing">
           <p v-if="selected.quotationBatch" class="detail-batch-reference">提交批次：<button class="batch-reference" @click="filterProduct=selected.quotationBatch.no; filterReviewStatus=''">{{ selected.quotationBatch.no }} · 查看同批记录</button>（{{ selected.quotationBatch.index }}/{{ selected.quotationBatch.count }}）</p>
           <div class="detail-review-tools">
+          <p v-if="reviewFeedback?.id === selected.id && reviewFeedback.version === reviewSync.stateFor(selected)._version && reviewFeedback.reviewVersion === reviewSync.stateFor(selected)._reviewVersion" class="review-save-success" role="status">{{ reviewFeedback.message }}</p>
           <div class="detail-review-status" role="status" aria-label="审核状态">
             {{ financeReviewLabel(reviewSync.stateFor(selected).financeReviewStatus) }}<em v-if="priorityFor(selected)" class="priority-badge">优先处理</em>
             <span v-if="reviewSync.stateFor(selected).financeReviewClaimedBy"> · {{ reviewSync.stateFor(selected).financeReviewClaimedBy }}审核中</span>
@@ -741,6 +789,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
 .review-groups small{margin-left:auto;color:#71808c;font-size:12px}
 @media(max-width:720px){.review-groups button{flex:1 1 90px;padding:9px 12px}.review-groups small{flex-basis:100%;margin:2px 0 0}}
 
+.review-save-success{margin:12px 24px;padding:10px 14px;background:#e7f7ee;border-radius:6px;color:#078347;font-size:13px;font-weight:600}
 .detail-review-status{margin:12px 24px;padding:10px 14px;background:#f4f7fa;border-radius:6px;color:#31526c;font-size:13px;font-weight:600}
 .reissue-quote{padding:7px 12px;border:1px solid #ffb54e;border-radius:6px;background:#fff8ed;color:#a95f00;font-size:11px;font-weight:700;text-decoration:none}
 .finance-review{box-sizing:border-box;max-width:100%;min-width:0;padding:7px;border:1px solid #d9e1e7;border-radius:6px;font-size:12px;color:#586575;background:#f7f9fb;white-space:normal}.finance-review.logistics-exempt{color:#5e429a;background:#f5f0ff;border-color:#c9b5eb}.finance-review.channel-exempt{color:#17659b;background:#edf6ff;border-color:#9bc8e8}.finance-review.approved{color:#078347;background:#e7f7ee;border-color:#9ad8b4}.finance-review.rejected{color:#b52b25;background:#fff0ef;border-color:#efb0ac}.record-row-actions{min-width:0;gap:8px}

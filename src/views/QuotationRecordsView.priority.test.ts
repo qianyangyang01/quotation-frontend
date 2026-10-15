@@ -49,6 +49,6 @@ it('filters on the server, resets pagination, and refreshes an empty priority qu
   await mount([])
   document.querySelectorAll<HTMLButtonElement>('.priority-filters button')[1]!.click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page.mock.lastCall?.slice(0,3)).toEqual(['mine',expect.objectContaining({priorityOnly:true}),0])
-  mocks.page.mockResolvedValue(page([row({priorityProcessing:true})]));mocks.get.mockResolvedValue([row({priorityProcessing:true})]);await vi.advanceTimersByTimeAsync(3000);await flush()
+  mocks.page.mockResolvedValue(page([row({priorityProcessing:true})]));mocks.get.mockResolvedValue([row({priorityProcessing:true})]);await vi.advanceTimersByTimeAsync(30000);await flush()
   expect(document.querySelector('.priority-badge')).not.toBeNull()
 })

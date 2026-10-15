@@ -13,6 +13,7 @@ let app:App
 const flush=async()=>{for(let i=0;i<6;i++){await nextTick();await Promise.resolve()}}
 const saved=()=>normalizeQuotationRecord({id:'r',no:'QT-1',createdAt:'2026-09-23T12:00:00Z',updatedAt:'2026-09-23T12:00:00Z',salespersonAccount:'EMPLOYEE',_version:2,_reviewVersion:0,financeReviewStatus:'pending'})!
 const claimed=()=>({...saved(),_reviewVersion:1,financeReviewStatus:'reviewing' as const,financeReviewClaimedBy:'ADMIN',financeReviewClaimedAccount:'ADMIN',financeReviewStartedAt:'2026-09-23T12:00:00Z'})
+const pageResult=(items:ReturnType<typeof saved>[])=>({items,page:0,size:10,total:items.length,totalPages:items.length?1:0,summary:{pending:items.length,won:0,lost:0,total:items.length},countries:[]})
 const button=(text:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===text) as HTMLButtonElement
 async function mount(role:'super_admin'|'employee',scope:'mine'|'company') {
   authState.current={id:role,name:role,account:role==='employee'?'EMPLOYEE':'ADMIN',role,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=role==='employee'?['myRecords']:['allRecords']
@@ -20,6 +21,82 @@ async function mount(role:'super_admin'|'employee',scope:'mine'|'company') {
   const host=document.createElement('div');document.body.append(host);app=createApp(View,{scope});app.component('RouterLink',{template:'<a><slot /></a>'});app.mount(host);await flush();button('全部').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
 }
 afterEach(()=>{app?.unmount();document.body.innerHTML='';authState.current=null;authState.permissions=[];vi.useRealTimers();vi.resetAllMocks()})
+it('finishes the review immediately and retains its success when the background list fails',async()=>{
+  vi.useFakeTimers();await mount('super_admin','company')
+  button('待审核').click();await flush();await vi.advanceTimersByTimeAsync(250);await flush()
+  mocks.patch.mockResolvedValue(claimed());mocks.page.mockResolvedValue(pageResult([claimed()]))
+  button('开始审核').click();await flush()
+  mocks.get.mockResolvedValue([claimed()])
+  button('审核完成').click();await flush()
+  let rejectList!:(error:Error)=>void
+  mocks.page.mockImplementationOnce(()=>new Promise((_resolve,reject)=>{rejectList=reject}))
+  const completed={...saved(),_reviewVersion:2,financeReviewStatus:'logistics-exempt' as const,financeReviewedBy:'ADMIN'}
+  mocks.patch.mockResolvedValue(completed)
+  button('物流免审-采购已审可报价 · 仅当前报价').click();await flush()
+  expect(button('正在提交…')).toBeUndefined()
+  expect(button('重新审核').disabled).toBe(false)
+  expect(document.querySelector('.review-save-success')?.textContent).toContain('审核已完成 · 物流免审-采购已审')
+  expect(document.querySelector('.detail-review-status')?.textContent).toContain('物流免审-采购已审')
+  await vi.advanceTimersByTimeAsync(2400);await flush()
+  expect(document.querySelector('.review-save-success')).not.toBeNull()
+  rejectList(new Error('列表连接失败'));await flush()
+  expect(document.body.textContent).toContain('列表刷新失败，已保存的操作不受影响')
+  expect(document.querySelector('.records .finance-review')?.textContent).toBe('物流免审-采购已审')
+  expect(mocks.patch).toHaveBeenCalledTimes(2)
+})
+it('keeps a blank-note rejection category visible while the independent list refresh fails',async()=>{
+  vi.useFakeTimers();await mount('super_admin','company')
+  mocks.patch.mockResolvedValue(claimed());mocks.page.mockResolvedValue(pageResult([claimed()]))
+  button('开始审核').click();await flush()
+  button('审核完成').click();await flush();button('价格异常不可报价').click();await flush()
+  const select=document.querySelector<HTMLSelectElement>('[aria-label="异常类型"]')!
+  select.value='channel-price';select.dispatchEvent(new Event('change'));await flush()
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="异常说明"]')!.value).toBe('')
+  expect(button('确认价格异常').disabled).toBe(false)
+  let rejectList!:(error:Error)=>void
+  mocks.page.mockImplementationOnce(()=>new Promise((_resolve,reject)=>{rejectList=reject}))
+  mocks.patch.mockResolvedValue({...saved(),_reviewVersion:2,financeReviewStatus:'rejected',priceException:{category:'channel-price',targets:[]}})
+  button('确认价格异常').click();await flush()
+  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'rejected',exceptionType:'channel-price',note:'',_version:2,_reviewVersion:1})
+  expect(button('正在提交…')).toBeUndefined()
+  expect(document.querySelector<HTMLDialogElement>('[aria-label="选择审核结果"]')!.open).toBe(false)
+  expect(document.querySelector('.record-drawer')?.textContent).toContain('渠道价格异常')
+  expect(document.querySelector('.review-save-success')?.textContent).toContain('审核已完成')
+  rejectList(new Error('列表连接失败'));await flush()
+  expect(document.querySelector('.record-drawer')?.textContent).toContain('渠道价格异常')
+  expect(button('重新审核').disabled).toBe(false)
+  expect(mocks.patch).toHaveBeenCalledTimes(2)
+})
+it('aborts an old list at review start, skips timers during saving and ignores a late pre-review snapshot',async()=>{
+  vi.useFakeTimers();await mount('super_admin','company')
+  let oldList!:(value:unknown)=>void
+  mocks.page.mockImplementationOnce(()=>new Promise(resolve=>{oldList=resolve}))
+  await vi.advanceTimersByTimeAsync(30000);await flush()
+  const oldSignal=mocks.page.mock.lastCall?.[4] as AbortSignal
+  let finishClaim!:(value:unknown)=>void
+  mocks.patch.mockImplementationOnce(()=>new Promise(resolve=>{finishClaim=resolve}))
+  button('开始审核').click();await flush()
+  expect(oldSignal.aborted).toBe(true)
+  const calls=mocks.page.mock.calls.length
+  await vi.advanceTimersByTimeAsync(60000);await flush()
+  expect(mocks.page).toHaveBeenCalledTimes(calls)
+  let newList!:(value:unknown)=>void
+  mocks.page.mockImplementationOnce(()=>new Promise(resolve=>{newList=resolve}))
+  finishClaim(claimed());await flush()
+  expect(mocks.page).toHaveBeenCalledTimes(calls+1)
+  expect(button('审核完成').disabled).toBe(false)
+  oldList(pageResult([{...saved(),id:'old',no:'QT-STALE'}]));await flush()
+  expect(document.querySelector('.records')?.textContent).not.toContain('QT-STALE')
+  expect(document.querySelector('.detail-review-status')?.textContent).toContain('审核中')
+  newList(pageResult([claimed()]));await flush()
+})
+it('uses light polls without repeatedly searching an unchanged full list',async()=>{
+  vi.useFakeTimers();await mount('employee','mine')
+  const pages=mocks.page.mock.calls.length, polls=mocks.get.mock.calls.length
+  await vi.advanceTimersByTimeAsync(12000);await flush()
+  expect(mocks.page).toHaveBeenCalledTimes(pages)
+  expect(mocks.get.mock.calls.length).toBeGreaterThan(polls)
+})
 it.each([['employee','mine'],['super_admin','company']] as const)('uses the same review conclusions regardless of legacy business confirmation for %s',async(role,scope)=>{
   vi.useFakeTimers();await mount(role,scope)
   const states=['pending','reviewing','channel-exempt','approved','rejected','logistics-exempt'] as const
@@ -183,7 +260,7 @@ it('refreshes externally changed review filters, including an empty result becom
   await vi.advanceTimersByTimeAsync(6500);await flush()
   expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 0 条')
   mocks.page.mockResolvedValue({items:[saved()],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]})
-  await vi.advanceTimersByTimeAsync(6500);await flush()
+  await vi.advanceTimersByTimeAsync(30000);await flush()
   expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 1 条')
 })
 it('shows the same live review conclusion in an employee detail without review actions',async()=>{
@@ -212,8 +289,8 @@ it('does not overlap slow filtered-list synchronization with a second timer',asy
   let finish!:(value:unknown)=>void
   mocks.page.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
   const before=mocks.page.mock.calls.length
-  await vi.advanceTimersByTimeAsync(3000);await flush()
-  await vi.advanceTimersByTimeAsync(15000);await flush()
+  await vi.advanceTimersByTimeAsync(30000);await flush()
+  await vi.advanceTimersByTimeAsync(60000);await flush()
   expect(mocks.page).toHaveBeenCalledTimes(before+1)
   finish({items:[saved()],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});await flush()
 })

@@ -56,7 +56,7 @@ it.each(['mine', 'company'])('combines column filters, resets pagination and exp
     button('近 7 天').click()
     await flush();await vi.advanceTimersByTimeAsync(250);await flush()
     const expected={product:'SKU-1',customer:'Alice',channel:'专线',optionScale:'multiple',priceDifference:'lower',status:'won',category:'服装',country:'美国',startDate:'2026-09-04',endDate:'2026-09-10',reviewStatus:'pending'}
-    expect(query.loadRecordPage.mock.lastCall).toEqual([scope,expect.objectContaining(expected),0,10])
+    expect(query.loadRecordPage.mock.lastCall).toEqual([scope,expect.objectContaining(expected),0,10,expect.any(AbortSignal)])
     expect(header.textContent).toContain('任一渠道、数量符合即显示')
     button('导出筛选结果').click();await flush()
     expect(query.loadFilteredRecords).toHaveBeenCalledWith(scope,expect.objectContaining(expected))
@@ -95,7 +95,7 @@ it.each(['mine', 'company'])('filters pending finance reviews and resets paginat
   query.loadRecordPage.mockResolvedValue(result(3))
   button('待审核').click()
   await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
-  expect(query.loadRecordPage.mock.lastCall).toEqual([scope, expect.objectContaining({reviewStatus:'pending'}), 0, 10])
+  expect(query.loadRecordPage.mock.lastCall).toEqual([scope, expect.objectContaining({reviewStatus:'pending'}), 0, 10, expect.any(AbortSignal)])
   expect(document.querySelector('[aria-label="报价记录分页"]')!.textContent).toContain('共 3 条')
   expect(document.querySelector('.record-query-feedback')!.textContent).toContain('共 3 条')
 })
@@ -133,7 +133,7 @@ it.each(['mine', 'company'])('keeps review groups separate and exports the selec
     expect(document.querySelector('.records')?.textContent).toContain('QT-pending')
     expect(document.querySelector('.records')?.textContent).not.toContain('QT-approved')
     rows = rows.map(row => row.financeReviewStatus === 'pending' ? { ...row, financeReviewStatus: 'approved' as const } : row)
-    await vi.advanceTimersByTimeAsync(3000); await flush()
+    await vi.advanceTimersByTimeAsync(30000); await flush()
     expect(document.querySelector('.records')?.textContent).not.toContain('QT-pending')
     expect(document.querySelector('[aria-label="报价记录分页"]')?.textContent).toContain('共 0 条')
     button('审核通过').click(); await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
@@ -151,7 +151,7 @@ it.each(['mine', 'company'])('keeps review groups separate and exports the selec
 
 it('opens a saved batch in the original list with all review states and no central batch entry',async()=>{
  vi.useFakeTimers();route.query={batch:'BQT-14'};query.loadRecordPage.mockResolvedValue(result(14));await mount();
- expect(query.loadRecordPage).toHaveBeenCalledWith('mine',expect.objectContaining({product:'BQT-14',reviewStatus:''}),0,10);
+ expect(query.loadRecordPage).toHaveBeenCalledWith('mine',expect.objectContaining({product:'BQT-14',reviewStatus:''}),0,10,expect.any(AbortSignal));
  expect(document.querySelector<HTMLInputElement>('#record-product-filter')?.value).toBe('BQT-14');
  expect(document.querySelector('.heading')?.textContent).not.toContain('批量单品报价记录');
  expect(document.querySelector('.lifecycle-tabs')?.textContent).not.toContain('历史批量记录');

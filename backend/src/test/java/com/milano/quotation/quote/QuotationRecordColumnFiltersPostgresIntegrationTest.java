@@ -18,11 +18,16 @@ class QuotationRecordColumnFiltersPostgresIntegrationTest {
     private final ObjectMapper mapper=new ObjectMapper();
     private NamedParameterJdbcTemplate jdbc;
     private QuotationRecordQuery query;
-    @BeforeEach void setup() {
+    @BeforeEach void setup() throws Exception {
         jdbc=new NamedParameterJdbcTemplate(new DriverManagerDataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()));
         jdbc.getJdbcTemplate().execute("drop table if exists quotation_review,quotation_record");
         jdbc.getJdbcTemplate().execute("create table quotation_record(id uuid primary key,quote_no text,owner_account text,status text,payload jsonb,version bigint,created_at timestamptz,lifecycle_state text default 'active')");
         jdbc.getJdbcTemplate().execute("create table quotation_review(id uuid primary key,status text,claimant_account text,state jsonb,version bigint)");
+        jdbc.getJdbcTemplate().execute("drop function if exists quotation_product_search_text(text,jsonb)");
+        try (var connection = jdbc.getJdbcTemplate().getDataSource().getConnection()) {
+            org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                new org.springframework.core.io.ClassPathResource("db/migration/V62__quotation_product_search.sql"));
+        }
         query=new QuotationRecordQuery(jdbc,mapper);
     }
     private ObjectNode record(String name, double customerPrice) {
@@ -56,6 +61,21 @@ class QuotationRecordColumnFiltersPostgresIntegrationTest {
         assertEquals(0,query.search("ME",filters("","100__","","",""),0,10).total());
         assertEquals(1,query.search("ME",filters("","","云途","",""),0,10).total());
         assertEquals(1,query.search("ME",filters("","","装专","",""),0,10).total());
+    }
+    @Test void indexedProductFilterRetainsLiteralWildcardsShortNamesBatchAndLegacySemantics() {
+        var row=record("QT-LITERAL",9).put("primarySku","SKU-100%_\\CASE");
+        row.putObject("quotationBatch").put("no","BQT-ONE");
+        row.putArray("bundleItems").addObject().put("sku","BUNDLE+02").put("name","收纳袋");
+        save(row,"ME");
+        var legacy=record("QT-LEGACY",10);legacy.remove("primarySku");legacy.put("bundleItems","old-format");save(legacy,"OTHER");
+        for(var term:List.of("100%_", "%", "_", "\\", "CASE", "张", "张三", "bqt-one", "收纳", "BUNDLE+02"))
+            assertEquals(1,query.search("ME",filters(term,"","","",""),0,10).total(),term);
+        assertEquals(0,query.search("ME",filters("100__","","","",""),0,10).total());
+        assertEquals(0,query.search("ME",filters("Alice","","","",""),0,10).total());
+        assertEquals(1,query.search("OTHER",filters("qt-legacy","","","",""),0,10).total());
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=jsonb_set(payload,'{salespersonName}','\"李四\"') where quote_no='QT-LITERAL'");
+        assertEquals(0,query.search("ME",filters("张三","","","",""),0,10).total());
+        assertEquals(1,query.search("ME",filters("李四","","","",""),0,10).total());
     }
     @Test void usesSavedQuantityBaselineAndAnyChangedCellIncludingMixedAndMissingPrices() {
         save(record("LOW",9),"ME");save(record("EQUAL",10),"ME");save(record("HIGH",11),"ME");
