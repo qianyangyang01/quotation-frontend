@@ -20,6 +20,7 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/v1/batch-single-quotations/{id}")
 public class BatchSingleReview {
+    @org.springframework.beans.factory.annotation.Autowired private PriceExceptionClassification exceptions;
     private final JdbcClient jdbc;
     private final JsonMapper mapper;
     private final BatchSingleQuotation pricing;
@@ -102,9 +103,11 @@ public class BatchSingleReview {
                 for(int index:selected) {
                     var item=(ObjectNode)state.path("items").get(index);var entry=body.path("items").get(offset++);
                     if(!result.equals("rejected")&&item.path("status").asText().equals("rejected"))throw AppException.conflict("退回项须重新查询修正并提交后才能通过");
-                    String reason=result.equals("rejected")?FobQuotation.text(entry.path("reason"),500,true).trim():"";
+                    String reason=result.equals("rejected")?PriceExceptionClassification.optionalExplanation(entry,"reason"):"";
                     var before=item.deepCopy();item.put("status",result.equals("rejected")?"rejected":"approved").put("reviewResult",result).put("reason",reason).put("note",note)
                         .put("reviewedBy",actor.displayName()).put("reviewedAccount",actor.account()).put("reviewedAt",Instant.now().toString());
+                    if(result.equals("rejected"))item.set("priceException",exceptions.captureItem(entry,stored.payload.at("/items/"+index+"/input/primarySku").asText(),"standard"));
+                    else item.remove("priceException");
                     var change=changes.addObject().put("index",index).put("sku",stored.payload.at("/items/"+index+"/input/primarySku").asText());change.set("before",before);change.set("after",item.deepCopy());
                 }
                 release(state);

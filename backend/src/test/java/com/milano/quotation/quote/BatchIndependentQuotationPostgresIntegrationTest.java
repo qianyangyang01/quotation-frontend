@@ -58,7 +58,7 @@ class BatchIndependentQuotationPostgresIntegrationTest {
     JsonNode save(String key,ObjectNode body) throws Exception { return mapper.readTree(submit("employee",key,body).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data"); }
     JsonNode read(String id) throws Exception { return mapper.readTree(mvc.perform(get("/api/v1/quotations/"+id).session(sessions.get("employee"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data"); }
     JsonNode review(JsonNode record,String action,String result) throws Exception {
-        var body=mapper.createObjectNode().put("action",action).put("_version",record.path("_version").asLong()).put("_reviewVersion",record.path("_reviewVersion").asLong()).put("financeReviewStatus",result).put("note","逐条核实");
+        var body=mapper.createObjectNode().put("action",action).put("_version",record.path("_version").asLong()).put("_reviewVersion",record.path("_reviewVersion").asLong()).put("financeReviewStatus",result).put("note","逐条核实").put("exceptionType","other");
         return mapper.readTree(mvc.perform(patch("/api/v1/quotations/"+record.path("id").asText()+"/finance-review").session(sessions.get("finance")).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
     }
     long count(String table) { return jdbc.sql("select count(*) from "+table).query(Long.class).single(); }

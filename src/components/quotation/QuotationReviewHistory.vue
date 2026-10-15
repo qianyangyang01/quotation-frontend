@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import PriceExceptionSummary from './PriceExceptionSummary.vue'
 import { loadQuotationReviewHistory, financeReviewLabel, type QuotationReviewEvent } from '@/data/quotationRecords'
 const props=defineProps<{ id:string; version?:number; account:string }>()
 const rows=ref<QuotationReviewEvent[]>([]),error=ref('')
@@ -12,7 +13,7 @@ watch(()=>[props.id,props.version,props.account],async()=>{
 const labels:Record<string,string>={'fob-return':'逐项退回','fob-approve':'逐项审核完成','fob-resubmit':'异常项重新提交','spot-check':'标记已抽检','spot-check-cancel':'取消抽检标记','priority-set':'设为优先处理','priority-cancel':'取消优先处理','priority-ended':'退出优先队列',comment:'添加审核意见',withdraw:'撤回报价，原审核失效',claim:'开始审核',cancel:'取消审核',release:'管理员解除占用',complete:'审核完成','content-changed':'报价变更，需重新核对','legacy-review':'历史审核结果'}
 </script>
 <template>
-  <section class="review-history"><b>财务审核记录</b><p v-if="error" role="alert">{{ error }}</p><p v-else-if="!rows.length">暂无新增审核操作；此前审核记录保留在修改记录中。</p><article v-for="row in rows" :key="row.id"><span>{{ row.actorName }}（{{ row.actorAccount }}） · {{ row.at ? new Date(row.at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}) : '历史时间未保存' }}</span><strong>{{ labels[row.action] || row.action }} · {{ financeReviewLabel(row.after) }}</strong><p v-if="row.note">{{ row.note }}</p><p v-for="item in row.itemChanges" :key="item.index">{{ item.sku }}（第{{ item.index+1 }}项） · {{ item.status==='pending'?'待复核':item.reviewResult ? financeReviewLabel(item.reviewResult) : item.status==='approved'?'审核通过':'价格异常 · 已退回' }}<template v-if="item.reason"> · 退回原因：{{ item.reason }}</template></p></article></section>
+  <section class="review-history"><b>财务审核记录</b><p v-if="error" role="alert">{{ error }}</p><p v-else-if="!rows.length">暂无新增审核操作；此前审核记录保留在修改记录中。</p><article v-for="row in rows" :key="row.id"><span>{{ row.actorName }}（{{ row.actorAccount }}） · {{ row.at ? new Date(row.at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}) : '历史时间未保存' }}</span><strong>{{ labels[row.action] || row.action }} · {{ financeReviewLabel(row.after) }}</strong><PriceExceptionSummary v-if="row.after === 'rejected' && ['complete','legacy-review'].includes(row.action)" :value="row.priceException" /><p v-if="row.note">{{ row.note }}</p><div class="item-history" v-for="item in row.itemChanges" :key="item.index">{{ item.sku }}（第{{ item.index+1 }}项） · {{ item.status==='pending'?'待复核':item.reviewResult ? financeReviewLabel(item.reviewResult) : item.status==='approved'?'审核通过':'价格异常 · 已退回' }}<PriceExceptionSummary v-if="item.status === 'rejected'" :value="item.priceException" /><template v-if="item.reason"> · 退回原因：{{ item.reason }}</template></div></article></section>
 </template>
 <style scoped>
 .review-history{padding:16px 24px;border-top:1px solid #e2e7ee;color:#526071;font-size:13px}.review-history article{display:flex;flex-direction:column;gap:6px;border-top:1px solid #edf0f4;padding:12px 0}.review-history p{white-space:pre-wrap;line-height:1.5}.review-history b{display:block;margin-bottom:12px;color:#25344a}

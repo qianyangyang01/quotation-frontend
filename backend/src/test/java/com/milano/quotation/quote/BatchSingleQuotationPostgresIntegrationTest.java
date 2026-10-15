@@ -110,8 +110,10 @@ class BatchSingleQuotationPostgresIntegrationTest {
         mutate("super_admin",row,"review",approve,key).andExpect(status().isOk()).andExpect(jsonPath("$.data._reviewVersion").value(approved.path("_reviewVersion").asInt()));
         assertEquals("pending",approved.at("/review/items/0/status").asText());assertEquals("channel-exempt",approved.at("/review/items/2/reviewResult").asText());
         claimed=change(approved,action(approved,"claim"));var reject=action(claimed,"complete").put("result","rejected");reject.putArray("items").addObject().put("index",0).put("reason","");
-        mutate("super_admin",row,"review",reject,"empty-reason").andExpect(status().isUnprocessableEntity());
-        ((ObjectNode)reject.at("/items/0")).put("reason","采购价格需核实");var returned=change(row,reject);
+        mutate("super_admin",row,"review",reject,"missing-category").andExpect(status().isUnprocessableEntity());
+        ((ObjectNode)reject.at("/items/0")).put("exceptionType","purchase-price");var returned=change(row,reject);
+        assertEquals("",returned.at("/review/items/0/reason").asText());
+        assertEquals("purchase-price",returned.at("/review/items/0/priceException/category").asText());
         assertEquals("pending",returned.at("/review/items/1/status").asText());assertEquals(approved.at("/review/items/2"),returned.at("/review/items/2"));
         claimed=change(returned,action(returned,"claim"));var illegal=action(claimed,"complete").put("result","approved");illegal.putArray("items").addObject().put("index",0);
         mutate("super_admin",row,"review",illegal,"uncorrected").andExpect(status().isConflict());

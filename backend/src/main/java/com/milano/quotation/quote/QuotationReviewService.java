@@ -30,10 +30,11 @@ public class QuotationReviewService {
     static final Set<String> SPOT_CHECK_FIELDS = Set.of("spotChecked", "spotCheckedAt", "spotCheckedBy", "spotCheckedAccount");
     static final Set<String> VIEW_FIELDS = Set.of("financeReviewStatus", "financeReviewedAt", "financeReviewedBy", "financeReviewedAccount",
         "financeReviewStartedAt", "financeReviewClaimedBy", "financeReviewClaimedAccount", "financeReviewNote",
-        "financeReviewCommentCount", "financeReviewLatestComment");
+        "financeReviewCommentCount", "financeReviewLatestComment", "priceException");
     private final QuotationReviewRepository reviews;
     private final AuditService audit;
     @org.springframework.beans.factory.annotation.Autowired private QuotationReviewNotifications notifications;
+    @org.springframework.beans.factory.annotation.Autowired private PriceExceptionClassification exceptions;
     public QuotationReviewService(QuotationReviewRepository reviews, AuditService audit) { this.reviews=reviews; this.audit=audit; }
     String currentStatus(QuotationRecordEntity quote) {
         return reviews.findById(quote.id).map(row->row.status).orElseGet(()->legacy(quote.payload).path("financeReviewStatus").asText());
@@ -196,6 +197,8 @@ public class QuotationReviewService {
                 var result=request.path("financeReviewStatus").asText();
                 if(!Set.of("approved","rejected","channel-exempt","logistics-exempt").contains(result)) throw AppException.unprocessable("请选择审核结论");
                 if(FobQuotation.isFob(quote.payload) && result.equals("channel-exempt")) throw AppException.unprocessable("FOB报价没有物流渠道，请选择审核通过或价格异常");
+                if(result.equals("rejected"))current.set("priceException",exceptions.capture(request,quote.payload));
+                else current.remove("priceException");
                 row.status=result;
                 current.put("financeReviewedBy",actor.displayName()).put("financeReviewedAccount",actor.account()).put("financeReviewedAt",Instant.now().toString());
                 current.put("financeReviewNote",note);
@@ -209,10 +212,14 @@ public class QuotationReviewService {
             event(current, actor, "priority-ended", before, row.status, "", quote.version);
         }
         event(current,actor,action,before,row.status,note,quote.version);
+        if(action.equals("complete") && row.status.equals("rejected"))
+            ((ObjectNode)current.path("history").get(current.path("history").size()-1)).set("priceException",current.path("priceException").deepCopy());
         row.state=current;reviews.saveAndFlush(row);
         if (Set.of("complete","comment").contains(action)) notifications.publish(quote,row,action,note,actor);
         else notifications.invalidate(quote.id);
-        audit.record("quotation.review."+action,"quotation",quote.id.toString(),"success",Map.of("before",before,"after",row.status,"note",note));
+        var detail=new LinkedHashMap<String,Object>();detail.put("before",before);detail.put("after",row.status);detail.put("note",note);
+        if(action.equals("complete") && row.status.equals("rejected"))detail.put("priceException",current.path("priceException"));
+        audit.record("quotation.review."+action,"quotation",quote.id.toString(),"success",detail);
     }
     private void requireQuoteVersion(QuotationRecordEntity quote,ObjectNode request) {
         if(!request.path("_version").isIntegralNumber() || request.path("_version").asLong(-1)!=quote.version)

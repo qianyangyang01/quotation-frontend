@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import PriceExceptionSummary from './PriceExceptionSummary.vue'
 import { loadQuotationReviewHistory, reviewQuotationRecord, type QuotationRecord, type QuotationReviewEvent, type QuotationReviewState } from '@/data/quotationRecords'
 
 const props = defineProps<{ record: QuotationRecord; state: QuotationReviewState; account: string; canReview: boolean; busy: boolean }>()
@@ -80,7 +81,7 @@ onUnmounted(() => { disposed = true; generation++ })
         <p v-if="loading" role="status">正在加载意见…</p>
         <p v-else-if="loadError" class="comment-error" role="alert">{{ loadError }} <button type="button" @click="loadHistory">重新加载意见</button></p>
         <p v-else-if="!history.length">暂无审核意见</p>
-        <article v-for="item in history" :key="item.id"><small>{{ item.actorName }} · {{ time(item.at) }}</small><p>{{ item.note }}</p></article>
+        <article v-for="item in history" :key="item.id"><small>{{ item.actorName }} · {{ time(item.at) }}</small><PriceExceptionSummary v-if="item.after === 'rejected' && item.action !== 'comment'" :value="item.priceException" /><p>{{ item.note }}</p></article>
       </section>
       <footer><button type="button" :disabled="saving" @click="close">{{ canWrite ? '取消' : '关闭' }}</button><button v-if="canWrite" type="button" class="comment-save" :disabled="saving || busy || changed || !note.trim() || note.trim().length > 500" :aria-busy="saving" @click="save">{{ saving ? '保存中…' : '保存意见' }}</button></footer>
     </dialog>

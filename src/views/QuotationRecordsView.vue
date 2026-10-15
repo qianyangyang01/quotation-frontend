@@ -16,6 +16,7 @@ import QuotationSpotCheck from '@/components/quotation/QuotationSpotCheck.vue'
 import QuotationReviewPanel from '@/components/quotation/QuotationReviewPanel.vue'
 import QuotationReviewButton from '@/components/quotation/QuotationReviewButton.vue'
 import QuotationReviewComments from '@/components/quotation/QuotationReviewComments.vue'
+import PriceExceptionSummary from '@/components/quotation/PriceExceptionSummary.vue'
 import QuotationReviewHistory from '@/components/quotation/QuotationReviewHistory.vue'
 import QuotationRevisionSnapshot from '@/components/quotation/QuotationRevisionSnapshot.vue'
 import QuotationWeightTrace from '@/components/quotation/QuotationWeightTrace.vue'
@@ -662,7 +663,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <span v-else-if="reviewSync.stateFor(selected).financeReviewedAt"> · 审核于 {{ dateTime(reviewSync.stateFor(selected).financeReviewedAt) }}</span>
           </div>
           <QuotationSpotCheck :state="reviewSync.stateFor(selected)" :can-mark="canSpotCheck && isActive(selected)" :busy="spotCheckBusy.has(selected.id) || lifecycleBusy || mutationBusy" detail @mark="markSpotChecked(selected)" />
-          <div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @viewed="reviewViewed(selected,$event)" /></div>
+          <PriceExceptionSummary v-if="reviewSync.stateFor(selected).financeReviewStatus === 'rejected' && !selected.fob?.items?.length" :value="reviewSync.stateFor(selected).priceException" /><div class="detail-review-comments"><QuotationReviewComments :record="selected" :state="reviewSync.stateFor(selected)" :account="currentAuthUser.account" :can-review="canReview&&isActive(selected)" :busy="reviewing.has(selected.id)||lifecycleBusy" @saved="commentSaved" @viewed="reviewViewed(selected,$event)" /></div>
           </div>
           <nav class="detail-tabs drawer-tabs"><button :class="{active:detailTab==='overview'}" @click="detailTab='overview'">报价概览</button><button v-if="selected.fob?.schemaVersion===2" :class="{active:detailTab==='sheet'}" @click="detailTab='sheet'">客户报价单</button><button v-if="selected.quoteMode!=='fob'" :class="{active:detailTab==='options'}" @click="detailTab='options'">国家与渠道 <i>{{ recordOptions(selected).length }}</i></button><button :class="{active:detailTab==='history'}" @click="detailTab='history'">修改记录 <i>{{ revisionGroups.length }}</i></button></nav>
           <QuotationFeatureBoundary v-if="selected.fob?.schemaVersion===2" :active="detailTab==='overview'" :key="selected.id" label="FOB逐项审核" @close="closeDrawer">

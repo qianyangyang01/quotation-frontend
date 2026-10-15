@@ -46,7 +46,7 @@ class QuotationFinanceReviewIntegrationTest {
         var sheet=p.putObject("sheetQuote");sheet.putArray("quantities").add(1);sheet.putArray("rows").addObject().put("optionId","us").putArray("prices").add(6.35);p.set("customerQuote",sheet.deepCopy());r.payload=p;return records.saveAndFlush(r);
     }
     ResultActions action(QuotationRecordEntity r,RequestPostProcessor actor,long qv,long rv,String action,String result,String note) throws Exception {
-        var b=mapper.createObjectNode().put("_version",qv).put("_reviewVersion",rv).put("action",action).put("note",note);if(result!=null)b.put("financeReviewStatus",result);
+        var b=mapper.createObjectNode().put("_version",qv).put("_reviewVersion",rv).put("action",action).put("note",note);if(result!=null)b.put("financeReviewStatus",result);if("rejected".equals(result))b.put("exceptionType","other");
         return mvc.perform(patch("/api/v1/quotations/{id}/finance-review",r.id).with(actor).with(csrf()).contentType("application/json").content(mapper.writeValueAsString(b)));
     }
     JsonNode view(QuotationRecordEntity r) throws Exception {return mapper.readTree(mvc.perform(get("/api/v1/quotations/{id}",r.id).with(employee)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");}
@@ -148,7 +148,7 @@ class QuotationFinanceReviewIntegrationTest {
         for (var result:List.of("approved","rejected","channel-exempt","logistics-exempt")) {
             var r=record();priority(r,employee,true,0).andExpect(status().isOk());claim(r);
             var stale=rv(r);
-            action(r,finance,qv(r),stale,"complete",result,"").andExpect(status().isOk()).andExpect(jsonPath("$.data.priorityProcessing").value(false));
+            action(r,finance,qv(r),stale,"complete",result,"请核实价格").andExpect(status().isOk()).andExpect(jsonPath("$.data.priorityProcessing").value(false));
             priority(r,employee,true,stale).andExpect(status().isConflict());
             priority(r,employee,true,rv(r)).andExpect(status().isConflict());
             claim(r);assertFalse(view(r).path("priorityProcessing").asBoolean());
@@ -279,9 +279,9 @@ class QuotationFinanceReviewIntegrationTest {
     @Test void preservesLegacyConclusionsAndRejectsOldDirectReviewApi() throws Exception {
         var r=record();((ObjectNode)r.payload).put("financeReviewStatus","approved").put("financeReviewedBy","历史审核人");r=records.saveAndFlush(r);assertEquals("approved",view(r).path("financeReviewStatus").asText());
         mvc.perform(patch("/api/v1/quotations/{id}/finance-review",r.id).with(finance).with(csrf()).contentType("application/json").content("{\"_version\":1,\"financeReviewStatus\":\"approved\"}")).andExpect(status().isUnprocessableEntity());
-        claim(r);action(r,finance,qv(r),rv(r),"complete","rejected","").andExpect(status().isOk());
+        claim(r);action(r,finance,qv(r),rv(r),"complete","rejected","请核实价格").andExpect(status().isOk());
         assertEquals("rejected",view(r).path("financeReviewStatus").asText());
-        assertEquals("",view(r).path("financeReviewNote").asText());
+        assertEquals("请核实价格",view(r).path("financeReviewNote").asText());
         assertEquals(r.payload,records.findById(r.id).orElseThrow().payload);
         assertEquals(r.version,qv(r));
         assertEquals("rejected",reviews.findById(r.id).orElseThrow().state.path("history").get(2).path("after").asText());
@@ -377,4 +377,20 @@ class QuotationFinanceReviewIntegrationTest {
         var input=PackagingWeightTest.valid();input.put("financeReviewStatus","reviewing").put("financeReviewClaimedAccount","forged").put("_reviewVersion",90);
         mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key",UUID.randomUUID()).contentType("application/json").content(mapper.writeValueAsString(input))).andExpect(status().isOk()).andExpect(jsonPath("$.data.financeReviewStatus").value("pending")).andExpect(jsonPath("$.data.financeReviewClaimedAccount").doesNotExist()).andExpect(jsonPath("$.data._reviewVersion").value(0));
     }
+    @Test void classificationIsRequiredAtomicAndPreservedInHistoryWithoutChangingQuote() throws Exception {
+        var r=record();claim(r);var before=records.findById(r.id).orElseThrow();long version=rv(r);
+        var body=mapper.createObjectNode().put("_version",qv(r)).put("_reviewVersion",version).put("action","complete").put("financeReviewStatus","rejected").put("note","请核实渠道计费");
+        mvc.perform(patch("/api/v1/quotations/{id}/finance-review",r.id).with(finance).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isUnprocessableEntity());
+        assertEquals(version,rv(r));assertEquals("reviewing",view(r).path("financeReviewStatus").asText());
+        body.put("exceptionType","channel-price").put("note","  ");
+        // A selected category may be submitted with a blank explanation.
+        mvc.perform(patch("/api/v1/quotations/{id}/finance-review",r.id).with(finance).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk()).andExpect(jsonPath("$.data.priceException.category").value("channel-price"));
+        var history=reviews.findById(r.id).orElseThrow().state.path("history");
+        assertEquals("channel-price",history.get(history.size()-1).at("/priceException/category").asText());
+        var after=records.findById(r.id).orElseThrow();assertEquals(before.payload,after.payload);assertEquals(before.version,after.version);assertEquals(before.updatedAt,after.updatedAt);
+        claim(r);action(r,finance,qv(r),rv(r),"complete","approved","").andExpect(status().isOk());
+        assertFalse(view(r).has("priceException"));
+        assertTrue(reviews.findById(r.id).orElseThrow().state.path("history").toString().contains("channel-price"));
+    }
+
 }

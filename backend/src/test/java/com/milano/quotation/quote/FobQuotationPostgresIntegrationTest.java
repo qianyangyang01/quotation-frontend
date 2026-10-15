@@ -145,8 +145,8 @@ class FobQuotationPostgresIntegrationTest {
         correction("super_admin",row,"review",approval,"selected-approval").andExpect(status().isOk());
         claimed=claim(read("employee",row.path("id").asText()));
         var body=versions(claimed).put("action","return").put("approveOthers",false);
-        body.putArray("items").addObject().put("index",0).put("reason","采购克重不对，请核实");
-        body.withArray("items").addObject().put("index",1).put("reason","采购价格异常，自定义原因");
+        body.putArray("items").addObject().put("index",0).put("reason","采购克重不对，请核实").put("exceptionType","other");
+        body.withArray("items").addObject().put("index",1).put("exceptionType","purchase-price");
         correction("super_admin",row,"review",body,"unused").andExpect(status().isOk());return read("employee",row.path("id").asText());
     }
     ObjectNode fresh(JsonNode row,int index) throws Exception {

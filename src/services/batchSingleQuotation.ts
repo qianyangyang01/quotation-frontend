@@ -1,3 +1,4 @@
+import type { PriceException, PriceExceptionType } from '@/data/priceExceptions'
 import type { createQuotationRecord } from '@/data/quotationRecords'
 import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import type { QuotationDraftPayload } from './quotationDrafts'
@@ -24,7 +25,7 @@ export interface BatchSingleDocument {
   review?: BatchSingleReviewState
 }
 export type BatchReviewResult = 'approved' | 'rejected' | 'channel-exempt' | 'logistics-exempt'
-export interface BatchItemReview { index: number; status: 'pending' | 'approved' | 'rejected'; reviewResult?: BatchReviewResult; reason?: string; note?: string; reviewedBy?: string; reviewedAccount?: string; reviewedAt?: string }
+export interface BatchItemReview { priceException?: PriceException; index: number; status: 'pending' | 'approved' | 'rejected'; reviewResult?: BatchReviewResult; reason?: string; note?: string; reviewedBy?: string; reviewedAccount?: string; reviewedAt?: string }
 export interface BatchSingleReviewState {
   status: string; revision: number; claimantAccount?: string; claimantName?: string; claimedAt?: string
   items: BatchItemReview[]
@@ -39,7 +40,7 @@ export function approvedBatchSheet(document: BatchSingleDocument): CustomerQuote
   const approved = new Set(document.items.flatMap((item, index) => states[index]?.status === 'approved' ? item.sheet.rows.map(row => `${index}:${row.key}`) : []))
   return { ...document.sheet, rows: document.sheet.rows.filter(row => approved.has(row.key)).map((row, index) => ({ ...row, number: index + 1 })) }
 }
-export function reviewBatchSingle(document: BatchSingleDocument, action: 'claim' | 'cancel' | 'complete', key: string, options: { result?: BatchReviewResult; note?: string; items?: Array<{ index: number; reason?: string }> } = {}) {
+export function reviewBatchSingle(document: BatchSingleDocument, action: 'claim' | 'cancel' | 'complete', key: string, options: { result?: BatchReviewResult; note?: string; items?: Array<{ index: number; reason?: string; exceptionType?: PriceExceptionType }> } = {}) {
   return request<BatchSingleDocument>(`/batch-single-quotations/${encodeURIComponent(document.id!)}/review`, { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ _reviewVersion: document._reviewVersion ?? 0, action, ...options }) })
 }
 export function correctBatchSingle(document: BatchSingleDocument, index: number, fresh: BatchSingleDocument, key: string) {

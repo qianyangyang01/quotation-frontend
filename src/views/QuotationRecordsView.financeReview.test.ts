@@ -217,18 +217,24 @@ it('does not overlap slow filtered-list synchronization with a second timer',asy
   expect(mocks.page).toHaveBeenCalledTimes(before+1)
   finish({items:[saved()],page:0,size:10,total:1,totalPages:1,summary:{pending:1,won:0,lost:0,total:1},countries:[]});await flush()
 })
-it('submits a price exception without a note and keeps the selector openable after failure',async()=>{
+it('requires classification with an optional explanation, and retains the rejection form after a failure',async()=>{
   vi.useFakeTimers();await mount('super_admin','company')
   mocks.patch.mockResolvedValue(claimed());button('开始审核').click();await flush()
-  button('审核完成').click();await flush()
-  expect(document.querySelector<HTMLTextAreaElement>('dialog[aria-label="选择审核结果"] textarea')?.required).toBe(false)
-  mocks.patch.mockRejectedValueOnce(new Error('提交失败'))
-  button('价格异常不可报价').click();await flush()
-  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'rejected',note:'',_version:2,_reviewVersion:1})
+  button('审核完成').click();await flush();button('价格异常不可报价').click();await flush()
+  expect(button('确认价格异常').disabled).toBe(true)
+  expect(mocks.patch).toHaveBeenCalledTimes(1)
+  const select=document.querySelector<HTMLSelectElement>('[aria-label="异常类型"]')!
+  expect(select.value).toBe('');select.value='channel-price';select.dispatchEvent(new Event('change'));await flush()
+  expect(button('确认价格异常').disabled).toBe(false)
+  const note=document.querySelector<HTMLTextAreaElement>('[aria-label="异常说明"]')!
+  note.value='渠道运费需核实';note.dispatchEvent(new Event('input'));await flush()
+  mocks.patch.mockRejectedValueOnce(new Error('提交失败'));button('确认价格异常').click();await flush()
+  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'rejected',note:'渠道运费需核实',exceptionType:'channel-price',_version:2,_reviewVersion:1})
   expect(document.body.textContent).toContain('提交失败')
-  button('审核完成').click();await flush()
+  expect(document.querySelector<HTMLDialogElement>('[aria-label="确认价格异常"]')!.open).toBe(true)
+  expect(note.value).toBe('渠道运费需核实')
   mocks.patch.mockResolvedValue({...saved(),_reviewVersion:2,financeReviewStatus:'rejected',financeReviewedBy:'ADMIN'})
-  button('价格异常不可报价').click();await flush()
+  button('确认价格异常').click();await flush()
   expect(document.querySelector('.finance-review.rejected')).not.toBeNull()
 })
 it('closes the result selector when a newer quotation arrives',async()=>{

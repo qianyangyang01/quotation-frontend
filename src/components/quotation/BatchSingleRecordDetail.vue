@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { priceExceptionLabel, type PriceException } from '@/data/priceExceptions'
 import { batchItemReviews, batchReviewLabels, approvedBatchSheet, loadBatchSingleRecord, loadBatchSingleOriginal, type BatchSingleDocument } from '@/services/batchSingleQuotation'
 import { currentAuthUser, hasPermission } from '@/data/authStore'
 import BatchSingleReviewActions from './BatchSingleReviewActions.vue'
@@ -22,7 +23,7 @@ function selectPage() { if (!own.value || actions.value?.busy) return; selected.
 function close() { if (actions.value?.busy || refreshing.value) return; if ((selected.value.length || actions.value?.hasUnsavedChanges) && !window.confirm('还有未提交的选择或审核意见，确定关闭并放弃吗？')) return; emit('close') }
 async function reload() { if (!props.document.id || refreshing.value) return; const id = props.document.id, account = currentAuthUser.value.account; refreshing.value = true; error.value = ''; try { const fresh = await loadBatchSingleRecord(id); if (props.document.id === id && account === currentAuthUser.value.account) emit('updated', fresh) } catch (e) { error.value = e instanceof Error ? e.message : '读取失败' } finally { refreshing.value = false } }
 async function showOriginal() { tab.value = 'original'; if (!props.document.id) return; const id = props.document.id, account = currentAuthUser.value.account; try { const result = await loadBatchSingleOriginal(id); if (id === props.document.id && account === currentAuthUser.value.account) original.value = result } catch (e) { error.value = e instanceof Error ? e.message : '读取失败' } }
-function outcome(value: unknown) { const item = value as { reviewResult?: string; status?: string; reason?: string; note?: string }; return [batchReviewLabels[item.reviewResult || item.status || ''] || '', item.reason || item.note || ''].filter(Boolean).join(' · ') }
+function outcome(value: unknown) { const item = value as { priceException?: PriceException; reviewResult?: string; status?: string; reason?: string; note?: string }; return [batchReviewLabels[item.reviewResult || item.status || ''] || '', item.status === 'rejected' ? priceExceptionLabel(item.priceException?.category) : '', item.reason || item.note || ''].filter(Boolean).join(' · ') }
 watch(() => [props.document.id, props.document._reviewVersion, currentAuthUser.value.account], () => { selected.value = []; original.value = undefined })
 const query = ref(''), page = ref(0), pageSize = ref(10), tab = ref<'details' | 'sheet' | 'history' | 'original'>('details')
 const expanded = ref(new Set(props.document.items.slice(0, 1).map(item => item.input.primarySku)))

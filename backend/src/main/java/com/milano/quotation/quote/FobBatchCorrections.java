@@ -18,6 +18,7 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/v1/quotations/{id}/fob-corrections")
 public class FobBatchCorrections {
+    @org.springframework.beans.factory.annotation.Autowired private PriceExceptionClassification exceptions;
     private final QuotationRecordRepository records;
     private final QuotationReviewRepository reviews;
     private final FobQuotation pricing;
@@ -88,7 +89,11 @@ public class FobBatchCorrections {
         for(int index:selected) {
             var item=(ObjectNode)items.get(index);var entry=body.path("items").get(offset++);
             if(action.equals("approve")&&item.path("status").asText().equals("rejected"))throw AppException.conflict("退回项必须由业务员重新查询提交后再审核");
-            String reason=action.equals("return")?FobQuotation.text(entry.path("reason"),500,true).trim():"";
+            String reason=action.equals("return")?PriceExceptionClassification.optionalExplanation(entry,"reason"):"";
+            if(action.equals("return")) {
+                var product=snapshot(quote,current).path("items").get(index).path("product");
+                item.set("priceException",exceptions.captureItem(entry,product.path("sku").asText(),product.path("source").asText()));
+            } else item.remove("priceException");
             item.put("status",action.equals("return")?"rejected":"approved").put("reviewResult",result).put("note",reviewNote).put("reason",reason)
                 .put("reviewedBy",actor.displayName()).put("reviewedAt",Instant.now().toString());
         }
@@ -202,6 +207,10 @@ public class FobBatchCorrections {
         var details=((ObjectNode)current.path("history").get(current.path("history").size()-1)).putArray("itemChanges");
         for(int index:selected)details.addObject().put("index",index).put("sku",snapshot(quote,current).path("items").get(index).at("/product/sku").asText())
             .put("status",states.get(index).path("status").asText()).put("reviewResult",states.get(index).path("reviewResult").asText()).put("note",states.get(index).path("note").asText()).put("reason",states.get(index).path("reason").asText());
+        for(int i=0;i<selected.size();i++) {
+            var source=states.get(selected.get(i));
+            if(source.has("priceException"))((ObjectNode)details.get(i)).set("priceException",source.path("priceException").deepCopy());
+        }
         row.state=current;reviews.saveAndFlush(row);
         if(rejected||!pending) {
             String notificationNote=rejected&&pending?note+"；仍有退回项待处理，已提交项进入待审核列表":note;
