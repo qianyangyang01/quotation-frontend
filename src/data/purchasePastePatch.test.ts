@@ -19,7 +19,8 @@ describe('sparse purchase paste', () => {
   it('defers missing group members to merged server validation, rejecting invalid supplied values', () => {
     const row = Object.assign(emptyPurchasePasteRow(), { 3: 'AB-C', 8: '10', 14: '9' })
     expect(validatePurchasePaste([row], true).canSave).toBe(true)
-    row[8] = '0'; expect(validatePurchasePaste([row], true).canSave).toBe(false)
+    row[8] = '0'; expect(validatePurchasePaste([row], true).canSave).toBe(true)
+    row[8] = '-1'; expect(validatePurchasePaste([row], true).canSave).toBe(false)
     row[8] = '10'; row[14] = '-2'; expect(validatePurchasePaste([row], true).canSave).toBe(false)
     row[14] = '9'; row[22] = '101%'; expect(validatePurchasePaste([row], true).canSave).toBe(false)
   })
@@ -29,5 +30,11 @@ describe('sparse purchase paste', () => {
     const result = validatePurchasePaste([emptyPurchasePasteRow(), a, b], true)
     expect(result.records).toEqual([{ sku: 'AB-C', sourceRow: 2, purchasePriceCny: 8 }])
     expect(result.skippedRows).toEqual([{ sku: 'AB-C', sourceRow: 3 }])
+  })
+  it.each(['0', '0.00', ' 0 '])('treats dimension %s as a blank patch without losing other zero values', zero => {
+    const row = Object.assign(emptyPurchasePasteRow(), { 3: 'TC2600009-1', 8: zero, 9: zero, 10: zero, 12: '0', 17: '0', 22: '0%' })
+    const result = validatePurchasePaste([row], true)
+    expect(result.canSave).toBe(true)
+    expect(result.records).toEqual([{ sku: 'TC2600009-1', sourceRow: 1, purchasePriceCny: 0, singleFreightCny: 0, taxPoint: 0 }])
   })
 })

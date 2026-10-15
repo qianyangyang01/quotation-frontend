@@ -6,6 +6,7 @@ import java.util.List;
 
 /** Validation for data-only paste. Existing import/editor workflows keep their own rules. */
 final class PurchasePasteValidator {
+    static final List<String> DIMENSIONS = List.of("lengthCm", "widthCm", "heightCm");
     private PurchasePasteValidator() {}
     static void validate(ObjectNode row, int index) {
         validateValues(row, index, false);
@@ -29,8 +30,10 @@ final class PurchasePasteValidator {
             if (row.hasNonNull(fields[0]) != row.hasNonNull(fields[1])) fail(prefix, "阶梯起订量与价格须一起填写");
             if (row.hasNonNull(fields[0]) && (!row.hasNonNull(fields[2]) || row.path(fields[0]).asDouble() <= row.path(fields[2]).asDouble())) fail(prefix, "阶梯起订量须逐档递增，请按顺序填写");
         }
-        var dimensions = List.of("lengthCm", "widthCm", "heightCm");
-        if (dimensions.stream().anyMatch(row::hasNonNull) && dimensions.stream().anyMatch(f -> !row.hasNonNull(f) || row.path(f).asDouble() <= 0)) fail(prefix, "长宽高须一起填写且大于0；也可全部留空");
+        // Legacy zero dimensions represent missing measurements. Do not rewrite stored values during validation.
+        if (DIMENSIONS.stream().anyMatch(f -> row.hasNonNull(f) && row.path(f).asDouble() > 0)
+                && DIMENSIONS.stream().anyMatch(f -> !row.hasNonNull(f) || row.path(f).asDouble() <= 0))
+            fail(prefix, "长宽高须一起填写且大于0；也可全部留空（0按空值处理）");
         var free = row.path("freeShipping").asText("");
         if (!List.of("", "是", "否").contains(free)) fail(prefix, "是否包邮请填写是或否");
         if (!free.equals("是") && (!row.hasNonNull("singleFreightCny") || (!legacy && !row.hasNonNull("freight10Cny")))) fail(prefix, legacy ? "未包邮时须填写1件总运费" : "未包邮时须填写1件及10件总运费");

@@ -4,7 +4,7 @@ import { normalizePurchaseRecord, type PurchaseProductRecord } from './purchaseS
 export const PURCHASE_PASTE_COLUMNS = [
   ['报价日期*', 'quotationDate'], ['报价人*', 'quotationOwner'], ['备注', 'notes'], ['SKU', 'sku'],
   ['克重(g)*', 'weightG'], ['尺码', 'size'], ['颜色', 'color'], ['材质', 'material'],
-  ['长(cm)*', 'lengthCm'], ['宽(cm)*', 'widthCm'], ['高(cm)*', 'heightCm'], ['起订量(件)*', 'minOrderQty'],
+  ['长(cm)', 'lengthCm'], ['宽(cm)', 'widthCm'], ['高(cm)', 'heightCm'], ['起订量(件)*', 'minOrderQty'],
   ['基准采购单价(CNY/件)*', 'purchasePriceCny'], ['阶梯价2起订量', 'tier2MinQty'], ['阶梯价2(CNY/件)', 'tier2PriceCny'],
   ['阶梯价3起订量', 'tier3MinQty'], ['阶梯价3(CNY/件)', 'tier3PriceCny'], ['1件总运费(CNY)', 'singleFreightCny'],
   ['10件总运费(CNY)', 'freight10Cny'], ['100件总运费(CNY)', 'freight100Cny'], ['是否包邮', 'freeShipping'],
@@ -62,6 +62,7 @@ export function applyPurchasePaste(grid: string[][], clipboard: string[][], star
 
 export type PurchasePasteIssue = { row: number; column: number; message: string }
 const numericFields = new Set(['weightG', 'lengthCm', 'widthCm', 'heightCm', 'minOrderQty', 'purchasePriceCny', 'tier2MinQty', 'tier2PriceCny', 'tier3MinQty', 'tier3PriceCny', 'singleFreightCny', 'freight10Cny', 'freight100Cny', 'taxIncludedPriceCny', 'taxPoint'])
+const dimensionFields = new Set(['lengthCm', 'widthCm', 'heightCm'])
 export type PurchasePastePatch = Partial<PurchaseProductRecord> & { sku: string; sourceRow: number }
 type PasteCheck<T> = { issues: PurchasePasteIssue[]; records: T[]; skipped: string[]; skippedRows: { sku: string; sourceRow: number }[]; canSave: boolean }
 export function validatePurchasePaste(grid: string[][], sparse: true): PasteCheck<PurchasePastePatch>
@@ -84,6 +85,8 @@ export function validatePurchasePaste(grid: string[][], sparse = false): PasteCh
       const numeric = field === 'taxPoint' ? raw.replace(/[％%]$/, '') : raw
       const value = Number(numeric)
       if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(numeric) || !Number.isFinite(value) || value < 0) issue(field, '请填写有效非负数字')
+      // Dimension zero means missing, including sparse updates where blanks preserve the old value.
+      if (dimensionFields.has(field) && value === 0) { if (!sparse) data[field] = null; return }
       data[field] = field === 'taxPoint' && (/[％%]$/.test(raw) || value > 1) ? value / 100 : value
       if (field === 'taxPoint' && Number(data[field]) > 1) issue(field, '票点须在0%至100%之间')
     })
@@ -101,8 +104,8 @@ export function validatePurchasePaste(grid: string[][], sparse = false): PasteCh
       if ((data[qty!] == null) !== (data[price!] == null)) issue(data[qty!] == null ? qty! : price!, '阶梯起订量与价格须一起填写')
       if (data[qty!] != null && (data[previous!] == null || Number(data[qty!]) <= Number(data[previous!]))) issue(qty!, '须大于前一档起订量，请按顺序填写')
     }
-    const dimensions = ['lengthCm', 'widthCm', 'heightCm']
-    if (dimensions.some(field => data[field] != null)) dimensions.forEach(field => { if ((!sparse && data[field] == null) || (data[field] != null && Number(data[field]) <= 0)) issue(field, '长宽高须一起填写且大于0；也可全部留空') })
+    const dimensions = [...dimensionFields]
+    if (dimensions.some(field => data[field] != null)) dimensions.forEach(field => { if ((!sparse && data[field] == null) || (data[field] != null && Number(data[field]) <= 0)) issue(field, '长宽高须一起填写且大于0；也可全部留空（0按空值处理）') })
     if (!['', '是', '否'].includes(String(data.freeShipping || ''))) issue('freeShipping', '请填写是或否')
     if (!sparse && data.freeShipping !== '是') for (const field of ['singleFreightCny', 'freight10Cny']) if (data[field] == null) issue(field, '未包邮时须填写运费；免运费请明确填0或选择包邮')
     if (data.stockStatus === '有') data.stockStatus = '有货'

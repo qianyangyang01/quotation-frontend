@@ -140,6 +140,8 @@ public class PurchasePasteService {
                     throw AppException.unprocessable("第" + sourceRow + "行：" + name + "格式错误");
                 if (NUMBERS.contains(name) && (!Double.isFinite(value.asDouble()) || value.asDouble() < 0))
                     throw AppException.unprocessable("第" + sourceRow + "行：" + name + "须为有效非负数字");
+                // Match blank-cell merge semantics; zero dimensions must not erase an existing measurement.
+                if (PurchasePasteValidator.DIMENSIONS.contains(name) && value.asDouble() == 0) continue;
                 patch.set(name, value.isTextual() ? JsonNodeFactory.instance.textNode(value.asText().trim()) : value.deepCopy());
             }
             inputs.put(sku, patch);
