@@ -163,7 +163,7 @@ class FobPurchasePostgresIntegrationTest {
                 if (row.issues().isEmpty()) ready++;
             }
         }
-        assertEquals(290, ready);
+        assertTrue(ready >= 290, "Descriptive notes must not reduce the previously accepted corpus");
         assertEquals(before, repository.count()); assertEquals(ordinaryBefore, ordinary.count());
         assertTrue(report.valueStream().anyMatch(row -> row.path("sku").asText().equals("PF2600270") && row.path("issues").toString().contains("同批SKU")));
         java.nio.file.Files.writeString(java.nio.file.Path.of(source).resolveSibling("backend-preview.json"), mapper.writeValueAsString(report));
@@ -198,11 +198,48 @@ class FobPurchasePostgresIntegrationTest {
     @Test void invalidRowOrTamperedPreviewDoesNotPartiallyPersist() {
         String a = sku(), b = sku(); List<JsonNode> rows = List.of(row(a),row(b).put("priceRaw","单价27;批发价24"));
         assertFalse(service.preview(rows).canSave());
-        assertFalse(service.preview(List.of(row(sku()).put("notes", "版费300元，满3000个可退"))).canSave());
         assertThrows(AppException.class,()->service.confirm(confirmation(rows))); assertFalse(repository.existsById(a));
         List<JsonNode> good = List.of(row(a)); var approved = confirmation(good);
         var changed = new FobPurchaseService.Confirmation(List.of(row(a).put("priceRaw","25")),approved.expected(),approved.digest());
         assertThrows(AppException.class,()->service.confirm(changed)); assertFalse(repository.existsById(a));
+    }
+    @Test void purchaseRoleCanImportSampleFeeNotesAndUpdateThemWithoutChangingPrices() throws Exception {
+        String sku = sku();
+        String notes = "单色300件起订,欧码，打样费300.交期3-5天，大货可低打样费";
+        var source = row(sku).put("weightRaw", "220").put("moqRaw", "300")
+                .put("priceRaw", "1件：23.5   1000件23.5      3000件23")
+                .put("freightRaw", "试拍运费1件4/10件7/300件61").put("notes", notes);
+        long countBefore = repository.count();
+        var preview = mapper.readTree(mvc.perform(post("/api/v1/fob-purchase-products/paste/preview")
+                .with(user("buyer").roles("PURCHASE")).with(csrf()).contentType("application/json")
+                .content(mapper.writeValueAsString(List.of(source))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.canSave").value(true))
+                .andReturn().getResponse().getContentAsString()).path("data");
+        assertEquals(countBefore, repository.count(), "Preview must not persist data");
+        assertTrue(service.history(sku).isEmpty());
+        var expectedParsed = preview.path("rows").get(0).path("effective").path("parsed");
+        assertEquals(300, expectedParsed.path("minOrderQty").asInt());
+        assertEquals(3, expectedParsed.path("priceTiers").size());
+        assertEquals(23.5, expectedParsed.path("priceTiers").get(0).path("unitPriceCny").asDouble());
+        assertEquals(23, expectedParsed.path("priceTiers").get(2).path("unitPriceCny").asDouble());
+        assertEquals(300, expectedParsed.path("freight").path("quantity").asInt());
+        assertEquals(61, expectedParsed.path("freight").path("totalFreightCny").asInt());
+        mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").with(user("buyer").roles("PURCHASE"))
+                .with(csrf()).contentType("application/json")
+                .content(mapper.writeValueAsString(confirmation(List.of(source)))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.added").value(1));
+        var saved = service.get(sku);
+        assertEquals(notes, saved.path("notes").asText());
+        assertEquals(expectedParsed, saved.path("parsed"));
+        String updatedNotes = "版费300元，满3000个可退；打样费、包装费另收或另计，仅作说明";
+        service.confirm(confirmation(List.of(mapper.createObjectNode().put("sku", sku).put("notes", updatedNotes))));
+        assertEquals(updatedNotes, service.get(sku).path("notes").asText());
+        assertEquals(expectedParsed, service.get(sku).path("parsed"));
+        assertEquals(2, service.history(sku).size());
+        assertTrue(service.history(sku).getFirst().changes().toString().contains(notes));
+        assertTrue(service.history(sku).getFirst().changes().toString().contains(updatedNotes));
+        assertFalse(service.preview(List.of(source.deepCopy().put("priceRaw", "单价23.5;打样费300"))).canSave());
+        assertFalse(service.preview(List.of(source.deepCopy().put("freightRaw", "300件61;另计包装费"))).canSave());
     }
     @Test void identicalDuplicatesAreSkippedButConflictsBlockTheEntireBatch() {
         String conflict = sku(), other = sku();

@@ -103,8 +103,7 @@ public class FobPurchaseService {
             // Derived lists are rebuilt from the complete merged source, never merged by tier index.
             merged.remove("parsed");
             try {
-                if (java.util.regex.Pattern.compile("版费|打样费|包装费|另收|另计").matcher(merged.path("notes").asText("")).find())
-                    throw new IllegalArgumentException("备注含额外收费条件，请先确认适用费用，不能仅按单价自动报价");
+                // Notes are retained as descriptive text, never interpreted as pricing rules.
                 var parsed = FobSourceParser.parse(merged.path("moqRaw").asText(""), merged.path("priceRaw").asText(""), merged.path("freightRaw").asText(""));
                 merged.set("parsed", mapper.valueToTree(parsed)); notices.addAll(parsed.notices());
                 if (merged.path("weightRaw").asText("").isBlank()) notices.add("克重未填写，本次仅保存价格与运费资料");
