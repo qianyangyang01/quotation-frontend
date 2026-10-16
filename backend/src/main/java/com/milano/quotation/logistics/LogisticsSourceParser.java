@@ -805,8 +805,7 @@ public class LogisticsSourceParser {
                     source.numberText(r,columns.from)+(columns.boundsInGrams?"G":"")+"-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):
                     columns.to>=0?"0-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):source.text(r,columns.weight);
             if(!looksRange(weight)) {
-                if(provider.equals("容鼎")&&columns.channel>=0&&columns.code>=0
-                        &&(columns.rate>=0&&!source.text(r,columns.rate).isBlank()||columns.fee>=0&&!source.text(r,columns.fee).isBlank())) {
+                if(provider.equals("容鼎")&&rongdingPriceRowEvidence(source,r,columns)) {
                     var target=selected(source,provider,source.text(r,columns.channel),source.text(r,columns.code),r,channels);
                     if(target!=null)issue(target,r+1,"重量段","容鼎价格行缺少有效重量范围，禁止部分价格替换","error");
                 }
@@ -1223,6 +1222,23 @@ public class LogisticsSourceParser {
         }
         return codes;
     }
+    private boolean rongdingPriceRowEvidence(Source source,int row,Columns columns) {
+        if(columns.channel<0||columns.code<0)return false;
+        var name=source.cell(row,columns.channel);var code=source.cell(row,columns.code);
+        // Footer notes may span the entire former table. Resolved merged values alone
+        // cannot prove that those identity/price columns still contain a price row.
+        if(name!=null&&name==code)return false;
+        boolean identityCell=name!=null&&name.getColumnIndex()==columns.channel
+                ||code!=null&&code.getColumnIndex()==columns.code;
+        if(!identityCell)return false;
+        for(int column:new int[]{columns.rate,columns.fee}) {
+            var price=source.cell(row,column);
+            if(price!=null&&price.getColumnIndex()==column&&price!=name&&price!=code
+                    &&!source.parsingText(price).isBlank())return true;
+        }
+        return false;
+    }
+
     private boolean referenceSection(Source source,int row) {
         // Only a section heading in the first populated cell ends a table. A price-row
         // remark containing these words must never hide that row or subsequent prices.

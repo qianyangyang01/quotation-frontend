@@ -1,6 +1,7 @@
 package com.milano.quotation.logistics;
 
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -62,6 +63,34 @@ class RongdingImportIdentitySafetyTest {
             fixture.assertPrices(result);
             assertEquals(25,result.path("filteredChannels").asInt(),result.path("sheets").toString());
             assertEquals(0,result.path("ambiguousChannels").asInt(),result.path("sheets").toString());
+        }
+    }
+
+    @Test void mergedFooterNotesNeverBecomeProductIdentityConflicts()throws Exception {
+        try(var book=new XSSFWorkbook(new ByteArrayInputStream(fixture.fixture()))) {
+            var sheet=book.getSheetAt(0);
+            row(sheet,34,"计费规则");sheet.addMergedRegion(new CellRangeAddress(34,34,0,8));
+            row(sheet,35,"说明：本段文字仅用于说明产品服务，不是价格记录，保留原文供核对。");
+            sheet.addMergedRegion(new CellRangeAddress(35,36,0,8));
+            row(sheet,38,"重量与尺寸限制","","","","请核对产品适用尺寸；这里的说明并非价格行或产品代码。");
+            sheet.addMergedRegion(new CellRangeAddress(38,38,0,3));
+            sheet.addMergedRegion(new CellRangeAddress(38,38,4,8));
+            row(sheet,40,"","申报价值","","","该文字从原价格列开始，但前方说明合并名称和产品代码，仍不是价格记录。");
+            sheet.addMergedRegion(new CellRangeAddress(40,40,1,3));
+            sheet.addMergedRegion(new CellRangeAddress(40,40,4,8));
+
+            var result=parse(book);
+            fixture.assertPrices(result);
+            assertEquals(0,result.path("ambiguousChannels").asInt(),result.path("sheets").toString());
+            assertEquals(5,result.path("matchedChannels").asInt());
+            assertTrue(result.path("sheets").toString().contains("保留原文供核对"),"Footer evidence must remain available");
+        }
+    }
+
+    @Test void missingOrMalformedWeightOnARealPriceRowStillBlocksTheChannel()throws Exception {
+        for(String weight:new String[]{"","待确认"})try(var book=new XSSFWorkbook(new ByteArrayInputStream(fixture.fixture()))) {
+            book.getSheetAt(0).getRow(26).getCell(3).setCellValue(weight);
+            assertBlocked(parse(book),RongdingProductCellTest.CODES[0]);
         }
     }
 
