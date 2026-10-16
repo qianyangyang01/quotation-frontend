@@ -52,3 +52,60 @@ describe('partial logistics import review UI', () => {
     expect(mocks.publish.mock.calls[0]?.[4]).toEqual({ coverageToken: 'v5', partialUpdateConfirmed: true })
   })
 })
+
+describe('filtered logistics import feedback', () => {
+  function unmatchedReport(): NonNullable<Batch['payload']['fileReports']>[number] {
+    return { fileName: '容鼎10月19日.xlsx', status: 'filtered', sheets: [{ name: '美国商派', status: 'filtered', channelMatches: [{ providerName: '容鼎', channelName: '美国标准DDP专线-普货A(SP)', sourceRow: 22, status: 'filtered', reason: '渠道未登记或未登记该名称别名' }] }] }
+  }
+  async function mountBatch(value: Batch) {
+    sessionStorage.setItem('milano.logistics.active-batch.dataset', 'batch')
+    mocks.batch.mockResolvedValue(value)
+    const host = document.createElement('div'); document.body.append(host)
+    app = createApp(LogisticsWorkspaceView); app.mount(host)
+    await vi.waitFor(() => expect(host.textContent).toContain('物流价格批量审核'))
+    return host
+  }
+  it('shows a prominent no-update reason and no completed publication for zero matches', async () => {
+    const value = batch(); value.payload.results = []; value.payload.files = [{ name: '容鼎10月19日.xlsx' }]; value.payload.fileReports = [unmatchedReport()]
+    const host = await mountBatch(value)
+    const alert = host.querySelector('.filtered-import-file[role="alert"]')!
+    expect(alert.textContent).toContain('容鼎10月19日.xlsx')
+    expect(alert.textContent).toContain('未匹配到可用的公司渠道，未生成价格草稿、未更新运费')
+    expect(host.textContent).not.toContain('首重续重已过滤')
+    expect(host.textContent).not.toContain('本批渠道检查通过')
+    expect(host.querySelector('.review-steps > span:last-child')?.classList.contains('done')).toBe(false)
+    expect(host.querySelector<HTMLDetailsElement>('.batch-channel-matches')?.open).toBe(true)
+    expect(host.querySelector<HTMLDetailsElement>('.batch-source-files')?.open).toBe(true)
+    expect(host.querySelector<HTMLButtonElement>('.publish-all')?.disabled).toBe(true)
+    expect(mocks.publish).not.toHaveBeenCalled()
+  })
+  it('names an unmatched file while retaining review results for the other file', async () => {
+    const value = batch(); value.payload.files.push({ name: '容鼎10月19日.xlsx' }); value.payload.fileReports = [{ fileName: '新增渠道.xlsx', status: 'parsed' }, unmatchedReport()]
+    const host = await mountBatch(value)
+    expect(host.querySelector('.filtered-import-file[role="alert"]')?.textContent).toContain('容鼎10月19日.xlsx')
+    expect(host.querySelector('.batch-results-table')?.textContent).toContain('新渠道')
+    expect(host.querySelector('.review-publish-bar')?.textContent).toContain('1 个文件需处理')
+    expect(host.querySelector<HTMLButtonElement>('.publish-all')?.disabled).toBe(true)
+    expect(mocks.publish).not.toHaveBeenCalled()
+  })
+  it('keeps genuine first-next exclusions informational and never marks an empty batch as published', async () => {
+    const value = batch(); value.payload.results = []; value.payload.fileReports = [{ fileName: '首重续重.xlsx', status: 'filtered', sheets: [{ name: '首重价格', status: 'filtered', filteredFirstNextRows: [3, 4] }] }]
+    const host = await mountBatch(value)
+    expect(host.querySelector('.filtered-import-file[role="status"]')?.textContent).toContain('首重续重价格已过滤')
+    expect(host.querySelector('.filtered-import-file[role="alert"]')).toBeNull()
+    expect(host.querySelector('.review-steps > span:last-child')?.classList.contains('done')).toBe(false)
+    expect(host.querySelector<HTMLButtonElement>('.publish-all')?.disabled).toBe(true)
+  })
+  it('does not mark identity conflicts complete when the other imported channel is unchanged', async () => {
+    const value = batch(); value.payload.results[0]!.status = 'unchanged'
+    value.payload.fileReports = [{ fileName: '渠道归属冲突.xlsx', status: 'match-pending', sheets: [{ name: '价格', status: 'match-pending', channelMatches: [{ providerName: '容鼎', channelName: '冲突渠道', sourceRow: 22, status: 'ambiguous', reason: '产品代码与渠道名称指向不同渠道' }] }] }]
+    const host = await mountBatch(value)
+    expect(host.querySelector('.filtered-import-file[role="alert"]')?.textContent).toContain('渠道归属待确认')
+    expect(host.querySelector('.review-steps > span:last-child')?.classList.contains('done')).toBe(false)
+    expect(host.querySelector('.review-publish-bar')?.textContent).toContain('1 个文件需处理')
+    expect(host.textContent).not.toContain('本批渠道检查通过')
+    expect(host.querySelector<HTMLDetailsElement>('.batch-channel-matches')?.open).toBe(true)
+    expect(host.querySelector<HTMLDetailsElement>('.batch-file-list > details')?.open).toBe(true)
+    expect(host.querySelector<HTMLButtonElement>('.publish-all')?.disabled).toBe(true)
+  })
+})

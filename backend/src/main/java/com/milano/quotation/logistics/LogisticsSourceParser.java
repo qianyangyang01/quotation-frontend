@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="shared-source-layout-2026.10.12-v4";
+    public static final String VERSION="rongding-product-cells-2026.10.16-v5";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -198,6 +198,7 @@ public class LogisticsSourceParser {
             }
         } catch(AppException e){throw e;} catch(Exception e){org.slf4j.LoggerFactory.getLogger(getClass()).warn("Workbook read failed: {}",filename,e);throw AppException.unprocessable("物流文件无法解析："+e.getClass().getSimpleName());}
         if(provider.equals(SunyouSourceRules.PROVIDER))applySunyouReferences(sheets,channels);
+        validateRongdingIdentities(sheets,channels);
         var items=result.putArray("channels");
         for(var reference:coverageSheets) {
             var matched=channels.values().stream().filter(channel->referenceAppliesToChannel(reference,channel.path("channelName").asText())).toList();
@@ -410,7 +411,9 @@ public class LogisticsSourceParser {
     }
 
     private ObjectNode selected(Source source,String provider,String name,String code,int row,Map<String,ObjectNode> channels,boolean sheetFallback) {
-        var decision=sheetFallback?sheetIdentity(source,provider,name,code):source.scope.match(provider,name,code);
+        // An explicit Rongding code must never be replaced by a worksheet/title fallback.
+        var decision=provider.equals("容鼎")&&!code.isBlank()?source.scope.matchSourceCell(provider,name,code)
+                :sheetFallback?sheetIdentity(source,provider,name,code):source.scope.matchSourceCell(provider,name,code);
         TitleIdentity title=sheetFallback?source.titleIdentities.get(provider):null;
         var key=CompanyChannelScope.normalize(provider)+"|"+CompanyChannelScope.normalize(name)+"|"+CompanyChannelScope.normalize(code);
         if(source.matchKeys.add(key)){
@@ -425,6 +428,25 @@ public class LogisticsSourceParser {
         if(!decision.accepted()) {source.parsedRows.add(row);source.ambiguous|=decision.status().equals("ambiguous");return null;}
         String canonical=decision.entry()==null?name:decision.entry().path("channelName").asText();
         var target=channel(provider,canonical,channels);CompanyChannelScope.identify(target,decision);return target;
+    }
+
+    private void validateRongdingIdentities(ArrayNode sheets,Map<String,ObjectNode> channels) {
+        var matchedNames=new HashSet<String>();var rejected=new ArrayList<ObjectNode>();
+        for(var sheet:sheets)for(var value:sheet.path("channelMatches")) {
+            if(!value.path("providerName").asText().equals("容鼎"))continue;
+            var match=(ObjectNode)value;
+            if(match.path("status").asText().equals("matched"))matchedNames.add(CompanyChannelScope.normalize(match.path("channelName").asText()));
+            else {var evidence=match.deepCopy();evidence.put("sourceSheet",sheet.path("name").asText());rejected.add(evidence);}
+        }
+        for(var match:rejected) {
+            if(!match.path("status").asText().equals("ambiguous")&&!matchedNames.contains(CompanyChannelScope.normalize(match.path("channelName").asText())))continue;
+            for(var channel:channels.values()) {
+                if(!channel.path("providerName").asText().equals("容鼎"))continue;
+                issue(channel,match.path("sourceRow").asInt(),"容鼎渠道身份冲突","同一原表存在冲突或同名价格组中混入未登记代码，禁止部分价格替换："+match.path("reason").asText(),"error");
+                var finding=(ObjectNode)channel.path("issues").get(channel.path("issues").size()-1);
+                finding.put("sourceSheet",match.path("sourceSheet").asText()).set("sourceIdentity",match.deepCopy());
+            }
+        }
     }
 
     private record TitleIdentity(CompanyChannelScope.Match decision,ArrayNode evidence) {}
@@ -783,6 +805,11 @@ public class LogisticsSourceParser {
                     source.numberText(r,columns.from)+(columns.boundsInGrams?"G":"")+"-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):
                     columns.to>=0?"0-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):source.text(r,columns.weight);
             if(!looksRange(weight)) {
+                if(provider.equals("容鼎")&&columns.channel>=0&&columns.code>=0
+                        &&(columns.rate>=0&&!source.text(r,columns.rate).isBlank()||columns.fee>=0&&!source.text(r,columns.fee).isBlank())) {
+                    var target=selected(source,provider,source.text(r,columns.channel),source.text(r,columns.code),r,channels);
+                    if(target!=null)issue(target,r+1,"重量段","容鼎价格行缺少有效重量范围，禁止部分价格替换","error");
+                }
                 if((tongyouSensitive||jitongBattery||yunexpress!=null||yanwenWanbang!=null)&&columns.rate>=0&&!source.text(r,columns.rate).isBlank()&&columns.country>=0
                         &&supportedCountryCode(countryCode(source.text(r,columns.country)))) {
                     var target=selected(source,provider,section,"",r,channels,section.equals(source.sheet.getSheetName().trim()));

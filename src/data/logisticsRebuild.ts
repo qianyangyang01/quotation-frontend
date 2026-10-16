@@ -28,7 +28,7 @@ export type MissingEtaRoute = { routeKey: string; status: 'missing' | 'partial' 
 export type Version = { id: string; channelId: string; versionNumber: number; status: string; fileName: string; fingerprint: string; pricingReady?: boolean; quoteReady?: boolean; etaReady?: boolean; etaMissingCount?: number; errors: number; rowCount?: number; countryCount?: number; rows?: Price[]; issues?: SourceIssue[]; diffRows?: Diff[]; missingEtaRoutes?: MissingEtaRoute[]; blockingReasons?: string[]; reviewWarnings?: string[]; summary: Record<string, number>; basePublishedVersionId?: string; batchId?: string; sourceFileIndex?: number; importedAt?: string; importedBy?: string; publishedAt?: string; publishedBy?: string; auditNote?: string }
 export type Workspace = { dataset: Dataset; providers: Provider[]; channels: Channel[]; versions: Version[] }
 export type BatchResult = { channelId?: string; channelName: string; providerName: string; versionId?: string; status: string; message?: string; errors?: number; pricingReady?: boolean; etaReady?: boolean; etaMissingCount?: number; priceRows?: number; pendingReasons?: string[]; missingEtaRoutes?: MissingEtaRoute[]; blockingReasons?: string[]; reviewWarnings?: string[]; basePublishedVersionId?: string; summary?: Record<string, number>; issues?: SourceIssue[] }
-export type Batch = { id: string; dataset_id: string; status: string; phase: string; created_at: string; payload: { coverage?: ImportCoverage; scopeRevision?: number; matchedChannels?: number; filteredChannels?: number; ambiguousChannels?: number; progress: number; elapsedMs?: number; error?: string; etaReady?: boolean; etaMissingCount?: number; missingEtaRoutes?: Array<MissingEtaRoute & { providerName?: string; channelName?: string }>; blockingReasons?: string[]; reviewWarnings?: string[]; totalFiles?: number; processedFiles?: number; currentFileIndex?: number; currentFileName?: string; totalChannels?: number; processedChannels?: number; currentChannelName?: string; files: Array<{ name: string; size?: number; sha256?: string; lifecycleStatus?: string; deletedAt?: string; deleteError?: string }>; fileReports?: Array<{ fileName: string; status: string; message?: string; retentionUntil?: string; sourceEvidence?: { sha256: string }; sheets?: Array<{ name: string; status: string; channelMatches?: Array<{ providerName: string; channelName: string; sourceRow: number; status: string; reason: string }>; templateStatus?: string; priceRows?: number; errors?: number; message?: string; filteredFirstNextRows?: number[] }> }>; results: BatchResult[] } }
+export type Batch = { id: string; dataset_id: string; status: string; phase: string; created_at: string; payload: { coverage?: ImportCoverage; scopeRevision?: number; matchedChannels?: number; filteredChannels?: number; ambiguousChannels?: number; progress: number; elapsedMs?: number; error?: string; etaReady?: boolean; etaMissingCount?: number; missingEtaRoutes?: Array<MissingEtaRoute & { providerName?: string; channelName?: string }>; blockingReasons?: string[]; reviewWarnings?: string[]; totalFiles?: number; processedFiles?: number; currentFileIndex?: number; currentFileName?: string; totalChannels?: number; processedChannels?: number; currentChannelName?: string; files: Array<{ name: string; size?: number; sha256?: string; lifecycleStatus?: string; deletedAt?: string; deleteError?: string }>; fileReports?: Array<{ fileName: string; status: string; message?: string; retentionUntil?: string; sourceEvidence?: { sha256: string }; sheets?: Array<{ name: string; status: string; channelMatches?: Array<{ providerName: string; channelName: string; sourceRow: number; status: string; reason: string }>; templateStatus?: string; priceRows?: number; errors?: number; message?: string; filteredFirstNextRows?: number[]; filteredOtherRows?: Array<{ row: number; reason: string }> }> }>; results: BatchResult[] } }
 export type BatchSummary = Pick<Batch, 'id' | 'status' | 'phase' | 'created_at'> & { progress: number; files: Array<{ name: string }> }
 export type Mapping = { oldChannelId: string; oldName: string; newChannelId: string; status: string; candidates: Channel[] }
 export type Cutover = { previewToken: string; sourceDatasetId: string; targetDatasetId: string; readyChannels: number; requiredReady: boolean; requiredConfirmed: boolean; requiredCount: number; requiredNotReady: Channel[]; unmappedChannels: number; mappings: Mapping[]; pendingChannels: Channel[]; draftsToReprice?: number; bindingChanges?: Array<{ kind: string; id: string; path: string; before: string; after: string; status: string }> }
@@ -127,10 +127,34 @@ export function formatTransferBytes(value: number) {
 export function weightLabel(price: Price) {
   return `${price.weightFromInclusive ? '[' : '('}${Number((price.weightFromKg * 1000).toFixed(3))}, ${Number((price.weightToKg * 1000).toFixed(3))}${price.weightToInclusive === false ? ')' : ']'} g`
 }
+type ImportFileReport = NonNullable<Batch['payload']['fileReports']>[number]
+export function filteredImportFileOutcome(report: ImportFileReport) {
+  if (report.status === 'match-pending') return {
+    kind: 'ambiguous' as const,
+    message: '渠道归属待确认，不能视为价格已全部更新。请核对渠道名称、产品代码及下方匹配报告；已生成的价格草稿仍需审核。',
+  }
+  if (report.status !== 'filtered') return null
+  const sheets = report.sheets || []
+  const matches = sheets.flatMap(sheet => sheet.channelMatches || [])
+  if (matches.some(match => match.status !== 'matched')) return {
+    kind: 'unmatched' as const,
+    message: '未匹配到可用的公司渠道，未生成价格草稿、未更新运费。请核对渠道名称、产品代码及下方过滤原因。',
+  }
+  const filteredSheets = sheets.filter(sheet => sheet.status === 'filtered')
+  if (filteredSheets.length && filteredSheets.every(sheet => sheet.filteredFirstNextRows?.length && !sheet.filteredOtherRows?.length)) return {
+    kind: 'first-next' as const,
+    message: '首重续重价格已过滤，未生成价格草稿、未更新运费。',
+  }
+  return { kind: 'other' as const, message: '文件已过滤，未生成价格草稿、未更新运费。请查看原始文件与解析证据中的过滤原因。' }
+}
 export function completedBatchStage(batch: Pick<Batch, 'status' | 'payload'>) {
   if (batch.status !== 'completed') return ''
   if (batch.payload.fileReports?.some(f => ['failed', 'template-pending'].includes(f.status))) return '存在文件解析失败或新模板待适配，请核对'
-  if (batch.payload.fileReports?.length && batch.payload.fileReports.every(f => f.status === 'filtered')) return '首重续重已过滤，无需审核'
+  const filtered = (batch.payload.fileReports || []).map(filteredImportFileOutcome).filter(outcome => outcome !== null)
+  if (filtered.some(outcome => outcome.kind === 'ambiguous')) return '存在文件渠道归属待确认，请核对'
+  if (filtered.some(outcome => outcome.kind === 'unmatched')) return '存在文件未匹配到可用的公司渠道，请核对'
+  if (batch.payload.fileReports?.length && filtered.length === batch.payload.fileReports.length) return filtered.every(outcome => outcome.kind === 'first-next') ? '首重续重已过滤，无需审核' : '文件已过滤，未生成价格草稿、未更新运费'
+  if (!batch.payload.results.length) return '未生成渠道价格草稿，请核对解析结果'
   if (batch.payload.results.some(r => r.status === 'blocked')) return '存在阻断，请核对'
   if (batch.payload.results.some(r => r.status === 'draft')) return '待审核'
   return '无需审核'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ref } from 'vue'
-import { buildPriceCorrections, clonePriceRows } from './logisticsRebuild'
+import { buildPriceCorrections, clonePriceRows, filteredImportFileOutcome } from './logisticsRebuild'
 import { calculateLogisticsFee, findPriceRow, type LogisticsRule } from './logistics'
 import { normalizeLogisticsPriceRow } from './logisticsRepository'
 import { aggregateChangeSummary, batchComparisonSummary, buildEtaCorrections, changeImpact, completedBatchStage, diffKinds, formatTransferBytes, logisticsAdjustmentStatus, logisticsUploadError, rangeImpact, weightLabel, type Batch, type Diff, type Price } from './logisticsRebuild'
@@ -58,8 +58,31 @@ describe('rebuild pricing safety', () => {
     expect(completedBatchStage(batch(['draft', 'blocked']))).toBe('存在阻断，请核对')
     const failedFile = batch(['unchanged']); failedFile.payload.fileReports = [{ fileName: '损坏.xlsx', status: 'failed' }]
     expect(completedBatchStage(failedFile)).toBe('存在文件解析失败或新模板待适配，请核对')
-    const filtered = batch([]); filtered.payload.fileReports = [{ fileName: '首重续重.xlsx', status: 'filtered' }]
+    const filtered = batch([]); filtered.payload.fileReports = [{ fileName: '首重续重.xlsx', status: 'filtered', sheets: [{ name: '价格', status: 'filtered', filteredFirstNextRows: [3, 4] }] }]
     expect(completedBatchStage(filtered)).toBe('首重续重已过滤，无需审核')
+  })
+  it('identifies unmatched code cells without treating them as first-next filtering', () => {
+    const report: NonNullable<Batch['payload']['fileReports']>[number] = { fileName: '容鼎10月19日.xlsx', status: 'filtered', sheets: [{ name: '美国商派', status: 'filtered', channelMatches: [{ providerName: '容鼎', channelName: '美国标准DDP专线-普货A(SP)\n美国标准DDP专线-普货C(SP)', sourceRow: 22, status: 'filtered', reason: '渠道未登记或未登记该名称别名' }] }] }
+    expect(filteredImportFileOutcome(report)).toMatchObject({ kind: 'unmatched' })
+    expect(filteredImportFileOutcome(report)?.message).toContain('未生成价格草稿、未更新运费')
+    for (const statuses of [[], ['draft']]) {
+      const batch = { status: 'completed', payload: { fileReports: [report], results: statuses.map(status => ({ status })) } } as Batch
+      expect(completedBatchStage(batch)).toBe('存在文件未匹配到可用的公司渠道，请核对')
+    }
+  })
+  it('requires actual first-next evidence and does not hide other exclusions', () => {
+    const report = { fileName: '任意过滤.xlsx', status: 'filtered' }
+    expect(filteredImportFileOutcome(report)?.kind).toBe('other')
+    expect(filteredImportFileOutcome({ ...report, sheets: [{ name: '价格', status: 'filtered', filteredFirstNextRows: [3], filteredOtherRows: [{ row: 4, reason: '暂停服务' }] }] })?.kind).toBe('other')
+    expect(filteredImportFileOutcome({ ...report, status: 'parsed' })).toBeNull()
+    expect(completedBatchStage({ status: 'completed', payload: { results: [] } } as unknown as Batch)).toBe('未生成渠道价格草稿，请核对解析结果')
+  })
+  it('keeps identity conflicts pending even when another channel is unchanged', () => {
+    const report = { fileName: '渠道归属冲突.xlsx', status: 'match-pending' }
+    expect(filteredImportFileOutcome(report)?.kind).toBe('ambiguous')
+    const batch = { status: 'completed', payload: { fileReports: [report], results: [{ status: 'unchanged' }] } } as Batch
+    expect(completedBatchStage(batch)).toBe('存在文件渠道归属待确认，请核对')
+    expect(filteredImportFileOutcome(report)?.message).not.toContain('未生成价格草稿')
   })
   it('preserves the confirmed 200g/201g boundary through API normalization', () => {
     const rule = makeRule([{ ...row, weightFromKg: 0, weightToKg: 0.2, pricePerKg: 10 }, { ...row, weightFromKg: 0.201, weightToKg: 0.5, weightFromInclusive: true, pricePerKg: 20 }])

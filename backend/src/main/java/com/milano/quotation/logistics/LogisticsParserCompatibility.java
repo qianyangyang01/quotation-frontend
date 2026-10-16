@@ -4,7 +4,7 @@ package com.milano.quotation.logistics;
 final class LogisticsParserCompatibility {
     static final String SEPTEMBER_29 = "wanbang-yanwen-express-2026.09.29-v3";
     private static final java.util.Set<String> REVIEWED_VERSIONS=java.util.Set.of(
-        SEPTEMBER_29,"yanwen-october-layout-2026.10.04-v1","shared-source-layout-2026.10.04-v2","shared-source-layout-2026.10.09-v3","shared-source-layout-2026.10.12-v4");
+        SEPTEMBER_29,"yanwen-october-layout-2026.10.04-v1","shared-source-layout-2026.10.04-v2","shared-source-layout-2026.10.09-v3","shared-source-layout-2026.10.12-v4","rongding-product-cells-2026.10.16-v5");
     private LogisticsParserCompatibility() {}
 
     static String blockingReason(String version) {
