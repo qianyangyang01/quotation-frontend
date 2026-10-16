@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatFobFreight } from '@/services/fobFreightDisplay'
 import type { FobCatalogRecord } from '@/services/purchaseCatalog'
 import { FOB_COLUMNS } from '@/data/fobClipboard'
 defineProps<{ record: FobCatalogRecord }>()
@@ -9,7 +10,7 @@ defineEmits<{ close: [] }>()
     <header><h2 id="fob-detail-title">{{ record.sku }} · FOB资料详情</h2><button aria-label="关闭FOB详情" @click="$emit('close')">关闭</button></header>
     <p>FOB数据 · 不含票采购价 · 与普通采购资料独立保存</p>
     <div class="fob-images"><figure v-if="record.productImage"><img :src="record.productImage" alt="产品图片"><figcaption>产品图片</figcaption></figure><figure v-if="record.physicalImage"><img :src="record.physicalImage" alt="实物图"><figcaption>实物图</figcaption></figure></div>
-    <table v-if="record.parsed"><thead><tr><th>采购数量</th><th>单价</th><th>均摊运费/单位</th></tr></thead><tbody><tr v-for="tier in record.parsed.priceTiers" :key="tier.minQty"><td>{{ tier.minQty }}{{ tier.maxQty == null ? '起' : `–${tier.maxQty}` }}{{ tier.unit }}</td><td>¥{{ tier.unitPriceCny.toFixed(2) }}</td><td>¥{{ record.parsed.freight.unitFreightCny.toFixed(2) }}</td></tr></tbody></table>
+    <table v-if="record.parsed"><thead><tr><th>采购数量</th><th>单价</th><th>均摊运费/单位</th></tr></thead><tbody><tr v-for="tier in record.parsed.priceTiers" :key="tier.minQty"><td>{{ tier.minQty }}{{ tier.maxQty == null ? '起' : `–${tier.maxQty}` }}{{ tier.unit }}</td><td>¥{{ tier.unitPriceCny.toFixed(2) }}</td><td>{{ formatFobFreight(record.parsed.freight.unitFreightCny) }}</td></tr></tbody></table>
     <p v-if="record.parsed">运费采用：{{ record.parsed.freight.basis }}<template v-if="record.parsed.freight.estimated">（预估/预拍）</template></p>
     <dl><template v-for="[label,field] in FOB_COLUMNS" :key="field"><dt>{{ label }}</dt><dd>{{ record[field] || '暂无数据' }}</dd></template></dl>
   </section></div></Teleport>

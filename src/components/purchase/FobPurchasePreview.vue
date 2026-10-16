@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatFobFreight } from '@/services/fobFreightDisplay'
 import type { FobPreview } from '@/services/fobPurchase'
 defineProps<{ preview: FobPreview; locations?: { sheet: string; row: number }[] }>()
 </script>
@@ -13,8 +14,8 @@ defineProps<{ preview: FobPreview; locations?: { sheet: string; row: number }[] 
       <p v-for="notice in row.notices" :key="notice" class="warning">{{ notice }}</p>
       <div class="preview-images"><img v-if="row.effective.productImage" :src="row.effective.productImage" alt="保存后的产品图片"><img v-if="row.effective.physicalImage" :src="row.effective.physicalImage" alt="保存后的实物图"></div>
       <template v-if="row.effective.parsed">
-        <p>起订量 {{ row.effective.parsed.minOrderQty }} · 下单倍数 {{ row.effective.parsed.orderMultiple }} · 运费：{{ row.effective.parsed.freight.basis }}＝¥{{ row.effective.parsed.freight.unitFreightCny }}/单位</p>
-        <table><thead><tr><th>采购阶梯</th><th>数量区间</th><th>未税采购价</th><th>均摊运费</th></tr></thead><tbody><tr v-for="(tier,i) in row.effective.parsed.priceTiers" :key="i"><td>阶梯{{ i + 1 }}</td><td>{{ tier.minQty }}{{ tier.maxQty == null ? '起' : `—${tier.maxQty}` }}{{ tier.unit }}</td><td>¥{{ tier.unitPriceCny }}</td><td>¥{{ row.effective.parsed.freight.unitFreightCny }}</td></tr></tbody></table>
+        <p>起订量 {{ row.effective.parsed.minOrderQty }} · 下单倍数 {{ row.effective.parsed.orderMultiple }} · 运费：{{ row.effective.parsed.freight.basis }}＝{{ formatFobFreight(row.effective.parsed.freight.unitFreightCny) }}/单位</p>
+        <table><thead><tr><th>采购阶梯</th><th>数量区间</th><th>未税采购价</th><th>均摊运费</th></tr></thead><tbody><tr v-for="(tier,i) in row.effective.parsed.priceTiers" :key="i"><td>阶梯{{ i + 1 }}</td><td>{{ tier.minQty }}{{ tier.maxQty == null ? '起' : `—${tier.maxQty}` }}{{ tier.unit }}</td><td>¥{{ tier.unitPriceCny }}</td><td>{{ formatFobFreight(row.effective.parsed.freight.unitFreightCny) }}</td></tr></tbody></table>
       </template>
       <details v-if="row.changes.length" :open="row.action === 'update'"><summary>查看 {{ row.changes.length }} 项修改</summary><table><thead><tr><th>字段</th><th>原值</th><th>保存后</th></tr></thead><tbody><tr v-for="change in row.changes" :key="change.field"><th>{{ change.label }}</th><td>{{ change.before || '（空）' }}</td><td>{{ change.after || '（空）' }}</td></tr></tbody></table></details>
       <p v-else>原文无变化，相同内容不重复生成修改记录。</p>

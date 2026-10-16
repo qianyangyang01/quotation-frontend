@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatFobFreight } from '@/services/fobFreightDisplay'
 import type { FobCatalogRecord } from '@/services/purchaseCatalog'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 defineProps<{ record: FobCatalogRecord; canMaintain: boolean }>()
@@ -9,7 +10,7 @@ defineEmits<{ detail: []; maintain: [] }>()
     <td><div class="product"><img v-if="record.productImage" class="fob-thumbnail" :src="record.productImage" alt="产品图片"><PurchaseCategoryBadge v-else :category="record.category || ''" /><span><b>{{ record.category || '暂无数据' }}</b><small>{{ record.sku }}</small><em>FOB数据</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
     <td><div v-if="record.parsed?.priceTiers.length" class="tiers"><span v-for="(tier,index) in record.parsed.priceTiers" :key="tier.minQty"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}${tier.unit}起` : `${tier.minQty}–${tier.maxQty}${tier.unit}` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/{{ tier.unit }}</b></span></div><span v-else>阶梯待核对</span><small>不含票采购价</small></td>
     <td><b>{{ record.weightRaw || '暂无克重' }}<template v-if="record.weightRaw && /^[\d.]+$/.test(record.weightRaw.trim())"> g</template></b><small>起订 {{ record.parsed?.minOrderQty ?? record.moqRaw ?? '待核对' }}</small><small v-if="record.parsed">下单倍数 {{ record.parsed.orderMultiple }}</small></td>
-    <td><template v-if="record.parsed"><b>¥{{ record.parsed.freight.unitFreightCny.toFixed(2) }}/单位</b><small>{{ record.parsed.freight.basis }}</small><small v-if="record.parsed.freight.estimated">预估/预拍运费</small></template><span v-else>运费待核对</span></td>
+    <td><template v-if="record.parsed"><b>{{ formatFobFreight(record.parsed.freight.unitFreightCny) }}/单位</b><small>{{ record.parsed.freight.basis }}</small><small v-if="record.parsed.freight.estimated">预估/预拍运费</small></template><span v-else>运费待核对</span></td>
     <td class="description"><b>{{ record.size || '暂无数据' }}</b><small>{{ record.color || '暂无数据' }}</small></td>
     <td><em>FOB专用资料</em><small>{{ record.parsed ? `已识别 ${record.parsed.priceTiers.length} 档` : '请核对价格与运费原文' }}</small></td>
     <td class="actions"><button @click="$emit('detail')">查看详情</button><button v-if="canMaintain" @click="$emit('maintain')">粘贴更新 / 修改记录</button></td>
