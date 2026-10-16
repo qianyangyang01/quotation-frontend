@@ -20,7 +20,7 @@ import java.util.Set;
 public class QuotationDraftController {
     private static final int MAX_DRAFT_BYTES = 1_000_000;
     private static final Set<String> DRAFT_FIELDS = Set.of(
-            "manualPricing", "priorityProcessing", "schemaVersion", "customerName", "selectedCustomerId", "quoteMode", "skuSearch", "productCategory",
+            "manualPricing", "shippingNote", "priorityProcessing", "schemaVersion", "customerName", "selectedCustomerId", "quoteMode", "skuSearch", "productCategory",
             "logisticsAttribute", "selectedCustomerGrade", "selectedTaxCustomerType",
             "monthlySalesEstimate", "commissionThreshold", "specialPackagingGrams", "customQuoteQuantity", "quoteMatrixMode",
             "selectedQuoteRegions", "product", "bundleItems", "commonSelections",
@@ -29,7 +29,7 @@ public class QuotationDraftController {
     @org.springframework.beans.factory.annotation.Autowired private QuotationRecordRepository records;
     private final QuotationDraftRepository drafts;private final PurchaseProductService products; public QuotationDraftController(QuotationDraftRepository drafts,PurchaseProductService products){this.drafts=drafts;this.products=products;}
     @GetMapping("/mine") @Transactional(readOnly=true) ApiResponse<JsonNode> get(Authentication auth){return ApiResponse.ok(drafts.findById(account(auth)).map(row->row.payload).orElse(null));}
-    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){guard.requireOrdinary(account(auth));if(body instanceof ObjectNode object){CommissionThreshold.normalize(object);PackagingWeight.draft(object);}products.lockStructuredReferences(body);var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
+    @PutMapping("/mine") @Transactional ApiResponse<JsonNode> put(@RequestBody JsonNode body,Authentication auth){guard.requireOrdinary(account(auth));if(body instanceof ObjectNode object){CommissionThreshold.normalize(object);ShippingQuotationNote.normalizeDraft(object);PackagingWeight.draft(object);}products.lockStructuredReferences(body);var account=account(auth);var row=drafts.findById(account).orElseGet(()->{var draft=new QuotationDraftEntity();draft.ownerAccount=account;return draft;});row.payload=body.deepCopy();if(row.payload instanceof ObjectNode payload)payload.remove("customerId");row.updatedAt=Instant.now();drafts.save(row);return ApiResponse.ok(row.payload);}
     @DeleteMapping("/mine") @Transactional ApiResponse<Void> delete(Authentication auth){guard.requireOrdinary(account(auth));drafts.deleteById(account(auth));return ApiResponse.ok(null);}
 
     @GetMapping("/mine/state") @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
@@ -70,7 +70,10 @@ public class QuotationDraftController {
         if(input.path("schemaVersion").asInt()!=2)throw AppException.unprocessable("草稿版本不受支持");
         if (input.has("priorityProcessing") && !input.path("priorityProcessing").isBoolean()) throw AppException.unprocessable("优先处理参数不合法");
         input.propertyNames().forEach(key->{if(!DRAFT_FIELDS.contains(key))throw AppException.unprocessable("草稿包含不支持的字段："+key);});
+        ShippingQuotationNote.normalizeDraft(input);
         var sensitiveFields = input.deepCopy();
+        // This separately validated, bounded text field is a remark, not an embedded resource.
+        sensitiveFields.remove("shippingNote");
         // Only this top-level identifier refers to the finance fee template, not legacy customer master data.
         var selectedCustomer = sensitiveFields.remove("selectedCustomerId");
         if(selectedCustomer != null) {

@@ -3,6 +3,7 @@ import { refreshReviewNotifications } from '@/data/reviewNotifications'
 import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
 import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
+import { normalizeShippingNote, shippingQuotationSummary, SHIPPING_NOTE_MAX_LENGTH, SHIPPING_NOTE_LENGTH_ERROR } from '@/data/shippingQuotationNote'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
 import QuotationFeatureBoundary from '@/components/quotation/QuotationFeatureBoundary.vue'
 import FobQuotePanel from '@/components/quotation/FobQuotePanel.vue'
@@ -193,6 +194,8 @@ async function retryFobFinance() {
 }
 const manualCost = ref('')
 const manualWeightGrams = ref('')
+const shippingNote = ref('')
+const shippingNoteError = computed(() => quoteMode.value === 'shipping-only' && normalizeShippingNote(shippingNote.value).length > SHIPPING_NOTE_MAX_LENGTH ? SHIPPING_NOTE_LENGTH_ERROR : '')
 const manualQueried = ref(false)
 const manualMode = computed(() => isManualQuotation(quoteMode.value))
 const manualPricing = computed(() => manualPricingInput(quoteMode.value, manualCost.value, manualWeightGrams.value))
@@ -1058,6 +1061,7 @@ function draftPayload(): QuotationDraftPayload {
     customerName: customerName.value,
     selectedCustomerId: selectedCustomerId.value,
     quoteMode: quoteMode.value,
+    ...(quoteMode.value === 'shipping-only' ? { shippingNote: shippingNote.value } : {}),
     ...(manualMode.value ? { manualPricing: { costCny: quoteMode.value === 'shipping-only' ? 0 : manualDecimal(manualCost.value, 2), weightGrams: manualDecimal(manualWeightGrams.value, 3) } } : {}),
     skuSearch: manualMode.value ? '' : skuSearch.value,
     productCategory: productCategory.value,
@@ -1179,6 +1183,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   if (!reuseBatchLogistics) cancelQuoteLogistics()
   draftChannelNotice.value = ''
   quoteMode.value = normalizeQuotationMode(payload.quoteMode)
+  shippingNote.value = quoteMode.value === 'shipping-only' ? normalizeShippingNote(payload.shippingNote) : ''
   manualQueried.value = false
   manualCost.value = payload.manualPricing?.costCny == null ? '' : String(payload.manualPricing.costCny)
   manualWeightGrams.value = payload.manualPricing?.weightGrams == null ? '' : String(payload.manualPricing.weightGrams)
@@ -1371,6 +1376,7 @@ async function resetLocalDraft(customer?: LastQuotationCustomer) {
   selectedCustomerGrade.value = (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   quoteMode.value = 'single'
   manualCost.value = ''; manualWeightGrams.value = ''; manualQueried.value = false; manualPanelError.value = ''
+  shippingNote.value = ''
   quoteMatrixMode.value = 'template'
   customQuoteQuantity.value = 3
   selectedQuoteRegions.value = {}
@@ -1923,6 +1929,7 @@ const showSaveValidation = ref(false)
 const saveValidationIssues = computed(() => {
   const p = products.value[0]
   const issues: Array<{ key: string; label: string; message: string }> = []
+  if (shippingNoteError.value) issues.push({ key: 'shippingNote', label: '备注信息', message: shippingNoteError.value })
   if (purchaseTaxBlockReason.value) issues.push({ key: 'sku', label: '采购票点', message: purchaseTaxBlockReason.value })
   if (quoteMode.value === 'single' && (purchaseQueryError.value || (p?.sku && skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== p.sku))) issues.push({ key: 'sku', label: '商品 SKU', message: purchaseQueryError.value || 'SKU 已改变，请重新查询商品后保存' })
   if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || '最新资料正在读取，请稍候' })
@@ -2011,7 +2018,7 @@ async function prepareAndSaveQuotation() {
 }
 function locateValidationIssue(key: string) {
   if (key === 'financeSettings') { void retrySavePreparation(); return }
-  const selector = ['manualPricing','customerName','quoteMode','productCategory','sku','logisticsAttribute','customerGrade','monthlySalesEstimate','commissionThreshold'].includes(key)
+  const selector = ['manualPricing','shippingNote','customerName','quoteMode','productCategory','sku','logisticsAttribute','customerGrade','monthlySalesEstimate','commissionThreshold'].includes(key)
     ? `[data-validation-field="${key}"]`
     : key === 'workspaceInitialization' ? '.draft-status-bar'
     : key === 'taxPolicy' || key === 'businessReadiness'
@@ -2288,6 +2295,7 @@ async function save() {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (specialPackagingError.value) { toast(specialPackagingError.value); return }
   if (commissionError.value) { toast(commissionError.value); return }
+  if (shippingNoteError.value) { toast(shippingNoteError.value); return }
   if (draftInitializationFailed.value) { toast(draftError.value || '报价工作区读取失败，请查看顶部错误提示'); return }
   if (!financeSettingsAreHydrated()) { toast(financeSettingsLoadError() || '财务设置尚未完整加载，请重试读取后保存'); return }
   const p = products.value[0]
@@ -2303,7 +2311,7 @@ async function save() {
   const quoteOptions = buildQuoteOptions()
   const summary = selectedQuoteSummary(quoteOptions)
   if (!summary) { toast('首选渠道无法计算1件报价，请重新选择可计价渠道后保存'); return }
-  const productSummary = manualMode.value ? quotationModeLabels[quoteMode.value] : quoteMode.value === 'bundle'
+  const productSummary = quoteMode.value === 'shipping-only' ? shippingQuotationSummary(shippingNote.value) : manualMode.value ? quotationModeLabels[quoteMode.value] : quoteMode.value === 'bundle'
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
   const recordBundleItems = quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => {
@@ -2349,6 +2357,7 @@ async function save() {
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
     ...(manualMode.value ? { manualPricing: manualPricing.value! } : {}),
+    ...(quoteMode.value === 'shipping-only' ? { shippingNote: normalizeShippingNote(shippingNote.value) } : {}),
     weightSnapshot: manualMode.value ? undefined : buildQuotationWeightSnapshot(quoteMode.value === 'bundle'
       ? bundleItems.value.filter(item => item.sku).map(item => ({sku:item.sku, quantityPerSet:normalizedBundleSets(item.quantityPerSet), baseWeightKg:item.customWeightKg ?? item.weightKg, weightSource:item.customWeightKg == null ? 'purchase' as const : 'manual' as const, purchaseWeightKg:item.weightKg}))
       : [{sku:p.sku, quantityPerSet:1, baseWeightKg:singleBaseWeight(p,1), weightSource:p.weightSource, purchaseWeightKg:p.netWeight}],
@@ -2476,7 +2485,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           <i></i><span><b>{{ logisticsLoadState === 'loading' ? '正在按商品条件加载物流规则' : logisticsLoadState === 'stale' ? '当前显示缓存物流规则' : logisticsLoadState === 'empty' ? '没有匹配的已发布物流渠道' : logisticsLoadState === 'error' ? '物流规则加载失败' : '物流规则待加载' }}</b><small>{{ logisticsLoadState === 'loading' ? '页面其他内容可继续查看，完成后将自动计算最低报价渠道' : logisticsLoadState === 'stale' ? '网络恢复并确认正式版本后才能保存报价' : logisticsLoadState === 'idle' ? '点击重新加载，按当前商品条件获取正式物流规则' : logisticsLoadError || p.status }}</small></span><button v-if="logisticsLoadState !== 'loading'" type="button" @click="retryQuoteLogistics">重新加载</button>
         </section>
 
-        <ManualQuotePanel v-if="manualMode" :shipping-only="quoteMode === 'shipping-only'" :cost="manualCost" :weight="manualWeightGrams" :error="manualPanelError" :busy="logisticsLoadState === 'loading' || savingQuotation || syncRefreshing" @update:cost="manualCost=$event" @update:weight="manualWeightGrams=$event" @query="queryManualQuote" />
+        <ManualQuotePanel v-if="manualMode" :shipping-only="quoteMode === 'shipping-only'" :cost="manualCost" :weight="manualWeightGrams" :shipping-note="shippingNote" :error="shippingNoteError || manualPanelError" :busy="logisticsLoadState === 'loading' || savingQuotation || syncRefreshing" @update:cost="manualCost=$event" @update:weight="manualWeightGrams=$event" @update:shipping-note="shippingNote=$event" @query="queryManualQuote" />
         <section v-if="quoteMode === 'single' && !draftNeedsQuery" class="cost-workbench">
           <CostWeightPanel :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)"><template #product><ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" /></template></CostWeightPanel>
         </section>

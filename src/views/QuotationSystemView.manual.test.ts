@@ -31,6 +31,7 @@ const fees = (amount: number) => ({ countries: [{ country: '美国', fixedFeeUsd
 let app: App | undefined, host: HTMLDivElement
 let state: {
   notice: string; draftReady: boolean; manualCost: string; manualWeightGrams: string; manualQueried: boolean; manualPanelError: string
+  shippingNote: string; activeQuoteMatrixContextKey: string; resetLocalDraft: () => Promise<void>
   manualMode: boolean; quoteMode: QuotationMode; products: QuotationProduct[]; specialPackagingGrams: string
   quoteMatrixMode: string; commonQuoteRows: QuotationMatrixRow[]; templateQuoteRows: QuotationMatrixRow[]
   changeQuoteMode: (mode: QuotationMode) => void; queryManualQuote: () => Promise<void>
@@ -144,6 +145,62 @@ it('shipping-only excludes all product cost while preserving finance charges and
   expect(quote(1)?.quoteUsd).toBe(6.85)
   expect(state.draftPayload().manualPricing?.costCny).toBe(0)
 })
+it('typing a shipping note preserves queried prices, selected rows and matrix identity without extra requests', async () => {
+  await query('shipping-only')
+  state.quoteMatrixMode = 'common'
+  state.commonQuoteRows = state.excelQuoteRows(state.products[0]!, '美国')
+  await nextTick()
+  const input = host.querySelector<HTMLInputElement>('[aria-label="备注信息（选填）"]')!
+  expect(input.maxLength).toBe(200)
+  expect(host.querySelector('#shipping-note-hint')?.textContent).toContain('通过备注关键词搜索')
+  const before = { key: state.activeQuoteMatrixContextKey, rows: JSON.stringify(state.commonQuoteRows), price: quote(7),
+    requests: vi.mocked(api.get).mock.calls.length, logistics: vi.mocked(loadPublishedLogisticsRules).mock.calls.length }
+  const put = vi.spyOn(api, 'put').mockResolvedValue({} as never)
+  const post = vi.spyOn(api, 'post').mockResolvedValue({} as never)
+  for (let i = 1; i <= 30; i++) {
+    input.value = `TC2600009-1 客户自备 ${i}`
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+  }
+  expect(state.shippingNote).toBe('TC2600009-1 客户自备 30')
+  expect(state.manualQueried).toBe(true)
+  expect(state.activeQuoteMatrixContextKey).toBe(before.key)
+  expect(JSON.stringify(state.commonQuoteRows)).toBe(before.rows)
+  expect(quote(7)).toEqual(before.price)
+  expect(vi.mocked(api.get).mock.calls).toHaveLength(before.requests)
+  expect(vi.mocked(loadPublishedLogisticsRules).mock.calls).toHaveLength(before.logistics)
+  expect(put).not.toHaveBeenCalled(); expect(post).not.toHaveBeenCalled()
+})
+it('isolates notes from other modes and clears them for a new quote or a legacy draft', async () => {
+  await query('shipping-only')
+  state.shippingNote = 'TC2600009-1'
+  const draft = state.draftPayload()
+  expect(draft.shippingNote).toBe('TC2600009-1')
+  for (const mode of ['freight-trial', 'single', 'bundle'] as const) {
+    state.changeQuoteMode(mode); await nextTick()
+    expect(host.querySelector('[aria-label="备注信息（选填）"]')).toBeNull()
+    expect(state.draftPayload()).not.toHaveProperty('shippingNote')
+  }
+  await state.applyDraftPayload(draft)
+  expect(state.shippingNote).toBe('TC2600009-1')
+  await state.applyDraftPayload({ ...draft, shippingNote: undefined })
+  expect(state.shippingNote).toBe('')
+  state.shippingNote = 'another quote'
+  await state.resetLocalDraft()
+  expect(state.shippingNote).toBe('')
+})
+it('rejects oversized notes before submitting while preserving entered text and calculated prices', async () => {
+  await query('shipping-only')
+  state.shippingNote = '备'.repeat(201)
+  const before = quote(1)
+  const post = vi.spyOn(api, 'post').mockResolvedValue({} as never)
+  await state.save()
+  expect(state.saveValidationIssues.some(issue => issue.key === 'shippingNote')).toBe(true)
+  expect(state.notice).toContain('不能超过200字')
+  expect(post).not.toHaveBeenCalled()
+  expect(state.shippingNote).toHaveLength(201)
+  expect(quote(1)).toEqual(before)
+})
 it.each(['', '-1', 'NaN', 'Infinity', '1e3', '1000001', '0.0001'])('blocks invalid gram input %s and invalidates old prices immediately', async grams => {
   await query('freight-trial')
   state.manualWeightGrams = grams
@@ -182,6 +239,7 @@ it.each(['freight-trial','shipping-only'] as const)('round-trips %s conditions a
 
 it.each(['freight-trial','shipping-only'] as const)('saves the complete %s payload with no SKU costs and reopens the same snapshot', async mode => {
   await query(mode)
+  state.shippingNote = '  TC2600009-1 客户自备耳机  '
   state.quoteMatrixMode='common'
   await nextTick()
   await vi.waitFor(() => expect(host.querySelector('.selection-actions button')).not.toBeNull())
@@ -192,9 +250,15 @@ it.each(['freight-trial','shipping-only'] as const)('saves the complete %s paylo
   expect(post, state.notice).toHaveBeenCalledTimes(1)
   const payload=post.mock.calls[0]![1] as Record<string,unknown>
   expect(payload).toMatchObject({quoteMode:mode,primarySku:'',manualPricing:{costCny:mode==='freight-trial'?30:0,weightGrams:500},purchaseVersions:{}})
+  if (mode === 'shipping-only') expect(payload).toMatchObject({ shippingNote: 'TC2600009-1 客户自备耳机', productSummary: '仅代发货报价：TC2600009-1 客户自备耳机' })
+  else expect(payload).not.toHaveProperty('shippingNote')
   expect(payload.weightSnapshot).toBeUndefined();expect(payload.purchaseUnitPriceCny).toBeUndefined();expect(payload.domesticFreightPerUnitCny).toBeUndefined()
   const record=normalizeQuotationRecord({...payload,id:'saved-manual',no:'Q-MANUAL'} as never)!
   expect(record.systemQuoteUsd).toBe(mode==='freight-trial'?12.5:6.5)
   expect(record.customerQuote?.rows[0]?.prices[0]).toBe(mode==='freight-trial'?12.5:6.5)
   expect(quotationRecordQuoteSheetSource(record).quoteMode).toBe(mode)
+  const reissued = quotationReissuePayload(record)
+  expect(reissued.shippingNote).toBe(mode === 'shipping-only' ? 'TC2600009-1 客户自备耳机' : undefined)
+  expect(quotationRecordQuoteSheetSource(record).skus).toEqual([mode === 'shipping-only' ? '仅代发货报价' : '报价试算'])
+  expect(state.shippingNote).toBe('')
 })

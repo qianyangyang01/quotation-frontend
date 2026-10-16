@@ -43,6 +43,21 @@ class QuotationDraftControllerTest {
         assertTrue(saved.path("payload").path("product").path("purchaseInvoiceTaxApplied").asBoolean());
     }
 
+    @Test void shippingNoteSurvivesVersionedAndLegacyDraftsWithTheSameValidation() {
+        when(drafts.findById("ADMIN")).thenReturn(Optional.empty());
+        when(drafts.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+        var input = validDraft().put("quoteMode", "shipping-only").put("shippingNote", "  TC2600009-1 蓝色  ");
+        var saved = controller.saveState(input, -1, null, auth).data();
+        assertEquals("TC2600009-1 蓝色", saved.path("payload").path("shippingNote").asText());
+        assertEquals("TC2600009-1 蓝色", controller.put(input.deepCopy(), auth).data().path("shippingNote").asText());
+        assertEquals("data: 客户自备", controller.validated(input.deepCopy().put("shippingNote", "data: 客户自备")).path("shippingNote").asText());
+        assertThrows(com.milano.quotation.common.FieldValidationException.class,
+            () -> controller.validated(input.deepCopy().put("shippingNote", "x".repeat(201))));
+        assertThrows(com.milano.quotation.common.FieldValidationException.class,
+            () -> controller.validated(input.deepCopy().put("quoteMode", "freight-trial")));
+        assertFalse(controller.validated(input.deepCopy().put("shippingNote", "  ")).has("shippingNote"));
+    }
+
     @Test void roundTripsCommissionForEmployeeAndAdminAndRejectsInvalidInput() {
         for (var role : new String[]{"employee", "super_admin"}) {
             var principal = new QuotationPrincipal(UUID.randomUUID(), role, role, "hash", role, true, false, List.of("quote"));

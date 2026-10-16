@@ -32,9 +32,14 @@ class QuotationAnalyticsPostgresIntegrationTest {
             from generate_series(1,205)i
             """);
         jdbc.execute("update quotation_record set payload=(payload-'quoteOptions')||jsonb_build_object('specifiedQuotes',jsonb_build_array(jsonb_build_object('country','英国'))) where id=md5('1')::uuid");
+        jdbc.execute("update quotation_record set payload=payload||jsonb_build_object('quoteMode','shipping-only','primarySku','','shippingNote','TC2600009-1 蓝色','productSummary','仅代发货报价：TC2600009-1 蓝色') where id=md5('2')::uuid");
         var controller=new QuotationAnalyticsController(JdbcClient.create(ds),new ObjectMapper());
         var result=controller.snapshot().data();
         assertEquals(204,result.total());assertEquals(204,result.items().size());
+        var shipping = result.items().stream().filter(row -> row.path("no").asText().equals("Q-2")).findFirst().orElseThrow();
+        assertEquals("TC2600009-1 蓝色", shipping.path("shippingNote").asText());
+        assertEquals("仅代发货报价：TC2600009-1 蓝色", shipping.path("productSummary").asText());
+        assertEquals("", shipping.path("primarySku").asText());
         assertTrue(result.items().stream().anyMatch(row->row.path("quoteOptions").get(0).path("country").asText().equals("英国")));
         for(var row:result.items()) {
             assertEquals("2026-09-23T01:02:03.123456789Z",row.path("createdAt").asText());

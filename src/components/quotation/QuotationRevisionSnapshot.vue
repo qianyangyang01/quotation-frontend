@@ -10,6 +10,7 @@ const snapshots = computed(() => [parse(props.before), parse(props.after)])
 const fields = computed(() => [
   { label: '客户', values: snapshots.value.map(row => row?.customerName) },
   { label: 'SKU', values: snapshots.value.map(row => row?.primarySku) },
+  ...(snapshots.value.some(row => row?.quoteMode === 'shipping-only') ? [{ label: '备注信息', values: snapshots.value.map(row => row?.quoteMode === 'shipping-only' ? row.shippingNote || '未填写' : '不适用') }] : []),
   { label: '物流属性', values: snapshots.value.map(row => row?.logisticsAttribute) },
   { label: '客户等级', values: snapshots.value.map(row => row ? customerGradeDisplayLabel(row.customerGrade) : '') },
   { label: '系统报价', values: snapshots.value.map(row => row ? `$${row.systemQuoteUsd.toFixed(2)}` : '') },

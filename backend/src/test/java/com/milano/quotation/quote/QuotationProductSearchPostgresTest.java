@@ -73,4 +73,27 @@ class QuotationProductSearchPostgresTest {
         assertFalse(newPlan.contains("Function Scan"),newPlan);
         System.out.println("PRODUCT_SEARCH_BEFORE\n"+oldPlan+"\nPRODUCT_SEARCH_AFTER\n"+newPlan);
     }
+
+    @Test void shippingNoteSearchUsesExistingTrigramIndexWithoutReadingEveryPricingSnapshot() {
+        migrate();
+        jdbc.execute("""
+            insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at)
+            select md5(n::text)::uuid,'QT-'||n,'ME','pending',
+              jsonb_build_object('quoteMode','shipping-only','primarySku','',
+                'shippingNote','TC2600009-'||n||' 客户自备蓝色',
+                'productSummary','仅代发货报价：TC2600009-'||n||' 客户自备蓝色',
+                'quoteOptions',(select jsonb_agg(jsonb_build_object('id',k,'channel',md5((n*100+k)::text),
+                  'snapshot',repeat(md5((n*200+k)::text),8))) from generate_series(1,60) k)),
+              0,now(),now() from generate_series(1,3100) n
+            """);
+        // Flush the GIN pending list after this artificial bulk load, as normal autovacuum does.
+        jdbc.execute("vacuum analyze quotation_record");
+        var sql = "select count(*) from quotation_record where lifecycle_state='active' and product_search_text like '%tc2600009-3099%'";
+        assertEquals(1L, jdbc.queryForObject(sql, Long.class));
+        var plan = String.join("\n", jdbc.queryForList("explain (analyze,buffers,timing off) " + sql, String.class));
+        assertTrue(plan.contains("quotation_record_product_search_idx"), plan);
+        assertFalse(plan.contains("Function Scan"), plan);
+        assertFalse(plan.contains("Seq Scan on quotation_record"), plan);
+        System.out.println("SHIPPING_NOTE_INDEXED_SEARCH\n" + plan);
+    }
 }

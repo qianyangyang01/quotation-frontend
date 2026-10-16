@@ -28,6 +28,36 @@ class QuotationWithdrawalPostgresTest extends QuotationFinanceReviewIntegrationT
         r.add("spring.jpa.defer-datasource-initialization",()->"false");r.add("spring.flyway.enabled",()->"true");
     }
     @Autowired QuotationDraftRepository drafts;
+    @Test void shippingNoteSurvivesWithdrawalResubmissionAndIndependentReissueWithOriginalSnapshotRetained() throws Exception {
+        var q = record();
+        var original = (ObjectNode) mapper.readTree(getClass().getResourceAsStream("/manual-quotation/shipping-only.json"));
+        original.put("shippingNote", "TC2600009-1 原始备注"); ShippingQuotationNote.snapshot(original);
+        original.put("id", q.id.toString()).put("no", q.quoteNo); q.payload = original; q = records.saveAndFlush(q);
+        var withdrawal = withdrawal(q);
+        ((ObjectNode) withdrawal.path("draft")).put("quoteMode", "shipping-only").put("shippingNote", "TC2600009-1 原始备注");
+        command(q, "withdraw", withdrawal, "shipping-withdraw-" + q.id, employee).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.payload.shippingNote").value("TC2600009-1 原始备注"));
+        mvc.perform(get("/api/v1/quotation-drafts/mine/state").with(employee)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.payload.shippingNote").value("TC2600009-1 原始备注"));
+        var body = cancelBody(q);
+        body.set("quotation", original.deepCopy().put("shippingNote", "  TC2600009-1 修改后备注  ").put("productSummary", "过期标题"));
+        var response = command(q, "resubmit", body, "shipping-resubmit-" + q.id, employee).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.shippingNote").value("TC2600009-1 修改后备注"))
+            .andExpect(jsonPath("$.data.productSummary").value("仅代发货报价：TC2600009-1 修改后备注")).andReturn();
+        var resubmitted = records.findById(q.id).orElseThrow();
+        assertEquals(q.quoteNo, resubmitted.quoteNo); assertEquals(original.path("manualPricing"), resubmitted.payload.path("manualPricing"));
+        var revision = resubmitted.payload.path("revisions").get(0);
+        assertEquals("TC2600009-1 原始备注", mapper.readTree(revision.path("before").asText()).path("shippingNote").asText());
+        assertEquals("TC2600009-1 修改后备注", mapper.readTree(revision.path("after").asText()).path("shippingNote").asText());
+        assertEquals(mapper.readTree(response.getResponse().getContentAsByteArray()).path("data"),
+            mapper.readTree(command(q, "resubmit", body, "shipping-resubmit-" + q.id, employee).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data"));
+        var beforeReissue = resubmitted.payload.deepCopy();
+        mvc.perform(post("/api/v1/quotations").with(employee).with(csrf()).header("Idempotency-Key", "shipping-reissue-" + q.id)
+            .contentType("application/json").content(original.deepCopy().put("shippingNote", "再次发起备注").toString()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.shippingNote").value("再次发起备注"))
+            .andExpect(jsonPath("$.data.id").value(org.hamcrest.Matchers.not(q.id.toString())));
+        assertEquals(beforeReissue, records.findById(q.id).orElseThrow().payload);
+    }
     @Test void pendingEditIsDiscoverableAndIndependentCreatesPreserveDraftAndOriginal() throws Exception {
         var q=record();
         ((ObjectNode)q.payload).putObject("quotationBatch").put("id",UUID.randomUUID().toString()).put("no","B-DEMO").put("index",2).put("count",3);

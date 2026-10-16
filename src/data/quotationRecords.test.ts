@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeQuotationRecord } from './quotationRecords'
+import { shippingQuotationSummary } from './shippingQuotationNote'
 
 function baseRecord() {
   return {
@@ -10,6 +11,17 @@ function baseRecord() {
     createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z', revisions: [],
   }
 }
+
+it('preserves shipping identification independently of legacy deal notes and never injects it into other modes', () => {
+  const raw = { ...baseRecord(), quoteMode: 'shipping-only' as const, primarySku: '', shippingNote: '  TC2600009-1  ', productSummary: '仅代发货报价：TC2600009-1', note: '跟进备注' }
+  const before = JSON.stringify(raw)
+  expect(normalizeQuotationRecord(raw)).toMatchObject({ shippingNote: 'TC2600009-1', productSummary: raw.productSummary, note: '跟进备注' })
+  expect(JSON.stringify(raw)).toBe(before)
+  expect(normalizeQuotationRecord({ ...raw, quoteMode: 'freight-trial' })?.shippingNote).toBeUndefined()
+  expect(normalizeQuotationRecord({ ...raw, shippingNote: undefined, productSummary: '' })?.productSummary).toBe('仅代发货报价')
+  expect(shippingQuotationSummary('  ')).toBe('仅代发货报价')
+  expect(shippingQuotationSummary('耳机 SKU_100%')).toBe('仅代发货报价：耳机 SKU_100%')
+})
 
 describe('quotation record bundle snapshots', () => {
   it('preserves logistics version and calculation inputs without rewriting saved freight', () => {

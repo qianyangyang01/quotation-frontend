@@ -14,6 +14,7 @@ export interface DraftChannelSelection {
 }
 
 export interface QuotationDraftPayload {
+  shippingNote?: string
   manualPricing?: { costCny: number | null; weightGrams: number | null }
   priorityProcessing?: boolean
   specialPackagingGrams?: number | null

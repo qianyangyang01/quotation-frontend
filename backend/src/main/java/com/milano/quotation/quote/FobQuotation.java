@@ -37,6 +37,7 @@ public class FobQuotation {
         return n.asText();
     }
     public ObjectNode prepare(ObjectNode request) {
+        ShippingQuotationNote.validated(request);
         if(request.has("priorityProcessing")&&!request.path("priorityProcessing").isBoolean())throw AppException.unprocessable("优先处理参数无效");
         var snapshot=request.path("fob");
         if(snapshot.path("schemaVersion").asInt()==2)return prepareBatch(request);

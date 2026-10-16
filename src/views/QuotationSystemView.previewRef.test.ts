@@ -130,7 +130,7 @@ it.each([
   const emit=vi.fn()
   const context = { props: batch ? {batchCapture:true} : {}, emit, draftPayload:()=>({skuSearch:'SKU-A'}), fobActive: {value:false}, manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
-    parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
+    parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, shippingNoteError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,
     products:{value:[{sku:'SKU-A',quantity:1,name:'QA',country:'美国',rule:'rule',purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchase:2,purchaseFreightPerUnit:grade==='A'?.21:0,netWeight:manual?.12:.14,weightSource:manual?'manual':'purchase'}]},
     customerOperation:{value:{configured:true,snapshot:undefined}},customerName:{value:'QA'},productCategory:{value:'日用品'},savedQuoteRows:{value:state.previewProps.rows.map(row=>({...row,taxConfigured:true}))},

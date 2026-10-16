@@ -1,5 +1,6 @@
 import type { QuotationRecord, QuotationRecordQuoteOption } from '@/data/quotationRecords'
 import { draftSelection, type QuotationDraftPayload } from './quotationDrafts'
+import { normalizeShippingNote } from '@/data/shippingQuotationNote'
 
 /** Copy editable inputs only. Prices, approvals and deal results belong to the original record. */
 export function quotationReissuePayload(record: QuotationRecord): QuotationDraftPayload {
@@ -16,6 +17,7 @@ export function quotationReissuePayload(record: QuotationRecord): QuotationDraft
   const selectedQuoteRegions = Object.fromEntries(selections.filter(item => item.quoteRegion).map(item => [item.country, item.quoteRegion!]))
   if (primary?.country) selectedQuoteRegions[primary.country] = primary.quoteRegion || ''
   return {
+    ...(record.quoteMode === 'shipping-only' ? { shippingNote: normalizeShippingNote(record.shippingNote) } : {}),
     manualPricing: record.manualPricing ? { ...record.manualPricing } : undefined,
     schemaVersion: 2, customerName: record.customerName, selectedCustomerId: record.customerOperation?.id,
     commissionThreshold: record.commissionThreshold ?? 1,

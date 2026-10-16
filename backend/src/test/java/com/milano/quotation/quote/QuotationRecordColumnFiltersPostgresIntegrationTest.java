@@ -95,6 +95,43 @@ class QuotationRecordColumnFiltersPostgresIntegrationTest {
         assertEquals(Set.of("EQUAL","BOTH-NULL","ORIGINAL"),names("equal"));
         assertEquals(Set.of("BLANK","NO-BASELINE"),names("missing"));
     }
+
+    @Test void shippingNotesUseIndexedLiteralSearchWithFilteredCountsAndEveryExportPageWithoutMutatingHistory() {
+        for (int i = 0; i < 105; i++) {
+            var row = record("SHIPPING-" + i, 9).put("quoteMode", "shipping-only").put("primarySku", "")
+                .put("shippingNote", "TC2600009-1 蓝色 客户自备 100%_/A\\B").put("financeReviewStatus", "approved");
+            ShippingQuotationNote.snapshot(row); save(row, "ME");
+        }
+        var otherOwner = record("OTHER-OWNER", 9).put("quoteMode", "shipping-only").put("primarySku", "")
+            .put("shippingNote", "TC2600009-1 蓝色 客户自备 100%_/A\\B").put("financeReviewStatus", "approved");
+        ShippingQuotationNote.snapshot(otherOwner); save(otherOwner, "OTHER");
+        var archived = otherOwner.deepCopy().put("id", UUID.randomUUID().toString()).put("no", "ARCHIVED");
+        save(archived, "ME");
+        jdbc.getJdbcTemplate().execute("update quotation_record set lifecycle_state='archived' where quote_no='ARCHIVED'");
+        save(record("LEGACY-SHIPPING", 10).put("quoteMode", "shipping-only").put("primarySku", "").put("productSummary", "仅代发货报价"), "ME");
+        save(record("PRODUCT", 9).put("quoteMode", "single").put("productSummary", "TC2600009-1 蓝色 客户自备 100%_/A\\B"), "ME");
+        var before = jdbc.getJdbcTemplate().queryForObject("select md5(string_agg(to_jsonb(q)::text,'' order by id)) from quotation_record q", String.class);
+        for (var term : List.of("tc2600009-1", "TC2600009", "蓝色", "客户自备", "100%_", "%", "_", "/A", "\\B")) {
+            var filter = shippingFilters(term, "", "active");
+            var first = query.search("ME", filter, 0, 100); var second = query.search("ME", filter, 1, 100);
+            assertEquals(105, first.total(), term); assertEquals(105, first.summary().processed(), term);
+            assertEquals(100, first.items().size(), term); assertEquals(5, second.items().size(), term);
+            assertEquals(2, first.totalPages(), term);
+            var ids = new HashSet<String>(); first.items().forEach(row -> ids.add(row.path("id").asText()));
+            second.items().forEach(row -> ids.add(row.path("id").asText())); assertEquals(105, ids.size(), term);
+            assertTrue(first.items().stream().allMatch(row -> row.path("primarySku").asText().isEmpty()));
+            assertEquals(105, query.search("ME", shippingFilters("", term, "active"), 0, 100).total(), "global " + term);
+        }
+        assertEquals(0, query.search("ME", shippingFilters("100__", "", "active"), 0, 10).total());
+        assertEquals(106, query.search(null, shippingFilters("tc2600009", "", "active"), 0, 100).total());
+        assertEquals(1, query.search("ME", shippingFilters("tc2600009", "", "archived"), 0, 100).total());
+        assertEquals(before, jdbc.getJdbcTemplate().queryForObject("select md5(string_agg(to_jsonb(q)::text,'' order by id)) from quotation_record q", String.class));
+    }
+
+    private QuotationRecordQuery.Filters shippingFilters(String product, String q, String lifecycle) {
+        return new QuotationRecordQuery.Filters(q, "processed", "美国", "", java.time.LocalDate.parse("2026-09-24"),
+            java.time.LocalDate.parse("2026-09-24"), lifecycle, "ME", "approved", false, product, "alice", "专线", "single", "lower", false, "", "shipping-only");
+    }
     @Test void preservesOwnerLifecycleReviewAndStatisticsAcrossAllExportPages() {
         for(int i=0;i<105;i++)save(record("LOW-"+i,9).put("financeReviewStatus","approved"),"ME");
         save(record("OTHER",9).put("financeReviewStatus","approved"),"OTHER");

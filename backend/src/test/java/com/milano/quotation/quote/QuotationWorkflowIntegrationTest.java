@@ -41,10 +41,16 @@ class QuotationWorkflowIntegrationTest {
         var session = authenticatedSession();
         for (var mode : java.util.List.of("freight-trial", "shipping-only")) {
             var body = (tools.jackson.databind.node.ObjectNode) mapper.readTree(getClass().getResourceAsStream("/manual-quotation/" + mode + ".json"));
+            if (mode.equals("shipping-only")) body.put("shippingNote", "  TC2600009-1 蓝色  ").put("productSummary", "客户端旧标题");
             var result = mvc.perform(post("/api/v1/quotations").session(session).with(csrf())
                     .header("Idempotency-Key", "manual-" + mode).contentType("application/json").content(body.toString()))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.data.quoteMode").value(mode)).andReturn();
             var id = mapper.readTree(result.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+            if (mode.equals("shipping-only")) {
+                mvc.perform(get("/api/v1/quotations/{id}", id).session(session))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.shippingNote").value("TC2600009-1 蓝色"))
+                    .andExpect(jsonPath("$.data.productSummary").value("仅代发货报价：TC2600009-1 蓝色"));
+            }
             mvc.perform(get("/api/v1/quotations/{id}", id).session(session))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.data.quoteMode").value(mode))
                     .andExpect(jsonPath("$.data.systemQuantityQuotes.quantities[3]").value(7))

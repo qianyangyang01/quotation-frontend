@@ -389,6 +389,7 @@ const isMine = computed(() => props.scope === 'mine')
 const title = computed(() => isMine.value ? '我的报价记录' : '报价记录')
 const list = computed(() => records.value.filter(row => !reviewSync.isMissing(row.id) && (reviewSync.stateFor(row).lifecycleState || row.lifecycleState || 'active') === lifecycle.value))
 function recordSku(row: QuotationRecord) {
+  if (row.quoteMode === 'shipping-only') return row.productSummary
   if (isManualQuotation(row.quoteMode)) return quotationModeLabels[row.quoteMode]
   if (row.quoteMode === 'bundle' && row.bundleItems?.length) return row.bundleItems.map(item => item.sku).join('+')
   return row.quoteMode === 'bundle' ? row.primarySku.replace(/[、,，]/g, '+') : row.primarySku
@@ -617,7 +618,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
         <header class="record-column-filters" aria-label="报价记录列筛选">
           <div class="record-column-filter">
             <label for="record-product-filter">报价单 / 商品</label>
-            <input id="record-product-filter" v-model="filterProduct" type="search" placeholder="搜索报价单号 / SKU / 商品 / 业务员 / 批次号">
+            <input id="record-product-filter" v-model="filterProduct" type="search" placeholder="搜索报价单号 / SKU / 商品 / 代发备注 / 业务员 / 批次号" title="支持按仅代发货报价的备注内容搜索；其他筛选条件仍同时生效">
             <select v-model="filterCategory" aria-label="产品品类"><option value="">全部品类</option><option v-for="item in quotationProductCategories" :key="item" :value="item">{{ item }}</option></select>
           </div>
           <label class="record-column-filter">客户<input v-model="filterCustomer" type="search" aria-label="客户" placeholder="搜索客户名称"></label>
@@ -641,7 +642,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             <QuotationProductImage class="quote-record-image" :snapshot-image="row.productImage" :physical-image="recordPurchaseProduct(row)?.physicalImage" :product-image="recordPurchaseProduct(row)?.productImage" :alt="row.productSummary"><template #fallback><PurchaseCategoryBadge :category="recordPurchaseProduct(row)?.category || row.productCategory" /></template></QuotationProductImage>
             <div class="quote-info-copy">
               <BatchSkuSummary v-if="row.fob?.schemaVersion===2" :skus="(row.fob.items || []).map(item=>item.product.sku)" />
-              <div v-else class="record-product-title"><b class="record-sku" :title="recordSku(row)">{{ recordSku(row) }}</b><strong>{{ row.productSummary }}</strong><em v-if="priorityFor(row)" class="priority-badge">优先处理</em></div>
+              <div v-else class="record-product-title" :class="{'shipping-product-title':row.quoteMode==='shipping-only'}"><b class="record-sku" :title="recordSku(row)">{{ recordSku(row) }}</b><strong v-if="row.quoteMode!=='shipping-only'">{{ row.productSummary }}</strong><em v-if="priorityFor(row)" class="priority-badge">优先处理</em></div>
               <em v-if="row.fob?.schemaVersion===2 && priorityFor(row)" class="priority-badge">优先处理</em>
               <div class="record-product-meta"><span class="record-commission" :class="{applied: (row.commissionThreshold ?? 1) > 0 && (row.commissionThreshold ?? 1) < 1}">{{ recordCommission(row) }}</span><small>{{ quotationModeLabels[row.quoteMode] }}<template v-if="!isMine"> · {{ row.salespersonName }}</template></small></div>
               <small class="record-number" :title="row.no">报价单号：{{ row.no }}</small>
@@ -695,7 +696,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
     <QuotationLifecycleDialog v-if="lifecycleAction" :action="lifecycleAction" :rows="lifecycleTargets" :skipped="lifecycleSkipped" :busy="lifecycleBusy" :error="lifecycleError" :batch-no="lifecycleBatch?.quotationBatch?.no" :blocked="lifecycleBlocked" @cancel="lifecycleAction=null" @confirm="confirmLifecycle" />
     <QuotationLifecycleDialog v-if="lifecycleLoadFailure" action="trash" :rows="[]" :busy="lifecycleBusy" :error="lifecycleLoadFailure.message" :batch-no="lifecycleLoadFailure.row.quotationBatch?.no" loading-failed @cancel="lifecycleLoadFailure=null" @retry="beginRecordTrash(lifecycleLoadFailure.row, true)" />
     <div v-if="selected" class="mask" @click.self="closeDrawer">
-      <aside class="record-drawer" :class="{'batch-review-drawer':selected.fob?.schemaVersion===2 && !editing, 'batch-review-active':selected.fob?.schemaVersion===2 && !editing && detailTab==='overview'}">
+      <aside class="record-drawer" :class="{'shipping-record-drawer':selected.quoteMode==='shipping-only', 'batch-review-drawer':selected.fob?.schemaVersion===2 && !editing, 'batch-review-active':selected.fob?.schemaVersion===2 && !editing && detailTab==='overview'}">
         <header><div><small>{{ editing ? 'QUOTATION FOLLOW-UP' : 'QUOTATION DOCUMENT' }}</small><h2>{{ editing ? (selected.status === 'pending' ? '回填成交结果' : '修改成交结果') : selected.no }}</h2><span v-if="!editing">{{ selected.customerName }} · {{ selected.fob?.schemaVersion===2 ? `FOB批量 · ${selected.fob.items?.length || 0}项 · ${selected.fob.sheet.rows.length}档` : selected.productSummary }}<template v-if="selected.quoteMode!=='fob'"> · {{ recordCountries(selected).length || 1 }}国{{ recordOptions(selected).length || 1 }}渠道</template></span></div><button aria-label="关闭" @click="closeDrawer">×</button></header>
 
         <p v-if="!isActive(selected)" class="lifecycle-readonly">{{ lifecycleLabel(selected.lifecycleState) }} · {{ selected.lifecycleChangedBy }} · {{ selected.lifecycleReason }}。恢复后可修改。</p>
@@ -844,6 +845,10 @@ main{width:min(1680px,calc(100% - 48px))}
 .quote-record-table .record-product-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;min-width:0}
 .quote-record-table .record-sku{font-size:18px!important;line-height:1.4}
 .quote-record-table .record-product-title strong{font-size:14px;color:#52616d;white-space:normal;overflow-wrap:anywhere}
+.quote-record-table .shipping-product-title .record-sku{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.shipping-record-drawer>header>div{min-width:0}.shipping-record-drawer>header span{overflow-wrap:anywhere}.shipping-record-drawer>header button{flex-shrink:0}
+.shipping-record-drawer .overview-info>div{grid-template-columns:72px minmax(0,1fr) 72px minmax(0,1fr)}.shipping-record-drawer .overview-info b{min-width:0;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:720px){.shipping-record-drawer .overview-info>div{grid-template-columns:70px minmax(0,1fr)}}
 .quote-record-table .record-product-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
 .quote-record-table>article small{font-size:13px;line-height:1.5;color:#63717d;white-space:normal;overflow-wrap:anywhere}
 .quote-record-table .record-number{font-size:13px;line-height:1.5;color:#63717d}

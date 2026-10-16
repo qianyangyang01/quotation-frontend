@@ -39,3 +39,12 @@ it('retries an uncertain resubmission without creating another quotation or key'
   expect(post.mock.calls[2]![2]).not.toBe(post.mock.calls[1]![2])
   expect(post.mock.calls.every(call => call[0] === '/quotations/id/resubmit')).toBe(true)
 })
+it('carries a shipping note into withdrawn editing without copying deal notes or changing the saved snapshot', async () => {
+  const original = normalizeQuotationRecord({ ...record(), quoteMode: 'shipping-only', primarySku: '', shippingNote: 'TC2600009-1 自备货', note: '成交跟进', manualPricing: { costCny: 0, weightGrams: 500 } })!
+  const before = JSON.stringify(original)
+  post.mockResolvedValue({ exists: true, version: 0, payload: { schemaVersion: 2 } })
+  await withdrawQuotation(original)
+  expect(post.mock.calls[0]![1].draft).toMatchObject({ quoteMode: 'shipping-only', shippingNote: 'TC2600009-1 自备货', skuSearch: '', manualPricing: { costCny: 0, weightGrams: 500 } })
+  expect(post.mock.calls[0]![1].draft).not.toHaveProperty('note')
+  expect(JSON.stringify(original)).toBe(before)
+})

@@ -237,6 +237,7 @@ public class QuotationController {
     }
 
     private JsonNode persistPrepared(ObjectNode payload, ObjectNode input, QuotationPrincipal principal) {
+        ShippingQuotationNote.snapshot(payload);
         var now = Instant.now(); var id = UUID.randomUUID(); var no = quoteNo(now, id);
         QuotationReviewService.SPOT_CHECK_FIELDS.forEach(payload::remove);
         if (!FobQuotation.isFob(payload)) logisticsGuard.validate(payload);

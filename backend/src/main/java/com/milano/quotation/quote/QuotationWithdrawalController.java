@@ -109,6 +109,7 @@ public class QuotationWithdrawalController {
             ||!input.path("financeVersions").isObject()||input.path("financeVersions").isEmpty())
             throw AppException.unprocessable("缺少采购或财务版本信息，请刷新草稿并重新计价");
         var payload=input.deepCopy();validator.validate(payload);validator.validateQuotePricing(payload);readiness.assertCanCreate(payload);
+        ShippingQuotationNote.snapshot(payload);
         logistics.validate(payload);
         payload.remove(List.of("priorityProcessing","customerId","_version","_reviewVersion","lifecycleState","lifecyclePreviousState","lifecycleChangedAt","lifecycleChangedBy","lifecycleChangedAccount","lifecycleReason",
             "actualQuoteUsd","actualQuoteCny","dealQuantity","dealLines","dealOptionId","dealOptionLabel","closedAt","note","quoteConfirmedAt","quoteConfirmedBy"));
