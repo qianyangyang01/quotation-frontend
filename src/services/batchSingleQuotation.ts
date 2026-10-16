@@ -2,6 +2,7 @@ import type { PriceException, PriceExceptionType } from '@/data/priceExceptions'
 import type { createQuotationRecord } from '@/data/quotationRecords'
 import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { orderQuoteRows, placeAverageRowsBeforeMembers } from '@/data/quoteSheetRowOrder'
+import { averageScope } from '@/data/quoteChannelAverage'
 import type { QuotationDraftPayload } from './quotationDrafts'
 import { request } from './http'
 import { saveQuotationBatch, type QuotationBatchResult } from './quotationBatchSubmission'
@@ -76,13 +77,13 @@ export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument 
     // Initial batch assembly also receives averages created in the ordinary single-SKU editor.
     // Only order this new sheet; saved history and the source snapshots are never rewritten.
     const plans = (item.input.customerQuote?.averagePlans ?? []).filter(plan => item.sheet.rows.some(row => row.averageId === plan.id))
-    const order = placeAverageRowsBeforeMembers(item.sheet.rows.map(row => row.key), plans.map(plan => ({
-      key: item.sheet.rows.find(row => row.averageId === plan.id)!.key,
-      members: plan.members.map(member => {
-        const option = item.input.quoteOptions?.find(option => option.id === member.optionId) as { quoteSheetKey?: string } | undefined
-        return option?.quoteSheetKey ?? member.optionId
-      }),
-    })))
+    const order = placeAverageRowsBeforeMembers(item.sheet.rows.map(row => row.key), plans.map(plan => {
+      const options = item.input.quoteOptions ?? []
+      const source = options.find(option => option.id === plan.members[0]?.optionId)
+      const scope = (option: typeof options[number]) => averageScope({ country: option.countryCode || option.country })
+      const members = source ? options.filter(option => scope(option) === scope(source)).map(option => (option as { quoteSheetKey?: string }).quoteSheetKey ?? option.id) : plan.members.map(member => member.optionId)
+      return { key: item.sheet.rows.find(row => row.averageId === plan.id)!.key, members }
+    }))
     return orderQuoteRows(item.sheet.rows, order, row => row.key).map(row => ({ ...row, prices: [...row.prices], key: `${index}:${row.key}`, sku: item.input.primarySku }))
   }).map((row, index) => ({ ...row, number: index + 1 }))
   if (sheet.rows.length > 500) throw new Error('合并报价最多500条渠道明细，请减少 SKU 或渠道')

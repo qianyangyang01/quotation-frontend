@@ -14,7 +14,7 @@ import { copyQuoteSheetImage, preloadQuoteSheetAssets, renderCustomerQuoteSheet,
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import QuoteAveragePanel from './QuoteAveragePanel.vue'
-import { applyAveragePlans, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
+import { applyAveragePlans, averageScope, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
 import { placeAverageRowsBeforeMembers, restoreQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
 import { releaseQuotePhotos, MAX_QUOTE_PHOTOS, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
@@ -306,9 +306,13 @@ function addBatchAverages(plans: AveragePlan[]) {
     for (const key of Object.keys(averageInputs.value)) if (key.startsWith(plan.id + ':')) delete averageInputs.value[key]
     for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(plan.id + ':')) delete averagePriceErrors.value[key]
   }
-  rowOrder.value = placeAverageRowsBeforeMembers(order, plans.map(plan => ({ key: `average:${plan.id}`, members: plan.members.map(member => member.optionId) })))
+  rowOrder.value = placeAverageRowsBeforeMembers(order, plans.map(plan => {
+    const source = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)
+    const members = source ? props.rows.filter(row => averageScope(row) === averageScope(source)).map(quoteSheetRowKey) : plan.members.map(member => member.optionId)
+    return { key: `average:${plan.id}`, members }
+  }))
   averagePlans.value = [...averagePlans.value.filter(plan => !keys.has(`average:${plan.id}`)), ...plans]
-  averageNotice.value = `已为 ${plans.length} 个 SKU 生成平均行，分别放在对应国家的来源渠道上方`
+  averageNotice.value = `已为 ${plans.length} 个 SKU 生成平均行，分别放在对应国家的明细上方`
   invalidate()
 }
 function removeAverage(id: string) { for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(id + ':')) delete averagePriceErrors.value[key]; averagePlans.value = averagePlans.value.filter(plan => plan.id !== id); invalidate() }

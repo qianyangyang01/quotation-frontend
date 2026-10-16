@@ -27,7 +27,7 @@ export function validAveragePlans(plans: unknown): plans is AveragePlan[] {
     try { return JSON.stringify(averagePrices(p.members, p.mode, p.quantities.length)) === JSON.stringify(p.systemPrices) } catch { return false }
   })
 }
-function averageCountry(row: QuoteSheetSourceRow) {
+function averageCountry(row: Pick<QuoteSheetSourceRow, 'country'>) {
   return quoteSheetCountryCode(row.country, []) || (row.country.trim().toLowerCase() === 'australia' ? 'AU' : row.country)
 }
 export function australiaAverageZone(row: QuoteSheetSourceRow) {
@@ -35,7 +35,7 @@ export function australiaAverageZone(row: QuoteSheetSourceRow) {
     .replace('一区', '1区').replace('二区', '2区').replace('三区', '3区').replace('四区', '4区')
   return averageCountry(row) === 'AU' && /^[1-4]区$/.test(region) ? Number(region[0]) : undefined
 }
-export function averageScope(row: QuoteSheetSourceRow) {
+export function averageScope(row: Pick<QuoteSheetSourceRow, 'sku' | 'country'>) {
   return JSON.stringify(row.sku ? [row.sku, averageCountry(row)] : [averageCountry(row)])
 }
 export function averagePrices(members: AveragePlan['members'], mode: AveragePlan['mode'], count: number) {

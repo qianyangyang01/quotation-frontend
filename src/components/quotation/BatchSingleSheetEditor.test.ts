@@ -166,6 +166,30 @@ it('retains deliberate manual average moves through capture and reopen without c
  app.unmount();document.body.innerHTML='';await mount(undefined,moved)
  expect((await editor.capture()).sheet.rows.map(row => [row.sku, !!row.averageId, row.prices])).toEqual(moved.sheet.rows.map(row => [row.sku, !!row.averageId, row.prices]))
 })
+it.each([false, true])('puts the average before unselected same-country routes (imported: %s)', async (imported) => {
+ const source = multiCountryItem('SKU-A', imported)
+ const option = { ...source.input.quoteOptions![0]!, id: 'unselected', quoteSheetKey: 'sheet-unselected', channel: 'unselected' }
+ const price = { optionId: option.id, prices: [100,200,300] }
+ source.input.quoteOptions!.unshift(option)
+ source.input.customerQuote!.rows.unshift(price)
+ source.input.systemQuantityQuotes!.rows.unshift(price)
+ source.sheet.rows.unshift({ ...source.sheet.rows[0]!, key: option.quoteSheetKey, provider: 'Unselected', prices: price.prices })
+ const merged = mergeBatchSingle([source])
+ if (imported) expect(merged.sheet.rows[0]!.averageId).toBe('us')
+ await mount(undefined, merged)
+ if (!imported) { button('渠道平均报价').click();await nextTick() }
+ for (const label of ['参与平均：4PX · a','参与平均：4PX · b']) {
+  // The extra route uses a distinct transport label to stay out of this plan.
+  const member = [...document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')].filter(input => input.getAttribute('aria-label') === label).at(-1)!
+  member.click();await nextTick()
+ }
+ button('生成平均行').click();await nextTick()
+ const saved = await editor.capture()
+ expect(saved.sheet.rows[0]!.averageId).toBeTruthy()
+ expect(saved.sheet.rows[1]!.provider).toBe('Unselected')
+ expect(saved.items[0]!.input.customerQuote!.averagePlans!.find(plan => plan.id === saved.sheet.rows[0]!.averageId)!.members.map(member => member.optionId)).toEqual(['a','b'])
+ expect(saved.sheet.rows[0]!.prices).toEqual(imported ? [9.95,19.95,29.95] : [5.5,10.5,15.5])
+})
 it('uses each SKU price, puts averages first, and preserves order and SKU boundaries after reopening',async()=>{
  const a=item('SKU-A'),b=item('SKU-B')
  b.input.systemQuantityQuotes=JSON.parse(JSON.stringify(b.input.systemQuantityQuotes))
