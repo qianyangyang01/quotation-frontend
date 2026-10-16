@@ -43,7 +43,7 @@ class PurchaseRankingServiceTest {
                 review("missing","2026-10-02T00:00:00Z",refs("A"),exception("A","")),
                 review("outside","2026-08-02T00:00:00Z",refs("A"),exception("A","采购甲")));
         var result=report(List.of(product("A","采购甲")),rows);
-        assertEquals(0,owner(result,"采购甲").count());assertEquals(1,owner(result,"").count());
+        assertEquals(0,owner(result,"采购甲").count());assertTrue(result.exceptions().stream().noneMatch(x->x.owner().isBlank()));
         assertEquals(1,result.unclassified());assertEquals(1,result.undated());
     }
     @Test void itemChangesOnlyCountsTheReviewedSkuAndIgnoresRetainedCopies(){
@@ -72,8 +72,19 @@ class PurchaseRankingServiceTest {
         assertEquals(1,result.completion().getFirst().total());assertEquals(1,result.completion().getFirst().complete());
         var conflict=aggregate("all","all",30,now.minusSeconds(30L*86400),now,"",true,Set.of(),
                 List.of(product("A","甲"),new Product("A","fob","乙",json("{}"))),List.of());
-        assertEquals(1,conflict.completion().size());assertEquals("",conflict.completion().getFirst().owner());
-        assertEquals(1,conflict.completion().getFirst().total());assertEquals(0,conflict.completion().getFirst().complete());
+        assertTrue(conflict.completion().isEmpty());
+    }
+    @Test void excludedFirstAnomalyCannotBeReassignedToLaterEligibleOwner(){
+        var result=report(List.of(product("A","采购甲")),List.of(
+            review("q1","2026-10-02T00:00:00Z",refs("A"),exception("A","")),
+            review("q1","2026-10-03T00:00:00Z",refs("A"),exception("A","采购甲"))));
+        assertEquals(0,owner(result,"采购甲").count());assertEquals(0,owner(result,"采购甲").relatedQuotes());
+    }
+    @Test void excludedOwnersDoNotContributeDiagnosticsOrCompletion(){
+        var result=report(List.of(product("A","")),List.of(
+            review("q1","2026-10-02T00:00:00Z",refs("A"),null),review("q2","",refs("A"),null)));
+        assertTrue(result.completion().isEmpty());assertTrue(result.exceptions().isEmpty());
+        assertEquals(0,result.unclassified());assertEquals(0,result.undated());
     }
     @Test void sourceFilterDoesNotCountSameSkuFromAnotherCatalog(){
         var classified=exception("A","FOB采购").deepCopy();((tools.jackson.databind.node.ObjectNode)classified.at("/targets/0")).put("source","fob");

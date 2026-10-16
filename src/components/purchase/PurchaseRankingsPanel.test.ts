@@ -66,3 +66,20 @@ it('does not automatically retry failed initial reads when reopened', async () =
   expect(load).toHaveBeenCalledTimes(1); expect(host.textContent).toContain('读取失败')
   button(host, '重试').click(); await flush(); expect(load).toHaveBeenCalledTimes(2)
 })
+
+it('switches ranking locally, shows weighted summary and removes individual extremes and unassigned rows', async () => {
+  load.mockResolvedValue({ ...result, completion: [
+    { owner: '小数量', total: 1, complete: 1, pending: 0, rate: 100 },
+    { owner: '大数量', total: 100, complete: 90, pending: 10, rate: 90 },
+    { owner: '', total: 500, complete: 0, pending: 500, rate: 0 },
+  ] })
+  const host = mount(); button(host, '展开').click(); await flush()
+  const owners = () => [...host.querySelectorAll('table[aria-label="资料补全排名"] tbody th')].map(el => el.textContent)
+  expect(owners()).toEqual(['大数量', '小数量'])
+  expect(host.querySelector('[aria-label="采购排名汇总"]')?.textContent).toContain('90.1%')
+  expect(host.textContent).not.toContain('未归属采购人'); expect(host.textContent).not.toContain('最高'); expect(host.textContent).not.toContain('最低')
+  button(host, '完整度排名').click(); await flush(); expect(owners()).toEqual(['小数量', '大数量'])
+  expect(load).toHaveBeenCalledTimes(1)
+  button(host, '收起').click(); await flush(); button(host, '展开').click(); await flush()
+  expect(owners()).toEqual(['小数量', '大数量']); expect(load).toHaveBeenCalledTimes(1)
+})

@@ -26,6 +26,7 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @SpringBootTest(properties="app.purchase-sales.source=classpath:purchase-sales-test.json")
 @ActiveProfiles("test") @Testcontainers(disabledWithoutDocker=true)
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
+@org.springframework.transaction.annotation.Transactional
 class PurchaseRankingPostgresIntegrationTest {
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
@@ -38,6 +39,10 @@ class PurchaseRankingPostgresIntegrationTest {
     @Autowired PurchaseProductService products;
     @Autowired PurchaseRankingService rankings;
     @Autowired WebApplicationContext context;
+    @Autowired com.milano.quotation.security.UserAccountRepository accounts;
+    private void account(String account,String name,String role) {
+        accounts.saveAndFlush(com.milano.quotation.security.UserAccount.create(account,name,"unused-test-hash",role,false));
+    }
     private ObjectNode exception(String owner,String source) {
         var c=mapper.createObjectNode().put("category","purchase-price").put("recordedAt",Instant.now().toString());
         c.putArray("targets").addObject().put("sku","SALES-PRIMARY").put("source",source).put("procurementOwner",owner);
@@ -50,9 +55,11 @@ class PurchaseRankingPostgresIntegrationTest {
         jdbc.sql("insert into quotation_review(id,status,state,version) values(:id,'rejected',cast(:state as jsonb),0)")
             .param("id",id).param("state",state.toString()).update();
     }
-    private String fingerprint() {return jdbc.sql("select md5(string_agg(v,'|' order by v)) from (select payload::text||version::text as v from quotation_record union all select state::text||version::text from quotation_review union all select payload::text||version::text from purchase_product union all select state::text||version::text from batch_single_review) t").query(String.class).single();}
+    private String fingerprint() {return jdbc.sql("select md5(string_agg(v,'|' order by v)) from (select payload::text||version::text as v from quotation_record union all select state::text||version::text from quotation_review union all select payload::text||version::text from purchase_product union all select payload::text||version::text from fob_purchase_product union all select state::text||version::text from batch_single_review union all select account||display_name||role_key||status||version::text from app_user) t").query(String.class).single();}
     @Test @WithMockUser(authorities={"PERM_purchase","ROLE_PURCHASE"})
     void projectsAllReviewShapesDeduplicatesAndNeverWritesBusinessRecords() throws Exception {
+        account("CURRENTBUYER","当前采购","purchase");account("OLDBUYER","历史采购","purchase");
+        account("FOBBUYER","FOB采购","purchase");account("BATCHBUYER","批量采购","purchase");
         products.upsert(mapper.createObjectNode().put("sku","SALES-PRIMARY").put("quotationOwner","当前采购")
             .put("weightG",100).put("minOrderQty",1).put("purchasePriceCny",12).put("singleFreightCny",0).put("taxPoint",0));
         var state=mapper.createObjectNode();var history=state.putArray("history");
@@ -78,6 +85,38 @@ class PurchaseRankingPostgresIntegrationTest {
         mvc.perform(get("/api/v1/purchase-rankings")).andExpect(status().isOk());
         mvc.perform(get("/api/v1/purchase-rankings?days=-1")).andExpect(status().isUnprocessableEntity());
         assertEquals(before,fingerprint());
+    }
+    @Test void filtersByRoleMergesAliasesAndKeepsHistoricalOwners() {
+        account("ZHENGKE","郑珂","purchase");account("RANKADMIN","管理员","super_admin");
+        account("RANKEMPLOYEE","普通员工","employee");
+        for(var entry:java.util.Map.of("ALIAS","郑","FULL","郑珂","ACCOUNT","zhengke","ADMIN","管理员","EMPLOYEE","普通员工","UNKNOWN","感温款").entrySet())
+            products.upsert(mapper.createObjectNode().put("sku",entry.getKey()).put("quotationOwner",entry.getValue())
+                .put("weightG",100).put("minOrderQty",1).put("purchasePriceCny",12).put("singleFreightCny",0).put("taxPoint",0));
+        for(var entry:java.util.Map.of("ALIAS","郑珂","ACCOUNT","管理员").entrySet()) {
+            var payload=mapper.readTree("""
+                {"weightRaw":"100g","parsed":{"minOrderQty":1,"priceTiers":[{}],"freight":{"totalFreightCny":0}}}
+                """);
+            ((ObjectNode)payload).put("quotationOwner",entry.getValue());
+            jdbc.sql("insert into fob_purchase_product(sku,payload,created_at,updated_at) values(:sku,cast(:payload as jsonb),now(),now())")
+                .param("sku",entry.getKey()).param("payload",payload.toString()).update();
+        }
+        for(var owner:java.util.List.of("郑","管理员","感温款")) {
+            var state=mapper.createObjectNode();
+            state.putArray("history").addObject().put("action","complete").put("after","rejected").put("at",Instant.now().toString()).set("priceException",exception(owner,"standard"));
+            quote(mapper.createObjectNode().put("primarySku","SALES-PRIMARY"),state);
+        }
+        String before=fingerprint();
+        var result=rankings.get("all","all",30);
+        assertEquals(1,result.completion().size());assertEquals("郑珂",result.completion().getFirst().owner());
+        assertEquals(2,result.completion().getFirst().total());assertEquals(2,result.completion().getFirst().complete());
+        assertEquals(3,rankings.get("all","standard",30).completion().getFirst().total());
+        assertEquals(1,result.exceptions().size());assertEquals(1,result.exceptions().getFirst().count());
+        assertEquals(1,result.exceptions().getFirst().relatedQuotes());assertEquals(before,fingerprint());
+        jdbc.sql("update app_user set status='disabled' where account='ZHENGKE'").update();
+        assertEquals(2,rankings.get("all","all",30).completion().getFirst().total());
+        jdbc.sql("update app_user set role_key='employee' where account='ZHENGKE'").update();
+        assertTrue(rankings.get("all","all",30).completion().isEmpty());
+        assertTrue(rankings.get("all","all",30).exceptions().isEmpty());
     }
     @Test @WithMockUser(authorities="PERM_quote") void deniesUsersWithoutPurchaseAccess() throws Exception {
         webAppContextSetup(context).apply(springSecurity()).build().perform(get("/api/v1/purchase-rankings")).andExpect(status().isForbidden());

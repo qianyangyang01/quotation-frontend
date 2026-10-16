@@ -35,6 +35,8 @@ public class PurchaseRankingService {
                 || !Set.of(0,7,30,90).contains(days)) throw AppException.unprocessable("统计筛选条件无效");
         if(scope.equals("sales") && !sales.configured()) throw AppException.unprocessable("尚未配置销量表，不能统计在售SKU");
         var to=Instant.now(); var from=days==0?Instant.EPOCH:to.minus(days,ChronoUnit.DAYS);
+        var owners=new PurchaseRankingOwners(jdbc.sql("select account,display_name,role_key from app_user")
+                .query((rs,n)->new PurchaseRankingOwners.Account(rs.getString("account"),rs.getString("display_name"),rs.getString("role_key"))).list());
         // Explicit small fields only: image/source text blobs never leave PostgreSQL.
         var products=jdbc.sql("""
             select sku,'standard' as source,jsonb_build_object(
@@ -49,10 +51,22 @@ public class PurchaseRankingService {
             select sku,'fob',jsonb_build_object('quotationOwner',payload->'quotationOwner',
               'weightRaw',payload->'weightRaw','parsed',payload->'parsed')::text from fob_purchase_product
             """).query((rs,n)->{var data=mapper.readTree(rs.getString("data"));
-                return new Product(rs.getString("sku"),rs.getString("source"),data.path("quotationOwner").asText("").trim(),data);}).list();
+                return new Product(rs.getString("sku"),rs.getString("source"),owners.resolve(data.path("quotationOwner").asText("")),data);}).list();
         var reviews=jdbc.sql(REVIEW_SQL).query((rs,n)->new Review(rs.getString("id"),
-                mapper.readTree(rs.getString("refs")),mapper.readTree(rs.getString("event")))).list();
+                mapper.readTree(rs.getString("refs")),resolveEvent(mapper.readTree(rs.getString("event")),owners))).list();
         return aggregate(scope,source,days,from,to,sales.period(),sales.configured(),new HashSet<>(sales.scopeSkus()),products,reviews);
+    }
+
+    static JsonNode resolveEvent(JsonNode event, PurchaseRankingOwners owners) {
+        // These are detached read projections, not persisted review history.
+        var resolved=event.deepCopy();
+        resolveTargets(resolved.path("priceException"),owners);
+        for(var change:resolved.path("itemChanges"))resolveTargets(change.path("priceException"),owners);
+        return resolved;
+    }
+    private static void resolveTargets(JsonNode classification, PurchaseRankingOwners owners) {
+        for(var target:classification.path("targets"))if(target instanceof tools.jackson.databind.node.ObjectNode object)
+            object.put("procurementOwner",owners.resolve(target.path("procurementOwner").asText("")));
     }
 
     // Include only completed reviews. FOB itemReviews contains unchanged copies and must NEVER be counted.
@@ -106,6 +120,7 @@ public class PurchaseRankingService {
             // all its source records must be complete before the SKU is marked complete.
             var owners=entries.stream().map(Product::owner).collect(java.util.stream.Collectors.toSet());
             var owner=owners.size()==1?owners.iterator().next():"";
+            if(owner.isBlank())continue;
             var counts=completion.computeIfAbsent(owner,k->new long[2]);counts[0]++;
             if(entries.stream().allMatch(PurchaseRankingService::complete))counts[1]++;
         }
@@ -115,18 +130,13 @@ public class PurchaseRankingService {
             try { at=Instant.parse(row.event.path("at").asText()); }
             catch(java.time.DateTimeException ex) {
                 // Unknown timestamps are never silently assigned to a recent window.
-                if(isRejected(row.event) && relevantRefs(row.refs,scope,source,salesSkus))undated.add(row.id);
+                var unknown=new ArrayList<Hit>();
+                collectReview(unknown,row,from,catalog,scope,source,salesSkus);
+                if(unknown.stream().anyMatch(h->!h.owner.isBlank()&&(h.abnormal||h.unclassified)))undated.add(row.id);
                 continue;
             }
             if(at.isBefore(from)||at.isAfter(to))continue;
-            var changes=row.event.path("itemChanges");
-            if(changes.isArray()) {
-                for(var change:changes) {
-                    var index=change.path("index").asInt(-1);
-                    var ref=index>=0&&index<row.refs.size()?row.refs.get(index):mapperNode(change.path("sku").asText(),"");
-                    collect(hits,row.id,List.of(ref),change.path("priceException"),change.path("status").asText().equals("rejected"),at,catalog,scope,source,salesSkus);
-                }
-            } else collect(hits,row.id,toList(row.refs),row.event.path("priceException"),isRejected(row.event),at,catalog,scope,source,salesSkus);
+            collectReview(hits,row,at,catalog,scope,source,salesSkus);
         }
         // First classified occurrence inside the selected period supplies immutable historical ownership.
         // A repeated submission or another tier for the same record/SKU is one anomaly.
@@ -137,11 +147,13 @@ public class PurchaseRankingService {
         completion.keySet().forEach(owner->related.put(owner,new HashSet<>()));
         var unclassified=new HashSet<String>();
         for(var h:hits) {
-            if(h.unclassified)unclassified.add(h.record);
             var attribution=anomalies.getOrDefault(key(h),h);
+            if(attribution.owner.isBlank())continue;
+            if(h.unclassified)unclassified.add(h.record);
             related.computeIfAbsent(attribution.owner,k->new HashSet<>()).add(h.record);
         }
         for(var h:anomalies.values()) {
+            if(h.owner.isBlank())continue;
             counts.merge(h.owner,1L,Long::sum);
             abnormalQuotes.computeIfAbsent(h.owner,k->new HashSet<>()).add(h.record);
         }
@@ -156,7 +168,16 @@ public class PurchaseRankingService {
     private static boolean isRejected(JsonNode event) { return event.path("after").asText().equals("rejected")||event.path("action").asText().equals("fob-return"); }
     private static List<JsonNode> toList(JsonNode array) {var result=new ArrayList<JsonNode>();array.forEach(result::add);return result;}
     private static JsonNode mapperNode(String sku,String source) {return tools.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("sku",sku).put("source",source);}
-    private static boolean relevantRefs(JsonNode refs,String scope,String source,Set<String> skus) {for(var r:refs)if(selected(scope,source,skus,r.path("sku").asText(),r.path("source").asText()))return true;return false;}
+    private static void collectReview(List<Hit> hits,Review row,Instant at,Map<String,Product> catalog,String scope,String source,Set<String> salesSkus) {
+        var changes=row.event.path("itemChanges");
+        if(changes.isArray()) {
+            for(var change:changes) {
+                var index=change.path("index").asInt(-1);
+                var ref=index>=0&&index<row.refs.size()?row.refs.get(index):mapperNode(change.path("sku").asText(),"");
+                collect(hits,row.id,List.of(ref),change.path("priceException"),change.path("status").asText().equals("rejected"),at,catalog,scope,source,salesSkus);
+            }
+        } else collect(hits,row.id,toList(row.refs),row.event.path("priceException"),isRejected(row.event),at,catalog,scope,source,salesSkus);
+    }
     private static void collect(List<Hit> hits,String id,List<JsonNode> refs,JsonNode classification,boolean rejected,Instant at,
                                 Map<String,Product> catalog,String scope,String source,Set<String> sales) {
         var targets=new LinkedHashMap<String,Target>();
