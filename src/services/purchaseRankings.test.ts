@@ -25,5 +25,8 @@ describe('purchase ranking presentation and export', () => {
     expect(csv).not.toContain('"900"'); expect(csv).not.toContain('未归属采购人')
     expect(csv.indexOf('"周圆圆"')).toBeLessThan(csv.indexOf('"唐慧珍"'))
     expect(rankingsCsv({ ...data, completion: [row('=危险文本', 1, 1)] })).toContain("'=危险文本")
+    const timedCsv = rankingsCsv({ ...data, completionTo: '2026-10-16T00:00:00Z', to: '2026-10-16T00:01:00Z' })
+    expect(timedCsv).toContain('"资料统计更新于","2026-10-16T00:00:00Z"')
+    expect(timedCsv).toContain('"异常统计更新于","2026-10-16T00:01:00Z"')
   })
 })

@@ -16,6 +16,9 @@ public class PurchaseRankingService {
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
     private final PurchaseSalesController sales;
+    private final PurchaseRankingCache<CatalogKey, List<Product>> catalogs =
+            new PurchaseRankingCache<>(4, java.time.Duration.ofSeconds(60), System::nanoTime);
+    private final PurchaseRankingCache<ResultKey, Result> results = new PurchaseRankingCache<>();
     public PurchaseRankingService(JdbcClient jdbc, ObjectMapper mapper, PurchaseSalesController sales) {
         this.jdbc=jdbc; this.mapper=mapper; this.sales=sales;
     }
@@ -28,34 +31,106 @@ public class PurchaseRankingService {
     record Review(String id, JsonNode refs, JsonNode event) {}
     record Target(String sku, String source, String owner) {}
     record Hit(String record, String sku, String source, String owner, Instant at, boolean abnormal, boolean unclassified) {}
+    private record CatalogKey(String scope, String source, String revision, List<PurchaseRankingOwners.Account> accounts) {}
+    private record ResultKey(CatalogKey catalog, String part, int days, String reviews) {}
 
     @Transactional(readOnly=true, isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Result get(String scope, String source, int days) {
-        if(!Set.of("all","sales").contains(scope) || !Set.of("standard","fob","all").contains(source)
-                || !Set.of(0,7,30,90).contains(days)) throw AppException.unprocessable("统计筛选条件无效");
-        if(scope.equals("sales") && !sales.configured()) throw AppException.unprocessable("尚未配置销量表，不能统计在售SKU");
-        var to=Instant.now(); var from=days==0?Instant.EPOCH:to.minus(days,ChronoUnit.DAYS);
-        var owners=new PurchaseRankingOwners(jdbc.sql("select account,display_name,role_key from app_user")
-                .query((rs,n)->new PurchaseRankingOwners.Account(rs.getString("account"),rs.getString("display_name"),rs.getString("role_key"))).list());
-        // Explicit small fields only: image/source text blobs never leave PostgreSQL.
-        var products=jdbc.sql("""
-            select sku,'standard' as source,jsonb_build_object(
-              'quotationOwner',payload->'quotationOwner','weightG',payload->'weightG',
-              'minOrderQty',payload->'minOrderQty','purchasePriceCny',payload->'purchasePriceCny',
-              'taxIncludedPriceCny',payload->'taxIncludedPriceCny','tier2PriceCny',payload->'tier2PriceCny',
-              'tier3PriceCny',payload->'tier3PriceCny','taxPoint',payload->'taxPoint',
-              'invoiceType',payload->'invoiceType','singleFreightCny',payload->'singleFreightCny',
-              'freeShipping',payload->'freeShipping','dataSource',payload->'dataSource',
-              'skuOrigin',payload->'skuOrigin')::text as data from purchase_product
-            union all
-            select sku,'fob',jsonb_build_object('quotationOwner',payload->'quotationOwner',
-              'weightRaw',payload->'weightRaw','parsed',payload->'parsed')::text from fob_purchase_product
-            """).query((rs,n)->{var data=mapper.readTree(rs.getString("data"));
-                return new Product(rs.getString("sku"),rs.getString("source"),owners.resolve(data.path("quotationOwner").asText("")),data);}).list();
-        var reviews=jdbc.sql(REVIEW_SQL).query((rs,n)->new Review(rs.getString("id"),
-                mapper.readTree(rs.getString("refs")),resolveEvent(mapper.readTree(rs.getString("event")),owners))).list();
-        return aggregate(scope,source,days,from,to,sales.period(),sales.configured(),new HashSet<>(sales.scopeSkus()),products,reviews);
+        return get(scope, source, days, "all", false);
     }
+
+    @Transactional(readOnly=true, isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public Result get(String scope, String source, int days, String part, boolean refresh) {
+        if(!Set.of("all","sales").contains(scope) || !Set.of("standard","fob","all").contains(source)
+                || !Set.of(0,7,30,90).contains(days) || !Set.of("all","completion","exceptions").contains(part))
+            throw AppException.unprocessable("统计筛选条件无效");
+        if(scope.equals("sales") && !sales.configured()) throw AppException.unprocessable("尚未配置销量表，不能统计在售SKU");
+        // These cheap columns also capture role/name changes made without bumping an account version.
+        var accounts=jdbc.sql("select account,display_name,role_key from app_user order by account")
+                .query((rs,n)->new PurchaseRankingOwners.Account(rs.getString("account"),rs.getString("display_name"),rs.getString("role_key"))).list();
+        var owners=new PurchaseRankingOwners(accounts);
+        var catalogKey=new CatalogKey(scope,source,catalogRevision(source),List.copyOf(accounts));
+        Result completion=null;
+        if(!part.equals("exceptions")) completion=part(catalogKey,owners,"completion",0,"",refresh);
+        if(part.equals("completion")) return completion;
+        var exceptions=part(catalogKey,owners,"exceptions",days,reviewRevision(),refresh);
+        if(part.equals("exceptions")) return exceptions;
+        return new Result(scope,source,days,exceptions.from,exceptions.to,exceptions.salesPeriod,exceptions.salesConfigured,
+                completion.unmatchedSalesSkus,exceptions.unclassified,exceptions.undated,completion.completion,exceptions.exceptions);
+    }
+
+    private Result part(CatalogKey key, PurchaseRankingOwners owners, String part, int days, String reviewRevision, boolean refresh) {
+        return results.get(new ResultKey(key,part,days,reviewRevision),refresh,()->{
+            var to=Instant.now(); var from=days==0?Instant.EPOCH:to.minus(days,ChronoUnit.DAYS);
+            var products=catalogs.get(key,false,()->readProducts(key.scope,key.source,owners));
+            var reviews=part.equals("completion")?List.<Review>of():readReviews(owners,from,to);
+            var result=aggregate(key.scope,key.source,days,from,to,sales.period(),sales.configured(),new HashSet<>(sales.scopeSkus()),products,reviews,
+                    part.equals("completion"));
+            return new Result(result.scope,result.source,result.days,result.from,result.to,result.salesPeriod,result.salesConfigured,
+                    result.unmatchedSalesSkus,result.unclassified,result.undated,
+                    part.equals("completion")?result.completion:List.of(),part.equals("exceptions")?result.exceptions:List.of());
+        });
+    }
+
+    List<Product> readProducts(String scope, String source, PurchaseRankingOwners owners) {
+        return jdbc.sql(PRODUCT_SQL).param("source",source).param("scope",scope)
+                // A dummy value keeps the JDBC collection nonempty when sales are unconfigured.
+                .param("skus",scope.equals("sales")&&!sales.scopeSkus().isEmpty()?sales.scopeSkus():List.of(""))
+                .query((rs,n)->{var data=mapper.readTree(rs.getString("data"));
+                    return new Product(rs.getString("sku"),rs.getString("source"),owners.resolve(data.path("quotationOwner").asText("")),data);}).list();
+    }
+
+    List<Review> readReviews(PurchaseRankingOwners owners, Instant from, Instant to) {
+        // PostgreSQL timestamps have microsecond precision. This is only a conservative prefilter;
+        // aggregate still uses Instant.parse and exact inclusive nanosecond bounds. Unknown/other
+        // timestamp formats are retained for Java parsing and the existing undated diagnostic.
+        return jdbc.sql(REVIEW_SQL).param("queryFrom",from.truncatedTo(ChronoUnit.SECONDS).minusSeconds(1).toString())
+                .param("queryTo",to.truncatedTo(ChronoUnit.SECONDS).plusSeconds(2).toString())
+                .query((rs,n)->new Review(rs.getString("id"),mapper.readTree(rs.getString("refs")),
+                        resolveEvent(mapper.readTree(rs.getString("event")),owners))).list();
+    }
+
+    private String catalogRevision(String source) {
+        return jdbc.sql("""
+            select coalesce(md5(string_agg(revision,',' order by source,sku)),'') from (
+              select 'standard' as source,sku,sku||':'||xmin::text||':'||version::text as revision
+                from purchase_product where :source in ('all','standard')
+              union all select 'fob',sku,sku||':'||xmin::text||':'||version::text
+                from fob_purchase_product where :source in ('all','fob')
+            ) revisions
+            """).param("source",source).query(String.class).single();
+    }
+
+    private String reviewRevision() {
+        // xmin sees every committed row change, including guarded maintenance SQL. Version also
+        // distinguishes repeated application edits inside one transaction. No large JSON is read.
+        return jdbc.sql("""
+            select coalesce(md5(string_agg(revision,',' order by kind,id)),'') from (
+              select 'quote' as kind,id::text as id,id::text||':'||xmin::text||':'||version::text as revision from quotation_record
+              union all select 'review',id::text,id::text||':'||xmin::text||':'||version::text from quotation_review
+              union all select 'batch',id::text,id::text||':'||xmin::text from batch_single_quotation
+              union all select 'batch-review',record_id::text,record_id::text||':'||xmin::text||':'||version::text from batch_single_review
+            ) revisions
+            """).query(String.class).single();
+    }
+
+    // Extract all fields from each large payload in one function call, retaining JSON types and
+    // missing/null fields exactly. Non-object payloads retain the previous all-null projection.
+    static final String PRODUCT_SQL="""
+        select p.sku,'standard' as source,to_jsonb(d)::text as data
+        from purchase_product p cross join lateral jsonb_to_record(
+          case when jsonb_typeof(p.payload)='object' then p.payload else '{}'::jsonb end
+        ) as d("quotationOwner" jsonb,"weightG" jsonb,"minOrderQty" jsonb,"purchasePriceCny" jsonb,
+          "taxIncludedPriceCny" jsonb,"tier2PriceCny" jsonb,"tier3PriceCny" jsonb,"taxPoint" jsonb,
+          "invoiceType" jsonb,"singleFreightCny" jsonb,"freeShipping" jsonb,"dataSource" jsonb,"skuOrigin" jsonb)
+        where :source in ('all','standard') and (:scope='all' or p.sku in (:skus))
+        union all
+        select p.sku,'fob',to_jsonb(d)::text
+        from fob_purchase_product p cross join lateral jsonb_to_record(
+          case when jsonb_typeof(p.payload)='object' then p.payload else '{}'::jsonb end
+        ) as d("quotationOwner" jsonb,"weightRaw" jsonb,"parsed" jsonb)
+        where :source in ('all','fob') and (:scope='all' or p.sku in (:skus))
+        """;
 
     static JsonNode resolveEvent(JsonNode event, PurchaseRankingOwners owners) {
         // These are detached read projections, not persisted review history.
@@ -71,40 +146,70 @@ public class PurchaseRankingService {
 
     // Include only completed reviews. FOB itemReviews contains unchanged copies and must NEVER be counted.
     static final String REVIEW_SQL="""
-        with ordinary as (
-          select q.id::text as id,q.payload,
-            coalesce(r.state,q.payload) as state
+        with ordinary as materialized (
+          select q.id::text as id,s.history,s."financeReviewStatus",s."financeReviewedAt",
+            d."quoteMode",d."primarySku",d."bundleItems",f."schemaVersion",f.items,f.product
           from quotation_record q left join quotation_review r on r.id=q.id
-        ), ordinary_events as (
-          select id,payload,e from ordinary cross join lateral jsonb_array_elements(
-            case when jsonb_array_length(coalesce(state->'history','[]'::jsonb))>0 then state->'history'
-            when state->>'financeReviewStatus' in ('approved','rejected','channel-exempt','logistics-exempt') then
-              jsonb_build_array(jsonb_build_object('action','legacy-review','after',state->'financeReviewStatus','at',state->'financeReviewedAt'))
+          cross join lateral jsonb_to_record(case when jsonb_typeof(q.payload)='object' then q.payload else '{}'::jsonb end)
+            as d("quoteMode" jsonb,"primarySku" jsonb,"bundleItems" jsonb,fob jsonb)
+          cross join lateral jsonb_to_record(case when jsonb_typeof(d.fob)='object' then d.fob else '{}'::jsonb end)
+            as f("schemaVersion" jsonb,items jsonb,product jsonb)
+          cross join lateral jsonb_to_record(case when jsonb_typeof(coalesce(r.state,q.payload))='object'
+            then coalesce(r.state,q.payload) else '{}'::jsonb end)
+            as s(history jsonb,"financeReviewStatus" jsonb,"financeReviewedAt" jsonb)
+        ), ordinary_events as materialized (
+          select id,ordinary."quoteMode",ordinary."primarySku",ordinary."bundleItems",
+            ordinary."schemaVersion",ordinary.items,ordinary.product,d.*
+          from ordinary cross join lateral jsonb_array_elements(
+            case when jsonb_array_length(coalesce(history,'[]'::jsonb))>0 then history
+            when "financeReviewStatus" #>> '{}' in ('approved','rejected','channel-exempt','logistics-exempt') then
+              jsonb_build_array(jsonb_build_object('action','legacy-review','after',"financeReviewStatus",'at',"financeReviewedAt"))
             else '[]'::jsonb end) e
+          cross join lateral jsonb_to_record(case when jsonb_typeof(e)='object' then e else '{}'::jsonb end)
+            as d(action jsonb,at jsonb,after jsonb,"priceException" jsonb,"itemChanges" jsonb)
           where e->>'action' in ('complete','legacy-review','fob-return','fob-approve')
+            and case when d.at #>> '{}' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,9})?Z$'
+                and pg_input_is_valid(d.at #>> '{}','timestamp with time zone')
+              then (d.at #>> '{}')::timestamptz between cast(:queryFrom as timestamptz) and cast(:queryTo as timestamptz)
+              else true end
+        ), batches as materialized (
+          select b.id,r.state->'history' as history,b.payload->'items' as quote_items
+          from batch_single_quotation b join batch_single_review r on r.record_id=b.id
+        ), batch_events as materialized (
+          select id,quote_items,d.* from batches cross join lateral jsonb_array_elements(coalesce(history,'[]'::jsonb)) e
+          cross join lateral jsonb_to_record(case when jsonb_typeof(e)='object' then e else '{}'::jsonb end)
+            as d(action jsonb,at jsonb,items jsonb)
+          where e->>'action'='complete'
+            and case when d.at #>> '{}' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,9})?Z$'
+                and pg_input_is_valid(d.at #>> '{}','timestamp with time zone')
+              then (d.at #>> '{}')::timestamptz between cast(:queryFrom as timestamptz) and cast(:queryTo as timestamptz)
+              else true end
         )
         select 'quote:'||id as id,
-          (case when payload->>'quoteMode' in ('freight-trial','shipping-only') then '[]'::jsonb
-           when payload->>'quoteMode'='bundle' then coalesce((select jsonb_agg(jsonb_build_object('sku',b->'sku','source','standard')) from jsonb_array_elements(payload->'bundleItems') b),'[]'::jsonb)
-           when payload->>'quoteMode'='fob' and payload#>>'{fob,schemaVersion}'='2' then coalesce((select jsonb_agg(jsonb_build_object('sku',b#>'{product,sku}','source',b#>'{product,source}')) from jsonb_array_elements(payload#>'{fob,items}') b),'[]'::jsonb)
-           when payload->>'quoteMode'='fob' then jsonb_build_array(jsonb_build_object('sku',payload#>'{fob,product,sku}','source',payload#>'{fob,product,source}'))
-           else jsonb_build_array(jsonb_build_object('sku',payload->'primarySku','source','standard')) end)::text as refs,
-          jsonb_build_object('action',e->'action','at',e->'at','after',e->'after',
-            'priceException',e->'priceException','itemChanges',e->'itemChanges')::text as event
+          (case when "quoteMode" #>> '{}' in ('freight-trial','shipping-only') then '[]'::jsonb
+           when "quoteMode" #>> '{}'='bundle' then coalesce((select jsonb_agg(jsonb_build_object('sku',b->'sku','source','standard')) from jsonb_array_elements("bundleItems") b),'[]'::jsonb)
+           when "quoteMode" #>> '{}'='fob' and "schemaVersion" #>> '{}'='2' then coalesce((select jsonb_agg(jsonb_build_object('sku',b#>'{product,sku}','source',b#>'{product,source}')) from jsonb_array_elements(items) b),'[]'::jsonb)
+           when "quoteMode" #>> '{}'='fob' then jsonb_build_array(jsonb_build_object('sku',product->'sku','source',product->'source'))
+           else jsonb_build_array(jsonb_build_object('sku',"primarySku",'source','standard')) end)::text as refs,
+          jsonb_build_object('action',action,'at',at,'after',after,'priceException',"priceException",'itemChanges',"itemChanges")::text as event
         from ordinary_events
         union all
-        select 'batch:'||b.id::text,
-          coalesce((select jsonb_agg(jsonb_build_object('sku',i#>'{input,primarySku}','source','standard')) from jsonb_array_elements(b.payload->'items') i),'[]'::jsonb)::text,
-          jsonb_build_object('action','batch-complete','at',e->'at','itemChanges',
+        select 'batch:'||id::text,
+          coalesce((select jsonb_agg(jsonb_build_object('sku',i#>'{input,primarySku}','source','standard'))
+            from jsonb_array_elements(quote_items) i),'[]'::jsonb)::text,
+          jsonb_build_object('action','batch-complete','at',at,'itemChanges',
             (select jsonb_agg(jsonb_build_object('index',i->'index','sku',i->'sku','status',i#>'{after,status}',
-              'priceException',i#>'{after,priceException}')) from jsonb_array_elements(e->'items') i))::text
-        from batch_single_quotation b join batch_single_review r on r.record_id=b.id
-          cross join lateral jsonb_array_elements(coalesce(r.state->'history','[]'::jsonb)) e
-        where e->>'action'='complete'
+              'priceException',i#>'{after,priceException}')) from jsonb_array_elements(items) i))::text
+        from batch_events
         """;
 
     static Result aggregate(String scope,String source,int days,Instant from,Instant to,String period,boolean configured,
                             Set<String> salesSkus,List<Product> products,List<Review> reviews) {
+        return aggregate(scope,source,days,from,to,period,configured,salesSkus,products,reviews,true);
+    }
+
+    static Result aggregate(String scope,String source,int days,Instant from,Instant to,String period,boolean configured,
+                            Set<String> salesSkus,List<Product> products,List<Review> reviews,boolean includeCompletion) {
         var catalog=new HashMap<String,Product>();
         var completion=new TreeMap<String,long[]>();
         var matched=new HashSet<String>();
@@ -122,7 +227,7 @@ public class PurchaseRankingService {
             var owner=owners.size()==1?owners.iterator().next():"";
             if(owner.isBlank())continue;
             var counts=completion.computeIfAbsent(owner,k->new long[2]);counts[0]++;
-            if(entries.stream().allMatch(PurchaseRankingService::complete))counts[1]++;
+            if(includeCompletion && entries.stream().allMatch(PurchaseRankingService::complete))counts[1]++;
         }
         var hits=new ArrayList<Hit>();var undated=new HashSet<String>();
         for(var row:reviews) {
@@ -157,8 +262,8 @@ public class PurchaseRankingService {
             counts.merge(h.owner,1L,Long::sum);
             abnormalQuotes.computeIfAbsent(h.owner,k->new HashSet<>()).add(h.record);
         }
-        var completeRows=completion.entrySet().stream().map(e->new Completion(e.getKey(),e.getValue()[0],e.getValue()[1],e.getValue()[0]-e.getValue()[1],percent(e.getValue()[1],e.getValue()[0])))
-                .sorted(Comparator.comparingDouble(Completion::rate).reversed().thenComparing(Completion::owner)).toList();
+        var completeRows=includeCompletion?completion.entrySet().stream().map(e->new Completion(e.getKey(),e.getValue()[0],e.getValue()[1],e.getValue()[0]-e.getValue()[1],percent(e.getValue()[1],e.getValue()[0])))
+                .sorted(Comparator.comparingDouble(Completion::rate).reversed().thenComparing(Completion::owner)).toList():List.<Completion>of();
         var exceptionRows=related.entrySet().stream().map(e->{long abnormal=abnormalQuotes.getOrDefault(e.getKey(),Set.of()).size();
             return new Exceptions(e.getKey(),counts.getOrDefault(e.getKey(),0L),abnormal,e.getValue().size(),percent(abnormal,e.getValue().size()));})
                 .sorted(Comparator.comparingLong(Exceptions::count).reversed().thenComparing(Exceptions::owner)).toList();

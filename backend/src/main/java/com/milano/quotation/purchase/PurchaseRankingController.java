@@ -13,9 +13,10 @@ public class PurchaseRankingController {
     public PurchaseRankingController(PurchaseRankingService rankings) {this.rankings=rankings;}
     @GetMapping @PreAuthorize("hasRole('SUPER_ADMIN') or hasAuthority('PERM_purchase')")
     public ApiResponse<PurchaseRankingService.Result> get(@RequestParam(defaultValue="all") String scope,
-            @RequestParam(defaultValue="30") int days,Authentication auth) {
+            @RequestParam(defaultValue="30") int days,@RequestParam(defaultValue="all") String part,
+            @RequestParam(defaultValue="false") boolean refresh,Authentication auth) {
         boolean fob=auth.getAuthorities().stream().anyMatch(a->Set.of("ROLE_SUPER_ADMIN","ROLE_PURCHASE","PERM_quote").contains(a.getAuthority()));
         // Scope follows existing catalog access; there is no user-facing source filter.
-        return ApiResponse.ok(rankings.get(scope,fob?"all":"standard",days));
+        return ApiResponse.ok(rankings.get(scope,fob?"all":"standard",days,part,refresh));
     }
 }

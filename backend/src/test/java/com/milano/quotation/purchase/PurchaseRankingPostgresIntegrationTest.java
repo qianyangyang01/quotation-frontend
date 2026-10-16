@@ -21,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
 @SpringBootTest(properties="app.purchase-sales.source=classpath:purchase-sales-test.json")
@@ -81,6 +82,10 @@ class PurchaseRankingPostgresIntegrationTest {
         assertEquals(1,result.unclassified());assertEquals(1,result.completion().getFirst().total());
         assertEquals(100,result.completion().getFirst().rate());
         var sales=rankings.get("sales","all",30);assertEquals(2,sales.unmatchedSalesSkus());
+        var legacyProjection=legacyReviews().stream().collect(java.util.stream.Collectors.groupingBy(Object::toString,java.util.stream.Collectors.counting()));
+        var projected=rankings.readReviews(owners(),Instant.EPOCH,Instant.now()).stream()
+                .collect(java.util.stream.Collectors.groupingBy(Object::toString,java.util.stream.Collectors.counting()));
+        assertEquals(legacyProjection,projected,"ordinary, legacy, FOB item and batch projections remain identical");
         var mvc=webAppContextSetup(context).apply(springSecurity()).build();
         mvc.perform(get("/api/v1/purchase-rankings")).andExpect(status().isOk());
         mvc.perform(get("/api/v1/purchase-rankings?days=-1")).andExpect(status().isUnprocessableEntity());
@@ -120,5 +125,117 @@ class PurchaseRankingPostgresIntegrationTest {
     }
     @Test @WithMockUser(authorities="PERM_quote") void deniesUsersWithoutPurchaseAccess() throws Exception {
         webAppContextSetup(context).apply(springSecurity()).build().perform(get("/api/v1/purchase-rankings")).andExpect(status().isForbidden());
+    }
+
+    private PurchaseRankingOwners owners() {
+        return new PurchaseRankingOwners(jdbc.sql("select account,display_name,role_key from app_user")
+                .query((rs,n)->new PurchaseRankingOwners.Account(rs.getString(1),rs.getString(2),rs.getString(3))).list());
+    }
+
+    private java.util.List<PurchaseRankingService.Review> legacyReviews() throws Exception {
+        String sql;
+        try(var input=getClass().getResourceAsStream("/purchase-ranking-legacy-reviews.sql")) {
+            assertNotNull(input);sql=new String(input.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8).replace("\uFEFF","");
+        }
+        var owners=owners();
+        return jdbc.sql(sql).query((rs,n)->new PurchaseRankingService.Review(rs.getString("id"),mapper.readTree(rs.getString("refs")),
+                PurchaseRankingService.resolveEvent(mapper.readTree(rs.getString("event")),owners))).list();
+    }
+
+    @Test void productProjectionPreservesEveryJsonTypeMissingFieldsAndNonObjects() {
+        account("JSONBUYER","类型采购","purchase");
+        String[] samples={"{}","null","[]","12","\"text\"", """
+          {"quotationOwner":"类型采购","weightG":"100","minOrderQty":1,"purchasePriceCny":0,
+           "taxIncludedPriceCny":null,"tier2PriceCny":[],"tier3PriceCny":{},"taxPoint":0.1300,
+           "invoiceType":true,"singleFreightCny":0,"freeShipping":"是","dataSource":"legacy_2026","skuOrigin":"manual",
+           "weightRaw":"100g","parsed":{"minOrderQty":1,"priceTiers":[{"price":1.2500}],"freight":{"totalFreightCny":0}}}
+          """};
+        for(int i=0;i<samples.length;i++) {
+            jdbc.sql("insert into purchase_product(id,sku,payload,created_at,updated_at) values(:id,:sku,cast(:payload as jsonb),now(),now())")
+                .param("id",UUID.randomUUID()).param("sku","JSON-"+i).param("payload",samples[i]).update();
+            jdbc.sql("insert into fob_purchase_product(sku,payload,created_at,updated_at) values(:sku,cast(:payload as jsonb),now(),now())")
+                .param("sku","JSON-"+i).param("payload",samples[i]).update();
+        }
+        var projected=rankings.readProducts("all","all",owners());
+        var standard=java.util.List.of("quotationOwner","weightG","minOrderQty","purchasePriceCny","taxIncludedPriceCny","tier2PriceCny","tier3PriceCny","taxPoint","invoiceType","singleFreightCny","freeShipping","dataSource","skuOrigin");
+        var fob=java.util.List.of("quotationOwner","weightRaw","parsed");
+        for(var source:java.util.List.of("standard","fob")) {
+            var fields=source.equals("standard")?standard:fob;
+            String pairs=fields.stream().map(field->"'"+field+"',payload->'"+field+"'").collect(java.util.stream.Collectors.joining(","));
+            String table=source.equals("standard")?"purchase_product":"fob_purchase_product";
+            var expected=jdbc.sql("select sku,jsonb_build_object("+pairs+")::text as data from "+table+" where sku like 'JSON-%'")
+                    .query((rs,n)->java.util.Map.entry(rs.getString("sku"),mapper.readTree(rs.getString("data")))).list();
+            assertEquals(samples.length,expected.size());
+            for(var row:expected)assertEquals(row.getValue(),projected.stream().filter(p->p.source().equals(source)&&p.sku().equals(row.getKey())).findFirst().orElseThrow().data());
+        }
+        var stringWeight=projected.stream().filter(p->p.source().equals("standard")&&p.sku().equals("JSON-5")).findFirst().orElseThrow();
+        assertTrue(stringWeight.data().path("weightG").isTextual());
+        assertFalse(PurchaseRankingService.complete(stringWeight));
+    }
+
+    @Test void reviewSqlMatchesLegacyAcrossExactNanosecondBoundsInvalidDatesAndOtherIsoFormats() throws Exception {
+        account("WINDOWBUYER","窗口采购","purchase");
+        products.upsert(mapper.createObjectNode().put("sku","SALES-PRIMARY").put("quotationOwner","窗口采购")
+                .put("weightG",100).put("minOrderQty",1).put("purchasePriceCny",12).put("singleFreightCny",0).put("taxPoint",0));
+        var from=Instant.parse("2026-10-01T00:00:00.123456789Z");
+        var to=Instant.parse("2026-10-16T00:00:00.987654321Z");
+        var dates=java.util.List.of(from.minusNanos(1).toString(),from.toString(),from.plusNanos(1).toString(),
+                to.minusNanos(1).toString(),to.toString(),to.plusNanos(1).toString(),
+                "2026-09-01T00:00:00Z","2026-11-01T00:00:00Z","2026-02-30T00:00:00Z","bad-time","",
+                "2026-10-01T08:00:00.123456789+08:00","2026-10-02t00:00:00z","2026-10-02T23:59:60Z");
+        for(var at:dates) {
+            var state=mapper.createObjectNode();state.putArray("history").addObject().put("action","complete")
+                    .put("after","rejected").put("at",at).set("priceException",exception("窗口采购","standard"));
+            // Creation time is deliberately unrelated to the review event window.
+            quote(mapper.createObjectNode().put("primarySku","SALES-PRIMARY"),state);
+        }
+        // An unreviewed malformed bundle was never expanded by the original query.
+        quote(mapper.createObjectNode().put("quoteMode","bundle").put("bundleItems","not-an-array"),mapper.createObjectNode());
+        var products=rankings.readProducts("all","all",owners());
+        var original=legacyReviews();var optimized=rankings.readReviews(owners(),from,to);
+        assertTrue(optimized.size()<original.size(),"valid events far outside the selected window are removed in SQL");
+        var expected=PurchaseRankingService.aggregate("all","all",30,from,to,"",true,java.util.Set.of(),products,original);
+        var actual=PurchaseRankingService.aggregate("all","all",30,from,to,"",true,java.util.Set.of(),products,optimized);
+        assertEquals(expected,actual);
+        assertEquals(3,actual.undated());
+        assertEquals(7,actual.exceptions().getFirst().count());
+        var legacyAll=original.stream().collect(java.util.stream.Collectors.groupingBy(Object::toString,java.util.stream.Collectors.counting()));
+        var optimizedAll=rankings.readReviews(owners(),Instant.EPOCH,Instant.parse("2100-01-01T00:00:00Z"))
+                .stream().collect(java.util.stream.Collectors.groupingBy(Object::toString,java.util.stream.Collectors.counting()));
+        assertEquals(legacyAll,optimizedAll);
+    }
+
+    @Test @WithMockUser(authorities={"PERM_purchase","ROLE_PURCHASE"})
+    void independentPartsReuseCompletionAcrossDaysInvalidateOnWritesAndKeepZeroExceptionOwners() throws Exception {
+        account("CACHEBUYER","缓存采购","purchase");
+        products.upsert(mapper.createObjectNode().put("sku","SALES-PRIMARY").put("quotationOwner","缓存采购")
+                .put("weightG",100).put("minOrderQty",1).put("purchasePriceCny",12).put("singleFreightCny",0).put("taxPoint",0));
+        var first=rankings.get("all","all",30,"completion",false);
+        assertSame(first,rankings.get("all","all",7,"completion",false));
+        assertEquals(0,first.days());assertTrue(first.exceptions().isEmpty());
+        var exceptions=rankings.get("all","all",30,"exceptions",false);
+        assertTrue(exceptions.completion().isEmpty());assertEquals("缓存采购",exceptions.exceptions().getFirst().owner());
+        assertEquals(0,exceptions.exceptions().getFirst().count());
+        assertSame(exceptions,rankings.get("all","all",30,"exceptions",false));
+        assertNotSame(first,rankings.get("all","all",30,"completion",true));
+        var state=mapper.createObjectNode();state.putArray("history").addObject().put("action","complete").put("after","rejected")
+                .put("at",Instant.now().toString()).set("priceException",exception("缓存采购","standard"));
+        quote(mapper.createObjectNode().put("primarySku","SALES-PRIMARY"),state);
+        assertEquals(1,rankings.get("all","all",30,"exceptions",false).exceptions().getFirst().count());
+        // An application edit bumps product version and invalidates both its catalog and results.
+        long productVersion=jdbc.sql("select version from purchase_product where sku='SALES-PRIMARY'").query(Long.class).single();
+        products.upsert(mapper.createObjectNode().put("sku","SALES-PRIMARY").put("quotationOwner","缓存采购")
+                .put("_version",productVersion)
+                .put("weightG",0).put("minOrderQty",1).put("purchasePriceCny",12).put("singleFreightCny",0).put("taxPoint",0));
+        assertEquals(0,rankings.get("all","all",30,"completion",false).completion().getFirst().complete());
+        jdbc.sql("update app_user set role_key='employee' where account='CACHEBUYER'").update();
+        assertTrue(rankings.get("all","all",30,"completion",false).completion().isEmpty());
+        assertTrue(rankings.get("all","all",30,"exceptions",false).exceptions().isEmpty());
+        var mvc=webAppContextSetup(context).apply(springSecurity()).build();
+        mvc.perform(get("/api/v1/purchase-rankings?part=completion&days=7"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.days").value(0)).andExpect(jsonPath("$.data.exceptions").isEmpty());
+        mvc.perform(get("/api/v1/purchase-rankings?part=exceptions&days=7&refresh=true"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.days").value(7)).andExpect(jsonPath("$.data.completion").isEmpty());
+        mvc.perform(get("/api/v1/purchase-rankings?part=other")).andExpect(status().isUnprocessableEntity());
     }
 }

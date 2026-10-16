@@ -91,4 +91,14 @@ class PurchaseRankingServiceTest {
         var result=report(List.of(product("A","普通采购")),List.of(review("fob","2026-10-02T00:00:00Z",json("[{\"sku\":\"A\",\"source\":\"fob\"}]"),classified)));
         assertEquals(0,result.exceptions().getFirst().count());assertEquals(0,result.exceptions().getFirst().relatedQuotes());
     }
+    @Test void exceptionsOnlyDoNotReadCompletenessFieldsButKeepOwnershipConflictsAndZeroRows(){
+        // The exception path needs SKU/source/owner only: absent completeness JSON must not be read.
+        var metadataOnly=List.of(new Product("A","standard","甲",null),new Product("A","fob","甲",null),
+                new Product("B","standard","乙",null),new Product("B","fob","丙",null));
+        var result=aggregate("sales","all",30,now.minusSeconds(30L*86400),now,"",true,
+                Set.of("A","B","MISSING"),metadataOnly,List.of(),false);
+        assertTrue(result.completion().isEmpty());
+        assertEquals(List.of(new Exceptions("甲",0,0,0,0)),result.exceptions());
+        assertEquals(1,result.unmatchedSalesSkus());
+    }
 }
