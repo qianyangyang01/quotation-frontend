@@ -51,13 +51,13 @@ it('keeps a blank-note rejection category visible while the independent list ref
   button('审核完成').click();await flush();button('价格异常不可报价').click();await flush()
   const select=document.querySelector<HTMLSelectElement>('[aria-label="异常类型"]')!
   select.value='channel-price';select.dispatchEvent(new Event('change'));await flush()
-  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="异常说明"]')!.value).toBe('')
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="异常说明"]')!.value).toBe('渠道价格异常，请核实渠道价格及计费规则')
   expect(button('确认价格异常').disabled).toBe(false)
   let rejectList!:(error:Error)=>void
   mocks.page.mockImplementationOnce(()=>new Promise((_resolve,reject)=>{rejectList=reject}))
   mocks.patch.mockResolvedValue({...saved(),_reviewVersion:2,financeReviewStatus:'rejected',priceException:{category:'channel-price',targets:[]}})
   button('确认价格异常').click();await flush()
-  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'rejected',exceptionType:'channel-price',note:'',_version:2,_reviewVersion:1})
+  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'rejected',exceptionType:'channel-price',note:'渠道价格异常，请核实渠道价格及计费规则',_version:2,_reviewVersion:1})
   expect(button('正在提交…')).toBeUndefined()
   expect(document.querySelector<HTMLDialogElement>('[aria-label="选择审核结果"]')!.open).toBe(false)
   expect(document.querySelector('.record-drawer')?.textContent).toContain('渠道价格异常')
@@ -306,7 +306,7 @@ it('requires classification with an optional explanation, and retains the reject
   const note=document.querySelector<HTMLTextAreaElement>('[aria-label="异常说明"]')!
   note.value='渠道运费需核实';note.dispatchEvent(new Event('input'));await flush()
   mocks.patch.mockRejectedValueOnce(new Error('提交失败'));button('确认价格异常').click();await flush()
-  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'rejected',note:'渠道运费需核实',exceptionType:'channel-price',_version:2,_reviewVersion:1})
+  expect(mocks.patch).toHaveBeenLastCalledWith('/quotations/r/finance-review',{action:'complete',financeReviewStatus:'rejected',note:'渠道价格异常，请核实渠道价格及计费规则；渠道运费需核实',exceptionType:'channel-price',_version:2,_reviewVersion:1})
   expect(document.body.textContent).toContain('提交失败')
   expect(document.querySelector<HTMLDialogElement>('[aria-label="确认价格异常"]')!.open).toBe(true)
   expect(note.value).toBe('渠道运费需核实')

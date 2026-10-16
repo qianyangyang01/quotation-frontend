@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import PriceExceptionSummary from './PriceExceptionSummary.vue'
+import { priceExceptionOpinion } from '@/data/priceExceptions'
 import { loadQuotationReviewHistory, reviewQuotationRecord, type QuotationRecord, type QuotationReviewEvent, type QuotationReviewState } from '@/data/quotationRecords'
 
 const props = defineProps<{ record: QuotationRecord; state: QuotationReviewState; account: string; canReview: boolean; busy: boolean }>()
@@ -12,8 +13,16 @@ const history = ref<QuotationReviewEvent[]>([])
 let generation = 0
 const baseVersion = ref<number>(), baseReviewVersion = ref(0)
 let disposed = false
-const latest = computed(() => props.state.financeReviewLatestComment)
-const count = computed(() => props.state.financeReviewCommentCount || (latest.value ? 1 : 0))
+const classifiedWithoutNote = computed(() => props.state.financeReviewStatus === 'rejected' && props.state.priceException && !props.state.financeReviewNote?.trim())
+const latest = computed(() => {
+  const saved = props.state.financeReviewLatestComment
+  const at = props.state.financeReviewedAt || props.state.priceException?.recordedAt || ''
+  if (classifiedWithoutNote.value && (!saved || Date.parse(at) >= Date.parse(saved.at))) {
+    return { note: priceExceptionOpinion(props.state.priceException?.category), at, actorName: props.state.financeReviewedBy || '历史审核人未保存' }
+  }
+  return saved ? { ...saved, note: priceExceptionOpinion(saved.action !== 'comment' && saved.after === 'rejected' ? saved.priceException?.category : undefined, saved.note) } : undefined
+})
+const count = computed(() => (props.state.financeReviewCommentCount || (props.state.financeReviewLatestComment ? 1 : 0)) + (classifiedWithoutNote.value ? 1 : 0))
 const canWrite = computed(() => props.canReview && (props.state.lifecycleState || 'active') === 'active')
 const changed = computed(() => props.state._version !== baseVersion.value || (props.state._reviewVersion ?? 0) !== baseReviewVersion.value)
 const time = (value: string) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '历史时间未保存'
@@ -25,7 +34,8 @@ async function loadHistory() {
   try {
     const rows = await loadQuotationReviewHistory(props.record.id)
     if (current !== generation) return
-    history.value = rows.filter(row => ['comment', 'complete', 'legacy-review'].includes(row.action) && row.note?.trim()
+    history.value = rows.map(row => ({ ...row, note: priceExceptionOpinion(row.action !== 'comment' && row.after === 'rejected' ? row.priceException?.category : undefined, row.note) }))
+      .filter(row => ['comment', 'complete', 'legacy-review'].includes(row.action) && row.note?.trim()
       && !(row.action === 'legacy-review' && row.note === '保留的历史审核结果')).reverse()
     await nextTick()
     if(current === generation && opened.value) emit('viewed', displayedVersion)
@@ -89,5 +99,5 @@ onUnmounted(() => { disposed = true; generation++ })
 </template>
 
 <style scoped>
-.review-comments{width:100%;min-width:0}.comment-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.comment-entry{color:#2563a6;border-color:#b8cde6}.comment-preview{display:grid;gap:4px;width:100%;min-width:0;margin-top:6px;padding:7px 9px;text-align:left;background:#eef5fc;border:0;color:#31577c}.comment-preview span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.comment-preview small{color:#65768a;font-size:11px;overflow-wrap:anywhere}button{padding:7px 10px;border:1px solid #d7dee7;border-radius:6px;background:#fff;color:#374151;font:inherit;font-size:13px;cursor:pointer}button:hover:not(:disabled){background:#edf5ff}button:active:not(:disabled){transform:translateY(1px)}button:focus-visible,textarea:focus-visible{outline:2px solid #3782d6;outline-offset:2px}button:disabled{opacity:.5;cursor:not-allowed}.review-comments-dialog{box-sizing:border-box;width:min(640px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:1px solid #dce4ed;border-radius:12px;padding:24px;background:white;color:#25344a;box-shadow:0 20px 60px #17212b33;font:14px Arial,"Microsoft YaHei",sans-serif}.review-comments-dialog::backdrop{background:#17212b66}header{display:flex;justify-content:space-between;gap:16px;margin-bottom:20px}header strong{font-size:20px}header p{margin:8px 0 0;color:#65768a}header>button{align-self:flex-start;border:0;font-size:24px;padding:0 4px}label{display:grid;gap:8px;font-weight:600}textarea{box-sizing:border-box;width:100%;resize:vertical;min-height:112px;padding:10px;border:1px solid #cbd7e4;border-radius:6px;font:inherit;line-height:1.7}.comment-help{display:flex;justify-content:space-between;gap:12px;margin-top:8px;color:#65768a;line-height:1.5}.comment-help span{white-space:nowrap}.comment-history{margin-top:20px;padding-top:16px;border-top:1px solid #e2e8ef}.comment-history article{padding:14px 0;border-bottom:1px solid #edf0f4}.comment-history small{color:#65768a}.comment-history p{margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}.comment-error{color:#b52b25;line-height:1.6}footer{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}footer button{min-width:88px;padding:9px 16px}.comment-save{background:#246de3;border-color:#246de3;color:white}.comment-save:hover:not(:disabled){background:#1558bf}@media(prefers-reduced-motion:reduce){button:active:not(:disabled){transform:none}}
+.review-comments{width:100%;min-width:0}.comment-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.comment-entry{color:#2563a6;border-color:#b8cde6}.comment-preview{display:grid;gap:4px;width:100%;min-width:0;margin-top:6px;padding:7px 9px;text-align:left;background:#eef5fc;border:0;color:#31577c}.comment-preview span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}.comment-preview small{color:#65768a;font-size:11px;overflow-wrap:anywhere}button{padding:7px 10px;border:1px solid #d7dee7;border-radius:6px;background:#fff;color:#374151;font:inherit;font-size:13px;cursor:pointer}button:hover:not(:disabled){background:#edf5ff}button:active:not(:disabled){transform:translateY(1px)}button:focus-visible,textarea:focus-visible{outline:2px solid #3782d6;outline-offset:2px}button:disabled{opacity:.5;cursor:not-allowed}.review-comments-dialog{box-sizing:border-box;width:min(640px,calc(100vw - 32px));max-height:85vh;overflow:auto;border:1px solid #dce4ed;border-radius:12px;padding:24px;background:white;color:#25344a;box-shadow:0 20px 60px #17212b33;font:14px Arial,"Microsoft YaHei",sans-serif}.review-comments-dialog::backdrop{background:#17212b66}header{display:flex;justify-content:space-between;gap:16px;margin-bottom:20px}header strong{font-size:20px}header p{margin:8px 0 0;color:#65768a}header>button{align-self:flex-start;border:0;font-size:24px;padding:0 4px}label{display:grid;gap:8px;font-weight:600}textarea{box-sizing:border-box;width:100%;resize:vertical;min-height:112px;padding:10px;border:1px solid #cbd7e4;border-radius:6px;font:inherit;line-height:1.7}.comment-help{display:flex;justify-content:space-between;gap:12px;margin-top:8px;color:#65768a;line-height:1.5}.comment-help span{white-space:nowrap}.comment-history{margin-top:20px;padding-top:16px;border-top:1px solid #e2e8ef}.comment-history article{padding:14px 0;border-bottom:1px solid #edf0f4}.comment-history small{color:#65768a}.comment-history p{margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}.comment-error{color:#b52b25;line-height:1.6}footer{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}footer button{min-width:88px;padding:9px 16px}.comment-save{background:#246de3;border-color:#246de3;color:white}.comment-save:hover:not(:disabled){background:#1558bf}@media(prefers-reduced-motion:reduce){button:active:not(:disabled){transform:none}}
 </style>

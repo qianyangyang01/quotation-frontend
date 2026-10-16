@@ -89,3 +89,26 @@ it('clears an open dialog and draft on account changes', async () => {
   props.account = 'E2'; props.canReview = false; await flush()
   expect(dialog()).toBeNull(); expect(document.body.textContent).not.toContain('未提交意见')
 })
+
+it('shows a saved classification with no explanation in the list and full opinion history', async () => {
+  const priceException = { category: 'purchase-price' as const, recordedAt: '2026-10-16T00:37:42Z', targets: [] }
+  const { props } = await mount(false)
+  props.state = { ...record(), financeReviewStatus: 'rejected', priceException, financeReviewedBy: '财务甲', financeReviewedAt: priceException.recordedAt }
+  await flush()
+  expect(document.querySelector('.comment-preview')?.textContent).toContain('采购价格异常，请采购核实并更新价格、票点或采购运费')
+  mocks.get.mockResolvedValue([{ ...event(''), action: 'complete', after: 'rejected', priceException }])
+  button('查看审核意见 · 1').click(); await flush()
+  expect(dialog().textContent).toContain('历史意见 · 1')
+  expect(dialog().textContent).toContain('采购价格异常，请采购核实并更新价格、票点或采购运费')
+  expect(mocks.patch).not.toHaveBeenCalled()
+})
+
+it('does not duplicate generated opinions or replace later manually added comments', async () => {
+  const priceException = { category: 'channel-price' as const, recordedAt: '2026-10-16T00:37:42Z', targets: [] }
+  const note = '渠道价格异常，请核实渠道价格及计费规则；核实最低计费重量'
+  const { props } = await mount(false, { ...record(), financeReviewStatus: 'rejected', priceException, financeReviewNote: note, financeReviewCommentCount: 1, financeReviewLatestComment: { ...event(note), action: 'complete', after: 'rejected', priceException } })
+  expect(document.querySelector('.comment-preview span')?.textContent).toBe(`审核意见：${note}`)
+  props.state = { ...props.state, financeReviewNote: '', financeReviewedAt: priceException.recordedAt, financeReviewLatestComment: { ...event('补充：已通知相关人员'), at: '2026-10-16T01:00:00Z' } }
+  await flush()
+  expect(document.querySelector('.comment-preview span')?.textContent).toBe('审核意见：补充：已通知相关人员')
+})

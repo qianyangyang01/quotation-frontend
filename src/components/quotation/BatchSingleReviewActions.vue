@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import PriceExceptionSelect from './PriceExceptionSelect.vue'
-import type { PriceExceptionType } from '@/data/priceExceptions'
+import { changeExceptionOpinion, priceExceptionOpinion, type PriceExceptionType } from '@/data/priceExceptions'
 import { currentAuthUser, hasPermission } from '@/data/authStore'
 import { batchItemReviews, batchReviewLabels, reviewBatchSingle, type BatchReviewResult, type BatchSingleDocument } from '@/services/batchSingleQuotation'
 import { idempotencyKey } from '@/services/http'
 const props = defineProps<{ document: BatchSingleDocument; selected: number[]; hiddenSelected: number }>()
 const emit = defineEmits<{ saved: [document: BatchSingleDocument]; clear: []; reload: [] }>()
+function selectException(index: number, value: PriceExceptionType | '') { reasons.value[index] = changeExceptionOpinion(reasons.value[index] || '', exceptionTypes.value[index], value); exceptionTypes.value[index] = value }
 const exceptionTypes = ref<Record<number, PriceExceptionType | ''>>({})
 const busy = ref(false), error = ref(''), note = ref(''), result = ref<BatchReviewResult>('approved'), reasons = ref<Record<number, string>>({}), common = ref('')
 const dialog = ref<HTMLDialogElement>(), returning = ref<number[]>([])
@@ -23,8 +24,9 @@ async function submit(action: 'claim' | 'cancel' | 'complete', returns = false) 
   const indexes = returns ? returning.value : props.selected
   if (action === 'complete' && !indexes.length) return
 
+  if (returns && indexes.some(i => priceExceptionOpinion(exceptionTypes.value[i], reasons.value[i]).length > 500)) { error.value = '审核意见最多500字，请缩短补充内容'; return }
   if (returns && indexes.some(i => !exceptionTypes.value[i])) { error.value = '请为每个退回SKU选择异常类型'; return }
-  const options = action === 'complete' ? { result: returns ? 'rejected' as const : result.value, note: note.value.trim(), items: indexes.map(index => ({ index, reason: returns ? (reasons.value[index] || '').trim() : '', ...(returns && exceptionTypes.value[index] ? { exceptionType: exceptionTypes.value[index] as PriceExceptionType } : {}) })) } : {}
+  const options = action === 'complete' ? { result: returns ? 'rejected' as const : result.value, note: note.value.trim(), items: indexes.map(index => ({ index, reason: returns ? priceExceptionOpinion(exceptionTypes.value[index], reasons.value[index]) : '', ...(returns && exceptionTypes.value[index] ? { exceptionType: exceptionTypes.value[index] as PriceExceptionType } : {}) })) } : {}
   const next = JSON.stringify({ id: props.document.id, version: props.document._reviewVersion, account: currentAuthUser.value.account, action, options })
   if (signature !== next) { signature = next; retryKey = idempotencyKey('batch-review') }
   const account = currentAuthUser.value.account, id = props.document.id
@@ -43,7 +45,7 @@ async function submit(action: 'claim' | 'cancel' | 'complete', returns = false) 
       <label class="note">审核意见<input v-model="note" :disabled="busy" maxlength="500" placeholder="选填，最多500字"></label><small>仅处理勾选SKU；退回项须修正重提后才能通过。</small>
     </template>
     <button v-else-if="document.review?.status !== 'reviewing'" class="primary" :disabled="busy" @click="submit('claim')">开始逐项审核</button><span v-else>{{ document.review.claimantName }}审核中</span>
-    <Teleport to="body"><dialog ref="dialog" class="batch-return-dialog" aria-label="单品批量退回原因" @cancel="busy && $event.preventDefault()"><h3>退回所选 {{ returning.length }} 个SKU</h3><div class="common"><textarea v-model="common" :disabled="busy" maxlength="500" aria-label="统一退回原因" placeholder="统一原因（可选）" /><button :disabled="busy || !common.trim()" @click="returning.forEach(i => reasons[i] = common.trim())">应用到所选SKU</button></div><div class="reason-scroll"><div class="return-item" v-for="index in returning" :key="index">{{ document.items[index]?.input.primarySku }}<PriceExceptionSelect :model-value="exceptionTypes[index] || ''" :disabled="busy" :label="`第${index + 1}项异常类型`" @update:model-value="exceptionTypes[index] = $event" /><textarea v-model="reasons[index]" :disabled="busy" maxlength="500" :aria-label="`第${index + 1}项退回原因`" placeholder="退回原因（选填）" /></div></div><p v-if="error" role="alert">{{ error }}</p><footer><button :disabled="busy" @click="dialog?.close()">返回修改</button><button class="return" :disabled="busy" @click="submit('complete', true)">{{ busy ? '正在退回…' : `确认退回${returning.length}项` }}</button></footer></dialog></Teleport>
+    <Teleport to="body"><dialog ref="dialog" class="batch-return-dialog" aria-label="单品批量退回原因" @cancel="busy && $event.preventDefault()"><h3>退回所选 {{ returning.length }} 个SKU</h3><div class="common"><textarea v-model="common" :disabled="busy" maxlength="500" aria-label="统一退回原因" placeholder="统一原因（可选）" /><button :disabled="busy || !common.trim()" @click="returning.forEach(i => reasons[i] = priceExceptionOpinion(exceptionTypes[i], common))">应用到所选SKU</button></div><div class="reason-scroll"><div class="return-item" v-for="index in returning" :key="index">{{ document.items[index]?.input.primarySku }}<PriceExceptionSelect :model-value="exceptionTypes[index] || ''" :disabled="busy" :label="`第${index + 1}项异常类型`" @update:model-value="selectException(index, $event)" /><textarea v-model="reasons[index]" :disabled="busy" maxlength="500" :aria-label="`第${index + 1}项退回原因`" placeholder="选择异常类型后自动带出，可在后面补充" /></div></div><p v-if="error" role="alert">{{ error }}</p><footer><button :disabled="busy" @click="dialog?.close()">返回修改</button><button class="return" :disabled="busy" @click="submit('complete', true)">{{ busy ? '正在退回…' : `确认退回${returning.length}项` }}</button></footer></dialog></Teleport>
   </section>
 </template>
 <style scoped>
