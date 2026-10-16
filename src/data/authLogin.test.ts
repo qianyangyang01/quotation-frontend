@@ -3,11 +3,11 @@ const dependencies = vi.hoisted(() => ({ post: vi.fn(), resetCsrf: vi.fn(), hydr
 vi.mock('@/services/http', () => ({ api: { post: dependencies.post }, setRequestAccount: vi.fn(), resetCsrf: dependencies.resetCsrf }))
 vi.mock('@/services/financeSettings', () => ({ hydrateFinanceSettings: dependencies.hydrateFinanceSettings, clearFinanceSettingsCache: dependencies.clearFinanceSettingsCache }))
 vi.mock('@/data/publishedLogisticsRepository', () => ({ clearPublishedLogisticsCache: dependencies.clearPublishedLogisticsCache }))
-import { authState, login, defaultHomeForRole, type RoleKey } from './authStore'
+import { authState, login, defaultHomeForRole, hasAnyPermission, type RoleKey } from './authStore'
 
 describe('login does not depend on unrelated workspace data', () => {
   beforeEach(() => { vi.clearAllMocks(); authState.current = null; authState.permissions = []; authState.initialized = false })
-  it.each<[RoleKey, string]>([['super_admin', '/quotation/overview'], ['finance', '/quotation/overview'], ['employee', '/quotation'], ['purchase', '/quotation/products'], ['logistics', '/quotation/logistics']])(
+  it.each<[RoleKey, string]>([['super_admin', '/quotation/overview'], ['finance', '/quotation/overview'], ['employee', '/quotation'], ['purchase', '/quotation/products'], ['logistics', '/quotation/logistics'], ['operations_employee', '/quotation/no-access']])(
     '%s reaches its homepage without waiting for finance', async (role, home) => {
       dependencies.hydrateFinanceSettings.mockReturnValue(new Promise(() => {}))
       dependencies.post.mockResolvedValue({ id: 'user-1', name: 'Test', account: 'TEST', role, permissions: [], mustChangePassword: false })
@@ -18,6 +18,14 @@ describe('login does not depend on unrelated workspace data', () => {
       expect(defaultHomeForRole()).toBe(home)
     },
   )
+  it('replaces a previous employee session with the empty operations permissions', async () => {
+    authState.permissions = ['quote', 'myRecords']
+    dependencies.post.mockResolvedValue({ id: 'operations-1', name: '运营员工', account: 'OPS01', role: 'operations_employee', permissions: [], mustChangePassword: true })
+    await expect(login('ops01', 'fixture')).resolves.toMatchObject({ ok: true, user: { role: 'operations_employee', mustChangePassword: true } })
+    expect(authState.permissions).toEqual([])
+    expect(hasAnyPermission('quote', 'purchase', 'logistics', 'finance', 'myRecords', 'allRecords', 'permissions')).toBe(false)
+    expect(defaultHomeForRole()).toBe('/quotation/no-access')
+  })
   it('does not invalidate current settings or establish a session on failed authentication', async () => {
     dependencies.post.mockRejectedValue(new Error('账号或密码错误'))
     await expect(login('test', 'wrong')).resolves.toEqual({ ok: false, message: '账号或密码错误' })

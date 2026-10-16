@@ -26,8 +26,11 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @ActiveProfiles("test")
 @Testcontainers(disabledWithoutDocker=true)
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
-@WithMockUser(username="FOBBUYER", roles="SUPER_ADMIN")
+@WithMockUser(username="FOBBUYER", authorities={"ROLE_SUPER_ADMIN","PERM_purchase"})
 class FobPurchasePostgresIntegrationTest {
+    private static org.springframework.security.core.authority.SimpleGrantedAuthority authority(String value) {
+        return new org.springframework.security.core.authority.SimpleGrantedAuthority(value);
+    }
     @Container static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url", postgres::getJdbcUrl); r.add("spring.datasource.username", postgres::getUsername); r.add("spring.datasource.password", postgres::getPassword);
@@ -54,9 +57,9 @@ class FobPurchasePostgresIntegrationTest {
             book.write(out); bytes = out.toByteArray();
         }
         var file = new org.springframework.mock.web.MockMultipartFile("file","采购表.xlsx","application/octet-stream",bytes);
-        mvc.perform(multipart("/api/v1/fob-purchase-products/import/read").file(file).with(user("viewer").roles("EMPLOYEE")).with(csrf())).andExpect(status().isForbidden());
-        mvc.perform(multipart("/api/v1/fob-purchase-products/images").file(file).with(user("viewer").roles("EMPLOYEE")).with(csrf())).andExpect(status().isForbidden());
-        var result = mapper.readTree(mvc.perform(multipart("/api/v1/fob-purchase-products/import/read").file(file).with(user("buyer").roles("PURCHASE")).with(csrf()))
+        mvc.perform(multipart("/api/v1/fob-purchase-products/import/read").file(file).with(user("viewer").authorities(authority("ROLE_EMPLOYEE"),authority("PERM_quote"))).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(multipart("/api/v1/fob-purchase-products/images").file(file).with(user("viewer").authorities(authority("ROLE_EMPLOYEE"),authority("PERM_quote"))).with(csrf())).andExpect(status().isForbidden());
+        var result = mapper.readTree(mvc.perform(multipart("/api/v1/fob-purchase-products/import/read").file(file).with(user("buyer").authorities(authority("ROLE_PURCHASE"),authority("PERM_purchase"))).with(csrf()))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
         assertEquals(fobBefore, repository.count()); assertEquals(auditBefore, service.history(sku).size());
         var rows = new ArrayList<JsonNode>(); result.path("rows").forEach(rows::add);
@@ -211,7 +214,7 @@ class FobPurchasePostgresIntegrationTest {
                 .put("freightRaw", "试拍运费1件4/10件7/300件61").put("notes", notes);
         long countBefore = repository.count();
         var preview = mapper.readTree(mvc.perform(post("/api/v1/fob-purchase-products/paste/preview")
-                .with(user("buyer").roles("PURCHASE")).with(csrf()).contentType("application/json")
+                .with(user("buyer").authorities(authority("ROLE_PURCHASE"),authority("PERM_purchase"))).with(csrf()).contentType("application/json")
                 .content(mapper.writeValueAsString(List.of(source))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.canSave").value(true))
                 .andReturn().getResponse().getContentAsString()).path("data");
@@ -224,7 +227,7 @@ class FobPurchasePostgresIntegrationTest {
         assertEquals(23, expectedParsed.path("priceTiers").get(2).path("unitPriceCny").asDouble());
         assertEquals(300, expectedParsed.path("freight").path("quantity").asInt());
         assertEquals(61, expectedParsed.path("freight").path("totalFreightCny").asInt());
-        mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").with(user("buyer").roles("PURCHASE"))
+        mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").with(user("buyer").authorities(authority("ROLE_PURCHASE"),authority("PERM_purchase")))
                 .with(csrf()).contentType("application/json")
                 .content(mapper.writeValueAsString(confirmation(List.of(source)))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.added").value(1));
@@ -287,7 +290,7 @@ class FobPurchasePostgresIntegrationTest {
             for(String body:List.of(first,second)) tasks.add(pool.submit(()->{
                 start.await();
                 return mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm").with(csrf())
-                    .with(user("FOBRACE").roles("SUPER_ADMIN")).contentType("application/json").content(body))
+                    .with(user("FOBRACE").authorities(authority("ROLE_SUPER_ADMIN"),authority("PERM_purchase"))).contentType("application/json").content(body))
                     .andReturn().getResponse().getStatus();
             }));
             start.countDown();
@@ -310,7 +313,7 @@ class FobPurchasePostgresIntegrationTest {
         try(var pool=java.util.concurrent.Executors.newFixedThreadPool(8)) {
             var start=new java.util.concurrent.CountDownLatch(1);var tasks=new ArrayList<java.util.concurrent.Future<Integer>>();
             for(String body:bodies)tasks.add(pool.submit(()->{start.await();return mvc.perform(post("/api/v1/fob-purchase-products/paste/confirm")
-                .with(csrf()).with(user("FOBUPDATE").roles("SUPER_ADMIN")).contentType("application/json").content(body)).andReturn().getResponse().getStatus();}));
+                .with(csrf()).with(user("FOBUPDATE").authorities(authority("ROLE_SUPER_ADMIN"),authority("PERM_purchase"))).contentType("application/json").content(body)).andReturn().getResponse().getStatus();}));
             start.countDown();int winner=-1;
             for(int i=0;i<tasks.size();i++) {int status=tasks.get(i).get(20,java.util.concurrent.TimeUnit.SECONDS);
                 if(status==200){assertEquals(-1,winner);winner=i;}else assertEquals(409,status);

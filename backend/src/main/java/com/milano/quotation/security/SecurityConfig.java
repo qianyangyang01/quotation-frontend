@@ -45,6 +45,11 @@ public class SecurityConfig {
                 .csrf(config -> config.csrfTokenRepository(csrf))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/api/v1/auth/csrf", "/api/v1/auth/login").permitAll()
+                        .requestMatchers("/api/v1/auth/**").authenticated()
+                        // Accounts without business permissions can manage their own session only.
+                        // Keep endpoint-specific checks in place after this shared minimum gate.
+                        .requestMatchers("/api/v1/**").hasAnyAuthority("PERM_quote", "PERM_purchase", "PERM_logistics",
+                                "PERM_finance", "PERM_myRecords", "PERM_allRecords", "PERM_permissions")
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> writeError(response, mapper, 401, "UNAUTHORIZED", "登录已失效，请重新登录"))

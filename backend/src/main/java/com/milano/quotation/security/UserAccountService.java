@@ -18,7 +18,7 @@ import java.util.UUID;
 
 @Service
 public class UserAccountService implements UserDetailsService {
-    private static final List<String> ROLES = List.of("super_admin", "finance", "logistics", "purchase", "employee");
+    private static final List<String> ROLES = List.of("super_admin", "finance", "logistics", "purchase", "employee", "operations_employee");
     private final UserAccountRepository users;
     private final JdbcClient jdbc;
     private final PasswordEncoder encoder;

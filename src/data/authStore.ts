@@ -3,7 +3,7 @@ import { api, request, resetCsrf, setRequestAccount } from '@/services/http'
 import { clearPublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
 import { clearFinanceSettingsCache } from '@/services/financeSettings'
 
-export type RoleKey = 'super_admin' | 'finance' | 'logistics' | 'purchase' | 'employee'
+export type RoleKey = 'super_admin' | 'finance' | 'logistics' | 'purchase' | 'employee' | 'operations_employee'
 export type PermissionKey = 'quote' | 'purchase' | 'logistics' | 'finance' | 'myRecords' | 'allRecords' | 'permissions'
 export type AccountStatus = 'enabled' | 'disabled'
 
@@ -18,7 +18,8 @@ export const roleDefinitions: RoleDefinition[] = [
   { key: 'finance', name: '财务', shortName: '财务', description: '现阶段与超级管理员使用相同业务权限。', permissions: ['quote', 'purchase', 'logistics', 'finance', 'allRecords', 'permissions'] },
   { key: 'logistics', name: '物流', shortName: '物流', description: '仅维护物流商、渠道、价格版本、审核与发布。', permissions: ['logistics'] },
   { key: 'purchase', name: '采购', shortName: '采购', description: '仅维护采购商品资料及 Excel 导入数据。', permissions: ['purchase'] },
-  { key: 'employee', name: '员工', shortName: '员工', description: '仅发起本人报价并查看本人的报价记录。', permissions: ['quote', 'myRecords'] },
+  { key: 'employee', name: '业务-员工', shortName: '业务-员工', description: '仅发起本人报价并查看本人的报价记录。', permissions: ['quote', 'myRecords'] },
+  { key: 'operations_employee', name: '运营-员工', shortName: '运营-员工', description: '暂未分配业务权限。', permissions: [] },
 ]
 
 type SessionUser = { id: string; account: string; name: string; role: RoleKey; permissions: PermissionKey[]; mustChangePassword: boolean }
@@ -69,7 +70,7 @@ export async function logout() { try { await api.post('/auth/logout') } finally 
 export function hasPermission(permission: PermissionKey) { return isAuthenticated.value && authState.permissions.includes(permission) }
 export function hasAnyPermission(...permissions: PermissionKey[]) { return permissions.some(permission => hasPermission(permission)) }
 export function canAccessMyRecords(permissions: readonly PermissionKey[]) { return permissions.includes('myRecords') || permissions.includes('allRecords') }
-export function defaultHomeForRole(role = currentAuthUser.value.role) { if (role === 'logistics') return '/quotation/logistics'; if (role === 'purchase') return '/quotation/products'; if (role === 'employee') return '/quotation'; return '/quotation/overview' }
+export function defaultHomeForRole(role = currentAuthUser.value.role) { if (role === 'logistics') return '/quotation/logistics'; if (role === 'purchase') return '/quotation/products'; if (role === 'employee') return '/quotation'; if (role === 'operations_employee') return '/quotation/no-access'; return '/quotation/overview' }
 
 export async function loadAuthUsers() {
   const loaded = await api.get<AuthUser[]>('/users', { signal: AbortSignal.timeout(20_000) })

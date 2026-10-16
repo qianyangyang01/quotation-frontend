@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS role_permission (
     PRIMARY KEY (role_key, permission_key)
 );
 MERGE INTO app_role KEY(role_key) VALUES
- ('super_admin','超级管理员'),('finance','财务'),('logistics','物流'),('purchase','采购'),('employee','员工');
+ ('super_admin','超级管理员'),('finance','财务'),('logistics','物流'),('purchase','采购'),('employee','业务-员工'),('operations_employee','运营-员工');
 MERGE INTO role_permission KEY(role_key, permission_key) VALUES
  ('super_admin','quote'),('super_admin','purchase'),('super_admin','logistics'),('super_admin','finance'),('super_admin','allRecords'),('super_admin','permissions'),
  ('finance','quote'),('finance','purchase'),('finance','logistics'),('finance','finance'),('finance','allRecords'),('finance','permissions'),

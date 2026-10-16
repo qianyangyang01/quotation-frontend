@@ -24,7 +24,7 @@ const initials = computed(() => currentAuthUser.value.name.slice(0, 2).toUpperCa
 let cancelPrefetch: () => void = () => undefined
 
 watch(() => route.path, () => { pendingPath.value = '' })
-onMounted(() => { cancelPrefetch = scheduleRouteViewPrefetch(navItems.value.map(item => item.path).filter(path => path !== route.path)) })
+onMounted(() => { if (navItems.value.length) cancelPrefetch = scheduleRouteViewPrefetch(navItems.value.map(item => item.path).filter(path => path !== route.path)) })
 onUnmounted(() => cancelPrefetch())
 
 function prepareNavigation(path: string) { prefetchRouteView(path) }
@@ -44,8 +44,8 @@ async function signOut() {
 <template>
   <header class="app-topbar">
     <RouterLink class="app-brand" :to="home"><i>M</i><span><b>米莱诺报价</b><small>MILANO PRICING ERP</small></span></RouterLink>
-    <nav><RouterLink v-for="item in navItems" :key="item.path" :class="{ active:route.path===item.path, pending:pendingPath===item.path }" :to="item.path" @pointerenter="prepareNavigation(item.path)" @pointerdown="beginNavigation(item.path)" @focus="prepareNavigation(item.path)" @click="beginNavigation(item.path)">{{ item.label }}</RouterLink></nav>
-    <ReviewNotificationBell />
+    <nav v-if="navItems.length"><RouterLink v-for="item in navItems" :key="item.path" :class="{ active:route.path===item.path, pending:pendingPath===item.path }" :to="item.path" @pointerenter="prepareNavigation(item.path)" @pointerdown="beginNavigation(item.path)" @focus="prepareNavigation(item.path)" @click="beginNavigation(item.path)">{{ item.label }}</RouterLink></nav>
+    <ReviewNotificationBell v-if="hasAnyPermission('myRecords', 'allRecords')" />
     <div class="app-user">
       <button type="button" @click="accountMenuOpen=!accountMenuOpen"><i>{{ initials }}</i><span><b>{{ currentAuthUser.name }}</b><small>{{ currentRole.name }} · {{ currentAuthUser.account }}</small></span><em>⌄</em></button>
       <div v-if="accountMenuOpen" class="account-menu">

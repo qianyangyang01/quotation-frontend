@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/', redirect: () => isAuthenticated.value ? defaultHomeForRole() : '/login' },
     { path: '/login', name: 'login', component: routeView('/login'), meta: { title: '登录' } },
     { path: '/change-password', name: 'change-password', component: routeView('/change-password'), meta: { title: '修改临时密码' } },
+    { path: '/quotation/no-access', name: 'quotation-no-access', component: routeView('/quotation/no-access'), meta: { title: '暂无业务权限' } },
     { path: '/quotation/overview', name: 'quotation-overview', component: routeView('/quotation/overview'), meta: { title: '报价情况预览', permission: 'allRecords' } },
     { path: '/quotation/batch-single', name: 'quotation-batch-single', component: routeView('/quotation/batch-single'), meta: { title: '批量单品报价', permissions: ['quote', 'myRecords', 'allRecords'] } },
     { path: '/quotation', name: 'quotation', component: routeView('/quotation'), meta: { title: '我的报价', permission: 'quote' } },
