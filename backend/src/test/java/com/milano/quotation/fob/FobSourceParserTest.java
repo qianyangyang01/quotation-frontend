@@ -6,6 +6,16 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FobSourceParserTest {
+    @Test void explicitManualMinimumAndMultipleRemainIndependentWithoutChangingLegacyParsing() {
+        var parsed = FobSourceParser.parse("100件起订;20的倍数下单", "100-499件单价12.5\n500件起单价11.8", "100件运费35");
+        assertEquals(100, parsed.minOrderQty()); assertEquals(20, parsed.orderMultiple());
+        assertEquals(499, parsed.priceTiers().getFirst().maxQty());
+        assertEquals(new BigDecimal("0.35"), parsed.freight().unitFreightCny());
+        assertEquals(10, FobSourceParser.parse("10的倍数下单", "5", "包邮").orderMultiple());
+        assertEquals(1, FobSourceParser.parse("100", "5", "包邮").orderMultiple());
+        assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("100件起订;0的倍数下单", "5", "包邮"));
+        assertThrows(IllegalArgumentException.class, () -> FobSourceParser.parse("100件起订;10的倍数下单;另计", "5", "包邮"));
+    }
     @Test void acceptsMemberPricesAndAbbreviatedFreightFromTc2600009Rows() {
         for (String price : List.of("会员价：71.25", "会员价80.75")) {
             var p = FobSourceParser.parse("1", price, "1个运5；10个运费32；100个运费302");

@@ -340,3 +340,31 @@ it('rejects typing 10 instead of 0.10 for the ticket point',async()=>{
   expect(mocks.update).not.toHaveBeenCalled()
   expect(document.body.textContent).toContain('0～1')
 })
+
+
+it('creates legacy data using its tax rule and preserves separate new-data draft on source switches',async()=>{
+  await mount()
+  Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.includes('新增采购资料'))!.click();await flush()
+  const choose=(source:string)=>Array.from(document.querySelectorAll<HTMLButtonElement>('.entry-source-options button')).find(b=>b.textContent?.startsWith(source))!.click()
+  const sku=document.querySelector<HTMLInputElement>('.form-grid input')!
+  sku.value='PF2600100';sku.dispatchEvent(new Event('input',{bubbles:true}));await flush()
+  choose('2026旧数据');await flush()
+  expect(document.querySelector<HTMLInputElement>('.form-grid input')!.value).toBe('')
+  await setPriceField('未税采购单价','100');await setPriceField('采购票点','0.13')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="含票价（自动计算）"]')!.value).toBe('113.00')
+  const legacySku=document.querySelector<HTMLInputElement>('.form-grid input')!;legacySku.value='PF2600101';legacySku.dispatchEvent(new Event('input',{bubbles:true}));await flush()
+  choose('新数据');await flush();expect(document.querySelector<HTMLInputElement>('.form-grid input')!.value).toBe('PF2600100')
+  choose('2026旧数据');await flush();expect(document.querySelector<HTMLInputElement>('.form-grid input')!.value).toBe('PF2600101')
+  mocks.save.mockResolvedValueOnce([normalizePurchaseRecord({sku:'PF2600101',dataSource:'legacy_2026'})]);editorSave();await flush()
+  expect(mocks.save).toHaveBeenCalledWith([expect.objectContaining({dataSource:'legacy_2026',sourceQuotedPriceCny:100,taxIncludedPriceCny:113,purchasePriceCny:113,legacyPriceMode:'auto_tax'})])
+})
+it('shows FOB entry only to maintainers and never submits it through ordinary purchase save',async()=>{
+  authState.current={id:'buyer',account:'buyer',name:'采购',role:'purchase',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['purchase']
+  await mount();Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.includes('新增采购资料'))!.click();await flush()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.entry-source-options button')).find(b=>b.textContent?.startsWith('FOB数据'))!.click();await flush()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="FOB SKU"]')).not.toBeNull()
+  expect(document.querySelector<HTMLElement>('.form-grid')!.style.display).toBe('none')
+  expect(Array.from(document.querySelectorAll('.editor-modal button')).some(b=>b.textContent==='保存资料')).toBe(false)
+  expect(mocks.save).not.toHaveBeenCalled()
+  authState.current.role='logistics';await flush();expect(document.querySelector('.fob-entry')).toBeNull()
+})

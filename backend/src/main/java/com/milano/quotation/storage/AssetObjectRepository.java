@@ -9,6 +9,8 @@ public interface AssetObjectRepository extends JpaRepository<AssetObject,UUID>{
            AND NOT EXISTS (SELECT 1 FROM migration_manifest_entry entry WHERE entry.asset_id=asset.id)
            AND NOT EXISTS (SELECT 1 FROM purchase_import_row pir WHERE asset.id IN (pir.product_asset_id,pir.physical_asset_id,pir.before_product_asset_id,pir.before_physical_asset_id))
            AND NOT EXISTS (SELECT 1 FROM supplier_record supplier WHERE supplier.business_license_asset_id=asset.id)
+           AND NOT EXISTS (SELECT 1 FROM fob_purchase_product fob WHERE lower(cast(fob.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
+           AND NOT EXISTS (SELECT 1 FROM audit_log audit WHERE audit.resource_type='fob-purchase-product' AND lower(cast(audit.detail as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_record quote WHERE lower(cast(quote.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_draft draft WHERE lower(cast(draft.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
         """,nativeQuery=true)int retireUnreferenced(@Param("ids")Collection<UUID>ids,@Param("now")Instant now);
@@ -19,6 +21,8 @@ public interface AssetObjectRepository extends JpaRepository<AssetObject,UUID>{
            AND NOT EXISTS (SELECT 1 FROM migration_manifest_entry entry WHERE entry.asset_id=asset.id)
            AND NOT EXISTS (SELECT 1 FROM purchase_import_row pir WHERE asset.id IN (pir.product_asset_id,pir.physical_asset_id,pir.before_product_asset_id,pir.before_physical_asset_id))
            AND NOT EXISTS (SELECT 1 FROM supplier_record supplier WHERE supplier.business_license_asset_id=asset.id)
+           AND NOT EXISTS (SELECT 1 FROM fob_purchase_product fob WHERE lower(cast(fob.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
+           AND NOT EXISTS (SELECT 1 FROM audit_log audit WHERE audit.resource_type='fob-purchase-product' AND lower(cast(audit.detail as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_record quote WHERE lower(cast(quote.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_draft draft WHERE lower(cast(draft.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
         """,nativeQuery=true)List<AssetObject>findExpiredUnreferenced(@Param("now")Instant now);

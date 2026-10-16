@@ -174,6 +174,9 @@ public class PurchaseProductService {
         object.put("sku", sku);
         var existing=originalSku==null?products.findBySku(sku):Optional.of(locked(originalSku));
         if(existing.isPresent()&&requireVersionForExisting&&(!object.has("_version")||object.path("_version").asLong(-1)!=existing.get().version))throw AppException.conflict("商品 "+sku+" 已被其他用户修改，请刷新后重试");
+        if (existing.isPresent() && requireVersionForExisting && operation == null
+                && !existing.get().payload.path("dataSource").asText("standard").equals(object.path("dataSource").asText("standard")))
+            throw AppException.conflict("已有采购资料不能通过编辑切换数据类型，请保留原资料类型");
         if (requireVersionForExisting && operation == null && existing.isPresent()
                 && "auto_tax".equals(existing.get().payload.path("legacyPriceMode").asText())
                 && !"auto_tax".equals(object.path("legacyPriceMode").asText()))
@@ -300,6 +303,8 @@ public class PurchaseProductService {
     private static Optional<String> referencedSku(String value){if(value==null)return Optional.empty();var sku=value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+","");return sku.isEmpty()||sku.length()>96||!sku.matches("[A-Z0-9._/-]+")?Optional.empty():Optional.of(sku);}
     private static void addReferencedSku(Collection<String> skus,String value){referencedSku(value).ifPresent(skus::add);}
     private static void validatePayload(ObjectNode object) {
+        if (!List.of("standard", "legacy_2026").contains(object.path("dataSource").asText("standard")))
+            throw AppException.unprocessable("普通采购接口仅支持新数据或2026旧数据；FOB资料请使用FOB入口");
         for (var field : List.of("weightG", "minOrderQty", "purchasePriceCny", "tier2PriceCny", "tier3PriceCny", "taxIncludedPriceCny", "singleFreightCny", "freight10Cny", "freight100Cny")) {
             var value=object.path(field);
             if (object.hasNonNull(field) && (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble()<0)) throw AppException.unprocessable(field+"必须为有效非负数");

@@ -7,7 +7,7 @@ export const FOB_COLUMNS = [
   ['报价日期', 'quotationDate'], ['尺码', 'size'], ['颜色', 'color'], ['材质', 'material'], ['工厂信息', 'factoryInfo'],
 ] as const
 export type FobField = typeof FOB_COLUMNS[number][1]
-export type FobPatch = Partial<Record<FobField, string>> & { sku: string }
+export type FobPatch = Partial<Record<FobField, string>> & { sku: string; productImage?: string; physicalImage?: string }
 const skuPattern = /^[A-Z][A-Z0-9._/-]{1,95}$/i
 const normalizeSku = (value: string) => value.normalize('NFKC').toUpperCase().replace(/[\s\u200b]/g, '')
 const aliases: Record<string, FobField> = {

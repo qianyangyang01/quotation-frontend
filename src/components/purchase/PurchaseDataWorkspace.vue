@@ -15,6 +15,7 @@ import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
 import FobPasteDialog from './FobPasteDialog.vue'
+import FobPurchaseEntry from './FobPurchaseEntry.vue'
 import FobCatalogRow from './FobCatalogRow.vue'
 import FobCatalogDetail from './FobCatalogDetail.vue'
 import { loadPurchaseCatalogPage, type PurchaseCatalogRecord, type FobCatalogRecord } from '@/services/purchaseCatalog'
@@ -294,12 +295,42 @@ function toast(message: string) {
 function emptyRecord() {
   return normalizePurchaseRecord({ sourceRow: Date.now(), sku: '', skuOrigin: 'manual', catalogState: 'ready', stockStatus: '待确认', quotationDate: new Date().toISOString().slice(0, 10), importWarnings: [] })
 }
+type EntrySource = 'standard' | 'legacy_2026' | 'fob'
+const entrySource = ref<EntrySource>('standard')
+const entryMethod = ref<'manual' | 'excel'>('manual')
+const fobEntryBusy = ref(false), fobEntryDirty = ref(false), confirmEditorClose = ref(false)
+const newEntryDrafts = new Map<EntrySource, { record: PurchaseProductRecord; unitPrice: number | string | null; pricingDirty: boolean }>()
+const entryBusy = computed(() => editorSaving.value || fobEntryBusy.value || asyncUploading.value)
+function selectEntrySource(source: EntrySource) {
+  if (!editor.value || editingOriginalSku.value || entryBusy.value || (source === 'fob' && !canMaintainFob.value)) return
+  if (entrySource.value !== 'fob') newEntryDrafts.set(entrySource.value, { record: editor.value, unitPrice: legacyEditorUnitPrice.value, pricingDirty: legacyEditorPricingDirty.value })
+  entrySource.value = source
+  if (source === 'fob') return
+  const saved = newEntryDrafts.get(source)
+  editor.value = saved?.record ?? normalizePurchaseRecord({ ...emptyRecord(), dataSource: source, sourceSheet: '手工新增资料' })
+  legacyEditorUnitPrice.value = saved?.unitPrice ?? null
+  legacyEditorPricingDirty.value = saved?.pricingDirty ?? source === 'legacy_2026'
+}
+function closeEditor() {
+  if (entryBusy.value) return
+  if (!editingOriginalSku.value && (fobEntryDirty.value || editor.value?.sku || [...newEntryDrafts.values()].some(d => d.record.sku))) { confirmEditorClose.value = true; return }
+  editor.value = null
+}
+function fobEntrySaved(counts: PasteSavedCounts) { editor.value = null; fobEntryDirty.value = false; fobPasteSaved(counts) }
+async function importFromEditor(event: Event) {
+  if (entryBusy.value || entrySource.value === 'fob') return
+  const previousJob = activeJob.value?.id
+  await chooseAsyncWorkbook(event, entrySource.value === 'legacy_2026' ? 'legacy-2026' : 'standard')
+  if (activeJob.value?.id && activeJob.value.id !== previousJob) editor.value = null
+}
 function openEditor(record?: PurchaseProductRecord) {
   if (editorSaving.value) return
   editingOriginalSku.value = record?.sku || ''
   editor.value = record ? normalizePurchaseRecord(JSON.parse(JSON.stringify(record)) as PurchaseProductRecord) : emptyRecord()
   legacyEditorUnitPrice.value = legacyUntaxedUnitPrice(editor.value)
   legacyEditorPricingDirty.value = false
+  entrySource.value = record?.dataSource === 'legacy_2026' ? 'legacy_2026' : 'standard'
+  entryMethod.value = 'manual'; newEntryDrafts.clear(); fobEntryDirty.value = false; confirmEditorClose.value = false
   detail.value = null
 }
 const legacyEditorUnitPrice = ref<number | string | null>(null)
@@ -338,7 +369,7 @@ async function executeDelete(){
 }
 async function disableBlockedDelete(){if(!deleteTarget.value||deleteTarget.value.catalogState==='disabled')return;const target=deleteTarget.value;closeDelete();requestCatalogState(target,'disabled')}
 async function saveEditor() {
-  if (!editor.value||editorSaving.value) return
+  if (!editor.value||entryBusy.value||entrySource.value==='fob'||(!editingOriginalSku.value&&entryMethod.value==='excel')) return
   const sku = editor.value.sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!sku) { toast('请填写 SKU'); return }
   if (records.value.some(item => item.dataSource !== 'fob' && item.sku === sku && item.sku !== editingOriginalSku.value)) { toast(`SKU ${sku} 已存在`); return }
@@ -585,10 +616,22 @@ const detailFields = computed(() => detail.value ? [
   </section></div>
 
   <div v-if="editor" class="mask"><section class="modal editor-modal">
-    <button :disabled="editorSaving" class="close" @click="editor=null">×</button><small>PURCHASE DATA EDITOR</small><h2>{{ editingOriginalSku ? '编辑采购资料' : '新增采购资料' }}</h2><p>字段顺序与标准 Excel 模板一致；空字段保存后显示“暂无数据”。</p>
+    <button :disabled="entryBusy" class="close" aria-label="关闭采购资料编辑" @click="closeEditor">×</button><small>PURCHASE DATA EDITOR</small><h2>{{ editingOriginalSku ? '编辑采购资料' : '新增采购资料' }}</h2><p>{{ editingOriginalSku ? '保留原资料类型；空字段保存后显示“暂无数据”。' : '选择资料类型，再手工填写或从 Excel 导入。' }}</p>
+    <template v-if="!editingOriginalSku">
+      <div class="entry-source-options" role="group" aria-label="资料类型">
+        <button :disabled="entryBusy" :aria-pressed="entrySource==='standard'" @click="selectEntrySource('standard')">新数据<small>标准采购资料</small></button>
+        <button :disabled="entryBusy" :aria-pressed="entrySource==='legacy_2026'" @click="selectEntrySource('legacy_2026')">2026旧数据<small>历史采购资料</small></button>
+        <button v-if="canMaintainFob" :disabled="entryBusy" :aria-pressed="entrySource==='fob'" @click="selectEntrySource('fob')">FOB数据<small>FOB 报价专用资料</small></button>
+      </div>
+      <p class="entry-source-help">{{ entrySource==='fob' ? '保存到 FOB 资料库，同 SKU 的普通采购资料保留。' : entrySource==='legacy_2026' ? '保存为2026旧数据，未税采购价和票点按旧数据规则计算。' : '保存为新数据，使用标准采购资料。' }}</p>
+      <div v-if="entrySource!=='fob'" class="entry-methods"><button :disabled="entryBusy" :aria-pressed="entryMethod==='manual'" @click="entryMethod='manual'">手工填写</button><button :disabled="entryBusy" :aria-pressed="entryMethod==='excel'" @click="entryMethod='excel'">Excel 文件导入</button></div>
+    </template>
+    <p v-else class="entry-source-help">资料类型：{{ purchaseSourceLabel(editor) }}</p>
+    <FobPurchaseEntry v-if="!editingOriginalSku && canMaintainFob" v-show="entrySource==='fob'" :active="entrySource==='fob'" @busy="fobEntryBusy=$event" @dirty="fobEntryDirty=$event" @saved="fobEntrySaved" />
+    <section v-if="!editingOriginalSku && entrySource!=='fob' && entryMethod==='excel'" class="entry-file-panel"><h3>导入{{ entrySource==='legacy_2026' ? '2026旧数据' : '新数据' }}采购表</h3><p>上传后进入现有导入任务中心，核对解析结果再确认入库。</p><input type="file" accept=".xlsx" aria-label="选择普通采购Excel文件" :disabled="entryBusy" @change="importFromEditor"><p>仅导入文字资料，表格中的图片不导入。{{ asyncUploading ? uploadProgress.stage+' '+uploadProgress.percent+'%' : '' }}</p></section>
     <div v-if="editor.skuOrigin==='system'" class="generated-warning">系统生成 SKU 必须修改成真实 SKU 后，才可以参与报价。</div>
     <div v-else-if="editor.catalogState==='pending_template'" class="generated-warning">{{ editor.dataSource==='legacy_2026' ? '请补全克重、有效价格和旧数据单档运费，再点击“确认可参与报价”。类别、尺寸和图片为空不阻断报价。' : '当前是模板待补全目录。保存不会解除锁定；改成真实业务SKU并点击“确认转正式”后才可参与报价。' }}</div>
-    <fieldset class="form-grid" :disabled="editorSaving">
+    <fieldset v-show="entrySource!=='fob' && (editingOriginalSku || entryMethod==='manual')" class="form-grid" :disabled="entryBusy">
       <label>1. SKU*<input v-model="editor.sku" :class="{ alert:editor.skuOrigin==='system' }"></label><label>2. 类别*<input v-model="editor.category"></label>
       <label class="wide">3. 产品图片（嵌入本格）<div class="upload"><img v-if="editor.productImage" :src="editor.productImage"><input type="file" accept="image/*" @change="handleImage($event,'productImage')"><button v-if="editor.productImage" @click.prevent="editor.productImage=''">移除</button></div></label>
       <label class="wide">4. 实物图（嵌入本格）<div class="upload"><img v-if="editor.physicalImage" :src="editor.physicalImage"><input type="file" accept="image/*" @change="handleImage($event,'physicalImage')"><button v-if="editor.physicalImage" @click.prevent="editor.physicalImage=''">移除</button></div></label>
@@ -610,7 +653,8 @@ const detailFields = computed(() => detail.value ? [
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>
     </fieldset>
-    <footer><button :disabled="editorSaving" v-if="editingOriginalSku" @click="historySku=editingOriginalSku">修改记录</button><button :disabled="editorSaving" @click="editor=null">取消</button><button :disabled="editorSaving" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存资料' }}</button><button v-if="editor.catalogState==='pending_template'" class="primary" :disabled="editorSaving" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
+    <footer v-if="entrySource!=='fob'"><button :disabled="entryBusy" v-if="editingOriginalSku" @click="historySku=editingOriginalSku">修改记录</button><button :disabled="entryBusy" @click="closeEditor">取消</button><button v-if="editingOriginalSku || entryMethod==='manual'" :disabled="entryBusy" @click="saveEditor">{{ editorSaving ? '保存中…' : '保存资料' }}</button><button v-if="editor.catalogState==='pending_template'" class="primary" :disabled="entryBusy" @click="promoteEditor">{{ editor.dataSource==='legacy_2026' ? '确认可参与报价' : '确认转正式' }}</button></footer>
+    <div v-if="confirmEditorClose" class="entry-discard" role="alert">关闭将丢弃尚未保存的资料。<button @click="confirmEditorClose=false">继续填写</button><button @click="editor=null;confirmEditorClose=false">丢弃并关闭</button></div>
   </section></div>
 
   <div v-if="previewImage" class="image-preview" @click.self="previewImage=null"><button @click="previewImage=null">×</button><figure><img :src="previewImage.src"><figcaption>{{ previewImage.title }}</figcaption></figure></div>
@@ -645,6 +689,7 @@ const detailFields = computed(() => detail.value ? [
 .weight-cell>b,.weight-cell>small:last-child,.freight-cell>small,.table-card td>em.ready{white-space:nowrap}
 .table-card .description-cell{overflow-wrap:anywhere;word-break:normal}
 .table-card .actions{white-space:normal}.actions button{white-space:nowrap;line-height:1.8}
+.entry-source-options{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:15px 0 10px}.entry-source-options button{padding:12px;text-align:left;border:1px solid #dce3e8;border-radius:7px;background:#fff;color:#273540;font-weight:800}.entry-source-options small{display:block;margin-top:4px;color:#74818b;font-size:11px;font-weight:400;letter-spacing:0}.entry-source-options button[aria-pressed=true]{border-color:#ed9b30;background:#fff8ec;box-shadow:inset 0 0 0 1px #ed9b30}.entry-source-help{font-size:11px!important;color:#72818b!important;margin:8px 0 14px!important}.entry-methods{display:flex;gap:22px;border-bottom:1px solid #e2e7eb;margin-bottom:14px}.entry-methods button{padding:9px 0;border:0;border-bottom:2px solid transparent;background:#fff;color:#71808d}.entry-methods button[aria-pressed=true]{color:#b26a07;border-bottom-color:#ee941c}.entry-file-panel{padding:24px;border:1px dashed #d3dce2;border-radius:8px;background:#fafbfc;text-align:center}.entry-file-panel p{font-size:12px;color:#74818b}.entry-file-panel input{max-width:100%}.entry-discard{padding:12px;margin-top:12px;border-radius:6px;background:#fff3df;font-size:12px}.entry-discard button{margin-left:8px}.editor-modal .entry-source-options button:disabled{opacity:.5}@media(max-width:600px){.entry-source-options{gap:5px}.entry-source-options button{padding:9px 6px;font-size:12px}.entry-source-options small{font-size:10px}}
 </style>
 
 <style scoped>

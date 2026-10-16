@@ -40,7 +40,55 @@ class FobPurchasePostgresIntegrationTest {
     @Autowired ObjectMapper mapper;
     @Autowired WebApplicationContext context;
     @Autowired org.springframework.jdbc.core.simple.JdbcClient jdbc;
+    @Autowired com.milano.quotation.storage.AssetObjectRepository assets;
     MockMvc mvc;
+    @Test void workbookReadUsesFobPermissionsAndHasNoWritesBeforeConfirmation() throws Exception {
+        String sku = sku(); catalogPair(sku);
+        var ordinaryBefore = ordinary.findBySku(sku).orElseThrow().payload.deepCopy();
+        long fobBefore = repository.count(), auditBefore = service.history(sku).size();
+        byte[] bytes;
+        try (var book = new org.apache.poi.xssf.usermodel.XSSFWorkbook(); var out = new java.io.ByteArrayOutputStream()) {
+            var sheet = book.createSheet("FOB采购");
+            String[][] values = {{"SKU","起订量","单价","运费原文"}, {sku,"100件起订;20的倍数下单","100-499件单价12.5\n500件起单价11.8","100件运费35"}};
+            for (int i=0;i<values.length;i++) { var row=sheet.createRow(i); for(int j=0;j<values[i].length;j++)row.createCell(j).setCellValue(values[i][j]); }
+            book.write(out); bytes = out.toByteArray();
+        }
+        var file = new org.springframework.mock.web.MockMultipartFile("file","采购表.xlsx","application/octet-stream",bytes);
+        mvc.perform(multipart("/api/v1/fob-purchase-products/import/read").file(file).with(user("viewer").roles("EMPLOYEE")).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(multipart("/api/v1/fob-purchase-products/images").file(file).with(user("viewer").roles("EMPLOYEE")).with(csrf())).andExpect(status().isForbidden());
+        var result = mapper.readTree(mvc.perform(multipart("/api/v1/fob-purchase-products/import/read").file(file).with(user("buyer").roles("PURCHASE")).with(csrf()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+        assertEquals(fobBefore, repository.count()); assertEquals(auditBefore, service.history(sku).size());
+        var rows = new ArrayList<JsonNode>(); result.path("rows").forEach(rows::add);
+        assertEquals(1, service.confirm(confirmation(rows)).updated());
+        var saved = service.get(sku);
+        assertEquals("fob",saved.path("dataSource").asText());
+        assertEquals(20,saved.path("parsed").path("orderMultiple").asInt());
+        assertEquals(ordinaryBefore,ordinary.findBySku(sku).orElseThrow().payload);
+        assertEquals(auditBefore+1,service.history(sku).size());
+    }
+    UUID imageFixture() {
+        var id=UUID.randomUUID(); var hash=id.toString().replace("-","").repeat(2);
+        jdbc.sql("""
+            insert into asset_object(id,sha256,object_key,media_type,size_bytes,original_name,created_at,storage_state,expires_at)
+            values(:id,:sha,:key,'image/png',4,'image.png',now(),'temporary',now()-interval '1 day')
+            """).param("id",id).param("sha",hash).param("key","fob-test/"+id).update();
+        return id;
+    }
+    @Test void manualImagesAreValidatedShownAndProtectedByCurrentAndHistoricalReferences() {
+        String sku=sku(); var first=imageFixture(); var replacement=imageFixture(); var orphan=imageFixture();
+        var url="/api/v1/assets/"+first;
+        service.confirm(confirmation(List.of(row(sku).put("productImage",url))));
+        assertEquals(url,service.get(sku).path("productImage").asText());
+        assertTrue(assets.findExpiredUnreferenced(java.time.Instant.now()).stream().noneMatch(a->a.id.equals(first)));
+        service.confirm(confirmation(List.of(mapper.createObjectNode().put("sku",sku).put("productImage","/api/v1/assets/"+replacement))));
+        // Replacement must not invalidate images retained in the audit history.
+        assertTrue(assets.findExpiredUnreferenced(java.time.Instant.now()).stream().noneMatch(a->a.id.equals(first)||a.id.equals(replacement)));
+        assertTrue(assets.findExpiredUnreferenced(java.time.Instant.now()).stream().anyMatch(a->a.id.equals(orphan)));
+        assertEquals(2,service.history(sku).size());
+        assertThrows(AppException.class,()->service.preview(List.of(row(sku).put("physicalImage","https://example.com/image.png"))));
+        assertThrows(AppException.class,()->service.preview(List.of(row(sku).put("physicalImage","/api/v1/assets/"+UUID.randomUUID()))));
+    }
     @BeforeEach void setup() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
     String sku() { return "FB-" + UUID.randomUUID().toString().substring(0,8).toUpperCase(Locale.ROOT); }
     void catalogPair(String sku) {

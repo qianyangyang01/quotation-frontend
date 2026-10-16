@@ -19,3 +19,14 @@ export const previewFobPaste = (rows: FobPatch[]) => request<FobPreview>('/fob-p
 export const confirmFobPaste = (rows: FobPatch[], preview: FobPreview) => request<PasteSavedCounts>('/fob-purchase-products/paste/confirm', { method: 'POST', body: JSON.stringify({ rows, expected: preview.rows.map(row => row.expected), digest: preview.digest }), signal: AbortSignal.timeout(60_000) })
 export const loadFobRecord = (sku: string, signal?: AbortSignal) => request<FobRecord>(`/fob-purchase-products/${encodeURIComponent(sku)}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000), cache: 'no-store' })
 export const loadFobHistory = (sku: string) => request<FobHistory[]>(`/fob-purchase-products/${encodeURIComponent(sku)}/history`)
+export interface FobWorkbookRows { rows: FobPatch[]; locations: { sheet: string; row: number }[]; notices: string[] }
+export function readFobWorkbook(file: File) {
+  const body = new FormData()
+  body.append('file', file)
+  return request<FobWorkbookRows>('/fob-purchase-products/import/read', { method: 'POST', body, signal: AbortSignal.timeout(60_000) })
+}
+export function uploadFobImage(file: File) {
+  const body = new FormData()
+  body.append('file', file)
+  return request<{ url: string }>('/fob-purchase-products/images', { method: 'POST', body, signal: AbortSignal.timeout(60_000) })
+}

@@ -23,14 +23,15 @@ public class FobPurchaseService {
         m.put("freightRaw", "运费原文"); m.put("category", "类别"); m.put("notes", "备注");
         m.put("quotationOwner", "报价人"); m.put("quotationDate", "报价日期");
         m.put("size", "尺码"); m.put("color", "颜色"); m.put("material", "材质");
-        m.put("factoryInfo", "工厂信息"); FIELDS = Collections.unmodifiableMap(m);
+        m.put("factoryInfo", "工厂信息"); m.put("productImage", "产品图片"); m.put("physicalImage", "实物图"); FIELDS = Collections.unmodifiableMap(m);
     }
     private final FobPurchaseRepository repository;
     private final AuditService audit;
     private final AuditLogRepository logs;
     private final ObjectMapper mapper;
-    public FobPurchaseService(FobPurchaseRepository repository, AuditService audit, AuditLogRepository logs, ObjectMapper mapper) {
-        this.repository = repository; this.audit = audit; this.logs = logs; this.mapper = mapper;
+    private final com.milano.quotation.storage.AssetObjectRepository assets;
+    public FobPurchaseService(FobPurchaseRepository repository, AuditService audit, AuditLogRepository logs, ObjectMapper mapper, com.milano.quotation.storage.AssetObjectRepository assets) {
+        this.repository = repository; this.audit = audit; this.logs = logs; this.mapper = mapper; this.assets = assets;
     }
     @Transactional(readOnly = true)
     public Preview preview(List<JsonNode> input) {
@@ -41,7 +42,7 @@ public class FobPurchaseService {
     public Result confirm(Confirmation input) {
         if (input == null || input.expected == null || input.digest == null) throw AppException.unprocessable("请先预览FOB数据");
         var batch = inputs(input.rows);
-        if (!digest(batch).equals(input.digest)) throw AppException.conflict("粘贴内容已变化，请重新预览");
+        if (!digest(batch).equals(input.digest)) throw AppException.conflict("资料内容已变化，请重新预览");
         var existing = repository.findLocked(batch.rows.keySet()).stream().collect(Collectors.toMap(p -> p.sku, p -> p));
         var expectations = new HashMap<String, Expected>();
         for (var e : input.expected) if (e == null || e.sku == null || expectations.put(e.sku, e) != null) throw AppException.unprocessable("预览版本格式错误");
@@ -133,7 +134,7 @@ public class FobPurchaseService {
         return a.equals(b);
     }
     private Batch inputs(List<JsonNode> input) {
-        if (input == null || input.isEmpty() || input.size() > 100) throw AppException.unprocessable("FOB粘贴每次须为1至100行");
+        if (input == null || input.isEmpty() || input.size() > 100) throw AppException.unprocessable("FOB资料每次须为1至100行");
         var rows = new LinkedHashMap<String, ObjectNode>(); var skipped = new ArrayList<Skipped>(); var conflicts = new HashSet<String>();
         for (int i = 0; i < input.size(); i++) {
             var node = input.get(i); int row = i + 1;
@@ -147,7 +148,14 @@ public class FobPurchaseService {
                 if (value.isNull()) continue;
                 if (!value.isTextual() || value.asText().length() > 10000) throw AppException.unprocessable("第" + row + "行字段格式错误或过长：" + name);
                 String text = value.asText().replace("\r\n", "\n").trim();
-                if (!text.isBlank()) patch.put(name, text);
+                if (!text.isBlank()) {
+                    if (name.equals("productImage") || name.equals("physicalImage")) {
+                        if (!text.matches("/api/v1/assets/[0-9a-fA-F-]{36}")) throw AppException.unprocessable("图片必须使用本系统上传的文件");
+                        try { if (!assets.existsById(UUID.fromString(text.substring("/api/v1/assets/".length())))) throw AppException.unprocessable("图片已失效，请重新上传"); }
+                        catch (IllegalArgumentException e) { throw AppException.unprocessable("图片地址无效，请重新上传"); }
+                    }
+                    patch.put(name, text);
+                }
             }
             if (rows.containsKey(sku)) {
                 var previous = rows.get(sku);

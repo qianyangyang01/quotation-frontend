@@ -20,6 +20,13 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class PurchaseProductServiceTest {
+    @Test void ordinaryEndpointRejectsFobSourceAndDoesNotConvertExistingSource() {
+        assertThrows(AppException.class, () -> service.upsert(pasted("PF2600100").put("dataSource", "fob")));
+        verify(products, never()).saveAndFlush(any());
+        var saved = (tools.jackson.databind.node.ObjectNode) service.upsert(pasted("PF2600100").put("dataSource", "standard"));
+        assertEquals(409, assertThrows(AppException.class, () -> service.upsert(saved.deepCopy().put("dataSource", "legacy_2026"))).status().value());
+        assertEquals("standard", service.get("PF2600100").path("dataSource").asText());
+    }
     @Test void legacyAutoTaxIgnoresStaleIncludedPriceAndPersistsUntaxedPriceAndRateChanges() {
         var input = pasted("FL2600293-2").put("dataSource", "legacy_2026").put("legacyPriceMode", "auto_tax")
                 .put("sourceQuotedPriceCny", 100).put("taxPoint", .1)

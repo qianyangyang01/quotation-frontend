@@ -20,10 +20,15 @@ public final class FobSourceParser {
         String moq = clean(moqRaw), prices = clean(priceRaw), freight = clean(freightRaw);
         int minimum = 0, multiple = 1;
         if (!moq.isBlank()) {
+            var explicit = Pattern.compile("^(\\d+)件起订;(\\d+)的倍数下单$").matcher(moq);
+            if (explicit.matches()) {
+                minimum = integer(explicit.group(1)); multiple = integer(explicit.group(2));
+            } else {
             var m = Pattern.compile("^(\\d+)(?:的倍数下单|起订|" + UNIT + "起订|" + UNIT + ")?;?$").matcher(moq);
             if (!m.matches()) fail("起订量无法识别，请填写正整数或“10的倍数下单”");
             minimum = integer(m.group(1));
             if (moq.contains("倍数")) multiple = minimum;
+            }
         }
         if (prices.isBlank()) fail("缺少采购价格原文");
         if (Pattern.compile("版费|打样|协议价|批发价|独立包装|线下|更新|\\d{4}\\.").matcher(prices).find())

@@ -15,6 +15,10 @@ public class FobPurchaseController {
     public ApiResponse<FobPurchaseService.Preview> preview(@RequestBody List<JsonNode> input) { return ApiResponse.ok(service.preview(input)); }
     @PostMapping("/paste/confirm") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE')")
     public ApiResponse<FobPurchaseService.Result> confirm(@RequestBody FobPurchaseService.Confirmation input) { return ApiResponse.ok(service.confirm(input)); }
+    @PostMapping(value="/import/read", consumes="multipart/form-data") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE')")
+    public ApiResponse<FobWorkbookReader.Result> readWorkbook(@RequestPart("file") org.springframework.web.multipart.MultipartFile file) {
+        return ApiResponse.ok(new FobWorkbookReader().read(file));
+    }
     @GetMapping("/{sku}") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE') or hasAuthority('PERM_quote')")
     public ApiResponse<JsonNode> get(@PathVariable String sku) { return ApiResponse.ok(service.get(sku)); }
     @GetMapping("/{sku}/history") @PreAuthorize("hasAnyRole('SUPER_ADMIN','PURCHASE')")
