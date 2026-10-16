@@ -1,6 +1,7 @@
 import type { PriceException, PriceExceptionType } from '@/data/priceExceptions'
 import type { createQuotationRecord } from '@/data/quotationRecords'
 import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { orderQuoteRows, placeAverageRowsBeforeMembers } from '@/data/quoteSheetRowOrder'
 import type { QuotationDraftPayload } from './quotationDrafts'
 import { request } from './http'
 import { saveQuotationBatch, type QuotationBatchResult } from './quotationBatchSubmission'
@@ -71,7 +72,19 @@ export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument 
     if (item.sheet.issues.length || !item.sheet.rows.length) throw new Error(`${item.input.primarySku}：报价单尚未准备好`)
   }
   const sheet = JSON.parse(JSON.stringify(first.sheet)) as CustomerQuoteSheet
-  sheet.rows = items.flatMap((item, index) => item.sheet.rows.map(row => ({ ...row, prices: [...row.prices], key: `${index}:${row.key}`, sku: item.input.primarySku }))).map((row, index) => ({ ...row, number: index + 1 }))
+  sheet.rows = items.flatMap((item, index) => {
+    // Initial batch assembly also receives averages created in the ordinary single-SKU editor.
+    // Only order this new sheet; saved history and the source snapshots are never rewritten.
+    const plans = (item.input.customerQuote?.averagePlans ?? []).filter(plan => item.sheet.rows.some(row => row.averageId === plan.id))
+    const order = placeAverageRowsBeforeMembers(item.sheet.rows.map(row => row.key), plans.map(plan => ({
+      key: item.sheet.rows.find(row => row.averageId === plan.id)!.key,
+      members: plan.members.map(member => {
+        const option = item.input.quoteOptions?.find(option => option.id === member.optionId) as { quoteSheetKey?: string } | undefined
+        return option?.quoteSheetKey ?? member.optionId
+      }),
+    })))
+    return orderQuoteRows(item.sheet.rows, order, row => row.key).map(row => ({ ...row, prices: [...row.prices], key: `${index}:${row.key}`, sku: item.input.primarySku }))
+  }).map((row, index) => ({ ...row, number: index + 1 }))
   if (sheet.rows.length > 500) throw new Error('合并报价最多500条渠道明细，请减少 SKU 或渠道')
   return JSON.parse(JSON.stringify({ schemaVersion: 1, customerName: first.input.customerName, items, sheet }))
 }

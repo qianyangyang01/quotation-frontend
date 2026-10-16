@@ -1,3 +1,17 @@
+/** Position new batch summaries before their own routes; leave unrelated/manual row order intact. */
+export function placeAverageRowsBeforeMembers(order: string[], plans: Array<{ key: string; members: string[] }>): string[] {
+  const before = new Map<string, string[]>(), moving = new Set<string>()
+  for (const plan of plans) {
+    const members = new Set(plan.members)
+    const anchor = order.find(key => members.has(key))
+    // Summary-only sheets may have no visible source rows. Keep their saved position.
+    if (!anchor) continue
+    before.set(anchor, [...(before.get(anchor) ?? []), plan.key])
+    moving.add(plan.key)
+  }
+  return order.filter(key => !moving.has(key)).flatMap(key => [...(before.get(key) ?? []), key])
+}
+
 /** Stable snapshot identities distinguish saved routes from average plans. */
 export function captureQuoteRowOrder(keys: string[] | undefined, optionId: (key: string) => string | undefined): string[] | undefined {
   return keys?.flatMap(key => {

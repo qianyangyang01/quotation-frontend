@@ -15,7 +15,7 @@ import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import QuoteAveragePanel from './QuoteAveragePanel.vue'
 import { applyAveragePlans, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
-import { restoreQuoteRowOrder } from '@/data/quoteSheetRowOrder'
+import { placeAverageRowsBeforeMembers, restoreQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
 import { releaseQuotePhotos, MAX_QUOTE_PHOTOS, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
 import QuotePhotoPicker from './QuotePhotoPicker.vue'
@@ -301,21 +301,14 @@ function addAverage(plan: AveragePlan) {
 }
 function addBatchAverages(plans: AveragePlan[]) {
   const keys = new Set(plans.map(plan => `average:${plan.id}`))
-  const rows = orderedRowsSheet.value.rows.filter(row => !keys.has(row.key))
-  const pending = new Map<string, string[]>()
+  const order = orderedRowsSheet.value.rows.map(row => row.key)
   for (const plan of plans) {
-    const sku = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)?.sku
-    if (sku) pending.set(sku, [...(pending.get(sku) ?? []), `average:${plan.id}`])
     for (const key of Object.keys(averageInputs.value)) if (key.startsWith(plan.id + ':')) delete averageInputs.value[key]
     for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(plan.id + ':')) delete averagePriceErrors.value[key]
   }
-  rowOrder.value = rows.flatMap(row => {
-    const before = pending.get(row.sku ?? '') ?? []
-    pending.delete(row.sku ?? '')
-    return [...before, row.key]
-  })
+  rowOrder.value = placeAverageRowsBeforeMembers(order, plans.map(plan => ({ key: `average:${plan.id}`, members: plan.members.map(member => member.optionId) })))
   averagePlans.value = [...averagePlans.value.filter(plan => !keys.has(`average:${plan.id}`)), ...plans]
-  averageNotice.value = `已为 ${plans.length} 个 SKU 生成平均行，分别放在各 SKU 的第一行`
+  averageNotice.value = `已为 ${plans.length} 个 SKU 生成平均行，分别放在对应国家的来源渠道上方`
   invalidate()
 }
 function removeAverage(id: string) { for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(id + ':')) delete averagePriceErrors.value[key]; averagePlans.value = averagePlans.value.filter(plan => plan.id !== id); invalidate() }

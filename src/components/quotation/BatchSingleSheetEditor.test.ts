@@ -4,10 +4,14 @@ import { createApp, nextTick, type App } from 'vue'
 import Editor from './BatchSingleSheetEditor.vue'
 import { mergeBatchSingle, type BatchSingleItem } from '@/services/batchSingleQuotation'
 import { batchSheetEditorSource } from '@/services/batchSingleSheetEditor'
-import { averageScope } from '@/data/quoteChannelAverage'
+import { averageScope, type AveragePlan } from '@/data/quoteChannelAverage'
+import { quoteSheetTextTable } from '@/data/customerQuoteSheet'
+import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
+import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { buildQuotationWeightSnapshot } from '@/data/quotationWeightSnapshot'
 
-vi.mock('@/services/customerQuoteSheetRenderer',async original=>({...await original<typeof import('@/services/customerQuoteSheetRenderer')>(),preloadQuoteSheetAssets:vi.fn().mockResolvedValue([])}))
+vi.mock('@/services/customerQuoteSheetRenderer',async original=>({...await original<typeof import('@/services/customerQuoteSheetRenderer')>(),preloadQuoteSheetAssets:vi.fn().mockResolvedValue([]),renderCustomerQuoteSheet:vi.fn().mockResolvedValue([])}))
+vi.mock('@/services/customerQuoteSheetClipboard', () => ({ copyQuoteSheetData: vi.fn().mockResolvedValue(undefined) }))
 let app:App, editor:InstanceType<typeof Editor>
 const button=(text:string)=>[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()===text)!
 export function item(sku:string):BatchSingleItem {
@@ -83,6 +87,85 @@ async function generateAverages() {
  for(const member of document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')) {member.click();await nextTick()}
  button('生成平均行').click();await nextTick()
 }
+
+function multiCountryItem(sku: string, withAverages = false): BatchSingleItem {
+ const value = item(sku)
+ const options = value.input.quoteOptions!, prices = value.input.customerQuote!.rows, rows = value.sheet.rows
+ value.input.quoteOptions = [...options, ...options.map(option => ({ ...option, id: `it-${option.id}`, quoteSheetKey: `it-${option.id}`, country: 'IT' }))]
+ value.input.customerQuote!.rows = [...prices, ...prices.map(row => ({ ...row, optionId: `it-${row.optionId}` }))]
+ value.input.systemQuantityQuotes = JSON.parse(JSON.stringify(value.input.customerQuote))
+ value.sheet.rows = [...rows, ...rows.map(row => ({ ...row, key: `it-${row.key}`, country: 'Italy' }))]
+ if (withAverages) {
+  const plans = ['us', 'it'].map(country => {
+   const ids = country === 'us' ? ['a', 'b'] : ['it-a', 'it-b']
+   return { id: country, mode: 'equal', display: 'details', provider: `${country}-average`, shippingTime: 'To be confirmed', quantities: [1,2,3],
+    members: ids.map(optionId => ({ optionId, weight: 50, sourcePrices: [...value.input.customerQuote!.rows.find(row => row.optionId === optionId)!.prices] })),
+    systemPrices: [5.5,10.5,15.5], prices: [9.95,19.95,29.95] } as AveragePlan
+  })
+  value.input.customerQuote!.averagePlans = plans
+  value.sheet.rows = value.sheet.rows.flatMap(row => {
+   const plan = plans.find(plan => plan.members.at(-1)!.optionId === row.key)
+   return plan ? [row, { ...row, key: `average:${plan.id}`, averageId: plan.id, number: 'AVG', provider: plan.provider, prices: [...plan.prices] }] : [row]
+  })
+ }
+ // Persisted option IDs and sheet keys are different in actual quotations.
+ value.input.quoteOptions = value.input.quoteOptions!.map(option => ({ ...option, quoteSheetKey: `sheet-${option.id}` }))
+ value.sheet.rows = value.sheet.rows.map(row => row.averageId ? row : { ...row, key: `sheet-${row.key}` })
+ return value
+}
+
+it('places imported averages above their own country routes and keeps preview, capture and reopen consistent', async () => {
+ const items = [multiCountryItem('SKU-A', true), multiCountryItem('SKU-B', true)], before = JSON.stringify(items)
+ const merged = mergeBatchSingle(items)
+ const expected = items.flatMap(item => ['United States', 'Italy'].flatMap(country => [true, false, false].map(average => [item.input.primarySku, country, average])))
+ const order = (rows: typeof merged.sheet.rows) => rows.map(row => [row.sku, row.country, !!row.averageId])
+ expect(order(merged.sheet.rows)).toEqual(expected)
+ expect(JSON.stringify(items)).toBe(before)
+ expect(merged.items).toEqual(items)
+ await mount(undefined, merged)
+ expect([...document.querySelectorAll('.sheet-editor tbody tr')].map(row => row.classList.contains('sheet-average-row'))).toEqual(expected.map(row => row[2]))
+ const saved = await editor.capture()
+ expect(order(saved.sheet.rows)).toEqual(expected)
+ expect(saved.items.every(item => item.input.customerQuote!.averagePlans!.every(plan => JSON.stringify(plan.prices) === '[9.95,19.95,29.95]'))).toBe(true)
+ const table = quoteSheetTextTable(saved.sheet)
+ expect(table.flat().indexOf('us-average')).toBeLessThan(table.flat().indexOf('4PX'))
+ const search = document.querySelector<HTMLInputElement>('[aria-label="搜索报价单 SKU"]')!
+ search.value = 'SKU-B';search.dispatchEvent(new Event('input'));await nextTick()
+ button('复制报价数据').click();await nextTick();await nextTick()
+ expect(order(vi.mocked(copyQuoteSheetData).mock.lastCall![0].rows)).toEqual(expected)
+ button('预览报价单').click();await nextTick();await nextTick()
+ expect(order(vi.mocked(renderCustomerQuoteSheet).mock.lastCall![0].rows)).toEqual(expected)
+ app.unmount();document.body.innerHTML='';await mount(undefined,saved)
+ expect(order((await editor.capture()).sheet.rows)).toEqual(expected)
+})
+
+it('generates a second-country average next to its sources and leaves the first-country average in place', async () => {
+ await mount(undefined, mergeBatchSingle([multiCountryItem('SKU-A'), multiCountryItem('SKU-B')]))
+ await generateAverages()
+ const country = document.querySelector<HTMLSelectElement>('[aria-label="平均报价国家"]')!
+ const italy = [...country.options].find(option => option.value && JSON.parse(option.value)[1] === 'IT')!
+ expect(italy).toBeTruthy()
+ country.value = italy.value;country.dispatchEvent(new Event('change'));await nextTick()
+ for (const member of document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')) { if (!member.checked) member.click(); await nextTick() }
+ button('生成平均行').click();await nextTick()
+ const first = await editor.capture()
+ expect(first.sheet.rows.map(row => [row.country, !!row.averageId])).toEqual(Array.from({length:2}, () => [
+  ['United States',true],['United States',false],['United States',false],['Italy',true],['Italy',false],['Italy',false],
+ ]).flat())
+ button('生成平均行').click();await nextTick()
+ expect((await editor.capture()).sheet.rows).toEqual(first.sheet.rows)
+})
+
+it('retains deliberate manual average moves through capture and reopen without changing prices', async () => {
+ await mount();await generateAverages()
+ const before = await editor.capture()
+ document.querySelector<HTMLButtonElement>('.sheet-average-row [title="下移"]')!.click();await nextTick()
+ const moved = await editor.capture()
+ expect(moved.sheet.rows.map(row => !!row.averageId)).toEqual([false,true,false,true,false,false])
+ expect(moved.items.map(item => item.input.customerQuote!.averagePlans)).toEqual(before.items.map(item => item.input.customerQuote!.averagePlans))
+ app.unmount();document.body.innerHTML='';await mount(undefined,moved)
+ expect((await editor.capture()).sheet.rows.map(row => [row.sku, !!row.averageId, row.prices])).toEqual(moved.sheet.rows.map(row => [row.sku, !!row.averageId, row.prices]))
+})
 it('uses each SKU price, puts averages first, and preserves order and SKU boundaries after reopening',async()=>{
  const a=item('SKU-A'),b=item('SKU-B')
  b.input.systemQuantityQuotes=JSON.parse(JSON.stringify(b.input.systemQuantityQuotes))
