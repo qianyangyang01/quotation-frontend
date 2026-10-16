@@ -1,34 +1,40 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { loadPurchaseRankings, rankingsCsv, type PurchaseRankings, type RankingScope } from '@/services/purchaseRankings'
 
-const props = defineProps<{ refreshKey?: number }>()
 const expanded = ref(false)
 const scope = ref<RankingScope>('all')
 const days = ref(30)
-const data = ref<PurchaseRankings | null>(null)
-const loading = ref(false)
-const error = ref('')
-let request = 0
-let abort: AbortController | undefined
-async function refresh() {
+type Snapshot = { data: PurchaseRankings | null; loading: boolean; error: string }
+const snapshots = reactive(new Map<string, Snapshot>())
+const controllers = new Set<AbortController>()
+const selection = computed(() => `${scope.value}:${days.value}`)
+const current = computed(() => snapshots.get(selection.value))
+const data = computed(() => current.value?.data ?? null)
+const loading = computed(() => current.value?.loading ?? false)
+const error = computed(() => current.value?.error ?? '')
+async function load(force = false) {
   if (!expanded.value) return
-  const id = ++request
-  abort?.abort()
-  const controller = new AbortController(); abort = controller
-  loading.value = true; error.value = ''; data.value = null
+  const key = selection.value
+  let snapshot = snapshots.get(key)
+  // Keep each viewed selection until an explicit refresh, including failed reads.
+  if (snapshot && (snapshot.loading || !force)) return
+  if (!snapshot) {
+    snapshots.set(key, { data: null, loading: false, error: '' })
+    snapshot = snapshots.get(key)!
+  }
+  const controller = new AbortController(); controllers.add(controller)
+  snapshot.loading = true; snapshot.error = ''
   try {
     const result = await loadPurchaseRankings(scope.value, days.value, controller.signal)
-    if (id === request) data.value = result
+    if (!controller.signal.aborted) snapshot.data = result
   } catch (reason) {
-    if (id === request && !controller.signal.aborted) error.value = reason instanceof Error ? reason.message : '统计读取失败，请重试'
-  } finally { if (id === request) loading.value = false }
+    if (!controller.signal.aborted) snapshot.error = (snapshot.data ? '更新失败，仍显示上次结果。' : '') + (reason instanceof Error ? reason.message : '统计读取失败，请重试')
+  } finally { snapshot.loading = false; controllers.delete(controller) }
 }
-watch([expanded, scope, days, () => props.refreshKey], () => {
-  if (expanded.value) void refresh()
-  else { request++; abort?.abort(); loading.value = false }
-})
-onUnmounted(() => { request++; abort?.abort() })
+function refresh() { void load(true) }
+watch([expanded, scope, days], () => { if (expanded.value) void load() })
+onUnmounted(() => { controllers.forEach(controller => controller.abort()); controllers.clear() })
 const completion = computed(() => data.value?.completion.filter(row => row.owner) ?? [])
 const exceptions = computed(() => data.value?.exceptions.filter(row => row.owner) ?? [])
 const unassignedData = computed(() => data.value?.completion.find(row => !row.owner))
@@ -57,7 +63,7 @@ function exportRanking() {
     <div v-if="expanded" id="purchase-rankings-content">
     <div class="ranking-toolbar">
       <span>统计范围：</span><div class="scope-buttons"><button :class="{ active: scope === 'all' }" :aria-pressed="scope === 'all'" @click="scope = 'all'">全部采购</button><button :class="{ active: scope === 'sales' }" :aria-pressed="scope === 'sales'" @click="scope = 'sales'">在售 SKU</button></div>
-      <div class="ranking-actions"><button :disabled="loading" @click="refresh">{{ loading ? '统计中…' : '↻ 刷新统计' }}</button><button :disabled="!data || loading || !!error" @click="exportRanking">导出排名</button></div>
+      <div class="ranking-actions"><button :disabled="loading" @click="refresh">{{ loading ? (data ? '更新中…' : '统计中…') : '↻ 刷新统计' }}</button><button :disabled="!data || loading || !!error" @click="exportRanking">导出排名</button></div>
     </div>
     <p v-if="error" class="ranking-error" role="alert">{{ error }} <button @click="refresh">重试</button></p>
     <div class="ranking-grid">
