@@ -50,4 +50,9 @@ public class PurchaseSalesController {
     }
 
     public record Result(JsonNode source, List<JsonNode> products, Instant matchedAt) {}
+
+    // Reuse the exact configured sales SKU scope without a second source or product read.
+    boolean configured() { return source != null; }
+    List<String> scopeSkus() { return skus; }
+    String period() { return source == null ? "" : source.path("period").asText(); }
 }

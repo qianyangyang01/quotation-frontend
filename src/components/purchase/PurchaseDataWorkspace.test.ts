@@ -10,6 +10,7 @@ const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.f
 vi.mock('@/services/fobPurchase',async original=>({...await original<object>(),loadFobRecord:mocks.fob,loadFobHistory:mocks.fobHistory}))
 vi.mock('@/services/purchaseHistory',async original=>({...await original<object>(),updatePurchaseProduct:mocks.update,loadPurchaseHistory:mocks.history}))
 vi.mock('./PurchaseSalesPanel.vue', () => ({ default: { template: '<section />' } }))
+vi.mock('./PurchaseRankingsPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save,loadPurchaseProduct:mocks.load,promotePurchaseProduct:mocks.promote}))
 vi.mock('@/services/purchaseCatalog',()=>({loadPurchaseCatalogPage:mocks.page}))
 let app:App
