@@ -35,7 +35,7 @@ export function australiaAverageZone(row: QuoteSheetSourceRow) {
     .replace('一区', '1区').replace('二区', '2区').replace('三区', '3区').replace('四区', '4区')
   return averageCountry(row) === 'AU' && /^[1-4]区$/.test(region) ? Number(region[0]) : undefined
 }
-export function averageScope(row: Pick<QuoteSheetSourceRow, 'sku' | 'country'>) {
+export function averageScope(row: Pick<QuoteSheetSourceRow, 'country'> & Partial<QuoteSheetSourceRow>) {
   return JSON.stringify(row.sku ? [row.sku, averageCountry(row)] : [averageCountry(row)])
 }
 export function averagePrices(members: AveragePlan['members'], mode: AveragePlan['mode'], count: number) {
