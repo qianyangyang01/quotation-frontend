@@ -61,14 +61,14 @@ final class LogisticsSheetReader implements AutoCloseable {
             var sheet=current.createSheet(sheets.getSheetName());
             if(skip.test(sheet.getSheetName()))return sheet;
             var events=xml().createXMLStreamReader(input);
-            String address="",type="",value="";int style=-1,cells=0;boolean formula=false;
+            String address="",type="",value="";int style=-1,cells=0;boolean formula=false,externalFormula=false;
             var formats=new HashMap<Integer,CellStyle>();
             while(events.hasNext()) {
                 int event=events.next();
                 if(event==XMLStreamConstants.START_ELEMENT) {
                     switch(events.getLocalName()) {
-                        case "c" -> {address=events.getAttributeValue(null,"r");type=Objects.toString(events.getAttributeValue(null,"t"),"");var s=events.getAttributeValue(null,"s");style=s==null?-1:Integer.parseInt(s);value="";formula=false;}
-                        case "f" -> {formula=true;events.getElementText();}
+                        case "c" -> {address=events.getAttributeValue(null,"r");type=Objects.toString(events.getAttributeValue(null,"t"),"");var s=events.getAttributeValue(null,"s");style=s==null?-1:Integer.parseInt(s);value="";formula=false;externalFormula=false;}
+                        case "f" -> {formula=true;externalFormula=events.getElementText().contains("[");}
                         case "v" -> value=events.getElementText();
                         case "t" -> {if(type.equals("inlineStr"))value+=events.getElementText();}
                         case "mergeCell" -> sheet.addMergedRegionUnsafe(CellRangeAddress.valueOf(events.getAttributeValue(null,"ref")));
@@ -79,7 +79,9 @@ final class LogisticsSheetReader implements AutoCloseable {
                     if(!formula&&value.isBlank())continue;
                     if(++cells>250_000)throw new IOException("工作表有效单元格超过安全读取上限："+sheet.getSheetName());
                     var ref=new CellReference(address);var row=sheet.getRow(ref.getRow());if(row==null)row=sheet.createRow(ref.getRow());var cell=row.createCell(ref.getCol());
-                    if(formula&&(rejectFormulaCells||value.isEmpty()))cell.setCellErrorValue(FormulaError.NA.getCode());
+                    // Match the numeric parser's external-reference guard even after
+                    // streaming converts cached formulas into plain cells.
+                    if(formula&&(rejectFormulaCells||externalFormula||value.isEmpty()))cell.setCellErrorValue(FormulaError.NA.getCode());
                     else switch(type) {
                         case "s" -> cell.setCellValue(strings.getItemAt(Integer.parseInt(value)).getString());
                         case "inlineStr","str","d" -> cell.setCellValue(value);
