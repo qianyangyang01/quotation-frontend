@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="sf-duplicate-operation-fee-2026.10.17-v6";
+    public static final String VERSION="confirmed-source-billing-2026.10.17-v7";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -172,6 +172,7 @@ public class LogisticsSourceParser {
                 }
                 if(source.ambiguous)for(var channel:parsed.values())issue(channel,0,"渠道匹配待确认","同一工作表存在冲突匹配，先确认渠道归属再导入，防止部分价格覆盖","error");
                 applyMinimumWeights(source,parsed);
+                for(var channel:parsed.values())ConfirmedSourceBillingRules.apply(channel,report.path("sourceCells"));
                 if(provider.equals(JisuSourceRules.PROVIDER))for(var channel:parsed.values())JisuSourceRules.applyMinimum(channel);
                 applyFooterEta(source,parsed);
                 if(scope.unrestricted())splitDistinctProducts(parsed,provider);
