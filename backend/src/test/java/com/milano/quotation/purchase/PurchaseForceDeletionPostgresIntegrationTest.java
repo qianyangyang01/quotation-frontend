@@ -92,8 +92,9 @@ class PurchaseForceDeletionPostgresIntegrationTest {
         assertTrue(archived.path("archived").asBoolean());
         assertEquals("宠物用品",archived.path("categoryHistory").get(0).path("category").asText());
         assertTrue(archived.path("purchasePriceCny").isNull());
-        assertEquals(0,new org.springframework.transaction.support.TransactionTemplate(transactions)
-                .execute(status->assets.retireUnreferenced(List.of(f.image),Instant.now())));
+        Integer retired=new org.springframework.transaction.support.TransactionTemplate(transactions)
+                .execute(status->assets.retireUnreferenced(List.of(f.image),Instant.now()));
+        assertEquals(Integer.valueOf(0),retired);
         mvc.perform(get("/api/v1/purchase-products/"+f.sku).with(admin())).andExpect(status().isNotFound());
         var audit=mapper.readTree(db.queryForObject("select detail::text from audit_log where action='purchase.force-delete' and resource_id=?",String.class,f.sku));
         assertEquals(1,audit.path("quotationRecords").asInt());assertEquals(1,audit.path("drafts").asInt());
