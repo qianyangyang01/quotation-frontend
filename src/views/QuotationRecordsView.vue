@@ -39,7 +39,7 @@ import { currentAuthUser, hasPermission } from '@/data/authStore'
 import { reviewNotifications as inbox, unreadReview, acknowledgeReview, openReviewInbox, refreshReviewNotifications } from '@/data/reviewNotifications'
 
 import { loadRecordPage, loadFilteredRecords, loadRecord, recentRecordDates } from '@/data/quotationRecordQuery'
-import { quotationDetailsCsv } from '@/data/quotationAnalytics'
+import { quotationDetailsCsv, quotationSkus, withDeletedPurchaseCategories } from '@/data/quotationAnalytics'
 
 const FobBatchReviewPanel = defineAsyncComponent(() => import('@/components/quotation/FobBatchReviewPanel.vue'))
 const FobRecordDetail = defineAsyncComponent(() => import('@/components/quotation/FobRecordDetail.vue'))
@@ -217,7 +217,8 @@ async function exportRecords(){
   exporting.value=true
   try {
     const rows=await loadFilteredRecords(props.scope,{...filters.value})
-    const blob=new Blob([quotationDetailsCsv(rows,purchaseProducts.value,{includeReview:true,includeCost:canViewFullPricing.value})],{type:'text/csv;charset=utf-8'})
+    const snapshots=await loadDeletedPurchaseSnapshots(rows.flatMap(quotationSkus))
+    const blob=new Blob([quotationDetailsCsv(rows,withDeletedPurchaseCategories(purchaseProducts.value,snapshots),{includeReview:true,includeCost:canViewFullPricing.value})],{type:'text/csv;charset=utf-8'})
     const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=title.value+'-'+recentRecordDates(1).endDate+'.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
     toast('已导出当前筛选范围全部 '+rows.length+' 条记录')
   }catch(error){toast(error instanceof Error?error.message:'导出失败，请重试')}finally{exporting.value=false}

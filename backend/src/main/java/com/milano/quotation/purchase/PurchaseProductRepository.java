@@ -29,9 +29,17 @@ public interface PurchaseProductRepository extends JpaRepository<PurchaseProduct
 
     // A single database snapshot without loading image/notes/tier payloads into Hibernate.
     @Query(value="""
-        SELECT jsonb_build_object('sku',sku,'category',payload->'category',
-          'purchasePriceCny',payload->'purchasePriceCny')::text
-        FROM purchase_product ORDER BY sku
+        WITH history AS (
+          SELECT resource_id AS sku,jsonb_agg(jsonb_build_object(
+            'category',detail->'productSnapshot'->'category','createdAt',detail->>'createdAt',
+            'deletedAt',created_at) ORDER BY created_at DESC,id DESC) AS categories
+          FROM audit_log WHERE action='purchase.force-delete' AND resource_type='purchase-product' AND outcome='success'
+          GROUP BY resource_id
+        )
+        SELECT jsonb_build_object('sku',coalesce(p.sku,h.sku),'category',p.payload->'category',
+          'purchasePriceCny',p.payload->'purchasePriceCny','archived',p.id IS NULL,
+          'categoryHistory',coalesce(h.categories,'[]'::jsonb))::text
+        FROM purchase_product p FULL JOIN history h ON h.sku=p.sku ORDER BY coalesce(p.sku,h.sku)
         """,nativeQuery=true)
     List<String> analyticsCatalog();
     Optional<PurchaseProduct> findBySku(String sku);

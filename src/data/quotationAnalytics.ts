@@ -2,7 +2,20 @@ import { isManualQuotation, quotationModeLabels } from './quotationModes'
 import type { PurchaseProductRecord } from './purchaseStore'
 import { financeReviewLabel, quotationDealLabel, type QuotationRecord } from './quotationRecords'
 
-export type AnalyticsPurchase = Pick<PurchaseProductRecord, 'sku' | 'category' | 'purchasePriceCny'>
+export type AnalyticsPurchase = Pick<PurchaseProductRecord, 'sku' | 'category' | 'purchasePriceCny'> & {
+  archived?: boolean
+  categoryHistory?: Array<{ category: string; createdAt: string; deletedAt: string }>
+}
+
+export function withDeletedPurchaseCategories(purchases: AnalyticsPurchase[], snapshots: Array<{ sku: string; category: string; createdAt: string; deletedAt: string }>): AnalyticsPurchase[] {
+  const bySku = new Map(purchases.map(product => [product.sku, { ...product }]))
+  for (const snapshot of snapshots) {
+    const product = bySku.get(snapshot.sku) || { sku: snapshot.sku, category: '', purchasePriceCny: null, archived: true }
+    product.categoryHistory = [...(product.categoryHistory || []), snapshot]
+    bySku.set(snapshot.sku, product)
+  }
+  return [...bySku.values()]
+}
 
 export interface DashboardFilters {
   keyword: string
@@ -64,7 +77,14 @@ export function purchaseCategoryForSkus(skus: string[], purchaseBySku: Map<strin
 
 export function resolveRecordCategory(record: QuotationRecord, purchaseBySku: Map<string, AnalyticsPurchase>) {
   if(record.quoteMode==='fob')return record.productCategory || record.fob?.product.category || '其他'
-  return isManualQuotation(record.quoteMode) ? quotationModeLabels[record.quoteMode] : purchaseCategoryForSkus(quotationSkus(record), purchaseBySku)
+  if (isManualQuotation(record.quoteMode)) return quotationModeLabels[record.quoteMode]
+  const at = Date.parse(record.createdAt)
+  const categories = new Set(quotationSkus(record).map(sku => {
+    const product = purchaseBySku.get(sku)
+    const historical = product?.categoryHistory?.find(item => at >= Date.parse(item.createdAt) && at <= Date.parse(item.deletedAt))
+    return (historical ? historical.category?.trim() : product?.archived ? '' : product?.category?.trim()) || '其他'
+  }))
+  return categories.size === 1 ? [...categories][0]! : '其他'
 }
 
 export function filterQuotationRecords(records: QuotationRecord[], filters: DashboardFilters, purchases: AnalyticsPurchase[]) {
@@ -133,6 +153,7 @@ export function buildCategoryPerformance(records: QuotationRecord[], purchases: 
   const purchaseBySku = new Map(purchases.map(item => [item.sku.toUpperCase(), item]))
   const catalog = new Map<string, AnalyticsPurchase[]>()
   for (const product of purchases) {
+    if (product.archived) continue
     const category = product.category?.trim() || '其他'
     const rows = catalog.get(category)
     if (rows) rows.push(product)

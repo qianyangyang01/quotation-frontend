@@ -30,3 +30,8 @@ it('accepts a genuinely empty catalog', async () => {
   get.mockResolvedValue({ items: [], total: 0 })
   expect(await loadAnalyticsPurchases()).toEqual([])
 })
+it('preserves archived category metadata for analytics without making it a live product', async () => {
+  const history = [{category:'宠物用品',createdAt:'2026-10-01',deletedAt:'2026-10-17'}]
+  get.mockResolvedValue({items:[{sku:'OLD',archived:true,categoryHistory:history}],total:1})
+  expect(await loadAnalyticsPurchases()).toEqual([expect.objectContaining({sku:'OLD',archived:true,categoryHistory:history})])
+})

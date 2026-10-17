@@ -40,6 +40,8 @@ class PurchaseForceDeletionPostgresIntegrationTest {
     @Autowired PurchaseProductService products;
     @Autowired AssetObjectRepository assets;
     @Autowired ObjectMapper mapper;
+    @Autowired com.milano.quotation.imports.PurchaseImportJdbcService importJdbc;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     MockMvc mvc;
     @BeforeEach void setup(){mvc=webAppContextSetup(context).apply(springSecurity()).build();}
     private org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.UserRequestPostProcessor admin(){
@@ -85,6 +87,13 @@ class PurchaseForceDeletionPostgresIntegrationTest {
         assertEquals(0,db.queryForObject("select count(*) from purchase_product_image where product_id=?",Integer.class,f.product));
         assertEquals(before,preserved(f));
         assertFalse(products.isQuoteReady(f.sku));
+        assertEquals(1,importJdbc.lockAndCountRollbackConflicts(f.job));
+        var archived=products.analyticsCatalog().items().stream().filter(item->item.path("sku").asText().equals(f.sku)).findFirst().orElseThrow();
+        assertTrue(archived.path("archived").asBoolean());
+        assertEquals("宠物用品",archived.path("categoryHistory").get(0).path("category").asText());
+        assertTrue(archived.path("purchasePriceCny").isNull());
+        assertEquals(0,new org.springframework.transaction.support.TransactionTemplate(transactions)
+                .execute(status->assets.retireUnreferenced(List.of(f.image),Instant.now())));
         mvc.perform(get("/api/v1/purchase-products/"+f.sku).with(admin())).andExpect(status().isNotFound());
         var audit=mapper.readTree(db.queryForObject("select detail::text from audit_log where action='purchase.force-delete' and resource_id=?",String.class,f.sku));
         assertEquals(1,audit.path("quotationRecords").asInt());assertEquals(1,audit.path("drafts").asInt());

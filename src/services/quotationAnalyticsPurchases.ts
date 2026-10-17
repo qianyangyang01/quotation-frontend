@@ -3,7 +3,7 @@ import type { AnalyticsPurchase } from '@/data/quotationAnalytics'
 import { api } from '@/services/http'
 
 export async function loadAnalyticsPurchases(signal?: AbortSignal): Promise<AnalyticsPurchase[]> {
-  const response = await api.get<{ items: Partial<PurchaseProductRecord>[]; total: number }>(
+  const response = await api.get<{ items: (Partial<PurchaseProductRecord> & Pick<AnalyticsPurchase, 'archived' | 'categoryHistory'>)[]; total: number }>(
     '/purchase-products/analytics-catalog',
     { cache: 'no-store', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000) },
   )
@@ -13,7 +13,8 @@ export async function loadAnalyticsPurchases(signal?: AbortSignal): Promise<Anal
   // Preserve the same legacy price and SKU normalization as full product reads.
   const rows = response.items.map(item => {
     const { sku, category, purchasePriceCny } = normalizePurchaseRecord(item)
-    return { sku, category, purchasePriceCny }
+    return { sku, category, purchasePriceCny, ...(item.archived ? { archived: true } : {}),
+      ...(item.categoryHistory?.length ? { categoryHistory: item.categoryHistory } : {}) }
   })
   if (rows.some(row => !row.sku) || new Set(rows.map(row => row.sku)).size !== response.total) {
     throw new Error('采购目录读取不完整，请重试')
