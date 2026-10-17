@@ -60,7 +60,9 @@ class PurchaseSearchPostgresIntegrationTest {
         assertEquals(632,result.total());
         assertEquals(632,result.items().size());
         for(var item:result.items()) {
-            assertEquals(3,item.size());
+            assertEquals(5,item.size());
+            assertFalse(item.path("archived").asBoolean());assertTrue(item.path("categoryHistory").isArray());
+            assertEquals(0,item.path("categoryHistory").size());
             assertTrue(item.has("sku"));assertTrue(item.has("category"));assertTrue(item.has("purchasePriceCny"));
             assertFalse(item.has("notes"));assertFalse(item.has("productImage"));
         }
