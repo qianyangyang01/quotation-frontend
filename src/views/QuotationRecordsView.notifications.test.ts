@@ -71,3 +71,5 @@ it('can retry the same notification after a detail load failure', async () => {
   expect(document.querySelector('.record-drawer')?.textContent).toContain('QT-EXACT')
   expect(mocks.post).toHaveBeenCalledWith('/review-notifications/r1/read',{eventId:'e1'})
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

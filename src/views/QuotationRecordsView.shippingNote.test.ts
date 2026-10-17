@@ -85,3 +85,5 @@ it.each(['mine', 'company'] as const)('debounces note search, preserves filters 
   expect(csv).toContain('代发备注'); expect(csv).toContain('包装SKU-B')
   expect(download).toHaveBeenCalledOnce()
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

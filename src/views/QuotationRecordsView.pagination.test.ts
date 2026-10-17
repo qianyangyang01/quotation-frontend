@@ -156,3 +156,5 @@ it('opens a saved batch in the original list with all review states and no centr
  expect(document.querySelector('.heading')?.textContent).not.toContain('批量单品报价记录');
  expect(document.querySelector('.lifecycle-tabs')?.textContent).not.toContain('历史批量记录');
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

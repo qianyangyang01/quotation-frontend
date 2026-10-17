@@ -52,3 +52,5 @@ it('filters on the server, resets pagination, and refreshes an empty priority qu
   mocks.page.mockResolvedValue(page([row({priorityProcessing:true})]));mocks.get.mockResolvedValue([row({priorityProcessing:true})]);await vi.advanceTimersByTimeAsync(30000);await flush()
   expect(document.querySelector('.priority-badge')).not.toBeNull()
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

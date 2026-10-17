@@ -68,3 +68,5 @@ it('keeps the batch review mounted across detail tabs and prevents accidental dr
   const confirm=vi.fn(()=>false);vi.stubGlobal('confirm',confirm)
   document.querySelector<HTMLButtonElement>('.record-drawer [aria-label="关闭"]')!.click();await flush();expect(confirm).toHaveBeenCalled();expect(document.querySelector('.record-drawer')).not.toBeNull();vi.unstubAllGlobals()
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

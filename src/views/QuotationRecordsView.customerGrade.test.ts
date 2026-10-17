@@ -27,3 +27,5 @@ it.each(['mine', 'company'] as const)('shows saved customer grades below the cus
     expect(el.previousElementSibling?.tagName).toBe('B')
   }
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

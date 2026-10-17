@@ -63,3 +63,5 @@ it('sends the selected inspection filter to the server and clears it on reset',a
   await mount('super_admin');const select=document.querySelector<HTMLSelectElement>('[aria-label="抽检筛选"]')!;select.value='checked';select.dispatchEvent(new Event('change',{bubbles:true}));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page.mock.lastCall?.[1]).toMatchObject({spotCheck:'checked'});Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='重置')!.click();await flush();await vi.advanceTimersByTimeAsync(250);await flush();expect(mocks.page.mock.lastCall?.[1]).toMatchObject({spotCheck:''})
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

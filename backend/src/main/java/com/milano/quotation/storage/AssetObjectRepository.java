@@ -13,6 +13,8 @@ public interface AssetObjectRepository extends JpaRepository<AssetObject,UUID>{
            AND NOT EXISTS (SELECT 1 FROM audit_log audit WHERE audit.resource_type='fob-purchase-product' AND lower(cast(audit.detail as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_record quote WHERE lower(cast(quote.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_draft draft WHERE lower(cast(draft.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
+           AND NOT EXISTS (SELECT 1 FROM quotation_template template WHERE lower(cast(template.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
+           AND NOT EXISTS (SELECT 1 FROM audit_log audit WHERE audit.action='purchase.force-delete' AND audit.outcome='success' AND lower(cast(audit.detail as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
         """,nativeQuery=true)int retireUnreferenced(@Param("ids")Collection<UUID>ids,@Param("now")Instant now);
     @Query(value="""
         SELECT asset.* FROM asset_object asset
@@ -25,5 +27,7 @@ public interface AssetObjectRepository extends JpaRepository<AssetObject,UUID>{
            AND NOT EXISTS (SELECT 1 FROM audit_log audit WHERE audit.resource_type='fob-purchase-product' AND lower(cast(audit.detail as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_record quote WHERE lower(cast(quote.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
            AND NOT EXISTS (SELECT 1 FROM quotation_draft draft WHERE lower(cast(draft.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
+           AND NOT EXISTS (SELECT 1 FROM quotation_template template WHERE lower(cast(template.payload as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
+           AND NOT EXISTS (SELECT 1 FROM audit_log audit WHERE audit.action='purchase.force-delete' AND audit.outcome='success' AND lower(cast(audit.detail as varchar)) LIKE '%' || cast(asset.id as varchar) || '%')
         """,nativeQuery=true)List<AssetObject>findExpiredUnreferenced(@Param("now")Instant now);
 }

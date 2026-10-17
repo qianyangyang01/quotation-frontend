@@ -376,3 +376,5 @@ it('a released and reclaimed quotation cannot be completed from the previous cla
   expect(button('审核完成')).toBeUndefined();expect(button('取消审核')).toBeUndefined()
   expect(button('重新加载详情').title).toContain('审核占用已变化');expect(mocks.patch).toHaveBeenCalledTimes(1)
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

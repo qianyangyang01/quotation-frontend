@@ -36,3 +36,5 @@ it.each(['mine', 'company'])('hides all repeated bundle costs in the %s record d
   expect(drawer().innerHTML).not.toContain('12.37')
   expect(JSON.stringify(record)).toBe(original)
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

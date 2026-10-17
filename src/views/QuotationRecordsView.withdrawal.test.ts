@@ -43,3 +43,5 @@ it('does not expose owner commands on another owner or deal record', async () =>
   await mount([{ ...row(), salespersonAccount: 'OTHER' }, { ...row(), id: 'deal', status: 'won' }, { ...row(), id: 'details', dealQuantity: 1 }])
   expect(button('取消')).toBeUndefined(); expect(button('撤回重新编辑')).toBeUndefined()
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

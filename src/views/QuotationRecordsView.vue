@@ -27,6 +27,7 @@ import { cancelQuotation, withdrawQuotation, withdrawalBlocked } from '@/service
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
 import { updateQuotationRecord, type QuotationRecord, type QuotationRecordDealLine, type QuotationRecordQuoteOption, type QuotationRecordStatus } from '@/data/quotationRecords'
 import { loadPurchaseProducts } from '@/data/purchaseStore'
+import { loadDeletedPurchaseSnapshots, deletedPurchaseSnapshotForQuote, type DeletedPurchaseDisplaySnapshot } from '@/services/purchaseForceDeletion'
 import { quotationProductCategories } from '@/components/quotation/types'
 import QuotationProductImage from '@/components/quotation/QuotationProductImage.vue'
 import PurchaseCategoryBadge from '@/components/purchase/PurchaseCategoryBadge.vue'
@@ -51,6 +52,7 @@ const openingReview = ref(false)
 let openGeneration = 0, linkGeneration = 0
 onUnmounted(() => { openGeneration++; linkGeneration++ })
 const purchaseProducts = ref<Awaited<ReturnType<typeof loadPurchaseProducts>>>([])
+const deletedPurchaseProducts = ref<DeletedPurchaseDisplaySnapshot[]>([])
 const lifecycle = ref<RecordLifecycle>('active')
 const checkedIds = ref<string[]>([])
 const lifecycleAction = ref<LifecycleAction | null>(null)
@@ -226,6 +228,17 @@ watch([filters,pageSize,()=>props.scope,()=>currentAuthUser.value.account],()=>{
 const selected = ref<QuotationRecord | null>(null)
 const reviewSync = useQuotationReviewSync(records, selected, computed(() => currentAuthUser.value.account))
 const observedRecords = computed(() => [...records.value, ...(selected.value ? [selected.value] : [])])
+const missingSnapshotImageSkus = computed(() => [...new Set(observedRecords.value.filter(row => !row.productImage)
+  .map(row => row.primarySku.split(/[、,+，\s]+/)[0] || '').filter(Boolean))])
+watch(() => [currentAuthUser.value.account, missingSnapshotImageSkus.value.join('\n')], (_value, _old, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  deletedPurchaseProducts.value = []
+  if (!missingSnapshotImageSkus.value.length) return
+  void loadDeletedPurchaseSnapshots(missingSnapshotImageSkus.value).then(rows => {
+    if (current) deletedPurchaseProducts.value = rows
+  }).catch(() => { /* Saved quotation amounts and snapshots remain usable if image fallback is unavailable. */ })
+})
 // Keep the light status poll fast; reload full rows only when membership/order/content changes.
 const listStateChanged = computed(() => records.value.some(row => {
   const live = reviewSync.stateFor(row)
@@ -457,8 +470,8 @@ const dateTime = (value?: string) => {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(date)
 }
 function recordPurchaseProduct(row: QuotationRecord) {
-  const primarySku = row.primarySku.split(/[、,+\s]/).find(Boolean) || row.primarySku
-  return purchaseProducts.value.find(item => item.sku === primarySku)
+  const primarySku = row.primarySku.split(/[、,+，\s]/).find(Boolean) || row.primarySku
+  return deletedPurchaseSnapshotForQuote(deletedPurchaseProducts.value,primarySku,row.createdAt) || purchaseProducts.value.find(item => item.sku === primarySku)
 }
 let filteredSyncTimer: ReturnType<typeof setInterval> | undefined
 let filteredSyncBusy = false

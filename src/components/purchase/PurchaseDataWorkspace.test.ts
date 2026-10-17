@@ -6,12 +6,13 @@ import { normalizePurchaseRecord } from '@/data/purchaseStore'
 import { authState, roleDefinitions } from '@/data/authStore'
 import type { FobCatalogRecord } from '@/services/purchaseCatalog'
 
-const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn(),fob:vi.fn(),fobHistory:vi.fn(),load:vi.fn(),promote:vi.fn()}))
+const mocks=vi.hoisted(()=>({page:vi.fn(),stats:vi.fn(),save:vi.fn(),update:vi.fn(),history:vi.fn(),fob:vi.fn(),fobHistory:vi.fn(),load:vi.fn(),promote:vi.fn(),deletionCheck:vi.fn(),delete:vi.fn(),forceDelete:vi.fn()}))
+vi.mock('@/services/purchaseForceDeletion',()=>({forceDeletePurchaseProduct:mocks.forceDelete}))
 vi.mock('@/services/fobPurchase',async original=>({...await original<object>(),loadFobRecord:mocks.fob,loadFobHistory:mocks.fobHistory}))
 vi.mock('@/services/purchaseHistory',async original=>({...await original<object>(),updatePurchaseProduct:mocks.update,loadPurchaseHistory:mocks.history}))
 vi.mock('./PurchaseSalesPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('./PurchaseRankingsPanel.vue', () => ({ default: { template: '<section />' } }))
-vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save,loadPurchaseProduct:mocks.load,promotePurchaseProduct:mocks.promote}))
+vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save,loadPurchaseProduct:mocks.load,promotePurchaseProduct:mocks.promote,loadPurchaseDeletionCheck:mocks.deletionCheck,deletePurchaseProduct:mocks.delete}))
 vi.mock('@/services/purchaseCatalog',()=>({loadPurchaseCatalogPage:mocks.page}))
 let app:App
 const row=(sku:string)=>normalizePurchaseRecord({sku,weightG:100,minOrderQty:1,purchasePriceCny:10,_version:5})
@@ -367,4 +368,65 @@ it('shows FOB entry only to maintainers and never submits it through ordinary pu
   expect(Array.from(document.querySelectorAll('.editor-modal button')).some(b=>b.textContent==='保存资料')).toBe(false)
   expect(mocks.save).not.toHaveBeenCalled()
   authState.current.role='logistics';await flush();expect(document.querySelector('.fob-entry')).toBeNull()
+})
+
+async function openReferencedDelete(role:'super_admin'|'purchase'='super_admin'){
+  authState.current={id:'force-user',name:'删除验收',account:'DELETEUSER',role,status:'enabled',mustChangePassword:false,passwordUpdatedAt:''}
+  authState.permissions=['purchase']
+  mocks.deletionCheck.mockResolvedValue({canDelete:false,version:9,imageCount:1,quotationRecords:1,drafts:0,templates:0,importBatches:0})
+  await mount()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='删除')!.click()
+  await flush()
+}
+function dialogButton(label:string){return Array.from(document.querySelectorAll<HTMLButtonElement>('.product-action-modal button')).find(b=>b.textContent===label)!}
+async function chooseForceDelete(){
+  const checkbox=document.querySelector<HTMLInputElement>('.force-delete-option input')!
+  checkbox.click();await nextTick()
+}
+async function typeDeleteSku(sku:string){
+  const input=document.querySelector<HTMLInputElement>('.delete-confirmation input')!
+  input.value=sku;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()
+}
+it('requires explicit force mode and a matching SKU and uses the checked version, not a stale list version',async()=>{
+  await openReferencedDelete()
+  expect(document.body.textContent).toContain('保留历史记录')
+  expect(dialogButton('确认强制删除')).toBeUndefined()
+  await chooseForceDelete();expect(dialogButton('确认强制删除').disabled).toBe(true)
+  await typeDeleteSku('OTHER');expect(dialogButton('确认强制删除').disabled).toBe(true)
+  await typeDeleteSku('INITIAL');expect(dialogButton('确认强制删除').disabled).toBe(false)
+  let finish!:()=>void
+  mocks.forceDelete.mockReturnValueOnce(new Promise<void>(resolve=>{finish=resolve}))
+  dialogButton('确认强制删除').click();await flush()
+  expect(mocks.forceDelete).toHaveBeenCalledWith('INITIAL',9,'INITIAL')
+  dialogButton('删除中…').click();expect(mocks.forceDelete).toHaveBeenCalledTimes(1)
+  expect(dialogButton('取消').disabled).toBe(true)
+  expect(document.querySelector<HTMLInputElement>('.delete-confirmation input')!.disabled).toBe(true)
+  mocks.page.mockResolvedValueOnce({items:[],total:0,totalPages:0,page:0,size:10})
+  finish();await flush();await flush()
+  expect(document.querySelector('.product-action-modal')).toBeNull()
+  expect(document.body.textContent).toContain('已强制删除，历史报价和图片已保留')
+  expect(mocks.delete).not.toHaveBeenCalled()
+})
+it('does not offer force deletion to procurement staff',async()=>{
+  await openReferencedDelete('purchase')
+  expect(document.querySelector('.force-delete-option')).toBeNull()
+  expect(document.body.textContent).toContain('请联系超级管理员')
+  expect(mocks.forceDelete).not.toHaveBeenCalled()
+})
+it('cancel keeps data and resets confirmation when reopening',async()=>{
+  await openReferencedDelete();await chooseForceDelete();await typeDeleteSku('INITIAL')
+  dialogButton('取消').click();await flush()
+  expect(mocks.forceDelete).not.toHaveBeenCalled()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='删除')!.click();await flush()
+  expect(document.querySelector<HTMLInputElement>('.force-delete-option input')!.checked).toBe(false)
+  expect(document.querySelector('.delete-confirmation input')).toBeNull()
+})
+it('keeps the dialog and entered SKU after a stale-version rejection and never reports success',async()=>{
+  await openReferencedDelete();await chooseForceDelete();await typeDeleteSku('INITIAL')
+  mocks.forceDelete.mockRejectedValueOnce(new Error('商品已被其他用户修改，请重新打开删除窗口检查后再确认'))
+  dialogButton('确认强制删除').click();await flush()
+  expect(document.querySelector('.product-action-modal')).not.toBeNull()
+  expect(document.querySelector<HTMLInputElement>('.delete-confirmation input')!.value).toBe('INITIAL')
+  expect(document.body.textContent).toContain('商品已被其他用户修改')
+  expect(document.body.textContent).not.toContain('已强制删除，历史报价和图片已保留')
 })

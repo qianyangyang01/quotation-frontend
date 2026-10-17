@@ -195,3 +195,5 @@ it('discards a stale batch loading failure after switching accounts',async()=>{
   rejectLoad(new Error('原账号批次异常'));await flush()
   expect(document.querySelector('dialog')).toBeNull();expect(document.querySelector('.toast')).toBeNull();expect(change).not.toHaveBeenCalled()
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

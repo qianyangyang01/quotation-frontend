@@ -49,3 +49,5 @@ it('keeps ordinary record details available before and after a FOB batch review 
   expect(globalError).not.toHaveBeenCalled()
   expect(JSON.stringify([ordinary, batch])).toBe(before)
 })
+
+vi.mock('@/services/purchaseForceDeletion',()=>({loadDeletedPurchaseSnapshots:async()=>[],deletedPurchaseSnapshotForQuote:()=>undefined}))

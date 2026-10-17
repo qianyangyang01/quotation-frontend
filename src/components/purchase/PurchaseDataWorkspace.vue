@@ -24,6 +24,8 @@ import PurchaseHistoryDialog from './PurchaseHistoryDialog.vue'
 import PurchaseSalesPanel from './PurchaseSalesPanel.vue'
 import PurchaseRankingsPanel from './PurchaseRankingsPanel.vue'
 import { updatePurchaseProduct } from '@/services/purchaseHistory'
+import { forceDeletePurchaseProduct } from '@/services/purchaseForceDeletion'
+import { currentAuthUser, hasPermission } from '@/data/authStore'
 
 const historySku = ref('')
 const salesRefreshKey = ref(0)
@@ -88,6 +90,9 @@ const pendingJobAction = ref<'confirm'|'retry'|'cancel'|'rollback'|null>(null)
 const deleteTarget = ref<PurchaseProductRecord | null>(null)
 const deleteCheck = ref<PurchaseDeletionCheck | null>(null)
 const deleteConfirmation = ref('')
+const forceDelete = ref(false)
+const deleteError = ref('')
+const canForceDelete = computed(() => currentAuthUser.value.status === 'enabled' && currentAuthUser.value.role === 'super_admin' && hasPermission('purchase'))
 const catalogAction = ref<{ record:PurchaseProductRecord;state:'ready'|'disabled' } | null>(null)
 const productActionBusy = ref(false)
 let jobPollTimer = 0
@@ -355,16 +360,21 @@ async function executeCatalogState(){
   finally{productActionBusy.value=false}
 }
 async function requestDelete(record:PurchaseProductRecord){
-  detail.value=null;deleteTarget.value=record;deleteCheck.value=null;deleteConfirmation.value='';productActionBusy.value=true
+  detail.value=null;deleteTarget.value=record;deleteCheck.value=null;deleteConfirmation.value='';forceDelete.value=false;deleteError.value='';productActionBusy.value=true
   try{deleteCheck.value=await loadPurchaseDeletionCheck(record.sku)}catch(error){deleteTarget.value=null;toast(error instanceof Error?error.message:'删除检查失败')}
   finally{productActionBusy.value=false}
 }
-function closeDelete(force=false){if(productActionBusy.value&&!force)return;deleteTarget.value=null;deleteCheck.value=null;deleteConfirmation.value=''}
+function closeDelete(force=false){if(productActionBusy.value&&!force)return;deleteTarget.value=null;deleteCheck.value=null;deleteConfirmation.value='';forceDelete.value=false;deleteError.value=''}
 async function executeDelete(){
-  if(!deleteTarget.value||!deleteCheck.value?.canDelete||!deleteConfirmationMatches.value||productActionBusy.value)return
-  const target=deleteTarget.value;productActionBusy.value=true
-  try{await deletePurchaseProduct(target.sku,deleteCheck.value.version);if(records.value.length===1&&currentPage.value>1)currentPage.value-=1;closeDelete(true);await reload();toast(`${target.sku} 已彻底删除`)}
-  catch(error){toast(error instanceof Error?error.message:'采购资料删除失败')}
+  if(!deleteTarget.value||!deleteCheck.value||(!deleteCheck.value.canDelete&&!(forceDelete.value&&canForceDelete.value))||!deleteConfirmationMatches.value||productActionBusy.value)return
+  const target=deleteTarget.value;const forced=forceDelete.value&&canForceDelete.value;deleteError.value='';productActionBusy.value=true
+  try{
+    if(forced)await forceDeletePurchaseProduct(target.sku,deleteCheck.value.version,deleteConfirmation.value)
+    else await deletePurchaseProduct(target.sku,deleteCheck.value.version)
+    if(records.value.length===1&&currentPage.value>1)currentPage.value-=1
+    closeDelete(true);await reload();toast(forced?`${target.sku} 已强制删除，历史报价和图片已保留`:`${target.sku} 已彻底删除`)
+  }
+  catch(error){deleteError.value=error instanceof Error?error.message:'采购资料删除失败';toast(deleteError.value)}
   finally{productActionBusy.value=false}
 }
 async function disableBlockedDelete(){if(!deleteTarget.value||deleteTarget.value.catalogState==='disabled')return;const target=deleteTarget.value;closeDelete();requestCatalogState(target,'disabled')}
@@ -600,19 +610,25 @@ const detailFields = computed(() => detail.value ? [
     <p>此操作不会删除采购商品、报价记录或现有图片。归档不等于整批回滚。</p>
     <footer><button :disabled="taskMaintenanceBusy" @click="removalTarget=null">返回</button><button v-if="removalTarget.check.action!=='blocked'" :disabled="taskMaintenanceBusy" :class="removalTarget.check.action==='delete'?'danger-button':'primary'" @click="removeTask()">{{ taskMaintenanceBusy?'处理中…':removalTarget.check.action==='archive'?'确认归档':'确认彻底删除' }}</button></footer>
   </section></div>
-  <div v-if="deleteTarget" class="mask" @click.self="closeDelete()"><section class="modal product-action-modal">
-    <button class="close" :disabled="productActionBusy" @click="closeDelete()">×</button><small>PURCHASE SAFE DELETE</small><h2>删除采购资料</h2><p><b>{{ deleteTarget.sku }}</b></p>
+  <div v-if="deleteTarget" class="mask" @click.self="closeDelete()"><section class="modal product-action-modal" role="dialog" aria-modal="true" aria-labelledby="purchase-delete-title">
+    <button class="close" :disabled="productActionBusy" @click="closeDelete()">×</button><small>PURCHASE SAFE DELETE</small><h2 id="purchase-delete-title">{{ forceDelete ? '强制删除采购资料' : '删除采购资料' }}</h2><p><b>{{ deleteTarget.sku }}</b></p>
     <div v-if="!deleteCheck" class="delete-loading">正在检查报价、草稿、模板和导入批次引用…</div>
     <template v-else-if="!deleteCheck.canDelete">
-      <div class="action-warning danger">该商品存在业务引用，不能彻底删除，只能停用。</div>
+      <div class="action-warning danger">该商品存在业务引用，普通删除不可用。{{ canForceDelete ? '超级管理员可选择强制删除并保留历史记录。' : '可停用该商品；如需强制删除，请联系超级管理员。' }}</div>
       <div class="reference-grid"><span><b>{{ deleteCheck.quotationRecords }}</b>报价记录</span><span><b>{{ deleteCheck.drafts }}</b>报价草稿</span><span><b>{{ deleteCheck.templates }}</b>报价模板</span><span><b>{{ deleteCheck.importBatches }}</b>未回滚导入批次</span><span><b>{{ deleteCheck.imageCount }}</b>图片关系</span></div>
-      <p v-if="deleteCheck.importBatches" class="rollback-hint">该商品来自仍可回滚的导入批次，请从“导入任务”执行整批回滚。</p>
+      <p v-if="deleteCheck.importBatches" class="rollback-hint">该商品关联导入批次。强制删除后，相关批次的整批回滚会报告商品已删除的冲突；导入记录仍保留。正在导入或回滚时暂不能删除。</p>
+      <label v-if="canForceDelete" class="force-delete-option"><input v-model="forceDelete" type="checkbox" :disabled="productActionBusy" @change="deleteConfirmation='';deleteError=''">强制删除，保留历史报价</label>
+      <template v-if="forceDelete && canForceDelete">
+        <p>仅移除当前采购资料，历史报价的商品快照、图片、金额和审核状态保持不变。草稿、模板保留，但再次报价需重新选择有效 SKU。删除不能通过页面撤销，操作及原采购资料将留存审计。</p>
+        <label class="delete-confirmation">请输入完整 SKU <b>{{ deleteTarget.sku }}</b> 以确认<input v-model="deleteConfirmation" :disabled="productActionBusy" autocomplete="off" :placeholder="deleteTarget.sku"></label>
+      </template>
     </template>
     <template v-else>
       <div class="action-warning danger">此操作不可恢复，将删除商品及 {{ deleteCheck.imageCount }} 个图片关系；无其他引用的图片会进入清理队列。</div>
       <label class="delete-confirmation">请输入完整 SKU <b>{{ deleteTarget.sku }}</b> 以确认<input v-model="deleteConfirmation" autocomplete="off" :placeholder="deleteTarget.sku"></label>
     </template>
-    <footer><button :disabled="productActionBusy" @click="closeDelete()">取消</button><button v-if="deleteCheck&&!deleteCheck.canDelete&&deleteTarget.catalogState!=='disabled'" :disabled="productActionBusy" @click="disableBlockedDelete">停用该商品</button><button v-if="deleteCheck?.canDelete" class="danger-button" :disabled="productActionBusy||!deleteConfirmationMatches" @click="executeDelete">{{ productActionBusy?'删除中…':'确认彻底删除' }}</button></footer>
+    <p v-if="deleteError" class="action-warning danger" role="alert">{{ deleteError }}</p>
+    <footer><button :disabled="productActionBusy" @click="closeDelete()">取消</button><button v-if="deleteCheck&&!deleteCheck.canDelete&&!forceDelete&&deleteTarget.catalogState!=='disabled'" :disabled="productActionBusy" @click="disableBlockedDelete">停用该商品</button><button v-if="deleteCheck?.canDelete || (deleteCheck && forceDelete && canForceDelete)" class="danger-button" :disabled="productActionBusy||!deleteConfirmationMatches" @click="executeDelete">{{ productActionBusy?'删除中…':forceDelete?'确认强制删除':'确认彻底删除' }}</button></footer>
   </section></div>
 
   <div v-if="editor" class="mask"><section class="modal editor-modal">
