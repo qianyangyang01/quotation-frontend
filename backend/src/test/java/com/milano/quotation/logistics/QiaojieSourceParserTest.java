@@ -146,6 +146,39 @@ class QiaojieSourceParserTest {
         for(var name:List.of("巧捷小包全球特惠E(服装)","巧捷专线小包全球特惠F(普货)","巧捷小包全球特惠M(特货)"))assertNull(QiaojieSourceRules.named(name));
         assertFalse(QiaojieSourceRules.allowed("巧捷小包全球商派E(服装)","QEGBFA"));
     }
+    @Test void retainsTheExplicitCarrierCodeAcrossRenameWithoutChangingChannelOrPrices() throws Exception {
+        ObjectNode previous=null;
+        for(var code:List.of("QEUBF","QEGBFE")) {
+            byte[] input;
+            try(var book=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture("巧捷小包全球商派E（服装） "+code,65,false)))) {
+                book.setSheetName(0,"巧捷小包全球商派E(服装)");input=bytes(book);
+            }
+            var result=parser.parse(input,"巧捷新版.xlsx",directory());
+            assertEquals(1,result.path("channels").size());
+            var channel=(ObjectNode)result.path("channels").get(0);
+            assertTrue(channel.path("quoteReady").asBoolean(),channel.toPrettyString());
+            assertEquals(2,channel.path("rows").size());
+            for(var r:channel.path("rows")) {
+                assertEquals(code,r.path("sourceProductCode").asText());
+                assertEquals(65,r.path("pricePerKg").asDouble());
+            }
+            assertTrue(QiaojieSourceRules.allowed(channel.path("channelName").asText(),code));
+            if(previous!=null) {
+                assertEquals(previous.path("companyChannelId"),channel.path("companyChannelId"));
+                assertEquals(previous.path("rows").get(0).path("rowKey"),channel.path("rows").get(0).path("rowKey"));
+                assertEquals(previous.path("rows").get(0).path("registrationFee"),channel.path("rows").get(0).path("registrationFee"));
+            }
+            previous=channel;
+        }
+    }
+    @Test void conflictingExplicitOldAndNewCarrierCodesRemainBlocked() throws Exception {
+        try(var book=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture("巧捷小包全球商派E(服装)QEGBFE",65,false)))) {
+            book.setSheetName(0,"巧捷小包全球商派E(服装)QEUBF");
+            var channel=parser.parse(bytes(book),"巧捷代码冲突.xlsx",directory()).path("channels").get(0);
+            assertFalse(channel.path("quoteReady").asBoolean());
+            assertTrue(channel.path("errors").asInt()>0);
+        }
+    }
     @Test void aOnlyRetainsUsBeforeReadingExcludedPriceCellsAndRejectsEmptyCoverage() throws Exception {
         byte[] mixed,foreignOnly;
         try(var book=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture("巧捷小包全球特惠A(服装)",51,false)))) {

@@ -14,6 +14,7 @@ final class QiaojieSourceRules {
     static final List<Product> PRODUCTS=List.of(
             new Product("巧捷专线小包全球特惠F(敏感)","QEGBTF","敏感货",false),
             new Product("巧捷小包全球商派E(服装)","QEUBF","普货",false),
+            new Product("巧捷小包全球商派E(服装)","QEGBFE","普货",false),
             new Product("巧捷小包全球特惠A(服装)","QEGBFA","普货",false),
             new Product("巧捷小包快递特惠包税B","QEUFAB","普货",true));
     private QiaojieSourceRules() {}
@@ -24,7 +25,11 @@ final class QiaojieSourceRules {
     }
     static boolean allowed(String name,String code) {
         var product=named(name);
-        return product!=null&&(code.isBlank()||CompanyChannelScope.normalize(code).equals(CompanyChannelScope.normalize(product.code())));
+        return product!=null&&(code.isBlank()||PRODUCTS.stream().anyMatch(p->p.name().equals(product.name())
+                &&CompanyChannelScope.normalize(code).equals(CompanyChannelScope.normalize(p.code()))));
+    }
+    static boolean explicitCode(String text,Product product) {
+        return CompanyChannelScope.normalize(text).equals(CompanyChannelScope.normalize(product.name()+product.code()));
     }
     static boolean usOnly(String name,String code,String companyId) {
         var product=named(name);

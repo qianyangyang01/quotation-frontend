@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="confirmed-source-billing-2026.10.17-v7";
+    public static final String VERSION="qiaojie-carrier-code-2026.10.17-v8";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -252,11 +252,21 @@ public class LogisticsSourceParser {
     }
     private QiaojieSourceRules.Product qiaojieProduct(Source source) {
         var products=new LinkedHashSet<QiaojieSourceRules.Product>();
+        var explicit=new LinkedHashSet<QiaojieSourceRules.Product>();
         var named=QiaojieSourceRules.named(source.sheet.getSheetName());if(named!=null)products.add(named);
+        if(named!=null&&QiaojieSourceRules.explicitCode(source.sheet.getSheetName(),named))explicit.add(named);
         for(int r=0;r<=source.lastContentRow;r++) {
             if(detect(source,r,QiaojieSourceRules.PROVIDER)!=null)break;
-            for(var text:source.rowTexts(r)){var product=QiaojieSourceRules.named(text);if(product!=null)products.add(product);}
+            for(var text:source.rowTexts(r)) {
+                var product=QiaojieSourceRules.named(text);
+                if(product!=null) {
+                    products.add(product);
+                    if(QiaojieSourceRules.explicitCode(text,product))explicit.add(product);
+                }
+            }
         }
+        // A bare sheet name identifies the service, not its dated carrier code.
+        products.removeIf(p->!explicit.contains(p)&&explicit.stream().anyMatch(e->e.name().equals(p.name())));
         if(products.size()>1)source.ambiguous=true;
         return products.isEmpty()?null:products.iterator().next();
     }
