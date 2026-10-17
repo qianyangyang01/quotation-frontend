@@ -265,6 +265,9 @@ public class ShimoSyncService {
         if(duplicate) { pending(run,row,"conflict","新版表存在重复 SKU，需人工核对");return false; }
         var patch=ShimoRowMapper.patch(row.cells());
         var current=products.findBySku(row.sku()).orElse(null);
+        if(current==null&&Boolean.TRUE.equals(db.queryForObject("select exists(select 1 from audit_log where action='purchase.force-delete' and resource_type='purchase-product' and resource_id=? and outcome='success')",Boolean.class,row.sku()))) {
+            pending(run,row,"conflict","该 SKU 已被强制删除，不自动恢复；如需恢复请先人工新增采购资料");return false;
+        }
         if(current!=null&&"legacy_2026".equals(current.payload.path("dataSource").asText())&&!"老数据更新".equals(row.sheet())) {
             pending(run,row,"conflict","同 SKU 属于旧版来源，不自动覆盖");return false;
         }

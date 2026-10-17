@@ -41,6 +41,30 @@ class ShimoSyncPostgresIntegrationTest {
     ShimoClient.SourceRow source(String sheet,ArrayNode cells) {return new ShimoClient.SourceRow(sheet,2,ShimoRowMapper.sku(cells),cells);}
     void read(ShimoClient.SourceRow... rows) {when(client.readAll(any(),any())).thenReturn(List.of(rows));sync.runOnce();}
     String state(String sku) {return db.queryForObject("select status from shimo_sync_item where sku=?",String.class,sku);}
+    @Test void forceDeletedManualSkuIsNeverAutomaticallyResurrectedButOtherSkusStillSync() throws Exception {
+        var sku=sku();var row=ShimoRowMapperTest.cells(sku);
+        products.upsert(ShimoRowMapper.patch(row));
+        var version=db.queryForObject("select version from purchase_product where sku=?",Long.class,sku);
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+            .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/purchase-products/"+sku+"/force-delete")
+            .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("ADMIN").authorities(
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_SUPER_ADMIN"),
+                new org.springframework.security.core.authority.SimpleGrantedAuthority("PERM_purchase")))
+            .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+            .contentType("application/json").content(mapper.createObjectNode().put("expectedVersion",version).put("confirmationSku",sku).toString()))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+        var other=ShimoRowMapperTest.cells(sku());
+        when(client.readAll(any(),any())).thenReturn(List.of(source("业务新人",row),source("业务新人",other)));
+        for(var mode:List.of("incremental","daily")) {
+            sync.runOnce(mode);
+            assertFalse(products.exists(sku));assertEquals("conflict",state(sku));
+            assertTrue(products.exists(ShimoRowMapper.sku(other)));
+        }
+        assertEquals(0,db.queryForObject("select count(*) from shimo_sync_change where sku=?",Integer.class,sku));
+        products.upsert(ShimoRowMapper.patch(row)); // Explicit manual recreation restores eligibility.
+        sync.runOnce("daily");assertTrue(products.exists(sku));assertEquals("synced",state(sku));
+    }
     long changes() {return db.queryForObject("select count(*) from shimo_sync_change",Long.class);}
     @Test void noonAndEveningEachRunOnceAndRestartsUsePersistedSchedule() {
         db.update("update shimo_sync_control set updated_at='2026-09-27T00:00:00Z'");
