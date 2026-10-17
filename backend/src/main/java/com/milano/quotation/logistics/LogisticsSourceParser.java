@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="rongding-product-cells-2026.10.16-v5";
+    public static final String VERSION="sf-duplicate-operation-fee-2026.10.17-v6";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -894,8 +894,11 @@ public class LogisticsSourceParser {
             row.put("sourceWeightRange",weight);
             if(provider.equals("顺丰")){if(columns.weight>=0)row.put("sourceWeightCell",source.address(r,columns.weight));sfPrice(row,source,r,columns,target);}
             else numeric(row,"pricePerKg",source,r,columns.rate,target,false);
-            numeric(row,"registrationFee",source,r,columns.fee,target,false);
-            row.put("sourceFeeLabel",columns.fee>=0?source.text(columns.feeHeaderRow,columns.fee):"");
+            if(provider.equals("顺丰")&&columns.fees.size()>1)sfRegistrationFee(row,source,r,columns,target);
+            else {
+                numeric(row,"registrationFee",source,r,columns.fee,target,false);
+                row.put("sourceFeeLabel",columns.fee>=0?source.text(columns.feeHeaderRow,columns.fee):"");
+            }
             if(columns.minimum>=0) {
                 var raw=source.text(r,columns.minimum);
                 var headerText=source.text(columns.headerRow,columns.minimum);
@@ -1089,7 +1092,7 @@ public class LogisticsSourceParser {
                 case "country"->c.country=col;case "countryCode"->c.countryCode=col;case "continent"->c.continent=col;case "channel"->c.channel=col;case "productCode"->c.code=col;
                 case "weightFrom"->{c.from=col;if(t.contains("克"))c.boundsInGrams=true;}case "weightTo"->{c.to=col;if(t.contains("克"))c.boundsInGrams=true;}
                 case "minimumWeight"->c.minimum=col;case "billingStep"->c.step=col;case "weightRange"->{if(c.weight<0||weightColumnRank(t)>weightColumnRank(source.text(r,c.weight)))c.weight=col;}case "pricePerKg"->c.rate=col;
-                case "settlementRate"->{if(c.settlement>=0)c.ambiguousSfPrice=true;c.settlement=col;}case "registrationFee"->c.fee=col;
+                case "settlementRate"->{if(c.settlement>=0)c.ambiguousSfPrice=true;c.settlement=col;}case "registrationFee"->{c.fee=col;c.fees.add(col);}
                 case "firstWeightPrice"->{c.firstPrice=col;c.firstKg=firstNumber(t,0.5);}case "nextWeightPrice"->{c.nextPrice=col;c.nextKg=firstNumber(t,0.5);}
                 case "linehaulPerKg"->c.linehaul=col;case "originRegion"->c.origin=col;case "zone"->c.zone=col;case "eta"->c.eta=col;case "notes"->c.notes.add(col);default->{}
             }
@@ -1097,7 +1100,7 @@ public class LogisticsSourceParser {
         }
         if(c.rate<0&&c.firstPrice<0&&(c.weight>=0||(c.from>=0&&c.to>=0)))for(int col=0;col<Math.min(source.width(r+1),80);col++) {
             String t=clean(source.text(r+1,col));var field=t.length()>60?"":aliases.firstMatch(provider,t,List.of("pricePerKg","firstWeightPrice","nextWeightPrice","registrationFee"));
-            if(field.equals("pricePerKg"))c.rate=col;if(field.equals("registrationFee")){c.fee=col;c.feeHeaderRow=r+1;}
+            if(field.equals("pricePerKg"))c.rate=col;if(field.equals("registrationFee")){if(c.feeHeaderRow!=r+1)c.fees.clear();c.fee=col;c.feeHeaderRow=r+1;c.fees.add(col);}
             if(field.equals("firstWeightPrice")){c.firstPrice=col;c.firstKg=firstNumber(t,0.5);}if(field.equals("nextWeightPrice")){c.nextPrice=col;c.nextKg=firstNumber(t,0.5);}
             if(!field.equals("registrationFee")&&t.matches(".*(附加费|燃油费|超尺寸费|重派费|服务费).*")&&!t.matches(".*(备注|说明).*"))c.blockingFeeHeaders.add(t);
         }
@@ -1548,6 +1551,65 @@ public class LogisticsSourceParser {
             issue(channel,r+1,"pricePerKg","顺丰有效运费必须大于0","error");
         }
     }
+    private void sfRegistrationFee(ObjectNode out,Source source,int r,Columns columns,ObjectNode channel) {
+        var evidence=out.putArray("sourceFeeCandidates");
+        var labels=new HashSet<String>();
+        for(int col:columns.fees) {
+            String label=source.text(columns.feeHeaderRow,col),address=source.address(r,col);
+            boolean blank=sfPriceCellBlank(source.cell(r,col));
+            evidence.addObject().put("cell",address).put("label",label).put("raw",source.text(r,col)).put("blank",blank);
+            labels.add(clean(label));
+        }
+        int original=columns.fees.getFirst(),operation=columns.fees.getLast();
+        // Confirmed SF layout: G/H/I are original freight/fee/weight, J/K/L
+        // are discount/net freight/operation fee. A populated L remains authoritative.
+        boolean pairedLayout=columns.fees.size()==2&&labels.size()==1&&columns.rate>=0
+                &&columns.rate<original&&original<columns.weight&&columns.weight<columns.discount
+                &&columns.discount<columns.settlement&&columns.settlement<operation;
+        if(pairedLayout) {
+            boolean blank=sfPriceCellBlank(source.cell(r,operation));
+            if(blank&&!out.path("sourcePricingBasis").asText().equals("original")) {
+                String reason="顺丰折扣计价行的操作费缺失，禁止回退原价操作费";
+                issue(channel,r+1,"registrationFee",reason+"："+source.address(r,operation),"error");pending(out,reason);return;
+            }
+            int selected=blank?original:operation;
+            numeric(out,"registrationFee",source,r,selected,channel,false);
+            if(!out.has("registrationFee")) {
+                String reason="顺丰操作费缺失或无效，禁止按零计价或回退其他列";
+                var issues=(ArrayNode)channel.path("issues");var error=(ObjectNode)issues.get(issues.size()-1);
+                error.put("message",reason+"："+source.address(r,selected)+"="+source.text(r,selected));pending(out,reason);return;
+            }
+            out.put("sourceFeeCell",source.address(r,selected)).put("sourceFeeLabel",source.text(columns.feeHeaderRow,selected))
+                    .put("sourceFeeValue",source.text(r,selected)).put("sourceFeeSelection",blank?"original-fee-no-discount":"operation-fee-column");
+            return;
+        }
+        // Unknown duplicate layouts still require agreeing, valid populated values.
+        BigDecimal agreed=null;int selected=-1;boolean invalid=false,conflict=false;
+        for(int col:columns.fees) {
+            String address=source.address(r,col);boolean blank=sfPriceCellBlank(source.cell(r,col));
+            if(blank)continue;
+            var candidate=mapper.createObjectNode();
+            numeric(candidate,"registrationFee",source,r,col,channel,false);
+            if(!candidate.has("registrationFee")) {
+                invalid=true;
+                var issues=(ArrayNode)channel.path("issues");var error=(ObjectNode)issues.get(issues.size()-1);
+                error.put("message","顺丰操作费单元格 "+address+"："+error.path("message").asText());
+                continue;
+            }
+            var value=candidate.path("registrationFee").decimalValue();
+            if(agreed==null){agreed=value;selected=col;}
+            else if(agreed.compareTo(value)!=0)conflict=true;
+        }
+        String locations=columns.fees.stream().map(col->source.address(r,col)+"="+source.text(r,col)).collect(java.util.stream.Collectors.joining("，"));
+        String reason=labels.size()>1?"顺丰每票费列含义不一致，需核对":conflict?"顺丰重复操作费列金额冲突，需核对":invalid?"顺丰操作费含无效数值，禁止回退其他列":agreed==null?"顺丰操作费缺失，禁止按零计价":"";
+        if(!reason.isBlank()) {
+            if(!invalid||conflict||labels.size()>1)issue(channel,r+1,"registrationFee",reason+"："+locations,"error");
+            pending(out,reason);return;
+        }
+        out.put("registrationFee",agreed).put("sourceFeeCell",source.address(r,selected))
+                .put("sourceFeeLabel",source.text(columns.feeHeaderRow,selected))
+                .put("sourceFeeValue",source.text(r,selected)).put("sourceFeeSelection","consistent-nonblank-duplicates");
+    }
     private static boolean sfPriceCellBlank(Cell cell) {
         return cell==null || cell.getCellType()==CellType.BLANK
                 || (cell.getCellType()==CellType.STRING && clean(cell.getStringCellValue()).isBlank());
@@ -1627,7 +1689,7 @@ public class LogisticsSourceParser {
     private static Map<String,String> countries(){var m=new HashMap<String,String>();for(var code:Locale.getISOCountries())m.put(new Locale.Builder().setRegion(code).build().getDisplayCountry(Locale.SIMPLIFIED_CHINESE),code);m.put("英国","GB");m.put("韩国","KR");m.put("捷克","CZ");m.put("中国台湾","TW");m.put("台湾","TW");m.put("中国香港","HK");m.put("香港","HK");m.put("俄罗斯","RU");m.put("阿联酋","AE");m.put("土库曼","TM");m.putAll(Map.ofEntries(Map.entry("马其顿","MK"),Map.entry("刚果","CG"),Map.entry("圣基茨","KN"),Map.entry("圣尤斯特歇斯岛","BQ"),Map.entry("圣巴特勒米岛","BL"),Map.entry("塞拉里昂","SL"),Map.entry("安提瓜及巴布达","AG"),Map.entry("布维岛","BV"),Map.entry("瓦利斯群岛和富图纳群岛","WF"),Map.entry("科科斯群岛","CC"),Map.entry("科索沃","XK"),Map.entry("蒙特塞拉岛","MS"),Map.entry("西萨摩亚","WS"),Map.entry("阿森松","AC"),Map.entry("夏威夷","HI")));return m;}
     private static class Columns {
         int headerRow=-1,feeHeaderRow=-1,country=-1,countryCode=-1,continent=-1,channel=-1,code=-1,weight=-1,from=-1,to=-1,rate=-1,fee=-1,settlement=-1,minimum=-1,step=-1,origin=-1,zone=-1,eta=-1,linehaul=-1,firstPrice=-1,nextPrice=-1;
-        int discount=-1;boolean ambiguousSfPrice=false;
+        int discount=-1;boolean ambiguousSfPrice=false;List<Integer> fees=new ArrayList<>();
         double firstKg=0.5,nextKg=0.5;boolean boundsInGrams=false;String fixedWeight="";List<Integer> notes=new ArrayList<>();Set<String> blockingFeeHeaders=new LinkedHashSet<>();
     }
     private static boolean hasFirstNextValue(String value) {return !value.isBlank()&&!value.matches("0+(\\.0+)?|[-—/]");}
