@@ -30,6 +30,9 @@ let host: HTMLDivElement
 let purchaseOverride: Record<string, unknown> = {}
 let state: {
   queryProduct: () => Promise<void>
+  singleFreightWarning: import('@/domain/domesticFreightWarning').DomesticFreightWarning | null
+  bundleFreightWarnings: Record<number, import('@/domain/domesticFreightWarning').DomesticFreightWarning | null>
+  skuSearch: string
   queryBundleItems: () => Promise<void>
   purchaseInvoiceNotice: string[]
   purchaseTaxBlockReason: string
@@ -216,6 +219,75 @@ async function selectBundleTier(index: number, value: string) {
   select.dispatchEvent(new Event('change', { bubbles: true }))
   await nextTick()
 }
+
+const warningPurchase = {
+  factoryInfo: '浙江省义乌市示例工厂', minOrderQty: 1, tier2MinQty: 20, tier2PriceCny: 12,
+  tier3MinQty: 500, tier3PriceCny: 10, freight10Cny: 20, freight100Cny: 5,
+}
+
+it('rechecks the actual freight tier on each purchase price tier without altering quotation prices', async () => {
+  purchaseOverride = warningPurchase
+  await mount('single')
+  expect(state.singleFreightWarning).toMatchObject({ quantity: 10, actualTotal: 20, expectedTotal: 8 })
+  expect(host.querySelector('.domestic-freight-warning')?.textContent).toContain('运费超出合理范围，请联系采购确认是否有误！')
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(2)
+  await selectTier('100') // Tier 2 starts at 20, so it still uses 10-piece freight.
+  expect(state.singleFreightWarning).toMatchObject({ quantity: 10, actualTotal: 20 })
+  await selectTier('100+') // Tier 3 starts at 500 and uses 100-piece freight.
+  expect(state.singleFreightWarning).toBeNull()
+  expect(host.querySelector('.domestic-freight-warning')).toBeNull()
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(.05)
+  await selectTier('10')
+  expect(state.singleFreightWarning?.expectedTotal).toBe(8)
+  expect(state.saveValidationIssues.some(issue => /运费超出|国内运费预警/.test(issue.message))).toBe(false)
+  expect(JSON.stringify(state.draftPayload())).not.toMatch(/freightWarning|FreightSource|expectedTotal/)
+})
+
+it('drops the old freight warning after procurement correction, missing warning fields, SKU edits and failed requery', async () => {
+  purchaseOverride = warningPurchase
+  await mount('single')
+  expect(state.singleFreightWarning).not.toBeNull()
+  purchaseOverride = { ...warningPurchase, freight10Cny: 8 }
+  await state.queryProduct(); await nextTick()
+  expect(state.singleFreightWarning).toBeNull()
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(.8)
+  purchaseOverride = { ...warningPurchase, factoryInfo: '' }
+  await state.queryProduct(); await nextTick()
+  expect(state.singleFreightWarning).toBeNull()
+  expect(state.purchaseQueryError).toBe('')
+  expect(Number.isFinite(state.salePrice(state.products[0]!))).toBe(true)
+  purchaseOverride = warningPurchase
+  await state.queryProduct(); await nextTick()
+  expect(state.singleFreightWarning).not.toBeNull()
+  state.skuSearch = 'DIFFERENT-SKU'; await nextTick()
+  expect(state.singleFreightWarning).toBeNull()
+  state.skuSearch = record.sku
+  vi.mocked(api.get).mockRejectedValueOnce(new Error('本地测试：重新查询失败'))
+  await state.queryProduct(); await nextTick()
+  expect(state.singleFreightWarning).toBeNull()
+  expect(host.querySelector('.domestic-freight-warning')).toBeNull()
+})
+
+it('keeps bundle warnings independent of other SKUs, set quantities and manually overridden shipping weights', async () => {
+  purchaseOverride = warningPurchase
+  await mount('bundle', '10', ['10', '10'])
+  const first = state.bundleItems[0]!, second = state.bundleItems[1]!
+  expect(state.bundleFreightWarnings[first.id]).toMatchObject({ quantity: 10, expectedTotal: 8 })
+  expect(state.bundleFreightWarnings[second.id]).toBeNull()
+  first.quantityPerSet = 10; first.customWeightKg = 99
+  state.updateBundleItemQuantity(first); await nextTick()
+  expect(state.bundleFreightWarnings[first.id]?.expectedTotal).toBe(8)
+  await selectBundleTier(0, '100+')
+  expect(state.bundleFreightWarnings[first.id]).toBeNull()
+  await selectBundleTier(0, '10')
+  expect(state.bundleFreightWarnings[first.id]?.expectedTotal).toBe(8)
+  purchaseOverride = { ...warningPurchase, freight10Cny: 8 }
+  expect(await state.queryBundleItem(first, { loadLogistics: false, announce: false })).toBe(true)
+  await nextTick()
+  expect(state.bundleFreightWarnings[first.id]).toBeNull()
+  expect(first.purchaseFreightPerUnit).toBe(.8)
+  expect(state.bundleFreightWarnings[second.id]).toBeNull()
+})
 
 it('changes only the selected bundle SKU and explains missing tiers without changing domestic freight', async () => {
   await mount('bundle')

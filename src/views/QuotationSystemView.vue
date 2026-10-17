@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { refreshReviewNotifications } from '@/data/reviewNotifications'
+import { getDomesticFreightWarning, type DomesticFreightWarning } from '@/domain/domesticFreightWarning'
 import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
 import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
@@ -97,7 +98,7 @@ import {
 const FobCorrectionDialog = defineAsyncComponent(() => import('@/components/quotation/FobCorrectionDialog.vue'))
 
 const props = defineProps<{ resumeQuoteId?: string; batchCapture?: boolean; batchInitialSku?: string; batchSize?: number; batchSkus?: string[] }>()
-const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean]; batchSampleBusy: [value: boolean] }>()
+const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean]; batchSampleBusy: [value: boolean]; batchFreightWarning: [value: { sku: string; purchaseTier: string; warning: DomesticFreightWarning | null }] }>()
 let batchCalculationActive = false
 let batchCaptured: import('@/services/batchSingleQuotation').BatchSingleItem | undefined
 const batchQuantities = ref<number[]>()
@@ -363,13 +364,25 @@ function emptyQuotationProduct(): Product {
   }
 }
 const products = ref<Product[]>([emptyQuotationProduct()])
+// Display-only sources: never part of draft payloads, quotation snapshots or save validation.
+const singleFreightSource = shallowRef<PurchaseProductRecord>()
+const bundleFreightSources = ref<Record<number, PurchaseProductRecord | undefined>>({})
+const normalizedFreightSku = (sku: string) => sku.trim().toUpperCase().replace(/\s+/g, '')
+const singleFreightWarning = computed(() => {
+  const source = singleFreightSource.value
+  if (quoteMode.value !== 'single' || draftNeedsQuery.value || productQueryBusy.value || purchaseQueryError.value || batchSampleSwitching.value || batchSampleError.value || !source
+    || normalizedFreightSku(skuSearch.value) !== source.sku || products.value[0]?.sku !== source.sku) return null
+  return getDomesticFreightWarning(source, monthlySalesEstimate.value)
+})
 let bundleItemId = 1
 function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied = true, tier = '10'): BundleQuoteItem {
   const quantityPerSet = 1
   const purchaseTier = normalizePurchaseTier(tier, monthlySalesEstimate.value)
   const pricing = record ? calculatePurchasePriceBreakdown(record, purchaseTier, invoiceTaxApplied) : null
+  const id = bundleItemId++
+  if (record) bundleFreightSources.value[id] = record
   return {
-    id: bundleItemId++,
+    id,
     purchaseTier,
     sku: record?.sku || '',
     name: record ? purchaseDisplayName(record) : '',
@@ -397,6 +410,12 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
   }
 }
 const bundleItems = ref<BundleQuoteItem[]>([bundleItemFromRecord()])
+const bundleFreightWarnings = computed(() => Object.fromEntries(bundleItems.value.map(item => {
+  const source = bundleFreightSources.value[item.id]
+  const warning = quoteMode.value === 'bundle' && source && normalizedFreightSku(item.sku) === source.sku
+    ? getDomesticFreightWarning(source, item.purchaseTier) : null
+  return [item.id, warning]
+})))
 const missingTaxPointSkus = computed(() => missingPurchaseTaxPointSkus(
   quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || ''], purchaseRecords.value))
 const pendingInvoiceSkus = computed(() => pendingPurchaseInvoiceSkus(
@@ -460,6 +479,8 @@ function taxResult(country: string, provider: string, baseQuoteCny: number, rule
 function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
+  if (singleFreightSource.value?.sku === record.sku) singleFreightSource.value = record
+  if (props.batchCapture) emit('batchFreightWarning', { purchaseTier: monthlySalesEstimate.value, sku: record.sku, warning: singleFreightSource.value?.sku === record.sku ? getDomesticFreightWarning(record, monthlySalesEstimate.value) : null })
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
   const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
   p.purchase = pricing.effectiveUnitPriceCny
@@ -477,6 +498,7 @@ function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, 
   p.purchasePriceBasis = record.purchasePriceBasis
 }
 function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProductRecord, invoiceTaxApplied = item.purchaseInvoiceTaxApplied) {
+  if (bundleFreightSources.value[item.id]?.sku === record.sku) bundleFreightSources.value[item.id] = record
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
   item.purchaseTier = normalizePurchaseTier(item.purchaseTier, monthlySalesEstimate.value)
   const pricing = calculatePurchasePriceBreakdown(record, item.purchaseTier, effectiveInvoiceTaxApplied)
@@ -495,6 +517,7 @@ function applyBundlePurchasePricing(item: BundleQuoteItem, record: PurchaseProdu
   item.purchasePriceBasis = record.purchasePriceBasis
 }
 function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = true) {
+  singleFreightSource.value = record
   purchaseQueryError.value = ''
   p.sku = record.sku
   p.name = purchaseDisplayName(record)
@@ -541,6 +564,8 @@ async function queryProduct() {
   productQueryAbort?.abort()
   const controller = new AbortController(); productQueryAbort = controller
   productQueryBusy.value = true
+  singleFreightSource.value = undefined
+  if (props.batchCapture) emit('batchFreightWarning', { purchaseTier: monthlySalesEstimate.value, sku: normalizedSku, warning: null })
   let candidates: PurchaseProductRecord[]
   try {
     const remote = await loadPurchaseProduct(normalizedSku, controller.signal)
@@ -587,6 +612,7 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   const normalizedSku = item.sku.trim().toUpperCase().replace(/\s+/g, '')
   const generation = (bundleQueryGenerations.get(item) || 0) + 1
   bundleQueryGenerations.set(item, generation)
+  delete bundleFreightSources.value[item.id]
   let record: PurchaseProductRecord | undefined
   try { record = await loadPurchaseProduct(normalizedSku) }
   catch (error) { toast(error instanceof Error ? error.message : '采购资料读取失败，请重试'); return false }
@@ -598,6 +624,7 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   const duplicate = bundleItems.value.find(other => other.id !== item.id && other.sku === record.sku)
   if (duplicate) {
     duplicate.quantityPerSet += normalizedBundleSets(item.quantityPerSet)
+    bundleFreightSources.value[duplicate.id] = record
     applyBundlePurchasePricing(duplicate, record, true)
     removeBundleItem(item.id)
     updateBundleItemQuantity(duplicate)
@@ -613,6 +640,7 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   item.stockStatus = record.stockStatus ?? ''
   if (!draftNeedsQuery.value) item.customWeightKg = null
   item.weightKg = record.weightKg || 0
+  bundleFreightSources.value[item.id] = record
   applyBundlePurchasePricing(item, record, true)
   item.status = record.status === '资料完整' ? '采购资料已加载' : record.status
   if (blockConditionProgress(conditionIssues({ includeSku: false, includeCategory: true }))) {
@@ -648,6 +676,7 @@ function addBundleItem() {
 }
 function removeBundleItem(id: number) {
   if (bundleItems.value.length <= 1) return
+  delete bundleFreightSources.value[id]
   bundleItems.value = bundleItems.value.filter(item => item.id !== id)
   normalizeRule(products.value[0], true)
 }
@@ -1162,6 +1191,8 @@ async function recordForDraftSku(sku: string, freshPurchases?: Map<string, Purch
   return record?.quoteReady ? record : undefined
 }
 async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>, options: { restoreQuotation?: boolean } = {}) {
+  singleFreightSource.value = undefined
+  bundleFreightSources.value = {}
   const migrated = migrateDraftMatrix(payload)
   payload = migrated
   // During batch generation only, keep the already loaded common rule slice.
@@ -2396,6 +2427,7 @@ async function save() {
   if (props.batchCapture) {
     const sheet = quotationPreview.value?.captureSheet()
     if (!sheet || sheet.issues.length) { toast(sheet?.issues.join('；') || '报价单尚未准备好'); return }
+    emit('batchFreightWarning', { purchaseTier: monthlySalesEstimate.value, sku: p.sku, warning: singleFreightWarning.value })
     batchCaptured = JSON.parse(JSON.stringify({ input, conditions: draftPayload(), sheet }))
     if (!batchCalculationActive) emit('batchCaptured', batchCaptured!)
     return
@@ -2487,11 +2519,11 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <ManualQuotePanel v-if="manualMode" :shipping-only="quoteMode === 'shipping-only'" :cost="manualCost" :weight="manualWeightGrams" :shipping-note="shippingNote" :error="shippingNoteError || manualPanelError" :busy="logisticsLoadState === 'loading' || savingQuotation || syncRefreshing" @update:cost="manualCost=$event" @update:weight="manualWeightGrams=$event" @update:shipping-note="shippingNote=$event" @query="queryManualQuote" />
         <section v-if="quoteMode === 'single' && !draftNeedsQuery" class="cost-workbench">
-          <CostWeightPanel :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)"><template #product><ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" /></template></CostWeightPanel>
+          <CostWeightPanel :freight-warning="singleFreightWarning" :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)"><template #product><ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" /></template></CostWeightPanel>
         </section>
         <section v-else-if="quoteMode === 'bundle'" class="cost-workbench">
           <BundleProductCard
-            :items="bundleItems" :purchase-cost="bundlePurchaseCost(1)"
+            :freight-warnings="bundleFreightWarnings" :items="bundleItems" :purchase-cost="bundlePurchaseCost(1)"
             :base-weight="bundleBaseWeight(1)" :packaging-weight="bundlePackagingWeight(1)" :total-weight="bundleGoodsWeight(1)" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" :domestic-freight="bundleDomesticFreight(1)"
             @add="addBundleItem" @remove="removeBundleItem" @query="queryBundleItem" @query-all="queryBundleItems"
             @quantity-change="updateBundleItemQuantity" @weight-change="updateBundleItemWeight"

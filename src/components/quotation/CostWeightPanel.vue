@@ -3,9 +3,11 @@ import { computed } from 'vue'
 import { formatLegacyPurchaseUnitPrice } from '@/services/legacyPurchaseDisplay'
 import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import SpecialPackagingInput from './SpecialPackagingInput.vue'
+import DomesticFreightWarning from './DomesticFreightWarning.vue'
+import type { DomesticFreightWarning as FreightWarning } from '@/domain/domesticFreightWarning'
 import { displayWeightGrams, gramsToKg, sumDecimal, decimal } from "@/services/quotationDecimal"
 import type { QuotationProduct } from './types'
-const props = defineProps<{ specialPackagingGrams?: string; specialPackagingWeight?: number; specialPackagingError?: string; product: QuotationProduct; baseWeight: number; packagingWeight: number; chargeWeight: number; domesticFreight: number; purchaseTierLabel: string }>()
+const props = defineProps<{ freightWarning?: FreightWarning | null; specialPackagingGrams?: string; specialPackagingWeight?: number; specialPackagingError?: string; product: QuotationProduct; baseWeight: number; packagingWeight: number; chargeWeight: number; domesticFreight: number; purchaseTierLabel: string }>()
 const emit = defineEmits<{ weightChange: []; 'update:specialPackagingGrams': [value: string] }>()
 
 const purchaseDisplay = computed(() => props.product.purchaseDataSource === 'legacy_2026' && props.product.purchaseDisplay?.effectiveUnitPrice === props.product.purchase ? props.product.purchaseDisplay : undefined)
@@ -51,7 +53,7 @@ function purchasePricingLabel() {
       <label>商品重量（g）<input :value="grams(product.netWeight)" disabled></label>
       <label>重量来源<select v-model="product.weightSource" @change="$emit('weightChange')"><option value="purchase">使用采购表重量</option><option value="manual">业务员指定重量</option></select></label>
       <label v-if="product.weightSource==='manual'">指定重量（g）<input :value="grams(product.manualWeight)" type="number" min="0" step="1" inputmode="numeric" @input="updateManualWeight"></label>
-      <label v-if="canViewPurchaseCost">国内运费/件（CNY）<input :value="product.purchaseFreightPerUnit.toFixed(2)" disabled><small class="freight-match">{{ product.purchaseFreightLabel }}</small></label>
+      <label v-if="canViewPurchaseCost">国内运费/件（CNY）<span class="domestic-freight-input" :class="{ 'has-warning': freightWarning }"><input :value="product.purchaseFreightPerUnit.toFixed(2)" disabled><em v-if="freightWarning">超出规则价</em></span><small class="freight-match">{{ product.purchaseFreightLabel }}</small></label>
     </div>
     <SpecialPackagingInput compact :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
     <div class="highlights">
@@ -59,6 +61,7 @@ function purchasePricingLabel() {
       <p><span>含包材重量</span><b>{{ specialPackagingError ? '—' : grams(chargeWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></p>
     </div>
     </div>
+    <DomesticFreightWarning v-if="freightWarning" :warning="freightWarning" />
     <div class="cost-notes"><small v-if="canViewPurchaseCost" class="tier-match">{{ purchasePricingLabel() }}</small><small>普通包材：每件商品每 50g 加 1g，不足 50g 按 50g 计算；特殊包装整票只加一次，不随件数或套数增加，也不再计算普通包材。</small></div>
     <div v-if="product.volumetricEnabled" class="volumetric-card">
       <div class="volumetric-title">
@@ -91,4 +94,6 @@ header em{background:#e7f6ed;color:#17794f}header em.legacy{background:#eee8ff;c
 
 <style scoped>
 .legacy-price-note{font-size:11px;line-height:1.5;color:#697580}
+.cost-notes{margin-top:10px}
+.domestic-freight-input{position:relative;display:block;min-width:0}.domestic-freight-input.has-warning input:disabled{border-color:#ff5966;background:#fff1ef;color:#c12432;padding-right:80px}.domestic-freight-input em{position:absolute;right:5px;top:50%;transform:translateY(-50%);padding:2px 5px;border-radius:4px;background:#ed3547;color:#fff;font-size:10px;font-style:normal;pointer-events:none}
 </style>

@@ -2,6 +2,8 @@
 import { formatLegacyPurchaseUnitPrice } from '@/services/legacyPurchaseDisplay'
 import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import SpecialPackagingInput from './SpecialPackagingInput.vue'
+import DomesticFreightWarning from './DomesticFreightWarning.vue'
+import type { DomesticFreightWarning as FreightWarning } from '@/domain/domesticFreightWarning'
 import { displayWeightGrams, gramsToKg, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import type { BundleQuoteItem } from './types'
 import QuotationProductImage from './QuotationProductImage.vue'
@@ -26,6 +28,7 @@ const purchasePricingLabel = (item: BundleQuoteItem) => {
 }
 
 defineProps<{
+  freightWarnings?: Record<number, FreightWarning | null>
   specialPackagingGrams?: string
   specialPackagingWeight?: number
   specialPackagingError?: string
@@ -72,13 +75,14 @@ defineEmits<{
           <small v-if="canViewPurchaseCost">{{ purchasePricingLabel(item) }}</small>
         </div>
         <label class="custom-weight"><input :value="grams(effectiveWeightKg(item))" type="number" min="0" step="1" @input="item.customWeightKg=gramsToKg(Number(($event.target as HTMLInputElement).value)||0);$emit('weightChange',item)"><span>g</span><small>{{ item.customWeightKg == null ? '采购' : '自定义' }} {{ grams(effectiveWeightKg(item)) }}g + 包材 {{ grams(packagingWeightKg(effectiveWeightKg(item))) }}g = {{ grams(packagedWeightKg(item)) }}g</small><button v-if="item.customWeightKg != null" type="button" @click="item.customWeightKg=null;$emit('weightChange',item)">恢复</button></label>
-        <div v-if="canViewPurchaseCost" class="row-domestic-freight"><b>¥{{ rowDomesticFreight(item).toFixed(2) }}</b><small>¥{{ item.purchaseFreightPerUnit.toFixed(2) }}/件 × {{ Math.max(1, Math.floor(Number(item.quantityPerSet) || 1)) }}</small><small>{{ item.purchaseFreightLabel }}</small></div>
+        <div v-if="canViewPurchaseCost" class="row-domestic-freight" :class="{ 'has-freight-warning': freightWarnings?.[item.id] }"><b>¥{{ rowDomesticFreight(item).toFixed(2) }}</b><small>¥{{ item.purchaseFreightPerUnit.toFixed(2) }}/件 × {{ Math.max(1, Math.floor(Number(item.quantityPerSet) || 1)) }}</small><small>{{ item.purchaseFreightLabel }}</small><em v-if="freightWarnings?.[item.id]">超出规则价</em></div>
         <button class="remove" type="button" :disabled="items.length <= 1" @click="$emit('remove',item.id)">删除</button>
       </article>
     </div>
 
     </div>
     <SpecialPackagingInput :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
+    <div class="bundle-freight-warnings"><template v-for="item in items" :key="item.id"><DomesticFreightWarning v-if="freightWarnings?.[item.id]" :warning="freightWarnings[item.id]!" :sku="item.sku" /></template></div>
     <div class="summary-grid">
       <div v-if="canViewPurchaseCost"><span>单套采购成本</span><b>¥{{ purchaseCost.toFixed(2) }}</b><small>各 SKU 按各自所选阶梯价及采购票点计算</small></div>
       <div><span>单套含包材重量（g）</span><b>{{ specialPackagingError ? '—' : grams(totalWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></div>
@@ -123,4 +127,5 @@ defineEmits<{
 
 <style scoped>
 .legacy-price small{font-size:10px;line-height:1.5}
+.bundle-freight-warnings{padding:0 20px}.row-domestic-freight.has-freight-warning{padding:6px;border:1px solid #ff8b94;border-radius:5px;background:#fff3f1}.row-domestic-freight.has-freight-warning b,.row-domestic-freight em{color:#ce2436}.row-domestic-freight em{font-size:10px;font-style:normal}
 </style>

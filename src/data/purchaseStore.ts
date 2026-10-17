@@ -15,7 +15,7 @@ export type PurchaseProductRecord = {
   dataSource: PurchaseDataSource; purchasePriceBasis: PurchasePriceBasis; sourceQuotedPriceCny: number | null
   legacyPriceMode?: 'auto_tax'
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
-  size: string; color: string; weightG: number | null; lengthCm: number | null; widthCm: number | null; heightCm: number | null
+  size: string; color: string; weightG: number | null; weightOriginal?: string; lengthCm: number | null; widthCm: number | null; heightCm: number | null
   minOrderQty: number | null; purchasePriceCny: number | null
   tier2MinQty: number | null; tier2PriceCny: number | null; tier3MinQty: number | null; tier3PriceCny: number | null
   priceTiers: PurchasePriceTier[]; singleFreightCny: number | null; freight10Cny: number | null; freight100Cny: number | null
@@ -79,7 +79,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     sourceQuotedPriceCny: numberOrNull(input.sourceQuotedPriceCny),
     ...(dataSource === 'legacy_2026' && input.legacyPriceMode === 'auto_tax' ? { legacyPriceMode: 'auto_tax' as const } : {}),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
-    size: String(input.size || '').trim(), color, weightG, lengthCm: numberOrNull(input.lengthCm), widthCm: numberOrNull(input.widthCm), heightCm: numberOrNull(input.heightCm),
+    size: String(input.size || '').trim(), color, weightG, ...(input.weightOriginal == null ? {} : { weightOriginal: String(input.weightOriginal) }), lengthCm: numberOrNull(input.lengthCm), widthCm: numberOrNull(input.widthCm), heightCm: numberOrNull(input.heightCm),
     minOrderQty, purchasePriceCny, tier2MinQty: numberOrNull(input.tier2MinQty), tier2PriceCny: numberOrNull(input.tier2PriceCny),
     tier3MinQty: numberOrNull(input.tier3MinQty), tier3PriceCny: numberOrNull(input.tier3PriceCny),
     singleFreightCny: numberOrNull(input.singleFreightCny), freight10Cny: numberOrNull(input.freight10Cny), freight100Cny: numberOrNull(input.freight100Cny),
@@ -196,7 +196,8 @@ export function purchaseFreightChoices(record: PurchaseProductRecord) {
 export function purchaseFreightUnit(record: PurchaseProductRecord, batchQuantity: number) {
   return purchaseFreightChoices(record).find(item => item.quantity === batchQuantity)?.unitFreightCny ?? 0
 }
-function purchaseQuoteFreight(record: PurchaseProductRecord, purchaseTier: string) {
+// The requested band can differ from choice.quantity after the legacy fallback.
+export function purchaseQuoteFreight(record: PurchaseProductRecord, purchaseTier = '10') {
   const minQuantity = selectedPurchaseTier(record, purchaseTier).tier?.minQty ?? record.minOrderQty ?? 1
   const quantity = minQuantity >= 100 ? 100 : 10
   const choices = purchaseFreightChoices(record)

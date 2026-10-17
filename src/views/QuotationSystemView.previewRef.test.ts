@@ -137,7 +137,7 @@ it.each([
     quotationHasInputs:()=>true,draftSignature:()=>'stable',hasQuotationProduct:()=>true,quoteMode:{value:mode},bundleItems:{value:mode==='bundle'?[{sku:'SKU-A',quantityPerSet:2,weightKg:.12,customWeightKg:.14,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21},{sku:'SKU-B',quantityPerSet:1,weightKg:.05,customWeightKg:null,purchaseBaseUnitPrice:2,purchaseInvoiceRatePercent:0,purchaseUnitPrice:2,purchaseFreightPerUnit:.21}]:[]},normalizedBundleSets:(n:number)=>n,quoteMatrixMode:{value:'template'},activeTemplateSnapshot:{value:{id:'template-a',name:'QA'}},
     buildQuoteOptions:()=>[{id:'option-a',quoteSheetKey:quoteSheetRowKey(state.previewProps.rows[0]!)}],
     selectedQuoteSummary:()=>({systemQuoteUsd:2,systemQuoteCny:13.4,totalCostCny:10}),
-    activePurchaseSkus:()=>[],logisticsRevision:{value:'revision-a'},currentSalespersonName:{value:'QA'},currentSalespersonAccount:{value:'QA'},
+     activePurchaseSkus:()=>[],logisticsRevision:{value:'revision-a'},currentSalespersonName:{value:'QA'},currentSalespersonAccount:{value:'QA'},singleFreightWarning:{value:null},
     preferredQuotationImage:()=>'',selectedCustomerGrade:{value:grade},monthlySalesEstimate:{value:10},exchange:{value:{usd:6.7}},customQuoteQuantity:{value:4},
     draftVersion:{value:-1},draftUpdatedAt:{value:''},
     appliedFinanceVersions:{'country-classification':3,'channel-policies':43,'customer-grades':14,'exchange-rate':7,'tax-settings':28,'surcharge-settings':12,'customer-operation-fees':4},
@@ -163,8 +163,9 @@ it.each([
       input:expect.objectContaining({quoteMode:'single',primarySku:'SKU-A',customerQuote:expect.objectContaining({quantities:[1,2,3,4,8]})}),
       conditions:{skuSearch:'SKU-A'},sheet:expect.objectContaining({rows:[expect.objectContaining({sku:'SKU-A',prices:[2,2.7,4,5,8.8]})]}),
     }))
-    if (automatic) expect(emit).not.toHaveBeenCalled()
-    else expect(emit).toHaveBeenCalledExactlyOnceWith('batchCaptured',captured)
+    expect(emit).toHaveBeenCalledWith('batchFreightWarning',{purchaseTier:10,sku:'SKU-A',warning:null})
+    if (automatic) expect(emit).not.toHaveBeenCalledWith('batchCaptured',captured)
+    else expect(emit).toHaveBeenCalledWith('batchCaptured',captured)
     return
   }
   expect(createQuotationRecord.mock.calls[0]?.[0].priorityProcessing).toBe(mode==='bundle')
