@@ -113,6 +113,8 @@ it.each([
   const state=mount('template');await settle()
   await input('报价单署名','Vivian')
   await input('WhatsApp 联系方式','+183 5650 6953')
+  await input('第 1 个价格列单位','set')
+  await input('第 2 个价格列单位','sets')
   const rulesToggle=document.querySelector<HTMLInputElement>('input[aria-label="显示尺码规则列"]')!
   rulesToggle.checked=true;rulesToggle.dispatchEvent(new Event('change',{bubbles:true}));await settle()
   const rulesText=document.querySelector<HTMLTextAreaElement>('textarea[aria-label="尺码规则说明"]')!
@@ -160,7 +162,7 @@ it.each([
     expect(createQuotationRecord).not.toHaveBeenCalled()
     expect(resetLocalDraft).not.toHaveBeenCalled()
     expect(captured).toEqual(expect.objectContaining({
-      input:expect.objectContaining({quoteMode:'single',primarySku:'SKU-A',customerQuote:expect.objectContaining({quantities:[1,2,3,4,8]})}),
+      input:expect.objectContaining({quoteMode:'single',primarySku:'SKU-A',customerQuote:expect.objectContaining({quantityUnits:{'1':'set','2':'sets'},quantities:[1,2,3,4,8]})}),
       conditions:{skuSearch:'SKU-A'},sheet:expect.objectContaining({rows:[expect.objectContaining({sku:'SKU-A',prices:[2,2.7,4,5,8.8]})]}),
     }))
     expect(emit).toHaveBeenCalledWith('batchFreightWarning',{purchaseTier:10,sku:'SKU-A',warning:null})
@@ -176,7 +178,7 @@ it.each([
     weightSnapshot: expect.objectContaining({items:mode==='single'
       ? [expect.objectContaining({sku:'SKU-A',quantityPerSet:1,baseWeightKg:.14,weightSource:manual?'manual':'purchase',purchaseWeightKg:manual?.12:.14})]
       : [expect.objectContaining({sku:'SKU-A',quantityPerSet:2,baseWeightKg:.14,weightSource:'manual',purchaseWeightKg:.12}),expect.objectContaining({sku:'SKU-B',quantityPerSet:1,baseWeightKg:.05,weightSource:'purchase',purchaseWeightKg:.05})]}),
-    customerQuote:{photos:[],showPhotos:true,rowOrder:['option:option-a'],sizeRules:'S–XXL',sizeRulesEnabled:true,averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
+    customerQuote:{quantityUnits:{'1':'set','2':'sets'},photos:[],showPhotos:true,rowOrder:['option:option-a'],sizeRules:'S–XXL',sizeRulesEnabled:true,averagePlans:[],hiddenOptionIds:['option-a'],contact:{agent:'Vivian',whatsapp:'+183 5650 6953'},quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,2.7,4,5,8.8]}]},
     systemQuantityQuotes:{quantities:[1,2,3,4,8],rows:[{optionId:'option-a',prices:[2,3,4,5,9]}]},
   }))
   const saved = normalizeQuotationRecord({ ...createQuotationRecord.mock.calls[0]![0], id: 'saved-tax', no: 'QT-TAX' })!
