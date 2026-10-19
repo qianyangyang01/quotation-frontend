@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="source-effective-date-2026.10.19-v9";
+    public static final String VERSION="tongyou-epacket-2026.10.19-v10";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -113,7 +113,8 @@ public class LogisticsSourceParser {
                 }
                 if(!recognized) {
                     var sheetChannel=sheetChannelName(source,provider);
-                    if(provider.equals(SunyouSourceRules.PROVIDER))recognized=parseSunyou(source,filename,parsed);
+                    if(provider.equals("通邮")&&CompanyChannelScope.normalize(sheetChannel).equals(CompanyChannelScope.normalize("TY-E邮宝")))recognized=parseTongyouEpacket(source,filename,parsed);
+                    else if(provider.equals(SunyouSourceRules.PROVIDER))recognized=parseSunyou(source,filename,parsed);
                     else if(provider.equals(QiaojieSourceRules.PROVIDER)&&qiaojieProduct(source)!=null&&qiaojieProduct(source).perPiece())recognized=parseQiaojiePiece(source,filename,parsed);
                     else if(provider.equals("通邮")&&sheetChannel.toUpperCase(Locale.ROOT).contains("MINI"))recognized=parseIntervalMatrix(source,provider,filename,parsed);
                     else if(provider.equals("通邮") && (sheetChannel.contains("美国专线小包")||sheetChannel.contains("加拿大专线")||sheetChannel.equals("ebay挂号保建品")||sheetChannel.equals("通邮专线特货-澳大利亚"))) recognized=parseMatrix(source,provider,filename,parsed);
@@ -489,6 +490,9 @@ public class LogisticsSourceParser {
         var evidence=mapper.createArrayNode();boolean ambiguous=false,priceHeader=false;
         // Scan title/header cells before the first price header, never price rows or footer notes.
         for(int r=0;r<=Math.min(39,source.lastContentRow);r++) {
+            if(provider.equals("通邮")&&hits.values().stream().anyMatch(hit->hit.entry().path("channelName").asText().equals("TY-E邮宝"))
+                    &&source.rowTexts(r).stream().anyMatch(text->text.replaceAll("\\s","").matches("运费[（(]元/[kK][gG][)）]"))
+                    &&source.rowTexts(r).stream().anyMatch(text->text.replaceAll("\\s","").matches("处理费[（(]元/票[)）]"))){priceHeader=true;break;}
             if(detect(source,r,provider)!=null||source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码")){priceHeader=true;break;}
             for(int c=0;c<Math.min(80,source.width(r));c++) {
                 var text=source.text(r,c).trim();
@@ -724,6 +728,52 @@ public class LogisticsSourceParser {
             row.put("notes",String.join("\n",notes));add(target,row,source,r,file);
         }
         return recognized;
+    }
+
+    private boolean parseTongyouEpacket(Source source,String file,Map<String,ObjectNode> channels) {
+        var target=selected(source,"通邮","TY-E邮宝","",0,channels);if(target==null)return true;
+        int country=-1,rate=-1,fee=-1,header=-1;BigDecimal limit=null,side=null,sum=null;
+        var prefixes=new LinkedHashSet<String>();var notes=new LinkedHashSet<String>();
+        for(int r=0;r<=source.lastContentRow;r++)for(int c=0;c<source.width(r);c++) {
+            var text=source.text(r,c);if(text.isBlank())continue;
+            var compact=text.replaceAll("\\s","");
+            if(compact.equals("路向")||compact.equals("国家"))country=c;
+            if(compact.matches("运费[（(]元/[kK][gG][)）]")){rate=c;header=r;}
+            if(compact.matches("处理费[（(]元/票[)）]"))fee=c;
+            var weight=Pattern.compile("单票限重([0-9]+(?:\\.[0-9]+)?)(?:公斤|KG|kg)").matcher(compact);
+            if(weight.find()) {var value=new BigDecimal(weight.group(1));if(limit!=null&&limit.compareTo(value)!=0)issue(target,r+1,"限重","单票限重说明冲突","error");limit=value;}
+            var sideMatch=Pattern.compile("单边长度[≤≦]([0-9]+(?:\\.[0-9]+)?)cm").matcher(compact);
+            if(sideMatch.find())side=new BigDecimal(sideMatch.group(1));
+            var sumMatch=Pattern.compile("长\\+宽\\+高[≤≦]([0-9]+(?:\\.[0-9]+)?)cm").matcher(compact);
+            if(sumMatch.find())sum=new BigDecimal(sumMatch.group(1));
+            var postal=Pattern.compile("仅支持([0-9/／、,，]+)开头的邮编").matcher(compact);
+            if(postal.find())for(var prefix:postal.group(1).split("[/／、,，]")) {
+                if(!prefix.matches("[0-9]{2}"))issue(target,r+1,"邮编","邮编前缀必须为两位数字","error");else prefixes.add(prefix);
+            }
+            if(compact.matches("^[0-9]+[、，,.．].*")){notes.add(text);source.referenceRows.add(r);}
+        }
+        target.put("sourceNotes",String.join("\n",notes));
+        if(country<0||rate<0||fee<0||limit==null||limit.signum()<=0||prefixes.size()<2) {
+            issue(target,0,"TY-E邮宝规则","缺少路向、公斤价、每票处理费、单票限重或明确邮编范围，禁止猜测","error");return true;
+        }
+        int count=0;
+        for(int r=header+1;r<=source.lastContentRow;r++) {
+            var destination=source.text(r,country);
+            if(source.referenceRows.contains(r)||destination.isBlank())continue;
+            if(source.text(r,rate).isBlank()&&source.text(r,fee).isBlank())continue;
+            if(!destination.matches("西班牙(?:[（(]偏远邮编[)）])?")){issue(target,r+1,"路向","TY-E邮宝当前仅适配西班牙偏远邮编，发现其他价格行","error");continue;}
+            count++;
+            var base=mapper.createObjectNode().put("areaName","西班牙").put("countryCode","ES").put("currency","CNY").put("pricingModel","per-kg")
+                    .put("weightFromKg",0).put("weightToKg",limit).put("weightFromInclusive",false).put("weightToInclusive",true)
+                    .put("sourceWeightRange","单票限重"+limit+"公斤").put("notes",String.join("\n",notes))
+                    .put("allowedMarks","普货、带电、化妆品").put("sourceFeeLabel","处理费（元/票）").put("sourcePriceUnit","元/kg");
+            numeric(base,"pricePerKg",source,r,rate,target,false);numeric(base,"registrationFee",source,r,fee,target,false);
+            if(side!=null)base.put("maxSideCm",side);
+            if(sum!=null)base.put("maxLengthWidthHeightSumCm",sum);
+            for(var prefix:prefixes) {var row=base.deepCopy();row.put("zoneName","邮编"+prefix+"开头").put("zonePostalPrefix",prefix);add(target,row,source,r,file);}
+        }
+        if(count!=1)issue(target,0,"价格行","TY-E邮宝应有一条西班牙价格行；缺失或重复需复核","error");
+        return true;
     }
 
     private boolean jitongBatterySheet(Source source) {

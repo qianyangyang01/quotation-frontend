@@ -1,11 +1,17 @@
 <script setup lang="ts">
 // Display classification only: never changes a channel's identity or billing rules.
+const isTongyouEpacket = (name?: string | null) => /^TY[-－]E邮宝$/i.test(name?.trim() || '')
 defineProps<{ name?: string | null }>()
 </script>
 
 <template>
   <mark
-    v-if="name?.trim() && !/商派|精品/.test(name)"
+    v-if="isTongyouEpacket(name)"
+    class="channel-coverage-badge"
+    title="仅支持原表指定的西班牙邮编范围，报价时请选择对应邮编分区"
+  >指定邮编</mark>
+  <mark
+    v-else-if="name?.trim() && !/商派|精品/.test(name)"
     class="channel-coverage-badge"
     title="按渠道名称默认标记：不含“商派”或“精品”的渠道显示全邮编"
   >全邮编</mark>
