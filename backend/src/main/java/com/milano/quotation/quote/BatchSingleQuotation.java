@@ -83,7 +83,8 @@ public class BatchSingleQuotation {
             throw AppException.unprocessable(sku + "：报价单尚未准备好");
         for (int i = 0; i < quantities.size(); i++) {
             long q = quantities.get(i).asLong();
-            if (q <= 0 || !sheet.path("quantityLabels").get(i).asText().equals(q + (q == 1 ? " pc" : " pcs")))
+            var unit = input.path("customerQuote").path("quantityUnits").path(Long.toString(q)).asText(q == 1 ? "pc" : "pcs");
+            if (q <= 0 || !sheet.path("quantityLabels").get(i).asText().equals(q + " " + unit))
                 throw AppException.unprocessable("报价单数量标题与价格数量不一致");
         }
         var options = new HashMap<String, JsonNode>(); var prices = new HashMap<String, JsonNode>();

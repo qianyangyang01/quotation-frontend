@@ -49,7 +49,7 @@ export function captureBatchSheet(document: BatchSingleDocument, source: ReturnT
     const optionId = (key: string) => entries.find(entry => entry.key === key)?.option.id
     const ownedKeys = (captured.rowOrderKeys ?? []).filter(key => ownership.get(key) === index)
     const snapshot: CustomerPriceSnapshot = {
-      quantities: [...captured.quantities], contact: captured.contact, photos: captured.photos, showPhotos: captured.showPhotos,
+      quantityUnits: captured.quantityUnits ? { ...captured.quantityUnits } : undefined, quantities: [...captured.quantities], contact: captured.contact, photos: captured.photos, showPhotos: captured.showPhotos,
       sizeRules: captured.sizeRules, sizeRulesEnabled: captured.sizeRulesEnabled,
       hiddenOptionIds: entries.filter(entry => captured.hiddenRowKeys?.includes(entry.key)).map(entry => entry.option.id),
       rowOrder: captureQuoteRowOrder(ownedKeys, optionId),

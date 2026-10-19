@@ -47,7 +47,7 @@ it('restores tools and keeps same-channel price edits, hidden rows, order and me
 it('recalculates added quantities per SKU and saves all rows despite a search filter',async()=>{
  const calculate=vi.fn(async(sku:string,quantities:number[])=>{const result=item(sku);result.input.systemQuantityQuotes={quantities,rows:result.input.quoteOptions!.map(option=>({optionId:option.id,prices:quantities.map(q=>q*(sku==='SKU-A'?5:7))}))};return result})
  await mount(calculate);button('＋ 新增列').click();await nextTick()
- const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input')].at(-1)!;quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
+ const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input[type=number]')].at(-1)!;quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
  await vi.waitFor(()=>expect(calculate).toHaveBeenCalledTimes(2));await nextTick()
  const search=document.querySelector<HTMLInputElement>('[aria-label="搜索报价单 SKU"]')!;search.value='SKU-B';search.dispatchEvent(new Event('input'));await nextTick()
  expect(document.querySelectorAll('.sheet-editor-scroll tbody tr')).toHaveLength(2)
@@ -59,7 +59,7 @@ it('recalculates added quantities per SKU and saves all rows despite a search fi
 it('blocks save after quantity lookup failure and supports a retry without clearing edits',async()=>{
  const calculate=vi.fn(async()=>{throw new Error('SKU-B 渠道查询超时')})
  await mount(calculate);button('＋ 新增列').click();await nextTick()
- const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input')].at(-1)!;quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
+ const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input[type=number]')].at(-1)!;quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
  await vi.waitFor(()=>expect(document.body.textContent).toContain('SKU-B 渠道查询超时'))
  await expect(editor.capture()).rejects.toThrow('SKU-B 渠道查询超时')
  expect(button('重试数量计算')).toBeTruthy()
@@ -240,7 +240,7 @@ it('reports a missing route and does not leave a partially generated batch',asyn
 it('rejects a changed pricing basis instead of mixing new purchase prices with the existing sheet', async () => {
  const calculate=vi.fn(async(sku:string)=>{const changed=item(sku);changed.input.exchangeRate=7;return changed})
  await mount(calculate);button('＋ 新增列').click();await nextTick()
- const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input')].at(-1)!
+ const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input[type=number]')].at(-1)!
  quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
  await vi.waitFor(()=>expect(document.body.textContent).toContain('计价资料已变化'))
  await expect(editor.capture()).rejects.toThrow('重新生成整批报价')
@@ -252,7 +252,7 @@ it('actually retries a failed quantity calculation and preserves prior customer 
  const price=await openCell('第 1 行第 1 列美元价格')
  price.value='9.95';price.dispatchEvent(new Event('input'));await nextTick()
  button('＋ 新增列').click();await nextTick()
- const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input')].at(-1)!
+ const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input[type=number]')].at(-1)!
  quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
  await vi.waitFor(()=>expect(document.body.textContent).toContain('临时断网'))
  button('重试数量计算').click()
@@ -271,7 +271,7 @@ it('serializes rapid quantity edits and captures only the final requested quanti
  })
  await mount(calculate)
  button('＋ 新增列').click();await nextTick()
- const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input')].at(-1)!
+ const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input[type=number]')].at(-1)!
  quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
  await vi.waitFor(()=>expect(calculate).toHaveBeenCalledTimes(1))
  await expect(editor.capture()).rejects.toThrow('仍在计算')
@@ -327,4 +327,19 @@ it('keeps invalid ordinary prices blocked after blur and opens only one editor a
  await openCell('第 1 行国家');await openCell('第 2 行处理时间')
  expect(document.querySelectorAll('.sheet-editor tbody input')).toHaveLength(1)
  const saved=await editor.capture();expect(saved.sheet.rows[0]!.prices[0]).toBe(12.35)
+})
+
+it('saves custom quantity units for every batch item and restores them without repricing', async () => {
+ const calculate=vi.fn(); const original=await mount(calculate)
+ const unit=document.querySelector<HTMLInputElement>('[aria-label="第 1 个价格列单位"]')!
+ unit.value='set'; unit.dispatchEvent(new Event('input')); await nextTick()
+ const saved=await editor.capture()
+ expect(saved.sheet.quantityLabels).toEqual(['1 set','2 pcs','3 pcs'])
+ for (const [i,item] of saved.items.entries()) {
+   expect(item.input.customerQuote!.quantityUnits).toEqual({'1':'set'})
+   expect(item.input.customerQuote!.rows).toEqual(original.items[i]!.input.customerQuote!.rows)
+   expect(item.input.systemQuantityQuotes!.quantityUnits).toBeUndefined()
+ }
+ expect(batchSheetEditorSource(saved).initialQuote.quantityUnits).toEqual({'1':'set'})
+ expect(calculate).not.toHaveBeenCalled()
 })

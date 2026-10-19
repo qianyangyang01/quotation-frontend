@@ -32,6 +32,38 @@ class CustomerQuotePricesTest {
         for(int i=0;i<7;i++)photos.addObject().put("assetId","11111111-2222-3333-4444-555555555555").put("name","photo.png");
         assertThrows(RuntimeException.class,()->CustomerQuotePrices.validate(r,value));
     }
+    @Test void persistsUnitsWithoutChangingPriceBaselinesAndRetainsUnitsForOlderClients() {
+        var r = record();
+        ((ObjectNode) r.path("customerQuote")).putObject("quantityUnits").put("1", "set").put("2", "套");
+        CustomerQuotePrices.initialize(r);
+        var reloaded = (ObjectNode) mapper.readTree(r.toString());
+        assertEquals("set", reloaded.path("sheetQuote").path("quantityUnits").path("1").asText());
+        assertFalse(reloaded.path("systemQuantityQuotes").has("quantityUnits"));
+        var original = reloaded.path("sheetQuote").deepCopy();
+        var patch = mapper.createObjectNode();
+        var customer = (ObjectNode) reloaded.path("customerQuote").deepCopy();
+        customer.remove("quantityUnits"); patch.set("customerQuote", customer);
+        CustomerQuotePrices.preparePatch(reloaded, patch);
+        assertEquals(reloaded.path("customerQuote"), patch.path("customerQuote"));
+        ((ObjectNode) patch.path("customerQuote")).putObject("quantityUnits").put("1", "box");
+        CustomerQuotePrices.preparePatch(reloaded, patch);
+        assertFalse(QuotationFinanceReview.pricesChanged(reloaded, patch));
+        reloaded.put("quoteConfirmed", true); QuotationConfirmation.prepare(reloaded, patch);
+        assertFalse(patch.has("quoteConfirmed"));
+        assertEquals(original, reloaded.path("sheetQuote"));
+        ((ObjectNode) patch.path("customerQuote")).putObject("quantityUnits");
+        CustomerQuotePrices.preparePatch(reloaded, patch);
+        assertTrue(patch.path("customerQuote").path("quantityUnits").isEmpty());
+    }
+    @Test void rejectsMalformedQuantityUnits() {
+        var r = record(); var value = (ObjectNode) r.path("customerQuote");
+        for (var json : new String[]{"null", "[]", "{\"1\":5}", "{\"1\":\"\"}", "{\"3\":\"sets\"}", "{\"01\":\"set\"}", "{\"1\":\"a\\nb\"}"}) {
+            value.set("quantityUnits", mapper.readTree(json));
+            assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
+        }
+        value.putObject("quantityUnits").put("1", "x".repeat(25));
+        assertThrows(RuntimeException.class, () -> CustomerQuotePrices.validate(r, value));
+    }
     final ObjectMapper mapper=new ObjectMapper();
     @Test void persistsHiddenRoutesWithoutDroppingPricesAndPreservesThemForOldClients() {
         var r = record();

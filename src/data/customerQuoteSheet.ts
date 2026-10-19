@@ -1,3 +1,4 @@
+import { quoteSheetUnit, type QuoteSheetUnits } from './quoteSheetUnits'
 import { isManualQuotation, type QuotationMode } from './quotationModes'
 import type { QuotationMatrixRow } from '@/components/quotation/types'
 import { parseQuotePriceInput } from './quotePriceExpression'
@@ -246,7 +247,7 @@ export function quoteSheetUsd(value: number | null) {
 export function buildCustomerQuoteSheet(input: {
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; edits: QuoteSheetEdits
   quoteMode?: QuotationMode
-  customQuantity: number; bundle: boolean; skus?: string[]
+  customQuantity: number; bundle: boolean; skus?: string[]; quantityUnits?: QuoteSheetUnits
   quantities?: number[]; calculatePrice?: QuoteSheetPriceCalculator; legacyCustomIndex?: number
 }): CustomerQuoteSheet {
   const issues: string[] = []
@@ -316,7 +317,7 @@ export function buildCustomerQuoteSheet(input: {
     title: input.edits.title ?? quoteSheetModeDefaults(input.quoteMode).title,
     notes: input.edits.notes ?? quoteSheetModeDefaults(input.quoteMode).notes,
     agent, date, rows, issues: [...issues, ...new Set(tableIssues)], tableIssues: [...new Set(tableIssues)], priceIssues: [...new Set(priceIssues)],
-    quantityLabels: quantities.map((quantity, index) => isLegacyCustom(quantity, index) || (!input.quantities && index === 3 && !input.customQuantity) ? 'Custom' : `${validQuoteSheetQuantity(quantity) ? quantity : '—'} ${input.bundle ? quantity === 1 ? 'set' : 'sets' : quantity === 1 ? 'pc' : 'pcs'}`),
+    quantityLabels: quantities.map((quantity, index) => isLegacyCustom(quantity, index) || (!input.quantities && index === 3 && !input.customQuantity) ? 'Custom' : `${validQuoteSheetQuantity(quantity) ? quantity : '—'} ${quoteSheetUnit(quantity, input.bundle, input.quantityUnits?.[String(quantity)])}`),
   }
 }
 

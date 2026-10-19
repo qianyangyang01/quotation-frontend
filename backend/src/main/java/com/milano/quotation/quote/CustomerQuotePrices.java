@@ -57,6 +57,20 @@ final class CustomerQuotePrices {
             }
         }
         if (!ids.equals(options.keySet())) throw AppException.unprocessable("客户报价必须包含原报价的全部渠道");
+        if (value.has("quantityUnits")) {
+            var units = value.path("quantityUnits");
+            if (!units.isObject()) throw AppException.unprocessable("报价单数量单位格式错误");
+            var allowed = new HashSet<String>();
+            quantities.forEach(q -> { if (q.asLong() > 0) allowed.add(q.asText()); });
+            var savedUnits = clean.putObject("quantityUnits");
+            for (var entry : units.properties()) {
+                var unit = entry.getValue();
+                if (!allowed.contains(entry.getKey()) || !unit.isTextual() || unit.asText().isBlank()
+                    || unit.asText().length() > 24 || unit.asText().chars().anyMatch(c -> c < 32 || c == 127))
+                    throw AppException.unprocessable("报价单单位须对应数量列，且为不超过24字的单行文本");
+                savedUnits.put(entry.getKey(), unit.asText().strip());
+            }
+        }
         if (value.has("hiddenOptionIds")) {
             var hidden = value.path("hiddenOptionIds");
             if (!hidden.isArray()) throw AppException.unprocessable("隐藏报价行格式错误");
@@ -132,6 +146,7 @@ final class CustomerQuotePrices {
         var customer = validate(payload, payload.path("customerQuote"));
         var system = payload.has("systemQuantityQuotes") ? validate(payload, payload.path("systemQuantityQuotes")) : customer.deepCopy();
         system.remove("sizeRules");
+        system.remove("quantityUnits");
         system.remove("sizeRulesEnabled");
         system.remove("contact");
         system.remove("hiddenOptionIds");
@@ -159,6 +174,18 @@ final class CustomerQuotePrices {
             if (patch.has(field)) throw AppException.unprocessable("系统报价及首次报价单价格不可覆盖");
         if (patch.has("customerQuote")) {
             var customer = validate(current, patch.path("customerQuote"));
+            // Old price-only clients keep units for surviving quantities. An explicit
+            // empty object resets all units to the mode's default without changing prices.
+            if (!customer.has("quantityUnits")) {
+                var previous = current.path("customerQuote").path("quantityUnits");
+                if (previous.isMissingNode()) previous = current.path("sheetQuote").path("quantityUnits");
+                if (previous.isObject()) {
+                    var units = customer.putObject("quantityUnits");
+                    for (var q : customer.path("quantities")) {
+                        if (previous.has(q.asText())) units.set(q.asText(), previous.path(q.asText()).deepCopy());
+                    }
+                }
+            }
             for (var field : List.of("sizeRules", "sizeRulesEnabled", "photos", "showPhotos")) {
                 if (!customer.has(field)) {
                     var previous = current.path("customerQuote").path(field);

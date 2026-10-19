@@ -58,11 +58,15 @@ class BatchSingleQuotationPostgresIntegrationTest {
         for(var node:List.of((ObjectNode)input.path("sheet"),(ObjectNode)input.at("/items/0/sheet"))) {
             node.put("title","Edited quote").put("whatsapp","+86 10000000000").put("sizeRules","Size S / M");
             node.putArray("hiddenColumns").add("processingTime");
+            ((ArrayNode) node.path("quantityLabels")).set(0, mapper.valueToTree("1 set"));
         }
+        ((ObjectNode) input.at("/items/0/input/customerQuote")).putObject("quantityUnits").put("1", "set");
         var saved=save(UUID.randomUUID().toString(),input);
         var read=mapper.readTree(mvc.perform(get("/api/v1/batch-single-quotations/"+saved.path("id").asText()).session(sessions.get("employee"))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
         assertEquals(saved,read);assertEquals("Edited quote",read.at("/sheet/title").asText());
         assertEquals("plan",read.at("/items/0/input/customerQuote/averagePlans/0/id").asText());
+        assertEquals("set",read.at("/items/0/input/customerQuote/quantityUnits/1").asText());
+        assertEquals("1 set",read.at("/sheet/quantityLabels/0").asText());
     }
     @Test void oneDocumentRoundTripOwnerIsolationIdempotencyAndNoOrdinaryWrites() throws Exception {
         long before=jdbc.sql("select count(*) from quotation_record").query(Long.class).single();

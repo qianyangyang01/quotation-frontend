@@ -100,6 +100,7 @@ class QuotationWorkflowIntegrationTest {
             .put("monthlySalesEstimate", "10").put("systemQuoteUsd", 5).put("systemQuoteCny", 33.5).put("exchangeRate", 6.7);
         ((tools.jackson.databind.node.ObjectNode) input.path("customerQuote")).putArray("rowOrder")
             .add("option:c").add("average:p").add("option:a").add("option:b");
+        ((tools.jackson.databind.node.ObjectNode) input.path("customerQuote")).putObject("quantityUnits").put("1", "set").put("2", "sets");
         var created = mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key", "qa-average-order")
             .contentType("application/json").content(input.toString())).andExpect(status().isOk()).andReturn();
         var saved = mapper.readTree(created.getResponse().getContentAsByteArray()).path("data");
@@ -108,14 +109,18 @@ class QuotationWorkflowIntegrationTest {
         var restored = mapper.readTree(read.getResponse().getContentAsByteArray()).path("data");
         org.junit.jupiter.api.Assertions.assertEquals(input.path("customerQuote").path("rowOrder"), restored.path("customerQuote").path("rowOrder"));
         org.junit.jupiter.api.Assertions.assertEquals(restored.path("customerQuote"), restored.path("sheetQuote"));
+        org.junit.jupiter.api.Assertions.assertEquals("set", restored.at("/customerQuote/quantityUnits/1").asText());
+        org.junit.jupiter.api.Assertions.assertFalse(restored.path("systemQuantityQuotes").has("quantityUnits"));
         var prices = (tools.jackson.databind.node.ObjectNode) restored.path("customerQuote").deepCopy();
         prices.putArray("rowOrder").add("average:p").add("option:b").add("option:a").add("option:c");
+        prices.putObject("quantityUnits").put("1", "套");
         var patch = mapper.createObjectNode().put("_version", restored.path("_version").asLong()).set("customerQuote", prices);
         mvc.perform(patch("/api/v1/quotations/{id}", id).session(session).with(csrf()).header("If-Match", restored.path("_version").asLong())
             .contentType("application/json").content(patch.toString())).andExpect(status().isOk());
         var finalRead = mvc.perform(get("/api/v1/quotations/{id}", id).session(session)).andExpect(status().isOk()).andReturn();
         var finalRecord = mapper.readTree(finalRead.getResponse().getContentAsByteArray()).path("data");
         org.junit.jupiter.api.Assertions.assertEquals(prices.path("rowOrder"), finalRecord.path("customerQuote").path("rowOrder"));
+        org.junit.jupiter.api.Assertions.assertEquals("套", finalRecord.at("/customerQuote/quantityUnits/1").asText());
         for (var field : new String[]{"sheetQuote", "systemQuantityQuotes", "quoteOptions"})
             org.junit.jupiter.api.Assertions.assertEquals(restored.path(field), finalRecord.path(field));
     }
