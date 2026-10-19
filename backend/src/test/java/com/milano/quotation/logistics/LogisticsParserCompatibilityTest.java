@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class LogisticsParserCompatibilityTest {
     @Test void onlyExplicitlyReviewedProducerVersionsAreAccepted(){
         assertEquals("",LogisticsParserCompatibility.blockingReason(LogisticsSourceParser.VERSION));
+        assertEquals("",LogisticsParserCompatibility.blockingReason("source-effective-date-2026.10.19-v9"));
         assertEquals("",LogisticsParserCompatibility.blockingReason("wanbang-yanwen-express-2026.09.29-v3"));
         for(var version:new String[]{"","unknown","wanbang-yanwen-express-2026.09.29-v2","wanbang-yanwen-express-2026.09.29-v3-untrusted","future-version"})
             assertFalse(LogisticsParserCompatibility.blockingReason(version).isBlank(),version);
