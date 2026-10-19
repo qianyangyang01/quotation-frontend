@@ -57,14 +57,15 @@ describe('domestic freight warning presentation', () => {
     expect(rules.firstElementChild?.tagName).toBe('SUMMARY')
     expect(rules.firstElementChild?.textContent).toContain('查看计算规则')
     expect(rules.textContent).toContain('按当前采购阶梯实际采用的运费档位')
-    expect(rules.textContent).toContain('仅严格超出参考金额时预警')
+    expect(rules.textContent).toContain('实际运费严格大于参考金额的 1.5 倍时预警，正好超出 50% 不预警')
+    expect(root.querySelector('.warning-advisory')?.textContent).toContain('实际运费超过参考金额 50% 时预警')
     expect(root.querySelector('dialog, [role="dialog"], [role="alertdialog"], button')).toBeNull()
   })
 
-  it('shows a sub-cent excess without rounding it to zero', async () => {
+  it('preserves sub-cent precision in the excess over the reference amount', async () => {
     setPricingTestPermissions(['quote', 'purchase'])
-    await mount({ ...warning, quantity: 10, actualTotal: 6.501, expectedTotal: 6.5, excessTotal: 0.001,
-      actualUnit: 0.6501, expectedUnit: 0.65, excessUnit: 0.0001, weightG: 100.01, totalWeightG: 1000.1, chargeableKg: 2 })
-    expect(root.querySelector('.warning-excess')?.textContent).toBe('¥0.001')
+    await mount({ ...warning, quantity: 10, actualTotal: 9.751, expectedTotal: 6.5, excessTotal: 3.251,
+      actualUnit: 0.9751, expectedUnit: 0.65, excessUnit: 0.3251, weightG: 100.01, totalWeightG: 1000.1, chargeableKg: 2 })
+    expect(root.querySelector('.warning-excess')?.textContent).toBe('¥3.251')
   })
 })

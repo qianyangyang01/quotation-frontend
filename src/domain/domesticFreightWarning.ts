@@ -37,7 +37,7 @@ export function getDomesticFreightWarning(record: PurchaseProductRecord, purchas
     if (chargeable.greaterThan(1) && rate == null) return null
     const expected = decimal(5).plus(chargeable.minus(1).times(rate ?? 0))
     const actual = decimal(selected.totalFreightCny)
-    if (!actual.greaterThan(expected)) return null
+    if (!actual.greaterThan(expected.times('1.5'))) return null
     const excess = actual.minus(expected)
     const warning: DomesticFreightWarning = {
       regionLabel: region.regionLabel,

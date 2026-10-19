@@ -225,6 +225,19 @@ const warningPurchase = {
   tier3MinQty: 500, tier3PriceCny: 10, freight10Cny: 20, freight100Cny: 5,
 }
 
+it.each([11.99, 12, 12.01])('warns during product lookup only above 50 percent of reference freight: %s', async freight10Cny => {
+  purchaseOverride = { ...warningPurchase, freight10Cny }
+  await mount('single')
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(freight10Cny / 10)
+  if (freight10Cny > 12) {
+    expect(state.singleFreightWarning).toMatchObject({ expectedTotal: 8, actualTotal: freight10Cny })
+    expect(host.querySelector('.domestic-freight-warning')).not.toBeNull()
+  } else {
+    expect(state.singleFreightWarning).toBeNull()
+    expect(host.querySelector('.domestic-freight-warning')).toBeNull()
+  }
+})
+
 it('rechecks the actual freight tier on each purchase price tier without altering quotation prices', async () => {
   purchaseOverride = warningPurchase
   await mount('single')
