@@ -7,6 +7,29 @@ import tools.jackson.databind.node.ObjectNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LogisticsReadinessTest {
+    @Test void missingAndMalformedTicketFeesCannotSilentlyBecomeZero() {
+        for(var invalid:java.util.List.of("", "not-a-price", "NaN", "Infinity", "-0.01")) {
+            var channel=JsonNodeFactory.instance.objectNode();var row=price("GB","",0,1).put("registrationFee",invalid);
+            channel.putArray("rows").add(row);LogisticsReadiness.apply(channel);
+            assertFalse(channel.path("pricingReady").asBoolean(),invalid);
+            assertTrue(row.path("blockingReason").asText().contains("每票费用"));
+            row.put("registrationFee",0);LogisticsReadiness.apply(channel);
+            assertTrue(channel.path("pricingReady").asBoolean(),"A genuine zero is allowed after correction");
+        }
+        var channel=JsonNodeFactory.instance.objectNode();var row=price("GB","",0,1);row.remove("registrationFee");channel.putArray("rows").add(row);
+        LogisticsReadiness.apply(channel);assertFalse(channel.path("pricingReady").asBoolean());
+        row.putNull("registrationFee");LogisticsReadiness.apply(channel);assertFalse(channel.path("pricingReady").asBoolean());
+    }
+
+    @Test void invalidWeightRangesBlockPublishingAndCanBeCorrected() {
+        var channel=JsonNodeFactory.instance.objectNode();var row=price("GB","",0,1);channel.putArray("rows").add(row);
+        for(var field:java.util.List.of("weightFromKg","weightToKg")) {
+            var original=row.get(field);row.remove(field);LogisticsReadiness.apply(channel);assertFalse(channel.path("pricingReady").asBoolean());
+            row.set(field,original);LogisticsReadiness.apply(channel);assertTrue(channel.path("pricingReady").asBoolean());
+        }
+        row.put("weightToKg",0);LogisticsReadiness.apply(channel);assertFalse(channel.path("pricingReady").asBoolean());
+        row.put("weightToKg",1).put("weightFromKg",-1);LogisticsReadiness.apply(channel);assertFalse(channel.path("pricingReady").asBoolean());
+    }
     @Test void recomputesPerKgBlockersAfterCorrectionAndRejectsANewInvalidPrice() {
         var channel=JsonNodeFactory.instance.objectNode().put("templateStatus","known");channel.putArray("issues");
         var row=price("GB","",0,1).put("pricePerKg",0);channel.putArray("rows").add(row);

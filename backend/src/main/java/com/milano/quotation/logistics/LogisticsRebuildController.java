@@ -149,7 +149,7 @@ public class LogisticsRebuildController {
         guard.request(actor,"logistics-price-review",key);var existing=idempotency.existing(actor,"logistics-price-review",key,input);if(existing.isPresent())return ApiResponse.ok(existing.get());
         var v=versions.findById(version).orElseThrow(()->AppException.notFound("物流版本不存在"));
         if(v.payload.path("summary").path("highRisk").asInt()>0&&!input.path("reviewConfirmed").asBoolean())throw AppException.unprocessable("大幅涨跌需明确确认风险");
-        var result=logistics.publishReviewed(channel,version,input.path("note").asText(),actor,input.path("removalConfirmed").asBoolean(),input.path("reviewConfirmed").asBoolean());
+        var result=logistics.publishReviewed(channel,version,input.path("note").asText(),actor,input.path("removalConfirmed").asBoolean(),input.path("reviewConfirmed").asBoolean(),input.path("effectiveDateConfirmed").asBoolean());
         idempotency.save(actor,"logistics-price-review",key,input,result);audit.record("logistics.publish","logistics-version",version.toString(),"success",Map.of("actor",actor));return ApiResponse.ok(result);
     }
     @PostMapping("/channels/{channel}/versions/{version}/recompare") public ApiResponse<?> recompare(@PathVariable UUID channel,@PathVariable UUID version){

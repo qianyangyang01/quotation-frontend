@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="qiaojie-carrier-code-2026.10.17-v8";
+    public static final String VERSION="source-effective-date-2026.10.19-v9";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -175,6 +175,7 @@ public class LogisticsSourceParser {
                 for(var channel:parsed.values())ConfirmedSourceBillingRules.apply(channel,report.path("sourceCells"));
                 if(provider.equals(JisuSourceRules.PROVIDER))for(var channel:parsed.values())JisuSourceRules.applyMinimum(channel);
                 applyFooterEta(source,parsed);
+                applyEffectiveDate(source,parsed);
                 if(scope.unrestricted())splitDistinctProducts(parsed,provider);
                 int rows=0; int errors=0;
                 for(var channel:parsed.values()) {
@@ -220,6 +221,28 @@ public class LogisticsSourceParser {
         result.put("priceCellsParsed",sheets.valueStream().mapToInt(sheet->sheet.path("priceCellsParsed").asInt()).sum());
         result.put("filteredChannels",filtered).put("ambiguousChannels",ambiguous).put("matchedChannels",matched);
         return result;
+    }
+
+    private void applyEffectiveDate(Source source,Map<String,ObjectNode> channels) {
+        var dates=new TreeMap<String,String>();
+        String problem="";
+        int firstPriceRow=channels.values().stream().flatMap(c->c.path("rows").valueStream())
+                .mapToInt(row->row.path("sourceRow").asInt()-1).filter(row->row>=0).min().orElse(0);
+        for(int r=0;r<firstPriceRow;r++) {
+            // Parsing text deliberately strips date metadata; read original cell evidence here.
+            var text=source.rawRow(r).properties().stream().map(e->e.getValue().asText()).collect(java.util.stream.Collectors.joining(" "));
+            try {
+                var date=LogisticsEffectiveDate.parse(text);
+                if(!date.isBlank())dates.putIfAbsent(date,source.sheet.getSheetName()+" 第"+(r+1)+"行："+text.trim());
+            }catch(IllegalArgumentException e){problem=e.getMessage();}
+        }
+        if(dates.size()>1)problem="原表表头存在冲突生效时间，请明确后重新导入";
+        for(var channel:channels.values()) {
+            if(!problem.isBlank())issue(channel,0,"生效时间",problem,"error");
+            else if(dates.size()==1)for(var value:channel.path("rows")) {
+                ((ObjectNode)value).put("effectiveAt",dates.firstKey()).put("sourceEffectiveAtText",dates.firstEntry().getValue());
+            }
+        }
     }
 
     private String providerFromTitles(Source source) {

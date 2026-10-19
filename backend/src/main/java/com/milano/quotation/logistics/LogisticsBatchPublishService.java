@@ -27,6 +27,7 @@ public class LogisticsBatchPublishService {
             where c.dataset_id=:dataset and c.archived_at is null and v.status='published'
                 and coalesce((c.payload->>'enabled')::boolean,true) and coalesce((p.payload->>'enabled')::boolean,true)
             """).param("dataset",uuid(batch.path("datasetId").asText())).query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).list();
+        applyParserEligibility(batchId,batch);
         return LogisticsImportCoverage.calculate(batch.path("payload"),channels).put("batchStatus",batch.path("status").asText());
     }
 
@@ -46,14 +47,31 @@ public class LogisticsBatchPublishService {
     /** Read-only projection using the same compatibility decision as final acceptance. */
     public void applyParserEligibility(UUID batchId,ObjectNode batch){
         var versions=jdbc.sql("""
-            select v.id::text,coalesce(v.payload->>'parserVersion','') parser_version
+            select v.id::text,coalesce(v.payload->>'parserVersion','') parser_version,v.status,
+                coalesce(c.current_version_id=v.id,false) is_current,
+                jsonb_path_query_array(v.payload,'$.rows[*].effectiveAt')::text effective_dates
             from logistics_import_batch b cross join lateral jsonb_array_elements(b.payload->'results') r
             join logistics_version v on v.id::text=r->>'versionId'
-            where b.id=:id and v.status='draft'
-            """).param("id",batchId).query((rs,n)->Map.entry(rs.getString(1),rs.getString(2))).list();
+            join logistics_channel c on c.id=v.channel_id
+            where b.id=:id
+            """).param("id",batchId).query((rs,n)->mapper.createObjectNode().put("id",rs.getString(1)).put("parser",rs.getString(2)).put("status",rs.getString(3)).put("current",rs.getBoolean(4)).put("effectiveDates",rs.getString(5))).list();
         var reasons=new HashMap<String,String>();
-        for(var version:versions){var reason=LogisticsParserCompatibility.blockingReason(version.getValue());if(!reason.isEmpty())reasons.put(version.getKey(),reason);}
+        var effectiveWarnings=new HashMap<String,String>();
+        for(var version:versions){
+            String reason;
+            if(version.path("status").asText().equals("draft")){
+                reason=LogisticsParserCompatibility.blockingReason(version.path("parser").asText());
+                var warning=LogisticsEffectiveDate.blockingDates(mapper.readTree(version.path("effectiveDates").asText()),java.time.Instant.now());
+                effectiveWarnings.put(version.path("id").asText(),warning);
+                if(warning.contains("无效"))reason=warning;
+            }
+            else if(!version.path("status").asText().equals("published")||!version.path("current").asBoolean())reason="本批引用的价格版本已被替换或终止，请核对当前价格或重新导入";
+            else reason="";
+            if(!reason.isEmpty())reasons.put(version.path("id").asText(),reason);
+        }
         for(var item:batch.path("payload").path("results")){
+            var warning=effectiveWarnings.getOrDefault(item.path("versionId").asText(),"");
+            ((ObjectNode)item).put("effectiveDateWarning",warning).put("effectiveDateRequiresConfirmation",!warning.isBlank());
             var reason=reasons.get(item.path("versionId").asText());
             if(reason!=null)((ObjectNode)item).put("pricingReady",false).put("status","blocked").put("message",reason);
         }
@@ -88,7 +106,7 @@ public class LogisticsBatchPublishService {
                 var outcome=tx.execute(status->{var meta=meta(versionId);var channelId=uuid(meta.path("channelId").asText());
                     if(meta.path("status").asText().equals("published")&&meta.path("currentVersionId").asText().equals(versionId.toString())&&meta.path("quoteReady").asBoolean())return mapper.createObjectNode().put("alreadyPublished",true).set("version",meta);
                     if(!meta.path("status").asText().equals("draft"))throw AppException.conflict("版本已不再是待审核状态");
-                    var version=logistics.publishReviewed(channelId,versionId,note,actor,selection.path("removalConfirmed").asBoolean(false),selection.path("reviewConfirmed").asBoolean(false));
+                    var version=logistics.publishReviewed(channelId,versionId,note,actor,selection.path("removalConfirmed").asBoolean(false),selection.path("reviewConfirmed").asBoolean(false),selection.path("effectiveDateConfirmed").asBoolean(false));
                     billing.approveValidatedImport(versionId,actor,note);return mapper.createObjectNode().put("alreadyPublished",false).set("version",version);});
                 var item=published.addObject().put("versionId",versionId.toString()).put("channelId",batchItem.path("channelId").asText()).put("providerName",batchItem.path("providerName").asText()).put("channelName",batchItem.path("channelName").asText()).put("quoteReady",true).put("alreadyPublished",outcome.path("alreadyPublished").asBoolean());
                 item.put("message",item.path("alreadyPublished").asBoolean()?"该版本已发布，无需重复生成":"价格已发布；已有财务绑定自动更新，新渠道进入财务可选列表");

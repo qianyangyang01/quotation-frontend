@@ -14,6 +14,37 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class LogisticsServiceTest {
+    @Test void explicitEarlyConfirmationIsRecordedAndDoesNotRewriteSavedSourceTime() {
+        var p=provider("EARLY","物流商");var c=channel(p,"EARLY","渠道");var r=rows();
+        ((tools.jackson.databind.node.ObjectNode)r.get(0)).put("effectiveAt","2099-10-20T00:00+08:00");
+        var draft=version(c,"draft","EARLY",r);
+        var published=service.publishReviewed(c.id,draft.id,"物流商书面同意提前执行","ADMIN",true,true,true);
+        assertEquals("published",published.path("status").asText());
+        assertEquals("ADMIN",published.path("earlyEffectiveDateConfirmation").path("confirmedBy").asText());
+        assertFalse(published.path("earlyEffectiveDateConfirmation").path("confirmedAt").asText().isBlank());
+        assertEquals("2099-10-20T00:00+08:00",published.path("rows").get(0).path("effectiveAt").asText());
+    }
+    @Test void explicitEarlyConfirmationCannotBypassInvalidDateOrProviderBatchPreflight() {
+        var p=provider("EARLY-BATCH","物流商");var c=channel(p,"EARLY-BATCH","渠道");var r=rows();
+        ((tools.jackson.databind.node.ObjectNode)r.get(0)).put("effectiveAt","bad-date");
+        var draft=version(c,"draft","EARLY-BATCH",r);
+        assertThrows(AppException.class,()->service.publishReviewed(c.id,draft.id,"确认","ADMIN",true,true,true));
+        ((tools.jackson.databind.node.ObjectNode)r.get(0)).put("effectiveAt","2099-10-20T00:00+08:00");
+        var selections=JsonNodeFactory.instance.arrayNode();var selection=selections.addObject().put("channelId",c.id.toString()).put("versionId",draft.id.toString()).put("reviewConfirmed",true).put("removalConfirmed",true);
+        assertThrows(AppException.class,()->service.publishProviderBatch(p.id,selections,"确认","ADMIN"));
+        assertEquals("draft",draft.status);assertNull(c.currentVersionId);
+        selection.put("effectiveDateConfirmed",true);
+        service.publishProviderBatch(p.id,selections,"物流商已确认提前执行","ADMIN");assertEquals("published",draft.status);
+    }
+    @Test void futureSourceDateCannotBePublishedEvenWithRiskAndRemovalConfirmed() {
+        var p=provider("FUTURE","生效时间测试");var c=channel(p,"FUTURE-C","渠道");
+        var futureRows=rows();((tools.jackson.databind.node.ObjectNode)futureRows.get(0)).put("effectiveAt","2099-10-20T00:00+08:00");
+        var draft=version(c,"draft","FUTURE",futureRows);
+        var error=assertThrows(AppException.class,()->service.publishReviewed(c.id,draft.id,"已审核","ADMIN",true,true));
+        assertTrue(error.getMessage().contains("尚未到生效时间"));assertEquals("draft",draft.status);assertNull(c.currentVersionId);
+        ((tools.jackson.databind.node.ObjectNode)futureRows.get(0)).put("effectiveAt","2020-10-20T00:00+08:00");
+        assertDoesNotThrow(()->service.publishReviewed(c.id,draft.id,"到期发布","ADMIN",true,true));
+    }
     @Test void qiaojieDestinationGuardBlocksOldDraftBatchAndRollbackEvenAfterRename() {
         var p=provider("QJ","巧捷");var c=channel(p,QiaojieSourceRules.US_ONLY_CHANNEL_CODE,"改名的渠道");
         var foreign=rows();((tools.jackson.databind.node.ObjectNode)foreign.get(0)).put("countryCode","CA").put("areaName","加拿大");

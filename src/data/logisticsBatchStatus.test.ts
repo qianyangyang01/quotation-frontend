@@ -5,6 +5,10 @@ import type { BatchResult } from './logisticsRebuild'
 const result = (fields: Partial<BatchResult> = {}): BatchResult => ({ channelId: 'c', versionId: 'v', channelName: '渠道', providerName: '物流商', status: 'draft', pricingReady: true, ...fields })
 
 describe('batch publication status', () => {
+  it('does not let an old unchanged result or cached publication hide a superseded version', () => {
+    expect(batchReviewStatus(result({ status: 'unchanged' }), 'superseded')).toBe('blocked')
+    expect(batchReviewStatus(result({ status: 'published' }), 'rejected', true)).toBe('blocked')
+  })
   it('keeps unchanged imports visible even though their referenced version is published', () => {
     expect(batchReviewStatus(result({ status: 'unchanged' }), 'published')).toBe('unchanged')
   })

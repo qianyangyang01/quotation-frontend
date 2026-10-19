@@ -6,6 +6,8 @@ export const batchReviewStatusLabels: Record<BatchReviewStatus, string> = {
 }
 
 export function batchReviewStatus(result: BatchResult, versionStatus?: string, justPublished = false, inScope = true): BatchReviewStatus {
+  // A historical "unchanged" result no longer describes the current price after another update.
+  if (versionStatus === 'superseded' || versionStatus === 'rejected') return 'blocked'
   // An unchanged import references an existing published version. Keep its import outcome.
   if (result.status === 'unchanged') return 'unchanged'
   if (justPublished || versionStatus === 'published' || result.status === 'published') return 'published'

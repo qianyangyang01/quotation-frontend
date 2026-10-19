@@ -56,7 +56,12 @@ class LogisticsParserCompatibilityPostgresTest {
         publish.applyParserEligibility(UUID.fromString(unknownBatch.path("id").asText()),unknownView);
         assertFalse(unknownView.path("payload").path("results").get(0).path("pricingReady").asBoolean());
         assertEquals("draft",unknownBatch.path("payload").path("results").get(0).path("status").asText(),"Read projection must not overwrite import evidence");
-        result=publish.publishReady(UUID.fromString(unknownBatch.path("id").asText()),request(channelId,unknownId),"COMPAT-QA");
+        var unknownBatchId=UUID.fromString(unknownBatch.path("id").asText());
+        var partial=request(channelId,unknownId);var coverage=publish.coverage(unknownBatchId);
+        assertTrue(coverage.path("partial").asBoolean(),"An incompatible draft must not hide the retained old price");
+        assertThrows(com.milano.quotation.common.AppException.class,()->publish.publishReady(unknownBatchId,request(channelId,unknownId),"COMPAT-QA"));
+        partial.put("partialUpdateConfirmed",true).put("coverageToken",coverage.path("token").asText());
+        result=publish.publishReady(unknownBatchId,partial,"COMPAT-QA");
         assertEquals(1,result.path("skippedCount").asInt());assertTrue(result.path("skipped").get(0).path("reason").asText().contains("兼容性"));
         assertEquals(versionId,jdbc.sql("select current_version_id from logistics_channel where id=:id").param("id",channelId).query(UUID.class).single());
         assertEquals("draft",jdbc.sql("select status from logistics_version where id=:id").param("id",unknownId).query(String.class).single());
@@ -64,8 +69,41 @@ class LogisticsParserCompatibilityPostgresTest {
         // Trusting the producer never bypasses real validation errors.
         jdbc.sql("update logistics_version set payload=payload || cast(:patch as jsonb) where id=:id")
             .param("patch",mapper.createObjectNode().put("parserVersion",LogisticsParserCompatibility.SEPTEMBER_29).put("errors",1).toString()).param("id",unknownId).update();
-        result=publish.publishReady(UUID.fromString(unknownBatch.path("id").asText()),request(channelId,unknownId),"COMPAT-QA");
+        result=publish.publishReady(unknownBatchId,partial,"COMPAT-QA");
         assertEquals(1,result.path("skippedCount").asInt());assertTrue(result.path("skipped").get(0).path("reason").asText().contains("阻断错误"));
+
+        jdbc.sql("update logistics_version set status='superseded' where id=:id").param("id",versionId).update();
+        var oldView=batch.deepCopy();((ObjectNode)oldView.path("payload").path("results").get(0)).put("status","unchanged");
+        publish.applyParserEligibility(UUID.fromString(batch.path("id").asText()),oldView);
+        assertEquals("blocked",oldView.path("payload").path("results").get(0).path("status").asText());
+        assertTrue(oldView.path("payload").path("results").get(0).path("message").asText().contains("已被替换"));
+        assertEquals("draft",batch.path("payload").path("results").get(0).path("status").asText(),"Preserve original import evidence");
+    }
+
+    @Test void batchEarlyPublicationNeedsSeparateConfirmationAndPersistsItsEvidence() {
+        var provider=logistics.addProvider(mapper.createObjectNode().put("name","提前生效测试").put("code","EARLY"));
+        var channel=logistics.addChannel(mapper.createObjectNode().put("providerId",provider.path("id").asText()).put("name","提前生效渠道").put("code","EARLY-1"));
+        var channelId=UUID.fromString(channel.path("id").asText());
+        var input=mapper.createObjectNode().put("parserVersion",LogisticsSourceParser.VERSION).put("templateStatus","known").put("errors",0).put("fileName","early.xlsx").put("sourceHash","early-source");
+        input.putArray("rows").addObject().put("countryCode","US").put("areaName","美国").put("zoneName","").put("currency","CNY")
+            .put("weightFromKg",0).put("weightToKg",2).put("pricePerKg",10).put("registrationFee",2).put("pricingModel","per-kg")
+            .put("effectiveAt","2099-10-20T00:00+08:00").put("sourceEffectiveAtText","原表 A1：生效日期 2099-10-20");
+        var draft=logistics.createDraft(channelId,input);var versionId=UUID.fromString(draft.path("id").asText());
+        var batch=batch(channelId,versionId);var batchId=UUID.fromString(batch.path("id").asText());
+        var view=batch.deepCopy();publish.applyParserEligibility(batchId,view);
+        assertTrue(view.path("payload").path("results").get(0).path("effectiveDateRequiresConfirmation").asBoolean());
+        assertEquals("draft",view.path("payload").path("results").get(0).path("status").asText());
+        var request=request(channelId,versionId);var selection=(ObjectNode)request.path("selections").get(0);
+        selection.put("reviewConfirmed",true).put("removalConfirmed",true);
+        var blocked=publish.publishReady(batchId,request,"EARLY-QA");assertEquals(1,blocked.path("skippedCount").asInt());
+        assertTrue(jdbc.sql("select current_version_id is null from logistics_channel where id=:id").param("id",channelId).query(Boolean.class).single());
+        selection.put("effectiveDateConfirmed",true);request.put("note","物流商已确认提前执行");
+        var accepted=publish.publishReady(batchId,request,"EARLY-QA");assertEquals(1,accepted.path("publishedCount").asInt(),accepted.toString());
+        var stored=mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
+        assertEquals("EARLY-QA",stored.path("earlyEffectiveDateConfirmation").path("confirmedBy").asText());
+        assertFalse(stored.path("earlyEffectiveDateConfirmation").path("confirmedAt").asText().isBlank());
+        assertEquals("2099-10-20T00:00+08:00",stored.path("rows").get(0).path("effectiveAt").asText());
+        assertTrue(guard.quoteReady(versionId));
     }
 
     private ObjectNode batch(UUID channel,UUID version){

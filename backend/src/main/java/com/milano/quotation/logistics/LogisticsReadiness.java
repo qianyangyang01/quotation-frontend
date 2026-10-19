@@ -11,13 +11,14 @@ import java.util.*;
 final class LogisticsReadiness {
     private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL);
     private static final Set<String> GENERATED_ETA_CODES=Set.of("ETA_MISSING","ETA_PARTIAL","ETA_CONFLICT");
-    private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式","公斤价计费结构不完整","0.5kg进位整票价的档位、起重或金额无效");
+    private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式","公斤价计费结构不完整","0.5kg进位整票价的档位、起重或金额无效","每票费用缺失或无效","重量区间缺失或无效");
 
     private LogisticsReadiness() {}
 
     static void apply(ObjectNode target,ObjectMapper mapper) {apply(target);}
 
     static void apply(ObjectNode target) {
+        LogisticsEffectiveDate.project(target);
         int priorErrors=target.path("errors").asInt();
         var rows=target.withArray("rows");
         var issues=target.withArray("issues");
@@ -44,8 +45,13 @@ final class LogisticsReadiness {
             if(row.path("sourceProductCode").asText().isBlank())warn(row,"原表未提供产品代码，使用系统渠道编码");
             if(row.path("originRegion").asText().isBlank()&&row.path("sourceOriginRegion").asText().isBlank())warn(row,"原表未标注报价区域");
             var model=row.path("pricingModel").asText();
+            // Missing or malformed fees must never become a free shipment component through asDouble(0).
+            var fee=decimal(row,"registrationFee");
+            if(fee==null||fee.signum()<0)block(row,"每票费用缺失或无效");
+            var lower=decimal(row,"weightFromKg");var upper=decimal(row,"weightToKg");
+            if(lower==null||upper==null||lower.signum()<0||upper.compareTo(lower)<=0)block(row,"重量区间缺失或无效");
             if(model.isBlank()){model=row.path("firstWeightPrice").asDouble()>0?"first-next":row.path("intervalPrice").asDouble()>0?"interval":row.path("pricePerKg").asDouble()>0?"per-kg":"unknown";row.put("pricingModel",model);}
-            if(row.path("sourceFeeLabel").asText().isBlank()&&row.path("registrationFee").asDouble()>0)row.put("sourceFeeLabel","挂号费");
+            if(row.path("sourceFeeLabel").asText().isBlank()&&fee!=null&&fee.signum()>0)row.put("sourceFeeLabel","挂号费");
             if(row.path("etaMinDays").asInt()>0&&row.path("etaMaxDays").asInt()>=row.path("etaMinDays").asInt()&&row.path("etaSource").asText().isBlank())row.put("etaSource","source-row");
             if(model.equals("interval"))block(row,"区间价计费方式暂不支持");
             else if(LogisticsPiecePricing.applies(row)&&!LogisticsPiecePricing.valid(row))block(row,"0.5kg进位整票价的档位、起重或金额无效");
@@ -115,6 +121,12 @@ final class LogisticsReadiness {
         for(var value:rows)((ObjectNode)value).put("quoteReady",ready&&((ObjectNode)value).path("blockingReason").asText().isBlank());
         target.put("errors",errors).put("warnings",warningRows).put("etaReady",etaReady).put("etaMissingCount",missing.size())
                 .put("pendingRows",blockedRows).put("reviewWarningRows",warningRows).put("quoteReady",ready).put("pricingReady",ready);
+    }
+
+    private static java.math.BigDecimal decimal(JsonNode row,String field) {
+        var value=row.path(field);
+        if(!value.isNumber()&&!value.isTextual())return null;
+        try{return new java.math.BigDecimal(value.asText().trim());}catch(NumberFormatException e){return null;}
     }
 
     static String routeKey(JsonNode row) {

@@ -15,7 +15,11 @@ final class LogisticsImportCoverage {
         var included = new HashSet<String>();
         for (var result : payload.path("results")) {
             providers.add(CompanyChannelScope.normalize(result.path("providerName").asText()));
-            if (!result.path("channelId").asText().isBlank()) included.add(result.path("channelId").asText());
+            // A matched but blocked channel still uses its old price. Do not call it covered.
+            boolean valid=Set.of("draft","unchanged","published").contains(result.path("status").asText())
+                    &&!result.path("versionId").asText().isBlank()&&result.path("errors").asInt()==0
+                    &&result.path("pricingReady").asBoolean(false)&&result.path("pendingReasons").isEmpty();
+            if (valid&&!result.path("channelId").asText().isBlank()) included.add(result.path("channelId").asText());
         }
         // A selected provider remains in scope even if all of its sheets failed to parse.
         if (!payload.path("selectedProviderName").asText().isBlank())

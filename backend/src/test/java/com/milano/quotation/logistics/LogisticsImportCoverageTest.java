@@ -14,7 +14,7 @@ class LogisticsImportCoverageTest {
             .put("versionId",version).put("versionNumber",4).put("sourceFile","9月10日报价.xlsx");
     }
     ObjectNode additions() {
-        var payload=mapper.createObjectNode();payload.putArray("results").addObject().put("channelId","new").put("providerName","燕文").put("status","draft");return payload;
+        var payload=mapper.createObjectNode();payload.putArray("results").addObject().put("channelId","new").put("providerName","燕文").put("status","draft").put("versionId","new-v1").put("pricingReady",true);return payload;
     }
     @Test void newChannelsDoNotHideExistingCosmeticsPrices() {
         var report=LogisticsImportCoverage.calculate(additions(),List.of(channel("old","燕文","燕文化妆品专线","v4"),channel("other","云途","其他","v2")));
@@ -25,12 +25,12 @@ class LogisticsImportCoverageTest {
         assertDoesNotThrow(()->LogisticsImportCoverage.requireAcknowledgment(report,mapper.createObjectNode().put("partialUpdateConfirmed",true).put("coverageToken",report.path("token").asText())));
     }
     @Test void unchangedRowsCountAsIncludedByIdentityNotNameAndStableOrdering() {
-        var payload=additions();payload.withArray("results").addObject().put("channelId","old").put("providerName","燕文").put("status","unchanged");
+        var payload=additions();payload.withArray("results").addObject().put("channelId","old").put("providerName","燕文").put("status","unchanged").put("versionId","v4").put("pricingReady",true);
         var old=channel("old","燕文","已改名的化妆品渠道","v4");var other=channel("another","燕文","另一条线","v1");
         var report=LogisticsImportCoverage.calculate(payload,List.of(old,other));
         assertEquals(1,report.path("coveredChannels").asInt());assertEquals(1,report.path("missingCount").asInt());
         assertEquals(report.path("token"),LogisticsImportCoverage.calculate(payload,List.of(other,old)).path("token"));
-        payload.withArray("results").addObject().put("channelId","another").put("providerName","燕文");
+        payload.withArray("results").addObject().put("channelId","another").put("providerName","燕文").put("status","draft").put("versionId","v2").put("pricingReady",true);
         var complete=LogisticsImportCoverage.calculate(payload,List.of(old,other));assertFalse(complete.path("partial").asBoolean());
         assertDoesNotThrow(()->LogisticsImportCoverage.requireAcknowledgment(complete,mapper.createObjectNode()));
     }
@@ -39,6 +39,20 @@ class LogisticsImportCoverageTest {
         old.put("versionId","v5");var next=LogisticsImportCoverage.calculate(additions(),List.of(old));
         assertNotEquals(first.path("token"),next.path("token"));
         assertThrows(AppException.class,()->LogisticsImportCoverage.requireAcknowledgment(next,mapper.createObjectNode().put("partialUpdateConfirmed",true).put("coverageToken",first.path("token").asText())));
+    }
+    @Test void blockedMatchedChannelsRemainInTheUnchangedOldPriceWarning() {
+        for(var status:List.of("blocked","failed","superseded","rejected")) {
+            var payload=additions();payload.withArray("results").addObject().put("channelId","old").put("providerName","燕文")
+                .put("status",status).put("versionId","v5").put("pricingReady",true);
+            var report=LogisticsImportCoverage.calculate(payload,List.of(channel("old","燕文","化妆品","v4")));
+            assertEquals(1,report.path("missingCount").asInt(),status);
+            assertThrows(AppException.class,()->LogisticsImportCoverage.requireAcknowledgment(report,mapper.createObjectNode()));
+        }
+        var payload=additions();var result=payload.withArray("results").addObject().put("channelId","old").put("providerName","燕文")
+            .put("status","draft").put("versionId","v5").put("pricingReady",false);
+        assertTrue(LogisticsImportCoverage.calculate(payload,List.of(channel("old","燕文","化妆品","v4"))).path("partial").asBoolean());
+        result.put("pricingReady",true).put("errors",1);
+        assertTrue(LogisticsImportCoverage.calculate(payload,List.of(channel("old","燕文","化妆品","v4"))).path("partial").asBoolean());
     }
     @Test void selectedAndFailedProviderStillShowsUncoveredPrices() {
         var payload=mapper.createObjectNode().put("selectedProviderName"," 燕 文 ");
