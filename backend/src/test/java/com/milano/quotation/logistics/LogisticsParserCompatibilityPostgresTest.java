@@ -27,6 +27,7 @@ class LogisticsParserCompatibilityPostgresTest {
         r.add("spring.datasource.url",postgres::getJdbcUrl);r.add("spring.datasource.username",postgres::getUsername);r.add("spring.datasource.password",postgres::getPassword);
     }
     @Autowired JdbcClient jdbc; @Autowired ObjectMapper mapper; @Autowired LogisticsService logistics;
+    @Autowired LogisticsQueryService queries;
     @Autowired LogisticsDatasetGuard guard; @Autowired LogisticsBatchPublishService publish;
 
     @Test void oldDraftPublishesWithOriginalProvenanceAndUnknownDraftRollsBack() throws Exception {
@@ -80,7 +81,7 @@ class LogisticsParserCompatibilityPostgresTest {
         assertEquals("draft",batch.path("payload").path("results").get(0).path("status").asText(),"Preserve original import evidence");
     }
 
-    @Test void batchEarlyPublicationNeedsSeparateConfirmationAndPersistsItsEvidence() {
+    @Test void batchPublicationTreatsSourceDatesAsReferenceMetadata() {
         var provider=logistics.addProvider(mapper.createObjectNode().put("name","提前生效测试").put("code","EARLY"));
         var channel=logistics.addChannel(mapper.createObjectNode().put("providerId",provider.path("id").asText()).put("name","提前生效渠道").put("code","EARLY-1"));
         var channelId=UUID.fromString(channel.path("id").asText());
@@ -91,19 +92,47 @@ class LogisticsParserCompatibilityPostgresTest {
         var draft=logistics.createDraft(channelId,input);var versionId=UUID.fromString(draft.path("id").asText());
         var batch=batch(channelId,versionId);var batchId=UUID.fromString(batch.path("id").asText());
         var view=batch.deepCopy();publish.applyParserEligibility(batchId,view);
-        assertTrue(view.path("payload").path("results").get(0).path("effectiveDateRequiresConfirmation").asBoolean());
+        assertFalse(view.path("payload").path("results").get(0).path("effectiveDateRequiresConfirmation").asBoolean());
         assertEquals("draft",view.path("payload").path("results").get(0).path("status").asText());
         var request=request(channelId,versionId);var selection=(ObjectNode)request.path("selections").get(0);
         selection.put("reviewConfirmed",true).put("removalConfirmed",true);
-        var blocked=publish.publishReady(batchId,request,"EARLY-QA");assertEquals(1,blocked.path("skippedCount").asInt());
-        assertTrue(jdbc.sql("select current_version_id is null from logistics_channel where id=:id").param("id",channelId).query(Boolean.class).single());
-        selection.put("effectiveDateConfirmed",true);request.put("note","物流商已确认提前执行");
         var accepted=publish.publishReady(batchId,request,"EARLY-QA");assertEquals(1,accepted.path("publishedCount").asInt(),accepted.toString());
         var stored=mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
-        assertEquals("EARLY-QA",stored.path("earlyEffectiveDateConfirmation").path("confirmedBy").asText());
-        assertFalse(stored.path("earlyEffectiveDateConfirmation").path("confirmedAt").asText().isBlank());
+        assertFalse(stored.has("earlyEffectiveDateConfirmation"));
         assertEquals("2099-10-20T00:00+08:00",stored.path("rows").get(0).path("effectiveAt").asText());
         assertTrue(guard.quoteReady(versionId));
+    }
+
+    @Test void oldDateOnlyBlockIsProjectedWithoutWritesAndPublishesThroughBatch() {
+        var provider=logistics.addProvider(mapper.createObjectNode().put("name","旧日期测试").put("code","LEGACY-DATE"));
+        var channel=logistics.addChannel(mapper.createObjectNode().put("providerId",provider.path("id").asText()).put("name","联邮通婚纱专线").put("code","LEGACY-DATE-1"));
+        var channelId=UUID.fromString(channel.path("id").asText());
+        var input=mapper.createObjectNode().put("parserVersion","tongyou-epacket-2026.10.19-v10").put("templateStatus","known").put("errors",0).put("fileName","legacy.xlsx").put("sourceHash","legacy-date");
+        input.putArray("rows").addObject().put("countryCode","US").put("areaName","美国").put("currency","CNY")
+            .put("weightFromKg",0).put("weightToKg",2).put("pricePerKg",10).put("registrationFee",2).put("pricingModel","per-kg");
+        var draft=logistics.createDraft(channelId,input);var versionId=UUID.fromString(draft.path("id").asText());
+        var legacy=(ObjectNode)draft.deepCopy();legacy.put("errors",1).put("pricingReady",false).put("quoteReady",false);
+        legacy.putArray("issues").addObject().put("field","生效时间").put("level","error").put("row",0)
+            .put("sourceSheet","联邮通婚纱专线（S5290）").put("message","同一处存在多个生效日期，请明确本表生效时间");
+        jdbc.sql("update logistics_version set payload=cast(:payload as jsonb) where id=:id").param("id",versionId).param("payload",legacy.toString()).update();
+        var before=jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single();
+        var batch=batch(channelId,versionId);var batchId=UUID.fromString(batch.path("id").asText());
+        var item=(ObjectNode)batch.path("payload").path("results").get(0);item.put("status","blocked").put("errors",1).put("pricingReady",false);
+        jdbc.sql("update logistics_import_batch set payload=cast(:payload as jsonb) where id=:id").param("id",batchId).param("payload",batch.path("payload").toString()).update();
+        var batchBefore=jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",batchId).query(String.class).single();
+        publish.applyParserEligibility(batchId,batch);
+        assertEquals("draft",item.path("status").asText());assertEquals(0,item.path("errors").asInt());assertTrue(item.path("pricingReady").asBoolean());
+        var summary=queries.versions(0,10,channelId,"draft").items().getFirst();
+        assertEquals(0,summary.path("errors").asInt());assertTrue(summary.path("pricingReady").asBoolean());assertFalse(summary.has("rows"));
+        var issue=queries.versionIssues(versionId,0,10).items().getFirst();assertEquals("warning",issue.path("level").asText());
+        assertEquals(before,jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
+        assertEquals(batchBefore,jdbc.sql("select payload::text from logistics_import_batch where id=:id").param("id",batchId).query(String.class).single());
+        var approval=request(channelId,versionId);var coverage=publish.coverage(batchId);
+        approval.put("partialUpdateConfirmed",true).put("coverageToken",coverage.path("token").asText());
+        var outcome=publish.publishReady(batchId,approval,"DATE-QA");assertEquals(1,outcome.path("publishedCount").asInt(),outcome.toString());
+        var stored=mapper.readTree(jdbc.sql("select payload::text from logistics_version where id=:id").param("id",versionId).query(String.class).single());
+        assertEquals("warning",stored.path("issues").get(0).path("level").asText());
+        assertEquals(legacy.path("rows"),stored.path("rows"));assertTrue(guard.quoteReady(versionId));
     }
 
     private ObjectNode batch(UUID channel,UUID version){

@@ -29,7 +29,7 @@ let app: App | undefined
 afterEach(() => { app?.unmount(); app = undefined; document.body.innerHTML = ''; sessionStorage.clear(); vi.clearAllMocks() })
 
 describe('partial logistics import review UI', () => {
-  it('requires a separate carrier early-use confirmation and sends it with the selected versions', async () => {
+  it('ignores legacy effective-date confirmation flags when publishing reviewed prices', async () => {
     sessionStorage.setItem('milano.logistics.active-batch.dataset', 'batch')
     const value = batch()
     value.payload.coverage = { token: 'all', existingChannels: 0, coveredChannels: 0, missingCount: 0, partial: false, missingChannels: [] }
@@ -37,15 +37,14 @@ describe('partial logistics import review UI', () => {
     mocks.batch.mockResolvedValue(value); mocks.publish.mockRejectedValue(new Error('请求已检查'))
     const host = document.createElement('div'); document.body.append(host)
     app = createApp(LogisticsWorkspaceView); app.mount(host)
-    await vi.waitFor(() => expect(host.textContent).toContain('2099-10-20'))
+    await vi.waitFor(() => expect(host.textContent).toContain('一键发布 1 个可用渠道'))
     const button = () => host.querySelector<HTMLButtonElement>('.publish-all')!
     const note = host.querySelector<HTMLInputElement>('input[placeholder="填写价格来源和审核结论"]')!
-    note.value = '物流商书面确认可提前执行'; note.dispatchEvent(new Event('input', { bubbles: true })); await nextTick()
-    expect(button().disabled).toBe(true); expect(mocks.publish).not.toHaveBeenCalled()
-    const label = [...host.querySelectorAll('label')].find(el => el.textContent?.includes('已向物流商确认上述渠道'))!
-    label.querySelector<HTMLInputElement>('input')!.click(); await nextTick(); expect(button().disabled).toBe(false)
+    note.value = '已核对价格'; note.dispatchEvent(new Event('input', { bubbles: true })); await nextTick()
+    expect(button().disabled).toBe(false)
+    expect(host.textContent).not.toContain('已向物流商确认上述渠道')
     button().click(); await vi.waitFor(() => expect(mocks.publish).toHaveBeenCalledOnce())
-    expect(mocks.publish.mock.calls[0]?.[1]).toEqual([expect.objectContaining({ versionId: 'draft', effectiveDateConfirmed: true, reviewConfirmed: false })])
+    expect(mocks.publish.mock.calls[0]?.[1]).toEqual([expect.objectContaining({ versionId: 'draft', reviewConfirmed: false })])
   })
   it('blocks publication until acknowledged, resets on refresh, and sends the reviewed scope', async () => {
     sessionStorage.setItem('milano.logistics.active-batch.dataset', 'batch')

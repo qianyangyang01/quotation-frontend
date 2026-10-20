@@ -1,7 +1,6 @@
 package com.milano.quotation.logistics;
 
 import java.time.*;
-import java.time.format.DateTimeFormatter;
 import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
 
@@ -23,33 +22,31 @@ final class LogisticsEffectiveDate {
         }catch(DateTimeException e){throw new IllegalArgumentException("原表生效日期或时间无效，请核对原表",e);}
     }
 
-    static void requireConfirmation(JsonNode payload,boolean confirmed,Instant now) {
-        var reason=blockingReason(payload,now);
-        if(!reason.isBlank()&&(!confirmed||reason.contains("无效")))throw com.milano.quotation.common.AppException.unprocessable(reason);
-    }
-
+    /** Source dates are reference metadata, never a publication gate. */
     static void project(tools.jackson.databind.node.ObjectNode payload) {
-        var warning=blockingReason(payload,Instant.now());
-        payload.put("effectiveDateWarning",warning);
-        payload.put("effectiveDateRequiresConfirmation",!warning.isBlank());
-    }
-
-    static String blockingReason(JsonNode payload,Instant now) {
-        var dates=tools.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
-        for(var row:payload.path("rows"))if(row.has("effectiveAt"))dates.add(row.get("effectiveAt"));
-        return blockingDates(dates,now);
-    }
-
-    static String blockingDates(JsonNode dates,Instant now) {
-        Instant latest=null;
-        for(var date:dates) {
-            try {
-                var instant=OffsetDateTime.parse(date.asText()).toInstant();
-                if(latest==null||instant.isAfter(latest))latest=instant;
-            }catch(DateTimeException e){return "原表生效时间无效，请重新导入并核对";}
+        payload.put("effectiveDateWarning", "").put("effectiveDateRequiresConfirmation", false);
+        int removed=0;
+        for(var value:payload.path("issues")) {
+            if(isDateIssue(value)&&value.path("level").asText().equals("error")) {
+                var issue=(tools.jackson.databind.node.ObjectNode)value;
+                issue.put("level","warning").put("originalLevel","error");
+                removed++;
+            }
         }
-        if(latest==null||!latest.isAfter(now))return "";
-        return "原表生效时间为 "+DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(BUSINESS_ZONE).format(latest)
-                +"（北京时间），尚未到生效时间，请到期后发布，或明确确认物流商同意提前执行";
+        if(removed==0)return;
+        int remaining=0;
+        for(var issue:payload.path("issues"))if(issue.path("level").asText().equals("error"))remaining++;
+        int errors=Math.max(remaining,Math.max(0,payload.path("errors").asInt()-removed));
+        payload.put("errors",errors);
+        // Compact workspace/batch projections do not contain price rows.
+        boolean ready=errors==0&&payload.path("blockingReasons").isEmpty()
+                &&payload.path("pendingRows").asInt()==0
+                &&payload.path("templateStatus").asText("known").equals("known")
+                &&(payload.path("rowCount").asInt()>0||!payload.path("rows").isEmpty());
+        payload.put("pricingReady",ready).put("quoteReady",ready);
+    }
+
+    static boolean isDateIssue(JsonNode issue) {
+        return java.util.Set.of("生效时间","生效日期").contains(issue.path("field").asText());
     }
 }

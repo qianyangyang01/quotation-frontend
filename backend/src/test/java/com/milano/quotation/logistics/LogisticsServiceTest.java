@@ -14,36 +14,46 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class LogisticsServiceTest {
-    @Test void explicitEarlyConfirmationIsRecordedAndDoesNotRewriteSavedSourceTime() {
-        var p=provider("EARLY","物流商");var c=channel(p,"EARLY","渠道");var r=rows();
-        ((tools.jackson.databind.node.ObjectNode)r.get(0)).put("effectiveAt","2099-10-20T00:00+08:00");
-        var draft=version(c,"draft","EARLY",r);
-        var published=service.publishReviewed(c.id,draft.id,"物流商书面同意提前执行","ADMIN",true,true,true);
-        assertEquals("published",published.path("status").asText());
-        assertEquals("ADMIN",published.path("earlyEffectiveDateConfirmation").path("confirmedBy").asText());
-        assertFalse(published.path("earlyEffectiveDateConfirmation").path("confirmedAt").asText().isBlank());
-        assertEquals("2099-10-20T00:00+08:00",published.path("rows").get(0).path("effectiveAt").asText());
+    @Test void sourceDatesNeverRequirePublicationConfirmationAndRemainUnchanged() {
+        for(var date:List.of("2099-10-20T00:00+08:00","bad-date","2020-10-20T00:00+08:00")) {
+            var p=provider(date,"物流商");var c=channel(p,date,"渠道");var r=rows();
+            ((tools.jackson.databind.node.ObjectNode)r.get(0)).put("effectiveAt",date);
+            var draft=version(c,"draft",date,r);
+            var published=service.publishReviewed(c.id,draft.id,"审核发布","ADMIN",true,true);
+            assertEquals("published",published.path("status").asText());
+            assertEquals(date,published.path("rows").get(0).path("effectiveAt").asText());
+            assertFalse(published.has("earlyEffectiveDateConfirmation"));
+            assertFalse(published.path("effectiveDateRequiresConfirmation").asBoolean());
+        }
     }
-    @Test void explicitEarlyConfirmationCannotBypassInvalidDateOrProviderBatchPreflight() {
-        var p=provider("EARLY-BATCH","物流商");var c=channel(p,"EARLY-BATCH","渠道");var r=rows();
-        ((tools.jackson.databind.node.ObjectNode)r.get(0)).put("effectiveAt","bad-date");
-        var draft=version(c,"draft","EARLY-BATCH",r);
-        assertThrows(AppException.class,()->service.publishReviewed(c.id,draft.id,"确认","ADMIN",true,true,true));
+    @Test void providerBatchPublishesFutureDatesWithoutExtraConfirmation() {
+        var p=provider("DATE-BATCH","物流商");var c=channel(p,"DATE-BATCH","渠道");var r=rows();
         ((tools.jackson.databind.node.ObjectNode)r.get(0)).put("effectiveAt","2099-10-20T00:00+08:00");
-        var selections=JsonNodeFactory.instance.arrayNode();var selection=selections.addObject().put("channelId",c.id.toString()).put("versionId",draft.id.toString()).put("reviewConfirmed",true).put("removalConfirmed",true);
-        assertThrows(AppException.class,()->service.publishProviderBatch(p.id,selections,"确认","ADMIN"));
+        var draft=version(c,"draft","DATE-BATCH",r);
+        var selections=JsonNodeFactory.instance.arrayNode();selections.addObject().put("channelId",c.id.toString()).put("versionId",draft.id.toString()).put("reviewConfirmed",true).put("removalConfirmed",true);
+        service.publishProviderBatch(p.id,selections,"审核发布","ADMIN");assertEquals("published",draft.status);
+    }
+    @Test void legacyDateErrorsAreReferenceOnlyButUnrelatedErrorsStillBlock() {
+        var p=provider("DATE-LEGACY","物流商");var c=channel(p,"DATE-LEGACY","渠道");
+        var draft=version(c,"draft","DATE-LEGACY",rows());
+        var payload=(tools.jackson.databind.node.ObjectNode)draft.payload;
+        payload.put("errors",2);var issues=payload.putArray("issues");
+        issues.addObject().put("field","生效时间").put("level","error").put("message","同一处存在多个生效日期，请明确本表生效时间");
+        issues.addObject().put("field","价格").put("level","error").put("message","价格缺失");
+        assertThrows(AppException.class,()->service.publishReviewed(c.id,draft.id,"审核发布","ADMIN",true,true));
         assertEquals("draft",draft.status);assertNull(c.currentVersionId);
-        selection.put("effectiveDateConfirmed",true);
-        service.publishProviderBatch(p.id,selections,"物流商已确认提前执行","ADMIN");assertEquals("published",draft.status);
+        issues.remove(1);payload.put("errors",0);
+        var published=service.publishReviewed(c.id,draft.id,"审核发布","ADMIN",true,true);
+        assertEquals("published",published.path("status").asText());
+        assertEquals("warning",published.path("issues").get(0).path("level").asText());
+        assertEquals("error",published.path("issues").get(0).path("originalLevel").asText());
     }
-    @Test void futureSourceDateCannotBePublishedEvenWithRiskAndRemovalConfirmed() {
-        var p=provider("FUTURE","生效时间测试");var c=channel(p,"FUTURE-C","渠道");
-        var futureRows=rows();((tools.jackson.databind.node.ObjectNode)futureRows.get(0)).put("effectiveAt","2099-10-20T00:00+08:00");
-        var draft=version(c,"draft","FUTURE",futureRows);
-        var error=assertThrows(AppException.class,()->service.publishReviewed(c.id,draft.id,"已审核","ADMIN",true,true));
-        assertTrue(error.getMessage().contains("尚未到生效时间"));assertEquals("draft",draft.status);assertNull(c.currentVersionId);
-        ((tools.jackson.databind.node.ObjectNode)futureRows.get(0)).put("effectiveAt","2020-10-20T00:00+08:00");
-        assertDoesNotThrow(()->service.publishReviewed(c.id,draft.id,"到期发布","ADMIN",true,true));
+    @Test void legacyDateOnlyErrorCanBePublishedDirectly() {
+        var p=provider("DATE-ONLY","物流商");var c=channel(p,"DATE-ONLY","渠道");
+        var draft=version(c,"draft","DATE-ONLY",rows());var payload=(tools.jackson.databind.node.ObjectNode)draft.payload;
+        payload.put("errors",1).putArray("issues").addObject().put("field","生效时间").put("level","error").put("message","原表日期无效");
+        assertDoesNotThrow(()->service.publishReviewed(c.id,draft.id,"审核发布","ADMIN",true,true));
+        assertEquals("published",draft.status);
     }
     @Test void qiaojieDestinationGuardBlocksOldDraftBatchAndRollbackEvenAfterRename() {
         var p=provider("QJ","巧捷");var c=channel(p,QiaojieSourceRules.US_ONLY_CHANNEL_CODE,"改名的渠道");

@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="tongyou-epacket-2026.10.19-v10";
+    public static final String VERSION="source-date-reference-2026.10.20-v11";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -239,7 +239,7 @@ public class LogisticsSourceParser {
         }
         if(dates.size()>1)problem="原表表头存在冲突生效时间，请明确后重新导入";
         for(var channel:channels.values()) {
-            if(!problem.isBlank())issue(channel,0,"生效时间",problem,"error");
+            if(!problem.isBlank())channel.put("sourceEffectiveDateNote",problem);
             else if(dates.size()==1)for(var value:channel.path("rows")) {
                 ((ObjectNode)value).put("effectiveAt",dates.firstKey()).put("sourceEffectiveAtText",dates.firstEntry().getValue());
             }

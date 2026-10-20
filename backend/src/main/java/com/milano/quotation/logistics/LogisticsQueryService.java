@@ -106,7 +106,7 @@ public class LogisticsQueryService {
             where.append(" and status = :status");
             params.put("status", status);
         }
-        var select = "workspace_payload::text as payload, row_count, issue_count, " +
+        var select = "(workspace_payload || jsonb_build_object('issues',coalesce(payload->'issues','[]'::jsonb)))::text as payload, row_count, issue_count, " +
                 "jsonb_array_length(case when jsonb_typeof(payload->'diffRows')='array' then payload->'diffRows' else '[]'::jsonb end) as diff_count, " +
                 "country_count";
         return jsonPage("logistics_version" + where, select, "created_at desc", page, size, params, false);
@@ -485,6 +485,8 @@ public class LogisticsQueryService {
         var total = jdbc.sql("select count(*) from " + from).params(params).query(Long.class).single();
         List<JsonNode> items = jdbc.sql("select item::text as payload from " + from + " order by ordinal limit :limit offset :offset")
                 .params(withPage(params, page, size)).query((rs, rowNum) -> (JsonNode) json(rs.getString("payload"))).list();
+        if(field.equals("issues"))for(var item:items)if(LogisticsEffectiveDate.isDateIssue(item)&&item.path("level").asText().equals("error"))
+            ((ObjectNode)item).put("level","warning").put("originalLevel","error");
         return new PageResponse<>(items, page, size, total, pages(total, size));
     }
 
@@ -503,6 +505,8 @@ public class LogisticsQueryService {
                         body.put("issueCount", rs.getLong("issue_count"));
                         body.put("diffCount", rs.getLong("diff_count"));
                         body.put("countryCount", rs.getLong("country_count"));
+                        LogisticsEffectiveDate.project(body);
+                        body.remove("issues");
                     }
                     return (JsonNode) body;
                 }).list();
