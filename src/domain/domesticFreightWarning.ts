@@ -6,12 +6,9 @@ export interface DomesticFreightWarning {
   regionLabel: string
   quantity: number
   weightG: number
-  totalWeightG: number
   chargeableKg: number
   rate?: 1.5 | 3
   actualTotal: number
-  expectedTotal: number
-  excessTotal: number
   actualUnit: number
   expectedUnit: number
   excessUnit: number
@@ -31,27 +28,25 @@ export function getDomesticFreightWarning(record: PurchaseProductRecord, purchas
     const selected = purchaseQuoteFreight(record, purchaseTier).choice
     if (!selected || ![1, 10, 100].includes(selected.quantity) || !Number.isFinite(selected.totalFreightCny) || selected.totalFreightCny < 0) return null
     const region = resolveFactoryRegion(record.factoryInfo)
-    const totalWeight = decimal(record.weightG).times(selected.quantity)
-    const chargeable = totalWeight.div(1000).ceil()
+    // Compare the allocated per-item cost with the single-item shipping rule.
+    // The source freight tier determines allocation, never billable weight.
+    const chargeable = decimal(record.weightG).div(1000).ceil()
     const rate = region.continuationRateCny
     if (chargeable.greaterThan(1) && rate == null) return null
     const expected = decimal(5).plus(chargeable.minus(1).times(rate ?? 0))
-    const actual = decimal(selected.totalFreightCny)
+    const actual = decimal(selected.totalFreightCny).div(selected.quantity)
     if (!actual.greaterThan(expected.times('1.5'))) return null
     const excess = actual.minus(expected)
     const warning: DomesticFreightWarning = {
       regionLabel: region.regionLabel,
       quantity: selected.quantity,
       weightG: record.weightG,
-      totalWeightG: totalWeight.toNumber(),
       chargeableKg: chargeable.toNumber(),
       ...(rate == null ? {} : { rate }),
-      actualTotal: actual.toNumber(),
-      expectedTotal: expected.toNumber(),
-      excessTotal: excess.toNumber(),
-      actualUnit: actual.div(selected.quantity).toNumber(),
-      expectedUnit: expected.div(selected.quantity).toNumber(),
-      excessUnit: excess.div(selected.quantity).toNumber(),
+      actualTotal: selected.totalFreightCny,
+      actualUnit: actual.toNumber(),
+      expectedUnit: expected.toNumber(),
+      excessUnit: excess.toNumber(),
     }
     return Object.values(warning).some(value => typeof value === 'number' && !Number.isFinite(value)) ? null : warning
   } catch {

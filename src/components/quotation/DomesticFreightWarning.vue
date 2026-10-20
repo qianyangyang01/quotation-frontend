@@ -15,18 +15,18 @@ const money = (value: number) => value.toLocaleString('zh-CN', { minimumFraction
     </div>
     <div v-if="canViewPurchaseCost" class="warning-values">
       <span>工厂地区：<b>{{ warning.regionLabel }}</b></span>
-      <span>{{ warning.quantity === 1 ? '当前国内运费' : `当前 ${warning.quantity} 件总运费` }}：<b>¥{{ money(warning.actualTotal) }} / {{ warning.quantity === 1 ? '件' : `${warning.quantity}件` }}</b></span>
-      <span>规则参考金额：<b>¥{{ money(warning.expectedTotal) }} / {{ warning.quantity === 1 ? '件' : `${warning.quantity}件` }}</b></span>
-      <span>超出：<b class="warning-excess">¥{{ money(warning.excessTotal) }}</b></span>
+      <span>当前国内运费：<b>¥{{ money(warning.actualUnit) }} / 件</b></span>
+      <span>单件参考运费：<b>¥{{ money(warning.expectedUnit) }} / 件</b></span>
+      <span>每件高于参考价：<b class="warning-excess">¥{{ money(warning.excessUnit) }}</b></span>
     </div>
     <div class="warning-footer">
-      <p v-if="canViewPurchaseCost" class="warning-calculation">计算依据：{{ number(warning.weightG) }}g × {{ warning.quantity }}件 = {{ number(warning.totalWeightG) }}g → 按 {{ warning.chargeableKg }}kg 计费；首重 5 元<span v-if="warning.chargeableKg > 1"> + 续重 {{ warning.chargeableKg - 1 }}kg × {{ warning.rate }} 元</span> = {{ number(warning.expectedTotal) }} 元<span v-if="warning.quantity > 1">（折合 ¥{{ money(warning.expectedUnit) }}/件）</span></p>
-      <p class="warning-advisory">实际运费超过参考金额 50% 时预警。本提示仅供核对，可继续正常报价。</p>
+      <p v-if="canViewPurchaseCost" class="warning-calculation">计算依据：单件 {{ number(warning.weightG) }}g → 按 {{ warning.chargeableKg }}kg 计费；首重 5 元<span v-if="warning.chargeableKg > 1"> + 续重 {{ warning.chargeableKg - 1 }}kg × {{ warning.rate }} 元</span> = {{ number(warning.expectedUnit) }} 元/件。当前运费来源：{{ warning.quantity }}件总运费 ¥{{ money(warning.actualTotal) }} ÷ {{ warning.quantity }} = ¥{{ money(warning.actualUnit) }}/件。</p>
+      <p class="warning-advisory">当前每件运费超过单件参考运费 50% 时预警。本提示仅供核对，可继续正常报价。</p>
       <details class="warning-rules">
         <summary>查看计算规则</summary>
         <div>
           <p>国内运费首重 1kg 为 5 元，不足 1kg 也按 1kg；超过部分向上取整到整公斤。工厂位于江苏、浙江、上海、安徽，续重每公斤 1.5 元；其他已确认地区为 3 元。</p>
-          <p>按当前采购阶梯实际采用的运费档位，用采购单件克重 × 该档件数核对总运费；高阶梯缺失时跟随实际回退档位。实际运费严格大于参考金额的 1.5 倍时预警，正好超出 50% 不预警，不改变采购运费和报价。</p>
+          <p>按当前采购阶梯实际采用的运费档位，将总运费除以该档件数，得到当前每件运费；高阶梯缺失时跟随实际回退档位。参考运费按采购单件克重计算，10件、100件档位只用于分摊运费，不合并重量。当前每件运费严格大于单件参考运费的 1.5 倍时预警，正好超出 50% 不预警，不改变采购运费和报价。</p>
           <p>不使用国际运费、包材重量或业务员指定重量。判断资料不足时不作超额结论；首重以内无需地区也能核对。采购更新后重新查询商品，会按最新资料重新判断。</p>
         </div>
       </details>
