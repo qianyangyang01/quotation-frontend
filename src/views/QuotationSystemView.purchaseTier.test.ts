@@ -5,7 +5,8 @@ import { setPricingTestPermissions, clearPricingTestPermissions } from '@/test/p
 beforeEach(() => setPricingTestPermissions())
 afterEach(clearPricingTestPermissions)
 import View from './QuotationSystemView.vue'
-import type { BundleQuoteItem, QuotationProduct } from '@/components/quotation/types'
+import type { BundleQuoteItem, QuotationMode, QuotationProduct } from '@/components/quotation/types'
+import { loadPurchaseProduct, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { api } from '@/services/http'
 import { clearFinanceSettingsCache } from '@/services/financeSettings'
 import type { QuotationDraftPayload } from '@/services/quotationDrafts'
@@ -30,6 +31,8 @@ let host: HTMLDivElement
 let purchaseOverride: Record<string, unknown> = {}
 let state: {
   queryProduct: () => Promise<void>
+  batchReady: boolean
+  primeBatchProduct: (purchase: PurchaseProductRecord) => void
   singleFreightWarning: import('@/domain/domesticFreightWarning').DomesticFreightWarning | null
   bundleFreightWarnings: Record<number, import('@/domain/domesticFreightWarning').DomesticFreightWarning | null>
   skuSearch: string
@@ -49,7 +52,7 @@ let state: {
   applyDraftPayload: (payload: QuotationDraftPayload, purchases?: undefined, options?: { restoreQuotation?: boolean }) => Promise<void>
   updateBundleItemQuantity: (item: BundleQuoteItem) => void
   queryBundleItem: (item: BundleQuoteItem, options: { loadLogistics: boolean; announce: boolean }) => Promise<boolean>
-  changeQuoteMode: (mode: 'single' | 'bundle') => void
+  changeQuoteMode: (mode: QuotationMode | 'fob') => void
   addBundleItem: () => void
   removeBundleItem: (id: number) => void
   hasQueriedQuotationProduct: boolean
@@ -64,7 +67,7 @@ let state: {
 beforeEach(() => { vi.clearAllMocks(); clearFinanceSettingsCache(); purchaseOverride = {} })
 afterEach(() => { app?.unmount(); app = undefined; host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache(); replaceLogisticsRules([]) })
 
-async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<string | undefined> = [], secondSku = 'SINGLE', omitProductSnapshot = false, sku = record.sku) {
+async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<string | undefined> = [], secondSku = 'SINGLE', omitProductSnapshot = false, sku = record.sku, batchCapture = false) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
     if (path === '/finance-settings') return {
       'country-classification': { value: [], _version: 1 }, 'channel-policies': { value: [{id:'普货',category:'普货',enabled:true,countryRules:[{country:'美国',allowedChannels:['1::测试::A']}]}], _version: 1 },
@@ -91,10 +94,16 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<st
   })
   vi.spyOn(api, 'put').mockResolvedValue({ exists: true, version: 2, updatedAt: 'test' })
   host = document.createElement('div'); document.body.append(host)
-  app = createApp(View, { resumeQuoteId: 'withdrawn' })
+  app = createApp(View, batchCapture ? { batchCapture: true, batchInitialSku: sku, batchSkus: [sku] } : { resumeQuoteId: 'withdrawn' })
+  app.component('RouterLink', { template: '<a><slot /></a>' })
   const vm = app.mount(host)
   state = (vm.$ as unknown as { setupState: typeof state }).setupState
-  await vi.waitFor(() => expect(state.draftReady).toBe(true))
+  await vi.waitFor(() => expect(batchCapture ? state.batchReady : state.draftReady).toBe(true))
+  if (batchCapture) {
+    state.primeBatchProduct(await loadPurchaseProduct(sku))
+    await nextTick()
+    return
+  }
   if (mode === 'single') await state.queryProduct()
   else await state.queryBundleItems()
   await nextTick()
@@ -224,6 +233,29 @@ const warningPurchase = {
   factoryInfo: '浙江省义乌市示例工厂', weightG: 1150, minOrderQty: 1, tier2MinQty: 20, tier2PriceCny: 12,
   tier3MinQty: 500, tier3PriceCny: 10, freight10Cny: 100, freight100Cny: 5,
 }
+
+it('suppresses freight warnings in the batch calculator while retaining purchase freight across tiers', async () => {
+  purchaseOverride = { ...warningPurchase, freight100Cny: 1000 }
+  await mount('single', '10', [], 'SINGLE', false, record.sku, true)
+  expect(state.products[0]!.sku).toBe(record.sku)
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(10)
+  expect(state.singleFreightWarning).toBeNull()
+  expect(host.querySelector('.domestic-freight-warning')).toBeNull()
+  await selectTier('100+')
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(10)
+  expect(state.singleFreightWarning).toBeNull()
+  expect(host.querySelector('.domestic-freight-warning')).toBeNull()
+})
+
+it.each(['freight-trial', 'shipping-only', 'fob'] as const)('does not carry ordinary SKU freight warnings into %s', async mode => {
+  purchaseOverride = warningPurchase
+  await mount('single')
+  expect(state.singleFreightWarning).not.toBeNull()
+  state.changeQuoteMode(mode); await nextTick()
+  expect(state.singleFreightWarning).toBeNull()
+  expect(Object.values(state.bundleFreightWarnings).every(warning => warning === null)).toBe(true)
+  expect(host.querySelector('.domestic-freight-warning')).toBeNull()
+})
 
 it.each([
   { freight10Cny: 34, unit: 3.4 },

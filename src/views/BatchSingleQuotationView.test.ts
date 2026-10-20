@@ -34,6 +34,56 @@ it('protects an unsaved batch when following a notification and lets the user st
 const button = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text)!
 beforeEach(() => { setPricingTestPermissions(['quote']); vi.clearAllMocks(); calculate.mockImplementation(async sku => item(sku)); vi.mocked(loadPurchaseProduct).mockImplementation(async sku => ({ sku, quoteReady: true }) as never); vi.mocked(saveBatchSingle).mockImplementation(async document => ({ ...document, no: 'BATCH-TEST', createdRecords: document.items.map((item,i)=>({id:String(i),no:'QT'+i,primarySku:item.input.primarySku,quoteMode:'single' as const})) })) })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.unstubAllGlobals(); clearPricingTestPermissions() })
+it('excludes pending legacy invoices during lookup and saves the other seventeen SKUs, including confirmed zero tax', async () => {
+ const writeText = vi.fn().mockResolvedValue(undefined)
+ vi.stubGlobal('navigator', { clipboard: { writeText } })
+ vi.mocked(loadPurchaseProduct).mockImplementation(async sku => ({
+  sku, quoteReady: true, dataSource: 'legacy_2026', taxPoint: 0,
+  invoiceType: ['SKU1', 'SKU2'].includes(sku) ? '待确认' : '普票',
+ }) as never)
+ await mount(19)
+ expect(document.body.textContent).toContain('可继续报价 17 个 · 异常 2 个')
+ expect(document.body.textContent).toContain('采购票点为待确认，不可报价')
+ for (const index of [1, 2]) {
+  const checkbox = document.querySelector<HTMLInputElement>(`[aria-label="选入 SKU${index} 第${index + 1}行"]`)!
+  expect(checkbox.checked).toBe(false)
+  expect(checkbox.disabled).toBe(true)
+ }
+ button('复制异常 SKU').click(); await nextTick()
+ expect(writeText).toHaveBeenCalledWith('SKU1\nSKU2')
+ button('应用条件并生成批量报价').click()
+ await vi.waitFor(() => expect(document.body.textContent).toContain('17个成功，0个待处理'))
+ expect(calculate.mock.calls.map(call => call[0])).not.toContain('SKU1')
+ expect(calculate.mock.calls.map(call => call[0])).not.toContain('SKU2')
+ expect(button('保存 17 条报价记录').disabled).toBe(false)
+ button('保存 17 条报价记录').click()
+ await vi.waitFor(() => expect(saveBatchSingle).toHaveBeenCalledOnce())
+ const skus = vi.mocked(saveBatchSingle).mock.calls[0]![0].items.map(entry => entry.input.primarySku)
+ expect(skus).toHaveLength(17)
+ expect(skus).toContain('SKU0')
+ expect(skus).not.toContain('SKU1')
+ expect(skus).not.toContain('SKU2')
+})
+
+it('does not prime an all-pending invoice batch and includes it again after procurement confirms the invoices', async () => {
+ vi.mocked(loadPurchaseProduct).mockImplementation(async sku => ({
+  sku, quoteReady: true, dataSource: 'legacy_2026', invoiceType: '待确认',
+ }) as never)
+ await mount(2, undefined, false)
+ expect(prime).not.toHaveBeenCalled()
+ expect(document.body.textContent).toContain('可继续报价 0 个 · 异常 2 个')
+ expect(calculate).not.toHaveBeenCalled()
+ expect(saveBatchSingle).not.toHaveBeenCalled()
+ vi.mocked(loadPurchaseProduct).mockImplementation(async sku => ({
+  sku, quoteReady: true, dataSource: 'legacy_2026', invoiceType: '普票', taxPoint: 0,
+ }) as never)
+ button('重新查询 SKU').click()
+ await vi.waitFor(() => expect(prime).toHaveBeenCalledOnce())
+ expect(prime).toHaveBeenCalledWith(expect.objectContaining({ sku: 'SKU0' }))
+ expect(document.body.textContent).toContain('可继续报价 2 个 · 异常 0 个')
+ expect(document.body.textContent).not.toContain('采购票点为待确认，不可报价')
+})
+
 it('automatically excludes five query failures and quotes the other fifteen with one exception-copy action', async () => {
  const writeText=vi.fn().mockResolvedValue(undefined)
  vi.stubGlobal('navigator',{clipboard:{writeText}})
@@ -106,17 +156,23 @@ it('hides but keeps the calculator mounted, stops after the in-flight SKU and re
  expect(button('保存 4 条报价记录').disabled).toBe(false)
 })
 
-it('shows partial results after failure, retries only the failed SKU and saves all selected rows despite filtering', async () => {
+it('automatically excludes calculation failures, retries only failed SKUs and restores successful retries to the save selection', async () => {
  await mount(3)
  calculate.mockImplementationOnce(async () => { throw new Error('渠道加载超时') })
  button('应用条件并生成批量报价').click()
- await vi.waitFor(() => expect(document.body.textContent).toContain('2个成功，1个待处理'))
+ await vi.waitFor(() => expect(document.body.textContent).toContain('2个成功，0个待处理，1个异常已排除'))
  expect(document.querySelectorAll('.result-card .batch-sheet tbody tr, .result-card .sheet-editor-scroll tbody tr')).toHaveLength(2)
  expect(document.querySelector('.pending-panel')!.textContent).toContain('渠道加载超时')
- expect(button('保存 3 条报价记录').disabled).toBe(true)
- button('仅重试失败 / 未完成项').click()
+ expect(button('保存 2 条报价记录').disabled).toBe(false)
+ calculate.mockImplementationOnce(async () => { throw new Error('渠道仍不可用') })
+ button('重试异常 / 未完成项').click()
+ await vi.waitFor(() => expect(document.body.textContent).toContain('渠道仍不可用'))
+ expect(button('保存 2 条报价记录').disabled).toBe(false)
+ expect(document.querySelector<HTMLInputElement>('[aria-label="选入 SKU1 第2行"]')!.checked).toBe(false)
+ button('重试异常 / 未完成项').click()
  await vi.waitFor(() => expect(document.body.textContent).toContain('3个成功'))
- expect(calculate.mock.calls.map(call => call[0])).toEqual(['SKU1','SKU2','SKU1'])
+ expect(calculate.mock.calls.map(call => call[0])).toEqual(['SKU1','SKU2','SKU1','SKU1'])
+ expect(document.querySelector<HTMLInputElement>('[aria-label="选入 SKU1 第2行"]')!.checked).toBe(true)
  const search = document.querySelector<HTMLInputElement>('[aria-label="搜索报价单 SKU"]')!
  search.value='SKU2'; search.dispatchEvent(new Event('input')); await nextTick()
  expect(document.querySelectorAll('.result-card .batch-sheet tbody tr, .result-card .sheet-editor-scroll tbody tr')).toHaveLength(1)
@@ -127,17 +183,30 @@ it('shows partial results after failure, retries only the failed SKU and saves a
  expect(documentInput.sheet.rows).toHaveLength(3)
 })
 
-it('requires explicit deselection before saving successful items from an incomplete batch', async () => {
- await mount(3)
- calculate.mockImplementationOnce(async () => { throw new Error('缺少渠道') })
+it('saves seventeen successful SKUs directly when two fail during generation without opening details or changing checkboxes', async () => {
+ await mount(19)
+ calculate.mockImplementation(async sku => {
+  if (['SKU1', 'SKU2'].includes(sku)) throw new Error('采购票点为待确认，不可报价')
+  return item(sku)
+ })
  button('应用条件并生成批量报价').click()
- await vi.waitFor(() => expect(document.body.textContent).toContain('2个成功，1个待处理'))
- const check = document.querySelector<HTMLInputElement>('[aria-label="选入 SKU1 第2行"]')!
- check.click(); await nextTick()
- expect(button('保存 2 条报价记录').disabled).toBe(false)
- button('保存 2 条报价记录').click()
+ await vi.waitFor(() => expect(document.body.textContent).toContain('17个成功，0个待处理，2个异常已排除'))
+ expect(document.querySelector<HTMLDetailsElement>('.processing-card details')!.open).toBe(false)
+ for (const index of [1, 2]) {
+  const check = document.querySelector<HTMLInputElement>(`[aria-label="选入 SKU${index} 第${index + 1}行"]`)!
+  expect(check.checked).toBe(false)
+  expect(check.disabled).toBe(true)
+ }
+ expect(document.querySelector('.excluded-panel')!.textContent).toContain('可直接保存其余成功商品')
+ expect(button('保存 17 条报价记录').disabled).toBe(false)
+ button('保存 17 条报价记录').click()
  await vi.waitFor(() => expect(saveBatchSingle).toHaveBeenCalledTimes(1))
- expect(vi.mocked(saveBatchSingle).mock.calls[0]![0].items.map(entry => entry.input.primarySku)).toEqual(['SKU0','SKU2'])
+ const skus = vi.mocked(saveBatchSingle).mock.calls[0]![0].items.map(entry => entry.input.primarySku)
+ expect(skus).toHaveLength(17)
+ expect(skus).not.toContain('SKU1')
+ expect(skus).not.toContain('SKU2')
+ expect(document.querySelector('.excluded-panel')!.textContent).toContain('本次保存未包含这些商品')
+ expect(button('重试异常 / 未完成项')).toBeUndefined()
 })
 
 it('restores the editor after validation fails and never generates or saves', async () => {

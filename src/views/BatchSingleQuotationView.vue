@@ -11,8 +11,7 @@ import BatchSingleSheet from '@/components/quotation/BatchSingleSheet.vue'
 import BatchSingleRecordDetail from '@/components/quotation/BatchSingleRecordDetail.vue'
 import BatchQuotationProgress from '@/components/quotation/BatchQuotationProgress.vue'
 import BatchSingleSheetEditor from '@/components/quotation/BatchSingleSheetEditor.vue'
-import DomesticFreightWarningPanel from '@/components/quotation/DomesticFreightWarning.vue'
-import type { DomesticFreightWarning } from '@/domain/domesticFreightWarning'
+import { purchaseInvoicePending, PURCHASE_INVOICE_PENDING_MESSAGE } from '@/services/purchaseInvoiceConfirmation'
 import { batchLineState, batchQueryLabels, batchQueryFailure, batchFollowupText, deferredBatchLines } from '@/services/batchSingleReadiness'
 
 const route = useRoute()
@@ -44,17 +43,9 @@ const records = ref<Awaited<ReturnType<typeof loadBatchSingleRecords>>>({ items:
 const historyOpen = ref(false), historyBusy = ref(false), page = ref(0), scope = ref('mine')
 let disposed = false, generation = 0, lastRequest = '', saveKey = '', historyGeneration = 0
 const selected = computed(() => lines.value.filter(line => line.selected))
-// Only current, unsaved workbench feedback; never added to the customer sheet or saved records.
-const freightWarnings = ref<Record<string, DomesticFreightWarning | null>>({})
-let freightWarningTier = ''
-const freightWarningLines = computed(() => selected.value.filter(line => freightWarnings.value[line.sku]))
-function updateFreightWarning(value: { sku: string; purchaseTier: string; warning: DomesticFreightWarning | null }) {
-  if (freightWarningTier !== value.purchaseTier) freightWarnings.value = {}
-  freightWarningTier = value.purchaseTier
-  freightWarnings.value[value.sku] = value.warning
-}
 const completed = computed(() => selected.value.filter(line => line.item && !line.error))
 const unfinished = computed(() => selected.value.filter(line => !line.item || line.error))
+const failedLines = computed(() => lines.value.filter(line => line.queried && line.error && !line.item))
 const partial = computed(() => {
   if (!completed.value.length) return undefined
   try { return mergeBatchSingle(completed.value.map(line => line.item!)) } catch { return undefined }
@@ -68,7 +59,6 @@ const combined = computed(() => {
 onErrorCaptured(e => { engineFailed.value = true; running.value = false; generating.value = false; validating.value = false; generation++; error.value = `批量工作区异常：${e.message}。可重新打开此功能，普通报价仍可使用。`; return false })
 async function prepare() {
   if (locked.value) return
-  freightWarnings.value = {}
   error.value = ''; saved.value = undefined; correction.value = undefined; seed.value = undefined; stopped.value = false; processingPage.value = 0; followupMessage.value = ''; sheetBusy.value = false
   try { lines.value = parseBatchSingleSkus(text.value) }
   catch (e) { error.value = e instanceof Error ? e.message : 'SKU清单无效'; return }
@@ -85,6 +75,7 @@ async function prepare() {
         const purchase = await loadPurchaseProduct(line.sku)
         if (disposed || token !== generation || account !== currentAuthUser.value.account) return
         if (!purchase.quoteReady) { line.queryState = 'incomplete'; line.error = purchaseQuoteBlockingMessage(purchase) || '采购资料不完整'; line.selected = false; continue }
+        if (purchaseInvoicePending(purchase)) { line.queryState = 'incomplete'; line.error = PURCHASE_INVOICE_PENDING_MESSAGE; line.selected = false; continue }
         line.queried = true; line.queryState = 'ready'; first ??= purchase
       } catch (e) { if (disposed || token !== generation || account !== currentAuthUser.value.account) return; line.queryState = batchQueryFailure(e); line.error = e instanceof Error ? e.message : '查询失败，可重新查询'; line.selected = false }
     }
@@ -107,7 +98,6 @@ async function goToConditions() { if (locked.value) return; await edit(); await 
 function preparing(value: boolean) {
   validating.value = value
   if (value) {
-    freightWarnings.value = {}
     // Invalidate previous prices before the user's new conditions are captured.
     for (const line of lines.value) { line.item = undefined; if (line.queried) line.error = '' }
     seed.value = undefined; stopped.value = false
@@ -120,13 +110,14 @@ async function captured(first: BatchSingleItem) {
 }
 async function generate(first: BatchSingleItem, retry = false) {
   const token = ++generation, account = currentAuthUser.value.account
-  const candidates = [...(retry ? unfinished.value : selected.value)], quantities = first.input.customerQuote!.quantities
+  const candidates = retry ? [...new Set([...unfinished.value, ...failedLines.value])] : [...selected.value]
+  const quantities = first.input.customerQuote!.quantities
   if (!candidates.length) return
   const fresh = () => !disposed && token === generation && account === currentAuthUser.value.account
   seed.value = JSON.parse(JSON.stringify(first))
   running.value = true; generating.value = true; stopping.value = false; stopped.value = false
   error.value = ''; saved.value = undefined; currentSku.value = candidates[0]!.sku
-  for (const line of candidates) { line.item = undefined; line.error = '' }
+  for (const line of candidates) { line.selected = true; line.item = undefined; line.error = '' }
   showEditor.value = false
   try {
     await nextTick()
@@ -142,16 +133,16 @@ async function generate(first: BatchSingleItem, retry = false) {
         line.item = item
       } catch (e) { if (!fresh()) return; line.error = e instanceof Error ? e.message : '查询失败，请重试' }
     }
+    for (const line of candidates) if (line.error) line.selected = false
     stopped.value = stopping.value && unfinished.value.some(line => !line.error)
-    progress.value = `${stopped.value ? '已停止' : '已完成'}：${completed.value.length}个成功，${unfinished.value.length}个待处理`
-    if (!combined.value && !unfinished.value.length) error.value = '各 SKU 的客户、汇率或数量列不一致，请统一重新生成'
+    progress.value = `${stopped.value ? '已停止' : '已完成'}：${completed.value.length}个成功，${unfinished.value.length}个待处理${failedLines.value.length ? `，${failedLines.value.length}个异常已排除` : ''}`
+    if (selected.value.length && !combined.value && !unfinished.value.length) error.value = '各 SKU 的客户、汇率或数量列不一致，请统一重新生成'
   } finally { if (token === generation) { running.value = false; generating.value = false; stopping.value = false; currentSku.value = '' } }
 }
 function stop() { if (generating.value) stopping.value = true }
-async function retryUnfinished() { if (!locked.value && seed.value && !engineFailed.value) await generate(seed.value, true) }
+async function retryUnfinished() { if (!locked.value && !saved.value && seed.value && !engineFailed.value) await generate(seed.value, true) }
 async function edit() {
   if (locked.value) return
-  freightWarnings.value = {}
   saved.value = undefined; stopped.value = false
   await engine.value?.restoreBatchSample()
   showEditor.value = true
@@ -212,7 +203,7 @@ async function beginCorrection(index: number) {
   } catch (e) { if (!disposed && token === generation && account === currentAuthUser.value.account) { showEditor.value = true; error.value = e instanceof Error ? e.message : '重新查询失败'; if (lines.value[0]) lines.value[0].error = error.value } }
   finally { if (token === generation) { running.value = false; generating.value = false; stopping.value = false; currentSku.value = '' } }
 }
-async function reset() { freightWarnings.value = {}; freightWarningTier = ""; generation++; active.value = false; running.value = false; saving.value = false; validating.value = false; generating.value = false; stopping.value = false; stopped.value = false; seed.value = undefined; await nextTick(); lines.value = []; correction.value = undefined; inputExpanded.value = true; progress.value = ''; processingPage.value = 0; saved.value = undefined; error.value = ''; engineFailed.value = false; followupMessage.value = ''; sheetBusy.value = false }
+async function reset() { generation++; active.value = false; running.value = false; saving.value = false; validating.value = false; generating.value = false; stopping.value = false; stopped.value = false; seed.value = undefined; await nextTick(); lines.value = []; correction.value = undefined; inputExpanded.value = true; progress.value = ''; processingPage.value = 0; saved.value = undefined; error.value = ''; engineFailed.value = false; followupMessage.value = ''; sheetBusy.value = false }
 watch(() => currentAuthUser.value.account, () => { historyGeneration++; historyOpen.value = false; historyDocument.value = undefined; records.value = { items: [], total: 0 }; void reset() })
 const unsavedBatch = computed(() => !saved.value && !!(text.value.trim() || active.value))
 onBeforeRouteLeave(() => !locked.value && (!unsavedBatch.value || window.confirm('当前批量报价尚未保存，离开将丢失本批内容。建议先保存本批报价，再处理小铃铛中的待办。确定离开？')))
@@ -246,17 +237,16 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
       <section v-if="lines.length" class="card readiness-card">
         <div class="readiness-summary"><div><h2>查询结果</h2><p>共 {{ lines.length }} 个 SKU · 可继续报价 {{ readyLines.length }} 个 · 异常 {{ followupLines.length }} 个</p><p v-if="followupLines.length">资料异常的 SKU 已默认不勾选，可报价的 SKU 直接继续报价。</p></div><button v-if="followupLines.length" :disabled="locked" @click="copyFollowup">复制异常 SKU</button></div>
         <p v-if="followupMessage" role="status">{{ followupMessage }}</p>
-      </section><section v-if="lines.length" class="card processing-card"><details :open="showEditor && !batchBusy"><summary>SKU 处理清单 · 已选 {{ selected.length }} 个 <span>{{ progress }}</span></summary><header><h2>02 SKU 处理清单</h2><p role="status">{{ progress }}</p><button class="primary" :disabled="locked || !selected.length" @click="goToConditions">设置条件与渠道 ↓</button></header><div ref="processingScroll" class="processing-scroll"><table><thead><tr><th>选入</th><th>SKU</th><th>状态</th><th>明细数</th></tr></thead><tbody><tr v-for="{ line, index } in visibleLines" :key="index"><td><input v-model="line.selected" type="checkbox" :aria-label="`选入 ${line.sku} 第${index+1}行`" :disabled="locked || !!saved || !line.queried"></td><td>{{ line.sku }}</td><td :class="{error:line.error}"><strong>{{ line.item && !line.error ? '报价已生成' : line.queried && line.error ? '报价异常，待处理' : batchQueryLabels[batchLineState(line)] }}</strong><small class="line-reason">{{ line.error || (line.deferred ? '已暂缓，可下次再报价' : line.queried ? '采购资料齐全，待按所选渠道校验报价' : '') }}</small></td><td>{{ line.item?.sheet.rows.length ?? '—' }}</td></tr></tbody></table></div><nav class="processing-pagination" aria-label="SKU处理清单分页"><span>共 {{ lines.length }} 个SKU · 已选 {{ selected.length }} 个</span><label>每页 <select v-model.number="processingSize" aria-label="每页处理SKU数"><option :value="10">10</option><option :value="20">20</option><option :value="50">50</option></select> 个</label><div><button :disabled="processingPage===0" @click="processingPage--">上一页</button><span>{{ processingPage+1 }} / {{ processingPages }}</span><button :disabled="processingPage+1>=processingPages" @click="processingPage++">下一页</button></div></nav><p v-if="lines.some(l=>l.error)">{{ lines.some(line => line.queried && line.error) ? '生成报价时出现异常的 SKU 可重试，或取消勾选后保存其余商品。' : '资料异常的 SKU 已自动排除，可复制后下次再查询报价。' }}</p></details></section>
+      </section><section v-if="lines.length" class="card processing-card"><details :open="showEditor && !batchBusy"><summary>SKU 处理清单 · 已选 {{ selected.length }} 个 <span>{{ progress }}</span></summary><header><h2>02 SKU 处理清单</h2><p role="status">{{ progress }}</p><button class="primary" :disabled="locked || !selected.length" @click="goToConditions">设置条件与渠道 ↓</button></header><div ref="processingScroll" class="processing-scroll"><table><thead><tr><th>选入</th><th>SKU</th><th>状态</th><th>明细数</th></tr></thead><tbody><tr v-for="{ line, index } in visibleLines" :key="index"><td><input v-model="line.selected" type="checkbox" :aria-label="`选入 ${line.sku} 第${index+1}行`" :disabled="locked || !!saved || !line.queried || !!line.error"></td><td>{{ line.sku }}</td><td :class="{error:line.error}"><strong>{{ line.item && !line.error ? '报价已生成' : line.queried && line.error ? '报价异常，已自动排除' : batchQueryLabels[batchLineState(line)] }}</strong><small class="line-reason">{{ line.error || (line.deferred ? '已暂缓，可下次再报价' : line.queried ? '采购资料齐全，待按所选渠道校验报价' : '') }}</small></td><td>{{ line.item?.sheet.rows.length ?? '—' }}</td></tr></tbody></table></div><nav class="processing-pagination" aria-label="SKU处理清单分页"><span>共 {{ lines.length }} 个SKU · 已选 {{ selected.length }} 个</span><label>每页 <select v-model.number="processingSize" aria-label="每页处理SKU数"><option :value="10">10</option><option :value="20">20</option><option :value="50">50</option></select> 个</label><div><button :disabled="processingPage===0" @click="processingPage--">上一页</button><span>{{ processingPage+1 }} / {{ processingPages }}</span><button :disabled="processingPage+1>=processingPages" @click="processingPage++">下一页</button></div></nav><p v-if="lines.some(l=>l.error)">{{ lines.some(line => line.queried && line.error) ? '生成报价时出现异常的 SKU 已自动取消勾选，可直接保存其余商品；异常项可单独重试。' : '资料异常的 SKU 已自动排除，可复制后下次再查询报价。' }}</p></details></section>
       <section v-if="active && !engineFailed" v-show="showEditor && !batchBusy" ref="editorSection" class="editor card" :inert="locked || undefined">
         <h2>02 设置公共条件与渠道</h2><p>当前已选 {{ selected.length }} 个 SKU，以下公共条件统一应用。加载渠道并选择方案后，点击“生成整批报价”；系统会按各 SKU 的成本和重量分别计算。</p>
-        <Workbench ref="engine" batch-capture :batch-size="selected.length" :batch-skus="selected.map(line => line.sku)" @batch-sample-busy="sheetBusy=$event" :batch-initial-sku="selected[0]?.sku" @batch-captured="captured" @batch-preparing="preparing" @batch-freight-warning="updateFreightWarning" />
+        <Workbench ref="engine" batch-capture :batch-size="selected.length" :batch-skus="selected.map(line => line.sku)" @batch-sample-busy="sheetBusy=$event" :batch-initial-sku="selected[0]?.sku" @batch-captured="captured" @batch-preparing="preparing" />
       </section>
       <section v-if="active && seed && (!showEditor || batchBusy)" class="card common-summary">
         <h2>02 公共条件与渠道</h2><div class="condition-grid">
           <div><small>客户名称</small><b>{{ seed.input.customerName }}</b></div><div><small>物流属性</small><b>{{ seed.conditions.logisticsAttribute || '—' }}</b></div><div><small>客户等级</small><b>{{ seed.input.customerGrade }}</b></div><div><small>采购阶梯</small><b>{{ tierLabel }}</b></div><div><small>佣金阈值</small><b>{{ seed.input.commissionThreshold }}</b></div><div><small>报价方案</small><b>{{ seed.conditions.activeTemplate?.name || '自选渠道' }} · {{ seed.sheet.rows.length }} 条渠道</b></div>
         </div>
       </section>
-      <section v-if="active && !showEditor && !batchBusy && freightWarningLines.length" class="batch-freight-warnings" aria-label="本批国内运费预警"><DomesticFreightWarningPanel v-for="line in freightWarningLines" :key="line.sku" :sku="line.sku" :warning="freightWarnings[line.sku]!" /></section>
       <div v-if="active && (batchBusy || !showEditor)" ref="resultSection" class="result-section">
         <BatchQuotationProgress v-if="batchBusy" :lines="selected" :current-sku="currentSku" :validating="validating && !generating" :stopping="stopping" @stop="stop" />
         <section v-else class="card result-card">
@@ -264,6 +254,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
           <div class="result-body">
             <div class="result-stats"><span><b>{{ combined ? 1 : 0 }}</b> 张完整报价单</span><span><b>{{ completed.length }} / {{ selected.length }}</b> 个 SKU 已完成</span><span><b>{{ partial?.sheet.rows.length || 0 }}</b> 行明细</span><span><b>{{ countryCount }}</b> 个国家</span></div>
             <div v-if="unfinished.length" class="pending-panel"><strong>{{ unfinished.length }} 个 SKU 待处理，当前只展示成功结果，尚不能整批保存</strong><ul><li v-for="line in unfinished" :key="line.sku"><b>{{ line.sku }}</b><span>{{ line.error || '尚未计算' }}</span></li></ul><button :disabled="locked || !seed || engineFailed" @click="retryUnfinished">{{ stopped ? '继续处理未完成项' : '仅重试失败 / 未完成项' }}</button><p>也可展开上方 SKU 处理清单，明确取消选入待处理项后保存其余商品。</p></div>
+            <div v-if="failedLines.length" class="pending-panel excluded-panel" role="status"><strong>已自动取消勾选 {{ failedLines.length }} 个异常 SKU，{{ saved ? '本次保存未包含这些商品' : combined ? '可直接保存其余成功商品' : '异常商品不会计入保存范围' }}。</strong><details><summary>查看异常原因</summary><ul><li v-for="line in failedLines" :key="line.sku"><b>{{ line.sku }}</b><span>{{ line.error }}</span></li></ul></details><button v-if="!saved" :disabled="locked || !seed || engineFailed" @click="retryUnfinished">重试异常 / 未完成项</button></div>
             <div v-if="partial && (!combined || saved)" class="quote-meta"><strong>{{ (saved?.sheet || partial.sheet).title || 'JerryFulfillment Quote Sheet' }}</strong><span>客户：{{ partial.customerName }}</span><span>By Agent：{{ (saved?.sheet || partial.sheet).agent }}</span><span>Date：{{ (saved?.sheet || partial.sheet).date }}</span></div>
             <div v-if="combined && !saved" :inert="saving || undefined"><BatchSingleSheetEditor :key="JSON.stringify(combined)" ref="sheetEditor" :document="combined" :calculate-item="calculateSheetItem" @busy="sheetBusy=$event" /></div><BatchSingleSheet v-else-if="partial" :sheet="saved?.sheet || partial.sheet" :photos="saved?.items[0]?.input.customerQuote?.showPhotos === false ? [] : saved?.items[0]?.input.customerQuote?.photos" :read-only="!combined" paginated />
             <p v-if="saved" class="success" role="status"><template v-if="saved.createdRecords">已生成 {{ saved.createdRecords.length }} 条独立报价记录，按原流程逐条审核。批次：{{ saved.no }}。<RouterLink :to="{ path: '/quotation/my-records', query: { batch: saved.no } }">查看本批报价记录</RouterLink></template><template v-else>已保存历史批次修正：{{ saved.no }}</template></p>

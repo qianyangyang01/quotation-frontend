@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { refreshReviewNotifications } from '@/data/reviewNotifications'
-import { getDomesticFreightWarning, type DomesticFreightWarning } from '@/domain/domesticFreightWarning'
+import { getDomesticFreightWarning } from '@/domain/domesticFreightWarning'
 import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
 import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
 import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
@@ -98,7 +98,7 @@ import {
 const FobCorrectionDialog = defineAsyncComponent(() => import('@/components/quotation/FobCorrectionDialog.vue'))
 
 const props = defineProps<{ resumeQuoteId?: string; batchCapture?: boolean; batchInitialSku?: string; batchSize?: number; batchSkus?: string[] }>()
-const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean]; batchSampleBusy: [value: boolean]; batchFreightWarning: [value: { sku: string; purchaseTier: string; warning: DomesticFreightWarning | null }] }>()
+const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean]; batchSampleBusy: [value: boolean] }>()
 let batchCalculationActive = false
 let batchCaptured: import('@/services/batchSingleQuotation').BatchSingleItem | undefined
 const batchQuantities = ref<number[]>()
@@ -370,7 +370,7 @@ const bundleFreightSources = ref<Record<number, PurchaseProductRecord | undefine
 const normalizedFreightSku = (sku: string) => sku.trim().toUpperCase().replace(/\s+/g, '')
 const singleFreightWarning = computed(() => {
   const source = singleFreightSource.value
-  if (quoteMode.value !== 'single' || draftNeedsQuery.value || productQueryBusy.value || purchaseQueryError.value || batchSampleSwitching.value || batchSampleError.value || !source
+  if (props.batchCapture || fobActive.value || quoteMode.value !== 'single' || draftNeedsQuery.value || productQueryBusy.value || purchaseQueryError.value || batchSampleSwitching.value || batchSampleError.value || !source
     || normalizedFreightSku(skuSearch.value) !== source.sku || products.value[0]?.sku !== source.sku) return null
   return getDomesticFreightWarning(source, monthlySalesEstimate.value)
 })
@@ -412,7 +412,7 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
 const bundleItems = ref<BundleQuoteItem[]>([bundleItemFromRecord()])
 const bundleFreightWarnings = computed(() => Object.fromEntries(bundleItems.value.map(item => {
   const source = bundleFreightSources.value[item.id]
-  const warning = quoteMode.value === 'bundle' && source && normalizedFreightSku(item.sku) === source.sku
+  const warning = !props.batchCapture && !fobActive.value && quoteMode.value === 'bundle' && source && normalizedFreightSku(item.sku) === source.sku
     ? getDomesticFreightWarning(source, item.purchaseTier) : null
   return [item.id, warning]
 })))
@@ -480,7 +480,6 @@ function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
   if (singleFreightSource.value?.sku === record.sku) singleFreightSource.value = record
-  if (props.batchCapture) emit('batchFreightWarning', { purchaseTier: monthlySalesEstimate.value, sku: record.sku, warning: singleFreightSource.value?.sku === record.sku ? getDomesticFreightWarning(record, monthlySalesEstimate.value) : null })
   const effectiveInvoiceTaxApplied = record.dataSource === 'legacy_2026' ? true : invoiceTaxApplied
   const pricing = purchasePricingForMonthlySales(record, effectiveInvoiceTaxApplied)
   p.purchase = pricing.effectiveUnitPriceCny
@@ -565,7 +564,6 @@ async function queryProduct() {
   const controller = new AbortController(); productQueryAbort = controller
   productQueryBusy.value = true
   singleFreightSource.value = undefined
-  if (props.batchCapture) emit('batchFreightWarning', { purchaseTier: monthlySalesEstimate.value, sku: normalizedSku, warning: null })
   let candidates: PurchaseProductRecord[]
   try {
     const remote = await loadPurchaseProduct(normalizedSku, controller.signal)
@@ -2427,7 +2425,6 @@ async function save() {
   if (props.batchCapture) {
     const sheet = quotationPreview.value?.captureSheet()
     if (!sheet || sheet.issues.length) { toast(sheet?.issues.join('；') || '报价单尚未准备好'); return }
-    emit('batchFreightWarning', { purchaseTier: monthlySalesEstimate.value, sku: p.sku, warning: singleFreightWarning.value })
     batchCaptured = JSON.parse(JSON.stringify({ input, conditions: draftPayload(), sheet }))
     if (!batchCalculationActive) emit('batchCaptured', batchCaptured!)
     return
