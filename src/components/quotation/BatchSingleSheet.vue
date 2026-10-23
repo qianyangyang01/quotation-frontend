@@ -37,8 +37,14 @@ async function copy(kind: 'data' | 'image', index = 0) {
   copying.value = true; error.value = ''; message.value = ''
   try {
     assertOutputCurrent()
-    if (kind === 'data') await copyQuoteSheetData(props.sheet)
-    else { const image = images.value[index]; if (!image) throw new Error('请先生成报价图片'); await copyQuoteSheetImage(image.blob) }
+    if (kind === 'data') {
+      if (props.currentQuote) await copyQuoteSheetData(props.sheet, assertOutputCurrent)
+      else await copyQuoteSheetData(props.sheet)
+    } else {
+      const image = images.value[index]; if (!image) throw new Error('请先生成报价图片')
+      if (props.currentQuote) await copyQuoteSheetImage(image.blob, assertOutputCurrent)
+      else await copyQuoteSheetImage(image.blob)
+    }
     if (token === generation) message.value = kind === 'data' ? `已复制全部 ${props.sheet.rows.length} 行报价数据` : `已复制第 ${index + 1} 张报价图片`
   } catch (e) { if (token === generation) error.value = e instanceof Error ? e.message : '复制失败，请使用下载图片' }
   finally { copying.value = false }

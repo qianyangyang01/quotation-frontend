@@ -1,14 +1,15 @@
 import { reactive, readonly } from 'vue'
 
 const POLL_MS = 60_000
-const CHECK_TIMEOUT_MS = 8_000
+const CHECK_TIMEOUT_MS = 2_000
+const SUCCESS_TTL_MS = 10_000
+const FAILURE_BACKOFF_MS = 30_000
 const UPDATE_MESSAGE = '系统已更新，当前操作未提交。请先保留未保存内容，刷新页面后重新查询并操作。'
-const UNAVAILABLE_MESSAGE = '暂时无法确认系统版本，当前操作未提交。请检查网络后重试，当前输入已保留。'
 
 export class ClientUpdateError extends Error {
   readonly status = 409
-  constructor(public readonly code: 'CLIENT_UPDATE_REQUIRED' | 'CLIENT_VERSION_UNAVAILABLE') {
-    super(code === 'CLIENT_UPDATE_REQUIRED' ? UPDATE_MESSAGE : UNAVAILABLE_MESSAGE)
+  constructor(public readonly code: 'CLIENT_UPDATE_REQUIRED') {
+    super(UPDATE_MESSAGE)
     this.name = 'ClientUpdateError'
   }
 }
@@ -18,6 +19,7 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
   const state = reactive({ updateRequired: false, reason: 'application' as 'application' | 'exchange-rate', checking: false, unavailable: false, activeOperations: 0 })
   let pending: Promise<void> | undefined
   let lastAttempt = 0
+  let reusableUntil = 0
 
   function assertCurrent() {
     if (state.updateRequired) throw new ClientUpdateError('CLIENT_UPDATE_REQUIRED')
@@ -34,14 +36,23 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
     state.checking = true
     lastAttempt = Date.now()
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS)
     pending = Promise.resolve().then(async () => {
+      let timeout: ReturnType<typeof setTimeout> | undefined
       try {
-        const response = await fetchVersion(`${import.meta.env.BASE_URL}app-version.json?_=${Date.now()}`, {
-          cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: controller.signal,
-        })
-        if (!response.ok) throw new Error('Version check failed')
-        const value: unknown = await response.json()
+        // The deadline covers both headers and body, even if fetch ignores abort.
+        // Only the race winner may change state; late responses cannot latch an update.
+        const value: unknown = await Promise.race([
+          Promise.resolve().then(async () => {
+            const response = await fetchVersion(`${import.meta.env.BASE_URL}app-version.json?_=${Date.now()}`, {
+              cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' }, signal: controller.signal,
+            })
+            if (!response.ok) throw new Error('Version check failed')
+            return response.json()
+          }),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => { reject(new Error('Version check timed out')); controller.abort() }, CHECK_TIMEOUT_MS)
+          }),
+        ])
         if (!value || typeof value !== 'object' || !('schemaVersion' in value) || value.schemaVersion !== 1
           || !('buildId' in value) || typeof value.buildId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(value.buildId)) {
           throw new Error('Invalid application version')
@@ -50,8 +61,10 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
         // full reload gives every mounted module a coherent code/data baseline.
         if (value.buildId !== buildId) requireUpdate()
         state.unavailable = false
+        reusableUntil = Date.now() + SUCCESS_TTL_MS
       } catch {
         state.unavailable = true
+        reusableUntil = Date.now() + FAILURE_BACKOFF_MS
       } finally {
         clearTimeout(timeout)
         state.checking = false
@@ -65,9 +78,10 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
     signal?.throwIfAborted()
     assertCurrent()
     if (!buildId) return
-    // Never use the polling TTL to approve a write. Coalesce concurrent checks,
-    // and allow one caller to cancel without aborting another caller's check.
-    const verification = check()
+    // Share a recent result and back off after metadata failures. An unavailable
+    // manifest must not take a healthy business API down; confirmed updates still
+    // block immediately. Caller cancellation does not cancel other callers.
+    const verification = pending ?? (Date.now() < reusableUntil ? Promise.resolve() : check())
     if (signal) {
       await new Promise<void>((resolve, reject) => {
         const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason) }
@@ -78,7 +92,6 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
     } else await verification
     signal?.throwIfAborted()
     assertCurrent()
-    if (state.unavailable) throw new ClientUpdateError('CLIENT_VERSION_UNAVAILABLE')
   }
 
   function beginOperation() {
@@ -111,8 +124,13 @@ export function createAppUpdateMonitor(buildId: string, fetchVersion: typeof fet
 export const appUpdate = createAppUpdateMonitor(typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__ : '')
 
 /** Keep recovery and the completion of an accepted upload possible on old tabs. */
+export function isReadOnlyRequest(path: string, method: string) {
+  return ['GET', 'HEAD', 'OPTIONS'].includes(method)
+    || (path.split('?')[0] === '/quotation-sync/logistics' && method === 'POST')
+}
+
 export function requiresCurrentClient(path: string, method: string) {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return false
+  if (isReadOnlyRequest(path, method)) return false
   const pathname = path.split('?')[0]!
   if (/^\/auth\/(?:login|logout|change-password)$/.test(pathname)) return false
   if (pathname === '/quotation-drafts/mine/state' && ['PUT', 'DELETE'].includes(method)) return false
@@ -123,10 +141,10 @@ export function requiresCurrentClient(path: string, method: string) {
   return true
 }
 
-export function refreshUpdatedApplication() {
-  if (appUpdate.state.activeOperations > 0) return
-  if (!window.confirm('刷新会清除尚未保存的输入。请先复制需要保留的内容，或确认当前草稿已保存。确认现在刷新？')) return
-  if (appUpdate.state.activeOperations > 0) return
+export function refreshUpdatedApplication(confirmed = false) {
+  // Confirmation happens inline so embedded browsers never depend on a native
+  // dialog. Require an explicit true and recheck work immediately before reload.
+  if (confirmed !== true || appUpdate.state.activeOperations > 0) return
   const url = new URL(window.location.href)
   url.searchParams.set('_appUpdate', String(Date.now()))
   window.location.assign(url.href)

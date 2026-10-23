@@ -112,8 +112,13 @@ async function copy(asImage: boolean) {
   copying.value = true; message.value = ''
   try {
     assertOutputCurrent()
-    if (asImage) await copyQuoteSheetImage(currentImage.value!.blob)
-    else await copyQuoteSheetData(sheet.value)
+    if (asImage) {
+      if (props.currentQuote) await copyQuoteSheetImage(currentImage.value!.blob, assertOutputCurrent)
+      else await copyQuoteSheetImage(currentImage.value!.blob)
+    } else {
+      if (props.currentQuote) await copyQuoteSheetData(sheet.value, assertOutputCurrent)
+      else await copyQuoteSheetData(sheet.value)
+    }
     message.value = asImage ? '已复制报价图片' : '已复制报价数据'
   } catch (e) { message.value = e instanceof Error ? e.message : '复制失败，请重试' }
   finally { copying.value = false }

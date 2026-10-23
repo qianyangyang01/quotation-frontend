@@ -21,10 +21,14 @@ describe('application update monitor', () => {
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining('/app-version.json?_='), expect.objectContaining({ cache: 'no-store' }))
   })
 
-  it('checks every new submission and latches changes even when the server rolls back', async () => {
+  it('shares a recent result and latches changes even when the server rolls back', async () => {
+    vi.useFakeTimers()
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(response()))
     const monitor = createAppUpdateMonitor('current', fetcher)
     await monitor.ensureCurrent()
+    await monitor.ensureCurrent()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(10_001)
     await monitor.ensureCurrent()
     expect(fetcher).toHaveBeenCalledTimes(2)
     fetcher.mockResolvedValueOnce(response('new'))
@@ -41,29 +45,76 @@ describe('application update monitor', () => {
     () => Promise.resolve(new Response('missing', { status: 404 })),
   ])('does not mistake an invalid/unavailable manifest for a confirmed update', async fetcher => {
     const monitor = createAppUpdateMonitor('current', vi.fn(fetcher))
-    await expect(monitor.ensureCurrent()).rejects.toMatchObject({ code: 'CLIENT_VERSION_UNAVAILABLE' })
+    await expect(monitor.ensureCurrent()).resolves.toBeUndefined()
     expect(monitor.state.updateRequired).toBe(false)
+    expect(monitor.state.unavailable).toBe(true)
     expect(monitor.state.checking).toBe(false)
   })
 
   it('recovers after a failed or synchronous-throwing check', async () => {
     const fetcher = vi.fn().mockImplementationOnce(() => { throw new Error('network') }).mockImplementation(() => Promise.resolve(response()))
     const monitor = createAppUpdateMonitor('current', fetcher)
-    await expect(monitor.ensureCurrent()).rejects.toThrow('暂时无法')
-    await monitor.ensureCurrent()
+    await expect(monitor.ensureCurrent()).resolves.toBeUndefined()
+    await monitor.check()
     expect(monitor.state.unavailable).toBe(false)
   })
 
-  it('times out a stalled check and permits retry', async () => {
+  it.each(['headers', 'body'])('bounds a stalled %s even if abort is ignored and discards a late mismatch', async stage => {
     vi.useFakeTimers()
-    const fetcher = vi.fn().mockImplementationOnce((_url, init: RequestInit) => new Promise((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(new Error('aborted')))))
+    let finish!: (value: unknown) => void
+    const stalled = new Promise(resolve => { finish = resolve })
+    const fetcher = vi.fn().mockImplementationOnce(() => stage === 'headers' ? stalled : Promise.resolve({ ok: true, json: () => stalled }))
       .mockImplementation(() => Promise.resolve(response()))
     const monitor = createAppUpdateMonitor('current', fetcher)
-    const pending = monitor.ensureCurrent().catch(error => error)
-    await vi.advanceTimersByTimeAsync(8_001)
-    expect(await pending).toMatchObject({ code: 'CLIENT_VERSION_UNAVAILABLE' })
+    const pending = monitor.ensureCurrent()
+    await vi.advanceTimersByTimeAsync(2_001)
+    await expect(pending).resolves.toBeUndefined()
+    expect(monitor.state.checking).toBe(false)
+    expect(monitor.state.unavailable).toBe(true)
+    await monitor.check()
+    finish(stage === 'headers' ? response('new') : { schemaVersion: 1, buildId: 'new' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(monitor.state.updateRequired).toBe(false)
+    expect(monitor.state.unavailable).toBe(false)
     await monitor.ensureCurrent()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('backs off after metadata failure during concurrent and sequential business operations, then detects recovery', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn().mockRejectedValueOnce(new Error('offline')).mockImplementation(() => Promise.resolve(response('new')))
+    const monitor = createAppUpdateMonitor('current', fetcher)
+    await Promise.all(Array.from({ length: 100 }, () => monitor.ensureCurrent()))
+    for (let i = 0; i < 100; i++) await monitor.ensureCurrent()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(30_001)
+    await expect(monitor.ensureCurrent()).rejects.toMatchObject({ code: 'CLIENT_UPDATE_REQUIRED' })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(monitor.state.unavailable).toBe(false)
+  })
+
+  it('blocks immediately when a confirmed update arrives inside the success TTL', async () => {
+    const monitor = createAppUpdateMonitor('current', vi.fn().mockResolvedValue(response()))
+    await monitor.ensureCurrent()
+    monitor.requireUpdate()
+    await expect(monitor.ensureCurrent()).rejects.toMatchObject({ code: 'CLIENT_UPDATE_REQUIRED' })
+  })
+
+  it('waits for a running background check even inside the success TTL', async () => {
+    let finish!: (value: Response) => void
+    const fetcher = vi.fn().mockResolvedValueOnce(response()).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve }))
+    const monitor = createAppUpdateMonitor('current', fetcher)
+    await monitor.ensureCurrent()
+    const check = monitor.check()
+    const result = monitor.ensureCurrent().catch(error => error)
+    let settled = false
+    void result.then(() => { settled = true })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    expect(settled).toBe(false)
+    finish(response('new'))
+    await check
+    expect(await result).toMatchObject({ code: 'CLIENT_UPDATE_REQUIRED' })
+    expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
   it('shares a check without letting a cancelled caller cancel another submission', async () => {
@@ -73,7 +124,7 @@ describe('application update monitor', () => {
     const controller = new AbortController()
     const first = monitor.ensureCurrent(controller.signal).catch(error => error)
     const second = monitor.ensureCurrent()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
     controller.abort(new Error('cancelled'))
     expect(await first).toMatchObject({ message: 'cancelled' })
     finish(response())
@@ -134,6 +185,7 @@ describe('linked module update policy', () => {
     ['/quotation-drafts/mine/state', 'PUT'], ['/quotation-drafts/mine/state', 'DELETE'],
     ['/logistics/rebuild/uploads/id/files/0/chunks/1', 'POST'], ['/logistics/rebuild/uploads/id/complete', 'POST'],
     ['/purchase-imports/jobs/id/image-parts?partNumber=1', 'POST'], ['/purchase-imports/jobs/id/cancel', 'POST'],
+    ['/quotation-sync/logistics', 'POST'],
   ])('preserves recovery/read/accepted-upload action %s %s', (path, method) => expect(requiresCurrentClient(path!, method!)).toBe(false))
 })
 
@@ -141,12 +193,13 @@ describe('deliberate page refresh', () => {
   it('preserves the route and existing parameters, and never reloads without confirmation', () => {
     window.history.replaceState(null, '', '/quotation?draft=mine#sheet')
     const navigate = vi.spyOn(window.location, 'assign').mockImplementation(() => undefined)
-    const confirm = vi.fn().mockReturnValue(false)
+    const confirm = vi.fn()
     vi.stubGlobal('confirm', confirm)
     refreshUpdatedApplication()
+    refreshUpdatedApplication(false)
     expect(navigate).not.toHaveBeenCalled()
-    confirm.mockReturnValue(true)
-    refreshUpdatedApplication()
+    refreshUpdatedApplication(true)
+    expect(confirm).not.toHaveBeenCalled()
     const url = new URL(navigate.mock.calls[0]![0] as string)
     expect(url.pathname).toBe('/quotation')
     expect(url.searchParams.get('draft')).toBe('mine')
@@ -154,18 +207,15 @@ describe('deliberate page refresh', () => {
     expect(url.hash).toBe('#sheet')
   })
 
-  it('refuses refresh while a request is pending and rechecks after confirmation', () => {
+  it('refuses even an explicitly confirmed refresh while a request is pending', () => {
     const navigate = vi.spyOn(window.location, 'assign').mockImplementation(() => undefined)
-    const confirm = vi.fn().mockReturnValue(true)
-    vi.stubGlobal('confirm', confirm)
     const end = appUpdate.beginOperation()
-    refreshUpdatedApplication()
-    expect(confirm).not.toHaveBeenCalled()
+    refreshUpdatedApplication(true)
+    expect(navigate).not.toHaveBeenCalled()
     end()
-    let finish!: () => void
-    confirm.mockImplementation(() => { finish = appUpdate.beginOperation(); return true })
     refreshUpdatedApplication()
     expect(navigate).not.toHaveBeenCalled()
-    finish()
+    refreshUpdatedApplication(true)
+    expect(navigate).toHaveBeenCalledOnce()
   })
 })

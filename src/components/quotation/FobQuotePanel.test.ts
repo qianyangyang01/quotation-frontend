@@ -126,7 +126,7 @@ it('previews and copies customer-only prices and refreshes the current quantity 
   const input=document.querySelector<HTMLInputElement>('[aria-label="FOB报价数量"]')!;input.value='100';input.dispatchEvent(new Event('input'));await tick()
   expect(preview().querySelectorAll('tbody tr')).toHaveLength(1);expect(preview().textContent).toContain('$2.58')
   Array.from(sheet.querySelectorAll('button')).find(b=>b.textContent==='复制报价数据')!.click();await tick()
-  expect(copyQuoteSheetData).toHaveBeenCalledWith(expect.objectContaining({rows:[expect.objectContaining({sku:'PF2600053',quantityRange:'100 pcs',prices:[2.58,2.63]})]}))
+  expect(copyQuoteSheetData).toHaveBeenCalledWith(expect.objectContaining({rows:[expect.objectContaining({sku:'PF2600053',quantityRange:'100 pcs',prices:[2.58,2.63]})]}),expect.any(Function))
   expect(renderCustomerQuoteSheet).toHaveBeenLastCalledWith(expect.objectContaining({showQuantityRange:true,priceGroupLabel:'FOB Unit Price (USD)'}),expect.any(Function))
   expect(document.body.textContent).not.toContain('资料更新时间')
   input.value='0';input.dispatchEvent(new Event('input'));await tick()
@@ -155,7 +155,11 @@ it('carries edited FOB notes into both the shared image renderer and copied quot
   button('预览报价单').click();await tick()
   expect(renderCustomerQuoteSheet).toHaveBeenLastCalledWith(expect.objectContaining({notes:expect.arrayContaining([note.value])}),expect.any(Function))
   button('复制报价数据').click();await tick()
-  expect(copyQuoteSheetData).toHaveBeenLastCalledWith(expect.objectContaining({notes:expect.arrayContaining([note.value])}))
+  expect(copyQuoteSheetData).toHaveBeenLastCalledWith(expect.objectContaining({notes:expect.arrayContaining([note.value])}),expect.any(Function))
+  const guard=vi.mocked(copyQuoteSheetData).mock.lastCall![1]!
+  expect(()=>guard()).not.toThrow()
+  updateState.updateRequired=true
+  expect(()=>guard()).toThrow('系统已更新')
 })
 it('never displays prices with failed finance loading and blocks invalid quantities',async()=>{
   mount('财务读取失败');vi.mocked(loadFobQuoteProduct).mockResolvedValue(sample());await sku('PF2600053');await query()

@@ -294,11 +294,14 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
   return images
 }
 
-export async function copyQuoteSheetImage(blob: Blob) {
+export async function copyQuoteSheetImage(blob: Blob, beforeWrite?: () => void) {
   if (!globalThis.isSecureContext || typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
     throw new Error('当前浏览器不支持复制图片，请使用新版 Chrome 或 Edge；也可右键预览图片选择“复制图片”')
   }
   await withQuoteSheetCopyLock(async () => {
+    // The lock callback may run after a new version has been detected.
+    // Guard failures must not be replaced with a clipboard permission error.
+    beforeWrite?.()
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
     } catch {

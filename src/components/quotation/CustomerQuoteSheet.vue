@@ -691,7 +691,8 @@ async function copyCurrent() {
   message.value = ''
   try {
     assertOutputCurrent()
-    await copyQuoteSheetImage(currentImage.value.blob)
+    if (props.currentQuote) await copyQuoteSheetImage(currentImage.value.blob, assertOutputCurrent)
+    else await copyQuoteSheetImage(currentImage.value.blob)
     if (disposed) return
     if (token !== generation) {
       failed.value = true
@@ -715,7 +716,8 @@ async function copyData() {
   message.value = ''
   try {
     assertOutputCurrent()
-    await copyQuoteSheetData(sheet.value)
+    if (props.currentQuote) await copyQuoteSheetData(sheet.value, assertOutputCurrent)
+    else await copyQuoteSheetData(sheet.value)
     if (disposed) return
     if (token !== generation) throw new Error('报价已发生变化，请重新复制最新数据')
     message.value = `已复制 ${sheet.value.rows.length} 条报价数据，可直接粘贴到 Excel / WPS 表格`

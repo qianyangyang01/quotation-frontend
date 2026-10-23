@@ -37,20 +37,24 @@ function copyTextDuringClick(text: string, html?: string) {
   }
 }
 
-export async function copyQuoteSheetData(sheet: CustomerQuoteSheet) {
-  return copyQuotationText(customerQuoteSheetTsv(sheet), typeof sheet.sizeRules === 'string' ? customerQuoteSheetHtml(sheet) : undefined)
+export async function copyQuoteSheetData(sheet: CustomerQuoteSheet, beforeWrite?: () => void) {
+  return copyQuotationText(customerQuoteSheetTsv(sheet), typeof sheet.sizeRules === 'string' ? customerQuoteSheetHtml(sheet) : undefined, beforeWrite)
 }
 
-export async function copyQuotationText(text: string, html?: string) {
+export async function copyQuotationText(text: string, html?: string, beforeWrite?: () => void) {
   if (!globalThis.isSecureContext) {
     throw new Error('当前浏览器不支持复制数据，请使用 Chrome 或 Edge 打开安全页面后重试')
   }
   // Prefer the bounded synchronous command for text. Embedded browsers can
   // leave writeText pending indefinitely when their clipboard bridge stalls.
+  beforeWrite?.()
   if (withSynchronousQuoteSheetCopy(() => copyTextDuringClick(text, html))) return
   const canWriteHtml = !!html && typeof navigator.clipboard?.write === 'function' && typeof ClipboardItem !== 'undefined'
   if (typeof navigator.clipboard?.writeText !== 'function' && !canWriteHtml) throw new Error('当前浏览器不支持复制数据，请使用 Chrome 或 Edge 打开安全页面后重试')
   await withQuoteSheetCopyLock(async () => {
+    // A Web Locks callback runs asynchronously. Recheck before starting any
+    // native write; a write already handed to the browser cannot be cancelled.
+    beforeWrite?.()
     if (html && canWriteHtml) {
       try {
         await navigator.clipboard.write([new ClipboardItem({
@@ -60,6 +64,9 @@ export async function copyQuotationText(text: string, html?: string) {
         return
       } catch { /* Keep the same readable layout in text-only clipboard environments. */ }
     }
+    // Do not let an update during HTML rejection start a fresh fallback write.
+    // Keep this outside the clipboard catch so guard errors retain their cause.
+    beforeWrite?.()
     try { await navigator.clipboard.writeText(text) }
     catch { throw new Error('报价数据未复制成功，请允许剪贴板权限后重试') }
   })

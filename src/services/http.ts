@@ -1,4 +1,4 @@
-import { appUpdate, requiresCurrentClient } from './appUpdate'
+import { appUpdate, isReadOnlyRequest, requiresCurrentClient } from './appUpdate'
 
 export interface ApiEnvelope<T> {
   requestId: string
@@ -72,7 +72,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   headers.set('X-Request-Id', crypto.randomUUID())
   if (account) headers.set('X-Expected-Account', account)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  const endOperation = !['GET', 'HEAD', 'OPTIONS'].includes(method) ? appUpdate.beginOperation() : () => undefined
+  const endOperation = !isReadOnlyRequest(path, method) ? appUpdate.beginOperation() : () => undefined
   try {
     if (needsCurrentClient) appUpdate.assertCurrent()
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {

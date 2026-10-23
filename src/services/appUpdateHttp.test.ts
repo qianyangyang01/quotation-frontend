@@ -12,6 +12,17 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); resetCsrf(); setRequestAccount('') })
 
 describe('version checks at the shared HTTP boundary', () => {
+  it.each([404, 503, 200])('keeps a healthy business API usable when metadata returns %s or rollback HTML', async status => {
+    const fetcher = vi.fn().mockImplementation(url => {
+      if (String(url).endsWith('/auth/csrf')) return Promise.resolve(csrf())
+      if (String(url).includes('app-version.json')) return Promise.resolve(new Response('<html>rollback</html>', { status }))
+      return Promise.resolve(data())
+    })
+    vi.stubGlobal('fetch', fetcher)
+    for (let i = 0; i < 3; i++) await expect(api.post('/quotations', {})).resolves.toEqual({ saved: true })
+    expect(fetcher.mock.calls.filter(([url]) => String(url).includes('app-version.json'))).toHaveLength(1)
+    expect(appUpdate.state.activeOperations).toBe(0)
+  })
   it.each(['/quotations', '/quotations/fob/preview', '/batch-single-quotations', '/purchase-products/SKU/maintenance', '/finance-settings/exchange-rate', '/users/id'])('never sends stale-page writes to %s', async path => {
     const fetcher = vi.fn().mockResolvedValueOnce(csrf()).mockResolvedValueOnce(version())
     vi.stubGlobal('fetch', fetcher)
@@ -46,8 +57,20 @@ describe('version checks at the shared HTTP boundary', () => {
     await api.get('/quotations')
     await api.post('/logistics/rebuild/uploads/id/complete')
     await api.post('/auth/logout')
+    await api.post('/quotation-sync/logistics', {})
     expect(appUpdate.ensureCurrent).not.toHaveBeenCalled()
     expect(appUpdate.state.activeOperations).toBe(0)
+  })
+
+  it('does not hold the refresh lock for a stalled read-only logistics synchronization POST', async () => {
+    let finish!: (value: Response) => void
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(csrf()).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve })))
+    const pending = api.post('/quotation-sync/logistics', {})
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    expect(appUpdate.state.activeOperations).toBe(0)
+    expect(appUpdate.ensureCurrent).not.toHaveBeenCalled()
+    finish(data())
+    await pending
   })
 
   it('rechecks the account and cancellation after asynchronous version verification', async () => {
