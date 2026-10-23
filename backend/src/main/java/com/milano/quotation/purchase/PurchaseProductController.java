@@ -18,6 +18,10 @@ public class PurchaseProductController {
     private final PurchasePasteService pasteService;
     private final PurchaseProductService products; private final AuditService audit;
     public PurchaseProductController(PurchaseProductService products, AuditService audit, PurchasePasteService pasteService) { this.products=products; this.audit=audit; this.pasteService=pasteService; }
+    @PostMapping("/paste/shared/preview") @PreAuthorize("hasAuthority('PERM_purchase')")
+    ApiResponse<PurchasePasteService.Preview> previewShared(@RequestBody List<JsonNode> body) { return ApiResponse.ok(pasteService.preview(body, true)); }
+    @PostMapping("/paste/shared/confirm") @PreAuthorize("hasAuthority('PERM_purchase')")
+    ApiResponse<PurchasePasteService.Result> confirmShared(@RequestBody PurchasePasteService.Confirmation body) { return ApiResponse.ok(pasteService.confirmShared(body)); }
     @PostMapping("/paste/preview") @PreAuthorize("hasAuthority('PERM_purchase')")
     ApiResponse<PurchasePasteService.Preview> previewPaste(@RequestBody List<JsonNode> body) {
         return ApiResponse.ok(pasteService.preview(body));

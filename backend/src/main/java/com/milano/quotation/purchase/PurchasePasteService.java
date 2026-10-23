@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
 public class PurchasePasteService {
     private static final Set<String> NUMBERS = Set.of("weightG", "lengthCm", "widthCm", "heightCm",
             "minOrderQty", "purchasePriceCny", "tier2MinQty", "tier2PriceCny", "tier3MinQty",
-            "tier3PriceCny", "singleFreightCny", "freight10Cny", "freight100Cny", "taxIncludedPriceCny", "taxPoint");
+            "tier3PriceCny", "tier4MinQty", "tier4PriceCny", "tier5MinQty", "tier5PriceCny", "singleFreightCny", "freight10Cny", "freight100Cny", "taxIncludedPriceCny", "taxPoint");
     private static final Set<String> TEXT = Set.of("sku", "quotationDate", "quotationOwner", "notes",
             "size", "color", "material", "freeShipping", "invoiceType", "category", "stockStatus",
             "factoryInfo", "auditNotes", "sourceLink1", "sourceLink2", "sourceLink3", "similarSource");
@@ -30,7 +30,11 @@ public class PurchasePasteService {
 
     @Transactional(readOnly = true)
     public Preview preview(List<JsonNode> rows) {
-        var batch = parse(rows);
+        return preview(rows, false);
+    }
+    @Transactional(readOnly = true)
+    public Preview preview(List<JsonNode> rows, boolean shared) {
+        var batch = parse(rows, shared);
         var existing = repository.findAllBySkuIn(batch.inputs.keySet()).stream()
                 .collect(Collectors.toMap(p -> p.sku, p -> p));
         return prepare(batch, existing);
@@ -38,17 +42,20 @@ public class PurchasePasteService {
 
     @Transactional
     public Result confirm(Confirmation input) {
-        return confirm(input, false);
+        return confirm(input, false, false);
     }
 
     @Transactional
     Result confirmSynchronized(Confirmation input) {
-        return confirm(input, true);
+        return confirm(input, true, false);
     }
 
-    private Result confirm(Confirmation input, boolean synchronizedSource) {
+    @Transactional
+    public Result confirmShared(Confirmation input) { return confirm(input, false, true); }
+
+    private Result confirm(Confirmation input, boolean synchronizedSource, boolean shared) {
         if (input == null || input.expected == null) throw AppException.unprocessable("请先预览采购数据");
-        var batch = parse(input.rows);
+        var batch = parse(input.rows, shared);
         // Lock in SKU order, including unchanged rows. Missing rows are protected by the unique SKU constraint.
         var existing = repository.findAllLockedBySkuIn(batch.inputs.keySet()).stream()
                 .collect(Collectors.toMap(p -> p.sku, p -> p));
@@ -92,6 +99,13 @@ public class PurchasePasteService {
                 merged.put("_version", current.version);
                 merged.put("catalogState", current.catalogState);
             }
+            if (batch.shared) {
+                if (!"standard".equals(merged.path("dataSource").asText()))
+                    throw AppException.unprocessable("第" + sourceRow + "行：此SKU属于2026旧数据，请使用原入口维护，不能自动转换资料来源");
+                if ("tax_included".equals(merged.path("purchasePriceBasis").asText()))
+                    throw AppException.unprocessable("第" + sourceRow + "行：含票价资料不能直接转为共用未税数据源，请先核对采购价格口径");
+                merged.put("purchaseUsage", "shared");
+            }
             // Once explicitly maintained as untaxed + rate, all later sparse updates
             // (including synchronization) must retain that same price contract.
             if ("auto_tax".equals(merged.path("legacyPriceMode").asText())) {
@@ -102,6 +116,11 @@ public class PurchasePasteService {
             PurchaseProductService.normalizeLegacyPrice(merged);
             PurchasePasteValidator.validateValues(merged, sourceRow, "legacy_2026".equals(merged.path("dataSource").asText()));
             var notices = new ArrayList<String>();
+            if (batch.shared) {
+                notices.add("保存一份采购资料，普通报价及FOB自动查询共用此来源；原FOB专用资料和历史报价保留");
+                if (!"是".equals(merged.path("freeShipping").asText()) && !merged.hasNonNull("freight100Cny"))
+                    notices.add("未填写100件总运费，普通报价可用；FOB报价需补齐百件运费或明确包邮");
+            }
             if (patch.has("purchasePriceCny") && patch.get("purchasePriceCny").decimalValue().compareTo(merged.path("purchasePriceCny").decimalValue()) != 0)
                 notices.add("auto_tax".equals(merged.path("legacyPriceMode").asText())
                         ? "未税采购单价 " + merged.path("sourceQuotedPriceCny").asText() + " ×（1＋票点 "
@@ -117,7 +136,7 @@ public class PurchasePasteService {
         return new Preview(rows, batch.skipped);
     }
 
-    private Batch parse(List<JsonNode> rows) {
+    private Batch parse(List<JsonNode> rows, boolean shared) {
         if (rows == null || rows.isEmpty() || rows.size() > 100) throw AppException.unprocessable("采购粘贴每次须为1至100条");
         var inputs = new LinkedHashMap<String, ObjectNode>();
         var skipped = new ArrayList<Skipped>();
@@ -146,10 +165,10 @@ public class PurchasePasteService {
             }
             inputs.put(sku, patch);
         }
-        return new Batch(inputs, skipped);
+        return new Batch(inputs, skipped, shared);
     }
 
-    private record Batch(LinkedHashMap<String, ObjectNode> inputs, List<Skipped> skipped) {}
+    private record Batch(LinkedHashMap<String, ObjectNode> inputs, List<Skipped> skipped, boolean shared) {}
     public record Expected(String sku, UUID productId, Long version, Instant updatedAt) {}
     public record Skipped(int sourceRow, String sku) {}
     public record PreviewRow(int sourceRow, String sku, String action, Expected expected,

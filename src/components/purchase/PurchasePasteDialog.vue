@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { applyPurchasePaste, emptyPurchasePasteRow, PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, validatePurchasePaste, type PurchasePastePatch } from '@/data/purchasePaste'
-import { readPurchaseClipboardResult } from '@/data/purchaseClipboard'
+import { applyPurchasePaste, emptyPurchasePasteRow, PURCHASE_PASTE_COLUMNS, UNIFIED_PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, validatePurchasePaste, type PurchasePastePatch } from '@/data/purchasePaste'
+import { readPurchaseClipboardResult, readUnifiedPurchaseClipboardResult } from '@/data/purchaseClipboard'
 import { previewPurchasePaste, confirmPurchasePaste, type PastePreview, type PasteSavedCounts, type PasteSkipped } from '@/services/purchasePaste'
 
+const props = defineProps<{ unified?: boolean }>()
+const columns = computed(() => props.unified ? UNIFIED_PURCHASE_PASTE_COLUMNS : PURCHASE_PASTE_COLUMNS)
+const emptyRow = () => emptyPurchasePasteRow(columns.value)
 const emit = defineEmits<{ close: []; saved: [counts: PasteSavedCounts] }>()
-const grid = ref(Array.from({ length: 10 }, emptyPurchasePasteRow))
+const grid = ref(Array.from({ length: 10 }, emptyRow))
 const selected = ref({ row: 0, col: 0 })
 const busy = ref(false)
 const message = ref('')
@@ -14,7 +17,7 @@ const savedShareText = ref('')
 const savedCount = ref(0)
 const copying = ref(false)
 const showCopyFallback = ref(false)
-const check = computed(() => validatePurchasePaste(grid.value, true))
+const check = computed(() => validatePurchasePaste(grid.value, true, columns.value))
 const pending = ref<{ preview: PastePreview; rows: PurchasePastePatch[]; skipped: PasteSkipped[] } | null>(null)
 const previewCounts = computed(() => ({
   added: pending.value?.preview.rows.filter(row => row.action === 'create').length || 0,
@@ -32,8 +35,8 @@ function paste(event: ClipboardEvent, row: number, col: number) {
   if (busy.value) return
   try {
     if (!event.clipboardData) throw new Error('未读取到剪贴板内容，请重新复制单元格区域')
-    const { rows: cells, skippedImageColumns } = readPurchaseClipboardResult(event.clipboardData, col)
-    grid.value = applyPurchasePaste(grid.value, cells, row, col)
+    const { rows: cells, skippedImageColumns } = (props.unified ? readUnifiedPurchaseClipboardResult : readPurchaseClipboardResult)(event.clipboardData, col)
+    grid.value = applyPurchasePaste(grid.value, cells, row, col, columns.value)
     message.value = cells.length ? `已粘贴${cells.length}行${skippedImageColumns ? '，已过滤前3列图片/空白列' : ''}，空白单元格已跳过并保留列位置` : '剪贴板中没有表格文字'
   } catch (error) { message.value = error instanceof Error ? error.message : '粘贴失败' }
 }
@@ -63,7 +66,7 @@ async function save() {
   const rows = check.value.records
   const skipped = [...check.value.skippedRows]
   try {
-    const preview = await previewPurchasePaste(rows)
+    const preview = await previewPurchasePaste(rows, props.unified)
     pending.value = { preview, rows, skipped }
     message.value = '请核对新增和更新内容，确认后统一保存。'
   } catch (error) { message.value = error instanceof Error ? error.message : '预览失败，数据已保留，请重试' }
@@ -74,14 +77,14 @@ async function confirmSave() {
   const snapshot = pending.value
   busy.value = true; message.value = '正在保存，请稍候…'
   try {
-    const result = await confirmPurchasePaste(snapshot.rows, snapshot.preview.rows.map(row => row.expected))
+    const result = await confirmPurchasePaste(snapshot.rows, snapshot.preview.rows.map(row => row.expected), props.unified)
     const saved = [...result.added, ...result.updated]
     const skipped = [...snapshot.skipped, ...result.skipped]
     const counts = { added: result.added.length, updated: result.updated.length, unchanged: result.unchanged.length, skipped: skipped.length }
     savedShareText.value = saved.map(record => [record.sku, record.category].map(value => String(value || '').replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n')
     savedCount.value = saved.length
     showCopyFallback.value = false
-    grid.value = Array.from({ length: 10 }, emptyPurchasePasteRow)
+    grid.value = Array.from({ length: 10 }, emptyRow)
     pending.value = null
     message.value = `已成功新增${counts.added}条，更新${counts.updated}条，无变化${counts.unchanged}条，同批重复跳过${counts.skipped}条；更新已计入修改记录。`
     emit('saved', counts)
@@ -99,11 +102,11 @@ async function confirmSave() {
   <Teleport to="body">
     <div class="paste-overlay" @keydown.esc.prevent="close">
       <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="paste-title">
-        <header><div><h2 id="paste-title">采购粘贴新增/更新</h2><p>支持整行复制，自动过滤原表前3列图片/空白列。无需表头，点击“报价日期”列后按 Ctrl + V；也可从原表报价日期开始复制。</p></div><button :disabled="busy" aria-label="关闭采购粘贴" @click="close">×</button></header>
-        <div class="paste-tools"><span>当前：第{{ selected.row + 1 }}行 · {{ PURCHASE_PASTE_COLUMNS[selected.col]?.[0] }}</span><button :disabled="busy || !!pending || grid.length >= PURCHASE_PASTE_LIMIT" @click="grid.push(...Array.from({ length: Math.min(5, PURCHASE_PASTE_LIMIT-grid.length) }, emptyPurchasePasteRow))">增加5行</button><small>最多100行 · 已有SKU确认后更新，空白保留原值 · 向右滚动查看全部列</small></div>
+        <header><div><h2 id="paste-title">{{ unified ? '统一粘贴采购资料（五档）' : '采购粘贴新增/更新' }}</h2><p v-if="!unified">支持整行复制，自动过滤原表前3列图片/空白列。无需表头，点击“报价日期”列后按 Ctrl + V；也可从原表报价日期开始复制。</p><p v-if="unified">一份采购资料供普通与 FOB 报价共用。支持最多五档价格；建议连同表头复制，自动识别字段并过滤图片列。无表头时请复制完整五档行，从“报价日期”列粘贴。</p></div><button :disabled="busy" aria-label="关闭采购粘贴" @click="close">×</button></header>
+        <p v-if="unified" class="paste-help">第四、第五档可留空；填写时数量与单价须成对、逐档递增。普通报价保留原采购票点与运费规则，FOB 保留固定10%票点和百件运费均摊规则。使用 FOB 需填写100件总运费或明确包邮。</p><a v-if="unified" class="paste-template-link" href="/templates/采购统一五档模板.xlsx" download>下载统一五档模板</a><div class="paste-tools"><span>当前：第{{ selected.row + 1 }}行 · {{ columns[selected.col]?.[0] }}</span><button :disabled="busy || !!pending || grid.length >= PURCHASE_PASTE_LIMIT" @click="grid.push(...Array.from({ length: Math.min(5, PURCHASE_PASTE_LIMIT-grid.length) }, emptyRow))">增加5行</button><small>最多100行 · 已有SKU确认后更新，空白保留原值 · 向右滚动查看全部列</small></div>
         <p class="paste-help">已有SKU可只填写需更新的字段，空白保留原值；长宽高的0按空值处理，其他字段的0及0%正常更新。新SKU必填：正式SKU、克重、起订量、基准采购单价、票点；未包邮时需1件及10件总运费。是否有货为选填说明，可填写自定义文字，不影响报价资格。合并后统一校验，实际变更计入修改记录。</p>
-        <div v-show="!pending" ref="table" class="paste-grid"><table><thead><tr><th class="row-index">行</th><th v-for="([label, field], c) in PURCHASE_PASTE_COLUMNS" :key="field"><small>{{ String.fromCharCode(65 + Math.floor(c / 26) - 1).replace('@', '') }}{{ String.fromCharCode(65 + c % 26) }}</small>{{ label }}</th><th>操作</th></tr></thead><tbody>
-          <tr v-for="(row, r) in grid" :key="r"><th class="row-index">{{ r + 1 }}</th><td v-for="([label, field], c) in PURCHASE_PASTE_COLUMNS" :key="field" :class="{ invalid: errors.has(`${r}:${c}`) }"><input v-model="row[c]" :data-cell="`${r}:${c}`" :aria-label="`第${r + 1}行 ${label}`" :aria-invalid="errors.has(`${r}:${c}`)" :title="errors.get(`${r}:${c}`) || row[c]" :disabled="busy || !!pending" autocomplete="off" @focus="selected = { row:r, col:c }" @paste="paste($event, r, c)" @keydown="move($event, r, c)"><small v-if="errors.has(`${r}:${c}`)">{{ errors.get(`${r}:${c}`) }}</small></td><td><button :disabled="busy" :aria-label="`删除第${r + 1}行`" @click="grid.splice(r,1)">删除</button></td></tr>
+        <div v-show="!pending" ref="table" class="paste-grid"><table><thead><tr><th class="row-index">行</th><th v-for="([label, field], c) in columns" :key="field" :class="{ 'quantity-column': unified && (field === 'minOrderQty' || field.endsWith('MinQty')) }"><small>{{ String.fromCharCode(65 + Math.floor(c / 26) - 1).replace('@', '') }}{{ String.fromCharCode(65 + c % 26) }}</small>{{ label }}</th><th>操作</th></tr></thead><tbody>
+          <tr v-for="(row, r) in grid" :key="r"><th class="row-index">{{ r + 1 }}</th><td v-for="([label, field], c) in columns" :key="field" :class="{ invalid: errors.has(`${r}:${c}`) }"><input v-model="row[c]" :data-cell="`${r}:${c}`" :aria-label="`第${r + 1}行 ${label}`" :aria-invalid="errors.has(`${r}:${c}`)" :title="errors.get(`${r}:${c}`) || row[c]" :disabled="busy || !!pending" autocomplete="off" @focus="selected = { row:r, col:c }" @paste="paste($event, r, c)" @keydown="move($event, r, c)"><small v-if="errors.has(`${r}:${c}`)">{{ errors.get(`${r}:${c}`) }}</small></td><td><button :disabled="busy" :aria-label="`删除第${r + 1}行`" @click="grid.splice(r,1)">删除</button></td></tr>
         </tbody></table></div>
         <p v-if="check.skipped.length" class="paste-help">同批重复 SKU 保留第一条，跳过 {{ check.skipped.length }} 条：{{ check.skippedRows.map(row => `第${row.sourceRow}行 ${row.sku}`).join("、") }}</p>
         <section v-if="pending" class="paste-preview" aria-label="采购粘贴变更预览">
@@ -118,7 +121,7 @@ async function confirmSave() {
             <p v-else>内容相同，不重复生成修改记录。</p>
           </article>
         </section>
-        <div v-if="check.issues.length" class="paste-errors"><b>{{ check.issues.length }}处需要修正</b><button v-for="(issue,i) in check.issues.slice(0,5)" :key="i" @click="focusCell(issue.row,issue.column)">第{{ issue.row + 1 }}行 {{ PURCHASE_PASTE_COLUMNS[issue.column]?.[0] }}：{{ issue.message }}</button></div>
+        <div v-if="check.issues.length" class="paste-errors"><b>{{ check.issues.length }}处需要修正</b><button v-for="(issue,i) in check.issues.slice(0,5)" :key="i" @click="focusCell(issue.row,issue.column)">第{{ issue.row + 1 }}行 {{ columns[issue.column]?.[0] }}：{{ issue.message }}</button></div>
         <p v-if="message" class="paste-message" role="status">{{ message }}</p>
         <textarea v-if="showCopyFallback" class="copy-fallback" aria-label="已保存的SKU和品类" :value="savedShareText" readonly @focus="($event.target as HTMLTextAreaElement).select()" />
         <footer><span>已填写 {{ check.records.length }} 条<small>{{ savedCount ? `上次成功新增/更新 ${savedCount} 条，可复制SKU和品类。` : '预览后统一确认保存；已有SKU仅更新已填写字段。' }}</small></span><div><button :disabled="busy" @click="close">{{ pending ? '返回编辑' : savedCount && !check.records.length ? '完成' : '取消' }}</button><button v-if="pending" class="primary" :disabled="busy" @click="confirmSave">{{ busy ? '正在保存…' : '确认全部保存' }}</button><button v-else class="primary" :disabled="busy || !check.canSave" @click="save">{{ busy ? '正在校验…' : `预览并保存 ${check.records.length} 条` }}</button><button class="copy-saved" :disabled="busy || copying || !savedShareText" @click="copySaved">{{ copying ? '正在复制…' : '一键复制SKU和品类' }}</button></div></footer>
@@ -130,6 +133,9 @@ async function confirmSave() {
 </template>
 
 <style scoped>
+.paste-template-link{margin:0 20px 8px;align-self:flex-start;color:#176247;font-size:12px;font-weight:700;text-decoration:none;padding:7px 12px;border:1px solid #c6ddce;border-radius:6px;background:#f1f8f3}
+.paste-grid th.quantity-column{background:#deedd8;color:#284a28}
+
 .paste-preview{overflow:auto;min-height:180px;padding:0 24px 16px;flex:1}.paste-preview h3{font-size:17px}.paste-preview h4{margin:18px 0 8px}.paste-preview table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px}.paste-preview th,.paste-preview td{border:1px solid #dde6ee;padding:8px;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}.paste-preview th{background:#f1f5f9}.paste-preview .price-notice{padding:10px;background:#fff5df;color:#805000;margin-bottom:8px}
 
 .paste-dialog .copy-saved{background:#eef1f4;border-color:#d4dbe2;color:#45586b}.copy-fallback{margin:0 24px 12px;min-height:70px}.paste-dialog footer div{flex-wrap:wrap}

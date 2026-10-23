@@ -25,12 +25,12 @@ public class PurchaseHistoryService {
             {"weightG","克重(g)"},{"lengthCm","长(cm)"},{"widthCm","宽(cm)"},{"heightCm","高(cm)"},
             {"minOrderQty","起订量(件)"},{"purchasePriceCny","基准采购单价(CNY/件)"},
             {"sourceQuotedPriceCny","未税采购单价(CNY/件)"},{"legacyPriceMode","含票价计算方式"},
-            {"tier2MinQty","阶梯价2起订量"},{"tier2PriceCny","阶梯价2(CNY/件)"},{"tier3MinQty","阶梯价3起订量"},{"tier3PriceCny","阶梯价3(CNY/件)"},
+            {"tier2MinQty","阶梯价2起订量"},{"tier2PriceCny","阶梯价2(CNY/件)"},{"tier3MinQty","阶梯价3起订量"},{"tier3PriceCny","阶梯价3(CNY/件)"},{"tier4MinQty","阶梯价4起订量"},{"tier4PriceCny","阶梯价4(CNY/件)"},{"tier5MinQty","阶梯价5起订量"},{"tier5PriceCny","阶梯价5(CNY/件)"},
             {"singleFreightCny","1件总运费(CNY)"},{"freight10Cny","10件总运费(CNY)"},{"freight100Cny","100件总运费(CNY)"},
             {"freeShipping","是否包邮"},{"taxIncludedPriceCny","含票价(CNY/件)"},{"taxPoint","票点"},{"invoiceType","票类型"},
             {"stockStatus","是否有货"},{"notes","备注"},{"factoryInfo","工厂信息"},{"sourceLink1","货源链接1"},
             {"sourceLink2","货源链接2"},{"sourceLink3","货源链接3"},{"similarSource","相似货源"},{"auditNotes","审核备注"},
-            {"catalogState","目录状态"}
+            {"catalogState","目录状态"},{"purchaseUsage","报价用途（shared为普通与FOB共用）"}
         };
         for (var field : fields) FIELDS.put(field[0], field[1]);
     }

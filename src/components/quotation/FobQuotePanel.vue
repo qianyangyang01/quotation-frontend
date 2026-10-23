@@ -63,7 +63,7 @@ async function copy() {
     <header><h2><i>02</i> FOB阶梯报价</h2></header>
     <form class="fob-query" aria-label="FOB查询" @submit.prevent="query">
       <label class="query-sku">SKU<input ref="skuInput" v-model="sku" aria-label="FOB查询SKU" placeholder="输入SKU，例如 PF2600053" autocomplete="off"></label>
-      <label class="query-source">采购数据来源<select v-model="source" aria-label="FOB采购数据来源"><option value="auto">自动：优先FOB资料，其次新采购数据</option><option value="fob">FOB数据（粘贴更新）</option><option value="standard">系统新采购数据</option></select></label>
+      <label class="query-source">采购数据来源<select v-model="source" aria-label="FOB采购数据来源"><option value="auto">自动：统一资料优先，兼容原FOB资料</option><option value="fob">原FOB专用资料</option><option value="standard">系统新采购数据</option></select></label>
       <button type="submit" class="query-submit" :disabled="busy || !sku.trim()">{{ busy ? '查询中…' : '查询报价' }}</button>
       <button type="button" @click="batchOpen=true">批量粘贴报价</button>
     </form>

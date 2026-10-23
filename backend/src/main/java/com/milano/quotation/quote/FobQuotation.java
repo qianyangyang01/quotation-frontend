@@ -152,7 +152,7 @@ public class FobQuotation {
             throw AppException.unprocessable("该新采购资料不满足FOB报价条件");
         var parsed=object().put("minOrderQty",count(raw.path("minOrderQty"))).put("orderMultiple",1);
         var candidates=new ArrayList<ObjectNode>();
-        for (var pair:List.of(new String[]{"minOrderQty","purchasePriceCny"},new String[]{"tier2MinQty","tier2PriceCny"},new String[]{"tier3MinQty","tier3PriceCny"})) {
+        for (var pair:List.of(new String[]{"minOrderQty","purchasePriceCny"},new String[]{"tier2MinQty","tier2PriceCny"},new String[]{"tier3MinQty","tier3PriceCny"},new String[]{"tier4MinQty","tier4PriceCny"},new String[]{"tier5MinQty","tier5PriceCny"})) {
             if (!raw.hasNonNull(pair[0]) || !raw.hasNonNull(pair[1])) continue;
             candidates.add(object().put("minQty",count(raw.path(pair[0]))).put("unitPriceCny",amount(raw.path(pair[1]))).put("unit","件"));
         }

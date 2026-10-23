@@ -12,8 +12,15 @@ export const PURCHASE_PASTE_COLUMNS = [
   ['是否有货', 'stockStatus'], ['工厂信息', 'factoryInfo'], ['审核备注', 'auditNotes'],
   ['货源链接1', 'sourceLink1'], ['货源链接2', 'sourceLink2'], ['货源链接3', 'sourceLink3'], ['相似货源', 'similarSource'],
 ] as const
+export const UNIFIED_PURCHASE_PASTE_COLUMNS = [
+  ...PURCHASE_PASTE_COLUMNS.slice(0, 17),
+  ['阶梯价4起订量', 'tier4MinQty'], ['阶梯价4(CNY/件)', 'tier4PriceCny'],
+  ['阶梯价5起订量', 'tier5MinQty'], ['阶梯价5(CNY/件)', 'tier5PriceCny'],
+  ...PURCHASE_PASTE_COLUMNS.slice(17),
+] as const
+export type PurchasePasteColumns = readonly (readonly [string, string])[]
 export const PURCHASE_PASTE_LIMIT = 100
-export const emptyPurchasePasteRow = () => PURCHASE_PASTE_COLUMNS.map(() => '')
+export const emptyPurchasePasteRow = (columns: PurchasePasteColumns = PURCHASE_PASTE_COLUMNS) => columns.map(() => '')
 
 /** Excel/WPS TSV: quoted newlines, escaped quotes and empty columns retain their positions. */
 export function parsePurchaseClipboard(text: string): string[][] {
@@ -48,11 +55,11 @@ export function parsePurchaseClipboard(text: string): string[][] {
   return rows
 }
 
-export function applyPurchasePaste(grid: string[][], clipboard: string[][], startRow: number, startCol: number) {
+export function applyPurchasePaste(grid: string[][], clipboard: string[][], startRow: number, startCol: number, columns: PurchasePasteColumns = PURCHASE_PASTE_COLUMNS) {
   if (startRow + clipboard.length > PURCHASE_PASTE_LIMIT) throw new Error('每次最多100行，请分批粘贴')
-  if (clipboard.some(row => startCol + row.length > PURCHASE_PASTE_COLUMNS.length)) throw new Error('粘贴列数超出模板，请检查起始列；本次未写入')
+  if (clipboard.some(row => startCol + row.length > columns.length)) throw new Error('粘贴列数超出模板，请检查起始列；本次未写入')
   const next = grid.map(row => [...row])
-  while (next.length < startRow + clipboard.length) next.push(emptyPurchasePasteRow())
+  while (next.length < startRow + clipboard.length) next.push(emptyPurchasePasteRow(columns))
   clipboard.forEach((row, r) => row.forEach((value, c) => {
     // Blank clipboard cells skip the target but never shift later columns.
     if (value.trim()) next[startRow + r]![startCol + c] = value
@@ -61,13 +68,13 @@ export function applyPurchasePaste(grid: string[][], clipboard: string[][], star
 }
 
 export type PurchasePasteIssue = { row: number; column: number; message: string }
-const numericFields = new Set(['weightG', 'lengthCm', 'widthCm', 'heightCm', 'minOrderQty', 'purchasePriceCny', 'tier2MinQty', 'tier2PriceCny', 'tier3MinQty', 'tier3PriceCny', 'singleFreightCny', 'freight10Cny', 'freight100Cny', 'taxIncludedPriceCny', 'taxPoint'])
+const numericFields = new Set(['weightG', 'lengthCm', 'widthCm', 'heightCm', 'minOrderQty', 'purchasePriceCny', 'tier2MinQty', 'tier2PriceCny', 'tier3MinQty', 'tier3PriceCny', 'tier4MinQty', 'tier4PriceCny', 'tier5MinQty', 'tier5PriceCny', 'singleFreightCny', 'freight10Cny', 'freight100Cny', 'taxIncludedPriceCny', 'taxPoint'])
 const dimensionFields = new Set(['lengthCm', 'widthCm', 'heightCm'])
 export type PurchasePastePatch = Partial<PurchaseProductRecord> & { sku: string; sourceRow: number }
 type PasteCheck<T> = { issues: PurchasePasteIssue[]; records: T[]; skipped: string[]; skippedRows: { sku: string; sourceRow: number }[]; canSave: boolean }
-export function validatePurchasePaste(grid: string[][], sparse: true): PasteCheck<PurchasePastePatch>
-export function validatePurchasePaste(grid: string[][], sparse?: false): PasteCheck<PurchaseProductRecord>
-export function validatePurchasePaste(grid: string[][], sparse = false): PasteCheck<PurchaseProductRecord | PurchasePastePatch> {
+export function validatePurchasePaste(grid: string[][], sparse: true, columns?: PurchasePasteColumns): PasteCheck<PurchasePastePatch>
+export function validatePurchasePaste(grid: string[][], sparse?: false, columns?: PurchasePasteColumns): PasteCheck<PurchaseProductRecord>
+export function validatePurchasePaste(grid: string[][], sparse = false, columns: PurchasePasteColumns = PURCHASE_PASTE_COLUMNS): PasteCheck<PurchaseProductRecord | PurchasePastePatch> {
   const issues: PurchasePasteIssue[] = []; const records: (PurchaseProductRecord | PurchasePastePatch)[] = []; const seen = new Map<string, number>(); const skipped: string[] = []
   const skippedRows: { sku: string; sourceRow: number }[] = []
   grid.forEach((cells, row) => {
@@ -76,8 +83,8 @@ export function validatePurchasePaste(grid: string[][], sparse = false): PasteCh
     if (key && seen.has(key)) { skipped.push(key); skippedRows.push({ sku: key, sourceRow: row + 1 }); return }
     if (key) seen.set(key, row)
     const data: Record<string, unknown> = sparse ? { sourceRow: row + 1 } : { skuOrigin: 'manual', dataSource: 'standard', sourceSheet: '采购粘贴新增', sourceRow: row + 1 }
-    const issue = (field: string, message: string) => issues.push({ row, column: PURCHASE_PASTE_COLUMNS.findIndex(c => c[1] === field), message })
-    PURCHASE_PASTE_COLUMNS.forEach(([, field], col) => {
+    const issue = (field: string, message: string) => issues.push({ row, column: columns.findIndex(c => c[1] === field), message })
+    columns.forEach(([, field], col) => {
       const raw = (cells[col] || '').trim()
       if (sparse && !raw) return
       if (!numericFields.has(field)) { data[field] = raw; return }
@@ -99,8 +106,8 @@ export function validatePurchasePaste(grid: string[][], sparse = false): PasteCh
     }
     if (!sparse && data.purchasePriceCny == null) issue('purchasePriceCny', '请填写基准采购单价')
     if (!sparse && data.taxPoint == null) issue('taxPoint', '请填写票点；无票点请明确填0%')
-    for (const field of ['minOrderQty', 'tier2MinQty', 'tier3MinQty']) if (data[field] != null && (!Number.isSafeInteger(data[field]) || Number(data[field]) <= 0)) issue(field, '起订量须为正整数')
-    if (!sparse) for (const [qty, price, previous] of [['tier2MinQty', 'tier2PriceCny', 'minOrderQty'], ['tier3MinQty', 'tier3PriceCny', 'tier2MinQty']]) {
+    for (const field of ['minOrderQty', 'tier2MinQty', 'tier3MinQty', 'tier4MinQty', 'tier5MinQty']) if (data[field] != null && (!Number.isSafeInteger(data[field]) || Number(data[field]) <= 0)) issue(field, '起订量须为正整数')
+    if (!sparse) for (const [qty, price, previous] of [['tier2MinQty', 'tier2PriceCny', 'minOrderQty'], ['tier3MinQty', 'tier3PriceCny', 'tier2MinQty'], ['tier4MinQty', 'tier4PriceCny', 'tier3MinQty'], ['tier5MinQty', 'tier5PriceCny', 'tier4MinQty']]) {
       if ((data[qty!] == null) !== (data[price!] == null)) issue(data[qty!] == null ? qty! : price!, '阶梯起订量与价格须一起填写')
       if (data[qty!] != null && (data[previous!] == null || Number(data[qty!]) <= Number(data[previous!]))) issue(qty!, '须大于前一档起订量，请按顺序填写')
     }

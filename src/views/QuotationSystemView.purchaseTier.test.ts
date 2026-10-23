@@ -89,6 +89,7 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<st
     } }
     if (path === `/purchase-products/${sku}`) return { ...record, ...purchaseOverride, sku }
     if (path === '/purchase-products/BK2601961') return { ...record, sku: 'BK2601961', purchasePriceCny: 20, tier2PriceCny: 18 }
+    if (path === '/purchase-products/SECOND-FIVE') return { ...record, ...purchaseOverride, sku: 'SECOND-FIVE' }
     if (path === '/purchase-products/SINGLE') return { sku: 'SINGLE', category: '宠物用品', weightG: 100, minOrderQty: 100, purchasePriceCny: 20, taxPoint: .02, freight10Cny: 5, freight100Cny: 50 }
     throw new Error(`Unexpected API: ${path}`)
   })
@@ -111,7 +112,7 @@ async function mount(mode: 'single' | 'bundle', estimate = '10', tiers: Array<st
 
 async function selectTier(value: string) {
   const select = host.querySelector<HTMLSelectElement>('[data-validation-field="monthlySalesEstimate"] select')!
-  expect([...select.options].map(option => option.text)).toEqual(['阶梯价1', '阶梯价2', '阶梯价3'])
+  expect([...select.options].map(option => option.text)).toEqual(['阶梯价1', '阶梯价2', '阶梯价3', '阶梯价4', '阶梯价5'])
   select.value = value
   select.dispatchEvent(new Event('change', { bubbles: true }))
   await nextTick()
@@ -654,4 +655,29 @@ it.each(['single', 'bundle'] as const)('shows 110 untaxed but calculates 121 exa
   const item = mode === 'single' ? state.products[0]! : state.bundleItems[0]!
   expect(item.purchaseDisplay).toMatchObject({ unitPrice: 100, effectiveUnitPrice: 110 })
   expect('purchase' in item ? item.purchase : item.purchaseUnitPrice).toBe(110)
+})
+
+it('keeps fourth and fifth tiers through single quotation, draft save and restore', async () => {
+  purchaseOverride = { tier4MinQty: 2000, tier4PriceCny: 10, tier5MinQty: 5000, tier5PriceCny: 9 }
+  await mount('single', 'tier4')
+  expect(state.products[0]!.purchase).toBe(10.2)
+  await selectTier('tier5')
+  expect(state.products[0]!.purchaseBaseUnitPrice).toBe(9)
+  expect(state.products[0]!.purchase).toBe(9.18)
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(.21)
+  const payload = state.draftPayload()
+  expect(payload.monthlySalesEstimate).toBe('tier5')
+  await selectTier('10')
+  await state.applyDraftPayload(payload, undefined, { restoreQuotation: true })
+  await nextTick()
+  expect(state.monthlySalesEstimate).toBe('tier5')
+  expect(state.products[0]!.purchase).toBe(9.18)
+})
+it('retains independent fourth and fifth tiers in a combination draft', async () => {
+  purchaseOverride = { tier4MinQty: 2000, tier4PriceCny: 10, tier5MinQty: 5000, tier5PriceCny: 9 }
+  await mount('bundle', '10', ['tier5', 'tier4'], 'SECOND-FIVE')
+  expect(state.bundleItems.map(item => item.purchaseTier)).toEqual(['tier5', 'tier4'])
+  expect(state.bundleItems.map(item => item.purchaseUnitPrice)).toEqual([9.18, 10.2])
+  expect(state.bundlePurchaseCost()).toBe(28.56)
+  expect(state.draftPayload().bundleItems.map(item => item.purchaseTier)).toEqual(['tier5', 'tier4'])
 })

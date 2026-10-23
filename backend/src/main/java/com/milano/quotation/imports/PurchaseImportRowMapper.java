@@ -32,6 +32,7 @@ public class PurchaseImportRowMapper {
         else if(sku.length()>96||!sku.matches("[A-Z0-9._/-]+"))errors.add("SKU格式不合法");
         else if(reserved(sku))errors.add("TESTP/TEST/DEMO/MOCK/AUTO 前缀为测试SKU，不能作为正式数据");
         var out=mapper.createObjectNode();out.put("sourceSheet",sourceSheet);out.put("sourceSheetIndex",sourceSheetIndex);out.put("sourceRow",sourceRow);out.put("sku",sku);out.put("skuOrigin",generated?"system":"imported");
+        if (!legacy2026 && schema.tier4Qty() >= 0 && schema.tier4Price() >= 0 && schema.tier5Qty() >= 0 && schema.tier5Price() >= 0) out.put("purchaseUsage", "shared");
         if(legacy2026){out.put("dataSource",PurchaseImportProfile.LEGACY_DATA_SOURCE);out.put("sourceLabel",PurchaseImportProfile.LEGACY_SOURCE_LABEL);out.put("importProfile",PurchaseImportProfile.LEGACY_2026);}
         optionalText(out,"category",value(values,schema,PurchaseWorkbookSchema.Field.CATEGORY,warnings),"类别",warnings);
         out.put("productImage","");out.put("physicalImage","");out.put("image","");
@@ -51,6 +52,21 @@ public class PurchaseImportRowMapper {
         number(out,"tier2PriceCny",values,schema.tier2Price(),"阶梯价2",warnings,false);
         number(out,"tier3MinQty",values,schema.tier3Qty(),"阶梯价3起订量",warnings,true);
         number(out,"tier3PriceCny",values,schema.tier3Price(),"阶梯价3",warnings,false);
+        number(out,"tier4MinQty",values,schema.tier4Qty(),"阶梯价4起订量",warnings,true);
+        number(out,"tier4PriceCny",values,schema.tier4Price(),"阶梯价4",warnings,false);
+        number(out,"tier5MinQty",values,schema.tier5Qty(),"阶梯价5起订量",warnings,true);
+        number(out,"tier5PriceCny",values,schema.tier5Price(),"阶梯价5",warnings,false);
+        if (!clean(values,schema.tier4Qty()).isBlank() || !clean(values,schema.tier4Price()).isBlank() || !clean(values,schema.tier5Qty()).isBlank() || !clean(values,schema.tier5Price()).isBlank()) {
+            String previous = "minOrderQty";
+            for (int tier = 2; tier <= 5; tier++) {
+                String q = "tier" + tier + "MinQty", p = "tier" + tier + "PriceCny";
+                if (out.hasNonNull(q) != out.hasNonNull(p)) errors.add("阶梯" + tier + "起订量与价格须一起填写");
+                if (out.hasNonNull(q) && (!out.hasNonNull(previous) || out.path(q).asDouble() <= out.path(previous).asDouble())) errors.add("阶梯起订量须逐档递增，请按顺序填写");
+                previous = q;
+            }
+            for (var pair : List.of(new String[]{"tier4MinQty", Integer.toString(schema.tier4Qty())}, new String[]{"tier4PriceCny", Integer.toString(schema.tier4Price())}, new String[]{"tier5MinQty", Integer.toString(schema.tier5Qty())}, new String[]{"tier5PriceCny", Integer.toString(schema.tier5Price())}))
+                if (!clean(values,Integer.parseInt(pair[1])).isBlank() && !out.hasNonNull(pair[0])) errors.add("第四或第五档存在无法识别的数字，不可忽略");
+        }
         var singleFreightText=value(values,schema,PurchaseWorkbookSchema.Field.FREIGHT1,warnings);number(out,"singleFreightCny",new String[]{singleFreightText},0,"1件总运费",warnings,false);
         number(out,"freight10Cny",values,schema.freight10(),"10件总运费",warnings,false);
         number(out,"freight100Cny",values,schema.freight100(),"100件总运费",warnings,false);
@@ -72,6 +88,7 @@ public class PurchaseImportRowMapper {
                 if(field==PurchaseWorkbookSchema.Field.PRODUCT_IMAGE||field==PurchaseWorkbookSchema.Field.PHYSICAL_IMAGE)continue;
                 if(ignoreSku&&field==PurchaseWorkbookSchema.Field.SKU)continue;
                 var text=schema.value(values,field,null);
+                if (Set.of(PurchaseWorkbookSchema.Field.TIER4_QTY, PurchaseWorkbookSchema.Field.TIER4_PRICE, PurchaseWorkbookSchema.Field.TIER5_QTY, PurchaseWorkbookSchema.Field.TIER5_PRICE).contains(field) && text.isBlank()) continue;
                 var bytes=text.getBytes(StandardCharsets.UTF_8);
                 digest.update((field.name()+":"+bytes.length+":").getBytes(StandardCharsets.UTF_8));
                 digest.update(bytes);
@@ -91,7 +108,7 @@ public class PurchaseImportRowMapper {
         o.put("colorSku",o.path("color").asText());for(var f:List.of("marks","rawTierPrice","l6Price","freightTrial","invoiceInfo","otherNotes","more"))o.put(f,"");o.putArray("shippingMarks");
         o.put("taxIncludedPrice",o.path("taxIncludedPriceCny").isNumber()?o.path("taxIncludedPriceCny").asText():"");o.put("taxDifference",o.path("invoiceType").asText());o.put("packagingInfo",o.path("factoryInfo").asText());
         var links=o.putArray("sourceLinks");for(var k:List.of("sourceLink1","sourceLink2","sourceLink3","similarSource"))links.add(o.path(k).asText());
-        var candidates=new ArrayList<double[]>();addTier(candidates,o,"minOrderQty","purchasePriceCny");addTier(candidates,o,"tier2MinQty","tier2PriceCny");addTier(candidates,o,"tier3MinQty","tier3PriceCny");
+        var candidates=new ArrayList<double[]>();addTier(candidates,o,"minOrderQty","purchasePriceCny");addTier(candidates,o,"tier2MinQty","tier2PriceCny");addTier(candidates,o,"tier3MinQty","tier3PriceCny");addTier(candidates,o,"tier4MinQty","tier4PriceCny");addTier(candidates,o,"tier5MinQty","tier5PriceCny");
         candidates.sort(Comparator.comparingDouble(v->v[0]));var tiers=o.putArray("priceTiers");for(int i=0;i<candidates.size();i++){var t=tiers.addObject();t.put("minQty",(long)candidates.get(i)[0]);if(i+1<candidates.size())t.put("maxQty",(long)candidates.get(i+1)[0]-1);else t.putNull("maxQty");t.put("unitPriceCny",candidates.get(i)[1]);t.put("source",i==0?"基准采购单价":"阶梯价"+(i+1));}
         var issueArray=o.putArray("importWarnings");warnings.forEach(issueArray::add);errors.forEach(issueArray::add);
     }

@@ -16,7 +16,7 @@ export interface PastePreviewRow {
 export interface PastePreview { rows: PastePreviewRow[]; skipped: PasteSkipped[] }
 export interface PasteResult { added: PurchaseProductRecord[]; updated: PurchaseProductRecord[]; unchanged: string[]; skipped: PasteSkipped[] }
 export interface PasteSavedCounts { added: number; updated: number; unchanged: number; skipped: number }
-export const previewPurchasePaste = (rows: PurchasePastePatch[]) =>
-  request<PastePreview>('/purchase-products/paste/preview', { method: 'POST', body: JSON.stringify(rows), signal: AbortSignal.timeout(60_000) })
-export const confirmPurchasePaste = (rows: PurchasePastePatch[], expected: PasteExpected[]) =>
-  request<PasteResult>('/purchase-products/paste/confirm', { method: 'POST', body: JSON.stringify({ rows, expected }), signal: AbortSignal.timeout(60_000) })
+export const previewPurchasePaste = (rows: PurchasePastePatch[], unified = false) =>
+  request<PastePreview>(`/purchase-products/paste/${unified ? 'shared/' : ''}preview`, { method: 'POST', body: JSON.stringify(rows), signal: AbortSignal.timeout(60_000) })
+export const confirmPurchasePaste = (rows: PurchasePastePatch[], expected: PasteExpected[], unified = false) =>
+  request<PasteResult>(`/purchase-products/paste/${unified ? 'shared/' : ''}confirm`, { method: 'POST', body: JSON.stringify({ rows, expected }), signal: AbortSignal.timeout(60_000) })

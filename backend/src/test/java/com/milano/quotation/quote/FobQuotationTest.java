@@ -62,4 +62,22 @@ class FobQuotationTest {
         raw.put("purchasePriceBasis","tax_included");assertThrows(RuntimeException.class,()->FobQuotation.standard(raw));
         raw.remove("purchasePriceBasis");raw.remove("freight100Cny");assertThrows(RuntimeException.class,()->FobQuotation.standard(raw));
     }
+
+    @Test void standardSourceRetainsAllFiveTiersAndFixedFobTax() {
+        var source=FobQuotation.object().put("dataSource","standard").put("catalogState","ready").put("minOrderQty",1)
+            .put("purchasePriceCny",20).put("tier2MinQty",10).put("tier2PriceCny",18).put("tier3MinQty",100).put("tier3PriceCny",16)
+            .put("tier4MinQty",500).put("tier4PriceCny",14).put("tier5MinQty",1000).put("tier5PriceCny",12).put("freight100Cny",100).put("taxPoint",.08);
+        var parsed=FobQuotation.standard(source);
+        assertEquals(5,parsed.path("priceTiers").size());
+        assertEquals(999,parsed.at("/priceTiers/3/maxQty").asInt()); assertEquals(1000,parsed.at("/priceTiers/4/minQty").asInt());
+        assertEquals(12,parsed.at("/priceTiers/4/unitPriceCny").asInt());
+        assertEquals(1,parsed.at("/freight/unitFreightCny").asInt());
+        var request=input(); var fob=(ObjectNode)request.path("fob");
+        fob.put("quantity",1000).put("displayMode","quantity").put("rate",7);
+        var product=(ObjectNode)fob.path("product"); product.set("parsed",parsed); product.put("source","standard");
+        ((ObjectNode)fob.path("sheet")).putArray("rows").addObject().put("key","FOB-SAVE-0").putArray("prices").add(2.31).add(2.36);
+        var calculated=FobQuotation.calculate(request,product,new BigDecimal("7"));
+        assertEquals("2.31",calculated.at("/fob/current/declaredUsd").asText());
+        assertEquals("2.36",calculated.at("/fob/current/undeclaredUsd").asText());
+    }
 }

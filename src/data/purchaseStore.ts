@@ -13,11 +13,12 @@ export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageC
 export type PurchaseProductRecord = {
   sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number; _updatedAt?: string
   dataSource: PurchaseDataSource; purchasePriceBasis: PurchasePriceBasis; sourceQuotedPriceCny: number | null
+  purchaseUsage?: 'shared'
   legacyPriceMode?: 'auto_tax'
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
   size: string; color: string; weightG: number | null; weightOriginal?: string; lengthCm: number | null; widthCm: number | null; heightCm: number | null
   minOrderQty: number | null; purchasePriceCny: number | null
-  tier2MinQty: number | null; tier2PriceCny: number | null; tier3MinQty: number | null; tier3PriceCny: number | null
+  tier2MinQty: number | null; tier2PriceCny: number | null; tier3MinQty: number | null; tier3PriceCny: number | null; tier4MinQty: number | null; tier4PriceCny: number | null; tier5MinQty: number | null; tier5PriceCny: number | null
   priceTiers: PurchasePriceTier[]; singleFreightCny: number | null; freight10Cny: number | null; freight100Cny: number | null
   freeShipping: '' | '是' | '否'; taxIncludedPriceCny: number | null; taxPoint: number | null; taxPointExplicit: boolean; invoiceType: string; stockStatus: PurchaseStockStatus
   notes: string; factoryInfo: string; sourceLink1: string; sourceLink2: string; sourceLink3: string; similarSource: string; auditNotes: string
@@ -45,11 +46,13 @@ function taxPointOrNull(value: unknown) {
   return normalized <= 1 ? normalized : null
 }
 
-function buildPriceTiers(record: Pick<PurchaseProductRecord, 'minOrderQty' | 'purchasePriceCny' | 'tier2MinQty' | 'tier2PriceCny' | 'tier3MinQty' | 'tier3PriceCny'>) {
+function buildPriceTiers(record: Pick<PurchaseProductRecord, 'minOrderQty' | 'purchasePriceCny' | 'tier2MinQty' | 'tier2PriceCny' | 'tier3MinQty' | 'tier3PriceCny' | 'tier4MinQty' | 'tier4PriceCny' | 'tier5MinQty' | 'tier5PriceCny'>) {
   const candidates = [
     { minQty: record.minOrderQty, price: record.purchasePriceCny, source: '基准采购单价' },
     { minQty: record.tier2MinQty, price: record.tier2PriceCny, source: '阶梯价2' },
     { minQty: record.tier3MinQty, price: record.tier3PriceCny, source: '阶梯价3' },
+    { minQty: record.tier4MinQty, price: record.tier4PriceCny, source: '阶梯价4' },
+    { minQty: record.tier5MinQty, price: record.tier5PriceCny, source: '阶梯价5' },
   ].filter((item): item is { minQty: number; price: number; source: string } => item.minQty != null && item.minQty > 0 && item.price != null && item.price >= 0)
     .sort((a, b) => a.minQty - b.minQty)
   return candidates.map((item, index) => ({
@@ -80,8 +83,11 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     ...(dataSource === 'legacy_2026' && input.legacyPriceMode === 'auto_tax' ? { legacyPriceMode: 'auto_tax' as const } : {}),
     physicalImage: String(input.physicalImage || ''), quotationOwner: String(input.quotationOwner || '').trim(), quotationDate: String(input.quotationDate || ''),
     size: String(input.size || '').trim(), color, weightG, ...(input.weightOriginal == null ? {} : { weightOriginal: String(input.weightOriginal) }), lengthCm: numberOrNull(input.lengthCm), widthCm: numberOrNull(input.widthCm), heightCm: numberOrNull(input.heightCm),
+    ...(input.purchaseUsage === 'shared' ? { purchaseUsage: 'shared' as const } : {}),
     minOrderQty, purchasePriceCny, tier2MinQty: numberOrNull(input.tier2MinQty), tier2PriceCny: numberOrNull(input.tier2PriceCny),
     tier3MinQty: numberOrNull(input.tier3MinQty), tier3PriceCny: numberOrNull(input.tier3PriceCny),
+    tier4MinQty: numberOrNull(input.tier4MinQty), tier4PriceCny: numberOrNull(input.tier4PriceCny),
+    tier5MinQty: numberOrNull(input.tier5MinQty), tier5PriceCny: numberOrNull(input.tier5PriceCny),
     singleFreightCny: numberOrNull(input.singleFreightCny), freight10Cny: numberOrNull(input.freight10Cny), freight100Cny: numberOrNull(input.freight100Cny),
     freeShipping: input.freeShipping === '是' || input.freeShipping === '否' ? input.freeShipping : '' as '' | '是' | '否',
     taxIncludedPriceCny: numberOrNull(input.taxIncludedPriceCny ?? input.taxIncludedPrice), taxPoint: taxPointOrNull(input.taxPoint), taxPointExplicit,
@@ -178,7 +184,7 @@ export function purchaseUnitPrice(record: PurchaseProductRecord, quantity: numbe
 }
 
 export function purchaseTierIndex(value: string): number {
-  return value === '100+' ? 2 : value === '100' ? 1 : 0
+  return value === 'tier5' ? 4 : value === 'tier4' ? 3 : value === '100+' ? 2 : value === '100' ? 1 : 0
 }
 
 export function selectedPurchaseTier(record: PurchaseProductRecord, value: string) {

@@ -2,7 +2,7 @@ import { decimal, sumDecimal, productDecimal } from './quotationDecimal'
 import type { ShipmentDimensions } from '@/data/logistics'
 import { findPurchaseProduct, purchaseTierIndex, selectedPurchaseTier, type PurchaseProductRecord } from '@/data/purchaseStore'
 
-export type MonthlySalesEstimate = '10' | '100' | '100+'
+export type MonthlySalesEstimate = '10' | '100' | '100+' | 'tier4' | 'tier5'
 
 export type BundleCalculationItem = {
   sku: string
@@ -33,8 +33,8 @@ export function normalizedQuoteQuantity(value: number) {
 
 // Keep persisted option values compatible with existing drafts and reissued quotes.
 export function normalizePurchaseTier(value: unknown, fallback = '10'): MonthlySalesEstimate {
-  if (value === '10' || value === '100' || value === '100+') return value
-  return fallback === '100' || fallback === '100+' ? fallback : '10'
+  if (value === '10' || value === '100' || value === '100+' || value === 'tier4' || value === 'tier5') return value
+  return fallback === '100' || fallback === '100+' || fallback === 'tier4' || fallback === 'tier5' ? fallback : '10'
 }
 
 export function monthlySalesTierLabel(value: string, record?: PurchaseProductRecord) {

@@ -350,7 +350,7 @@ function normalizeBundleItems(value: unknown): QuotationRecordBundleItem[] {
   if (!Array.isArray(value)) return []
   return value.map(raw => ({
     sku: String(raw?.sku || '').trim().toUpperCase(),
-    ...(['10', '100', '100+'].includes(raw?.purchaseTier) ? { purchaseTier: String(raw.purchaseTier) } : {}),
+    ...(['10', '100', '100+', 'tier4', 'tier5'].includes(raw?.purchaseTier) ? { purchaseTier: String(raw.purchaseTier) } : {}),
     name: String(raw?.name || '').trim(),
     quantityPerSet: Math.max(1, Math.floor(n(raw?.quantityPerSet))),
     effectiveWeightKg: Math.max(0, n(raw?.effectiveWeightKg)),

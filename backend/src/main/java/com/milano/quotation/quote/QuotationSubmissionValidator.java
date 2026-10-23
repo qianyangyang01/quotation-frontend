@@ -15,7 +15,7 @@ import java.util.Set;
 public class QuotationSubmissionValidator {
     private static final Set<String> MODES = Set.of("single", "bundle", "freight-trial", "shipping-only");
     private static final Set<String> GRADES = Set.of("S级客户", "A级客户", "B级客户", "C级客户", "D级客户", "E级客户", "新客户");
-    private static final Set<String> SALES = Set.of("10", "100", "100+");
+    private static final Set<String> SALES = Set.of("10", "100", "100+", "tier4", "tier5");
 
     // Called after idempotency lookup: old successful retries retain their original snapshot.
     public void validateQuotePricing(ObjectNode input) {

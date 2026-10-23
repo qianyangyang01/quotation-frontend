@@ -2,16 +2,16 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
-import { emptyPurchasePasteRow } from '@/data/purchasePaste'
+import { emptyPurchasePasteRow, UNIFIED_PURCHASE_PASTE_COLUMNS } from '@/data/purchasePaste'
 
 const request = vi.hoisted(() => vi.fn())
 vi.mock('@/services/http', () => ({ request }))
 let app: App | undefined
 const tick = async () => { await nextTick(); await nextTick(); await nextTick() }
-function mount() {
+function mount(unified = false) {
   const saved = vi.fn()
   const host = document.createElement('div'); document.body.append(host)
-  app = createApp(PurchasePasteDialog, { onSaved: saved }); app.mount(host)
+  app = createApp(PurchasePasteDialog, { onSaved: saved, unified }); app.mount(host)
   return saved
 }
 function button(name: string) { return Array.from(document.querySelectorAll('button')).find(b => b.textContent === name)! }
@@ -119,4 +119,19 @@ it('keeps multiline HTML aligned, filters images and rejects jagged clipboard in
   request.mockResolvedValueOnce({ rows: preview('QA-1').rows.concat(preview('QA-2').rows), skipped: [] })
   button('预览并保存 2 条').click(); await tick()
   expect(JSON.parse(request.mock.calls[0]![1].body)[0]).toMatchObject({ sku: 'QA-1', size: '页数118\n尺寸253*250', color: '小熊\n小兔', purchasePriceCny: 41.1 })
+})
+
+it('uses the five-tier endpoint and keeps exact values through preview and confirmation', async () => {
+  mount(true)
+  const input = emptyPurchasePasteRow(UNIFIED_PURCHASE_PASTE_COLUMNS)
+  Object.assign(input, {3: 'P-1', 17: '500', 18: '4.25', 19: '1000', 20: '0', 21: '9', 22: '40', 23: '150'})
+  await paste([input]); request.mockResolvedValueOnce(preview())
+  button('预览并保存 1 条').click(); await tick()
+  expect(request.mock.calls[0]![0]).toBe('/purchase-products/paste/shared/preview')
+  const payload = JSON.parse(request.mock.calls[0]![1].body)
+  expect(payload[0]).toMatchObject({tier4MinQty:500,tier4PriceCny:4.25,tier5MinQty:1000,tier5PriceCny:0,singleFreightCny:9,freight10Cny:40,freight100Cny:150})
+  request.mockResolvedValueOnce({added: [], updated: [{sku:'P-1'}], unchanged:[], skipped:[]})
+  button('确认全部保存').click(); await tick()
+  expect(request.mock.calls[1]![0]).toBe('/purchase-products/paste/shared/confirm')
+  expect(JSON.parse(request.mock.calls[1]![1].body).rows).toEqual(payload)
 })

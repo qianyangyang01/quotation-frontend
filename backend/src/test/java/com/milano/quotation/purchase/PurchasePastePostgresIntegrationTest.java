@@ -347,4 +347,35 @@ class PurchasePastePostgresIntegrationTest {
         assertEquals(before, jdbc.queryForMap("select * from quotation_record where id=?", id));
         assertEquals(19, products.get(sku).path("purchasePriceCny").asInt(), "new queries see the new price");
     }
+
+    @Test void sharedEndpointPersistsFiveTiersAuditsChangesAndPreservesHistoricalAndFobRows() throws Exception {
+        var sku = sku();
+        var input = full(sku).put("tier2MinQty",10).put("tier2PriceCny",11).put("tier3MinQty",100).put("tier3PriceCny",10)
+            .put("tier4MinQty",500).put("tier4PriceCny",9).put("tier5MinQty",1000).put("tier5PriceCny",8).put("freight100Cny",150);
+        jdbc.update("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values(?,cast(? as jsonb),0,now(),now())",sku,"{\"notes\":\"preserve FOB source\"}");
+        var oldFob = jdbc.queryForMap("select * from fob_purchase_product where sku=?",sku);
+        List<JsonNode> rows = List.of(input);
+        mvc.perform(post("/api/v1/purchase-products/paste/shared/preview").with(csrf()).contentType("application/json").content(mapper.writeValueAsString(rows)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.rows[0].effective.tier5PriceCny").value(8))
+            .andExpect(jsonPath("$.data.rows[0].effective.purchaseUsage").value("shared"));
+        assertFalse(products.exists(sku));
+        var preview = paste.preview(rows,true);
+        var request = new PurchasePasteService.Confirmation(rows,preview.rows().stream().map(PurchasePasteService.PreviewRow::expected).toList());
+        mvc.perform(post("/api/v1/purchase-products/paste/shared/confirm").with(csrf()).contentType("application/json").content(mapper.writeValueAsString(request)))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.added[0].tier4PriceCny").value(9));
+        var saved = products.get(sku);
+        assertEquals(8,saved.path("tier5PriceCny").asInt()); assertEquals("shared",saved.path("purchaseUsage").asText());
+        var id = UUID.randomUUID();
+        jdbc.update("insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at,lifecycle_state) values(?,?,?,'processed',cast(? as jsonb),3,now(),now(),'active')",
+            id,"SHARED-"+id.toString().substring(0,8),"PASTEBUYER","{\"systemQuote\":33,\"financeReviewStatus\":\"approved\",\"dealStatus\":\"won\"}");
+        var history = jdbc.queryForMap("select * from quotation_record where id=?",id);
+        List<JsonNode> change = List.of(mapper.createObjectNode().put("sku",sku).put("tier5PriceCny",0));
+        var expected = paste.preview(change,true).rows().stream().map(PurchasePasteService.PreviewRow::expected).toList();
+        paste.confirmShared(new PurchasePasteService.Confirmation(change,expected));
+        assertEquals(0,products.get(sku).path("tier5PriceCny").asInt()); assertEquals(150,products.get(sku).path("freight100Cny").asInt());
+        assertEquals(2,historyCount(sku));
+        assertEquals(oldFob,jdbc.queryForMap("select * from fob_purchase_product where sku=?",sku));
+        assertEquals(history,jdbc.queryForMap("select * from quotation_record where id=?",id));
+        assertThrows(AppException.class,()->paste.confirmShared(new PurchasePasteService.Confirmation(change,expected)));
+    }
 }

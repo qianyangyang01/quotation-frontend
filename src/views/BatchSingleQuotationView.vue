@@ -51,7 +51,7 @@ const partial = computed(() => {
   try { return mergeBatchSingle(completed.value.map(line => line.item!)) } catch { return undefined }
 })
 const countryCount = computed(() => new Set(partial.value?.sheet.rows.map(row => row.country)).size)
-const tierLabel = computed(() => ({ '10': '阶梯价1', '100': '阶梯价2', '100+': '阶梯价3' })[seed.value?.conditions.monthlySalesEstimate || ''] || '—')
+const tierLabel = computed(() => ({ '10': '阶梯价1', '100': '阶梯价2', '100+': '阶梯价3', 'tier4': '阶梯价4', 'tier5': '阶梯价5' })[seed.value?.conditions.monthlySalesEstimate || ''] || '—')
 const combined = computed(() => {
   if (!selected.value.length || selected.value.some(line => !line.item || line.error)) return undefined
   try { return mergeBatchSingle(selected.value.map(line => line.item!)) } catch { return undefined }

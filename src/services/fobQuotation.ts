@@ -32,11 +32,16 @@ export function fromStandardPurchase(record: PurchaseProductRecord): FobQuotePro
 export async function loadFobQuoteProduct(sku: string, source: FobSourceMode, signal?: AbortSignal, strictFreight = false): Promise<FobQuoteProduct> {
   const normalized = sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!/^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(normalized)) throw new Error('请填写有效SKU')
-  if (source !== 'standard') {
+  let record: PurchaseProductRecord | undefined
+  if (source !== 'fob') {
+    try { record = await loadPurchaseProduct(normalized, signal) }
+    catch (e) { if (source === 'standard' || !(e instanceof ApiError) || e.status !== 404 || e.code !== 'NOT_FOUND') throw e }
+  }
+  if (source === 'fob' || (source === 'auto' && record?.purchaseUsage !== 'shared')) {
     try { return fromFobRecord(await loadFobRecord(normalized, signal)) }
     catch (e) { if (source === 'fob' || !(e instanceof ApiError) || e.status !== 404 || e.code !== 'FOB_PURCHASE_NOT_FOUND') throw e }
   }
-  const record = await loadPurchaseProduct(normalized, signal)
+  if (!record) throw new Error('未找到该SKU的采购资料，请先通过统一粘贴资料维护')
   if (strictFreight && record.freeShipping === '是' && [record.singleFreightCny, record.freight10Cny, record.freight100Cny].some(v => v != null && v > 0)) throw new Error('采购资料冲突：已选包邮但填写了正数运费，请先核对采购资料')
   return fromStandardPurchase(record)
 }

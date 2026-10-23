@@ -36,6 +36,7 @@ async function editSalesSku(sku: string) {
 
 const showPasteDialog = ref(false)
 const showFobPasteDialog = ref(false)
+const showUnifiedPasteDialog = ref(false)
 const fobLookupSku = ref('')
 const fobDetail = ref<FobCatalogRecord | null>(null)
 function openFob(sku = '') { fobLookupSku.value = sku; showFobPasteDialog.value = true }
@@ -459,7 +460,7 @@ const detailFields = computed(() => detail.value ? [
   ['报价人*', detail.value.quotationOwner], ['报价日期*', detail.value.quotationDate], ['尺码', detail.value.size], ['颜色', detail.value.color], ['材质', detail.value.material],
   ['克重(g)*', value(detail.value.weightG, ' g')], ['长(cm)', value(detail.value.lengthCm, ' cm')], ['宽(cm)', value(detail.value.widthCm, ' cm')], ['高(cm)', value(detail.value.heightCm, ' cm')],
   ['起订量(件)*', value(detail.value.minOrderQty, ' 件')], [detail.value.dataSource==='legacy_2026' ? '未税采购单价(CNY/件)*' : '基准采购单价(CNY/件)*', money(detail.value.dataSource==='legacy_2026' ? legacyUntaxedUnitPrice(detail.value) : detail.value.purchasePriceCny)], ['阶梯价2起订量', value(detail.value.tier2MinQty, ' 件')], ['阶梯价2(CNY/件)', money(detail.value.tier2PriceCny)],
-  ['阶梯价3起订量', value(detail.value.tier3MinQty, ' 件')], ['阶梯价3(CNY/件)', money(detail.value.tier3PriceCny)], ...freightDetailFields(detail.value),
+  ['阶梯价3起订量', value(detail.value.tier3MinQty, ' 件')], ['阶梯价3(CNY/件)', money(detail.value.tier3PriceCny)], ['阶梯价4起订量', value(detail.value.tier4MinQty, ' 件')], ['阶梯价4(CNY/件)', money(detail.value.tier4PriceCny)], ['阶梯价5起订量', value(detail.value.tier5MinQty, ' 件')], ['阶梯价5(CNY/件)', money(detail.value.tier5PriceCny)], ...freightDetailFields(detail.value),
   ['是否包邮', detail.value.freeShipping], ['含票价(CNY/件)', money(detail.value.taxIncludedPriceCny)], ['票点', detail.value.taxPoint == null ? '暂无数据' : `${(detail.value.taxPoint * 100).toFixed(2).replace(/\.00$/, '')}%`], ['票类型', detail.value.invoiceType],
   ['是否有货', detail.value.stockStatus], ['备注', detail.value.notes], ['工厂信息', detail.value.factoryInfo], ['货源链接1', detail.value.sourceLink1], ['货源链接2', detail.value.sourceLink2], ['货源链接3', detail.value.sourceLink3],
   ['相似货源', detail.value.similarSource], ['审核备注', detail.value.auditNotes],
@@ -467,6 +468,7 @@ const detailFields = computed(() => detail.value ? [
 </script>
 
 <template>
+  <PurchasePasteDialog v-if="showUnifiedPasteDialog" unified @close="showUnifiedPasteDialog=false" @saved="pasteSaved" />
   <PurchasePasteDialog v-if="showPasteDialog" @close="showPasteDialog=false" @saved="pasteSaved" />
   <FobCatalogDetail v-if="fobDetail" :record="fobDetail" @close="fobDetail=null" />
   <FobPasteDialog v-if="canMaintainFob && showFobPasteDialog" :initial-sku="fobLookupSku" @close="showFobPasteDialog=false" @saved="fobPasteSaved" />
@@ -476,6 +478,7 @@ const detailFields = computed(() => detail.value ? [
     <div class="heading-actions">
       <a :href="TEMPLATE_URL" download>下载标准模板</a>
       <button class="outline" :class="{ active:showSupplierRecords }" @click="showSupplierRecords=true">供应商</button>
+      <button class="new-import" @click="showUnifiedPasteDialog=true">统一粘贴资料（五档）</button>
       <button class="new-import" @click="showPasteDialog=true">粘贴新增</button>
       <button v-if="canMaintainFob" class="new-import" @click="openFob()">FOB 粘贴更新</button>
       <button class="new-import" :disabled="asyncUploading" @click="asyncFileInput?.click()">{{ asyncUploading && uploadProgress.profile==='standard' ? `${uploadProgress.percent}%` : '新数据导入' }}</button>
@@ -660,6 +663,8 @@ const detailFields = computed(() => detail.value ? [
       <label v-else>14. 基准采购单价(CNY/件)*<input v-model.number="editor.purchasePriceCny" type="number" min="0" step="0.01"></label>
       <label v-if="editor.dataSource!=='legacy_2026'">15. 阶梯价2起订量<input v-model.number="editor.tier2MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">16. 阶梯价2(CNY/件)<input v-model.number="editor.tier2PriceCny" type="number" min="0" step="0.01"></label>
       <label v-if="editor.dataSource!=='legacy_2026'">17. 阶梯价3起订量<input v-model.number="editor.tier3MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">18. 阶梯价3(CNY/件)<input v-model.number="editor.tier3PriceCny" type="number" min="0" step="0.01"></label>
+      <label v-if="editor.dataSource!=='legacy_2026'">阶梯价4起订量<input v-model.number="editor.tier4MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">阶梯价4(CNY/件)<input v-model.number="editor.tier4PriceCny" type="number" min="0" step="0.01"></label>
+      <label v-if="editor.dataSource!=='legacy_2026'">阶梯价5起订量<input v-model.number="editor.tier5MinQty" type="number" min="1" step="1"></label><label v-if="editor.dataSource!=='legacy_2026'">阶梯价5(CNY/件)<input v-model.number="editor.tier5PriceCny" type="number" min="0" step="0.01"></label>
       <label>19. 1件总运费(CNY)<input v-model.number="editor.singleFreightCny" type="number" min="0" step="0.01"></label><label>20. 10件总运费(CNY)<input v-model.number="editor.freight10Cny" type="number" min="0" step="0.01"><small>报价按此金额÷10分摊；旧数据留空时采用1件运费</small></label>
       <label>21. 100件总运费(CNY)<input v-model.number="editor.freight100Cny" type="number" min="0" step="0.01"></label><label>22. 是否包邮<select v-model="editor.freeShipping"><option value="">暂无数据</option><option>是</option><option>否</option></select></label>
       <label v-if="editor.dataSource==='legacy_2026'">23. 含票价(CNY/件，自动计算)<input :value="legacyEditorIncludedPrice?.toFixed(2) ?? ''" aria-label="含票价（自动计算）" type="text" readonly placeholder="待补齐未税单价和票点"><small>未税单价 ×（1＋票点），国内运费另计；报价不重复加票点。</small><small v-if="!legacyEditorPricingDirty && editor.legacyPriceMode!=='auto_tax'">当前保留原含票价；修改未税单价或票点后自动重算。</small><small v-if="editor.taxPoint===0">0票点时含票价等于未税价；报价另按现有规则加成1%。</small></label>

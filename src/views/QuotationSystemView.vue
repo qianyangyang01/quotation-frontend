@@ -1222,7 +1222,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   selectedCustomerGrade.value = customerGradeSettings.some(item => item.enabled && item.grade === payload.selectedCustomerGrade) ? payload.selectedCustomerGrade as CustomerGrade : (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
   specialPackagingGrams.value = payload.specialPackagingGrams === undefined ? '' : String(payload.specialPackagingGrams)
   commissionThreshold.value = payload.commissionThreshold === undefined ? '1' : String(payload.commissionThreshold ?? '')
-  monthlySalesEstimate.value = ['10', '100', '100+'].includes(payload.monthlySalesEstimate) ? payload.monthlySalesEstimate : '10'
+  monthlySalesEstimate.value = ['10', '100', '100+', 'tier4', 'tier5'].includes(payload.monthlySalesEstimate) ? payload.monthlySalesEstimate : '10'
   customQuoteQuantity.value = Math.max(1, Math.floor(Number(payload.customQuoteQuantity) || 1))
   quoteMatrixMode.value = migrated.quoteMatrixMode
   selectedQuoteRegions.value = Object.fromEntries(Object.entries(payload.selectedQuoteRegions || {})

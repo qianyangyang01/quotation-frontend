@@ -18,15 +18,15 @@ final class PurchasePasteValidator {
         var sku = row.path("sku").asText("").trim().toUpperCase(java.util.Locale.ROOT).replaceAll("\\s+", "");
         if (!sku.matches("[A-Z0-9._/-]{1,96}") || sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK|AUTO-).*$")) fail(prefix, "请填写有效的正式SKU");
         row.put("sku", sku);
-        String[][] numbers = {{"weightG","克重"},{"minOrderQty","起订量"},{"purchasePriceCny","基准采购单价"},{"lengthCm","长"},{"widthCm","宽"},{"heightCm","高"},{"tier2MinQty","阶梯价2起订量"},{"tier2PriceCny","阶梯价2"},{"tier3MinQty","阶梯价3起订量"},{"tier3PriceCny","阶梯价3"},{"singleFreightCny","1件总运费"},{"freight10Cny","10件总运费"},{"freight100Cny","100件总运费"},{"taxIncludedPriceCny","含票价"},{"taxPoint","票点"}};
+        String[][] numbers = {{"weightG","克重"},{"minOrderQty","起订量"},{"purchasePriceCny","基准采购单价"},{"lengthCm","长"},{"widthCm","宽"},{"heightCm","高"},{"tier2MinQty","阶梯价2起订量"},{"tier2PriceCny","阶梯价2"},{"tier3MinQty","阶梯价3起订量"},{"tier3PriceCny","阶梯价3"},{"tier4MinQty","阶梯价4起订量"},{"tier4PriceCny","阶梯价4"},{"tier5MinQty","阶梯价5起订量"},{"tier5PriceCny","阶梯价5"},{"singleFreightCny","1件总运费"},{"freight10Cny","10件总运费"},{"freight100Cny","100件总运费"},{"taxIncludedPriceCny","含票价"},{"taxPoint","票点"}};
         for (var pair : numbers) if (row.hasNonNull(pair[0]) && (!row.path(pair[0]).isNumber() || !Double.isFinite(row.path(pair[0]).asDouble()) || row.path(pair[0]).asDouble() < 0)) fail(prefix, pair[1] + "须为有效非负数字");
         for (var field : List.of("weightG", "minOrderQty")) if (!row.hasNonNull(field) || row.path(field).asDouble() <= 0) fail(prefix, field.equals("weightG") ? "克重须大于0" : "起订量须大于0");
         if (!row.hasNonNull("purchasePriceCny")) fail(prefix, "请填写基准采购单价");
-        for (var field : List.of("minOrderQty", "tier2MinQty", "tier3MinQty")) if (row.hasNonNull(field)) {
+        for (var field : List.of("minOrderQty", "tier2MinQty", "tier3MinQty", "tier4MinQty", "tier5MinQty")) if (row.hasNonNull(field)) {
             var value = row.path(field).asDouble();
             if (value <= 0 || value != Math.floor(value) || value > 9007199254740991d) fail(prefix, "起订量须为正整数");
         }
-        for (var fields : new String[][]{{"tier2MinQty","tier2PriceCny","minOrderQty"},{"tier3MinQty","tier3PriceCny","tier2MinQty"}}) {
+        for (var fields : new String[][]{{"tier2MinQty","tier2PriceCny","minOrderQty"},{"tier3MinQty","tier3PriceCny","tier2MinQty"},{"tier4MinQty","tier4PriceCny","tier3MinQty"},{"tier5MinQty","tier5PriceCny","tier4MinQty"}}) {
             if (row.hasNonNull(fields[0]) != row.hasNonNull(fields[1])) fail(prefix, "阶梯起订量与价格须一起填写");
             if (row.hasNonNull(fields[0]) && (!row.hasNonNull(fields[2]) || row.path(fields[0]).asDouble() <= row.path(fields[2]).asDouble())) fail(prefix, "阶梯起订量须逐档递增，请按顺序填写");
         }
@@ -42,6 +42,22 @@ final class PurchasePasteValidator {
         if (row.hasNonNull("stockStatus") && !row.path("stockStatus").isTextual()) fail(prefix, "是否有货请填写文字说明");
         var date = row.path("quotationDate").asText("");
         if (!date.isBlank()) try { if (!java.time.LocalDate.parse(date).toString().equals(date)) fail(prefix, "报价日期格式不合法"); } catch (java.time.DateTimeException error) { fail(prefix, "报价日期格式不合法"); }
+    }
+    static void validateExtendedTiers(ObjectNode row) {
+        if (!List.of("tier4MinQty", "tier4PriceCny", "tier5MinQty", "tier5PriceCny").stream().anyMatch(row::hasNonNull)) return;
+        String previous = "minOrderQty";
+        for (int tier = 2; tier <= 5; tier++) {
+            String quantity = "tier" + tier + "MinQty", price = "tier" + tier + "PriceCny";
+            if (row.hasNonNull(quantity) != row.hasNonNull(price)) fail("", "阶梯" + tier + "起订量与价格须一起填写");
+            if (row.hasNonNull(quantity)) {
+                var q = row.path(quantity); var p = row.path(price);
+                if (!q.isNumber() || !Double.isFinite(q.asDouble()) || q.asDouble() <= 0 || q.asDouble() != Math.floor(q.asDouble()) || q.asDouble() > 9007199254740991d)
+                    fail("", "阶梯起订量须为正整数");
+                if (!p.isNumber() || !Double.isFinite(p.asDouble()) || p.asDouble() < 0) fail("", "阶梯价须为有效非负数字");
+                if (!row.hasNonNull(previous) || q.asDouble() <= row.path(previous).asDouble()) fail("", "阶梯起订量须逐档递增，请按顺序填写");
+            }
+            previous = quantity;
+        }
     }
     private static void fail(String prefix, String message) { throw AppException.unprocessable(prefix + message); }
 }

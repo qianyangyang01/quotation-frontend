@@ -97,13 +97,13 @@ it('uses standard untaxed tiers and explicit hundred-piece freight without impor
 })
 it('prefers dedicated FOB data and only falls back on actual absence', async () => {
   vi.mocked(loadFobRecord).mockResolvedValue({sku:'KJ2600788',parsed:product().parsed})
-  expect((await loadFobQuoteProduct('kj2600788','auto')).source).toBe('fob'); expect(loadPurchaseProduct).not.toHaveBeenCalled()
+  expect((await loadFobQuoteProduct('kj2600788','auto')).source).toBe('fob'); expect(loadPurchaseProduct).toHaveBeenCalled()
   vi.mocked(loadFobRecord).mockRejectedValue(new ApiError('未找到',404,'FOB_PURCHASE_NOT_FOUND','test'))
   vi.mocked(loadPurchaseProduct).mockResolvedValue(standard())
   expect((await loadFobQuoteProduct('PF2600053','auto')).source).toBe('standard')
   vi.mocked(loadPurchaseProduct).mockClear()
   for (const error of [new ApiError('权限',403,'FORBIDDEN','test'),new ApiError('接口未部署',404,'NOT_FOUND','test'),new Error('网络失败')]) {
     vi.mocked(loadFobRecord).mockRejectedValue(error)
-    await expect(loadFobQuoteProduct('PF2600053','auto')).rejects.toThrow(); expect(loadPurchaseProduct).not.toHaveBeenCalled()
+    await expect(loadFobQuoteProduct('PF2600053','auto')).rejects.toThrow(); expect(loadPurchaseProduct).toHaveBeenCalled()
   }
 })

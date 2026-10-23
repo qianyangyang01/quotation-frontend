@@ -91,4 +91,28 @@ class PurchaseImportRowMapperTest {
         }
     }
     private static String[] values(String sku){var v=new String[32];java.util.Arrays.fill(v,"");v[0]=sku;v[1]="运动内衣";v[4]="采购员";v[5]="2026-08-24";v[8]="350";v[9]="23.1";v[10]="23.1";v[11]="5.6";v[12]="1";v[13]="65.61";v[24]="有货";return v;}
+
+    @Test void downloadsTemplateMapsFiveTierCellsAndRejectsInvalidExtraTiers() throws Exception {
+        var path=java.nio.file.Path.of(System.getProperty("basedir", "."),"..","public","templates","采购统一五档模板.xlsx");
+        try(var workbook=org.apache.poi.ss.usermodel.WorkbookFactory.create(path.toFile())) {
+            var header=workbook.getSheetAt(0).getRow(0);
+            var headers=new String[39]; for(int c=0;c<39;c++) headers[c]=header.getCell(c).getStringCellValue();
+            var schema=PurchaseWorkbookSchema.identify(headers,"采购统一五档");
+            var values=new String[39]; java.util.Arrays.fill(values, "");
+            values[6]="QA-FIVE"; values[7]="120"; values[14]="1"; values[15]="20";
+            values[16]="10"; values[17]="18"; values[18]="100"; values[19]="16";
+            values[20]="500"; values[21]="14"; values[22]="1000"; values[23]="12";
+            values[24]="5"; values[25]="20"; values[26]="100"; values[29]="8%";
+            var result=mapper.map("采购统一五档",2,values,schema);
+            assertTrue(result.errors().isEmpty());
+            assertEquals(5,result.payload().path("priceTiers").size());
+            assertEquals("shared", result.payload().path("purchaseUsage").asText());
+            assertEquals(14,result.payload().path("tier4PriceCny").asInt());
+            assertEquals(12,result.payload().path("tier5PriceCny").asInt());
+            assertEquals(5,result.payload().path("singleFreightCny").asInt());
+            assertEquals(.08,result.payload().path("taxPoint").asDouble(),.000001);
+            values[23]=""; assertFalse(mapper.map("采购统一五档",2,values,schema).errors().isEmpty());
+            values[23]="bad"; assertFalse(mapper.map("采购统一五档",2,values,schema).errors().isEmpty());
+        }
+    }
 }
