@@ -47,7 +47,7 @@ describe('purchase catalog state', () => {
     const record = normalizePurchaseRecord({ sku: 'TC2602184-1', dataSource, minOrderQty: 1, purchasePriceCny: 7.6,
       singleFreightCny: 2.5, freight10Cny: 3.5, freight100Cny: 9.5 })
     const before = structuredClone(record)
-    expect(['10', '100', '100+', 'tier4', 'tier5'].map(tier => purchaseQuoteFreightUnit(record, tier))).toEqual([2.5, .35, .095, .095, .095])
+    expect(['10', '100', '100+', 'tier4', 'tier5'].map(tier => purchaseQuoteFreightUnit(record, tier))).toEqual([.35, .35, .095, .095, .095])
     expect(selectedPurchaseTier(record, '100+').tier?.unitPriceCny).toBe(7.6)
     expect(purchaseQuoteFreightLabel(record, '100+')).toBe('所选阶梯3，采用100件总运费 ¥9.50 ÷ 100，不计采购票点')
     expect(record).toEqual(before)
@@ -56,7 +56,7 @@ describe('purchase catalog state', () => {
   it.each([1, 9, 10, 11, 50, 99, 100, 300, 500, 1000])('does not use price minimum %i to choose freight', minOrderQty => {
     const record = normalizePurchaseRecord({ minOrderQty, purchasePriceCny: 20,
       singleFreightCny: 10, freight10Cny: 12, freight100Cny: 38 })
-    expect(['10', '100', '100+'].map(tier => purchaseQuoteFreightUnit(record, tier))).toEqual([10, 1.2, .38])
+    expect(['10', '100', '100+'].map(tier => purchaseQuoteFreightUnit(record, tier))).toEqual([1.2, 1.2, .38])
   })
 
   it('keeps source freight positions with complete or sparse price tiers', () => {
@@ -65,18 +65,18 @@ describe('purchase catalog state', () => {
       singleFreightCny: 10, freight10Cny: 12, freight100Cny: 38 })
     const sparse = normalizePurchaseRecord({ ...record, tier2MinQty: null, tier2PriceCny: null, tier3MinQty: 500 })
     for (const source of [record, sparse]) {
-      expect(['10', '100', '100+'].map(tier => purchaseQuoteFreightUnit(source, tier))).toEqual([10, 1.2, .38])
+      expect(['10', '100', '100+'].map(tier => purchaseQuoteFreightUnit(source, tier))).toEqual([1.2, 1.2, .38])
     }
   })
 
-  it.each(['standard', 'legacy_2026'] as const)('uses available source bands in order and caps at the highest for %s', dataSource => {
+  it.each(['standard', 'legacy_2026'] as const)('matches explicit bands and falls back through ten pieces then one piece for %s', dataSource => {
     for (const [fields, expected] of [
-      [{ singleFreightCny: 2, freight10Cny: 3 }, [2, .3, .3]],
-      [{ singleFreightCny: 2, freight100Cny: 9 }, [2, .09, .09]],
-      [{ freight10Cny: 3, freight100Cny: 9 }, [.3, .09, .09]],
+      [{ singleFreightCny: 2, freight10Cny: 3 }, [.3, .3, .3]],
+      [{ singleFreightCny: 2, freight100Cny: 9 }, [2, 2, .09]],
+      [{ freight10Cny: 3, freight100Cny: 9 }, [.3, .3, .09]],
       [{ singleFreightCny: 2 }, [2, 2, 2]],
-      [{ freight100Cny: 9 }, [.09, .09, .09]],
-      [{ singleFreightCny: 2, freight10Cny: 3, freight100Cny: 0 }, [2, .3, 0]],
+      [{ freight100Cny: 9 }, [0, 0, .09]],
+      [{ singleFreightCny: 2, freight10Cny: 3, freight100Cny: 0 }, [.3, .3, 0]],
       [{}, [0, 0, 0]],
     ] as const) {
       const record = normalizePurchaseRecord({ dataSource, ...fields })
@@ -88,6 +88,20 @@ describe('purchase catalog state', () => {
     const free = normalizePurchaseRecord({ dataSource, freeShipping: '是', singleFreightCny: 2, freight10Cny: 3, freight100Cny: 9 })
     expect(['10', '100', '100+', 'tier4', 'tier5'].map(tier => purchaseQuoteFreightUnit(free, tier))).toEqual([0, 0, 0, 0, 0])
     expect(purchaseQuoteFreightLabel(free, '100+')).toBe('采购包邮，国内运费为0')
+  })
+
+
+  it('uses FL2601517 ten-piece average at the lowest tier without changing procurement data', () => {
+    const record = normalizePurchaseRecord({ sku: 'FL2601517', minOrderQty: 2, purchasePriceCny: 76,
+      singleFreightCny: 10, freight10Cny: 19, freight100Cny: 60 })
+    const before = structuredClone(record)
+    expect(purchaseQuoteFreightUnit(record)).toBe(1.9)
+    expect(purchaseQuoteFreightLabel(record, '10')).toContain('采用10件总运费 ¥19.00 ÷ 10')
+    expect(purchaseQuoteFreightUnit(record, '100+')).toBe(.6)
+    expect(purchaseQuoteFreightUnit({ ...record, freight100Cny: null }, '100+')).toBe(1.9)
+    expect(purchaseQuoteFreightUnit({ ...record, freight100Cny: null, freight10Cny: null }, '100+')).toBe(10)
+    expect(purchaseQuoteFreightLabel({ ...record, freight100Cny: null }, '100+')).toContain('100件运费未配置，回退到10件档')
+    expect(record).toEqual(before)
   })
 
   it('preserves explicit image removal while still accepting old image-only records', () => {

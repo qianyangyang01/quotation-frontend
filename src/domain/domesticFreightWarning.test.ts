@@ -65,19 +65,19 @@ describe('domestic freight notice', () => {
   it('uses the selected freight band independently of price minimums', () => {
     const record = product({ dataSource: 'standard', weightG: 120, freight10Cny: 100, freight100Cny: 800,
       tier2MinQty: 20, tier2PriceCny: 9, tier3MinQty: 500, tier3PriceCny: 8 })
-    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.quantity)).toEqual([1, 10, 100])
+    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.quantity)).toEqual([10, 10, 100])
     expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.expectedUnit)).toEqual([5, 5, 5])
-    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.actualTotal)).toEqual([8, 100, 800])
+    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.actualTotal)).toEqual([100, 100, 800])
     for (const tier of ['10', '100', '100+']) {
       expect(getDomesticFreightWarning(record, tier)?.actualUnit).toBe(purchaseQuoteFreightUnit(record, tier))
     }
   })
 
   it.each([
-    { minOrderQty: 1, tier2MinQty: 300, tier2PriceCny: 9, expected: [1, 10, 100] },
-    { minOrderQty: 1, expected: [1, 10, 100] },
-    { minOrderQty: 100, expected: [1, 10, 100] },
-    { minOrderQty: 1, tier3MinQty: 500, tier3PriceCny: 8, expected: [1, 10, 100] },
+    { minOrderQty: 1, tier2MinQty: 300, tier2PriceCny: 9, expected: [10, 10, 100] },
+    { minOrderQty: 1, expected: [10, 10, 100] },
+    { minOrderQty: 100, expected: [10, 10, 100] },
+    { minOrderQty: 1, tier3MinQty: 500, tier3PriceCny: 8, expected: [10, 10, 100] },
   ])('ignores price tier fallback with $minOrderQty minimum', ({ expected, ...values }) => {
     const record = product({ dataSource: 'standard', weightG: 120, freight10Cny: 100, freight100Cny: 800, ...values })
     expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.quantity)).toEqual(expected)

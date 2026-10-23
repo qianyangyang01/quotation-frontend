@@ -182,7 +182,7 @@ it.each([false, true])('keeps TC2602184-1 tier-three freight at 100 pieces when 
     singleFreightCny: 2.5, freight10Cny: 3.5, freight100Cny: 9.5 }
   await mount('single', '10', [], 'SINGLE', false, 'TC2602184-1', batchCapture)
   const product = state.products[0]!
-  expect(product.purchaseFreightPerUnit).toBe(2.5)
+  expect(product.purchaseFreightPerUnit).toBe(.35)
   expect(product.purchase).toBe(7.68)
   await selectTier('100')
   expect(product.purchaseFreightPerUnit).toBe(.35)
@@ -195,9 +195,38 @@ it.each([false, true])('keeps TC2602184-1 tier-three freight at 100 pieces when 
   expect(host.querySelector('.tier-match')?.textContent).toContain('阶梯价3未配置，采用阶梯价1')
   const saved = JSON.parse(JSON.stringify(state.draftPayload())) as QuotationDraftPayload
   await selectTier('10')
-  expect(product.purchaseFreightPerUnit).toBe(2.5)
+  expect(product.purchaseFreightPerUnit).toBe(.35)
   await state.applyDraftPayload(saved, undefined, { restoreQuotation: true })
   expect(state.products[0]!.purchaseFreightPerUnit).toBe(.095)
+  expect(vi.mocked(api.put).mock.calls.filter(([path]) => String(path).includes('/quotations'))).toHaveLength(0)
+})
+
+
+it.each(['single', 'bundle', 'batch'] as const)('uses FL2601517 ten-piece minimum and explicit fallback in the %s calculator', async mode => {
+  purchaseOverride = { minOrderQty: 2, purchasePriceCny: 76, weightG: 1400,
+    tier2MinQty: null, tier2PriceCny: null, tier3MinQty: null, tier3PriceCny: null, taxPoint: .08,
+    singleFreightCny: 10, freight10Cny: 19, freight100Cny: 60 }
+  await mount(mode === 'bundle' ? 'bundle' : 'single', '10', [], 'SINGLE', false, 'FL2601517', mode === 'batch')
+  const item = () => mode === 'bundle' ? state.bundleItems[0]! : state.products[0]!
+  const select = (tier: string) => mode === 'bundle' ? selectBundleTier(0, tier) : selectTier(tier)
+  expect(item().purchaseFreightPerUnit).toBe(1.9)
+  await select('100+')
+  expect(item().purchaseFreightPerUnit).toBe(.6)
+  expect(item().purchaseBaseUnitPrice).toBe(76)
+  purchaseOverride.freight100Cny = null
+  const refresh = async () => {
+    if (mode === 'bundle') await state.queryBundleItems()
+    else if (mode === 'batch') state.primeBatchProduct((await loadPurchaseProduct('FL2601517'))!)
+    else await state.queryProduct()
+    await nextTick()
+  }
+  await refresh()
+  expect(item().purchaseFreightPerUnit).toBe(1.9)
+  expect(host.textContent).toContain('回退到10件档')
+  purchaseOverride.freight10Cny = null
+  await refresh()
+  expect(item().purchaseFreightPerUnit).toBe(10)
+  expect(host.textContent).toContain('回退到1件档')
   expect(vi.mocked(api.put).mock.calls.filter(([path]) => String(path).includes('/quotations'))).toHaveLength(0)
 })
 
@@ -282,8 +311,8 @@ it('rechecks the actual freight tier on each purchase price tier without alterin
   expect(state.singleFreightWarning).toMatchObject({ quantity: 10, actualTotal: 100, expectedUnit: 6.5 })
   expect(host.querySelector('.domestic-freight-warning')?.textContent).toContain('运费超出合理范围，请联系采购确认是否有误！')
   expect(state.products[0]!.purchaseFreightPerUnit).toBe(10)
-  await selectTier('100') // Only 10/100-piece source bands exist; tier 2 uses the second band.
-  expect(state.singleFreightWarning).toBeNull()
+  await selectTier('100') // Missing single-piece data must not shift the ten-piece band.
+  expect(state.singleFreightWarning).toMatchObject({ quantity: 10, actualTotal: 100 })
   await selectTier('100+') // Higher requested tiers retain the highest available band.
   expect(state.singleFreightWarning).toBeNull()
   expect(host.querySelector('.domestic-freight-warning')).toBeNull()
