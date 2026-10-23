@@ -16,7 +16,7 @@ const source = readFileSync(new URL('./QuotationSystemView.vue', import.meta.url
 const parsed = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, true)
 const names = ['taxResult', 'finalSalePrice', 'quantityCostBreakdown', 'excelQuoteRows', 'copyQuoteRows', 'attemptSave', 'prepareAndSaveQuotation', 'save', 'useLogistics']
 const bodies = parsed.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text || '')).map(node => node.getText(parsed)).join('\n')
-const js = 'const fobActive = {value:false}, savingQuotation = {value:false}, props = {batchCapture:false};\n' + ts.transpileModule(bodies, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const js = 'const appUpdate = { assertCurrent() {} }; const fobActive = {value:false}, savingQuotation = {value:false}, props = {batchCapture:false};\n' + ts.transpileModule(bodies, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 
 describe('quotation view fee integration', () => {
   it.each([['single', false], ['bundle', false], ['single', true], ['bundle', true]] as const)('includes surcharge in %s quantity totals with country scope %s', async (mode, scoped) => {

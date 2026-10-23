@@ -6,7 +6,9 @@ import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } f
 import { loadSavedQuoteSheetPhotos } from '@/services/quoteSheetPhotos'
 import { releaseQuotePhotos } from '@/services/quoteLocalPhotos'
 import type { QuoteSheetPhoto } from '@/data/quoteSheetPhotos'
-const props = defineProps<{ sheet: CustomerQuoteSheet; photos?: QuoteSheetPhoto[]; readOnly?: boolean; paginated?: boolean }>()
+import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutputGuard'
+const props = defineProps<{ sheet: CustomerQuoteSheet; photos?: QuoteSheetPhoto[]; readOnly?: boolean; paginated?: boolean; currentQuote?: boolean }>()
+const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => !!props.currentQuote)
 const search = ref(''), page = ref(0), pageSize = ref(12)
 const filtered = computed(() => props.sheet.rows.filter(row => !props.paginated || (row.sku || '').toUpperCase().includes(search.value.trim().toUpperCase())))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
@@ -18,7 +20,9 @@ const copying = ref(false), message = ref('')
 let generation = 0
 function clear() { for (const image of images.value) URL.revokeObjectURL(image.url); images.value = [] }
 watch(() => props.sheet, () => { generation++; clear(); error.value = ''; message.value = ''; busy.value = false })
+watch(outputBlocked, blocked => { if (blocked) { generation++; clear(); busy.value = false } }, { flush: 'sync' })
 async function preview() {
+  if (outputBlocked.value) { error.value = QUOTE_UPDATE_MESSAGE; return }
   if (copying.value) return
   const token = ++generation; busy.value = true; error.value = ''; clear()
   const controller = new AbortController(), timer = window.setTimeout(() => controller.abort(), 30000)
@@ -32,6 +36,7 @@ async function copy(kind: 'data' | 'image', index = 0) {
   const token = generation
   copying.value = true; error.value = ''; message.value = ''
   try {
+    assertOutputCurrent()
     if (kind === 'data') await copyQuoteSheetData(props.sheet)
     else { const image = images.value[index]; if (!image) throw new Error('请先生成报价图片'); await copyQuoteSheetImage(image.blob) }
     if (token === generation) message.value = kind === 'data' ? `已复制全部 ${props.sheet.rows.length} 行报价数据` : `已复制第 ${index + 1} 张报价图片`
@@ -43,14 +48,15 @@ defineExpose({ preview })
 </script>
 <template>
   <section class="batch-sheet" :class="{ paginated }">
-    <div v-if="!readOnly" class="toolbar"><button :disabled="busy || copying" @click="preview">{{ busy ? '正在生成…' : '预览报价图片' }}</button><button :disabled="busy || copying" @click="copy('data')">复制报价数据</button><button v-if="images.length === 1" :disabled="busy || copying" @click="copy('image')">复制报价图片</button></div>
+    <p v-if="outputBlocked" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
+    <div v-if="!readOnly" class="toolbar"><button :disabled="outputBlocked || busy || copying" @click="preview">{{ busy ? '正在生成…' : '预览报价图片' }}</button><button :disabled="outputBlocked || busy || copying" @click="copy('data')">复制报价数据</button><button v-if="images.length === 1" :disabled="outputBlocked || busy || copying" @click="copy('image')">复制报价图片</button></div>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="message" role="status" class="copy-success">{{ message }}</p>
     <div v-if="paginated" class="filter"><input v-model="search" type="search" placeholder="搜索 SKU" aria-label="搜索报价单 SKU"><span>共 {{ sheet.rows.length }} 行明细 · 搜索与分页仅影响屏幕显示，复制和图片包含全部明细</span></div>
     <div class="table-scroll"><table><thead><tr><th v-for="(cell,i) in displayTable[0]" :key="i">{{ cell }}</th></tr></thead><tbody><tr v-for="(row,i) in displayTable.slice(1)" :key="i"><td v-for="(cell,j) in row" :key="j">{{ cell }}</td></tr></tbody></table></div>
     <p v-if="paginated && !filtered.length" class="empty">未找到匹配的 SKU</p>
     <nav v-if="paginated" class="pagination" aria-label="合并报价单分页"><span>匹配 {{ filtered.length }} 行 · 当前显示 {{ filtered.length ? page * pageSize + 1 : 0 }}–{{ Math.min((page + 1) * pageSize, filtered.length) }} 行</span><label>每页 <select v-model.number="pageSize" aria-label="每页报价明细数"><option :value="12">12</option><option :value="30">30</option><option :value="60">60</option></select> 行</label><div><button :disabled="page === 0" @click="page--">上一页</button><span>{{ page + 1 }} / {{ pageCount }}</span><button :disabled="page + 1 >= pageCount" @click="page++">下一页</button></div></nav>
-    <div v-for="(image,i) in images" :key="image.url" class="image"><button v-if="images.length > 1" type="button" :disabled="busy || copying" @click="copy('image', i)">复制第 {{ i+1 }} 张图片</button> <a :href="image.url" :download="`批量报价-${i+1}.png`">下载第 {{ i+1 }} 页高清图片</a><img :src="image.url" :alt="`合并报价单第${i+1}页`"></div>
+    <div v-for="(image,i) in images" :key="image.url" class="image"><button v-if="images.length > 1" type="button" :disabled="outputBlocked || busy || copying" @click="copy('image', i)">复制第 {{ i+1 }} 张图片</button> <a :href="image.url" :download="`批量报价-${i+1}.png`">下载第 {{ i+1 }} 页高清图片</a><img :src="image.url" :alt="`合并报价单第${i+1}页`"></div>
   </section>
 </template>
 <style scoped>

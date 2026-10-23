@@ -134,7 +134,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
       <div class="preview-toolbar"><button :disabled="saving" @click="discardPreview">返回核对 / 修改</button><b>{{ preview.items?.length }}行商品 · {{ new Set(preview.items?.map(i=>i.product.sku)).size }}个SKU</b><label>客户名称<input v-model="customer" maxlength="120" :disabled="saving || !!savedNo" @input="saveKey=idempotencyKey('fob-batch')"></label><button class="primary" :disabled="saving || !!savedNo || stale || previewChanged || !!financeIssue" @click="save">{{ saving?'正在保存…':savedNo?'已保存':`保存 ${new Set(preview.items?.map(i=>i.product.sku)).size} 条FOB报价记录` }}</button></div>
       <p v-if="savedNo" role="status">已生成 {{ savedCount }} 条独立FOB报价记录，按原流程逐条审核。批次：{{ savedNo }}。<RouterLink :to="{ path: '/quotation/my-records', query: { batch: savedNo } }">查看本批报价记录</RouterLink></p>
       <p v-if="stale || previewChanged" class="error" role="alert">资料或价格已变化，请返回核对并重新查询后生成，当前预览不可用于报价。</p>
-      <template v-else><FobBatchSheetExports :sheet="preview.sheet" /><FobQuoteSheet :product="preview.product" :rate="preview.rate" :quantity="String(preview.quantity)" :policy="preview.policy" :saved-sheet="preview.sheet" :preview-only="!savedNo" /></template>
+      <template v-else><FobBatchSheetExports :sheet="preview.sheet" :current-quote="!savedNo" /><FobQuoteSheet :product="preview.product" :rate="preview.rate" :quantity="String(preview.quantity)" :policy="preview.policy" :saved-sheet="preview.sheet" :preview-only="!savedNo" :current-quote="!savedNo" /></template>
     </template>
     </fieldset>
   </dialog>

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { currentAuthUser, defaultHomeForRole, hasPermission, initializeAuth, isAuthenticated, type PermissionKey } from '@/data/authStore'
 import { routeView } from '@/router/routeViews'
 import { installNavigationRecovery } from '@/router/navigationRecovery'
+import { appUpdate } from '@/services/appUpdate'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -43,6 +44,7 @@ router.beforeEach(async (to) => {
 })
 
 router.afterEach((to) => {
+  void appUpdate.check()
   document.title = `${String(to.meta.title || '报价系统')} · 米莱诺报价`
 })
 

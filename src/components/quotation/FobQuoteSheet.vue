@@ -10,10 +10,12 @@ import { fobQuantityQuote, fobSheetRows, fobTierQuotes, type FobQuoteProduct, ty
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { formatQuoteDate, localQuoteDate, quoteSheetTextTable, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutputGuard'
 
-const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string; previewOnly?: boolean; batchRecord?: QuotationRecord }>()
+const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string; previewOnly?: boolean; batchRecord?: QuotationRecord; currentQuote?: boolean }>()
 const batchCopy = ref<InstanceType<typeof QuotationBatchCopy>>()
 const customer = ref(props.initialCustomer || ''), saving = ref(false), savedNo = ref(''), saveError = ref('')
+const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => !!props.currentQuote && !savedNo.value)
 const columns = ref<QuoteSheetColumnKey[]>(['number','sku','prices']), priceOrder = ref([0,1]), rowOrder = ref<string[]>([])
 const drag = ref<{kind:'row'|'column'|'price'; index:number} | null>(null)
 let disposed = false, lastSignature = '', saveKey = ''
@@ -64,6 +66,7 @@ function clearImages() { images.value.forEach(image => URL.revokeObjectURL(image
 async function preview() {
   const request = ++generation
   clearImages(); renderError.value = ''; message.value = ''
+  if (outputBlocked.value) { rendering.value = false; return }
   if (sheet.value.issues.length || !sheet.value.rows.length) { rendering.value = false; return }
   rendering.value = true
   try {
@@ -77,6 +80,10 @@ watch([sheet, editing], () => {
   generation++; clearImages(); message.value = ''; renderError.value = ''; rendering.value = false
   if (!editing.value) void preview()
 }, { immediate: true })
+watch(outputBlocked, blocked => {
+  if (blocked) { generation++; clearImages(); rendering.value = false }
+  else if (!editing.value) void preview()
+}, { flush: 'sync' })
 onBeforeUnmount(() => { disposed = true; generation++; clearImages() })
 function move(kind:'row'|'column'|'price', from:number, to:number) {
   if (saving.value || copying.value || props.savedSheet) return
@@ -104,6 +111,7 @@ async function copy(asImage: boolean) {
   if (copying.value || rendering.value || sheet.value.issues.length || !sheet.value.rows.length || asImage && !currentImage.value) return
   copying.value = true; message.value = ''
   try {
+    assertOutputCurrent()
     if (asImage) await copyQuoteSheetImage(currentImage.value!.blob)
     else await copyQuoteSheetData(sheet.value)
     message.value = asImage ? '已复制报价图片' : '已复制报价数据'
@@ -114,6 +122,7 @@ async function copy(asImage: boolean) {
 
 <template>
   <section class="customer-sheet" aria-label="FOB客户报价单">
+    <p v-if="outputBlocked" class="sheet-pending" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
     <div class="sheet-toolbar"><h3>{{ previewOnly ? '客户报价单预览' : savedSheet ? '已保存客户报价单' : '客户报价单' }}</h3></div>
     <div v-if="!savedSheet" class="sheet-save"><label>客户名称 <input v-model="customer" aria-label="FOB客户名称" maxlength="120" :disabled="saving" placeholder="填写客户名称"></label><button class="sheet-primary" type="button" :disabled="saving || !policy || !!sheet.issues.length || !sheet.rows.length || !!savedNo" @click="save">{{ saving ? '正在保存…' : savedNo ? '已保存' : '保存FOB报价' }}</button><span v-if="savedNo" role="status">已保存：{{ savedNo }}，可在我的报价记录查看</span><span v-if="saveError" role="alert">{{ saveError }}</span></div>
     <fieldset :disabled="saving" class="sheet-edit-fieldset">
@@ -128,11 +137,11 @@ async function copy(asImage: boolean) {
         <label v-if="!savedSheet">展示范围 <select v-model="mode" aria-label="FOB报价单展示范围" :disabled="copying"><option value="tiers">全部阶梯</option><option value="quantity">当前数量</option></select></label>
         <div class="sheet-actions">
           <button v-if="!savedSheet" class="sheet-primary" type="button" :disabled="copying" @click="editing = !editing">{{ editing ? '预览报价单' : '编辑报价单' }}</button>
-          <QuotationCopyScope :count="batchRecord?.quotationBatch?.count" label="复制报价图片" :disabled="copying || rendering || batchCopy?.busy" @current="copy(true)" @batch="batchCopy?.run('image')">
-          <button type="button" :disabled="!currentImage || copying || rendering || batchCopy?.busy" @click="copy(true)">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
+          <QuotationCopyScope :count="batchRecord?.quotationBatch?.count" label="复制报价图片" :disabled="outputBlocked || copying || rendering || batchCopy?.busy" @current="copy(true)" @batch="batchCopy?.run('image')">
+          <button type="button" :disabled="outputBlocked || !currentImage || copying || rendering || batchCopy?.busy" @click="copy(true)">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
           </QuotationCopyScope>
-          <QuotationCopyScope :count="batchRecord?.quotationBatch?.count" label="复制报价数据" :disabled="copying || rendering || batchCopy?.busy" @current="copy(false)" @batch="batchCopy?.run('full')">
-          <button type="button" :disabled="!sheet.rows.length || !!sheet.issues.length || copying || rendering || batchCopy?.busy" @click="copy(false)">复制报价数据</button>
+          <QuotationCopyScope :count="batchRecord?.quotationBatch?.count" label="复制报价数据" :disabled="outputBlocked || copying || rendering || batchCopy?.busy" @current="copy(false)" @batch="batchCopy?.run('full')">
+          <button type="button" :disabled="outputBlocked || !sheet.rows.length || !!sheet.issues.length || copying || rendering || batchCopy?.busy" @click="copy(false)">复制报价数据</button>
           </QuotationCopyScope>
         </div>
       </div>

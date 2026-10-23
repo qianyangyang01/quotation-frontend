@@ -5,10 +5,12 @@ import FobQuoteSheet from './FobQuoteSheet.vue'
 import QuotationFeatureBoundary from './QuotationFeatureBoundary.vue'
 import type { FobBatchMode } from '@/services/fobBatchQuotation'
 import { FOB_SMALL_ORDER_EXTRA_CNY, fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
+import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutputGuard'
 
 const FobBatchQuoteDialog = defineAsyncComponent(() => import('./FobBatchQuoteDialog.vue'))
 
 const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {sku:string;source:FobSourceMode;customer:string;quantity:number;batch?:{text:string;mode:FobBatchMode;customer:string;sources?:FobSourceMode[]}} }>()
+const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => true)
 const batchOpen = ref(!!props.initial?.batch)
 const emit = defineEmits<{ status: [value: string]; retryFinance: [] }>()
 const sku = ref(props.initial?.sku || ''), source = ref<FobSourceMode>(props.initial?.source || 'auto'), busy = ref(false), error = ref(''), copied = ref('')
@@ -53,8 +55,8 @@ async function copy() {
   if (!product.value || !selected.value.result) return
   const p = product.value, quote = selected.value.result
   const text = `FOB（批发）报价\nSKU\t数量\t报关 USD/${quote.row.unit}\t不报关 USD/${quote.row.unit}\n${p.sku}\t${quote.quantity}\t${quote.declaredUsd}\t${quote.undeclaredUsd}\n汇率：${props.rate} CNY/USD；${quote.extraCny ? `已含每件${quote.extraCny}元小额订单加价` : '无小额订单加价'}`
-  try { await navigator.clipboard.writeText(text); copied.value = '已复制当前数量的两种报价' }
-  catch { copied.value = '复制失败，请选择表格内容手动复制' }
+  try { assertOutputCurrent(); await navigator.clipboard.writeText(text); copied.value = '已复制当前数量的两种报价' }
+  catch { copied.value = outputBlocked.value ? QUOTE_UPDATE_MESSAGE : '复制失败，请选择表格内容手动复制' }
 }
 </script>
 
@@ -68,6 +70,7 @@ async function copy() {
       <button type="button" @click="batchOpen=true">批量粘贴报价</button>
     </form>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="outputBlocked" class="error" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
     <p v-if="product" class="product-summary"><strong class="fob-sku">{{ product.sku }}</strong> · {{ product.category || '未分类' }} · 克重：{{ product.weight }}<span class="source">{{ product.source === 'fob' ? 'FOB数据 · 待验证' : '新采购资料' }}</span></p>
     <div class="fob-parameters"><span v-if="canViewPurchaseCost">票点 <b>10%</b></span><span>汇率 <b>{{ rate }} CNY/USD</b></span><span v-if="canViewPricingFactors">报关 <b>×1.14</b></span><span v-if="canViewPricingFactors">不报关 <b>×1.1628</b></span></div>
     <p v-if="calculation.error" class="error" role="alert">{{ calculation.error }} <button v-if="financeError" type="button" :disabled="financePending" @click="emit('retryFinance')">重新读取财务汇率</button></p>
@@ -75,7 +78,7 @@ async function copy() {
       <div class="quantity-quote">
         <div class="quantity-controls"><label>报价数量 <input v-model="quantity" aria-label="FOB报价数量" inputmode="numeric" placeholder="填写件数"></label><span class="quantity-minimum">起订量 {{ product.parsed.minOrderQty }}<template v-if="product.parsed.orderMultiple > 1"> · 按 {{ product.parsed.orderMultiple }} 的倍数下单</template></span></div>
         <div v-if="selected.result" class="quantity-status">已匹配阶梯{{ calculation.rows.indexOf(selected.result.row) + 1 }}<span> · {{ selected.result.extraCny ? `最终价已含每件${selected.result.extraCny}元小额订单加价` : '无小额订单加价' }}</span></div>
-        <button type="button" :disabled="!selected.result" @click="copy">复制当前数量报价</button>
+        <button type="button" :disabled="outputBlocked || !selected.result" @click="copy">复制当前数量报价</button>
       </div>
       <p v-if="selected.error" class="error" role="alert">{{ selected.error }}</p>
       <div class="fob-table-wrap"><table aria-label="FOB基础阶梯与本次数量最终报价">
@@ -104,7 +107,7 @@ async function copy() {
     </template>
     <details v-if="canViewFullPricing" ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p>含票价＝不含票采购价×1.1；成本价＝含票价＋批量均摊运费；报关＝成本价×1.14÷汇率；不报关＝成本价×1.14×1.02÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
   </section>
-  <FobQuoteSheet v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
+  <FobQuoteSheet current-quote v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
   <QuotationFeatureBoundary v-if="batchOpen" label="FOB批量报价" @close="batchOpen=false">
   <FobBatchQuoteDialog :rate="rate" :policy="policy" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
   </QuotationFeatureBoundary>

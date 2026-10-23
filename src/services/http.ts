@@ -1,3 +1,5 @@
+import { appUpdate, requiresCurrentClient } from './appUpdate'
+
 export interface ApiEnvelope<T> {
   requestId: string
   code: string
@@ -52,6 +54,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const account = expectedAccount
   guardAccount(path, account)
   const method = String(init.method || 'GET').toUpperCase()
+  const needsCurrentClient = requiresCurrentClient(path, method)
   // Bound every network stage that can hold quotation initialization/submission open.
   // Import/export requests have separate, deliberately longer deadlines.
   const batchMutation = method === 'POST' && /^\/batch-single-quotations(?:\/[^/]+\/(?:corrections|review))?$/.test(path)
@@ -69,12 +72,17 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   headers.set('X-Request-Id', crypto.randomUUID())
   if (account) headers.set('X-Expected-Account', account)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  const endOperation = !['GET', 'HEAD', 'OPTIONS'].includes(method) ? appUpdate.beginOperation() : () => undefined
   try {
+    if (needsCurrentClient) appUpdate.assertCurrent()
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
       const token = await ensureCsrf(signal)
       headers.set(token.headerName, token.token)
     }
     guardAccount(path, account)
+    if (needsCurrentClient) await appUpdate.ensureCurrent(signal)
+    guardAccount(path, account)
+    signal?.throwIfAborted()
     const response = await fetch(`${API_BASE}${path}`, { ...init, signal, method, headers, credentials: 'include' })
     const result = await parseEnvelope<T>(response)
     guardAccount(path, account)
@@ -88,6 +96,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     }
     throw error
   } finally {
+    endOperation()
     if (timer !== undefined) clearTimeout(timer)
   }
 }
@@ -95,16 +104,17 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 export interface UploadProgress { loaded:number;total:number;percent:number;bytesPerSecond:number;phase?:'hashing'|'uploading'|'confirming' }
 export function uploadForm<T>(path:string,form:FormData,onProgress?:(progress:UploadProgress)=>void,extraHeaders:HeadersInit={}){
   const account=expectedAccount
-  const xhr=new XMLHttpRequest();let cancelled=false;let startedAt=performance.now()
-  const promise=(async()=>{guardAccount(path,account);const token=await ensureCsrf();guardAccount(path,account);if(cancelled)throw new DOMException('上传已取消','AbortError');return await new Promise<T>((resolve,reject)=>{
+  const xhr=new XMLHttpRequest();const controller=new AbortController();let startedAt=performance.now()
+  const endOperation=appUpdate.beginOperation()
+  const promise=(async()=>{guardAccount(path,account);const needsCurrentClient=requiresCurrentClient(path,'POST');if(needsCurrentClient)appUpdate.assertCurrent();const token=await ensureCsrf(AbortSignal.any([controller.signal,AbortSignal.timeout(20_000)]));if(needsCurrentClient)await appUpdate.ensureCurrent(controller.signal);guardAccount(path,account);controller.signal.throwIfAborted();return await new Promise<T>((resolve,reject)=>{
     xhr.open('POST',`${API_BASE}${path}`);xhr.withCredentials=true;const headers=new Headers(extraHeaders);headers.set('Accept','application/json');headers.set('X-Request-Id',crypto.randomUUID());headers.set(token.headerName,token.token);if(account)headers.set('X-Expected-Account',account);headers.forEach((value,name)=>xhr.setRequestHeader(name,value));startedAt=performance.now()
     xhr.upload.onprogress=event=>{const elapsed=Math.max((performance.now()-startedAt)/1000,0.001);const total=event.lengthComputable?event.total:0;onProgress?.({loaded:event.loaded,total,percent:total?Math.min(100,Math.round(event.loaded*100/total)):0,bytesPerSecond:event.loaded/elapsed})}
     xhr.onerror=()=>reject(new ApiError('网络连接中断，文件未上传完成',xhr.status||0,'UPLOAD_NETWORK_ERROR',xhr.getResponseHeader('X-Request-Id')||'unknown'))
     xhr.onabort=()=>reject(new DOMException('上传已取消','AbortError'))
     xhr.onload=()=>{let body:ApiEnvelope<T>;try{body=JSON.parse(xhr.responseText) as ApiEnvelope<T>}catch{reject(new ApiError('服务器返回了无法识别的响应',xhr.status,'INVALID_RESPONSE',xhr.getResponseHeader('X-Request-Id')||'unknown'));return}if(body.code==='ACCOUNT_CHANGED'){reject(accountError());return}try{guardAccount(path,account)}catch(error){reject(error);return}if(xhr.status<200||xhr.status>=300){if(xhr.status===401&&typeof window!=='undefined')window.dispatchEvent(new CustomEvent('quotation:session-expired'));reject(new ApiError(body.message||'请求失败',xhr.status,body.code||'REQUEST_FAILED',body.requestId,body.fieldErrors||[]));return}resolve(body.data)}
     xhr.send(form)
-  })})()
-  return {promise,cancel:()=>{cancelled=true;xhr.abort()}}
+  })})().finally(endOperation)
+  return {promise,cancel:()=>{controller.abort(new DOMException('上传已取消','AbortError'));xhr.abort()}}
 }
 
 export type ConditionalGetResult<T> = { status: 200; data: T; etag: string } | { status: 304; data: null; etag: string }

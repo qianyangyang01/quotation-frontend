@@ -1,6 +1,7 @@
 import { api, ApiError, uploadForm, type UploadProgress } from './http'
 import { currentAuthUser } from '@/data/authStore'
 import type { Batch } from '@/data/logisticsRebuild'
+import { appUpdate } from './appUpdate'
 
 type UploadState = { id: string; chunkBytes: number; received: string[][]; batch?: Batch }
 type SavedUpload = { key: string; expires: number }
@@ -30,8 +31,10 @@ export function resumableLogisticsUpload(dataset: string, input: File[], replace
   const files: File[] = []
   const controller = new AbortController()
   const cancellations = new Set<() => void>()
+  const endOperation = appUpdate.beginOperation()
   const checkCancelled = () => { if (controller.signal.aborted) throw new DOMException('已暂停上传', 'AbortError') }
   const promise = (async () => {
+    await appUpdate.ensureCurrent(controller.signal)
     progress?.({ loaded: 0, total: input.reduce((sum, file) => sum + file.size, 0), percent: 0, bytesPerSecond: 0, phase: 'hashing' })
     const entries = []
     for (const file of input) {
@@ -111,6 +114,6 @@ export function resumableLogisticsUpload(dataset: string, input: File[], replace
     const batch = await api.post<Batch>(`/logistics/rebuild/uploads/${state.id}/complete`)
     localStorage.removeItem(storageKey)
     return batch
-  })()
+  })().finally(endOperation)
   return { promise, cancel: () => { controller.abort(); cancellations.forEach(cancel => cancel()) } }
 }

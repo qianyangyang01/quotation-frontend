@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { appUpdate } from '@/services/appUpdate'
+import { checkFobFinanceVersion } from '@/services/fobFinanceFreshness'
 import { refreshReviewNotifications } from '@/data/reviewNotifications'
 import { getDomesticFreightWarning } from '@/domain/domesticFreightWarning'
 import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
@@ -1551,7 +1553,12 @@ onMounted(async () => {
   catch { toast('报价工作区读取失败，请检查网络后重试') }
   if (viewDisposed) return
   stopLiveSync = startQuotationSync(async signal => {
-    if (fobActive.value || batchCalculationActive || !draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
+    if (fobActive.value || typeof route.query.fobCorrection === 'string') {
+      await checkFobFinanceVersion(signal)
+      syncError.value = ''
+      return
+    }
+    if (batchCalculationActive || !draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
     await checkLiveVersions(signal)
     if (!signal.aborted && !activePurchaseSkus().length && syncPending.value) {
       await reloadLiveConfiguration(); syncPending.value = ''
@@ -2058,6 +2065,7 @@ function locateValidationIssue(key: string) {
   window.setTimeout(() => target?.querySelector<HTMLElement>('input,select,button')?.focus(), 380)
 }
 async function copyQuoteRows(rows: QuotationMatrixRow[]) {
+  try { appUpdate.assertCurrent() } catch (error) { toast(error instanceof Error ? error.message : '系统已更新，请刷新后重新报价'); return }
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (specialPackagingError.value) { toast(specialPackagingError.value); return }
   if (commissionError.value) { toast(commissionError.value); return }
@@ -2092,6 +2100,7 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
   try {
     await navigator.clipboard.writeText(excelText)
   } catch {
+    try { appUpdate.assertCurrent() } catch (error) { toast(error instanceof Error ? error.message : '系统已更新，请刷新后重新报价'); return }
     const textarea = document.createElement('textarea')
     textarea.value = excelText
     textarea.style.position = 'fixed'
@@ -2471,6 +2480,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}；请核对并更新报价。` : `同步暂不可用：${syncError}` }}</span>
         <button type="button" :disabled="syncRefreshing || savingQuotation || retryingSavePreparation || financeSettingsAreLoading()" @click="retrySavePreparation">{{ syncRefreshing ? '更新中…' : retryingSavePreparation ? '核验中…' : syncPending ? '更新报价' : '重试核验' }}</button>
       </section>
+      <section v-if="fobActive && syncError" class="live-data-notice" role="status">汇率核验暂不可用：{{ syncError }}。系统将自动重试，当前输入仍保留。</section>
 
       <QuotationHeader v-if="!batchCapture" :salesperson="selectedSalesperson" :rate="fobActive ? fobRate : exchange.usd" :status="fobActive ? fobStatus : products[0]?.status || '待查询'" :mode-label="fobActive ? 'FOB（批发）报价' : quotationModeLabels[quoteMode]" @show-rule="fobActive ? fobPanel?.openRules() : showRule=true" />
 

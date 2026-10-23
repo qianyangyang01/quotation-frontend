@@ -3,12 +3,17 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/AppTopbar.vue'
 import PageLoadNotice from '@/components/PageLoadNotice.vue'
+import AppUpdateNotice from '@/components/AppUpdateNotice.vue'
+import { appUpdate } from '@/services/appUpdate'
 import { authState, isAuthenticated } from '@/data/authStore'
 import { hasRequestAccountChanged } from '@/services/http'
 import { installButtonFeedback } from '@/services/buttonFeedback'
 import '@/styles/buttonFeedback.css'
 
 let removeButtonFeedback: (() => void) | undefined
+let stopUpdateMonitor: (() => void) | undefined
+onMounted(() => { stopUpdateMonitor = appUpdate.start() })
+onUnmounted(() => stopUpdateMonitor?.())
 onMounted(() => { removeButtonFeedback = installButtonFeedback() })
 onUnmounted(() => removeButtonFeedback?.())
 
@@ -23,6 +28,7 @@ const showTopbar = computed(() => isAuthenticated.value && !['login', 'change-pa
 </script>
 
 <template>
+  <AppUpdateNotice />
   <div v-if="!authState.initialized" class="app-bootstrap" aria-live="polite">
     <header><i>M</i><span><b>米莱诺报价</b><small>MILANO PRICING ERP</small></span></header>
     <main><div class="skeleton-title"></div><div class="skeleton-card"></div><p><i></i>正在加载报价工作区…</p></main>

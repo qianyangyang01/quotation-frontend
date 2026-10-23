@@ -26,6 +26,7 @@ import { loadQuoteSheetColumnOrder, saveQuoteSheetColumnOrder, loadQuoteSheetAus
 import { loadSavedQuoteSheetPhotos, saveQuoteSheetPhotos } from '@/services/quoteSheetPhotos'
 import type { QuoteSheetPhoto } from '@/data/quoteSheetPhotos'
 import { loadQuoteSheetContact, saveQuoteSheetContact } from '@/data/quoteSheetContactPreferences'
+import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutputGuard'
 
 const props = defineProps<{
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; salesperson: string
@@ -36,6 +37,7 @@ const props = defineProps<{
   initialPhotos?: QuoteSheetPhoto[]
   initialSystemQuote?: CustomerPriceSnapshot
   recordMode?: boolean
+  currentQuote?: boolean
   canRemoveRows?: boolean
   removalDisabled?: boolean
   showAllRows?: boolean
@@ -48,6 +50,7 @@ const props = defineProps<{
   preservePricesWhilePending?: boolean
   batchAverage?: boolean
 }>()
+const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => !!props.currentQuote)
 const emit = defineEmits<{ removeRow: [key: string]; quantitiesChange: [quantities: number[]] }>()
 const layoutUserId = computed(() => currentAuthUser.value.id)
 function initialEdits() {
@@ -425,7 +428,7 @@ const currentImage = computed(() => images.value[activeImage.value])
 const missingProviders = computed(() => !columnVisible('provider') ? [] : [...new Map(visibleSourceRows.value
   .filter(row => !quoteSheetProviderName(row.carrier))
   .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
-const canCopy = computed(() => Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
+const canCopy = computed(() => !outputBlocked.value && Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
 
 const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value, typeof sheet.value.sizeRules === 'string').map(group => group.key === 'sku' ? { ...group, label: sheet.value.skuLabel ?? group.label } : group))
 const textTable = computed(() => quoteSheetTextTable(sheet.value))
@@ -487,6 +490,7 @@ function invalidate() {
   message.value = ''
   failed.value = false
 }
+watch(outputBlocked, blocked => { if (blocked) invalidate() }, { flush: 'sync' })
 watch(() => [props.contextKey, props.resetKey, props.rows, props.countries, props.customQuantity, props.bundle, props.sourcePending], invalidate, { deep: true, flush: 'sync' })
 // Reset after the parent finishes updating all props, so new quantities never use the old product's custom quantity.
 watch(() => [props.contextKey, props.resetKey], () => {
@@ -642,8 +646,10 @@ function dropColumn(index: number) {
   endColumnDrag()
 }
 async function preview() {
+  if (outputBlocked.value) { failed.value = true; message.value = QUOTE_UPDATE_MESSAGE; return }
   if (disposed || copying.value || props.sourcePending || rendering.value || !sheet.value.rows.length) return
   await photoLoad
+  if (outputBlocked.value) { failed.value = true; message.value = QUOTE_UPDATE_MESSAGE; return }
   if (disposed || copying.value || rendering.value || props.sourcePending || photoLoading.value) return
   if (photoError.value) { failed.value = true; message.value = photoError.value; return }
   invalidate()
@@ -684,6 +690,7 @@ async function copyCurrent() {
   failed.value = false
   message.value = ''
   try {
+    assertOutputCurrent()
     await copyQuoteSheetImage(currentImage.value.blob)
     if (disposed) return
     if (token !== generation) {
@@ -707,6 +714,7 @@ async function copyData() {
   failed.value = false
   message.value = ''
   try {
+    assertOutputCurrent()
     await copyQuoteSheetData(sheet.value)
     if (disposed) return
     if (token !== generation) throw new Error('报价已发生变化，请重新复制最新数据')
@@ -757,6 +765,7 @@ onBeforeUnmount(() => {
   <section class="customer-sheet" :class="{ 'sheet-quiet': batchAverage }" aria-labelledby="customer-sheet-title">
     <QuoteBackToTop v-if="!hideBackToTop" />
     <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
+    <p v-if="outputBlocked" class="sheet-pending" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :batch="batchAverage" :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @add-batch="addBatchAverages" @remove="removeAverage" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
@@ -804,9 +813,9 @@ onBeforeUnmount(() => {
         <div class="sheet-actions">
           <button type="button" :disabled="copying" :aria-expanded="averageOpen" @click="toggleAveragePanel">渠道平均报价</button>
           <button v-if="!editing" class="sheet-primary" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
-          <button v-if="editing" class="sheet-primary" type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
+          <button v-if="editing" class="sheet-primary" type="button" :disabled="outputBlocked || sourcePending || !sheet.rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
           <button type="button" :disabled="!canCopy" @click="copyCurrent">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
-          <button type="button" :disabled="sourcePending || !sheet.rows.length || rendering || copying" @click="copyData">复制报价数据</button>
+          <button type="button" :disabled="outputBlocked || sourcePending || !sheet.rows.length || rendering || copying" @click="copyData">复制报价数据</button>
           <button v-if="editing" type="button" class="sheet-add-button" :title="`价格列 ${columns.length} / ${MAX_QUOTE_SHEET_COLUMNS}`" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button>
         </div>
       </div>

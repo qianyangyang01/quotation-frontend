@@ -2,12 +2,19 @@
 import { createApp, nextTick, type App } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { setPricingTestPermissions } from '@/test/pricingPermissions'
-beforeEach(() => setPricingTestPermissions())
+beforeEach(() => { setPricingTestPermissions(); updateState.updateRequired = false })
 import Panel from './FobQuotePanel.vue'
 import { FOB_SMALL_ORDER_POLICY, loadFobQuoteProduct, type FobQuoteProduct } from '@/services/fobQuotation'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
 import { authState, roleDefinitions } from '@/data/authStore'
+import { appUpdate } from '@/services/appUpdate'
+vi.mock('@/services/appUpdate', async () => {
+  const { reactive } = await import('vue')
+  const state = reactive({ updateRequired: false })
+  return { appUpdate: { state, assertCurrent: () => { if (state.updateRequired) throw new Error('系统已更新，请刷新') } } }
+})
+const updateState = appUpdate.state as { updateRequired: boolean }
 vi.mock('@/services/customerQuoteSheetClipboard', () => ({ copyQuoteSheetData: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@/services/customerQuoteSheetRenderer', () => ({ renderCustomerQuoteSheet: vi.fn().mockResolvedValue([]), copyQuoteSheetImage: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@/services/fobQuotation', async original => ({ ...await original<typeof import('@/services/fobQuotation')>(), loadFobQuoteProduct: vi.fn() }))
@@ -40,11 +47,37 @@ it('quotes and copies a one-yuan small-order surcharge and removes it at the exi
   expect(document.querySelector('.quantity-status')!.textContent).toContain('最终价已含每件1元小额订单加价')
   expect([...document.querySelectorAll('.current-price')].map(cell=>cell.textContent)).toEqual(['报关 $1.52/件','不报关 $1.55/件'])
   expect(document.body.textContent).toContain('不足200元时，每件加1元')
-  Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='复制当前数量报价')!.click();await tick()
+  Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='复制当前数量报价')!.click()
+  expect(writeText).toHaveBeenCalledOnce() // Retains the user activation without awaiting a version request.
+  await tick()
   expect(writeText).toHaveBeenCalledWith(expect.stringContaining('已含每件1元小额订单加价'))
   quantity.value='26';quantity.dispatchEvent(new Event('input',{bubbles:true}));await tick()
   expect(document.querySelector('.quantity-status')!.textContent).toContain('无小额订单加价')
   expect(document.querySelector('.final-quote')!.textContent).toContain('报关 $1.35/件')
+})
+it('blocks direct quantity copy before the DOM updates and preserves SKU, quantity and the customer sheet',async()=>{
+  const writeText=vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true})
+  mount();vi.mocked(loadFobQuoteProduct).mockResolvedValue(sample());await sku('PF2600053');await query()
+  const skuInput=document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!
+  const quantityInput=document.querySelector<HTMLInputElement>('[aria-label="FOB报价数量"]')!
+  quantityInput.value='100';quantityInput.dispatchEvent(new Event('input',{bubbles:true}));await tick()
+  const sheet=document.querySelector('[aria-label="FOB客户报价单"]')!
+  const copyButton=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='复制当前数量报价')!
+  expect(copyButton.disabled).toBe(false)
+  updateState.updateRequired=true
+  copyButton.click() // The handler must guard even before the disabled attribute is rendered.
+  expect(writeText).not.toHaveBeenCalled()
+  await tick()
+  expect(copyButton.disabled).toBe(true)
+  expect(document.querySelector('.fob-card [role="alert"]')!.textContent).toContain('刷新后重新查询并报价')
+  expect(document.querySelector('[aria-label="FOB查询SKU"]')).toBe(skuInput)
+  expect(skuInput.value).toBe('PF2600053')
+  expect(skuInput.disabled).toBe(false)
+  expect(quantityInput.value).toBe('100')
+  expect(quantityInput.disabled).toBe(false)
+  expect(document.querySelector('[aria-label="FOB客户报价单"]')).toBe(sheet)
+  expect(Array.from(sheet.querySelectorAll('button')).find(b=>b.textContent==='复制报价数据')!.disabled).toBe(true)
 })
 it('keeps only the latest result after a burst of twenty queries resolving in reverse order',async()=>{
   mount()
