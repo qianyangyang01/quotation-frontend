@@ -176,33 +176,33 @@ it('recalculates a restored tier 2 draft with current purchase tiers and keeps t
   expect(host.querySelector('.tier-match')?.textContent).toContain('阶梯价2（500–999件）')
 })
 
-it('matches domestic freight to actual purchase minimums and follows the tier 3 price fallback', async () => {
-  purchaseOverride = { minOrderQty: 1, purchasePriceCny: 45.98,
-    tier2MinQty: 300, tier2PriceCny: 39.5, tier3MinQty: null, tier3PriceCny: null, taxPoint: 0,
-    singleFreightCny: 10, freight10Cny: 12, freight100Cny: 38 }
-  await mount('single', '10', [], 'SINGLE', false, 'BK2602172')
+it.each([false, true])('keeps TC2602184-1 tier-three freight at 100 pieces when price falls back (batch=%s)', async batchCapture => {
+  purchaseOverride = { minOrderQty: 1, purchasePriceCny: 7.6, weightG: 61,
+    tier2MinQty: null, tier2PriceCny: null, tier3MinQty: null, tier3PriceCny: null, taxPoint: .01,
+    singleFreightCny: 2.5, freight10Cny: 3.5, freight100Cny: 9.5 }
+  await mount('single', '10', [], 'SINGLE', false, 'TC2602184-1', batchCapture)
   const product = state.products[0]!
-  expect(product.purchaseFreightPerUnit).toBe(1.2)
-  const firstPrice = state.salePrice(product)
+  expect(product.purchaseFreightPerUnit).toBe(2.5)
+  expect(product.purchase).toBe(7.68)
   await selectTier('100')
-  expect(product.purchaseFreightPerUnit).toBe(.38)
-  expect(state.salePrice(product)).toBeCloseTo(firstPrice + (39.9 - 46.44 + .38 - 1.2) * 1.2)
+  expect(product.purchaseFreightPerUnit).toBe(.35)
   const before = state.salePrice(product)
   await selectTier('100+')
-  expect(product.purchase).toBe(39.9)
-  expect(product.purchaseFreightPerUnit).toBe(.38)
-  expect(state.salePrice(product)).toBe(before)
-  expect(host.querySelector('.freight-match')?.textContent).toContain('100件总运费 ¥38.00 ÷ 100')
-  expect(host.querySelector('.tier-match')?.textContent).toContain('阶梯价3未配置，采用阶梯价2')
+  expect(product.purchase).toBe(7.68)
+  expect(product.purchaseFreightPerUnit).toBe(.095)
+  expect(state.salePrice(product)).toBeCloseTo(before + (.095 - .35) * 1.2)
+  expect(host.querySelector('.freight-match')?.textContent).toContain('所选阶梯3，采用100件总运费 ¥9.50 ÷ 100')
+  expect(host.querySelector('.tier-match')?.textContent).toContain('阶梯价3未配置，采用阶梯价1')
   const saved = JSON.parse(JSON.stringify(state.draftPayload())) as QuotationDraftPayload
   await selectTier('10')
-  expect(product.purchaseFreightPerUnit).toBe(1.2)
+  expect(product.purchaseFreightPerUnit).toBe(2.5)
   await state.applyDraftPayload(saved, undefined, { restoreQuotation: true })
-  expect(state.products[0]!.purchaseFreightPerUnit).toBe(.38)
+  expect(state.products[0]!.purchaseFreightPerUnit).toBe(.095)
+  expect(vi.mocked(api.put).mock.calls.filter(([path]) => String(path).includes('/quotations'))).toHaveLength(0)
 })
 
 it('keeps each bundle freight tier through quantities, requery and draft restoration', async () => {
-  purchaseOverride = { minOrderQty: 1, tier2MinQty: 50, tier3MinQty: 300,
+  purchaseOverride = { minOrderQty: 1, tier2MinQty: null, tier2PriceCny: null, tier3MinQty: null, tier3PriceCny: null,
     singleFreightCny: 10, freight10Cny: 12, freight100Cny: 38 }
   await mount('bundle', '10', ['100', '10'], 'BK2601961')
   expect(state.bundleItems.map(item => item.purchaseFreightPerUnit)).toEqual([1.2, .21])
@@ -282,9 +282,9 @@ it('rechecks the actual freight tier on each purchase price tier without alterin
   expect(state.singleFreightWarning).toMatchObject({ quantity: 10, actualTotal: 100, expectedUnit: 6.5 })
   expect(host.querySelector('.domestic-freight-warning')?.textContent).toContain('运费超出合理范围，请联系采购确认是否有误！')
   expect(state.products[0]!.purchaseFreightPerUnit).toBe(10)
-  await selectTier('100') // Tier 2 starts at 20, so it still uses 10-piece freight.
-  expect(state.singleFreightWarning).toMatchObject({ quantity: 10, actualTotal: 100 })
-  await selectTier('100+') // Tier 3 starts at 500 and uses 100-piece freight.
+  await selectTier('100') // Only 10/100-piece source bands exist; tier 2 uses the second band.
+  expect(state.singleFreightWarning).toBeNull()
+  await selectTier('100+') // Higher requested tiers retain the highest available band.
   expect(state.singleFreightWarning).toBeNull()
   expect(host.querySelector('.domestic-freight-warning')).toBeNull()
   expect(state.products[0]!.purchaseFreightPerUnit).toBe(.05)
@@ -527,7 +527,7 @@ it('restores a withdrawn quotation containing a SKU but no product snapshot with
 
 it.each(['single', 'bundle'] as const)('refreshes legacy domestic freight from current batch data in the %s editor and restored drafts', async mode => {
   purchaseOverride = { dataSource: 'legacy_2026', singleFreightCny: 5, freight10Cny: null, freight100Cny: null }
-  await mount(mode)
+  await mount(mode, '100', ['100'])
   const freight = () => mode === 'single' ? state.products[0]!.purchaseFreightPerUnit : state.bundleItems[0]!.purchaseFreightPerUnit
   expect(freight()).toBe(5)
   const draft = state.draftPayload()
@@ -550,7 +550,7 @@ it('quotes ten YT2600676 items to NL at $21.90 using the recorded five-yuan batc
     singleFreightCny: 5, freight10Cny: 5, freight100Cny: 11.5,
     tier2MinQty: null, tier2PriceCny: null, tier3MinQty: null, tier3PriceCny: null,
   }
-  await mount('single', '10', [], 'SINGLE', false, 'YT2600676')
+  await mount('single', '100', [], 'SINGLE', false, 'YT2600676')
   state.customerGradeSettings.find(row => row.grade === 'S')!.coefficient = 1.21605
   state.exchange = { usd: 6.7, eurUsd: 1.16 }
   const name = '云途欧洲专线（特惠普货）-CHC'
@@ -576,7 +576,7 @@ it('quotes ten YT2600676 items to NL at $21.90 using the recorded five-yuan batc
   // S coefficient 1.21605 / 6.7 + duty 1.95 USD, rounded upward to 0.05 USD.
   expect(quote()).toMatchObject({ cost: 109.88, freight: 65.48, quoteUsd: 21.9, tax: { configured: true } })
   product.purchaseFreightPerUnit = 5
-  expect(quote()?.quoteUsd).toBe(30.1) // Reproduces the reported screenshot with the old freight selection.
+  expect(quote()?.quoteUsd).toBe(30.1) // Selecting the single-piece source freight produces a different current quote.
 })
 
 it.each(['single', 'bundle'] as const)('applies TC2601815 tier tax in the %s editor and restored drafts', async mode => {

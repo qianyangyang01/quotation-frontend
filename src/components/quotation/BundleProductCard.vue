@@ -86,7 +86,7 @@ defineEmits<{
     <div class="summary-grid">
       <div v-if="canViewPurchaseCost"><span>单套采购成本</span><b>¥{{ purchaseCost.toFixed(2) }}</b><small>各 SKU 按各自所选阶梯价及采购票点计算</small></div>
       <div><span>单套含包材重量（g）</span><b>{{ specialPackagingError ? '—' : grams(totalWeight) }} g</b><small>基础 {{ grams(baseWeight) }}g + 普通包材 {{ grams(packagingWeight) }}g + 特殊包装 {{ specialPackagingError ? '—' : grams(specialPackagingWeight ?? 0) }}g</small></div>
-      <div v-if="canViewPurchaseCost"><span>单套国内运费</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>按采购阶梯起订量匹配：不足100件用10件档，100件起用100件档；包邮为0</small></div>
+      <div v-if="canViewPurchaseCost"><span>单套国内运费</span><b>¥{{ domesticFreight.toFixed(2) }}</b><small>按所选阶梯依次匹配源数据运费档，超出已有档位用最高档；采购价回退不影响运费，包邮为0</small></div>
     </div>
   </section>
 </template>

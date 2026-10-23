@@ -30,7 +30,7 @@ const finance = {
 const source = { id: 'original', no: 'QT-OLD', customerName: '原客户', primarySku: 'BK100', quoteMode: 'single',
   logisticsAttribute: '普货', customerGrade: '新客户', country: '日本', carrier: '原物流', rule: '原规则', channel: '原渠道',
   quoteConfirmed: true, status: 'won', customQuoteQuantity: 8, purchaseUnitPriceCny: 999,
-  domesticFreightPerUnitCny: 5, systemQuoteUsd: 30.1,
+  domesticFreightPerUnitCny: 5, systemQuoteUsd: 30.1, monthlySalesEstimate: '100+',
   quoteOptions: [{ id: 'option', country: '日本', channelKey: '1::原物流::JP', carrier: '原物流', rule: '原规则', channel: '原渠道', isPrimary: true }],
 }
 const oldDraft = { schemaVersion: 2, quoteMode: 'single', customerName: '未完成客户', skuSearch: '', logisticsAttribute: '普货' }
@@ -75,12 +75,12 @@ async function mount(existing: boolean, withdrawn = false, batchCapture = false,
 }
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
 
-it('uses current legacy batch freight on explicit reissue and preserves the original quotation snapshot', async () => {
-  purchaseOverride = { dataSource: 'legacy_2026', invoiceType: '普票', singleFreightCny: 5, freight10Cny: 5 }
+it('uses highest source freight on explicit tier-three reissue without changing the original snapshot', async () => {
+  purchaseOverride = { dataSource: 'legacy_2026', invoiceType: '普票', singleFreightCny: 2.5, freight10Cny: 3.5, freight100Cny: 9.5 }
   const original = JSON.stringify(source)
   await mount(false)
   await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
-  expect(state.products[0]).toMatchObject({ purchaseFreightPerUnit: .5 })
+  expect(state.products[0]).toMatchObject({ purchaseFreightPerUnit: .095 })
   expect(JSON.stringify(source)).toBe(original)
   expect(api.post).not.toHaveBeenCalled()
   expect(api.patch).not.toHaveBeenCalled()

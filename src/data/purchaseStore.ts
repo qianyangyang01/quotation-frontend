@@ -202,26 +202,23 @@ export function purchaseFreightChoices(record: PurchaseProductRecord) {
 export function purchaseFreightUnit(record: PurchaseProductRecord, batchQuantity: number) {
   return purchaseFreightChoices(record).find(item => item.quantity === batchQuantity)?.unitFreightCny ?? 0
 }
-// The requested band can differ from choice.quantity after the legacy fallback.
+// Freight follows the requested tier's position in the available source bands.
+// Price fallback and price minimum quantities must not move the freight band.
 export function purchaseQuoteFreight(record: PurchaseProductRecord, purchaseTier = '10') {
-  const minQuantity = selectedPurchaseTier(record, purchaseTier).tier?.minQty ?? record.minOrderQty ?? 1
-  const quantity = minQuantity >= 100 ? 100 : 10
+  const index = purchaseTierIndex(purchaseTier)
+  const quantity = index === 0 ? 1 : index === 1 ? 10 : 100
   const choices = purchaseFreightChoices(record)
-  const choice = choices.find(item => item.quantity === quantity)
-    ?? (record.dataSource === 'legacy_2026'
-      ? choices.find(item => item.quantity === 10) ?? choices.find(item => item.quantity === 1)
-      : undefined)
-  return { minQuantity, quantity, choice }
+  const choice = choices[Math.min(index, choices.length - 1)]
+  return { quantity, choice }
 }
 export function purchaseQuoteFreightUnit(record: PurchaseProductRecord, purchaseTier = '10') {
   return purchaseQuoteFreight(record, purchaseTier).choice?.unitFreightCny ?? 0
 }
 export function purchaseQuoteFreightLabel(record: PurchaseProductRecord, purchaseTier: string) {
   if (record.freeShipping === '是') return '采购包邮，国内运费为0'
-  const { minQuantity, quantity, choice } = purchaseQuoteFreight(record, purchaseTier)
-  if (!choice) return `${quantity}件总运费未配置，暂按0计算`
-  const fallback = choice.quantity !== quantity ? `${quantity}件运费未配置，沿用旧数据${choice.quantity}件档；` : ''
-  return `${fallback}采购${minQuantity}件起，采用${choice.quantity}件总运费 ¥${choice.totalFreightCny.toFixed(2)} ÷ ${choice.quantity}，不计采购票点`
+  const { choice } = purchaseQuoteFreight(record, purchaseTier)
+  if (!choice) return '国内运费未配置，暂按0计算'
+  return `所选阶梯${purchaseTierIndex(purchaseTier) + 1}，采用${choice.quantity}件总运费 ¥${choice.totalFreightCny.toFixed(2)} ÷ ${choice.quantity}，不计采购票点`
 }
 export function purchaseSourceLabel(record: Pick<PurchaseProductRecord, 'dataSource'>) { return record.dataSource === 'legacy_2026' ? '2026旧数据' : '新数据' }
 export function purchaseQuoteBlockingMessage(record: PurchaseProductRecord) {

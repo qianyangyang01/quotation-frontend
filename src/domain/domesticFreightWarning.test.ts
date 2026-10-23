@@ -39,8 +39,8 @@ describe('domestic freight notice', () => {
   ])('uses a strict 50 percent threshold for $field', ({ weightG, minOrderQty, quantity, field, expectedUnit }) => {
     const threshold = expectedUnit * 1.5 * quantity
     const record = product({ weightG, minOrderQty, [field]: threshold })
-    expect(getDomesticFreightWarning(record)).toBeNull()
-    expect(getDomesticFreightWarning({ ...record, [field]: threshold + 0.0001 })).toMatchObject({ expectedUnit })
+    expect(getDomesticFreightWarning(record, quantity === 1 ? '10' : quantity === 10 ? '100' : '100+')).toBeNull()
+    expect(getDomesticFreightWarning({ ...record, [field]: threshold + 0.0001 }, quantity === 1 ? '10' : quantity === 10 ? '100' : '100+')).toMatchObject({ expectedUnit })
   })
 
   it.each([34, 65, 97.5])('does not warn for TC2602250 at 10-piece freight %s', freight10Cny => {
@@ -49,36 +49,36 @@ describe('domestic freight notice', () => {
       freight100Cny: 304, tier2MinQty: 200, tier2PriceCny: 9 })
     const snapshot = structuredClone(record)
     expect(getDomesticFreightWarning(record)).toBeNull()
-    expect(purchaseQuoteFreightUnit(record)).toBe(freight10Cny / 10)
+    expect(purchaseQuoteFreightUnit(record, '100')).toBe(freight10Cny / 10)
     expect(getDomesticFreightWarning(record, '100')).toBeNull()
     expect(record).toEqual(snapshot)
   })
 
   it('compares allocated unit freight with a single-item reference, preserving precision', () => {
     const record = product({ weightG: 1150, freight10Cny: 97.501 })
-    expect(getDomesticFreightWarning(record)).toMatchObject({
+    expect(getDomesticFreightWarning(record, '100')).toMatchObject({
       quantity: 10, weightG: 1150, chargeableKg: 2, rate: 1.5,
       actualTotal: 97.501, actualUnit: 9.7501, expectedUnit: 6.5, excessUnit: 3.2501,
     })
   })
 
-  it('compares each selected purchase price tier using its minimum, not the option ID', () => {
+  it('uses the selected freight band independently of price minimums', () => {
     const record = product({ dataSource: 'standard', weightG: 120, freight10Cny: 100, freight100Cny: 800,
       tier2MinQty: 20, tier2PriceCny: 9, tier3MinQty: 500, tier3PriceCny: 8 })
-    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.quantity)).toEqual([10, 10, 100])
+    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.quantity)).toEqual([1, 10, 100])
     expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.expectedUnit)).toEqual([5, 5, 5])
-    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.actualTotal)).toEqual([100, 100, 800])
+    expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.actualTotal)).toEqual([8, 100, 800])
     for (const tier of ['10', '100', '100+']) {
       expect(getDomesticFreightWarning(record, tier)?.actualUnit).toBe(purchaseQuoteFreightUnit(record, tier))
     }
   })
 
   it.each([
-    { minOrderQty: 1, tier2MinQty: 300, tier2PriceCny: 9, expected: [10, 100, 100] },
-    { minOrderQty: 1, expected: [10, 10, 10] },
-    { minOrderQty: 100, expected: [100, 100, 100] },
-    { minOrderQty: 1, tier3MinQty: 500, tier3PriceCny: 8, expected: [10, 100, 100] },
-  ])('follows price tier fallback with $minOrderQty minimum', ({ expected, ...values }) => {
+    { minOrderQty: 1, tier2MinQty: 300, tier2PriceCny: 9, expected: [1, 10, 100] },
+    { minOrderQty: 1, expected: [1, 10, 100] },
+    { minOrderQty: 100, expected: [1, 10, 100] },
+    { minOrderQty: 1, tier3MinQty: 500, tier3PriceCny: 8, expected: [1, 10, 100] },
+  ])('ignores price tier fallback with $minOrderQty minimum', ({ expected, ...values }) => {
     const record = product({ dataSource: 'standard', weightG: 120, freight10Cny: 100, freight100Cny: 800, ...values })
     expect(['10', '100', '100+'].map(tier => getDomesticFreightWarning(record, tier)?.quantity)).toEqual(expected)
   })
@@ -89,7 +89,7 @@ describe('domestic freight notice', () => {
     expect(getDomesticFreightWarning(record, '100+')).toMatchObject({ quantity: 10, actualTotal: 100, actualUnit: 10, expectedUnit: 5 })
     const single = product({ ...record, freight10Cny: null })
     expect(getDomesticFreightWarning(single, '100+')).toMatchObject({ quantity: 1, actualTotal: 8, expectedUnit: 5 })
-    expect(getDomesticFreightWarning(product({ ...record, dataSource: 'standard' }), '100+')).toBeNull()
+    expect(getDomesticFreightWarning(product({ ...record, dataSource: 'standard' }), '100+')).toMatchObject({ quantity: 10, actualUnit: 10 })
   })
 
   it('uses the current factory and weightG, ignoring stale alias/weightKg values', () => {
@@ -133,6 +133,6 @@ describe('domestic freight notice', () => {
     getDomesticFreightWarning(record)
     expect(record).toEqual(snapshot)
     expect(record.quoteReady).toBe(true)
-    expect(getDomesticFreightWarning({ ...record, priceTiers: null } as unknown as PurchaseProductRecord)).toBeNull()
+    expect(getDomesticFreightWarning({ ...record, priceTiers: null } as unknown as PurchaseProductRecord)).toEqual(getDomesticFreightWarning(record))
   })
 })
