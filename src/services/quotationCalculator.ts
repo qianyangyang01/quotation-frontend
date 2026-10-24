@@ -82,7 +82,7 @@ export function purchasePriceBreakdown(record: PurchaseProductRecord, estimate: 
   const legacy = record.dataSource === 'legacy_2026'
   // The imported included price and original quote describe only the base price.
   // Optional tiers are quoted prices, even when they equal the included base.
-  const legacyQuotedTier = legacy && (tier?.source === '阶梯价2' || tier?.source === '阶梯价3')
+  const legacyQuotedTier = legacy && ['阶梯价2', '阶梯价3', '阶梯价4', '阶梯价5'].includes(tier?.source ?? '')
   // Legacy purchasePriceCny can be an imported tax-included price. An amount
   // identical to its original quote has no added tax to preserve.
   const originalPrice = legacy && !legacyQuotedTier && record.sourceQuotedPriceCny != null && record.sourceQuotedPriceCny > 0

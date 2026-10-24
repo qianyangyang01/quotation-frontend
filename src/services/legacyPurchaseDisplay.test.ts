@@ -37,9 +37,14 @@ it('preserves a separately supplied included price instead of deriving or replac
 })
 
 it('prices later quoted tiers independently even when a tier equals the included base', () => {
-  const product = record({ tier2MinQty: 100, tier2PriceCny: 121, tier3MinQty: 500, tier3PriceCny: 90 })
-  expect(['10', '100', '100+'].map(tier => legacyPurchaseDisplay(product, tier)!.unitPrice)).toEqual([110, 121, 90])
-  expect(['10', '100', '100+'].map(tier => legacyPurchaseDisplay(product, tier)!.effectiveUnitPrice)).toEqual([121, 133.1, 99])
+  const product = record({ tier2MinQty: 100, tier2PriceCny: 121, tier3MinQty: 500, tier3PriceCny: 90,
+    tier4MinQty: 1000, tier4PriceCny: 80, tier5MinQty: 2000, tier5PriceCny: 70 })
+  expect(['10', '100', '100+', 'tier4', 'tier5'].map(tier => legacyPurchaseDisplay(product, tier)!.unitPrice)).toEqual([110, 121, 90, 80, 70])
+  expect(['10', '100', '100+', 'tier4', 'tier5'].map(tier => legacyPurchaseDisplay(product, tier)!.effectiveUnitPrice)).toEqual([121, 133.1, 99, 88, 77])
+  expect(legacyPurchaseDisplay(product, 'tier4')).toMatchObject({ label: '未税单价', range: '第4档 · 1000–1999件' })
+  expect(legacyPurchaseDisplay(product, 'tier5')).toMatchObject({ label: '未税单价', range: '第5档 · 2000件起订' })
+  expect(legacyPurchaseDisplay({ ...product, taxPoint: 0 }, 'tier4')).toMatchObject({ unitPrice: 80, effectiveUnitPrice: 80.8 })
+  expect(legacyPurchaseDisplay({ ...product, taxPoint: 0 }, 'tier5')).toMatchObject({ unitPrice: 70, effectiveUnitPrice: 70.7 })
   const rows = [
     { sku: product.sku, purchaseTier: '10', quantityPerSet: 2, purchaseUnitPrice: 110, purchaseFreightPerUnit: 0, weightKg: .1, customWeightKg: null },
     { sku: product.sku, purchaseTier: '100', quantityPerSet: 3, purchaseUnitPrice: 121, purchaseFreightPerUnit: 0, weightKg: .1, customWeightKg: null },

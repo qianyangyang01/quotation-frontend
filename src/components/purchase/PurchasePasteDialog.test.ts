@@ -135,3 +135,38 @@ it('uses the five-tier endpoint and keeps exact values through preview and confi
   expect(request.mock.calls[1]![0]).toBe('/purchase-products/paste/shared/confirm')
   expect(JSON.parse(request.mock.calls[1]![1].body).rows).toEqual(payload)
 })
+
+it('previews and confirms legacy updates in the unified entry with the original price rules and version', async () => {
+  const saved = mount(true)
+  const sku = 'FL2600389ZT'
+  const input = emptyPurchasePasteRow(UNIFIED_PURCHASE_PASTE_COLUMNS)
+  Object.assign(input, { 3: sku, 12: '120' })
+  await paste([input])
+  const expected = { sku, productId: 'legacy-product-1', version: 7, updatedAt: '2026-10-24T01:02:03Z' }
+  const effective = { sku, dataSource: 'legacy_2026', legacyPriceMode: 'auto_tax',
+    sourceQuotedPriceCny: 120, purchasePriceCny: 132, taxIncludedPriceCny: 132, taxPoint: .1 }
+  const notices = ['2026旧数据沿用原资料类型和价格规则；本次仅更新已填写字段，不自动切换FOB来源',
+    '未税采购单价 120 ×（1＋票点 0.1）＝含票价 132']
+  request.mockResolvedValueOnce({ rows: [{ sku, sourceRow: 1, action: 'update', expected, effective, notices,
+    changes: [{ field: 'sourceQuotedPriceCny', label: '未税采购单价(CNY/件)', before: 110, after: 120 },
+      { field: 'purchasePriceCny', label: '基准采购单价(CNY/件)', before: 121, after: 132 }] }], skipped: [] })
+
+  button('预览并保存 1 条').click(); await tick()
+  expect(request).toHaveBeenCalledTimes(1)
+  expect(request.mock.calls[0]![0]).toBe('/purchase-products/paste/shared/preview')
+  const rows = [{ sourceRow: 1, sku, purchasePriceCny: 120 }]
+  expect(JSON.parse(request.mock.calls[0]![1].body)).toEqual(rows)
+  const panel = document.querySelector('[aria-label="采购粘贴变更预览"]')!
+  expect(Array.from(panel.querySelectorAll('.price-notice'), notice => notice.textContent)).toEqual(notices)
+  expect(Array.from(panel.querySelectorAll('tbody tr'), row => Array.from(row.querySelectorAll('th,td'), cell => cell.textContent)))
+    .toEqual([['未税采购单价(CNY/件)', '110', '120'], ['基准采购单价(CNY/件)', '121', '132']])
+  expect(panel.textContent).toContain('历史报价保持不变')
+  expect(saved).not.toHaveBeenCalled()
+
+  request.mockResolvedValueOnce({ added: [], updated: [effective], unchanged: [], skipped: [] })
+  button('确认全部保存').click(); await tick()
+  expect(request.mock.calls[1]![0]).toBe('/purchase-products/paste/shared/confirm')
+  expect(JSON.parse(request.mock.calls[1]![1].body)).toEqual({ rows, expected: [expected] })
+  expect(saved).toHaveBeenCalledWith({ added: 0, updated: 1, unchanged: 0, skipped: 0 })
+  expect(document.querySelector('[role="status"]')!.textContent).toContain('更新已计入修改记录')
+})

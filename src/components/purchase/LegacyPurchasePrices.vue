@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { PurchaseProductRecord } from '@/data/purchaseStore'
 import { legacyPurchaseDisplay, formatLegacyPurchaseUnitPrice } from '@/services/legacyPurchaseDisplay'
 const props = defineProps<{ record: PurchaseProductRecord }>()
-const prices = computed(() => (props.record.priceTiers.length ? props.record.priceTiers.map((_, i) => ['10', '100', '100+'][i]!) : ['10'])
+const prices = computed(() => (props.record.priceTiers.length ? props.record.priceTiers.map((_, i) => ['10', '100', '100+', 'tier4', 'tier5'][i]!) : ['10'])
   .map(tier => legacyPurchaseDisplay(props.record, tier)).filter(price => price != null))
 </script>
 <template>

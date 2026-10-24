@@ -348,6 +348,111 @@ class PurchasePastePostgresIntegrationTest {
         assertEquals(19, products.get(sku).path("purchasePriceCny").asInt(), "new queries see the new price");
     }
 
+    @Test void sharedEndpointMixesLegacyUpdatesAndNewRowsWithoutConvertingPricesOrHistoricalRecords() throws Exception {
+        var auto = sku(); var fixed = sku(); var added = sku();
+        var automatic = full(auto).put("dataSource", "legacy_2026").put("legacyPriceMode", "auto_tax")
+                .put("sourceQuotedPriceCny", 100).put("taxPoint", .1).put("sourceSheet", "2026原始采购表")
+                .put("sourceRow", 88).put("skuOrigin", "imported").put("productImage", "/legacy-product.png")
+                .put("physicalImage", "/legacy-physical.png").put("notes", "原始备注")
+                .put("tier2MinQty", 10).put("tier2PriceCny", 95).put("tier3MinQty", 100).put("tier3PriceCny", 90);
+        automatic.remove("freight10Cny");
+        products.upsert(automatic);
+        var original = products.get(auto);
+        var originalId = repository.findBySku(auto).orElseThrow().id;
+        var fixedPrice = full(fixed).put("dataSource", "legacy_2026").put("taxIncludedPriceCny", 125);
+        fixedPrice.remove("freight10Cny");
+        products.upsert(fixedPrice);
+        var originalFixed = products.get(fixed);
+        long autoHistory = historyCount(auto), fixedHistory = historyCount(fixed);
+        assertEquals(110, original.path("purchasePriceCny").asDouble());
+        var quoteId = UUID.randomUUID();
+        var payload = mapper.createObjectNode().put("primarySku", auto).put("purchaseUnitPriceCny", 110)
+                .put("systemQuote", 200).put("customerQuote", 210).put("freight", 10)
+                .put("financeReviewStatus", "approved").put("dealStatus", "won");
+        jdbc.update("insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at,lifecycle_state) values(?,?,?,'processed',cast(? as jsonb),3,now(),now(),'active')",
+                quoteId, "LEGACY-SHARED-" + quoteId.toString().substring(0, 8), "PASTEBUYER", payload.toString());
+        jdbc.update("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values(?,cast(? as jsonb),0,now(),now())",
+                auto, "{\"purchasePriceCny\":110,\"notes\":\"原FOB专用资料\"}");
+        var historicalQuote = jdbc.queryForMap("select * from quotation_record where id=?", quoteId);
+        var historicalFob = jdbc.queryForMap("select * from fob_purchase_product where sku=?", auto);
+        List<JsonNode> rows = List.of(full(added), patch(auto, 80).put("notes", " ").put("sourceRow", 2)
+                        .put("tier4MinQty", 500).put("tier4PriceCny", 70).put("tier5MinQty", 1000).put("tier5PriceCny", 60),
+                patch(fixed, 80).put("color", "蓝色"));
+
+        mvc.perform(post("/api/v1/purchase-products/paste/shared/preview").with(csrf()).contentType("application/json")
+                .content(mapper.writeValueAsString(rows)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.rows[1].effective.purchasePriceCny").value(88))
+                .andExpect(jsonPath("$.data.rows[2].effective.purchasePriceCny").value(125));
+        assertEquals(original, products.get(auto));
+        assertEquals(originalFixed, products.get(fixed));
+        assertFalse(products.exists(added));
+        var preview = paste.preview(rows, true);
+        assertEquals("standard", preview.rows().get(0).effective().path("dataSource").asText());
+        assertEquals("shared", preview.rows().get(0).effective().path("purchaseUsage").asText());
+        for (var row : preview.rows().subList(1, 3)) {
+            assertEquals("legacy_2026", row.effective().path("dataSource").asText());
+            assertEquals("tax_included", row.effective().path("purchasePriceBasis").asText());
+            assertNotEquals("shared", row.effective().path("purchaseUsage").asText());
+            assertFalse(row.effective().hasNonNull("freight10Cny"));
+        }
+        var request = new PurchasePasteService.Confirmation(rows, preview.rows().stream().map(PurchasePasteService.PreviewRow::expected).toList());
+        mvc.perform(post("/api/v1/purchase-products/paste/shared/confirm").with(csrf()).contentType("application/json")
+                .content(mapper.writeValueAsString(request)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.added.length()").value(1))
+                .andExpect(jsonPath("$.data.updated.length()").value(2));
+
+        var saved = products.get(auto);
+        assertEquals(80, saved.path("sourceQuotedPriceCny").asDouble());
+        assertEquals(88, saved.path("purchasePriceCny").asDouble());
+        assertEquals(88, saved.path("taxIncludedPriceCny").asDouble());
+        assertEquals(500, saved.path("tier4MinQty").asInt());
+        assertEquals(70, saved.path("tier4PriceCny").asDouble());
+        assertEquals(1000, saved.path("tier5MinQty").asInt());
+        assertEquals(60, saved.path("tier5PriceCny").asDouble());
+        assertEquals(originalId, repository.findBySku(auto).orElseThrow().id);
+        for (var field : List.of("dataSource", "purchasePriceBasis", "legacyPriceMode", "purchaseUsage", "taxPoint",
+                "sourceSheet", "sourceRow", "skuOrigin", "productImage", "physicalImage", "notes", "freight10Cny"))
+            assertEquals(original.path(field), saved.path(field), field);
+        assertEquals(125, products.get(fixed).path("purchasePriceCny").asDouble());
+        assertEquals("legacy_2026", products.get(fixed).path("dataSource").asText());
+        assertNotEquals("shared", products.get(fixed).path("purchaseUsage").asText());
+        assertEquals("shared", products.get(added).path("purchaseUsage").asText());
+        assertEquals("standard", products.get(added).path("dataSource").asText());
+        assertEquals(autoHistory + 1, historyCount(auto));
+        assertEquals(fixedHistory + 1, historyCount(fixed));
+        var audit = products.history(auto, PageRequest.of(0, 1)).getContent().getFirst();
+        assertEquals("采购粘贴更新", audit.operation());
+        var changedFields = new HashSet<String>();
+        for (var change : audit.changes()) changedFields.add(change.path("field").asText());
+        assertTrue(changedFields.containsAll(List.of("purchasePriceCny", "sourceQuotedPriceCny", "taxIncludedPriceCny")));
+        assertFalse(changedFields.contains("dataSource"));
+        assertFalse(changedFields.contains("purchaseUsage"));
+        assertEquals(historicalQuote, jdbc.queryForMap("select * from quotation_record where id=?", quoteId));
+        assertEquals(historicalFob, jdbc.queryForMap("select * from fob_purchase_product where sku=?", auto));
+    }
+
+    @Test void sharedLegacyVersionConflictRejectsTheEntireMixedBatchWithoutProductOrAuditWrites() {
+        var legacy = sku(); var added = sku();
+        var initial = full(legacy).put("dataSource", "legacy_2026").put("legacyPriceMode", "auto_tax")
+                .put("sourceQuotedPriceCny", 100).put("taxPoint", .1);
+        initial.remove("freight10Cny");
+        products.upsert(initial);
+        List<JsonNode> rows = List.of(full(added), patch(legacy, 80));
+        var expected = paste.preview(rows, true).rows().stream().map(PurchasePasteService.PreviewRow::expected).toList();
+        products.update(legacy, ((ObjectNode) products.get(legacy)).put("notes", "另一位采购已更新"));
+        var concurrentSave = products.get(legacy);
+        long existingHistory = historyCount(legacy);
+
+        var conflict = assertThrows(AppException.class, () -> paste.confirmShared(new PurchasePasteService.Confirmation(rows, expected)));
+
+        assertEquals(409, conflict.status().value());
+        assertFalse(products.exists(added));
+        assertEquals(0L, jdbc.queryForObject("select count(*) from audit_log where resource_type='purchase-product-history' and detail->>'sku'=?", Long.class, added));
+        assertEquals(concurrentSave, products.get(legacy));
+        assertEquals(110, products.get(legacy).path("purchasePriceCny").asDouble());
+        assertEquals(existingHistory, historyCount(legacy));
+    }
+
     @Test void sharedEndpointPersistsFiveTiersAuditsChangesAndPreservesHistoricalAndFobRows() throws Exception {
         var sku = sku();
         var input = full(sku).put("tier2MinQty",10).put("tier2PriceCny",11).put("tier3MinQty",100).put("tier3PriceCny",10)

@@ -196,6 +196,35 @@ describe('legacy purchase tax reconciliation', () => {
     expect(purchasePriceForMonthlySales({ ...tc, sourceQuotedPriceCny: null }, '100')).toBe(10.8)
   })
 
+  it.each(['auto_tax', undefined] as const)('keeps fourth and fifth legacy tiers untaxed under %s base pricing', mode => {
+    const legacy = normalizePurchaseRecord({
+      ...tc, legacyPriceMode: mode, minOrderQty: 1, sourceQuotedPriceCny: 100,
+      purchasePriceCny: mode === 'auto_tax' ? 110 : 125, taxIncludedPriceCny: mode === 'auto_tax' ? 110 : 125,
+      taxPoint: .1, tier2MinQty: 10, tier2PriceCny: 90, tier3MinQty: 100, tier3PriceCny: 80,
+      tier4MinQty: 500, tier4PriceCny: 70, tier5MinQty: 1000, tier5PriceCny: 60,
+    })
+    for (const flag of [true, false]) {
+      expect(purchasePriceForMonthlySales(legacy, '10', flag)).toBe(mode === 'auto_tax' ? 110 : 125)
+      expect(purchasePriceBreakdown(legacy, 'tier4', flag)).toMatchObject({
+        baseUnitPriceCny: 70, effectiveUnitPriceCny: 77, invoiceMultiplier: 1.1, priceSource: 'legacy-tax-point',
+      })
+      expect(purchasePriceBreakdown(legacy, 'tier5', flag)).toMatchObject({
+        baseUnitPriceCny: 60, effectiveUnitPriceCny: 66, invoiceMultiplier: 1.1, priceSource: 'legacy-tax-point',
+      })
+    }
+    expect(purchasePriceForMonthlySales({ ...legacy, taxPoint: 0 }, 'tier4')).toBe(70.7)
+    expect(purchasePriceForMonthlySales({ ...legacy, taxPoint: 0 }, 'tier5')).toBe(60.6)
+    expect(purchasePriceForMonthlySales({ ...legacy, sourceQuotedPriceCny: null }, 'tier5')).toBe(66)
+    const equalPrice = normalizePurchaseRecord({ ...legacy, tier4PriceCny: legacy.purchasePriceCny, tier5PriceCny: 0 })
+    expect(purchasePriceForMonthlySales(equalPrice, 'tier4')).toBe(mode === 'auto_tax' ? 121 : 137.5)
+    expect(purchasePriceForMonthlySales(equalPrice, 'tier5')).toBe(0)
+    const items = [
+      { sku: legacy.sku, purchaseTier: 'tier4', quantityPerSet: 2, purchaseUnitPrice: 70, purchaseFreightPerUnit: 0, weightKg: .1, customWeightKg: null },
+      { sku: legacy.sku, purchaseTier: 'tier5', quantityPerSet: 3, purchaseUnitPrice: 60, purchaseFreightPerUnit: 0, weightKg: .1, customWeightKg: null },
+    ]
+    expect(bundlePurchaseCost(items, [legacy], '10', 5)).toBe(1760)
+  })
+
   const az = normalizePurchaseRecord({
     sku: 'AZ2601758', dataSource: 'legacy_2026', purchasePriceBasis: 'tax_included',
     purchasePriceCny: 6.8, sourceQuotedPriceCny: 6.8, taxIncludedPriceCny: 6.8,

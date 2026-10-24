@@ -22,8 +22,8 @@ export function legacyPurchaseDisplay(record: PurchaseProductRecord, estimate: s
   if (record.dataSource !== 'legacy_2026') return undefined
   const { index, tier } = selectedPurchaseTier(record, estimate)
   if (tier == null && record.purchasePriceCny == null) return undefined
-  const quotedTier = tier?.source === '阶梯价2' || tier?.source === '阶梯价3'
-  const untaxed = quotedTier ? tier.unitPriceCny : legacyUntaxedUnitPrice(record)
+  const quotedTier = ['阶梯价2', '阶梯价3', '阶梯价4', '阶梯价5'].includes(tier?.source ?? '')
+  const untaxed = quotedTier && tier ? tier.unitPriceCny : legacyUntaxedUnitPrice(record)
   const pricing = purchasePriceBreakdown(record, estimate)
   const effective = pricing.effectiveUnitPriceCny
   const rate = record.taxPoint == null ? '票点待补充' : `票点 ${Number((record.taxPoint * 100).toFixed(6))}%`

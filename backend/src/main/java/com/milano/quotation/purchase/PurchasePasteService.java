@@ -99,11 +99,12 @@ public class PurchasePasteService {
                 merged.put("_version", current.version);
                 merged.put("catalogState", current.catalogState);
             }
-            if (batch.shared) {
-                if (!"standard".equals(merged.path("dataSource").asText()))
-                    throw AppException.unprocessable("第" + sourceRow + "行：此SKU属于2026旧数据，请使用原入口维护，不能自动转换资料来源");
-                if ("tax_included".equals(merged.path("purchasePriceBasis").asText()))
-                    throw AppException.unprocessable("第" + sourceRow + "行：含票价资料不能直接转为共用未税数据源，请先核对采购价格口径");
+            // The unified entry also maintains existing legacy/included-price records.
+            // Only an eligible untaxed standard source opts into shared FOB lookup;
+            // updating an older record must preserve its source and pricing contract.
+            boolean sharedSource = batch.shared && "standard".equals(merged.path("dataSource").asText("standard"))
+                    && !"tax_included".equals(merged.path("purchasePriceBasis").asText());
+            if (sharedSource) {
                 merged.put("purchaseUsage", "shared");
             }
             // Once explicitly maintained as untaxed + rate, all later sparse updates
@@ -116,17 +117,23 @@ public class PurchasePasteService {
             PurchaseProductService.normalizeLegacyPrice(merged);
             PurchasePasteValidator.validateValues(merged, sourceRow, "legacy_2026".equals(merged.path("dataSource").asText()));
             var notices = new ArrayList<String>();
-            if (batch.shared) {
+            if (sharedSource) {
                 notices.add("保存一份采购资料，普通报价及FOB自动查询共用此来源；原FOB专用资料和历史报价保留");
                 if (!"是".equals(merged.path("freeShipping").asText()) && !merged.hasNonNull("freight100Cny"))
                     notices.add("未填写100件总运费，普通报价可用；FOB报价需补齐百件运费或明确包邮");
+            } else if (batch.shared) {
+                notices.add("legacy_2026".equals(merged.path("dataSource").asText())
+                        ? "本次更新保留2026旧数据类型及原有价格规则，空白保留原值；不自动切换FOB资料来源，原FOB专用资料和历史报价保留"
+                        : "本次更新保留原资料类型及含票价口径，空白保留原值；不自动切换FOB资料来源，原FOB专用资料和历史报价保留");
             }
             if (patch.has("purchasePriceCny") && patch.get("purchasePriceCny").decimalValue().compareTo(merged.path("purchasePriceCny").decimalValue()) != 0)
                 notices.add("auto_tax".equals(merged.path("legacyPriceMode").asText())
                         ? "未税采购单价 " + merged.path("sourceQuotedPriceCny").asText() + " ×（1＋票点 "
                             + merged.path("taxPoint").asText() + "）＝含票价 " + merged.path("purchasePriceCny").asText()
                         : "旧数据按原有价格规则计算：本次填写采购单价 " + patch.get("purchasePriceCny").asText()
-                            + "，最终生效采购单价 " + merged.path("purchasePriceCny").asText() + "；如需调整，请在编辑资料中维护未税单价和票点。");
+                            + "，最终生效采购单价 " + merged.path("purchasePriceCny").asText()
+                            + (batch.shared ? "；如需调整含票价，可在本入口填写“含票价”后重新预览。"
+                                : "；如需调整，请在编辑资料中维护未税单价和票点。"));
             var changes = PurchaseHistoryService.changes(current == null ? null : current.payload, merged);
             var expectation = new Expected(sku, current == null ? null : current.id,
                     current == null ? null : current.version, current == null ? null : current.updatedAt);
