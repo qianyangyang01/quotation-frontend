@@ -11,7 +11,7 @@ final class LogisticsParserCompatibility {
         // October changes recognize additional source layouts without changing the persisted
         // pricing contract. Keep the original producer version in both source and audit data.
         if (version == null || version.isBlank()) return "草稿缺少解析器版本，不能自动发布，请重新导入原表";
-        if (REVIEWED_VERSIONS.contains(version)||LogisticsSourceParser.VERSION.equals(version)) return "";
+        if (REVIEWED_VERSIONS.contains(version)||"source-date-reference-2026.10.20-v11".equals(version)||LogisticsSourceParser.VERSION.equals(version)) return "";
         return "草稿解析器版本尚未验证兼容性，请重新导入原表后发布";
     }
 }

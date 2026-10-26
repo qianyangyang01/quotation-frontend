@@ -1,0 +1,49 @@
+{
+  "entries": [
+    {
+      "id": "15f48124-12ca-419d-972e-503ea2bb0347",
+      "aliases": [
+        "欧洲优选专线普货",
+        "万邦速达优选专线普货报价表(RMB)"
+      ],
+      "enabled": true,
+      "channelName": "万邦优选专线普货",
+      "productCodes": [
+        "EUSLPH-P"
+      ],
+      "providerName": "万邦",
+      "providerAliases": [],
+      "logisticsAttribute": "普货"
+    },
+    {
+      "id": "c6292524-f9fc-4573-a557-91c469c1cc0c",
+      "aliases": [
+        "欧洲优选专线含电",
+        "万邦速达优选专线含电报价表(RMB)"
+      ],
+      "enabled": true,
+      "channelName": "万邦优选专线含电",
+      "productCodes": [
+        "EUSL-P"
+      ],
+      "providerName": "万邦",
+      "providerAliases": [],
+      "logisticsAttribute": "普货、带电"
+    },
+    {
+      "id": "5826fad3-8ea1-42a9-9730-2eee272e58a8",
+      "aliases": [
+        "欧洲优选专线敏感",
+        "万邦速达优选专线敏感报价表(RMB)"
+      ],
+      "enabled": true,
+      "channelName": "万邦优选专线敏感",
+      "productCodes": [
+        "ECSL-P"
+      ],
+      "providerName": "万邦",
+      "providerAliases": [],
+      "logisticsAttribute": "普货、带电、化妆品"
+    }
+  ]
+}
