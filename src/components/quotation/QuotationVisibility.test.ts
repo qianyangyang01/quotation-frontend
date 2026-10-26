@@ -49,7 +49,11 @@ function mountWorkspace() {
 it('hides sensitive DOM values for employees while retaining quantity, tier, weight and sale prices', () => {
   setPricingTestPermissions(['quote', 'myRecords'])
   const before = JSON.stringify([product, bundle]), host = mountWorkspace()
-  for (const secret of ['731.29', '12.37', '83.46', '172.88', '1.27', '计入成本单价', '单套采购成本', '国内运费', '计算规则']) expect(host.innerHTML).not.toContain(secret)
+  for (const secret of ['731.29', '83.46', '172.88', '1.27', '计入成本单价', '单套采购成本', '计算规则']) expect(host.innerHTML).not.toContain(secret)
+  expect(host.querySelector('.fields input:disabled[value="12.37"]')).not.toBeNull()
+  expect(host.querySelector('.row-domestic-freight')?.textContent).toContain('¥12.37')
+  expect(host.querySelector('.summary-grid')?.textContent).toContain('单套国内运费¥12.37')
+  expect(host.querySelector('.cost-grid')?.textContent).toContain('国内运费¥12.37')
   expect(host.textContent).toContain('204 g')
   expect(host.textContent).toContain('$150.00')
   expect(host.querySelector('.purchase-tier')).not.toBeNull()
@@ -71,6 +75,7 @@ it('uses effective module permissions and immediately removes fields after permi
   expect(host.innerHTML).not.toContain('731.29')
   authState.current = null; await nextTick()
   expect(host.innerHTML).not.toContain('83.46')
+  expect(host.innerHTML).not.toContain('12.37')
 })
 
 it('hides the saved FOB cost table and factors without changing the stored customer sheet', () => {
@@ -83,7 +88,9 @@ it('hides the saved FOB cost table and factors without changing the stored custo
       sheet: { title: 'Saved sheet', agent: '', date: '2026-10-09', quantityLabels: ['With declaration', 'Without declaration'], notes: [], rows: [], issues: [] } } })!
   const before = JSON.stringify(record), host = document.createElement('div')
   app = createApp(FobRecordDetail, { record }); app.mount(host)
-  for (const secret of ['731.29', '804.42', '12.37', '816.79', '1.14', '1.1628', '采购价', '成本价', '票点']) expect(host.innerHTML).not.toContain(secret)
+  for (const secret of ['731.29', '804.42', '816.79', '1.14', '1.1628', '采购价', '成本价', '票点']) expect(host.innerHTML).not.toContain(secret)
+  expect(host.textContent).toContain('国内运费 ¥')
+  expect(host.textContent).toContain('12.37')
   expect(host.textContent).toContain('150.00')
   expect(JSON.stringify(record)).toBe(before)
 })

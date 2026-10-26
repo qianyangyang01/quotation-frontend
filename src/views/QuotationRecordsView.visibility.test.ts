@@ -27,13 +27,15 @@ it.each(['mine', 'company'])('hides all repeated bundle costs in the %s record d
   const snapshot = () => document.querySelector('.bundle-snapshot')!
   expect(snapshot().textContent).toContain('BUNDLE-A × 2/套')
   expect(snapshot().textContent).toContain('123 g/件')
-  for (const secret of ['731.29', '12.37', '采购 ¥', '国内运费 ¥', '产品成本快照']) expect(drawer().innerHTML).not.toContain(secret)
+  for (const secret of ['731.29', '采购 ¥', '产品成本快照']) expect(drawer().innerHTML).not.toContain(secret)
+  expect(snapshot().textContent).toContain('国内运费 ¥12.37')
+  expect(drawer().textContent).toContain('国内运费快照')
   setPricingTestPermissions(['quote', 'myRecords', 'allRecords', 'purchase']); await flush()
   expect(snapshot().textContent).toContain('采购 ¥731.29')
   expect(snapshot().textContent).toContain('国内运费 ¥12.37')
   setPricingTestPermissions(['quote', 'myRecords', 'allRecords']); await flush()
   expect(drawer().innerHTML).not.toContain('731.29')
-  expect(drawer().innerHTML).not.toContain('12.37')
+  expect(drawer().innerHTML).toContain('12.37')
   expect(JSON.stringify(record)).toBe(original)
 })
 

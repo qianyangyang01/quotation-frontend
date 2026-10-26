@@ -7,6 +7,22 @@ afterEach(clearPricingTestPermissions)
 import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import QuotationProductCostTrace from './QuotationProductCostTrace.vue'
 
+it.each([0, 1.25, undefined])('shows saved domestic freight %s to sales without purchase values', freight => {
+  setPricingTestPermissions(['myRecords'])
+  const record = normalizeQuotationRecord({ id: 'freight', no: 'QT-FREIGHT', primarySku: 'SKU', purchaseUnitPriceCny: 731.29,
+    purchaseInvoiceRatePercent: 6, domesticFreightPerUnitCny: freight })!
+  const before = JSON.stringify(record)
+  const host = document.createElement('div')
+  const app = createApp(QuotationProductCostTrace, { record }); app.mount(host)
+  try {
+    expect(host.textContent).toContain('国内运费快照')
+    expect(host.querySelector('tbody tr')!.textContent).toContain(freight == null ? '未保存' : freight.toFixed(2))
+    expect(host.querySelectorAll('thead th')).toHaveLength(5)
+    for (const secret of ['731.29', '6%', '采购原价', '计入采购价', '产品成本合计']) expect(host.innerHTML).not.toContain(secret)
+    expect(JSON.stringify(record)).toBe(before)
+  } finally { app.unmount() }
+})
+
 it('shows saved costs and updates when a different quotation is opened', async () => {
   const state = reactive({ record: normalizeQuotationRecord({ id: 'a', no: 'QT-A', primarySku: '001', purchaseBaseUnitPriceCny: 10, purchaseUnitPriceCny: 10.6, domesticFreightPerUnitCny: .21, purchaseInvoiceRatePercent: 6 })! })
   const host = document.createElement('div')

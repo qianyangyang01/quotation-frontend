@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { canViewPurchaseCost, canViewPricingFactors } from '@/data/quotationVisibility'
+import { canViewDomesticFreight, canViewPurchaseCost, canViewPricingFactors } from '@/data/quotationVisibility'
 import type { QuotationRecord, QuotationReviewState } from '@/data/quotationRecords'
 import FobRevisionHistory from './FobRevisionHistory.vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
@@ -22,7 +22,7 @@ const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record
   <section v-if="record.fob?.schemaVersion===2 && record.fob.items?.length" class="fob-record" aria-label="FOB批量历史报价快照">
     <h3>FOB批量报价 · {{ record.fob.items.length }}行商品</h3><p>客户：{{ record.customerName }} · 报价人：{{ record.salespersonName }} · 修订 {{ record.fobRevision || 0 }}（各商品按自身保存汇率计价）</p>
     <p>以下为保存时的完整报价快照，采购资料和汇率更新不会改变此报价。</p>
-    <details v-if="canViewPurchaseCost"><summary>查看各SKU采购成本快照（内部）</summary><div class="cost-table"><table><thead><tr><th>SKU</th><th>阶梯起订量</th><th>采购价 ¥</th><th>含票价 ¥</th><th>国内运费 ¥</th><th>成本 ¥</th></tr></thead><tbody><template v-for="(item,index) in record.fob.items" :key="index"><tr v-for="tier in item.tiers" :key="tier.minQty"><td>{{ item.product.sku }}</td><td>{{ tier.minQty }}</td><td>{{ tier.purchaseCny }}</td><td>{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td>{{ tier.costCny }}</td></tr></template></tbody></table></div></details>
+    <details v-if="canViewDomesticFreight"><summary>{{ canViewPurchaseCost ? '查看各SKU采购成本快照（内部）' : '查看各SKU国内运费快照' }}</summary><div class="cost-table"><table><thead><tr><th>SKU</th><th>阶梯起订量</th><th v-if="canViewPurchaseCost">采购价 ¥</th><th v-if="canViewPurchaseCost">含票价 ¥</th><th>国内运费 ¥</th><th v-if="canViewPurchaseCost">成本 ¥</th></tr></thead><tbody><template v-for="(item,index) in record.fob.items" :key="index"><tr v-for="tier in item.tiers" :key="tier.minQty"><td>{{ item.product.sku }}</td><td>{{ tier.minQty }}</td><td v-if="canViewPurchaseCost">{{ tier.purchaseCny }}</td><td v-if="canViewPurchaseCost">{{ tier.taxIncludedCny }}</td><td v-if="canViewDomesticFreight">{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td></tr></template></tbody></table></div></details>
     <FobRevisionHistory v-if="record.fobRevision" :id="record.id" :revision="record.fobRevision" />
     <p v-if="record.fobItemReviews && record.fobItemReviews.some(i=>i.status!=='approved')" role="status">下方客户报价单仅包含已通过商品；待审核及退回商品不进入导出。</p>
     <p v-if="stale" role="alert">审核状态已变化，请加载最新记录后生成报价单。<button @click="emit('reload')">加载最新记录</button></p>
@@ -36,7 +36,7 @@ const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record
         <thead>
           <tr>
             <th rowspan="2" scope="col">数量</th>
-            <template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">采购价 ¥</th><th rowspan="2" scope="col">含票价 ¥</th><th rowspan="2" scope="col">国内运费 ¥</th><th rowspan="2" scope="col">成本价 ¥</th></template>
+            <template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">采购价 ¥</th><th rowspan="2" scope="col">含票价 ¥</th></template><th v-if="canViewDomesticFreight" rowspan="2" scope="col">国内运费 ¥</th><template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">成本价 ¥</th></template>
             <th colspan="2" scope="colgroup" class="base-heading">基础单价<small>未含小额订单加价</small></th>
             <th colspan="2" scope="colgroup" class="final-heading final-start">本次最终单价 · {{ record.fob.quantity }}{{ quoteUnit }}<small>{{ record.fob.current ? '已含适用的小额订单加价' : '此快照未保存最终单价' }}</small></th>
           </tr>
@@ -46,10 +46,10 @@ const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record
           <tr v-for="(tier,index) in tiers" :key="tier?.minQty ?? 'missing'">
             <template v-if="tier">
               <td>{{ tier.minQty }}{{ tier.maxQty==null?'+':'–'+tier.maxQty }}{{ tier.unit }}</td>
-              <template v-if="canViewPurchaseCost"><td>{{ tier.purchaseCny }}</td><td>{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td>{{ tier.costCny }}</td></template>
+              <template v-if="canViewPurchaseCost"><td>{{ tier.purchaseCny }}</td><td>{{ tier.taxIncludedCny }}</td></template><td v-if="canViewDomesticFreight">{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td>
               <td class="base-price">{{ tier.declaredUsd }}</td><td class="base-price">{{ tier.undeclaredUsd }}</td>
             </template>
-            <td v-else :colspan="canViewPurchaseCost ? 7 : 3" class="missing-base">此快照未保存基础价格明细</td>
+            <td v-else :colspan="3 + (canViewPurchaseCost ? 3 : 0) + (canViewDomesticFreight ? 1 : 0)" class="missing-base">此快照未保存基础价格明细</td>
             <template v-if="index===0">
               <td :rowspan="tiers.length" class="final-price final-start"><strong v-if="record.fob.current">{{ record.fob.current.declaredUsd }}</strong><span v-else>未保存</span></td>
               <td :rowspan="tiers.length" class="final-price"><strong v-if="record.fob.current">{{ record.fob.current.undeclaredUsd }}</strong><span v-else>未保存</span></td>

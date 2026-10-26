@@ -34,7 +34,9 @@ it('keeps employee FOB quoting available while hiding purchase values, notices a
   expect(document.querySelector('.final-quote')).not.toBeNull()
   expect(document.querySelector('[aria-label="FOB报价数量"]')).not.toBeNull()
   expect(Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='保存FOB报价')).toBe(true)
-  for(const secret of ['731.29','12.37','×1.14','×1.1628','成本价','FOB计算规则'])expect(document.body.innerHTML).not.toContain(secret)
+  for(const secret of ['731.29','×1.14','×1.1628','成本价','FOB计算规则'])expect(document.body.innerHTML).not.toContain(secret)
+  expect(document.body.textContent).toContain('国内运费 ¥/单位')
+  expect(document.body.textContent).toContain('12.37')
   expect(JSON.stringify(product)).toBe(before)
 })
 it('quotes and copies a one-yuan small-order surcharge and removes it at the existing threshold',async()=>{

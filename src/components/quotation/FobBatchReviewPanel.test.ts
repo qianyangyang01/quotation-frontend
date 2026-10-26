@@ -79,5 +79,5 @@ it('shows saved range amounts without recalculating historical prices and hides 
  item.current={minQty:3,maxQty:3,unit:'件',declaredUsd:'0.93',undeclaredUsd:'0.95',extraCny:1}
  const original=JSON.stringify(row);await panel(row)
  expect(document.querySelector('tbody')!.textContent).toContain('4.29');expect(document.querySelector('tbody')!.textContent).toContain('0.93');expect(JSON.stringify(row)).toBe(original)
- setPricingTestPermissions(['quote','myRecords']);await tick();expect(document.querySelector('thead')!.textContent).not.toContain('含票价');expect(document.querySelector('tbody')!.textContent).not.toContain('4.29')
+ setPricingTestPermissions(['quote','myRecords']);await tick();expect(document.querySelector('thead')!.textContent).toContain('国内运费');expect(document.querySelector('tbody')!.textContent).toContain('0.17');expect(document.querySelector('thead')!.textContent).not.toContain('含票价');expect(document.querySelector('tbody')!.textContent).not.toContain('4.29')
 })

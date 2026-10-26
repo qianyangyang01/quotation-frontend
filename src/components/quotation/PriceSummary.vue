@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { canViewPurchaseCost, canViewLogisticsCost, canViewFullPricing } from '@/data/quotationVisibility'
+import { canViewDomesticFreight, canViewPurchaseCost, canViewLogisticsCost, canViewFullPricing } from '@/data/quotationVisibility'
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { customerGradeLabel } from '@/data/financeChannelPolicies'
@@ -112,10 +112,10 @@ function isPrimary(row: QuotationMatrixRow) {
       <p><strong>¥{{ cnyPrice.toFixed(2) }}</strong><small>${{ usdPrice.toFixed(2) }}</small></p>
     </section>
 
-    <dl v-if="canViewPurchaseCost || canViewLogisticsCost" class="cost-grid">
+    <dl v-if="canViewPurchaseCost || canViewLogisticsCost || canViewDomesticFreight" class="cost-grid">
       <div v-if="canViewPurchaseCost"><dt>商品成本</dt><dd>¥{{ productCost.toFixed(2) }}</dd></div>
       <div v-if="canViewLogisticsCost"><dt>物流费用</dt><dd>¥{{ logisticsCost.toFixed(2) }}</dd></div>
-      <div v-if="canViewPurchaseCost"><dt>国内运费</dt><dd>¥{{ domesticFreightCost.toFixed(2) }}</dd></div>
+      <div v-if="canViewDomesticFreight"><dt>国内运费</dt><dd>¥{{ domesticFreightCost.toFixed(2) }}</dd></div>
       <div v-if="canViewFullPricing"><dt>首选方案利润</dt><dd class="profit">¥{{ profit.toFixed(2) }}</dd></div>
     </dl>
     <div class="coefficient"><span>客户等级</span><b>{{ customerGradeLabel(grade) }}</b></div>

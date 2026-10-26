@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { formatLegacyPurchaseUnitPrice } from '@/services/legacyPurchaseDisplay'
-import { canViewPurchaseCost } from '@/data/quotationVisibility'
+import { canViewDomesticFreight, canViewPurchaseCost } from '@/data/quotationVisibility'
 import SpecialPackagingInput from './SpecialPackagingInput.vue'
 import DomesticFreightWarning from './DomesticFreightWarning.vue'
 import type { DomesticFreightWarning as FreightWarning } from '@/domain/domesticFreightWarning'
@@ -53,7 +53,7 @@ function purchasePricingLabel() {
       <label>商品重量（g）<input :value="grams(product.netWeight)" disabled></label>
       <label>重量来源<select v-model="product.weightSource" @change="$emit('weightChange')"><option value="purchase">使用采购表重量</option><option value="manual">业务员指定重量</option></select></label>
       <label v-if="product.weightSource==='manual'">指定重量（g）<input :value="grams(product.manualWeight)" type="number" min="0" step="1" inputmode="numeric" @input="updateManualWeight"></label>
-      <label v-if="canViewPurchaseCost">国内运费/件（CNY）<span class="domestic-freight-input" :class="{ 'has-warning': freightWarning }"><input :value="product.purchaseFreightPerUnit.toFixed(2)" disabled><em v-if="freightWarning">超出规则价</em></span><small class="freight-match">{{ product.purchaseFreightLabel }}</small></label>
+      <label v-if="canViewDomesticFreight">国内运费/件（CNY）<span class="domestic-freight-input" :class="{ 'has-warning': freightWarning }"><input :value="product.purchaseFreightPerUnit.toFixed(2)" disabled><em v-if="freightWarning">超出规则价</em></span><small class="freight-match">{{ product.purchaseFreightLabel }}</small></label>
     </div>
     <SpecialPackagingInput compact :model-value="specialPackagingGrams ?? ''" :error="specialPackagingError" @update:model-value="$emit('update:specialPackagingGrams', $event)" />
     <div class="highlights">

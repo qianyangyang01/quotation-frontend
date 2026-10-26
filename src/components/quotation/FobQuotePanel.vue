@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { canViewPurchaseCost, canViewPricingFactors, canViewFullPricing } from '@/data/quotationVisibility'
+import { canViewDomesticFreight, canViewPurchaseCost, canViewPricingFactors, canViewFullPricing } from '@/data/quotationVisibility'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
 import QuotationFeatureBoundary from './QuotationFeatureBoundary.vue'
@@ -85,7 +85,7 @@ async function copy() {
         <thead>
           <tr>
             <th rowspan="2" scope="col">采购阶梯</th><th rowspan="2" scope="col">数量区间</th>
-            <template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">不含票 ¥/单位</th><th rowspan="2" scope="col">含票价 ¥/单位</th><th rowspan="2" scope="col">国内运费 ¥/单位</th><th rowspan="2" scope="col">成本价 ¥/单位</th></template>
+            <template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">不含票 ¥/单位</th><th rowspan="2" scope="col">含票价 ¥/单位</th></template><th v-if="canViewDomesticFreight" rowspan="2" scope="col">国内运费 ¥/单位</th><template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">成本价 ¥/单位</th></template>
             <th colspan="2" scope="colgroup" class="base-heading">基础单价<small>未含小额订单加价 · 仅供核对</small></th>
             <th colspan="2" scope="colgroup" class="current-heading current-start">本次数量最终报价<small v-if="selected.result">{{ selected.result.quantity }}{{ selected.result.row.unit }} · 对外报价请用此处</small><small v-else>请核对数量或报价规则</small></th>
           </tr>
@@ -93,7 +93,7 @@ async function copy() {
         </thead>
         <tbody><tr v-for="(row,i) in calculation.rows" :key="i" :class="{ selected: selected.result?.row === row }">
           <td>阶梯{{ i + 1 }}<span v-if="selected.result?.row === row" class="active-tier">当前档</span></td><td>{{ quantityRange(row.minQty,row.maxQty,row.unit) }}</td>
-          <template v-if="canViewPurchaseCost"><td>{{ row.purchaseCny }}</td><td>{{ row.taxIncludedCny }}</td><td>{{ row.freightCny }}</td><td>{{ row.costCny }}</td></template><td class="quote-price">{{ row.declaredUsd }}</td><td class="quote-price">{{ row.undeclaredUsd }}</td>
+          <template v-if="canViewPurchaseCost"><td>{{ row.purchaseCny }}</td><td>{{ row.taxIncludedCny }}</td></template><td v-if="canViewDomesticFreight">{{ row.freightCny }}</td><template v-if="canViewPurchaseCost"><td>{{ row.costCny }}</td></template><td class="quote-price">{{ row.declaredUsd }}</td><td class="quote-price">{{ row.undeclaredUsd }}</td>
           <template v-if="i===0">
             <td :rowspan="calculation.rows.length" class="current-price current-start"><div v-if="selected.result" class="final-quote" aria-live="polite"><span class="sr-only">报关 </span><strong>${{ selected.result.declaredUsd }}</strong><small>/{{ selected.result.row.unit }}</small></div><span v-else class="price-pending">暂无有效报价</span></td>
             <td :rowspan="calculation.rows.length" class="current-price"><div v-if="selected.result" class="final-quote" aria-live="polite"><span class="sr-only">不报关 </span><strong>${{ selected.result.undeclaredUsd }}</strong><small>/{{ selected.result.row.unit }}</small></div><span v-else class="price-pending">暂无有效报价</span></td>

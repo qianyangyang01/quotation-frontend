@@ -40,6 +40,10 @@ it('queries twenty items with bounded concurrency and keeps save retry idempoten
 })
 it('does not expose costs to employees and blocks stale server previews',async()=>{
   setPricingTestPermissions(['quote','myRecords']);mount();await paste('SKU 3');expect(document.body.textContent).not.toContain('采购成本明细')
+  const freight = [...document.querySelectorAll('details')].find(detail => detail.textContent?.includes('国内运费明细'))!
+  expect(freight.textContent).toContain('0.17')
+  expect(freight.querySelectorAll('th')).toHaveLength(2)
+  expect(freight.textContent).not.toContain('含票价')
   vi.mocked(validateFobQuotation).mockRejectedValueOnce(new Error('SKU：采购资料已更新，请重新查询'))
   button('生成1行').click();await tick();expect(document.body.textContent).toContain('采购资料已更新');expect(document.body.textContent).not.toContain('条FOB报价记录')
 })

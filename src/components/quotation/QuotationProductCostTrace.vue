@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { canViewPurchaseCost } from '@/data/quotationVisibility'
+import { canViewDomesticFreight, canViewPurchaseCost } from '@/data/quotationVisibility'
 import type { QuotationRecord } from '@/data/quotationRecords'
 import { quotationProductCostSnapshot, snapshotMoney } from '@/data/quotationProductCostSnapshot'
 const props = defineProps<{ record: QuotationRecord }>()
@@ -8,21 +8,23 @@ const snapshot = computed(() => quotationProductCostSnapshot(props.record))
 </script>
 
 <template>
-  <section v-if="canViewPurchaseCost" class="product-cost-trace">
-    <h3>产品成本快照</h3>
-    <p>按保存时的采购单价和商品数量展示，金额单位：人民币。计入采购价沿用保存时的票点处理结果。</p>
+  <section v-if="canViewDomesticFreight" class="product-cost-trace">
+    <h3>{{ canViewPurchaseCost ? '产品成本快照' : '国内运费快照' }}</h3>
+    <p v-if="canViewPurchaseCost">按保存时的采购单价和商品数量展示，金额单位：人民币。计入采购价沿用保存时的票点处理结果。</p>
+    <p v-else>按报价保存时的国内运费和商品数量展示，金额单位：人民币。</p>
     <div class="scroll"><table>
-      <thead><tr><th>SKU</th><th>{{ snapshot.bundle ? '每套件数' : '件数' }}</th><th>采购原价/件</th><th>采购发票</th><th>票点</th><th>计入采购价/件</th><th>国内运费/件</th></tr></thead>
+      <thead><tr><th>SKU</th><th>{{ snapshot.bundle ? '每套件数' : '件数' }}</th><template v-if="canViewPurchaseCost"><th>采购原价/件</th><th>采购发票</th><th>票点</th><th>计入采购价/件</th></template><th>国内运费/件</th></tr></thead>
       <tbody><tr v-for="(item, index) in snapshot.items" :key="index">
-        <td>{{ item.sku }}</td><td>{{ item.count }}</td><td>{{ snapshotMoney(item.base) }}</td><td>{{ item.invoice || '未保存' }}</td><td>{{ item.rate == null ? '未保存' : `${item.rate}%` }}</td><td>{{ snapshotMoney(item.purchase) }}</td><td>{{ snapshotMoney(item.freight) }}</td>
-      </tr><tr v-if="!snapshot.items.length"><td colspan="7">旧记录未保存组合商品成本明细</td></tr></tbody>
+        <td>{{ item.sku }}</td><td>{{ item.count }}</td><template v-if="canViewPurchaseCost"><td>{{ snapshotMoney(item.base) }}</td><td>{{ item.invoice || '未保存' }}</td><td>{{ item.rate == null ? '未保存' : `${item.rate}%` }}</td><td>{{ snapshotMoney(item.purchase) }}</td></template><td>{{ snapshotMoney(item.freight) }}</td>
+      </tr><tr v-if="!snapshot.items.length"><td :colspan="canViewPurchaseCost ? 7 : 3">旧记录未保存组合商品明细</td></tr></tbody>
     </table></div>
     <div class="scroll totals"><table>
-      <thead><tr><th>数量</th><th>采购成本</th><th>国内运费</th><th>产品成本合计</th></tr></thead>
-      <tbody><tr v-for="row in snapshot.rows" :key="row.quantity"><td>{{ row.quantity }}{{ snapshot.unit }}</td><td>{{ snapshotMoney(row.purchase) }}</td><td>{{ snapshotMoney(row.freight) }}</td><td>{{ snapshotMoney(row.total) }}</td></tr></tbody>
+      <thead><tr><th>数量</th><th v-if="canViewPurchaseCost">采购成本</th><th>国内运费</th><th v-if="canViewPurchaseCost">产品成本合计</th></tr></thead>
+      <tbody><tr v-for="row in snapshot.rows" :key="row.quantity"><td>{{ row.quantity }}{{ snapshot.unit }}</td><td v-if="canViewPurchaseCost">{{ snapshotMoney(row.purchase) }}</td><td>{{ snapshotMoney(row.freight) }}</td><td v-if="canViewPurchaseCost">{{ snapshotMoney(row.total) }}</td></tr></tbody>
     </table></div>
     <small v-if="snapshot.freightRecovered">国内运费由本报价已保存的同数量成本与国际运费还原。</small>
-    <small>合计为采购成本＋国内运费，不含国际运费、关税或操作费。缺失项显示“未保存”，不按当前采购价回填。</small>
+    <small v-if="canViewPurchaseCost">合计为采购成本＋国内运费，不含国际运费、关税或操作费。缺失项显示“未保存”，不按当前采购价回填。</small>
+    <small v-else>缺失项显示“未保存”，不按当前采购资料回填。</small>
   </section>
 </template>
 
