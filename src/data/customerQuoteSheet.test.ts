@@ -16,6 +16,37 @@ function source(overrides: Partial<QuoteSheetSourceRow> = {}): QuoteSheetSourceR
 const edits = () => newQuoteSheetEdits('Alex', new Date(2026, 8, 12))
 
 describe('customer quotation presentation', () => {
+  it('exports saved Qiaojie and tax-included routes without changing their prices or identities', () => {
+    const rows = [source({ country: 'AU', carrier: '巧捷', quoteRegion: '澳大利亚3区', quote1: 5.55 }),
+      source({ country: 'NZ', carrier: '极通环球', quoteRegion: '含税', channelKey: 'tax-included', quote1: 8.55 })]
+    const original = JSON.stringify(rows)
+    const sheet = buildCustomerQuoteSheet({ rows, countries: [], edits: edits(), quantities: [1, 2, 3], customQuantity: 3, bundle: false })
+    expect(sheet.issues).toEqual([])
+    expect(sheet.rows.map(row => [row.provider, row.region, row.prices[0], row.key])).toEqual([
+      ['Qiaojie', 'Zone 3', 5.55, quoteSheetRowKey(rows[0])],
+      ['JITO', 'Tax Included', 8.55, quoteSheetRowKey(rows[1])],
+    ])
+    expect(customerQuoteSheetTsv(sheet)).toContain('Qiaojie')
+    expect(customerQuoteSheetTsv(sheet)).toContain('New Zealand · Tax Included')
+    expect(JSON.stringify(rows)).toBe(original)
+    expect(quoteSheetProviderName('巧捷物流')).toBe('Qiaojie')
+    expect(quoteSheetRegion('未知含税地区', 'NZ')).toBeNull()
+  })
+  it('exports the other observed historical labels while preserving postal prefixes and source prices', () => {
+    const rows = [source({ carrier: '急速国际', quoteRegion: '全国统一' }),
+      source({ carrier: '云速递', quoteRegion: '化妆品', channelKey: 'cosmetics' }),
+      source({ carrier: '通邮', country: 'ES', quoteRegion: '邮编07开头', channelKey: 'postal-07' })]
+    const original = JSON.stringify(rows)
+    const sheet = buildCustomerQuoteSheet({ rows, countries: [], edits: edits(), quantities: [1, 2, 3], customQuantity: 3, bundle: false })
+    expect(sheet.issues).toEqual([])
+    const tsv = customerQuoteSheetTsv(sheet)
+    expect(tsv).toContain('Jisu International')
+    expect(tsv).toContain('United States · Cosmetics')
+    expect(tsv).toContain('Spain · Postal Code Prefix 07')
+    expect(sheet.rows.map(row => row.prices)).toEqual(rows.map(row => [row.quote1, row.quote2, row.quote3]))
+    expect(JSON.stringify(rows)).toBe(original)
+    expect(quoteSheetRegion('邮编07或35开头', 'ES')).toBeNull()
+  })
   it.each([
     ['澳大利亚2区', 'AU', 'Zone 2'], ['澳大利亚（二区）', '澳大利亚', 'Zone 2'],
     ['燕文｜服装专线｜2区', '加拿大', 'Zone 2'], ['加拿大一区', 'CA', 'Zone 1'],
@@ -116,7 +147,8 @@ describe('customer quotation presentation', () => {
     const two = source({ carrier: '新物流', channelKey: 'two' })
     const draft = edits()
     const input = { rows: [one, two], countries: [], edits: draft, customQuantity: 5, bundle: false }
-    expect(buildCustomerQuoteSheet(input).issues).toHaveLength(1)
+    expect(buildCustomerQuoteSheet(input).issues).toEqual([])
+    expect(buildCustomerQuoteSheet(input).rows.map(row => row.provider)).toEqual(['Xin Wu Liu', 'Xin Wu Liu'])
     draft.providerNames![quoteSheetProviderKey(one.carrier)] = 'New Logistics'
     Object.freeze(one); Object.freeze(two)
     expect(buildCustomerQuoteSheet(input).rows.map(row => row.provider)).toEqual(['New Logistics', 'New Logistics'])
@@ -185,12 +217,20 @@ describe('customer quotation presentation', () => {
     expect(buildCustomerQuoteSheet({ rows: [row], countries: [], edits: draft, customQuantity: 5, bundle: false }).rows[0].shippingTime).toBe('—')
   })
 
-  it('reports unmapped identities instead of translating them into an unrelated provider/country', () => {
+  it('romanizes unknown providers while still requiring a real country mapping', () => {
     expect(['燕文','递四方','云途','顺丰'].map(quoteSheetProviderName)).toEqual(['Yanwen','4PX','YunExpress','SF Express'])
     const sheet = buildCustomerQuoteSheet({ rows: [source({ country: '未知国家', carrier: '未配置物流商' })], countries: [], edits: edits(), customQuantity: 5, bundle: false })
-    expect(sheet.issues).toHaveLength(2)
+    expect(sheet.issues).toHaveLength(1)
     expect(sheet.rows[0].country).toBe('—')
-    expect(sheet.rows[0].provider).toBe('—')
+    expect(sheet.rows[0].provider).toBe('Wei Pei Zhi Wu Liu Shang')
+  })
+
+  it('keeps ASCII brands and digits in pinyin fallback, supports umlauts and normalized punctuation', () => {
+    expect(quoteSheetProviderName('新物流 ABC 12')).toBe('Xin Wu Liu ABC 12')
+    expect(quoteSheetProviderName('绿通（广州）')).toBe('Lv Tong ( Guang Zhou )')
+    expect(quoteSheetProviderName('')).toBe('')
+    expect(quoteSheetProviderName('🚚物流')).toBe('')
+    expect(quoteSheetProviderName('My Carrier 01')).toBe('My Carrier 01')
   })
 
   it('uses local dates without UTC drift and rejects impossible calendar dates', () => {
@@ -275,6 +315,6 @@ it('omits hidden metadata validation, preserves manual prices and restores visib
   expect(buildCustomerQuoteSheet(input).priceIssues).toHaveLength(1)
   draft.fields![quoteSheetRowKey(row)].prices = { '1': '6.35' }
   draft.hiddenColumns = []
-  expect(buildCustomerQuoteSheet(input).issues).toHaveLength(4)
+  expect(buildCustomerQuoteSheet(input).issues).toHaveLength(3)
   expect(sheet.hiddenColumns).toHaveLength(4)
 })

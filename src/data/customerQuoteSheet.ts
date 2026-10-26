@@ -2,6 +2,7 @@ import { quoteSheetUnit, type QuoteSheetUnits } from './quoteSheetUnits'
 import { isManualQuotation, type QuotationMode } from './quotationModes'
 import type { QuotationMatrixRow } from '@/components/quotation/types'
 import { parseQuotePriceInput } from './quotePriceExpression'
+import { pinyin } from 'pinyin-pro'
 
 /** Customer-facing composition of one set; keep quantities out of the underlying SKU identifiers. */
 export function quoteSheetBundleSkus(items: ReadonlyArray<{ sku: string; quantityPerSet: number }>) {
@@ -123,6 +124,8 @@ const providerNames: Record<string, string> = {
   // Readable romanized display names; these do not rename the provider's business record.
   '花海': 'Hua Hai', '花海供应链': 'Hua Hai', huahai: 'Hua Hai',
   '容鼎': 'Rongding', '容鼎供应链': 'Rongding', rongding: 'Rongding',
+  '巧捷': 'Qiaojie', '巧捷物流': 'Qiaojie', qiaojie: 'Qiaojie',
+  '急速国际': 'Jisu International',
   '百洲': 'Baizhou', '百洲货运': 'Baizhou', baizhou: 'Baizhou',
   '中国邮政': 'China Post', '邮政': 'China Post', '中邮': 'China Post',
   '菜鸟': 'Cainiao', '菜鸟物流': 'Cainiao', '菜鸟国际': 'Cainiao',
@@ -222,12 +225,15 @@ export function quoteSheetRegion(region = '', country = '', catalog: QuoteSheetC
   if (!value || ['全国统一', '全国', '全境', '未保存', '—', '-'].includes(value)) return ''
   const names: Record<string, string> = {
     西马: 'West Malaysia', 东马: 'East Malaysia', 普货: 'General Cargo', 带电: 'With Battery',
+    含税: 'Tax Included', 化妆品: 'Cosmetics',
     共和国: 'Republic', 岛: 'Island',
     普通区域: 'Standard Area', 普通地区: 'Standard Area', 普通区: 'Standard Area',
     非偏远: 'Non-remote Area', 非偏远地区: 'Non-remote Area', 非偏远区域: 'Non-remote Area', 非偏远区: 'Non-remote Area',
     偏远: 'Remote Area', 偏远地区: 'Remote Area', 偏远区域: 'Remote Area', 偏远区: 'Remote Area',
   }
   if (names[value]) return names[value]
+  const postalPrefix = /^邮编([0-9]+)开头$/.exec(value)
+  if (postalPrefix) return `Postal Code Prefix ${postalPrefix[1]}`
   const digits = value.replace(/[一二三四五六七八九]/g, digit => String('一二三四五六七八九'.indexOf(digit) + 1))
   const zone = /^(?:第\s*)?([0-9]+|[A-Z])\s*区$/i.exec(digits) || /^zone\s*([0-9]+|[A-Z])$/i.exec(digits)
   if (zone) return `Zone ${zone[1].toUpperCase()}`
@@ -239,7 +245,12 @@ export function quoteSheetProviderKey(provider: string) {
 }
 export function quoteSheetProviderName(provider: string) {
   const name = provider.normalize('NFKC').trim()
-  return providerNames[quoteSheetProviderKey(name)] || (/^[\x20-\x7e]+$/.test(name) ? name : '')
+  const known = providerNames[quoteSheetProviderKey(name)]
+  if (known || /^[\x20-\x7e]+$/.test(name)) return known || name
+  // Display-only fallback for new carriers; never change saved route identities.
+  const romanized = pinyin(name, { toneType: 'none', nonZh: 'consecutive', v: true })
+    .replace(/\s+/g, ' ').trim().replace(/\b[a-z]/g, letter => letter.toUpperCase())
+  return /^[\x20-\x7e]+$/.test(romanized) ? romanized : ''
 }
 export function quoteSheetUsd(value: number | null) {
   return value == null || !Number.isFinite(value) ? '—' : `$${value.toFixed(2)}`
@@ -275,7 +286,7 @@ export function buildCustomerQuoteSheet(input: {
     const regionTranslationRequired = !hideRegion && (translatedRegion === null || !!translatedRegion)
     if (visible('country') && (regionTranslationRequired && !region || /[^\x20-\x7e]/.test(region))) tableIssues.push(`第 ${index + 1} 行分区请填写英文，例如 Zone 2：${row.quoteRegion}`)
     const manualProvider = input.edits.providerNames?.[quoteSheetProviderKey(row.carrier)]?.trim() || ''
-    const provider = fields.provider === undefined ? quoteSheetProviderName(row.carrier) || (/^[\x20-\x7e]+$/.test(manualProvider) ? manualProvider : '') : fields.provider.trim()
+    const provider = fields.provider === undefined ? manualProvider || quoteSheetProviderName(row.carrier) : fields.provider.trim()
     if (visible('country') && !country) tableIssues.push(`第 ${index + 1} 行缺少国家${input.edits.countryFormat === 'code' ? '二字码' : '英文全称'}：${fields.country ?? row.country}`)
     if (visible('provider') && !provider) tableIssues.push(`请在英文名补填区填写物流商“${row.carrier || '未命名'}”的英文名称`)
     if (visible('provider') && /[^\x20-\x7e]/.test(provider)) tableIssues.push(`第 ${index + 1} 行物流商请填写英文名称`)

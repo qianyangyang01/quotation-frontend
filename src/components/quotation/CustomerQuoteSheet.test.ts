@@ -457,15 +457,25 @@ it('previews and copies a saved missing-ETA route, supports a local supplement a
   expect(state.rows[0]!.eta).toBe('该物流暂无时效说明')
 })
 
-it('shows errors above a long table and allows one English-name supplement for all matching routes', async () => {
-  mount([row('one', '新物流'), row('two', '新物流')])
+it('automatically uses pinyin for new Chinese carriers in image and data exports', async () => {
+  const state = mount([row('one', '新物流'), row('two', '新物流')])
+  await click('预览报价单')
+  expect(render.mock.calls[0][0].rows.map(row => row.provider)).toEqual(['Xin Wu Liu', 'Xin Wu Liu'])
+  expect(document.querySelector('[role="alert"]')).toBeNull()
+  await click('复制报价数据')
+  expect(writeText.mock.calls[0][0].match(/Xin Wu Liu/g)).toHaveLength(2)
+  expect(state.rows.map(row => row.carrier)).toEqual(['新物流', '新物流'])
+})
+
+it('shows errors above a long table and allows one English-name supplement for unsupported characters', async () => {
+  mount([row('one', '🚚物流'), row('two', '🚚物流')])
   await click('预览报价单')
   expect(render).not.toHaveBeenCalled()
   const alert = document.querySelector('[role="alert"]')!
   expect(alert.textContent).toContain('英文名补填区')
   expect(alert.compareDocumentPosition(document.querySelector('.sheet-editor')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  expect(document.querySelectorAll('[aria-label="新物流英文名"]')).toHaveLength(1)
-  await input('新物流英文名', 'New Logistics')
+  expect(document.querySelectorAll('[aria-label="🚚物流英文名"]')).toHaveLength(1)
+  await input('🚚物流英文名', 'New Logistics')
   await click('预览报价单')
   expect(render.mock.calls[0][0].rows.map(row => row.provider)).toEqual(['New Logistics', 'New Logistics'])
   await click('复制报价数据'); expect(writeText.mock.calls[0][0].match(/New Logistics/g)).toHaveLength(2)
@@ -492,8 +502,8 @@ it('invalidates previews and binds time edits to route identity through reorder 
 })
 
 it('clears temporary provider names when switching quotation context', async () => {
-  const state = mount([row('one', '新物流')])
-  await input('新物流英文名', 'New Logistics'); await click('复制报价数据')
+  const state = mount([row('one', '🚚物流')])
+  await input('🚚物流英文名', 'New Logistics'); await click('复制报价数据')
   state.contextKey = 'another'; await settle(); await click('复制报价数据')
   expect(writeText).toHaveBeenCalledTimes(1)
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('英文名称')
