@@ -13,8 +13,14 @@ final class YanwenWanbangAdditionalRules {
         new Product("燕文","燕文大货专线追踪-普货","","1557"),
         new Product("万邦","万邦大货专线挂号含电","万邦大货专线含电","WBSLLP"),
         new Product("万邦","万邦中包专线挂号含电","万邦中包专线含电","WBSLMP"),
-        new Product("万邦","万邦中包专线挂号普货","万邦中包专线普货","WBSLMPPH"));
+        new Product("万邦","万邦中包专线挂号普货","万邦中包专线普货","WBSLMPPH"),
+        new Product("万邦","万邦优选专线普货","欧洲优选专线普货","EUSLPH-P"),
+        new Product("万邦","万邦优选专线含电","欧洲优选专线含电","EUSL-P"),
+        new Product("万邦","万邦优选专线敏感","欧洲优选专线敏感","ECSL-P"));
     private YanwenWanbangAdditionalRules() {}
+    static boolean requiresWanbangPriceColumns(Product product) {
+        return product!=null&&List.of("WBSLMP","WBSLMPPH","EUSLPH-P","EUSL-P","ECSL-P").contains(product.code());
+    }
     static Product named(String provider,String name) {
         var normalized=CompanyChannelScope.normalize(name);
         return PRODUCTS.stream().filter(p->p.provider.equals(provider)&&(CompanyChannelScope.normalize(p.name).equals(normalized)

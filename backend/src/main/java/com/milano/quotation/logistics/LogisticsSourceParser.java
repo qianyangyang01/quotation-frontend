@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="source-date-reference-2026.10.20-v11";
+    public static final String VERSION="source-date-reference-2026.10.26-wanbang-preferred-v12";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -930,10 +930,10 @@ public class LogisticsSourceParser {
             if(additional!=null&&!additional.code().equals(productCode))issue(target,r+1,"产品代码","渠道名称与原表产品代码不一致或缺失，禁止混入其他产品","error");
             if(additional!=null&&provider.equals("燕文")&&Set.of("440","557").contains(additional.code())&&columns.fee<0)
                 issue(target,r+1,"处理费","燕文快递缺少处理费列，禁止按零费用导入","error");
-            if(additional!=null&&Set.of("WBSLMP","WBSLMPPH").contains(additional.code())) {
+            if(YanwenWanbangAdditionalRules.requiresWanbangPriceColumns(additional)) {
                 if(columns.weight>=0&&weightColumnRank(source.text(columns.headerRow,columns.weight))==1)
-                    issue(target,r+1,"重量段","中包专线缺少计价重量段，不能以重量限制代替","error");
-                if(columns.fee<0)issue(target,r+1,"操作费","中包专线缺少操作费列，禁止按零费用导入","error");
+                    issue(target,r+1,"重量段","万邦专线缺少计价重量段，不能以重量限制代替","error");
+                if(columns.fee<0)issue(target,r+1,"操作费","万邦专线缺少操作费列，禁止按零费用导入","error");
             }
             if(jitongBattery&&productCode.isBlank())issue(target,r+1,"产品代码","定制纯电缺少明确的JT-HQ-MDCD产品代码","error");
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg");
