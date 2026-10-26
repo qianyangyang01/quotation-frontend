@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { createApp, nextTick } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AppUpdateNotice from './AppUpdateNotice.vue'
-import { appUpdate, refreshUpdatedApplication } from '@/services/appUpdate'
+import { appUpdate, createAppUpdateMonitor, refreshUpdatedApplication } from '@/services/appUpdate'
 
 vi.mock('@/services/appUpdate', async importOriginal => {
   const actual = await importOriginal<typeof import('@/services/appUpdate')>()
@@ -10,21 +10,53 @@ vi.mock('@/services/appUpdate', async importOriginal => {
 })
 
 let unmount: (() => void) | undefined
-afterEach(() => { unmount?.(); document.body.innerHTML = ''; vi.unstubAllGlobals(); vi.clearAllMocks() })
+beforeEach(() => { Object.assign(appUpdate, createAppUpdateMonitor('current')) })
+afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('global application update notice', () => {
-  it('shows a recoverable network problem without clearing the surrounding form', async () => {
+  it('keeps repeated network failures and recovery silent without clearing the surrounding form', async () => {
     const host = document.createElement('div'); document.body.append(host)
     const input = document.createElement('input'); input.value = '正在填写的报价'; document.body.append(input)
     const app = createApp(AppUpdateNotice); app.mount(host); unmount = () => app.unmount()
     expect(host.textContent).toBe('')
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
-    await appUpdate.check(); await nextTick()
-    expect(host.textContent).toContain('暂时无法确认系统版本')
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await appUpdate.check(); await nextTick()
+      expect(appUpdate.state.unavailable).toBe(true)
+      expect(host.querySelector('[role="alert"]')).toBeNull()
+      expect(host.textContent).toBe('')
+    }
     expect(input.value).toBe('正在填写的报价')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, buildId: 'current' }))))
     await appUpdate.check(); await nextTick()
     expect(host.textContent).toBe('')
+  })
+
+  it('silently retries a timed-out background check and shows only a confirmed release', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(() => undefined))
+      .mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify({ schemaVersion: 1, buildId: 'current' }))))
+      .mockImplementationOnce(() => Promise.resolve(new Response(JSON.stringify({ schemaVersion: 1, buildId: 'next' }))))
+      .mockRejectedValue(new Error('offline'))
+    vi.stubGlobal('fetch', fetcher)
+    const host = document.createElement('div'); document.body.append(host)
+    const app = createApp(AppUpdateNotice); app.mount(host); unmount = () => app.unmount()
+    const stop = appUpdate.start()
+    try {
+      await vi.advanceTimersByTimeAsync(2_001); await nextTick()
+      expect(appUpdate.state.unavailable).toBe(true)
+      expect(host.textContent).toBe('')
+      await vi.advanceTimersByTimeAsync(57_999); await nextTick()
+      expect(appUpdate.state.unavailable).toBe(false)
+      expect(host.textContent).toBe('')
+      await vi.advanceTimersByTimeAsync(60_000); await nextTick()
+      expect(fetcher).toHaveBeenCalledTimes(3)
+      expect(host.textContent).toContain('系统已更新')
+      await appUpdate.check(); await nextTick()
+      expect(appUpdate.state.unavailable).toBe(true)
+      expect(host.textContent).toContain('系统已更新')
+      expect(refreshUpdatedApplication).not.toHaveBeenCalled()
+    } finally { stop() }
   })
 
   it('requires two deliberate actions and rechecks pending work before confirming refresh', async () => {
