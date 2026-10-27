@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import PriceExceptionSelect from './PriceExceptionSelect.vue'
-import { changeExceptionOpinion, priceExceptionOpinion, priceExceptionLabel, type PriceExceptionType } from '@/data/priceExceptions'
+import { priceExceptionLabel, type PriceExceptionType } from '@/data/priceExceptions'
 import type { QuotationRecord, QuotationReviewState, ReviewAction } from '@/data/quotationRecords'
 import { fobItemReviews, fobItemReviewLabel, reviewFobItems, type FobReviewResult } from '@/services/fobCorrections'
 import type { FobQuotationSnapshot } from '@/services/fobQuotationRecords'
@@ -9,7 +9,7 @@ import { canViewDomesticFreight, canViewPurchaseCost } from '@/data/quotationVis
 
 const props = defineProps<{ record: QuotationRecord; state: QuotationReviewState; account: string; canReview: boolean; busy: boolean }>()
 const emit = defineEmits<{ saved: [record: QuotationRecord]; action: [action: ReviewAction]; reload: [] }>()
-function selectException(index: number, value: PriceExceptionType | '') { reasons.value[index] = changeExceptionOpinion(reasons.value[index] || '', exceptionTypes.value[index], value); exceptionTypes.value[index] = value }
+function selectException(index: number, value: PriceExceptionType | '') { exceptionTypes.value[index] = value }
 const exceptionTypes = ref<Record<number, PriceExceptionType | ''>>({})
 const checked = ref<number[]>([]), reasons = ref<Record<number, string>>({}), note = ref(''), error = ref(''), sending = ref(false)
 const query = ref(''), statusFilter = ref(''), page = ref(0), pageSize = ref(20), expanded = ref<number[]>([])
@@ -53,15 +53,15 @@ function openReturn() {
   if (disabled.value || !checked.value.length) return
   error.value = ''; returnIndexes.value = [...checked.value]; commonReason.value = ''; returnDialog.value?.showModal()
 }
-function applyReason() { for (const index of returnIndexes.value) reasons.value[index] = priceExceptionOpinion(exceptionTypes.value[index], commonReason.value) }
+function applyReason() { for (const index of returnIndexes.value) reasons.value[index] = commonReason.value.trim() }
 async function review(action: 'approve' | 'return') {
   if (disabled.value) return
   const indexes = action === 'return' ? returnIndexes.value : checked.value
   if (!indexes.length || (action === 'approve' && (result.value === 'rejected' || hasRejected.value))) return
   const requestId = props.record.id, requestAccount = props.account
-  const items = indexes.map(index => ({ index, reason: action === 'return' ? priceExceptionOpinion(exceptionTypes.value[index], reasons.value[index]) : '', ...(action === 'return' && exceptionTypes.value[index] ? { exceptionType: exceptionTypes.value[index] as PriceExceptionType } : {}) }))
+  const items = indexes.map(index => ({ index, reason: action === 'return' ? (reasons.value[index] || '').trim() : '', ...(action === 'return' && exceptionTypes.value[index] ? { exceptionType: exceptionTypes.value[index] as PriceExceptionType } : {}) }))
 
-  if (items.some(item => item.reason.length > 500)) { error.value = '审核意见最多500字，请缩短补充内容'; return }
+  if (items.some(item => item.reason.length > 500)) { error.value = '审核意见最多500字，请缩短填写内容'; return }
   if (action === 'return' && items.some(item => !item.exceptionType)) { error.value = '请为每个退回SKU选择异常类型'; return }
   sending.value = true; error.value = ''
   try {
@@ -100,7 +100,7 @@ async function review(action: 'approve' | 'return') {
       </template>
       <button v-else-if="state.financeReviewStatus !== 'reviewing'" class="confirm-button" :disabled="busy || sending || stale" @click="emit('action', { action: 'claim' })">{{ states.some(s => s.status !== 'pending') ? '继续审核' : '开始逐项审核' }}</button><span v-else>{{ state.financeReviewClaimedBy }}审核中</span>
     </footer>
-    <Teleport to="body"><dialog ref="returnDialog" class="fob-return-dialog" aria-label="填写所选SKU退回原因" @cancel="sending && $event.preventDefault()"><header><b>退回所选 {{ returnIndexes.length }} 项</b><button :disabled="sending" aria-label="关闭退回原因" @click="returnDialog?.close()">×</button></header><p>这些商品将标记为价格异常。业务员核实后重新提交，其他商品不变。</p><div class="common-reason"><label>统一原因（可选）<textarea v-model="commonReason" maxlength="500" :disabled="disabled" rows="2" /></label><button :disabled="disabled || !commonReason.trim()" @click="applyReason">应用到所选商品</button></div><div class="return-reasons"><div class="return-item" v-for="index in returnIndexes" :key="index">{{ record.fob?.items?.[index]?.product.sku }}<PriceExceptionSelect :model-value="exceptionTypes[index] || ''" :disabled="disabled" :label="`第${index + 1}项异常类型`" @update:model-value="selectException(index, $event)" /><textarea v-model="reasons[index]" maxlength="500" :disabled="disabled" :aria-label="`第${index + 1}项退回原因`" rows="2" placeholder="选择异常类型后自动带出，可在后面补充" /></div></div><p v-if="error || stale" class="review-alert" role="alert">{{ stale ? '报价或审核已变化，请关闭并重新加载后处理；原因尚未提交。' : error }}</p><footer><button :disabled="sending" @click="returnDialog?.close()">返回修改</button><button class="return-button" :disabled="disabled" @click="review('return')">{{ sending ? '正在退回…' : `确认退回${returnIndexes.length}项` }}</button></footer></dialog></Teleport>
+    <Teleport to="body"><dialog ref="returnDialog" class="fob-return-dialog" aria-label="填写所选SKU退回原因" @cancel="sending && $event.preventDefault()"><header><b>退回所选 {{ returnIndexes.length }} 项</b><button :disabled="sending" aria-label="关闭退回原因" @click="returnDialog?.close()">×</button></header><p>这些商品将标记为价格异常。业务员核实后重新提交，其他商品不变。</p><div class="common-reason"><label>统一原因（可选）<textarea v-model="commonReason" maxlength="500" :disabled="disabled" rows="2" /></label><button :disabled="disabled || !commonReason.trim()" @click="applyReason">应用到所选商品</button></div><div class="return-reasons"><div class="return-item" v-for="index in returnIndexes" :key="index">{{ record.fob?.items?.[index]?.product.sku }}<PriceExceptionSelect :model-value="exceptionTypes[index] || ''" :disabled="disabled" :label="`第${index + 1}项异常类型`" @update:model-value="selectException(index, $event)" /><textarea v-model="reasons[index]" maxlength="500" :disabled="disabled" :aria-label="`第${index + 1}项退回原因`" rows="2" placeholder="请自行填写具体异常原因（选填，最多500字）" /></div></div><p v-if="error || stale" class="review-alert" role="alert">{{ stale ? '报价或审核已变化，请关闭并重新加载后处理；原因尚未提交。' : error }}</p><footer><button :disabled="sending" @click="returnDialog?.close()">返回修改</button><button class="return-button" :disabled="disabled" @click="review('return')">{{ sending ? '正在退回…' : `确认退回${returnIndexes.length}项` }}</button></footer></dialog></Teleport>
   </section>
 </template>
 

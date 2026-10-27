@@ -95,11 +95,13 @@ it('shows a saved classification with no explanation in the list and full opinio
   const { props } = await mount(false)
   props.state = { ...record(), financeReviewStatus: 'rejected', priceException, financeReviewedBy: '财务甲', financeReviewedAt: priceException.recordedAt }
   await flush()
-  expect(document.querySelector('.comment-preview')?.textContent).toContain('采购价格异常，请采购核实并更新价格、票点或采购运费')
+  expect(document.querySelector('.comment-preview')?.textContent).toContain('异常类型：采购价格异常')
+  expect(document.body.textContent).not.toContain('请采购核实并更新')
   mocks.get.mockResolvedValue([{ ...event(''), action: 'complete', after: 'rejected', priceException }])
   button('查看审核意见 · 1').click(); await flush()
   expect(dialog().textContent).toContain('历史意见 · 1')
-  expect(dialog().textContent).toContain('采购价格异常，请采购核实并更新价格、票点或采购运费')
+  expect(dialog().textContent).toContain('采购价格异常')
+  expect(dialog().textContent).not.toContain('请采购核实并更新')
   expect(mocks.patch).not.toHaveBeenCalled()
 })
 
@@ -111,4 +113,15 @@ it('does not duplicate generated opinions or replace later manually added commen
   props.state = { ...props.state, financeReviewNote: '', financeReviewedAt: priceException.recordedAt, financeReviewLatestComment: { ...event('补充：已通知相关人员'), at: '2026-10-16T01:00:00Z' } }
   await flush()
   expect(document.querySelector('.comment-preview span')?.textContent).toBe('审核意见：补充：已通知相关人员')
+})
+
+it('displays saved manual reasons verbatim without adding category instructions', async () => {
+ const priceException = { category: 'purchase-price' as const, recordedAt: '2026-10-27T00:00:00Z', targets: [] }
+ const note = '需采购更新票点'
+ const saved = { ...event(note), action: 'complete' as const, after: 'rejected' as const, priceException }
+ await mount(false, { ...record(), financeReviewStatus: 'rejected', priceException, financeReviewNote: note, financeReviewCommentCount: 1, financeReviewLatestComment: saved })
+ expect(document.querySelector('.comment-preview span')?.textContent).toBe('审核意见：' + note)
+ mocks.get.mockResolvedValue([saved]); button('查看审核意见 · 1').click(); await flush()
+ expect(document.querySelector('.comment-history article > p')?.textContent).toBe(note)
+ expect(dialog().textContent).not.toContain('请采购核实并更新')
 })

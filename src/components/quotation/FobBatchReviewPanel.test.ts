@@ -25,7 +25,7 @@ async function panel(row=record(),stale=false){setPricingTestPermissions();const
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();clearPricingTestPermissions();delivered.rows=[]})
 it('opens a return dialog, requires a category with an optional reason and submits only selected items',async()=>{
  const row=record();await panel(row);document.querySelector<HTMLInputElement>('[aria-label="选择审核 SKU0 第1项"]')!.click();await tick();button('退回所选').click();await tick();button('确认退回').click();await tick();expect(reviewFobItems).not.toHaveBeenCalled();expect(document.body.textContent).toContain('请为每个退回SKU选择异常类型')
- const input=document.querySelector<HTMLTextAreaElement>('[aria-label=第1项退回原因]')!;input.value='   ';input.dispatchEvent(new Event('input',{bubbles:true}));await tick();const type=document.querySelector<HTMLSelectElement>('[aria-label="第1项异常类型"]')!;expect(type.value).toBe('');type.value='other';type.dispatchEvent(new Event('change'));await nextTick();vi.mocked(reviewFobItems).mockResolvedValue(row);button('确认退回').click();await tick();expect(reviewFobItems).toHaveBeenCalledTimes(1);expect(reviewFobItems).toHaveBeenCalledWith(row,'return',[{index:0,reason:'其他 / 原因待核实，请核实异常原因后再归类',exceptionType:'other'}],'rejected','')
+ const input=document.querySelector<HTMLTextAreaElement>('[aria-label=第1项退回原因]')!;input.value='   ';input.dispatchEvent(new Event('input',{bubbles:true}));await tick();const type=document.querySelector<HTMLSelectElement>('[aria-label="第1项异常类型"]')!;expect(type.value).toBe('');type.value='other';type.dispatchEvent(new Event('change'));await nextTick();vi.mocked(reviewFobItems).mockResolvedValue(row);button('确认退回').click();await tick();expect(reviewFobItems).toHaveBeenCalledTimes(1);expect(reviewFobItems).toHaveBeenCalledWith(row,'return',[{index:0,reason:'',exceptionType:'other'}],'rejected','')
 })
 it('cannot approve an uncorrected return and cannot act against a stale review',async()=>{
  await panel();document.querySelector<HTMLInputElement>('[aria-label="选择审核 SKU1 第2项"]')!.click();await tick();expect(button('确认审核').disabled).toBe(true)
@@ -80,4 +80,23 @@ it('shows saved range amounts without recalculating historical prices and hides 
  const original=JSON.stringify(row);await panel(row)
  expect(document.querySelector('tbody')!.textContent).toContain('4.29');expect(document.querySelector('tbody')!.textContent).toContain('0.93');expect(JSON.stringify(row)).toBe(original)
  setPricingTestPermissions(['quote','myRecords']);await tick();expect(document.querySelector('thead')!.textContent).toContain('国内运费');expect(document.querySelector('tbody')!.textContent).toContain('0.17');expect(document.querySelector('thead')!.textContent).not.toContain('含票价');expect(document.querySelector('tbody')!.textContent).not.toContain('4.29')
+})
+
+it('preserves manually applied common reasons when switching categories', async () => {
+ const row = record(); await panel(row)
+ document.querySelector<HTMLInputElement>('[aria-label="选择审核 SKU0 第1项"]')!.click(); await tick()
+ button('退回所选').click(); await tick()
+ const type = document.querySelector<HTMLSelectElement>('[aria-label="第1项异常类型"]')!
+ const reason = document.querySelector<HTMLTextAreaElement>('[aria-label="第1项退回原因"]')!
+ type.value = 'purchase-price'; type.dispatchEvent(new Event('change')); await tick()
+ expect(reason.value).toBe('')
+ const common = document.querySelector<HTMLTextAreaElement>('.common-reason textarea')!
+ common.value = '请核对采购票点'; common.dispatchEvent(new Event('input')); await tick()
+ button('应用到所选商品').click(); await tick()
+ expect(reason.value).toBe('请核对采购票点')
+ type.value = 'entry-error'; type.dispatchEvent(new Event('change')); await tick()
+ expect(reason.value).toBe('请核对采购票点')
+ vi.mocked(reviewFobItems).mockResolvedValue(row)
+ button('确认退回').click(); await tick()
+ expect(reviewFobItems).toHaveBeenCalledWith(row, 'return', [{ index: 0, reason: '请核对采购票点', exceptionType: 'entry-error' }], 'rejected', '')
 })

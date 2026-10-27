@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import PriceExceptionSummary from './PriceExceptionSummary.vue'
-import { priceExceptionOpinion } from '@/data/priceExceptions'
+import { priceExceptionLabel } from '@/data/priceExceptions'
 import { loadQuotationReviewHistory, reviewQuotationRecord, type QuotationRecord, type QuotationReviewEvent, type QuotationReviewState } from '@/data/quotationRecords'
 
 const props = defineProps<{ record: QuotationRecord; state: QuotationReviewState; account: string; canReview: boolean; busy: boolean }>()
@@ -18,9 +18,9 @@ const latest = computed(() => {
   const saved = props.state.financeReviewLatestComment
   const at = props.state.financeReviewedAt || props.state.priceException?.recordedAt || ''
   if (classifiedWithoutNote.value && (!saved || Date.parse(at) >= Date.parse(saved.at))) {
-    return { note: priceExceptionOpinion(props.state.priceException?.category), at, actorName: props.state.financeReviewedBy || '历史审核人未保存' }
+    return { note: '', priceException: props.state.priceException, at, actorName: props.state.financeReviewedBy || '历史审核人未保存' }
   }
-  return saved ? { ...saved, note: priceExceptionOpinion(saved.action !== 'comment' && saved.after === 'rejected' ? saved.priceException?.category : undefined, saved.note) } : undefined
+  return saved
 })
 const count = computed(() => (props.state.financeReviewCommentCount || (props.state.financeReviewLatestComment ? 1 : 0)) + (classifiedWithoutNote.value ? 1 : 0))
 const canWrite = computed(() => props.canReview && (props.state.lifecycleState || 'active') === 'active')
@@ -34,8 +34,7 @@ async function loadHistory() {
   try {
     const rows = await loadQuotationReviewHistory(props.record.id)
     if (current !== generation) return
-    history.value = rows.map(row => ({ ...row, note: priceExceptionOpinion(row.action !== 'comment' && row.after === 'rejected' ? row.priceException?.category : undefined, row.note) }))
-      .filter(row => ['comment', 'complete', 'legacy-review'].includes(row.action) && row.note?.trim()
+    history.value = rows.filter(row => ['comment', 'complete', 'legacy-review'].includes(row.action) && (row.note?.trim() || (row.action !== 'comment' && row.after === 'rejected' && row.priceException))
       && !(row.action === 'legacy-review' && row.note === '保留的历史审核结果')).reverse()
     await nextTick()
     if(current === generation && opened.value) emit('viewed', displayedVersion)
@@ -75,7 +74,7 @@ onUnmounted(() => { disposed = true; generation++ })
       <slot />
       <button v-if="canWrite || count" type="button" class="comment-entry" :disabled="busy || saving" @click="open">{{ canWrite ? '审核意见' : '查看审核意见' }}<template v-if="count"> · {{ count }}</template></button>
     </div>
-    <button v-if="latest" type="button" class="comment-preview" :title="latest.note" @click="open"><span>审核意见：{{ latest.note }}</span><small>{{ latest.actorName }} · {{ time(latest.at) }}</small></button>
+    <button v-if="latest" type="button" class="comment-preview" :title="latest.note" @click="open"><span v-if="latest.note">审核意见：{{ latest.note }}</span><span v-else>异常类型：{{ priceExceptionLabel(latest.priceException?.category) }}</span><small>{{ latest.actorName }} · {{ time(latest.at) }}</small></button>
   </div>
   <Teleport to="body">
     <dialog v-if="opened" ref="dialog" class="review-comments-dialog" aria-label="审核意见" @cancel="saving ? $event.preventDefault() : close()" @close="opened = false" @click="($event.target === dialog) && close()">
@@ -91,7 +90,7 @@ onUnmounted(() => { disposed = true; generation++ })
         <p v-if="loading" role="status">正在加载意见…</p>
         <p v-else-if="loadError" class="comment-error" role="alert">{{ loadError }} <button type="button" @click="loadHistory">重新加载意见</button></p>
         <p v-else-if="!history.length">暂无审核意见</p>
-        <article v-for="item in history" :key="item.id"><small>{{ item.actorName }} · {{ time(item.at) }}</small><PriceExceptionSummary v-if="item.after === 'rejected' && item.action !== 'comment'" :value="item.priceException" /><p>{{ item.note }}</p></article>
+        <article v-for="item in history" :key="item.id"><small>{{ item.actorName }} · {{ time(item.at) }}</small><PriceExceptionSummary v-if="item.after === 'rejected' && item.action !== 'comment'" :value="item.priceException" /><p v-if="item.note">{{ item.note }}</p></article>
       </section>
       <footer><button type="button" :disabled="saving" @click="close">{{ canWrite ? '取消' : '关闭' }}</button><button v-if="canWrite" type="button" class="comment-save" :disabled="saving || busy || changed || !note.trim() || note.trim().length > 500" :aria-busy="saving" @click="save">{{ saving ? '保存中…' : '保存意见' }}</button></footer>
     </dialog>

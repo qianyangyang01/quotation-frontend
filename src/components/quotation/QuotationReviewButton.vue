@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { type QuotationRecord, type QuotationReviewState, type ReviewAction } from '@/data/quotationRecords'
 import PriceExceptionSelect from './PriceExceptionSelect.vue'
-import { changeExceptionOpinion, priceExceptionOpinion, type PriceExceptionType } from '@/data/priceExceptions'
+import { type PriceExceptionType } from '@/data/priceExceptions'
 
 const props = defineProps<{ record: QuotationRecord; state: QuotationReviewState; account: string; busy: boolean }>()
 const emit = defineEmits<{ action: [value: ReviewAction]; reload: [] }>()
@@ -10,7 +10,7 @@ const dialog = ref<HTMLDialogElement | null>(null)
 const note = ref('')
 const rejecting = ref(false), exceptionType = ref<PriceExceptionType | ''>(''), exceptionSkus = ref<string[]>([])
 const skuOptions = computed(() => [...new Set(props.record.quoteMode === 'bundle' ? (props.record.bundleItems || []).map(item => item.sku) : [props.record.primarySku])].filter(sku => /^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(sku)))
-const canReject = computed(() => priceExceptionOpinion(exceptionType.value, note.value).length <= 500 && !!exceptionType.value && (exceptionType.value !== 'purchase-price' || exceptionSkus.value.length > 0))
+const canReject = computed(() => note.value.trim().length <= 500 && !!exceptionType.value && (exceptionType.value !== 'purchase-price' || exceptionSkus.value.length > 0))
 watch(() => props.record.id, () => { note.value = '' })
 watch(() => props.state.financeReviewStatus, value => { if (value !== 'reviewing') note.value = '' })
 const active = computed(() => props.state.financeReviewStatus === 'reviewing')
@@ -41,14 +41,14 @@ function complete(financeReviewStatus: 'approved' | 'rejected' | 'channel-exempt
   if (props.busy || !own.value || needsReload.value) return
   if (financeReviewStatus === 'rejected') {
     if (!canReject.value) return
-    emit('action', { action: 'complete', financeReviewStatus, note: priceExceptionOpinion(exceptionType.value, note.value), exceptionType: exceptionType.value as PriceExceptionType, ...(exceptionType.value === 'purchase-price' ? { exceptionSkus: exceptionSkus.value } : {}) })
+    emit('action', { action: 'complete', financeReviewStatus, note: note.value.trim(), exceptionType: exceptionType.value as PriceExceptionType, ...(exceptionType.value === 'purchase-price' ? { exceptionSkus: exceptionSkus.value } : {}) })
   } else {
     dialog.value?.close()
     emit('action', { action: 'complete', financeReviewStatus, note: note.value.trim() })
   }
 }
-function selectException(value: PriceExceptionType | '') { note.value = changeExceptionOpinion(note.value, exceptionType.value, value); exceptionType.value = value }
-function backToResults() { note.value = changeExceptionOpinion(note.value, exceptionType.value); exceptionType.value = ''; rejecting.value = false }
+function selectException(value: PriceExceptionType | '') { exceptionType.value = value }
+function backToResults() { exceptionType.value = ''; rejecting.value = false }
 function openRejection() { rejecting.value = true; selectException(''); exceptionSkus.value = skuOptions.value.length === 1 ? [...skuOptions.value] : [] }
 </script>
 
@@ -66,8 +66,8 @@ function openRejection() { rejecting.value = true; selectException(''); exceptio
           <fieldset v-if="skuOptions.length > 1" class="exception-skus"><legend>请选择采购价格异常的 SKU（必选）</legend><label v-for="sku in skuOptions" :key="sku"><input v-model="exceptionSkus" :disabled="busy" type="checkbox" :value="sku">{{ sku }}</label></fieldset>
           <p v-else class="exception-owner">{{ skuOptions.length ? '需处理人员：按该 SKU 自动关联采购报价人，提交时保存归属。' : '该报价没有可关联的采购 SKU，请选择其他异常类型。' }}</p>
         </template>
-        <label class="review-note exception-note"><span>审核意见（自动带出，可补充）</span><textarea v-model="note" :disabled="busy" maxlength="500" rows="4" aria-label="异常说明" placeholder="选择异常类型后自动带出意见，可在后面补充说明" /></label>
-        <p v-if="priceExceptionOpinion(exceptionType, note).length > 500" role="alert">审核意见最多500字，请缩短补充内容后提交。</p>
+        <label class="review-note exception-note"><span>审核意见（选填）</span><textarea v-model="note" :disabled="busy" maxlength="500" rows="4" aria-label="异常说明" placeholder="请自行填写具体异常原因（选填，最多500字）" /></label>
+        <p v-if="note.trim().length > 500" role="alert">审核意见最多500字，请缩短填写内容后提交。</p>
         <p class="exception-help">提交后保存异常分类、说明及审核历史，作为后续分类统计的依据。</p>
         <footer class="exception-footer"><button type="button" :disabled="busy" @click="backToResults">返回审核结果</button><button type="button" class="confirm-rejection" :disabled="busy || !own || needsReload || !canReject" @click="complete('rejected')">{{ busy ? '正在提交…' : '确认价格异常' }}</button></footer>
       </template>

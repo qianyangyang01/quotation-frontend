@@ -11,18 +11,3 @@ export interface PriceException {
   targets: Array<{ sku: string; source: string; dataSource?: string; procurementOwner: string; attribution: 'assigned' | 'unassigned' }>
 }
 export const priceExceptionLabel = (value?: string) => priceExceptionOptions.find(option => option.value === value)?.label || '历史未分类'
-
-export function priceExceptionOpinion(category?: string, note = ''): string {
-  const option = priceExceptionOptions.find(item => item.value === category)
-  const text = note.trim()
-  if (!option) return text
-  const prefix = `${option.label}，${option.hint}`
-  return text.startsWith(prefix) ? text : [prefix, text].filter(Boolean).join('；')
-}
-
-// Only replace the generated opening; preserve the reviewer's supplementary text.
-export function changeExceptionOpinion(note: string, previous?: string, next?: string): string {
-  const prefix = priceExceptionOpinion(previous)
-  const text = prefix && note.trim().startsWith(prefix) ? note.trim().slice(prefix.length).replace(/^[；\s]+/, '') : note
-  return priceExceptionOpinion(next, text)
-}
