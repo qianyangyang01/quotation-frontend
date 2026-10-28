@@ -27,6 +27,7 @@ import { loadSavedQuoteSheetPhotos, saveQuoteSheetPhotos } from '@/services/quot
 import type { QuoteSheetPhoto } from '@/data/quoteSheetPhotos'
 import { loadQuoteSheetContact, saveQuoteSheetContact } from '@/data/quoteSheetContactPreferences'
 import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutputGuard'
+import { captureRecoveryPhotos, restoreRecoveryPhotos, repriceRecoveryAverages, type QuoteSheetRecovery } from '@/services/quoteSheetRecovery'
 
 const props = defineProps<{
   rows: QuoteSheetSourceRow[]; countries: QuoteSheetCountry[]; salesperson: string
@@ -750,7 +751,46 @@ async function captureForSave(): Promise<CapturedSheetPrices> {
     return { ...captured, photos: saved, showPhotos: visible }
   } finally { photoSaving.value = false }
 }
-defineExpose({ captureSheet: () => JSON.parse(JSON.stringify(sheet.value)) as import('@/data/customerQuoteSheet').CustomerQuoteSheet, preview, copyData, invalidate, copying, capturePrices, captureForSave })
+async function captureRecovery(): Promise<QuoteSheetRecovery> {
+  if (photoPickerOpen.value || photoSaving.value || copying.value) throw new Error('请先完成图片选择、保存或复制，再保留报价并刷新')
+  await photoLoad
+  if (photoLoading.value || photoError.value || disposed) throw new Error(photoError.value || '报价单尚未就绪，请稍后刷新')
+  const version = generation
+  const snapshot = JSON.parse(JSON.stringify({ edits: edits.value, columns: columns.value,
+    hiddenRows: [...hiddenRowKeys.value], rowOrder: rowOrder.value, averages: averagePlans.value,
+    averageInputs: averageInputs.value, averageErrors: averagePriceErrors.value,
+    showPhotos: showPhotos.value, photos: [],
+  })) as QuoteSheetRecovery
+  snapshot.photos = await captureRecoveryPhotos(photos.value)
+  if (disposed || generation !== version) throw new Error('保留期间报价单已变化，请重新点击刷新')
+  return snapshot
+}
+async function restoreRecovery(snapshot: QuoteSheetRecovery) {
+  if (props.recordMode) throw new Error('历史报价不能应用临时恢复内容')
+  await photoLoad
+  const loaded = await restoreRecoveryPhotos(snapshot.photos)
+  if (disposed) { releaseQuotePhotos(loaded); throw new Error('报价页面已关闭，恢复内容仍保留') }
+  columns.value = snapshot.columns.map(column => ({ ...column, id: ++columnId }))
+  edits.value = reconcileQuoteSheetEdits(JSON.parse(JSON.stringify(snapshot.edits)), props.rows)
+  const keys = new Set(props.rows.map(quoteSheetRowKey))
+  hiddenRowKeys.value = new Set(snapshot.hiddenRows.filter(key => keys.has(key)))
+  showHiddenRows.value = hiddenRowKeys.value.size > 0
+  rowOrder.value = [...snapshot.rowOrder]
+  // Let quantity/price watchers settle before installing recalculated averages.
+  await nextTick()
+  const averages = repriceRecoveryAverages(snapshot.averages, props.rows, quantities.value, cachedSystemPrice, snapshot.averageInputs)
+  averagePlans.value = averages.restored
+  const restoredIds = new Set(averages.restored.map(plan => plan.id))
+  averageInputs.value = Object.fromEntries(Object.entries(snapshot.averageInputs).filter(([key]) => restoredIds.has(key.split(':')[0]!)))
+  averagePriceErrors.value = Object.fromEntries(Object.entries(snapshot.averageErrors).filter(([key]) => restoredIds.has(key.split(':')[0]!)))
+  averageOpen.value = snapshot.averages.length > 0
+  averageNotice.value = averages.unavailable.length ? `以下综合方案的来源渠道失效，未恢复：${averages.unavailable.join('、')}` : ''
+  releaseQuotePhotos(photos.value)
+  photos.value = loaded
+  showPhotos.value = snapshot.showPhotos
+  invalidate()
+}
+defineExpose({ captureSheet: () => JSON.parse(JSON.stringify(sheet.value)) as import('@/data/customerQuoteSheet').CustomerQuoteSheet, preview, copyData, invalidate, copying, capturePrices, captureForSave, captureRecovery, restoreRecovery })
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', clearPhotos)
   window.removeEventListener('pageshow', restoreAfterNavigation)

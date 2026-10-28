@@ -11,6 +11,8 @@ function handler(name: string, state: Record<string, unknown>) {
   const js = ts.transpile(node.getText(ast), { target: ts.ScriptTarget.ES2022 })
   state.props ??= { batchCapture: false }
   state.fobActive ??= {value:false}
+  state.recoveryRestoring ??= { value: false }
+  state.recoveryPending ??= { value: null }
   if (name === 'attemptSave') {
     state.props ??= { batchCapture: false }
     state.prepareAndSaveQuotation = handler('prepareAndSaveQuotation', state)

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { appUpdate, refreshUpdatedApplication } from '@/services/appUpdate'
+import { quotationRecoveryState as recovery, prepareQuotationUpdateRecovery } from '@/services/quotationUpdateRecovery'
 const state = appUpdate.state
 const confirmingRefresh = ref(false)
 const refreshButton = ref<HTMLButtonElement>(), cancelButton = ref<HTMLButtonElement>()
@@ -15,8 +16,13 @@ async function cancelRefresh() {
   await nextTick()
   refreshButton.value?.focus()
 }
-function confirmRefresh() {
-  if (!confirmingRefresh.value || state.activeOperations > 0) return
+async function confirmRefresh() {
+  if (!confirmingRefresh.value || state.activeOperations > 0 || recovery.busy) return
+  if (recovery.available) {
+    try { await prepareQuotationUpdateRecovery() }
+    catch { return }
+    if (state.activeOperations > 0) { recovery.prepared = false; recovery.error = '有新的操作正在提交，请等待完成后重试刷新'; return }
+  }
   refreshUpdatedApplication(true)
 }
 watch(() => state.updateRequired, visible => { if (!visible) confirmingRefresh.value = false })
@@ -26,16 +32,17 @@ watch(() => state.updateRequired, visible => { if (!visible) confirmingRefresh.v
   <aside v-if="state.updateRequired" class="app-update-notice" role="alert" aria-live="polite">
     <div>
       <strong>{{ state.reason === 'exchange-rate' ? '财务汇率已更新，请刷新后重新报价' : '系统已更新，请刷新后继续操作' }}</strong>
-      <p>新报价、审核及资料修改已暂停。请先保留未保存内容；刷新后重新查询，再使用新的报价结果。</p>
+      <p>新报价、审核及资料修改已暂停。{{ recovery.available ? '刷新前会在本标签页保留报价条件、渠道和表格编辑，恢复后按最新资料核价。' : '请先保留未保存内容；刷新后重新查询，再使用新的报价结果。' }}</p>
       <small v-if="state.activeOperations">正在提交或上传，请等待完成后刷新。</small>
-      <small v-else>刷新会清除未保存的输入；已保存的历史报价不受影响。</small>
-      <p v-if="confirmingRefresh" id="app-update-refresh-confirmation">请确认需要的内容已经复制保留，或当前草稿已经保存。确认刷新后，尚未保存的输入将被清除。</p>
+      <small v-else>{{ recovery.available ? '临时备份仅供当前账号、当前标签页恢复；已保存的历史报价不受影响。' : '刷新会清除未保存的输入；已保存的历史报价不受影响。' }}</small>
+      <p v-if="confirmingRefresh" id="app-update-refresh-confirmation">{{ recovery.available ? '确认后先保留当前报价，再刷新恢复。若备份失败会留在当前页面，不会继续刷新。' : '请确认需要的内容已经复制保留，或当前草稿已经保存。确认刷新后，尚未保存的输入将被清除。' }}</p>
+      <p v-if="recovery.error" role="alert">{{ recovery.error }}</p>
     </div>
     <div class="update-actions">
       <button v-if="!confirmingRefresh" ref="refreshButton" type="button" :disabled="state.activeOperations > 0" @click="beginRefresh">保留内容后刷新</button>
       <div v-else class="update-actions" role="group" aria-label="确认刷新页面" aria-describedby="app-update-refresh-confirmation" @keydown.esc="cancelRefresh">
-        <button ref="cancelButton" type="button" @click="cancelRefresh">取消</button>
-        <button type="button" :disabled="state.activeOperations > 0" @click="confirmRefresh">已保留内容，确认刷新</button>
+        <button ref="cancelButton" type="button" :disabled="recovery.busy" @click="cancelRefresh">取消</button>
+        <button type="button" :disabled="state.activeOperations > 0 || recovery.busy" @click="confirmRefresh">{{ recovery.busy ? '正在保留报价…' : recovery.available ? '保存当前报价内容并刷新' : '已保留内容，确认刷新' }}</button>
       </div>
     </div>
   </aside>

@@ -120,13 +120,23 @@ export function readUnifiedPurchaseClipboardResult(data: Pick<DataTransfer, 'get
   if (html == null && new Set(nonempty.map(row => row.length)).size > 1) throw new Error(ambiguousMessage)
   if (nonempty.length > PURCHASE_PASTE_LIMIT) throw new Error('每次最多100行，请分批粘贴')
   const imageOrBlank = (value: string) => !value.trim() || /^(?:\[?图片\]?|\[?image\]?|=?_?xlfn\.DISPIMG\([\s\S]*\)|=?DISPIMG\([\s\S]*\))$/i.test(value.trim())
-  const skippedImageColumns = nonempty.length > 0 && nonempty.every(row => row.length === columns.length + 3 && row.slice(0, 3).every(imageOrBlank))
+  const skippedImageColumns = nonempty.length > 0 && nonempty.every(row =>
+    row.slice(0, 3).every(imageOrBlank) && (row.length === columns.length + 3 || (
+      row.length >= 16 && row.length < columns.length + 3 &&
+      /^\d{4}[./-]\d{1,2}[./-]\d{1,2}$/.test(row[3]!.trim()) &&
+      /^[A-Z0-9._/-]{1,96}$/i.test(row[6]!.trim()) && /^\d+(?:\.\d+)?$/.test(row[7]!.trim())
+    )))
   if (skippedImageColumns) {
     if (startColumn !== 0) throw new Error('整行复制请从“报价日期”列粘贴；本次未写入')
     rows = rows.map(row => row.slice(3))
   }
-  // A long partial row cannot distinguish the old three-tier template from the new one.
-  if (startColumn === 0 && rows.some(row => row.length > 17 && row.length !== columns.length)) throw new Error('请复制完整五档模板行，或连同表头复制；旧三档模板须带表头，避免运费与价格错列')
+  // Only the suffix beyond the complete legacy layout is unambiguous without
+  // headers. Pad at the end, never remove/reposition an internal empty cell.
+  // Shorter rows may be a three-tier source: do not interpret its freight as tiers.
+  if (startColumn === 0 && rows.some(row => row.length > 17 && row.length <= PURCHASE_PASTE_COLUMNS.length)) throw new Error('无法确认三档或五档列序，请至少复制至“货源链接1”列，或连同表头复制；旧三档模板须带表头，避免运费与价格错列')
   if (rows.some(row => row.length + startColumn > columns.length)) throw new Error('粘贴列数超出五档模板；本次未写入')
+  if (startColumn === 0) rows = rows.map(row => row.length > PURCHASE_PASTE_COLUMNS.length
+    ? [...row, ...Array<string>(columns.length - row.length).fill('')]
+    : row)
   return { rows, skippedImageColumns }
 }

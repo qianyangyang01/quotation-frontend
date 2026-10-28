@@ -29,6 +29,36 @@ function preview(sku = 'P-1', action = 'update', notices: string[] = []) {
 }
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.resetAllMocks(); vi.unstubAllGlobals() })
 
+it('previews and confirms the reported five-tier row without its empty trailing links, keeping every monetary field', async () => {
+  mount(true)
+  const source = ['', '', '', '2026.9.10', '方', '暂时现货，相似款，下单需要跟工厂确定是否现货',
+    'HC2601658-1', '1500', '100厘米', '恐龙 ，兔子,小猪', '四面弹力面料+羽绒棉填充',
+    '', '', '', '1', '45.6', '', '', '', '', '', '', '', '', '4', '22', '202', '否', '', '0%',
+    '普票1', '家居用品', '有', '保定九赞商贸有限公司', '', 'https://detail.1688.com/offer/1048790478494.html']
+  await paste([source])
+  expect(cell(0, 3).value).toBe('HC2601658-1')
+  expect(cell(0, 12).value).toBe('45.6')
+  expect(Array.from({ length: 8 }, (_, i) => cell(0, 13 + i).value)).toEqual(Array(8).fill(''))
+  expect([21, 22, 23].map(i => cell(0, i).value)).toEqual(['4', '22', '202'])
+  const expectedRow = {
+    sourceRow: 1, sku: 'HC2601658-1', quotationDate: '2026-09-10', quotationOwner: '方',
+    notes: source[5], weightG: 1500, size: '100厘米', color: '恐龙 ，兔子,小猪',
+    material: '四面弹力面料+羽绒棉填充', minOrderQty: 1, purchasePriceCny: 45.6,
+    singleFreightCny: 4, freight10Cny: 22, freight100Cny: 202, freeShipping: '否', taxPoint: 0,
+    invoiceType: '普票1', category: '家居用品', stockStatus: '有货', factoryInfo: '保定九赞商贸有限公司',
+    sourceLink1: 'https://detail.1688.com/offer/1048790478494.html',
+  }
+  const serverPreview = preview('HC2601658-1')
+  request.mockResolvedValueOnce(serverPreview)
+  button('预览并保存 1 条').click(); await tick()
+  expect(request.mock.calls[0]![0]).toBe('/purchase-products/paste/shared/preview')
+  expect(JSON.parse(request.mock.calls[0]![1].body)).toEqual([expectedRow])
+  request.mockResolvedValueOnce({ added: [], updated: [expectedRow], unchanged: [], skipped: [] })
+  button('确认全部保存').click(); await tick()
+  expect(request.mock.calls[1]![0]).toBe('/purchase-products/paste/shared/confirm')
+  expect(JSON.parse(request.mock.calls[1]![1].body)).toEqual({ rows: [expectedRow], expected: [serverPreview.rows[0]!.expected] })
+})
+
 it('previews sparse patches and requires explicit confirmation with the preview version', async () => {
   const saved = mount(); await paste([row()]); request.mockResolvedValueOnce(preview())
   button('预览并保存 1 条').click(); await tick()

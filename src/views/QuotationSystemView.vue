@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { appUpdate } from '@/services/appUpdate'
+import { quotationRecoveryState, quotationRecoveryScope, registerQuotationUpdateRecovery, readQuotationUpdateRecovery, clearQuotationUpdateRecovery } from '@/services/quotationUpdateRecovery'
+import type { QuoteSheetRecovery } from '@/services/quoteSheetRecovery'
 import { checkFobFinanceVersion } from '@/services/fobFinanceFreshness'
 import { refreshReviewNotifications } from '@/data/reviewNotifications'
 import { getDomesticFreightWarning } from '@/domain/domesticFreightWarning'
@@ -169,6 +171,7 @@ const modeSelections = ref<Record<'common' | 'template', DraftChannelSelection[]
 const activeTemplateSnapshot = ref<{ id: string; name: string } | null>(null)
 const quoteMatrixMode = ref<'common' | 'template'>('template')
 const templateSelectionState = ref<'loading' | 'ready' | 'error'>('ready')
+const commonSelectionState = ref<'loading' | 'ready' | 'error'>('ready')
 const templateSaveBlockReason = computed(() => quoteMatrixMode.value !== 'template' || templateSelectionState.value === 'ready' ? ''
   : templateSelectionState.value === 'loading' ? '模板渠道正在加载，请稍候' : '模板渠道加载失败，请先重试加载')
 const commonMatrix = ref<InstanceType<typeof QuotationCommonMatrix> | null>(null)
@@ -205,6 +208,7 @@ const manualPricing = computed(() => manualPricingInput(quoteMode.value, manualC
 const manualInputError = computed(() => !manualMode.value || manualPricing.value ? '' : quoteMode.value === 'shipping-only' ? '重量须大于0且不超过1000000克，最多3位小数' : '请填写有效成本（0～1000000元，最多2位小数）和重量（大于0且不超过1000000克，最多3位小数）')
 const manualPanelError = ref('')
 function invalidateManualQuery() {
+  if (recoveryRestoring.value) return
   if (!manualMode.value) return
   manualQueried.value = false; manualPanelError.value = ''
   cancelQuoteLogistics()
@@ -312,6 +316,73 @@ const draftError = ref('')
 const draftRestored = ref(false)
 const draftNeedsQuery = ref(false)
 const draftChannelNotice = ref('')
+type UpdateRecovery = { payload: QuotationDraftPayload; sheet?: QuoteSheetRecovery; sourceId?: string; sourceVersion: number; raw: { manualCost: string; manualWeightGrams: string; specialPackagingGrams: string; commissionThreshold: string; skuSearch: string } }
+const recoveryNotice = ref('')
+const recoveryRestoring = ref(false)
+const recoveryPending = ref<UpdateRecovery | null>(null)
+let stopUpdateRecovery: (() => void) | undefined
+const recoveryScope = () => quotationRecoveryScope(currentAuthUser.value.id, route.fullPath)
+async function captureUpdateRecovery(): Promise<UpdateRecovery> {
+  if (fobActive.value) throw new Error('当前为FOB报价，请先完成或保留FOB内容再刷新')
+  if (!draftReady.value || recoveryRestoring.value || recoveryPending.value || productQueryBusy.value || syncRefreshing.value || savingQuotation.value || draftSavePromise || draftStatus.value === 'conflict') throw new Error('报价正在加载、恢复或保存，请完成当前操作后重试刷新')
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+  await nextTick()
+  const payload = draftPayload(), signature = draftSignature()
+  const sheet = await quotationPreview.value?.captureRecovery()
+  if (signature !== draftSignature()) throw new Error('保留期间报价条件已变化，请重试刷新')
+  return { payload, sheet, sourceId: draftSource.value?.id, sourceVersion: draftVersion.value,
+    raw: { manualCost: manualCost.value, manualWeightGrams: manualWeightGrams.value, specialPackagingGrams: specialPackagingGrams.value, commissionThreshold: commissionThreshold.value, skuSearch: skuSearch.value } }
+}
+async function restoreUpdateRecovery(snapshot: UpdateRecovery) {
+  if (recoveryRestoring.value) return
+  recoveryPending.value = snapshot
+  recoveryRestoring.value = true
+  recoveryNotice.value = '正在恢复更新前的报价内容，并按最新资料核价…'
+  const scope = recoveryScope(), previousSignature = lastSavedDraftSignature
+  try {
+    if (snapshot.payload?.schemaVersion !== 2 || snapshot.sourceId !== draftSource.value?.id || (snapshot.sourceId && snapshot.sourceVersion !== draftVersion.value)) throw new Error('关联报价或服务器草稿已变化，不能自动覆盖；刷新前的备份仍保留')
+    await applyDraftPayload(snapshot.payload, undefined, { restoreQuotation: true, preserveInputs: true })
+    if (viewDisposed || recoveryScope() !== scope) throw new Error('账号或页面已变化，请返回原报价入口恢复')
+    manualCost.value = snapshot.raw.manualCost
+    manualWeightGrams.value = snapshot.raw.manualWeightGrams
+    specialPackagingGrams.value = snapshot.raw.specialPackagingGrams
+    commissionThreshold.value = snapshot.raw.commissionThreshold
+    skuSearch.value = snapshot.raw.skuSearch
+    await nextTick()
+    if (hasQueriedQuotationProduct.value) {
+      if (!['ready', 'empty'].includes(logisticsLoadState.value)) throw new Error(logisticsLoadError.value || '最新物流尚未核验，请重试恢复')
+      await new Promise<void>((resolve, reject) => {
+        let stop: (() => void) | undefined
+        const timer = window.setTimeout(() => { stop?.(); reject(new Error('渠道恢复超时，请重试恢复')) }, 30_000)
+        const selectionState = () => quoteMatrixMode.value === 'template' ? templateSelectionState.value : commonSelectionState.value
+        stop = watch(() => [selectionState(), countryLoads.value, countryLoadError.value] as const, ([state, loading, error]) => {
+          if (error || state === 'error') { window.clearTimeout(timer); stop?.(); reject(new Error(error || '渠道恢复失败，请重试恢复')) }
+          else if (!loading && state === 'ready') { window.clearTimeout(timer); stop?.(); resolve() }
+        }, { flush: 'post' })
+        if (!countryLoads.value && selectionState() === 'ready') { window.clearTimeout(timer); stop(); resolve() }
+      })
+    }
+    await nextTick()
+    if (snapshot.sheet) {
+      if (!quotationPreview.value) throw new Error('报价表格尚未就绪，请重试恢复')
+      await quotationPreview.value.restoreRecovery(snapshot.sheet)
+    }
+    if (viewDisposed || recoveryScope() !== scope) throw new Error('账号或页面已变化，请返回原报价入口恢复')
+    const unavailable = savedQuoteRows.value.filter(row => row.available === false)
+    if (unavailable.length) draftChannelNotice.value += ` 以下渠道暂不能计价，请核对：${unavailable.map(row => [row.country, row.transport || row.rule, row.availabilityMessage].filter(Boolean).join(' · ')).join('；')}`
+    await establishDraftBaseline(draftSource.value ? 'saved' : 'idle')
+    lastSavedDraftSignature = previousSignature
+    markDraftDirty()
+    recoveryPending.value = null
+    clearQuotationUpdateRecovery(scope)
+    recoveryNotice.value = hasQueriedQuotationProduct.value
+      ? '已恢复更新前的报价条件、渠道和表格编辑，并按当前资料重新计算。请核对价格后保存；手填客户价已保留。'
+      : '已恢复更新前的报价条件和表格编辑，请查询商品并核对最新价格后保存。'
+  } catch (error) {
+    recoveryNotice.value = `恢复尚未完成：${error instanceof Error ? error.message : '请重试'}。备份仍保留，不会写入历史报价。`
+    draftReady.value = true
+  } finally { recoveryRestoring.value = false }
+}
 const draftReady = ref(false)
 const draftInitializationFailed = ref(false)
 const showDraftLeaveDialog = ref(false)
@@ -1190,7 +1261,7 @@ async function recordForDraftSku(sku: string, freshPurchases?: Map<string, Purch
   catch (error) { if (error instanceof ApiError && error.status === 404) return undefined; throw error }
   return record?.quoteReady ? record : undefined
 }
-async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>, options: { restoreQuotation?: boolean } = {}) {
+async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?: Map<string, PurchaseProductRecord | undefined>, options: { restoreQuotation?: boolean; preserveInputs?: boolean } = {}) {
   singleFreightSource.value = undefined
   bundleFreightSources.value = {}
   const migrated = migrateDraftMatrix(payload)
@@ -1275,11 +1346,11 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     p.weightSource = productState.weightSource === 'manual' ? 'manual' : 'purchase'
     p.manualWeight = Math.max(0, Number(productState.manualWeight) || 0)
     p.volumeDivisor = Math.max(1, Number(productState.volumeDivisor) || 8000)
-    if (!restoredFromPurchase) {
+    if (!restoredFromPurchase || options.preserveInputs) {
       p.packageLengthCm = Math.max(0, Number(productState.packageLengthCm) || 0)
       p.packageWidthCm = Math.max(0, Number(productState.packageWidthCm) || 0)
       p.packageHeightCm = Math.max(0, Number(productState.packageHeightCm) || 0)
-      p.volumetricEnabled = false
+      p.volumetricEnabled = options.preserveInputs ? productState.volumetricEnabled === true : false
     }
   }
   if (quoteMode.value === 'bundle') {
@@ -1338,8 +1409,10 @@ function reconcileRestoredChannels(p: Product) {
       && allowed.has(financeChannelKey(rule.id, relation))))
   }
   let removed = 0
+  const removedLabels: string[] = []
   for (const mode of ['common', 'template'] as const) {
     const previous = modeSelections.value[mode]
+    removedLabels.push(...previous.filter(selection => !keep(selection)).map(selection => [selection.country, selection.quoteRegion, selection.carrier, selection.transport || selection.rule, selection.channelKey].filter(Boolean).join(' · ')))
     modeSelections.value[mode] = previous.filter(keep)
     removed += previous.length - modeSelections.value[mode].length
   }
@@ -1347,7 +1420,7 @@ function reconcileRestoredChannels(p: Product) {
   restoredCommonSelections.value = draftSelection(modeSelections.value.common)
   restoredTemplateSelections.value = draftSelection(modeSelections.value.template)
   restoredSelectionVersion.value += 1
-  draftChannelNotice.value = `已按当前物流属性“${p.logisticsAttribute}”移除 ${removed} 个未授权或已停用的旧渠道；请重新选择可用渠道。`
+  draftChannelNotice.value = `以下 ${removed} 个渠道已停用或未获当前物流属性“${p.logisticsAttribute}”授权，未用于本次报价：${[...new Set(removedLabels)].join('；')}。请重新选择可用渠道。`
 }
 async function establishDraftBaseline(status: 'idle' | 'saved') {
   await nextTick()
@@ -1386,6 +1459,9 @@ async function loadAndRestoreDraft() {
   return state.sourceQuote ? state : { exists: false, payload: null, version: -1, updatedAt: null }
 }
 async function resetLocalDraft(customer?: LastQuotationCustomer) {
+  if (!props.batchCapture && currentAuthUser.value.id) clearQuotationUpdateRecovery(recoveryScope())
+  recoveryPending.value = null
+  recoveryNotice.value = ''
   priorityProcessing.value = false
   submitOrdinaryQuotation = quotationSubmitter()
   draftNeedsQuery.value = false
@@ -1442,6 +1518,8 @@ async function initializeQuotationWorkspace() {
     const sourceRecord = reissueId ? await loadRecord(reissueId) : null
     if (reissueId && !sourceRecord) throw new Error('原报价不存在或无权读取，请返回报价记录重新选择')
     const restored = await loadAndRestoreDraft()
+    const updateRecovery = currentAuthUser.value.id ? readQuotationUpdateRecovery<UpdateRecovery>(recoveryScope()) : null
+    if (updateRecovery) { await restoreUpdateRecovery(updateRecovery); return }
     if (sourceRecord) {
       pendingReissue.value = sourceRecord
       if (!restored.exists) await applyReissue()
@@ -1535,6 +1613,7 @@ async function overwriteServerDraftAfterConflict() {
   if (draftDirty) await flushDraft()
 }
 function beforeWindowUnload(event: BeforeUnloadEvent) {
+  if (quotationRecoveryState.prepared) return
   if (!draftSource.value && !draftDirty) return
   if (!draftDirty && draftStatus.value !== 'error' && draftStatus.value !== 'conflict') return
   event.preventDefault()
@@ -1542,6 +1621,16 @@ function beforeWindowUnload(event: BeforeUnloadEvent) {
 }
 watch(draftSignature, signature => markDraftDirty(signature))
 onMounted(async () => {
+  if (!props.batchCapture) {
+    const owner = currentAuthUser.value.id
+    watch(() => fobActive.value || typeof route.query.fobCorrection === 'string', separateWorkspace => {
+      stopUpdateRecovery?.(); stopUpdateRecovery = undefined
+      if (!separateWorkspace) stopUpdateRecovery = registerQuotationUpdateRecovery({ scope: () => {
+        if (currentAuthUser.value.id !== owner) throw new Error('登录账号已变化，请确认账号后操作')
+        return recoveryScope()
+      }, capture: captureUpdateRecovery })
+    }, { immediate: true, flush: 'sync' })
+  }
   window.addEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.addEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.addEventListener(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
@@ -1558,7 +1647,7 @@ onMounted(async () => {
       syncError.value = ''
       return
     }
-    if (batchCalculationActive || !draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
+    if (quotationRecoveryState.busy || recoveryRestoring.value || recoveryPending.value || batchCalculationActive || !draftReady.value || reissueBusy.value || syncRefreshing.value || savingQuotation.value || retryingSavePreparation.value || productQueryBusy.value || logisticsLoadState.value === 'loading') return
     await checkLiveVersions(signal)
     if (!signal.aborted && !activePurchaseSkus().length && syncPending.value) {
       await reloadLiveConfiguration(); syncPending.value = ''
@@ -1566,6 +1655,7 @@ onMounted(async () => {
   }, error => { syncError.value = error instanceof Error ? error.message : '暂时无法核验最新资料，请重试' })
 })
 onBeforeUnmount(() => {
+  stopUpdateRecovery?.()
   viewDisposed = true
   window.removeEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
   window.removeEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
@@ -2022,6 +2112,7 @@ async function attemptSave() {
   finally { if (report) emit('batchPreparing', false) }
 }
 async function prepareAndSaveQuotation() {
+  if (recoveryRestoring.value || recoveryPending.value) { toast('请先完成更新后的内容恢复与核价'); return }
   if (fobActive.value) return
   if (templateSaveBlockReason.value) { toast(templateSaveBlockReason.value); return }
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
@@ -2474,7 +2565,10 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       <FobCorrectionDialog :key="String(route.query.fobCorrection)+currentAuthUser.account" :id="String(route.query.fobCorrection)" :rate="fobRate" :policy="fobSmallOrderPolicy" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" @close="router.push({path: '/quotation/my-records',query:{record:route.query.fobCorrection}})" />
     </QuotationFeatureBoundary>
 
-    <main class="quotation-page" :inert="(!fobActive && syncRefreshing) || undefined">
+    <main class="quotation-page" :inert="quotationRecoveryState.busy || recoveryRestoring || (!fobActive && syncRefreshing) || undefined">
+      <section v-if="recoveryNotice" class="live-data-notice" role="status">
+        <span>{{ recoveryNotice }}</span><button v-if="recoveryPending && !recoveryRestoring" type="button" @click="restoreUpdateRecovery(recoveryPending)">重试恢复</button>
+      </section>
       <p v-if="!fobActive && logisticsRebuilding" role="status" class="notice">物流价格正在重建，新报价提交已暂停；请等待基准审核完成。</p>
       <section v-if="!fobActive && (syncPending || syncError || syncRefreshing)" class="live-data-notice" role="status">
         <span>{{ syncRefreshing ? '正在更新报价，保留当前填写内容…' : syncPending ? `${syncPending}；请核对并更新报价。` : `同步暂不可用：${syncError}` }}</span>
@@ -2564,7 +2658,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
             :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
-            @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
+            @preset-state-change="commonSelectionState=$event" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
           >
             <template #toolbar-actions><button type="button" class="save-selection-template" :disabled="!commonQuoteRows.length || logisticsLoadState !== 'ready'" @click="createTemplateFromCurrentMode">将当前清单存为模板</button></template>
           </QuotationCommonMatrix>

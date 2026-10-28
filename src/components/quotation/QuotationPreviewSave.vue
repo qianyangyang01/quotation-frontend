@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import type { QuoteSheetCountry, QuoteSheetPriceCalculator } from '@/data/customerQuoteSheet'
+import type { QuoteSheetRecovery } from '@/services/quoteSheetRecovery'
 
 const props = withDefaults(defineProps<{
   batchSample?: boolean
@@ -45,7 +46,13 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:priorityProcessing': [value: boolean]; save: []; retry: []; locateIssue: [key: string]; removeRow: [key: string] }>()
 const sampleExpanded = ref(false)
 const customerSheet = ref<InstanceType<typeof CustomerQuoteSheet>>()
-defineExpose({ captureSheet: () => customerSheet.value?.captureSheet(), capturePrices: () => customerSheet.value?.capturePrices(), captureForSave: () => customerSheet.value?.captureForSave() })
+defineExpose({ captureSheet: () => customerSheet.value?.captureSheet(), capturePrices: () => customerSheet.value?.capturePrices(), captureForSave: () => customerSheet.value?.captureForSave(),
+  captureRecovery: () => customerSheet.value?.captureRecovery(),
+  restoreRecovery: async (snapshot: QuoteSheetRecovery) => {
+    if (!customerSheet.value) throw new Error('报价表格尚未就绪，请重试恢复')
+    await customerSheet.value.restoreRecovery(snapshot)
+  },
+})
 const countryCount = computed(() => new Set(props.rows.map(row => row.country)).size)
 const hasQuoteRows = computed(() => props.rows.length > 0)
 const previewStatus = computed(() => {

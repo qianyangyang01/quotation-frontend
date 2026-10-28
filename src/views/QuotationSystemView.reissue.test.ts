@@ -10,9 +10,12 @@ import type { QuotationMatrixRow } from '@/components/quotation/types'
 import type { QuotationDraftPayload } from '@/services/quotationDrafts'
 import { authState } from '@/data/authStore'
 import { loadLastQuotationCustomer, rememberQuotationCustomer } from '@/data/lastQuotationCustomer'
+import { prepareQuotationUpdateRecovery, readQuotationUpdateRecovery, quotationRecoveryScope } from '@/services/quotationUpdateRecovery'
+import { replaceLogisticsRules, type LogisticsRule } from '@/data/logistics'
+import { normalizeLogisticsPriceRow } from '@/data/logisticsRepository'
 
 const router = vi.hoisted(() => ({ replace: vi.fn().mockResolvedValue(undefined), query: { reissue: 'original', release: 'local' } as Record<string, string> }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: router.query }), useRouter: () => router, onBeforeRouteLeave: vi.fn() }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: router.query, fullPath: '/quotation' }), useRouter: () => router, onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async original => ({ ...await original<typeof import('@/services/quotationSync')>(), startQuotationSync: vi.fn(() => vi.fn()) }))
 vi.mock('@/data/publishedLogisticsRepository', async original => ({
   ...await original<typeof import('@/data/publishedLogisticsRepository')>(),
@@ -43,15 +46,19 @@ let batchProps = reactive({ batchCapture: false, batchSkus: ['BK100', 'BK200'], 
 let purchaseFailure = false
 let purchaseOverride: Record<string, unknown> = {}
 let sourceFailure = false
+let financeOverride: Record<string, unknown> | undefined
 beforeEach(() => {
-  clearFinanceSettingsCache(); vi.clearAllMocks(); localStorage.clear()
+  clearFinanceSettingsCache(); vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear()
   authState.current = { id: 'employee-a', account: 'A', name: '业务员 A', role: 'employee', status: 'enabled', mustChangePassword: false, passwordUpdatedAt: '' }
   purchaseFailure = false; purchaseOverride = {}; sourceFailure = false; router.query = { reissue: 'original', release: 'local' }
+  financeOverride = undefined
+  replaceLogisticsRules([])
+  vi.mocked(loadPublishedLogisticsRules).mockResolvedValue({ verified: true, revision: 'latest', rules: [] } as never)
 })
-afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks(); localStorage.clear(); authState.current = null })
+afterEach(() => { app?.unmount(); host?.remove(); clearFinanceSettingsCache(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); authState.current = null })
 async function mount(existing: boolean, withdrawn = false, batchCapture = false, resumeQuoteId = withdrawn ? 'original' : undefined) {
   vi.spyOn(api, 'get').mockImplementation(async path => {
-    if (path === '/finance-settings') return finance
+    if (path === '/finance-settings') return financeOverride || finance
     if (path === '/quotation-readiness') return { ready: true, missing: [] }
     if (path === '/quotation-templates') return []
     if (path === '/quotations/original') { if (sourceFailure) throw new Error('无权读取原报价'); return source }
@@ -75,6 +82,62 @@ async function mount(existing: boolean, withdrawn = false, batchCapture = false,
 }
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
 
+it('restores update inputs after remount, reloads current purchase prices and identifies the removed special channel without writing any quotation', async () => {
+  const original = JSON.stringify(source)
+  await mount(false)
+  await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
+  state.customerName = '更新前客户'
+  state.modeSelections.common = [{ country: '日本', channelKey: 'removed-special', carrier: '特殊物流', transport: '指定渠道', rule: '指定规则' }]
+  await nextTick()
+  await prepareQuotationUpdateRecovery()
+  const scope = quotationRecoveryScope('employee-a', '/quotation')
+  expect(readQuotationUpdateRecovery(scope)).toMatchObject({ payload: { customerName: '更新前客户', commonSelections: [{ channelKey: 'removed-special' }] } })
+  app.unmount(); host.remove()
+  purchaseOverride = { purchasePriceCny: 20 }
+  router.query = {}
+  await mount(false)
+  await vi.waitFor(() => expect(host.textContent).toContain('已恢复更新前的报价条件'), { timeout: 5000 })
+  expect(state.customerName).toBe('更新前客户')
+  expect(state.products[0]).toMatchObject({ sku: 'BK100', purchase: 20.2 })
+  expect(host.textContent).toContain('removed-special')
+  expect(host.textContent).toContain('指定渠道')
+  expect(state.modeSelections.common).toEqual([])
+  expect(readQuotationUpdateRecovery(scope)).toBeNull()
+  expect(JSON.stringify(source)).toBe(original)
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled(); expect(api.delete).not.toHaveBeenCalled()
+})
+
+it('retains the exact valid special channel after refresh and recalculates its freight from current rules', async () => {
+  const key = '1::原物流::JP'
+  let perKg = 100
+  const rule = (): LogisticsRule => ({ id: 1, name: '原规则', status: '启用', billingVerified: true,
+    relations: [{ carrier: '原物流', channel: '原渠道', channelCode: 'JP' }],
+    prices: [normalizeLogisticsPriceRow({ countryCode: 'JP', areaName: '日本', weightFromKg: 0, weightToKg: 30, pricePerKg: perKg, registrationFee: 2, quoteReady: true, pricingModel: 'per-kg' })],
+  } as LogisticsRule)
+  financeOverride = { ...finance,
+    'country-classification': { value: [{ country: '日本', code: 'JP', stage: 'common', continent: 'asia', sortOrder: 1, enabled: true }], _version: 1 },
+    'channel-policies': { value: [{ id: '普货', category: '普货', enabled: true, countryRules: [{ country: '日本', allowedChannels: [key], stage: 'common', continent: 'asia', sortOrder: 1 }] }], _version: 1 },
+    'tax-settings': { value: { countries: [{ country: '日本', fixedFeeUsd: 0, selected: true, enabled: true, sortOrder: 1, channelRules: [{ key, mode: 'no-tax' }] }], providers: [], updatedAt: 'test' }, _version: 1 },
+  }
+  vi.mocked(loadPublishedLogisticsRules).mockImplementation(async () => {
+    const rules = [rule()]; replaceLogisticsRules(rules)
+    return { verified: true, revision: `price-${perKg}`, rules } as never
+  })
+  await mount(false)
+  await vi.waitFor(() => expect(state.commonQuoteRows).toHaveLength(1))
+  const oldFreight = state.commonQuoteRows[0]!.freight
+  expect(state.commonQuoteRows[0]!.channelKey).toBe(key)
+  await prepareQuotationUpdateRecovery()
+  app.unmount(); host.remove(); router.query = {}; perKg = 200
+  await mount(false)
+  await vi.waitFor(() => expect(host.textContent).toContain('已恢复更新前的报价条件'))
+  expect(state.commonQuoteRows).toHaveLength(1)
+  expect(state.commonQuoteRows[0]!.channelKey).toBe(key)
+  expect(state.commonQuoteRows[0]!.freight).toBeGreaterThan(oldFreight)
+  expect(state.modeSelections.common).toMatchObject([{ channelKey: key }])
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled()
+})
+
 it('uses highest source freight on explicit tier-three reissue without changing the original snapshot', async () => {
   purchaseOverride = { dataSource: 'legacy_2026', invoiceType: '普票', singleFreightCny: 2.5, freight10Cny: 3.5, freight100Cny: 9.5 }
   const original = JSON.stringify(source)
@@ -85,6 +148,26 @@ it('uses highest source freight on explicit tier-three reissue without changing 
   expect(api.post).not.toHaveBeenCalled()
   expect(api.patch).not.toHaveBeenCalled()
   expect(api.put).not.toHaveBeenCalled()
+})
+
+it('retains the backup on purchase reload failure and restores it on an explicit retry', async () => {
+  await mount(false)
+  await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
+  state.customerName = '断网前客户'; await nextTick()
+  await prepareQuotationUpdateRecovery()
+  const scope = quotationRecoveryScope('employee-a', '/quotation')
+  app.unmount(); host.remove(); router.query = {}; purchaseFailure = true
+  await mount(false)
+  await vi.waitFor(() => expect(host.textContent).toContain('恢复尚未完成'))
+  expect(readQuotationUpdateRecovery(scope)).not.toBeNull()
+  await state.attemptSave()
+  expect(api.post).not.toHaveBeenCalled()
+  purchaseFailure = false
+  button('重试恢复').click()
+  await vi.waitFor(() => expect(host.textContent).toContain('已恢复更新前的报价条件'))
+  expect(state.customerName).toBe('断网前客户')
+  expect(readQuotationUpdateRecovery(scope)).toBeNull()
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled()
 })
 
 it('reissues in memory, reads current purchase data and removes unavailable source channels without creating a record', async () => {

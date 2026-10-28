@@ -3,6 +3,7 @@ import { createApp, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AppUpdateNotice from './AppUpdateNotice.vue'
 import { appUpdate, createAppUpdateMonitor, refreshUpdatedApplication } from '@/services/appUpdate'
+import { registerQuotationUpdateRecovery, readQuotationUpdateRecovery } from '@/services/quotationUpdateRecovery'
 
 vi.mock('@/services/appUpdate', async importOriginal => {
   const actual = await importOriginal<typeof import('@/services/appUpdate')>()
@@ -14,6 +15,24 @@ beforeEach(() => { Object.assign(appUpdate, createAppUpdateMonitor('current')) }
 afterEach(() => { unmount?.(); unmount = undefined; document.body.innerHTML = ''; vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('global application update notice', () => {
+  it('refreshes only after a verified quote backup, and stays on the page on storage failure', async () => {
+    const unregister = registerQuotationUpdateRecovery({ scope: () => 'notice-test', capture: async () => ({ channels: ['special'] }) })
+    const host = document.createElement('div'); document.body.append(host)
+    const app = createApp(AppUpdateNotice); app.mount(host); unmount = () => app.unmount()
+    try {
+      appUpdate.requireUpdate(); await nextTick()
+      host.querySelector('button')!.click(); await nextTick()
+      const confirm = [...host.querySelectorAll('button')].find(button => button.textContent === '保存当前报价内容并刷新')!
+      const storage = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => { throw new Error('存储空间不足') })
+      confirm.click()
+      await vi.waitFor(() => expect(host.textContent).toContain('页面未刷新'))
+      expect(refreshUpdatedApplication).not.toHaveBeenCalled()
+      storage.mockRestore()
+      confirm.click()
+      await vi.waitFor(() => expect(refreshUpdatedApplication).toHaveBeenCalledOnce())
+      expect(readQuotationUpdateRecovery('notice-test')).toEqual({ channels: ['special'] })
+    } finally { unregister(); sessionStorage.clear() }
+  })
   it('keeps repeated network failures and recovery silent without clearing the surrounding form', async () => {
     const host = document.createElement('div'); document.body.append(host)
     const input = document.createElement('input'); input.value = '正在填写的报价'; document.body.append(input)

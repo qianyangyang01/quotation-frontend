@@ -53,6 +53,55 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('restores edited cells, quantities, hidden rows and ordering after remount while using new system prices', async () => {
+  mount([row(), row('two')])
+  await settle()
+  await input('第 1 行第 1 列美元价格', '25.50')
+  await input('第 1 行运输时效', '15-20 days')
+  const snapshot = await exposed.captureRecovery()
+  snapshot.edits.sizeRules = '黑色，S/M/L'; snapshot.edits.sizeRulesEnabled = true
+  snapshot.hiddenRows = [quoteSheetRowKey(row('two'))]
+  snapshot.rowOrder = [quoteSheetRowKey(row('two')), quoteSheetRowKey(row())]
+  snapshot.columns[0]!.unit = 'set'
+  app.unmount(); document.body.innerHTML = ''
+  const state = mount([{ ...row(), quote1: 15 }, { ...row('two'), quote1: 22 }])
+  await settle(); await exposed.restoreRecovery(snapshot); await settle()
+  const captured = exposed.capturePrices()
+  expect(captured.rows.find(row => row.key === quoteSheetRowKey(state.rows[0]!))).toMatchObject({ prices: [25.5, 16.35, 21.9, 30.85], systemPrices: [15, 16.35, 21.9, 30.85] })
+  expect(captured.rows.find(row => row.key === quoteSheetRowKey(state.rows[1]!))!.prices[0]).toBe(22)
+  expect(captured.hiddenRowKeys).toEqual(snapshot.hiddenRows)
+  expect(captured.rowOrderKeys).toEqual(snapshot.rowOrder)
+  expect(captured.sizeRules).toBe('黑色，S/M/L')
+  expect(captured.quantityUnits).toMatchObject({ '1': 'set' })
+  expect(exposed.captureSheet().rows[0]!.shippingTime).toBe('15-20 working days')
+})
+
+it('recalculates recovered averages and reports a missing member without substituting a same-name channel', async () => {
+  const first = row('one'), second = row('two')
+  mount([first, second]); await settle()
+  const snapshot = await exposed.captureRecovery()
+  snapshot.averages = [{ id: 'avg', mode: 'equal', display: 'summary', provider: 'Combined Shipping', shippingTime: '', quantities: [1,2,3,5],
+    members: [first, second].map(row => ({ optionId: quoteSheetRowKey(row), weight: 50, sourcePrices: [10.8,16.35,21.9,30.85] })),
+    systemPrices: [10.8,16.35,21.9,30.85], prices: [10.8,40,21.9,30.85] }]
+  app.unmount(); document.body.innerHTML = ''
+  mount([{ ...first, quote1: 20 }, { ...second, quote1: 30 }]); await settle()
+  await exposed.restoreRecovery(snapshot); await settle()
+  expect(exposed.capturePrices().averagePlans![0]).toMatchObject({ systemPrices: [25,16.35,21.9,30.85], prices: [25,40,21.9,30.85] })
+  app.unmount(); document.body.innerHTML = ''
+  mount([first, row('replacement-same-name')]); await settle()
+  await exposed.restoreRecovery(snapshot); await settle()
+  expect(exposed.capturePrices().averagePlans).toEqual([])
+  expect(document.body.textContent).toContain('来源渠道失效')
+})
+
+it('never restores temporary edits into a saved historical quotation', async () => {
+  mount(); await settle(); const snapshot = await exposed.captureRecovery()
+  app.unmount(); document.body.innerHTML = ''
+  mount([row()], undefined, undefined, true); await settle()
+  await expect(exposed.restoreRecovery(snapshot)).rejects.toThrow('历史报价不能')
+  expect(exposed.capturePrices().rows[0]!.prices[0]).toBe(10.8)
+})
+
 it('shows the missing quantity reason only in the editor, never in preview or customer exports', async () => {
   const reason = '3件含包材重量1.377kg，超过上限1kg'
   mount([{ ...row('italy', '云途'), country: 'IT', quote3: null, quantityMessages: { '3': reason } }])

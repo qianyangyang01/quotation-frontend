@@ -210,7 +210,8 @@ describe('quotation finance initialization for an employee', () => {
     await vi.waitFor(() => expect(state.savedQuoteRows.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL']))
     for (const selections of Object.values(state.modeSelections)) expect(selections.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL'])
     expect(JSON.stringify(state.draftPayload())).not.toContain('2::物流商::OLD')
-    expect(host.textContent).toContain('已按当前物流属性“香氛”移除')
+    expect(host.textContent).toContain('未获当前物流属性“香氛”授权')
+    expect(host.textContent).toContain('2::物流商::OLD')
     const good = state.savedQuoteRows[0]!
     expect(state.quoteSheetPrice(state.products[0]!, good, 5)).toEqual(expect.any(Number))
     expect(state.quoteSheetPrice(state.products[0]!, { ...good, channelKey:'2::物流商::OLD', ruleId:2 }, 5)).toBeNull()
