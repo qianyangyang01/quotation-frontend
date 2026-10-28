@@ -1,3 +1,6 @@
+import {notifyLogisticsPriceChange} from './logisticsPriceEvents'
+// Optional display notification must never alter the outcome of a business request.
+function withPriceDisplay<T>(result:T,notify:()=>void):T {try{notify()}catch{/* display only */}return result}
 import { api, downloadFile, idempotencyKey } from '@/services/http'
 import { resumableLogisticsUpload } from '@/services/logisticsResumableUpload'
 import type { ImportCoverage } from './logisticsImportCoverage'
@@ -77,26 +80,26 @@ export const logisticsRebuild = {
   required: (id: string) => api.get<RequiredChannels>(`${root}/datasets/${id}/required-channels`),
   saveRequired: (id: string, input: { revision: number; confirmed: boolean; channelIds: string[]; note: string }, key: string) => api.put<RequiredChannels>(`${root}/datasets/${id}/required-channels`, input, { 'Idempotency-Key': key }),
   billing: (id: string) => api.get<BillingAcceptance>(`${root}/versions/${id}/billing-acceptance`),
-  approveBilling: (id: string, input: unknown, key: string) => api.post<BillingAcceptance>(`${root}/versions/${id}/billing-acceptance`, input, key),
+  approveBilling: (id: string, input: unknown, key: string) => api.post<BillingAcceptance>(`${root}/versions/${id}/billing-acceptance`, input, key).then(result=>withPriceDisplay(result,()=>{if(result.pricePublished&&result.quoteReady)notifyLogisticsPriceChange('published','billing:'+id+':'+key)})),
   datasets: () => api.get<Dataset[]>(`${root}/datasets`),
   create: (name: string) => api.post<Dataset>(`${root}/datasets`, { name }, idempotencyKey('dataset')),
   workspace: (id: string) => api.get<Workspace>(`${root}/datasets/${id}/workspace`),
   prices: (id: string, filters: URLSearchParams) => api.get<PricePage>(`${root}/datasets/${id}/prices?${filters}`),
   batches: (id: string) => api.get<BatchSummary[]>(`${root}/datasets/${id}/imports`),
-  batch: (id: string) => api.get<Batch>(`${root}/imports/${id}`),
+  batch: (id: string) => api.get<Batch>(`${root}/imports/${id}`).then(result=>withPriceDisplay(result,()=>{if(result.status==='completed')notifyLogisticsPriceChange('imported',result.id+':'+result.payload.results.map(r=>r.versionId||'').sort().join(','))})),
   publishProgress: (id: string) => api.get<{ batchId: string; publishedVersionIds: string[] }>(`${root}/imports/${id}/publish-progress`),
   upload: resumableLogisticsUpload,
   retry: (id: string) => api.post<Batch>(`${root}/imports/${id}/retry`),
   version: (id: string) => api.get<Version>(`${root}/versions/${id}`),
   patchRows: (version: Version, changes: RowCorrection[], etaChanges: EtaCorrection[] = []) => api.patch<Version>(`${root}/versions/${version.id}/rows`, { fingerprint: version.fingerprint, changes, etaChanges, revalidate: true }),
-  review: (version: Version, note: string, removalConfirmed: boolean, reviewConfirmed: boolean, key: string, effectiveDateConfirmed = false) => api.post<Version>(`${root}/channels/${version.channelId}/versions/${version.id}/review`, { note, removalConfirmed, reviewConfirmed, effectiveDateConfirmed }, key),
-  publishProvider: (providerId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<BatchPublishResult>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, key),
-  publishReady: (batchId: string, selections: BatchPublishSelection[], note: string, key: string, coverage: { coverageToken: string; partialUpdateConfirmed: boolean }) => api.post<ReadyPublishResult>(`${root}/imports/${batchId}/publish-ready`, { selections, note, ...coverage }, key),
+  review: (version: Version, note: string, removalConfirmed: boolean, reviewConfirmed: boolean, key: string, effectiveDateConfirmed = false) => api.post<Version>(`${root}/channels/${version.channelId}/versions/${version.id}/review`, { note, removalConfirmed, reviewConfirmed, effectiveDateConfirmed }, key).then(result=>withPriceDisplay(result,()=>{if(result.status==='published')notifyLogisticsPriceChange('published',result.id)})),
+  publishProvider: (providerId: string, selections: BatchPublishSelection[], note: string, key: string) => api.post<BatchPublishResult>(`/logistics/providers/${providerId}/versions/publish-batch`, { selections, note }, key).then(result=>withPriceDisplay(result,()=>{if(result.count>0)notifyLogisticsPriceChange('published',result.published.map(v=>v.id).sort().join(','))})),
+  publishReady: (batchId: string, selections: BatchPublishSelection[], note: string, key: string, coverage: { coverageToken: string; partialUpdateConfirmed: boolean }) => api.post<ReadyPublishResult>(`${root}/imports/${batchId}/publish-ready`, { selections, note, ...coverage }, key).then(result=>withPriceDisplay(result,()=>{if(result.publishedCount>0)notifyLogisticsPriceChange('published',result.published.map(v=>v.versionId).sort().join(','))})),
   recompare: (v: Version) => api.post<Version>(`${root}/channels/${v.channelId}/versions/${v.id}/recompare`),
-  rollback: (v: Version, note: string) => api.post<Version>(`/logistics/channels/${v.channelId}/versions/${v.id}/rollback`, { note }, idempotencyKey('rollback')),
+  rollback: (v: Version, note: string) => api.post<Version>(`/logistics/channels/${v.channelId}/versions/${v.id}/rollback`, { note }, idempotencyKey('rollback')).then(result=>withPriceDisplay(result,()=>{if(result.status==='published')notifyLogisticsPriceChange('rollback',result.id)})),
   backup: (id: string) => api.post<{ sha256: string }>(`${root}/datasets/${id}/backup`),
   preview: (id: string, mappings: Mapping[] = []) => api.post<Cutover>(`${root}/datasets/${id}/preview`, { mappings: mappings.map(({ oldChannelId, newChannelId }) => ({ oldChannelId, newChannelId })) }),
-  activate: (id: string, preview: Cutover, note: string, unavailableConfirmed: boolean, key: string) => api.post<Cutover>(`${root}/datasets/${id}/activate`, { previewToken: preview.previewToken, mappings: preview.mappings.map(({ oldChannelId, newChannelId }) => ({ oldChannelId, newChannelId })), note, reviewConfirmed: true, unavailableConfirmed }, key),
+  activate: (id: string, preview: Cutover, note: string, unavailableConfirmed: boolean, key: string) => api.post<Cutover>(`${root}/datasets/${id}/activate`, { previewToken: preview.previewToken, mappings: preview.mappings.map(({ oldChannelId, newChannelId }) => ({ oldChannelId, newChannelId })), note, reviewConfirmed: true, unavailableConfirmed }, key).then(result=>withPriceDisplay(result,()=>{notifyLogisticsPriceChange('activated',key)})),
   exportPrices: (id: string, filters: URLSearchParams) => downloadFile(new URLSearchParams({ ...Object.fromEntries(filters), kind: 'prices', id })),
   exportAllChannels: (id: string) => downloadFile(new URLSearchParams({ kind: 'all-channel-prices', id })),
   exportDiff: (v: Version) => downloadFile(new URLSearchParams({ kind: 'version-diff', id: v.id })),

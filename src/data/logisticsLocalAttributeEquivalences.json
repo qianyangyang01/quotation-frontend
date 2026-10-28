@@ -1,0 +1,96 @@
+{
+  "scope": "仅本地主要渠道价格变动展示，不改变正式物流属性或发货资格",
+  "confirmedOn": "2026-10-28",
+  "entries": [
+    {
+      "tableAttribute": "普货/服装",
+      "channelId": "f6529d5a-3711-4252-88af-a7f4e0f44529",
+      "tableChannel": "顺丰商派普货",
+      "systemAttribute": "带电"
+    },
+    {
+      "tableAttribute": "普货/服装",
+      "channelId": "e499a482-56c2-4ca1-80da-630151581a89",
+      "tableChannel": "燕文化妆品",
+      "systemAttribute": "非液体化妆品"
+    },
+    {
+      "tableAttribute": "化妆品",
+      "channelId": "e499a482-56c2-4ca1-80da-630151581a89",
+      "tableChannel": "燕文化妆品",
+      "systemAttribute": "非液体化妆品"
+    },
+    {
+      "tableAttribute": "保健品",
+      "channelId": "1b4c81d9-dd36-4319-9ca4-36b065f277a3",
+      "tableChannel": "花海精选商派敏感",
+      "systemAttribute": "敏感货"
+    },
+    {
+      "tableAttribute": "保健品",
+      "channelId": "98c6ff5f-327e-49fb-adbb-e2b916141673",
+      "tableChannel": "花海全量精选敏感",
+      "systemAttribute": "敏感货"
+    },
+    {
+      "tableAttribute": "保健品",
+      "channelId": "2edba0fc-1283-408d-98f4-98eef22ae5c9",
+      "tableChannel": "云速递敏感",
+      "systemAttribute": "敏感货"
+    },
+    {
+      "tableAttribute": "保健品",
+      "channelId": "65862e6e-c8c0-4c22-94fa-75e81d73db99",
+      "tableChannel": "极通标准定制特货",
+      "systemAttribute": "带电"
+    },
+    {
+      "tableAttribute": "保健品",
+      "channelId": "fdae2d50-b072-4db4-8c74-0a09463909d1",
+      "tableChannel": "通邮标准类敏感",
+      "systemAttribute": "敏感货"
+    },
+    {
+      "tableAttribute": "带电",
+      "channelId": "e499a482-56c2-4ca1-80da-630151581a89",
+      "tableChannel": "燕文化妆品",
+      "systemAttribute": "非液体化妆品"
+    },
+    {
+      "tableAttribute": "化妆品",
+      "channelId": "c8e718d6-e014-47ed-af56-739e5053f9d7",
+      "tableChannel": "顺丰敏货",
+      "systemAttribute": "带电"
+    },
+    {
+      "tableAttribute": "保健品",
+      "channelId": "c4d12596-2387-4ede-bad8-3c8bbc04671e",
+      "tableChannel": "万邦特敏专线B",
+      "systemAttribute": "敏感货"
+    },
+    {
+      "tableAttribute": "普货/服装",
+      "channelId": "05ac59c6-e10d-41fc-8395-4833b842b15d",
+      "tableChannel": "顺丰CD",
+      "systemAttribute": "带电"
+    },
+    {
+      "tableAttribute": "化妆品",
+      "channelId": "3e9a3290-1adc-45c4-b7ea-265718836c29",
+      "tableChannel": "通邮挂号特货",
+      "systemAttribute": "带电"
+    },
+    {
+      "tableAttribute": "化妆品",
+      "channelId": "8f962038-db1d-4512-8f7d-2f257dbb7bce",
+      "tableChannel": "云途化妆品CHC",
+      "systemAttribute": "非液体化妆品"
+    },
+    {
+      "tableAttribute": "化妆品",
+      "channelId": "7523259b-31b6-4e9d-beae-f91e0bfaa095",
+      "tableChannel": "万邦化妆品",
+      "systemAttribute": "非液体化妆品"
+    }
+  ]
+}

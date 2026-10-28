@@ -35,6 +35,8 @@ class LogisticsPriceWorkflowPostgresTest {
     @DynamicPropertySource static void database(DynamicPropertyRegistry r){
         r.add("spring.datasource.url",postgres::getJdbcUrl);r.add("spring.datasource.username",postgres::getUsername);r.add("spring.datasource.password",postgres::getPassword);
     }
+    @Autowired LogisticsPriceHistoryWorker displayWorker;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean LogisticsPriceHistoryCalculator displayCalculator;
     @Autowired JdbcClient jdbc; @Autowired ObjectMapper mapper; @Autowired LogisticsSourceParser parser;
     @Autowired LogisticsService logistics; @Autowired LogisticsDatasetGuard guard; @Autowired PlatformTransactionManager manager;
     @Autowired LogisticsDraftReviewService review; @Autowired LogisticsBatchPublishService publish;
@@ -70,6 +72,12 @@ class LogisticsPriceWorkflowPostgresTest {
     }
 
     @Test void importFillEtaPublishAndUpdateKeepTheFinanceChannelAndUseNewBasePrice()throws Exception {
+        // The optional display is deliberately broken for this complete import/review/publication workflow.
+        doThrow(new IllegalStateException("injected display calculation failure")).when(displayCalculator).calculate(any());
+        var savedQuote=UUID.randomUUID();
+        jdbc.sql("insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at) values(:id,:no,'QA','quoted',cast(:payload as jsonb),3,now(),now())")
+            .param("id",savedQuote).param("no",savedQuote.toString()).param("payload",mapper.createObjectNode().put("internationalFreight",123.45).put("systemQuote",200).put("customerQuote",220).put("reviewStatus","approved").put("processingStatus","completed").put("dealStatus","won").toString()).update();
+        var savedBefore=jdbc.sql("select to_jsonb(q)::text from quotation_record q where id=:id").param("id",savedQuote).query(String.class).single();
         var objects=new HashMap<String,byte[]>();
         when(storage.putRawWithSha256(anyString(),any(InputStream.class),anyLong(),anyString())).thenAnswer(i->{
             var bytes=i.<InputStream>getArgument(1).readAllBytes();objects.put(i.getArgument(0),bytes);
@@ -117,6 +125,10 @@ class LogisticsPriceWorkflowPostgresTest {
         var repeated=upload(imports,20,"运输说明再次调整，不影响价格。");
         assertEquals("unchanged",repeated.path("payload").path("results").get(0).path("status").asText(),repeated.toString());
         assertEquals(3,jdbc.sql("select count(*) from logistics_version where channel_id=:id").param("id",UUID.fromString(channel)).query(Integer.class).single());
+        displayWorker.refresh(false).get(10,java.util.concurrent.TimeUnit.SECONDS);
+        verify(displayCalculator,atLeastOnce()).calculate(any());
+        assertEquals(savedBefore,jdbc.sql("select to_jsonb(q)::text from quotation_record q where id=:id").param("id",savedQuote).query(String.class).single());
+        assertEquals(22,total(secondId,1));assertTrue(guard.quoteReady(secondId));
     }
     private ObjectNode upload(LogisticsImportService imports,double rate,String notes)throws Exception {
         try(var book=new XSSFWorkbook();var out=new ByteArrayOutputStream()) {

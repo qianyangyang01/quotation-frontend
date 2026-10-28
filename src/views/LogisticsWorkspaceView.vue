@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
+import LogisticsPriceDisplayBoundary from '@/components/logistics/LogisticsPriceDisplayBoundary.vue'
 import { displayWeightGrams } from '@/services/quotationDecimal'
 import { coveragePublishInput, coveragePublishSummary } from '@/data/logisticsImportCoverage'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import LogisticsChannelStatus from '@/components/logistics/LogisticsChannelStatus.vue'
 import type { LogisticsChannelRecord } from '@/data/logisticsRepository'
@@ -23,6 +24,10 @@ import { invalidatePublishedLogisticsCache } from '@/data/publishedLogisticsRepo
 import { formatLogisticsDateTime, LOGISTICS_PROVIDER_CHANNEL_PAGE_SIZE, logisticsWorkspaceLoadPlan, matchesLogisticsProviderScope, paginateLogisticsProviderChannels } from '@/data/logisticsWorkspaceView'
 import { initializeLogisticsWorkspace } from '@/data/logisticsWorkspaceInitialization'
 import { logisticsRebuild as service, money, shown, weightLabel, completedBatchStage, diffKinds, aggregateChangeSummary, batchComparisonSummary, rangeImpact, changeImpact, logisticsAdjustmentStatus, logisticsUploadError, formatTransferBytes, buildPriceCorrections, buildEtaCorrections, type Dataset, type Workspace, type Batch, type Version, type PricePage, type Diff, type DiffChange, type DiffKind, type Price, type RowCorrection, type ReadyPublishResult, type Channel, type Provider } from '@/data/logisticsRebuild'
+
+const showPriceChanges = ref(false)
+const PriceChanges = defineAsyncComponent(() => import('./LogisticsPriceChangesLocalView.vue'))
+function closePriceChanges(mode: 'base' | 'rules') { showPriceChanges.value = false; selectWorkspaceMode(mode) }
 
 const companyDirectory = ref<CompanyDirectory | null>(null)
 const route = useRoute(), router = useRouter()
@@ -546,7 +551,10 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
 </script>
 
 <template>
-  <div class="logistics-page">
+  <LogisticsPriceDisplayBoundary v-if="showPriceChanges" @workspace="closePriceChanges">
+    <PriceChanges source="system" @workspace="closePriceChanges" />
+  </LogisticsPriceDisplayBoundary>
+  <div v-else class="logistics-page">
     <main>
       <header class="milano-heading"><div><p>LOGISTICS CONFIGURATION</p><h1>物流规则</h1><span>维护物流渠道、国家区域、重量限制与分段运费，供米莱诺报价计算直接调用。</span></div></header>
       <p v-if="error" role="alert" class="notice error">{{ error }}</p><p v-if="message" role="status" class="notice success">{{ message }}</p>
@@ -554,7 +562,7 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); cancelActiveUpload
       <p v-if="archived" class="notice">这里是归档旧库，只能查阅和导出；不参与当前报价，不会被新导入自动恢复。</p>
       <CompanyChannelDirectory @changed="companyDirectory = $event" @select-dataset="openCompanyDataset" />
       <p v-if="selected?.status === 'preparing' && !companyDirectory?.state?.paused" class="notice">新库准备期间不影响当前报价。确认整体切换后，当前物流商和渠道列表才会全部换新。</p>
-      <nav class="workspace-switch" aria-label="物流工作区"><button :class="{ active: workspaceMode === 'base' }" @click="selectWorkspaceMode('base')">基础资料设置</button><button :class="{ active: workspaceMode === 'rules' }" @click="selectWorkspaceMode('rules')">运费规则列表</button></nav>
+      <nav class="workspace-switch" aria-label="物流工作区"><button :class="{ active: workspaceMode === 'base' }" @click="selectWorkspaceMode('base')">基础资料设置</button><button :class="{ active: workspaceMode === 'rules' }" @click="selectWorkspaceMode('rules')">运费规则列表</button><button @click="showPriceChanges = true">渠道价格变动</button></nav>
       <input ref="logisticsFileInput" class="hidden-file" aria-label="物流报价文件" type="file" accept=".xls,.xlsx" multiple :disabled="busy || !selected || archived" @change="chooseFiles">
 
       <section v-if="tab === 'prices'" class="rule-workspace-card">
