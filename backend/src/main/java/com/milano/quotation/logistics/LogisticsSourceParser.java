@@ -879,6 +879,7 @@ public class LogisticsSourceParser {
             var canonical=name.isBlank()?byCode:name;
             var target=selected(source,"捷易通达",canonical,JYTD_PRODUCTS.get(canonical),r,channels);
             if(target==null)continue;
+            if(source.scope.unrestricted())target.put("logisticsAttribute","带电、化妆品、保健品");
             for(var field:required) {
                 var cell=source.cell(r,headers.get(field));
                 if(cell!=null&&cell.getCellType()==CellType.FORMULA)

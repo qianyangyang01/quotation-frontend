@@ -62,6 +62,7 @@ class JieyitongdaSourceParserTest {
         assertEquals(2,result.path("channels").size(),result.toPrettyString());
         for(var c:result.path("channels")) {
             boolean door=c.path("channelName").asText().contains("到门");
+            assertEquals("带电、化妆品、保健品",c.path("logisticsAttribute").asText());
             assertTrue(c.path("quoteReady").asBoolean(),c.toPrettyString());assertEquals(0,c.path("errors").asInt(),c.toPrettyString());
             assertEquals(3,c.path("rows").size());assertEquals("捷易通达",c.path("providerName").asText());
             var ranges=door?new double[][]{{.1,2,50},{2,5,50},{5,20,65}}:new double[][]{{.1,.5,18},{.5,2,22},{2,5,22}};

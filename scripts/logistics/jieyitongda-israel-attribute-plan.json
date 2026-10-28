@@ -1,0 +1,9 @@
+{
+  "provider": "捷易通达",
+  "countries": ["以色列"],
+  "source": "2026-10-28 用户确认：这两个渠道均可发带电、化妆品、保健品",
+  "channels": [
+    { "name": "以色列敏感", "productCode": "1961", "attributes": ["带电", "化妆品", "保健品"] },
+    { "name": "以色列敏感(到门)", "productCode": "2001", "attributes": ["带电", "化妆品", "保健品"] }
+  ]
+}

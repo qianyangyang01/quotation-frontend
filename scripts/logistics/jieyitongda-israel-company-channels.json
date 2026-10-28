@@ -7,7 +7,7 @@
       "channelName": "以色列敏感",
       "aliases": [],
       "productCodes": ["1961"],
-      "logisticsAttribute": "敏感",
+      "logisticsAttribute": "带电、化妆品、保健品",
       "enabled": true
     },
     {
@@ -17,7 +17,7 @@
       "channelName": "以色列敏感(到门)",
       "aliases": ["以色列敏感（到门）"],
       "productCodes": ["2001"],
-      "logisticsAttribute": "敏感",
+      "logisticsAttribute": "带电、化妆品、保健品",
       "enabled": true
     }
   ]

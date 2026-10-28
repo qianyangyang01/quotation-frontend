@@ -7,10 +7,11 @@ import { normalizeLogisticsPriceRow } from './logisticsRepository'
 const evidence = 'backend/target/jieyitongda/parsed.json'
 it.skipIf(!existsSync(evidence))('quotes the six original Jieyitongda tariffs through the frontend without crossing products or rounding bands', () => {
   const result = JSON.parse(readFileSync(evidence, 'utf8')) as {
-    channels: { channelName: string; rows: Parameters<typeof normalizeLogisticsPriceRow>[0][] }[]
+    channels: { channelName: string; logisticsAttribute: string; rows: Parameters<typeof normalizeLogisticsPriceRow>[0][] }[]
   }
   expect(result.channels).toHaveLength(2)
   for (const channel of result.channels) {
+    expect(channel.logisticsAttribute).toBe('带电、化妆品、保健品')
     const door = channel.channelName.includes('到门')
     const rule: LogisticsRule = { id: 1, name: channel.channelName, englishName: '', type: '专线', currency: 'CNY',
       published: '', status: '启用', dates: '', users: '', relations: [], phoneRequired: false,
@@ -22,8 +23,10 @@ it.skipIf(!existsSync(evidence))('quotes the six original Jieyitongda tariffs th
       [2.0001, 2.1, door ? 184.4 : 156.4], [4.9991, 5, door ? 370 : 342], [5, 5, door ? 370 : 342],
     ]
     for (const [weight, charged, total] of samples) {
-      expect(calculateLogisticsFee(rule, 'IL', weight!), `${channel.channelName}/${weight}`)
-        .toMatchObject({ chargeWeightKg: charged, total })
+      for (const attribute of ['带电', '化妆品', '保健品']) {
+        expect(calculateLogisticsFee(rule, 'IL', weight!, [attribute]), `${channel.channelName}/${attribute}/${weight}`)
+          .toMatchObject({ chargeWeightKg: charged, total })
+      }
     }
     if (door) {
       expect(calculateLogisticsFee(rule, 'IL', 5.0001)).toMatchObject({ chargeWeightKg: 5.1, total: 391.4 })
