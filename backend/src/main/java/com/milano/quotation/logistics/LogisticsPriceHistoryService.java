@@ -90,7 +90,7 @@ public class LogisticsPriceHistoryService {
                   (select b.channel_id from logistics_company_binding b join logistics_company_channel d on d.id=b.company_channel_id where d.enabled))) visible
               from logistics_channel c join logistics_provider p on p.id=c.provider_id
               where c.dataset_id=logistics_active_dataset() and c.archived_at is null
-            ), state as (
+            ), state as materialized (
               select jsonb_build_object('dataset',logistics_active_dataset(),
                 'pendingVersions',(select count(*) from logistics_version v join channels c on c.id=v.channel_id
                   left join logistics_price_history_projection h on h.version_id=v.id and h.rows_fingerprint=v.rows_fingerprint and h.engine_version=:engine
