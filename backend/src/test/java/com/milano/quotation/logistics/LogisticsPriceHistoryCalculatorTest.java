@@ -8,6 +8,17 @@ import static org.junit.jupiter.api.Assertions.*;
 class LogisticsPriceHistoryCalculatorTest {
     final JsonMapper mapper=JsonMapper.builder().build();
     final LogisticsPriceHistoryCalculator calculator=new LogisticsPriceHistoryCalculator(mapper,new LogisticsBillingEngine(mapper));
+    @Test void calculatesOtherPublishedDestinationsWithoutRestrictingToPriorityCountries(){
+        var rows=mapper.createArrayNode();
+        for(var country:java.util.List.of("NZ","JP","ZA","US"))rows.addObject().put("countryCode",country).put("weightFromKg",0).put("weightToKg",30).put("pricePerKg",20).put("registrationFee",5).put("pricingModel","per-kg");
+        var result=calculator.calculate(rows);
+        for(var country:java.util.List.of("NZ","JP","ZA","US")){
+            assertEquals(15,result.path(country+"|0.5").path("全国统一").path("price").asDouble());
+            assertEquals(25,result.path(country+"|1").path("全国统一").path("price").asDouble());
+            assertEquals(45,result.path(country+"|2").path("全国统一").path("price").asDouble());
+        }
+        assertFalse(result.has("GB|1"));
+    }
     @Test void computesThreeWeightsAndSeparateRegionsWithoutChangingSource(){
         var rows=mapper.createArrayNode();
         rows.addObject().put("countryCode","AU").put("zoneName","1区").put("weightFromKg",0).put("weightToKg",30).put("pricePerKg",20).put("registrationFee",5).put("minChargeWeightKg",1).put("pricingModel","per-kg");

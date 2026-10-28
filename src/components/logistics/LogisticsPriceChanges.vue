@@ -3,7 +3,7 @@ import {computed,ref,watch,onMounted,onUnmounted} from 'vue'
 import {realChannelHistories,comparedVersions,recordedYearLow,recordedPeriod,publicationTime,publicationDate,priorityPriceCountries,type RealPriceSnapshot,type ChannelPriceHistory,type HistoryPoint} from '@/data/logisticsRealPriceHistory'
 import catalog from '@/data/logisticsPriceCountryCatalog.json'
 import {channelSearchTerms,searchCountryChannels,type SearchableChannelHistory} from '@/data/logisticsChannelSearch'
-import {attributeChannelHistories,priceHistoryAttributes,majorChannelCategories} from '@/data/logisticsMajorChannelHistory'
+import {attributeChannelHistories,priceHistoryAttributes,majorChannelCategories,hasWorkbookCountry} from '@/data/logisticsMajorChannelHistory'
 import FinanceCountrySelect from '@/components/finance/FinanceCountrySelect.vue'
 const props=defineProps<{snapshot:RealPriceSnapshot;refreshing:boolean;error:string;checkedAt?:string}>()
 const emit=defineEmits<{workspace:[mode:'base'|'rules'];refresh:[]}>()
@@ -12,7 +12,7 @@ const countryOptions=catalog.countries.map(c=>({country:c.name,code:c.code,stage
 const country=ref('德国'),attribute=ref('普货/服装'),weight=ref(1),comparison=ref('currentPrevious'),search=ref(''),page=ref(1),detailsOpen=ref(false),selected=ref('')
 const countryCode=computed(()=>catalog.countries.find(c=>c.name===country.value)?.code||'')
 const attributes=computed(()=>priceHistoryAttributes(props.snapshot))
-const isMajorAttribute=computed(()=>majorChannelCategories.includes(attribute.value))
+const isMajorAttribute=computed(()=>hasWorkbookCountry(countryCode.value)&&majorChannelCategories.includes(attribute.value))
 watch(attributes,values=>{if(!values.includes(attribute.value))attribute.value=values[0]!},{immediate:true})
 const shortlist=computed(()=>attributeChannelHistories(props.snapshot,countryCode.value,weight.value,attribute.value))
 const isSearching=computed(()=>channelSearchTerms(search.value).length>0)
@@ -81,7 +81,7 @@ onUnmounted(()=>window.removeEventListener('keydown',closeOnEscape))
   <div class="detail-context">当前比较：<b>{{comparisonLabel}}</b><span>日期为系统发布时间，各渠道独立取最近三版</span></div>
   <table class="detail-table"><thead><tr><th>渠道 / 分区</th><th>前两版</th><th>上一版</th><th>本版</th><th>涨跌 / 幅度</th><th class="annual-low-text">年内已记录最低<small>首次记录日期</small></th><th>区间均价<small>较期初平均涨跌</small></th></tr></thead><tbody><tr v-for="r in detailRows" :key="r.key"><td :title="'系统渠道：'+r.channel.name">{{r.watchName}}<small>{{r.channel.provider}} · {{r.region}}</small><small>{{r.channel.name}}</small><small v-if="r.candidateFor?.length">待确认对应：{{r.candidateFor.join('、')}}</small><small>系统属性：{{r.channel.attribute}}<template v-if="r.temporaryEquivalent"> → {{r.tableAttribute}}（暂按等同）</template></small></td><td v-for="(v,i) in [compare(r).older,compare(r).previous,compare(r).current]" :key="i" :class="{'current':i===2,'annual-low-text':isLow(r,v)}" :title="v?.reason||v?.file">{{f(v?.price)}}<small v-if="v">V{{v.number}} · {{v.date}}</small><small v-else>无此历史版本</small><small v-if="v?.price==null&&v">{{v.reason}}</small></td><td :class="tone(compare(r).change)"><b>{{signed(compare(r).change)}}</b><small>{{pct(compare(r).percent)}}</small></td><td class="annual-cell"><b>{{f(low(r)?.price)}}</b><small>{{low(r)?.date||'暂无记录'}}</small></td><td class="period-cell"><b>{{period(r)?f(period(r)!.avg):'历史不足'}}</b><small>{{period(r)?signed(period(r)!.change)+' / '+pct(period(r)!.percent):'缺少期初或连续记录'}}</small></td></tr></tbody></table>
   <details v-for="r in detailRows" :key="r.key" class="history-records" :open="!!selected"><summary>{{r.channel.name}} · {{r.region}} · 查看全部 {{r.history.length}} 个已发布版本及来源</summary><table><thead><tr><th>版本 / 发布时间</th><th>每票运费</th><th>计费重 / kg</th><th>计价单价 / 挂号费</th><th>原始价格文件</th></tr></thead><tbody><tr v-for="v in [...r.history].reverse()" :key="v.id"><td>V{{v.number}} · {{publicationTime(v.timestamp)}}<small v-if="v.id===r.channel.current">当前版本</small></td><td :class="{'annual-low-text':isLow(r,v)}">{{f(v.price)}}<small v-if="v.price==null">{{v.reason}}</small></td><td>{{f(v.chargeWeight)}}</td><td>{{v.model==='per-piece-500g'?f(v.intervalPrice)+' / 票':f(v.rate)+' / kg'}} · {{f(v.fee)}}</td><td>{{v.file}}</td></tr></tbody></table></details>
-  <div class="detail-note">物流属性优先排列原表的普货/服装、化妆品、保健品、带电，后接其他系统属性。选择表内属性时按原表顺序展示重点渠道；选择其他属性时按系统实际属性展示对应渠道；输入搜索词后查询当前国家全部已启用渠道，涵盖全部物流属性，匹配的表内重点渠道优先。表外渠道显示系统原属性，不套用表内临时等同关系。物流属性沿用原表的普货/服装、化妆品、保健品、带电，同一渠道可分别出现在原表列出的各属性下，已确认的属性差异在对应表内渠道上暂按等同处理，仅用于本地展示，系统原属性保留。数据来自当前物流库留存的已发布 / 已替代版本，不含待审草稿。公斤价、挂号费、最低计费重及重量段按系统计费规则计算；图表各分区分别展示。财务折扣、税费等不在此比较口径内。<br/>日期采用北京时间的系统发布时间，不把原文件日期当作生效日；版本历史不证明发布前价格或整年价格已完整。年内已记录最低只在有记录的版本中比较。</div>
+  <div class="detail-note">物流属性优先排列原表的普货/服装、化妆品、保健品、带电，后接其他系统属性。原表有渠道名单的国家按原表顺序展示重点渠道，其他国家按系统物流属性展示渠道；选择其他属性时按系统实际属性展示对应渠道；输入搜索词后查询当前国家全部已启用渠道，涵盖全部物流属性，匹配的表内重点渠道优先。表外渠道显示系统原属性，不套用表内临时等同关系。物流属性沿用原表的普货/服装、化妆品、保健品、带电，同一渠道可分别出现在原表列出的各属性下，已确认的属性差异在对应表内渠道上暂按等同处理，仅用于价格展示，系统原属性保留。数据来自当前物流库留存的已发布 / 已替代版本，不含待审草稿。公斤价、挂号费、最低计费重及重量段按系统计费规则计算；图表各分区分别展示。财务折扣、税费等不在此比较口径内。<br/>日期采用北京时间的系统发布时间，不把原文件日期当作生效日；版本历史不证明发布前价格或整年价格已完整。年内已记录最低只在有记录的版本中比较。</div>
  </section>
 </div>
 </template>

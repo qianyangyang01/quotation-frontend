@@ -12,10 +12,16 @@ export function priceHistoryAttributes(snapshot:RealPriceSnapshot) {
   return [...new Set([...majorChannelCategories,...selectableLogisticsAttributes(snapshot.channels.flatMap(c=>systemAttributes(c.attribute)))])]
 }
 
-/** Workbook groups keep their shortlist; additional system attributes use their actual channel membership. */
+export function hasWorkbookCountry(countryCode:string) {
+  const name=priorityPriceCountries.find(([code])=>code===countryCode)?.[1]
+  return watchlist.rows.some(row=>row.country===name)
+}
+
+/** Listed destinations keep the workbook shortlist; others use actual system membership. */
 export function attributeChannelHistories(snapshot:RealPriceSnapshot,country:string,weight:number,attribute:string) {
-  if(majorChannelCategories.includes(attribute))return majorChannelHistories(snapshot,country,weight,attribute)
-  const channels=snapshot.channels.filter(c=>systemAttributes(c.attribute).includes(attribute))
+  if(hasWorkbookCountry(country)&&majorChannelCategories.includes(attribute))return majorChannelHistories(snapshot,country,weight,attribute)
+  const matches=attribute==='普货/服装'?['普货','服装']:[attribute]
+  const channels=snapshot.channels.filter(c=>systemAttributes(c.attribute).some(a=>matches.includes(a)))
   const rows:MajorChannelHistory[]=realChannelHistories({...snapshot,channels},country,weight).map(r=>({...r,watchName:r.channel.name,tableAttribute:attribute,temporaryEquivalent:false}))
   return {rows,pending:[],listedCount:0}
 }

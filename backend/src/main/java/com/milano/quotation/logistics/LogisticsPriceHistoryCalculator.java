@@ -12,8 +12,7 @@ import java.util.List;
 /** A publication-time projection of the existing billing engine, not a second pricing formula. */
 @Component
 public class LogisticsPriceHistoryCalculator {
-    public static final String VERSION=LogisticsBillingEngine.VERSION+":price-history-1";
-    public static final List<String> COUNTRIES=List.of("US","CA","GB","DE","FR","ES","IT","NL","BE","AU");
+    public static final String VERSION=LogisticsBillingEngine.VERSION+":price-history-2";
     private final ObjectMapper mapper;
     private final LogisticsBillingEngine billing;
     public LogisticsPriceHistoryCalculator(ObjectMapper mapper,LogisticsBillingEngine billing){this.mapper=mapper;this.billing=billing;}
@@ -21,14 +20,20 @@ public class LogisticsPriceHistoryCalculator {
         if(rows==null||!rows.isArray()||rows.size()>50000)throw new IllegalArgumentException("Invalid or oversized price display source");
         for(var row:rows)if(!row.isObject())throw new IllegalArgumentException("Invalid price display row");
         var result=mapper.createObjectNode();
-        for(var country:COUNTRIES){
-            var countryRows=mapper.createArrayNode();var regions=new LinkedHashSet<String>();
-            for(var row:rows)if(country.equals(row.path("countryCode").asText())&&!row.path("zoneExclude").asBoolean()){
-                countryRows.add(row);var zone=row.path("zoneName").asText().trim();
+        var grouped=new java.util.LinkedHashMap<String,tools.jackson.databind.node.ArrayNode>();
+        for(var row:rows){
+            var country=row.path("countryCode").asText();
+            if(country.matches("[A-Z]{2}")&&!row.path("zoneExclude").asBoolean())grouped.computeIfAbsent(country,key->mapper.createArrayNode()).add(row);
+        }
+        int regionCount=0;
+        for(var entry:grouped.entrySet()){
+            var country=entry.getKey();var countryRows=entry.getValue();var regions=new LinkedHashSet<String>();
+            for(var row:countryRows){
+                var zone=row.path("zoneName").asText().trim();
                 if(zone.isEmpty())regions.add("全国统一");else regions.addAll(LogisticsBillingEngine.splitZones(zone));
             }
-            if(countryRows.isEmpty())continue;
-            if(regions.size()>1000)throw new IllegalArgumentException("Too many display regions");
+            regionCount+=regions.size();
+            if(regionCount>1000)throw new IllegalArgumentException("Too many display regions");
             for(var weight:List.of("0.5","1","2")){
                 var prices=result.putObject(country+"|"+weight);
                 for(var region:regions){

@@ -10,6 +10,25 @@ function snapshot(): RealPriceSnapshot {
   return {capturedAt:'2026-10-27T08:00:00Z',dataset:'test',channels,versions:channels.map(c=>({id:c.current,channel:c.id,number:1,status:'published',publishedAt:'2026-10-01T01:00:00Z',fileName:'test',rows:['US','DE','FR','AU'].map(countryCode=>({countryCode,areaName:countryCode,zoneName:'',pricePerKg:40,registrationFee:10,weightFromKg:0,weightToKg:30,minChargeWeightKg:0,startWeightKg:0,firstWeightKg:0,firstWeightPrice:0,nextWeightKg:0,nextWeightPrice:0,intervalPrice:0,surcharge:0,pricingModel:'per-kg'} as LogisticsPriceRow))}))}
 }
 describe('workbook main channels only',()=>{
+ it('shows actual routes for destinations absent from the workbook, including priority Australia',()=>{
+  const s=snapshot(),channel=s.channels.find(c=>c.id==='unlisted')!
+  channel.attribute='普货'
+  s.versions.find(v=>v.channel==='unlisted')!.rows.push({...s.versions[0]!.rows[0]!,countryCode:'NZ',areaName:'新西兰'})
+  for(const country of ['NZ','AU']){
+   expect(attributeChannelHistories(s,country,1,'普货/服装').rows.map(r=>r.channel.id)).toContain('unlisted')
+   expect(attributeChannelHistories(s,country,1,'普货').rows.map(r=>r.channel.id)).toContain('unlisted')
+  }
+  channel.attribute='带电'
+  expect(attributeChannelHistories(s,'NZ',1,'带电').rows.map(r=>r.channel.id)).toContain('unlisted')
+  expect(attributeChannelHistories(s,'NZ',1,'普货/服装').rows).toEqual([])
+  expect(attributeChannelHistories(s,'NZ',1,'以色列到门').rows).toEqual([])
+  const reviewed=s.channels.find(c=>c.id===mapping.bindings['通邮挂号特货'].id)!
+  reviewed.attribute='带电'
+  s.versions.find(v=>v.channel===reviewed.id)!.rows.push({...s.versions[0]!.rows[0]!,countryCode:'NZ',areaName:'新西兰'})
+  expect(attributeChannelHistories(s,'NZ',1,'带电').rows.some(r=>r.channel.id===reviewed.id)).toBe(true)
+  expect(attributeChannelHistories(s,'NZ',1,'化妆品').rows).toEqual([])
+  expect(attributeChannelHistories(s,'DE',1,'带电').rows.some(r=>r.channel.id==='unlisted')).toBe(false)
+ })
  it('puts workbook attributes first and retains other system attributes without duplicates',()=>{
   const s=snapshot();s.channels[0]!.attribute='敏感货';s.channels[1]!.attribute='纯电池'
   const options=priceHistoryAttributes(s)
