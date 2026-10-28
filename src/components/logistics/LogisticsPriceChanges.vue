@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import {computed,ref,watch,onMounted,onUnmounted} from 'vue'
+import {computed,ref,reactive,toRefs,watch,onMounted,onUnmounted} from 'vue'
+import type {PriceHistoryFilters} from '@/data/logisticsPriceSession'
 import {realChannelHistories,comparedVersions,recordedYearLow,recordedPeriod,publicationTime,publicationDate,priorityPriceCountries,type RealPriceSnapshot,type ChannelPriceHistory,type HistoryPoint} from '@/data/logisticsRealPriceHistory'
 import catalog from '@/data/logisticsPriceCountryCatalog.json'
 import {channelSearchTerms,searchCountryChannels,type SearchableChannelHistory} from '@/data/logisticsChannelSearch'
 import {attributeChannelHistories,priceHistoryAttributes,majorChannelCategories,hasWorkbookCountry} from '@/data/logisticsMajorChannelHistory'
 import FinanceCountrySelect from '@/components/finance/FinanceCountrySelect.vue'
-const props=defineProps<{snapshot:RealPriceSnapshot;refreshing:boolean;error:string;checkedAt?:string}>()
+const props=defineProps<{snapshot:RealPriceSnapshot;refreshing:boolean;error:string;checkedAt?:string;state?:PriceHistoryFilters}>()
 const emit=defineEmits<{workspace:[mode:'base'|'rules'];refresh:[]}>()
 const priority=new Map<string,number>(priorityPriceCountries.map(([code],i)=>[code,i]))
 const countryOptions=catalog.countries.map(c=>({country:c.name,code:c.code,stageLabel:priority.has(c.code)?'重点国家':'其他国家/地区'})).sort((a,b)=>(priority.get(a.code)??999)-(priority.get(b.code)??999)||a.country.localeCompare(b.country,'zh-CN'))
-const country=ref('德国'),attribute=ref('普货/服装'),weight=ref(1),comparison=ref('currentPrevious'),search=ref(''),page=ref(1),detailsOpen=ref(false),selected=ref('')
+const {country,attribute,weight,comparison,search,page}=toRefs(reactive(props.state??{country:'德国',attribute:'普货/服装',weight:1,comparison:'currentPrevious',search:'',page:1}))
+const detailsOpen=ref(false),selected=ref('')
 const countryCode=computed(()=>catalog.countries.find(c=>c.name===country.value)?.code||'')
 const attributes=computed(()=>priceHistoryAttributes(props.snapshot))
 const isMajorAttribute=computed(()=>hasWorkbookCountry(countryCode.value)&&majorChannelCategories.includes(attribute.value))
@@ -56,7 +58,7 @@ onUnmounted(()=>window.removeEventListener('keydown',closeOnEscape))
   <aside v-if="!isSearching&&isMajorAttribute&&shortlist.pending.length" class="watch-pending" aria-label="渠道对应说明"><b>说明</b><p v-for="item in shortlist.pending" :key="item.cell">{{item.name}}：{{item.reason}}。</p></aside>
   <div class="chart-grid" v-if="visibleRows.length">
    <article class="channel-card" v-for="r in visibleRows" :key="r.key">
-    <div class="card-heading"><div><h3 :title="'系统渠道：'+r.channel.name">{{r.candidateFor?.length?r.channel.name:r.watchName}}</h3><small class="channel-meta">{{r.tableAttribute}} · {{r.channel.provider}} · {{r.region}}<span v-if="isSearching&&r.isMajor" class="major-tag">重点</span></small><small v-if="r.candidateFor?.length" class="candidate-note">待确认对应：{{r.candidateFor.join('、')}}</small></div><span v-if="low(r)" class="annual-low-badge">年内已记录最低 <b>¥ {{f(low(r)!.price)}}</b><small>{{low(r)!.date}} 首次记录</small></span></div>
+    <div class="card-heading"><div><h3 :title="'系统渠道：'+r.channel.name">{{r.candidateFor?.length?r.channel.name:r.watchName}}</h3><small class="channel-meta">{{r.tableAttribute}} · {{r.channel.provider}} · {{r.region}}<span v-if="isSearching&&r.isMajor" class="major-tag">重点</span></small><small v-if="r.candidateFor?.length" class="candidate-note">待确认对应：{{r.candidateFor.join('、')}}</small></div></div>
     <div class="card-price"><div><strong :class="{'annual-low-text':isLow(r,r.current)}"><small v-if="r.current?.price!=null">¥</small> {{f(r.current?.price)}}</strong><span>{{r.current?.price==null?r.current?.reason:'本版 V'+r.current.number+' · '+r.current.date}}</span></div><div class="card-change" :class="tone(compare(r).change)"><b>{{compare(r).change==null?'暂不可比':compare(r).change===0?'不变':signed(compare(r).change)+' 元'}}</b><span>{{pct(compare(r).percent)}} · {{comparisonLabel}}</span></div></div>
     <svg class="channel-chart" viewBox="0 0 454 147" role="img" :aria-label="r.channel.name+' '+r.region+'最近五个已发布版本的价格趋势'">
       <g v-for="v in [extent(r).lo,(extent(r).lo+extent(r).hi)/2,extent(r).hi]" :key="v"><line x1="40" x2="416" :y1="cy(r,v)" :y2="cy(r,v)" stroke="#e9edf1"/><text x="28" :y="cy(r,v)+4" text-anchor="end" class="axis">{{v.toFixed(1)}}</text></g>
@@ -66,6 +68,7 @@ onUnmounted(()=>window.removeEventListener('keydown',closeOnEscape))
        <text v-else :x="cx(r,i)" y="66" text-anchor="middle" class="date">无适用价</text><text :x="cx(r,i)" y="135" text-anchor="middle" class="date">{{v.date.slice(5).replace('-','/')}} · V{{v.number}}</text>
       </g>
     </svg>
+    <div v-if="low(r)" class="low-row"><span>年内已记录最低 <b>¥ {{f(low(r)!.price)}}</b></span><small>{{low(r)!.date}} 首次记录</small></div>
     <div class="period-summary"><span v-if="period(r)">区间均价 <b>¥ {{f(period(r)!.avg)}}</b> · 较期初 {{signed(period(r)!.change)}}（{{pct(period(r)!.percent)}}）</span><span v-else title="2025/01/01—2026/10/01，缺少期初基准价或连续历史，不能计算完整均价">区间均价 <span class="muted">历史不足</span></span><button class="card-detail" @click="openDetails(r.key)">明细 ↗</button></div>
    </article>
   </div>

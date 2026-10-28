@@ -1,0 +1,80 @@
+.price-history-view.price-history-view .charts-screen main{max-width:1480px;padding:14px 28px 18px}
+.price-history-view.price-history-view .workspace-switch{margin-bottom:14px;background:#e8edf1;gap:6px;padding:5px}
+.price-history-view.price-history-view .workspace-switch button{height:40px;font-size:14px;min-width:170px}
+.price-history-view.price-history-view .chart-workspace{box-shadow:none;border-color:#dce3e9}
+.price-history-view.price-history-view .chart-title{padding:20px 24px;gap:20px}
+.price-history-view.price-history-view .chart-title h2{font-size:24px;margin-bottom:7px;letter-spacing:-.4px}
+.price-history-view.price-history-view .chart-title p{font-size:14px;color:#5c7080;line-height:1.5}
+.price-history-view.price-history-view .real-badge{font-size:12px;color:#266a55;background:#eef6f2;vertical-align:middle}
+.price-history-view.price-history-view .head-actions{gap:12px}
+.price-history-view.price-history-view .auto-update{font-size:13px;color:#466c59}
+.price-history-view.price-history-view .auto-update small{font-size:12px;color:#627483}
+.price-history-view.price-history-view .refresh-button{font-size:14px;padding:10px 14px;min-height:40px;color:#435c70}
+.price-history-view.price-history-view .detail-button{font-size:14px!important;min-height:40px;padding:10px 14px!important}
+.price-history-view.price-history-view .chart-filters{display:grid;grid-template-columns:170px 180px 100px 180px minmax(190px,1fr);align-items:end;gap:16px;padding:16px 24px;background:#fafbfd}
+.price-history-view.price-history-view .chart-filters label,.price-history-view.price-history-view .trend-country-field{display:flex;flex-direction:column;align-items:stretch;gap:7px;font-size:13px;color:#536777}
+.price-history-view.price-history-view .trend-country-field .finance-country-select{width:100%}
+.price-history-view.price-history-view .chart-filters select,.price-history-view.price-history-view .country-trigger,.price-history-view.price-history-view .channel-search-field .channel-search{width:100%;min-height:40px;font-size:15px;padding:8px 12px;background:#fff;color:#243d50;border:1px solid #ccd7e0;border-radius:7px;font-weight:400}
+.price-history-view.price-history-view .channel-search-field:before{content:'渠道搜索';position:absolute;bottom:47px;font-size:13px;color:#536777}
+.price-history-view.price-history-view .results-bar{padding:14px 24px 8px;color:#425f73;font-size:14px;align-items:center;gap:12px}
+.price-history-view.price-history-view .results-bar small{display:none}
+.price-history-view.price-history-view .counts{font-size:14px;gap:16px;white-space:nowrap;color:#526979}
+.price-history-view.price-history-view .watch-pending{padding:0 24px 10px;font-size:12px;color:#596e7e;line-height:1.5;border-bottom:0}
+.price-history-view.price-history-view .watch-pending b{display:none}
+.price-history-view.price-history-view .watch-pending p{margin:0}
+.price-history-view.price-history-view .chart-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:12px 20px 20px;background:#f6f8fa}
+.price-history-view.price-history-view .channel-card{padding:18px 18px 10px;border-color:#dbe3e9;box-shadow:0 2px 4px #20374b03;display:flex;flex-direction:column}
+.price-history-view.price-history-view .card-heading{min-height:47px;display:block}
+.price-history-view.price-history-view .card-heading h3{font-size:17px;line-height:1.45;font-weight:650;white-space:normal;overflow:visible;min-height:25px;color:#213d52}
+.price-history-view.price-history-view .channel-meta{font-size:12px;line-height:1.5;color:#5d7180;margin-top:4px}
+.price-history-view.price-history-view .candidate-note{display:none}
+.price-history-view.price-history-view .card-price{margin:10px 0 0;align-items:center}
+.price-history-view.price-history-view .card-price strong{font-size:32px;line-height:1.25;font-weight:700;letter-spacing:.2px}
+.price-history-view.price-history-view .card-price strong small{font-size:18px}
+.price-history-view.price-history-view .card-price>div>span{font-size:12px;margin-top:4px;color:#607585}
+.price-history-view.price-history-view .card-change b{font-size:17px}
+.price-history-view.price-history-view .card-change>span{font-size:12px!important}
+.price-history-view.price-history-view .channel-chart{width:100%;height:auto;aspect-ratio:454/147;min-height:110px;margin:8px 0 3px}
+.price-history-view.price-history-view .channel-chart .axis{display:none}
+.price-history-view.price-history-view .channel-chart .date{font-size:14px;fill:#546f82}
+.price-history-view.price-history-view .channel-chart .point-label{font-size:15px;fill:#2c4a60;font-weight:600}
+.price-history-view.price-history-view .channel-chart .annual-low-point{fill:#c63642}
+.price-history-view.price-history-view .low-row{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px 0 10px;color:#b9303d;font-size:12px;border-bottom:1px solid #e5ebef}
+.price-history-view.price-history-view .low-row b{font-size:14px;margin-left:5px;font-variant-numeric:tabular-nums}
+.price-history-view.price-history-view .low-row small{color:#697986;font-size:12px;white-space:nowrap}
+.price-history-view.price-history-view .period-summary{font-size:13px;padding:10px 0 1px;margin:0;border:0;color:#546d80;white-space:normal;margin-top:auto}
+.price-history-view.price-history-view .period-summary .muted{color:#697d8a}
+.price-history-view.price-history-view .card-detail{font-size:13px;min-height:26px;color:#956120;white-space:nowrap}
+.price-history-view.price-history-view .chart-footer{padding:12px 24px;align-items:center;font-size:12px;color:#5e7383}
+.price-history-view.price-history-view .pager button{padding:6px 12px;min-height:32px;font-size:13px}
+.price-history-view.price-history-view .coverage-note{font-size:12px;line-height:1.7;color:#617687;margin:10px 0 0}
+.price-history-view.price-history-view .card-price .annual-low-text{color:#263e50!important}
+.price-history-view.price-history-view .refresh-button[aria-busy=true]{opacity:1;background:#f4f8fa;border-color:#c9d8e2;color:#486579;cursor:wait}
+@media(min-width:1720px){.price-history-view.price-history-view .chart-grid{gap:20px}.price-history-view.price-history-view .channel-card{padding:20px 22px 12px}.price-history-view.price-history-view .card-heading h3{font-size:18px}}
+@media(max-width:1279px){.price-history-view.price-history-view .chart-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.price-history-view.price-history-view .chart-filters{grid-template-columns:1.1fr 1.2fr .7fr 1.2fr}.price-history-view.price-history-view .channel-search-field{grid-column:1/-1;margin-top:24px}.price-history-view.price-history-view .chart-title{flex-wrap:wrap}.price-history-view.price-history-view .chart-title h2{white-space:normal}.price-history-view.price-history-view .channel-chart{min-height:140px}}
+@media(max-width:719px){.price-history-view.price-history-view .charts-screen main{padding:12px}.price-history-view.price-history-view .chart-grid{grid-template-columns:1fr;padding:12px}.price-history-view.price-history-view .chart-filters{grid-template-columns:1fr 1fr;padding:16px}.price-history-view.price-history-view .chart-title{padding:18px 16px}.price-history-view.price-history-view .workspace-switch button{min-width:0;flex:1;padding:0 8px;font-size:13px}.price-history-view.price-history-view .head-actions{flex-wrap:wrap}.price-history-view.price-history-view .results-bar{flex-wrap:wrap;padding:12px 16px}.price-history-view.price-history-view .counts{margin-left:0}.price-history-view.price-history-view .watch-pending{padding:0 16px 10px}.price-history-view.price-history-view .chart-footer{flex-direction:column;gap:12px}}
+.price-loading-shell{font-family:Arial,"Microsoft YaHei",sans-serif;color:#263b4a;background:#f3f5f7;min-height:calc(100vh - 72px)}
+.price-loading-shell *{box-sizing:border-box}
+.price-loading-shell main{margin:auto;width:100%}
+.price-loading-shell .workspace-switch{display:flex;border-radius:10px}
+.price-loading-shell .workspace-switch button{padding:0 24px;border:0;border-radius:7px;background:transparent;color:#68747e;font-weight:750;cursor:pointer}
+.price-loading-shell .workspace-switch .active{background:#fff;color:#17232e;box-shadow:0 3px 12px #24313d12}
+.price-loading-shell .chart-workspace{overflow:hidden;border:1px solid #dce3e9;border-radius:12px;background:white}
+.price-loading-shell .chart-title{display:flex;align-items:center;border-bottom:1px solid #e7ebee}
+.price-loading-shell .chart-title h2,.price-loading-shell .chart-title p{margin:0}
+.price-loading-shell .chart-filters{border-bottom:1px solid #e6ebef}
+.price-loading-shell input{min-width:0;width:100%;min-height:40px;border:1px solid #ccd7e0;border-radius:7px;padding:8px 12px;background:white;font-size:15px}
+.price-loading-shell select:disabled,.price-loading-shell input:disabled{opacity:1;color:#607585;-webkit-text-fill-color:#607585}
+.price-loading-shell .chart-grid{display:grid}
+.price-loading-shell .channel-card{border:1px solid #dbe3e9;border-radius:10px;background:#fff;min-width:0}
+.price-loading-shell .initial-price-status{margin:0;padding:18px 24px;background:#f6f8fa;font-size:14px;color:#526f82}
+.price-loading-shell .skeleton-card{min-height:345px;gap:12px}
+.price-loading-shell .skeleton-card i,.price-loading-shell .skeleton-card b,.price-loading-shell .skeleton-card>span{display:block;border-radius:4px;background:#eaf0f4;height:14px;width:70%}
+.price-loading-shell .skeleton-card i:first-child{width:55%;height:18px}
+.price-loading-shell .skeleton-card b{height:32px;width:40%;margin-top:10px}
+.price-loading-shell .skeleton-card>span{height:120px;width:100%;background:#f1f4f6;margin:12px 0}
+.price-loading-shell .initial-price-error{padding:40px 24px;min-height:280px;color:#5b6e7e}
+.price-loading-shell .initial-price-error h3{color:#344f63}
+.price-loading-shell .initial-price-error button{padding:10px 14px;margin:8px 10px 0 0;border:1px solid #ccd7e0;border-radius:6px;background:#fff;color:#405f75;cursor:pointer}
+.price-history-view .load-error{line-height:1.6}
+@media(max-width:1279px){.price-loading-shell .chart-filters>label:last-child{grid-column:1/-1}}

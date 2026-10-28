@@ -2,6 +2,7 @@ import { computed, reactive } from 'vue'
 import { api, request, resetCsrf, setRequestAccount } from '@/services/http'
 import { clearPublishedLogisticsCache } from '@/data/publishedLogisticsRepository'
 import { clearFinanceSettingsCache } from '@/services/financeSettings'
+import { clearLogisticsPriceSessions } from '@/data/logisticsPriceSession'
 
 export type RoleKey = 'super_admin' | 'finance' | 'logistics' | 'purchase' | 'employee' | 'operations_employee'
 export type PermissionKey = 'quote' | 'purchase' | 'logistics' | 'finance' | 'myRecords' | 'allRecords' | 'permissions'
@@ -28,6 +29,7 @@ export const authState = reactive<{ users: AuthUser[]; current: AuthUser | null;
 let initialization: Promise<void> | null = null
 
 function applySession(session: SessionUser) {
+  if (authState.current?.id !== session.id || authState.current?.account !== session.account || authState.current?.role !== session.role || [...authState.permissions].sort().join(',') !== [...session.permissions].sort().join(',')) clearLogisticsPriceSessions()
   setRequestAccount(session.account)
   authState.current = { id: session.id, name: session.name, account: session.account, role: session.role, status: 'enabled', mustChangePassword: session.mustChangePassword, passwordUpdatedAt: '' }
   authState.permissions = [...session.permissions]
@@ -38,7 +40,7 @@ export async function initializeAuth(force = false) {
   if (initialization && !force) return initialization
   initialization = (async () => {
     try { applySession(await api.get<SessionUser>('/auth/me')) }
-    catch { setRequestAccount(''); authState.current = null; authState.permissions = [] }
+    catch { clearLogisticsPriceSessions(); setRequestAccount(''); authState.current = null; authState.permissions = [] }
     finally { authState.initialized = true; initialization = null }
   })()
   return initialization
@@ -60,13 +62,14 @@ export async function login(account: string, password: string) {
     // Invalidate prior settings even when logging in again without a logout.
     // The destination workspace must verify fresh settings before calculating.
     clearFinanceSettingsCache()
+    clearLogisticsPriceSessions()
     applySession(session)
     authState.initialized = true
     return { ok: true as const, user: currentAuthUser.value }
   }
   catch (error) { return { ok: false as const, message: error instanceof Error ? error.message : '登录失败' } }
 }
-export async function logout() { try { await api.post('/auth/logout') } finally { clearFinanceSettingsCache(); await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; setRequestAccount(''); resetCsrf() } }
+export async function logout() { try { await api.post('/auth/logout') } finally { clearLogisticsPriceSessions(); clearFinanceSettingsCache(); await clearPublishedLogisticsCache(); authState.current = null; authState.permissions = []; setRequestAccount(''); resetCsrf() } }
 export function hasPermission(permission: PermissionKey) { return isAuthenticated.value && authState.permissions.includes(permission) }
 export function hasAnyPermission(...permissions: PermissionKey[]) { return permissions.some(permission => hasPermission(permission)) }
 export function canAccessMyRecords(permissions: readonly PermissionKey[]) { return permissions.includes('myRecords') || permissions.includes('allRecords') }

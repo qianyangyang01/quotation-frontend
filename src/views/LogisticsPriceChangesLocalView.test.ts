@@ -3,6 +3,8 @@ import {createApp,nextTick} from 'vue'
 import {afterEach,beforeEach,expect,it,vi} from 'vitest'
 import LocalView from './LogisticsPriceChangesLocalView.vue'
 import {LOGISTICS_PRICE_EVENT} from '@/data/logisticsPriceEvents'
+import {clearLogisticsPriceSessions,logisticsPriceSession} from '@/data/logisticsPriceSession'
+import {PriceChangesView} from '@/components/logistics/priceChangesView'
 const native=vi.hoisted(()=>({request:vi.fn()}))
 vi.mock('@/services/http',()=>({request:native.request}))
 
@@ -21,7 +23,7 @@ beforeEach(()=>{
   vi.stubGlobal('BroadcastChannel',class {onmessage=null;close(){}})
   Object.defineProperty(document,'visibilityState',{value:'visible',configurable:true})
 })
-afterEach(()=>{unmount?.();vi.useRealTimers();vi.unstubAllGlobals()})
+afterEach(()=>{unmount?.();clearLogisticsPriceSessions();vi.useRealTimers();vi.unstubAllGlobals()})
 
 
 function completed(id:string){window.dispatchEvent(new CustomEvent(LOGISTICS_PRICE_EVENT,{detail:{id,kind:'published',at:Date.now()}}))}
@@ -63,7 +65,7 @@ it('manual refresh runs once, adopts a new snapshot, and preserves it on errors 
   await vi.advanceTimersByTimeAsync(120000)
   expect(request).toHaveBeenCalledTimes(3)
 })
-it('does not lose a publication arriving during refresh, and stops on unmount',async()=>{
+it('does not lose a publication arriving during refresh, and stops on session disposal',async()=>{
   let finish!:(r:Response)=>void
   request.mockResolvedValueOnce(response(snapshot())).mockImplementationOnce(()=>new Promise<Response>(resolve=>{finish=resolve})).mockResolvedValueOnce(response(snapshot('2026-10-28T03:00:00Z')))
   const host=await mount()
@@ -74,7 +76,7 @@ it('does not lose a publication arriving during refresh, and stops on unmount',a
   finish(response(null,204));await flush();await vi.advanceTimersByTimeAsync(250);await flush()
   expect(request).toHaveBeenCalledTimes(3)
   expect(host.textContent).toContain('2026-10-28T03:00:00Z')
-  unmount();unmount=()=>{};completed('v7');await vi.advanceTimersByTimeAsync(120000)
+  unmount();unmount=()=>{};clearLogisticsPriceSessions();completed('v7');await vi.advanceTimersByTimeAsync(120000)
   expect(request).toHaveBeenCalledTimes(3)
 })
 
@@ -113,11 +115,74 @@ it('initial API failure leaves a return path and never retries on its own',async
  await vi.advanceTimersByTimeAsync(120000);expect(native.request).toHaveBeenCalledTimes(1)
 })
 
-it('unmount aborts a pending native request and discards late data',async()=>{
+it('session disposal aborts a pending native request and discards late data',async()=>{
  let finish!:(data:unknown)=>void
  native.request.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
  await mount('system');const signal=native.request.mock.calls[0]![1].signal as AbortSignal
- unmount();unmount=()=>{};expect(signal.aborted).toBe(true)
+ unmount();unmount=()=>{};clearLogisticsPriceSessions();expect(signal.aborted).toBe(true)
  finish({...snapshot(),sourceRevision:'late'});await flush();await vi.advanceTimersByTimeAsync(120000)
  expect(native.request).toHaveBeenCalledTimes(1)
+})
+
+it('re-entering uses the loaded snapshot and all filters without another request',async()=>{
+ native.request.mockResolvedValueOnce({...snapshot(),sourceRevision:'r1'})
+ await mount('system')
+ Object.assign(logisticsPriceSession('system').filters,{country:'新西兰',attribute:'带电',weight:2,comparison:'previousOlder',search:'云途',page:2})
+ unmount();const host=await mount('system')
+ expect(host.textContent).toContain('2026-10-27T00:00:00Z')
+ expect(logisticsPriceSession('system').filters).toEqual({country:'新西兰',attribute:'带电',weight:2,comparison:'previousOlder',search:'云途',page:2})
+ await vi.advanceTimersByTimeAsync(120000)
+ expect(native.request).toHaveBeenCalledTimes(1)
+})
+
+it('leaving during the initial read keeps the same request for the return visit',async()=>{
+ let finish!:(data:unknown)=>void
+ native.request.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+ const initial=await mount('system')
+ expect(initial.querySelector('nav[aria-label="物流工作区"]')).not.toBeNull()
+ expect(initial.querySelectorAll('.skeleton-card')).toHaveLength(6)
+ const signal=native.request.mock.calls[0]![1].signal as AbortSignal
+ unmount();const host=await mount('system')
+ expect(signal.aborted).toBe(false);expect(native.request).toHaveBeenCalledTimes(1)
+ finish({...snapshot(),sourceRevision:'r1'});await flush()
+ expect(host.textContent).toContain('2026-10-27T00:00:00Z')
+ expect(host.querySelectorAll('.skeleton-card')).toHaveLength(0)
+})
+
+it('a publication while away updates the retained snapshot once before returning',async()=>{
+ native.request.mockResolvedValueOnce({...snapshot(),sourceRevision:'r1'}).mockResolvedValueOnce({...snapshot('2026-10-28T02:00:00Z'),sourceRevision:'r2'})
+ await mount('system');unmount();unmount=()=>{}
+ completed('away-v2');completed('away-v2');await vi.advanceTimersByTimeAsync(250);await flush()
+ const host=await mount('system')
+ expect(host.textContent).toContain('2026-10-28T02:00:00Z');expect(native.request).toHaveBeenCalledTimes(2)
+})
+
+it('re-entry after an initial failure retains the error and only an explicit retry reads again',async()=>{
+ native.request.mockRejectedValueOnce(new Error('价格展示暂不可用（503）')).mockResolvedValueOnce({...snapshot(),sourceRevision:'r1'})
+ await mount('system');unmount();const host=await mount('system')
+ expect(host.textContent).toContain('503');expect(native.request).toHaveBeenCalledTimes(1)
+ Array.from(host.querySelectorAll('button')).find(button=>button.textContent==='刷新最新价格')!.click();await flush()
+ expect(native.request).toHaveBeenCalledTimes(2);expect(host.textContent).toContain('2026-10-27T00:00:00Z')
+})
+
+it.each(['quotation:account-changed','quotation:session-expired'])('clears cached data and filters on %s',async event=>{
+ native.request.mockResolvedValueOnce({...snapshot(),sourceRevision:'r1'}).mockResolvedValueOnce({...snapshot('2026-10-28T02:00:00Z'),sourceRevision:'r2'})
+ await mount('system');const old=logisticsPriceSession('system');old.filters.country='新西兰'
+ window.dispatchEvent(new Event(event));expect(old.snapshot.value).toBeNull()
+ unmount();const host=await mount('system')
+ expect(native.request).toHaveBeenCalledTimes(2);expect(logisticsPriceSession('system').filters.country).toBe('德国')
+ expect(host.textContent).toContain('2026-10-28T02:00:00Z')
+})
+
+it('the resolved async page remounts synchronously without flashing the loading shell',async()=>{
+ native.request.mockResolvedValueOnce({...snapshot(),sourceRevision:'r1'})
+ const host=document.createElement('div');document.body.append(host)
+ let app=createApp(PriceChangesView,{source:'system'});app.mount(host)
+ unmount=()=>{app.unmount();host.remove()}
+ await vi.dynamicImportSettled();await flush()
+ expect(host.textContent).toContain('2026-10-27T00:00:00Z')
+ app.unmount();app=createApp(PriceChangesView,{source:'system'});app.mount(host)
+ expect(host.querySelector('.price-loading-shell')).toBeNull()
+ expect(host.textContent).toContain('2026-10-27T00:00:00Z')
+ await flush();expect(native.request).toHaveBeenCalledTimes(1)
 })

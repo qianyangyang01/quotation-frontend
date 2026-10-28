@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import LogisticsPriceDisplayBoundary from '@/components/logistics/LogisticsPriceDisplayBoundary.vue'
+import { PriceChangesView as PriceChanges } from '@/components/logistics/priceChangesView'
 import { displayWeightGrams } from '@/services/quotationDecimal'
 import { coveragePublishInput, coveragePublishSummary } from '@/data/logisticsImportCoverage'
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import LogisticsChannelStatus from '@/components/logistics/LogisticsChannelStatus.vue'
 import type { LogisticsChannelRecord } from '@/data/logisticsRepository'
@@ -26,7 +27,6 @@ import { initializeLogisticsWorkspace } from '@/data/logisticsWorkspaceInitializ
 import { logisticsRebuild as service, money, shown, weightLabel, completedBatchStage, diffKinds, aggregateChangeSummary, batchComparisonSummary, rangeImpact, changeImpact, logisticsAdjustmentStatus, logisticsUploadError, formatTransferBytes, buildPriceCorrections, buildEtaCorrections, type Dataset, type Workspace, type Batch, type Version, type PricePage, type Diff, type DiffChange, type DiffKind, type Price, type RowCorrection, type ReadyPublishResult, type Channel, type Provider } from '@/data/logisticsRebuild'
 
 const showPriceChanges = ref(false)
-const PriceChanges = defineAsyncComponent(() => import('./LogisticsPriceChangesLocalView.vue'))
 function closePriceChanges(mode: 'base' | 'rules') { showPriceChanges.value = false; selectWorkspaceMode(mode) }
 
 const companyDirectory = ref<CompanyDirectory | null>(null)
