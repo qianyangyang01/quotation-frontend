@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "id": "f747bc18-cd23-4800-a7da-f145273a16dc",
+      "providerName": "捷易通达",
+      "providerAliases": [],
+      "channelName": "以色列敏感",
+      "aliases": [],
+      "productCodes": ["1961"],
+      "logisticsAttribute": "敏感",
+      "enabled": true
+    },
+    {
+      "id": "794bef2c-d427-4fb5-a797-c7703a68f3c0",
+      "providerName": "捷易通达",
+      "providerAliases": [],
+      "channelName": "以色列敏感(到门)",
+      "aliases": ["以色列敏感（到门）"],
+      "productCodes": ["2001"],
+      "logisticsAttribute": "敏感",
+      "enabled": true
+    }
+  ]
+}

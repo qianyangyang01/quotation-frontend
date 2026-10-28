@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="source-date-reference-2026.10.26-wanbang-preferred-v12";
+    public static final String VERSION="jieyitongda-israel-2026.10.28-v13";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -53,13 +53,16 @@ public class LogisticsSourceParser {
         result.put("scopeRevision",scope.revision());
         String provider=scope.unrestricted()?provider(filename):scope.providerFromFilename(filename);
         if(provider.isBlank()&&scope.containsProvider(JisuSourceRules.PROVIDER)&&JisuSourceRules.providerEvidence(filename))provider=JisuSourceRules.PROVIDER;
-        try(var book=new LogisticsSheetReader(bytes,filename,name->referenceOnlySheet(name)&&!systemMetadataCandidate(name))) {
+        try(var book=new LogisticsSheetReader(bytes,filename,name->referenceOnlySheet(name)&&!systemMetadataCandidate(name),provider.equals("捷易通达"))) {
             while(book.hasNext()) {
                 var sheet=book.next();
                 if(provider.isBlank())provider=scope.unrestricted()?provider(sheet.getSheetName()):scope.providerFromFilename(sheet.getSheetName());
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
                 var source=new Source(sheet,scope);
                 if(provider.isBlank())provider=providerFromTitles(source);
+                if(provider.equals("捷易通达")&&!jieyitongdaSheet(source)) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","捷易通达仅解析以色列敏感1961、以色列敏感(到门)2001");continue;
+                }
                 if(provider.equals(SunyouSourceRules.PROVIDER)&&!referenceOnlySheet(sheet.getSheetName())&&!qiaojieStandardSheet(source)
                         &&sunyouProduct(source)==null&&!SunyouSourceRules.selectedSheet(sheet.getSheetName())) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","顺友仅导入登记的三个渠道；其他产品及服务费表保留在原文件中");
@@ -111,7 +114,8 @@ public class LogisticsSourceParser {
                 for(int r=0;r<=source.lastContentRow;r++) if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst()) && source.text(r,1).equals("国家简码")) {
                     parseStandard(source,r,provider,filename,parsed); recognized=true; break;
                 }
-                if(!recognized) {
+                if(!recognized&&provider.equals("捷易通达"))recognized=parseJieyitongda(source,filename,parsed);
+                if(!recognized&&!provider.equals("捷易通达")) {
                     var sheetChannel=sheetChannelName(source,provider);
                     if(provider.equals("通邮")&&CompanyChannelScope.normalize(sheetChannel).equals(CompanyChannelScope.normalize("TY-E邮宝")))recognized=parseTongyouEpacket(source,filename,parsed);
                     else if(provider.equals(SunyouSourceRules.PROVIDER))recognized=parseSunyou(source,filename,parsed);
@@ -815,6 +819,142 @@ public class LogisticsSourceParser {
             for(var text:source.rowTexts(r)){product=YanwenWanbangAdditionalRules.named(provider,text);if(product!=null)return product;}
         }
         return null;
+    }
+
+    private static final Map<String,String> JYTD_PRODUCTS=Map.of("以色列敏感","1961","以色列敏感(到门)","2001");
+    private static String jytdName(String text) {
+        var normalized=CompanyChannelScope.normalize(text);
+        return JYTD_PRODUCTS.keySet().stream().filter(n->CompanyChannelScope.normalize(n).equals(normalized)).findFirst().orElse("");
+    }
+    private boolean jieyitongdaSheet(Source source) {
+        if(CompanyChannelScope.normalize(source.sheet.getSheetName()).equals("以色列专线"))return true;
+        for(var row:source.sheet)for(var cell:row) {
+            var text=source.parsingText(cell);
+            if(text.equals("以色列专线")||!jytdName(text).isBlank())return true;
+        }
+        return false;
+    }
+    /** Exact product identities, independent of sheet/column order. Never forward-fill prices. */
+    private boolean parseJieyitongda(Source source,String file,Map<String,ObjectNode> channels) {
+        var headers=new LinkedHashMap<String,Integer>();int header=-1;
+        var labels=Map.ofEntries(Map.entry("目的国","country"),Map.entry("国家","country"),
+                Map.entry("渠道名称","name"),Map.entry("产品id","code"),Map.entry("产品代码","code"),
+                Map.entry("重量范围","weight"),Map.entry("重量段","weight"),Map.entry("精度单位","step"),
+                Map.entry("公斤单价(元/公斤)","rate"),Map.entry("挂号费/票","fee"),
+                Map.entry("渠道属性","attribute"),Map.entry("时效","eta"),Map.entry("单号规则","tracking"));
+        var duplicate=new HashSet<String>();
+        for(int r=0;r<=source.lastContentRow;r++) {
+            var candidate=new LinkedHashMap<String,Integer>();var duplicates=new HashSet<String>();
+            for(int c=0;c<source.width(r);c++) {
+                String key=labels.get(CompanyChannelScope.normalize(source.text(r,c)));
+                if(key!=null&&candidate.putIfAbsent(key,c)!=null)duplicates.add(key);
+            }
+            if(candidate.containsKey("name")&&candidate.containsKey("code")) {
+                headers=candidate;duplicate=duplicates;header=r;break;
+            }
+        }
+        var required=Set.of("country","name","code","weight","step","rate","fee");
+        if(header<0||!headers.keySet().containsAll(required)||!duplicate.isEmpty()) {
+            for(var product:JYTD_PRODUCTS.entrySet()) {
+                var target=selected(source,"捷易通达",product.getKey(),product.getValue(),Math.max(0,header),channels);
+                if(target!=null)issue(target,Math.max(0,header)+1,"表头","捷易通达必需表头缺失或重复，禁止部分价格替换","error");
+            }
+            return true;
+        }
+        var notes=new LinkedHashSet<String>();var noteCells=new LinkedHashSet<String>();
+        boolean footer=false;
+        for(int r=header+1;r<=source.lastContentRow;r++) {
+            if(source.rowTexts(r).stream().anyMatch(t->clean(t).matches("(?:渠道|服务)说明[:：]?")))footer=true;
+            if(footer) {
+                source.referenceRows.add(r);
+                for(var cell:source.sheet.getRow(r)==null?List.<Cell>of():source.sheet.getRow(r)) {
+                    var text=source.parsingText(cell);if(!text.isBlank()){notes.add(text);noteCells.add(cell.getAddress().formatAsString());}
+                }
+                continue;
+            }
+            var name=jytdName(source.text(r,headers.get("name")));
+            var code=source.text(r,headers.get("code"));
+            var byCode=JYTD_PRODUCTS.entrySet().stream().filter(e->e.getValue().equals(code)).map(Map.Entry::getKey).findFirst().orElse("");
+            if(name.isBlank()&&byCode.isBlank()) {source.filteredOtherRows.put(r,"非指定的1961/2001渠道，不解析价格");continue;}
+            var canonical=name.isBlank()?byCode:name;
+            var target=selected(source,"捷易通达",canonical,JYTD_PRODUCTS.get(canonical),r,channels);
+            if(target==null)continue;
+            for(var field:required) {
+                var cell=source.cell(r,headers.get(field));
+                if(cell!=null&&cell.getCellType()==CellType.FORMULA)
+                    issue(target,r+1,field,"关键字段含公式，不能仅依赖缓存价格，请提供确认后的数值","error");
+            }
+            if(!canonical.equals(name)||!JYTD_PRODUCTS.get(canonical).equals(code)) {
+                issue(target,r+1,"产品代码","完整渠道名称与产品ID不一致或缺失，禁止串入其他产品","error");
+                source.parsedRows.add(r);continue;
+            }
+            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg")
+                    .put("sourceProductCode",code).put("sourceCode",code).put("sourceChannelName",source.text(r,headers.get("name")));
+            var country=source.text(r,headers.get("country"));
+            boolean israel=Set.of("il以色列","以色列","il").contains(CompanyChannelScope.normalize(country));
+            row.put("sourceCountry",country).put("countryCode",israel?"IL":"").put("areaName",israel?"以色列":country);
+            if(!israel)issue(target,r+1,"国家","以色列渠道目的国缺失或不是IL","error");
+            var weight=source.text(r,headers.get("weight"));
+            row.put("sourceWeightRange",weight).put("sourceWeightCell",source.address(r,headers.get("weight")));
+            try {
+                var range=parseRange(weight);
+                row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo);
+            } catch(IllegalArgumentException invalid) {
+                issue(target,r+1,"重量段","无效或缺失重量范围，禁止部分价格替换","error");source.parsedRows.add(r);continue;
+            }
+            numeric(row,"pricePerKg",source,r,headers.get("rate"),target,false);
+            numeric(row,"registrationFee",source,r,headers.get("fee"),target,false);
+            row.put("sourcePriceCell",source.address(r,headers.get("rate"))).put("sourceFeeCell",source.address(r,headers.get("fee")))
+                    .put("sourceFeeLabel",source.text(header,headers.get("fee")));
+            var precision=source.text(r,headers.get("step"));
+            var step=Pattern.compile("(?i)^([0-9]+(?:\\.[0-9]+)?)\\s*(kg|g|公斤|千克|克)$").matcher(precision);
+            if(!step.matches())issue(target,r+1,"计费进位","精度单位缺失或无效，禁止默认不进位","error");
+            else {
+                var unit=LogisticsMinimumWeight.kilograms(step.group(1),step.group(2));
+                if(unit.signum()<=0)issue(target,r+1,"计费进位","精度单位必须大于零","error");
+                row.put("sourceBillingStepKg",unit);
+            }
+            row.put("sourceBillingStepText",precision).put("sourceBillingStepCell",source.address(r,headers.get("step")));
+            var etaColumns=new Columns();etaColumns.eta=headers.getOrDefault("eta",-1);etaColumns.headerRow=header;readRowEta(row,target,source,r,etaColumns);
+            var rowNotes=new LinkedHashSet<String>();
+            for(var field:List.of("attribute","tracking"))if(headers.containsKey(field))rowNotes.add(source.text(r,headers.get(field)));
+            row.put("notes",String.join("\n",rowNotes));add(target,row,source,r,file);
+        }
+        var sourceNotes=String.join("\n",notes);
+        for(var target:channels.values()) {
+            target.put("sourceNotes",sourceNotes);
+            var rows=new ArrayList<ObjectNode>();for(var value:target.path("rows"))rows.add((ObjectNode)value);
+            rows.sort(Comparator.comparingDouble(r->r.path("weightFromKg").asDouble()));
+            var minimum=LogisticsMinimumWeight.fromNotes(sourceNotes,"IL");
+            if(minimum.kg()==null||minimum.conflict())issue(target,0,"最低计费重量","原表缺少明确起重或起重说明冲突","error");
+            var bands=mapper.createArrayNode();BigDecimal previousStep=null,previousEnd=null;
+            for(var row:rows) {
+                if(minimum.kg()!=null&&!minimum.conflict()) {
+                    row.put("minChargeWeightKg",minimum.kg()).put("sourceMinimumWeightKind","note")
+                            .put("sourceMinimumWeightText",minimum.evidence()).put("sourceMinimumWeightCell",String.join(",",noteCells));
+                    if(previousEnd==null&&row.path("weightFromKg").decimalValue().compareTo(minimum.kg())!=0)
+                        issue(target,row.path("sourceRow").asInt(),"重量段","首档与原表起重不一致，可能缺失价格行","error");
+                }
+                if(previousEnd!=null&&row.path("weightFromKg").decimalValue().compareTo(previousEnd)!=0)
+                    issue(target,row.path("sourceRow").asInt(),"重量段","价格档位重叠或缺失，禁止部分价格替换","error");
+                if(row.path("sourceBillingStepKg").isNumber()) {
+                    var unit=row.path("sourceBillingStepKg").decimalValue();
+                    if(previousStep==null||unit.compareTo(previousStep)!=0)bands.addObject()
+                            .put("aboveKg",previousStep==null?BigDecimal.ZERO:row.path("weightFromKg").decimalValue()).put("stepKg",unit);
+                    previousStep=unit;
+                }
+                previousEnd=row.path("weightToKg").decimalValue();
+                row.put("weightFromInclusive",rows.getFirst()==row).put("billingStepKg",0);
+                row.put("notes",row.path("notes").asText()+"\n[表级规则]\n"+sourceNotes);
+                warn(row,"基础运费按公斤价加每票费；软包装免泡、盒装计泡、尺寸限制、超尺寸费用及收寄要求请核对原表");
+            }
+            // All tiers share one rounding schedule: row-specific steps can create two matches near 2kg.
+            for(var row:rows)row.set("billingStepBands",bands.deepCopy());
+            var limit=Pattern.compile((target.path("channelName").asText().contains("到门")?"到门":"自提")+"渠道限重\\s*([0-9.]+)\\s*kg",Pattern.CASE_INSENSITIVE).matcher(sourceNotes);
+            if(!limit.find()||previousEnd==null||previousEnd.compareTo(new BigDecimal(limit.group(1)))!=0)
+                issue(target,0,"最大重量","末档与原表渠道限重不一致或限重说明缺失，禁止遗漏末档价格","error");
+        }
+        return true;
     }
 
     private boolean parseTable(Source source,String provider,String file,Map<String,ObjectNode> channels) {
