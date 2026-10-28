@@ -3,7 +3,7 @@ import { onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import LogisticsPriceChanges from '@/components/logistics/LogisticsPriceChanges.vue'
 import LogisticsPriceDisplayBoundary from '@/components/logistics/LogisticsPriceDisplayBoundary.vue'
 import {assertPriceSnapshot} from '@/data/logisticsPriceSnapshotValidation'
-import type { RealPriceSnapshot } from '@/data/logisticsRealPriceHistory'
+import { publicationDate, type RealPriceSnapshot } from '@/data/logisticsRealPriceHistory'
 import {subscribeLogisticsPriceChanges,type LogisticsPriceEvent} from '@/data/logisticsPriceEvents'
 import {request} from '@/services/http'
 const props=withDefaults(defineProps<{source?:'preview'|'system'}>(),{source:'preview'})
@@ -38,7 +38,7 @@ async function load(mode: 'cached' | 'sync' | 'manual' = 'cached') {
     if(disposed||active.signal.aborted)return
     if(result.data){
       assertPriceSnapshot(result.data)
-      if(!snapshot.value||snapshot.value.sourceRevision!==result.data.sourceRevision||(props.source==='preview'&&snapshot.value.capturedAt!==result.data.capturedAt))snapshot.value=result.data
+      if(!snapshot.value||snapshot.value.sourceRevision!==result.data.sourceRevision||publicationDate(snapshot.value.capturedAt)!==publicationDate(result.data.capturedAt)||(props.source==='preview'&&snapshot.value.capturedAt!==result.data.capturedAt))snapshot.value=result.data
     }
     if(result.checkedAt)checkedAt.value=result.checkedAt
   } catch (e) { if(!disposed)error.value = e instanceof Error ? e.message : '价格展示读取失败，请稍后手动刷新' }

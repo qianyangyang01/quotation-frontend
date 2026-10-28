@@ -8,6 +8,25 @@ const snapshot=():RealPriceSnapshot=>({capturedAt:'2026-10-27T08:00:00Z',dataset
  {id:'v3',channel:'a',number:3,status:'published',publishedAt:'2026-10-10T01:00:00Z',fileName:'本版',rows:[row('1区',35),row('2区',45)]},
 ]})
 describe('real published logistics history',()=>{
+ it('selects the first repeated annual low, including rollback, and excludes other years, future prices and gaps',()=>{
+  const s=snapshot(),base=s.versions[0]!
+  s.capturedAt='2026-10-27T08:00:00Z'
+  s.versions=[
+   {...base,id:'old',number:1,publishedAt:'2025-12-31T15:59:59Z',rows:[row('1区',1)]},
+   {...base,id:'first',number:2,publishedAt:'2025-12-31T16:00:00Z',rows:[row('1区',20)]},
+   {...base,id:'gap',number:3,publishedAt:'2026-05-01T01:00:00Z',rows:[]},
+   {...base,id:'repeat',number:4,publishedAt:'2026-06-01T01:00:00Z',rollbackFromVersionId:'first',rows:[row('1区',20)]},
+   {...base,id:'current',number:5,status:'published',publishedAt:'2026-09-01T01:00:00Z',rows:[row('1区',30)]},
+   {...base,id:'future',number:6,publishedAt:'2026-11-01T01:00:00Z',rows:[row('1区',2)]},
+   {...base,id:'draft',number:7,status:'draft',publishedAt:'2026-10-01T01:00:00Z',rows:[row('1区',3)]},
+  ].reverse()
+  s.channels[0]!.current='current'
+  const item=realChannelHistories(s,'AU',1)[0]!
+  expect(recordedYearLow(item,s.capturedAt)).toMatchObject({id:'first',price:25,date:'2026-01-01'})
+  expect(recordedYearLow(item,'2025-12-31T15:59:59Z')).toMatchObject({id:'old',price:6,date:'2025-12-31'})
+  expect(recordedYearLow(item,'2026-12-31T16:01:00Z')).toBeNull()
+  expect(recordedYearLow({...item,history:item.history.map(v=>({...v,price:null}))},s.capturedAt)).toBeNull()
+ })
  it('reads publication-time results without original price rows and keeps missing version pairs unavailable',()=>{
   const s=snapshot()
   s.versions.forEach((v,i)=>{v.rows=[];v.preparedPrices={'AU|1':{'1区':{price:[25,35,40][i]!,rate:[20,30,35][i]!,fee:5,chargeWeight:1,model:'per-kg',intervalPrice:0,reason:''}}}})

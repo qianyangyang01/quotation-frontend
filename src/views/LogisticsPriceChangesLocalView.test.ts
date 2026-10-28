@@ -25,6 +25,13 @@ afterEach(()=>{unmount?.();vi.useRealTimers();vi.unstubAllGlobals()})
 
 
 function completed(id:string){window.dispatchEvent(new CustomEvent(LOGISTICS_PRICE_EVENT,{detail:{id,kind:'published',at:Date.now()}}))}
+it('updates the statistics date across China midnight even when prices are unchanged, without polling',async()=>{
+ native.request.mockResolvedValueOnce({...snapshot('2026-12-31T15:59:00Z'),sourceRevision:'same'})
+   .mockResolvedValueOnce({...snapshot('2026-12-31T16:01:00Z'),sourceRevision:'same'})
+ const host=await mount('system');host.querySelector('button')!.click();await flush()
+ expect(host.textContent).toContain('2026-12-31T16:01:00Z')
+ await vi.advanceTimersByTimeAsync(120000);expect(native.request).toHaveBeenCalledTimes(2)
+})
 it('uses already-calculated system results after publication without calling the slow preview collector',async()=>{
  native.request.mockResolvedValueOnce({...snapshot(),sourceRevision:'r1'}).mockResolvedValueOnce({...snapshot('2026-10-28T02:00:00Z'),sourceRevision:'r2'})
  const host=await mount('system');completed('native-v4');completed('native-v4');await vi.advanceTimersByTimeAsync(250);await flush()
