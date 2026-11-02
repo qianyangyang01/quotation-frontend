@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { priceUpdateBatches, priceUpdateGroups, updateAmount, updateCounts, updatePercent } from './logisticsUpdateOverview'
+import { allCountryPriceUpdateGroups, priceUpdateBatches, priceUpdateGroups, updateAmount, updateCounts, updatePercent } from './logisticsUpdateOverview'
 import type { HistoryChannel, PreparedPrice, PublishedPriceVersion, RealPriceSnapshot } from './logisticsRealPriceHistory'
 
 const point = (price: number | null, reason = ''): PreparedPrice => ({ price, rate: price, fee: 0, chargeWeight: 1, model: 'per-kg', intervalPrice: null, reason })
@@ -101,4 +101,25 @@ describe('four-hour update groups', () => {
     expect(groups.find(group => group.id === 'import:unknown')!.windowStartAt).toBeNull()
     expect(groups.find(group => group.id === 'version:known-3')!.windowStartAt).toBeNull()
   })
+})
+
+
+it('unions all countries without cross-country baselines, duplicate keys, lost original batches or snapshot writes', () => {
+  const data = snapshot([channel('A', { attribute: '敏感货' })], [
+    version('A', 1, 53, { baseVersionId: '', preparedPrices: { 'DE|1': { 全国统一: point(53) }, 'US|1': { 全国统一: point(100) } } }),
+    version('A', 2, 67, { baseVersionId: 'A-1', importBatchId: 'latest', preparedPrices: { 'DE|1': { 全国统一: point(67) }, 'US|1': { 全国统一: point(95) }, 'GB|1': { 全国统一: point(30) } } }),
+  ])
+  data.importBatches = [{ id: 'latest', importedAt: '2026-11-02T00:00:00Z', operator: '甲' }]
+  const original = JSON.stringify(data)
+  const groups = allCountryPriceUpdateGroups(data, 1)
+  const group = groups.find(item => item.id === 'window:latest')!
+  expect(group.rows).toHaveLength(3)
+  expect(group.rows.find(row => row.countryCode === 'DE')).toMatchObject({ countryName: '德国', change: 14, before: { price: 53 }, after: { price: 67 } })
+  expect(group.rows.find(row => row.countryCode === 'US')).toMatchObject({ change: -5, before: { price: 100 }, after: { price: 95 } })
+  expect(group.rows.find(row => row.countryCode === 'GB')).toMatchObject({ status: 'added', change: null })
+  expect(group.batches).toHaveLength(1)
+  expect(group.batches[0]!.rows).toHaveLength(3)
+  expect(new Set(group.rows.map(row => row.key)).size).toBe(3)
+  for (const code of ['DE', 'US', 'GB']) expect(group.rows.filter(row => row.countryCode === code)).toEqual(priceUpdateGroups(data, code, 1).find(item => item.id === group.id)!.rows)
+  expect(JSON.stringify(data)).toBe(original)
 })

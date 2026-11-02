@@ -1,9 +1,12 @@
 import { normalizeLogisticsAttribute } from './logisticsAttributes'
+import catalog from './logisticsPriceCountryCatalog.json'
 import { realChannelHistories, type RealPriceSnapshot, type PublishedPriceVersion, type HistoryPoint, type HistoryChannel, type PriceHistoryImportBatch } from './logisticsRealPriceHistory'
 
 export type UpdateStatus = 'up' | 'down' | 'same' | 'first' | 'added' | 'removed' | 'unavailable'
 export interface PriceUpdateRow {
   key: string
+  countryCode?: string
+  countryName?: string
   channel: HistoryChannel
   region: string
   before?: HistoryPoint
@@ -100,11 +103,47 @@ export function priceUpdateBatches(snapshot: RealPriceSnapshot, country: string,
       if (Date.parse(after.timestamp) > Date.parse(batch.publishedAt)) batch.publishedAt = after.timestamp
       if (!batch.providers.includes(history.channel.provider)) batch.providers.push(history.channel.provider)
       if (!batch.files.includes(after.file)) batch.files.push(after.file)
-      batch.rows.push(compareUpdate(history.channel, history.region, after, before, version))
+      const row = compareUpdate(history.channel, history.region, after, before, version)
+      batch.rows.push({ ...row, key: `${country}|${row.key}`, countryCode: country, countryName: catalog.countries.find(item => item.code === country)?.name || country })
     }
   }
   for (const batch of batches.values()) batch.rows.sort((a, b) => (b.change ?? -Infinity) - (a.change ?? -Infinity) || a.channel.name.localeCompare(b.channel.name, 'zh-CN') || a.region.localeCompare(b.region, 'zh-CN', { numeric: true }) || b.after.number - a.after.number)
   return [...batches.values()].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id))
+}
+
+/** Read-only union of country histories. Reuses the existing per-country price comparison
+ * and fixed-window grouping; never mixes countries when selecting a price baseline. */
+export function allCountryPriceUpdateGroups(snapshot: RealPriceSnapshot, weight: number): PriceUpdateGroup[] {
+  const countries = new Set(snapshot.versions.flatMap(version => version.preparedPrices
+    ? Object.keys(version.preparedPrices).map(key => key.split('|')[0]!).filter(Boolean)
+    : version.rows.map(row => row.countryCode).filter(Boolean)))
+  const merged = new Map<string, PriceUpdateGroup>()
+  for (const country of countries) {
+    for (const group of priceUpdateGroups(snapshot, country, weight)) {
+      const existing = merged.get(group.id)
+      if (!existing) { merged.set(group.id, group); continue }
+      existing.rows.push(...group.rows)
+      existing.providers = [...new Set([...existing.providers, ...group.providers])]
+      existing.files = [...new Set([...existing.files, ...group.files])]
+      if (Date.parse(group.startedAt) < Date.parse(existing.startedAt)) existing.startedAt = group.startedAt
+      if (Date.parse(group.publishedAt) > Date.parse(existing.publishedAt)) existing.publishedAt = group.publishedAt
+      for (const source of group.batches) {
+        const original = existing.batches.find(item => item.id === source.id)
+        if (original) {
+          original.rows.push(...source.rows)
+          original.providers = [...new Set([...original.providers, ...source.providers])]
+          original.files = [...new Set([...original.files, ...source.files])]
+          if (Date.parse(source.startedAt) < Date.parse(original.startedAt)) original.startedAt = source.startedAt
+          if (Date.parse(source.publishedAt) > Date.parse(original.publishedAt)) original.publishedAt = source.publishedAt
+        } else existing.batches.push(source)
+      }
+    }
+  }
+  for (const group of merged.values()) {
+    group.rows.sort((a, b) => (b.change ?? -Infinity) - (a.change ?? -Infinity) || (a.countryName || '').localeCompare(b.countryName || '', 'zh-CN') || a.key.localeCompare(b.key))
+    group.batches.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.id.localeCompare(b.id))
+  }
+  return [...merged.values()].sort((a, b) => Date.parse(b.windowStartAt || b.startedAt) - Date.parse(a.windowStartAt || a.startedAt) || a.id.localeCompare(b.id))
 }
 
 /** Fixed four-hour windows per operator, anchored before applying country, weight or publication filters.

@@ -38,7 +38,7 @@ async function renderPage(data: OverviewExport, rows: PriceUpdateRow[], page: nu
     const color = row.status === 'up' ? '#cd4039' : row.status === 'down' ? '#168978' : '#6d8296'
     context.fillStyle = row.status === 'up' ? '#fff2f0' : row.status === 'down' ? '#ebf8f5' : '#f8fafc'
     context.fillRect(985, y, 394, 106)
-    text(row.channel.name, xs[0]!, y + 35, 24, '#294660', true, 415)
+    text(`${row.countryName || row.countryCode || ''} · ${row.channel.name}`, xs[0]!, y + 35, 24, '#294660', true, 415)
     text(`${row.channel.provider} · ${row.region}`, xs[0]!, y + 69, 18, '#617b94', false, 415)
     text(row.rollback ? '回滚发布' : row.importBatchId ? `原始批次 ${row.importBatchId}` : row.channel.attribute, xs[0]!, y + 94, 17, '#617b94', false, 415)
     text(row.before?.price == null ? '—' : `¥ ${row.before.price.toFixed(2)}`, xs[1]!, y + 39, 27)

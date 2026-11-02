@@ -1,27 +1,42 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FinanceCountrySelect from '@/components/finance/FinanceCountrySelect.vue'
-import catalog from '@/data/logisticsPriceCountryCatalog.json'
 import { priceHistoryAttributes } from '@/data/logisticsMajorChannelHistory'
 import { publicationTime, type RealPriceSnapshot } from '@/data/logisticsRealPriceHistory'
-import { priceUpdateGroups, updateAmount, updateCounts, updatePercent, updateStatusLabels, type UpdateStatus, type PriceUpdateGroup } from '@/data/logisticsUpdateOverview'
+import { allCountryPriceUpdateGroups, matchesUpdateAttribute, updateAmount, updateCounts, updatePercent, updateStatusLabels, type UpdateStatus, type PriceUpdateGroup, type PriceUpdateRow } from '@/data/logisticsUpdateOverview'
 
 const props = defineProps<{ snapshot: RealPriceSnapshot; initialCountry: string; initialAttribute: string; initialWeight: number; refreshing: boolean; error: string }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
-const batchSelect = ref<HTMLSelectElement>()
-const country = ref(props.initialCountry), attribute = ref(props.initialAttribute), weight = ref(props.initialWeight)
-const selectedBatch = ref(''), search = ref(''), filter = ref<'changed' | 'all' | UpdateStatus>('changed')
+const batchSearchInput = ref<HTMLInputElement>()
+const batchSearch = ref('')
+const tableScroll = ref<HTMLElement>()
+const drawer = ref<'uploads' | 'row' | ''>('')
+const detailKey = ref('')
+const drawerClose = ref<HTMLButtonElement>()
+let detailTrigger: HTMLElement | null = null
+const country = ref('全部国家'), attribute = ref(''), weight = ref(props.initialWeight)
+const selectedBatch = ref(''), search = ref(''), filter = ref<'changed' | 'all' | 'exceptional' | UpdateStatus>('changed')
 const originalBatch = ref('')
-const originalDetails = ref<HTMLDetailsElement>()
 const downloading = ref(false), downloadError = ref('')
-const countries = catalog.countries.map(item => ({ country: item.name, code: item.code }))
-const countryCode = computed(() => catalog.countries.find(item => item.name === country.value)?.code || '')
+const countryCode = computed(() => countries.value.find(item => item.country === country.value)?.code || '')
 const attributes = computed(() => priceHistoryAttributes(props.snapshot))
-const batches = computed(() => priceUpdateGroups(props.snapshot, countryCode.value, weight.value, attribute.value))
-watch(batches, values => { if (!values.some(batch => batch.id === selectedBatch.value)) selectedBatch.value = values[0]?.id || '' }, { immediate: true })
+const batches = computed(() => allCountryPriceUpdateGroups(props.snapshot, weight.value))
+const matchedBatches = computed(() => {
+  const terms = batchSearch.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  return batches.value.filter(item => terms.every(term => batchLabel(item).toLocaleLowerCase().includes(term)))
+})
+const batchPageSize = 10
+const batchPageCount = computed(() => Math.max(1, Math.ceil(matchedBatches.value.length / batchPageSize)))
+const batchPage = computed(() => Math.floor(Math.max(0, matchedBatches.value.findIndex(item => item.id === selectedBatch.value)) / batchPageSize) + 1)
+const pageBatches = computed(() => matchedBatches.value.slice((batchPage.value - 1) * batchPageSize, batchPage.value * batchPageSize))
+function changeBatchPage(page: number) {
+  if (page < 1 || page > batchPageCount.value) return
+  const first = matchedBatches.value[(page - 1) * batchPageSize]
+  if (first) selectedBatch.value = first.id
+}
 const batch = computed(() => batches.value.find(item => item.id === selectedBatch.value))
-watch(selectedBatch, () => { originalBatch.value = '' })
+watch(selectedBatch, () => { originalBatch.value = ''; drawer.value = ''; country.value = '全部国家'; search.value = '' })
 const sourceBatches = computed(() => {
   const group = batch.value
   if (!group) return []
@@ -30,31 +45,68 @@ const sourceBatches = computed(() => {
 })
 const scopedRows = computed(() => originalBatch.value ? batch.value?.batches.find(item => item.id === originalBatch.value)?.rows || [] : batch.value?.rows || [])
 watch(sourceBatches, values => { if (originalBatch.value && !values.some(item => item.id === originalBatch.value && item.source)) originalBatch.value = '' })
+const filteredRows = computed(() => scopedRows.value.filter(row => (!countryCode.value || row.countryCode === countryCode.value) && matchesUpdateAttribute(row.channel, attribute.value)))
 const searchedRows = computed(() => {
   const terms = search.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  return scopedRows.value.filter(row => terms.every(term => `${row.channel.name} ${row.channel.provider} ${row.channel.code} ${row.region}`.toLocaleLowerCase().includes(term)))
+  return filteredRows.value.filter(row => terms.every(term => `${row.countryName} ${row.countryCode} ${row.channel.name} ${row.channel.provider} ${row.channel.code} ${row.region}`.toLocaleLowerCase().includes(term)))
 })
 const counts = computed(() => updateCounts(searchedRows.value))
 const changes = computed(() => counts.value.up + counts.value.down)
 const exceptional = computed(() => counts.value.first + counts.value.added + counts.value.removed + counts.value.unavailable)
-// Changed view includes additions/removals and incomparable rows so they can never disappear behind the headline numbers.
-const visibleRows = computed(() => searchedRows.value.filter(row => filter.value === 'all' || (filter.value === 'changed' ? row.status !== 'same' : row.status === filter.value)))
+// Default is comparable rises and falls; exceptional records have their own always-visible count and filter.
+const visibleRows = computed(() => searchedRows.value.filter(row => filter.value === 'all' || (filter.value === 'changed' ? row.status === 'up' || row.status === 'down' : filter.value === 'exceptional' ? row.change === null : row.status === filter.value)))
+const rowPage = ref(1)
+const pageSize = ref(10)
+const rowPageCount = computed(() => Math.max(1, Math.ceil(visibleRows.value.length / pageSize.value)))
+const pageRows = computed(() => visibleRows.value.slice((rowPage.value - 1) * pageSize.value, rowPage.value * pageSize.value))
+const countrySummary = computed(() => {
+  const rowsInScope = scopedRows.value.filter(row => matchesUpdateAttribute(row.channel, attribute.value))
+  const codes = [...new Set(rowsInScope.map(row => row.countryCode))]
+  return codes.map(code => {
+    const rows = rowsInScope.filter(row => row.countryCode === code)
+    const counts = updateCounts(rows)
+    return { code, name: rows[0]!.countryName!, total: rows.length, ...counts, exceptional: counts.first + counts.added + counts.removed + counts.unavailable }
+  }).sort((a, b) => (b.up + b.down) - (a.up + a.down) || a.name.localeCompare(b.name, 'zh-CN'))
+})
+const channelCount = computed(() => new Set(searchedRows.value.map(row => row.channel.id)).size)
+const countries = computed(() => [{ country: '全部国家', code: '' }, ...countrySummary.value.map(item => ({ country: item.name, code: item.code }))])
+const quickCountries = computed(() => countrySummary.value.slice(0, 5))
+watch([selectedBatch, originalBatch, country, attribute, weight, search, filter, pageSize], () => { rowPage.value = 1; if (tableScroll.value) tableScroll.value.scrollTop = 0 })
+watch(rowPage, () => { if (tableScroll.value) tableScroll.value.scrollTop = 0 })
+watch(rowPageCount, count => { rowPage.value = Math.min(rowPage.value, count) })
+watch(countries, values => { if (!values.some(item => item.country === country.value)) country.value = '全部国家' })
+const detailRow = computed(() => batch.value?.rows.find(row => row.key === detailKey.value))
+watch(detailRow, row => { if (!row && drawer.value === 'row') drawer.value = '' })
+function openDrawer(mode: 'uploads' | 'row', row?: PriceUpdateRow) {
+  detailTrigger = document.activeElement as HTMLElement
+  detailKey.value = row?.key || ''
+  drawer.value = mode
+  void nextTick(() => drawerClose.value?.focus())
+}
+function closeDrawer() {
+  drawer.value = ''
+  void nextTick(() => detailTrigger?.isConnected && detailTrigger.focus())
+}
+function cancel() { if (drawer.value) closeDrawer(); else emit('close') }
 const price = (value: number | null | undefined) => value == null ? '—' : `¥ ${value.toFixed(2)}`
 function viewOriginal(id: string) {
   originalBatch.value = id
-  if (originalDetails.value) originalDetails.value.open = false
+  country.value = '全部国家'
+  search.value = ''
+  closeDrawer()
 }
-const batchLabel = (value: PriceUpdateGroup) => {
+function batchLabel(value: PriceUpdateGroup) {
   const providers = value.providers.length > 2 ? `${value.providers.slice(0, 2).join('、')}等 ${value.providers.length} 家` : value.providers.join('、')
   if (value.windowStartAt) return `${publicationTime(value.windowStartAt)} · ${value.operator} · ${value.imports.length} 个上传批次`
   const original = value.batches[0]!
   return `${publicationTime(value.startedAt)} · ${providers} · ${original.importBatchId ? '原始批次 ' + original.importBatchId.slice(0, 8) : (value.rows[0]?.rollback ? '回滚' : '单次发布') + ' V' + value.rows[0]?.after.number + ' · ' + value.rows[0]?.channel.name + ' · ' + value.id.slice(-6)}`
 }
+watch(matchedBatches, values => { if (!values.some(item => item.id === selectedBatch.value)) selectedBatch.value = values[0]?.id || '' }, { immediate: true })
 let previousFocus: HTMLElement | null = null
 onMounted(() => {
   previousFocus = document.activeElement as HTMLElement
   dialog.value?.showModal()
-  batchSelect.value?.focus()
+  batchSearchInput.value?.focus()
 })
 onBeforeUnmount(() => { dialog.value?.close(); previousFocus?.focus() })
 function backdropClick(event: MouseEvent) {
@@ -65,7 +117,7 @@ function backdropClick(event: MouseEvent) {
 async function download() {
   if (!batch.value || !visibleRows.value.length || downloading.value) return
   downloading.value = true; downloadError.value = ''
-  const filterLabel = filter.value === 'all' ? '全部' : filter.value === 'changed' ? '有变动及待核对' : updateStatusLabels[filter.value]
+  const filterLabel = filter.value === 'all' ? '全部' : filter.value === 'changed' ? '有涨跌' : filter.value === 'exceptional' ? '新增 / 移除 / 无可比价' : updateStatusLabels[filter.value]
   const data = { batch: batch.value, rows: [...visibleRows.value], country: country.value, attribute: attribute.value || '全部属性', weight: weight.value, filter: `${originalBatch.value ? '原始批次 ' + originalBatch.value.replace(/^import:/, '') : '整组'} · ${filterLabel}`, search: search.value.trim() }
   try {
     const { downloadPriceUpdateOverview } = await import('@/data/logisticsUpdateOverviewExport')
@@ -76,77 +128,95 @@ async function download() {
 </script>
 
 <template>
-  <dialog ref="dialog" class="update-overview" aria-modal="true" aria-labelledby="update-overview-title" @cancel.prevent="emit('close')" @click="backdropClick">
-    <header class="overview-header">
-      <div><h2 id="update-overview-title">价格更新概览 <span>真实已发布价格</span></h2><p>每个渠道涨了多少、降了多少，一眼看清。</p></div>
-      <button type="button" class="overview-close" aria-label="关闭更新概览" @click="emit('close')">×</button>
+  <dialog ref="dialog" class="update-overview" aria-modal="true" aria-labelledby="update-overview-title" @cancel.prevent="cancel" @click="backdropClick">
+    <header class="overview-header" :inert="!!drawer">
+      <div><h2 id="update-overview-title">价格更新概览 <span>真实已发布价格</span></h2><p>选择一次更新，查看全部国家和渠道的价格变化</p></div>
+      <div class="header-actions"><button type="button" class="primary" :disabled="!visibleRows.length || downloading" @click="download">{{ downloading ? '生成中…' : '下载概览图' }}</button><button type="button" class="overview-close" aria-label="关闭更新概览" @click="emit('close')">×</button></div>
     </header>
-    <div class="overview-body">
-      <p v-if="error" class="overview-warning" role="alert">{{ error }}；当前保留上次成功读取的数据。</p>
-      <p v-if="refreshing" class="overview-hint" role="status">正在刷新价格，当前保留已读取的更新记录。</p>
-      <div class="overview-filters">
-        <label class="batch-field">更新批次 · 4小时汇总<select ref="batchSelect" v-model="selectedBatch" aria-label="更新批次" :disabled="!batches.length"><option v-if="!batches.length" value="">当前范围暂无更新</option><option v-for="item in batches" :key="item.id" :value="item.id">{{ batchLabel(item) }}</option></select></label>
-        <div class="country-field"><span>国家/地区</span><FinanceCountrySelect v-model="country" :countries="countries" /></div>
-        <label>物流属性<select v-model="attribute" aria-label="概览物流属性"><option value="">全部属性</option><option v-for="item in attributes" :key="item" :value="item">{{ item }}</option></select></label>
-        <label>试算重量<select v-model="weight" aria-label="概览试算重量"><option :value="0.5">0.5 kg</option><option :value="1">1 kg</option><option :value="2">2 kg</option></select></label>
-      </div>
-      <p class="overview-context">{{ country }} · {{ attribute || '全部属性' }} · {{ weight }} kg <span>价格单位：元 / 票</span></p>
-      <div v-if="batch" class="batch-context">
-        <span v-if="batch.windowStartAt">操作人：<b>{{ batch.operator }}</b> · 导入窗口：{{ publicationTime(batch.windowStartAt) }} — {{ publicationTime(batch.windowEndAt!) }}（结束时刻另起一组）</span>
-        <span v-else>{{ batch.batches[0]?.importBatchId ? '未留完整操作人 / 导入时间，原始批次独立展示' : '无导入批次 / 回滚，独立展示' }}</span>
-      </div>
-      <details v-if="batch" :key="batch.id" ref="originalDetails" class="original-batches">
-        <summary>展开原始上传批次（{{ sourceBatches.length }} 个）</summary>
-        <p class="overview-hint">同一操作人从第一笔导入起固定4小时，不随后续上传延长。下列批次均保留原始记录；只展示其中已发布的价格。</p>
-        <article v-for="item in sourceBatches" :key="item.id" class="original-batch-item" :data-batch="item.id">
-          <div><b>{{ item.importedAt ? publicationTime(item.importedAt) : '未记录导入时间' }}<template v-if="item.operator"> · {{ item.operator }}</template></b><small>{{ item.importId ? '原始上传批次：' + item.importId : '版本：' + item.source?.rows[0]?.after.id }}</small><small v-for="file in item.source?.files || []" :key="file">{{ file }}</small><small v-if="item.source">本次筛选内 {{ item.source.rows.length }} 条已发布价格 · 发布时间 {{ publicationTime(item.source.startedAt) }}<template v-if="publicationTime(item.source.startedAt) !== publicationTime(item.source.publishedAt)"> — {{ publicationTime(item.source.publishedAt) }}</template></small><small v-else>当前国家、属性和重量下暂无已发布价格</small></div>
-          <button type="button" :disabled="!item.source" :aria-pressed="originalBatch === item.id" @click="viewOriginal(item.id)">查看该批价格</button>
-        </article>
-      </details>
-      <div v-if="originalBatch" class="original-scope" role="status">正在查看原始批次：{{ originalBatch.replace(/^import:/, '') }} <button type="button" class="text-button" @click="originalBatch = ''">返回整组汇总</button></div>
-      <div class="overview-stats" aria-label="更新统计">
-        <div class="stat-total"><span>本次涉及</span><b>{{ searchedRows.length }} <small>条</small></b></div>
-        <div class="stat-up"><span>↑ 涨价</span><b>{{ counts.up }} <small>条</small></b></div>
-        <div class="stat-down"><span>↓ 降价</span><b>{{ counts.down }} <small>条</small></b></div>
-        <div class="stat-same"><span>— 不变</span><b>{{ counts.same }} <small>条</small></b></div>
-      </div>
-      <p class="overview-hint">统计{{ originalBatch ? '当前原始批次' : '本组' }}筛选范围的渠道 / 分区 / 发布版本；同一渠道多次更新逐次展示。<template v-if="exceptional">另有 <b>{{ exceptional }} 条</b>首次记录、新增、移除或暂不可比记录，不计入涨跌。</template></p>
-      <div class="overview-toolbar">
-        <div class="overview-tabs" aria-label="筛选价格变动">
-          <button type="button" :class="{ active: filter === 'changed' }" :aria-pressed="filter === 'changed'" @click="filter = 'changed'">有变动 {{ changes + exceptional }}</button>
-          <button type="button" :class="{ active: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部 {{ searchedRows.length }}</button>
-          <button type="button" :class="{ active: filter === 'up' }" :aria-pressed="filter === 'up'" @click="filter = 'up'">涨价 {{ counts.up }}</button>
-          <button type="button" :class="{ active: filter === 'down' }" :aria-pressed="filter === 'down'" @click="filter = 'down'">降价 {{ counts.down }}</button>
-          <button type="button" :class="{ active: filter === 'same' }" :aria-pressed="filter === 'same'" @click="filter = 'same'">不变 {{ counts.same }}</button>
+    <div class="overview-layout" :inert="!!drawer">
+      <aside class="batch-sidebar" aria-label="更新批次列表">
+        <div class="sidebar-title"><h3>更新批次</h3><span>每页10批</span></div>
+        <input ref="batchSearchInput" v-model="batchSearch" aria-label="搜索更新批次" placeholder="搜索日期 / 操作人" />
+        <div class="batch-list">
+          <button v-for="item in pageBatches" :key="item.id" type="button" class="batch-card" :class="{ active: selectedBatch === item.id }" :aria-pressed="selectedBatch === item.id" :aria-label="batchLabel(item)" :data-batch-id="item.id" @click="selectedBatch = item.id">
+            <b>{{ publicationTime(item.windowStartAt || item.startedAt) }}</b>
+            <span v-if="item.windowStartAt">{{ item.operator }} · {{ item.imports.length }} 个上传批次</span>
+            <span v-else>{{ item.providers.join('、') }} · {{ item.batches[0]?.importBatchId ? '原始批次独立展示' : item.rows[0]?.rollback ? '回滚发布' : '单次发布' }}</span>
+            <small v-if="item.windowEndAt">至 {{ publicationTime(item.windowEndAt) }}</small><small v-else>{{ item.id.replace(/^(import|version):/, '').slice(0, 8) }} · {{ item.rows[0]?.channel.name }}</small>
+          </button>
+          <p v-if="!pageBatches.length" class="overview-empty">{{ batchSearch ? '没有匹配的更新批次' : '暂无已发布更新记录' }}</p>
         </div>
-        <input v-model="search" aria-label="搜索更新渠道" placeholder="搜索渠道、物流商或分区" />
-      </div>
-      <div class="overview-table-scroll" tabindex="0" role="region" aria-label="渠道更新价格表">
-        <table class="overview-table">
-          <thead><tr><th scope="col">渠道名称 / 分区</th><th scope="col">更新前价格</th><th scope="col">更新后价格</th><th scope="col">具体涨跌金额</th><th scope="col">涨跌幅</th></tr></thead>
-          <tbody><tr v-for="row in visibleRows" :key="row.key" :data-status="row.status">
-            <td class="channel-cell"><b>{{ row.channel.name }}</b><small>{{ row.channel.provider }} · {{ row.region }} · {{ row.channel.attribute }}</small><small v-if="row.importBatchId" :title="row.importBatchId">原始批次 {{ row.importBatchId.slice(0, 8) }}</small><small v-if="!row.channel.enabled || !row.channel.quoteReady">当前暂不可报价 · 历史发布记录</small><span v-if="row.rollback" class="rollback-tag">回滚发布</span></td>
-            <td><span>{{ price(row.before?.price) }}</span><small v-if="row.before">V{{ row.before.number }} · {{ publicationTime(row.before.timestamp) }}</small><small v-else>{{ row.reason }}</small><small v-if="row.before?.price === null">{{ row.before.reason }}</small></td>
-            <td class="after-cell"><strong>{{ price(row.after.price) }}</strong><small>V{{ row.after.number }} · {{ publicationTime(row.after.timestamp) }}</small><small v-if="row.after.price === null">{{ row.after.reason }}</small></td>
-            <td class="amount-cell" :class="row.status"><b>{{ updateAmount(row) }}</b><small v-if="row.change === null">{{ row.reason }}</small></td>
-            <td class="percent-cell" :class="row.status">{{ updatePercent(row) }}<small v-if="row.before?.price === 0 && row.change !== null">原价为 0，不计算涨跌幅</small></td>
-          </tr></tbody>
-        </table>
-        <div v-if="!visibleRows.length" class="overview-empty" role="status"><b>{{ !batch ? '当前范围暂无已发布更新记录' : searchedRows.length ? '当前筛选下没有此类变动' : '没有匹配的渠道' }}</b><p>{{ !batch ? '可切换国家、物流属性或重量查看。' : '可切换“全部”或调整搜索条件查看。' }}</p></div>
-      </div>
-      <p v-if="filter === 'changed' && counts.same" class="overview-hint">已隐藏 {{ counts.same }} 条不变记录 · <button type="button" class="text-button" @click="filter = 'all'">展开全部</button></p>
-      <p class="overview-hint">金额差 = 更新后价格 − 更新前价格，含渠道原生固定费，不含财务折扣、关税及其他附加费。</p>
-      <p class="overview-hint">同一操作人从首笔导入起按固定4小时归组，按导入时间而非发布时间划分；原始上传批次可展开。无完整导入信息及回滚独立展示。名称和属性按当前资料显示。</p>
-      <p v-if="downloadError" class="overview-warning" role="alert">{{ downloadError }}</p>
+        <nav v-if="matchedBatches.length" class="batch-pagination" aria-label="更新批次分页"><span>共 {{ matchedBatches.length }} 批</span><div><button type="button" aria-label="上一页更新批次" :disabled="batchPage === 1" @click="changeBatchPage(batchPage - 1)">上一页</button><span aria-live="polite">{{ batchPage }} / {{ batchPageCount }}</span><button type="button" aria-label="下一页更新批次" :disabled="batchPage === batchPageCount" @click="changeBatchPage(batchPage + 1)">下一页</button></div></nav>
+        <p class="sidebar-note">同一操作人 · 首笔起固定4小时<br>原始上传批次保留，可展开追溯</p>
+      </aside>
+      <main class="overview-main">
+        <p v-if="error" class="overview-warning" role="alert">{{ error }}；当前保留上次成功读取的数据。</p>
+        <p v-if="refreshing" class="overview-hint" role="status">正在刷新价格，当前保留已读取的更新记录。</p>
+        <div class="batch-heading">
+          <div><h3 v-if="batch">{{ publicationTime(batch.windowStartAt || batch.startedAt) }}<template v-if="batch.windowEndAt"> — {{ publicationTime(batch.windowEndAt).slice(11) }}</template></h3><h3 v-else>选择更新批次</h3><p v-if="batch">{{ batch.operator || '独立发布记录' }} <span v-if="!batch.windowStartAt">· 无完整导入信息或回滚，独立展示</span></p></div>
+          <button v-if="batch" type="button" class="text-button" @click="openDrawer('uploads')">原始上传批次（{{ sourceBatches.length }}） ›</button>
+        </div>
+        <p class="overview-stats" aria-label="更新统计">{{ country }} · {{ attribute || '全部属性' }} · 涉及 {{ new Set(searchedRows.map(row => row.countryCode)).size }} 个国家、{{ channelCount }} 个渠道、{{ searchedRows.length }} 条价格记录</p>
+        <div v-if="originalBatch" class="original-scope" role="status"><span>原始批次 {{ originalBatch.replace(/^import:/, '').slice(0, 8) }}</span><button type="button" class="text-button" @click="originalBatch = ''">返回整组汇总</button></div>
+        <div class="overview-tabs" aria-label="筛选价格变动">
+          <button type="button" :class="{ active: filter === 'changed' }" :aria-pressed="filter === 'changed'" @click="filter = 'changed'">有涨跌 <b>{{ changes }}</b></button>
+          <button type="button" class="stat-up" :class="{ active: filter === 'up' }" :aria-pressed="filter === 'up'" @click="filter = 'up'">涨价 <b>{{ counts.up }}</b></button>
+          <button type="button" class="stat-down" :class="{ active: filter === 'down' }" :aria-pressed="filter === 'down'" @click="filter = 'down'">降价 <b>{{ counts.down }}</b></button>
+          <button type="button" :class="{ active: filter === 'same' }" :aria-pressed="filter === 'same'" @click="filter = 'same'">不变 <b>{{ counts.same }}</b></button>
+          <button type="button" class="stat-exceptional" :class="{ active: filter === 'exceptional' }" :aria-pressed="filter === 'exceptional'" @click="filter = 'exceptional'">新增 / 移除 / 无可比 <b>{{ exceptional }}</b></button>
+          <button type="button" :class="{ active: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部 <b>{{ searchedRows.length }}</b></button>
+        </div>
+        <div class="country-strip" aria-label="国家快捷筛选">
+          <div class="country-chips"><button type="button" :class="{ active: country === '全部国家' }" :aria-pressed="country === '全部国家'" @click="country = '全部国家'">全部国家</button><button v-for="item in quickCountries" :key="item.code" type="button" :class="{ active: country === item.name }" :aria-pressed="country === item.name" :aria-label="`查看${item.name}明细`" @click="country = item.name"><b>{{ item.name }}</b><small><span class="up">↑ {{ item.up }}</span><span class="down">↓ {{ item.down }}</span></small></button></div>
+          <div class="country-search"><label>全部 {{ countrySummary.length }} 国 · 可搜索<FinanceCountrySelect v-model="country" :countries="countries" /></label></div>
+        </div>
+        <div class="overview-toolbar">
+          <input v-model="search" aria-label="搜索更新渠道" placeholder="搜索国家、渠道或物流商" />
+          <label><span class="sr-only">物流属性</span><select v-model="attribute" aria-label="概览物流属性"><option value="">全部属性</option><option v-for="item in attributes" :key="item" :value="item">{{ item }}</option></select></label>
+          <label>试算重量 <select v-model="weight" aria-label="概览试算重量"><option :value="0.5">0.5 kg</option><option :value="1">1 kg</option><option :value="2">2 kg</option></select></label><span class="unit">金额：元/票</span>
+        </div>
+        <div ref="tableScroll" class="overview-table-scroll" tabindex="0" role="region" aria-label="渠道更新价格表">
+          <table class="overview-table">
+            <thead><tr><th scope="col">国家/地区</th><th scope="col">渠道 / 属性 / 分区</th><th scope="col">更新前</th><th scope="col">更新后</th><th scope="col">涨跌金额</th><th scope="col">涨跌幅</th><th scope="col">详情</th></tr></thead>
+            <tbody><tr v-for="row in pageRows" :key="row.key" :data-status="row.status">
+              <td><b>{{ row.countryName }}</b></td><td class="channel-cell"><b>{{ row.channel.name }}</b><small>{{ row.channel.provider }} · {{ row.channel.attribute }} · {{ row.region }}</small><small v-if="!row.channel.enabled || !row.channel.quoteReady">当前暂不可报价 · 历史记录</small><small v-if="row.rollback">回滚发布</small></td>
+              <td>{{ price(row.before?.price) }}</td><td class="after-cell"><strong>{{ price(row.after.price) }}</strong></td>
+              <td class="amount-cell" :class="row.status"><b :aria-label="updateAmount(row)">{{ row.change === null ? updateStatusLabels[row.status] : row.change === 0 ? '— 0.00' : `${row.change > 0 ? '↑' : '↓'} ${Math.abs(row.change).toFixed(2)}` }}</b></td>
+              <td :class="row.status">{{ updatePercent(row) }}</td><td><button type="button" class="text-button" :aria-label="`查看${row.countryName}${row.channel.name}价格详情`" @click="openDrawer('row', row)">查看</button></td>
+            </tr></tbody>
+          </table>
+          <div v-if="!visibleRows.length" class="overview-empty" role="status"><b>{{ !batch ? '当前范围暂无已发布更新记录' : !searchedRows.length ? '没有匹配的渠道' : '当前筛选下没有此类变动' }}</b><p v-if="batch">{{ filter === 'changed' && exceptional ? `另有 ${exceptional} 条新增、移除或无可比记录，可切换上方分类查看。` : '可切换“全部”或调整搜索条件查看。' }}</p></div>
+        </div>
+        <nav class="row-pagination" aria-label="渠道明细分页"><div>共 {{ visibleRows.length }} 条 <label><select v-model="pageSize" aria-label="每页明细条数"><option :value="10">每页10条</option><option :value="20">每页20条</option><option :value="50">每页50条</option></select></label></div><div><button type="button" aria-label="上一页渠道明细" :disabled="rowPage === 1" @click="rowPage--">上一页</button><span aria-live="polite">{{ rowPage }} / {{ rowPageCount }}</span><button type="button" aria-label="下一页渠道明细" :disabled="rowPage === rowPageCount" @click="rowPage++">下一页</button></div></nav>
+        <p class="overview-hint">按 {{ weight }} kg 比较已发布价格，含渠道原生固定费；新增、移除及无可比价单独列示。下载包含全部筛选结果。</p>
+        <p v-if="downloadError" class="overview-warning" role="alert">{{ downloadError }}</p>
+      </main>
     </div>
-    <footer class="overview-footer"><span>仅查看已发布价格历史</span><div><button type="button" @click="emit('close')">关闭</button><button type="button" class="primary" :disabled="!visibleRows.length || downloading" @click="download">{{ downloading ? '生成中…' : '下载概览图' }}</button></div></footer>
+    <footer class="overview-footer" :inert="!!drawer">仅查看价格历史，不修改报价数据 <span>同一渠道多次更新逐次保留 · 不含财务折扣、关税及其他附加费</span></footer>
+    <div v-if="drawer" class="drawer-shade" @click.self="closeDrawer">
+      <section class="detail-drawer" role="region" :aria-label="drawer === 'uploads' ? '原始上传批次详情' : '价格变动详情'">
+        <header><h3>{{ drawer === 'uploads' ? '原始上传批次' : '价格变动详情' }}</h3><button ref="drawerClose" type="button" aria-label="关闭详情" @click="closeDrawer">×</button></header>
+        <div class="drawer-body">
+          <template v-if="drawer === 'uploads'">
+            <p class="overview-hint">同一操作人从首笔导入起固定4小时，不随后续上传延长。原始批次及源文件记录完整保留。</p>
+            <article v-for="item in sourceBatches" :key="item.id" class="original-batch-item" :data-batch="item.id"><b>{{ item.importedAt ? publicationTime(item.importedAt) : '未记录导入时间' }} · {{ item.operator || '未记录操作人' }}</b><small>{{ item.importId ? '原始上传批次：' + item.importId : '版本：' + item.source?.rows[0]?.after.id }}</small><small v-for="file in item.source?.files || []" :key="file">{{ file }}</small><small>{{ item.source ? `全量 ${item.source.rows.length} 条已发布价格` : '当前重量下暂无已发布价格' }}</small><button type="button" :disabled="!item.source" :aria-pressed="originalBatch === item.id" @click="viewOriginal(item.id)">查看该批价格</button></article>
+          </template>
+          <template v-else-if="detailRow">
+            <h4>{{ detailRow.countryName }} · {{ detailRow.channel.name }}</h4><p>{{ detailRow.channel.provider }} · {{ detailRow.channel.attribute }} · {{ detailRow.region }} · {{ weight }} kg</p>
+            <div class="detail-prices"><div><small>更新前价格</small><strong>{{ price(detailRow.before?.price) }}</strong><small v-if="detailRow.before">V{{ detailRow.before.number }} · {{ publicationTime(detailRow.before.timestamp) }}</small><small>{{ detailRow.before?.reason || (!detailRow.before ? detailRow.reason : '') }}</small></div><div><small>更新后价格</small><strong>{{ price(detailRow.after.price) }}</strong><small>V{{ detailRow.after.number }} · {{ publicationTime(detailRow.after.timestamp) }}</small><small>{{ detailRow.after.reason }}</small></div></div>
+            <p class="detail-amount" :class="detailRow.status">{{ updateAmount(detailRow) }} <span>{{ updatePercent(detailRow) }}</span></p><p v-if="detailRow.reason">{{ detailRow.reason }}</p><p v-if="detailRow.before?.price === 0">原价为0，不计算涨跌幅。</p>
+            <dl><dt>更新前源文件</dt><dd>{{ detailRow.before?.file || '无更早记录' }}</dd><dt>更新后源文件</dt><dd>{{ detailRow.after.file }}</dd><dt>原始上传批次</dt><dd>{{ detailRow.importBatchId || '无导入批次 / 独立发布' }}</dd><dt>发布版本</dt><dd>{{ detailRow.after.id }}</dd></dl><p v-if="detailRow.rollback">此条为回滚发布记录，独立保留。</p>
+            <button type="button" class="text-button" @click="drawer = 'uploads'">查看本组原始上传批次 ›</button>
+          </template>
+        </div>
+      </section>
+    </div>
   </dialog>
 </template>
 
 <style scoped>
-.original-batches{margin:0 0 16px;border:1px solid #dce5ee;border-radius:7px;background:#f8fafc;padding:10px 14px}.original-batches>summary{cursor:pointer;color:#2169c4;font-size:13px;font-weight:600}.original-batch-item{display:flex;align-items:center;justify-content:space-between;gap:16px;border-top:1px solid #e0e7ef;padding:12px 0}.original-batch-item>div{min-width:0;overflow-wrap:anywhere}.original-batch-item b{font-size:13px}.original-batch-item small{display:block;color:#6d8296;font-size:12px;margin-top:4px}.original-batch-item button{flex-shrink:0;font-size:12px}.original-scope{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:10px 14px;border:1px solid #ccdef2;border-radius:6px;background:#eef5ff;color:#315b83;font-size:12px;overflow-wrap:anywhere}.original-scope button{flex-shrink:0}.original-batch-item button[aria-pressed=true]{background:#2169c4;color:#fff}.batch-context{line-height:1.8}@media(max-width:600px){.original-batch-item{align-items:flex-start;flex-direction:column;gap:8px}.original-scope{align-items:flex-start;flex-direction:column}}
-
-.update-overview{box-sizing:border-box;width:min(1240px,calc(100vw - 40px));max-height:92vh;max-height:92dvh;padding:0;border:1px solid #d7e2ec;border-radius:14px;background:#fff;color:#233f57;box-shadow:0 24px 80px #142d4c40;font:14px/1.5 Arial,"Microsoft YaHei",sans-serif;overflow:auto}.update-overview::backdrop{background:#192c4590}.overview-header{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:24px 28px;border-bottom:1px solid #e0e7ef}.overview-header h2{font-size:26px;margin:0;font-weight:750}.overview-header h2 span{display:inline-block;font-size:12px;vertical-align:middle;font-weight:400;background:#eaf6f3;color:#167c75;padding:4px 8px;margin-left:10px;border-radius:4px}.overview-header p{margin:6px 0 0;color:#617b94}.overview-close{font-size:29px!important;line-height:1;border:0!important;padding:2px 8px!important}.overview-body{padding:20px 28px 10px}.overview-filters{display:grid;grid-template-columns:minmax(260px,2.3fr) minmax(150px,1fr) minmax(150px,1fr) minmax(100px,.7fr);gap:16px}.overview-filters label,.country-field{display:flex;flex-direction:column;gap:7px;color:#59738c}.overview-filters select,.overview-toolbar input{box-sizing:border-box;border:1px solid #cad8e5;border-radius:6px;background:#fff;color:#244461;min-height:40px;padding:8px 10px;font:inherit;width:100%;min-width:0}.overview-filters :deep(.country-trigger){font:inherit;min-height:40px;border-color:#cad8e5;color:#244461}.overview-context{color:#59738c;margin:16px 0 7px}.overview-context>span{border-left:1px solid #cbd6df;margin-left:14px;padding-left:14px}.batch-context{display:flex;justify-content:space-between;gap:12px;color:#708399;font-size:12px;margin-bottom:16px}.batch-context details{max-width:55%;text-align:right;overflow-wrap:anywhere}.batch-context summary{cursor:pointer;color:#285f9a}.batch-context p{margin:5px 0}.overview-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.overview-stats>div{padding:15px 22px;border-radius:8px;display:flex;flex-direction:column}.overview-stats b{font-size:32px;line-height:1.3;margin-top:4px;font-variant-numeric:tabular-nums}.overview-stats small{font-size:17px;font-weight:400}.stat-total{background:#edf5ff}.stat-up{background:#fff1f0;color:#cb4039}.stat-down{background:#eaf8f6;color:#148878}.stat-same{background:#f1f4f7;color:#60768a}.overview-hint{font-size:12px;color:#6d8296;margin:10px 0;line-height:1.8}.overview-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 12px}.overview-tabs{display:flex;flex-wrap:wrap;gap:8px}.update-overview button{font:inherit;cursor:pointer;border:1px solid #d0ddeb;background:white;color:#34526d;border-radius:6px;padding:8px 16px}.update-overview button:focus-visible,.update-overview input:focus-visible,.update-overview select:focus-visible{outline:2px solid #2975d2;outline-offset:2px}.update-overview button.active,.update-overview button.primary{color:#fff;background:#2169c4;border-color:#2169c4}.update-overview button:disabled{opacity:.5;cursor:default}.overview-toolbar input{max-width:235px}.overview-table-scroll{overflow-x:auto;border:1px solid #dce5ee;border-radius:8px}.overview-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;text-align:left;table-layout:fixed;min-width:850px}.overview-table th{background:#f3f6fa;font-weight:500;font-size:13px;color:#607990;padding:12px 14px}.overview-table th:first-child{width:26%}.overview-table th:nth-child(2),.overview-table th:nth-child(3){width:18%}.overview-table th:nth-child(4){width:25%}.overview-table th:last-child{width:13%}.overview-table td{border-top:1px solid #e4ebf2;padding:14px;vertical-align:middle;font-size:16px;overflow-wrap:anywhere}.overview-table small{display:block;font-size:11px;color:#788ba0;margin-top:4px;line-height:1.6;font-weight:400}.channel-cell b{font-size:15px}.overview-table .after-cell strong{font-size:21px}.overview-table .amount-cell b{font-size:21px;white-space:nowrap}.amount-cell.up{background:#fff3f1;color:#d63e37}.amount-cell.down{background:#eaf8f5;color:#158877}.amount-cell.same{color:#7a8d9c}.amount-cell.first,.amount-cell.added,.amount-cell.removed,.amount-cell.unavailable{background:#fffaf0;color:#9a702f}.overview-table .amount-cell.first b,.overview-table .amount-cell.added b,.overview-table .amount-cell.removed b,.overview-table .amount-cell.unavailable b{font-size:16px}.percent-cell.up{color:#d63e37}.percent-cell.down{color:#158877}.rollback-tag{display:inline-block;padding:1px 5px;border-radius:4px;background:#f1effa;color:#716292;font-size:11px;margin-top:5px}.overview-empty{text-align:center;padding:36px;color:#6c8296}.overview-empty b{font-size:16px}.overview-footer{position:sticky;bottom:0;padding:16px 28px;background:#fff;border-top:1px solid #e0e7ef;display:flex;justify-content:space-between;align-items:center;gap:10px}.overview-footer>span{font-size:12px;color:#75899a}.overview-footer>div{display:flex;gap:12px}.update-overview .text-button{border:0;background:transparent;color:#2169c4;padding:0}.overview-warning{padding:10px 14px;background:#fff2e9;color:#a65431;border-radius:6px}
-@media(max-width:1050px){.overview-filters{grid-template-columns:2fr 1fr 1fr}.batch-field{grid-column:span 3}.overview-toolbar{flex-wrap:wrap}.overview-toolbar input{max-width:100%}.overview-header h2{font-size:23px}.overview-stats>div{padding:12px 16px}}
-@media(max-width:600px){.update-overview{width:calc(100vw - 16px);max-height:96dvh;border-radius:10px}.overview-header{padding:16px;gap:10px}.overview-header h2{font-size:21px}.overview-header h2 span{font-size:10px;margin-left:5px}.overview-header p{font-size:12px}.overview-body{padding:16px 12px 8px}.overview-filters{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.batch-field{grid-column:span 2}.country-field{grid-column:span 2}.overview-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.overview-stats>div{padding:10px 15px}.overview-stats b{font-size:27px}.overview-context{font-size:12px}.overview-context>span{display:block;border:0;margin:4px 0 0;padding:0}.batch-context{flex-direction:column}.batch-context details{text-align:left;max-width:100%}.overview-tabs{gap:6px}.overview-tabs button{padding:6px 10px;font-size:12px}.overview-footer{padding:12px}.overview-footer>span{display:none}.overview-footer>div{margin-left:auto}.overview-table-scroll:focus-visible{outline:2px solid #2975d2;outline-offset:2px}}
+.update-overview{box-sizing:border-box;width:min(1560px,calc(100vw - 32px));height:min(960px,94dvh);max-width:none;max-height:96dvh;padding:0;border:1px solid #d7e2ec;border-radius:12px;background:#fff;color:#233f57;box-shadow:0 24px 80px #142d4c40;font:14px/1.5 Arial,"Microsoft YaHei",sans-serif;overflow:hidden}.update-overview[open]{display:flex;flex-direction:column}.update-overview::backdrop{background:#192c4590}.update-overview *{box-sizing:border-box}.update-overview button,.update-overview input,.update-overview select{font:inherit;border:1px solid #d5e0ed;border-radius:6px;background:#fff;color:#34526d;padding:8px 12px;min-width:0}.update-overview button{cursor:pointer}.update-overview button:disabled{opacity:.45;cursor:default}.update-overview :is(button,input,select,[tabindex]):focus-visible{outline:2px solid #2975d2;outline-offset:2px}.update-overview button.active,.update-overview button.primary{background:#2169c4;color:white;border-color:#2169c4}.update-overview .text-button{border:0;background:none;color:#2169c4;padding:4px 0}.overview-header{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;gap:18px;border-bottom:1px solid #e1e8f0;flex-shrink:0}.overview-header h2{font-size:25px;margin:0}.overview-header h2 span{font-size:11px;font-weight:400;color:#167c75;background:#eaf6f3;border-radius:4px;padding:4px 7px;vertical-align:middle;margin-left:10px}.overview-header p{margin:4px 0 0;color:#72849a;font-size:13px}.header-actions{display:flex;align-items:center;gap:14px;flex-shrink:0}.update-overview .overview-close{font-size:27px;line-height:1;border:0;padding:4px 8px}.overview-layout{display:grid;grid-template-columns:245px minmax(0,1fr);flex:1;min-height:0}.batch-sidebar{display:flex;flex-direction:column;min-height:0;padding:18px 16px 10px;background:#f6f8fb;border-right:1px solid #e1e8f0;gap:12px}.sidebar-title{display:flex;align-items:center;justify-content:space-between;gap:10px}.sidebar-title h3{margin:0;font-size:18px}.sidebar-title>span,.sidebar-note{color:#7d8ba0;font-size:12px}.batch-list{overflow:auto;flex:1;min-height:0;padding:2px}.batch-list .batch-card{display:flex;flex-direction:column;gap:4px;text-align:left;width:100%;padding:12px;margin-bottom:9px;overflow-wrap:anywhere;border-left:3px solid transparent}.batch-card b{font-size:15px}.batch-card span{font-size:12px}.batch-card small{font-size:11px;color:#8594a5}.batch-list .batch-card.active{background:#eaf3ff;color:#2169c4;border-color:#bdd6f5;border-left-color:#2169c4}.batch-pagination{font-size:12px;color:#708399}.batch-pagination>span{display:block;margin-bottom:6px}.batch-pagination>div,.row-pagination,.row-pagination>div{display:flex;align-items:center;justify-content:space-between;gap:8px}.batch-pagination button{font-size:12px;padding:6px 8px}.sidebar-note{margin:0}.overview-main{min-width:0;min-height:0;padding:18px 20px 10px;display:flex;flex-direction:column;gap:10px}.batch-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.batch-heading h3{font-size:21px;margin:0}.batch-heading p{font-size:12px;color:#73859b;margin:2px 0 0}.batch-heading>button{flex-shrink:0;font-size:12px}.overview-stats{margin:0;font-size:13px;color:#526c85}.overview-tabs{display:flex;gap:8px;flex-shrink:0}.overview-tabs button{flex:1;white-space:nowrap;padding:9px 8px;font-size:13px;border-color:transparent;background:#f2f5f9}.overview-tabs b{margin-left:6px}.overview-tabs .stat-up{color:#ca423c;background:#fff2f1}.overview-tabs .stat-down{color:#178778;background:#eaf8f6}.overview-tabs .stat-exceptional{color:#a47132;background:#fff8ed;font-size:12px}.country-strip{display:flex;align-items:center;gap:12px;padding:3px 0 8px;border-bottom:1px solid #ecf0f5;min-width:0}.country-chips{display:flex;gap:7px;overflow:auto;flex:1;min-width:0;padding:3px}.country-chips button{flex:1;min-width:72px;padding:5px 9px;white-space:nowrap;font-size:12px}.country-chips small{display:flex;gap:12px;justify-content:center;font-size:11px}.country-chips .active :is(.up,.down){color:white}.country-search{width:155px;flex-shrink:0}.country-search label{font-size:11px;color:#74889b}.country-search :deep(.country-trigger){font-size:12px;min-height:33px;padding:5px 8px}.country-search :deep(.country-menu){left:auto;right:0}.overview-toolbar{display:flex;align-items:center;gap:10px;flex-shrink:0}.overview-toolbar>input{flex:1;width:0;min-width:120px}.overview-toolbar label{display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:12px}.overview-toolbar select{max-width:130px}.unit{font-size:12px;color:#74889b;white-space:nowrap}.overview-table-scroll{flex:1;min-height:100px;overflow:auto;border:1px solid #dce5ee;border-radius:7px}.overview-table{width:100%;min-width:820px;border-collapse:separate;border-spacing:0;table-layout:fixed;font-variant-numeric:tabular-nums;text-align:left}.overview-table th{position:sticky;top:0;z-index:1;background:#f1f5fa;color:#607990;font-size:12px;font-weight:500;padding:10px;border-bottom:1px solid #dde6ef}.overview-table th:nth-child(1){width:10%}.overview-table th:nth-child(2){width:26%}.overview-table th:nth-child(3),.overview-table th:nth-child(4){width:14%}.overview-table th:nth-child(5){width:17%}.overview-table th:nth-child(6){width:10%}.overview-table th:nth-child(7){width:9%}.overview-table td{padding:10px;border-bottom:1px solid #e7edf3;font-size:14px;overflow-wrap:anywhere;vertical-align:middle}.overview-table small{display:block;color:#8091a4;font-size:11px;line-height:1.5;margin-top:3px;font-weight:400}.channel-cell b{font-size:13px}.after-cell strong,.amount-cell b{font-size:17px;white-space:nowrap}.up{color:#ce423b}.down{color:#168878}.amount-cell.up{background:#fff3f1}.amount-cell.down{background:#eaf8f6}.amount-cell:is(.first,.added,.removed,.unavailable){color:#9c702e;background:#fff9ef}.amount-cell:is(.first,.added,.removed,.unavailable) b{font-size:13px}.same{color:#7c8e9e}.row-pagination{flex-shrink:0;font-size:12px;color:#6b8097}.row-pagination button,.row-pagination select{padding:6px 9px;font-size:12px}.row-pagination>div:first-child{justify-content:flex-start}.overview-hint{font-size:11px;color:#788ba0;margin:0;line-height:1.6}.overview-empty{text-align:center;padding:28px 12px;color:#7a8da1}.overview-empty b{font-size:15px}.overview-empty p{font-size:12px}.overview-footer{display:flex;justify-content:space-between;gap:16px;flex-shrink:0;border-top:1px solid #e1e8f0;padding:9px 22px;font-size:11px;color:#7b8b9e}.overview-warning{margin:0;padding:8px 12px;background:#fff2e9;color:#a65431;border-radius:6px;font-size:12px}.original-scope{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#eef5ff;padding:6px 10px;font-size:12px;border-radius:5px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.drawer-shade{position:absolute;inset:0;z-index:10;background:#20395445;display:flex;justify-content:flex-end}.detail-drawer{width:min(560px,100%);height:100%;background:#fff;box-shadow:-12px 0 40px #1e385326;display:flex;flex-direction:column;min-height:0}.detail-drawer>header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #e1e8f0}.detail-drawer h3{margin:0;font-size:20px}.detail-drawer>header button{font-size:23px;border:0;padding:0 8px}.drawer-body{padding:20px;overflow:auto;overflow-wrap:anywhere}.drawer-body h4{font-size:18px;margin:0 0 8px}.drawer-body>p{color:#6b8097;font-size:13px}.original-batch-item{padding:16px 0;border-bottom:1px solid #e3eaf2}.original-batch-item b{font-size:14px}.original-batch-item small{display:block;color:#7b8da2;font-size:12px;margin-top:7px}.original-batch-item button{margin-top:10px;font-size:12px}.detail-prices{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}.detail-prices>div{padding:14px;background:#f4f7fb;border-radius:8px;display:flex;flex-direction:column;gap:5px}.detail-prices small{font-size:12px;color:#7c8ea2}.detail-prices strong{font-size:25px}.drawer-body .detail-amount{font-size:22px;font-weight:700}.drawer-body .detail-amount.up{color:#ce423b}.drawer-body .detail-amount.down{color:#168878}.detail-amount span{font-size:15px;margin-left:12px}.drawer-body dt{font-size:12px;color:#8091a4;margin-top:16px}.drawer-body dd{margin:5px 0 0;font-size:13px}
+@media(max-width:1150px){.overview-table{min-width:680px}.overview-table td{font-size:12px;padding:9px 7px}.overview-table th{padding:9px 7px;font-size:11px}.channel-cell b{font-size:12px}.after-cell strong,.amount-cell b{font-size:15px}.overview-table td:nth-child(3),.overview-table td:nth-child(4){white-space:nowrap}.overview-layout{grid-template-columns:205px minmax(0,1fr)}.overview-main{padding:14px;gap:8px}.overview-tabs{gap:5px;flex-wrap:wrap}.overview-tabs button{padding:7px;font-size:12px;flex:1 0 27%}.country-search{width:130px}.overview-header{padding:14px 18px}.batch-heading h3{font-size:18px}.unit{display:none}.overview-toolbar{gap:7px}.overview-toolbar label{font-size:11px}.overview-toolbar select{max-width:105px}.overview-footer span{display:none}.batch-sidebar{padding:14px 12px}}
+@media(max-width:700px){.update-overview{width:calc(100vw - 12px);height:96dvh;overflow:auto;border-radius:9px}.overview-header{padding:12px;align-items:flex-start}.overview-header h2{font-size:20px}.overview-header h2 span{display:none}.overview-header p{font-size:11px}.header-actions{gap:6px}.header-actions .primary{font-size:11px;padding:7px}.overview-layout{display:flex;flex-direction:column;flex:none;min-height:auto}.batch-sidebar{max-height:260px;border-right:0;border-bottom:1px solid #e1e8f0;gap:7px;padding:10px 12px}.sidebar-title h3{font-size:15px}.batch-list{display:flex;gap:8px;overflow:auto;flex:none;padding:2px}.batch-list .batch-card{width:200px;flex-shrink:0;margin:0;padding:8px}.batch-card b{font-size:13px}.batch-pagination{display:flex;justify-content:space-between;align-items:center;gap:10px}.batch-pagination>span{margin:0}.sidebar-note{display:none}.overview-main{min-height:690px;padding:12px}.batch-heading{flex-wrap:wrap}.batch-heading h3{font-size:16px}.overview-stats{font-size:11px}.country-strip{align-items:flex-end}.country-search{width:120px}.country-chips button{min-width:68px}.overview-toolbar{flex-wrap:wrap}.overview-toolbar>input{flex-basis:100%;width:100%}.overview-table-scroll{height:330px;flex:none}.row-pagination{flex-wrap:wrap}.overview-footer{padding:10px 12px}.overview-header{flex-shrink:0}.detail-drawer{position:fixed;inset:0;width:100%;height:100dvh}.drawer-shade{position:fixed}.overview-tabs button{font-size:11px}}
 </style>
