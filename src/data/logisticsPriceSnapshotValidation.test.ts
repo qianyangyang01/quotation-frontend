@@ -3,6 +3,11 @@ import {assertPriceSnapshot} from './logisticsPriceSnapshotValidation'
 import {existsSync,readFileSync} from 'node:fs'
 
 function sample(){return {capturedAt:'2026-10-28T01:00:00Z',channels:[{id:'c',name:'真实渠道',provider:'物流商',attribute:'普货',code:'code',enabled:true,quoteReady:true,current:'v'}],versions:[{id:'v',channel:'c',number:1,status:'published',publishedAt:'2026-10-01T01:00:00Z',rows:[],preparedPrices:{'DE|1':{'全国统一':{price:20,rate:15,fee:5,chargeWeight:1,intervalPrice:null,model:'per-kg',reason:''}}}}]}}
+it('accepts original upload metadata and rejects damaged identities, times and duplicate batches',()=>{
+ const batch={id:'original',importedAt:'2026-11-02T00:00:00Z',operator:'物流甲'}
+ expect(()=>assertPriceSnapshot({...sample(),importBatches:[batch]})).not.toThrow()
+ for(const imports of [null,{},[null],[{...batch,importedAt:'bad'}],[{...batch,operator:123}],[batch,batch]])expect(()=>assertPriceSnapshot({...sample(),importBatches:imports})).toThrow('数据有误')
+})
 it.each([NaN,Infinity,-1,'20',undefined])('rejects an invalid computed price without modifying the source: %s',value=>{
  const data=sample();Object.assign(data.versions[0]!.preparedPrices['DE|1']['全国统一'],{price:value})
  const original=JSON.stringify(data);expect(()=>assertPriceSnapshot(data)).toThrow('数据有误');expect(JSON.stringify(data)).toBe(original)

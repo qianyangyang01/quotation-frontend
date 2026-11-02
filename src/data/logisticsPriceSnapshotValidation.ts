@@ -7,6 +7,14 @@ export function assertPriceSnapshot(value:unknown):asserts value is RealPriceSna
   const date=(v:unknown)=>typeof v==='string'&&Number.isFinite(Date.parse(v))
   if(!object(value)||!date(value.capturedAt)||!Array.isArray(value.channels)||!Array.isArray(value.versions))return bad()
   const channels=new Set<string>(),versions=new Set<string>()
+  if(value.importBatches!==undefined){
+    if(!Array.isArray(value.importBatches))return bad()
+    const imports=new Set<string>()
+    for(const batch of value.importBatches){
+      if(!object(batch)||typeof batch.id!=='string'||!batch.id||imports.has(batch.id)||!date(batch.importedAt)||typeof batch.operator!=='string')return bad()
+      imports.add(batch.id)
+    }
+  }
   for(const c of value.channels){
     if(!object(c)||typeof c.id!=='string'||!c.id||channels.has(c.id))return bad()
     if(!['name','provider','attribute','code'].every(key=>typeof c[key]==='string')||typeof c.enabled!=='boolean'||typeof c.quoteReady!=='boolean')return bad()

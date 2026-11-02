@@ -6,12 +6,15 @@ import catalog from '@/data/logisticsPriceCountryCatalog.json'
 import {channelSearchTerms,searchCountryChannels,type SearchableChannelHistory} from '@/data/logisticsChannelSearch'
 import {attributeChannelHistories,priceHistoryAttributes,majorChannelCategories,hasWorkbookCountry} from '@/data/logisticsMajorChannelHistory'
 import FinanceCountrySelect from '@/components/finance/FinanceCountrySelect.vue'
+import LogisticsUpdateOverview from './LogisticsUpdateOverview.vue'
+import LogisticsUpdateOverviewBoundary from './LogisticsUpdateOverviewBoundary.vue'
 const props=defineProps<{snapshot:RealPriceSnapshot;refreshing:boolean;error:string;checkedAt?:string;state?:PriceHistoryFilters}>()
 const emit=defineEmits<{workspace:[mode:'base'|'rules'];refresh:[]}>()
 const priority=new Map<string,number>(priorityPriceCountries.map(([code],i)=>[code,i]))
 const countryOptions=catalog.countries.map(c=>({country:c.name,code:c.code,stageLabel:priority.has(c.code)?'重点国家':'其他国家/地区'})).sort((a,b)=>(priority.get(a.code)??999)-(priority.get(b.code)??999)||a.country.localeCompare(b.country,'zh-CN'))
 const {country,attribute,weight,comparison,search,page}=toRefs(reactive(props.state??{country:'德国',attribute:'普货/服装',weight:1,comparison:'currentPrevious',search:'',page:1}))
 const detailsOpen=ref(false),selected=ref('')
+const overviewOpen=ref(false)
 const countryCode=computed(()=>catalog.countries.find(c=>c.name===country.value)?.code||'')
 const attributes=computed(()=>priceHistoryAttributes(props.snapshot))
 const isMajorAttribute=computed(()=>hasWorkbookCountry(countryCode.value)&&majorChannelCategories.includes(attribute.value))
@@ -51,7 +54,7 @@ onUnmounted(()=>window.removeEventListener('keydown',closeOnEscape))
 <div class="logistics-page charts-screen"><main>
  <nav class="workspace-switch" aria-label="物流工作区"><button @click="emit('workspace','base')">基础资料设置</button><button @click="emit('workspace','rules')">运费规则列表</button><button class="active">渠道价格变动</button></nav>
  <section class="rule-workspace-card chart-workspace">
-  <header class="chart-title"><div><h2>渠道价格变动 <small class="real-badge">真实已发布价格</small></h2><p>默认展示表内重点渠道 · 搜索可查看其他渠道 · CNY / 票</p></div><div class="head-actions"><span class="auto-update" :title="'价格快照读取于 '+publicationTime(snapshot.capturedAt)">按需更新<small>{{checkedAt?'检查于 '+publicationTime(checkedAt):'快照于 '+publicationTime(snapshot.capturedAt)}}</small></span><button class="refresh-button" :disabled="refreshing" :aria-busy="refreshing" @click="emit('refresh')">{{refreshing?'刷新中…':'刷新最新价格'}}</button><button class="detail-button" @click="openDetails()">价格明细 ↗</button></div></header>
+  <header class="chart-title"><div><h2>渠道价格变动 <small class="real-badge">真实已发布价格</small></h2><p>默认展示表内重点渠道 · 搜索可查看其他渠道 · CNY / 票</p></div><div class="head-actions"><span class="auto-update" :title="'价格快照读取于 '+publicationTime(snapshot.capturedAt)">按需更新<small>{{checkedAt?'检查于 '+publicationTime(checkedAt):'快照于 '+publicationTime(snapshot.capturedAt)}}</small></span><button class="refresh-button" :disabled="refreshing" :aria-busy="refreshing" @click="emit('refresh')">{{refreshing?'刷新中…':'刷新最新价格'}}</button><button class="overview-button" @click="overviewOpen=true">更新概览</button><button class="detail-button" @click="openDetails()">价格明细 ↗</button></div></header>
   <p v-if="error" class="load-error" role="alert">{{error}}；当前保留上次成功读取的数据。</p>
   <div class="chart-filters"><div class="trend-country-field"><span>国家/地区</span><FinanceCountrySelect v-model="country" :countries="countryOptions"/></div><label>物流属性<span v-if="isSearching" class="search-attribute">全部属性</span><select v-else v-model="attribute" aria-label="物流属性"><option v-for="a in attributes" :key="a" :value="a">{{a}}</option></select></label><label>重量<select v-model="weight" aria-label="重量"><option :value="0.5">0.5 kg</option><option :value="1">1 kg</option><option :value="2">2 kg</option></select></label><label>比较<select v-model="comparison" aria-label="比较版本"><option value="currentPrevious">本版 vs 上一版</option><option value="currentOlder">本版 vs 前两版</option><option value="previousOlder">上一版 vs 前两版</option></select></label><div class="channel-search-field"><input v-model="search" class="channel-search" placeholder="模糊搜索其他渠道" aria-label="搜索渠道或分区" @keydown.esc="search=''"/><button v-if="search" class="clear-search" @click="search=''" aria-label="清空渠道搜索">×</button></div></div>
   <div class="results-bar"><span>{{country}} · {{isSearching?'搜索结果':attribute+(isMajorAttribute?' · 表内重点渠道':' · 系统渠道')}} {{rows.length}} 条 / 分区 <small>{{isSearching?'搜索当前国家全部物流属性 · 清空恢复属性筛选':(isMajorAttribute?'按原表顺序 · 各分区独立比较':'按系统物流属性筛选 · 各分区独立比较')}}</small></span><div class="counts"><span class="up">↑ {{counts.up}} 涨价</span><span class="down">↓ {{counts.down}} 降价</span><span>{{counts.same}} 不变</span><span v-if="counts.missing">{{counts.missing}} 暂不可比</span></div></div>
@@ -77,6 +80,9 @@ onUnmounted(()=>window.removeEventListener('keydown',closeOnEscape))
  </section>
  <p class="coverage-note">均价区间：2025/01/01—2026/10/01（639天）。现有版本记录始于2026/09，缺少完整年度和区间历史；不以现价倒填。金额不含财务折扣、关税及其他附加费。</p>
 </main></div>
+<LogisticsUpdateOverviewBoundary v-if="overviewOpen" @close="overviewOpen=false">
+ <LogisticsUpdateOverview :snapshot="snapshot" :initial-country="country" :initial-attribute="isSearching ? '' : attribute" :initial-weight="weight" :refreshing="refreshing" :error="error" @close="overviewOpen=false" />
+</LogisticsUpdateOverviewBoundary>
 <div v-if="detailsOpen" class="detail-backdrop" @click.self="detailsOpen=false">
  <section class="detail-panel" role="dialog" aria-modal="true" aria-label="价格明细">
   <header><div><h2>真实价格明细</h2><p>{{country}} · {{isSearching?'搜索结果 · 全部物流属性':attribute}} · {{weight}} kg · CNY / 票</p></div><button class="close-details" @click="detailsOpen=false" aria-label="关闭价格明细">×</button></header>
@@ -119,5 +125,5 @@ onUnmounted(()=>window.removeEventListener('keydown',closeOnEscape))
 </style>
 
 <style scoped>
-.auto-update small{display:block;font-size:10px;margin-top:3px;text-align:right}
+.overview-button{background:#2169c4;color:#fff;border:1px solid #2169c4;border-radius:6px;padding:10px 16px;font-size:14px;white-space:nowrap;cursor:pointer}.overview-button:hover{background:#1856a4}.overview-button:focus-visible{outline:2px solid #164c90;outline-offset:3px}.auto-update small{display:block;font-size:10px;margin-top:3px;text-align:right}
 </style>

@@ -92,6 +92,8 @@ public class LogisticsPriceHistoryService {
               where c.dataset_id=logistics_active_dataset() and c.archived_at is null
             ), state as materialized (
               select jsonb_build_object('dataset',logistics_active_dataset(),
+                'importBatches',coalesce((select jsonb_agg(jsonb_build_object('id',b.id,'importedAt',b.created_at,'operator',b.requested_by)
+                  order by b.created_at,b.id) from logistics_import_batch b where b.dataset_id=logistics_active_dataset()),'[]'::jsonb),
                 'pendingVersions',(select count(*) from logistics_version v join channels c on c.id=v.channel_id
                   left join logistics_price_history_projection h on h.version_id=v.id and h.rows_fingerprint=v.rows_fingerprint and h.engine_version=:engine
                   where v.status in ('published','superseded') and v.published_at is not null and h.version_id is null),
@@ -103,8 +105,14 @@ public class LogisticsPriceHistoryService {
                     (select md5(string_agg(concat_ws(':',a.id,a.kind,a.engine_version,a.rows_fingerprint,a.reviewed_at),',' order by a.id)) from logistics_billing_acceptance a where a.version_id=c.current_version_id))) order by c.id) from channels c),'[]'::jsonb),
                 'versions',coalesce((select jsonb_agg(jsonb_build_object('id',v.id,'channel',v.channel_id,'number',v.version_number,'status',v.status,
                   'publishedAt',v.published_at,'fileName',v.workspace_payload->>'fileName','rollbackFromVersionId',v.workspace_payload->>'rollbackFromVersionId',
+                  'baseVersionId',v.workspace_payload->>'basePublishedVersionId',
+                  'importBatchId',case when coalesce(v.workspace_payload->>'rollbackFromVersionId','')='' and
+                    b.payload->'results' @> jsonb_build_array(jsonb_build_object('versionId',v.id::text)) then b.id else null end,
                   'rows','[]'::jsonb,'preparedPrices',h.prices) order by v.id)
                   from logistics_version v join channels c on c.id=v.channel_id
+                  left join logistics_import_batch b on b.dataset_id=c.dataset_id and b.id=case
+                    when v.workspace_payload->>'batchId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                    then (v.workspace_payload->>'batchId')::uuid else null end
                   join logistics_price_history_projection h on h.version_id=v.id and h.rows_fingerprint=v.rows_fingerprint and h.engine_version=:engine
                   where v.status in ('published','superseded') and v.published_at is not null),'[]'::jsonb)) value
             ) select (value||jsonb_build_object('sourceRevision',md5(value::text),'capturedAt',now()))::text from state

@@ -44,6 +44,46 @@ class LogisticsPriceHistoryPostgresTest {
   jdbc.sql("insert into logistics_billing_acceptance select gen_random_uuid(),id,rows_fingerprint,'legacy','legacy','{}','QA',now() from logistics_version where id=:id").param("id",id).update();
  }
  String source(UUID id){return jdbc.sql("select payload::text from logistics_version where id=:id").param("id",id).query(String.class).single();}
+ @Test void exposesOnlySourceConfirmedImportGroupsAndExplicitBaselinesWithoutWritingHistory(){
+  var batch=UUID.randomUUID();
+  var batchPayload=mapper.createObjectNode();batchPayload.putArray("results").addObject().put("versionId",old.toString());
+  jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload) values(:id,logistics_active_dataset(),'QA',:key,'completed','done',cast(:p as jsonb))")
+   .param("id",batch).param("key",batch.toString()).param("p",batchPayload.toString()).update();
+  var metadata=mapper.createObjectNode().put("batchId",batch.toString()).put("basePublishedVersionId","");
+  jdbc.sql("update logistics_version set payload=payload||cast(:p as jsonb) where id=:id").param("id",old).param("p",metadata.toString()).update();
+  var before=source(old);
+  var first=service.snapshot().path("versions").valueStream().filter(v->old.toString().equals(v.path("id").asText())).findFirst().orElseThrow();
+  assertEquals(batch.toString(),first.path("importBatchId").asText());assertEquals("",first.path("baseVersionId").asText());
+  assertEquals(before,source(old));
+  var rollback=version(2,25,"published");
+  metadata.put("rollbackFromVersionId",old.toString()).put("basePublishedVersionId",old.toString());
+  jdbc.sql("update logistics_version set payload=payload||cast(:p as jsonb) where id=:id").param("id",rollback).param("p",metadata.toString()).update();
+  // Even a copied batch ID is not evidence that a cloned/replayed version belonged to that import.
+  var copy=version(3,30,"published");metadata.remove("rollbackFromVersionId");
+  jdbc.sql("update logistics_version set payload=payload||cast(:p as jsonb) where id=:id").param("id",copy).param("p",metadata.toString()).update();
+  var malformed=version(4,40,"published");
+  jdbc.sql("update logistics_version set payload=payload||'{\"batchId\":\"legacy-import\"}'::jsonb where id=:id").param("id",malformed).update();
+  service.rebuildMissing();
+  var snapshot=service.snapshot();
+  for(var id:java.util.List.of(rollback,copy,malformed)){
+   var projected=snapshot.path("versions").valueStream().filter(v->id.toString().equals(v.path("id").asText())).findFirst().orElseThrow();
+   assertTrue(projected.path("importBatchId").isNull());
+   if(id.equals(rollback))assertEquals(old.toString(),projected.path("baseVersionId").asText());
+  }
+  assertEquals(before,source(old));
+ }
+ @Test void includesOriginalImportTimesAndOperatorsEvenBeforeAnyVersionPublishes(){
+  var first=UUID.randomUUID();var later=UUID.randomUUID();
+  for(var id:java.util.List.of(first,later))jdbc.sql("insert into logistics_import_batch(id,dataset_id,requested_by,request_key,status,phase,payload,created_at) values(:id,logistics_active_dataset(),:actor,:key,'completed','done','{}',cast(:created as timestamptz))")
+   .param("id",id).param("actor",id.equals(first)?"物流甲":"物流乙").param("key",id.toString()).param("created",id.equals(first)?"2026-11-02T08:00:00+08:00":"2026-11-02T09:00:00+08:00").update();
+  var before=source(old);var snapshot=service.snapshot();
+  for(var id:java.util.List.of(first,later)){
+   var original=snapshot.path("importBatches").valueStream().filter(b->id.toString().equals(b.path("id").asText())).findFirst().orElseThrow();
+   assertEquals(id.equals(first)?"物流甲":"物流乙",original.path("operator").asText());
+   assertEquals(java.time.Instant.parse(id.equals(first)?"2026-11-02T00:00:00Z":"2026-11-02T01:00:00Z"),java.time.OffsetDateTime.parse(original.path("importedAt").asText()).toInstant());
+  }
+  assertEquals(before,source(old));
+ }
  @Test void publishesNewDerivedPricesWithoutRewritingHistoryAndCachesUntilSourceChanges(){
   var before=source(old);var oldCalculation=jdbc.sql("select calculated_at::text from logistics_price_history_projection where version_id=:id").param("id",old).query(String.class).single();
   var draft=version(2,30,"draft");service.prepare(draft);

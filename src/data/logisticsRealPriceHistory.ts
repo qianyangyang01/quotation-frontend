@@ -3,8 +3,9 @@ import { calendarDay, weightedPricePeriod } from './logisticsPriceTrendAnalytics
 
 export interface HistoryChannel { id: string; ruleId: number; provider: string; code: string; current: string; name: string; attribute: string; enabled: boolean; quoteReady: boolean }
 export type PreparedPrice = Pick<HistoryPoint,'price'|'rate'|'fee'|'chargeWeight'|'model'|'intervalPrice'|'reason'>
-export interface PublishedPriceVersion { id: string; channel: string; number: number; status: string; publishedAt: string; fileName: string; rollbackFromVersionId?: string; rows: (LogisticsPriceRow & { currency?: string })[]; preparedPrices?:Record<string,Record<string,PreparedPrice>> }
-export interface RealPriceSnapshot { capturedAt: string; sourceRevision?:string; dataset: string; channels: HistoryChannel[]; versions: PublishedPriceVersion[] }
+export interface PublishedPriceVersion { id: string; channel: string; number: number; status: string; publishedAt: string; fileName: string; rollbackFromVersionId?: string; importBatchId?: string | null; baseVersionId?: string | null; rows: (LogisticsPriceRow & { currency?: string })[]; preparedPrices?:Record<string,Record<string,PreparedPrice>> }
+export interface PriceHistoryImportBatch { id: string; importedAt: string; operator: string }
+export interface RealPriceSnapshot { capturedAt: string; sourceRevision?:string; dataset: string; channels: HistoryChannel[]; versions: PublishedPriceVersion[]; importBatches?: PriceHistoryImportBatch[] }
 export interface HistoryPoint { id: string; number: number; timestamp: string; date: string; price: number | null; rate: number | null; fee: number | null; chargeWeight: number | null; model: string; intervalPrice: number | null; reason: string; file: string }
 export interface ChannelPriceHistory { key: string; channel: HistoryChannel; region: string; history: HistoryPoint[]; current: HistoryPoint | undefined }
 export const priorityPriceCountries = [ ['US','美国'],['CA','加拿大'],['GB','英国'],['DE','德国'],['FR','法国'],['ES','西班牙'],['IT','意大利'],['NL','荷兰'],['BE','比利时'],['AU','澳大利亚'] ] as const
@@ -14,16 +15,16 @@ const zones = (row: LogisticsPriceRow) => row.zoneName ? row.zoneName.split(/[/�
 const normalizeCanada = (name: string) => name.replace(/^加拿大/,'').replace(/[一二三四五六七八九]/g, x=>String('一二三四五六七八九'.indexOf(x)+1))
 
 /** Version IDs, not labels, bind history to the same real channel. No name matching or synthetic prices. */
-export function realChannelHistories(snapshot: RealPriceSnapshot, country: string, weight: number, attribute = ''): ChannelPriceHistory[] {
+export function realChannelHistories(snapshot: RealPriceSnapshot, country: string, weight: number, attribute = '', includeUnavailableChannels = false): ChannelPriceHistory[] {
   const result: ChannelPriceHistory[] = []
   const preparedKey=country+'|'+weight
   for (const channel of snapshot.channels) {
-    if (!channel.enabled || !channel.quoteReady) continue
+    if (!includeUnavailableChannels && (!channel.enabled || !channel.quoteReady)) continue
     if (attribute && !(channel.attribute || '普货').split(/[、,，;；|]/).includes(attribute)) continue
     const versions = snapshot.versions.filter(v=>v.channel===channel.id && v.publishedAt && ['published','superseded'].includes(v.status))
       .sort((a,b)=>Date.parse(a.publishedAt)-Date.parse(b.publishedAt)||a.number-b.number)
     const currentVersion = versions.find(v=>v.id===channel.current)
-    if (!currentVersion || !versions.some(v=>v.preparedPrices?.[preparedKey]||v.rows.some(r=>r.countryCode===country))) continue
+    if ((!currentVersion && !includeUnavailableChannels) || !versions.some(v=>v.preparedPrices?.[preparedKey]||v.rows.some(r=>r.countryCode===country))) continue
     const regions = [...new Set(versions.flatMap(v=>v.preparedPrices?Object.keys(v.preparedPrices[preparedKey]||{}):v.rows.filter(r=>r.countryCode===country&&!r.zoneExclude).flatMap(zones)))].sort((a,b)=>a.localeCompare(b,'zh-CN',{numeric:true}))
     for (const region of regions) {
       const history = versions.map(v => {
