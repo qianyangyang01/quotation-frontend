@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="jieyitongda-israel-2026.10.28-v13";
+    public static final String VERSION="sf-sensitive-latest-weight-2026.11.02-v14";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -1026,10 +1026,15 @@ public class LogisticsSourceParser {
                     source.filteredOtherRows.put(r,QiaojieSourceRules.US_ONLY_REASON);continue;
                 }
             }
+            int weightColumn=sfSensitiveWeightColumn(source,r,provider,columns);
             var weight=!columns.fixedWeight.isBlank()?columns.fixedWeight:columns.from>=0?
                     source.numberText(r,columns.from)+(columns.boundsInGrams?"G":"")+"-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):
-                    columns.to>=0?"0-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):source.text(r,columns.weight);
+                    columns.to>=0?"0-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):source.text(r,weightColumn);
             if(!looksRange(weight)) {
+                if(weightColumn!=columns.weight) {
+                    var target=selected(source,provider,section,"",r,channels,section.equals(source.sheet.getSheetName().trim()));
+                    if(target!=null)issue(target,r+1,"重量段","最新价格组缺少有效重量范围，禁止回退旧重量段："+source.address(r,weightColumn),"error");
+                }
                 if(provider.equals("容鼎")&&rongdingPriceRowEvidence(source,r,columns)) {
                     var target=selected(source,provider,source.text(r,columns.channel),source.text(r,columns.code),r,channels);
                     if(target!=null)issue(target,r+1,"重量段","容鼎价格行缺少有效重量范围，禁止部分价格替换","error");
@@ -1097,6 +1102,15 @@ public class LogisticsSourceParser {
             var embeddedZone=Pattern.compile("^([1-9一二三四五六七八九]区)[（(](.*)[)）]$").matcher(clean(weight));
             String parseWeight=weight;
             if(embeddedZone.matches()){zoneName=embeddedZone.group(1);parseWeight=embeddedZone.group(2);}
+            // User-confirmed typo in this specific November workbook/cell, not a general gap-fill rule.
+            if(provider.equals("顺丰")&&source.sheet.getSheetName().trim().equals("敏货电商专递")
+                    &&file.contains("20261101")&&countryCode(countryRaw).equals("AT")&&r==61&&weightColumn==8
+                    &&clean(parseWeight).equalsIgnoreCase("5.001-30KG")
+                    &&clean(source.text(r,6)).matches("98(?:\\.0+)?")&&clean(source.text(r,7)).matches("23(?:\\.0+)?")) {
+                parseWeight="2.001-30KG";
+                row.put("normalizationNote","用户于2026-11-02确认：奥地利I62原表5.001-30KG为笔误，按2.001-30KG；公斤价98、每票费23不变")
+                        .put("sourceWeightCorrectionRule","sf-sensitive-austria-20261101-I62");
+            }
             if(provider.equals("万邦")||provider.equals("云速递")) {
                 for(int c=0;c<source.width(r);c++) {
                     var label=source.text(r,c);var found=Pattern.compile("([1-9一二三四五六七八九]区(?:[.、,，][1-9一二三四五六七八九]区)*)").matcher(label);
@@ -1117,7 +1131,17 @@ public class LogisticsSourceParser {
             try { var range=parseRange(parseWeight.contains("以内")?parseWeight:parseWeight.replaceAll("[（(].*$","")); row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo); }
             catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
             row.put("sourceWeightRange",weight);
-            if(provider.equals("顺丰")){if(columns.weight>=0)row.put("sourceWeightCell",source.address(r,columns.weight));sfPrice(row,source,r,columns,target);}
+            if(provider.equals("顺丰")){
+                if(weightColumn>=0)row.put("sourceWeightCell",source.address(r,weightColumn));
+                sfPrice(row,source,r,columns,target);
+                if(weightColumn!=columns.weight) {
+                    row.put("sourceWeightSelection","latest-price-group");
+                    if(sfPriceCellBlank(source.cell(r,columns.settlement))) {
+                        issue(target,r+1,"pricePerKg","最新价格组缺少折后运费，禁止回退旧价："+source.address(r,columns.settlement),"error");
+                        pending(row,"最新价格组缺少折后运费");
+                    }
+                }
+            }
             else numeric(row,"pricePerKg",source,r,columns.rate,target,false);
             if(provider.equals("顺丰")&&columns.fees.size()>1)sfRegistrationFee(row,source,r,columns,target);
             else {
@@ -1735,6 +1759,21 @@ public class LogisticsSourceParser {
         }
         Collections.sort(normalized);
         return LogisticsDatasetService.hash(mapper.writeValueAsString(normalized));
+    }
+    private int sfSensitiveWeightColumn(Source source,int r,String provider,Columns c) {
+        // Only the confirmed G/H/I + J/K/L/M layout of this channel is affected.
+        if(!provider.equals("顺丰")||!source.sheet.getSheetName().trim().equals("敏货电商专递")
+                ||c.rate!=6||c.weight!=8||c.discount!=9||c.settlement!=10
+                ||!c.fees.equals(List.of(7,11))
+                ||!aliases.matches(provider,"weightRange",clean(source.text(c.headerRow,12))))return c.weight;
+        var country=countryCode(source.text(r,c.country));
+        if(Set.of("PL","AT").contains(country)&&sfPriceCellBlank(source.cell(r,9))
+                &&sfPriceCellBlank(source.cell(r,10)))return c.weight;
+        // Do not interpret footer notes as missing latest-price rows.
+        if(!supportedCountryCode(country)||!looksRange(source.text(r,8))&&!looksRange(source.text(r,12))
+                &&!clean(source.text(r,6)).matches("[0-9]+(?:\\.[0-9]+)?")
+                &&!clean(source.text(r,10)).matches("[0-9]+(?:\\.[0-9]+)?"))return c.weight;
+        return 12;
     }
     private void sfPrice(ObjectNode out,Source source,int r,Columns columns,ObjectNode channel) {
         for(var entry:Map.of("OriginalRate",columns.rate,"Discount",columns.discount,"SettlementRate",columns.settlement).entrySet()) {
