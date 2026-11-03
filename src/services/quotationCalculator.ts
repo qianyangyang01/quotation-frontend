@@ -1,3 +1,4 @@
+import { isSingleQuotation } from '@/data/quotationModes'
 import { decimal, sumDecimal, productDecimal } from './quotationDecimal'
 import type { ShipmentDimensions } from '@/data/logistics'
 import { findPurchaseProduct, purchaseTierIndex, selectedPurchaseTier, type PurchaseProductRecord } from '@/data/purchaseStore'
@@ -243,8 +244,8 @@ export function usdPriceFromCny(cny: number, usdCny: number) {
   return decimal(Math.max(0, Number(cny) || 0)).toDecimalPlaces(2).div(rate).toNumber()
 }
 
-export function hasQuotationProduct(mode: 'single' | 'bundle', primarySku: string, bundleItems: Array<{ sku: string; quantityPerSet: number }>) {
-  if (mode === 'single') return Boolean(primarySku.trim())
+export function hasQuotationProduct(mode: import('@/data/quotationModes').QuotationMode, primarySku: string, bundleItems: Array<{ sku: string; quantityPerSet: number }>) {
+  if (isSingleQuotation(mode)) return Boolean(primarySku.trim())
   const items = bundleItems.filter(item => item.sku.trim())
   if (!items.length || items.some(item => !Number.isSafeInteger(item.quantityPerSet) || item.quantityPerSet <= 0)) return false
   if (new Set(items.map(item => item.sku.trim().toUpperCase())).size !== items.length) return false

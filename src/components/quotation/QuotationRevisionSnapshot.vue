@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { isWomensQuotation, quotationModeLabels } from '@/data/quotationModes'
+import { canViewPricingFactors } from '@/data/quotationVisibility'
+import { womensPolicyLabel } from '@/data/womensPricing'
 import { computed } from 'vue'
 import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
@@ -12,9 +15,11 @@ const fields = computed(() => [
   { label: 'SKU', values: snapshots.value.map(row => row?.primarySku) },
   ...(snapshots.value.some(row => row?.quoteMode === 'shipping-only') ? [{ label: '备注信息', values: snapshots.value.map(row => row?.quoteMode === 'shipping-only' ? row.shippingNote || '未填写' : '不适用') }] : []),
   { label: '物流属性', values: snapshots.value.map(row => row?.logisticsAttribute) },
-  { label: '客户等级', values: snapshots.value.map(row => row ? customerGradeDisplayLabel(row.customerGrade) : '') },
+  { label: '报价类型', values: snapshots.value.map(row => row ? quotationModeLabels[row.quoteMode] : '') },
+  { label: '计价方式', values: snapshots.value.map(row => row ? isWomensQuotation(row.quoteMode) ? '女装金额自动分档' : customerGradeDisplayLabel(row.customerGrade) : '') },
+  ...(snapshots.value.some(row => row?.womensPricing) ? [{ label: '女装规则快照', values: snapshots.value.map(row => row?.womensPricing ? `V${row.womensPricing.version + 1}${canViewPricingFactors.value ? ' · ' + womensPolicyLabel(row.womensPricing) : ''}` : '不适用') }] : []),
   { label: '系统报价', values: snapshots.value.map(row => row ? `$${row.systemQuoteUsd.toFixed(2)}` : '') },
-  { label: '国家与渠道（1件）', values: snapshots.value.map(row => row?.quoteOptions?.map(option => `${option.country} · ${option.carrier} · ${option.channel}：${option.quote1Usd == null ? '不可报价' : '$' + option.quote1Usd.toFixed(2)}`).join('\n')) },
+  { label: '国家与渠道（1件／套）', values: snapshots.value.map(row => row?.quoteOptions?.map(option => `${option.country} · ${option.carrier} · ${option.channel}：${option.quote1Usd == null ? '不可报价' : '$' + option.quote1Usd.toFixed(2)}`).join('\n')) },
 ])
 </script>
 <template>

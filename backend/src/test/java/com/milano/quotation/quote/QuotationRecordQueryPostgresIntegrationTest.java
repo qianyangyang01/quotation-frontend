@@ -119,5 +119,13 @@ class QuotationRecordQueryPostgresIntegrationTest {
         assertEquals(97,query.search("ME",combinedPending,0,100).total());
         assertEquals(1,query.search("ME",exemptFilters,0,100).total());
         assertEquals(1,query.search(null,new QuotationRecordQuery.Filters("","won","","",date,date,"active","F1","logistics-exempt",false),0,100).total());
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"quoteMode\":\"womens-single\"}'::jsonb where quote_no='Q-1'");
+        jdbc.getJdbcTemplate().execute("update quotation_record set payload=payload||'{\"quoteMode\":\"womens-bundle\"}'::jsonb where quote_no in ('Q-2','OTHER')");
+        for(var mode:java.util.List.of("womens-single","womens-bundle")) {
+            var womens=new QuotationRecordQuery.Filters("","","","",null,null,"active",null,null,false,null,null,null,null,null,false,null,mode);
+            assertEquals(1,query.search("ME",womens,0,10).total());
+            assertEquals(mode.equals("womens-bundle")?2:1,query.search(null,womens,0,10).total());
+            assertEquals(mode,query.search("ME",womens,0,10).items().getFirst().path("quoteMode").asText());
+        }
     }
 }

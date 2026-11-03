@@ -1,3 +1,4 @@
+import { isBundleQuotation } from '@/data/quotationModes'
 import Decimal from 'decimal.js'
 import type { QuotationRecord } from './quotationRecords'
 
@@ -31,7 +32,7 @@ function savedSingleFreight(record: QuotationRecord) {
 
 /** Display the purchase fields saved on this quotation; never fetch the current catalog. */
 export function quotationProductCostSnapshot(record: QuotationRecord) {
-  const bundle = record.quoteMode === 'bundle'
+  const bundle = isBundleQuotation(record.quoteMode)
   const singleFreight = bundle ? undefined : savedSingleFreight(record)
   const items = bundle ? (record.bundleItems ?? []).map(item => ({
     sku: item.sku, name: item.name, count: item.quantityPerSet,

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { isBundleQuotation, isSingleQuotation } from '@/data/quotationModes'
+
+import { loadWomensPricing, womensPricingSample, womensPolicyLabel, WOMENS_PRICING_UNAVAILABLE, WOMENS_PRICING_UPDATED, type WomensPricingSample } from '@/data/womensPricing'
 import { appUpdate } from '@/services/appUpdate'
 import { quotationRecoveryState, quotationRecoveryScope, registerQuotationUpdateRecovery, readQuotationUpdateRecovery, clearQuotationUpdateRecovery } from '@/services/quotationUpdateRecovery'
 import type { QuoteSheetRecovery } from '@/services/quoteSheetRecovery'
@@ -6,8 +9,8 @@ import { checkFobFinanceVersion } from '@/services/fobFinanceFreshness'
 import { refreshReviewNotifications } from '@/data/reviewNotifications'
 import { getDomesticFreightWarning } from '@/domain/domesticFreightWarning'
 import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
-import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
-import { isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
+import { canViewFullPricing, canViewLogisticsCost, canViewPricingFactors } from '@/data/quotationVisibility'
+import { isWomensQuotation, isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import { normalizeShippingNote, shippingQuotationSummary, SHIPPING_NOTE_MAX_LENGTH, SHIPPING_NOTE_LENGTH_ERROR } from '@/data/shippingQuotationNote'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
 import QuotationFeatureBoundary from '@/components/quotation/QuotationFeatureBoundary.vue'
@@ -135,6 +138,8 @@ const selectedSalesperson = computed(() => currentSalespersonAccount.value === '
   ? currentSalespersonName.value
   : `${currentSalespersonName.value}（${currentSalespersonAccount.value}）`)
 const customerGradeSettings = reactive(loadCustomerGradeSettings())
+const womensPricing = ref(loadWomensPricing())
+const womensPricingBlock = computed(() => isWomensQuotation(quoteMode.value) && !womensPricing.value?.enabled ? WOMENS_PRICING_UNAVAILABLE : '')
 const selectedCustomerGrade = ref<CustomerGrade>('S')
 const financeExchangeRate = loadFinanceExchangeRate()
 const exchange = ref({ usd: financeExchangeRate.usdCny, eurUsd: financeExchangeRate.eurUsd, updatedAt: financeExchangeRate.updatedAt })
@@ -225,7 +230,7 @@ async function queryManualQuote() {
   await ensureQuoteLogistics(products.value[0])
 }
 function quotationHasInputs() {
-  return manualMode.value ? manualQueried.value && !!manualPricing.value : hasQuotationProduct(quoteMode.value as 'single' | 'bundle', products.value[0]?.sku || '', bundleItems.value)
+  return manualMode.value ? manualQueried.value && !!manualPricing.value : hasQuotationProduct(quoteMode.value, products.value[0]?.sku || '', bundleItems.value)
 }
 const route = useRoute()
 const router = useRouter()
@@ -259,7 +264,7 @@ async function applyReissue() {
       fobKey.value++;fobActive.value=true;pendingReissue.value=null;finishReissueRequest();return
     }
     const payload = quotationReissuePayload(record)
-    const skus = isManualQuotation(payload.quoteMode) ? [] : payload.quoteMode === 'bundle' ? payload.bundleItems.map(item => item.sku) : [payload.product.sku]
+    const skus = isManualQuotation(payload.quoteMode) ? [] : isBundleQuotation(payload.quoteMode) ? payload.bundleItems.map(item => item.sku) : [payload.product.sku]
     const purchases = new Map<string, PurchaseProductRecord | undefined>()
     for (const sku of skus) purchases.set(sku.trim().toUpperCase().replace(/\s+/g, ''), await recordForDraftSku(sku))
     await applyDraftPayload(payload, purchases, { restoreQuotation: true })
@@ -298,7 +303,7 @@ function selectFinanceCustomer(id: string) {
   const customer = customerOperationSettings.value.customers.find(row => row.id === id && row.enabled)
   if (customer) { selectedCustomerId.value = customer.id; customerName.value = customer.name }
 }
-const productCategory = computed(() => manualMode.value ? '' : purchaseCategoryForSkus(quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => item.sku) : [products.value[0]?.sku || ''], new Map(purchaseRecords.value.map(item => [item.sku.toUpperCase(), item]))))
+const productCategory = computed(() => manualMode.value ? '' : purchaseCategoryForSkus(isBundleQuotation(quoteMode.value) ? bundleItems.value.filter(item => item.sku).map(item => item.sku) : [products.value[0]?.sku || ''], new Map(purchaseRecords.value.map(item => [item.sku.toUpperCase(), item]))))
 const monthlySalesEstimate = ref('10')
 const specialPackagingGrams = ref('')
 const specialPackagingError = computed(() => manualMode.value ? '' : parseSpecialPackagingGrams(specialPackagingGrams.value) === null ? SPECIAL_PACKAGING_ERROR : '')
@@ -443,7 +448,7 @@ const bundleFreightSources = ref<Record<number, PurchaseProductRecord | undefine
 const normalizedFreightSku = (sku: string) => sku.trim().toUpperCase().replace(/\s+/g, '')
 const singleFreightWarning = computed(() => {
   const source = singleFreightSource.value
-  if (props.batchCapture || fobActive.value || quoteMode.value !== 'single' || draftNeedsQuery.value || productQueryBusy.value || purchaseQueryError.value || batchSampleSwitching.value || batchSampleError.value || !source
+  if (props.batchCapture || fobActive.value || !isSingleQuotation(quoteMode.value) || draftNeedsQuery.value || productQueryBusy.value || purchaseQueryError.value || batchSampleSwitching.value || batchSampleError.value || !source
     || normalizedFreightSku(skuSearch.value) !== source.sku || products.value[0]?.sku !== source.sku) return null
   return getDomesticFreightWarning(source, monthlySalesEstimate.value)
 })
@@ -485,14 +490,14 @@ function bundleItemFromRecord(record?: PurchaseProductRecord, invoiceTaxApplied 
 const bundleItems = ref<BundleQuoteItem[]>([bundleItemFromRecord()])
 const bundleFreightWarnings = computed(() => Object.fromEntries(bundleItems.value.map(item => {
   const source = bundleFreightSources.value[item.id]
-  const warning = !props.batchCapture && !fobActive.value && quoteMode.value === 'bundle' && source && normalizedFreightSku(item.sku) === source.sku
+  const warning = !props.batchCapture && !fobActive.value && isBundleQuotation(quoteMode.value) && source && normalizedFreightSku(item.sku) === source.sku
     ? getDomesticFreightWarning(source, item.purchaseTier) : null
   return [item.id, warning]
 })))
 const missingTaxPointSkus = computed(() => missingPurchaseTaxPointSkus(
-  quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || ''], purchaseRecords.value))
+  isBundleQuotation(quoteMode.value) ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || ''], purchaseRecords.value))
 const pendingInvoiceSkus = computed(() => pendingPurchaseInvoiceSkus(
-  quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || ''], purchaseRecords.value))
+  isBundleQuotation(quoteMode.value) ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || ''], purchaseRecords.value))
 const purchaseInvoiceNotice = ref<string[]>([])
 function blockPendingPurchaseInvoice(record: PurchaseProductRecord) {
   if (!purchaseInvoicePending(record)) return false
@@ -502,7 +507,7 @@ function blockPendingPurchaseInvoice(record: PurchaseProductRecord) {
 }
 const purchaseTaxBlockReason = computed(() => manualMode.value ? '' : pendingInvoiceSkus.value.length
   ? `${PURCHASE_INVOICE_PENDING_MESSAGE} SKU：${pendingInvoiceSkus.value.join('、')}`
-  : !missingTaxPointSkus.value.length ? '' : quoteMode.value === 'bundle'
+  : !missingTaxPointSkus.value.length ? '' : isBundleQuotation(quoteMode.value)
   ? `组合商品采购票点为空，请补齐后报价：${missingTaxPointSkus.value.join('、')}`
   : '该商品采购票点为空，请补齐后报价')
 function normalizedBundleSets(value: number) { return normalizedQuoteQuantity(value) }
@@ -531,25 +536,29 @@ function singleActualWeight(p: Product, quantity = Math.max(1, p.quantity)) {
   return manualMode.value ? singleBaseWeight(p, quantity) : calculateSingleActualWeight(p, quantity, specialPackagingWeightKg.value)
 }
 function chargeWeight(p: Product) {
-  if (quoteMode.value === 'bundle') return bundleGoodsWeight(1)
+  if (isBundleQuotation(quoteMode.value)) return bundleGoodsWeight(1)
   return singleActualWeight(p)
 }
 
-function domesticFreight(p: Product) { return manualMode.value ? 0 : quoteMode.value === 'bundle' ? bundleDomesticFreight(1) : productDecimal(p.purchaseFreightPerUnit, p.quantity) }
-function totalCost(p: Product) { return manualMode.value ? sumDecimal(manualPricing.value?.costCny ?? 0, p.freight) : quoteMode.value === 'bundle' ? sumDecimal(bundlePurchaseCost(1), bundleDomesticFreight(1), p.freight) : sumDecimal(p.purchase, p.purchaseFreightPerUnit, p.freight) }
-function selectedGradeCoefficient() { return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value) }
-function salePrice(p: Product) { return productDecimal(totalCost(p), selectedGradeCoefficient()) }
+function domesticFreight(p: Product) { return manualMode.value ? 0 : isBundleQuotation(quoteMode.value) ? bundleDomesticFreight(1) : productDecimal(p.purchaseFreightPerUnit, p.quantity) }
+function totalCost(p: Product) { return manualMode.value ? sumDecimal(manualPricing.value?.costCny ?? 0, p.freight) : isBundleQuotation(quoteMode.value) ? sumDecimal(bundlePurchaseCost(1), bundleDomesticFreight(1), p.freight) : sumDecimal(p.purchase, p.purchaseFreightPerUnit, p.freight) }
+function selectedGradeCoefficient(cost?: number) {
+  if (!isWomensQuotation(quoteMode.value)) return customerGradeCoefficient(customerGradeSettings, selectedCustomerGrade.value)
+  if (cost === undefined || !womensPricing.value?.enabled) return 0
+  return womensPricingSample(womensPricing.value, cost, exchange.value.usd).coefficient
+}
+function salePrice(p: Product) { return productDecimal(totalCost(p), selectedGradeCoefficient(totalCost(p))) }
 function usdPriceFromCny(cny: number) { return convertCnyToUsd(cny, exchange.value.usd) }
 function taxResult(country: string, provider: string, baseQuoteCny: number, ruleName = '', channelKey = '', weightKg = products.value[0] ? chargeWeight(products.value[0]) : undefined, quantity?: number) {
   const rule = logisticsRuleForChannel(ruleName, channelKey)
   const relations = rule?.relations.filter(row => row.carrier === provider) || []
   const key = channelKey || (rule && relations.length === 1 ? financeChannelKey(rule.id, relations[0]!) : '')
-  const fees = calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd, usdCny: exchange.value.usd, quantity, unit: quoteMode.value === 'bundle' ? '套' : '件' })
+  const fees = calculateFinanceQuoteFees(financeTaxSettings.value, financeSurchargeSettings.value, country, provider, usdPriceFromCny(baseQuoteCny), key, { weightKg, eurUsd: exchange.value.eurUsd, usdCny: exchange.value.usd, quantity, unit: isBundleQuotation(quoteMode.value) ? '套' : '件' })
   const operationFeeUsd = customerOperationFeeForQuantity(customerOperation.value.snapshot, quantity ?? 0)
   const totalUsd = operationFeeUsd === undefined ? null : applyCommissionThreshold(addCustomerOperationFee(fees.totalUsd, operationFeeUsd), commissionThreshold.value)
   return { ...fees, configured: totalUsd != null && fees.configured && customerOperation.value.configured, totalUsd: totalUsd ?? 0, label: operationFeeUsd === undefined ? '报价数量或客户操作费无效，请重新计算' : totalUsd == null ? COMMISSION_THRESHOLD_ERROR : customerOperation.value.configured ? fees.label : customerOperation.value.message }
 }
-function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd, exchange.value.usd) }
+function finalSalePrice(p: Product) { return quoteCnyFromUsd(taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)).totalUsd, exchange.value.usd) }
 function estimatedProfit(p: Product) { return salePrice(p) - totalCost(p) }
 function applyProductPurchasePricing(p: Product, record: PurchaseProductRecord, invoiceTaxApplied = p.purchaseInvoiceTaxApplied) {
   if (singleFreightSource.value?.sku === record.sku) singleFreightSource.value = record
@@ -609,6 +618,7 @@ function applyPurchaseRecord(p: Product, record: PurchaseProductRecord, invoiceT
 }
 const queryValidationFields = ref<string[]>([])
 function conditionIssues(options: { includeSku: boolean; includeCategory: boolean }) {
+  if (womensPricingBlock.value) return [{ key: 'womensPricing', message: womensPricingBlock.value }]
   const p = products.value[0]
   return validateQuotationConditions({
     customerName: customerName.value, quoteMode: quoteMode.value, sku: skuSearch.value, productCategory: productCategory.value,
@@ -640,7 +650,7 @@ async function queryProduct() {
   let candidates: PurchaseProductRecord[]
   try {
     const remote = await loadPurchaseProduct(normalizedSku, controller.signal)
-    if (request !== productQueryGeneration || skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== normalizedSku || quoteMode.value !== 'single') return
+    if (request !== productQueryGeneration || skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== normalizedSku || !isSingleQuotation(quoteMode.value)) return
     rememberPurchase(remote); candidates = [remote]
   } catch (error) {
     if (controller.signal.aborted) return
@@ -687,7 +697,7 @@ async function queryBundleItem(item: BundleQuoteItem, options: { loadLogistics?:
   let record: PurchaseProductRecord | undefined
   try { record = await loadPurchaseProduct(normalizedSku) }
   catch (error) { toast(error instanceof Error ? error.message : '采购资料读取失败，请重试'); return false }
-  if (quoteMode.value !== 'bundle' || bundleQueryGenerations.get(item) !== generation || !bundleItems.value.includes(item) || item.sku.trim().toUpperCase().replace(/\s+/g, '') !== normalizedSku) return false
+  if (!isBundleQuotation(quoteMode.value) || bundleQueryGenerations.get(item) !== generation || !bundleItems.value.includes(item) || item.sku.trim().toUpperCase().replace(/\s+/g, '') !== normalizedSku) return false
   rememberPurchase(record)
   if (!record) { toast(`未在采购资料中找到 SKU：${item.sku}`); return false }
   if (blockPendingPurchaseInvoice(record)) return false
@@ -737,7 +747,7 @@ async function queryBundleItems() {
   for (const item of [...items]) {
     if (await queryBundleItem(item, { loadLogistics: false, announce: false })) loaded += 1
   }
-  if (loaded && quoteMode.value === 'bundle') {
+  if (loaded && isBundleQuotation(quoteMode.value)) {
     toast(`已处理 ${loaded} 个组合 SKU；物流规则正在后台加载`)
     startQuoteLogisticsInBackground(products.value[0])
   }
@@ -803,7 +813,7 @@ function changeQuoteMode(mode: QuotationMode | 'fob') {
   }
   products.value[0].quantity = 1
   normalizeRule(products.value[0], true)
-  toast(mode === 'bundle' ? '已切换为组合 SKU 报价，报价数量按“套”计算' : '已切换为单品 SKU 报价')
+  toast('已切换为' + quotationModeLabels[mode] + (isBundleQuotation(mode) ? '，报价数量按“套”计算' : ''))
 }
 function changeMonthlySalesEstimate(p: Product, value: string) {
   monthlySalesEstimate.value = value
@@ -968,9 +978,11 @@ function rememberPurchase(record: PurchaseProductRecord) {
 }
 function activePurchaseSkus() {
   if (manualMode.value) return []
-  return [...new Set((quoteMode.value === 'bundle' ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || '']).filter(Boolean))].sort()
+  return [...new Set((isBundleQuotation(quoteMode.value) ? bundleItems.value.map(item => item.sku) : [products.value[0]?.sku || '']).filter(Boolean))].sort()
 }
 let liveVersionCheckSequence = 0
+function onWomensPricingUpdated() { if (isWomensQuotation(quoteMode.value)) syncPending.value = '女装报价系数已更新' }
+function changedAppliedFinance(latest: FinanceSettingVersions) { return changedFinanceSettings(appliedFinanceVersions, latest, isWomensQuotation(quoteMode.value) ? [] : ['womens-pricing']) }
 async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
   const request = ++liveVersionCheckSequence
   try {
@@ -987,15 +999,15 @@ async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
     const reuseBatchFinance = props.batchCapture && batchCalculationActive && financeSettingsAreHydrated()
       && latestFinanceVersions && Object.keys(appliedFinanceVersions).length > 0
       && Object.keys(appliedFinanceVersions).every(key => Object.prototype.hasOwnProperty.call(latestFinanceVersions, key))
-      && !changedFinanceSettings(appliedFinanceVersions, latestFinanceVersions).length
-      && !changedFinanceSettings(appliedFinanceVersions, financeSettingVersions()).length
+      && !changedAppliedFinance(latestFinanceVersions).length
+      && !changedAppliedFinance(financeSettingVersions()).length
     if ((beforeSave && !reuseBatchFinance) || !latestFinanceVersions) {
       await hydrateFinanceSettings({ force: true, signal })
       latestFinanceVersions = financeSettingVersions()
     }
     changed.push(...new Set([
-      ...(result.financeVersions ? changedFinanceSettings(appliedFinanceVersions, result.financeVersions) : []),
-      ...changedFinanceSettings(appliedFinanceVersions, latestFinanceVersions),
+      ...(result.financeVersions ? changedAppliedFinance(result.financeVersions) : []),
+      ...changedAppliedFinance(latestFinanceVersions),
     ]))
     if (!draftNeedsQuery.value && skus.some(sku => !result.purchaseVersions[sku] || result.purchaseVersions[sku] !== purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)))) changed.push('采购资料')
     const newerLogistics = !draftNeedsQuery.value && Boolean(logisticsRevision.value && result.logisticsRevision !== logisticsRevision.value)
@@ -1050,6 +1062,7 @@ function applyLiveFinance() {
   financeCountrySettings.value = loadFinanceCountrySettings()
   financeTaxSettings.value = loadFinanceTaxSettings()
   financeSurchargeSettings.value = loadFinanceSurchargeSettings()
+  womensPricing.value = loadWomensPricing()
   customerGradeSettings.splice(0, customerGradeSettings.length, ...loadCustomerGradeSettings())
   if (!customerGradeSettings.some(item => item.enabled && item.grade === selectedCustomerGrade.value)) {
     selectedCustomerGrade.value = customerGradeSettings.find(item => item.enabled)?.grade || 'S'
@@ -1314,7 +1327,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     p.purchaseInvoiceTaxApplied = payload.product?.purchaseInvoiceTaxApplied === true
     p.status = '已恢复报价条件，请点击查询商品'
     products.value = [p]
-    bundleItems.value = payload.quoteMode === 'bundle' ? (payload.bundleItems || []).map(saved => ({
+    bundleItems.value = isBundleQuotation(payload.quoteMode) ? (payload.bundleItems || []).map(saved => ({
       ...bundleItemFromRecord(undefined, saved.purchaseInvoiceTaxApplied === true, normalizePurchaseTier(saved.purchaseTier, monthlySalesEstimate.value)),
       sku: String(saved.sku || '').trim().toUpperCase(), quantityPerSet: normalizedBundleSets(saved.quantityPerSet),
       customWeightKg: saved.customWeightKg == null ? null : Math.max(0, Number(saved.customWeightKg) || 0),
@@ -1332,7 +1345,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     return
   }
   let restoredFromPurchase = false
-  if (quoteMode.value === 'single' && singleSku) {
+  if (isSingleQuotation(quoteMode.value) && singleSku) {
     const record = await recordForDraftSku(singleSku, freshPurchases)
     if (record) {
       applyPurchaseRecord(p, record, payload.product?.purchaseInvoiceTaxApplied === true)
@@ -1353,7 +1366,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
       p.volumetricEnabled = options.preserveInputs ? productState.volumetricEnabled === true : false
     }
   }
-  if (quoteMode.value === 'bundle') {
+  if (isBundleQuotation(quoteMode.value)) {
     const restoredItems: BundleQuoteItem[] = []
     for (const savedItem of payload.bundleItems || []) {
       const record = await recordForDraftSku(savedItem.sku, freshPurchases)
@@ -1375,7 +1388,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   activeTemplateSnapshot.value = payload.activeTemplate?.id ? { id: String(payload.activeTemplate.id), name: String(payload.activeTemplate.name || '个人报价模板') } : null
   products.value = [p]
   if (manualMode.value) manualQueried.value = !!manualPricing.value
-  const hasRestoredProduct = manualMode.value ? manualQueried.value : quoteMode.value === 'bundle'
+  const hasRestoredProduct = manualMode.value ? manualQueried.value : isBundleQuotation(quoteMode.value)
     ? bundleItems.value.some(item => Boolean(item.sku))
     : Boolean(p.sku)
   if (hasRestoredProduct && (manualMode.value || productCategory.value)) {
@@ -1632,6 +1645,7 @@ onMounted(async () => {
     }, { immediate: true, flush: 'sync' })
   }
   window.addEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
+  window.addEventListener(WOMENS_PRICING_UPDATED, onWomensPricingUpdated)
   window.addEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.addEventListener(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.addEventListener(CUSTOMER_OPERATION_FEES_UPDATED, refreshFinanceTaxSettings)
@@ -1658,6 +1672,7 @@ onBeforeUnmount(() => {
   stopUpdateRecovery?.()
   viewDisposed = true
   window.removeEventListener(FINANCE_COUNTRY_SETTINGS_UPDATED_EVENT, refreshFinanceCountrySettings)
+  window.removeEventListener(WOMENS_PRICING_UPDATED, onWomensPricingUpdated)
   window.removeEventListener(FINANCE_TAX_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.removeEventListener(FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, refreshFinanceTaxSettings)
   window.removeEventListener(CUSTOMER_OPERATION_FEES_UPDATED, refreshFinanceTaxSettings)
@@ -1721,7 +1736,7 @@ function matchedLogistics(p: Product, country = p.country, region = quoteRegionF
     const result = calculateLogisticsFee(
       rule,
       country,
-      quoteMode.value === 'bundle' ? chargeWeight(p) : singleActualWeight(p),
+      isBundleQuotation(quoteMode.value) ? chargeWeight(p) : singleActualWeight(p),
       [p.logisticsAttribute],
       undefined,
       region,
@@ -1745,11 +1760,11 @@ function matchedLogistics(p: Product, country = p.country, region = quoteRegionF
   }).sort((a, b) => a.freight - b.freight)
 }
 function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, country = p.country, provider = '', region = quoteRegionForCountry(country), channelKey = '') {
-  if (specialPackagingError.value || purchaseTaxBlockReason.value || (manualMode.value && (!manualQueried.value || !manualPricing.value))) return null
+  if (womensPricingBlock.value || specialPackagingError.value || purchaseTaxBlockReason.value || (manualMode.value && (!manualQueried.value || !manualPricing.value))) return null
   const rule = logisticsRuleForChannel(ruleName, channelKey)
   if (!rule) return null
   const normalizedQuantity = normalizedBundleSets(quantity)
-  const weightKg = quoteMode.value === 'bundle'
+  const weightKg = isBundleQuotation(quoteMode.value)
     ? bundleGoodsWeight(normalizedQuantity)
     : singleActualWeight(p, normalizedQuantity)
     const result = calculateLogisticsFee(rule, country, weightKg, [p.logisticsAttribute], undefined, region)
@@ -1758,14 +1773,14 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
   let cost: number
   if (manualMode.value) {
     cost = sumDecimal(manualQuantity(manualPricing.value!, normalizedQuantity).costCny, freight)
-  } else if (quoteMode.value === 'bundle') {
+  } else if (isBundleQuotation(quoteMode.value)) {
     cost = sumDecimal(bundlePurchaseCost(normalizedQuantity), bundleDomesticFreight(normalizedQuantity), freight)
   } else {
     const record = findPurchaseProduct(purchaseRecords.value, p.sku)
     const purchasePrice = record ? purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied) : p.purchase
     cost = sumDecimal(productDecimal(sumDecimal(purchasePrice, p.purchaseFreightPerUnit), normalizedQuantity), freight)
   }
-  const baseQuoteCny = productDecimal(cost, selectedGradeCoefficient())
+  const baseQuoteCny = productDecimal(cost, selectedGradeCoefficient(cost))
   // Freight minimums do not increase the actual parcel weight used by customs rules.
   const tax = taxResult(country, provider, baseQuoteCny, ruleName, channelKey, weightKg, normalizedQuantity)
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
@@ -1781,13 +1796,13 @@ function quoteSheetPrice(p: Product, row: QuoteSheetSourceRow, quantity: number)
 }
 function bestLogisticsOption(p: Product, country = p.country) {
   const rows = isAustraliaQuoteCountry(country) ? excelQuoteRows(p, country) : expandedCountryQuoteRows(p, country)
-  return rows.map(row => ({ ...row, finalQuoteCny: quantityCostBreakdown(p, row.rule, quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity), country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteCny ?? Infinity }))
+  return rows.map(row => ({ ...row, finalQuoteCny: quantityCostBreakdown(p, row.rule, isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity), country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteCny ?? Infinity }))
     .filter(row => Number.isFinite(row.finalQuoteCny)).sort((a, b) => a.finalQuoteCny - b.finalQuoteCny || a.freight - b.freight)[0]
 }
 function excelQuoteRows(p: Product, country = p.country, region = quoteRegionForCountry(country)): QuotationMatrixRow[] {
   if (purchaseTaxBlockReason.value) return []
   const quantity = Math.max(1, customQuoteQuantity.value || 1)
-  const currentQuantity = quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)
+  const currentQuantity = isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)
   return matchedLogistics(p, country, region).map(option => {
     const costs = new Map<number, ReturnType<typeof quantityCostBreakdown>>()
     const costFor = (count: number) => {
@@ -1913,7 +1928,7 @@ function quotationCountries(p: Product): QuotationCountrySummary[] {
   }).sort((a, b) => Number(a.stage !== 'common') - Number(b.stage !== 'common') || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-CN'))
 }
 function quoteMatrixContextKey(p: Product) {
-  const bundleKey = quoteMode.value === 'bundle'
+  const bundleKey = isBundleQuotation(quoteMode.value)
     ? bundleItems.value.map(item => `${item.sku}:${item.quantityPerSet}:${item.customWeightKg ?? item.weightKg}:${item.purchaseTier}`).join('|')
     : `${p.sku}:${chargeWeight(p)}`
   const priceInputs = {
@@ -1924,8 +1939,8 @@ function quoteMatrixContextKey(p: Product) {
     quantity: p.quantity, customQuantity: customQuoteQuantity.value,
     purchase: p.purchase, freight: p.purchaseFreightPerUnit, invoiceTax: p.purchaseInvoiceTaxApplied,
     commissionThreshold: commissionThreshold.value, specialPackagingGrams: specialPackagingGrams.value,
-    monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd, eurUsd: exchange.value.eurUsd,
-    purchaseCost: quoteMode.value === 'bundle' ? bundlePurchaseCost(1)
+    womensPricing: isWomensQuotation(quoteMode.value) ? womensPricing.value : undefined, monthlySales: monthlySalesEstimate.value, coefficient: selectedGradeCoefficient(), exchange: exchange.value.usd, eurUsd: exchange.value.eurUsd,
+    purchaseCost: isBundleQuotation(quoteMode.value) ? bundlePurchaseCost(1)
       : purchaseRecords.value.map(record => purchasePriceForMonthlySales(record, p.purchaseInvoiceTaxApplied)),
     bundleFreight: bundleDomesticFreight(1),
   }
@@ -1997,7 +2012,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
   const quote2 = quantityCostBreakdown(p, p.rule, 2, p.country, p.channel)
   const quote3 = quantityCostBreakdown(p, p.rule, 3, p.country, p.channel)
   const custom = quantityCostBreakdown(p, p.rule, quantity, p.country, p.channel)
-  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity))
+  const tax = custom?.tax || taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity))
   return {
     country: p.country,
     channelKey: rule && relation ? financeChannelKey(rule.id, relation) : `${p.rule}::${p.channel}`,
@@ -2014,7 +2029,7 @@ function commonSavedQuoteRow(p: Product): QuotationMatrixRow | null {
     quote1: quote1?.tax.configured ? quote1.quoteUsd : null,
     quote2: quote2?.tax.configured ? quote2.quoteUsd : null,
     quote3: quote3?.tax.configured ? quote3.quoteUsd : null,
-    quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd,
+    quoteCustom: custom?.quoteUsd ?? taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)).totalUsd,
     taxIncluded: tax.included,
     taxConfigured: tax.configured,
     taxRatePercent: tax.ratePercent,
@@ -2058,7 +2073,7 @@ const saveValidationIssues = computed(() => {
   const issues: Array<{ key: string; label: string; message: string }> = []
   if (shippingNoteError.value) issues.push({ key: 'shippingNote', label: '备注信息', message: shippingNoteError.value })
   if (purchaseTaxBlockReason.value) issues.push({ key: 'sku', label: '采购票点', message: purchaseTaxBlockReason.value })
-  if (quoteMode.value === 'single' && (purchaseQueryError.value || (p?.sku && skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== p.sku))) issues.push({ key: 'sku', label: '商品 SKU', message: purchaseQueryError.value || 'SKU 已改变，请重新查询商品后保存' })
+  if (isSingleQuotation(quoteMode.value) && (purchaseQueryError.value || (p?.sku && skuSearch.value.trim().toUpperCase().replace(/\s+/g, '') !== p.sku))) issues.push({ key: 'sku', label: '商品 SKU', message: purchaseQueryError.value || 'SKU 已改变，请重新查询商品后保存' })
   if (syncPending.value || syncError.value || syncRefreshing.value || productQueryBusy.value) issues.push({ key: 'liveData', label: '资料同步', message: syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || '最新资料正在读取，请稍候' })
   if (draftInitializationFailed.value) issues.push({ key: 'workspaceInitialization', label: '报价工作区', message: draftError.value || '报价工作区读取失败，请查看顶部错误提示' })
   else if (!financeSettingsAreHydrated()) issues.push({ key: 'financeSettings', label: '财务设置', message: financeSettingsAreLoading() ? '财务设置正在读取，请稍候' : financeSettingsLoadError() ? `财务设置读取失败：${financeSettingsLoadError()}；请重试读取` : '财务设置尚未完整加载，请重试读取后保存' })
@@ -2066,7 +2081,7 @@ const saveValidationIssues = computed(() => {
   conditionIssues({ includeSku: false, includeCategory: true }).forEach(issue => issues.push({ ...issue, label: labels[issue.key] || issue.key }))
   const hasSku = quotationHasInputs()
   if (manualMode.value && !hasSku) issues.push({ key:'manualPricing', label:'手填条件', message:manualInputError.value || '条件已变更，请重新查询后保存' })
-  if (!manualMode.value && !hasSku) issues.push({ key:'sku', label:quoteMode.value === 'bundle' ? '组合商品' : '商品 SKU', message:quoteMode.value === 'bundle' ? '请查询有效 SKU，每套合计至少 2 件；同款成套只需一行 SKU，将单套数量设为 2 或以上' : '请输入 SKU 并查询商品' })
+  if (!manualMode.value && !hasSku) issues.push({ key:'sku', label:isBundleQuotation(quoteMode.value) ? '组合商品' : '商品 SKU', message:isBundleQuotation(quoteMode.value) ? '请查询有效 SKU，每套合计至少 2 件；同款成套只需一行 SKU，将单套数量设为 2 或以上' : '请输入 SKU 并查询商品' })
   if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.some(row => row.available !== false && row.quote1 != null)) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
   if (savedQuoteRows.value.some(row => row.available !== false && !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message: savedQuoteRows.value.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请到对应财务模块补齐' })
@@ -2086,7 +2101,7 @@ const logisticsSaveBlockReason = computed(() => countryLoads.value ? '国家渠�
     : logisticsLoadState.value === 'empty' ? '当前条件没有可用物流渠道'
       : logisticsLoadState.value === 'error' ? logisticsLoadError.value || '物流规则加载失败'
         : ''))
-const displayedSaveBlockReason = computed(() => batchSampleBlock.value || templateSaveBlockReason.value || specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
+const displayedSaveBlockReason = computed(() => womensPricingBlock.value || batchSampleBlock.value || templateSaveBlockReason.value || specialPackagingError.value || commissionError.value || purchaseTaxBlockReason.value || (syncPending.value ? `${syncPending.value}；请核对并更新报价` : syncError.value || (syncRefreshing.value || productQueryBusy.value ? '最新资料正在读取，请稍候' : logisticsSaveBlockReason.value || displayedSaveValidationIssues.value[0]?.message || '')))
 const retryingSavePreparation = ref(false)
 const canRetrySavePreparation = computed(() => !draftInitializationFailed.value && Boolean(!financeSettingsAreHydrated() || syncPending.value || syncError.value || countryLoadError.value || ['error', 'stale'].includes(logisticsLoadState.value)))
 async function retrySavePreparation() {
@@ -2165,7 +2180,7 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
     toast('请先添加需要复制的报价渠道')
     return
   }
-  const unit = quoteMode.value === 'bundle' ? '套' : '件'
+  const unit = isBundleQuotation(quoteMode.value) ? '套' : '件'
   const values = [
     ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', '附加费属性', '附加费（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`],
     ...rows.map(row => [
@@ -2218,10 +2233,10 @@ function useLogistics(p: Product, option: { country: string; quoteRegion?: strin
   toast(canViewLogisticsCost.value ? `已采用“${option.rule}”，运费 ¥${option.freight.toFixed(2)}` : `已采用“${option.rule}”`)
 }
 function logisticsSamplesFor(row: QuotationMatrixRow, p: Product, extraQuantities: number[] = []) {
-  const quantities = [...new Set([...extraQuantities, 1, 2, 3, Math.max(1, customQuoteQuantity.value || 1), quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)])]
+  const quantities = [...new Set([...extraQuantities, 1, 2, 3, Math.max(1, customQuoteQuantity.value || 1), isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)])]
   const rule = logisticsRules.find(item => item.id === row.ruleId)
   return quantities.map(quantity => {
-    const weightKg = quoteMode.value === 'bundle' ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity)
+    const weightKg = isBundleQuotation(quoteMode.value) ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity)
     const result = rule ? calculateLogisticsFee(rule, row.country, weightKg, [p.logisticsAttribute], undefined, row.quoteRegion) : null
     return { quantity, input: { country: row.country, zoneName: rule ? billingQuoteRegion(rule, row.country, row.quoteRegion) ?? '' : '', weightKg, marks: [p.logisticsAttribute] },
       total: result ? Number(result.total.toFixed(2)) : null,
@@ -2233,19 +2248,27 @@ function missingQuantityReason(p: Product, name: string, channelKey: string, cou
   if (logisticsLoadState.value === 'error' || countryLoadError.value) return '渠道加载失败，请重试'
   if (purchaseTaxBlockReason.value) return purchaseTaxBlockReason.value
   const rule = logisticsRuleForChannel(name, channelKey)
-  const weight = quoteMode.value === 'bundle' ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity)
+  const weight = isBundleQuotation(quoteMode.value) ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity)
   return logisticsUnavailableReason(rule, country, weight, [p.logisticsAttribute], region, quantity,
-    quoteMode.value === 'bundle' ? '套' : '件') || '当前条件暂无可用运价'
+    isBundleQuotation(quoteMode.value) ? '套' : '件') || '当前条件暂无可用运价'
 }
 function unavailableTemplateReason(preset: {country:string;channelKey?:string;quoteRegion?:string;rule?:string}, quantity = 1) {
   return missingQuantityReason(products.value[0], preset.rule || '', preset.channelKey || '', preset.country, preset.quoteRegion || '', quantity)
 }
+function womensSamplesFor(row: QuotationMatrixRow, p: Product, quantities: number[]): WomensPricingSample[] | undefined {
+  if (!isWomensQuotation(quoteMode.value) || !womensPricing.value) return undefined
+  if (row.available === false) return []
+  return [...new Set([1,2,3,Math.max(1,customQuoteQuantity.value||1),isBundleQuotation(quoteMode.value)?1:Math.max(1,p.quantity),...quantities])].flatMap(quantity => {
+    const price = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)
+    return price ? [womensPricingSample(womensPricing.value!, price.cost, exchange.value.usd, quantity)] : []
+  })
+}
 function buildQuoteOptions() {
   const p = products.value[0]
   const selectedMatrixRows = savedQuoteRows.value
-  const snapshotQuantity = quoteMode.value === 'bundle' ? 1 : Math.max(1, p.quantity)
-  const snapshotBaseWeightKg = quoteMode.value === 'bundle' ? bundleBaseWeight(1) : singleBaseWeight(p, snapshotQuantity)
-  const snapshotPackagingWeightKg = quoteMode.value === 'bundle' ? bundlePackagingWeight(1) : singlePackagingWeight(p, snapshotQuantity)
+  const snapshotQuantity = isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)
+  const snapshotBaseWeightKg = isBundleQuotation(quoteMode.value) ? bundleBaseWeight(1) : singleBaseWeight(p, snapshotQuantity)
+  const snapshotPackagingWeightKg = isBundleQuotation(quoteMode.value) ? bundlePackagingWeight(1) : singlePackagingWeight(p, snapshotQuantity)
   const snapshotWeightKg = sumDecimal(snapshotBaseWeightKg, snapshotPackagingWeightKg, specialPackagingWeightKg.value)
   return selectedMatrixRows.map((row) => {
     const billingRule = logisticsRules.find(rule => rule.id === row.ruleId)
@@ -2256,6 +2279,7 @@ function buildQuoteOptions() {
       || ''
     return {
       id: `${row.country}::${row.quoteRegion || '全国统一'}::${row.channelKey || `${row.ruleId}::${row.carrier}::${row.channelCode || row.transport}`}`,
+      womensPricingSamples: womensSamplesFor(row, p, []),
       quoteSheetKey: quoteSheetRowKey(row),
       country: row.country,
       quoteRegion: billingRegion,
@@ -2441,10 +2465,10 @@ async function save() {
   const quoteOptions = buildQuoteOptions()
   const summary = selectedQuoteSummary(quoteOptions)
   if (!summary) { toast('首选渠道无法计算1件报价，请重新选择可计价渠道后保存'); return }
-  const productSummary = quoteMode.value === 'shipping-only' ? shippingQuotationSummary(shippingNote.value) : manualMode.value ? quotationModeLabels[quoteMode.value] : quoteMode.value === 'bundle'
+  const productSummary = quoteMode.value === 'shipping-only' ? shippingQuotationSummary(shippingNote.value) : manualMode.value ? quotationModeLabels[quoteMode.value] : isBundleQuotation(quoteMode.value)
     ? bundleItems.value.filter(item => item.sku).map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') || '组合 SKU'
     : p.name
-  const recordBundleItems = quoteMode.value === 'bundle' ? bundleItems.value.filter(item => item.sku).map(item => {
+  const recordBundleItems = isBundleQuotation(quoteMode.value) ? bundleItems.value.filter(item => item.sku).map(item => {
     return {
       sku: item.sku.trim().toUpperCase(),
       purchaseTier: normalizePurchaseTier(item.purchaseTier, monthlySalesEstimate.value),
@@ -2468,10 +2492,11 @@ async function save() {
   }
   catch (error) { toast(error instanceof Error ? error.message : '客户报价无法保存'); return }
   if (saveSignature !== draftSignature() || !quotationHasInputs()) { toast('报价条件已变化，请重新查询后保存'); return }
-  if (manualMode.value) {
+  if (manualMode.value || isWomensQuotation(quoteMode.value)) {
     for (const option of quoteOptions) {
       const source = selectedMatrixRows.find(row => quoteSheetRowKey(row) === option.quoteSheetKey)!
       if (option.available !== false) option.logisticsSamples = logisticsSamplesFor(source, p, captured.quantities)
+      option.womensPricingSamples = womensSamplesFor(source, p, captured.quantities)
     }
   }
   // Persist the preview order in the option array, so reopening and copying use the same sequence.
@@ -2484,38 +2509,39 @@ async function save() {
   const systemQuantityQuotes = captured ? { quantities:captured.quantities, rows:quoteOptions.map(option=>({ optionId:option.id, prices:captured!.rows.find(row=>row.key===option.quoteSheetKey)!.systemPrices })) } : undefined
   const input: Parameters<typeof createQuotationRecord>[0] = {
     priorityProcessing: priorityProcessing.value,
+    womensPricing: isWomensQuotation(quoteMode.value) ? JSON.parse(JSON.stringify(womensPricing.value)) : undefined,
     financeVersions: { ...appliedFinanceVersions },
     customerQuote:snapshot, systemQuantityQuotes,
     ...(manualMode.value ? { manualPricing: manualPricing.value! } : {}),
     ...(quoteMode.value === 'shipping-only' ? { shippingNote: normalizeShippingNote(shippingNote.value) } : {}),
-    weightSnapshot: manualMode.value ? undefined : buildQuotationWeightSnapshot(quoteMode.value === 'bundle'
+    weightSnapshot: manualMode.value ? undefined : buildQuotationWeightSnapshot(isBundleQuotation(quoteMode.value)
       ? bundleItems.value.filter(item => item.sku).map(item => ({sku:item.sku, quantityPerSet:normalizedBundleSets(item.quantityPerSet), baseWeightKg:item.customWeightKg ?? item.weightKg, weightSource:item.customWeightKg == null ? 'purchase' as const : 'manual' as const, purchaseWeightKg:item.weightKg}))
       : [{sku:p.sku, quantityPerSet:1, baseWeightKg:singleBaseWeight(p,1), weightSource:p.weightSource, purchaseWeightKg:p.netWeight}],
-      parseSpecialPackagingGrams(specialPackagingGrams.value)!, [...new Set([1,2,3,customQuoteQuantity.value,quoteMode.value==='bundle'?1:p.quantity,...captured.quantities])]),
+      parseSpecialPackagingGrams(specialPackagingGrams.value)!, [...new Set([1,2,3,customQuoteQuantity.value,isBundleQuotation(quoteMode.value)?1:p.quantity,...captured.quantities])]),
     purchaseVersions: Object.fromEntries(activePurchaseSkus().map(sku => [sku, purchaseRevision(findPurchaseProduct(purchaseRecords.value, sku)) || ''])),
     logisticsRevision: logisticsRevision.value,
     salespersonName: currentSalespersonName.value, salespersonAccount: currentSalespersonAccount.value,
     customerOperation: customerOperation.value.snapshot,
     customerName: customer, quoteMode: quoteMode.value, productSummary,
-    productImage: manualMode.value ? '' : quoteMode.value === 'bundle'
+    productImage: manualMode.value ? '' : isBundleQuotation(quoteMode.value)
       ? (bundleItems.value.map(item => preferredQuotationImage(item.physicalImage, item.image)).find(Boolean) || '')
       : preferredQuotationImage(p.physicalImage, p.image),
-    primarySku: manualMode.value ? '' : quoteMode.value === 'bundle' ? recordBundleItems!.map(item => item.sku).join('、') : p.sku,
+    primarySku: manualMode.value ? '' : isBundleQuotation(quoteMode.value) ? recordBundleItems!.map(item => item.sku).join('、') : p.sku,
     bundleItems: recordBundleItems,
     productCategory: productCategory.value,
-    purchaseBaseUnitPriceCny: quoteMode.value === 'single' ? Math.max(0, p.purchaseBaseUnitPrice) : undefined,
-    purchaseInvoiceType: quoteMode.value === 'single' ? (p.purchaseInvoiceType || undefined) : undefined,
-    purchaseInvoiceRatePercent: quoteMode.value === 'single' ? Math.max(0, p.purchaseInvoiceRatePercent) : undefined,
-    purchaseInvoiceTaxApplied: quoteMode.value === 'single' ? p.purchaseInvoiceTaxApplied : undefined,
-    purchaseUnitPriceCny: quoteMode.value === 'single' ? Math.max(0, p.purchase) : undefined,
-    domesticFreightPerUnitCny: quoteMode.value === 'single' ? Math.max(0, p.purchaseFreightPerUnit) : undefined,
+    purchaseBaseUnitPriceCny: isSingleQuotation(quoteMode.value) ? Math.max(0, p.purchaseBaseUnitPrice) : undefined,
+    purchaseInvoiceType: isSingleQuotation(quoteMode.value) ? (p.purchaseInvoiceType || undefined) : undefined,
+    purchaseInvoiceRatePercent: isSingleQuotation(quoteMode.value) ? Math.max(0, p.purchaseInvoiceRatePercent) : undefined,
+    purchaseInvoiceTaxApplied: isSingleQuotation(quoteMode.value) ? p.purchaseInvoiceTaxApplied : undefined,
+    purchaseUnitPriceCny: isSingleQuotation(quoteMode.value) ? Math.max(0, p.purchase) : undefined,
+    domesticFreightPerUnitCny: isSingleQuotation(quoteMode.value) ? Math.max(0, p.purchaseFreightPerUnit) : undefined,
     volumetricEnabled: false,
-    packageLengthCm: quoteMode.value === 'single' ? p.packageLengthCm : undefined,
-    packageWidthCm: quoteMode.value === 'single' ? p.packageWidthCm : undefined,
-    packageHeightCm: quoteMode.value === 'single' ? p.packageHeightCm : undefined,
-    defaultVolumeDivisor: quoteMode.value === 'single' ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
+    packageLengthCm: isSingleQuotation(quoteMode.value) ? p.packageLengthCm : undefined,
+    packageWidthCm: isSingleQuotation(quoteMode.value) ? p.packageWidthCm : undefined,
+    packageHeightCm: isSingleQuotation(quoteMode.value) ? p.packageHeightCm : undefined,
+    defaultVolumeDivisor: isSingleQuotation(quoteMode.value) ? Math.max(1, Number(p.volumeDivisor) || 8000) : undefined,
     logisticsAttribute: p.logisticsAttribute, ...summary,
-    customerGrade: customerGradeLabel(selectedCustomerGrade.value), monthlySalesEstimate: monthlySalesEstimate.value, commissionThreshold: parseCommissionThreshold(commissionThreshold.value), exchangeRate: exchange.value.usd,
+    customerGrade: isWomensQuotation(quoteMode.value) ? '女装自动系数' : customerGradeLabel(selectedCustomerGrade.value), monthlySalesEstimate: monthlySalesEstimate.value, commissionThreshold: parseCommissionThreshold(commissionThreshold.value), exchangeRate: exchange.value.usd,
     matrixMode: quoteMatrixMode.value,
     quotationTemplateId: templateSnapshot?.id,
     quotationTemplateName: templateSnapshot?.name,
@@ -2610,20 +2636,21 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
+        <p v-if="isWomensQuotation(quoteMode) && canViewPricingFactors" class="notice" role="status">{{ womensPricingBlock || (womensPricing ? `女装自动系数 V${womensPricing.version + 1}：${womensPolicyLabel(womensPricing)}。按各渠道、各数量的综合成本折美元选档，替代客户等级系数。` : '女装系数正在读取') }}</p>
         <p v-if="batchCapture && queryValidationFields.length" class="batch-query-error" role="alert">{{ conditionIssues({ includeSku: true, includeCategory: false }).map(issue => issue.message).join('；') }}。填写后点击“加载渠道”。</p>
         <p v-if="batchCapture && purchaseQueryError" class="batch-query-error" role="alert">{{ purchaseQueryError }}</p>
         <FobQuotePanel :initial="fobInitial" v-if="fobActive" :key="currentAuthUser.id + ':' + fobKey" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
         <template v-else>
-        <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ manualMode ? (quoteMode === 'shipping-only' ? '查询代发报价' : '查询试算') : quoteMode === 'bundle' ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
+        <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ manualMode ? (quoteMode === 'shipping-only' ? '查询代发报价' : '查询试算') : isBundleQuotation(quoteMode) ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
         <section v-if="!draftNeedsQuery && (manualMode ? manualQueried : p.sku) && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">
           <i></i><span><b>{{ logisticsLoadState === 'loading' ? '正在按商品条件加载物流规则' : logisticsLoadState === 'stale' ? '当前显示缓存物流规则' : logisticsLoadState === 'empty' ? '没有匹配的已发布物流渠道' : logisticsLoadState === 'error' ? '物流规则加载失败' : '物流规则待加载' }}</b><small>{{ logisticsLoadState === 'loading' ? '页面其他内容可继续查看，完成后将自动计算最低报价渠道' : logisticsLoadState === 'stale' ? '网络恢复并确认正式版本后才能保存报价' : logisticsLoadState === 'idle' ? '点击重新加载，按当前商品条件获取正式物流规则' : logisticsLoadError || p.status }}</small></span><button v-if="logisticsLoadState !== 'loading'" type="button" @click="retryQuoteLogistics">重新加载</button>
         </section>
 
         <ManualQuotePanel v-if="manualMode" :shipping-only="quoteMode === 'shipping-only'" :cost="manualCost" :weight="manualWeightGrams" :shipping-note="shippingNote" :error="shippingNoteError || manualPanelError" :busy="logisticsLoadState === 'loading' || savingQuotation || syncRefreshing" @update:cost="manualCost=$event" @update:weight="manualWeightGrams=$event" @update:shipping-note="shippingNote=$event" @query="queryManualQuote" />
-        <section v-if="quoteMode === 'single' && !draftNeedsQuery" class="cost-workbench">
+        <section v-if="isSingleQuotation(quoteMode) && !draftNeedsQuery" class="cost-workbench">
           <CostWeightPanel :freight-warning="singleFreightWarning" :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)"><template #product><ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" /></template></CostWeightPanel>
         </section>
-        <section v-else-if="quoteMode === 'bundle'" class="cost-workbench">
+        <section v-else-if="isBundleQuotation(quoteMode)" class="cost-workbench">
           <BundleProductCard
             :freight-warnings="bundleFreightWarnings" :items="bundleItems" :purchase-cost="bundlePurchaseCost(1)"
             :base-weight="bundleBaseWeight(1)" :packaging-weight="bundlePackagingWeight(1)" :total-weight="bundleGoodsWeight(1)" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" :domestic-freight="bundleDomesticFreight(1)"
@@ -2657,7 +2684,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
-            :unit-label="quoteMode === 'bundle' ? '套' : '件'" :custom-quantity="customQuoteQuantity"
+            :unit-label="isBundleQuotation(quoteMode) ? '套' : '件'" :custom-quantity="customQuoteQuantity"
             :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
             @preset-state-change="commonSelectionState=$event" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
           >
@@ -2673,7 +2700,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
             :ensure-countries="ensureCountries" :countries="activeQuotationCountries" :quote-rows-for-country="activeRegionalQuoteRows" :context-key="activeQuoteMatrixContextKey"
             :custom-quantity="customQuoteQuantity" :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unavailable-reason="unavailableTemplateReason" :owner-name="currentSalespersonName" :owner-account="currentSalespersonAccount"
-            :unit-label="quoteMode === 'bundle' ? '套' : '件'"
+            :unit-label="isBundleQuotation(quoteMode) ? '套' : '件'"
             :draft-selection="restoredTemplateSelections" :draft-template="activeTemplateSnapshot" :draft-version="restoredSelectionVersion"
             @update:custom-quantity="customQuoteQuantity=Math.max(1,$event||1)" @selection-change="updateTemplateQuotes" @template-change="updateActiveTemplate"
             @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
@@ -2688,13 +2715,13 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="quoteSheetResetKey"
           :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
-          :quote-mode="quoteMode" :product-name="manualMode ? quotationModeLabels[quoteMode] : quoteMode === 'bundle' ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
-          :skus="manualMode ? [quotationModeLabels[quoteMode]] : quoteMode === 'bundle' ? quoteSheetBundleSkus(bundleItems) : [p.sku]"
-          :sku="manualMode ? quotationModeLabels[quoteMode] : quoteMode === 'bundle' ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
+          :quote-mode="quoteMode" :product-name="manualMode ? quotationModeLabels[quoteMode] : isBundleQuotation(quoteMode) ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
+          :skus="manualMode ? [quotationModeLabels[quoteMode]] : isBundleQuotation(quoteMode) ? quoteSheetBundleSkus(bundleItems) : [p.sku]"
+          :sku="manualMode ? quotationModeLabels[quoteMode] : isBundleQuotation(quoteMode) ? bundleItems.filter(item=>item.sku).map(item=>item.sku).join('、') : p.sku"
           :customer-grade="selectedCustomerGrade" :coefficient="selectedGradeCoefficient()"
-          :custom-quantity="customQuoteQuantity" :unit-label="quoteMode === 'bundle' ? '套' : '件'" :exchange-rate="exchange.usd"
+          :custom-quantity="customQuoteQuantity" :unit-label="isBundleQuotation(quoteMode) ? '套' : '件'" :exchange-rate="exchange.usd"
           :primary-region="quoteRegionForCountry(p.country)" :primary-country="p.country" :primary-carrier="p.channel" :primary-rule="p.rule"
-          :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), quoteMode === 'bundle' ? 1 : Math.max(1, p.quantity)).totalUsd"
+          :primary-cny-price="purchaseTaxBlockReason ? 0 : finalSalePrice(p)" :primary-usd-price="purchaseTaxBlockReason ? 0 : taxResult(p.country, p.channel, salePrice(p), p.rule, p.selectedChannelKey, chargeWeight(p), isBundleQuotation(quoteMode) ? 1 : Math.max(1, p.quantity)).totalUsd"
           :block-reason="displayedSaveBlockReason" :validation-issues="displayedSaveValidationIssues" :saving="savingQuotation"
           :can-retry="canRetrySavePreparation" :retrying="retryingSavePreparation || syncRefreshing || quoteLogisticsBusy() || financeSettingsAreLoading()" @retry="retrySavePreparation" @locate-issue="locateValidationIssue" @save="attemptSave" @remove-row="removePreviewRow"
         />
@@ -2715,10 +2742,11 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button class="modal-close" @click="showRule = showHistory = false">×</button>
         <template v-if="showRule && canViewFullPricing">
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
+          <p v-if="isWomensQuotation(quoteMode) && womensPricing">女装计价：采购成本＋国内运费＋国际运费，按当前汇率折美元，在未取整金额上自动选档；各渠道、各件数／套数分别计算。规则版本 V{{ womensPricing.version + 1 }}：{{ womensPolicyLabel(womensPricing) }}。基础售价＝综合成本×命中系数，然后沿用税费、附加费、操作费和佣金阈值流程。</p>
           <p v-if="!manualMode">当前特殊包装：{{ specialPackagingGrams || 0 }}g／票，仅增加一次。</p>
           <p>当前佣金阈值：{{ commissionThreshold || '未填写' }}。最终报价＝原最终美元报价 ÷ 佣金阈值，再按0.05美元向上取整；阈值1不调整报价。</p>
           <ol v-if="manualMode"><li><b>成本</b><span>{{ quoteMode === 'shipping-only' ? '客户自备商品，商品成本为0，无需填写成本。' : '成本价格为每件总成本，已包含的采购、国内运费等费用不再重复叠加。' }}</span></li><li><b>重量</b><span>填写克重 × 数量 ÷ 1000，作为公斤重量送入当前物流渠道；不增加普通包材或特殊包装，渠道起重、进位等计费规则照常执行。</span></li><li><b>报价</b><span>每件成本 × 数量，加该数量整票运费，再沿用客户等级、汇率、税费、附加费、公司操作费和佣金阈值规则，最终按0.05美元向上取整。</span></li></ol>
-          <ol v-else><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每 50g（不足向上取整）增加 1g 普通包材；特殊包装按整票额外增加一次，不随件数或套数增加</span></li><li><b>采购成本</b><span>采购价与国内运费分别匹配：采购价缺档时沿用已有价格；国内运费按所选阶梯依次匹配源数据中已有的1件、10件、100件运费档，超出已有档位用最高档；第三档及以上采用最高运费档，不随采购价回退，按对应件数分摊，包邮为0</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>系统按客户等级计算报价，换算美元并加税费；从财务列表选择客户时再加公司操作费，按1、2、3、3以上件／套选择对应档位，每单一次、不乘数量，再按0.05美元向上取整；随后除以佣金阈值并再次向上取整到0.05美元</span></li></ol>
+          <ol v-else><li><b>物流属性</b><span>业务员在本次报价中统一选择{{ quotationAttributeOptions.join('、') }}；系统再匹配财务授权的国家与渠道</span></li><li><b>计费重量</b><span>前台统一以整克（g）展示和输入；单品采用采购资料重量或业务员指定重量，组合 SKU 采用各商品基础重量合计，并逐件按每 50g（不足向上取整）增加 1g 普通包材；特殊包装按整票额外增加一次，不随件数或套数增加</span></li><li><b>采购成本</b><span>采购价与国内运费分别匹配：采购价缺档时沿用已有价格；国内运费按所选阶梯依次匹配源数据中已有的1件、10件、100件运费档，超出已有档位用最高档；第三档及以上采用最高运费档，不随采购价回退，按对应件数分摊，包邮为0</span></li><li><b>物流运费</b><span>计费重量按物流规则的重量费、挂号费及特殊费用计算，本期不自动拆分多个包裹</span></li><li><b>最终报价</b><span>系统按{{ isWomensQuotation(quoteMode) ? '女装金额分档系数' : '客户等级' }}计算报价，换算美元并加税费；从财务列表选择客户时再加公司操作费，按1、2、3、3以上件／套选择对应档位，每单一次、不乘数量，再按0.05美元向上取整；随后除以佣金阈值并再次向上取整到0.05美元</span></li></ol>
           <p class="modal-tip">美元价格按保存报价时的汇率快照换算，历史报价不会随新汇率自动改变。</p>
         </template>
         <template v-else>

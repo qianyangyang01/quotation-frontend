@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isWomensQuotation } from '@/data/quotationModes'
 import { customerGradeDisplayLabel } from '@/data/financeChannelPolicies'
 import { computed, ref } from 'vue'
 import type { QuotationMatrixRow } from './types'
@@ -100,7 +101,7 @@ const quoteRange = computed(() => {
           <div><dt>商品</dt><dd>{{ productName || '待查询' }}</dd></div>
           <div><dt>{{ quoteMode === 'freight-trial' || quoteMode === 'shipping-only' ? '业务类型' : 'SKU' }}</dt><dd>{{ sku || '—' }}</dd></div>
           <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
-          <div><dt>客户等级</dt><dd>{{ customerGradeDisplayLabel(customerGrade) }}</dd></div>
+          <div><dt>{{ isWomensQuotation(quoteMode) ? '女装系数' : '客户等级' }}</dt><dd>{{ isWomensQuotation(quoteMode) ? '按各渠道／数量的金额自动匹配' : customerGradeDisplayLabel(customerGrade) }}</dd></div>
         </dl>
       </section>
     </div>

@@ -1,3 +1,4 @@
+import { quotationFunctionContext } from '@/test/quotationFunctionContext'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
@@ -42,7 +43,7 @@ it.each(cases)('live %s / %s / quantity %i keeps the entire final-price chain co
     logisticsAttribute: '普货', purchase: 10, purchaseFreightPerUnit: 1 }
   const items = ['A','B'].map(sku => ({ sku, quantityPerSet: 1, weightKg: .06, customWeightKg: null, purchaseUnitPrice: 5, purchaseFreightPerUnit: .5 }))
   const country = { country: '美国', fixedFeeUsd: 0, selected: true, enabled: true, sortOrder: 1 }
-  const context = { manualMode: { value: false },
+  const context = { ...quotationFunctionContext, manualMode: { value: false },
     specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' }, logisticsRuleForChannel: () => rule,
     normalizedBundleSets: (n: number) => n, quoteMode: { value: mode },
     bundleGoodsWeight: (n: number) => bundleGoodsWeight(items, n, .007), singleActualWeight: (p: typeof product, n: number) => singleActualWeight(p, n, .007), calculateLogisticsFee,

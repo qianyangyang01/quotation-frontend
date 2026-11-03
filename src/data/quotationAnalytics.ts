@@ -1,4 +1,5 @@
-import { isManualQuotation, quotationModeLabels } from './quotationModes'
+import { isManualQuotation, isWomensQuotation, quotationModeLabels } from './quotationModes'
+import { womensPolicyLabel } from './womensPricing'
 import type { PurchaseProductRecord } from './purchaseStore'
 import { financeReviewLabel, quotationDealLabel, type QuotationRecord } from './quotationRecords'
 
@@ -202,6 +203,14 @@ export function quotationDetailsCsv(records: QuotationRecord[], purchases: Analy
       const note = record.quoteMode === 'shipping-only' ? record.shippingNote || '' : ''
       rows[index]!.push(/^[=+@-]/.test(note.trimStart()) ? `'${note}` : note)
     })
+  }
+  if (records.some(record => isWomensQuotation(record.quoteMode))) {
+    header.push('女装规则版本', '女装计价说明', ...(options.includeCost === true ? ['女装系数规则快照'] : []))
+    records.forEach((record, index) => rows[index]!.push(
+      isWomensQuotation(record.quoteMode) ? record.womensPricing ? `V${record.womensPricing.version + 1}` : '未保存' : '',
+      isWomensQuotation(record.quoteMode) ? '按各渠道、各数量的综合成本折美元自动选档，替代客户等级系数；历史金额不回算' : '',
+      ...(options.includeCost === true ? [record.womensPricing ? womensPolicyLabel(record.womensPricing) : ''] : []),
+    ))
   }
   const visibleRows = options.includeCost === false ? [header, ...rows].map(row => row.filter((_, index) => index !== header.indexOf('成本(RMB)'))) : [header, ...rows]
   return `\uFEFF${visibleRows.map(row => row.map(csvCell).join(',')).join('\r\n')}`

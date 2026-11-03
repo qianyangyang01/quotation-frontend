@@ -16,7 +16,7 @@ import java.util.UUID;
 
 @RestController @RequestMapping("/api/v1/finance-settings")
 public class FinanceSettingController {
-    private static final List<String> KEYS=List.of("country-classification","channel-policies","customer-grades","exchange-rate","tax-settings","surcharge-settings","customer-operation-fees","freight-discount-settings");
+    private static final List<String> KEYS=List.of("country-classification","channel-policies","customer-grades","womens-pricing","exchange-rate","tax-settings","surcharge-settings","customer-operation-fees","freight-discount-settings");
     private final FinanceSettingRepository settings; private final AuditService audit; private final LogisticsDatasetService logisticsDatasets; private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
     public FinanceSettingController(FinanceSettingRepository settings, AuditService audit, LogisticsDatasetService logisticsDatasets, org.springframework.jdbc.core.simple.JdbcClient jdbc){this.settings=settings;this.audit=audit;this.logisticsDatasets=logisticsDatasets;this.jdbc=jdbc;}
     @GetMapping("/tax-channels") @PreAuthorize("hasAuthority('PERM_finance')") @Transactional(readOnly=true)
@@ -68,8 +68,9 @@ public class FinanceSettingController {
         var existing=settings.findById(key);if(existing.isPresent()&&existing.get().version!=expectedVersion)throw AppException.conflict("财务设置已被其他用户修改，请刷新后重试");if(existing.isEmpty()&&expectedVersion!=-1)throw AppException.conflict("财务设置版本不一致，请刷新后重试");
         if (key.equals("freight-discount-settings")) ChannelFreightDiscounts.validateBindings(jdbc,body,existing.map(row->row.payload).orElseGet(()->tools.jackson.databind.node.JsonNodeFactory.instance.objectNode()));
         if (key.equals("customer-operation-fees") && existing.isPresent()) CustomerOperationFees.preventLegacyOverwrite(existing.get().payload, body);
+        var previous=existing.map(row->row.payload.deepCopy().toString()).orElse("");
         var row=existing.orElseGet(()->FinanceSetting.create(key,body.deepCopy())); row.payload=body.deepCopy(); row.updatedAt=Instant.now(); settings.saveAndFlush(row);
-        audit.record("finance.update","finance-setting",key,"success",Map.of()); return ApiResponse.ok(view(row));
+        audit.record("finance.update","finance-setting",key,"success",key.equals("womens-pricing") ? Map.of("before",previous,"after",body.toString(),"version",row.version) : Map.of()); return ApiResponse.ok(view(row));
     }
     private JsonNode view(FinanceSetting row){var wrapper=tools.jackson.databind.node.JsonNodeFactory.instance.objectNode();wrapper.set("value",row.payload.deepCopy());wrapper.put("_version",row.version);wrapper.put("_updatedAt",row.updatedAt.toString());return wrapper;}
     private static void validateKey(String key){if(!KEYS.contains(key)) throw AppException.notFound("财务设置不存在");}

@@ -1,3 +1,4 @@
+import { isBundleQuotation } from '@/data/quotationModes'
 import { normalizeCustomerPrices } from './customerQuotePrices'
 import type { QuotationRecord } from './quotationRecords'
 
@@ -25,7 +26,7 @@ export function customerPriceRevision(record: QuotationRecord, beforeText: strin
       if (!hadPrice && !hasPrice) return []
       const oldPrice = oldRow?.prices[oldIndex] ?? null, newPrice = newRow?.prices[newIndex] ?? null
       if (hadPrice === hasPrice && oldPrice === newPrice) return []
-      return [{ quantity, label: quantity ? `${quantity}${record.quoteMode === 'bundle' ? '套' : '件'}` : '自定义数量',
+      return [{ quantity, label: quantity ? `${quantity}${isBundleQuotation(record.quoteMode) ? '套' : '件'}` : '自定义数量',
         before: hadPrice ? money(oldPrice) : '未设置', after: hasPrice ? money(newPrice) : '已移除' }]
     })
     if (!changes.length) return []

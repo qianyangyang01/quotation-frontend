@@ -1,3 +1,4 @@
+import { isBundleQuotation } from '@/data/quotationModes'
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
@@ -13,8 +14,8 @@ function setup() {
   const toast = vi.fn(), writeText = vi.fn().mockResolvedValue(undefined)
   const appUpdate = { assertCurrent: () => { if (version.updateRequired) throw new Error('系统已更新，请刷新后重新报价') } }
   vi.stubGlobal('navigator', { clipboard: { writeText } })
-  const copy = new Function('appUpdate', 'toast', 'purchaseTaxBlockReason', 'specialPackagingError', 'commissionError', 'quoteMode', 'quoteCnyFromUsd', 'exchange', js + '; return copyQuoteRows')(
-    appUpdate, toast, { value: '' }, { value: '' }, { value: '' }, { value: 'single' }, (usd: number, rate: number) => usd * rate, { value: { usd: 6.7 } },
+  const copy = new Function('isBundleQuotation', 'appUpdate', 'toast', 'purchaseTaxBlockReason', 'specialPackagingError', 'commissionError', 'quoteMode', 'quoteCnyFromUsd', 'exchange', js + '; return copyQuoteRows')(
+    isBundleQuotation, appUpdate, toast, { value: '' }, { value: '' }, { value: '' }, { value: 'single' }, (usd: number, rate: number) => usd * rate, { value: { usd: 6.7 } },
   ) as (rows: unknown[]) => Promise<void>
   return { version, toast, writeText, copy }
 }

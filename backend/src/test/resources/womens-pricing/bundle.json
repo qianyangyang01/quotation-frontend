@@ -1,0 +1,547 @@
+{
+  "priorityProcessing": false,
+  "womensPricing": {
+    "schemaVersion": 1,
+    "basis": "total-cost-usd",
+    "enabled": true,
+    "tiers": [
+      {
+        "fromUsd": 0,
+        "toUsd": 20,
+        "coefficient": 1.27
+      },
+      {
+        "fromUsd": 20,
+        "toUsd": 30,
+        "coefficient": 1.25
+      },
+      {
+        "fromUsd": 30,
+        "toUsd": 50,
+        "coefficient": 1.23
+      },
+      {
+        "fromUsd": 50,
+        "toUsd": null,
+        "coefficient": 1.22
+      }
+    ],
+    "version": 1
+  },
+  "financeVersions": {
+    "country-classification": 1,
+    "channel-policies": 1,
+    "customer-grades": 1,
+    "exchange-rate": 1,
+    "tax-settings": 1,
+    "surcharge-settings": 1,
+    "customer-operation-fees": 1,
+    "freight-discount-settings": -1,
+    "womens-pricing": 1
+  },
+  "customerQuote": {
+    "quantityUnits": {},
+    "photos": [],
+    "showPhotos": true,
+    "rowOrder": [
+      "option:美国::全国统一::9912::万邦::DEMO2",
+      "option:美国::全国统一::9910::燕文::DEMO0"
+    ],
+    "averagePlans": [],
+    "hiddenOptionIds": [],
+    "sizeRulesEnabled": false,
+    "contact": {
+      "agent": "演示业务员",
+      "whatsapp": ""
+    },
+    "quantities": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "rows": [
+      {
+        "optionId": "美国::全国统一::9912::万邦::DEMO2",
+        "prices": [
+          35.35,
+          65.2,
+          95.85,
+          126.5
+        ]
+      },
+      {
+        "optionId": "美国::全国统一::9910::燕文::DEMO0",
+        "prices": [
+          33.25,
+          61.75,
+          91.05,
+          120.35
+        ]
+      }
+    ]
+  },
+  "systemQuantityQuotes": {
+    "quantities": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "rows": [
+      {
+        "optionId": "美国::全国统一::9912::万邦::DEMO2",
+        "prices": [
+          35.35,
+          65.2,
+          95.85,
+          126.5
+        ]
+      },
+      {
+        "optionId": "美国::全国统一::9910::燕文::DEMO0",
+        "prices": [
+          33.25,
+          61.75,
+          91.05,
+          120.35
+        ]
+      }
+    ]
+  },
+  "weightSnapshot": {
+    "schemaVersion": 1,
+    "rule": "per-item-50g-1g-v1",
+    "specialPackagingGrams": 0,
+    "specialPackagingScope": "per-shipment",
+    "items": [
+      {
+        "sku": "NZ-DEMO-001",
+        "quantityPerSet": 1,
+        "baseWeightKg": 0.22,
+        "weightSource": "purchase",
+        "purchaseWeightKg": 0.22,
+        "standardPackagingWeightKg": 0.005
+      },
+      {
+        "sku": "NZ-DEMO-002",
+        "quantityPerSet": 1,
+        "baseWeightKg": 0.26,
+        "weightSource": "purchase",
+        "purchaseWeightKg": 0.26,
+        "standardPackagingWeightKg": 0.006
+      }
+    ],
+    "quantities": [
+      {
+        "quantity": 1,
+        "baseWeightKg": 0.48,
+        "standardPackagingWeightKg": 0.011,
+        "specialPackagingWeightKg": 0,
+        "weightKg": 0.491
+      },
+      {
+        "quantity": 2,
+        "baseWeightKg": 0.96,
+        "standardPackagingWeightKg": 0.022,
+        "specialPackagingWeightKg": 0,
+        "weightKg": 0.982
+      },
+      {
+        "quantity": 3,
+        "baseWeightKg": 1.44,
+        "standardPackagingWeightKg": 0.033,
+        "specialPackagingWeightKg": 0,
+        "weightKg": 1.473
+      },
+      {
+        "quantity": 4,
+        "baseWeightKg": 1.92,
+        "standardPackagingWeightKg": 0.044,
+        "specialPackagingWeightKg": 0,
+        "weightKg": 1.964
+      }
+    ]
+  },
+  "purchaseVersions": {
+    "NZ-DEMO-001": "1:demo",
+    "NZ-DEMO-002": "1:demo"
+  },
+  "logisticsRevision": "demo",
+  "salespersonName": "演示业务员",
+  "salespersonAccount": "DEMO",
+  "customerName": "女装客户（示例）",
+  "quoteMode": "womens-bundle",
+  "productSummary": "NZ-DEMO-001 × 1 + NZ-DEMO-002 × 1",
+  "productImage": "",
+  "primarySku": "NZ-DEMO-001、NZ-DEMO-002",
+  "bundleItems": [
+    {
+      "sku": "NZ-DEMO-001",
+      "purchaseTier": "10",
+      "name": "女装",
+      "quantityPerSet": 1,
+      "effectiveWeightKg": 0.22,
+      "purchaseBaseUnitPriceCny": 68,
+      "purchaseInvoiceType": "普票",
+      "purchaseInvoiceRatePercent": 1,
+      "purchaseInvoiceTaxApplied": true,
+      "purchaseUnitPriceCny": 68.68,
+      "domesticFreightPerUnitCny": 2
+    },
+    {
+      "sku": "NZ-DEMO-002",
+      "purchaseTier": "10",
+      "name": "女装",
+      "quantityPerSet": 1,
+      "effectiveWeightKg": 0.26,
+      "purchaseBaseUnitPriceCny": 58,
+      "purchaseInvoiceType": "普票",
+      "purchaseInvoiceRatePercent": 1,
+      "purchaseInvoiceTaxApplied": true,
+      "purchaseUnitPriceCny": 58.58,
+      "domesticFreightPerUnitCny": 2
+    }
+  ],
+  "productCategory": "女装",
+  "volumetricEnabled": false,
+  "logisticsAttribute": "普货",
+  "country": "美国",
+  "carrier": "万邦",
+  "channel": "服装专线（示例）",
+  "rule": "示例服装渠道3",
+  "systemQuoteUsd": 35.35,
+  "systemQuoteCny": 247.45,
+  "totalCostCny": 197.94,
+  "customerGrade": "女装自动系数",
+  "monthlySalesEstimate": "10",
+  "commissionThreshold": 1,
+  "exchangeRate": 7,
+  "matrixMode": "common",
+  "customQuoteQuantity": 3,
+  "quoteOptions": [
+    {
+      "id": "美国::全国统一::9912::万邦::DEMO2",
+      "womensPricingSamples": [
+        {
+          "fromUsd": 20,
+          "toUsd": 30,
+          "coefficient": 1.25,
+          "quantity": 1,
+          "costCny": 197.94,
+          "baseQuoteCny": 247.425
+        },
+        {
+          "fromUsd": 50,
+          "toUsd": null,
+          "coefficient": 1.22,
+          "quantity": 2,
+          "costCny": 373.88,
+          "baseQuoteCny": 456.1336
+        },
+        {
+          "fromUsd": 50,
+          "toUsd": null,
+          "coefficient": 1.22,
+          "quantity": 3,
+          "costCny": 549.82,
+          "baseQuoteCny": 670.7804
+        },
+        {
+          "fromUsd": 50,
+          "toUsd": null,
+          "coefficient": 1.22,
+          "quantity": 4,
+          "costCny": 725.76,
+          "baseQuoteCny": 885.4272
+        }
+      ],
+      "quoteSheetKey": "[\"美国\",\"\",\"9912::万邦::DEMO2\"]",
+      "country": "美国",
+      "quoteRegion": "",
+      "countryCode": "US",
+      "carrier": "万邦",
+      "channel": "服装专线（示例）",
+      "rule": "示例服装渠道3",
+      "eta": "该物流暂无时效说明",
+      "channelKey": "9912::万邦::DEMO2",
+      "ruleId": "9912",
+      "channelCode": "DEMO2",
+      "quantityMessages": {},
+      "freightCny": 66.68,
+      "logisticsChannelId": "demo-2",
+      "logisticsVersionId": "demo-v1",
+      "logisticsSamples": [
+        {
+          "quantity": 1,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 0.491,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 66.68,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 2,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 0.982,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 111.36,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 3,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 1.473,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 156.04,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 4,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 1.964,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 200.72,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        }
+      ],
+      "logisticsInput": {
+        "country": "美国",
+        "baseWeightKg": 0.48,
+        "packagingWeightKg": 0.011,
+        "standardPackagingWeightKg": 0.011,
+        "specialPackagingWeightKg": 0,
+        "quantity": 1,
+        "weightKg": 0.491,
+        "zoneName": "",
+        "marks": [
+          "普货"
+        ]
+      },
+      "totalCostCny": 549.82,
+      "profitCny": 120.96039999999994,
+      "quoteCny": 670.95,
+      "isPrimary": true,
+      "quote1Usd": 35.35,
+      "quote2Usd": 65.2,
+      "quote3Usd": 95.85,
+      "quoteCustomUsd": 95.85,
+      "taxIncluded": false,
+      "taxConfigured": true,
+      "taxRatePercent": null,
+      "countryFixedTaxUsd": 0,
+      "taxFeeMode": "no-tax",
+      "taxCalculations": {},
+      "taxLabel": "无关税",
+      "surchargeEnabled": false,
+      "surchargeConfigured": true,
+      "surchargeExempt": false,
+      "surchargeUsd": 0,
+      "surchargeLabel": "无附加费",
+      "tax1Usd": 0,
+      "tax2Usd": 0,
+      "tax3Usd": 0,
+      "taxCustomUsd": 0
+    },
+    {
+      "id": "美国::全国统一::9910::燕文::DEMO0",
+      "womensPricingSamples": [
+        {
+          "fromUsd": 20,
+          "toUsd": 30,
+          "coefficient": 1.25,
+          "quantity": 1,
+          "costCny": 186.09,
+          "baseQuoteCny": 232.6125
+        },
+        {
+          "fromUsd": 50,
+          "toUsd": null,
+          "coefficient": 1.22,
+          "quantity": 2,
+          "costCny": 354.17,
+          "baseQuoteCny": 432.0874
+        },
+        {
+          "fromUsd": 50,
+          "toUsd": null,
+          "coefficient": 1.22,
+          "quantity": 3,
+          "costCny": 522.26,
+          "baseQuoteCny": 637.1572
+        },
+        {
+          "fromUsd": 50,
+          "toUsd": null,
+          "coefficient": 1.22,
+          "quantity": 4,
+          "costCny": 690.34,
+          "baseQuoteCny": 842.2148
+        }
+      ],
+      "quoteSheetKey": "[\"美国\",\"\",\"9910::燕文::DEMO0\"]",
+      "country": "美国",
+      "quoteRegion": "",
+      "countryCode": "US",
+      "carrier": "燕文",
+      "channel": "服装专线（示例）",
+      "rule": "示例服装渠道1",
+      "eta": "该物流暂无时效说明",
+      "channelKey": "9910::燕文::DEMO0",
+      "ruleId": "9910",
+      "channelCode": "DEMO0",
+      "quantityMessages": {},
+      "freightCny": 54.83,
+      "logisticsChannelId": "demo-0",
+      "logisticsVersionId": "demo-v1",
+      "logisticsSamples": [
+        {
+          "quantity": 1,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 0.491,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 54.83,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 2,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 0.982,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 91.65,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 3,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 1.473,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 128.48,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 4,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 1.964,
+            "marks": [
+              "普货"
+            ]
+          },
+          "total": 165.3,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        }
+      ],
+      "logisticsInput": {
+        "country": "美国",
+        "baseWeightKg": 0.48,
+        "packagingWeightKg": 0.011,
+        "standardPackagingWeightKg": 0.011,
+        "specialPackagingWeightKg": 0,
+        "quantity": 1,
+        "weightKg": 0.491,
+        "zoneName": "",
+        "marks": [
+          "普货"
+        ]
+      },
+      "totalCostCny": 522.26,
+      "profitCny": 114.8972,
+      "quoteCny": 637.35,
+      "isPrimary": false,
+      "quote1Usd": 33.25,
+      "quote2Usd": 61.75,
+      "quote3Usd": 91.05,
+      "quoteCustomUsd": 91.05,
+      "taxIncluded": false,
+      "taxConfigured": true,
+      "taxRatePercent": null,
+      "countryFixedTaxUsd": 0,
+      "taxFeeMode": "no-tax",
+      "taxCalculations": {},
+      "taxLabel": "无关税",
+      "surchargeEnabled": false,
+      "surchargeConfigured": true,
+      "surchargeExempt": false,
+      "surchargeUsd": 0,
+      "surchargeLabel": "无附加费",
+      "tax1Usd": 0,
+      "tax2Usd": 0,
+      "tax3Usd": 0,
+      "taxCustomUsd": 0
+    }
+  ],
+  "specifiedQuotes": [
+    {
+      "country": "美国",
+      "carrier": "万邦",
+      "channel": "服装专线（示例）",
+      "rule": "示例服装渠道3",
+      "eta": "该物流暂无时效说明",
+      "quote1Usd": 35.35,
+      "quote2Usd": 65.2,
+      "quote3Usd": 95.85,
+      "quoteCustomUsd": 95.85
+    },
+    {
+      "country": "美国",
+      "carrier": "燕文",
+      "channel": "服装专线（示例）",
+      "rule": "示例服装渠道1",
+      "eta": "该物流暂无时效说明",
+      "quote1Usd": 33.25,
+      "quote2Usd": 61.75,
+      "quote3Usd": 91.05,
+      "quoteCustomUsd": 91.05
+    }
+  ],
+  "id": "demo-2",
+  "no": "QA-NZ-2",
+  "createdAt": "2026-11-03T03:15:31.266Z",
+  "_version": 0,
+  "status": "pending"
+}

@@ -1,3 +1,4 @@
+import { isBundleQuotation } from '@/data/quotationModes'
 import { validQuoteSheetUnits, type QuoteSheetUnits } from './quoteSheetUnits'
 import Decimal from 'decimal.js'
 import { validQuoteSheetPhotos, type QuoteSheetPhoto } from './quoteSheetPhotos'
@@ -102,7 +103,7 @@ export function representativePriceDifference(record: QuotationRecord) {
     .sort((a,b)=>(a.quantity||Infinity)-(b.quantity||Infinity))
   const first=changes[0]
   if (!first) return { label:'客户报价＝系统报价', detail:'查看明细', changed:false }
-  const quantity=first.quantity ? `${first.quantity}${record.quoteMode==='bundle'?'套':'件'}` : '自定义数量'
+  const quantity=first.quantity ? `${first.quantity}${isBundleQuotation(record.quoteMode)?'套':'件'}` : '自定义数量'
   const difference=first.difference==null ? first.system==null ? '无系统基准' : '未报价' : `${first.difference<0?'-':first.difference>0?'+':''}$${Math.abs(first.difference).toFixed(2)}`
   return { label:`${quantity} · ${difference}`, detail:first.percent==null ? '查看明细' : `${first.percent>0?'+':''}${first.percent.toFixed(2)}% · 查看明细`, changed:true,
     channel:`${first.option.country} · ${first.option.quoteRegion || ''} · ${first.option.carrier} · ${first.option.channel}` }

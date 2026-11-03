@@ -1,3 +1,4 @@
+import { isSingleQuotation } from '@/data/quotationModes'
 import type { QuotationRecord, QuotationRecordQuoteOption } from '@/data/quotationRecords'
 import { draftSelection, type QuotationDraftPayload } from './quotationDrafts'
 import { normalizeShippingNote } from '@/data/shippingQuotationNote'
@@ -22,14 +23,14 @@ export function quotationReissuePayload(record: QuotationRecord): QuotationDraft
     schemaVersion: 2, customerName: record.customerName, selectedCustomerId: record.customerOperation?.id,
     commissionThreshold: record.commissionThreshold ?? 1,
     specialPackagingGrams: record.weightSnapshot?.specialPackagingGrams ?? 0,
-    quoteMode: record.quoteMode, skuSearch: record.quoteMode === 'single' ? record.primarySku : '',
+    quoteMode: record.quoteMode, skuSearch: isSingleQuotation(record.quoteMode) ? record.primarySku : '',
     productCategory: record.productCategory || '', logisticsAttribute: record.logisticsAttribute,
     selectedCustomerGrade: record.customerGrade === '新客户' ? 'NEW' : record.customerGrade.replace(/级客户$/, ''),
     monthlySalesEstimate: record.monthlySalesEstimate || '10', customQuoteQuantity: record.customQuoteQuantity || 5,
     quoteMatrixMode: mode,
     selectedQuoteRegions,
     product: {
-      sku: record.quoteMode === 'single' ? record.primarySku : '', purchaseInvoiceTaxApplied: record.purchaseInvoiceTaxApplied,
+      sku: isSingleQuotation(record.quoteMode) ? record.primarySku : '', purchaseInvoiceTaxApplied: record.purchaseInvoiceTaxApplied,
       quantity: 1, weightSource: 'purchase', manualWeight: 0,
       volumetricEnabled: false, packageLengthCm: record.packageLengthCm || 0,
       packageWidthCm: record.packageWidthCm || 0, packageHeightCm: record.packageHeightCm || 0,

@@ -1,4 +1,4 @@
-import { isManualQuotation, quotationModeLabels } from '@/data/quotationModes'
+import { isManualQuotation, isWomensQuotation, quotationModeLabels } from '@/data/quotationModes'
 import { parseCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from './quotationCommission'
 
 export type QuotationConditionIssue = { key: string; message: string }
@@ -22,7 +22,7 @@ export function validateQuotationConditions(input: QuotationConditionInput, opti
   if (!Object.prototype.hasOwnProperty.call(quotationModeLabels, input.quoteMode)) issues.push({ key: 'quoteMode', message: '请选择报价模式' })
   if (options.includeSku && !isManualQuotation(input.quoteMode) && !input.sku.trim()) issues.push({ key: 'sku', message: '请输入SKU' })
   if (!input.logisticsAttribute || !input.allowedLogisticsAttributes.includes(input.logisticsAttribute)) issues.push({ key: 'logisticsAttribute', message: '请选择物流属性' })
-  if (!input.enabledCustomerGrades.includes(input.customerGrade)) issues.push({ key: 'customerGrade', message: '请选择已启用的客户等级' })
+  if (!isWomensQuotation(input.quoteMode) && !input.enabledCustomerGrades.includes(input.customerGrade)) issues.push({ key: 'customerGrade', message: '请选择已启用的客户等级' })
   if (!isManualQuotation(input.quoteMode) && !['10', '100', '100+', 'tier4', 'tier5'].includes(input.monthlySalesEstimate)) issues.push({ key: 'monthlySalesEstimate', message: '请选择采购阶梯' })
   if (input.commissionThreshold !== undefined && parseCommissionThreshold(input.commissionThreshold) == null) issues.push({ key: 'commissionThreshold', message: COMMISSION_THRESHOLD_ERROR })
   return issues

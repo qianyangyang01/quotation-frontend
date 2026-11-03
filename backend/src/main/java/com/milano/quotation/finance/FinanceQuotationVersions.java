@@ -17,7 +17,7 @@ public final class FinanceQuotationVersions {
         if (!quotation.has("financeVersions")) return;
         var expected = quotation.path("financeVersions");
         boolean oldClient = !expected.has("freight-discount-settings");
-        if (!expected.isObject() || expected.size() != KEYS.size() - (oldClient ? 1 : 0))
+        if (!expected.isObject() || expected.size() != KEYS.size() - (oldClient ? 1 : 0) + (expected.has("womens-pricing") ? 1 : 0))
             throw AppException.unprocessable("缺少完整财务版本信息，请刷新后重新计价");
         for (var key : KEYS) {
             if (oldClient && key.equals("freight-discount-settings")) continue;

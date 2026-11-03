@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isBundleQuotation } from '@/data/quotationModes'
+
 import { computed, ref, watch } from 'vue'
 import { type QuotationRecord, type QuotationReviewState, type ReviewAction } from '@/data/quotationRecords'
 import PriceExceptionSelect from './PriceExceptionSelect.vue'
@@ -9,7 +11,7 @@ const emit = defineEmits<{ action: [value: ReviewAction]; reload: [] }>()
 const dialog = ref<HTMLDialogElement | null>(null)
 const note = ref('')
 const rejecting = ref(false), exceptionType = ref<PriceExceptionType | ''>(''), exceptionSkus = ref<string[]>([])
-const skuOptions = computed(() => [...new Set(props.record.quoteMode === 'bundle' ? (props.record.bundleItems || []).map(item => item.sku) : [props.record.primarySku])].filter(sku => /^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(sku)))
+const skuOptions = computed(() => [...new Set(isBundleQuotation(props.record.quoteMode) ? (props.record.bundleItems || []).map(item => item.sku) : [props.record.primarySku])].filter(sku => /^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(sku)))
 const canReject = computed(() => note.value.trim().length <= 500 && !!exceptionType.value && (exceptionType.value !== 'purchase-price' || exceptionSkus.value.length > 0))
 watch(() => props.record.id, () => { note.value = '' })
 watch(() => props.state.financeReviewStatus, value => { if (value !== 'reviewing') note.value = '' })

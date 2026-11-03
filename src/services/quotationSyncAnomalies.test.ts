@@ -1,3 +1,4 @@
+import { isWomensQuotation } from '@/data/quotationModes'
 import {readFileSync} from 'node:fs'
 import ts from 'typescript'
 import {expect,it,vi} from 'vitest'
@@ -6,7 +7,7 @@ import { changedFinanceSettings, type FinanceSettingVersions } from './financeSe
 const source=readFileSync(new URL('../views/QuotationSystemView.vue',import.meta.url),'utf8').split('<script setup lang="ts">')[1]!.split('</script>')[0]!
 const ast=ts.createSourceFile('view.ts',source,ts.ScriptTarget.Latest,true)
 function setup(){
-  const state={props:{batchCapture:false},batchCalculationActive:false,financeSettingsAreHydrated:()=>true,liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
+  const state={isWomensQuotation, quoteMode:{value:'single'},props:{batchCapture:false},batchCalculationActive:false,financeSettingsAreHydrated:()=>true,liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
     selectedCustomerId:{value:''},customerName:{value:'甲'},customerOperation:{value:{snapshot:{id:'a',name:'甲',feeUsd:1}}},
     hydrateFinanceSettings:vi.fn(async()=>{}),loadCustomerOperationSettings:()=>({}),resolveCustomerOperation:vi.fn(()=>({configured:true,snapshot:{id:'a',name:'甲',feeUsd:1}})),
     appliedFinanceVersions:{} as FinanceSettingVersions,financeSettingVersions:vi.fn<()=>FinanceSettingVersions>(()=>({})),changedFinanceSettings,
@@ -16,7 +17,7 @@ function setup(){
     savedQuoteRows:{value:[{}]},products:{value:[{logisticsAttribute:'普货'}]},customQuoteQuantity:{value:1},buildQuoteOptions:()=>({}),
     checkSelectedLogistics:vi.fn(async(_body?:unknown)=>({revision:'r1'})),ApiError,syncPending:{value:''},syncError:{value:''}}
   const node=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='checkLiveVersions')!
-  const js=ts.transpile(node.getText(ast),{target:ts.ScriptTarget.ES2022})
+  const js=ts.transpile(ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='changedAppliedFinance')!.getText(ast)+'\n'+node.getText(ast),{target:ts.ScriptTarget.ES2022})
   const run=new Function('state',`with(state){${js};return checkLiveVersions}`)(state)
   return {state,run}
 }

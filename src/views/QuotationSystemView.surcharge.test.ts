@@ -1,3 +1,4 @@
+import { quotationFunctionContext } from '@/test/quotationFunctionContext'
 import { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { addCustomerOperationFee, customerOperationFeeForQuantity, type OperationFeesByQuantity } from '@/data/customerOperationFees'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
@@ -26,7 +27,7 @@ describe('quotation view fee integration', () => {
       updatedAt: 'test',
     }
     let copied = ''
-    const context = { manualMode: { value: false }, applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperationFeeForQuantity, customerOperation: { value: { configured: true, feeUsd: 0, feesByQuantityUsd: undefined as OperationFeesByQuantity | undefined, get snapshot() { return { id: 'client', name: 'Client', feeUsd: this.feeUsd, feesByQuantityUsd: this.feesByQuantityUsd } }, message: '' } },
+    const context = { ...quotationFunctionContext, manualMode: { value: false }, applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperationFeeForQuantity, customerOperation: { value: { configured: true, feeUsd: 0, feesByQuantityUsd: undefined as OperationFeesByQuantity | undefined, get snapshot() { return { id: 'client', name: 'Client', feeUsd: this.feeUsd, feesByQuantityUsd: this.feesByQuantityUsd } }, message: '' } },
       products: { value: [] }, chargeWeight: () => 1,
       specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
@@ -156,8 +157,8 @@ describe('quotation view fee integration', () => {
 
 it('blocks calculation and copying immediately when purchase tax points are missing', async () => {
   let blocked = 0
-  const run = new Function('specialPackagingError', 'purchaseTaxBlockReason', 'templateSaveBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copyQuoteRows, attemptSave, save, useLogistics}')(
-    { value: '' }, { value: '该商品采购票点为空，请补齐后报价' }, { value: '' }, () => { blocked++ }, nextTick)
+  const run = new Function('womensPricingBlock', 'specialPackagingError', 'purchaseTaxBlockReason', 'templateSaveBlockReason', 'toast', 'nextTick', js + '\nreturn {excelQuoteRows, quantityCostBreakdown, copyQuoteRows, attemptSave, save, useLogistics}')(
+    { value: '' }, { value: '' }, { value: '该商品采购票点为空，请补齐后报价' }, { value: '' }, () => { blocked++ }, nextTick)
   expect(run.excelQuoteRows({ country: '加拿大' }, '加拿大', '2区')).toEqual([])
   expect(run.quantityCostBreakdown({ country: '加拿大' }, '渠道', 1, '加拿大', '物流商', '2区')).toBeNull()
   await run.copyQuoteRows([{ country: '加拿大', quote1: 100 }])
@@ -178,8 +179,8 @@ it('blocks direct save and copy for an invalid commission before touching a reco
 
 it('blocks direct save, copy and recalculation for invalid special packaging', async () => {
   let blocked = 0
-  const run = new Function('purchaseTaxBlockReason', 'specialPackagingError', 'toast', 'nextTick', js + '\nreturn {save, copyQuoteRows, quantityCostBreakdown}')(
-    {value:''}, {value:'特殊包装克重无效'}, () => { blocked++ }, nextTick)
+  const run = new Function('womensPricingBlock', 'purchaseTaxBlockReason', 'specialPackagingError', 'toast', 'nextTick', js + '\nreturn {save, copyQuoteRows, quantityCostBreakdown}')(
+    {value:''}, {value:''}, {value:'特殊包装克重无效'}, () => { blocked++ }, nextTick)
   await run.save()
   await run.copyQuoteRows([{quote1:6}])
   expect(run.quantityCostBreakdown({country:'美国'},'QC',1,'美国','4PX','')).toBeNull()

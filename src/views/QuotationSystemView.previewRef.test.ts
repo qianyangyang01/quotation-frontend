@@ -1,3 +1,4 @@
+import { quotationFunctionContext } from '@/test/quotationFunctionContext'
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
 import { compileTemplate } from 'vue/compiler-sfc'
@@ -130,7 +131,7 @@ it.each([
   const createQuotationRecord=vi.fn().mockResolvedValue({no:'QA-SAVE-REF'})
   const resetLocalDraft=vi.fn().mockResolvedValue(undefined),toast=vi.fn()
   const emit=vi.fn()
-  const context = { props: batch ? {batchCapture:true} : {}, emit, draftPayload:()=>({skuSearch:'SKU-A'}), fobActive: {value:false}, manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
+  const context = { ...quotationFunctionContext, props: batch ? {batchCapture:true} : {}, emit, draftPayload:()=>({skuSearch:'SKU-A'}), fobActive: {value:false}, manualMode: { value: false }, priorityProcessing:{value:mode==='bundle'}, captureQuoteRowOrder, mapAveragePlans, normalizePurchaseTier,
     buildQuotationWeightSnapshot, parseSpecialPackagingGrams, specialPackagingGrams:{value:'10'}, specialPackagingError:{value:''}, singleBaseWeight:()=>.14,
     parseCommissionThreshold, commissionThreshold:{value:'0.95'}, commissionError:{value:''}, shippingNoteError:{value:''}, customerGradeLabel,nextTick:Vue.nextTick,quotationPreview:state.quotationPreview,createQuotationRecord,persistQuotation:createQuotationRecord,draftSource:{value:undefined},resetLocalDraft,toast,
     purchaseTaxBlockReason:{value:''},draftInitializationFailed:{value:false},financeSettingsAreHydrated:()=>true,

@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-03",
+  "branch": "codex/womens-quotation-20261103",
+  "baseline": "fd9594436ee54f67445c8f8dbaafffef2812df79",
+  "productionDeployed": false,
+  "frontend": {
+    "build": "passed",
+    "skipped": 21,
+    "passed": 2484,
+    "filesPassed": 291,
+    "lint": "passed"
+  },
+  "backendRuns": [
+    {
+      "skipped": 0,
+      "passed": 62,
+      "log": "artifacts-womens-integration.log",
+      "failed": 0
+    },
+    {
+      "skipped": 0,
+      "passed": 6,
+      "log": "artifacts-womens-contract.log",
+      "failed": 0
+    },
+    {
+      "skipped": 0,
+      "passed": 10,
+      "log": "artifacts-womens-workflow.log",
+      "failed": 0
+    },
+    {
+      "log": "artifacts-womens-query-final.log",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "coverage": "final womens mode filters and owner scope"
+    }
+  ],
+  "browser": {
+    "api": "isolated synthetic fixtures",
+    "quantityColumns": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "financePublish": "passed",
+    "savedModes": [
+      "womens-single",
+      "womens-bundle"
+    ],
+    "pageErrors": 0,
+    "historySnapshotPreserved": true,
+    "unknownApiRoutes": 0
+  },
+  "history": {
+    "productionQuotationWrites": 0,
+    "migration": "V65 only inserts missing womens-pricing configuration"
+  }
+}

@@ -187,7 +187,7 @@ public class PurchaseRankingService {
         )
         select 'quote:'||id as id,
           (case when "quoteMode" #>> '{}' in ('freight-trial','shipping-only') then '[]'::jsonb
-           when "quoteMode" #>> '{}'='bundle' then coalesce((select jsonb_agg(jsonb_build_object('sku',b->'sku','source','standard')) from jsonb_array_elements("bundleItems") b),'[]'::jsonb)
+           when "quoteMode" #>> '{}' in ('bundle','womens-bundle') then coalesce((select jsonb_agg(jsonb_build_object('sku',b->'sku','source','standard')) from jsonb_array_elements("bundleItems") b),'[]'::jsonb)
            when "quoteMode" #>> '{}'='fob' and "schemaVersion" #>> '{}'='2' then coalesce((select jsonb_agg(jsonb_build_object('sku',b#>'{product,sku}','source',b#>'{product,source}')) from jsonb_array_elements(items) b),'[]'::jsonb)
            when "quoteMode" #>> '{}'='fob' then jsonb_build_array(jsonb_build_object('sku',product->'sku','source',product->'source'))
            else jsonb_build_array(jsonb_build_object('sku',"primarySku",'source','standard')) end)::text as refs,

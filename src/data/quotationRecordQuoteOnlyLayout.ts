@@ -1,3 +1,4 @@
+import { isBundleQuotation } from '@/data/quotationModes'
 import { orderQuoteRows } from './quoteSheetRowOrder'
 import { savedSystemPrice, recordQuoteSheetVersion } from './customerQuotePrices'
 import { averageSelectedRegions } from './quoteChannelAverage'
@@ -63,9 +64,9 @@ export function quotationRecordQuoteOnlyLayout(record: QuotationRecord, version:
     const value = price(option, q)
     return value != null && Number.isFinite(value)
   }))).sort((a, b) => (a || Infinity) - (b || Infinity))
-  const unit = record.quoteMode === 'bundle' ? '套' : '件'
+  const unit = isBundleQuotation(record.quoteMode) ? '套' : '件'
   const summary = costWeightSummary(record, unit, visibility.includeCost !== false)
-  const sku = record.quoteMode === 'bundle' && record.bundleItems?.length ? record.bundleItems.map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') : record.primarySku
+  const sku = isBundleQuotation(record.quoteMode) && record.bundleItems?.length ? record.bundleItems.map(item => `${item.sku} × ${item.quantityPerSet}`).join(' + ') : record.primarySku
   const header = ['国家', '物流渠道', ...quantities.map(q => q ? `${q}${unit}` : '自定义（数量未保存）'), '预计时效']
   const rows: { kind: 'metadata' | 'header' | 'route' | 'note'; cells: string[] }[] = [
     { kind: 'metadata', cells: ['报价编号', record.no, '客户', record.customerName, '客户等级', customerGradeDisplayLabel(record.customerGrade)] },

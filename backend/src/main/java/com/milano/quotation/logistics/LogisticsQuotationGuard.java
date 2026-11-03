@@ -30,6 +30,7 @@ public class LogisticsQuotationGuard {
     }
     public void validate(ObjectNode quotation) {
         com.milano.quotation.finance.FinanceQuotationVersions.validate(jdbc, quotation);
+        com.milano.quotation.finance.WomensPricing.validateCurrent(jdbc, mapper, quotation);
         if (quotation.hasNonNull("customerOperation")) {
             var customerFees = mapper.readTree(jdbc.sql("select payload::text from finance_setting where setting_key='customer-operation-fees' for share").query(String.class).optional().orElse("{}"));
             com.milano.quotation.finance.CustomerOperationFees.validate(customerFees, quotation);
@@ -77,7 +78,7 @@ public class LogisticsQuotationGuard {
             boolean countryAvailable=false;
             for(var row:channel.path("rows"))if(CountryIdentity.matches(row.path("countryCode").asText(),row.path("areaName").asText(),country))countryAvailable=true;
             if(!countryAvailable||!allowed(policies,quotation.path("logisticsAttribute").asText(),country,key))throw AppException.unprocessable("渠道不在该国家及货物属性的财务允许范围内");
-            if(com.milano.quotation.quote.ManualQuotation.isManual(quotation)||scoped||!channel.path("legacy").asBoolean()||com.milano.quotation.finance.ChannelFreightDiscounts.matching(discounts,channel.path("channelId").asText())!=null){
+            if(com.milano.quotation.finance.WomensPricing.isWomens(quotation.path("quoteMode").asText())||com.milano.quotation.quote.ManualQuotation.isManual(quotation)||scoped||!channel.path("legacy").asBoolean()||com.milano.quotation.finance.ChannelFreightDiscounts.matching(discounts,channel.path("channelId").asText())!=null){
                 if((!scoped&&!option.path("logisticsVersionId").asText().equals(channel.path("versionId").asText()))||!option.path("logisticsChannelId").asText().equals(channel.path("channelId").asText()))throw AppException.conflict("缺少当前渠道版本，请重新计价确认");
                 var input=option.path("logisticsInput");
                 if(!input.isObject())throw AppException.unprocessable("缺少重新计价输入");
@@ -86,7 +87,7 @@ public class LogisticsQuotationGuard {
                 if(normalized.path("zoneName").asText().isBlank()&&!option.path("quoteRegion").asText().isBlank())normalized.put("zoneName",option.path("quoteRegion").asText());
                 var result=new LogisticsBillingEngine(mapper).calculate(quoteRows,normalized);
                 if(!option.path("freightCny").isNumber()||option.path("freightCny").decimalValue().compareTo(result.path("total").decimalValue())!=0)throw AppException.conflict("物流费用与服务器核算不一致，请重新计价");
-                if(scoped || com.milano.quotation.quote.ManualQuotation.isManual(quotation)) validateSamples(quoteRows,option,quotation.path("logisticsAttribute").asText(),country);
+                if(scoped || com.milano.quotation.finance.WomensPricing.isWomens(quotation.path("quoteMode").asText()) || com.milano.quotation.quote.ManualQuotation.isManual(quotation)) validateSamples(quoteRows,option,quotation.path("logisticsAttribute").asText(),country);
                 var discount=quoteRows.get(result.path("rowIndex").asInt()).path("financeFreightDiscount");
                 if (!discount.isMissingNode()) result.set("financeFreightDiscount",discount.deepCopy());
                 ((ObjectNode)option).set("logisticsCalculation",result);

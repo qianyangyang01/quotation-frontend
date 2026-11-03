@@ -1,3 +1,4 @@
+import { isBundleQuotation } from '@/data/quotationModes'
 import { isManualQuotation, quotationModeLabels } from './quotationModes'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 import { quoteSheetAssetPhoto } from './quoteSheetPhotos'
@@ -23,5 +24,5 @@ export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
   const snapshot = record.customerQuote ?? record.sheetQuote
   const saved = snapshot ? { ...snapshot, hiddenOptionIds: recordHiddenOptionIds(record) } : undefined
   const contact = saved?.contact ?? record.sheetQuote?.contact
-  return { quoteMode: record.quoteMode, initialPhotos: snapshot?.photos ?? record.sheetQuote?.photos ?? quoteSheetAssetPhoto(record.productImage), initialSystemQuote: record.systemQuantityQuotes, recordMode: true, skus: isManualQuotation(record.quoteMode) ? [quotationModeLabels[record.quoteMode]] : record.quoteMode === 'bundle' && record.bundleItems?.length ? quoteSheetBundleSkus(record.bundleItems) : [record.primarySku], rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: record.quoteMode === 'bundle', initialQuote: saved && contact ? { ...saved, contact } : saved }
+  return { quoteMode: record.quoteMode, initialPhotos: snapshot?.photos ?? record.sheetQuote?.photos ?? quoteSheetAssetPhoto(record.productImage), initialSystemQuote: record.systemQuantityQuotes, recordMode: true, skus: isManualQuotation(record.quoteMode) ? [quotationModeLabels[record.quoteMode]] : isBundleQuotation(record.quoteMode) && record.bundleItems?.length ? quoteSheetBundleSkus(record.bundleItems) : [record.primarySku], rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: isBundleQuotation(record.quoteMode), initialQuote: saved && contact ? { ...saved, contact } : saved }
 }

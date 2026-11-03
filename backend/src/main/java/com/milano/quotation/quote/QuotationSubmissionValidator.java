@@ -13,7 +13,7 @@ import java.util.Set;
 
 @Component
 public class QuotationSubmissionValidator {
-    private static final Set<String> MODES = Set.of("single", "bundle", "freight-trial", "shipping-only");
+    private static final Set<String> MODES = Set.of("single", "bundle", "womens-single", "womens-bundle", "freight-trial", "shipping-only");
     private static final Set<String> GRADES = Set.of("S级客户", "A级客户", "B级客户", "C级客户", "D级客户", "E级客户", "新客户");
     private static final Set<String> SALES = Set.of("10", "100", "100+", "tier4", "tier5");
 
@@ -61,7 +61,8 @@ public class QuotationSubmissionValidator {
         if (!ManualQuotation.isManual(input)) required(errors, input, "productCategory", "请选择有效的产品品类", 120);
         required(errors, input, "logisticsAttribute", "物流属性不能为空", 60);
         if("液体".equals(input.path("logisticsAttribute").asText().trim()))errors.add(new ApiResponse.FieldError("logisticsAttribute", "液体属性已停用，请重新选择物流属性并计价"));
-        oneOf(errors, input, "customerGrade", GRADES, "客户等级不合法");
+        if (com.milano.quotation.finance.WomensPricing.isWomens(input.path("quoteMode").asText())) oneOf(errors, input, "customerGrade", Set.of("女装自动系数"), "女装报价须使用自动系数");
+        else oneOf(errors, input, "customerGrade", GRADES, "客户等级不合法");
         if (!ManualQuotation.isManual(input)) oneOf(errors, input, "monthlySalesEstimate", SALES, "预估月销量不合法");
         validateBundle(errors, input);
         if (!input.path("quoteOptions").isArray() || input.path("quoteOptions").isEmpty()) {
@@ -110,11 +111,11 @@ public class QuotationSubmissionValidator {
     private static void validateBundle(ArrayList<ApiResponse.FieldError> errors, ObjectNode input) {
         var mode = input.path("quoteMode").asText("");
         var items = input.path("bundleItems");
-        if ("single".equals(mode)) {
+        if (com.milano.quotation.finance.WomensPricing.isSingle(mode)) {
             if (items.isArray() && !items.isEmpty()) addOnce(errors, "bundleItems", "单品报价不能包含组合商品明细");
             return;
         }
-        if (!"bundle".equals(mode)) return;
+        if (!com.milano.quotation.finance.WomensPricing.isBundle(mode)) return;
         if (!items.isArray() || items.isEmpty()) {
             addOnce(errors, "bundleItems", "组合报价每套至少需要两件商品，可使用同一 SKU");
             return;

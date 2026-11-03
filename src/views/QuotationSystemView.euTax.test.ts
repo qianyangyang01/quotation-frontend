@@ -1,3 +1,4 @@
+import { quotationFunctionContext } from '@/test/quotationFunctionContext'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
@@ -25,7 +26,7 @@ const bundle = [
 const empty = { countries:[],providers:[],updatedAt:'' }
 
 it.each([['single',0],['bundle',0],['single',.01],['bundle',.01]] as const)('uses the actual %s order including packaging for every quantity, without scaling the fixed duty or grade', (mode, special) => {
-  const context = { manualMode: { value: false },
+  const context = { ...quotationFunctionContext, manualMode: { value: false },
     specialPackagingError: { value: '' }, purchaseTaxBlockReason:{value:''},logisticsRuleForChannel:()=>rule,normalizedBundleSets:normalizedQuoteQuantity,
     quoteMode:{value:mode},bundleGoodsWeight:(q:number)=>bundleGoodsWeight(bundle,q,special),singleActualWeight:(p:typeof product,q:number)=>singleActualWeight(p,q,special),calculateLogisticsFee,
     bundlePurchaseCost:(q:number)=>30*q,bundleDomesticFreight:()=>0,sumDecimal,productDecimal,

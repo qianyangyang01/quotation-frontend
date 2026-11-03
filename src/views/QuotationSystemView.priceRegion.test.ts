@@ -1,3 +1,4 @@
+import { quotationFunctionContext } from '@/test/quotationFunctionContext'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
@@ -19,7 +20,7 @@ it('carries the actual published tariff scope to display without changing AU 2/3
     { ...nationwide, zoneName: '澳大利亚3区', pricePerKg: 120 },
   ])]
   const baseline = JSON.stringify(rules)
-  const context = { financeAllowedChannelKeys: () => new Set(['1', '2']), financePolicies: { value: [] }, logisticsRules: rules,
+  const context = { ...quotationFunctionContext, financeAllowedChannelKeys: () => new Set(['1', '2']), financePolicies: { value: [] }, logisticsRules: rules,
     financeChannelKey: (id: number) => String(id), quoteMode: { value: 'single' }, singleActualWeight: () => .5,
     calculateLogisticsFee, formatLogisticsEta, displayGrams: (kg: number) => kg * 1000 }
   const matched = new Function(...Object.keys(context), js + '\nreturn matchedLogistics')(...Object.values(context))

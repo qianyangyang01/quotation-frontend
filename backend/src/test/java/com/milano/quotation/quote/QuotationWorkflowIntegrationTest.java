@@ -37,6 +37,23 @@ class QuotationWorkflowIntegrationTest {
 
     @BeforeEach void setUp() { mvc = webAppContextSetup(context).apply(springSecurity()).build(); }
 
+    @Test void savesAndReopensWomensModesWithTheirOriginalPolicyAndExtraColumn() throws Exception {
+        var session=authenticatedSession();
+        for(var mode:java.util.List.of("single","bundle")) {
+            var body=(tools.jackson.databind.node.ObjectNode)mapper.readTree(getClass().getResourceAsStream("/womens-pricing/"+mode+".json"));
+            body.remove(java.util.List.of("id","no","_version","purchaseVersions"));
+            var response=mvc.perform(post("/api/v1/quotations").session(session).with(csrf()).header("Idempotency-Key","womens-"+mode)
+                .contentType("application/json").content(body.toString())).andExpect(status().isOk()).andReturn();
+            var id=mapper.readTree(response.getResponse().getContentAsByteArray()).path("data").path("id").asText();
+            mvc.perform(get("/api/v1/quotations/{id}",id).session(session)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.quoteMode").value("womens-"+mode))
+                .andExpect(jsonPath("$.data.customerGrade").value("女装自动系数"))
+                .andExpect(jsonPath("$.data.womensPricing.version").value(1))
+                .andExpect(jsonPath("$.data.systemQuantityQuotes.quantities[3]").value(4))
+                .andExpect(jsonPath("$.data.quoteOptions[0].womensPricingSamples[3].quantity").value(4));
+        }
+    }
+
     @Test void savesAndReadsBackBothManualModesWithoutPurchaseSnapshots() throws Exception {
         var session = authenticatedSession();
         for (var mode : java.util.List.of("freight-trial", "shipping-only")) {

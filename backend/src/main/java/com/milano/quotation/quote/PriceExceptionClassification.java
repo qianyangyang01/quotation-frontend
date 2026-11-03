@@ -33,7 +33,7 @@ public class PriceExceptionClassification {
         if("fob".equals(quote.path("quoteMode").asText())) {
             var product=quote.at("/fob/product");
             add(allowed,product.path("sku").asText(),product.path("source").asText());
-        } else if("bundle".equals(quote.path("quoteMode").asText())) {
+        } else if(com.milano.quotation.finance.WomensPricing.isBundle(quote.path("quoteMode").asText())) {
             for(var item:quote.path("bundleItems"))add(allowed,item.path("sku").asText(),"standard");
         } else if(!ManualQuotation.isManual(quote)) add(allowed,quote.path("primarySku").asText(),"standard");
         var selected=new LinkedHashSet<String>();

@@ -1,0 +1,102 @@
+{
+  "errors": [],
+  "unknown": [],
+  "requests": [
+    "GET /auth/me",
+    "GET /review-notifications",
+    "GET /quotation-templates",
+    "GET /finance-settings",
+    "GET /logistics/published/manifest",
+    "GET /quotation-readiness",
+    "GET /quotation-drafts/mine/state",
+    "GET /quotation-sync",
+    "GET /personal-quotation-customers",
+    "GET /purchase-products/NZ-DEMO-001",
+    "GET /logistics/published/manifest",
+    "GET /logistics/published/rules",
+    "GET /logistics/published/manifest",
+    "GET /logistics/published/rules",
+    "GET /quotation-sync",
+    "GET /finance-settings",
+    "GET /auth/csrf",
+    "POST /quotation-sync/logistics",
+    "POST /quotations",
+    "GET /auth/me",
+    "GET /review-notifications",
+    "GET /quotation-templates",
+    "GET /finance-settings",
+    "GET /logistics/published/manifest",
+    "GET /quotation-readiness",
+    "GET /quotation-drafts/mine/state",
+    "GET /personal-quotation-customers",
+    "GET /quotation-sync",
+    "GET /purchase-products/NZ-DEMO-001",
+    "GET /purchase-products/NZ-DEMO-002",
+    "GET /logistics/published/manifest",
+    "GET /logistics/published/manifest",
+    "GET /quotation-sync",
+    "GET /finance-settings",
+    "GET /auth/csrf",
+    "POST /quotation-sync/logistics",
+    "POST /quotations",
+    "GET /auth/me",
+    "GET /review-notifications",
+    "GET /quotations/search",
+    "GET /purchase-products",
+    "GET /quotations/review-status",
+    "GET /purchase-products/deleted-snapshots",
+    "GET /purchase-products/deleted-snapshots",
+    "GET /auth/me",
+    "GET /review-notifications",
+    "GET /finance-settings",
+    "GET /logistics/published/manifest",
+    "GET /logistics/published/catalog",
+    "GET /auth/csrf",
+    "PUT /finance-settings/womens-pricing"
+  ],
+  "saved": [
+    {
+      "id": "demo-1",
+      "mode": "womens-single",
+      "options": 2,
+      "version": 1
+    },
+    {
+      "id": "demo-2",
+      "mode": "womens-bundle",
+      "options": 2,
+      "version": 1
+    }
+  ],
+  "published": {
+    "value": {
+      "schemaVersion": 1,
+      "basis": "total-cost-usd",
+      "enabled": true,
+      "tiers": [
+        {
+          "fromUsd": 0,
+          "toUsd": 20,
+          "coefficient": 1.28
+        },
+        {
+          "fromUsd": 20,
+          "toUsd": 30,
+          "coefficient": 1.25
+        },
+        {
+          "fromUsd": 30,
+          "toUsd": 50,
+          "coefficient": 1.23
+        },
+        {
+          "fromUsd": 50,
+          "toUsd": null,
+          "coefficient": 1.22
+        }
+      ]
+    },
+    "_version": 2
+  },
+  "historyPreserved": true
+}

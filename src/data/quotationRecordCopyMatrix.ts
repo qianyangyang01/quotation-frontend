@@ -1,3 +1,4 @@
+import { isBundleQuotation } from '@/data/quotationModes'
 import Decimal from 'decimal.js'
 import { customerGradeDisplayLabel } from './financeChannelPolicies'
 import type { QuotationRecord } from './quotationRecords'
@@ -16,7 +17,7 @@ export function quotationRecordCopyMatrix(record: QuotationRecord, source: strin
   const start = source.findIndex(row => row[0] === '序号')
   const headers = source[start]!
   const routes = source.slice(start + 1, start + 1 + (record.quoteOptions?.length ?? 0))
-  const unit = record.quoteMode === 'bundle' ? '套' : '件'
+  const unit = isBundleQuotation(record.quoteMode) ? '套' : '件'
   const savedLabels = headers.filter(header => header.endsWith('客户价（USD）')).map(header => header.replace(/客户价（USD）$/, ''))
   const hasPrice = (value: string | undefined) => value != null && value.trim() !== '' && Number.isFinite(Number(value))
   const labels = [...new Set(savedLabels)].filter(label => routes.some(route =>

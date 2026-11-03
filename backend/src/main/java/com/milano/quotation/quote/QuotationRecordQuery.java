@@ -44,7 +44,7 @@ public class QuotationRecordQuery {
         var priority="(lifecycle_state='active' and exists(select 1 from quotation_review pr where pr.id=quotation_record.id and pr.status in ('pending','reviewing') and pr.state->>'priorityProcessing'='true'))";
         var where=new StringBuilder(" where lifecycle_state=:lifecycle");
         if(filters.quoteMode()!=null && !filters.quoteMode().isBlank()) {
-            if(!Set.of("single","bundle","freight-trial","shipping-only","fob").contains(filters.quoteMode()))throw AppException.unprocessable("报价类型不合法");
+            if(!Set.of("single","bundle","womens-single","womens-bundle","freight-trial","shipping-only","fob").contains(filters.quoteMode()))throw AppException.unprocessable("报价类型不合法");
             params.put("quoteMode",filters.quoteMode());where.append(" and coalesce(nullif(payload->>'quoteMode',''),'single')=:quoteMode");
         }
         if(filters.priorityOnly()) where.append(" and "+priority);
