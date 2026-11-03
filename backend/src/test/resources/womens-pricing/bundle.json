@@ -1,8 +1,8 @@
 {
   "priorityProcessing": false,
   "womensPricing": {
-    "schemaVersion": 1,
-    "basis": "total-cost-usd",
+    "schemaVersion": 2,
+    "basis": "reference-price-usd",
     "enabled": true,
     "tiers": [
       {
@@ -26,7 +26,8 @@
         "coefficient": 1.22
       }
     ],
-    "version": 1
+    "version": 1,
+    "referenceCoefficient": 1.23
   },
   "financeVersions": {
     "country-classification": 1,
@@ -64,7 +65,7 @@
       {
         "optionId": "美国::全国统一::9912::万邦::DEMO2",
         "prices": [
-          35.35,
+          34.8,
           65.2,
           95.85,
           126.5
@@ -73,7 +74,7 @@
       {
         "optionId": "美国::全国统一::9910::燕文::DEMO0",
         "prices": [
-          33.25,
+          32.7,
           61.75,
           91.05,
           120.35
@@ -92,7 +93,7 @@
       {
         "optionId": "美国::全国统一::9912::万邦::DEMO2",
         "prices": [
-          35.35,
+          34.8,
           65.2,
           95.85,
           126.5
@@ -101,7 +102,7 @@
       {
         "optionId": "美国::全国统一::9910::燕文::DEMO0",
         "prices": [
-          33.25,
+          32.7,
           61.75,
           91.05,
           120.35
@@ -210,8 +211,8 @@
   "carrier": "万邦",
   "channel": "服装专线（示例）",
   "rule": "示例服装渠道3",
-  "systemQuoteUsd": 35.35,
-  "systemQuoteCny": 247.45,
+  "systemQuoteUsd": 34.8,
+  "systemQuoteCny": 243.6,
   "totalCostCny": 197.94,
   "customerGrade": "女装自动系数",
   "monthlySalesEstimate": "10",
@@ -224,12 +225,13 @@
       "id": "美国::全国统一::9912::万邦::DEMO2",
       "womensPricingSamples": [
         {
-          "fromUsd": 20,
-          "toUsd": 30,
-          "coefficient": 1.25,
+          "fromUsd": 30,
+          "toUsd": 50,
+          "coefficient": 1.23,
           "quantity": 1,
           "costCny": 197.94,
-          "baseQuoteCny": 247.425
+          "baseQuoteCny": 243.4662,
+          "referenceQuoteCny": 243.4662
         },
         {
           "fromUsd": 50,
@@ -237,7 +239,8 @@
           "coefficient": 1.22,
           "quantity": 2,
           "costCny": 373.88,
-          "baseQuoteCny": 456.1336
+          "baseQuoteCny": 456.1336,
+          "referenceQuoteCny": 459.8724
         },
         {
           "fromUsd": 50,
@@ -245,7 +248,8 @@
           "coefficient": 1.22,
           "quantity": 3,
           "costCny": 549.82,
-          "baseQuoteCny": 670.7804
+          "baseQuoteCny": 670.7804,
+          "referenceQuoteCny": 676.2786
         },
         {
           "fromUsd": 50,
@@ -253,7 +257,8 @@
           "coefficient": 1.22,
           "quantity": 4,
           "costCny": 725.76,
-          "baseQuoteCny": 885.4272
+          "baseQuoteCny": 885.4272,
+          "referenceQuoteCny": 892.6848
         }
       ],
       "quoteSheetKey": "[\"美国\",\"\",\"9912::万邦::DEMO2\"]",
@@ -346,7 +351,7 @@
       "profitCny": 120.96039999999994,
       "quoteCny": 670.95,
       "isPrimary": true,
-      "quote1Usd": 35.35,
+      "quote1Usd": 34.8,
       "quote2Usd": 65.2,
       "quote3Usd": 95.85,
       "quoteCustomUsd": 95.85,
@@ -371,12 +376,13 @@
       "id": "美国::全国统一::9910::燕文::DEMO0",
       "womensPricingSamples": [
         {
-          "fromUsd": 20,
-          "toUsd": 30,
-          "coefficient": 1.25,
+          "fromUsd": 30,
+          "toUsd": 50,
+          "coefficient": 1.23,
           "quantity": 1,
           "costCny": 186.09,
-          "baseQuoteCny": 232.6125
+          "baseQuoteCny": 228.8907,
+          "referenceQuoteCny": 228.8907
         },
         {
           "fromUsd": 50,
@@ -384,7 +390,8 @@
           "coefficient": 1.22,
           "quantity": 2,
           "costCny": 354.17,
-          "baseQuoteCny": 432.0874
+          "baseQuoteCny": 432.0874,
+          "referenceQuoteCny": 435.6291
         },
         {
           "fromUsd": 50,
@@ -392,7 +399,8 @@
           "coefficient": 1.22,
           "quantity": 3,
           "costCny": 522.26,
-          "baseQuoteCny": 637.1572
+          "baseQuoteCny": 637.1572,
+          "referenceQuoteCny": 642.3798
         },
         {
           "fromUsd": 50,
@@ -400,7 +408,8 @@
           "coefficient": 1.22,
           "quantity": 4,
           "costCny": 690.34,
-          "baseQuoteCny": 842.2148
+          "baseQuoteCny": 842.2148,
+          "referenceQuoteCny": 849.1182
         }
       ],
       "quoteSheetKey": "[\"美国\",\"\",\"9910::燕文::DEMO0\"]",
@@ -493,7 +502,7 @@
       "profitCny": 114.8972,
       "quoteCny": 637.35,
       "isPrimary": false,
-      "quote1Usd": 33.25,
+      "quote1Usd": 32.7,
       "quote2Usd": 61.75,
       "quote3Usd": 91.05,
       "quoteCustomUsd": 91.05,

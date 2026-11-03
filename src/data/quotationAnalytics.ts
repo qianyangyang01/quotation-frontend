@@ -1,5 +1,5 @@
 import { isManualQuotation, isWomensQuotation, quotationModeLabels } from './quotationModes'
-import { womensPolicyLabel } from './womensPricing'
+import { womensPolicyLabel, womensPricingBasisLabel } from './womensPricing'
 import type { PurchaseProductRecord } from './purchaseStore'
 import { financeReviewLabel, quotationDealLabel, type QuotationRecord } from './quotationRecords'
 
@@ -208,7 +208,7 @@ export function quotationDetailsCsv(records: QuotationRecord[], purchases: Analy
     header.push('女装规则版本', '女装计价说明', ...(options.includeCost === true ? ['女装系数规则快照'] : []))
     records.forEach((record, index) => rows[index]!.push(
       isWomensQuotation(record.quoteMode) ? record.womensPricing ? `V${record.womensPricing.version + 1}` : '未保存' : '',
-      isWomensQuotation(record.quoteMode) ? '按各渠道、各数量的综合成本折美元自动选档，替代客户等级系数；历史金额不回算' : '',
+      isWomensQuotation(record.quoteMode) ? `${womensPricingBasisLabel(record.womensPricing)}；各渠道、数量独立计算；历史金额不回算` : '',
       ...(options.includeCost === true ? [record.womensPricing ? womensPolicyLabel(record.womensPricing) : ''] : []),
     ))
   }

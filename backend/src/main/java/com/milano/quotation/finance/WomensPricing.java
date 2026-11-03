@@ -22,8 +22,11 @@ public final class WomensPricing {
         return v;
     }
     public static void validatePolicy(JsonNode p) {
-        if (!p.isObject() || !p.path("schemaVersion").isIntegralNumber() || !p.path("schemaVersion").canConvertToInt() || p.path("schemaVersion").asInt() != 1 || !"total-cost-usd".equals(p.path("basis").asText()) || !p.path("enabled").isBoolean())
+        if (!p.isObject() || !p.path("schemaVersion").isIntegralNumber() || !p.path("schemaVersion").canConvertToInt() || p.path("schemaVersion").asInt() != 2 || !"reference-price-usd".equals(p.path("basis").asText()) || !p.path("enabled").isBoolean())
             throw AppException.unprocessable("女装报价系数口径无效");
+        var reference = number(p.path("referenceCoefficient"));
+        if (reference.signum() <= 0 || reference.compareTo(BigDecimal.TEN) > 0 || reference.stripTrailingZeros().scale() > 6)
+            throw AppException.unprocessable("选档基准系数须大于0且不超过10，最多6位小数");
         var tiers = p.path("tiers");
         if (!tiers.isArray() || tiers.isEmpty() || tiers.size() > 12) throw AppException.unprocessable("女装系数须为1至12档");
         var lower = BigDecimal.ZERO;
@@ -41,8 +44,9 @@ public final class WomensPricing {
         }
     }
     public static JsonNode tier(JsonNode policy, BigDecimal costCny, BigDecimal rate) {
-        for (var t : policy.path("tiers")) if (costCny.compareTo(number(t.path("fromUsd")).multiply(rate)) >= 0
-                && (t.path("toUsd").isNull() || costCny.compareTo(number(t.path("toUsd")).multiply(rate)) < 0)) return t;
+        var referenceCny = costCny.multiply(number(policy.path("referenceCoefficient")));
+        for (var t : policy.path("tiers")) if (referenceCny.compareTo(number(t.path("fromUsd")).multiply(rate)) >= 0
+                && (t.path("toUsd").isNull() || referenceCny.compareTo(number(t.path("toUsd")).multiply(rate)) < 0)) return t;
         throw AppException.unprocessable("女装金额未命中系数档位");
     }
     public static void validateCurrent(JdbcClient jdbc, ObjectMapper mapper, ObjectNode quote) {
@@ -60,7 +64,7 @@ public final class WomensPricing {
         var snapshot = quote.path("womensPricing");
         if (!snapshot.isObject() || !snapshot.path("version").isIntegralNumber() || snapshot.path("version").asLong() != version)
             throw AppException.conflict("女装系数版本已更新，请更新报价后保存");
-        for (var field : Set.of("schemaVersion", "basis", "enabled", "tiers")) if (!snapshot.path(field).equals(policy.path(field)))
+        for (var field : Set.of("schemaVersion", "basis", "referenceCoefficient", "enabled", "tiers")) if (!snapshot.path(field).equals(policy.path(field)))
             throw AppException.conflict("女装系数快照与已发布规则不一致");
         if (!"女装自动系数".equals(quote.path("customerGrade").asText())) throw AppException.unprocessable("女装报价不能使用客户等级系数");
         var rate = number(quote.path("exchangeRate"));
@@ -82,6 +86,7 @@ public final class WomensPricing {
                 if (freight == null || !freight.isNumber()) throw AppException.unprocessable("缺少女装对应数量的运费依据");
                 var cost = unitCost.multiply(number(q)).add(number(freight));
                 equal(sample.path("costCny"), cost, "女装综合成本与商品、数量及运费不一致");
+                equal(sample.path("referenceQuoteCny"), cost.multiply(number(policy.path("referenceCoefficient"))), "女装选档参考价计算不一致");
                 var band = tier(policy, cost, rate);
                 equal(sample.path("coefficient"), number(band.path("coefficient")), "女装系数与金额档位不一致");
                 if (!sample.path("fromUsd").equals(band.path("fromUsd")) || !sample.path("toUsd").equals(band.path("toUsd"))) throw AppException.unprocessable("女装档位说明不一致");

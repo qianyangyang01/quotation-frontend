@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { defaultWomensPricing, womensPricingError, womensPricingSample } from './womensPricing'
+import { defaultWomensPricing, womensPricingError, womensPricingSample, savedWomensReferenceUsd, womensPolicyLabel } from './womensPricing'
 import { normalizeQuotationMode, isBundleQuotation, isSingleQuotation } from './quotationModes'
 import { normalizeQuotationRecord } from './quotationRecords'
 import { quotationReissuePayload } from '@/services/quotationReissue'
@@ -10,12 +10,12 @@ import { quotationRecordReconciliationTsv } from './quotationRecordReconciliatio
 
 describe('女装分档计价', () => {
   it.each([[19.999999,1.27],[20,1.25],[29.999999,1.25],[30,1.23],[49.999999,1.23],[50,1.22],[100,1.22]])('uses unrounded USD %s at coefficient %s', (amount, expected) => {
-    expect(womensPricingSample(defaultWomensPricing(),amount,1).coefficient).toBe(expected)
+    expect(womensPricingSample(defaultWomensPricing(),amount,1.23).coefficient).toBe(expected)
   })
   it('does not round exchange conversion into the next tier or apply the customer grade twice', () => {
-    expect(womensPricingSample(defaultWomensPricing(),139.999,7).coefficient).toBe(1.27)
-    expect(womensPricingSample(defaultWomensPricing(),140,7).baseQuoteCny).toBe(175)
-    expect(womensPricingSample(defaultWomensPricing(),175,7,2)).toMatchObject({coefficient:1.25,quantity:2,baseQuoteCny:218.75})
+    expect(womensPricingSample(defaultWomensPricing(),99.999999,6.15).coefficient).toBe(1.27)
+    expect(womensPricingSample(defaultWomensPricing(),100,6.15).baseQuoteCny).toBe(125)
+    expect(womensPricingSample(defaultWomensPricing(),125,6.15,2)).toMatchObject({coefficient:1.25,quantity:2,baseQuoteCny:156.25})
   })
   it('rejects malformed policies and disabled settings', () => {
     for (const change of [(p:ReturnType<typeof defaultWomensPricing>)=>p.tiers[1]!.fromUsd=19, (p:ReturnType<typeof defaultWomensPricing>)=>p.tiers[0]!.coefficient=0, (p:ReturnType<typeof defaultWomensPricing>)=>p.tiers[0]!.toUsd=30, (p:ReturnType<typeof defaultWomensPricing>)=>p.tiers[3]!.toUsd=100]) {
@@ -47,4 +47,24 @@ describe('女装分档计价', () => {
     expect(validateQuotationConditions(input,{includeSku:true,includeCategory:true})).toEqual([])
     expect(validateQuotationConditions({...input,quoteMode:'single'},{includeSku:true,includeCategory:true})).toContainEqual(expect.objectContaining({key:'customerGrade'}))
   })
+})
+
+it.each([[10,12.3,1.27,12.7],[16,19.68,1.27,20.32],[17,20.91,1.25,21.25],[25,30.75,1.23,30.75],[41,50.43,1.22,50.02]])('cost %s uses the reference price once, never compounds or reselects the final factor', (cost,reference,coefficient,final) => {
+  expect(womensPricingSample(defaultWomensPricing(),cost,1)).toMatchObject({referenceQuoteCny:reference,coefficient,baseQuoteCny:final})
+})
+it('uses the published configurable reference factor and rejects missing or invalid factors',()=>{
+  const p=defaultWomensPricing();p.referenceCoefficient=1.5
+  expect(womensPricingSample(p,15,1)).toMatchObject({referenceQuoteCny:22.5,coefficient:1.25,baseQuoteCny:18.75})
+  for(const referenceCoefficient of [undefined,0,-1,11,1.1234567,NaN]) expect(womensPricingError({...p,referenceCoefficient})).not.toBe('')
+  expect(womensPricingError({...p,schemaVersion:1,basis:'total-cost-usd'})).not.toBe('')
+})
+
+it('uses saved reference amounts for exports and never backfills missing historical reference prices',()=>{
+  const policy=defaultWomensPricing(),sample=womensPricingSample(policy,100,6.15)
+  expect(savedWomensReferenceUsd(policy,sample,6.15)).toBe(20)
+  expect(savedWomensReferenceUsd(policy,{...sample,referenceQuoteCny:undefined},6.15)).toBeUndefined()
+  const legacy={...policy,schemaVersion:1 as const,basis:'total-cost-usd' as const,referenceCoefficient:undefined}
+  expect(savedWomensReferenceUsd(legacy,{...sample,costCny:123,referenceQuoteCny:undefined},6.15)).toBe(20)
+  expect(womensPolicyLabel(legacy)).toContain('旧规则：成本金额分档')
+  expect(womensPolicyLabel(legacy)).not.toContain('选档基准系数')
 })

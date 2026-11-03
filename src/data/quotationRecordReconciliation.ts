@@ -1,5 +1,5 @@
 import { isBundleQuotation, isWomensQuotation } from '@/data/quotationModes'
-import { womensPolicyLabel } from './womensPricing'
+import { womensPolicyLabel, womensPricingBasisLabel, savedWomensReferenceUsd } from './womensPricing'
 import { isManualQuotation, quotationModeLabels } from './quotationModes'
 import Decimal from 'decimal.js'
 import { customerOperationFeeForQuantity, operationFeesLabel } from './customerOperationFees'
@@ -74,7 +74,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['报价记录对账明细', '使用本条记录已保存的数据；人民币按该记录汇率换算；未保存的字段不补算']),
     line(['报价编号', record.no, '客户', record.customerName, '业务员', record.salespersonName, '账号', record.salespersonAccount]),
     line(['SKU', sku, '商品', record.productSummary, '报价类型', quotationModeLabels[record.quoteMode], '物流属性', record.logisticsAttribute]),
-    ...(isWomensQuotation(record.quoteMode) ? [line(['女装规则版本', record.womensPricing ? `V${record.womensPricing.version + 1}` : '未保存', '计价说明', '各渠道、数量的综合成本折美元选档，替代等级系数', '规则快照', record.womensPricing ? womensPolicyLabel(record.womensPricing) : '未保存；不可推算'])] : []),
+    ...(isWomensQuotation(record.quoteMode) ? [line(['女装规则版本', record.womensPricing ? `V${record.womensPricing.version + 1}` : '未保存', '计价说明', womensPricingBasisLabel(record.womensPricing), '规则快照', record.womensPricing ? womensPolicyLabel(record.womensPricing) : '未保存；不可推算'])] : []),
     line([isWomensQuotation(record.quoteMode) ? '计价方式' : '客户等级', record.customerGrade, '汇率（CNY/USD）', record.exchangeRate > 0 ? record.exchangeRate : missing, '佣金阈值', record.commissionThreshold ?? 1, '公司操作费（USD/单）', record.customerOperation?.feesByQuantityUsd ? operationFeesLabel(record.customerOperation, unit) : money(record.customerOperation?.feeUsd)]),
     line(['报价模式', record.matrixMode === 'template' ? '模板报价' : record.matrixMode === 'specified' ? '指定国家与渠道' : '常用国家', '模板', record.quotationTemplateName, '创建时间', record.createdAt, '修改时间', record.updatedAt]),
     line(['财务审核', financeReviewLabel(record.financeReviewStatus), '审核人', record.financeReviewedBy, '审核时间', record.financeReviewedAt]),
@@ -86,7 +86,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
     line(['序号', '报价编号', 'SKU', '国家', '国家代码', '区域', '物流商', '渠道', '计费规则', '渠道编码', '预计时效', '首选', '可用状态', '关税说明', '税率（%）', '附加费说明', '附加费（USD/单）', '计费重量快照（kg）', `${weightLabel}快照（g）`, '重量快照对应数量', '物流运费快照（CNY）', `${record.customQuoteQuantity ? `${record.customQuoteQuantity}${unit}` : '自定义档'}综合成本（CNY）`,
       ...quantities.flatMap(q => {
         const label = q ? `${q}${unit}` : '自定义（数量未保存）'
-        return [`${label}${weightLabel}（g）`, `${label}物流运费（CNY/单）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`, `${label}操作费（USD/单）`, ...(isWomensQuotation(record.quoteMode) ? [`${label}综合成本（CNY）`, `${label}女装系数`, `${label}基础售价（CNY）`] : [])]
+        return [`${label}${weightLabel}（g）`, `${label}物流运费（CNY/单）`, `${label}系统价（USD）`, `${label}系统价（CNY）`, `${label}客户价（USD）`, `${label}客户价（CNY）`, `${label}关税（USD）`, `${label}操作费（USD/单）`, ...(isWomensQuotation(record.quoteMode) ? [`${label}综合成本（CNY）`, `${label}选档参考价（USD）`, `${label}女装系数`, `${label}基础售价（CNY）`] : [])]
       })]),
   ]
   for (const [index, option] of (record.quoteOptions ?? []).entries()) {
@@ -97,7 +97,7 @@ export function quotationRecordReconciliationTsv(record: QuotationRecord): strin
         const system = savedSystemPrice(record, option, q)
         const customerIndex = snapshot?.quantities.indexOf(q) ?? -1
         const customer = snapshot ? customerRow && customerIndex >= 0 ? customerRow.prices[customerIndex] : null : system
-        return [grams(savedFinalWeightKg(record, option, q)), savedFreight(option, q), money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity), money(record.customerOperation ? customerOperationFeeForQuantity(record.customerOperation, q) : undefined), ...(isWomensQuotation(record.quoteMode) ? [money(option.womensPricingSamples?.find(s => s.quantity === q)?.costCny), option.womensPricingSamples?.find(s => s.quantity === q)?.coefficient ?? missing, money(option.womensPricingSamples?.find(s => s.quantity === q)?.baseQuoteCny)] : [])]
+        return [grams(savedFinalWeightKg(record, option, q)), savedFreight(option, q), money(system), cny(system), customer == null ? '未报价' : money(customer), customer == null ? '未报价' : cny(customer), savedTax(option, q, record.customQuoteQuantity), money(record.customerOperation ? customerOperationFeeForQuantity(record.customerOperation, q) : undefined), ...(isWomensQuotation(record.quoteMode) ? [money(option.womensPricingSamples?.find(s => s.quantity === q)?.costCny), money(record.womensPricing && option.womensPricingSamples?.find(s => s.quantity === q) ? savedWomensReferenceUsd(record.womensPricing, option.womensPricingSamples.find(s => s.quantity === q)!, record.exchangeRate) : undefined), option.womensPricingSamples?.find(s => s.quantity === q)?.coefficient ?? missing, money(option.womensPricingSamples?.find(s => s.quantity === q)?.baseQuoteCny)] : [])]
       }),
     ]))
   }

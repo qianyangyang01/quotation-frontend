@@ -2,13 +2,13 @@ import { decimal } from '@/services/quotationDecimal'
 import { financeSettingVersions, readFinanceSetting } from '@/services/financeSettings'
 
 export interface WomensPriceTier { fromUsd: number; toUsd: number | null; coefficient: number }
-export interface WomensPricingPolicy { schemaVersion: 1; basis: 'total-cost-usd'; enabled: boolean; tiers: WomensPriceTier[] }
+export interface WomensPricingPolicy { schemaVersion: 1 | 2; basis: 'total-cost-usd' | 'reference-price-usd'; referenceCoefficient?: number; enabled: boolean; tiers: WomensPriceTier[] }
 export interface WomensPricingSnapshot extends WomensPricingPolicy { version: number }
-export interface WomensPricingSample extends WomensPriceTier { quantity: number; costCny: number; baseQuoteCny: number }
+export interface WomensPricingSample extends WomensPriceTier { quantity: number; costCny: number; referenceQuoteCny?: number; baseQuoteCny: number }
 export const WOMENS_PRICING_UPDATED = 'quotation:womens-pricing-updated'
 export const WOMENS_PRICING_UNAVAILABLE = '女装报价系数尚未发布、已停用或配置无效，请联系财务确认'
 export function defaultWomensPricing(): WomensPricingPolicy {
-  return { schemaVersion: 1, basis: 'total-cost-usd', enabled: true, tiers: [
+  return { schemaVersion: 2, basis: 'reference-price-usd', referenceCoefficient: 1.23, enabled: true, tiers: [
     { fromUsd: 0, toUsd: 20, coefficient: 1.27 }, { fromUsd: 20, toUsd: 30, coefficient: 1.25 },
     { fromUsd: 30, toUsd: 50, coefficient: 1.23 }, { fromUsd: 50, toUsd: null, coefficient: 1.22 },
   ] }
@@ -16,9 +16,10 @@ export function defaultWomensPricing(): WomensPricingPolicy {
 export function womensPricingError(raw: unknown): string {
   if (!raw || typeof raw !== 'object') return '缺少女装系数配置'
   const p = raw as WomensPricingPolicy
-  if (p.schemaVersion !== 1 || p.basis !== 'total-cost-usd' || typeof p.enabled !== 'boolean') return '女装系数计价口径无效'
+  if (p.schemaVersion !== 2 || p.basis !== 'reference-price-usd' || typeof p.enabled !== 'boolean') return '女装系数计价口径无效'
   if (!Array.isArray(p.tiers) || !p.tiers.length || p.tiers.length > 12) return '金额档位须为1至12档'
   const valid = (n: unknown, max: number) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= max && decimal(n).decimalPlaces() <= 6
+  if (!valid(p.referenceCoefficient, 10) || p.referenceCoefficient! <= 0) return '选档基准系数须大于0且不超过10，最多6位小数'
   let lower = 0
   for (const [i, t] of p.tiers.entries()) {
     if (!t || !valid(t.fromUsd, 1_000_000) || t.fromUsd !== lower || !valid(t.coefficient, 10) || t.coefficient <= 0) return '区间必须从0起连续，系数须大于0且不超过10，最多6位小数'
@@ -33,13 +34,19 @@ export function loadWomensPricing(): WomensPricingSnapshot | null {
   const version = financeSettingVersions()['womens-pricing'] ?? -1
   return value && !womensPricingError(value) && version >= 0 ? { ...structuredClone(value), version } : null
 }
-/** Compare CNY against USD boundary × exchange rate; no rounded USD can choose the wrong band. */
+/** Reference price chooses the band once; the final factor multiplies original cost only. */
 export function womensPricingSample(policy: WomensPricingPolicy, costCny: number, exchangeRate: number, quantity = 1): WomensPricingSample {
   if (womensPricingError(policy) || !policy.enabled) throw new Error(WOMENS_PRICING_UNAVAILABLE)
   if (!Number.isFinite(costCny) || costCny < 0 || !Number.isFinite(exchangeRate) || exchangeRate <= 0 || !Number.isSafeInteger(quantity) || quantity < 1) throw new Error('女装计价成本、汇率或数量无效')
   const cost = decimal(costCny), rate = decimal(exchangeRate)
-  const tier = policy.tiers.find(t => cost.gte(decimal(t.fromUsd).times(rate)) && (t.toUsd == null || cost.lt(decimal(t.toUsd).times(rate))))!
-  return { ...tier, quantity, costCny, baseQuoteCny: cost.times(tier.coefficient).toNumber() }
+  const reference = cost.times(policy.referenceCoefficient!)
+  const tier = policy.tiers.find(t => reference.gte(decimal(t.fromUsd).times(rate)) && (t.toUsd == null || reference.lt(decimal(t.toUsd).times(rate))))!
+  return { ...tier, quantity, costCny, referenceQuoteCny: reference.toNumber(), baseQuoteCny: cost.times(tier.coefficient).toNumber() }
 }
 export function womensTierLabel(t: WomensPriceTier) { return t.toUsd == null ? `≥ $${t.fromUsd}` : `$${t.fromUsd} ≤ 金额 < $${t.toUsd}` }
-export function womensPolicyLabel(p: WomensPricingPolicy) { return p.tiers.map(t => `${womensTierLabel(t)}：${t.coefficient}`).join('；') }
+export function womensPricingBasisLabel(p?: WomensPricingPolicy) { return !p ? '未保存计价口径' : p.basis === 'reference-price-usd' ? '综合成本折美元 × 选档基准系数得到参考价，再按参考价选档；综合成本只乘最终命中系数' : '旧规则：综合成本折美元直接选档' }
+export function womensPolicyLabel(p: WomensPricingPolicy) { return `${p.basis === 'reference-price-usd' ? `选档基准系数 ${p.referenceCoefficient ?? '未保存'}；参考价分档` : '旧规则：成本金额分档'}：${p.tiers.map(t => `${womensTierLabel(t)}：${t.coefficient}`).join('；')}` }
+export function savedWomensReferenceUsd(policy: WomensPricingPolicy, sample: WomensPricingSample, rate: number): number | undefined {
+  const cny = policy.basis === 'reference-price-usd' ? sample.referenceQuoteCny : sample.costCny
+  return typeof cny === 'number' && Number.isFinite(cny) && rate > 0 ? decimal(cny).div(rate).toNumber() : undefined
+}

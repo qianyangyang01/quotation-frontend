@@ -2753,7 +2753,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <button class="modal-close" @click="showRule = showHistory = false">×</button>
         <template v-if="showRule && canViewFullPricing">
           <small>CALCULATION RULE</small><h2>报价计算规则</h2>
-          <p v-if="isWomensQuotation(quoteMode) && womensPricing">女装计价：采购成本＋国内运费＋国际运费，按当前汇率折美元，在未取整金额上自动选档；各渠道、各件数／套数分别计算。规则版本 V{{ womensPricing.version + 1 }}：{{ womensPolicyLabel(womensPricing) }}。基础售价＝综合成本×命中系数，然后沿用税费、附加费、操作费和佣金阈值流程。</p>
+          <p v-if="isWomensQuotation(quoteMode) && womensPricing">女装计价：采购成本＋国内运费＋国际运费，按当前汇率折美元后乘选档基准系数，按未取整参考价选档一次；各渠道、各件数／套数分别计算。规则版本 V{{ womensPricing.version + 1 }}：{{ womensPolicyLabel(womensPricing) }}。基础售价＝综合成本×命中系数，然后沿用税费、附加费、操作费和佣金阈值流程。</p>
           <p v-if="!manualMode">当前特殊包装：{{ specialPackagingGrams || 0 }}g／票，仅增加一次。</p>
           <p>当前佣金阈值：{{ commissionThreshold || '未填写' }}。最终报价＝原最终美元报价 ÷ 佣金阈值，再按0.05美元向上取整；阈值1不调整报价。</p>
           <ol v-if="manualMode"><li><b>成本</b><span>{{ quoteMode === 'shipping-only' ? '客户自备商品，商品成本为0，无需填写成本。' : '成本价格为每件总成本，已包含的采购、国内运费等费用不再重复叠加。' }}</span></li><li><b>重量</b><span>填写克重 × 数量 ÷ 1000，作为公斤重量送入当前物流渠道；不增加普通包材或特殊包装，渠道起重、进位等计费规则照常执行。</span></li><li><b>报价</b><span>每件成本 × 数量，加该数量整票运费，再沿用客户等级、汇率、税费、附加费、公司操作费和佣金阈值规则，最终按0.05美元向上取整。</span></li></ol>

@@ -18,38 +18,38 @@ const parsed = ts.createSourceFile('view.ts', source, ts.ScriptTarget.Latest, tr
 const functions = ['selectedGradeCoefficient', 'taxResult', 'quantityCostBreakdown'].map(name => parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)!.getText(parsed)).join('\n')
 const js = ts.transpileModule(functions, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 
-// Independent Python Decimal golden values: goods 59 + domestic 1 per unit/set; FX 6.7.
+// Independent Python Decimal golden values: goods 59 + domestic 1 per unit/set; FX 6.7; band reference = cost USD × 1.23, final = original cost × hit factor.
 // Five quantities cross all four bands, then tax, surcharge, operation fee and commission.
 const cases = [
   ['womens-single','exempt',1,0.130,25,85,0,17.85,119.60],
   ['womens-single','exempt',2,0.253,35,155,0,31.45,210.72],
   ['womens-single','exempt',3,0.376,45,225,0,44.60,298.82],
-  ['womens-single','exempt',4,0.499,55,295,0,58.25,390.28],
+  ['womens-single','exempt',4,0.499,55,295,0,57.75,386.93],
   ['womens-single','exempt',5,0.622,75,375,0,73.10,489.77],
   ['womens-single','fixed-order',1,0.130,25,85,3.51,21.55,144.39],
   ['womens-single','fixed-order',2,0.253,35,155,3.51,35.15,235.51],
   ['womens-single','fixed-order',3,0.376,45,225,3.51,48.30,323.61],
-  ['womens-single','fixed-order',4,0.499,55,295,3.51,61.90,414.73],
+  ['womens-single','fixed-order',4,0.499,55,295,3.51,61.45,411.72],
   ['womens-single','fixed-order',5,0.622,75,375,3.51,76.75,514.23],
   ['womens-single','weight',1,0.130,25,85,0.92,18.80,125.96],
   ['womens-single','weight',2,0.253,35,155,1.14,32.65,218.76],
   ['womens-single','weight',3,0.376,45,225,1.35,46.0,308.20],
-  ['womens-single','weight',4,0.499,55,295,1.56,59.85,401.00],
+  ['womens-single','weight',4,0.499,55,295,1.56,59.40,397.98],
   ['womens-single','weight',5,0.622,75,375,1.78,74.95,502.17],
   ['womens-bundle','exempt',1,0.131,25,85,0,17.85,119.60],
   ['womens-bundle','exempt',2,0.255,35,155,0,31.45,210.72],
   ['womens-bundle','exempt',3,0.379,45,225,0,44.60,298.82],
-  ['womens-bundle','exempt',4,0.503,65,305,0,60.15,403.01],
+  ['womens-bundle','exempt',4,0.503,65,305,0,59.65,399.66],
   ['womens-bundle','exempt',5,0.627,75,375,0,73.10,489.77],
   ['womens-bundle','fixed-order',1,0.131,25,85,3.51,21.55,144.39],
   ['womens-bundle','fixed-order',2,0.255,35,155,3.51,35.15,235.51],
   ['womens-bundle','fixed-order',3,0.379,45,225,3.51,48.30,323.61],
-  ['womens-bundle','fixed-order',4,0.503,65,305,3.51,63.80,427.46],
+  ['womens-bundle','fixed-order',4,0.503,65,305,3.51,63.35,424.45],
   ['womens-bundle','fixed-order',5,0.627,75,375,3.51,76.75,514.23],
   ['womens-bundle','weight',1,0.131,25,85,0.92,18.80,125.96],
   ['womens-bundle','weight',2,0.255,35,155,1.14,32.65,218.76],
   ['womens-bundle','weight',3,0.379,45,225,1.36,46.0,308.20],
-  ['womens-bundle','weight',4,0.503,65,305,1.57,61.80,414.06],
+  ['womens-bundle','weight',4,0.503,65,305,1.57,61.35,411.05],
   ['womens-bundle','weight',5,0.627,75,375,1.79,74.95,502.17]
 ] as const
 

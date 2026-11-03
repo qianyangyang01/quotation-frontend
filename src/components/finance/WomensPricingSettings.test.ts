@@ -25,10 +25,11 @@ beforeEach(async () => {
 })
 afterEach(() => { app.unmount(); document.body.innerHTML = ''; clearFinanceSettingsCache(); vi.restoreAllMocks() })
 
-it.each([['19.999999','1.27'],['20','1.25'],['29.999999','1.25'],['30','1.23'],['49.999999','1.23'],['50','1.22']])('trial selects USD %s without rounding into another band', async (amount, coefficient) => {
-  await fill('女装系数试算金额', amount)
-  expect(host.querySelector('.trial b')?.textContent).toBe(coefficient)
-  expect(http.put).not.toHaveBeenCalled()
+it('shows the editable reference factor and tiers without an amount trial panel',()=>{
+  expect(input('女装选档基准系数').value).toBe('1.23')
+  expect(host.querySelector('[aria-label=女装系数试算金额]')).toBeNull()
+  expect(host.querySelector('.trial')).toBeNull()
+  expect(host.textContent).not.toContain('综合成本 USD')
 })
 it.each(['0','-1','11','1.1234567',''])('blocks invalid coefficient %s before publication', async value => {
   await fill('第1档系数', value)
@@ -86,4 +87,21 @@ it('can publish disabled status while retaining all saved tier values', async ()
   expect(host.querySelector('.publish-preview')?.textContent).toContain('停用女装新报价')
   button('发布女装系数').click(); await settle()
   expect(loadWomensPricing()).toMatchObject({enabled:false,tiers:defaultWomensPricing().tiers})
+})
+
+it('publishes a configurable reference factor with a fresh preview and no hidden tier changes',async()=>{
+  expect(input('女装选档基准系数').value).toBe('1.23')
+  await fill('女装选档基准系数','2')
+  expect(loadWomensPricing()!.referenceCoefficient).toBe(1.23)
+  button('预览发布变更').click();await nextTick()
+  expect(host.querySelector('.publish-preview')?.textContent).toContain('选档基准系数 2')
+  await fill('女装选档基准系数','1.5')
+  expect(button('发布女装系数')).toBeUndefined()
+  button('预览发布变更').click();await nextTick();button('发布女装系数').click();await settle()
+  expect(loadWomensPricing()).toMatchObject({schemaVersion:2,basis:'reference-price-usd',referenceCoefficient:1.5,tiers:defaultWomensPricing().tiers})
+})
+it.each(['0','-1','11','1.1234567',''])('rejects invalid reference factor %s without publishing',async value=>{
+  await fill('女装选档基准系数',value)
+  expect(button('预览发布变更').disabled).toBe(true)
+  expect(http.put).not.toHaveBeenCalled()
 })

@@ -48,18 +48,18 @@ class WomensFinanceIntegrationTest {
     }
     @Test void financeCanPublishButEmployeeAnonymousMissingCsrfAndStaleVersionCannot() throws Exception {
         long version=settings.findById(KEY).orElseThrow().version;
-        var changed=fixture.policy().toString().replace("1.27","1.28");
+        var changed=fixture.policy().put("referenceCoefficient",1.5).toString().replace("1.27","1.28");
         mvc.perform(update(version,changed).with(employee)).andExpect(status().isForbidden());
         mvc.perform(update(version,changed)).andExpect(status().isUnauthorized());
         mvc.perform(put(PATH).with(finance).header("If-Match",version).contentType("application/json").content(changed)).andExpect(status().isForbidden());
         assertEquals(version,settings.findById(KEY).orElseThrow().version);
         mvc.perform(update(version,changed).with(finance)).andExpect(status().isOk()).andExpect(jsonPath("$.data._version").value(version+1));
         mvc.perform(update(version,fixture.policy().toString()).with(admin)).andExpect(status().isConflict());
-        mvc.perform(get(PATH).with(employee)).andExpect(status().isOk()).andExpect(jsonPath("$.data.value.tiers[0].coefficient").value(1.28));
+        mvc.perform(get(PATH).with(employee)).andExpect(status().isOk()).andExpect(jsonPath("$.data.value.tiers[0].coefficient").value(1.28)).andExpect(jsonPath("$.data.value.referenceCoefficient").value(1.5));
     }
     @Test void publishingAndDisablingPreserveHistoricalRecordsAndRecordBeforeAfterAudit() throws Exception {
         var ids=new ArrayList<UUID>();
-        for(var mode:List.of("single","bundle")) {
+        for(var mode:List.of("legacy/single","legacy/bundle","single","bundle")) {
             var body=(tools.jackson.databind.node.ObjectNode)mapper.readTree(getClass().getResourceAsStream("/womens-pricing/"+mode+".json"));
             body.put("status","won").put("financeReviewStatus","approved").put("financeReviewedBy","原审核人").put("financeReviewedAt","2026-11-01T01:00:00Z");
             var id=UUID.randomUUID();ids.add(id);
@@ -71,7 +71,7 @@ class WomensFinanceIntegrationTest {
         var before=jdbc.sql("select id,status,version,created_at,updated_at,cast(payload as varchar) as payload from quotation_record where id in (:ids) order by id").param("ids",ids).query().listOfRows();
         long version=settings.findById(KEY).orElseThrow().version;
         var previous=settings.findById(KEY).orElseThrow().payload.toString();
-        var changed=fixture.policy().put("enabled",false).toString();
+        var changed=fixture.policy().put("referenceCoefficient",1.5).put("enabled",false).toString();
         mvc.perform(update(version,changed).with(finance)).andExpect(status().isOk());
         assertEquals(before,jdbc.sql("select id,status,version,created_at,updated_at,cast(payload as varchar) as payload from quotation_record where id in (:ids) order by id").param("ids",ids).query().listOfRows());
         var log=audit.findAll().stream().filter(a->KEY.equals(a.resourceId)&&a.detail.path("version").asLong()==version+1).findFirst().orElseThrow();
@@ -81,7 +81,7 @@ class WomensFinanceIntegrationTest {
     @Test void rejectsMalformedPolicyWithoutAdvancingVersion() throws Exception {
         long version=settings.findById(KEY).orElseThrow().version;
         var policy=fixture.policy().toString();
-        for(var body:List.of(policy.replace("1.27","0"),policy.replace("1.27","10.1"),policy.replace("1.27","1.1234567"),policy.replace("\"fromUsd\":20","\"fromUsd\":19"),policy.replace("\"toUsd\":null","\"toUsd\":100"),policy.replace("\"schemaVersion\":1","\"schemaVersion\":1.5"),policy.replace("\"schemaVersion\":1","\"schemaVersion\":\"1\"")))
+        for(var body:List.of(policy.replace("1.27","0"),policy.replace("1.27","10.1"),policy.replace("1.27","1.1234567"),policy.replace("\"fromUsd\":20","\"fromUsd\":19"),policy.replace("\"toUsd\":null","\"toUsd\":100"),policy.replace("\"schemaVersion\":2","\"schemaVersion\":2.5"),policy.replace("\"schemaVersion\":2","\"schemaVersion\":\"1\"")))
             mvc.perform(update(version,body).with(admin)).andExpect(status().isUnprocessableEntity());
         assertEquals(version,settings.findById(KEY).orElseThrow().version);
     }
