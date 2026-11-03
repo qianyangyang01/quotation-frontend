@@ -11,6 +11,16 @@ export const quotationModeLabels: Record<SavedQuotationMode, string> = {
 export function isWomensQuotation(mode: unknown) { return mode === 'womens-single' || mode === 'womens-bundle' }
 export function isSingleQuotation(mode: unknown) { return mode === 'single' || mode === 'womens-single' }
 export function isBundleQuotation(mode: unknown) { return mode === 'bundle' || mode === 'womens-bundle' }
+// The workbench chooses product structure and customer pricing separately.
+// Keep the saved modes so existing quotes and backend snapshots stay compatible.
+export function quotationInputMode(mode: SavedQuotationMode) {
+  return mode === 'womens-single' ? 'single' : mode === 'womens-bundle' ? 'bundle' : mode
+}
+export function quotationModeForCustomer(mode: QuotationMode, womens: boolean): QuotationMode {
+  if (isSingleQuotation(mode)) return womens ? 'womens-single' : 'single'
+  if (isBundleQuotation(mode)) return womens ? 'womens-bundle' : 'bundle'
+  return mode
+}
 export function isManualQuotation(mode: string): mode is 'freight-trial' | 'shipping-only' {
   return mode === 'freight-trial' || mode === 'shipping-only'
 }

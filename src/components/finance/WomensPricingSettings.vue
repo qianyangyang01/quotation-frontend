@@ -25,8 +25,7 @@ async function publish() {
 </script>
 <template>
   <section class="womens-settings">
-    <header><div><h3>女装报价系数</h3><p>适用女装单品与女装组合；替代 S–E 客户等级系数。</p></div><span>{{ saved ? `已发布 V${saved.version + 1}` : '尚未发布' }}</span></header>
-    <p>选档金额＝（商品采购成本＋国内运费＋国际运费）÷ 当次美元汇率。每个渠道、每个件数／套数分别选档；税费、附加费、客户操作费、佣金阈值及取整沿用现有流程。</p>
+    <header><div><h3>女装报价系数</h3><p>统一用于女装单品、女装组合 SKU；报价时按金额自动匹配系数。</p></div><span class="version">{{ saved ? `已发布 V${saved.version + 1}` : '尚未发布' }}</span></header>
     <fieldset :disabled="saving" @input="preview=false" @change="preview=false">
       <label><input v-model="draft.enabled" type="checkbox"> 启用女装报价</label>
       <table><thead><tr><th>金额下限（含，USD）</th><th>金额上限（不含，USD）</th><th>系数</th><th>操作</th></tr></thead><tbody>
@@ -36,11 +35,13 @@ async function publish() {
       <div class="trial"><label>选档金额 USD <input v-model.number="amount" aria-label="女装系数试算金额" type="number" min="0" step="0.01"></label><span v-if="sample">命中系数 <b>{{ sample.coefficient }}</b> · 基础售价 <b>${{ sample.baseQuoteCny.toFixed(2) }}</b></span></div>
     </fieldset>
     <p v-if="error" role="alert" class="error">{{ error }}</p>
-    <p>按整笔金额乘命中系数；跨档时基础售价可能下降。发布前请用边界金额试算。</p>
+    <details class="rule-details"><summary>查看计算口径与联动说明</summary><p>选档金额＝（商品采购成本＋国内运费＋国际运费）÷ 当次美元汇率。每个渠道、每个件数／套数分别选档，替代 S–E 客户等级系数；税费、附加费、客户操作费、佣金阈值及取整沿用现有流程。</p><p>按整笔金额乘命中系数；跨档时基础售价可能下降。发布前请用边界金额试算。</p></details>
+    <p class="history-note">发布后用于新报价和再次发起；历史报价保留原系数、金额和状态。</p>
     <div v-if="preview" class="publish-preview"><p>发布后：{{ draft.enabled ? womensPolicyLabel(draft) : '停用女装新报价，历史记录仍可查看' }}</p><p>已打开的女装报价需更新计价；历史报价、审核状态和成交状态保留原样。再次发起将按当前版本生成新报价。</p></div>
     <footer><span role="status">{{ message }}</span><button v-if="!preview" :disabled="!!error||saving" @click="preview=true">预览发布变更</button><button v-else :disabled="!!error||saving" @click="publish">{{ saving ? '正在发布…' : '发布女装系数' }}</button></footer>
   </section>
 </template>
 <style scoped>
+.version{flex-shrink:0;padding:6px 10px;border-radius:6px;background:#edf7ef;color:#32834a;font-size:12px}.rule-details{margin:16px 0;padding:12px 14px;background:#f6f8fa;border-radius:7px}.rule-details summary{cursor:pointer;font-size:12px;color:#536571}.womens-settings .history-note{margin:14px 0}.womens-settings footer{padding-top:14px;border-top:1px solid #e3e8ec}
 .womens-settings{padding:22px;color:#26323d}.womens-settings header,.womens-settings footer{display:flex;justify-content:space-between;gap:16px;align-items:center}.womens-settings h3{margin:0;font-size:18px}.womens-settings p{font-size:12px;line-height:1.8;color:#677782}.womens-settings fieldset{border:0;padding:0;margin:18px 0}.womens-settings table{width:100%;border-collapse:collapse;margin:14px 0}.womens-settings th,.womens-settings td{text-align:left;padding:12px;border-bottom:1px solid #e3e8ec}.womens-settings input[type=number]{width:140px;max-width:100%;padding:9px;border:1px solid #dbe1e6;border-radius:6px}.womens-settings button{padding:9px 15px;background:#fff;border:1px solid #dbe1e6;border-radius:6px;color:#34434e}.womens-settings button:disabled{opacity:.5}.womens-settings footer button{background:#ff9700;border-color:#ff9700;color:#17232d;font-weight:700}.trial{display:flex;gap:24px;align-items:center;margin-top:18px;flex-wrap:wrap}.publish-preview{padding:12px 18px;background:#fff4e4;border-radius:8px}.womens-settings .error{color:#bd352a}@media(max-width:600px){.womens-settings{padding:12px}.womens-settings th,.womens-settings td{padding:8px 4px;font-size:12px}}
 </style>

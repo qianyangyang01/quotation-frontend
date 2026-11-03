@@ -31,6 +31,13 @@ class WomensPricingTest {
     @Test void acceptsCompleteSnapshotWithoutChangingIt() {
         var q=quote();var before=q.deepCopy();WomensPricing.validateSnapshot(q,policy(),2);assertEquals(before,q);
     }
+    @Test void rejectsCoercedOrOverflowingSchemaVersions() {
+        for (var value : new String[]{"\"1\"", "1.5", "4294967297", "null", "true"}) {
+            var p=mapper.readTree(policy().toString().replace("\"schemaVersion\":1", "\"schemaVersion\":"+value));
+            var error = assertThrows(com.milano.quotation.common.AppException.class,()->WomensPricing.validatePolicy(p),value);
+            assertEquals(422,error.status().value());
+        }
+    }
     @Test void rejectsStalePolicyAndTamperedCostsCoefficients() {
         assertThrows(RuntimeException.class,()->WomensPricing.validateSnapshot(quote(),policy(),3));
         for(String field:new String[]{"costCny","coefficient","baseQuoteCny","fromUsd"}) {

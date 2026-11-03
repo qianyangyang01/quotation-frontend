@@ -9,8 +9,8 @@ import { checkFobFinanceVersion } from '@/services/fobFinanceFreshness'
 import { refreshReviewNotifications } from '@/data/reviewNotifications'
 import { getDomesticFreightWarning } from '@/domain/domesticFreightWarning'
 import { legacyPurchaseDisplay } from '@/services/legacyPurchaseDisplay'
-import { canViewFullPricing, canViewLogisticsCost, canViewPricingFactors } from '@/data/quotationVisibility'
-import { isWomensQuotation, isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
+import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibility'
+import { quotationInputMode, quotationModeForCustomer, isWomensQuotation, isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import { normalizeShippingNote, shippingQuotationSummary, SHIPPING_NOTE_MAX_LENGTH, SHIPPING_NOTE_LENGTH_ERROR } from '@/data/shippingQuotationNote'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
 import QuotationFeatureBoundary from '@/components/quotation/QuotationFeatureBoundary.vue'
@@ -814,6 +814,17 @@ function changeQuoteMode(mode: QuotationMode | 'fob') {
   products.value[0].quantity = 1
   normalizeRule(products.value[0], true)
   toast('已切换为' + quotationModeLabels[mode] + (isBundleQuotation(mode) ? '，报价数量按“套”计算' : ''))
+}
+function changeCustomerGrade(value: string) {
+  if (savingQuotation.value || syncRefreshing.value) return
+  const womens = value === 'WOMENS'
+  if (womens && (props.batchCapture || manualMode.value || fobActive.value)) return
+  if (!womens && !customerGradeSettings.some(item => item.enabled && item.grade === value)) return
+  const mode = quotationModeForCustomer(quoteMode.value, womens)
+  if (mode !== quoteMode.value && props.resumeQuoteId && (!draftSource.value || draftSource.value.quotationBatch)) return
+  if (!womens) selectedCustomerGrade.value = value as CustomerGrade
+  // Changing the pricing category must not reset products, quantities or quote-sheet columns.
+  quoteMode.value = mode
 }
 function changeMonthlySalesEstimate(p: Product, value: string) {
   monthlySalesEstimate.value = value
@@ -1959,7 +1970,7 @@ const activeQuoteMatrixContextKey = computed(() => {
   return p ? quoteMatrixContextKey(p) : ''
 })
 // Repricing invalidates prices, but local photos belong to the current account/product selection.
-const quoteSheetResetKey = computed(() => JSON.stringify([currentAuthUser.value.id, quoteMode.value, activePurchaseSkus()]))
+const quoteSheetResetKey = computed(() => JSON.stringify([currentAuthUser.value.id, quotationInputMode(quoteMode.value), activePurchaseSkus()]))
 const activeCommonCountryCount = computed(() => activeQuotationCountries.value.filter(country => country.stage === 'common').length)
 async function searchChannelCountries(query: string): Promise<string[]> {
   const countries = activeQuotationCountries.value
@@ -2603,7 +2614,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
       </section>
       <section v-if="fobActive && syncError" class="live-data-notice" role="status">汇率核验暂不可用：{{ syncError }}。系统将自动重试，当前输入仍保留。</section>
 
-      <QuotationHeader v-if="!batchCapture" :salesperson="selectedSalesperson" :rate="fobActive ? fobRate : exchange.usd" :status="fobActive ? fobStatus : products[0]?.status || '待查询'" :mode-label="fobActive ? 'FOB（批发）报价' : quotationModeLabels[quoteMode]" @show-rule="fobActive ? fobPanel?.openRules() : showRule=true" />
+      <QuotationHeader v-if="!batchCapture" :salesperson="selectedSalesperson" :rate="fobActive ? fobRate : exchange.usd" :status="fobActive ? fobStatus : products[0]?.status || '待查询'" :mode-label="fobActive ? 'FOB（批发）报价' : quotationModeLabels[quotationInputMode(quoteMode)]" @show-rule="fobActive ? fobPanel?.openRules() : showRule=true" />
 
 
       <template v-if="!fobActive">
@@ -2632,11 +2643,11 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :grades="customerGradeSettings.filter(item=>item.enabled)" :grade="selectedCustomerGrade"
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode" @open-batch="openBatchQuotation"
-          @update:sku-search="skuSearch=$event" @update:customer-name="typeCustomerName" @select-customer="selectFinanceCustomer" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="selectedCustomerGrade=$event as CustomerGrade"
+          @update:sku-search="skuSearch=$event" @update:customer-name="typeCustomerName" @select-customer="selectFinanceCustomer" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="changeCustomerGrade"
           @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
-        <p v-if="isWomensQuotation(quoteMode) && canViewPricingFactors" class="notice" role="status">{{ womensPricingBlock || (womensPricing ? `女装自动系数 V${womensPricing.version + 1}：${womensPolicyLabel(womensPricing)}。按各渠道、各数量的综合成本折美元选档，替代客户等级系数。` : '女装系数正在读取') }}</p>
+        <p v-if="womensPricingBlock" class="womens-pricing-error" role="alert">{{ womensPricingBlock }}</p>
         <p v-if="batchCapture && queryValidationFields.length" class="batch-query-error" role="alert">{{ conditionIssues({ includeSku: true, includeCategory: false }).map(issue => issue.message).join('；') }}。填写后点击“加载渠道”。</p>
         <p v-if="batchCapture && purchaseQueryError" class="batch-query-error" role="alert">{{ purchaseQueryError }}</p>
         <FobQuotePanel :initial="fobInitial" v-if="fobActive" :key="currentAuthUser.id + ':' + fobKey" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
@@ -2782,6 +2793,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 </template>
 
 <style scoped>
+.womens-pricing-error{display:block;min-width:0;margin:14px 0;padding:12px 16px;border:1px solid #efc6b4;border-radius:8px;background:#fff3ed;color:#a63322;font-size:13px;line-height:1.6;white-space:normal}
 .batch-sample-bar{padding:14px 20px;background:#eef7fc;border-bottom:1px solid #dbeaf4;color:#355b74}.batch-sample-bar>div{display:flex;align-items:center;flex-wrap:wrap;gap:12px 24px}.batch-sample-bar strong{font-size:14px;color:#123c57}.batch-sample-bar label{display:flex;align-items:center;gap:10px;font-size:12px}.batch-sample-bar select{min-width:160px;max-width:100%;padding:7px 12px;border:1px solid #c5dce9;border-radius:6px;background:white;color:#173b53}.batch-sample-bar span,.batch-sample-bar p{font-size:12px;color:#668296}.batch-sample-bar p{margin:10px 0 0}.batch-sample-bar [role="alert"]{color:#b5472c}.batch-sample-bar button{border:1px solid #c5dce9;border-radius:5px;background:white;padding:4px 10px;cursor:pointer}
 
 .batch-query-error{padding:10px 14px;background:#fff3ed;border:1px solid #efc6b4;border-radius:6px;color:#a63322;font-size:13px}

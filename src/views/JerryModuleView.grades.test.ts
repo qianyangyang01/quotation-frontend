@@ -20,12 +20,35 @@ import { normalizeCustomerGradeSettings } from '@/data/financeChannelPolicies'
 let app: App
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; saveGrades.mockClear() })
 
+it('keeps both coefficient editors inside one card and preserves independent unsaved edits when switching', async () => {
+  fixture.customerGrades = normalizeCustomerGradeSettings([{grade:'S',coefficient:1.2,enabled:true}])
+  window.localStorage.setItem('milano.finance-settings-card-order.v1', JSON.stringify(['womens','grades','countries']))
+  const host=document.createElement('div');document.body.append(host)
+  app=createApp({render:()=>h(Jerry,{mode:'members'})});app.mount(host)
+  for(let i=0;i<8;i++){await Promise.resolve();await nextTick()}
+  const cards=[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')]
+  expect(cards).toHaveLength(8)
+  expect(cards.some(e=>e.textContent?.includes('女装报价系数'))).toBe(false)
+  cards.find(e=>e.textContent?.includes('客户系数'))!.click();await nextTick()
+  const grade=host.querySelector<HTMLInputElement>('.grade-grid input[type=number]')!
+  grade.value='1.42';grade.dispatchEvent(new Event('input'));await nextTick()
+  const tabs=host.querySelectorAll<HTMLButtonElement>('[role=tab]')
+  tabs[1]!.click();await nextTick()
+  expect(tabs[1]!.getAttribute('aria-selected')).toBe('true')
+  const women=host.querySelector<HTMLInputElement>('[aria-label="第1档系数"]')!
+  women.value='1.28';women.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()
+  tabs[0]!.click();await nextTick();expect(grade.value).toBe('1.42')
+  tabs[1]!.click();await nextTick();expect(women.value).toBe('1.28')
+  expect(saveGrades).not.toHaveBeenCalled()
+  window.localStorage.removeItem('milano.finance-settings-card-order.v1')
+})
+
 it('lets finance configure and enable NEW independently, rejecting invalid input before saving', async () => {
   fixture.customerGrades = normalizeCustomerGradeSettings([{grade:'S',coefficient:1.21605,enabled:true},{grade:'E',coefficient:1.27635,enabled:true}])
   const host=document.createElement('div');document.body.append(host)
   app=createApp({render:()=>h(Jerry,{mode:'members'})});app.mount(host)
   for(let i=0;i<8;i++){await Promise.resolve();await nextTick()}
-  ;[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')].find(e=>e.textContent?.includes('客户等级系数'))!.click();await nextTick()
+  ;[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')].find(e=>e.textContent?.includes('客户系数'))!.click();await nextTick()
   expect(host.querySelectorAll('.grade-grid>label')).toHaveLength(7)
   const row=[...host.querySelectorAll('.grade-grid>label')].find(e=>e.textContent?.includes('新客户'))!
   const input=row.querySelector<HTMLInputElement>('input[type=number]')!
@@ -45,7 +68,7 @@ it('shows failed grade saves, blocks duplicate submission and reads back the con
   app = createApp({ render: () => h(Jerry, { mode: 'members' }) }); app.mount(host)
   const settle = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); await nextTick() } }
   await settle()
-  ;[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')].find(e => e.textContent?.includes('客户等级系数'))!.click()
+  ;[...host.querySelectorAll<HTMLElement>('.finance-stats>[role=button]')].find(e => e.textContent?.includes('客户系数'))!.click()
   await settle()
   const save = host.querySelector<HTMLButtonElement>('.grade-settings>header button')!
   let fail!: (reason: Error) => void

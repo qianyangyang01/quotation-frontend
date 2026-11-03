@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isBundleQuotation, isSingleQuotation } from '@/data/quotationModes'
+import { isBundleQuotation, isSingleQuotation, quotationInputMode, quotationModeForCustomer } from '@/data/quotationModes'
 
 import { isManualQuotation, isWomensQuotation } from '@/data/quotationModes'
 import { canUseFob } from '@/data/fobAccess'
@@ -13,11 +13,12 @@ const emit = defineEmits<{ openBatch: [];  'update:commissionThreshold': [value:
 function changeMode(event: Event) {
   const select = event.target as HTMLSelectElement
   if (select.value === 'batch-single') {
-    select.value = props.mode
+    select.value = quotationInputMode(props.mode)
     if (!props.singleOnly) emit('openBatch')
     return
   }
-  emit('update:mode', select.value as QuotationMode | 'fob')
+  const mode = select.value as QuotationMode | 'fob'
+  emit('update:mode', mode === 'fob' ? mode : quotationModeForCustomer(mode, isWomensQuotation(props.mode)))
 }
 </script>
 
@@ -26,12 +27,12 @@ function changeMode(event: Event) {
     <header><div><b><i>01</i> 报价条件</b><span>{{ mode === 'fob' ? '按采购阶梯生成批发报价，同时展示报关和不报关价格' : isManualQuotation(mode) ? '手动填写条件，按现有规则查询渠道报价' : '系统自动匹配采购成本，并在报价矩阵中生成可用渠道' }}</span></div><p><span>当前报价业务员</span><strong>{{ salesperson }}</strong><em>登录账号自动带出</em></p></header>
     <div class="condition-grid" :class="{ bundle: isBundleQuotation(mode) }">
       <label v-if="mode !== 'fob'" class="customer-field" data-validation-field="customerName" :class="{ invalid:invalidFields.includes('customerName') }"><span>客户名称 <em>必填</em></span><CustomerNameInput :model-value="customerName" :selected-id="selectedCustomerId" :customers="customers" @update:model-value="$emit('update:customerName',$event)" @select="$emit('selectCustomer',$event)"/><small>{{ operationMessage || '手动填写，不加公司操作费' }}</small><small v-if="invalidFields.includes('customerName')" class="field-error">请填写客户名称</small></label>
-      <label v-if="!singleOnly" class="mode-field" data-validation-field="quoteMode" :class="{ invalid:invalidFields.includes('quoteMode') }"><span>报价模式 <em>必填</em></span><select required :disabled="lockMode" aria-label="报价模式" :value="mode" @change="changeMode"><option value="single">单品 SKU 报价</option><option v-if="!singleOnly" value="batch-single">批量单品 SKU 报价</option><option v-if="!singleOnly" value="bundle">组合 SKU 报价</option><option v-if="!singleOnly" value="womens-single">女装单品 SKU 报价</option><option v-if="!singleOnly" value="womens-bundle">女装组合 SKU 报价</option><option v-if="!singleOnly" value="freight-trial">报价试算</option><option v-if="!singleOnly" value="shipping-only">仅代发货报价</option><option v-if="canUseFob && !singleOnly" value="fob">FOB（批发）报价</option></select><small v-if="invalidFields.includes('quoteMode')" class="field-error">请选择报价模式</small></label>
+      <label v-if="!singleOnly" class="mode-field" data-validation-field="quoteMode" :class="{ invalid:invalidFields.includes('quoteMode') }"><span>报价模式 <em>必填</em></span><select required :disabled="lockMode" aria-label="报价模式" :value="quotationInputMode(mode)" @change="changeMode"><option value="single">单品 SKU 报价</option><option v-if="!singleOnly" value="batch-single">批量单品 SKU 报价</option><option v-if="!singleOnly" value="bundle">组合 SKU 报价</option><option v-if="!singleOnly" value="freight-trial">报价试算</option><option v-if="!singleOnly" value="shipping-only">仅代发货报价</option><option v-if="canUseFob && !singleOnly" value="fob">FOB（批发）报价</option></select><small v-if="invalidFields.includes('quoteMode')" class="field-error">请选择报价模式</small></label>
       <label v-if="isSingleQuotation(mode) && !singleOnly" class="sku-field" data-validation-field="sku" :class="{ invalid:invalidFields.includes('sku') }"><span>SKU <em>必填</em></span><div class="sku-input"><i>⌕</i><input required :value="skuSearch" placeholder="输入 SKU" @input="$emit('update:skuSearch', ($event.target as HTMLInputElement).value)" @keyup.enter="$emit('query')"></div><small v-if="invalidFields.includes('sku')" class="field-error">请输入并查询有效 SKU</small></label>
       <label v-if="mode !== 'fob'" class="logistics-field" data-validation-field="logisticsAttribute" :class="{ invalid:invalidFields.includes('logisticsAttribute') }"><span>物流属性 <em>必填</em></span><select required :disabled="financePending" :aria-busy="financePending" :value="logisticsAttribute" @change="$emit('update:logisticsAttribute', ($event.target as HTMLSelectElement).value)"><option v-if="!attributes.includes(logisticsAttribute)" :value="logisticsAttribute" disabled>{{ financePending ? (financeError ? '财务设置读取失败，请重试' : '财务设置正在读取…') : !attributes.length ? '暂无财务授权的物流属性' : logisticsAttribute ? '原物流属性未获财务授权，请重新选择' : '请选择物流属性' }}</option><option v-for="attribute in attributes" :key="attribute">{{ attribute }}</option></select><small v-if="invalidFields.includes('logisticsAttribute')" class="field-error">请选择物流属性</small></label>
-      <label v-if="mode !== 'fob' && !isWomensQuotation(mode)" class="grade-field" data-validation-field="customerGrade" :class="{ invalid:invalidFields.includes('customerGrade') }"><span>客户等级 <em>必填</em></span><select required :value="grade" @change="$emit('update:grade', ($event.target as HTMLSelectElement).value)"><option v-for="setting in grades" :key="setting.grade" :value="setting.grade">{{ customerGradeDisplayLabel(setting.grade) }}</option></select><small v-if="invalidFields.includes('customerGrade')" class="field-error">请选择已启用的客户等级</small></label>
+      <label v-if="mode !== 'fob'" class="grade-field" data-validation-field="customerGrade" :class="{ invalid:invalidFields.includes('customerGrade') }"><span>客户等级 <em>必填</em></span><select required aria-label="客户等级" :value="isWomensQuotation(mode) ? 'WOMENS' : grade" @change="$emit('update:grade', ($event.target as HTMLSelectElement).value)"><option v-for="setting in grades" :key="setting.grade" :value="setting.grade" :disabled="lockMode && isWomensQuotation(mode)">{{ customerGradeDisplayLabel(setting.grade) }}</option><option v-if="!singleOnly && (isSingleQuotation(mode) || isBundleQuotation(mode))" value="WOMENS" :disabled="lockMode && !isWomensQuotation(mode)">女装客户</option></select><small v-if="isWomensQuotation(mode)">按报价金额自动匹配系数</small><small v-if="invalidFields.includes('customerGrade')" class="field-error">请选择已启用的客户等级</small></label>
 
-      <label v-if="isWomensQuotation(mode)" class="grade-field"><span>女装系数</span><input readonly value="按金额自动匹配"><small>替代客户等级系数，各渠道／数量分别选档</small></label>
+
       <label v-if="isSingleQuotation(mode)" class="sales-field" data-validation-field="monthlySalesEstimate" :class="{ invalid:invalidFields.includes('monthlySalesEstimate') }"><span>采购阶梯 <em>必填</em></span><select required :value="monthlySalesEstimate" @change="$emit('update:monthlySalesEstimate', ($event.target as HTMLSelectElement).value)"><option value="10">阶梯价1</option><option value="100">阶梯价2</option><option value="100+">阶梯价3</option><option value="tier4">阶梯价4</option><option value="tier5">阶梯价5</option></select><small v-if="invalidFields.includes('monthlySalesEstimate')" class="field-error">请选择采购阶梯</small></label>
     <label v-if="mode !== 'fob'" class="commission-field" data-validation-field="commissionThreshold" :class="{ invalid: commissionError }">
       <span>佣金阈值</span>

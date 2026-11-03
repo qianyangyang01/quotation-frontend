@@ -31,7 +31,7 @@ const fees = (amount: number) => ({ countries: [{ country: '美国', fixedFeeUsd
 let app: App | undefined, host: HTMLDivElement
 let state: {
   notice: string; draftReady: boolean; manualCost: string; manualWeightGrams: string; manualQueried: boolean; manualPanelError: string
-  shippingNote: string; activeQuoteMatrixContextKey: string; resetLocalDraft: () => Promise<void>
+  shippingNote: string; quoteSheetResetKey: string; activeQuoteMatrixContextKey: string; resetLocalDraft: () => Promise<void>
   manualMode: boolean; quoteMode: QuotationMode; products: QuotationProduct[]; specialPackagingGrams: string
   quoteMatrixMode: string; commonQuoteRows: QuotationMatrixRow[]; templateQuoteRows: QuotationMatrixRow[]
   changeQuoteMode: (mode: QuotationMode) => void; queryManualQuote: () => Promise<void>
@@ -78,7 +78,7 @@ it.each(['purchase','logistics'] as const)('does not expose or activate FOB with
   state.changeQuoteMode('fob' as QuotationMode);await nextTick()
   expect(host.querySelector('.fob-card')).toBeNull()
   expect(state.draftPayload()).toEqual(before)
-  expect([...host.querySelectorAll('.mode-field option')].map(o=>(o as HTMLOptionElement).value)).toEqual(['single','batch-single','bundle','womens-single','womens-bundle','freight-trial','shipping-only'])
+  expect([...host.querySelectorAll('.mode-field option')].map(o=>(o as HTMLOptionElement).value)).toEqual(['single','batch-single','bundle','freight-trial','shipping-only'])
 })
 it.each(['super_admin','employee','finance'] as const)('opens FOB for %s without exposing or saving channel quotations', async role => {
   authState.current!.role=role;authState.permissions=[...roleDefinitions.find(r=>r.key===role)!.permissions];await nextTick()
@@ -126,7 +126,7 @@ function quote(q: number) { return state.quantityCostBreakdown(state.products[0]
 
 it('offers existing modes and the independent batch entry, hides SKU/tier and directly computes manual cost and grams at every quantity', async () => {
   await query('freight-trial')
-  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','批量单品 SKU 报价','组合 SKU 报价','女装单品 SKU 报价','女装组合 SKU 报价','报价试算','仅代发货报价','FOB（批发）报价'])
+  expect([...host.querySelectorAll('.mode-field option')].map(o => o.textContent)).toEqual(['单品 SKU 报价','批量单品 SKU 报价','组合 SKU 报价','报价试算','仅代发货报价','FOB（批发）报价'])
   expect(host.querySelector('.sku-field')).toBeNull(); expect(host.querySelector('.sales-field')).toBeNull()
   expect(host.querySelector('.manual-quote-panel')?.textContent).toContain('查询试算')
   expect(state.chargeWeight(state.products[0]!)).toBe(.5)
@@ -261,4 +261,21 @@ it.each(['freight-trial','shipping-only'] as const)('saves the complete %s paylo
   expect(reissued.shippingNote).toBe(mode === 'shipping-only' ? 'TC2600009-1 客户自备耳机' : undefined)
   expect(quotationRecordQuoteSheetSource(record).skus).toEqual([mode === 'shipping-only' ? '仅代发货报价' : '报价试算'])
   expect(state.shippingNote).toBe('')
+})
+
+it.each(['single', 'bundle'] as const)('changing the customer pricing for %s preserves product quantities and the sheet reset key', async mode => {
+  state.changeQuoteMode(mode)
+  state.products[0]!.quantity=3
+  state.skuSearch='KEEP-SKU'
+  const before=state.draftPayload(), sheetKey=state.quoteSheetResetKey
+  const grade=host.querySelector<HTMLSelectElement>('[aria-label="客户等级"]')!
+  grade.value='WOMENS';grade.dispatchEvent(new Event('change'));await nextTick()
+  expect(state.quoteMode).toBe(mode==='single'?'womens-single':'womens-bundle')
+  expect(state.draftPayload()).toMatchObject({quoteMode:state.quoteMode,skuSearch:before.skuSearch,product:before.product,bundleItems:before.bundleItems})
+  expect(state.products[0]!.quantity).toBe(3)
+  expect(state.quoteSheetResetKey).toBe(sheetKey)
+  grade.value='S';grade.dispatchEvent(new Event('change'));await nextTick()
+  expect(state.quoteMode).toBe(mode)
+  expect(state.products[0]!.quantity).toBe(3)
+  expect(state.quoteSheetResetKey).toBe(sheetKey)
 })

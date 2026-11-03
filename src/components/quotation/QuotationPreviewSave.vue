@@ -101,7 +101,7 @@ const quoteRange = computed(() => {
           <div><dt>商品</dt><dd>{{ productName || '待查询' }}</dd></div>
           <div><dt>{{ quoteMode === 'freight-trial' || quoteMode === 'shipping-only' ? '业务类型' : 'SKU' }}</dt><dd>{{ sku || '—' }}</dd></div>
           <div><dt>报价模式</dt><dd>{{ matrixModeLabel }}</dd></div>
-          <div><dt>{{ isWomensQuotation(quoteMode) ? '女装系数' : '客户等级' }}</dt><dd>{{ isWomensQuotation(quoteMode) ? '按各渠道／数量的金额自动匹配' : customerGradeDisplayLabel(customerGrade) }}</dd></div>
+          <div><dt>客户等级</dt><dd>{{ isWomensQuotation(quoteMode) ? '女装客户' : customerGradeDisplayLabel(customerGrade) }}</dd></div>
         </dl>
       </section>
     </div>

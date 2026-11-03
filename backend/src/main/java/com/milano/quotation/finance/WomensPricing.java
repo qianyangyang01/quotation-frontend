@@ -22,7 +22,7 @@ public final class WomensPricing {
         return v;
     }
     public static void validatePolicy(JsonNode p) {
-        if (!p.isObject() || p.path("schemaVersion").asInt() != 1 || !"total-cost-usd".equals(p.path("basis").asText()) || !p.path("enabled").isBoolean())
+        if (!p.isObject() || !p.path("schemaVersion").isIntegralNumber() || !p.path("schemaVersion").canConvertToInt() || p.path("schemaVersion").asInt() != 1 || !"total-cost-usd".equals(p.path("basis").asText()) || !p.path("enabled").isBoolean())
             throw AppException.unprocessable("女装报价系数口径无效");
         var tiers = p.path("tiers");
         if (!tiers.isArray() || tiers.isEmpty() || tiers.size() > 12) throw AppException.unprocessable("女装系数须为1至12档");

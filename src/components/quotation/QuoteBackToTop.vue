@@ -35,5 +35,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.quote-back-top{position:fixed;right:24px;bottom:28px;z-index:40;display:grid;justify-items:center;gap:3px;border:1px solid #f58220;border-radius:10px;background:#fff8f1;color:#a6530c;padding:9px 12px;font-size:12px;box-shadow:0 3px 14px #20253218;cursor:pointer}.quote-back-top span{font-size:21px;line-height:1}.quote-back-top:hover{background:#ffead8}.quote-back-top:focus-visible{outline:2px solid #f58220;outline-offset:3px}@media(max-width:600px){.quote-back-top{right:12px;bottom:16px}}
+.quote-back-top{position:fixed;right:24px;bottom:104px;z-index:40;display:grid;justify-items:center;gap:3px;border:1px solid #f58220;border-radius:10px;background:#fff8f1;color:#a6530c;padding:9px 12px;font-size:12px;box-shadow:0 3px 14px #20253218;cursor:pointer}.quote-back-top span{font-size:21px;line-height:1}.quote-back-top:hover{background:#ffead8}.quote-back-top:focus-visible{outline:2px solid #f58220;outline-offset:3px}@media(max-width:600px){.quote-back-top{right:12px}}
 </style>
