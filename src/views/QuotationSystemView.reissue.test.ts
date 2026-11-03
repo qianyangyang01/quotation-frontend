@@ -46,12 +46,14 @@ let batchProps = reactive({ batchCapture: false, batchSkus: ['BK100', 'BK200'], 
 let purchaseFailure = false
 let purchaseOverride: Record<string, unknown> = {}
 let sourceFailure = false
+let sourceOverride: Record<string, unknown> | undefined
 let financeOverride: Record<string, unknown> | undefined
 beforeEach(() => {
   clearFinanceSettingsCache(); vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear()
   authState.current = { id: 'employee-a', account: 'A', name: '业务员 A', role: 'employee', status: 'enabled', mustChangePassword: false, passwordUpdatedAt: '' }
   purchaseFailure = false; purchaseOverride = {}; sourceFailure = false; router.query = { reissue: 'original', release: 'local' }
   financeOverride = undefined
+  sourceOverride = undefined
   replaceLogisticsRules([])
   vi.mocked(loadPublishedLogisticsRules).mockResolvedValue({ verified: true, revision: 'latest', rules: [] } as never)
 })
@@ -61,7 +63,7 @@ async function mount(existing: boolean, withdrawn = false, batchCapture = false,
     if (path === '/finance-settings') return financeOverride || finance
     if (path === '/quotation-readiness') return { ready: true, missing: [] }
     if (path === '/quotation-templates') return []
-    if (path === '/quotations/original') { if (sourceFailure) throw new Error('无权读取原报价'); return source }
+    if (path === '/quotations/original') { if (sourceFailure) throw new Error('无权读取原报价'); return sourceOverride || source }
     if (path === '/quotation-drafts/mine/state') return { exists: existing, version: existing ? 7 : -1, payload: existing ? oldDraft : null, ...(withdrawn ? { sourceQuote: { id: 'original', no: 'QT-OLD', version: 8 } } : {}) }
     if (path === '/purchase-products/BK100' || path === '/purchase-products/BK200') {
       if (purchaseFailure) throw new Error('采购资料读取失败')
@@ -81,6 +83,59 @@ async function mount(existing: boolean, withdrawn = false, batchCapture = false,
   await vi.waitFor(() => expect(state.draftReady || state.draftStatus === 'error').toBe(true))
 }
 const button = (text: string) => [...host.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
+
+it.each(['womens-single', 'womens-bundle'])('reissues approved %s with current purchase data and reference policy while preserving the source', async quoteMode => {
+  const policy = { schemaVersion: 2, basis: 'reference-price-usd', enabled: true, referenceCoefficient: 1.23,
+    tiers: [{ fromUsd: 0, toUsd: 20, coefficient: 1.27 }, { fromUsd: 20, toUsd: 30, coefficient: 1.25 },
+      { fromUsd: 30, toUsd: 50, coefficient: 1.23 }, { fromUsd: 50, toUsd: null, coefficient: 1.22 }] }
+  sourceOverride = { ...source, quoteMode, customerGrade: '女装自动系数', womensPricing: { ...policy, version: 1 },
+    financeReviewStatus: 'approved', financeReviewedBy: '原审核人', financeReviewedAt: '2026-11-01T00:00:00Z',
+    ...(quoteMode === 'womens-bundle' ? { primarySku: 'BK100、BK200', bundleItems: [
+      { sku: 'BK100', quantityPerSet: 1, purchaseUnitPriceCny: 999, effectiveWeightKg: .05 },
+      { sku: 'BK200', quantityPerSet: 2, purchaseUnitPriceCny: 999, effectiveWeightKg: .05 },
+    ] } : {}) }
+  const before = JSON.stringify(sourceOverride)
+  const key = '1::原物流::JP'
+  purchaseOverride = { purchasePriceCny: 100 }
+  financeOverride = { ...finance,
+    'womens-pricing': { value: { ...policy, referenceCoefficient: 1.5 }, _version: 5 },
+    'surcharge-settings': { value: { countries: [], providers: [], updatedAt: 'test' }, _version: 1 },
+    'country-classification': { value: [{ country: '日本', code: 'JP', stage: 'common', continent: 'asia', sortOrder: 1, enabled: true }], _version: 1 },
+    'channel-policies': { value: [{ id: '普货', category: '普货', enabled: true, countryRules: [{ country: '日本', allowedChannels: [key], stage: 'common', continent: 'asia', sortOrder: 1 }] }], _version: 1 },
+    'tax-settings': { value: { countries: [{ country: '日本', fixedFeeUsd: 0, selected: true, enabled: true, sortOrder: 1, channelRules: [{ key, mode: 'no-tax', currency: 'USD', amount: 0, perKg: 0 }] }], providers: [], updatedAt: 'test' }, _version: 1 },
+  }
+  vi.mocked(loadPublishedLogisticsRules).mockImplementation(async () => {
+    const rules = [{ id: 1, name: '原规则', status: '启用', billingVerified: true,
+      relations: [{ carrier: '原物流', channel: '原渠道', channelCode: 'JP' }],
+      prices: [normalizeLogisticsPriceRow({ countryCode: 'JP', areaName: '日本', weightFromKg: 0, weightToKg: 30, pricePerKg: 100, registrationFee: 2, quoteReady: true, pricingModel: 'per-kg' })],
+    } as LogisticsRule]; replaceLogisticsRules(rules)
+    return { verified: true, revision: 'latest', rules } as never
+  })
+  await mount(false)
+  await vi.waitFor(() => expect(state.commonQuoteRows).toHaveLength(1))
+  expect(state.draftPayload().quoteMode).toBe(quoteMode)
+  const current = state as unknown as { womensPricing: { referenceCoefficient: number; version: number }; buildQuoteOptions: () => Array<{ quote1Usd: number; quote2Usd: number; quote3Usd: number; womensPricingSamples: Array<{ quantity: number; costCny: number; referenceQuoteCny: number; coefficient: number; baseQuoteCny: number }> }> }
+  expect(current.womensPricing).toMatchObject({ referenceCoefficient: 1.5, version: 5 })
+  const option = current.buildQuoteOptions()[0]!
+  expect(option.quote1Usd, JSON.stringify(option)).not.toBeNull()
+  const samples = option.womensPricingSamples
+  expect(samples.length).toBeGreaterThanOrEqual(3)
+  for (const sample of samples) {
+    const referenceUsd = sample.costCny * 1.5 / 6.7
+    const coefficient = referenceUsd < 20 ? 1.27 : referenceUsd < 30 ? 1.25 : referenceUsd < 50 ? 1.23 : 1.22
+    expect(sample.referenceQuoteCny).toBeCloseTo(sample.costCny * 1.5, 8)
+    expect(sample.coefficient).toBe(coefficient)
+    expect(sample.baseQuoteCny).toBeCloseTo(sample.costCny * coefficient, 8)
+    if (sample.quantity <= 3) {
+      const field = `quote${sample.quantity}Usd` as 'quote1Usd' | 'quote2Usd' | 'quote3Usd'
+      expect(option[field]).toBeCloseTo(Math.ceil(sample.costCny * coefficient / 6.7 * 20 - 1e-8) / 20, 8)
+    }
+  }
+  // 101 CNY goods plus current freight is far below the historical 999 CNY cost.
+  expect(samples[0]!.costCny).toBeLessThan(400)
+  expect(JSON.stringify(sourceOverride)).toBe(before)
+  expect(api.post).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled(); expect(api.delete).not.toHaveBeenCalled()
+})
 
 it('restores update inputs after remount, reloads current purchase prices and identifies the removed special channel without writing any quotation', async () => {
   const original = JSON.stringify(source)
