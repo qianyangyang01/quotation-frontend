@@ -2,22 +2,16 @@
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
 import { computed } from 'vue'
 import type { QuotationMatrixRow } from './types'
+import { priceRegionLabel } from './priceRegionLabel'
 
-const props = defineProps<{ row: Pick<QuotationMatrixRow, 'country' | 'carrier' | 'transport' | 'rule' | 'quoteRegion'> }>()
-const region = computed(() => {
-  const value = props.row.quoteRegion?.trim() || ''
-  if (!value || value === '全国统一') return ''
-  const prefix = `${props.row.carrier}｜${props.row.rule}｜`
-  return value.startsWith(prefix) ? value.slice(prefix.length) : value
-})
-const regionLabel = computed(() => region.value.startsWith(props.row.country)
-  ? region.value : `${props.row.country} · ${region.value}`)
+const props = defineProps<{ row: Pick<QuotationMatrixRow, 'country' | 'carrier' | 'transport' | 'rule' | 'quoteRegion' | 'priceRegion'> }>()
+const regionLabel = computed(() => priceRegionLabel(props.row))
 </script>
 
 <template>
   <span class="quote-channel-name">
     <span class="channel-title-line"><strong class="channel-title">{{ row.carrier }}｜{{ row.transport }}</strong><ChannelCoverageBadge :name="row.transport" /></span>
-    <span v-if="region" class="channel-region">{{ regionLabel }}</span>
+    <span v-if="regionLabel" class="channel-region">{{ regionLabel }}</span>
   </span>
 </template>
 

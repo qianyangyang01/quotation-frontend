@@ -88,6 +88,8 @@ export type QuotationMatrixRow = {
   country: string
   /** 报价行的区域身份；非澳大利亚可包含物流商和渠道范围，保存时转换为原始分区。 */
   quoteRegion?: string
+  /** 仅供本次报价展示：实际命中价格行的分区，空字符串表示全国统一；不参与计费或保存。 */
+  priceRegion?: string
   /** 财务渠道稳定标识：规则 ID + 物流商 + 渠道代码。模板匹配以此字段为准。 */
   channelKey: string
   ruleId: number

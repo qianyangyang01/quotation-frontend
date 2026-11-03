@@ -12,6 +12,23 @@ import type { QuotationCountrySummary, QuotationMatrixRow } from './types'
 
 let app: App
 
+it('shows actual tariff scope while retaining AU destination identity and all quote amounts', async () => {
+  const changed = vi.fn()
+  const routes = [
+    { ...row('澳大利亚', 1), carrier: '通邮', transport: '标准挂号类-敏感', quoteRegion: '澳大利亚3区', priceRegion: '' },
+    { ...row('澳大利亚', 2), carrier: '燕文', transport: '澳洲专线', quoteRegion: '澳大利亚3区', priceRegion: '澳大利亚3区', quote1: 35 },
+  ]
+  mount(Matrix, { active: true, variant: 'template', countries: [{ ...countries[1]!, quoteRegions: ['澳大利亚2区', '澳大利亚3区'], selectedQuoteRegion: '澳大利亚3区' }],
+    contextKey: 'v1', customQuantity: 5, exchangeRate: 6.7, presetVersion: 1,
+    presetSelection: routes, quoteRowsForCountry: () => routes, onSelectionChange: changed })
+  await nextTick(); await nextTick()
+  expect([...document.querySelectorAll('.selected-channels .channel-region')].map(el => el.textContent)).toEqual(['全国统一价', '澳大利亚3区'])
+  expect(changed.mock.lastCall?.[0].map((r: QuotationMatrixRow) => [r.channelKey, r.quoteRegion, r.quote1, r.quote2, r.quote3]))
+    .toEqual([['1', '澳大利亚3区', 10, 20, 30], ['2', '澳大利亚3区', 35, 20, 30]])
+  const select = document.querySelector<HTMLSelectElement>('.selected-channels .quote-region-select select')!
+  expect(select.value).toBe('澳大利亚3区')
+})
+
 it('shows and searches all four Canadian Yanwen zones while retaining the exact selected route', async () => {
   const changed = vi.fn()
   const routes = [1, 2, 3, 4].map(zone => ({

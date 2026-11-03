@@ -1737,6 +1737,7 @@ function matchedLogistics(p: Product, country = p.country, region = quoteRegionF
       freight: Number(result.total.toFixed(2)),
       baseFee: Number(result.base.toFixed(2)),
       registrationFee: result.price.registrationFee,
+      priceRegion: result.price.zoneName || '',
       minChargeWeightKg: result.minChargeWeightKg,
       eta: formatLogisticsEta(result.price),
       weightRange: `${displayGrams(result.price.weightFromKg)}～${displayGrams(result.price.weightToKg)} g`,
