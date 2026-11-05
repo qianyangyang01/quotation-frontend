@@ -26,6 +26,8 @@ it.each(['womens-single', 'womens-bundle'] as const)('restores %s into a normal 
     state.lockMode=false;state.mode='freight-trial';await nextTick()
     expect([...gradeSelect.options].some(o => o.value==='WOMENS')).toBe(false)
     state.mode='single';state.singleOnly=true;await nextTick()
-    expect([...gradeSelect.options].some(o => o.value==='WOMENS')).toBe(false)
+    expect([...gradeSelect.options].some(o => o.value==='WOMENS')).toBe(true)
+    gradeSelect.value='WOMENS';gradeSelect.dispatchEvent(new Event('change'))
+    expect(grade).toHaveBeenLastCalledWith('WOMENS')
   } finally { app.unmount() }
 })

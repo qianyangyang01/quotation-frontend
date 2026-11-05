@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import { batchSheetEditorSource, captureBatchSheet } from '@/services/batchSingleSheetEditor'
 import type { BatchSingleDocument, BatchSingleItem } from '@/services/batchSingleQuotation'
+import { isWomensQuotation } from '@/data/quotationModes'
 
 const props = defineProps<{ document: BatchSingleDocument; calculateItem?: (sku: string, quantities: number[]) => Promise<BatchSingleItem> }>()
 const emit = defineEmits<{ busy: [value: boolean] }>()
@@ -17,6 +18,7 @@ for (const [index, quantity] of system.value.quantities.entries()) extraPrices.s
 const sourcePending = computed(() => busy.value || !!error.value)
 function pricingBasis(input: BatchSingleItem['input']) {
   return JSON.stringify([
+    input.quoteMode, input.customerGrade, input.womensPricing,
     input.exchangeRate, input.financeVersions, input.purchaseVersions, input.logisticsRevision,
     input.purchaseUnitPriceCny, input.domesticFreightPerUnitCny, input.customerOperation,
     input.weightSnapshot?.items, input.weightSnapshot?.specialPackagingGrams,
@@ -33,16 +35,41 @@ async function quantitiesChanged(quantities: number[]) {
       const missing = next.filter(quantity => !extraPrices.has(quantity))
       if (missing.length) {
         const loaded = new Map(missing.map(quantity => [quantity, new Map<string, number | null>()]))
+        const sampleUpdates: Array<() => void> = []
         for (const [index, item] of original.items.entries()) {
           const fresh = await props.calculateItem(item.input.primarySku, next)
           if (disposed) return
           // A quantity edit must not silently replace the previously generated pricing basis.
           if (pricingBasis(item.input) !== pricingBasis(fresh.input)) throw new Error(`${item.input.primarySku} 的计价资料已变化，请修改条件后重新生成整批报价`)
+          if (isWomensQuotation(item.input.quoteMode)) {
+            for (const option of item.input.quoteOptions ?? []) {
+              const updated = fresh.input.quoteOptions?.find(row => row.id === option.id)
+              if (!updated) throw new Error(`${item.input.primarySku} 的报价渠道已变化，请重新生成`)
+              for (const quantity of missing) {
+                const price = fresh.input.systemQuantityQuotes?.rows.find(row => row.optionId === option.id)?.prices[fresh.input.systemQuantityQuotes.quantities.indexOf(quantity)]
+                if (price != null && (!updated.womensPricingSamples?.some(row => row.quantity === quantity) || !updated.logisticsSamples?.some(row => row.quantity === quantity))) throw new Error(`${item.input.primarySku} 的新增数量缺少女装计价依据，请重新生成`)
+              }
+              const mergeSamples = <T extends { quantity: number }>(previous: T[] = [], added: T[] = []) => {
+                const byQuantity = new Map(previous.map(row => [row.quantity, row]))
+                for (const row of added) {
+                  const existing = byQuantity.get(row.quantity)
+                  if (existing && JSON.stringify(existing) !== JSON.stringify(row)) throw new Error(`${item.input.primarySku} 的计价依据已变化，请重新生成整批报价`)
+                  byQuantity.set(row.quantity, row)
+                }
+                return [...byQuantity.values()]
+              }
+              const womens = mergeSamples(option.womensPricingSamples, updated.womensPricingSamples)
+              const logistics = mergeSamples(option.logisticsSamples, updated.logisticsSamples)
+              sampleUpdates.push(() => { option.womensPricingSamples = womens; option.logisticsSamples = logistics })
+            }
+          }
           for (const entry of source.entries.filter(entry => entry.index === index)) for (const q of missing) {
             const snapshot = fresh.input.systemQuantityQuotes
             loaded.get(q)!.set(entry.row.channelKey, snapshot?.rows.find(row => row.optionId === entry.option.id)?.prices[snapshot.quantities.indexOf(q)] ?? null)
           }
         }
+        // Apply only after every SKU passed, preserving the generated snapshots on failure.
+        sampleUpdates.forEach(update => update())
         for (const [quantity, prices] of loaded) extraPrices.set(quantity, prices)
       }
       const quantities = [...extraPrices.keys()]

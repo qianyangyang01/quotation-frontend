@@ -1,4 +1,5 @@
 import type { PriceException, PriceExceptionType } from '@/data/priceExceptions'
+import { isSingleQuotation, isWomensQuotation } from '@/data/quotationModes'
 import type { createQuotationRecord } from '@/data/quotationRecords'
 import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { orderQuoteRows, placeAverageRowsBeforeMembers } from '@/data/quoteSheetRowOrder'
@@ -66,7 +67,8 @@ export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument 
   if (!items.length || items.length > 50) throw new Error('请选择1至50个已完成报价的 SKU')
   const first = items[0]!, seen = new Set<string>()
   for (const item of items) {
-    if (item.input.quoteMode !== 'single' || seen.has(item.input.primarySku)) throw new Error('批量单品不能混入其他模式或重复 SKU')
+    if (!isSingleQuotation(item.input.quoteMode) || item.input.quoteMode !== first.input.quoteMode || seen.has(item.input.primarySku)) throw new Error('批量单品不能混入其他模式或重复 SKU')
+    if (isWomensQuotation(item.input.quoteMode) && (!item.input.womensPricing || JSON.stringify(item.input.womensPricing) !== JSON.stringify(first.input.womensPricing))) throw new Error('女装系数规则已变化，请统一重新生成整批报价')
     seen.add(item.input.primarySku)
     if (item.input.customerName !== first.input.customerName || item.input.customerGrade !== first.input.customerGrade || item.input.exchangeRate !== first.input.exchangeRate || item.input.commissionThreshold !== first.input.commissionThreshold) throw new Error('客户、等级、汇率或佣金条件不一致，请统一重新生成')
     if (JSON.stringify(item.input.customerQuote?.quantities) !== JSON.stringify(first.input.customerQuote?.quantities)) throw new Error('各 SKU 的数量列必须一致，请重新生成')

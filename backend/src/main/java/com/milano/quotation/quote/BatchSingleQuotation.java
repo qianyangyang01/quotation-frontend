@@ -1,6 +1,7 @@
 package com.milano.quotation.quote;
 
 import com.milano.quotation.common.AppException;
+import com.milano.quotation.finance.WomensPricing;
 import com.milano.quotation.logistics.LogisticsQuotationGuard;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
@@ -28,13 +29,13 @@ public class BatchSingleQuotation {
             if (!(item.path("input") instanceof ObjectNode original) || !(item.path("sheet") instanceof ObjectNode sheetInput))
                 throw AppException.unprocessable("批量商品与报价单格式错误");
             var input = original.deepCopy(); var sku = input.path("primarySku").asText().trim().toUpperCase(Locale.ROOT);
-            if (!"single".equals(input.path("quoteMode").asText()) || !sku.matches("[A-Z0-9][A-Z0-9._/-]{0,95}") || !seen.add(sku)
+            if (!WomensPricing.isSingle(input.path("quoteMode").asText()) || !sku.matches("[A-Z0-9][A-Z0-9._/-]{0,95}") || !seen.add(sku)
                 || input.has("fob") || input.has("batchSingle"))
                 throw AppException.unprocessable("仅允许不重复的单品 SKU 报价");
             input.put("primarySku", sku);
             if (input.path("quoteOptions").size() > 100) throw AppException.unprocessable("每个 SKU 最多100条渠道");
             if (firstInput == null) firstInput = input;
-            else for (var field : List.of("customerName", "customerGrade", "exchangeRate", "commissionThreshold"))
+            else for (var field : List.of("quoteMode", "customerName", "customerGrade", "exchangeRate", "commissionThreshold", "womensPricing"))
                 if (!Objects.equals(firstInput.path(field), input.path(field))) throw AppException.unprocessable("各 SKU 的客户、等级、汇率及佣金条件必须一致");
             validator.validate(input);
             validator.validateQuotePricing(input);

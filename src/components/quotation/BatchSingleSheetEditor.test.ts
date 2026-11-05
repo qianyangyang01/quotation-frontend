@@ -9,6 +9,7 @@ import { quoteSheetTextTable } from '@/data/customerQuoteSheet'
 import { renderCustomerQuoteSheet } from '@/services/customerQuoteSheetRenderer'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { buildQuotationWeightSnapshot } from '@/data/quotationWeightSnapshot'
+import { defaultWomensPricing, womensPricingSample } from '@/data/womensPricing'
 
 vi.mock('@/services/customerQuoteSheetRenderer',async original=>({...await original<typeof import('@/services/customerQuoteSheetRenderer')>(),preloadQuoteSheetAssets:vi.fn().mockResolvedValue([]),renderCustomerQuoteSheet:vi.fn().mockResolvedValue([])}))
 vi.mock('@/services/customerQuoteSheetClipboard', () => ({ copyQuoteSheetData: vi.fn().mockResolvedValue(undefined) }))
@@ -23,6 +24,42 @@ async function mount(calculateItem?: (sku:string,q:number[])=>Promise<BatchSingl
  const host=document.createElement('div');document.body.append(host);app=createApp(Editor,{document:documentInput,calculateItem});editor=app.mount(host) as unknown as typeof editor;await nextTick();return documentInput
 }
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.restoreAllMocks()})
+function womensItem(sku: string, quantities = [1,2,3]) {
+ const result=item(sku), policy={...defaultWomensPricing(),version:2}
+ result.input.quoteMode='womens-single';result.input.customerGrade='女装自动系数';result.input.womensPricing=policy
+ for(const option of result.input.quoteOptions!) {
+  option.womensPricingSamples=quantities.map(q=>womensPricingSample(policy,q*(sku==='SKU-A'?10:30),6.7,q))
+  option.logisticsSamples=quantities.map(q=>({quantity:q,input:{weightKg:q*.102},total:q*2}))
+ }
+ result.input.systemQuantityQuotes={quantities,rows:result.input.quoteOptions!.map(option=>({optionId:option.id,prices:quantities.map(q=>q*(sku==='SKU-A'?5:7))}))}
+ return result
+}
+it('retains per-SKU womens and freight evidence for successive new quantities without rewriting source snapshots',async()=>{
+ const original=mergeBatchSingle([womensItem('SKU-A'),womensItem('SKU-B')]), before=JSON.stringify(original)
+ const calculate=vi.fn(async(sku:string,quantities:number[])=>womensItem(sku,quantities))
+ await mount(calculate,original)
+ for(const q of [8,10]) {
+  button('＋ 新增列').click();await nextTick()
+  const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input[type=number]')].at(-1)!;quantity.value=String(q);quantity.dispatchEvent(new Event('input'));await nextTick()
+  await vi.waitFor(()=>expect(document.querySelector('[role="status"]')).toBeNull())
+ }
+ const saved=await editor.capture()
+ for(const item of saved.items)for(const option of item.input.quoteOptions!) {
+  expect(option.womensPricingSamples!.map(row=>row.quantity)).toEqual(expect.arrayContaining([1,2,3,8,10]))
+  expect(option.logisticsSamples!.map(row=>row.quantity)).toEqual(expect.arrayContaining([1,2,3,8,10]))
+  expect(item.input.womensPricing).toEqual(original.items[0]!.input.womensPricing)
+ }
+ expect(saved.items[0]!.input.quoteOptions![0]!.womensPricingSamples!.find(s=>s.quantity===8)!.coefficient).toBe(1.27)
+ expect(saved.items[1]!.input.quoteOptions![0]!.womensPricingSamples!.find(s=>s.quantity===8)!.coefficient).toBe(1.23)
+ expect(JSON.stringify(original)).toBe(before)
+})
+it('blocks new quantity save when womens policy changes even if the first three prices coincide',async()=>{
+ await mount(async(sku,quantities)=>{const fresh=womensItem(sku,quantities);fresh.input.womensPricing!.version++;return fresh},mergeBatchSingle([womensItem('SKU-A')]))
+ button('＋ 新增列').click();await nextTick()
+ const quantity=[...document.querySelectorAll<HTMLInputElement>('.sheet-quantity input[type=number]')].at(-1)!;quantity.value='8';quantity.dispatchEvent(new Event('input'));await nextTick()
+ await vi.waitFor(()=>expect(document.body.textContent).toContain('计价资料已变化'))
+ await expect(editor.capture()).rejects.toThrow('计价资料已变化')
+})
 it('restores tools and keeps same-channel price edits, hidden rows, order and metadata isolated by SKU',async()=>{
  const input=await mount(),before=JSON.stringify(input)
  expect(button('添加图片')).toBeTruthy();expect(button('渠道平均报价')).toBeTruthy();expect(button('＋ 新增列')).toBeTruthy()

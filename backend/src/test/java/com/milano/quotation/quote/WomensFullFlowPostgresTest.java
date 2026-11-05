@@ -125,6 +125,98 @@ class WomensFullFlowPostgresTest {
         mvc.perform(patch("/api/v1/quotations/{id}/finance-review",id).with(finance).with(csrf()).contentType("application/json").content(body.toString())).andExpect(status().isOk());
     }
     List<Map<String,Object>> snapshot(UUID id) {return jdbc.sql("select to_jsonb(q)::text as quotation,to_jsonb(r)::text as review from quotation_record q left join quotation_review r on r.id=q.id where q.id=:id").param("id",id).query().listOfRows();}
+    ObjectNode batch(String reference,long version) throws Exception {
+        var first=input("single",reference,version);
+        var second=(ObjectNode)mapper.readTree(first.toString().replace("NZ-DEMO-001","NZ-DEMO-002"));
+        currentPurchaseVersions(second);
+        return batchDocument(List.of(first,second));
+    }
+    void currentPurchaseVersions(ObjectNode quote) {
+        var versions=quote.putObject("purchaseVersions");
+        jdbc.sql("select sku,version,updated_at from purchase_product where sku=:sku").param("sku",quote.path("primarySku").asText()).query().listOfRows()
+            .forEach(row->versions.put(row.get("sku").toString(),row.get("version")+":"+((java.sql.Timestamp)row.get("updated_at")).toInstant()));
+    }
+    @Test void savesActualBrowserBatchIncludingAddedQuantityAndIndependentTierSnapshots() throws Exception {
+        ObjectNode body;
+        try(var resource=getClass().getResourceAsStream("/womens-batch-browser.json")){body=(ObjectNode)mapper.readTree(resource.readAllBytes());}
+        for(var item:body.at("/document/items")) {
+            var q=(ObjectNode)item.path("input");q.put("customerName",owner).put("logisticsSyncScope","selected");currentPurchaseVersions(q);
+            for(var node:q.path("quoteOptions")) {
+                var o=(ObjectNode)node;var code=o.path("channelCode").asText();o.put("logisticsChannelId",channels.get(code).toString()).put("logisticsVersionId",versions.get(code).toString());
+            }
+        }
+        var saved=createBatch(body,UUID.randomUUID().toString());assertEquals(2,saved.path("records").size());
+        for(int i=0;i<2;i++) {
+            var id=UUID.fromString(saved.path("records").get(i).path("id").asText());var actual=view(id);var expected=body.at("/document/items/"+i+"/input");
+            assertEquals(expected.path("systemQuantityQuotes"),actual.path("systemQuantityQuotes"));
+            assertEquals(expected.path("customerQuote"),actual.path("customerQuote"));
+            for(int j=0;j<2;j++) {
+                assertEquals(expected.at("/quoteOptions/"+j+"/womensPricingSamples"),actual.at("/quoteOptions/"+j+"/womensPricingSamples"));
+                assertTrue(java.util.stream.StreamSupport.stream(actual.at("/quoteOptions/"+j+"/womensPricingSamples").spliterator(),false).anyMatch(s->s.path("quantity").asInt()==8));
+            }
+            review(id,"claim");review(id,"complete");assertEquals("approved",view(id).path("financeReviewStatus").asText());
+        }
+    }
+    ObjectNode batchDocument(List<ObjectNode> quotes) {
+        var body=mapper.createObjectNode().put("kind","single");var document=body.putObject("document").put("schemaVersion",1);
+        var items=document.putArray("items");ObjectNode merged=null;int index=0;
+        for(var quote:quotes) {
+            var sheet=mapper.createObjectNode().put("agent",owner).put("date","5 Nov 2026");sheet.putArray("issues");
+            var labels=sheet.putArray("quantityLabels");for(var q:quote.at("/customerQuote/quantities"))labels.add(q.asInt()+(q.asInt()==1?" pc":" pcs"));
+            var rows=sheet.putArray("rows");
+            for(var option:quote.path("quoteOptions")) {
+                var row=rows.addObject().put("key",option.path("quoteSheetKey").asText()).put("number",rows.size()).put("sku",quote.path("primarySku").asText())
+                    .put("country","United States").put("provider",option.path("carrier").asText()).put("shippingTime","7-12 days").put("sourceDescription","");
+                for(var prices:quote.at("/customerQuote/rows"))if(prices.path("optionId").equals(option.path("id")))row.set("prices",prices.path("prices").deepCopy());
+            }
+            var item=items.addObject();item.set("input",quote);item.set("sheet",sheet);
+            if(merged==null){merged=sheet.deepCopy();merged.putArray("rows");}
+            for(var row:rows)merged.withArray("rows").add(((ObjectNode)row).deepCopy().put("key",index+":"+row.path("key").asText()).put("number",merged.path("rows").size()+1));
+            index++;
+        }
+        document.set("sheet",merged);return body;
+    }
+    ResultActions submitBatch(ObjectNode body,String key) throws Exception {
+        return mvc.perform(post("/api/v1/quotations/batch").with(employee).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(body.toString()));
+    }
+    JsonNode createBatch(ObjectNode body,String key) throws Exception {
+        return mapper.readTree(submitBatch(body,key).andDo(r->{if(r.getResponse().getStatus()>=400)System.out.println(r.getResponse().getContentAsString());}).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+    }
+    @Test void batchUsesOrdinaryWomensValidationAndPreservesApprovedHistoryAcrossPolicyChange() throws Exception {
+        var body=batch("1.23",1);var key=UUID.randomUUID().toString();var result=createBatch(body,key);
+        assertEquals(2,result.path("records").size());assertEquals(result,createBatch(body,key));
+        var snapshots=new LinkedHashMap<UUID,List<Map<String,Object>>>();
+        for(int i=0;i<2;i++) {
+            var id=UUID.fromString(result.path("records").get(i).path("id").asText());var saved=view(id);
+            var single=create((ObjectNode)body.at("/document/items/"+i+"/input"));
+            assertEquals("womens-single",saved.path("quoteMode").asText());
+            for(var field:List.of("quoteOptions","womensPricing","customerQuote","systemQuantityQuotes"))assertEquals(single.path(field),saved.path(field));
+            review(id,"claim");review(id,"complete");snapshots.put(id,snapshot(id));
+        }
+        var firstId=snapshots.keySet().iterator().next();
+        mvc.perform(get("/api/v1/quotations/{id}/batch-records",firstId).with(employee)).andExpect(status().isOk()).andExpect(jsonPath("$.data.length()").value(2));
+        var policy=(ObjectNode)body.at("/document/items/0/input/womensPricing").deepCopy();policy.remove("version");policy.put("referenceCoefficient",1.5);
+        mvc.perform(put("/api/v1/finance-settings/womens-pricing").with(finance).with(csrf()).header("If-Match",1).contentType("application/json").content(policy.toString())).andExpect(status().isOk());
+        var count=records.count();submitBatch(body,UUID.randomUUID().toString()).andExpect(status().isConflict());assertEquals(count,records.count());
+        var fresh=createBatch(batch("1.5",2),UUID.randomUUID().toString());
+        for(var saved:fresh.path("records"))assertEquals(2,view(UUID.fromString(saved.path("id").asText())).path("womensPricing").path("version").asInt());
+        for(var entry:snapshots.entrySet())assertEquals(entry.getValue(),snapshot(entry.getKey()));
+    }
+    @Test void batchRejectsSecondSkuTamperingMixedModesAndPolicyDriftAtomically() throws Exception {
+        for(var failure:List.of("coefficient","mode","version","missing-sample","sheet")) {
+            var body=batch("1.23",1);var second=(ObjectNode)body.at("/document/items/1/input");
+            switch(failure) {
+                case "coefficient" -> ((ObjectNode)second.at("/quoteOptions/0/womensPricingSamples/0")).put("coefficient",1.01);
+                case "mode" -> second.put("quoteMode","single");
+                case "version" -> ((ObjectNode)second.path("womensPricing")).put("version",2);
+                case "missing-sample" -> ((ArrayNode)second.at("/quoteOptions/0/womensPricingSamples")).remove(0);
+                case "sheet" -> ((ArrayNode)body.at("/document/items/1/sheet/rows/0/prices")).set(0,IntNode.valueOf(1));
+            }
+            var count=records.count();submitBatch(body,UUID.randomUUID().toString()).andExpect(status().isUnprocessableEntity());assertEquals(count,records.count(),failure);
+        }
+        var disabled=(ObjectNode)fixture("single").path("womensPricing").deepCopy();disabled.remove("version");disabled.put("enabled",false);setting("womens-pricing",disabled.toString(),1);
+        var count=records.count();submitBatch(batch("1.23",1),UUID.randomUUID().toString()).andExpect(status().isConflict());assertEquals(count,records.count());
+    }
     @ParameterizedTest @ValueSource(strings={"single","bundle"})
     void savesAuditsChangesPolicyAndReissuesWithoutMutatingHistory(String mode) throws Exception {
         var ordinaryInput=input(mode,"1.23",1,true);var ordinary=create(ordinaryInput);var ordinaryId=UUID.fromString(ordinary.path("id").asText());

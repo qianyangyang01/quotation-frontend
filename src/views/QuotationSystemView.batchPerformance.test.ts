@@ -11,8 +11,11 @@ import { replaceLogisticsRules, type LogisticsRule } from '@/data/logistics'
 import { loadPublishedLogisticsManifest, loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
 import type { QuotationDraftPayload } from '@/services/quotationDrafts'
 import type { BatchSingleItem } from '@/services/batchSingleQuotation'
+import { mergeBatchSingle } from '@/services/batchSingleQuotation'
+import { defaultWomensPricing } from '@/data/womensPricing'
+import Decimal from 'decimal.js'
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }), onBeforeRouteLeave: vi.fn() }))
+vi.mock('vue-router', () => ({ RouterLink: { template: '<a><slot /></a>' }, useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async original => ({ ...await original<typeof import('@/services/quotationSync')>(), startQuotationSync: vi.fn(() => vi.fn()) }))
 vi.mock('@/services/customerQuoteSheetRenderer', async original => ({ ...await original<typeof import('@/services/customerQuoteSheetRenderer')>(), preloadQuoteSheetAssets: vi.fn().mockResolvedValue([]) }))
 vi.mock('@/data/publishedLogisticsRepository', async original => ({
@@ -33,10 +36,11 @@ const finance = {
   'exchange-rate': { value: { usdCny: 6, eurUsd: 1.1, updatedAt: 'test' }, _version: 1 },
   'tax-settings': { value: fees, _version: 1 }, 'surcharge-settings': { value: fees, _version: 1 },
   'customer-operation-fees': { value: { customers: [] }, _version: 1 },
+  'womens-pricing': { value: defaultWomensPricing(), _version: 1 },
 }
 let app: App, host: HTMLDivElement
 afterEach(() => { app?.unmount(); host?.remove(); vi.restoreAllMocks(); clearFinanceSettingsCache(); replaceLogisticsRules([]); authState.current = null; authState.permissions = [] })
-it('generates 14 SKUs x 15 channels with independent prices and per-SKU server validation', async () => {
+it.each(['single', 'womens-single'] as const)('generates %s: 14 SKUs x 15 channels with independent prices and per-SKU server validation', async mode => {
   clearFinanceSettingsCache(); vi.clearAllMocks()
   authState.current = {id:'test-admin',name:'管理员',account:'ADMIN',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''}
   authState.permissions = [...roleDefinitions.find(r => r.key === 'super_admin')!.permissions]
@@ -61,15 +65,17 @@ it('generates 14 SKUs x 15 channels with independent prices and per-SKU server v
   host = document.createElement('div'); document.body.append(host)
   app = createApp(View,{batchCapture:true,batchSkus:Array.from({length:14},(_,i)=>`SKU${i}`),batchSize:14})
   const vm = app.mount(host)
-  const state = (vm.$ as unknown as {setupState:{draftReady:boolean;customerName:string;quoteMatrixMode:string;logisticsLoadState:string;draftPayload:()=>QuotationDraftPayload;calculateBatchItem:(sku:string,payload:QuotationDraftPayload,quantities:number[])=>Promise<BatchSingleItem>}}).setupState
+  const state = (vm.$ as unknown as {setupState:{draftReady:boolean;customerName:string;quoteMode:string;quoteMatrixMode:string;logisticsLoadState:string;changeCustomerGrade:(grade:string)=>void;restoreBatchSample:()=>Promise<void>;draftPayload:()=>QuotationDraftPayload;calculateBatchItem:(sku:string,payload:QuotationDraftPayload,quantities:number[])=>Promise<BatchSingleItem>}}).setupState
   await vi.waitFor(()=>expect(state.draftReady).toBe(true))
   vi.mocked(loadPublishedLogisticsManifest).mockClear(); vi.mocked(loadPublishedLogisticsRules).mockClear()
   state.customerName='批量性能验证'; state.quoteMatrixMode='common'; await nextTick()
+  state.changeCustomerGrade(mode === 'womens-single' ? 'WOMENS' : 'S'); await nextTick()
+  expect(state.quoteMode).toBe(mode)
   const conditions=state.draftPayload()
   conditions.product.sku='SKU0'; conditions.skuSearch='SKU0'
   conditions.commonSelections=rules.map(rule=>({country:'美国',quoteRegion:'',channelKey:`${rule.id}::燕文::${rule.relations[0]!.channelCode}`,rule:rule.name,carrier:'燕文',transport:rule.relations[0]!.channel}))
   const start=performance.now(), items:BatchSingleItem[]=[]
-  for(let i=0;i<14;i++) items.push(await state.calculateBatchItem(`SKU${i}`,conditions,[1,2,3]))
+  for(let i=0;i<14;i++) items.push(await state.calculateBatchItem(`SKU${i}`,conditions,[1,2,3,8]))
   const elapsedMs=Math.round(performance.now()-start)
   expect(items.flatMap(item=>item.sheet.rows)).toHaveLength(210)
   expect(new Set(items.map(item=>item.sheet.rows[0]!.prices[0])).size).toBe(14)
@@ -81,6 +87,30 @@ it('generates 14 SKUs x 15 channels with independent prices and per-SKU server v
   expect(loadPublishedLogisticsRules).toHaveBeenCalledTimes(baseline?14:1)
   expect(get.mock.calls.filter(([path])=>path==='/finance-settings')).toHaveLength(baseline?15:1)
   expect(post).not.toHaveBeenCalled()
+  expect(items.every(item => item.input.quoteMode === mode)).toBe(true)
+  expect(mergeBatchSingle(items).items).toHaveLength(14)
+  if (mode === 'womens-single') {
+    const factors = new Set<number>()
+    for (const item of items) for (const option of item.input.quoteOptions!) {
+      expect(option.womensPricingSamples!.map(sample => sample.quantity)).toEqual(expect.arrayContaining([1,2,3,8]))
+      for (const sample of option.womensPricingSamples!) {
+        const freight = option.logisticsSamples!.find(row => row.quantity === sample.quantity)!.total!
+        const cost = new Decimal(item.input.purchaseUnitPriceCny!).plus(item.input.domesticFreightPerUnitCny!).times(sample.quantity).plus(freight)
+        const reference = cost.times('1.23').div(6)
+        const factor = reference.lt(20) ? 1.27 : reference.lt(30) ? 1.25 : reference.lt(50) ? 1.23 : 1.22
+        factors.add(factor)
+        expect(sample.costCny).toBeCloseTo(cost.toNumber(), 8)
+        expect(sample.coefficient).toBe(factor)
+        expect(sample.baseQuoteCny).toBeCloseTo(cost.times(factor).toNumber(), 8)
+        // Same existing tax/surcharge and 0.05 rounding sequence; reference factor is never compounded.
+        const usd = cost.times(factor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).div(6).plus('.3').toDecimalPlaces(2, Decimal.ROUND_HALF_UP).plus('.3').div('.05').ceil().times('.05').toNumber()
+        const snapshot = item.input.systemQuantityQuotes!
+        const index = snapshot.quantities.indexOf(sample.quantity)
+        if (index >= 0) expect(snapshot.rows.find(row => row.optionId === option.id)!.prices[index]).toBe(usd)
+      }
+    }
+    expect([...factors].sort()).toEqual([1.22,1.23,1.25,1.27])
+  }
   const digest=createHash('sha256').update(JSON.stringify(items.map(item=>({input:item.input,rows:item.sheet.rows})))).digest('hex')
   const report={benchmark:'14x15',latencyMs:latency,elapsedMs,digest,manifest:vi.mocked(loadPublishedLogisticsManifest).mock.calls.length,ruleLoads:vi.mocked(loadPublishedLogisticsRules).mock.calls.length,financeLoads:get.mock.calls.filter(([path])=>path==='/finance-settings').length}
   if(process.env.BATCH_BENCHMARK_OUTPUT)writeFileSync(process.env.BATCH_BENCHMARK_OUTPUT,JSON.stringify(report,null,2))
@@ -97,4 +127,8 @@ it('generates 14 SKUs x 15 channels with independent prices and per-SKU server v
   differentAttribute.logisticsAttribute='带电'
   await state.calculateBatchItem('SKU0',differentAttribute,[1,2,3]).catch(()=>undefined)
   expect(loadPublishedLogisticsRules).toHaveBeenCalledTimes(priorLoads+3)
+  await state.restoreBatchSample()
+  expect(state.quoteMode).toBe(mode)
+  state.changeCustomerGrade('S');await nextTick()
+  expect(state.quoteMode).toBe('single')
 }, 60000)

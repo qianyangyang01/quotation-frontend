@@ -818,7 +818,7 @@ function changeQuoteMode(mode: QuotationMode | 'fob') {
 function changeCustomerGrade(value: string) {
   if (savingQuotation.value || syncRefreshing.value) return
   const womens = value === 'WOMENS'
-  if (womens && (props.batchCapture || manualMode.value || fobActive.value)) return
+  if (womens && (manualMode.value || fobActive.value)) return
   if (!womens && !customerGradeSettings.some(item => item.enabled && item.grade === value)) return
   const mode = quotationModeForCustomer(quoteMode.value, womens)
   if (mode !== quoteMode.value && props.resumeQuoteId && (!draftSource.value || draftSource.value.quotationBatch)) return
@@ -2373,7 +2373,8 @@ async function calculateBatchItem(sku: string, conditions: QuotationDraftPayload
     batchCaptured = undefined
     notice.value = ''
     const payload = JSON.parse(JSON.stringify(conditions)) as QuotationDraftPayload
-    payload.quoteMode = 'single'; payload.skuSearch = sku; payload.product.sku = sku
+    if (!isSingleQuotation(payload.quoteMode)) throw new Error('批量单品只支持普通单品或女装单品报价')
+    payload.skuSearch = sku; payload.product.sku = sku
     payload.product.weightSource = 'purchase'; payload.product.manualWeight = 0
     payload.product.primaryChannelKey = ''; payload.product.primaryRule = ''; payload.product.primaryCarrier = ''
     payload.bundleItems = []
@@ -2420,7 +2421,8 @@ async function selectBatchSample(sku: string, restore = false) {
     const purchase = await loadPurchaseProduct(sku)
     if (viewDisposed) return
     if (!purchase.quoteReady) throw new Error(purchaseQuoteBlockingMessage(purchase) || '采购资料不完整')
-    payload.quoteMode = 'single'; payload.skuSearch = sku; payload.product.sku = sku
+    if (!isSingleQuotation(payload.quoteMode)) throw new Error('批量单品只支持普通单品或女装单品报价')
+    payload.skuSearch = sku; payload.product.sku = sku
     payload.product.weightSource = 'purchase'; payload.product.manualWeight = 0
     payload.product.primaryChannelKey = ''; payload.product.primaryRule = ''; payload.product.primaryCarrier = ''; payload.bundleItems = []
     await applyDraftPayload(payload, new Map([[sku, purchase]]), { restoreQuotation: true })

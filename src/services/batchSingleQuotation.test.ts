@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mergeBatchSingle, parseBatchSingleSkus, type BatchSingleItem } from './batchSingleQuotation'
+import { defaultWomensPricing } from '@/data/womensPricing'
 
 export function batchItem(sku: string, price = 5): BatchSingleItem {
   return {
@@ -10,6 +11,17 @@ export function batchItem(sku: string, price = 5): BatchSingleItem {
   } as unknown as BatchSingleItem // Minimal fixture: merge does not consume calculation-only fields.
 }
 describe('independent batch single quotation', () => {
+  it('preserves womens snapshots and rejects mixed pricing modes or policy versions', () => {
+    const items = [batchItem('A', 12.7), batchItem('B', 25)]
+    items.forEach(item => { item.input.quoteMode = 'womens-single'; item.input.customerGrade = '女装自动系数'; item.input.womensPricing = { ...defaultWomensPricing(), version: 2 } })
+    const before = JSON.stringify(items)
+    expect(mergeBatchSingle(items).items.map(item => item.input)).toEqual(items.map(item => item.input))
+    expect(JSON.stringify(items)).toBe(before)
+    items[1]!.input.womensPricing!.version = 3
+    expect(() => mergeBatchSingle(items)).toThrow('女装系数规则已变化')
+    items[1]!.input.quoteMode = 'single'
+    expect(() => mergeBatchSingle(items)).toThrow('其他模式')
+  })
   it('parses Excel lines and flags duplicates without silently discarding input', () => {
     const result = parseBatchSingleSkus('\uFEFF sku-a\r\nSKU-B\n sku-a\nSKU-C\t20')
     expect(result).toHaveLength(4)
