@@ -446,7 +446,8 @@ it('resets pagination for date filters and downloads every matching row with the
   await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page).toHaveBeenLastCalledWith('BK',0,10,expect.any(AbortSignal),{dateFrom:'2026-11-01',dateTo:'2026-11-09'})
   const link=document.querySelector<HTMLAnchorElement>('.sku-download')!
-  expect(link.textContent).toBe('下载筛选 SKU（25 条）')
+  expect(link.textContent).toBe('下载筛选 SKU')
+  expect(link.title).toBe('下载全部筛选结果，共 25 条')
   expect(link.getAttribute('href')).toBe('/api/v1/purchase-catalog/export.xlsx?q=BK&dateFrom=2026-11-01&dateTo=2026-11-09')
   Array.from(document.querySelectorAll<HTMLButtonElement>('.toolbar button')).find(b=>b.textContent==='重置筛选')!.click()
   await nextTick();await vi.advanceTimersByTimeAsync(250);await flush()

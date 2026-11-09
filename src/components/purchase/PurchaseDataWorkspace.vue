@@ -519,10 +519,10 @@ const detailFields = computed(() => detail.value ? [
       <input v-model="dateFrom" type="date" aria-label="报价开始日期" :max="dateTo || undefined">
       <span>至</span>
       <input v-model="dateTo" type="date" aria-label="报价结束日期" :min="dateFrom || undefined">
+      <a v-if="!loading && !dateRangeError && totalRecords" class="sku-download" :href="exportUrl" :title="`下载全部筛选结果，共 ${totalRecords} 条`" download>下载筛选 SKU</a>
+      <button v-else class="sku-download" disabled>下载筛选 SKU</button>
     </div>
     <button @click="resetFilters">重置筛选</button>
-    <a v-if="!loading && !dateRangeError && totalRecords" class="sku-download" :href="exportUrl" download>下载筛选 SKU（{{ totalRecords }} 条）</a>
-    <button v-else disabled>下载筛选 SKU</button>
     <span>普通采购与FOB · 共 {{ totalRecords }} 条 · 当前页 {{ tieredCount }} 条含阶梯价<span v-if="totalRecords"> · 当前 {{ pageStart + 1 }}–{{ pageEnd }} 条</span></span>
   </section>
   <p v-if="dateRangeError" class="filter-message error" role="alert">{{ dateRangeError }}</p>
@@ -729,7 +729,7 @@ const detailFields = computed(() => detail.value ? [
 .table-card .description-cell{overflow-wrap:anywhere;word-break:normal}
 .table-card .actions{white-space:normal}.actions button{white-space:nowrap;line-height:1.8}
 .entry-source-options{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:15px 0 10px}.entry-source-options button{padding:12px;text-align:left;border:1px solid #dce3e8;border-radius:7px;background:#fff;color:#273540;font-weight:800}.entry-source-options small{display:block;margin-top:4px;color:#74818b;font-size:11px;font-weight:400;letter-spacing:0}.entry-source-options button[aria-pressed=true]{border-color:#ed9b30;background:#fff8ec;box-shadow:inset 0 0 0 1px #ed9b30}.entry-source-help{font-size:11px!important;color:#72818b!important;margin:8px 0 14px!important}.entry-methods{display:flex;gap:22px;border-bottom:1px solid #e2e7eb;margin-bottom:14px}.entry-methods button{padding:9px 0;border:0;border-bottom:2px solid transparent;background:#fff;color:#71808d}.entry-methods button[aria-pressed=true]{color:#b26a07;border-bottom-color:#ee941c}.entry-file-panel{padding:24px;border:1px dashed #d3dce2;border-radius:8px;background:#fafbfc;text-align:center}.entry-file-panel p{font-size:12px;color:#74818b}.entry-file-panel input{max-width:100%}.entry-discard{padding:12px;margin-top:12px;border-radius:6px;background:#fff3df;font-size:12px}.entry-discard button{margin-left:8px}.editor-modal .entry-source-options button:disabled{opacity:.5}@media(max-width:600px){.entry-source-options{gap:5px}.entry-source-options button{padding:9px 6px;font-size:12px}.entry-source-options small{font-size:10px}}
-.toolbar{flex-wrap:wrap}.toolbar .date-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#596771;font-size:12px}.toolbar .date-filter input{box-sizing:border-box;width:145px;min-height:36px;padding:5px 8px;border:1px solid #dce3e8;border-radius:6px;background:#fff;font:inherit}.toolbar .sku-download{display:inline-flex;align-items:center;min-height:36px;padding:0 12px;border:1px solid #ffb452;border-radius:6px;background:#fff7eb;color:#a96000;font-size:12px;font-weight:700;text-decoration:none}.toolbar button:disabled{opacity:.5;cursor:not-allowed}.filter-message{margin:0 0 12px;color:#74808a;font-size:12px}.filter-message.error{color:#b42318}.toolbar label{max-width:100%;box-sizing:border-box}
+.toolbar{flex-wrap:wrap}.toolbar .date-filter{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;max-width:100%;overflow-x:auto;color:#596771;font-size:12px;white-space:nowrap}.toolbar .date-filter input{box-sizing:border-box;width:132px;min-height:32px;flex-shrink:0;padding:4px 6px;border:1px solid #dce3e8;border-radius:6px;background:#fff;font:inherit}.toolbar .sku-download{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;height:28px;padding:0 8px;border:1px solid #ffb452;border-radius:5px;background:#fff7eb;color:#a96000;font-size:11px;font-weight:700;white-space:nowrap;text-decoration:none}.toolbar button:disabled{opacity:.5;cursor:not-allowed}.filter-message{margin:0 0 12px;color:#74808a;font-size:12px}.filter-message.error{color:#b42318}.toolbar label{flex:1 1 240px;min-width:180px;max-width:360px;box-sizing:border-box}
 </style>
 
 <style scoped>
