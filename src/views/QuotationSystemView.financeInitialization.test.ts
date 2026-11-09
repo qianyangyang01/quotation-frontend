@@ -81,6 +81,7 @@ type PricingState = {
   financeSurchargeSettings: FinanceSurchargeSettings
   quotationAttributeOptions: string[]
   products: QuotationProduct[]
+  excelQuoteRows: (product: QuotationProduct, country: string, region?: string) => QuotationMatrixRow[]
   conditionIssues: (options: { includeSku: boolean; includeCategory: boolean }) => Array<{ key: string; message: string }>
   selectFinanceCustomer: (id: string) => void
   taxResult: (country: string, provider: string, cny: number, rule: string, channel: string, weight: number, quantity: number) => { configured: boolean; taxUsd: number; surchargeUsd: number; totalUsd: number }
@@ -150,6 +151,41 @@ describe('quotation finance initialization for an employee', () => {
     expect(host.innerHTML).not.toContain(coefficient.toString())
     expect(state.salePrice({ purchase: 80, purchaseFreightPerUnit: 5, freight: 15 } as QuotationProduct)).toBeCloseTo(100 * coefficient, 10)
   }
+
+  it('restores a legacy Israel draft into one picker option and loads both delivery modes in Israel', async () => {
+    await mountPage({ attribute: '以色列自提' })
+    const finance = financeResponse()
+    finance['channel-policies'].value = ['以色列自提', '以色列到门'].map((category, index) => ({
+      id: category, category, enabled: true, countryRules: [{ country: '以色列', stage: 'rare', allowedChannels: [`${index + 1}::物流商::C${index + 1}`] }],
+    }))
+    finance['country-classification'].value.push({ country: '以色列', code: 'IL', enabled: true, stage: 'rare', sortOrder: 22 })
+    resolveFinance(finance)
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    expect(selectableAttributes()).toEqual(['以色列'])
+    expect(state.products[0]!.logisticsAttribute).toBe('以色列')
+    const purchase = { sku: 'ISRAEL', category: '服装', productName: '测试商品', purchasePriceCny: 10, weightKg: .21,
+      quoteReady: true, status: '资料完整', taxPoint: 0, domesticFreight: .2, priceTiers: [] } as unknown as PurchaseProductRecord
+    const rules = [1, 2].map(id => ({ id, name: `渠道${id}`, status: '启用', billingVerified: true,
+      relations: [{ carrier: '物流商', channel: `渠道${id}`, channelCode: `C${id}`, discounts: '' }],
+      prices: [{ areaName: '以色列', countryCode: 'IL', weightFromKg: 0, weightToKg: 10, pricePerKg: 20, registrationFee: id * 5,
+        allowedMarks: '', prohibitedMarks: '', quoteReady: true, minChargeWeightKg: 0, startWeightKg: 0, firstWeightKg: 0,
+        firstWeightPrice: 0, nextWeightKg: 0, nextWeightPrice: 0, intervalPrice: 0, surcharge: 0, fuelSurchargeRate: 0 }],
+    } as LogisticsRule))
+    vi.mocked(loadPublishedLogisticsRules).mockImplementationOnce(async () => {
+      replaceLogisticsRules(rules)
+      return { revision: 'r1', verified: true, rules, source: 'network' }
+    })
+    await state.applyDraftPayload({ schemaVersion: 2, quoteMode: 'single', logisticsAttribute: '以色列到门', product: { sku: 'ISRAEL', primaryCountry: '美国' } } as QuotationDraftPayload,
+      new Map([['ISRAEL', purchase]]), { restoreQuotation: true })
+    expect(loadPublishedLogisticsRules).toHaveBeenLastCalledWith({ attribute: '以色列', countries: ['以色列'] }, expect.anything())
+    const rows = state.excelQuoteRows(state.products[0]!, '以色列', '全国统一')
+    expect(rows.map(row => [row.channelKey, row.deliveryModes])).toEqual([
+      ['1::物流商::C1', ['自提']], ['2::物流商::C2', ['到门']],
+    ])
+    expect(rows.every(row => row.quote1 != null && row.quote2 != null && row.quote3 != null)).toBe(true)
+    expect(JSON.stringify(finance['channel-policies'].value)).toContain('以色列自提')
+    expect(JSON.stringify(finance['channel-policies'].value)).toContain('以色列到门')
+  })
 
   it.each(['common', 'specified', 'template'] as const)('ignores legacy ordinary %s drafts without loading their products or channels', async mode => {
     const old = [{country:'美国', channelKey:'1::物流商::CHANNEL', rule:'旧规则', carrier:'物流商', transport:'旧渠道'}]

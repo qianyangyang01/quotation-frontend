@@ -8,3 +8,15 @@ export function normalizeLogisticsAttribute(value: string) {
 export function selectableLogisticsAttributes(values: string[]) {
   return [...new Set([...logisticsAttributeOptions, ...values.map(normalizeLogisticsAttribute)])].filter(value => value !== '液体')
 }
+
+// Quotation picker grouping only; finance policies and historical attributes remain distinct.
+export const israelDeliveryAttributes = ['以色列自提', '以色列到门'] as const
+export type IsraelDeliveryMode = '自提' | '到门'
+export function quotationLogisticsAttribute(value: string) {
+  const attribute = normalizeLogisticsAttribute(value)
+  return (israelDeliveryAttributes as readonly string[]).includes(attribute) ? '以色列' : attribute
+}
+export function quotationLogisticsAttributeOptions(values: string[]) {
+  const authorized = new Set(values.map(normalizeLogisticsAttribute))
+  return [...new Set(selectableLogisticsAttributes(values).filter(value => authorized.has(value)).map(quotationLogisticsAttribute))]
+}

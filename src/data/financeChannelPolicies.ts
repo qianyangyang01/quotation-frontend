@@ -1,5 +1,5 @@
 import { countryIdentityMatches, sameCountryIdentity } from './countryIdentity'
-import { logisticsAttributeOptions, normalizeLogisticsAttribute } from './logisticsAttributes'
+import { israelDeliveryAttributes, logisticsAttributeOptions, normalizeLogisticsAttribute, type IsraelDeliveryMode } from './logisticsAttributes'
 import { australiaQuoteRegions, logisticsCountries, logisticsRules, normalizeAustraliaQuoteRegion, type LogisticsRelation, type LogisticsPriceRow } from './logistics'
 import {
   defaultCountrySortOrder,
@@ -108,7 +108,7 @@ export function normalizeCustomerGradeSettings(settings: Partial<CustomerGradeSe
 
 export function countriesAvailableForCategory(attribute: string) {
   if (!attribute.trim()) return []
-  const countries = logisticsCountries.filter(country => country.name !== '全球')
+  const countries = logisticsCountries.filter(country => country.name !== '全球' && (attribute !== '以色列' || sameCountryIdentity(country.code || country.name, 'IL')))
   return [...new Map(countries.map(country => [country.code || country.name, country])).values()]
 }
 
@@ -333,7 +333,8 @@ export function customerGradeCoefficient(settings: CustomerGradeSetting[], grade
   return settings.find(setting => setting.grade === grade && setting.enabled)?.coefficient ?? 1
 }
 
-export function financeCountriesForCategory(policies: FinanceChannelPolicy[], attribute: string) {
+export function financeCountriesForCategory(policies: FinanceChannelPolicy[], attribute: string): string[] {
+  if (attribute === '以色列') return [...new Set(israelDeliveryAttributes.flatMap(value => financeCountriesForCategory(policies, value)))].filter(country => sameCountryIdentity(country, 'IL'))
   const matches = policies.filter(item => normalizeLogisticsAttribute(item.category) === normalizeLogisticsAttribute(attribute))
   const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
   const available = new Set(countriesAvailableForCategory(attribute).map(country => country.name))
@@ -357,7 +358,8 @@ export function financeCountryOptionsForCategory(policies: FinanceChannelPolicy[
 export function financeAllowsLogisticsChannel(
   policies: FinanceChannelPolicy[], attribute: string, country: string, ruleId: number,
   relation: Pick<LogisticsRelation, 'carrier' | 'channel' | 'channelCode'>,
-) {
+): boolean {
+  if (attribute === '以色列') return sameCountryIdentity(country, 'IL') && israelDeliveryAttributes.some(value => financeAllowsLogisticsChannel(policies, value, country, ruleId, relation))
   const matches = policies.filter(item => normalizeLogisticsAttribute(item.category) === normalizeLogisticsAttribute(attribute))
   const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
   const countryRule = policy?.countryRules.find(rule => sameCountryIdentity(rule.country,country))
@@ -367,12 +369,27 @@ export function financeAllowsLogisticsChannel(
 }
 
 /** One availability scan for a whole country's calculation, not one scan per channel. */
-export function financeAllowedChannelKeys(policies: FinanceChannelPolicy[], attribute: string, country: string) {
+export function financeAllowedChannelKeys(policies: FinanceChannelPolicy[], attribute: string, country: string): Set<string> {
+  const allowed = financeAuthorizedChannelKeys(policies, attribute, country)
+  return new Set(channelsAvailableForCountry(country, attribute).map(option => option.key).filter(key => allowed.has(key)))
+}
+
+export function financeAuthorizedChannelKeys(policies: FinanceChannelPolicy[], attribute: string, country: string): Set<string> {
+  if (attribute === '以色列') return new Set<string>(sameCountryIdentity(country, 'IL') ? israelDeliveryAttributes.flatMap(value => [...financeAuthorizedChannelKeys(policies, value, country)]) : [])
   const normalizedAttribute = normalizeLogisticsAttribute(attribute)
   const matches = policies.filter(item => normalizeLogisticsAttribute(item.category) === normalizedAttribute)
   const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
   const rule = policy?.countryRules.find(item => sameCountryIdentity(item.country, country))
   if (!rule?.allowedChannels.length) return new Set<string>()
-  const allowed = new Set(rule.allowedChannels)
-  return new Set(channelsAvailableForCountry(country, attribute).map(option => option.key).filter(key => allowed.has(key)))
+  return new Set(rule.allowedChannels)
+}
+
+export function financeIsraelDeliveryModes(policies: FinanceChannelPolicy[], country: string, key: string): IsraelDeliveryMode[] {
+  if (!sameCountryIdentity(country, 'IL')) return []
+  return israelDeliveryAttributes.flatMap(attribute => {
+    const matches = policies.filter(policy => normalizeLogisticsAttribute(policy.category) === attribute)
+    const policy = matches.length === 1 && matches[0]?.enabled ? matches[0] : undefined
+    return policy?.countryRules.find(rule => sameCountryIdentity(rule.country, country))?.allowedChannels.includes(key)
+      ? [attribute === '以色列自提' ? '自提' as const : '到门' as const] : []
+  })
 }

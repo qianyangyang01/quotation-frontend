@@ -83,6 +83,7 @@ export type BundleQuoteItem = {
 }
 
 export type QuotationMatrixRow = {
+  deliveryModes?: import('@/data/logisticsAttributes').IsraelDeliveryMode[]
   /** Published minimum for the parcel, applied once after combining all items. */
   minChargeWeightKg?: number
   country: string

@@ -22,11 +22,11 @@ import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import "@/styles/quotationCompact.css"
 import { loadCustomerOperationSettings, resolveCustomerOperation, customerOperationFeeForQuantity, addCustomerOperationFee, CUSTOMER_OPERATION_FEES_UPDATED } from '@/data/customerOperationFees'
 import { purchaseCategoryForSkus } from '@/data/quotationAnalytics'
-import { customerGradeLabel } from '@/data/financeChannelPolicies'
+import { customerGradeLabel, financeAuthorizedChannelKeys, financeIsraelDeliveryModes } from '@/data/financeChannelPolicies'
 import { quoteSheetBundleSkus, quoteSheetRowKey } from '@/data/customerQuoteSheet'
 import { displayWeightGrams, sumDecimal, productDecimal } from "@/services/quotationDecimal"
 import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotationRowsSignature'
-import { normalizeLogisticsAttribute, selectableLogisticsAttributes } from '@/data/logisticsAttributes'
+import { normalizeLogisticsAttribute, quotationLogisticsAttribute, quotationLogisticsAttributeOptions } from '@/data/logisticsAttributes'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { calculateFinanceQuoteFees, FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
 import { defineAsyncComponent, computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
@@ -290,7 +290,7 @@ const quotationAttributeOptions = computed(() => {
   const policies = financePolicies.value
   if (!financeSettingsAreHydrated()) return []
   const authorized = new Set(policies.filter(policy => policy.enabled).map(policy => normalizeLogisticsAttribute(policy.category)))
-  return selectableLogisticsAttributes([...authorized]).filter(attribute => authorized.has(attribute))
+  return quotationLogisticsAttributeOptions([...authorized])
 })
 let appliedFinanceVersions: FinanceSettingVersions = {}
 const skuSearch = ref('')
@@ -949,6 +949,7 @@ async function runQuoteLogistics(p: Product) {
       financeCountrySettings.value = loadFinanceCountrySettings()
       countries = buildQuoteLogisticsCountryQuery(financeCountrySettings.value, p.country, selectedCountries)
     }
+    if (p.logisticsAttribute === '以色列') countries = ['以色列']
     const result = await loadPublishedLogisticsRules({ attribute: p.logisticsAttribute, countries }, { signal: controller.signal, manifestResult })
     if (controller.signal.aborted) return
     loadedQuoteCountries.value = countries
@@ -1296,7 +1297,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   const reuseBatchLogistics = props.batchCapture && batchCalculationActive && options.restoreQuotation
     && logisticsLoadState.value === 'ready' && !countryLoads.value && !countryLoadError.value
     && !syncPending.value && !syncError.value && !logisticsRebuilding.value
-    && products.value[0]?.logisticsAttribute === normalizeLogisticsAttribute(payload.logisticsAttribute || '')
+    && products.value[0]?.logisticsAttribute === quotationLogisticsAttribute(payload.logisticsAttribute || '')
     && [...(payload.commonSelections || []), ...(payload.templateSelections || [])]
       .every(selection => loadedQuoteCountries.value.includes(selection.country))
     && (!payload.product?.primaryCountry || loadedQuoteCountries.value.includes(payload.product.primaryCountry))
@@ -1325,7 +1326,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
   selectedQuoteRegions.value = Object.fromEntries(Object.entries(payload.selectedQuoteRegions || {})
     .filter(([, region]) => typeof region === 'string')) as Record<string, string>
   const p = reactive(emptyQuotationProduct())
-  p.logisticsAttribute = normalizeLogisticsAttribute(payload.logisticsAttribute || '')
+  p.logisticsAttribute = quotationLogisticsAttribute(payload.logisticsAttribute || '')
   const singleSku = payload.product?.sku || payload.skuSearch
   if (draftNeedsQuery.value) {
     // Server drafts restore input conditions only. Reissue/live refresh explicitly
@@ -1836,6 +1837,7 @@ function excelQuoteRows(p: Product, country = p.country, region = quoteRegionFor
     const tax = custom?.tax || quote1?.tax || quote2?.tax || quote3?.tax || taxResult(country, option.carrier, 0, option.rule, option.channelKey, undefined, customQuoteQuantity.value)
     const row: QuotationMatrixRow = {
         ...option,
+        deliveryModes: financeIsraelDeliveryModes(financePolicies.value, country, option.channelKey),
         quantityMessages: Object.fromEntries([...new Set([1,2,3,quantity])].flatMap(count => {
           const result = costFor(count)
           if (result?.tax.configured) return []
@@ -1976,16 +1978,14 @@ async function searchChannelCountries(query: string): Promise<string[]> {
   const countries = activeQuotationCountries.value
   const attribute = products.value[0].logisticsAttribute
   const result = await loadPublishedLogisticsRuleCatalog([attribute], countries.map(country => country.name), { apply: false })
-  const policies = financePolicies.value.filter(policy => normalizeLogisticsAttribute(policy.category) === normalizeLogisticsAttribute(attribute))
-  const policy = policies.length === 1 && policies[0]?.enabled ? policies[0] : undefined
   const matching = result.rules.filter(rule => rule.status === '启用').map(rule => ({
     prices: rule.prices,
     keys: rule.relations.filter(relation => [rule.name, relation.carrier, relation.channel, relation.channelCode].some(value => value?.toLowerCase().includes(query)))
       .map(relation => financeChannelKey(rule.id, relation)),
   })).filter(rule => rule.keys.length)
   return countries.filter(country => {
-    const allowed = policy?.countryRules.find(item => item.country === country.name)?.allowedChannels || []
-    return matching.some(rule => rule.keys.some(key => allowed.includes(key))
+    const allowed = financeAuthorizedChannelKeys(financePolicies.value, attribute, country.name)
+    return matching.some(rule => rule.keys.some(key => allowed.has(key))
       && rule.prices.some(price => price.areaName === country.name || price.countryCode.toUpperCase() === country.code.toUpperCase()))
   }).map(country => country.name)
 }
@@ -2297,6 +2297,7 @@ function buildQuoteOptions() {
       countryCode,
       carrier: row.carrier,
       channel: row.transport,
+      deliveryModes: row.deliveryModes,
       rule: row.rule,
       eta: row.eta,
       channelKey: row.channelKey,

@@ -248,7 +248,9 @@ export function isWeightRangePrice(price: LogisticsPriceRow) {
     && (minimum === 0 || (price.weightToInclusive === false ? minimum < price.weightToKg : minimum <= price.weightToKg))
     && ![price.firstWeightKg, price.firstWeightPrice, price.nextWeightKg, price.nextWeightPrice, ...(piece ? [] : [price.intervalPrice]), price.surcharge].some(value => value > 0)
 }
-export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: string[] = ['普货']) {
+export function isPriceRowEligible(price: LogisticsPriceRow, productMarks: string[] = ['普货']): boolean {
+  if (productMarks.includes('以色列')) return countryIdentityMatches(price.countryCode, price.areaName, 'IL') && ['以色列自提', '以色列到门'].some(attribute =>
+    isPriceRowEligible(price, productMarks.map(mark => mark === '以色列' ? attribute : mark)))
   productMarks = productMarks.map(normalizeLogisticsAttribute)
   if (price.quoteReady === false || !isWeightRangePrice(price)) return false
   const marks = normalizeShippingMarks(productMarks)

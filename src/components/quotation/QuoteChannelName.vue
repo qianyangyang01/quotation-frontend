@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import ChannelCoverageBadge from '@/components/logistics/ChannelCoverageBadge.vue'
+import IsraelDeliveryBadges from './IsraelDeliveryBadges.vue'
 import { computed } from 'vue'
 import type { QuotationMatrixRow } from './types'
 import { priceRegionLabel } from './priceRegionLabel'
 
-const props = defineProps<{ row: Pick<QuotationMatrixRow, 'country' | 'carrier' | 'transport' | 'rule' | 'quoteRegion' | 'priceRegion'> }>()
+const props = defineProps<{ row: Pick<QuotationMatrixRow, 'country' | 'carrier' | 'transport' | 'rule' | 'quoteRegion' | 'priceRegion' | 'deliveryModes'> }>()
 const regionLabel = computed(() => priceRegionLabel(props.row))
 </script>
 
 <template>
   <span class="quote-channel-name">
-    <span class="channel-title-line"><strong class="channel-title">{{ row.carrier }}｜{{ row.transport }}</strong><ChannelCoverageBadge :name="row.transport" /></span>
+    <span class="channel-title-line"><strong class="channel-title">{{ row.carrier }}｜{{ row.transport }}</strong><ChannelCoverageBadge :name="row.transport" /><IsraelDeliveryBadges :modes="row.deliveryModes" /></span>
     <span v-if="regionLabel" class="channel-region">{{ regionLabel }}</span>
   </span>
 </template>

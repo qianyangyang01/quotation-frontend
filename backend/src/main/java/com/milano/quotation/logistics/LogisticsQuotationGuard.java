@@ -179,6 +179,8 @@ public class LogisticsQuotationGuard {
         }
     }
     static boolean allowed(JsonNode policies,String attribute,String country,String key){
+        if ("以色列".equals(attribute)) return CountryIdentity.same(country, "IL")
+            && (allowed(policies, "以色列自提", country, key) || allowed(policies, "以色列到门", country, key));
         int matches=0;
         for(var policy:policies)if(com.milano.quotation.common.LogisticsAttributes.normalize(policy.path("category").asText()).equals(com.milano.quotation.common.LogisticsAttributes.normalize(attribute)))matches++;
         if(matches!=1)return false;

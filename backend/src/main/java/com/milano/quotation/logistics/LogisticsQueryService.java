@@ -533,6 +533,8 @@ public class LogisticsQueryService {
     }
 
     static boolean eligible(JsonNode row, String attribute) {
+        if ("以色列".equals(attribute)) return CountryIdentity.matches(row.path("countryCode").asText(), row.path("areaName").asText(), "IL")
+            && (eligible(row, "以色列自提") || eligible(row, "以色列到门"));
         var mark = attribute == null || attribute.isBlank() ? "普货" : com.milano.quotation.common.LogisticsAttributes.normalize(attribute);
         // Keep cosmetics, non-liquid cosmetics and supplements as distinct shipment attributes.
         var prohibited = splitMarks(row.path("prohibitedMarks").asText(""));
