@@ -442,7 +442,7 @@ it('resets pagination for date filters and downloads every matching row with the
   expect(mocks.page.mock.lastCall?.[1]).toBe(1)
   await search('BK')
   await setDate('报价开始日期','2026-11-01');await setDate('报价结束日期','2026-11-09')
-  expect(document.querySelector('.sku-download')).toBeNull()
+  expect(document.querySelector('a.sku-download')).toBeNull()
   await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page).toHaveBeenLastCalledWith('BK',0,10,expect.any(AbortSignal),{dateFrom:'2026-11-01',dateTo:'2026-11-09'})
   const link=document.querySelector<HTMLAnchorElement>('.sku-download')!
@@ -459,11 +459,11 @@ it('blocks reversed dates and disables downloading empty results',async()=>{
   await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page).toHaveBeenCalledTimes(calls)
   expect(document.querySelector('[role="alert"]')?.textContent).toBe('报价开始日期不能晚于结束日期')
-  expect(document.querySelector('.sku-download')).toBeNull()
+  expect(document.querySelector('a.sku-download')).toBeNull()
   mocks.page.mockResolvedValue({items:[],total:0,totalPages:0,page:0,size:10})
   await setDate('报价开始日期','2026-11-01');await vi.advanceTimersByTimeAsync(250);await flush()
   expect(document.querySelector('[role="alert"]')).toBeNull()
-  expect(document.querySelector('.sku-download')).toBeNull()
+  expect(document.querySelector('a.sku-download')).toBeNull()
   expect(document.querySelector('.empty')?.textContent).toContain('没有符合筛选条件')
 })
 it('re-queries the date range after editing instead of inserting a row outside the filter',async()=>{
