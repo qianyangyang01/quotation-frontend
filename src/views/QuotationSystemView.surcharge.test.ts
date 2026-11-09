@@ -1,4 +1,5 @@
 import { quotationFunctionContext } from '@/test/quotationFunctionContext'
+import { financeIsraelDeliveryModes } from '@/data/financeChannelPolicies'
 import { applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR } from '@/services/quotationCommission'
 import { addCustomerOperationFee, customerOperationFeeForQuantity, type OperationFeesByQuantity } from '@/data/customerOperationFees'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, type QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
@@ -29,6 +30,7 @@ describe('quotation view fee integration', () => {
     let copied = ''
     const context = { ...quotationFunctionContext, manualMode: { value: false }, applyCommissionThreshold, COMMISSION_THRESHOLD_ERROR, commissionThreshold: { value: '1' }, commissionError: { value: '' }, sumDecimal, productDecimal, addCustomerOperationFee, customerOperationFeeForQuantity, customerOperation: { value: { configured: true, feeUsd: 0, feesByQuantityUsd: undefined as OperationFeesByQuantity | undefined, get snapshot() { return { id: 'client', name: 'Client', feeUsd: this.feeUsd, feesByQuantityUsd: this.feesByQuantityUsd } }, message: '' } },
       products: { value: [] }, chargeWeight: () => 1,
+      financeIsraelDeliveryModes, financePolicies: { value: [] },
       specialPackagingError: { value: '' }, purchaseTaxBlockReason: { value: '' },
       quoteCnyFromUsd, calculateFinanceQuoteFees, financeTaxSettings: { value: settings }, financeSurchargeSettings: { value: { ...settings, countries: settings.countries.map(c => ({ ...c, fixedFeeUsd: 2, ...(scoped ? { exemptChannelKeys: ['1::物流商::FREE', '1::豁免商::FREE'] } : {}) })), providers: settings.providers.map(p => ({ ...p, mode: p.provider === '豁免商' ? 'exempt' : 'taxable' })) } }, usdPriceFromCny: (cny: number) => cny / 5,
       logisticsRules: [{ id: 1, name: '同一规则', relations: ['PAY', 'FREE'].map(code => ({ carrier: '物流商', channel: '同名渠道', channelCode: code })) }], normalizedBundleSets: (n: number) => n,
