@@ -13,7 +13,7 @@ vi.mock('@/services/purchaseHistory',async original=>({...await original<object>
 vi.mock('./PurchaseSalesPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('./PurchaseRankingsPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/data/purchaseStore',async importOriginal=>({...await importOriginal<object>(),loadPurchaseStats:mocks.stats,upsertPurchaseProducts:mocks.save,loadPurchaseProduct:mocks.load,promotePurchaseProduct:mocks.promote,loadPurchaseDeletionCheck:mocks.deletionCheck,deletePurchaseProduct:mocks.delete}))
-vi.mock('@/services/purchaseCatalog',()=>({loadPurchaseCatalogPage:mocks.page}))
+vi.mock('@/services/purchaseCatalog',async original=>({...await original<object>(),loadPurchaseCatalogPage:mocks.page}))
 let app:App
 const row=(sku:string)=>normalizePurchaseRecord({sku,weightG:100,minOrderQty:1,purchasePriceCny:10,_version:5})
 const legacyPriceRow=()=>normalizePurchaseRecord({...row('FL2600293-2'),dataSource:'legacy_2026',
@@ -429,4 +429,48 @@ it('keeps the dialog and entered SKU after a stale-version rejection and never r
   expect(document.querySelector<HTMLInputElement>('.delete-confirmation input')!.value).toBe('INITIAL')
   expect(document.body.textContent).toContain('商品已被其他用户修改')
   expect(document.body.textContent).not.toContain('已强制删除，历史报价和图片已保留')
+})
+
+async function setDate(label:string,value:string){
+  const input=document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+  input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()
+}
+it('resets pagination for date filters and downloads every matching row with the same search',async()=>{
+  mocks.page.mockResolvedValue({...page('INITIAL'),total:25,totalPages:3})
+  await mount()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.pagination button')).find(b=>b.textContent==='下一页')!.click();await flush()
+  expect(mocks.page.mock.lastCall?.[1]).toBe(1)
+  await search('BK')
+  await setDate('报价开始日期','2026-11-01');await setDate('报价结束日期','2026-11-09')
+  expect(document.querySelector('.sku-download')).toBeNull()
+  await vi.advanceTimersByTimeAsync(250);await flush()
+  expect(mocks.page).toHaveBeenLastCalledWith('BK',0,10,expect.any(AbortSignal),{dateFrom:'2026-11-01',dateTo:'2026-11-09'})
+  const link=document.querySelector<HTMLAnchorElement>('.sku-download')!
+  expect(link.textContent).toBe('下载筛选 SKU（25 条）')
+  expect(link.getAttribute('href')).toBe('/api/v1/purchase-catalog/export.xlsx?q=BK&dateFrom=2026-11-01&dateTo=2026-11-09')
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.toolbar button')).find(b=>b.textContent==='重置筛选')!.click()
+  await nextTick();await vi.advanceTimersByTimeAsync(250);await flush()
+  expect(mocks.page).toHaveBeenLastCalledWith('',0,10,expect.any(AbortSignal),{dateFrom:'',dateTo:''})
+})
+it('blocks reversed dates and disables downloading empty results',async()=>{
+  await mount();const calls=mocks.page.mock.calls.length
+  await setDate('报价开始日期','2026-11-10');await setDate('报价结束日期','2026-11-09')
+  await vi.advanceTimersByTimeAsync(250);await flush()
+  expect(mocks.page).toHaveBeenCalledTimes(calls)
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe('报价开始日期不能晚于结束日期')
+  expect(document.querySelector('.sku-download')).toBeNull()
+  mocks.page.mockResolvedValue({items:[],total:0,totalPages:0,page:0,size:10})
+  await setDate('报价开始日期','2026-11-01');await vi.advanceTimersByTimeAsync(250);await flush()
+  expect(document.querySelector('[role="alert"]')).toBeNull()
+  expect(document.querySelector('.sku-download')).toBeNull()
+  expect(document.querySelector('.empty')?.textContent).toContain('没有符合筛选条件')
+})
+it('re-queries the date range after editing instead of inserting a row outside the filter',async()=>{
+  await mount();await setDate('报价开始日期','2026-11-09');await vi.advanceTimersByTimeAsync(250);await flush()
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click();await flush()
+  mocks.update.mockResolvedValueOnce(row('INITIAL'))
+  mocks.page.mockResolvedValueOnce({items:[],total:0,totalPages:0,page:0,size:10})
+  editorSave();await flush();await flush()
+  expect(document.querySelector('tr[data-sku="INITIAL"]')).toBeNull()
+  expect(mocks.page).toHaveBeenLastCalledWith('',0,10,expect.any(AbortSignal),{dateFrom:'2026-11-09',dateTo:''})
 })

@@ -18,7 +18,7 @@ import FobPasteDialog from './FobPasteDialog.vue'
 import FobPurchaseEntry from './FobPurchaseEntry.vue'
 import FobCatalogRow from './FobCatalogRow.vue'
 import FobCatalogDetail from './FobCatalogDetail.vue'
-import { loadPurchaseCatalogPage, type PurchaseCatalogRecord, type FobCatalogRecord } from '@/services/purchaseCatalog'
+import { loadPurchaseCatalogPage, purchaseCatalogExportUrl, type PurchaseCatalogRecord, type FobCatalogRecord } from '@/services/purchaseCatalog'
 import { canMaintainFob } from '@/data/fobAccess'
 import PurchaseHistoryDialog from './PurchaseHistoryDialog.vue'
 import PurchaseSalesPanel from './PurchaseSalesPanel.vue'
@@ -47,6 +47,11 @@ const TEMPLATE_URL = '/templates/米莱诺采购产品标准导入模板-新版.
 const records = ref<PurchaseCatalogRecord[]>([])
 const loading = ref(true)
 const search = ref('')
+const dateFrom = ref('')
+const dateTo = ref('')
+const dateRangeError = computed(() => dateFrom.value && dateTo.value && dateFrom.value > dateTo.value ? '报价开始日期不能晚于结束日期' : '')
+const hasFilters = computed(() => Boolean(search.value.trim() || dateFrom.value || dateTo.value))
+const exportUrl = computed(() => purchaseCatalogExportUrl(search.value.trim(), { dateFrom: dateFrom.value, dateTo: dateTo.value }))
 const detail = ref<PurchaseProductRecord | null>(null)
 const editor = ref<PurchaseProductRecord | null>(null)
 const editingOriginalSku = ref('')
@@ -130,7 +135,7 @@ let statsAbort:AbortController|null=null
 let statsTimer=0
 let pendingPage:{key:string;request:Promise<void>}|null=null
 function invalidatePage(){pageRequest++;pageAbort?.abort()}
-watch(search, () => { invalidatePage();loading.value=true;currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void reload(false),250) })
+watch([search,dateFrom,dateTo], () => { invalidatePage();loading.value=true;currentPage.value = 1;window.clearTimeout(searchTimer);searchTimer=window.setTimeout(()=>void reload(false),250) })
 watch(pageSize, () => { currentPage.value = 1;void reload(false) })
 watch(totalPages, total => {
   if (currentPage.value > total) currentPage.value = total
@@ -142,6 +147,8 @@ function goToPage(page: number) {
 }
 function resetFilters() {
   search.value = ''
+  dateFrom.value = ''
+  dateTo.value = ''
   currentPage.value = 1
 }
 
@@ -153,7 +160,7 @@ async function refreshStats(){
   catch(error){if(!controller.signal.aborted&&request===statsRequest)toast(error instanceof Error?error.message:'采购统计读取失败')}
 }
 function reload(refreshStatistics=true):Promise<void>{
-  const key=JSON.stringify([search.value.trim(),currentPage.value,pageSize.value])
+  const key=JSON.stringify([search.value.trim(),dateFrom.value,dateTo.value,currentPage.value,pageSize.value])
   // Share only an active read in this component. Mutations always force a fresh read.
   if(!refreshStatistics&&pendingPage?.key===key&&!pageAbort?.signal.aborted)return pendingPage.request
   const request=readPage(refreshStatistics)
@@ -167,8 +174,9 @@ async function readPage(refreshStatistics:boolean) {
   const controller=new AbortController();pageAbort=controller
   loading.value = true
   if(refreshStatistics)void refreshStats()
+  if(dateRangeError.value){records.value=[];totalRecords.value=0;serverTotalPages.value=1;loading.value=false;return}
   try {
-    const page=await loadPurchaseCatalogPage(search.value.trim(),currentPage.value-1,pageSize.value,controller.signal)
+    const page=await loadPurchaseCatalogPage(search.value.trim(),currentPage.value-1,pageSize.value,controller.signal,{dateFrom:dateFrom.value,dateTo:dateTo.value})
     if(request!==pageRequest)return
     if(currentPage.value>Math.max(1,page.totalPages)){currentPage.value=Math.max(1,page.totalPages);void reload(false);return}
     records.value=page.items;totalRecords.value=page.total;serverTotalPages.value=page.totalPages
@@ -399,7 +407,7 @@ async function saveEditor() {
       ? await updatePurchaseProduct(editingOriginalSku.value,record)
       : (await upsertPurchaseProducts([record]))[0]
     editor.value = null
-    if(saved&&!search.value.trim()&&currentPage.value===1&&!renamed){
+    if(saved&&!hasFilters.value&&currentPage.value===1&&!renamed){
       // The server response contains the authoritative version, readiness and costs.
       window.clearTimeout(searchTimer);invalidatePage();loading.value=false
       records.value=[saved,...records.value.filter(item=>item.dataSource==='fob'||item.sku!==saved.sku)].slice(0,pageSize.value)
@@ -506,20 +514,30 @@ const detailFields = computed(() => detail.value ? [
 
   <section class="toolbar">
     <label>⌕ <input v-model="search" aria-label="搜索普通采购与FOB资料" placeholder="搜索 SKU、类别、报价人、尺码、颜色或工厂"></label>
+    <div class="date-filter" role="group" aria-label="报价日期范围">
+      <b>报价日期</b>
+      <input v-model="dateFrom" type="date" aria-label="报价开始日期" :max="dateTo || undefined">
+      <span>至</span>
+      <input v-model="dateTo" type="date" aria-label="报价结束日期" :min="dateFrom || undefined">
+    </div>
     <button @click="resetFilters">重置筛选</button>
+    <a v-if="!loading && !dateRangeError && totalRecords" class="sku-download" :href="exportUrl" download>下载筛选 SKU（{{ totalRecords }} 条）</a>
+    <button v-else disabled>下载筛选 SKU</button>
     <span>普通采购与FOB · 共 {{ totalRecords }} 条 · 当前页 {{ tieredCount }} 条含阶梯价<span v-if="totalRecords"> · 当前 {{ pageStart + 1 }}–{{ pageEnd }} 条</span></span>
   </section>
+  <p v-if="dateRangeError" class="filter-message error" role="alert">{{ dateRangeError }}</p>
+  <p v-else-if="dateFrom || dateTo" class="filter-message">按采购资料中的报价日期筛选，包含起止当天；无有效报价日期的资料不计入。下载全部筛选结果，不限当前页。</p>
 
   <section class="table-card">
     <div v-if="loading" class="empty">正在读取采购数据…</div>
-    <div v-else-if="!filtered.length" class="empty"><b>暂无采购数据</b><span>当前模板请选择“新数据导入”，历史采购表请选择“旧数据导入”。</span></div>
+    <div v-else-if="!filtered.length" class="empty"><b>{{ hasFilters ? '没有符合筛选条件的采购资料' : '暂无采购数据' }}</b><span>{{ hasFilters ? '请调整报价日期范围或搜索条件。' : '当前模板请选择“新数据导入”，历史采购表请选择“旧数据导入”。' }}</span></div>
     <table v-else>
       <colgroup><col class="col-product"><col class="col-price"><col class="col-weight"><col class="col-freight"><col class="col-description"><col class="col-status"><col class="col-actions"></colgroup>
       <thead><tr><th>类别 / SKU</th><th>采购阶梯价格</th><th>重量与尺寸</th><th>国内运费</th><th>尺码 / 颜色</th><th>资料状态</th><th>操作</th></tr></thead>
       <tbody><template v-for="record in pagedRecords" :key="`${record.dataSource}:${record.sku}`">
       <FobCatalogRow v-if="record.dataSource==='fob'" :record="record" :can-maintain="canMaintainFob" @detail="fobDetail=record" @maintain="openFob(record.sku)" />
       <tr v-else :data-sku="record.sku" :data-source="record.dataSource">
-        <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ record.category || '暂无数据' }}</b><small class="product-sku">{{ record.sku }}</small><em class="source-badge" :class="{legacy:record.dataSource==='legacy_2026'}">{{ purchaseSourceLabel(record) }}</em><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small></span></div></td>
+        <td><div class="product"><button v-if="record.productImage" @click="showImage(record.productImage,`${record.sku} 产品图片`)"><img :src="record.productImage" :alt="record.sku"></button><PurchaseCategoryBadge v-else :category="record.category" /><span><b>{{ record.category || '暂无数据' }}</b><small class="product-sku">{{ record.sku }}</small><em class="source-badge" :class="{legacy:record.dataSource==='legacy_2026'}">{{ purchaseSourceLabel(record) }}</em><em v-if="record.skuOrigin==='system'">系统生成，请修改</em><small>报价人：{{ record.quotationOwner || '暂无数据' }}</small><small>报价日期：{{ record.quotationDate || '暂无数据' }}</small></span></div></td>
         <td><LegacyPurchasePrices v-if="record.dataSource==='legacy_2026'" :record="record" /><div v-else-if="record.priceTiers.length" class="purchase-tiers"><span v-for="(tier,index) in record.priceTiers" :key="`${tier.minQty}-${tier.maxQty}`" :class="{ base:index===0 }"><small>第{{ index+1 }}档 · {{ tier.maxQty == null ? `${tier.minQty}件起` : `${tier.minQty}–${tier.maxQty}件` }}</small><b>¥{{ tier.unitPriceCny.toFixed(2) }}/件</b></span></div><span v-else class="no-data">暂无采购价格</span></td>
         <td class="weight-cell"><b>{{ value(record.weightG,' g') }}</b><small>{{ dimensionSummary(record) }}</small><small>起订 {{ value(record.minOrderQty,' 件') }}</small></td>
         <td class="freight-cell"><template v-if="purchaseFreightChoices(record).length"><small v-for="choice in purchaseFreightChoices(record)" :key="choice.quantity">{{ choice.quantity }}件 {{ unitFreight(record,choice.quantity) }}</small></template><small v-else>暂无数据</small></td>
@@ -711,6 +729,7 @@ const detailFields = computed(() => detail.value ? [
 .table-card .description-cell{overflow-wrap:anywhere;word-break:normal}
 .table-card .actions{white-space:normal}.actions button{white-space:nowrap;line-height:1.8}
 .entry-source-options{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:15px 0 10px}.entry-source-options button{padding:12px;text-align:left;border:1px solid #dce3e8;border-radius:7px;background:#fff;color:#273540;font-weight:800}.entry-source-options small{display:block;margin-top:4px;color:#74818b;font-size:11px;font-weight:400;letter-spacing:0}.entry-source-options button[aria-pressed=true]{border-color:#ed9b30;background:#fff8ec;box-shadow:inset 0 0 0 1px #ed9b30}.entry-source-help{font-size:11px!important;color:#72818b!important;margin:8px 0 14px!important}.entry-methods{display:flex;gap:22px;border-bottom:1px solid #e2e7eb;margin-bottom:14px}.entry-methods button{padding:9px 0;border:0;border-bottom:2px solid transparent;background:#fff;color:#71808d}.entry-methods button[aria-pressed=true]{color:#b26a07;border-bottom-color:#ee941c}.entry-file-panel{padding:24px;border:1px dashed #d3dce2;border-radius:8px;background:#fafbfc;text-align:center}.entry-file-panel p{font-size:12px;color:#74818b}.entry-file-panel input{max-width:100%}.entry-discard{padding:12px;margin-top:12px;border-radius:6px;background:#fff3df;font-size:12px}.entry-discard button{margin-left:8px}.editor-modal .entry-source-options button:disabled{opacity:.5}@media(max-width:600px){.entry-source-options{gap:5px}.entry-source-options button{padding:9px 6px;font-size:12px}.entry-source-options small{font-size:10px}}
+.toolbar{flex-wrap:wrap}.toolbar .date-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#596771;font-size:12px}.toolbar .date-filter input{box-sizing:border-box;width:145px;min-height:36px;padding:5px 8px;border:1px solid #dce3e8;border-radius:6px;background:#fff;font:inherit}.toolbar .sku-download{display:inline-flex;align-items:center;min-height:36px;padding:0 12px;border:1px solid #ffb452;border-radius:6px;background:#fff7eb;color:#a96000;font-size:12px;font-weight:700;text-decoration:none}.toolbar button:disabled{opacity:.5;cursor:not-allowed}.filter-message{margin:0 0 12px;color:#74808a;font-size:12px}.filter-message.error{color:#b42318}.toolbar label{max-width:100%;box-sizing:border-box}
 </style>
 
 <style scoped>

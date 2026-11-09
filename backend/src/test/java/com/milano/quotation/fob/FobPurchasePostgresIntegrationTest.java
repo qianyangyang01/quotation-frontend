@@ -103,6 +103,62 @@ class FobPurchasePostgresIntegrationTest {
                 .param("payload","{\"sku\":\""+sku+"\",\"dataSource\":\"legacy_2026\",\"purchasePriceCny\":21.5,\"weightG\":80,\"singleFreightCny\":4}")
                 .update();
     }
+    void catalogDate(String sku,String date) {
+        jdbc.sql("update purchase_product set payload=jsonb_set(payload,'{quotationDate}',to_jsonb(cast(:date as text))) where sku=:sku")
+            .param("date",date).param("sku",sku).update();
+    }
+    JsonNode datedCatalog(String query,String from,String to,int size) throws Exception {
+        return mapper.readTree(mvc.perform(get("/api/v1/purchase-catalog").param("q",query).param("dateFrom",from).param("dateTo",to).param("size",String.valueOf(size)))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+    }
+    @Test void quotationDatesAreInclusiveAndExportIncludesAllPagesWithoutChangingSources() throws Exception {
+        String prefix=sku();
+        for(int i=0;i<14;i++){String item=prefix+"-"+i;catalogPair(item);catalogDate(item,i==0?"2026-11-01":i==13?"2026-11-09":"2026-11-05");}
+        String outside=prefix+"-OUT";catalogPair(outside);catalogDate(outside,"2026-11-10");
+        String bad=prefix+"-BAD";catalogPair(bad);catalogDate(bad,"2026-02-30");
+        jdbc.sql("update fob_purchase_product set payload=jsonb_set(payload,'{quotationDate}','\"2026/11/9\"'::jsonb) where sku=:sku").param("sku",prefix+"-0").update();
+        var ordinaryBefore=ordinary.findBySku(prefix+"-0").orElseThrow().payload.deepCopy();
+        var fobBefore=service.get(prefix+"-0");long normalCount=ordinary.count(),fobCount=repository.count();
+        var result=datedCatalog(prefix,"2026-11-01","2026-11-09",10);
+        assertEquals(15,result.path("total").asInt());assertEquals(10,result.path("items").size());assertEquals(2,result.path("totalPages").asInt());
+        var response=mvc.perform(get("/api/v1/purchase-catalog/export.xlsx").param("q",prefix).param("dateFrom","2026-11-01").param("dateTo","2026-11-09"))
+            .andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store")).andReturn().getResponse();
+        assertTrue(response.getHeader("Content-Disposition").contains(".xlsx"));
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new java.io.ByteArrayInputStream(response.getContentAsByteArray()))){
+            var sheet=book.getSheetAt(0);assertEquals(15,sheet.getLastRowNum());assertEquals("SKU",sheet.getRow(0).getCell(0).getStringCellValue());
+            var exported=new HashSet<String>();int fobRows=0;
+            for(int i=1;i<=15;i++){var row=sheet.getRow(i);assertEquals(org.apache.poi.ss.usermodel.CellType.STRING,row.getCell(0).getCellType());exported.add(row.getCell(0).getStringCellValue());if(row.getCell(4).getStringCellValue().equals("FOB"))fobRows++;}
+            assertEquals(14,exported.size());assertEquals(1,fobRows);assertFalse(exported.contains(outside));assertFalse(exported.contains(bad));
+        }
+        assertEquals(ordinaryBefore,ordinary.findBySku(prefix+"-0").orElseThrow().payload);assertEquals(fobBefore,service.get(prefix+"-0"));
+        assertEquals(normalCount,ordinary.count());assertEquals(fobCount,repository.count());
+    }
+    @Test void dateFiltersSupportSingleDayOpenBoundsAndIgnoreMissingOrMalformedDates() throws Exception {
+        String prefix=sku();String[] dates={"2026-11-01","2026-11-09","2026-11-10","","未提供","2026-02-30","2026-11-31","2026/11/9","2026.11.9","2026-1-9"};
+        for(int i=0;i<dates.length;i++){catalogPair(prefix+"-"+i);catalogDate(prefix+"-"+i,dates[i]);}
+        assertEquals(3,datedCatalog(prefix,"2026-11-09","2026-11-09",100).path("total").asInt());
+        assertEquals(4,datedCatalog(prefix,"2026-11-09","",100).path("total").asInt());
+        assertEquals(5,datedCatalog(prefix,"","2026-11-09",100).path("total").asInt());
+        assertEquals(20,datedCatalog(prefix,"","",100).path("total").asInt());
+        assertEquals(0,datedCatalog(prefix+"-0","2026-11-09","2026-11-09",100).path("total").asInt());
+    }
+    @Test void dateExportPreservesPermissionsAndRejectsInvalidRanges() throws Exception {
+        String sku=sku();catalogPair(sku);catalogDate(sku,"2026-11-09");
+        for(String path:List.of("/api/v1/purchase-catalog","/api/v1/purchase-catalog/export.xlsx")){
+            mvc.perform(get(path).param("dateFrom","2026-11-10").param("dateTo","2026-11-09")).andExpect(status().isUnprocessableEntity());
+            mvc.perform(get(path).param("dateFrom","not-a-date")).andExpect(status().isUnprocessableEntity());
+            mvc.perform(get(path).with(anonymous())).andExpect(status().isUnauthorized());
+            mvc.perform(get(path).with(user("viewer").authorities(authority("PERM_quote")))).andExpect(status().isForbidden());
+        }
+        var response=mvc.perform(get("/api/v1/purchase-catalog/export.xlsx").param("q",sku)
+            .with(user("custom").authorities(authority("PERM_purchase")))).andExpect(status().isOk()).andReturn().getResponse();
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new java.io.ByteArrayInputStream(response.getContentAsByteArray()))){
+            assertEquals(1,book.getSheetAt(0).getLastRowNum());assertEquals("2026旧数据",book.getSheetAt(0).getRow(1).getCell(4).getStringCellValue());
+        }
+        var empty=mvc.perform(get("/api/v1/purchase-catalog/export.xlsx").param("q",sku).param("dateFrom","2099-01-01"))
+            .andExpect(status().isOk()).andReturn().getResponse();
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new java.io.ByteArrayInputStream(empty.getContentAsByteArray()))){assertEquals(0,book.getSheetAt(0).getLastRowNum());}
+    }
     JsonNode catalog(String query,int page,int size) throws Exception {
         return mapper.readTree(mvc.perform(get("/api/v1/purchase-catalog").param("q",query).param("page",String.valueOf(page)).param("size",String.valueOf(size)))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
