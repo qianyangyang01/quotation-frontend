@@ -432,16 +432,18 @@ it('keeps the dialog and entered SKU after a stale-version rejection and never r
 })
 
 async function setDate(label:string,value:string){
+  if(!document.querySelector('[aria-label="报价日期范围选择器"]')){document.querySelector<HTMLButtonElement>('[aria-label="选择报价日期范围"]')!.click();await flush()}
   const input=document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
   input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()
 }
+async function applyRange(){Array.from(document.querySelectorAll<HTMLButtonElement>('.range-footer button')).find(b=>b.textContent==='确定筛选')!.click();await flush()}
 it('resets pagination for date filters and downloads every matching row with the same search',async()=>{
   mocks.page.mockResolvedValue({...page('INITIAL'),total:25,totalPages:3})
   await mount()
   Array.from(document.querySelectorAll<HTMLButtonElement>('.pagination button')).find(b=>b.textContent==='下一页')!.click();await flush()
   expect(mocks.page.mock.lastCall?.[1]).toBe(1)
   await search('BK')
-  await setDate('报价开始日期','2026-11-01');await setDate('报价结束日期','2026-11-09')
+  await setDate('报价开始日期','2026-11-01');await setDate('报价结束日期','2026-11-09');await applyRange()
   expect(document.querySelector('a.sku-download')).toBeNull()
   await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page).toHaveBeenLastCalledWith('BK',0,10,expect.any(AbortSignal),{dateFrom:'2026-11-01',dateTo:'2026-11-09'})
@@ -459,15 +461,15 @@ it('blocks reversed dates and disables downloading empty results',async()=>{
   await vi.advanceTimersByTimeAsync(250);await flush()
   expect(mocks.page).toHaveBeenCalledTimes(calls)
   expect(document.querySelector('[role="alert"]')?.textContent).toBe('报价开始日期不能晚于结束日期')
-  expect(document.querySelector('a.sku-download')).toBeNull()
+  expect(document.querySelector<HTMLButtonElement>('.range-apply')!.disabled).toBe(true)
   mocks.page.mockResolvedValue({items:[],total:0,totalPages:0,page:0,size:10})
-  await setDate('报价开始日期','2026-11-01');await vi.advanceTimersByTimeAsync(250);await flush()
+  await setDate('报价开始日期','2026-11-01');await applyRange();await vi.advanceTimersByTimeAsync(250);await flush()
   expect(document.querySelector('[role="alert"]')).toBeNull()
   expect(document.querySelector('a.sku-download')).toBeNull()
   expect(document.querySelector('.empty')?.textContent).toContain('没有符合筛选条件')
 })
 it('re-queries the date range after editing instead of inserting a row outside the filter',async()=>{
-  await mount();await setDate('报价开始日期','2026-11-09');await vi.advanceTimersByTimeAsync(250);await flush()
+  await mount();await setDate('报价开始日期','2026-11-09');await applyRange();await vi.advanceTimersByTimeAsync(250);await flush()
   Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click();await flush()
   mocks.update.mockResolvedValueOnce(row('INITIAL'))
   mocks.page.mockResolvedValueOnce({items:[],total:0,totalPages:0,page:0,size:10})

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LegacyPurchasePrices from './LegacyPurchasePrices.vue'
+import DateRangePicker from '@/components/DateRangePicker.vue'
 import ShimoSyncPanel from './ShimoSyncPanel.vue'
 import { legacyUntaxedUnitPrice, legacyAutoTaxPrice, withLegacyAutoTax } from '@/data/legacyPurchasePricing'
 import type { PasteSavedCounts } from '@/services/purchasePaste'
@@ -516,9 +517,7 @@ const detailFields = computed(() => detail.value ? [
     <label>⌕ <input v-model="search" aria-label="搜索普通采购与FOB资料" placeholder="搜索 SKU、类别、报价人、尺码、颜色或工厂"></label>
     <div class="date-filter" role="group" aria-label="报价日期范围">
       <b>报价日期</b>
-      <input v-model="dateFrom" type="date" aria-label="报价开始日期" :max="dateTo || undefined">
-      <span>至</span>
-      <input v-model="dateTo" type="date" aria-label="报价结束日期" :min="dateFrom || undefined">
+      <DateRangePicker :from="dateFrom" :to="dateTo" @change="range => { dateFrom=range.from; dateTo=range.to }" />
       <a v-if="!loading && !dateRangeError && totalRecords" class="sku-download" :href="exportUrl" :title="`下载全部筛选结果，共 ${totalRecords} 条`" download>下载筛选 SKU</a>
       <button v-else class="sku-download" disabled>下载筛选 SKU</button>
     </div>
