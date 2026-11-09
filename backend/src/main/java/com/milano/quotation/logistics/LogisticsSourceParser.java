@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="sf-sensitive-latest-weight-2026.11.02-v14";
+    public static final String VERSION="wanbang-preferred-clothing-2026.11.09-v15";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友");
@@ -1031,6 +1031,14 @@ public class LogisticsSourceParser {
                     source.numberText(r,columns.from)+(columns.boundsInGrams?"G":"")+"-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):
                     columns.to>=0?"0-"+source.numberText(r,columns.to)+(columns.boundsInGrams?"G":""):source.text(r,weightColumn);
             if(!looksRange(weight)) {
+                // A copied/mistitled workbook heading must not hide a missing clothing price band.
+                var rowProduct=YanwenWanbangAdditionalRules.named(provider,columns.channel>=0?source.text(r,columns.channel):"");
+                if(rowProduct!=null&&rowProduct.code().equals("EUSLPHFZ-P")&&columns.rate>=0
+                        &&!source.text(r,columns.rate).isBlank()&&columns.country>=0
+                        &&supportedCountryCode(countryCode(source.text(r,columns.country)))) {
+                    var target=selected(source,provider,rowProduct.name(),columns.code>=0?source.text(r,columns.code):"",r,channels);
+                    if(target!=null)issue(target,r+1,"重量段","价格行缺少有效重量范围，禁止部分替换","error");
+                }
                 if(weightColumn!=columns.weight) {
                     var target=selected(source,provider,section,"",r,channels,section.equals(source.sheet.getSheetName().trim()));
                     if(target!=null)issue(target,r+1,"重量段","最新价格组缺少有效重量范围，禁止回退旧重量段："+source.address(r,weightColumn),"error");
