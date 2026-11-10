@@ -24,4 +24,3 @@ SELECT EXISTS (
          OR a.engine_version='logistics-billing-v10')
 );
 $$;
-

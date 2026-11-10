@@ -199,7 +199,7 @@ class LogisticsAcceptanceMigrationTest {
         Flyway.configure().dataSource(postgres.getJdbcUrl(),postgres.getUsername(),postgres.getPassword()).load().migrate();
 
         var legacy=UUID.fromString("00000000-0000-0000-0000-000000000001");
-        assertEquals("66",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
+        assertEquals("67",jdbc.sql("select version from flyway_schema_history where success order by installed_rank desc limit 1").query(String.class).single());
         com.milano.quotation.finance.WomensPricing.validatePolicy(new tools.jackson.databind.ObjectMapper().readTree(jdbc.sql("select payload::text from finance_setting where setting_key='womens-pricing'").query(String.class).single()));
         assertEquals(0,jdbc.sql("select count(*) from batch_single_quotation").query(Integer.class).single());
         assertEquals(0,jdbc.sql("select count(*) from fob_purchase_product").query(Integer.class).single());
