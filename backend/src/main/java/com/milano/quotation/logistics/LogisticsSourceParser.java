@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="kuailv-us-sensitive-2026.11.10-v16";
+    public static final String VERSION="kuailv-us-special-line-2026.11.10-v17";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴");
@@ -61,7 +61,7 @@ public class LogisticsSourceParser {
                 var source=new Source(sheet,scope);
                 if(provider.isBlank())provider=providerFromTitles(source);
                 if(provider.equals("快驴")&&!qiaojieStandardSheet(source)&&!kuailvSelectedSheet(source)) {
-                    report.put("status","filtered").put("priceCellsParsed",0).put("message","快驴仅导入美国商派-特敏感；其他渠道保留在原文件中");continue;
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","快驴仅导入已适配的美国商派/专线特敏感渠道；其他渠道保留在原文件中");continue;
                 }
                 if(provider.equals("捷易通达")&&!jieyitongdaSheet(source)) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","捷易通达仅解析以色列敏感1961、以色列敏感(到门)2001");continue;
@@ -329,17 +329,24 @@ public class LogisticsSourceParser {
         return products.isEmpty()?null:products.iterator().next();
     }
 
-    /** Limit-weight columns describe consecutive upper bounds, not minimum billable weights. */
-    private static final String KUAILV_CHANNEL="美国商派-特敏感";
+    private static final List<String> KUAILV_CHANNELS=List.of("美国商派-特敏感","美国专线-特敏感");
     private boolean kuailvSelectedSheet(Source source) {
+        return KUAILV_CHANNELS.stream().anyMatch(name->kuailvContainsChannel(source,name));
+    }
+    private boolean kuailvContainsChannel(Source source,String channelName) {
         for(int r=0;r<=source.lastContentRow;r++)for(var value:source.rowTexts(r))
-            if(CompanyChannelScope.normalize(value).equals(CompanyChannelScope.normalize(KUAILV_CHANNEL)))return true;
+            if(CompanyChannelScope.normalize(value).equals(CompanyChannelScope.normalize(channelName)))return true;
         return false;
     }
 
     /** Product blocks share a header and merged labels, but never share prices or attributes. */
     private boolean parseKuailv(Source source,String file,Map<String,ObjectNode> channels) {
-        var target=selected(source,"快驴",KUAILV_CHANNEL,"",0,channels);
+        for(var name:KUAILV_CHANNELS)if(kuailvContainsChannel(source,name))parseKuailvChannel(source,file,channels,name);
+        source.parsedRows.forEach(source.filteredOtherRows::remove);
+        return true;
+    }
+    private boolean parseKuailvChannel(Source source,String file,Map<String,ObjectNode> channels,String channelName) {
+        var target=selected(source,"快驴",channelName,"",0,channels);
         if(target==null)return true;
         target.put("logisticsAttribute","保健品"); // Explicit user mapping, independent of supplier prose.
         int header=-1,name=-1,weight=-1,rate=-1,fee=-1,eta=-1,attribute=-1;
@@ -392,15 +399,15 @@ public class LogisticsSourceParser {
                 continue;
             }
             if(source.rowEmpty(r))continue;
-            if(!CompanyChannelScope.normalize(label).equals(CompanyChannelScope.normalize(KUAILV_CHANNEL))) {
+            if(!CompanyChannelScope.normalize(label).equals(CompanyChannelScope.normalize(channelName))) {
                 if(label.isBlank()&&(!source.text(r,weight).isBlank()||!source.text(r,rate).isBlank()||!source.text(r,fee).isBlank()))
                     issue(target,r+1,"渠道","价格行缺少明确渠道归属，禁止按上一行猜测","error");
-                source.filteredOtherRows.put(r,"非指定的美国商派-特敏感渠道");continue;
+                source.filteredOtherRows.put(r,"非当前指定的"+channelName+"渠道");continue;
             }
             source.parsedRows.add(r);
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
                     .put("areaName","美国").put("countryCode","US").put("zoneName","").put("originRegion","")
-                    .put("sourceCountry","美国商派-特敏感渠道目的地").put("sourceCountryCode","US")
+                    .put("sourceCountry",channelName+"渠道目的地").put("sourceCountryCode","US")
                     .put("sourceChannel",label).put("sourceChannelCell",source.address(r,name))
                     .put("sourceWeightRange",source.text(r,weight)).put("sourceWeightCell",source.address(r,weight))
                     .put("sourcePriceCell",source.address(r,rate)).put("sourceFeeCell",source.address(r,fee))

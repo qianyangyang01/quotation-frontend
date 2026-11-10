@@ -38,8 +38,8 @@ class KuailvSourceTest {
                 else row(s,h+1+i,i==0?NAME:"",RANGES[i],RATES[i],FEES[i],"10-18天","种子，植物，树苗等（不能带泥土）");
             }
             s.addMergedRegion(new CellRangeAddress(h+1,h+6,moved?1:0,moved?1:0));
-            if(moved)row(s,h+7,1,"美国专线-特敏感","8-15天","0-5","保健品",1);
-            else row(s,h+7,"美国专线-特敏感","0-5",1,1,"8-15天","保健品");
+            if(moved)row(s,h+7,1,"美国专线-特货","8-15天","0-5","保健品",1);
+            else row(s,h+7,"美国专线-特货","0-5",1,1,"8-15天","保健品");
             row(s,h+8,moved?"":"渠道说明",moved?"渠道说明":"");
             row(s,h+9,"计费方式","起重均为1g，计费向上取整，计费向上取整；计泡公式：长*宽*高/8000");
             row(s,h+10,"参考时效","10-15工作日");row(s,h+11,"附加费","无");
@@ -55,11 +55,14 @@ class KuailvSourceTest {
         for(var r:a.path("rows")){assertEquals(10,r.path("etaMinDays").asInt());assertEquals(18,r.path("etaMaxDays").asInt());}
     }
     void verifyBilling(ObjectNode channel) {
+        verifyBilling(channel,RATES,FEES);
+    }
+    void verifyBilling(ObjectNode channel,int[] rates,int[] fees) {
         var engine=new LogisticsBillingEngine(mapper);
         for(int grams=1;grams<=5000;grams++) {
             int tier=0;while(grams>ENDS[tier])tier++;
             // Independent integer arithmetic: ceil(grams * yuan/kg / 1000 + fee).
-            int expected=(grams*RATES[tier]+999)/1000+FEES[tier];
+            int expected=(grams*rates[tier]+999)/1000+fees[tier];
             for(var weight:List.of(BigDecimal.valueOf(grams,3),BigDecimal.valueOf(grams,3).subtract(new BigDecimal("0.0005")))) {
                 var result=engine.calculate(channel.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",weight));
                 assertEquals(expected,result.path("total").asInt(),weight.toString());assertEquals(tier,result.path("rowIndex").asInt());
@@ -99,6 +102,6 @@ class KuailvSourceTest {
         assertTrue(c.path("quoteReady").asBoolean(),c.toPrettyString());assertEquals(6,c.path("rows").size());
         for(int i=0;i<6;i++){var r=c.path("rows").get(i);assertEquals(i+9,r.path("sourceRow").asInt());assertEquals(RATES[i],r.path("pricePerKg").asInt());assertEquals(FEES[i],r.path("registrationFee").asInt());assertEquals(RANGES[i],r.path("sourceWeightRange").asText());}
         verifyBilling(c);
-        Files.writeString(Path.of("../artifacts/kuailv-us-sensitive-20261110/parsed.json"),c.toPrettyString());
+        var output=Path.of("../artifacts/kuailv-us-sensitive-20261110/parsed.json");Files.createDirectories(output.getParent());Files.writeString(output,c.toPrettyString());
     }
 }
