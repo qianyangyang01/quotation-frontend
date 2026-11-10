@@ -104,7 +104,7 @@ public class PurchaseCatalogService {
             ) matches order by updated_at desc,sku,kind limit 1048576
             """.formatted(selection.filter(),selection.filter())).params(selection.params())
             .query((rs,n)-> {
-                var row=new ArrayList<String>(Arrays.asList(rs.getString("sku"),rs.getString("quotation_date"),rs.getString("owner"),rs.getString("category"),rs.getString("source")));
+                var row=new ArrayList<Object>(Arrays.asList(rs.getString("sku"),rs.getString("quotation_date"),rs.getString("owner"),rs.getString("category"),rs.getString("source")));
                 row.addAll(PurchaseCatalogExportPrices.tiers(mapper.readTree(rs.getString("prices")),"fob".equals(rs.getString("kind"))));
                 return row;
             }).list();
@@ -113,11 +113,20 @@ public class PurchaseCatalogService {
             var sheet=book.createSheet("采购SKU");
             var headers=new ArrayList<>(List.of("SKU","报价日期","报价人","类别","数据来源"));
             int tierCount=Math.max(5,rows.stream().mapToInt(row->row.size()-5).max().orElse(0));
-            for(int tier=1;tier<=tierCount;tier++)headers.add("第"+tier+"档（数量 / 单价）");
+            var tierNames=List.of("一","二","三","四","五");
+            for(int tier=1;tier<=tierCount;tier++)headers.add("第"+(tier<=5?tierNames.get(tier-1):tier)+"档(单价/元)");
             var style=book.createCellStyle();var font=book.createFont();font.setBold(true);style.setFont(font);
             var header=sheet.createRow(0);
-            for(int col=0;col<headers.size();col++){var cell=header.createCell(col);cell.setCellValue(headers.get(col));cell.setCellStyle(style);sheet.setColumnWidth(col,(col>=5?48:col==0?30:20)*256);}
-            for(int i=0;i<rows.size();i++){var row=sheet.createRow(i+1);var values=rows.get(i);for(int col=0;col<headers.size();col++)row.createCell(col).setCellValue(col<values.size()?Objects.toString(values.get(col),""):"");}
+            for(int col=0;col<headers.size();col++){var cell=header.createCell(col);cell.setCellValue(headers.get(col));cell.setCellStyle(style);sheet.setColumnWidth(col,(col>=5?24:col==0?30:20)*256);}
+            for(int i=0;i<rows.size();i++){
+                var row=sheet.createRow(i+1);var values=rows.get(i);
+                for(int col=0;col<headers.size();col++){
+                    var cell=row.createCell(col);var value=col<values.size()?values.get(col):null;
+                    if(col<5)cell.setCellValue(Objects.toString(value,""));
+                    else if(value instanceof java.math.BigDecimal price)cell.setCellValue(price.doubleValue());
+                    // Missing tiers remain genuinely blank; General displays 27.8 and 31 without units or trailing zeros.
+                }
+            }
             sheet.createFreezePane(0,1);sheet.setAutoFilter(new CellRangeAddress(0,rows.size(),0,headers.size()-1));
             book.write(out);return out.toByteArray();
         }
