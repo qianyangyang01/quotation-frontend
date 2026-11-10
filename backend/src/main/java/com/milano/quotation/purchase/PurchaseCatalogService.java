@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import java.text.Normalizer;
 import java.time.LocalDate;
@@ -23,8 +24,9 @@ public class PurchaseCatalogService {
     private final PurchaseProductRepository ordinary;
     private final PurchaseProductService products;
     private final FobPurchaseRepository fob;
-    public PurchaseCatalogService(JdbcClient jdbc, PurchaseProductRepository ordinary, PurchaseProductService products, FobPurchaseRepository fob) {
-        this.jdbc=jdbc; this.ordinary=ordinary; this.products=products; this.fob=fob;
+    private final ObjectMapper mapper;
+    public PurchaseCatalogService(JdbcClient jdbc, PurchaseProductRepository ordinary, PurchaseProductService products, FobPurchaseRepository fob, ObjectMapper mapper) {
+        this.jdbc=jdbc; this.ordinary=ordinary; this.products=products; this.fob=fob; this.mapper=mapper;
     }
     @Transactional(readOnly=true,isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public PageResponse<JsonNode> page(String query,int page,int size,boolean includeFob,LocalDate dateFrom,LocalDate dateTo) {
@@ -84,7 +86,16 @@ public class PurchaseCatalogService {
         // One database snapshot, all matching rows, and only the small export fields (no images).
         var rows=jdbc.sql("""
             select sku,payload->>'quotationDate' as quotation_date,payload->>'quotationOwner' as owner,
-                   payload->>'category' as category,source from (
+                   payload->>'category' as category,source,kind,
+                   jsonb_build_object(
+                     'dataSource',payload->'dataSource','minOrderQty',payload->'minOrderQty',
+                     'purchasePriceCny',payload->'purchasePriceCny',
+                     'tier2MinQty',payload->'tier2MinQty','tier2PriceCny',payload->'tier2PriceCny',
+                     'tier3MinQty',payload->'tier3MinQty','tier3PriceCny',payload->'tier3PriceCny',
+                     'tier4MinQty',payload->'tier4MinQty','tier4PriceCny',payload->'tier4PriceCny',
+                     'tier5MinQty',payload->'tier5MinQty','tier5PriceCny',payload->'tier5PriceCny',
+                     'purchasePriceBasis',payload->'purchasePriceBasis','sourceQuotedPriceCny',payload->'sourceQuotedPriceCny',
+                     'fobTiers',payload->'parsed'->'priceTiers') as prices from (
               select sku,payload,updated_at,'purchase' as kind,
                      case when payload->>'dataSource'='legacy_2026' then '2026旧数据' else '新数据' end as source
               from purchase_product where %s
@@ -92,16 +103,22 @@ public class PurchaseCatalogService {
               select sku,payload,updated_at,'fob' as kind,'FOB' as source from fob_purchase_product where :fob and %s
             ) matches order by updated_at desc,sku,kind limit 1048576
             """.formatted(selection.filter(),selection.filter())).params(selection.params())
-            .query((rs,n)->new String[]{rs.getString("sku"),rs.getString("quotation_date"),rs.getString("owner"),rs.getString("category"),rs.getString("source")}).list();
+            .query((rs,n)-> {
+                var row=new ArrayList<String>(Arrays.asList(rs.getString("sku"),rs.getString("quotation_date"),rs.getString("owner"),rs.getString("category"),rs.getString("source")));
+                row.addAll(PurchaseCatalogExportPrices.tiers(mapper.readTree(rs.getString("prices")),"fob".equals(rs.getString("kind"))));
+                return row;
+            }).list();
         if(rows.size()>1048575)throw AppException.unprocessable("筛选结果超过 Excel 行数上限，请缩小报价日期范围后下载");
         try(var book=new SXSSFWorkbook(100);var out=new ByteArrayOutputStream()) {
             var sheet=book.createSheet("采购SKU");
-            String[] headers={"SKU","报价日期","报价人","类别","数据来源"};
+            var headers=new ArrayList<>(List.of("SKU","报价日期","报价人","类别","数据来源"));
+            int tierCount=Math.max(5,rows.stream().mapToInt(row->row.size()-5).max().orElse(0));
+            for(int tier=1;tier<=tierCount;tier++)headers.add("第"+tier+"档（数量 / 单价）");
             var style=book.createCellStyle();var font=book.createFont();font.setBold(true);style.setFont(font);
             var header=sheet.createRow(0);
-            for(int col=0;col<headers.length;col++){var cell=header.createCell(col);cell.setCellValue(headers[col]);cell.setCellStyle(style);sheet.setColumnWidth(col,(col==0?30:20)*256);}
-            for(int i=0;i<rows.size();i++){var row=sheet.createRow(i+1);for(int col=0;col<headers.length;col++)row.createCell(col).setCellValue(Objects.toString(rows.get(i)[col],""));}
-            sheet.createFreezePane(0,1);sheet.setAutoFilter(new CellRangeAddress(0,rows.size(),0,headers.length-1));
+            for(int col=0;col<headers.size();col++){var cell=header.createCell(col);cell.setCellValue(headers.get(col));cell.setCellStyle(style);sheet.setColumnWidth(col,(col>=5?48:col==0?30:20)*256);}
+            for(int i=0;i<rows.size();i++){var row=sheet.createRow(i+1);var values=rows.get(i);for(int col=0;col<headers.size();col++)row.createCell(col).setCellValue(col<values.size()?Objects.toString(values.get(col),""):"");}
+            sheet.createFreezePane(0,1);sheet.setAutoFilter(new CellRangeAddress(0,rows.size(),0,headers.size()-1));
             book.write(out);return out.toByteArray();
         }
     }

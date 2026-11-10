@@ -133,6 +133,41 @@ class FobPurchasePostgresIntegrationTest {
         assertEquals(ordinaryBefore,ordinary.findBySku(prefix+"-0").orElseThrow().payload);assertEquals(fobBefore,service.get(prefix+"-0"));
         assertEquals(normalCount,ordinary.count());assertEquals(fobCount,repository.count());
     }
+    @Test void skuExportAppendsAllPriceTiersAfterSourceAndLeavesMissingTiersBlank() throws Exception {
+        String sku=sku();catalogPair(sku);
+        jdbc.sql("update purchase_product set payload=payload || cast(:prices as jsonb) where sku=:sku")
+            .param("sku",sku).param("prices","""
+                {"dataSource":"standard","minOrderQty":1,"purchasePriceCny":30,
+                 "tier2MinQty":200,"tier2PriceCny":28,"tier3MinQty":2000,"tier3PriceCny":26}
+                """).update();
+        var ordinaryBefore=ordinary.findBySku(sku).orElseThrow().payload.deepCopy();
+        var fobBefore=service.get(sku);
+        var response=mvc.perform(get("/api/v1/purchase-catalog/export.xlsx").param("q",sku))
+            .andExpect(status().isOk()).andReturn().getResponse();
+        try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook(new java.io.ByteArrayInputStream(response.getContentAsByteArray()))){
+            var sheet=book.getSheetAt(0);
+            assertEquals(2,sheet.getLastRowNum());
+            assertEquals("数据来源",sheet.getRow(0).getCell(4).getStringCellValue());
+            assertEquals("第1档（数量 / 单价）",sheet.getRow(0).getCell(5).getStringCellValue());
+            assertEquals("第5档（数量 / 单价）",sheet.getRow(0).getCell(9).getStringCellValue());
+            assertEquals("A1:J3",sheet.getCTWorksheet().getAutoFilter().getRef());
+            for(int i=1;i<=2;i++){
+                var row=sheet.getRow(i);
+                if("新数据".equals(row.getCell(4).getStringCellValue())){
+                    assertEquals("1–199件；¥30.00/件",row.getCell(5).getStringCellValue());
+                    assertEquals("200–1999件；¥28.00/件",row.getCell(6).getStringCellValue());
+                    assertEquals("2000件起；¥26.00/件",row.getCell(7).getStringCellValue());
+                    assertEquals("",row.getCell(8).getStringCellValue());
+                    assertEquals("",row.getCell(9).getStringCellValue());
+                }else{
+                    assertEquals("FOB",row.getCell(4).getStringCellValue());
+                    for(int col=5;col<10;col++)assertFalse(row.getCell(col).getStringCellValue().isBlank());
+                }
+            }
+        }
+        assertEquals(ordinaryBefore,ordinary.findBySku(sku).orElseThrow().payload);
+        assertEquals(fobBefore,service.get(sku));
+    }
     @Test void dateFiltersSupportSingleDayOpenBoundsAndIgnoreMissingOrMalformedDates() throws Exception {
         String prefix=sku();String[] dates={"2026-11-01","2026-11-09","2026-11-10","","未提供","2026-02-30","2026-11-31","2026/11/9","2026.11.9","2026-1-9"};
         for(int i=0;i<dates.length;i++){catalogPair(prefix+"-"+i);catalogDate(prefix+"-"+i,dates[i]);}
