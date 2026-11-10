@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import Matrix from './QuotationCommonMatrix.vue'
 import type { QuotationCountrySummary, QuotationMatrixRow } from './types'
+import { loadCountrySearchHistory, saveCountrySearchHistory } from '@/data/countrySearchHistory'
 
 let app: App
 const tick = async () => { await nextTick(); await nextTick(); await nextTick() }
@@ -25,7 +26,7 @@ async function search(value: string) {
   input.value = value; input.dispatchEvent(new Event('input')); await tick()
 }
 const button = (text: string) => [...document.querySelectorAll('button')].find(item => item.textContent?.includes(text))!
-afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.useRealTimers() })
+afterEach(() => { app?.unmount(); document.body.innerHTML = ''; localStorage.clear(); vi.useRealTimers() })
 
 it('loads only the visible country after product readiness and when returning to common mode', async () => {
   const ensureCountries = vi.fn().mockResolvedValue(true)
@@ -192,4 +193,67 @@ it('labels batch prices as samples without changing ordinary channel actions', a
   expect(document.body.textContent).toContain('1件报价')
   expect(document.body.textContent).toContain('已加入')
   expect(document.body.textContent).toContain('加入报价单')
+})
+
+it('records completed country searches once, merges code and name, and ignores channel searches', async () => {
+  vi.useFakeTimers()
+  mount({ userId: 'sales-a', searchChannelCountries: vi.fn().mockResolvedValue(['日本']) })
+  await search('j'); await vi.advanceTimersByTimeAsync(800)
+  expect(loadCountrySearchHistory('sales-a')).toEqual([])
+  await search('jp'); await vi.advanceTimersByTimeAsync(800); await tick()
+  const input = document.querySelector<HTMLInputElement>('.country-search input')!
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+  input.dispatchEvent(new Event('blur')); await tick()
+  expect(loadCountrySearchHistory('sales-a')).toEqual([expect.objectContaining({ code: 'JP', count: 1 })])
+  await search('日本'); await vi.advanceTimersByTimeAsync(800)
+  expect(loadCountrySearchHistory('sales-a')).toEqual([expect.objectContaining({ code: 'JP', count: 2 })])
+  await search('专线B'); await vi.advanceTimersByTimeAsync(800); await tick()
+  document.querySelector<HTMLButtonElement>('.country-grid button')!.click(); await tick()
+  expect(loadCountrySearchHistory('sales-a')).toEqual([expect.objectContaining({ code: 'JP', count: 2 })])
+})
+
+it('records a country chosen from partial country results but not ordinary country browsing', async () => {
+  mount({ userId: 'sales-a' })
+  button('美国').click(); await tick()
+  expect(loadCountrySearchHistory('sales-a')).toEqual([])
+  await search('日')
+  document.querySelector<HTMLButtonElement>('.country-grid button')!.click(); await tick()
+  expect(loadCountrySearchHistory('sales-a')).toEqual([expect.objectContaining({ code: 'JP', count: 1 })])
+})
+
+it('uses a shortcut only to search, preserves the active country and quotation selection, and clears persistently', async () => {
+  vi.useFakeTimers()
+  saveCountrySearchHistory('sales-a', [{ code: 'JP', count: 3, lastSearchedAt: 1 }])
+  const ensureCountries = vi.fn().mockResolvedValue(true)
+  const { changed } = mount({ userId: 'sales-a', ensureCountries })
+  expect(document.querySelectorAll('.country-grid button')).toHaveLength(1)
+  document.querySelector<HTMLButtonElement>('.frequent-country-chip')!.click(); await tick()
+  expect(document.querySelector<HTMLInputElement>('.country-search input')!.value).toBe('日本')
+  expect(document.querySelector('.country-grid')!.textContent).toContain('日本')
+  expect(document.querySelector('.country-summary')!.textContent).toContain('美国')
+  expect(ensureCountries).not.toHaveBeenCalled()
+  expect(changed).not.toHaveBeenCalled()
+  expect(loadCountrySearchHistory('sales-a')[0]?.count).toBe(4)
+  document.querySelector<HTMLButtonElement>('.clear-country-history')!.click(); await tick()
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(document.querySelector('.frequent-country-searches')).toBeNull()
+  expect(loadCountrySearchHistory('sales-a')).toEqual([])
+  expect(document.querySelector<HTMLInputElement>('.country-search input')!.value).toBe('日本')
+})
+
+it('shows at most six available countries by frequency and recency, without account leakage', async () => {
+  vi.useFakeTimers()
+  const entries = ['US', 'JP', 'DE', 'FR', 'IT', 'ES', 'PL', 'XX'].map((code, i) => ({ code, count: 1, lastSearchedAt: i }))
+  entries[0]!.count = 10
+  saveCountrySearchHistory('sales-a', entries)
+  const catalog = [...countries, ...['DE', 'FR', 'IT', 'ES', 'PL'].map(code => ({ ...countries[1]!, code, name: code }))]
+  const { state } = mount({ userId: 'sales-a', countries: catalog })
+  expect([...document.querySelectorAll('.frequent-country-chip')].map(el => el.textContent)).toEqual(['美国', 'PL', 'ES', 'IT', 'FR', 'DE'])
+  await search('JP')
+  Object.assign(state, { userId: 'sales-b' }); await tick()
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(document.querySelector('.frequent-country-searches')).toBeNull()
+  expect(loadCountrySearchHistory('sales-b')).toEqual([])
+  Object.assign(state, { userId: 'sales-a' }); await tick()
+  expect(document.querySelectorAll('.frequent-country-chip')).toHaveLength(6)
 })

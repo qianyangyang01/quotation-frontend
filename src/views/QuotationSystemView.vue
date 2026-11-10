@@ -2695,7 +2695,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel" :inert="batchSampleSwitching || undefined">
           <QuotationCommonMatrix :batch-sample="batchCapture" :ref="instance => commonMatrix = instance as typeof commonMatrix" :auto-load-country="hasQueriedQuotationProduct && !draftNeedsQuery && ['ready', 'empty'].includes(logisticsLoadState)" :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
-            :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
+            :user-id="currentAuthUser.id" :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
             :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="isBundleQuotation(quoteMode) ? '套' : '件'" :custom-quantity="customQuoteQuantity"

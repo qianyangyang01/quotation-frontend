@@ -10,8 +10,10 @@ import QuoteTaxMeta from './QuoteTaxMeta.vue'
 import QuoteChannelName from './QuoteChannelName.vue'
 import QuoteMinimumWeight from './QuoteMinimumWeight.vue'
 import QuoteTaxLegend from './QuoteTaxLegend.vue'
+import { loadCountrySearchHistory, saveCountrySearchHistory, recordCountrySearch, rankCountrySearchHistory } from '@/data/countrySearchHistory'
 
 const props = withDefaults(defineProps<{
+  userId?: string
   batchSample?: boolean
   unavailableReason?: (preset: QuotationPresetSelection, quantity?: number) => string
   active?: boolean
@@ -44,6 +46,55 @@ const emit = defineEmits<{
 
 const activeCountry = ref('')
 const search = ref('')
+const countrySearchHistory = ref(loadCountrySearchHistory(props.userId || ''))
+let historyTimer: ReturnType<typeof setTimeout> | undefined
+let recordedSearchCountry = ''
+const frequentSearchCountries = computed(() => rankCountrySearchHistory(countrySearchHistory.value)
+  .flatMap(entry => {
+    const country = props.countries.find(item => item.code.toUpperCase() === entry.code)
+    return country ? [country] : []
+  }).slice(0, 6))
+
+function rememberSearchedCountry(country: QuotationCountrySummary) {
+  if (!props.userId || props.active === false || recordedSearchCountry === country.code) return
+  recordedSearchCountry = country.code
+  countrySearchHistory.value = recordCountrySearch(countrySearchHistory.value, country.code)
+  saveCountrySearchHistory(props.userId, countrySearchHistory.value)
+}
+function rememberExactCountrySearch() {
+  clearTimeout(historyTimer)
+  const query = search.value.trim().toLowerCase()
+  if (!query) return
+  const country = props.countries.find(item => item.name.toLowerCase() === query || item.code.toLowerCase() === query)
+  if (country) rememberSearchedCountry(country)
+}
+function searchFrequentCountry(country: QuotationCountrySummary) {
+  // Only filter the existing results; do not select channels or add quotation rows.
+  search.value = country.name
+  rememberExactCountrySearch()
+}
+function clearCountrySearchHistory() {
+  clearTimeout(historyTimer)
+  countrySearchHistory.value = []
+  saveCountrySearchHistory(props.userId || '', [])
+}
+function selectSearchedCountry(country: QuotationCountrySummary) {
+  const query = search.value.trim().toLowerCase()
+  if (query && countryMatchesQuery(country, query)) rememberSearchedCountry(country)
+  void selectCountry(country.name)
+}
+watch(search, () => {
+  clearTimeout(historyTimer)
+  recordedSearchCountry = ''
+  // Avoid counting unfinished input, IME composition or each keystroke.
+  if (search.value.trim()) historyTimer = setTimeout(rememberExactCountrySearch, 800)
+}, { flush: 'sync' })
+watch(() => props.userId, userId => {
+  clearTimeout(historyTimer)
+  recordedSearchCountry = ''
+  countrySearchHistory.value = loadCountrySearchHistory(userId || '')
+})
+watch(() => props.active, active => { if (active === false) clearTimeout(historyTimer) })
 const searchMatches = ref<string[]>([])
 const searchLoading = ref(false)
 const searchError = ref('')
@@ -243,7 +294,7 @@ function runGlobalSearch() {
   }, 250)
 }
 watch([search, () => props.active, () => props.contextKey], runGlobalSearch)
-onBeforeUnmount(() => { searchRequest++; countryRequest++; clearTimeout(searchTimer) })
+onBeforeUnmount(() => { searchRequest++; countryRequest++; clearTimeout(searchTimer); clearTimeout(historyTimer) })
 const rows = computed(() => {
   const current = availableRows(activeCountry.value)
   return [...current, ...selectedQuoteRows().filter(row => row.available === false && row.country === activeCountry.value)]
@@ -316,13 +367,18 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
   <section v-if="active !== false" class="common-matrix">
     <header class="common-head">
       <div class="common-head-actions">
-        <label class="country-search">⌕<input v-model="search" type="search" aria-label="搜索全部国家或渠道" placeholder="搜索全部国家、代码或物流渠道"></label>
+        <label class="country-search">⌕<input v-model="search" type="search" aria-label="搜索全部国家或渠道" placeholder="搜索全部国家、代码或物流渠道" @keydown.enter="rememberExactCountrySearch" @blur="rememberExactCountrySearch"></label>
+        <nav v-if="frequentSearchCountries.length" class="frequent-country-searches" aria-label="常搜国家">
+          <span class="frequent-search-label">常搜国家</span>
+          <button v-for="country in frequentSearchCountries" :key="country.code" type="button" class="frequent-country-chip" :title="`搜索${country.name}`" @click="searchFrequentCountry(country)">{{ country.name }}</button>
+          <button type="button" class="clear-country-history" aria-label="清空常搜国家记录" @click="clearCountrySearchHistory">清空</button>
+        </nav>
       </div>
       <slot name="toolbar-actions" />
     </header>
 
     <div v-if="filteredCountries.length" class="country-grid">
-      <button v-for="country in filteredCountries" :key="country.name" :draggable="!search.trim() && country.stage==='common'" :class="{ active:activeCountry===country.name, dragging:draggedCountry===country.name, 'drag-over':dragOverCountry===country.name }" :title="country.stage==='common' && !search.trim() ? '按住卡片拖动排序' : '查看该国渠道'" @click="selectCountry(country.name)" @dragstart="startCountryDrag(country.name,$event)" @dragover="moveCountryOver(country.name,$event)" @drop="dropCountry(country.name,$event)" @dragend="endCountryDrag">
+      <button v-for="country in filteredCountries" :key="country.name" :draggable="!search.trim() && country.stage==='common'" :class="{ active:activeCountry===country.name, dragging:draggedCountry===country.name, 'drag-over':dragOverCountry===country.name }" :title="country.stage==='common' && !search.trim() ? '按住卡片拖动排序' : '查看该国渠道'" @click="selectSearchedCountry(country)" @dragstart="startCountryDrag(country.name,$event)" @dragover="moveCountryOver(country.name,$event)" @drop="dropCountry(country.name,$event)" @dragend="endCountryDrag">
         <u v-if="country.stage==='common' && !search.trim()" aria-hidden="true">⋮⋮</u><i>{{ countryFlag(country.code) }}</i><span><b>{{ country.name }}</b><small>{{ country.code }} · {{ country.channelsLoaded === false ? '点击加载渠道' : `${country.channelCount} 条可用渠道` }}</small></span><em v-if="activeCountry===country.name">已选择</em>
       </button>
     </div>
@@ -380,5 +436,14 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 .quote-rows article.selected{box-shadow:inset 3px 0 #ff9700}.selection-actions{display:grid;gap:4px}.selection-actions button{height:27px;border:0;border-radius:5px;background:#17232d;color:#fff;font-size:8px;font-weight:800;cursor:pointer}.selection-actions button:first-child{background:#ff9700;color:#17232d}.selection-actions .primary-action{height:auto;padding:2px 0;background:none;color:#7d8992}.selection-actions .primary-action:hover{color:#c66b00}
 @media(max-width:680px){.common-head-actions{width:100%;align-items:stretch;flex-direction:column}.common-head-actions .country-search{width:100%}}
 .country-grid button{cursor:grab;transition:border-color .15s,background .15s,box-shadow .15s,opacity .15s,transform .15s}.country-grid button:active{cursor:grabbing}.country-grid button.dragging{opacity:.42;transform:scale(.98)}.country-grid button.drag-over{border-color:#ff8f00;background:#fff2dc;box-shadow:0 0 0 3px rgba(255,143,0,.15)}.country-grid u{color:#aeb8bf;font-size:13px;line-height:1;text-decoration:none;letter-spacing:-3px}
+.common-head-actions{min-width:0;max-width:100%;flex-wrap:wrap}
+.common-head-actions .country-search{flex-shrink:0;max-width:100%}
+.frequent-country-searches{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
+.common-head .frequent-search-label{margin-right:4px;color:#83909b;font-size:12px;white-space:nowrap}
+.frequent-country-chip{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:28px;padding:3px 11px;border:1px solid #dce4e9;border-radius:15px;background:#f7f9fb;color:#526170;font:inherit;font-size:12px;line-height:20px;cursor:pointer}
+.frequent-country-chip:hover{border-color:#a8cdbd;background:#f0faf5;color:#15835b}
+.clear-country-history{min-height:28px;padding:3px 8px;border:0;background:transparent;color:#83909b;font:inherit;font-size:12px;cursor:pointer}
+.clear-country-history:hover{color:#526170}
+.frequent-country-chip:focus-visible,.clear-country-history:focus-visible{outline:2px solid #159b70;outline-offset:2px}
 .channel-name-line{display:flex!important;flex-wrap:wrap;align-items:center;gap:7px;min-width:0}.channel-name-line>b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
