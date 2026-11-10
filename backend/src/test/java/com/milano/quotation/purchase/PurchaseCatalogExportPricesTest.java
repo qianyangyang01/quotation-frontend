@@ -21,6 +21,15 @@ class PurchaseCatalogExportPricesTest {
             """));
     }
 
+    @Test void fractionalCentPricesMatchTheCatalogNumberToFixedDisplay() {
+        assertEquals(List.of("1–9件；¥0.07/件", "10件起；¥2.67/件"), tiers("""
+            {"minOrderQty":1,"purchasePriceCny":0.075,"tier2MinQty":10,"tier2PriceCny":2.675}
+            """));
+        assertEquals(List.of("1双起；¥0.07/双"), PurchaseCatalogExportPrices.tiers(mapper.readTree("""
+            {"fobTiers":[{"minQty":1,"maxQty":null,"unitPriceCny":0.075,"unit":"双"}]}
+            """), true));
+    }
+
     @Test void usesCurrentFieldsInsteadOfStaleCachedTiersAndKeepsAllFive() {
         assertEquals(List.of("1–9件；¥5.00/件", "10–99件；¥4.00/件", "100–999件；¥3.00/件", "1000–9999件；¥2.00/件", "10000件起；¥1.00/件"), tiers("""
             {"minOrderQty":"1","purchasePriceCny":"5","tier2MinQty":100,"tier2PriceCny":3,

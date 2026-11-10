@@ -78,7 +78,10 @@ final class PurchaseCatalogExportPrices {
         return min.stripTrailingZeros().toPlainString() + (max == null ? unit + "起" : "–" + max.stripTrailingZeros().toPlainString() + unit);
     }
     private static String amount(BigDecimal value, boolean preservePrecision) {
-        return value.setScale(preservePrecision ? Math.max(2, value.stripTrailingZeros().scale()) : 2, RoundingMode.HALF_UP).toPlainString();
+        // Standard/FOB cards use Number.toFixed(2), which rounds the binary double.
+        // Legacy cards use decimal.js and preserve the supplier's decimal precision.
+        if (!preservePrecision) return new BigDecimal(value.doubleValue()).setScale(2, RoundingMode.HALF_UP).toPlainString();
+        return value.setScale(Math.max(2, value.stripTrailingZeros().scale()), RoundingMode.HALF_UP).toPlainString();
     }
     private record Tier(BigDecimal min, BigDecimal price, boolean base) {}
 }
