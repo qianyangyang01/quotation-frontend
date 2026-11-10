@@ -241,7 +241,7 @@ function formattedPrice(price: Price) {
   const currency = price.currency || 'CNY'
   if (price.pricingModel === 'first-next' || price.firstWeightPrice) return `${currency} 首重 ${money(price.firstWeightPrice)} / 续重 ${money(price.nextWeightPrice)}`
   if (price.intervalPrice) return `${currency} ${money(price.intervalPrice)} / 票 · 每票费 ${money(price.registrationFee)}${price.pricingModel === 'per-piece-500g' ? ' · 0.5kg进位' : ''}`
-  return `${currency} ${money(price.pricePerKg)} / kg · 每票 ${money(price.registrationFee)}${price.pricingModel === 'per-kg-1g' ? ' · 1g进位' : ''}`
+  return `${currency} ${money(price.pricePerKg)} / kg · 每票 ${money(price.registrationFee)}${price.pricingModel === 'per-kg-1g-ceil-cny' ? ' · 重量1g进位 · 运费向上取整到元' : price.pricingModel === 'per-kg-1g' ? ' · 1g进位' : ''}`
 }
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 let requestKey = idempotencyKey('logistics-import'), reviewKey = idempotencyKey('logistics-review')

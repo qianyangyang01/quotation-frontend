@@ -4,7 +4,7 @@ package com.milano.quotation.logistics;
 final class LogisticsParserCompatibility {
     static final String SEPTEMBER_29 = "wanbang-yanwen-express-2026.09.29-v3";
     private static final java.util.Set<String> REVIEWED_VERSIONS=java.util.Set.of(
-        SEPTEMBER_29,"yanwen-october-layout-2026.10.04-v1","shared-source-layout-2026.10.04-v2","shared-source-layout-2026.10.09-v3","shared-source-layout-2026.10.12-v4","rongding-product-cells-2026.10.16-v5","sf-duplicate-operation-fee-2026.10.17-v6","confirmed-source-billing-2026.10.17-v7","qiaojie-carrier-code-2026.10.17-v8","source-effective-date-2026.10.19-v9","tongyou-epacket-2026.10.19-v10","jieyitongda-israel-2026.10.28-v13","sf-sensitive-latest-weight-2026.11.02-v14");
+        SEPTEMBER_29,"wanbang-preferred-clothing-2026.11.09-v15","yanwen-october-layout-2026.10.04-v1","shared-source-layout-2026.10.04-v2","shared-source-layout-2026.10.09-v3","shared-source-layout-2026.10.12-v4","rongding-product-cells-2026.10.16-v5","sf-duplicate-operation-fee-2026.10.17-v6","confirmed-source-billing-2026.10.17-v7","qiaojie-carrier-code-2026.10.17-v8","source-effective-date-2026.10.19-v9","tongyou-epacket-2026.10.19-v10","jieyitongda-israel-2026.10.28-v13","sf-sensitive-latest-weight-2026.11.02-v14");
     private LogisticsParserCompatibility() {}
 
     static String blockingReason(String version) {

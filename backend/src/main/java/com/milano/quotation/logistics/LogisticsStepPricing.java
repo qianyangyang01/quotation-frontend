@@ -14,9 +14,9 @@ final class LogisticsStepPricing {
                 && (!step.isNumber() || !Double.isFinite(step.asDouble()) || step.decimalValue().signum() < 0)) return false;
         var bands = row.path("billingStepBands");
         var model = row.path("pricingModel").asText("per-kg");
-        if (model.equals("per-kg-1g") || model.equals("per-piece-500g")) {
+        if (LogisticsGramPricing.applies(row) || model.equals("per-piece-500g")) {
             if (!bands.isMissingNode() && !bands.isNull()) return false;
-            var nativeStep = new BigDecimal(model.equals("per-kg-1g") ? "0.001" : "0.5");
+            var nativeStep = new BigDecimal(LogisticsGramPricing.applies(row) ? "0.001" : "0.5");
             if (step.isNumber() && step.decimalValue().signum() > 0 && step.decimalValue().compareTo(nativeStep) != 0) return false;
         }
         if (!bands.isMissingNode() && !bands.isNull()) {

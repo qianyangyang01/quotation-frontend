@@ -13,7 +13,7 @@ import java.util.*;
 /** Fail-closed evaluator for explicitly supported, fully specified price rules. */
 @Component
 public class LogisticsBillingEngine {
-    public static final String VERSION="logistics-billing-v9";
+    public static final String VERSION="logistics-billing-v10";
     private final ObjectMapper mapper;
     public LogisticsBillingEngine(ObjectMapper mapper){this.mapper=mapper;}
     static BigDecimal minimum(JsonNode row){return n(row,"minChargeWeightKg").max(n(row,"startWeightKg"));}
@@ -34,7 +34,7 @@ public class LogisticsBillingEngine {
             long baseTypes=List.of("pricePerKg","intervalPrice","firstWeightPrice").stream().filter(f->n(row,f).signum()>0).count();
             if(baseTypes!=1)reasons.add("基础计费价格必须唯一，不能同时使用公斤价、区间价和首重价");
             if(!row.path("currency").asText("CNY").equals("CNY"))reasons.add("非人民币计价未适配");
-            if(!Set.of("per-kg","first-next","interval",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL).contains(model(row)))reasons.add("未知计费方式");
+            if(!Set.of("per-kg","first-next","interval",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL,LogisticsGramPricing.CEIL_CNY_MODEL).contains(model(row)))reasons.add("未知计费方式");
             if(n(row,"weightToKg").compareTo(n(row,"weightFromKg"))<=0)reasons.add("重量范围无效");
             var minimum=minimum(row);
             int minimumToUpper=minimum.compareTo(n(row,"weightToKg"));
@@ -70,7 +70,7 @@ public class LogisticsBillingEngine {
             if(!includes(row,charge))continue;
             BigDecimal base=LogisticsPiecePricing.applies(row)?n(row,"intervalPrice"):charge.multiply(n(row,"pricePerKg"));
             matches.add(mapper.createObjectNode().put("rowIndex",current).put("base",base).put("actualWeightKg",weight).put("minChargeWeightKg",minimum).put("chargeWeightKg",charge).put("volumeWeightKg",volume)
-                    .put("total",base.add(n(row,"registrationFee")).setScale(2,RoundingMode.HALF_UP)).put("engineVersion",VERSION));
+                    .put("total",base.add(n(row,"registrationFee")).setScale(LogisticsGramPricing.ceilCny(row)?0:2,LogisticsGramPricing.ceilCny(row)?RoundingMode.CEILING:RoundingMode.HALF_UP)).put("engineVersion",VERSION));
         }
         if(matches.isEmpty())throw AppException.unprocessable("国家、重量或货物属性不在已核验范围");
         if(matches.size()>1){var totals=new HashSet<String>();for(var match:matches)totals.add(priceKey(LogisticsRoundingNotes.apply(rows.get(match.path("rowIndex").asInt()))));if(totals.size()>1)throw AppException.unprocessable("存在多个匹配价格，禁止自动选择最低价");}

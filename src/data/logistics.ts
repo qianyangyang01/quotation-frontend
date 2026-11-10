@@ -241,7 +241,7 @@ export function isWeightRangePrice(price: LogisticsPriceRow) {
     && Number.isFinite(price.weightFromKg) && price.weightFromKg >= 0 && Number.isInteger(price.weightFromKg * 2)
     && price.weightToKg - price.weightFromKg === .5 && !price.weightFromInclusive && price.weightToInclusive !== false
     && [price.firstWeightKg, price.firstWeightPrice, price.nextWeightKg, price.nextWeightPrice, price.surcharge].every(value => value === 0)
-  return (piece ? validPiece : (!price.pricingModel || price.pricingModel === 'per-kg' || price.pricingModel === 'per-kg-1g') && price.pricePerKg > 0)
+  return (piece ? validPiece : (!price.pricingModel || price.pricingModel === 'per-kg' || (price.pricingModel === 'per-kg-1g' || price.pricingModel === 'per-kg-1g-ceil-cny')) && price.pricePerKg > 0)
     && validBillingSteps(price)
     && [price.minChargeWeightKg ?? 0, price.startWeightKg ?? 0].every(value => Number.isFinite(value) && value >= 0)
     && Number.isFinite(minimum) && minimum >= 0
@@ -271,7 +271,7 @@ export function validBillingSteps(price: Partial<LogisticsPriceRow>) {
   const step = price.billingStepKg
   if (step != null && (typeof step !== 'number' || !Number.isFinite(step) || step < 0)) return false
   const bands = price.billingStepBands
-  const nativeStep = price.pricingModel === 'per-kg-1g' ? .001 : price.pricingModel === 'per-piece-500g' ? .5 : 0
+  const nativeStep = (price.pricingModel === 'per-kg-1g' || price.pricingModel === 'per-kg-1g-ceil-cny') ? .001 : price.pricingModel === 'per-piece-500g' ? .5 : 0
   if (nativeStep && (bands != null || ((step ?? 0) > 0 && step !== nativeStep))) return false
   if (bands == null) return true
   if (!Array.isArray(bands) || !bands.length || (step ?? 0) > 0) return false
@@ -281,7 +281,7 @@ export function validBillingSteps(price: Partial<LogisticsPriceRow>) {
 }
 function roundedChargeWeight(price: Partial<LogisticsPriceRow>, minimum: number) {
   if (price.pricingModel === 'per-piece-500g') return decimal(minimum).div(.5).ceil().times(.5).toNumber()
-  if (price.pricingModel === 'per-kg-1g') return decimal(minimum).times(1000).ceil().div(1000).toNumber()
+  if ((price.pricingModel === 'per-kg-1g' || price.pricingModel === 'per-kg-1g-ceil-cny')) return decimal(minimum).times(1000).ceil().div(1000).toNumber()
   let step = price.billingStepKg ?? 0
   for (const band of price.billingStepBands ?? []) if (minimum > band.aboveKg) step = band.stepKg
   return step > 0 ? decimal(minimum).div(step).ceil().times(step).toNumber() : minimum
@@ -343,6 +343,7 @@ export function calculateLogisticsFee(rule: LogisticsRule, country: string, weig
   const chargeWeightKg = roundedChargeWeight(price, minimum)
   const base = piece ? price.intervalPrice : decimal(chargeWeightKg).times(price.pricePerKg).toNumber()
   const surcharge = 0
-  const total = decimal(base).plus(price.registrationFee || 0).toDecimalPlaces(2).toNumber()
+  const unrounded = decimal(base).plus(price.registrationFee || 0)
+  const total = (price.pricingModel === 'per-kg-1g-ceil-cny' ? unrounded.ceil() : unrounded.toDecimalPlaces(2)).toNumber()
   return { total: Number(total.toFixed(2)), base, surcharge, price, actualWeightKg, minChargeWeightKg, volumeWeightKg, chargeWeightKg, volumeDivisor }
 }

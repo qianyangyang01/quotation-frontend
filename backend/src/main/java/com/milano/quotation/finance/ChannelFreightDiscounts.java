@@ -45,7 +45,7 @@ public final class ChannelFreightDiscounts {
         var row=(ObjectNode)source.deepCopy();var rule=matching(settings,channelId);
         if(rule==null) return row;
         var model=source.path("pricingModel").asText("per-kg");
-        if (!Set.of("per-kg","per-kg-1g","per-piece-500g").contains(model)||source.has("financeFreightDiscount")) return unavailable(row);
+        if (!Set.of("per-kg","per-kg-1g","per-kg-1g-ceil-cny","per-piece-500g").contains(model)||source.has("financeFreightDiscount")) return unavailable(row);
         var code=source.path("countryCode").asText();
         var country=CountryIdentity.key(code.isBlank()?source.path("areaName").asText():code);
         var configured=rule.path("countries").path(country);

@@ -9,7 +9,7 @@ import java.util.*;
 
 /** Derives route-level ETA readiness and review flags without changing billing identity. */
 final class LogisticsReadiness {
-    private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL);
+    private static final Set<String> SUPPORTED_MODELS=Set.of("per-kg",LogisticsPiecePricing.MODEL,LogisticsGramPricing.MODEL,LogisticsGramPricing.CEIL_CNY_MODEL);
     private static final Set<String> GENERATED_ETA_CODES=Set.of("ETA_MISSING","ETA_PARTIAL","ETA_CONFLICT");
     private static final Set<String> GENERATED_REASONS=Set.of("缺少时效","时效范围不完整","同一路线存在冲突时效","区间价计费方式暂不支持","未知计费方式","公斤价计费结构不完整","0.5kg进位整票价的档位、起重或金额无效","每票费用缺失或无效","重量区间缺失或无效");
 
