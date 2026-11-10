@@ -58,6 +58,14 @@ class SfDiscountImportTest {
                 input=LogisticsSourceParserTest.bytes(book);
                 assertFalse(channel(input,provider).path("quoteReady").asBoolean(),"Unknown extra freight columns require review, never SF discount fallback");
             }
+            if(provider.equals("快驴"))try(var book=new XSSFWorkbook(new ByteArrayInputStream(new KuailvSourceTest().fixture(false)))) {
+                var sheet=book.getSheetAt(0);
+                sheet.getRow(2).getCell(2).setCellValue(97);
+                sheet.getRow(1).createCell(6).setCellValue("折扣");sheet.getRow(2).createCell(6).setCellValue(.7);
+                sheet.getRow(1).createCell(7).setCellValue("折后运费");sheet.getRow(2).createCell(7).setCellValue(51);
+                input=LogisticsSourceParserTest.bytes(book);
+                assertFalse(channel(input,provider).path("quoteReady").asBoolean(),"Unknown extra freight columns require review, never SF discount fallback");
+            }
             // Shandianhou only accepts approved US channels; keep the same pricing assertion.
             if(provider.equals("闪电猴"))try(var book=new XSSFWorkbook(new ByteArrayInputStream(input));var bytes=new ByteArrayOutputStream()) {
                 var sheet=book.getSheetAt(0);
