@@ -55,7 +55,7 @@ class KuailvWorkflowPostgresTest {
         var batch=imports.get(UUID.fromString(accepted.path("id").asText()));assertEquals("completed",batch.path("status").asText(),batch.toString());
         var result=batch.path("payload").path("results").get(0);assertEquals("draft",result.path("status").asText(),result.toString());
         var version=UUID.fromString(result.path("versionId").asText());
-        var input=mapper.createObjectNode().put("note","原表及用户确认取整规则，独立核对");
+        var input=mapper.createObjectNode().put("note","原表及用户确认取整规则，独立核对；局部新增渠道，现有渠道沿用原价").put("partialUpdateConfirmed",true);
         input.putArray("selections").addObject().put("versionId",version.toString()).put("channelId",result.path("channelId").asText()).put("reviewConfirmed",true).put("removalConfirmed",true);
         assertEquals(1,publish.publishReady(UUID.fromString(batch.path("id").asText()),input,"QA").path("publishedCount").asInt());
         assertTrue(guard.quoteReady(version));
