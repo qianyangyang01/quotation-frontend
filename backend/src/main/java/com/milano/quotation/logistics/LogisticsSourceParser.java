@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="kuailv-us-special-line-2026.11.10-v17";
+    public static final String VERSION="kuailv-eu-special-2026.11.11-v18";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴");
@@ -61,7 +61,7 @@ public class LogisticsSourceParser {
                 var source=new Source(sheet,scope);
                 if(provider.isBlank())provider=providerFromTitles(source);
                 if(provider.equals("快驴")&&!qiaojieStandardSheet(source)&&!kuailvSelectedSheet(source)) {
-                    report.put("status","filtered").put("priceCellsParsed",0).put("message","快驴仅导入已适配的美国商派/专线特敏感渠道；其他渠道保留在原文件中");continue;
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","快驴仅导入已适配的美国特敏感和欧盟小包特货渠道；其他渠道保留在原文件中");continue;
                 }
                 if(provider.equals("捷易通达")&&!jieyitongdaSheet(source)) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","捷易通达仅解析以色列敏感1961、以色列敏感(到门)2001");continue;
@@ -331,7 +331,11 @@ public class LogisticsSourceParser {
 
     private static final List<String> KUAILV_CHANNELS=List.of("美国商派-特敏感","美国专线-特敏感");
     private boolean kuailvSelectedSheet(Source source) {
-        return KUAILV_CHANNELS.stream().anyMatch(name->kuailvContainsChannel(source,name));
+        return kuailvEuropeSheet(source)||KUAILV_CHANNELS.stream().anyMatch(name->kuailvContainsChannel(source,name));
+    }
+    private boolean kuailvEuropeSheet(Source source) {
+        return CompanyChannelScope.normalize(source.sheet.getSheetName()).equals(CompanyChannelScope.normalize(KuailvEuropeSourceRules.TITLE))
+                ||kuailvContainsChannel(source,KuailvEuropeSourceRules.TITLE);
     }
     private boolean kuailvContainsChannel(Source source,String channelName) {
         for(int r=0;r<=source.lastContentRow;r++)for(var value:source.rowTexts(r))
@@ -341,8 +345,76 @@ public class LogisticsSourceParser {
 
     /** Product blocks share a header and merged labels, but never share prices or attributes. */
     private boolean parseKuailv(Source source,String file,Map<String,ObjectNode> channels) {
+        if(kuailvEuropeSheet(source))return parseKuailvEurope(source,file,channels);
         for(var name:KUAILV_CHANNELS)if(kuailvContainsChannel(source,name))parseKuailvChannel(source,file,channels,name);
         source.parsedRows.forEach(source.filteredOtherRows::remove);
+        return true;
+    }
+
+    private boolean parseKuailvEurope(Source source,String file,Map<String,ObjectNode> channels) {
+        var target=selected(source,"快驴",KuailvEuropeSourceRules.NAME,"",0,channels);
+        if(target==null)return true;
+        int header=-1,country=-1,weight=-1,rate=-1,fee=-1;
+        for(int r=0;r<=source.lastContentRow;r++) {
+            var columns=new HashMap<String,Integer>();
+            for(int c=0;c<source.width(r);c++) {
+                String label=java.text.Normalizer.normalize(source.text(r,c),java.text.Normalizer.Form.NFKC).replaceAll("\\s+","").toUpperCase(Locale.ROOT);
+                String key=switch(label){case "国家"->"country";case "重量"->"weight";case "单价(RMB/KG)"->"rate";case "挂号费(RMB/票)"->"fee";default->"";};
+                if(!key.isBlank()&&columns.putIfAbsent(key,c)!=null)issue(target,r+1,"表头","欧洲小包重复关键列："+label,"error");
+            }
+            if(columns.size()<3)continue;
+            if(header>=0){issue(target,r+1,"表头","欧洲小包存在多组价格表头","error");continue;}
+            header=r;country=columns.getOrDefault("country",-1);weight=columns.getOrDefault("weight",-1);rate=columns.getOrDefault("rate",-1);fee=columns.getOrDefault("fee",-1);
+            for(int c=0;c<source.width(r);c++)if(!columns.containsValue(c)&&!source.text(r,c).isBlank())
+                issue(target,r+1,"表头","欧洲小包出现未适配列："+source.text(r,c),"error");
+        }
+        if(header<0||country<0||weight<0||rate<0||fee<0){issue(target,0,"表头","欧洲小包必须包含国家、重量、单价(RMB/KG)、挂号费(RMB/票)，禁止缺列补零","error");return true;}
+        var minima=new HashMap<String,BigDecimal>();var minimumCells=new HashMap<String,String>();
+        var previous=new HashMap<String,BigDecimal>();var notes=new LinkedHashSet<String>();
+        boolean reference=false;
+        for(int r=header+1;r<=source.lastContentRow;r++) {
+            if(source.resolvedTexts(r).stream().anyMatch(t->clean(t).equals("渠道须知")))reference=true;
+            if(reference){source.referenceRows.add(r);notes.addAll(source.rowTexts(r));continue;}
+            if(source.rowEmpty(r))continue;
+            String rawCountry=source.text(r,country),code=countryCode(rawCountry);
+            if(KuailvEuropeSourceRules.EXCLUDED.contains(code)){source.filteredOtherRows.put(r,"用户限定欧盟国家，排除非欧盟目的地："+rawCountry);continue;}
+            source.parsedRows.add(r);
+            if(!KuailvEuropeSourceRules.EU.contains(code)){issue(target,r+1,"国家","欧洲小包国家缺失或不在确认的欧盟范围："+rawCountry,"error");continue;}
+            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
+                    .put("areaName",countryName(rawCountry)).put("countryCode",code).put("zoneName","").put("originRegion","")
+                    .put("sourceCountry",rawCountry).put("sourceCountryCode",code).put("sourceCountryCell",source.address(r,country))
+                    .put("sourceWeightRange",source.text(r,weight)).put("sourceWeightCell",source.address(r,weight))
+                    .put("sourcePriceCell",source.address(r,rate)).put("sourceFeeCell",source.address(r,fee)).put("sourceFeeLabel",source.text(header,fee))
+                    .put("volumetric",true).put("volumeDivisor",10000)
+                    .put("notes","用户指定：仅欧盟、保健品、免税、可发种子。原表尺寸、邮编、偏远和特殊操作费用说明保留供核对。")
+                    .put("sourceRoundingConfirmation","2026-11-11 用户确认：重量按1g向上进位，公斤价乘计费重量加一次挂号费后，运费向上取整到人民币元")
+                    .put("sourceEtaConfirmation","2026-11-11 用户确认：时效没有就不写，不借用美国时效");
+            try {
+                var band=KuailvEuropeSourceRules.band(source.text(r,weight));
+                if(band.minimum()!=null){
+                    var existing=minima.putIfAbsent(code,band.minimum());
+                    if(existing!=null&&existing.compareTo(band.minimum())!=0)issue(target,r+1,"起重","同一国家首重冲突","error");
+                    minimumCells.putIfAbsent(code,source.address(r,weight));
+                }
+                var minimum=minima.get(code);
+                if(minimum==null)issue(target,r+1,"起重","国家首档缺少明确首重，不借用其他国家规则","error");
+                else row.put("minChargeWeightKg",minimum).put("sourceMinimumWeightKind","column-inherited")
+                        .put("sourceMinimumWeightCell",minimumCells.get(code)).put("sourceMinimumWeightText","原表首重(KG)="+minimum);
+                var prev=previous.put(code,band.to());
+                if(prev!=null&&(band.from().compareTo(prev)<0||band.from().subtract(prev).compareTo(new BigDecimal("0.001"))>0))
+                    issue(target,r+1,"重量段","欧洲小包重量档位重叠或不连续，禁止遗漏价格后发布","error");
+                if(prev==null&&minimum!=null&&band.from().compareTo(minimum)>0)issue(target,r+1,"重量段","欧洲小包首档不覆盖起重","error");
+                row.put("weightFromKg",band.from()).put("weightToKg",band.to()).put("weightFromInclusive",prev==null||band.from().compareTo(prev)!=0).put("weightToInclusive",true);
+            }catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
+            numeric(row,"pricePerKg",source,r,rate,target,false);numeric(row,"registrationFee",source,r,fee,target,false);
+            if(row.path("pricePerKg").asDouble()<=0)issue(target,r+1,"单价","欧洲小包公斤价必须大于0","error");
+            if(code.equals("MT"))row.put("sourceWeightConfirmation","2026-11-11 用户确认：马耳他按价格行0–20kg计费，覆盖原表须知2kg限制");
+            if(code.equals("RO"))row.put("sourceFeeConfirmation","2026-11-11 用户确认：没有手续费，按照价格行计费，不加原表须知中的5欧手续费");
+            warn(row,"原表尺寸、邮编、偏远及特殊操作费用需按实际包裹核对");
+            add(target,row,source,r,file);
+        }
+        if(!reference)issue(target,0,"渠道须知","欧洲小包缺少渠道须知，须核对附加费和限制","error");
+        target.put("sourceNotes",String.join("\n",notes));
         return true;
     }
     private boolean parseKuailvChannel(Source source,String file,Map<String,ObjectNode> channels,String channelName) {

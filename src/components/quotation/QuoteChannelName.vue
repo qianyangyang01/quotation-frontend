@@ -7,7 +7,7 @@ import { priceRegionLabel } from './priceRegionLabel'
 
 const props = defineProps<{ row: Pick<QuotationMatrixRow, 'country' | 'carrier' | 'transport' | 'rule' | 'quoteRegion' | 'priceRegion' | 'deliveryModes'> }>()
 const regionLabel = computed(() => priceRegionLabel(props.row))
-const acceptsSeeds = computed(() => props.row.carrier.trim() === '快驴' && ['美国商派-特敏感', '美国专线-特敏感'].includes(props.row.transport.trim()))
+const acceptsSeeds = computed(() => props.row.carrier.trim() === '快驴' && ['美国商派-特敏感', '美国专线-特敏感', '欧洲小包-特货'].includes(props.row.transport.trim()))
 </script>
 
 <template>
