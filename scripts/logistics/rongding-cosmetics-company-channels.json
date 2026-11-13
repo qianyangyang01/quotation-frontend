@@ -1,0 +1,50 @@
+{
+  "enabled": true,
+  "revision": 23,
+  "entries": [
+    {
+      "id": "7242c2e4-ac63-3bbf-8b12-f9ef5cb869f3",
+      "aliases": [],
+      "enabled": true,
+      "sources": [
+        {
+          "file": "8.12容鼎.xlsx",
+          "sheet": "Sheet1",
+          "lastRow": 33,
+          "firstRow": 28,
+          "priceRows": 6
+        }
+      ],
+      "channelName": "美国纯商派化妆品专线",
+      "productCodes": [
+        "PK00270"
+      ],
+      "providerName": "容鼎",
+      "providerAliases": [],
+      "sharedSourceCodes": [],
+      "logisticsAttribute": "非液体化妆品"
+    },
+    {
+      "id": "f1789e9c-769a-4f87-a751-42453252f1e1",
+      "providerName": "容鼎",
+      "channelName": "美国标准DDP专线-特惠化妆品A(SP)",
+      "enabled": true,
+      "logisticsAttribute": "非液体化妆品",
+      "productCodes": [
+        "PK00369"
+      ],
+      "aliases": [],
+      "providerAliases": [],
+      "sharedSourceCodes": [],
+      "sources": [
+        {
+          "file": "容鼎供应链&合肥松创11月12日生效最新价格.xlsx",
+          "sheet": "容鼎美国化妆品专线 ",
+          "firstRow": 28,
+          "lastRow": 33,
+          "priceRows": 6
+        }
+      ]
+    }
+  ]
+}
