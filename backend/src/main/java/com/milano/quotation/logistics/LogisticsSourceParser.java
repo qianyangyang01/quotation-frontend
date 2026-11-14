@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="kuailv-eu-special-2026.11.11-v18";
+    public static final String VERSION="tongyou-unavailable-rates-2026.11.14-v19";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴");
@@ -58,7 +58,7 @@ public class LogisticsSourceParser {
                 var sheet=book.next();
                 if(provider.isBlank())provider=scope.unrestricted()?provider(sheet.getSheetName()):scope.providerFromFilename(sheet.getSheetName());
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
-                var source=new Source(sheet,scope);
+                var source=new Source(sheet,scope,book.formulaCells());
                 if(provider.isBlank())provider=providerFromTitles(source);
                 if(provider.equals("快驴")&&!qiaojieStandardSheet(source)&&!kuailvSelectedSheet(source)) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","快驴仅导入已适配的美国特敏感和欧盟小包特货渠道；其他渠道保留在原文件中");continue;
@@ -1267,6 +1267,12 @@ public class LogisticsSourceParser {
             boolean sheetFallback=(columns.channel<0||source.text(r,columns.channel).isBlank())&&section.equals(source.sheet.getSheetName().trim());
             var target=selected(source,provider,name,productCode,r,channels,sheetFallback);
             if(target==null)continue;
+            if(provider.equals("通邮")&&noQuoteMarker(source,r,columns.rate)
+                    &&source.rowTexts(r).stream().anyMatch(t->clean(t).equals("暂停"))) {
+                skipUnavailableQuote(source,target,r,"原表明确暂停且未提供公斤价，已跳过，不参与报价",columns.rate);
+                source.filteredOtherRows.put(r,"暂停且无报价");
+                continue;
+            }
             var additional=YanwenWanbangAdditionalRules.named(provider,target.path("channelName").asText());
             if(additional!=null&&!additional.code().equals(productCode))issue(target,r+1,"产品代码","渠道名称与原表产品代码不一致或缺失，禁止混入其他产品","error");
             if(additional!=null&&provider.equals("燕文")&&Set.of("440","557").contains(additional.code())&&columns.fee<0)
@@ -1454,12 +1460,30 @@ public class LogisticsSourceParser {
                         .put("countryCode",countryCode(destination)).put("currency","CNY").put("pricingModel","per-kg");
                 try{var range=parseRange(text);row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightFromInclusive",range.includeFrom).put("weightToInclusive",range.includeTo);}
                 catch(IllegalArgumentException e){issue(target,r+1,"重量段",e.getMessage(),"error");continue;}
+                if(provider.equals("通邮")&&noQuoteMarker(source,r,c)&&noQuoteMarker(source,r,c+1)) {
+                    skipUnavailableQuote(source,target,r,"本渠道运费、处理费均为无报价标记，已跳过此档，不参与报价",c,c+1);
+                    continue;
+                }
                 numeric(row,"pricePerKg",source,r,c,target,false);numeric(row,"registrationFee",source,r,c+1,target,false);
                 row.put("sourceFeeLabel",source.text(header,c+1));
                 pending(row,"横向渠道表的收寄条件和表尾附加规则待核对");add(target,row,source,r,file);
             }
         }
         return true;
+    }
+
+    /** Only explicit literal markers are exclusions; blanks, formulas and partial prices still fail validation. */
+    private boolean noQuoteMarker(Source source,int row,int column) {
+        var cell=source.cell(row,column);
+        return cell!=null&&!source.formulaCells.contains(cell)&&cell.getCellType()==CellType.STRING
+                &&Set.of("-","—","–").contains(source.text(row,column).trim());
+    }
+
+    private void skipUnavailableQuote(Source source,ObjectNode target,int row,String reason,int... columns) {
+        // A matrix exclusion belongs to this channel only. Other channel columns in the same row still parse.
+        source.parsedRows.add(row);
+        String cells=Arrays.stream(columns).mapToObj(c->source.address(row,c)).collect(java.util.stream.Collectors.joining("、"));
+        issue(target,row+1,"无报价已跳过",reason+"（"+cells+"）","warning");
     }
 
     private boolean parseIntervalMatrix(Source source,String provider,String file,Map<String,ObjectNode> channels) {
@@ -2156,6 +2180,7 @@ public class LogisticsSourceParser {
         PriceRowLimit(){super(null,null,false,false);}
     }
     private class Source {
+        final Set<Cell> formulaCells;
         final CompanyChannelScope scope;int priceCellsParsed;
         final ArrayNode matches=mapper.createArrayNode();final Set<String> matchKeys=new HashSet<>();boolean ambiguous;
         final Map<String,TitleIdentity> titleIdentities=new HashMap<>();
@@ -2202,7 +2227,7 @@ public class LogisticsSourceParser {
         final Set<Integer> exampleRows=new HashSet<>();
         final Map<Integer,Integer> auxiliaryRows=new HashMap<>();
         final Map<Integer,List<org.apache.poi.ss.util.CellRangeAddress>> merges=new HashMap<>();
-        Source(Sheet sheet,CompanyChannelScope scope){this.sheet=sheet;this.scope=scope;formatter.setUseCachedValuesForFormulaCells(true);int count=0,last=0;for(var r:sheet){boolean populated=false;for(var c:r)if(!formatter.formatCellValue(c).isBlank()){count++;populated=true;}if(populated)last=Math.max(last,r.getRowNum());}nonempty=count;lastContentRow=last;
+        Source(Sheet sheet,CompanyChannelScope scope,Set<Cell> formulaCells){this.sheet=sheet;this.scope=scope;this.formulaCells=formulaCells;formatter.setUseCachedValuesForFormulaCells(true);int count=0,last=0;for(var r:sheet){boolean populated=false;for(var c:r)if(!formatter.formatCellValue(c).isBlank()){count++;populated=true;}if(populated)last=Math.max(last,r.getRowNum());}nonempty=count;lastContentRow=last;
             for(var range:sheet.getMergedRegions())for(int row=range.getFirstRow();row<=Math.min(range.getLastRow(),lastContentRow);row++)merges.computeIfAbsent(row,k->new ArrayList<>()).add(range);
         }
         Cell cell(int r,int c){if(c<0)return null;for(var range:merges.getOrDefault(r,List.of()))if(range.isInRange(r,c)){r=range.getFirstRow();c=range.getFirstColumn();break;}var row=sheet.getRow(r);return row==null?null:row.getCell(c);}
