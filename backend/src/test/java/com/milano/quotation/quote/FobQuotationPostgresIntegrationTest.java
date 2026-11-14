@@ -33,7 +33,7 @@ class FobQuotationPostgresIntegrationTest {
         r.add("spring.sql.init.mode",()->"never");r.add("spring.jpa.hibernate.ddl-auto",()->"validate");r.add("spring.jpa.defer-datasource-initialization",()->"false");r.add("spring.flyway.enabled",()->"true");
     }
     @Autowired WebApplicationContext context;@Autowired UserAccountRepository users;@Autowired PasswordEncoder encoder;
-    @Autowired ObjectMapper mapper;@Autowired JdbcClient jdbc;@Autowired FobPurchaseService purchases;
+    @Autowired ObjectMapper mapper;@Autowired JdbcClient jdbc;@Autowired FobPurchaseService purchases;@Autowired FobQuotation fobQuotation;
     MockMvc mvc;Map<String,MockHttpSession> sessions;ObjectNode input;
     @BeforeEach void setup() throws Exception {
         mvc=webAppContextSetup(context).apply(springSecurity()).build();sessions=new HashMap<>();
@@ -47,15 +47,22 @@ class FobQuotationPostgresIntegrationTest {
         jdbc.sql("insert into finance_setting(setting_key,payload,version,updated_at) values('exchange-rate',cast(:p as jsonb),0,now()) on conflict(setting_key) do update set payload=excluded.payload,version=finance_setting.version+1").param("p","{\"usdCny\":6.7}").update();
         var source=mapper.createObjectNode().put("sku","FOB-SAVE").put("category","内裤").put("weightRaw","60 g");source.set("parsed",input.at("/fob/product/parsed"));
         jdbc.sql("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values('FOB-SAVE',cast(:p as jsonb),0,now(),'2026-10-09T00:00:00Z') on conflict(sku) do update set payload=excluded.payload,version=fob_purchase_product.version+1,updated_at=excluded.updated_at").param("p",source.toString()).update();
+        input=FobClassifiedTestData.request(input);
     }
     JsonNode save(String role,String key,ObjectNode body) throws Exception {
         return mapper.readTree(mvc.perform(post("/api/v1/quotations").session(sessions.get(role)).with(csrf()).header("Idempotency-Key",key).contentType("application/json").content(body.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
     }
-    JsonNode read(String role,String id) throws Exception {return mapper.readTree(mvc.perform(get("/api/v1/quotations/"+id).session(sessions.get(role))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");}
+    JsonNode read(String role,String id) throws Exception {
+        var result=mapper.readTree(mvc.perform(get("/api/v1/quotations/"+id).session(sessions.get(role))).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
+        // Compare common snapshot fields across roles; admin-only coefficient visibility is checked separately.
+        FobCoefficientVisibility.redact(result);return result;
+    }
     @Test void savesSnapshotWithIdempotencyOwnerIsolationAndAdminInspectionRoundTrip() throws Exception {
         var key=UUID.randomUUID().toString();var row=save("employee",key,input);String id=row.path("id").asText();var snapshot=row.path("fob");
         assertEquals("fob",row.path("quoteMode").asText());assertEquals(id,save("employee",key,input).path("id").asText());
         for(String role:List.of("employee","super_admin","finance"))assertEquals(snapshot,read(role,id).path("fob"));
+        mvc.perform(get("/api/v1/quotations/"+id).session(sessions.get("super_admin"))).andExpect(status().isOk()).andExpect(jsonPath("$.data.fob.product.pricing.fobCoefficient").value(1.08));
+        mvc.perform(get("/api/v1/quotations/"+id).session(sessions.get("employee"))).andExpect(status().isOk()).andExpect(jsonPath("$.data.fob.product.pricing.fobCoefficient").doesNotExist());
         mvc.perform(get("/api/v1/quotations/"+id).session(sessions.get("employee2"))).andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/quotations").session(sessions.get("purchase")).with(csrf()).header("Idempotency-Key","denied").contentType("application/json").content(input.toString())).andExpect(status().isForbidden());
         var mark=mapper.createObjectNode().put("_version",row.path("_version").asLong()).put("_reviewVersion",0).put("spotChecked",true);
@@ -82,7 +89,7 @@ class FobQuotationPostgresIntegrationTest {
         assertEquals(before,jdbc.sql("select count(*) from quotation_record").query(Long.class).single());
     }
     @Test void batchPreviewSaveSearchOwnershipDealAndSnapshotRoundTrip() throws Exception {
-        var batch=FobBatchQuotationTest.input(20);
+        var batch=FobClassifiedTestData.request(FobBatchQuotationTest.input(20));
         for(var item:batch.at("/fob/items")) {
             var p=(ObjectNode)item.path("product").deepCopy();p.put("weightRaw","60 g");
             jdbc.sql("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values(:sku,cast(:p as jsonb),0,now(),'2026-10-09T00:00:00Z') on conflict(sku) do update set payload=excluded.payload,updated_at=excluded.updated_at")
@@ -129,7 +136,15 @@ class FobQuotationPostgresIntegrationTest {
             jdbc.sql("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values(:sku,cast(:p as jsonb),0,now(),'2026-10-09T00:00:00Z') on conflict(sku) do update set payload=excluded.payload,updated_at=excluded.updated_at")
                 .param("sku",p.path("sku").asText()).param("p",p.toString()).update();
         }
-        return (ObjectNode)save("employee",UUID.randomUUID().toString(),batch);
+        // Seed a previously saved dual-price legacy record. New HTTP submissions require classification.
+        var payload=fobQuotation.prepare(batch);var id=UUID.randomUUID();var now=java.time.Instant.now();
+        var principal=((org.springframework.security.core.context.SecurityContext)sessions.get("employee").getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication();
+        var no="LEGACY-"+id.toString().replace("-","");
+        payload.put("id",id.toString()).put("no",no).put("salespersonName","employee").put("salespersonAccount",principal.getName()).put("status","pending").put("createdAt",now.toString()).put("updatedAt",now.toString()).put("quoteConfirmed",false);
+        payload.putArray("revisions");QuotationFinanceReview.initialize(payload);
+        jdbc.sql("insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at) values(:id,:no,:owner,'pending',cast(:payload as jsonb),0,:now,:now)")
+            .param("id",id).param("no",no).param("owner",principal.getName()).param("payload",payload.toString()).param("now",java.sql.Timestamp.from(now)).update();
+        return (ObjectNode)read("employee",id.toString());
     }
     ObjectNode versions(JsonNode row) {return mapper.createObjectNode().put("_version",row.path("_version").asLong()).put("_reviewVersion",row.path("_reviewVersion").asLong());}
     JsonNode claim(JsonNode row) throws Exception {

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.*;
 
 class BatchQuotationSubmissionTest {
     static ObjectNode request(ObjectNode input) {
+        input=FobClassifiedTestData.request(input);
         var body=JsonNodeFactory.instance.objectNode().put("kind","fob");
         body.set("customerName",input.path("customerName")); body.set("fob",input.path("fob")); return body;
     }
@@ -41,7 +42,7 @@ class BatchQuotationSubmissionTest {
         var in=repeatedQuantities();var service=new BatchQuotationSubmission(mock(BatchSingleQuotation.class),FobBatchQuotationTest.service(in));
         var out=service.prepare(request(in)); assertEquals(1,out.size());var snapshot=out.get(0).path("fob");
         assertEquals(1,snapshot.path("schemaVersion").asInt());assertEquals("[2,26]",snapshot.path("quantities").toString());
-        assertEquals("1.52",snapshot.at("/ranges/0/declaredUsd").asText());assertEquals("1.35",snapshot.at("/ranges/1/declaredUsd").asText());
+        assertEquals("1.44",snapshot.at("/ranges/0/declaredUsd").asText());assertEquals("1.28",snapshot.at("/ranges/1/declaredUsd").asText());
         assertEquals(2,snapshot.at("/sheet/rows").size());
     }
     @Test void rejectsTamperingAndSameSkuWithMixedSources() {

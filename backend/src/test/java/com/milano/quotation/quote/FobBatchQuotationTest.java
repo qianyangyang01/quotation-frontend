@@ -20,7 +20,10 @@ class FobBatchQuotationTest {
         return input;
     }
     static FobQuotation service(ObjectNode input) {
-        var source=mock(FobPurchaseService.class);var q=spy(new FobQuotation(source,mock(PurchaseProductService.class),null,null));
+        var source=mock(FobPurchaseService.class);
+        var jdbc=mock(org.springframework.jdbc.core.simple.JdbcClient.class,RETURNS_DEEP_STUBS);
+        when(jdbc.sql(anyString()).query(any(org.springframework.jdbc.core.RowMapper.class)).list()).thenReturn(java.util.List.of());
+        var q=spy(new FobQuotation(source,mock(PurchaseProductService.class),jdbc,new tools.jackson.databind.ObjectMapper()));
         doReturn(new BigDecimal("6.7")).when(q).currentRate();
         for(var item:input.at("/fob/items")) {var p=(ObjectNode)item.path("product").deepCopy();p.put("weightRaw","60g");when(source.getForQuotation(p.path("sku").asText())).thenReturn(p);}
         return q;
