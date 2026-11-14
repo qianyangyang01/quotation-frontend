@@ -24,6 +24,7 @@ final class LogisticsSheetReader implements AutoCloseable {
     private final Map<String,Boolean> hidden = new HashMap<>();
     private final Predicate<String> skip;
     private final boolean rejectFormulaCells;
+    private final Set<Cell> formulaCells=Collections.newSetFromMap(new IdentityHashMap<>());
     private static XMLInputFactory xml() {
         var factory=XMLInputFactory.newFactory();
         factory.setProperty(XMLInputFactory.SUPPORT_DTD,false);
@@ -52,10 +53,12 @@ final class LogisticsSheetReader implements AutoCloseable {
         } catch(Exception e){close();throw e;}
     }
     boolean hasNext(){return legacy!=null?index<legacy.getNumberOfSheets():sheets.hasNext();}
+    Set<Cell> formulaCells(){return Set.copyOf(formulaCells);}
     boolean isHidden(Sheet sheet){return legacy!=null?legacy.isSheetHidden(legacy.getSheetIndex(sheet)):hidden.getOrDefault(sheet.getSheetName(),false);}
     Sheet next()throws Exception {
         if(legacy!=null)return legacy.getSheetAt(index++);
         if(current!=null)current.close();
+        formulaCells.clear();
         current=new XSSFWorkbook();
         try(var input=sheets.next()) {
             var sheet=current.createSheet(sheets.getSheetName());
@@ -79,6 +82,7 @@ final class LogisticsSheetReader implements AutoCloseable {
                     if(!formula&&value.isBlank())continue;
                     if(++cells>250_000)throw new IOException("工作表有效单元格超过安全读取上限："+sheet.getSheetName());
                     var ref=new CellReference(address);var row=sheet.getRow(ref.getRow());if(row==null)row=sheet.createRow(ref.getRow());var cell=row.createCell(ref.getCol());
+                    if(formula)formulaCells.add(cell);
                     // Match the numeric parser's external-reference guard even after
                     // streaming converts cached formulas into plain cells.
                     if(formula&&(rejectFormulaCells||externalFormula||value.isEmpty()))cell.setCellErrorValue(FormulaError.NA.getCode());
