@@ -8,7 +8,7 @@ const SKU_PALETTES = [
 
 // A dedicated layout keeps ordinary customer sheets unchanged. Prices are rendered, never recalculated.
 export async function renderFobBatchSheet(sheet: CustomerQuoteSheet, cancelled: () => boolean): Promise<QuoteSheetImage[]> {
-  const images: QuoteSheetImage[] = [], width = 1536, margin = 40, columns = [40,125,465,756,1126,1496]
+  const images: QuoteSheetImage[] = [], width = 1536, margin = 40, columns = sheet.quantityLabels.length === 1 ? [40,125,465,756,1496] : [40,125,465,756,1126,1496]
   // Assign colors before pagination so a SKU keeps its color on continuation pages.
   // Only adjacent rows merge: preserve the saved row order and every quoted quantity.
   let groupIndex = -1
@@ -34,13 +34,13 @@ export async function renderFobBatchSheet(sheet: CustomerQuoteSheet, cancelled: 
     ctx.fillStyle='#fff';ctx.fillRect(0,0,width,canvas.height);ctx.textBaseline='middle'
     const text=(value:string,x:number,y:number,font= '22px Arial, sans-serif',color='#183951')=>{ctx.fillStyle=color;ctx.font=font;ctx.textAlign='left';ctx.fillText(value,x,y)}
     titleLines.forEach((line,i)=>text(line,margin,55+i*50,'bold 42px Arial, sans-serif','#102953'))
-    let y=65+titleLines.length*50;text('FOB 批量报价单 / Wholesale Quotation',margin,y,'24px Arial, sans-serif');y+=42
+    let y=65+titleLines.length*50;text((sheet.priceGroupLabel || 'FOB')+' 批量报价单 / Wholesale Quotation',margin,y,'24px Arial, sans-serif');y+=42
     customerLines.forEach(line=>{text(line,margin,y);y+=28});contactLines.forEach(line=>{text(line,margin,y);y+=28})
     text(`Currency: USD    ·    ${new Set(sheet.rows.map(r=>r.sku)).size} SKUs`,margin,y+8,'20px Arial, sans-serif')
     const head=headerBottom
     ctx.fillStyle='#e8f2ff';ctx.fillRect(margin,head,width-margin*2,100)
     const center=(value:string,col:number,top:number,height:number,bold=false)=>{const lines=wrap(value,columns[col+1]!-columns[col]!-20,`${bold?'bold ':''}${font}`);ctx.fillStyle=col>=3?'#144c88':'#193b53';ctx.font=`${bold?'bold ':''}${font}`;ctx.textAlign='center';lines.forEach((line,i)=>ctx.fillText(line,(columns[col]!+columns[col+1]!)/2,top+height/2+(i-(lines.length-1)/2)*27))}
-    const labels=['No.','SKU','Quantity / 数量',...sheet.quantityLabels.map(label=>`${label}\n${label==='With declaration'?'报关':'不报关'} USD/单位`)]
+    const labels=['No.','SKU','Quantity / 数量',...sheet.quantityLabels.map(label=>`${label}\n${label==='Unit Price'?'最终报价':label==='With declaration'?'报关':'不报关'} USD/单位`)]
     labels.forEach((label,i)=>center(label,i,head,100,true));y=head+100
     const groups: Array<{ sku: string; top: number; height: number; palette: typeof SKU_PALETTES[number] }> = []
     rows.forEach((r,i)=>{const h=rowHeights[i]!, palette=rowPalettes[offset+i]!

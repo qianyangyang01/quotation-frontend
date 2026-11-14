@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { canViewDomesticFreight, canViewPurchaseCost, canViewPricingFactors, canViewFullPricing } from '@/data/quotationVisibility'
+import { canViewDomesticFreight, canViewPurchaseCost, canViewFullPricing } from '@/data/quotationVisibility'
+import { canViewFobCoefficient, fobClassifications, fobClassificationLabel, type FobClassification } from '@/services/fobClassification'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
+import FobCalculationDetails from './FobCalculationDetails.vue'
 import QuotationFeatureBoundary from './QuotationFeatureBoundary.vue'
 import type { FobBatchMode } from '@/services/fobBatchQuotation'
-import { FOB_SMALL_ORDER_EXTRA_CNY, fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
+import { needsFobInvoiceVerification, FOB_SMALL_ORDER_EXTRA_CNY, fobQuantityQuote, fobTierQuotes, loadFobQuoteProduct, type FobQuoteProduct, type FobSmallOrderPolicy, type FobSourceMode } from '@/services/fobQuotation'
 import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutputGuard'
 
 const FobBatchQuoteDialog = defineAsyncComponent(() => import('./FobBatchQuoteDialog.vue'))
 
-const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {sku:string;source:FobSourceMode;customer:string;quantity:number;batch?:{text:string;mode:FobBatchMode;customer:string;sources?:FobSourceMode[]}} }>()
+const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {classification?: FobClassification;sku:string;source:FobSourceMode;customer:string;quantity:number;batch?:{text:string;mode:FobBatchMode;customer:string;sources?:FobSourceMode[]}} }>()
 const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => true)
+const classification = ref<FobClassification>(props.initial?.classification || 'rebate-fob')
 const batchOpen = ref(!!props.initial?.batch)
 const emit = defineEmits<{ status: [value: string]; retryFinance: [] }>()
 const sku = ref(props.initial?.sku || ''), source = ref<FobSourceMode>(props.initial?.source || 'auto'), busy = ref(false), error = ref(''), copied = ref('')
@@ -18,7 +21,7 @@ const quantity = ref(''), product = ref<FobQuoteProduct | null>(null), skuInput 
 const rulesOpen = ref(false), rulesElement = ref<HTMLElement | null>(null)
 let generation = 0, controller: AbortController | undefined
 function invalidate() { generation++; controller?.abort(); busy.value = false; error.value = ''; product.value = null; copied.value = ''; emit('status', '待查询SKU') }
-watch([sku, source], invalidate)
+watch([sku, source, classification], invalidate)
 onMounted(() => {skuInput.value?.focus({ preventScroll: true });if(props.initial && !props.initial.batch)void query()})
 onBeforeUnmount(() => { generation++; controller?.abort() })
 async function query() {
@@ -27,7 +30,7 @@ async function query() {
   const request = ++generation
   controller?.abort(); controller = new AbortController(); busy.value = true; error.value = ''; product.value = null; copied.value = ''; emit('status', '查询中')
   try {
-    const loaded = await loadFobQuoteProduct(normalized, source.value, controller.signal)
+    const loaded = await loadFobQuoteProduct(normalized, source.value, controller.signal, true, classification.value)
     if (request !== generation) return
     product.value = loaded; quantity.value = String(props.initial?.sku === normalized ? props.initial.quantity : Math.ceil(loaded.parsed.minOrderQty / loaded.parsed.orderMultiple) * loaded.parsed.orderMultiple)
     emit('status', '已读取最新采购资料')
@@ -54,25 +57,28 @@ function quantityRange(min: number, max: number | null, unit: string) { return m
 async function copy() {
   if (!product.value || !selected.value.result) return
   const p = product.value, quote = selected.value.result
-  const text = `FOB（批发）报价\nSKU\t数量\t报关 USD/${quote.row.unit}\t不报关 USD/${quote.row.unit}\n${p.sku}\t${quote.quantity}\t${quote.declaredUsd}\t${quote.undeclaredUsd}\n汇率：${props.rate} CNY/USD；${quote.extraCny ? `已含每件${quote.extraCny}元小额订单加价` : '无小额订单加价'}`
-  try { assertOutputCurrent(); await navigator.clipboard.writeText(text); copied.value = '已复制当前数量的两种报价' }
+  const text = fobClassificationLabel(classification.value)+'\nSKU\t数量\t最终价 USD/'+quote.row.unit+'\n'+p.sku+'\t'+quote.quantity+'\t'+quote.declaredUsd
+  try { assertOutputCurrent(); await navigator.clipboard.writeText(text); copied.value = '已复制当前数量报价' }
   catch { copied.value = outputBlocked.value ? QUOTE_UPDATE_MESSAGE : '复制失败，请选择表格内容手动复制' }
 }
+async function copyExceptionSku(){try{await navigator.clipboard.writeText(sku.value.trim().toUpperCase());copied.value='已复制 SKU，请联系采购核实后重新查询'}catch{copied.value='复制失败，请手动复制 SKU'}}
 </script>
 
 <template>
   <section class="fob-card" aria-label="FOB批发报价">
     <header><h2><i>02</i> FOB阶梯报价</h2></header>
+    <div class="classification-control"><label>报价分类<select v-model="classification" aria-label="报价分类"><option v-for="c in fobClassifications" :key="c.value" :value="c.value">{{c.label}}</option></select></label><span>{{classification==='ordinary-fob'?'普票、无票等沿用普通FOB原计价方式，无需专票确认':'新采购与原FOB均按实际专票类型和票点计价；缺资料时默认10点并持续提醒'}}</span></div>
     <form class="fob-query" aria-label="FOB查询" @submit.prevent="query">
       <label class="query-sku">SKU<input ref="skuInput" v-model="sku" aria-label="FOB查询SKU" placeholder="输入SKU，例如 PF2600053" autocomplete="off"></label>
       <label class="query-source">采购数据来源<select v-model="source" aria-label="FOB采购数据来源"><option value="auto">自动：统一资料优先，兼容原FOB资料</option><option value="fob">原FOB专用资料</option><option value="standard">系统新采购数据</option></select></label>
       <button type="submit" class="query-submit" :disabled="busy || !sku.trim()">{{ busy ? '查询中…' : '查询报价' }}</button>
       <button type="button" @click="batchOpen=true">批量粘贴报价</button>
     </form>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="error" class="error" role="alert">{{ error }} <button @click="copyExceptionSku">复制 SKU</button></p><p v-if="error && copied" role="status">{{copied}}</p>
     <p v-if="outputBlocked" class="error" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
-    <p v-if="product" class="product-summary"><strong class="fob-sku">{{ product.sku }}</strong> · {{ product.category || '未分类' }} · 克重：{{ product.weight }}<span class="source">{{ product.source === 'fob' ? 'FOB数据 · 待验证' : '新采购资料' }}</span></p>
-    <div class="fob-parameters"><span v-if="canViewPurchaseCost">票点 <b>10%</b></span><span>汇率 <b>{{ rate }} CNY/USD</b></span><span v-if="canViewPricingFactors">报关 <b>×1.14</b></span><span v-if="canViewPricingFactors">不报关 <b>×1.1628</b></span></div>
+    <p v-if="product" class="product-summary"><strong class="fob-sku">{{ product.sku }}</strong> · {{ product.category || '未分类' }} · 克重：{{ product.weight }}<span class="source">{{ product.source === 'fob' ? 'FOB专用资料' : '新采购资料' }}</span></p>
+    <div class="fob-parameters"><span v-if="product">{{ needsFobInvoiceVerification(product)?'原采购票据':'采购票据' }} <b>{{ product.invoiceType || '未填写' }}</b></span><span>汇率 <b>{{ rate }} CNY/USD</b></span><span v-if="product?.invoicePricing?.effectiveTaxPoint!=null">本次计价票点 <b>{{Number((product.invoicePricing.effectiveTaxPoint*100).toFixed(6))}}%{{classification==='ordinary-fob'?'（普通报价原口径）':needsFobInvoiceVerification(product)?'（默认，待采购核实）':'（数据源实际票点）'}}</b></span><span v-if="canViewFobCoefficient && product?.invoicePricing?.fobInvoiceRatio!=null && product.invoicePricing.effectiveTaxPoint==null">含票换算比例 <b>×{{Number(product.invoicePricing.fobInvoiceRatio.toFixed(8))}}</b></span><span v-if="canViewFobCoefficient && product?.pricing?.fobCoefficient">本次报价系数 <b>×{{ product.pricing.fobCoefficient }}</b></span></div>
+    <FobCalculationDetails v-if="product" :product="product" :rate="rate" :show-calculation="false" />
     <p v-if="calculation.error" class="error" role="alert">{{ calculation.error }} <button v-if="financeError" type="button" :disabled="financePending" @click="emit('retryFinance')">重新读取财务汇率</button></p>
     <template v-if="product && !calculation.error">
       <div class="quantity-quote">
@@ -85,35 +91,36 @@ async function copy() {
         <thead>
           <tr>
             <th rowspan="2" scope="col">采购阶梯</th><th rowspan="2" scope="col">数量区间</th>
-            <template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">不含票 ¥/单位</th><th rowspan="2" scope="col">含票价 ¥/单位</th></template><th v-if="canViewDomesticFreight" rowspan="2" scope="col">国内运费 ¥/单位</th><template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">成本价 ¥/单位</th></template>
-            <th colspan="2" scope="colgroup" class="base-heading">基础单价<small>未含小额订单加价 · 仅供核对</small></th>
-            <th colspan="2" scope="colgroup" class="current-heading current-start">本次数量最终报价<small v-if="selected.result">{{ selected.result.quantity }}{{ selected.result.row.unit }} · 对外报价请用此处</small><small v-else>请核对数量或报价规则</small></th>
+            <template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">采购价 ¥/单位</th><th rowspan="2" scope="col">{{classification==='ordinary-fob'?'计价采购价':'含专票采购价'}} ¥/单位</th></template><th v-if="canViewDomesticFreight" rowspan="2" scope="col">国内运费 ¥/单位</th><template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">成本价 ¥/单位</th></template>
+            <th colspan="1" scope="colgroup" class="base-heading">基础单价<small>未含小额订单加价 · 仅供核对</small></th>
+            <th colspan="1" scope="colgroup" class="current-heading current-start">本次数量最终报价<small v-if="selected.result">{{ selected.result.quantity }}{{ selected.result.row.unit }} · 对外报价请用此处</small><small v-else>请核对数量或报价规则</small></th>
           </tr>
-          <tr><th scope="col" class="base-heading">报关 $/单位</th><th scope="col" class="base-heading">不报关 $/单位</th><th scope="col" class="current-heading current-start">报关单价</th><th scope="col" class="current-heading">不报关单价</th></tr>
+          <tr><th scope="col" class="base-heading">基础价 $/单位</th><th scope="col" class="current-heading current-start">最终单价 $</th></tr>
         </thead>
         <tbody><tr v-for="(row,i) in calculation.rows" :key="i" :class="{ selected: selected.result?.row === row }">
           <td>阶梯{{ i + 1 }}<span v-if="selected.result?.row === row" class="active-tier">当前档</span></td><td>{{ quantityRange(row.minQty,row.maxQty,row.unit) }}</td>
-          <template v-if="canViewPurchaseCost"><td>{{ row.purchaseCny }}</td><td>{{ row.taxIncludedCny }}</td></template><td v-if="canViewDomesticFreight">{{ row.freightCny }}</td><template v-if="canViewPurchaseCost"><td>{{ row.costCny }}</td></template><td class="quote-price">{{ row.declaredUsd }}</td><td class="quote-price">{{ row.undeclaredUsd }}</td>
+          <template v-if="canViewPurchaseCost"><td>{{ row.purchaseCny }}</td><td>{{ Number(row.taxIncludedCny.toFixed(4)) }}</td></template><td v-if="canViewDomesticFreight">{{ row.freightCny }}</td><template v-if="canViewPurchaseCost"><td>{{ Number(row.costCny.toFixed(4)) }}</td></template><td class="quote-price">{{ row.declaredUsd }}</td>
           <template v-if="i===0">
-            <td :rowspan="calculation.rows.length" class="current-price current-start"><div v-if="selected.result" class="final-quote" aria-live="polite"><span class="sr-only">报关 </span><strong>${{ selected.result.declaredUsd }}</strong><small>/{{ selected.result.row.unit }}</small></div><span v-else class="price-pending">暂无有效报价</span></td>
-            <td :rowspan="calculation.rows.length" class="current-price"><div v-if="selected.result" class="final-quote" aria-live="polite"><span class="sr-only">不报关 </span><strong>${{ selected.result.undeclaredUsd }}</strong><small>/{{ selected.result.row.unit }}</small></div><span v-else class="price-pending">暂无有效报价</span></td>
+            <td :rowspan="calculation.rows.length" class="current-price current-start"><div v-if="selected.result" class="final-quote" aria-live="polite"><strong>${{ selected.result.declaredUsd }}</strong><small>/{{ selected.result.row.unit }}</small></div><span v-else class="price-pending">暂无有效报价</span></td>
           </template>
         </tr></tbody>
       </table></div>
+      <FobCalculationDetails v-if="selected.result" :product="product" :rate="rate" :row="selected.result.row" :quantity="selected.result.quantity" :extra-cny="selected.result.extraCny" :final-usd="selected.result.declaredUsd" :show-notice="false" />
       <p class="help"><template v-if="selected.result">右侧蓝色区域为本次数量的最终报价，已计入适用的小额订单加价。</template><template v-else>最终报价暂不可用，请先处理上方提示。</template><template v-if="canViewPurchaseCost">运费依据：{{ product.parsed.freight.basis }}。</template></p>
       <template v-if="canViewPurchaseCost"><p v-for="notice in product.notices" :key="notice" class="notice">{{ notice }}</p></template>
       <p v-if="canViewPurchaseCost && calculation.rows.length === 1" class="help">按本档成本达到200元且满足起订量及下单倍数的最低数量：{{ calculation.rows[0]?.thresholdQty ?? '本档成本或数量范围无法达到金额门槛' }}<template v-if="calculation.rows[0]?.thresholdQty != null">{{ calculation.rows[0]?.unit }}</template>。</p>
       <p v-if="copied" role="status" class="help">{{ copied }}</p>
     </template>
-    <details v-if="canViewFullPricing" ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p>含票价＝不含票采购价×1.1；成本价＝含票价＋批量均摊运费；报关＝成本价×1.14÷汇率；不报关＝成本价×1.14×1.02÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
+    <details v-if="canViewFobCoefficient && product" ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p><template v-if="classification==='ordinary-fob'">普通FOB沿用原10点成本口径：计价采购价＝各档原价×1.10，不按实际票点调整，不增加退税专票校验或缺票提醒。</template><template v-else>专票类型和票点完整时，含票采购价＝各档原价×（1＋实际票点）；新采购与原FOB缺资料时默认10点，并持续提醒采购更新对应来源SKU。</template>已含票阶梯直接使用，不重复加票点。成本价＝计价采购价格＋批量均摊运费；最终报价＝适用成本×所选分类系数÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
   </section>
   <FobQuoteSheet current-quote v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
   <QuotationFeatureBoundary v-if="batchOpen" label="FOB批量报价" @close="batchOpen=false">
-  <FobBatchQuoteDialog :rate="rate" :policy="policy" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
+  <FobBatchQuoteDialog :classification="classification" :rate="rate" :policy="policy" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
   </QuotationFeatureBoundary>
 </template>
 
 <style scoped>
+.classification-control{display:flex;gap:20px;align-items:end;margin-top:12px;padding:12px;background:#fff8ec;border:1px solid #f1dec0;border-radius:7px;font-size:12px}.classification-control label{display:grid;gap:6px}.classification-control select{min-width:350px;padding:10px;border:1px solid #d3dfe7;border-radius:6px;background:white;color:#334a60}.classification-control span{padding-bottom:10px;color:#71818e}
 .fob-sku{font-size:20px;font-weight:800;line-height:1.4;color:#233442;overflow-wrap:anywhere}
 .fob-card{margin-top:10px;border:1px solid #dce7ee;border-radius:12px;background:#fff;padding:12px 14px;color:#233442}.fob-card header{display:flex;justify-content:space-between;align-items:center;gap:16px}.fob-card h2{font-size:16px;margin:0}.fob-card h2 i{display:inline-grid;place-items:center;width:27px;height:27px;margin-right:8px;background:#e5f2ff;color:#368fe0;border-radius:6px;font-size:10px;font-style:normal}.source{display:inline-block;margin-left:10px;padding:3px 7px;border-radius:8px;background:#edf6f0;color:#25855d;font-size:10px}.fob-card button,.fob-query button{border:1px solid #d3dfe7;background:#fff;color:#33536b;border-radius:6px;padding:9px 12px;cursor:pointer;font:inherit;font-size:12px}.fob-parameters{display:flex;flex-wrap:wrap;gap:24px;padding:8px 0;font-size:12px;color:#71818e}.fob-parameters b{color:#334a60}.fob-table-wrap{overflow:auto}.fob-card table{border-collapse:collapse;width:100%;min-width:850px;font-size:12px;text-align:center}.fob-card th,.fob-card td{padding:8px 9px;border:1px solid #dce5eb}.fob-card th{background:#f0f6f8;font-size:11px}.help,.notice,.fob-rules p{font-size:12px;line-height:1.8;color:#71818e}.notice{color:#9a640e}.quantity-quote{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px 12px;align-items:center;padding:8px 12px;background:#fff8df;border-radius:8px;font-size:12px}.quantity-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-width:0;grid-column:1;grid-row:1}.quantity-controls label{display:flex;align-items:center;white-space:nowrap}.quantity-quote input{box-sizing:border-box;width:76px;margin-left:8px;padding:9px;border:1px solid #d3dfe7;border-radius:6px;background:#fff;color:#233442}.quantity-minimum{color:#71818e}.quantity-quote button{grid-column:3;grid-row:1;align-self:start;white-space:nowrap}.error{color:#b73126;font-size:12px;line-height:1.8}.updated{color:#82939e;font-size:11px}.fob-rules{margin-top:8px;font-size:12px}.fob-rules summary{cursor:pointer;color:#8e651d}.fob-query{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;margin-top:12px;padding:12px;background:#f7f9fb;border:1px solid #e6edf1;border-radius:8px}.fob-query label{display:grid;gap:6px;font-size:12px;color:#607587}.query-sku,.query-source{flex:1 1 0;min-width:0}.fob-query input,.fob-query select{box-sizing:border-box;width:100%;height:38px;padding:8px 10px;border:1px solid #ccdbe5;border-radius:6px;background:#fff;color:#233442;font:inherit}.fob-query input{font-size:16px;font-weight:600}.fob-query input::placeholder{font-size:13px;font-weight:400;color:#8a99a6}.fob-query input:focus,.fob-query select:focus{outline:2px solid #f6b96a;outline-offset:1px}.fob-card .query-submit{height:38px;min-width:108px;background:#f39017;color:#fff;border-color:#f39017;font-weight:700}.product-summary{margin:10px 0 2px;font-size:12px;color:#73828d}.fob-card button:disabled,.fob-query button:disabled{opacity:.5;cursor:not-allowed}@media(max-width:600px){.query-sku,.query-source{flex:1 1 100%}.fob-card .query-submit{flex:1 1 100%}.fob-card{padding:14px}.fob-card header{align-items:flex-start;flex-direction:column}.quantity-quote{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:10px}.quantity-quote input{width:64px}.quantity-quote button{grid-column:2}}
 /* Keep reference prices quiet and the actual quantity quote visually distinct. */

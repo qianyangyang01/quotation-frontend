@@ -36,6 +36,27 @@ public class FobQuotation {
         if (!n.isTextual() || n.asText().length()>max || required && n.asText().isBlank()) throw AppException.unprocessable("FOB文本内容无效或过长");
         return n.asText();
     }
+    public ObjectNode classifiedProduct(String sku,String source,String classification) {
+        if(!sku.matches("[A-Z0-9][A-Z0-9._/-]{0,95}")||!Set.of("auto","fob","standard").contains(source))throw AppException.unprocessable("SKU或采购来源无效");
+        if(source.equals("auto")) {
+            var standard=jdbc.sql("select coalesce(payload->>'purchaseUsage','') from purchase_product where sku=:sku").param("sku",sku).query(String.class).optional();
+            boolean dedicated=jdbc.sql("select exists(select 1 from fob_purchase_product where sku=:sku)").param("sku",sku).query(Boolean.class).single();
+            source=standard.filter("shared"::equals).isPresent()?"standard":dedicated?"fob":"standard";
+        }
+        // Resolve fallback before a transactional lookup, which marks NOT_FOUND rollback-only.
+        JsonNode raw=source.equals("fob")?fob.getForQuotation(sku):purchases.getForQuotation(sku);
+        var product=object().put("sku",sku).put("source",source).put("classification",classification)
+            .put("category",raw.path("category").asText()).put("weight",source.equals("fob")?raw.path("weightRaw").asText("未填写"):raw.path("weightG").asText("未填写")+" g")
+            .put("updatedAt",raw.path(source.equals("fob")?"updatedAt":"_updatedAt").asText());
+        FobPricing.classification(product);
+        if(source.equals("standard")&&"是".equals(raw.path("freeShipping").asText()))
+            for(var field:List.of("singleFreightCny","freight10Cny","freight100Cny"))if(raw.path(field).isNumber()&&raw.path(field).asDouble()>0)throw AppException.unprocessable("采购资料冲突：包邮与正数运费同时存在");
+        product.set("parsed",source.equals("fob")?raw.path("parsed").deepCopy():standard(raw,true));
+        product.put("invoiceType",raw.path("invoiceType").asText("未确认")).put("purchasePriceBasis",raw.path("purchasePriceBasis").asText(""));
+        product.putArray("notices");var rate=currentRate();if(rate.signum()<=0)throw AppException.conflict("财务汇率必须大于0");
+        FobPricing.applyPurchase(product,raw);
+        product.set("pricing",FobPricing.pricing(product,rate,FobPricing.configuration(jdbc,mapper)));return product;
+    }
     public ObjectNode prepare(ObjectNode request) {
         ShippingQuotationNote.validated(request);
         if(request.has("priorityProcessing")&&!request.path("priorityProcessing").isBoolean())throw AppException.unprocessable("优先处理参数无效");
@@ -55,10 +76,20 @@ public class FobQuotation {
         if (timestamp.isBlank() || !timestamp.equals(product.path("updatedAt").asText())) throw AppException.conflict("采购资料已更新，请重新查询SKU后再保存");
         if(source.equals("standard") && "是".equals(current.path("freeShipping").asText()))
             for(var field:List.of("singleFreightCny","freight10Cny","freight100Cny"))if(current.path(field).isNumber()&&current.path(field).asDouble()>0)throw AppException.unprocessable("采购资料冲突：包邮与正数运费同时存在");
-        var parsed=source.equals("fob")?current.path("parsed").deepCopy():standard(current);
+        var classified=product.has("classification");
+        var parsed=source.equals("fob")?current.path("parsed").deepCopy():standard(current,classified);
         var canonical=object().put("sku",sku).put("source",source).put("category",current.path("category").asText())
             .put("weight",source.equals("fob")?current.path("weightRaw").asText("未填写"):current.hasNonNull("weightG")?current.path("weightG").asText()+" g":"未填写").put("updatedAt",timestamp);
         canonical.set("parsed",parsed); canonical.putArray("notices");
+        if(classified){
+            var kind=FobPricing.classification(product);
+            if(product.at("/pricing/policyVersion").asInt()!=FobPricing.POLICY_VERSION)throw AppException.conflict("含票换算规则已更新，请重新查询SKU后报价");
+            var config=FobPricing.configuration(jdbc,mapper);
+            if(!product.at("/pricing/version").isIntegralNumber()||product.at("/pricing/version").asLong()!=config.path("version").asLong())throw AppException.conflict("FOB系数已变化，请重新查询后报价");
+            canonical.put("classification",kind).put("invoiceType",current.path("invoiceType").asText()).put("purchasePriceBasis",current.path("purchasePriceBasis").asText());
+            FobPricing.applyPurchase(canonical,current);
+            canonical.set("pricing",FobPricing.pricing(canonical,rate,config));
+        }
         var result=calculate(request,canonical,rate);
         // Full source is retained for audit; future source changes never reprice this snapshot.
         ((ObjectNode)result.path("fob")).set("sourceSnapshot",current.deepCopy());
@@ -72,6 +103,7 @@ public class FobQuotation {
         for(var entry:entries) {
             if(entry.path("schemaVersion").asInt()!=1)throw AppException.unprocessable("批量报价不能嵌套批量快照");
             if(!entry.path("rate").equals(input.path("rate"))||!entry.path("policy").equals(input.path("policy"))||!entry.path("displayMode").equals(input.path("displayMode")))throw AppException.unprocessable("批量报价必须使用相同汇率、规则和展示方式");
+            if(!entry.at("/product/classification").equals(input.at("/product/classification")))throw AppException.unprocessable("同批报价分类必须一致");
             var identity=entry.at("/product/sku").asText()+":"+("tiers".equals(entry.path("displayMode").asText())?"tiers":entry.path("quantity").asText());
             if(!unique.add(identity))throw AppException.unprocessable("批量报价中存在重复SKU和数量范围");
             var child=object().put("quoteMode","fob");child.set("customerName",request.path("customerName"));child.set("fob",entry.deepCopy());
@@ -103,11 +135,11 @@ public class FobQuotation {
         for(var row:submitted) {
             var canonical=expected.remove(row.path("key").asText());
             if(canonical==null)throw AppException.unprocessable("合并报价单包含重复或未知商品行");
-            var prices=row.path("prices");if(!prices.isArray()||prices.size()!=2)throw AppException.unprocessable("合并报价单价格无效");
-            for(int j=0;j<2;j++)if(amount(prices.get(j)).compareTo(amount(canonical.path("prices").get(j)))!=0)throw AppException.conflict("合并报价价格与当前资料不一致，请重新查询");
+            var prices=row.path("prices");if(!prices.isArray()||prices.size()!=sheet.path("quantityLabels").size())throw AppException.unprocessable("合并报价单价格无效");
+            for(int j=0;j<sheet.path("quantityLabels").size();j++)if(amount(prices.get(j)).compareTo(amount(canonical.path("prices").get(j)))!=0)throw AppException.conflict("合并报价价格与当前资料不一致，请重新查询");
             canonical.put("number",rows.size()+1);rows.add(canonical);
         }
-        sheet.put("priceGroupLabel","FOB Final Unit Price (USD)");
+        sheet.put("priceGroupLabel",first.at("/sheet/priceGroupLabel").asText("FOB Final Unit Price (USD)"));
         sheet.put("fobBatch",true).put("customerName",request.path("customerName").asText().equals("预览客户")?"":request.path("customerName").asText());
         var snapshot=(ObjectNode)first.deepCopy();snapshot.put("schemaVersion",2);snapshot.set("items",items);snapshot.set("sheet",sheet);
         // A batch has multiple alternative unit prices, so it has no meaningful single system price.
@@ -146,13 +178,15 @@ public class FobQuotation {
         if(values.isEmpty())throw AppException.conflict("缺少财务汇率，请刷新后重试");
         var setting=values.get(0);return amount(setting.has("usdCny")?setting.path("usdCny"):setting.path("usdToCny"));
     }
-    static ObjectNode standard(JsonNode raw) {
+    static ObjectNode standard(JsonNode raw) { return standard(raw,false); }
+    static ObjectNode standard(JsonNode raw,boolean classified) {
         if (!"standard".equals(raw.path("dataSource").asText()) || !"ready".equals(raw.path("catalogState").asText())
-            || "system".equals(raw.path("skuOrigin").asText()) || "tax_included".equals(raw.path("purchasePriceBasis").asText()))
+            || "system".equals(raw.path("skuOrigin").asText()) || !classified && "tax_included".equals(raw.path("purchasePriceBasis").asText()))
             throw AppException.unprocessable("该新采购资料不满足FOB报价条件");
         var parsed=object().put("minOrderQty",count(raw.path("minOrderQty"))).put("orderMultiple",1);
         var candidates=new ArrayList<ObjectNode>();
         for (var pair:List.of(new String[]{"minOrderQty","purchasePriceCny"},new String[]{"tier2MinQty","tier2PriceCny"},new String[]{"tier3MinQty","tier3PriceCny"},new String[]{"tier4MinQty","tier4PriceCny"},new String[]{"tier5MinQty","tier5PriceCny"})) {
+            if(classified && raw.hasNonNull(pair[0]) != raw.hasNonNull(pair[1]))throw AppException.unprocessable("采购阶梯数量与价格不成对，请联系采购核实");
             if (!raw.hasNonNull(pair[0]) || !raw.hasNonNull(pair[1])) continue;
             candidates.add(object().put("minQty",count(raw.path(pair[0]))).put("unitPriceCny",amount(raw.path(pair[1]))).put("unit","件"));
         }
@@ -166,11 +200,13 @@ public class FobQuotation {
     static String price(BigDecimal cost,int extra,String factor,BigDecimal rate) {return cost.add(BigDecimal.valueOf(extra)).multiply(new BigDecimal(factor)).divide(rate,2,RoundingMode.HALF_UP).toPlainString();}
     static ObjectNode quote(JsonNode row,long min,Long max,BigDecimal rate,boolean single) {
         var cost=amount(row.path("costCny"));int extra=single && cost.multiply(BigDecimal.valueOf(min)).compareTo(BigDecimal.valueOf(200))<0?1:0;
-        var out=object().put("minQty",min).put("unit",row.path("unit").asText()).put("extraCny",extra).put("declaredUsd",price(cost,extra,"1.14",rate)).put("undeclaredUsd",price(cost,extra,"1.1628",rate));
+        var factor=row.has("fobCoefficient")?row.path("fobCoefficient").asText():"1.14";
+        var out=object().put("minQty",min).put("unit",row.path("unit").asText()).put("extraCny",extra).put("declaredUsd",price(cost,extra,factor,rate)).put("undeclaredUsd",price(cost,extra,row.has("fobCoefficient")?factor:"1.1628",rate));
         if(max==null)out.putNull("maxQty");else out.put("maxQty",max);return out;
     }
     static ObjectNode calculate(ObjectNode request,ObjectNode product,BigDecimal rate) {
         var input=request.path("fob"); var parsed=product.path("parsed");
+        boolean classified=product.has("classification");var factor=classified?product.at("/pricing/fobCoefficient").asText():"1.14";
         long moq=count(parsed.path("minOrderQty")),multiple=count(parsed.path("orderMultiple")),quantity=count(input.path("quantity"));
         if(quantity<moq || quantity%multiple!=0)throw AppException.unprocessable("报价数量不满足起订量或下单倍数");
         if(!"single-price".equals(input.path("policy").path("scope").asText()) || !"before-coefficient".equals(input.path("policy").path("calculation").asText()))throw AppException.conflict("FOB计算规则已变化，请刷新报价");
@@ -182,9 +218,10 @@ public class FobQuotation {
         for(var tier:tiers) {
             long min=count(tier.path("minQty"));Long max=tier.path("maxQty").isNull()?null:count(tier.path("maxQty"));
             if(min<moq || min<=previous || max!=null&&max<min)throw AppException.unprocessable("FOB采购阶梯重叠或无效");previous=max==null?Long.MAX_VALUE:max;
-            var purchase=amount(tier.path("unitPriceCny"));var included=purchase.multiply(new BigDecimal("1.1"));var cost=included.add(freight);
+            var purchase=amount(tier.path("unitPriceCny"));var included=classified?FobPricing.purchaseCost(product,purchase):purchase.multiply(new BigDecimal("1.1"));var cost=included.add(freight);
             var row=object().put("minQty",min).put("unit",text(tier.path("unit"),20,true)).put("purchaseCny",purchase).put("taxIncludedCny",included).put("freightCny",freight).put("costCny",cost)
-                .put("declaredUsd",price(cost,0,"1.14",rate)).put("undeclaredUsd",price(cost,0,"1.1628",rate));
+                .put("declaredUsd",price(cost,0,factor,rate)).put("undeclaredUsd",price(cost,0,classified?factor:"1.1628",rate));
+            if(classified)row.put("fobCoefficient",new BigDecimal(factor));
             if(max==null)row.putNull("maxQty");else row.put("maxQty",max);
             long first=((min+multiple-1)/multiple)*multiple;Long last=max==null?null:max/multiple*multiple;
             Long threshold=null;
@@ -213,7 +250,9 @@ public class FobQuotation {
                 ranges.add(quote(tier,q,q,rate,tiers.size()==1));
             }
         }
+        if(classified && !input.at("/sheet/quantityLabels").equals(JsonNodeFactory.instance.arrayNode().add("Unit Price")))throw AppException.unprocessable("分类报价应使用单一最终价列");
         var sheet=validateSheet(input.path("sheet"),ranges,product.path("sku").asText());
+        if(classified)sheet.put("priceGroupLabel",product.path("classification").asText().equals("rebate-cfr-cif")?"CFR / CIF · USD":product.path("classification").asText().equals("rebate-fob")?"FOB / EXW · USD":"FOB · USD");
         var snapshot=object().put("schemaVersion",1).put("rate",rate).put("quantity",quantity).put("displayMode",mode);
         if(input.has("quantities")) snapshot.set("quantities",input.path("quantities").deepCopy());
         snapshot.set("product",product);snapshot.set("policy",input.path("policy").deepCopy());snapshot.set("tiers",rows);snapshot.set("ranges",ranges);snapshot.set("current",current);snapshot.set("sheet",sheet);
@@ -227,7 +266,8 @@ public class FobQuotation {
         if(!input.isObject())throw AppException.unprocessable("缺少FOB报价单");
         var sheet=object();for(var name:List.of("title","agent","date","whatsapp"))sheet.put(name,text(input.path(name),name.equals("title")?80:40,name.equals("date")));
         var labels=input.path("quantityLabels");var normal=List.of("With declaration","Without declaration");
-        if(!labels.isArray()||labels.size()!=2||!new HashSet<>(List.of(labels.path(0).asText(),labels.path(1).asText())).equals(new HashSet<>(normal)))throw AppException.unprocessable("FOB价格列无效");
+        boolean single=labels.isArray()&&labels.size()==1&&labels.get(0).asText().equals("Unit Price");
+        if(!single&&(!labels.isArray()||labels.size()!=2||!new HashSet<>(List.of(labels.path(0).asText(),labels.path(1).asText())).equals(new HashSet<>(normal))))throw AppException.unprocessable("FOB价格列无效");
         sheet.set("quantityLabels",labels.deepCopy());sheet.put("priceGroupLabel","FOB Unit Price (USD)").put("showQuantityRange",true);
         var hidden=sheet.putArray("hiddenColumns");List.of("country","provider","shippingTime","processingTime").forEach(hidden::add);
         var columns=input.path("columnOrder");if(!columns.isArray()||columns.size()!=3)throw AppException.unprocessable("FOB列排序无效");
@@ -238,8 +278,8 @@ public class FobQuotation {
         for(var r:sourceRows) {
             String key=r.path("key").asText();int index=-1;for(int i=0;i<ranges.size();i++)if(key.equals(sku+"-"+i))index=i;
             if(index<0||!used.add(index))throw AppException.unprocessable("FOB阶梯排序无效");var range=ranges.get(index);
-            var prices=r.path("prices");if(!prices.isArray()||prices.size()!=2)throw AppException.unprocessable("FOB报价无效");
-            for(int i=0;i<2;i++){var expected=new BigDecimal(range.path(labels.get(i).asText().equals(normal.get(0))?"declaredUsd":"undeclaredUsd").asText());if(amount(prices.get(i)).compareTo(expected)!=0)throw AppException.conflict("FOB价格与当前资料不一致，请重新查询");}
+            var prices=r.path("prices");if(!prices.isArray()||prices.size()!=labels.size())throw AppException.unprocessable("FOB报价无效");
+            for(int i=0;i<labels.size();i++){var expected=new BigDecimal(range.path(single||labels.get(i).asText().equals(normal.get(0))?"declaredUsd":"undeclaredUsd").asText());if(amount(prices.get(i)).compareTo(expected)!=0)throw AppException.conflict("FOB价格与当前资料不一致，请重新查询");}
             var unit=range.path("unit").asText();if(unit.equals("件"))unit="pcs";
             String min=range.path("minQty").asText(),max=range.path("maxQty").asText();String label=range.path("maxQty").isNull()?min+"+":min.equals(max)?min:min+"–"+max;
             var row=saved.addObject().put("key",key).put("number",saved.size()).put("sku",sku).put("quantityRange",label+" "+unit).put("country","").put("provider","").put("shippingTime","").put("sourceDescription","");row.set("prices",prices.deepCopy());

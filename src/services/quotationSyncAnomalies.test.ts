@@ -24,6 +24,18 @@ function setup(){
 it('accepts unchanged purchases and selected channel validation',async()=>{
   const {state,run}=setup();await run(undefined,true);expect(state.syncPending.value).toBe('')
 })
+it.each(['single','bundle','freight-trial','shipping-only','womens-single','womens-bundle'])('does not block %s quotation when only FOB coefficients change',async mode=>{
+  const {state,run}=setup();state.quoteMode.value=mode
+  state.appliedFinanceVersions={'fob-pricing':1,'exchange-rate':1}
+  const latest={'fob-pricing':2,'exchange-rate':1}
+  state.financeSettingVersions.mockReturnValue(latest)
+  state.loadQuotationSync.mockResolvedValue({purchaseVersions:{SKU:'v1'},logisticsRevision:'r1',financeVersions:latest})
+  expect(await run(undefined,true)).toBe(true)
+  expect(state.syncPending.value).toBe('')
+  state.financeSettingVersions.mockReturnValue({...latest,'exchange-rate':2})
+  expect(await run(undefined,true)).toBe(false)
+  expect(state.syncPending.value).toContain('汇率')
+})
 function batchSetup() {
   const result=setup(), {state}=result
   state.props.batchCapture=true;state.batchCalculationActive=true

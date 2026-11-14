@@ -30,7 +30,7 @@ public class PurchaseHistoryService {
             {"freeShipping","是否包邮"},{"taxIncludedPriceCny","含票价(CNY/件)"},{"taxPoint","票点"},{"invoiceType","票类型"},
             {"stockStatus","是否有货"},{"notes","备注"},{"factoryInfo","工厂信息"},{"sourceLink1","货源链接1"},
             {"sourceLink2","货源链接2"},{"sourceLink3","货源链接3"},{"similarSource","相似货源"},{"auditNotes","审核备注"},
-            {"catalogState","目录状态"},{"purchaseUsage","报价用途（shared为普通与FOB共用）"}
+            {"fobInvoiceRatioConfirmed","FOB含票阶梯确认"},{"invoiceVerificationNote","含票阶梯核实说明"},{"purchasePriceBasis","采购价格口径"},{"catalogState","目录状态"},{"purchaseUsage","报价用途（shared为普通与FOB共用）"}
         };
         for (var field : fields) FIELDS.put(field[0], field[1]);
     }

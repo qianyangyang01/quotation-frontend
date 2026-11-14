@@ -8,7 +8,8 @@ defineEmits<{ close: [] }>()
 <template>
   <Teleport to="body"><div class="fob-detail-mask" @click.self="$emit('close')" @keydown.esc.stop="$emit('close')"><section role="dialog" aria-modal="true" aria-labelledby="fob-detail-title">
     <header><h2 id="fob-detail-title">{{ record.sku }} · FOB资料详情</h2><button aria-label="关闭FOB详情" @click="$emit('close')">关闭</button></header>
-    <p>FOB数据 · 不含票采购价 · 与普通采购资料独立保存</p>
+    <p>FOB数据 · {{ record.invoiceType || '票据未确认' }} · {{record.purchasePriceBasis==='tax_included'?'采购价已含票':'原报价（未确认含票）'}} · 与普通采购资料独立保存</p>
+    <p>起步含票价：{{record.taxIncludedPriceCny??'未填写'}} · 全阶梯口径：{{record.fobInvoiceRatioConfirmed?'采购已确认':'待采购确认'}}</p>
     <div class="fob-images"><figure v-if="record.productImage"><img :src="record.productImage" alt="产品图片"><figcaption>产品图片</figcaption></figure><figure v-if="record.physicalImage"><img :src="record.physicalImage" alt="实物图"><figcaption>实物图</figcaption></figure></div>
     <table v-if="record.parsed"><thead><tr><th>采购数量</th><th>单价</th><th>均摊运费/单位</th></tr></thead><tbody><tr v-for="tier in record.parsed.priceTiers" :key="tier.minQty"><td>{{ tier.minQty }}{{ tier.maxQty == null ? '起' : `–${tier.maxQty}` }}{{ tier.unit }}</td><td>¥{{ tier.unitPriceCny.toFixed(2) }}</td><td>{{ formatFobFreight(record.parsed.freight.unitFreightCny) }}</td></tr></tbody></table>
     <p v-if="record.parsed">运费采用：{{ record.parsed.freight.basis }}<template v-if="record.parsed.freight.estimated">（预估/预拍）</template></p>

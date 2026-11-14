@@ -12,7 +12,7 @@ export function fobItemReviewLabel(item: FobItemReview) {
   return item.status === 'pending' ? '待审核' : item.status === 'rejected' ? '价格异常 · 已退回' : item.reviewResult === 'logistics-exempt' ? '物流免审-采购已审' : '审核通过'
 }
 export function correctionChanged(before: FobQuotationSnapshot, after: FobQuotationSnapshot) {
-  return before.product.updatedAt !== after.product.updatedAt || before.quantity !== after.quantity || before.rate !== after.rate || before.policy.scope !== after.policy.scope || before.policy.calculation !== after.policy.calculation
+  return before.product.pricing?.version !== after.product.pricing?.version || before.product.pricing?.policyVersion !== after.product.pricing?.policyVersion || before.product.updatedAt !== after.product.updatedAt || before.quantity !== after.quantity || before.rate !== after.rate || before.policy.scope !== after.policy.scope || before.policy.calculation !== after.policy.calculation
 }
 export async function reviewFobItems(record: QuotationRecord, action: 'return' | 'approve', items: { index: number; reason: string; exceptionType?: PriceExceptionType }[], reviewResult: FobReviewResult = 'approved', note = '') {
   return normalizeQuotationRecord(await api.post<QuotationRecord>(`/quotations/${record.id}/fob-corrections/review`, { _version: record._version, _reviewVersion: record._reviewVersion ?? 0, action, items, approveOthers: false, reviewResult: action === 'return' ? 'rejected' : reviewResult, note }))!

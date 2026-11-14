@@ -178,12 +178,28 @@ public class QuotationController {
         return ApiResponse.ok(payloads);
     }
 
+    // Historical correction previews keep their original price-column contract. New submissions still require a classification.
+    private boolean legacyCorrectionPreview(ObjectNode input,Authentication auth) {
+        if(input.at("/fob/product").has("classification")||!input.path("correctionOf").isObject())return false;
+        UUID id;
+        try{id=UUID.fromString(input.at("/correctionOf/id").asText());}catch(IllegalArgumentException e){throw AppException.unprocessable("退回报价标识无效");}
+        var record=records.findById(id).orElseThrow(()->AppException.notFound("退回报价不存在"));
+        if(!record.ownerAccount.equals(principal(auth).account()))throw new org.springframework.security.access.AccessDeniedException("只能预览自己的退回报价");
+        var index=input.at("/correctionOf/index");var items=record.payload.at("/fob/items");
+        if(record.payload.at("/fob/schemaVersion").asInt()!=2||!index.isIntegralNumber()||!index.canConvertToInt()||index.asInt()<0||index.asInt()>=items.size())throw AppException.unprocessable("退回商品索引无效");
+        var old=items.get(index.asInt());var submitted=input.path("fob");
+        FobBatchCorrections.assertSameClassification(old,submitted);
+        if(!old.at("/product/sku").equals(submitted.at("/product/sku"))||!old.at("/product/source").equals(submitted.at("/product/source")))throw AppException.unprocessable("退回商品SKU或来源不一致");
+        return true;
+    }
+
     @PostMapping("/fob/preview")
     @PreAuthorize("hasAuthority('PERM_quote')")
     @Transactional
-    ApiResponse<JsonNode> previewFob(@RequestBody JsonNode body) {
+    ApiResponse<JsonNode> previewFob(@RequestBody JsonNode body,Authentication auth) {
         if (!(body instanceof ObjectNode input) || body.toString().length()>4_000_000 || !FobQuotation.isFob(input)) throw AppException.unprocessable("FOB预览数据格式错误或过大");
         // Only calculate and validate current source versions; no records, audit entries or drafts are written.
+        if(!legacyCorrectionPreview(input,auth))FobPricing.requireClassification(input);
         return ApiResponse.ok(fobQuotation.prepare(input).path("fob"));
     }
 
@@ -203,6 +219,7 @@ public class QuotationController {
         var principal = principal(auth); var existing = idempotency.existing(principal.account(), "quotation-create", key, body);
         if (existing.isPresent()) return ApiResponse.ok(existing.get());
         if (!FobQuotation.isFob(input)) { submissionValidator.validateQuotePricing(input); readiness.assertCanCreate(input); }
+        if(FobQuotation.isFob(input)) FobPricing.requireClassification(input);
         var payload = FobQuotation.isFob(input) ? fobQuotation.prepare(input) : input.deepCopy();
         payload.remove("quotationBatch");
         var response = persistPrepared(payload, input, principal);

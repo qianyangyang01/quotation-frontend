@@ -1,4 +1,6 @@
 import { decimal } from './quotationDecimal'
+import { request } from './http'
+import { isFobSpecialInvoice, type FobClassification } from './fobClassification'
 import { ApiError } from './http'
 import { loadFobRecord, type FobParsed, type FobRecord } from './fobPurchase'
 import { loadPurchaseProduct, type PurchaseProductRecord } from '@/data/purchaseStore'
@@ -10,6 +12,9 @@ export const FOB_SMALL_ORDER_POLICY: FobSmallOrderPolicy = { scope: 'single-pric
 export interface FobQuoteProduct {
   sku: string; category: string; weight: string; source: 'fob' | 'standard'; updatedAt?: string
   parsed: FobParsed; notices: string[]
+  classification?: FobClassification; invoiceType?: string; purchasePriceBasis?: string
+  invoicePricing?: {mode:'ratio'|'included'|'quoted'|'legacy-ten-point'|'actual-tax-point'|'default-tax-point'|'ordinary-fixed-ticket';basePurchaseCny:number;baseIncludedCny?:number;fobInvoiceRatio?:number;confirmed?:boolean;confirmationFingerprint?:string;policyVersion:number;assumedTaxPoint?:number;basisLabel?:string;ruleSource?:string;procurementUnchanged?:boolean;effectiveTaxPoint?:number;sourceTaxPoint?:number;sourceIncludedCny?:number;verificationRequired?:boolean;missingFields?:string[]}
+  pricing?: { policyVersion?: number; version: number; rate: number; fobCoefficient?: number; rows: (FobQuoteRow & { smallOrderUsd: string })[] }
 }
 export function fromFobRecord(record: FobRecord): FobQuoteProduct {
   if (!record.parsed) throw new Error('FOB资料尚未完成有效解析，请在采购资料中重新预览保存')
@@ -29,10 +34,11 @@ export function fromStandardPurchase(record: PurchaseProductRecord): FobQuotePro
       freight: { quantity: 100, totalFreightCny: total, unitFreightCny: decimal(total).div(100).toNumber(), estimated: false, basis: record.freeShipping === '是' ? '包邮' : `100件总运费 ${total} ÷ 100` },
     } }
 }
-export async function loadFobQuoteProduct(sku: string, source: FobSourceMode, signal?: AbortSignal, strictFreight = false): Promise<FobQuoteProduct> {
+export async function loadFobQuoteProduct(sku: string, source: FobSourceMode, signal?: AbortSignal, strictFreight = false, classification?: FobClassification): Promise<FobQuoteProduct> {
   const normalized = sku.trim().toUpperCase().replace(/\s+/g, '')
   if (!/^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(normalized)) throw new Error('请填写有效SKU')
   let record: PurchaseProductRecord | undefined
+  if (classification) return request<FobQuoteProduct>(`/fob-pricing/${encodeURIComponent(normalized)}?source=${source}&classification=${classification}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000), cache: 'no-store' })
   if (source !== 'fob') {
     try { record = await loadPurchaseProduct(normalized, signal) }
     catch (e) { if (source === 'standard' || !(e instanceof ApiError) || e.status !== 404 || e.code !== 'NOT_FOUND') throw e }
@@ -49,8 +55,24 @@ export interface FobQuoteRow {
   minQty: number; maxQty: number | null; unit: string; purchaseCny: number; taxIncludedCny: number; freightCny: number; costCny: number
   declaredUsd: string; undeclaredUsd: string; thresholdQty: number | null
 }
+export function needsFobInvoiceVerification(product:FobQuoteProduct) {
+  return product.classification!=='ordinary-fob' && (product.invoicePricing?.verificationRequired===true || product.invoicePricing?.mode==='legacy-ten-point')
+}
 export function fobTierQuotes(product: FobQuoteProduct, rate: number): FobQuoteRow[] {
   if (!Number.isFinite(rate) || rate <= 0) throw new Error('美元汇率必须大于0')
+  if (product.classification) {
+    if (!product.pricing || product.pricing.rate !== rate) throw new Error('汇率或分类已变化，请重新查询')
+    const legacy = product.source === 'fob' && product.invoicePricing?.mode === 'legacy-ten-point' && product.invoicePricing.ruleSource === 'legacy-fob-default' && product.invoicePricing.assumedTaxPoint === 0.1
+    if(product.pricing.policyVersion===4){
+      const p=product.invoicePricing, special=isFobSpecialInvoice(product.invoiceType||'')
+      const missingType=['','未确认','待确认','暂无数据','未填写'].includes((product.invoiceType||'').trim())
+      const validPoint=p?.effectiveTaxPoint!=null&&Number.isFinite(p.effectiveTaxPoint)&&p.effectiveTaxPoint>=0&&p.effectiveTaxPoint<=1
+      const defaultRule=p?.verificationRequired===true&&p.ruleSource==='missing-invoice-default'&&p.effectiveTaxPoint===0.1&&(missingType||special)
+      const actualRule=p?.verificationRequired===false&&p.ruleSource==='procurement-tax-point'&&special&&validPoint
+      if(product.classification!=='ordinary-fob'&&!(defaultRule||actualRule))throw new Error('采购票据或票点口径已变化，请重新查询')
+    }else if (product.classification !== 'ordinary-fob' && !legacy && (!isFobSpecialInvoice(product.invoiceType || '') || !product.invoicePricing?.confirmed)) throw new Error('采购资料不符合专票及已确认含票阶梯要求，请联系采购核实后重新查询')
+    return product.pricing.rows
+  }
   const { minOrderQty, orderMultiple, freight, priceTiers } = product.parsed
   if (!Number.isSafeInteger(minOrderQty) || minOrderQty < 1 || !Number.isSafeInteger(orderMultiple) || orderMultiple < 1) throw new Error('起订量或下单倍数无效')
   if (!Number.isFinite(freight.unitFreightCny) || freight.unitFreightCny < 0 || !priceTiers.length) throw new Error('采购价或均摊运费无效')
@@ -77,6 +99,13 @@ export function fobQuantityQuote(product: FobQuoteProduct, rows: FobQuoteRow[], 
   const below = decimal(row.costCny).times(count).lt(200)
   if (below && policy == null) throw new Error('不足200元的加价规则尚未确认，暂不生成此数量的最终报价')
   const extra = below && (policy?.scope === 'all' || rows.length === 1) ? FOB_SMALL_ORDER_EXTRA_CNY : 0
+  if (product.classification) {
+    if (!product.pricing || product.pricing.rate !== rate || policy?.scope !== 'single-price' || policy.calculation !== 'before-coefficient') throw new Error('报价规则已变化，请重新查询')
+    const canonical=product.pricing.rows.find(t=>t.minQty===row.minQty)
+    if(!canonical) throw new Error('报价阶梯已变化，请重新查询')
+    const price=extra?canonical.smallOrderUsd:canonical.declaredUsd
+    return { quantity: count, row, extraCny: extra, declaredUsd: price, undeclaredUsd: price }
+  }
   const price = (factor: string) => {
     const amount = policy?.calculation === 'before-coefficient' ? decimal(row.costCny).plus(extra).times(factor) : decimal(row.costCny).times(factor).plus(extra)
     return amount.div(rate).toFixed(2)

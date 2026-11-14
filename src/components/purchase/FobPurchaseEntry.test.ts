@@ -10,7 +10,7 @@ function mount() { const host = document.createElement('div'); document.body.app
 const button = (text: string) => Array.from(document.querySelectorAll('button')).find(b => b.textContent?.trim() === text)!
 async function input(label: string, value: string) { const element = document.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!; element.value = value; element.dispatchEvent(new Event('input', { bubbles: true })); await tick() }
 const preview = (canSave = true): service.FobPreview => ({ rows: [{ sourceRow: 1, sku: 'PF2600100', action: 'create', expected: { sku: 'PF2600100', version: null, updatedAt: null }, changes: [], issues: canSave ? [] : ['价格有误'], notices: [], effective: { sku: 'PF2600100' } }], skipped: [], canSave, digest: 'digest' })
-async function fill() { await input('FOB SKU','PF2600100'); await input('FOB 起订量','100'); await input('第1档数量起点','100'); await input('第1档未税单价','12.5'); await input('FOB 国内总运费','35') }
+async function fill() { await input('FOB SKU','PF2600100'); await input('FOB 起订量','100'); await input('第1档数量起点','100'); await input('第1档采购单价','12.5'); await input('FOB 国内总运费','35') }
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.resetAllMocks() })
 it('includes uploaded image references in preview without writing a purchase record early', async () => {
   mount(); await fill()

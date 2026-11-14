@@ -123,6 +123,7 @@ public class FobBatchCorrections {
             if(submitted.path("schemaVersion").asInt()!=1 || !submitted.at("/product/sku").equals(old.at("/product/sku"))
                     || !submitted.at("/product/source").equals(old.at("/product/source")) || !submitted.path("displayMode").equals(old.path("displayMode")))
                 throw AppException.unprocessable("不能替换退回商品的SKU、采购来源或报价方式");
+            assertSameClassification(old,submitted);
             var request=FobQuotation.object().put("quoteMode","fob");request.set("customerName",quote.payload.path("customerName"));request.set("fob",submitted);
             // Validate prices and lock source/finance again at commit time; client totals are never trusted.
             var fresh=pricing.prepare(request).path("fob");
@@ -140,8 +141,11 @@ public class FobBatchCorrections {
         finish(quote,row,current,actor,"fob-resubmit",selected.size()+"项重新查询后提交复核"+(confirmedUnchanged>0?"；其中"+confirmedUnchanged+"项已核实资料无误，按原价重新提交审核":""),changes,selected);
         var result=view(quote,row);idempotency.save(actor.account(),operation,key,body,result);return ApiResponse.ok(result);
     }
+    static void assertSameClassification(JsonNode before,JsonNode after) {
+        if(!before.at("/product/classification").equals(after.at("/product/classification")))throw AppException.unprocessable("不能修改或移除退回报价的分类，请保留原分类重新查询");
+    }
     static boolean sourceChanged(JsonNode before,JsonNode after) {
-        return !before.at("/product/updatedAt").equals(after.at("/product/updatedAt")) || before.path("quantity").asLong()!=after.path("quantity").asLong()
+        return !before.at("/product/pricing/version").equals(after.at("/product/pricing/version")) || !before.at("/product/pricing/policyVersion").equals(after.at("/product/pricing/policyVersion")) || !before.at("/product/updatedAt").equals(after.at("/product/updatedAt")) || before.path("quantity").asLong()!=after.path("quantity").asLong()
                 || FobQuotation.amount(before.path("rate")).compareTo(FobQuotation.amount(after.path("rate")))!=0
                 || !before.at("/policy/scope").equals(after.at("/policy/scope")) || !before.at("/policy/calculation").equals(after.at("/policy/calculation"));
     }

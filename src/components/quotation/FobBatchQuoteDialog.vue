@@ -1,18 +1,21 @@
 <script setup lang="ts">
+import { fobClassifications, type FobClassification } from '@/services/fobClassification'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { canViewDomesticFreight, canViewPurchaseCost } from '@/data/quotationVisibility'
 import { localQuoteDate } from '@/data/customerQuoteSheet'
-import { fobQuantityQuote, fobSheetRows, fobTierQuotes, loadFobQuoteProduct, type FobSourceMode, type FobSmallOrderPolicy } from '@/services/fobQuotation'
+import { needsFobInvoiceVerification, fobQuantityQuote, fobSheetRows, fobTierQuotes, loadFobQuoteProduct, type FobSourceMode, type FobSmallOrderPolicy } from '@/services/fobQuotation'
 import { fobBatchIssue, fobBatchLookupError, fobBatchSnapshot, parseFobBatch, type FobBatchLine, type FobBatchMode } from '@/services/fobBatchQuotation'
 import { validateFobQuotation, type FobQuotationSnapshot } from '@/services/fobQuotationRecords'
 import { saveQuotationBatch } from '@/services/quotationBatchSubmission'
 import { idempotencyKey } from '@/services/http'
 import FobQuoteSheet from './FobQuoteSheet.vue'
+import FobCalculationDetails from './FobCalculationDetails.vue'
 import FobBatchSheetExports from './FobBatchSheetExports.vue'
 
-const props = defineProps<{ rate: number; policy: FobSmallOrderPolicy | null; financePending?: boolean; financeError?: string; salesperson?: string; initial?: { text: string; mode: FobBatchMode; customer: string; sources?: FobSourceMode[] } }>()
+const props = defineProps<{ classification?: FobClassification; rate: number; policy: FobSmallOrderPolicy | null; financePending?: boolean; financeError?: string; salesperson?: string; initial?: { text: string; mode: FobBatchMode; customer: string; sources?: FobSourceMode[] } }>()
 const emit = defineEmits<{ close: [] }>()
+const classification=ref<FobClassification>(props.classification || 'rebate-fob'), copyMessage=ref('')
 const dialog = ref<HTMLDialogElement>(), paste = ref(props.initial?.text || ''), mode = ref<FobBatchMode>(props.initial?.mode || 'quantity'), source = ref<FobSourceMode>('auto')
 const lines = ref<FobBatchLine[]>([]), busy = ref(false), error = ref(''), preview = ref<FobQuotationSnapshot>(), saving = ref(false), savedNo = ref(''), querying = ref(0)
 const customer = ref(props.initial?.customer || ''), title = ref('JerryFulfillment Quote Sheet'), agent = ref(props.salesperson || ''), date = ref(localQuoteDate()), whatsapp = ref('')
@@ -28,16 +31,23 @@ function finalRows(line: FobBatchLine) {
   try { if(mode.value==='tiers')return fobSheetRows(line.product,props.rate,props.policy).map(r=>({...r,label:`${r.minQty}${r.maxQty==null?'+':'–'+r.maxQty}${r.unit}`}))
     const q=fobQuantityQuote(line.product,fobTierQuotes(line.product,props.rate),line.quantity,props.rate,props.policy);return [{...q,label:`${q.quantity}${q.row.unit}`}]; } catch {return []}
 }
+function calculationQuotes(line: FobBatchLine) {
+  if(issue(line)||!line.product)return []
+  const p=line.product,rows=fobTierQuotes(p,props.rate)
+  const quantities=mode.value==='tiers'?fobSheetRows(p,props.rate,props.policy).map(r=>r.minQty):[Number(line.quantity)]
+  return quantities.map(q=>fobQuantityQuote(p,rows,String(q),props.rate,props.policy))
+}
 function costRows(line: FobBatchLine) { try { return line.product ? fobTierQuotes(line.product, props.rate) : [] } catch { return [] } }
 function issue(line: FobBatchLine) { return fobBatchIssue(line, lines.value, mode.value, props.rate, props.policy) }
 const valid = computed(() => lines.value.filter(l => !issue(l)))
+const legacyCount = computed(() => valid.value.filter(l => l.product && needsFobInvoiceVerification(l.product)).length)
 const selected = computed(() => valid.value.filter(l => l.selected))
 const invalid = computed(() => lines.value.filter(l => !!issue(l)))
 const visible = computed(() => lines.value.filter(l => filter.value === 'all' || (filter.value === 'valid' ? !issue(l) : !!issue(l))))
 const previewChanged = computed(() => !!preview.value && (preview.value.rate !== props.rate || JSON.stringify(preview.value.policy) !== JSON.stringify(props.policy)))
 function discardPreview() { preview.value = undefined; savedNo.value = ''; saveKey.value = ''; stale.value = false }
 watch([mode, source], () => { discardPreview(); if (source.value) { error.value = '' } })
-watch(source, () => { cancelQueries(); lines.value.forEach(l => { l.product = undefined; l.error = ''; l.loading = false }) })
+watch([source,classification], () => { cancelQueries(); lines.value.forEach(l => { l.product = undefined; l.error = ''; l.loading = false }) })
 function cancelQueries() { generation++; controller?.abort(); busy.value = false }
 function changedSku(line: FobBatchLine) { line.sku = line.sku.trim().toUpperCase(); line.product = undefined; line.error = ''; line.formatError = ''; discardPreview() }
 async function query(parse = false, only?: FobBatchLine) {
@@ -59,7 +69,7 @@ async function query(parse = false, only?: FobBatchLine) {
         if (line.formatError || !/^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(line.sku)) throw new Error(line.formatError || 'SKU格式无效')
         const rowSource = originalSources.value?.[line.id - 1] ?? source.value
         const key = `${rowSource}:${line.sku}`
-        if (!cache.has(key)) cache.set(key, loadFobQuoteProduct(line.sku, rowSource, AbortSignal.any([signal, AbortSignal.timeout(20000)]), true))
+        if (!cache.has(key)) cache.set(key, loadFobQuoteProduct(line.sku, rowSource, AbortSignal.any([signal, AbortSignal.timeout(20000)]), true, classification.value))
         const product = await cache.get(key)!
         if (request === generation) line.product = product
       } catch (e) { if (request === generation) line.error = fobBatchLookupError(e) }
@@ -91,6 +101,9 @@ async function save() {
   catch (e) { error.value = e instanceof Error ? e.message : '保存失败，请重试'; if (error.value.includes('变化') || error.value.includes('更新') || error.value.includes('不一致')) stale.value = true }
   finally { saving.value = false }
 }
+async function copyIssues(){try{await navigator.clipboard.writeText([...new Set(invalid.value.map(l=>l.sku).filter(Boolean))].join('\n'));copyMessage.value='已复制异常 SKU，每行一个'}catch{copyMessage.value='复制失败，请使用导出异常清单'}}
+function removeLine(line:FobBatchLine){lines.value=lines.value.filter(l=>l.id!==line.id);discardPreview()}
+function removeIssues(){const ids=new Set(invalid.value.map(l=>l.id));lines.value=lines.value.filter(l=>!ids.has(l.id));discardPreview()}
 function exportIssues() {
   const content = ['行号\tSKU\t数量\t原因', ...invalid.value.map(l => [l.id, l.sku, l.quantity, issue(l)].map(v => String(v).replace(/[\t\r\n]/g, ' ')).join('\t'))].join('\n')
   const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })), a = document.createElement('a')
@@ -109,7 +122,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
     <header><div><h2>批量粘贴报价</h2><p>粘贴SKU清单，核对异常后合并生成一份FOB报价单</p></div><button type="button" aria-label="关闭批量报价" :disabled="saving" @click="close">×</button></header>
     <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="financeIssue" role="alert" class="error">{{ financeIssue }}</p>
     <fieldset :disabled="saving" class="batch-fieldset">
-    <template v-if="!preview">
+    <template v-if="!preview"><label class="batch-classification">本批报价分类<select v-model="classification" aria-label="批量报价分类" :disabled="busy || saving"><option v-for="c in fobClassifications" :key="c.value" :value="c.value">{{c.label}}</option></select><span>{{classification==='ordinary-fob'?'普票、无票等沿用普通FOB原计价方式，无需专票确认':'新采购与原FOB均按实际专票类型和票点计价；缺资料时默认10点并持续提醒，已含票不重复加点'}}</span></label>
       <div class="batch-body">
         <aside><label for="fob-batch-paste"><b>从Excel复制一列或两列粘贴</b></label><p>每行一个SKU，可用空格、逗号或Tab分隔数量。最多100行。</p><textarea id="fob-batch-paste" v-model="paste" :disabled="saving || busy" placeholder="PF2600274  30&#10;PF2600166，50&#10;ZS2600437" />
           <label>报价方式<select v-model="mode" :disabled="saving || busy"><option value="quantity">按指定数量（漏写需补齐）</option><option value="tiers">全部阶梯（允许不填数量）</option></select></label>
@@ -119,10 +132,11 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
           <p>漏写数量不会自动按1报价。修改右侧SKU后，请点击该行“重新查询”。</p>
         </aside>
         <main><div class="summary"><b>共{{ lines.length }}行</b><span>可报价 {{ valid.length }}</span><span class="warning">待处理 {{ invalid.length }}</span></div>
-          <div class="filters"><button :class="{active:filter==='all'}" @click="filter='all'">全部</button><button :class="{active:filter==='valid'}" @click="filter='valid'">可报价</button><button :class="{active:filter==='invalid'}" @click="filter='invalid'">异常 / 待处理</button><button :disabled="saving || busy || !lines.length" @click="query()">重新查询全部</button><button :disabled="saving || !invalid.length || busy" @click="exportIssues">导出异常清单</button></div>
-          <div class="result-scroll"><table aria-label="批量报价核对结果"><thead><tr><th>选择</th><th>原行</th><th>SKU</th><th>数量</th><th>状态 / 原因</th><th class="price">报关最终价 $/单位</th><th class="price">不报关最终价 $/单位</th><th>操作</th></tr></thead><tbody>
-            <template v-for="line in visible" :key="line.id"><tr :class="{invalid:!!issue(line)}"><td><input v-model="line.selected" type="checkbox" :aria-label="`选择第${line.id}行`" :disabled="saving || busy"></td><td>{{ line.id }}</td><td><input v-model="line.sku" :aria-label="`第${line.id}行SKU`" :disabled="saving || busy" maxlength="96" @input="changedSku(line)"></td><td><input v-model="line.quantity" :aria-label="`第${line.id}行数量`" :disabled="saving || busy || mode==='tiers'" inputmode="numeric" placeholder="请填数量" @input="discardPreview"></td><td :class="issue(line)?'warning':'success'">{{ issue(line) || '可报价' }}</td><td class="price"><div v-for="(q,i) in finalRows(line)" :key="i"><b>${{ q.declaredUsd }}</b><small>{{ q.label }}</small></div><span v-if="issue(line)">—</span></td><td class="price"><div v-for="(q,i) in finalRows(line)" :key="i"><b>${{ q.undeclaredUsd }}</b><small>{{ q.label }}</small></div><span v-if="issue(line)">—</span></td><td><button :disabled="saving || busy" @click="query(false,line)">重新查询</button></td></tr>
-            <tr v-if="line.product && canViewDomesticFreight"><td colspan="8"><details><summary>{{ line.sku }} {{ canViewPurchaseCost ? '采购成本明细（内部）' : '国内运费明细' }}</summary><p v-if="canViewPurchaseCost">{{ line.product.parsed.freight.basis }}</p><table><thead><tr><th>起订量</th><th v-if="canViewPurchaseCost">采购价 ¥</th><th v-if="canViewPurchaseCost">含票价 ¥</th><th>运费 ¥</th><th v-if="canViewPurchaseCost">成本 ¥</th></tr></thead><tbody><tr v-for="tier in costRows(line)" :key="tier.minQty"><td>{{ tier.minQty }}</td><td v-if="canViewPurchaseCost">{{ tier.purchaseCny }}</td><td v-if="canViewPurchaseCost">{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td></tr></tbody></table></details></td></tr></template>
+          <p v-if="legacyCount" class="procurement-reminder" role="status">采购核实提醒：{{legacyCount}} 行票据资料待核实（原价默认10点，已含票不重复加点），本次可正常报价；请采购更新对应数据源 SKU 的票类型和票点。未补齐前，刷新或重复报价都不会消除提醒。</p>
+          <div class="filters"><button :class="{active:filter==='all'}" @click="filter='all'">全部</button><button :class="{active:filter==='valid'}" @click="filter='valid'">可报价</button><button :class="{active:filter==='invalid'}" @click="filter='invalid'">异常 / 待处理</button><button :disabled="saving || busy || !lines.length" @click="query()">重新查询全部</button><button :disabled="saving || !invalid.length || busy" @click="exportIssues">导出异常清单</button><button :disabled="busy || !invalid.length" @click="copyIssues">复制异常 SKU</button><button :disabled="busy || !invalid.length" @click="removeIssues">移除全部异常行</button></div><p v-if="copyMessage" role="status">{{copyMessage}}</p>
+          <div class="result-scroll"><table aria-label="批量报价核对结果"><thead><tr><th>选择</th><th>原行</th><th>SKU</th><th>数量</th><th>状态 / 原因</th><th class="price">最终报价 $/单位</th><th>操作</th></tr></thead><tbody>
+            <template v-for="line in visible" :key="line.id"><tr :class="{invalid:!!issue(line)}"><td><input v-model="line.selected" type="checkbox" :aria-label="`选择第${line.id}行`" :disabled="saving || busy"></td><td>{{ line.id }}</td><td><input v-model="line.sku" :aria-label="`第${line.id}行SKU`" :disabled="saving || busy" maxlength="96" @input="changedSku(line)"></td><td><input v-model="line.quantity" :aria-label="`第${line.id}行数量`" :disabled="saving || busy || mode==='tiers'" inputmode="numeric" placeholder="请填数量" @input="changedSku(line)"></td><td :class="issue(line)?'warning':'success'">{{ issue(line) || '可报价' }}<small v-if="!issue(line) && line.product && needsFobInvoiceVerification(line.product)" class="legacy-label">{{line.product.invoicePricing?.mode==='included'?'已含票 · 票据待核实':'系统默认10点 · 票据待核实'}}<br>请采购更新【{{line.product.source==='fob'?'原FOB专用资料':'系统新采购数据'}}】{{line.product.sku}} 的票类型和票点</small></td><td class="price"><div v-for="(q,i) in finalRows(line)" :key="i"><b>${{ q.declaredUsd }}</b><small>{{ q.label }}</small></div><span v-if="issue(line)">—</span></td><td><button :disabled="saving || busy" @click="query(false,line)">重新查询</button><button :disabled="busy || saving" @click="removeLine(line)">删除</button></td></tr>
+            <tr v-if="line.product && canViewDomesticFreight"><td colspan="8"><details><summary>{{ line.sku }} {{ canViewPurchaseCost ? '采购成本明细与计算过程（内部）' : '国内运费明细及计算过程' }}</summary><p v-if="canViewPurchaseCost">{{ line.product.parsed.freight.basis }}</p><table><thead><tr><th>起订量</th><th v-if="canViewPurchaseCost">采购价 ¥</th><th v-if="canViewPurchaseCost">含票价 ¥</th><th>运费 ¥</th><th v-if="canViewPurchaseCost">成本 ¥</th></tr></thead><tbody><tr v-for="tier in costRows(line)" :key="tier.minQty"><td>{{ tier.minQty }}</td><td v-if="canViewPurchaseCost">{{ tier.purchaseCny }}</td><td v-if="canViewPurchaseCost">{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td></tr></tbody></table><FobCalculationDetails v-for="(q,index) in calculationQuotes(line)" :key="q.quantity" :product="line.product" :rate="rate" :row="q.row" :quantity="q.quantity" :extra-cny="q.extraCny" :final-usd="q.declaredUsd" :show-notice="index===0" /></details></td></tr></template>
             <tr v-if="!visible.length"><td colspan="8">{{ lines.length ? '当前筛选无结果' : '请先粘贴并查询SKU' }}</td></tr>
           </tbody></table></div>
         </main>
@@ -140,6 +154,9 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
   </dialog>
 </template>
 <style scoped>
+.batch-dialog .procurement-reminder{padding:10px 12px;background:#fff1f0;border:1px solid #f2b8b5;border-radius:6px;color:#b42318;font-size:12px;font-weight:600;line-height:1.6}
+.legacy-label{display:block;color:#b42318;font-size:11px;line-height:1.5;margin-top:6px}
+.batch-classification{display:flex;align-items:center;gap:16px;margin:14px 0;padding:12px;background:#fff8ec;border:1px solid #f1dec0;border-radius:7px}.batch-classification select{min-width:350px}.batch-classification span{color:#71818e}
 .batch-dialog[open]{position:fixed;inset:88px 16px 16px;margin:0 auto;max-height:calc(100dvh - 104px);z-index:25;box-shadow:0 12px 40px #152a4133}@media(max-width:1100px){.batch-dialog[open]{top:126px;max-height:calc(100dvh - 142px)}}
 .batch-fieldset{border:0;margin:0;padding:0;min-width:0}.price{background:#eef6ff;color:#1c629a;min-width:92px}.price b{font-size:17px}.price small{display:block;font-size:10px;font-weight:400;color:#617d94}.price div+div{margin-top:8px}
 .batch-dialog{box-sizing:border-box;width:min(1420px,96vw);max-height:94vh;border:1px solid #dbe5ee;border-radius:12px;padding:20px;color:#233b50;background:#fff;overflow:auto}.batch-dialog::backdrop{background:#152a4166}header,footer,.preview-toolbar,.summary,.filters{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h2{margin:0;font-size:21px}p{font-size:12px;line-height:1.6;color:#708092}button,input,select,textarea{font:inherit;box-sizing:border-box;border:1px solid #ccd9e5;border-radius:6px;padding:8px;color:#29465d;background:white}button{cursor:pointer;font-size:13px}button:disabled{opacity:.5;cursor:not-allowed}button.primary{background:#f58b15;border-color:#f58b15;color:white;font-weight:700;padding:11px 18px}header>button{font-size:24px}.batch-body{display:grid;grid-template-columns:270px minmax(0,1fr);gap:18px;margin-top:16px}aside{background:#f6f9fc;border:1px solid #e1e9f0;padding:14px;border-radius:8px}aside textarea{width:100%;height:260px;resize:vertical;line-height:1.8}label{display:grid;gap:6px;font-size:12px}aside label,aside button{margin-top:12px;width:100%}.summary{justify-content:flex-start;padding:12px;background:#f0f6fc;border-radius:6px}.filters{justify-content:flex-start;margin:12px 0}.active{color:#1764a4;background:#eef6ff}.result-scroll{overflow:auto;max-height:520px}table{border-collapse:collapse;width:100%;font-size:12px}td,th{border:1px solid #dce5ed;padding:8px;text-align:left}th{background:#f1f6fa}td input:not([type=checkbox]){width:100%;min-width:72px}td:nth-child(3){min-width:155px}td:nth-child(4){width:95px}.warning{color:#a55b08}.success{color:#17805a}.error{padding:12px;background:#fff0ed;color:#a83324}.invalid{background:#fffaf1}.metadata{display:flex;flex-wrap:wrap;gap:12px;border-top:1px solid #e2e9ef;padding:16px 0;margin-top:16px}.metadata label{flex:1;min-width:145px}.metadata input{width:100%}footer{position:sticky;bottom:-20px;background:#fff;padding:16px 0;border-top:1px solid #e1e7ed;z-index:1}.preview-toolbar{justify-content:flex-start;margin:16px 0}summary{cursor:pointer;color:#71879b}details table{margin-top:8px}@media(max-width:760px){.batch-body{grid-template-columns:1fr}aside textarea{height:150px}.batch-dialog{padding:12px}footer{bottom:-12px}}

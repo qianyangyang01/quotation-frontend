@@ -24,6 +24,7 @@ public class BatchQuotationSubmission {
             throw AppException.unprocessable("批量报价类型无效");
         var request=JsonNodeFactory.instance.objectNode().put("quoteMode","fob");
         request.set("customerName",body.path("customerName")); request.set("fob",body.path("fob"));
+        FobPricing.requireClassification(request);
         var prepared=fob.prepare(request).path("fob");
         var result=new ArrayList<ObjectNode>();
         for(var snapshot:splitFob(prepared)) {

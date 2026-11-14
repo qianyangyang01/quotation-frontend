@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fobClassificationEnglish } from '@/services/fobClassification'
 import QuotationCopyScope from './QuotationCopyScope.vue'
 import QuotationBatchCopy from './QuotationBatchCopy.vue'
 import type { QuotationRecord } from '@/data/quotationRecords'
@@ -16,7 +17,7 @@ const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: st
 const batchCopy = ref<InstanceType<typeof QuotationBatchCopy>>()
 const customer = ref(props.initialCustomer || ''), saving = ref(false), savedNo = ref(''), saveError = ref('')
 const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => !!props.currentQuote && !savedNo.value)
-const columns = ref<QuoteSheetColumnKey[]>(['number','sku','prices']), priceOrder = ref([0,1]), rowOrder = ref<string[]>([])
+const columns = ref<QuoteSheetColumnKey[]>(['number','sku','prices']), priceOrder = ref(props.product.classification ? [0] : [0,1]), rowOrder = ref<string[]>([])
 const drag = ref<{kind:'row'|'column'|'price'; index:number} | null>(null)
 let disposed = false, lastSignature = '', saveKey = ''
 const mode = ref<'tiers' | 'quantity'>('tiers'), editing = ref(false), copying = ref(false), rendering = ref(false), message = ref(''), renderError = ref('')
@@ -25,7 +26,7 @@ const images = ref<Array<QuoteSheetImage & { url: string }>>([]), activeImage = 
 const currentImage = computed(() => images.value[activeImage.value])
 const editedNotes = ref<string[] | null>(null)
 const defaultNotes = computed(() => [
-  'FOB wholesale quotation. Unit prices are in USD. International shipping is not included.',
+  props.product.classification === 'rebate-cfr-cif' ? 'CFR / CIF pricing category. Confirm freight and insurance scope before order.' : 'FOB wholesale quotation. Unit prices are in USD. International shipping is not included.',
   `MOQ: ${props.product.parsed.minOrderQty}.` + (props.product.parsed.orderMultiple > 1 ? ` Order in multiples of ${props.product.parsed.orderMultiple}.` : ''),
 ])
 const notes = computed(() => editedNotes.value ?? defaultNotes.value)
@@ -52,7 +53,7 @@ const sheet = computed<CustomerQuoteSheet>(() => {
   const formattedDate = formatQuoteDate(date.value)
   return {
     title: title.value, agent: agent.value, date: formattedDate, whatsapp: whatsapp.value,
-    columnOrder: [...columns.value], quantityLabels: priceOrder.value.map(i => ['With declaration', 'Without declaration'][i]!), priceGroupLabel: 'FOB Unit Price (USD)', showQuantityRange: true,
+    columnOrder: [...columns.value], quantityLabels: props.product.classification ? ['Unit Price'] : priceOrder.value.map(i => ['With declaration', 'Without declaration'][i]!), priceGroupLabel: props.product.classification ? fobClassificationEnglish(props.product.classification)+' · USD' : 'FOB Unit Price (USD)', showQuantityRange: true,
     hiddenColumns: ['country', 'provider', 'shippingTime', 'processingTime'],
     rows: rows.map((row, index) => ({ key: `${props.product.sku}-${index}`, number: index + 1, sku: props.product.sku,
       quantityRange: range(row), prices: priceOrder.value.map(i => [Number(row.declaredUsd), Number(row.undeclaredUsd)][i]!),
@@ -89,11 +90,11 @@ function move(kind:'row'|'column'|'price', from:number, to:number) {
   if (saving.value || copying.value || props.savedSheet) return
   if(kind==='row') { const order=sheet.value.rows.map(r=>r.key); if(to<0||to>=order.length)return;order.splice(to,0,order.splice(from,1)[0]!);rowOrder.value=order }
   else if(kind==='column') {const order=[...columns.value];if(to<0||to>=order.length)return;order.splice(to,0,order.splice(from,1)[0]!);columns.value=order}
-  else if(to>=0&&to<2) priceOrder.value=[...priceOrder.value].reverse()
+  else if(!props.product.classification&&to>=0&&to<2) priceOrder.value=[...priceOrder.value].reverse()
 }
 function startDrag(kind:'row'|'column'|'price', index:number,event:DragEvent) {drag.value={kind,index};event.dataTransfer?.setData('text/plain',`${kind}:${index}`);if(event.dataTransfer)event.dataTransfer.effectAllowed='move'}
 function drop(kind:'row'|'column'|'price',index:number) {if(drag.value?.kind===kind)move(kind,drag.value.index,index);drag.value=null}
-function resetLayout() {columns.value=['number','sku','prices'];priceOrder.value=[0,1];rowOrder.value=[]}
+function resetLayout() {columns.value=['number','sku','prices'];priceOrder.value=props.product.classification?[0]:[0,1];rowOrder.value=[]}
 watch([sheet,customer],()=>{savedNo.value='';saveError.value=''})
 async function save() {
   if(saving.value || props.savedSheet || !props.policy || sheet.value.issues.length || !sheet.value.rows.length)return

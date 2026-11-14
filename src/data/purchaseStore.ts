@@ -13,6 +13,7 @@ export interface PurchaseDeletionCheck { canDelete:boolean;version:number;imageC
 export type PurchaseProductRecord = {
   sourceSheet: string; sourceRow: number; sku: string; skuOrigin: PurchaseSkuOrigin; category: string; _version?: number; _updatedAt?: string
   dataSource: PurchaseDataSource; purchasePriceBasis: PurchasePriceBasis; sourceQuotedPriceCny: number | null
+  fobInvoiceRatioConfirmed?: boolean; fobInvoiceConfirmedFingerprint?: string; invoiceVerificationNote?: string
   purchaseUsage?: 'shared'
   legacyPriceMode?: 'auto_tax'
   productImage: string; physicalImage: string; quotationOwner: string; quotationDate: string
@@ -78,6 +79,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
   const catalogState: PurchaseCatalogState = input.catalogState === 'pending_template' || input.catalogState === 'disabled' ? input.catalogState : 'ready'
   const base = {
     sourceSheet: String(input.sourceSheet || '').trim(), sourceRow: Number(input.sourceRow) || Date.now(), sku, skuOrigin, category, productImage, _version: input._version == null ? undefined : Number(input._version), _updatedAt: input._updatedAt == null ? undefined : String(input._updatedAt),
+    fobInvoiceRatioConfirmed:input.fobInvoiceRatioConfirmed===true, fobInvoiceConfirmedFingerprint:input.fobInvoiceConfirmedFingerprint, invoiceVerificationNote:input.invoiceVerificationNote || '',
     dataSource, purchasePriceBasis: input.purchasePriceBasis === 'tax_included' || input.purchasePriceBasis === 'quoted' ? input.purchasePriceBasis : '' as PurchasePriceBasis,
     sourceQuotedPriceCny: numberOrNull(input.sourceQuotedPriceCny),
     ...(dataSource === 'legacy_2026' && input.legacyPriceMode === 'auto_tax' ? { legacyPriceMode: 'auto_tax' as const } : {}),

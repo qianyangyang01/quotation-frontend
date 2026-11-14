@@ -10,6 +10,7 @@ final class FinanceSettingValidation {
     static void validate(String key, JsonNode body) {
         if (body == null || body.isNull()) fail("财务设置不能为空");
         switch (key) {
+            case "fob-pricing" -> com.milano.quotation.quote.FobPricing.validate(body);
             case "womens-pricing" -> WomensPricing.validatePolicy(body);
             case "customer-operation-fees" -> {
                 object(body);

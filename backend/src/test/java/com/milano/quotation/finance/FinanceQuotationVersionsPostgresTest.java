@@ -39,6 +39,17 @@ class FinanceQuotationVersionsPostgresTest {
         assertDoesNotThrow(()->FinanceQuotationVersions.validate(jdbc,new ObjectMapper().createObjectNode()));
         assertDoesNotThrow(()->tx.executeWithoutResult(s->FinanceQuotationVersions.validate(jdbc,quote())));
     }
+    @Test void fobCoefficientRevisionDoesNotInvalidateOtherQuotationModes() {
+        jdbc.sql("insert into finance_setting values('fob-pricing',2)").update();
+        for (var mode : java.util.List.of("single","bundle","womens-single","womens-bundle","freight-trial","shipping-only")) {
+            var current=quote().put("quoteMode",mode);
+            ((ObjectNode)current.path("financeVersions")).put("fob-pricing",1);
+            assertDoesNotThrow(()->tx.executeWithoutResult(s->FinanceQuotationVersions.validate(jdbc,current)));
+            ((ObjectNode)current.path("financeVersions")).put("exchange-rate",0);
+            assertEquals(409,assertThrows(AppException.class,()->tx.executeWithoutResult(s->FinanceQuotationVersions.validate(jdbc,current))).status().value());
+        }
+        assertDoesNotThrow(()->tx.executeWithoutResult(s->FinanceQuotationVersions.validate(jdbc,quote())));
+    }
     @Test void financeUpdateCannotCommitBetweenVersionCheckAndQuotationCommit() throws Exception {
         var checked=new CountDownLatch(1);var release=new CountDownLatch(1);var updating=new CountDownLatch(1);
         try(var workers=Executors.newFixedThreadPool(2)) {

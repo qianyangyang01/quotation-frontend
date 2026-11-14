@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { canViewFobCoefficient, fobClassificationLabel } from '@/services/fobClassification'
 import { computed } from 'vue'
-import { canViewDomesticFreight, canViewPurchaseCost, canViewPricingFactors } from '@/data/quotationVisibility'
+import { canViewDomesticFreight, canViewPurchaseCost } from '@/data/quotationVisibility'
 import type { QuotationRecord, QuotationReviewState } from '@/data/quotationRecords'
 import FobRevisionHistory from './FobRevisionHistory.vue'
 import FobQuoteSheet from './FobQuoteSheet.vue'
+import FobCalculationDetails from './FobCalculationDetails.vue'
+import { needsFobInvoiceVerification } from '@/services/fobQuotation'
+import type { FobQuotationSnapshot } from '@/services/fobQuotationRecords'
 import FobBatchSheetExports from './FobBatchSheetExports.vue'
 
 const props = defineProps<{record:QuotationRecord; state?:QuotationReviewState}>()
@@ -15,6 +19,9 @@ const approvedSheet = computed(() => {
   const approved=new Set(props.record.fobItemReviews.filter(s=>s.status==='approved').map(s=>s.index))
   return {...sheet, rows:sheet.rows.filter(r=>approved.has(Number(r.key.split(':')[0]))).map((r,i)=>({...r,number:i+1}))}
 })
+function savedCalculations(snapshot:FobQuotationSnapshot){
+  return (snapshot.ranges?.length?snapshot.ranges:snapshot.current?[snapshot.current]:[]).map(q=>({q,row:snapshot.tiers?.find(t=>q.minQty>=t.minQty&&(t.maxQty==null||q.minQty<=t.maxQty))}))
+}
 const tiers = computed(() => props.record.fob?.tiers?.length ? props.record.fob.tiers : [null])
 const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record.fob?.tiers?.[0]?.unit || '单位')
 </script>
@@ -23,41 +30,44 @@ const quoteUnit = computed(() => props.record.fob?.current?.unit || props.record
     <h3>FOB批量报价 · {{ record.fob.items.length }}行商品</h3><p>客户：{{ record.customerName }} · 报价人：{{ record.salespersonName }} · 修订 {{ record.fobRevision || 0 }}（各商品按自身保存汇率计价）</p>
     <p>以下为保存时的完整报价快照，采购资料和汇率更新不会改变此报价。</p>
     <details v-if="canViewDomesticFreight"><summary>{{ canViewPurchaseCost ? '查看各SKU采购成本快照（内部）' : '查看各SKU国内运费快照' }}</summary><div class="cost-table"><table><thead><tr><th>SKU</th><th>阶梯起订量</th><th v-if="canViewPurchaseCost">采购价 ¥</th><th v-if="canViewPurchaseCost">含票价 ¥</th><th>国内运费 ¥</th><th v-if="canViewPurchaseCost">成本 ¥</th></tr></thead><tbody><template v-for="(item,index) in record.fob.items" :key="index"><tr v-for="tier in item.tiers" :key="tier.minQty"><td>{{ item.product.sku }}</td><td>{{ tier.minQty }}</td><td v-if="canViewPurchaseCost">{{ tier.purchaseCny }}</td><td v-if="canViewPurchaseCost">{{ tier.taxIncludedCny }}</td><td v-if="canViewDomesticFreight">{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td></tr></template></tbody></table></div></details>
+    <details v-for="(item,index) in record.fob.items" :key="index"><summary>{{item.product.sku}} · 报价口径与计算快照<span v-if="needsFobInvoiceVerification(item.product)"> · 票据资料待采购核实</span></summary><FobCalculationDetails v-for="(c,i) in savedCalculations(item)" :key="i" :product="item.product" :rate="item.rate" :row="c.row" :quantity="c.q.minQty" :extra-cny="c.q.extraCny" :final-usd="c.q.declaredUsd" :show-notice="i===0" /></details>
     <FobRevisionHistory v-if="record.fobRevision" :id="record.id" :revision="record.fobRevision" />
     <p v-if="record.fobItemReviews && record.fobItemReviews.some(i=>i.status!=='approved')" role="status">下方客户报价单仅包含已通过商品；待审核及退回商品不进入导出。</p>
     <p v-if="stale" role="alert">审核状态已变化，请加载最新记录后生成报价单。<button @click="emit('reload')">加载最新记录</button></p>
     <template v-else-if="approvedSheet && (!record.fobItemReviews || approvedSheet.rows.length)"><FobBatchSheetExports :sheet="approvedSheet" /><FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="approvedSheet" /></template><p v-else>尚无审核通过商品，暂不能生成对外报价单。</p>
   </section>
   <section v-else-if="record.fob" class="fob-record" aria-label="FOB历史报价快照">
-    <div class="fob-meta"><b>FOB（批发）报价 · {{ record.primarySku }}</b><span>客户：{{ record.customerName }}</span><span>报价人：{{ record.salespersonName }}</span><span>采购来源：{{ record.fob.product.source==='fob'?'FOB数据':'新采购资料' }}</span><span>报价数量：{{ record.fob.quantities?.join(' / ') || record.fob.quantity }}</span><span class="finance-meta">汇率：{{ record.fob.rate }} CNY/USD<template v-if="canViewPurchaseCost"> · 票点10%</template><template v-if="canViewPricingFactors"> · 报关×1.14 · 不报关×1.1628</template></span></div>
+    <div class="fob-meta"><b>FOB（批发）报价 · {{ record.primarySku }}</b><span>客户：{{ record.customerName }}</span><span>报价人：{{ record.salespersonName }}</span><span>采购来源：{{ record.fob.product.source==='fob'?'FOB数据':'新采购资料' }}</span><span>报价数量：{{ record.fob.quantities?.join(' / ') || record.fob.quantity }}</span><span class="finance-meta">汇率：{{ record.fob.rate }} CNY/USD<template v-if="record.fob.product.classification"> · {{fobClassificationLabel(record.fob.product.classification)}}<template v-if="record.fob.product.invoicePricing?.effectiveTaxPoint!=null"> · 计价票点{{Number((record.fob.product.invoicePricing.effectiveTaxPoint*100).toFixed(6))}}%{{record.fob.product.classification==='ordinary-fob'?'（原计价口径）':needsFobInvoiceVerification(record.fob.product)?'（默认）':'（实际）'}}</template><template v-if="canViewFobCoefficient && record.fob.product.invoicePricing?.fobInvoiceRatio!=null && record.fob.product.invoicePricing.effectiveTaxPoint==null"> · 含票换算×{{Number(record.fob.product.invoicePricing.fobInvoiceRatio.toFixed(8))}}</template><template v-if="canViewFobCoefficient && record.fob.product.pricing?.fobCoefficient"> · 系数×{{record.fob.product.pricing.fobCoefficient}}</template></template><template v-else><template v-if="canViewPurchaseCost"> · 票点10%</template><template v-if="canViewFobCoefficient"> · 报关×1.14 · 不报关×1.1628</template></template></span></div>
     <p>以下为保存时的报价快照；采购资料和汇率更新不会改变此报价。<template v-if="record.fob.quantities?.length">同一 SKU 的 {{ record.fob.quantities.length }} 个数量档合并在本条记录审核，各档最终价格见下方客户报价单。</template></p>
+    <FobCalculationDetails :product="record.fob.product" :rate="record.fob.rate" :show-calculation="false" />
     <div class="cost-table">
       <table aria-label="FOB基础价格与本次数量最终单价">
         <thead>
           <tr>
             <th rowspan="2" scope="col">数量</th>
             <template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">采购价 ¥</th><th rowspan="2" scope="col">含票价 ¥</th></template><th v-if="canViewDomesticFreight" rowspan="2" scope="col">国内运费 ¥</th><template v-if="canViewPurchaseCost"><th rowspan="2" scope="col">成本价 ¥</th></template>
-            <th colspan="2" scope="colgroup" class="base-heading">基础单价<small>未含小额订单加价</small></th>
-            <th colspan="2" scope="colgroup" class="final-heading final-start">本次最终单价 · {{ record.fob.quantity }}{{ quoteUnit }}<small>{{ record.fob.current ? '已含适用的小额订单加价' : '此快照未保存最终单价' }}</small></th>
+            <th :colspan="record.fob.product.classification ? 1 : 2" scope="colgroup" class="base-heading">基础单价<small>未含小额订单加价</small></th>
+            <th :colspan="record.fob.product.classification ? 1 : 2" scope="colgroup" class="final-heading final-start">本次最终单价 · {{ record.fob.quantity }}{{ quoteUnit }}<small>{{ record.fob.current ? '已含适用的小额订单加价' : '此快照未保存最终单价' }}</small></th>
           </tr>
-          <tr><th scope="col" class="base-heading">报关 $</th><th scope="col" class="base-heading">不报关 $</th><th scope="col" class="final-heading final-start">报关 $</th><th scope="col" class="final-heading">不报关 $</th></tr>
+          <tr><th scope="col" class="base-heading">{{record.fob.product.classification?'基础价 $':'报关 $'}}</th><th v-if="!record.fob.product.classification" scope="col" class="base-heading">不报关 $</th><th scope="col" class="final-heading final-start">{{record.fob.product.classification?'最终价 $':'报关 $'}}</th><th v-if="!record.fob.product.classification" scope="col" class="final-heading">不报关 $</th></tr>
         </thead>
         <tbody>
           <tr v-for="(tier,index) in tiers" :key="tier?.minQty ?? 'missing'">
             <template v-if="tier">
               <td>{{ tier.minQty }}{{ tier.maxQty==null?'+':'–'+tier.maxQty }}{{ tier.unit }}</td>
               <template v-if="canViewPurchaseCost"><td>{{ tier.purchaseCny }}</td><td>{{ tier.taxIncludedCny }}</td></template><td v-if="canViewDomesticFreight">{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td>
-              <td class="base-price">{{ tier.declaredUsd }}</td><td class="base-price">{{ tier.undeclaredUsd }}</td>
+              <td class="base-price">{{ tier.declaredUsd }}</td><td v-if="!record.fob.product.classification" class="base-price">{{ tier.undeclaredUsd }}</td>
             </template>
             <td v-else :colspan="3 + (canViewPurchaseCost ? 3 : 0) + (canViewDomesticFreight ? 1 : 0)" class="missing-base">此快照未保存基础价格明细</td>
             <template v-if="index===0">
               <td :rowspan="tiers.length" class="final-price final-start"><strong v-if="record.fob.current">{{ record.fob.current.declaredUsd }}</strong><span v-else>未保存</span></td>
-              <td :rowspan="tiers.length" class="final-price"><strong v-if="record.fob.current">{{ record.fob.current.undeclaredUsd }}</strong><span v-else>未保存</span></td>
+              <td v-if="!record.fob.product.classification" :rowspan="tiers.length" class="final-price"><strong v-if="record.fob.current">{{ record.fob.current.undeclaredUsd }}</strong><span v-else>未保存</span></td>
             </template>
           </tr>
         </tbody>
       </table>
     </div>
+    <FobCalculationDetails v-for="(c,i) in savedCalculations(record.fob)" :key="i" :product="record.fob.product" :rate="record.fob.rate" :row="c.row" :quantity="c.q.minQty" :extra-cny="c.q.extraCny" :final-usd="c.q.declaredUsd" :show-notice="false" />
     <div class="price-notes"><p v-if="record.fob.current">对外报价请以右侧「本次最终单价」为准，单位：美元/{{ quoteUnit }}。</p><p v-if="canViewPurchaseCost">国内运费依据：{{ record.fob.product.parsed.freight.basis }}</p></div>
     <p v-if="!record.fob.current" class="missing-final" role="alert">此历史快照未保存本次数量的最终单价，请核对下方已保存客户报价单；基础阶梯单价不可直接作为最终报价。</p>
     <FobQuoteSheet :product="record.fob.product" :rate="record.fob.rate" :quantity="String(record.fob.quantity)" :policy="record.fob.policy" :saved-sheet="record.fob.sheet" :batch-record="record" />

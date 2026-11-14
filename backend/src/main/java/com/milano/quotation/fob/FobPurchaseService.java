@@ -19,6 +19,8 @@ public class FobPurchaseService {
     private static final Map<String, String> FIELDS;
     static {
         var m = new LinkedHashMap<String, String>();
+        m.put("taxIncludedPriceCny","起步含票价");m.put("taxPoint","票点");m.put("fobInvoiceRatioConfirmed","含票比例适用全部阶梯确认");m.put("fobInvoiceConfirmedFingerprint","含票确认版本");
+        m.put("invoiceType","票据类型");m.put("purchasePriceBasis","采购价格口径");m.put("invoiceVerificationNote","票据与含票价格核实说明");
         m.put("weightRaw", "克重原文"); m.put("moqRaw", "起订量原文"); m.put("priceRaw", "采购价格原文");
         m.put("freightRaw", "运费原文"); m.put("category", "类别"); m.put("notes", "备注");
         m.put("quotationOwner", "报价人"); m.put("quotationDate", "报价日期");
@@ -99,6 +101,10 @@ public class FobPurchaseService {
             merged.put("verificationStatus", "pending");
             FIELDS.keySet().forEach(field -> { if (patch.has(field)) merged.set(field, patch.get(field).deepCopy()); });
             var issues = new ArrayList<String>(); var notices = new ArrayList<String>();
+            if(patch.has("invoiceType")&&!FobInvoicePolicy.special(patch.path("invoiceType").asText())&&!Set.of("未确认","待确认","专票","普票","无票","没票","不开票","增值税专用发票","增值税普通发票","含专票","special").contains(patch.path("invoiceType").asText()))issues.add("请选择有效票据类型");
+            if(patch.has("purchasePriceBasis")&&!Set.of("quoted","tax_included").contains(patch.path("purchasePriceBasis").asText()))issues.add("请选择有效采购价格口径");
+            try { FobInvoicePolicy.maintainConfirmation(merged,current==null?null:current.payload,patch); }
+            catch(AppException e){issues.add(e.getMessage());}
             if (batch.conflicts.contains(sku)) issues.add("同批SKU存在不同内容：" + sku + "，请核对重复行并仅保留本次适用的一条；不会自动覆盖或丢弃冲突内容");
             // Derived lists are rebuilt from the complete merged source, never merged by tier index.
             merged.remove("parsed");
@@ -144,6 +150,14 @@ public class FobPurchaseService {
                 var name = field.getKey(); var value = field.getValue();
                 if (name.equals("sku")) continue;
                 if (!FIELDS.containsKey(name)) throw AppException.unprocessable("不允许修改FOB字段：" + name);
+                if(name.equals("taxIncludedPriceCny")||name.equals("taxPoint")){
+                    if(value.isNull()){patch.putNull(name);continue;}
+                    if(!value.isNumber()||!Double.isFinite(value.asDouble())||value.asDouble()<0||value.asDouble()>(name.equals("taxPoint")?1:1000000000))throw AppException.unprocessable("第"+row+"行"+name+"无效");
+                    patch.set(name,value);continue;
+                }
+                if(name.equals("fobInvoiceRatioConfirmed")){
+                    if(!value.isBoolean())throw AppException.unprocessable("含票阶梯确认必须为勾选值");patch.set(name,value);continue;
+                }
                 if (value.isNull()) continue;
                 if (!value.isTextual() || value.asText().length() > 10000) throw AppException.unprocessable("第" + row + "行字段格式错误或过长：" + name);
                 String text = value.asText().replace("\r\n", "\n").trim();

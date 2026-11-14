@@ -192,7 +192,7 @@ function createTemplateFromCurrentMode() {
 const quoteMode = ref<QuotationMode>('single')
 // FOB is a separate calculation workspace; it never serializes into a channel quotation or its draft.
 const fobKey = ref(0)
-const fobInitial = ref<{sku:string;source:'fob'|'standard';customer:string;quantity:number;batch?:{text:string;mode:'tiers'|'quantity';customer:string;sources:('fob'|'standard')[]}}>()
+const fobInitial = ref<{classification?: import('@/services/fobClassification').FobClassification;sku:string;source:'fob'|'standard';customer:string;quantity:number;batch?:{text:string;mode:'tiers'|'quantity';customer:string;sources:('fob'|'standard')[]}}>()
 const fobActive = ref(false)
 watch(canUseFob, allowed => { if (!allowed) fobActive.value = false })
 const fobPanel = ref<InstanceType<typeof FobQuotePanel> | null>(null)
@@ -258,7 +258,7 @@ async function applyReissue() {
     if (draftSource.value) throw new Error('当前正在编辑撤回报价，请返回我的报价后再次发起')
     if(record.quoteMode==='fob') {
       if(!record.fob || !canUseFob.value)throw new Error('无法载入FOB报价')
-      fobInitial.value={sku:record.primarySku,source:record.fob.product.source,customer:record.customerName,quantity:record.fob.quantity}
+      fobInitial.value={classification:record.fob.product.classification,sku:record.primarySku,source:record.fob.product.source,customer:record.customerName,quantity:record.fob.quantity}
       if(record.fob.quantities?.length)fobInitial.value.batch={text:record.fob.quantities.map(q=>`${record.primarySku}\t${q}`).join('\n'),mode:'quantity',customer:record.customerName,sources:record.fob.quantities.map(()=>record.fob!.product.source)}
       if(record.fob.schemaVersion===2 && record.fob.items?.length)fobInitial.value.batch={text:record.fob.items.map(item=>`${item.product.sku}\t${item.quantity}`).join('\n'),mode:record.fob.displayMode,customer:record.customerName,sources:record.fob.items.map(item=>item.product.source)}
       fobKey.value++;fobActive.value=true;pendingReissue.value=null;finishReissueRequest();return
@@ -994,7 +994,7 @@ function activePurchaseSkus() {
 }
 let liveVersionCheckSequence = 0
 function onWomensPricingUpdated() { if (isWomensQuotation(quoteMode.value)) syncPending.value = '女装报价系数已更新' }
-function changedAppliedFinance(latest: FinanceSettingVersions) { return changedFinanceSettings(appliedFinanceVersions, latest, isWomensQuotation(quoteMode.value) ? [] : ['womens-pricing']) }
+function changedAppliedFinance(latest: FinanceSettingVersions) { return changedFinanceSettings(appliedFinanceVersions, latest, isWomensQuotation(quoteMode.value) ? ['fob-pricing'] : ['fob-pricing', 'womens-pricing']) }
 async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
   const request = ++liveVersionCheckSequence
   try {

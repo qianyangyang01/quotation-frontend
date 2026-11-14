@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fobClassificationLabel } from '@/services/fobClassification'
 import { isBundleQuotation } from '@/data/quotationModes'
 
 import { fobBatchDealOptions } from '@/services/fobQuotationRecords'
@@ -669,9 +670,9 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
             </div>
           </div>
           <div class="record-customer"><b>{{ row.customerName }}</b><small class="record-customer-grade">{{ isWomensQuotation(row.quoteMode) ? '计价方式：女装自动系数' : `客户级别：${customerGradeDisplayLabel(row.customerGrade)}` }}</small></div>
-          <div v-if="row.quoteMode==='fob'" class="route-summary"><b>FOB批发报价</b><span>{{ row.fob?.sheet.rows.length || 0 }}档 · 报关 / 不报关</span></div>
+          <div v-if="row.quoteMode==='fob'" class="route-summary"><b>{{row.fob?.product.classification ? fobClassificationLabel(row.fob.product.classification) : 'FOB批发报价'}}</b><span>{{ row.fob?.sheet.rows.length || 0 }}档 · {{row.fob?.product.classification ? '最终报价' : '报关 / 不报关'}}</span></div>
           <div v-else class="route-summary"><b>{{ hasMultipleOptions(row) ? '多方案报价' : '单方案报价' }}</b><span class="country-tags"><i>{{ recordCountries(row).length || 1 }}国</i><i>{{ recordOptions(row).length || 1 }}渠道</i><em v-for="country in recordCountries(row).slice(0,2)" :key="country">{{ country }}</em><em v-if="recordCountries(row).length>2">+{{ recordCountries(row).length-2 }}</em></span></div>
-          <button v-if="row.quoteMode==='fob'" class="difference-cell" @click="open(row)"><template v-if="row.fob?.schemaVersion===2"><b>FOB批量 · {{ row.fob.items?.length }}行商品</b><span>查看各商品最终报价</span></template><template v-else><b>报关 ${{ row.fob?.current?.declaredUsd }}</b><span>不报关 ${{ row.fob?.current?.undeclaredUsd }} · {{ row.fob?.quantity }}件</span></template></button>
+          <button v-if="row.quoteMode==='fob'" class="difference-cell" @click="open(row)"><template v-if="row.fob?.schemaVersion===2"><b>FOB批量 · {{ row.fob.items?.length }}行商品</b><span>查看各商品最终报价</span></template><template v-else-if="row.fob?.product.classification"><b>最终价 ${{row.fob.current?.declaredUsd}}</b><span>{{row.fob.quantities?.join(' / ') || row.fob.quantity}}件</span></template><template v-else><b>报关 ${{ row.fob?.current?.declaredUsd }}</b><span>不报关 ${{ row.fob?.current?.undeclaredUsd }} · {{ row.fob?.quantity }}件</span></template></button>
           <button v-else class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
             <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>

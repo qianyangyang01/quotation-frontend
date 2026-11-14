@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FobInvoiceFields from './FobInvoiceFields.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { emptyFobManualDraft, fobManualPatch } from '@/data/fobManualEntry'
 import { FOB_COLUMNS, type FobPatch } from '@/data/fobClipboard'
@@ -90,11 +91,11 @@ async function save() {
             <label>实物图（最大5MB）<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="FOB 实物图" @change="selectImage($event,'physicalImage')"><img v-if="draft.physicalImage" class="product-image" :src="draft.physicalImage" alt="待保存的实物图"><button v-if="draft.physicalImage" type="button" class="text-button" @click="draft.physicalImage=''">取消本次图片</button></label>
             <label>克重（g）<input v-model="draft.weightRaw"></label><label>尺码<input v-model="draft.size"></label><label>颜色<input v-model="draft.color"></label><label>材质<input v-model="draft.material"></label><label class="wide">工厂信息<textarea v-model="draft.factoryInfo" rows="2"></textarea></label>
           </div></details>
-          <h3>FOB 采购与运费 <small>采购价填写未税金额</small></h3>
+          <h3>FOB 采购与运费 <small>请核实起步含票价与全部阶梯的适用关系</small></h3><FobInvoiceFields :record="draft" :show-invoice="true" :show-included="true" :price-signature="JSON.stringify([draft.invoiceType,draft.purchasePriceBasis,draft.taxIncludedPriceCny,draft.taxPoint,draft.minOrderQty,draft.orderMultiple,draft.tiers])" />
           <div class="fields"><label>起订量（件）*<input v-model="draft.minOrderQty" aria-label="FOB 起订量" type="text" inputmode="numeric" @change="draft.tiers.length===1 && !draft.tiers[0]!.minQty && (draft.tiers[0]!.minQty=draft.minOrderQty)"></label><label>下单倍数（件）*<input v-model="draft.orderMultiple" aria-label="FOB 下单倍数" type="text" inputmode="numeric"></label></div>
           <div class="tier-heading"><span>采购阶梯 *</span><button type="button" class="text-button" @click="addTier">＋ 添加阶梯</button></div>
-          <div class="tier-labels"><span>数量起点（件）</span><span>数量终点（件）</span><span>未税单价（元/件）</span><span></span></div>
-          <div v-for="(tier,i) in draft.tiers" :key="i" class="tier-row"><input v-model="tier.minQty" :aria-label="`第${i+1}档数量起点`" type="text" inputmode="numeric"><input v-model="tier.maxQty" :aria-label="`第${i+1}档数量终点`" type="text" inputmode="numeric" placeholder="不限"><input v-model="tier.price" :aria-label="`第${i+1}档未税单价`" type="text" inputmode="decimal"><button type="button" :disabled="draft.tiers.length===1" :aria-label="`删除第${i+1}档`" @click="draft.tiers.splice(i,1)">×</button></div>
+          <div class="tier-labels"><span>数量起点（件）</span><span>数量终点（件）</span><span>采购单价（元/件）</span><span></span></div>
+          <div v-for="(tier,i) in draft.tiers" :key="i" class="tier-row"><input v-model="tier.minQty" :aria-label="`第${i+1}档数量起点`" type="text" inputmode="numeric"><input v-model="tier.maxQty" :aria-label="`第${i+1}档数量终点`" type="text" inputmode="numeric" placeholder="不限"><input v-model="tier.price" :aria-label="`第${i+1}档采购单价`" type="text" inputmode="decimal"><button type="button" :disabled="draft.tiers.length===1" :aria-label="`删除第${i+1}档`" @click="draft.tiers.splice(i,1)">×</button></div>
           <p class="hint">各档数量须连续；最后一档终点留空表示不限。</p>
           <div class="fields"><label>运费对应数量（件）*<input v-model="draft.freightQuantity" aria-label="FOB 运费对应数量" type="text" inputmode="numeric"></label><label>该批国内运费（元）*<input v-model="draft.freightTotal" aria-label="FOB 国内总运费" type="text" inputmode="decimal"></label></div>
           <div class="freight">均摊国内运费 <strong>{{ freight }}</strong></div><p class="hint">沿用现有 FOB 规则，填写100件或更大批量的总运费；包邮请明确填写0。</p>

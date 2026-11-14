@@ -39,6 +39,16 @@ it('exports both FOB prices and source category without changing ordinary export
   const csv=quotationDetailsCsv([row()],[]);expect(csv).toContain('FOB不报关单价');expect(csv).toContain('FOB（批发）报价');expect(csv).toContain('内裤');expect(csv).toContain('1.37')
   expect(quotationDetailsCsv([{...row(),quoteMode:'single',fob:undefined}],[])).not.toContain('FOB不报关单价')
 })
+it('exports classified prices once while preserving legacy prices in mixed exports',()=>{
+  const legacy=row(), classified=row();classified.fob!.product.classification='rebate-fob'
+  const before=JSON.stringify(legacy)
+  const csv=quotationDetailsCsv([classified],[])
+  expect(csv).toContain('FOB最终单价(USD)');expect(csv).toContain('可报关退税-FOB/EXW')
+  expect(csv).not.toContain('不报关');expect(csv).not.toContain('1.37')
+  const mixed=quotationDetailsCsv([classified,legacy],[])
+  expect(mixed).toContain('FOB最终单价(USD)');expect(mixed).toContain('FOB不报关单价(USD)');expect(mixed).toContain('1.37')
+  expect(JSON.stringify(legacy)).toBe(before)
+})
 it('preserves the existing record correction link without a separate history menu',async()=>{
   vi.useFakeTimers();authState.current={id:'me',name:'ME',account:'ME',role:'employee',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''};authState.permissions=['myRecords','quote']
   const batch=row();batch.financeReviewStatus='pending';batch.fobItemReviews=[{index:0,status:'rejected',reason:'请核实'}]

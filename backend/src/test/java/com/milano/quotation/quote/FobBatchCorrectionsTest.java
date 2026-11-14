@@ -5,6 +5,15 @@ import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FobBatchCorrectionsTest {
+    @Test void correctionCannotDropOrReplaceTheSavedInvoiceClassification(){
+        var before=FobQuotation.object();before.putObject("product").put("classification","rebate-fob");
+        assertDoesNotThrow(()->FobBatchCorrections.assertSameClassification(before,before.deepCopy()));
+        var after=before.deepCopy();((ObjectNode)after.path("product")).remove("classification");
+        assertThrows(RuntimeException.class,()->FobBatchCorrections.assertSameClassification(before,after));
+        ((ObjectNode)after.path("product")).put("classification","ordinary-fob");
+        assertThrows(RuntimeException.class,()->FobBatchCorrections.assertSameClassification(before,after));
+        assertDoesNotThrow(()->FobBatchCorrections.assertSameClassification(FobQuotation.object(),FobQuotation.object()));
+    }
     @Test void numericRepresentationAndUnknownPolicyFieldsCannotBypassUnchangedGuard() {
         var before=FobQuotationTest.calculate(FobQuotationTest.input()).path("fob");var after=(ObjectNode)before.deepCopy();
         after.put("rate",6.7);after.put("quantity",26);((ObjectNode)after.path("policy")).put("unknown",true);

@@ -182,6 +182,7 @@ public class PurchaseProductService {
                 && !"auto_tax".equals(object.path("legacyPriceMode").asText()))
             throw AppException.conflict("采购价格规则已更新，请刷新页面后重新编辑未税单价和票点");
         normalizeLegacyPrice(object);
+        if("standard".equals(object.path("dataSource").asText()))com.milano.quotation.fob.FobInvoicePolicy.maintainConfirmation(object,existing.map(row->row.payload).orElse(null),input);
         if(originalSku!=null&&!originalSku.equals(sku)) {
             if(products.findBySku(sku).isPresent())throw AppException.conflict("目标SKU已存在："+sku);
             var current=existing.orElseThrow();

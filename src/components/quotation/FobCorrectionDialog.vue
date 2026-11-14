@@ -40,10 +40,13 @@ async function query(only?:Line){
   let cursor=0
   async function worker(){while(cursor<targets.length&&run===generation){const line=targets[cursor++]!
     try{
-      const product=await loadFobQuoteProduct(line.old.product.sku,line.old.product.source,AbortSignal.any([signal,AbortSignal.timeout(20000)]),true)
+      const lookupSignal=AbortSignal.any([signal,AbortSignal.timeout(20000)])
+      const product=line.old.product.classification
+        ? await loadFobQuoteProduct(line.old.product.sku,line.old.product.source,lookupSignal,true,line.old.product.classification)
+        : await loadFobQuoteProduct(line.old.product.sku,line.old.product.source,lookupSignal,true)
       if(run!==generation||!alive)return
       const batch=fobBatchSnapshot([{id:line.index+1,sku:product.sku,quantity:line.quantity,selected:true,formatError:'',product}],line.old.displayMode,props.rate,props.policy!,{title:record.value!.fob!.sheet.title||'JerryFulfillment Quote Sheet',agent:record.value!.salespersonName,date:localQuoteDate(),whatsapp:record.value!.fob!.sheet.whatsapp||''})
-      const canonical=await validateFobQuotation(record.value!.customerName,batch.items![0]!)
+      const canonical=await validateFobQuotation(record.value!.customerName,batch.items![0]!,{id:record.value!.id,index:line.index})
       if(run!==generation||!alive)return
       line.result=canonical
     }catch(e){if(run===generation&&alive)line.error=fobBatchLookupError(e)}finally{if(run===generation&&alive)line.loading=false}

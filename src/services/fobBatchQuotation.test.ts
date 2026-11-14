@@ -8,6 +8,14 @@ export const batchProduct = (sku = 'PF2600274'): FobQuoteProduct => ({ sku, sour
 const meta = { title: 'JerryFulfillment Quote Sheet', agent: '业务员', date: '2026-10-11', whatsapp: '' }
 function ready(text: string) { return parseFobBatch(text).map(l => ({ ...l, product: batchProduct(l.sku) })) }
 describe('FOB batch paste and final pricing', () => {
+  it('reports a later failed lookup before building notes from other selected products', () => {
+    const rows=parseFobBatch('VALIDSKU 100\nKJ2500444 100')
+    rows[0]!.product=batchProduct('VALIDSKU')
+    rows[1]!.error='起步含票价与实际票点计算不一致；请联系采购核实后重新查询'
+    expect(()=>fobBatchSnapshot(rows,'quantity',6.63,FOB_SMALL_ORDER_POLICY,meta)).toThrow('第2行 KJ2500444：起步含票价与实际票点计算不一致')
+    rows[1]!.selected=false
+    expect(fobBatchSnapshot(rows,'quantity',6.63,FOB_SMALL_ORDER_POLICY,meta).items).toHaveLength(1)
+  })
   it('uses a valid quantity when the first tier cannot satisfy order multiples', () => {
     const product=batchProduct();product.parsed.orderMultiple=10
     product.parsed.priceTiers=[{minQty:3,maxQty:5,unitPriceCny:4,unit:'件'},{minQty:20,maxQty:null,unitPriceCny:3.9,unit:'件'}]

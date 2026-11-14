@@ -1,4 +1,5 @@
 import { formatQuoteDate, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
+import { fobClassificationEnglish } from './fobClassification'
 import { ApiError } from './http'
 import { fobQuantityQuote, fobSheetRows, fobTierQuotes, type FobQuoteProduct, type FobSmallOrderPolicy } from './fobQuotation'
 import type { FobQuotationSnapshot } from './fobQuotationRecords'
@@ -52,22 +53,25 @@ export function fobBatchSnapshot(lines: FobBatchLine[], mode: FobBatchMode, rate
   const selected = lines.filter(l => l.selected)
   if (!selected.length) throw new Error('请至少选择一个有效商品')
   if (selected.length > 100) throw new Error('每份批量报价最多100行商品')
-  const items = selected.map(line => {
+  // Validate every selected row before building cross-row notes from its product.
+  for (const line of selected) {
     const issue = fobBatchIssue(line, selected, mode, rate, policy)
     if (issue) throw new Error(`第${line.id}行 ${line.sku}：${issue}`)
+  }
+  const items = selected.map(line => {
     const product = line.product!, quantity = fobBatchQuantity(product, line.quantity, mode)
     const ranges = mode === 'tiers' ? fobSheetRows(product, rate, policy) : (() => {
       const q = fobQuantityQuote(product, fobTierQuotes(product, rate), String(quantity), rate, policy)
       return [{ minQty: quantity, maxQty: quantity, unit: q.row.unit, declaredUsd: q.declaredUsd, undeclaredUsd: q.undeclaredUsd }]
     })()
     const sheet: CustomerQuoteSheet = { ...metadata, date: formatQuoteDate(metadata.date), columnOrder: ['number', 'sku', 'prices'],
-      quantityLabels: ['With declaration', 'Without declaration'], priceGroupLabel: 'FOB Final Unit Price (USD)', showQuantityRange: true,
+      quantityLabels: product.classification ? ['Unit Price'] : ['With declaration', 'Without declaration'], priceGroupLabel: product.classification ? fobClassificationEnglish(product.classification)+' · USD' : 'FOB Final Unit Price (USD)', showQuantityRange: true,
       hiddenColumns: ['country', 'provider', 'shippingTime', 'processingTime'], issues: [],
-      notes: ['Prices apply to the quantities shown. Applicable small-order adjustments are included.', 'FOB unit prices in USD. International shipping is not included.',
+      notes: ['Prices apply to the quantities shown. Applicable small-order adjustments are included.', product.classification === 'rebate-cfr-cif' ? 'CFR / CIF pricing category. Confirm freight and insurance scope before order.' : 'FOB unit prices in USD. International shipping is not included.',
         ...selected.filter(l => l.product!.parsed.orderMultiple > 1).map(l => `${l.sku}: Order in multiples of ${l.product!.parsed.orderMultiple}.`)],
       rows: ranges.map((r, i) => ({ key: `${product.sku}-${i}`, number: i + 1, sku: product.sku,
         quantityRange: `${r.maxQty == null ? `${r.minQty}+` : r.minQty === r.maxQty ? r.minQty : `${r.minQty}–${r.maxQty}`} ${r.unit === '件' ? 'pcs' : r.unit}`,
-        prices: [Number(r.declaredUsd), Number(r.undeclaredUsd)], country: '', provider: '', shippingTime: '', sourceDescription: '' })) }
+        prices: product.classification ? [Number(r.declaredUsd)] : [Number(r.declaredUsd), Number(r.undeclaredUsd)], country: '', provider: '', shippingTime: '', sourceDescription: '' })) }
     if (!sheet.date) throw new Error('请填写有效报价日期')
     // Group order-multiple notes into one note so the existing sheet contract stays bounded.
     const notes = sheet.notes!

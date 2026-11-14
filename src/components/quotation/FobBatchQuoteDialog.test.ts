@@ -14,6 +14,23 @@ vi.mock('@/services/customerQuoteSheetRenderer', () => ({ renderCustomerQuoteShe
 let app: App | undefined
 const product = (sku:string):FobQuoteProduct => ({sku,source:'fob',category:'日用品',weight:'50g',updatedAt:'2026-10-11T00:00:00Z',notices:[],parsed:{minOrderQty:3,orderMultiple:1,priceTiers:[{minQty:3,maxQty:null,unitPriceCny:3.9,unit:'件'}],freight:{quantity:100,totalFreightCny:17,unitFreightCny:.17,basis:'100件运费17÷100',estimated:false}}})
 const tick=async()=>{for(let i=0;i<12;i++){await Promise.resolve();await nextTick()}}
+it('copies unique invalid SKUs, removes only current-list rows and revalidates after category changes',async()=>{
+  const writeText=vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true})
+  vi.mocked(loadFobQuoteProduct).mockImplementation(async sku=>{if(sku==='NOINVOICE')throw new ApiError('采购资料不是已确认专票，请联系采购核实',422,'FOB_SPECIAL_INVOICE_REQUIRED','x');return product(sku)})
+  mount();await paste('GOOD 100\nNOINVOICE 100\nNOINVOICE 200')
+  expect(button('生成1行').disabled).toBe(false)
+  button('复制异常 SKU').click();await tick();expect(writeText).toHaveBeenCalledWith('NOINVOICE')
+  button('移除全部异常行').click();await tick()
+  expect(document.querySelectorAll('[aria-label^="第"][aria-label$="行SKU"]')).toHaveLength(1)
+  const select=document.querySelector<HTMLSelectElement>('[aria-label="批量报价分类"]')!
+  select.value='ordinary-fob';select.dispatchEvent(new Event('change'));await tick()
+  expect(button('生成0行').disabled).toBe(true)
+  button('重新查询全部').click();await tick()
+  expect(vi.mocked(loadFobQuoteProduct).mock.calls.at(-1)?.[4]).toBe('ordinary-fob')
+  expect(button('生成1行').disabled).toBe(false)
+  expect(saveQuotationBatch).not.toHaveBeenCalled()
+})
 function mount(){const host=document.createElement('div');document.body.append(host);app=createApp(Dialog,{rate:6.7,policy:FOB_SMALL_ORDER_POLICY});app.mount(host)}
 function button(text:string){return [...document.querySelectorAll('button')].find(b=>b.textContent?.includes(text))!}
 async function paste(text:string){const el=document.querySelector('textarea')!;el.value=text;el.dispatchEvent(new Event('input',{bubbles:true}));button('查询粘贴清单').click();await tick()}
@@ -25,7 +42,7 @@ it('keeps missing quantity, missing SKU and network failure distinct, repairs qu
   expect(document.body.textContent).toContain('请填写报价数量');expect(document.body.textContent).toContain('未找到SKU');expect(document.body.textContent).toContain('不代表SKU不存在')
   expect(button('生成1行').disabled).toBe(false)
   const input=document.querySelector<HTMLInputElement>('[aria-label="第2行数量"]')!;input.value='45';input.dispatchEvent(new Event('input',{bubbles:true}));await tick()
-  button('生成2行').click();await tick();expect(validateFobQuotation).toHaveBeenCalledTimes(1)
+  button('重新查询全部').click();await tick();button('生成2行').click();await tick();expect(validateFobQuotation).toHaveBeenCalledTimes(1)
   const snapshot=vi.mocked(validateFobQuotation).mock.calls[0]![1];expect(snapshot.sheet.rows.map(r=>r.sku)).toEqual(['OK','NOQUANTITY']);expect(snapshot.sheet.rows.map(r=>r.prices)).toEqual([[.93,.95],[.76,.77]])
   expect(document.body.textContent).toContain('条FOB报价记录');expect(saveQuotationBatch).not.toHaveBeenCalled()
 })
