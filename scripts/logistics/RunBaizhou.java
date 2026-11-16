@@ -20,8 +20,8 @@ import java.util.*;
 /** One-shot official service workflow; never starts migrations, schedulers or quotation recalculation. */
 public class RunBaizhou {
     static final String COMPANY="fe84a955-c584-4ed5-9b0e-1c79957c1c83",ACTOR="codex-maintenance";
-    static final Set<String> COUNTRIES=Set.of("美国","英国","德国","法国","意大利","西班牙","葡萄牙");
-    static final Set<String> TAX_SCOPES=Set.of("美国","英国","欧盟");
+    static final Set<String> COUNTRIES=Set.of("美国");
+    static final Set<String> TAX_SCOPES=Set.of("美国");
     static final Path ROOT=Path.of("/maintenance");
     static final ObjectMapper M=new ObjectMapper();
     static String env(String key){return Objects.requireNonNull(System.getenv(key),key);}
@@ -32,7 +32,7 @@ public class RunBaizhou {
             .param("id",UUID.randomUUID()).param("actor",ACTOR).param("action",action).param("resource",id).param("detail",M.writeValueAsString(detail)).update();
     }
     static void reconcile(JsonNode actual,JsonNode expected){
-        require(actual.path("errors").asInt()==0&&actual.path("pricingReady").asBoolean()&&actual.path("rows").size()==27,"Invalid channel "+actual.path("issues"));
+        require(actual.path("errors").asInt()==0&&actual.path("pricingReady").asBoolean()&&actual.path("rows").size()==7,"Invalid channel "+actual.path("issues"));
         require(actual.path("companyChannelId").asText().equals(COMPANY),"Wrong company identity");
         for(var row:expected.path("rows")){
             var hits=actual.path("rows").valueStream().filter(r->r.path("sourceRow").equals(row.path("sourceRow"))).toList();require(hits.size()==1,"Wrong source row");
@@ -66,7 +66,7 @@ public class RunBaizhou {
                 var client=new LogisticsParserClient(parser,M,env("APP_LOGISTICS_PARSER_URL"));var parsed=client.parse(bytes,expected.path("source").asText(),new CompanyChannelScope(config));
                 require(parsed.path("channels").size()==1&&parsed.path("parserVersion").asText().equals(LogisticsSourceParser.VERSION),"Wrong parser/scope");
                 reconcile(parsed.path("channels").get(0),expected);billing(parsed.path("channels").get(0),cases);save("live-parsed",parsed);
-                if(args[0].equals("check")){System.out.println("BAIZHOU_CHECK_OK 27 rows, 101 boundary cases");return;}
+                if(args[0].equals("check")){System.out.println("BAIZHOU_CHECK_OK 7 US rows");return;}
                 if(args[0].equals("import")){
                     save("directory-before",directory.list());
                     tx.executeWithoutResult(status->{var current=directory.list();require(current.path("revision").asInt()==24,"Directory changed");require(current.path("entries").valueStream().noneMatch(e->e.path("id").asText().equals(COMPANY)||e.path("productCodes").toString().contains("BZ503")),"Already registered");current.withArray("entries").add(config.path("entries").get(0));var result=directory.save(current,ACTOR);require(result.path("revision").asInt()==25&&result.path("entries").size()==131,"Directory mismatch");audit(jdbc,"logistics.company-directory",COMPANY,config.path("entries").get(0));});
@@ -87,9 +87,9 @@ public class RunBaizhou {
                     save("finance-before",jdbc.sql("select jsonb_object_agg(setting_key,to_jsonb(f))::text from finance_setting f").query((rs,n)->M.readTree(rs.getString(1))).single());
                     tx.executeWithoutResult(status->{
                         var v=acceptance.version(versionId);require(v.path("status").asText().equals("draft")&&v.path("currentVersionId").isNull(),"Version changed");reconcile(v.path("payload"),expected);
-                        String note="2026-11-16 用户确认新增百州BZ503：包税、全邮编、仅服装，覆盖原表税费及邮编限制。1g起计、重量向上进位1g，公斤价乘计费重量加一次挂号费后合计向上取整到人民币元。原表7国27档54个价格字段逐项核对，前后端各175000整克及101边界样本验证；保留尺寸及特殊包裹复核。历史报价和审核不改写。";
+                        String note="2026-11-16 用户确认新增百州BZ503仅美国：包税、全邮编、仅服装，覆盖原表税费及邮编限制。1g起计、重量向上进位1g，公斤价乘计费重量加一次挂号费后合计向上取整到人民币元。原表美国7档14个价格字段逐项核对，前后端各30000整克及各档边界样本验证；保留尺寸及特殊包裹复核。历史报价和审核不改写。";
                         logistics.publishReviewed(channelId,versionId,note,ACTOR,false,true,true);em.flush();
-                        var approval=acceptance.status(versionId).put("reviewConfirmed",true).put("note",note).put("sourceReference",expected.path("source").asText()+" / BZ-欧美服装专线挂号 A3:F30");var samples=approval.putArray("samples");
+                        var approval=acceptance.status(versionId).put("reviewConfirmed",true).put("note",note).put("sourceReference",expected.path("source").asText()+" / BZ-欧美服装专线挂号 A3:F10");var samples=approval.putArray("samples");
                         for(var c:cases.path("samples")){var s=samples.addObject().put("sourceReference","原表C"+c.path("sourceRow").asInt()+":F"+c.path("sourceRow").asInt()+"；用户确认1g和人民币元进位").set("expectedTotal",c.path("total"));s.putObject("input").put("country",c.path("country").asText()).set("weightKg",c.path("weightKg"));}
                         for(var c:cases.path("rejected"))samples.addObject().put("sourceReference","零重、超重及无价格国家拒绝").put("expectRejected",true).set("input",c);
                         acceptance.approve(versionId,approval,ACTOR);require(guard.quoteReady(versionId),"Not quote ready");
@@ -101,25 +101,25 @@ public class RunBaizhou {
                             require(c.path("allowedChannels").valueStream().noneMatch(k->k.asText().equals(key)),"Already authorized");
                             if(p.path("category").asText().equals("服装")&&COUNTRIES.contains(c.path("country").asText())){require(p.path("enabled").asBoolean(),"Clothing disabled");((ObjectNode)c).withArray("allowedChannels").add(key);added++;}
                         }
-                        require(added==7,"Wrong clothing country count");com.milano.quotation.finance.ValidateKuailvFinance.validate(next);
+                        require(added==1,"Wrong clothing country count");com.milano.quotation.finance.ValidateKuailvFinance.validate(next);
                         var nextTax=tax.path("payload").deepCopy();int taxAdded=0;
                         for(var c:nextTax.path("countries"))if(TAX_SCOPES.contains(c.path("country").asText())){require(c.path("selected").asBoolean(),"Tax scope inactive");require(c.path("channelRules").valueStream().noneMatch(k->k.path("key").asText().equals(key)),"Already taxed");((ObjectNode)c).withArray("channelRules").addObject().put("key",key).put("mode","exempt").put("amount",0).put("currency","USD").put("perKg",0).put("source","2026-11-16用户确认：百州BZ503服装渠道包税、全邮编，覆盖原表税费及邮编限制");taxAdded++;}
-                        require(taxAdded==3,"Wrong tax scope count");com.milano.quotation.finance.ValidateKuailvFinance.validateTax(nextTax);
+                        require(taxAdded==1,"Wrong tax scope count");com.milano.quotation.finance.ValidateKuailvFinance.validateTax(nextTax);
                         require(jdbc.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1,updated_at=now() where setting_key='channel-policies' and version=66 and payload=cast(:old as jsonb)").param("p",next.toString()).param("old",policy.path("payload").toString()).update()==1,"Policy race");
                         require(jdbc.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1,updated_at=now() where setting_key='tax-settings' and version=44 and payload=cast(:old as jsonb)").param("p",nextTax.toString()).param("old",tax.path("payload").toString()).update()==1,"Tax race");
-                        audit(jdbc,"finance.channel-and-tax",key,Map.of("category","服装","countries",COUNTRIES,"taxMode","exempt","fullPostalCoverage",true));audit(jdbc,"logistics.publish",versionId.toString(),Map.of("rows",27,"sourceSha256",expected.path("sha256").asText(),"channelId",channelId.toString()));
+                        audit(jdbc,"finance.channel-and-tax",key,Map.of("category","服装","countries",COUNTRIES,"taxMode","exempt","fullPostalCoverage",true));audit(jdbc,"logistics.publish",versionId.toString(),Map.of("rows",7,"sourceSha256",expected.path("sha256").asText(),"channelId",channelId.toString()));
                     });
                     System.out.println("BAIZHOU_PUBLISHED_OK "+versionId);
                 }
                 require(guard.quoteReady(versionId),"New version unavailable");var published=acceptance.version(versionId);reconcile(published.path("payload"),expected);billing(published.path("payload"),cases);
                 var rules=new LogisticsQueryService(jdbc,M).publishedRules(null,"服装",List.of(),List.of()).rules();
                 var hits=rules.stream().filter(r->r.path("relations").valueStream().anyMatch(x->x.path("carrier").asText().equals("百州")&&x.path("channel").asText().equals("BZ-欧美服装专线挂号"))).toList();
-                require(hits.size()==1&&hits.getFirst().path("billingVerified").asBoolean()&&hits.getFirst().path("prices").size()==27,"Quote projection mismatch");var projected=M.createArrayNode();hits.forEach(projected::add);save("published-rules",projected);save("publication-status",acceptance.status(versionId));
+                require(hits.size()==1&&hits.getFirst().path("billingVerified").asBoolean()&&hits.getFirst().path("prices").size()==7,"Quote projection mismatch");var projected=M.createArrayNode();hits.forEach(projected::add);save("published-rules",projected);save("publication-status",acceptance.status(versionId));
                 String key=jdbc.sql("select rule_id::text||'::百州::'||code from logistics_channel where id=:id").param("id",channelId).query(String.class).single();
                 var finance=jdbc.sql("select jsonb_object_agg(setting_key,to_jsonb(f))::text from finance_setting f").query((rs,n)->M.readTree(rs.getString(1))).single();save("finance-after",finance);int policyCount=0,taxCount=0;
                 for(var p:finance.path("channel-policies").path("payload"))for(var c:p.path("countryRules"))if(c.path("allowedChannels").valueStream().anyMatch(k->k.asText().equals(key))){require(p.path("category").asText().equals("服装")&&COUNTRIES.contains(c.path("country").asText()),"Non-clothing authorization");policyCount++;}
                 for(var c:finance.path("tax-settings").path("payload").path("countries"))for(var t:c.path("channelRules"))if(t.path("key").asText().equals(key)){require(TAX_SCOPES.contains(c.path("country").asText())&&c.path("selected").asBoolean()&&t.path("mode").asText().equals("exempt")&&t.path("amount").asDouble()==0&&t.path("perKg").asDouble()==0,"Tax mismatch");taxCount++;}
-                require(policyCount==7&&taxCount==3,"Finance readback mismatch");save("final-verification",M.createObjectNode().put("passed",true).put("channelId",channelId.toString()).put("versionId",versionId.toString()).put("rows",27).put("countries",7).put("category","服装").put("taxMode","exempt").put("allPostalCodes",true).put("channelKey",key));System.out.println("BAIZHOU_VERIFIED_OK "+versionId);
+                require(policyCount==1&&taxCount==1,"Finance readback mismatch");save("final-verification",M.createObjectNode().put("passed",true).put("channelId",channelId.toString()).put("versionId",versionId.toString()).put("rows",7).put("countries",1).put("category","服装").put("taxMode","exempt").put("allPostalCodes",true).put("channelKey",key));System.out.println("BAIZHOU_VERIFIED_OK "+versionId);
             }finally{factory.destroy();}
         }
     }

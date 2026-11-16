@@ -11,6 +11,6 @@
     "sharedSourceCodes": [],
     "logisticsAttribute": "服装",
     "enabled": true,
-    "sources": [{"file":"YB992-百洲最新报价-VVVVVIP-11.16(1).xlsx","sheet":"BZ-欧美服装专线挂号","firstRow":4,"lastRow":30,"priceRows":27}]
+    "sources": [{"file":"YB992-百洲最新报价-VVVVVIP-11.16(1).xlsx","sheet":"BZ-欧美服装专线挂号","firstRow":4,"lastRow":10,"priceRows":7,"country":"US","scopeConfirmation":"2026-11-16 用户最终确认只需要美国，其他国家不需要"}]
   }]
 }

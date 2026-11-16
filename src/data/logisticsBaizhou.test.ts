@@ -28,7 +28,7 @@ it.skipIf(!process.env.BAIZHOU_PACKAGE)('reconciles every source gram and fracti
       checked++
     }
   }
-  expect(checked).toBe(175000)
+  expect(checked).toBe(30000)
   const cases = JSON.parse(readFileSync(`${root}/billing-cases.json`, 'utf8')) as { samples: {country: string; weightKg: number; total: number}[]; rejected: {country: string; weightKg: number}[] }
   for (const sample of cases.samples) expect(calculateLogisticsFee(rule, sample.country, sample.weightKg, ['服装'])?.total).toBe(sample.total)
   for (const sample of cases.rejected) expect(calculateLogisticsFee(rule, sample.country, sample.weightKg, ['服装'])).toBeNull()

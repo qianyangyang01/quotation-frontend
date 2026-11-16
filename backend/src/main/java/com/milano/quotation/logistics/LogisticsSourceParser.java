@@ -376,14 +376,15 @@ public class LogisticsSourceParser {
         if(!title||!codes.equals(Set.of("BZ503")))issue(target,0,"渠道代码","必须同时具有BZ-欧美服装专线挂号标题和唯一完整BZ503代码，禁止按近似名称导入","error");
         if(!columns.keySet().containsAll(Set.of("country","weight","rate","fee","eta"))){issue(target,0,"表头","BZ503缺少国家、重量段、运费、挂号费或时效列","error");return true;}
         int country=columns.get("country"),weight=columns.get("weight"),rate=columns.get("rate"),fee=columns.get("fee");
-        var previous=new HashMap<String,BigDecimal>();var limits=Map.of("US",30,"GB",20,"DE",30,"FR",30,"IT",5,"ES",30,"PT",30);
+        var previous=new HashMap<String,BigDecimal>();var limits=Map.of("US",30);
         var notes=new LinkedHashSet<String>();boolean reference=false;
         for(int r=header+1;r<=source.lastContentRow;r++) {
             if(source.rowTexts(r).stream().anyMatch(t->clean(t).matches("三[、.]禁限运物品|食品.*等产品[；;]")))reference=true;
             if(reference){source.referenceRows.add(r);notes.addAll(source.rowTexts(r));continue;}
             if(source.rowEmpty(r))continue;
-            source.parsedRows.add(r);
             String rawCountry=source.text(r,country),code=countryCode(rawCountry);
+            if(supportedCountryCode(code)&&!code.equals("US")){source.filteredOtherRows.put(r,"用户限定仅美国，不导入其他国家价格："+rawCountry);continue;}
+            source.parsedRows.add(r);
             if(!limits.containsKey(code)){issue(target,r+1,"国家","BZ503国家缺失或超出已适配范围："+rawCountry,"error");continue;}
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
                     .put("areaName",countryName(rawCountry)).put("countryCode",code).put("zoneName","").put("originRegion","")
@@ -394,8 +395,8 @@ public class LogisticsSourceParser {
                     .put("minChargeWeightKg",new BigDecimal(".001")).put("sourceMinimumWeightKind","user-confirmed")
                     .put("sourceMinimumWeightText","2026-11-16 用户确认：1g起计，按1g向上进位")
                     .put("sourceRoundingConfirmation","2026-11-16 用户确认：公斤价乘计费重量加一次挂号费，合计向上取整到人民币元")
-                    .put("sourceServiceConfirmation","2026-11-16 用户确认：包税、全邮编、只发服装；覆盖原表税费及邮编限制")
-                    .put("notes","用户确认：包税、全邮编、只发服装；尺寸和特殊包裹条件按实际包裹核对");
+                    .put("sourceServiceConfirmation","2026-11-16 用户确认：仅美国、包税、全邮编、只发服装；覆盖原表税费及邮编限制")
+                    .put("notes","用户确认：仅美国、包税、全邮编、只发服装；尺寸和特殊包裹条件按实际包裹核对");
             // Country spans A:B in the supplied table; a real, separate zone must never be silently discarded.
             int zone=columns.getOrDefault("zone",-1);
             if(zone>=0&&!source.address(r,zone).equals(source.address(r,country))&&!source.text(r,zone).isBlank())issue(target,r+1,"分区","BZ503出现独立分区，需适配后再导入","error");

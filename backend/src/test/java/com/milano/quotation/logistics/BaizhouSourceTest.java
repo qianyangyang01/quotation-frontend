@@ -35,7 +35,7 @@ class BaizhouSourceTest {
         }
     }
     @Test void identityAndConfirmedBillingRemainIsolated()throws Exception {
-        var c=parse(fixture());assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(7,c.path("rows").size());
+        var c=parse(fixture());assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(1,c.path("rows").size());
         assertEquals("百州",c.path("providerName").asText());assertEquals("服装",c.path("logisticsAttribute").asText());
         var engine=new LogisticsBillingEngine(mapper);
         for(double[] pair:new double[][]{{.00001,21},{.1,28},{.100001,29},{30,2420}})
@@ -55,6 +55,14 @@ class BaizhouSourceTest {
             b.getSheetAt(0).getRow(2).createCell(5).setCellValue("运费（RMB/KG）");assertFalse(parse(bytes(b)).path("pricingReady").asBoolean());
         }
     }
+    @Test void excludedCountriesAreFilteredBeforePriceParsing()throws Exception {
+        try(var b=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
+            for(int r=4;r<=9;r++)for(int col=1;col<=3;col++)b.getSheetAt(0).getRow(r).getCell(col).setCellValue("不导入的其他国家价格");
+            b.setSheetName(0,"更新的工作表名");
+            var c=parse(bytes(b));assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(1,c.path("rows").size());
+            assertEquals("US",c.path("rows").get(0).path("countryCode").asText());
+        }
+    }
     @Test @EnabledIfSystemProperty(named="baizhou.package",matches=".+")
     void originalWorkbookCorruptionCannotPartiallyReplace()throws Exception {
         var source=Files.readAllBytes(Path.of(System.getProperty("baizhou.package")).resolve("source.xlsx"));
@@ -70,14 +78,14 @@ class BaizhouSourceTest {
         var p=Path.of(System.getProperty("baizhou.package"));var bytes=Files.readAllBytes(p.resolve("source.xlsx"));
         var e=mapper.readTree(Files.readString(p.resolve("expected.json")));var c=parse(bytes);
         Files.writeString(p.resolve("parsed.json"),c.toPrettyString());
-        assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(27,c.path("rows").size());
+        assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(7,c.path("rows").size());
         assertEquals(e.path("sha256").asText(),HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)));
         for(var expected:e.path("rows")){
             var actual=c.path("rows").valueStream().filter(r->r.path("sourceRow").equals(expected.path("sourceRow"))).findFirst().orElseThrow();
             for(var f:expected.properties())assertTrue(f.getValue().isNumber()?actual.path(f.getKey()).decimalValue().compareTo(f.getValue().decimalValue())==0:actual.path(f.getKey()).equals(f.getValue()),f.getKey()+expected);
         }
         var engine=new LogisticsBillingEngine(mapper);int checked=0;
-        for(String country:List.of("US","GB","DE","FR","IT","ES","PT")){
+        for(String country:List.of("US")){
             var rows=e.path("rows").valueStream().filter(r->r.path("countryCode").asText().equals(country)).toList();
             int max=rows.stream().mapToInt(r->r.path("weightToKg").decimalValue().movePointRight(3).intValueExact()).max().orElseThrow();
             for(int gram=1;gram<=max;gram++){
@@ -90,6 +98,6 @@ class BaizhouSourceTest {
         var cases=mapper.readTree(Files.readString(p.resolve("billing-cases.json")));
         for(var sample:cases.path("samples"))assertEquals(0,sample.path("total").decimalValue().compareTo(engine.calculate(c.path("rows"),sample).path("total").decimalValue()),sample.toString());
         for(var sample:cases.path("rejected"))assertThrows(com.milano.quotation.common.AppException.class,()->engine.calculate(c.path("rows"),sample));
-        Files.writeString(p.resolve("validation.json"),mapper.createObjectNode().put("passed",true).put("rows",27).put("priceFields",54).put("gramCases",checked).put("boundaryCases",cases.path("samples").size()).toPrettyString());
+        Files.writeString(p.resolve("validation.json"),mapper.createObjectNode().put("passed",true).put("rows",7).put("priceFields",14).put("gramCases",checked).put("boundaryCases",cases.path("samples").size()).toPrettyString());
     }
 }
