@@ -17,6 +17,7 @@ final class ConfirmedSourceBillingRules {
     private record Evidence(String cell, String text) {}
 
     static void apply(ObjectNode channel, JsonNode sourceCells) {
+        SfEuropeBulkyRules.apply(channel,sourceCells);
         var cells = new LinkedHashMap<String, String>();
         for (var row : sourceCells) for (var cell : row.properties()) cells.put(cell.getKey(), cell.getValue().asText());
         var provider = channel.path("providerName").asText();
