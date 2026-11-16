@@ -87,7 +87,9 @@ export function readPurchaseClipboard(data: Pick<DataTransfer, 'getData'>, start
 export function readUnifiedPurchaseClipboardResult(data: Pick<DataTransfer, 'getData'>, startColumn: number, options?: { columns: PurchasePasteColumns; sourceColumns: PurchasePasteColumns }): { rows: string[][]; skippedImageColumns: boolean } {
   const columns = options?.columns ?? UNIFIED_PURCHASE_PASTE_COLUMNS
   const sourceColumns = options?.sourceColumns ?? columns
-  const html = parsePurchaseHtmlTable(data.getData('text/html'), PURCHASE_PASTE_LIMIT + 1, columns.length + 3)
+  // A header-labelled optimization-price column is ignored independently; it must
+  // not replace the second-tier quantity or consume the last business column.
+  const html = parsePurchaseHtmlTable(data.getData('text/html'), PURCHASE_PASTE_LIMIT + 1, columns.length + 4)
   let rows = html ?? parsePurchaseClipboard(data.getData('text/plain'))
   const normalize = (value: string) => value.normalize('NFKC').replace(/[\s*]/g, '').toLowerCase()
   const header = rows[0]?.map(normalize) ?? []
@@ -98,7 +100,7 @@ export function readUnifiedPurchaseClipboardResult(data: Pick<DataTransfer, 'get
     let skippedImageColumns = false
     const mapping = header.map(label => {
       if (/^(实物图|产品图片|产品图)/.test(label)) { skippedImageColumns = true; return -1 }
-      const alias = label.replace(/^阶梯价([345])起订$/, '阶梯价$1起订量')
+      const alias = label.replace(/^阶梯价([2345])起订$/, '阶梯价$1起订量')
       if (label === '优化后价格') return -1 // User-confirmed erroneous column: keep its position, ignore its values.
       const index = columns.findIndex(([name]) => normalize(name) === alias)
       if (index < 0 && label) throw new Error('未识别表头“' + label + '”，请核对模板；本次未写入')

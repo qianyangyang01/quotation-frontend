@@ -13,6 +13,18 @@ const clipboard = (rows:string[][], html=false) => ({ getData: (type:string) => 
 const parse = (rows:string[][], html=false, sourceColumns=columns as readonly (readonly [string,string])[]) => readUnifiedPurchaseClipboardResult(clipboard(rows,html),0,{columns,sourceColumns}).rows
 
 describe('optional special invoice procurement fields',()=>{
+  it.each([false,true])('ignores an extra labelled optimization price without losing tier 2 or shifting later columns, HTML=%s',html=>{
+    const headers=['实物图','实物图','产品图片',...columns.map(c=>c[0])]
+    const source=['','','',...row()]
+    const qty=columns.findIndex(c=>c[1]==='tier2MinQty')+3
+    source[qty]='20';source[qty+1]='90'
+    headers[qty]='阶梯价2起订'
+    headers.splice(qty,0,'优化后价格');source.splice(qty,0,'888.88')
+    const result=validatePurchasePaste(parse([headers,source],html),true,columns)
+    expect(result.issues).toEqual([])
+    expect(result.records[0]).toMatchObject({tier2MinQty:20,tier2PriceCny:90,specialTaxIncludedPriceCny:113,specialTaxPoint:.13,specialInvoiceType:'专票13',category:'女装',similarSource:'https://example.com/4'})
+    expect(()=>parse([source],html)).toThrow('无表头')
+  })
   it('accepts the exact 42-column attachment headers and ignores its optimization-price cell',()=>{
     const source=['','','',...row()];source[16]='888.88'
     const result=validatePurchasePaste(parse([attachmentHeaders,source]),true,columns)

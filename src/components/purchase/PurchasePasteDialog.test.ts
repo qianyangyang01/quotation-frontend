@@ -3,19 +3,19 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
 import { emptyPurchasePasteRow, UNIFIED_PURCHASE_PASTE_COLUMNS } from '@/data/purchasePaste'
-import { SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS } from '@/data/purchasePaste'
+import { SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS, SPECIAL_PURCHASE_PASTE_COLUMNS } from '@/data/purchasePaste'
 
 const request = vi.hoisted(() => vi.fn())
 vi.mock('@/services/http', () => ({ request }))
 let app: App | undefined
 const tick = async () => { await nextTick(); await nextTick(); await nextTick() }
-function mount(unified = false) {
+function mount(unified = false, layoutValue: string | null = 'legacy') {
   const saved = vi.fn()
   const host = document.createElement('div'); document.body.append(host)
   app = createApp(PurchasePasteDialog, { onSaved: saved, unified }); app.mount(host)
   // Historical fixtures explicitly select the old column order.
   const layout = document.querySelector('select')!
-  layout.value = 'legacy'; layout.dispatchEvent(new Event('change', { bubbles: true }))
+  if (layoutValue !== null) { layout.value = layoutValue; layout.dispatchEvent(new Event('change', { bubbles: true })) }
   return saved
 }
 function button(name: string) { return Array.from(document.querySelectorAll('button')).find(b => b.textContent === name)! }
@@ -32,6 +32,38 @@ function preview(sku = 'P-1', action = 'update', notices: string[] = []) {
     effective: { sku, purchasePriceCny: 15 }, notices }], skipped: [] }
 }
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.resetAllMocks(); vi.unstubAllGlobals() })
+
+it.each([false, true])('preserves tier 2 and all subsequent columns in the default headerless layout, unified=%s', async unified => {
+  mount(unified, null)
+  expect(document.querySelector('select')!.value).toBe('special')
+  const columns = unified ? SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS : SPECIAL_PURCHASE_PASTE_COLUMNS
+  const values: Record<string, string> = {sku:'TIER-COLUMNS',quotationDate:'2026.11.16',quotationOwner:'周',weightG:'90',minOrderQty:'1',purchasePriceCny:'10',tier2MinQty:'20',tier2PriceCny:'9.5',tier3MinQty:'100',tier3PriceCny:'9',singleFreightCny:'6',freight10Cny:'11',freight100Cny:'56',freeShipping:'否',taxIncludedPriceCny:'10.3',taxPoint:'3%',invoiceType:'普票',specialTaxIncludedPriceCny:'11.3',specialTaxPoint:'13%',specialInvoiceType:'专票',category:'化妆品',stockStatus:'有',factoryInfo:'工厂',sourceLink1:'https://example.com/1',similarSource:'https://example.com/4'}
+  if (unified) Object.assign(values,{tier4MinQty:'500',tier4PriceCny:'8',tier5MinQty:'1000',tier5PriceCny:'7'})
+  await paste([['','','',...columns.map(c=>values[c[1]] || '')]])
+  expect(cell(0,13).value).toBe('20')
+  request.mockResolvedValueOnce(preview('TIER-COLUMNS'))
+  button('预览并保存 1 条').click(); await tick()
+  const payload=JSON.parse(request.mock.calls[0]![1].body)
+  expect(payload[0]).toMatchObject({sku:'TIER-COLUMNS',tier2MinQty:20,tier2PriceCny:9.5,tier3MinQty:100,tier3PriceCny:9,singleFreightCny:6,freight10Cny:11,freight100Cny:56,freeShipping:'否',taxIncludedPriceCny:10.3,taxPoint:.03,invoiceType:'普票',specialTaxIncludedPriceCny:11.3,specialTaxPoint:.13,specialInvoiceType:'专票',category:'化妆品',stockStatus:'有货',factoryInfo:'工厂',sourceLink1:'https://example.com/1',similarSource:'https://example.com/4'})
+  if (unified) expect(payload[0]).toMatchObject({tier4MinQty:500,tier4PriceCny:8,tier5MinQty:1000,tier5PriceCny:7})
+  request.mockResolvedValueOnce({added:[],updated:payload,unchanged:[],skipped:[]})
+  button('确认全部保存').click(); await tick()
+  expect(JSON.parse(request.mock.calls[1]![1].body).rows).toEqual(payload)
+})
+
+it('keeps the reported AZ2603605 row freight, non-free shipping and optional blanks in their original columns', async () => {
+  mount(true,null)
+  const input=['','','','2026.11.16','周','暂时现货','AZ2603605','90','','PDRN Pink Vitamin','液体','','','','1','10','','','','','','','','','6','11','56','否','10.3','3%','普票','10','','','化妆品','有','广州市栩来旺信息产业有限公司','','https://detail.1688.com/offer/1060977145108.html','https://detail.1688.com/offer/1061832490737.html','','']
+  expect(input).toHaveLength(42)
+  await paste([input])
+  request.mockResolvedValueOnce(preview('AZ2603605'))
+  button('预览并保存 1 条').click(); await tick()
+  const payload=JSON.parse(request.mock.calls[0]![1].body)
+  expect(payload[0]).toEqual({sourceRow:1,quotationDate:'2026-11-16',quotationOwner:'周',notes:'暂时现货',sku:'AZ2603605',weightG:90,color:'PDRN Pink Vitamin',material:'液体',minOrderQty:1,purchasePriceCny:10,singleFreightCny:6,freight10Cny:11,freight100Cny:56,freeShipping:'否',taxIncludedPriceCny:10.3,taxPoint:.03,invoiceType:'普票',specialTaxIncludedPriceCny:10,category:'化妆品',stockStatus:'有货',factoryInfo:'广州市栩来旺信息产业有限公司',sourceLink1:'https://detail.1688.com/offer/1060977145108.html',sourceLink2:'https://detail.1688.com/offer/1061832490737.html'})
+  request.mockResolvedValueOnce({added:[],updated:payload,unchanged:[],skipped:[]})
+  button('确认全部保存').click(); await tick()
+  expect(JSON.parse(request.mock.calls[1]![1].body).rows).toEqual(payload)
+})
 
 it('pastes new invoice columns, previews percentages, confirms exact prices and preserves category', async () => {
   const saved=mount(true)
