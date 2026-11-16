@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="tongyou-unavailable-rates-2026.11.14-v19";
+    public static final String VERSION="baizhou-bz503-2026.11.16-v20";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴");
@@ -121,6 +121,7 @@ public class LogisticsSourceParser {
                 if(!recognized&&!provider.equals("捷易通达")) {
                     var sheetChannel=sheetChannelName(source,provider);
                     if(provider.equals("通邮")&&CompanyChannelScope.normalize(sheetChannel).equals(CompanyChannelScope.normalize("TY-E邮宝")))recognized=parseTongyouEpacket(source,filename,parsed);
+                    else if((provider.equals("百州")||provider.equals("百洲"))&&baizhouClothingSheet(source))recognized=parseBaizhouClothing(source,provider,filename,parsed);
                     else if(provider.equals("快驴"))recognized=parseKuailv(source,filename,parsed);
                     else if(provider.equals(SunyouSourceRules.PROVIDER))recognized=parseSunyou(source,filename,parsed);
                     else if(provider.equals(QiaojieSourceRules.PROVIDER)&&qiaojieProduct(source)!=null&&qiaojieProduct(source).perPiece())recognized=parseQiaojiePiece(source,filename,parsed);
@@ -344,6 +345,81 @@ public class LogisticsSourceParser {
     }
 
     /** Product blocks share a header and merged labels, but never share prices or attributes. */
+    private boolean baizhouClothingSheet(Source source) {
+        if(clean(source.sheet.getSheetName()).equals("BZ-欧美服装专线挂号"))return true;
+        for(int r=0;r<=Math.min(20,source.lastContentRow);r++)for(var text:source.rowTexts(r))
+            if(clean(text).equals("BZ-欧美服装专线挂号")||clean(text).matches("渠道代码[:：]BZ503"))return true;
+        return false;
+    }
+
+    /** BZ503 alone: source identity, incomplete unit headers and merged cells are audited explicitly. */
+    private boolean parseBaizhouClothing(Source source,String provider,String file,Map<String,ObjectNode> channels) {
+        var target=selected(source,provider,"BZ-欧美服装专线挂号","BZ503",0,channels);
+        if(target==null)return true;
+        int header=-1;var columns=new HashMap<String,Integer>();var codes=new HashSet<String>();boolean title=false;
+        for(int r=0;r<=source.lastContentRow;r++) {
+            var found=new HashMap<String,Integer>();
+            for(int c=0;c<source.width(r);c++) {
+                String label=clean(source.text(r,c)).toUpperCase(Locale.ROOT);
+                String key=switch(label){case "国家"->"country";case "分区"->"zone";case "重量段()","重量段(KG)"->"weight";case "运费(RMB/)","运费(RMB/KG)"->"rate";case "挂号费(RMB/票)"->"fee";case "参考时效(工作日)"->"eta";default->"";};
+                if(!key.isBlank()&&found.putIfAbsent(key,c)!=null)issue(target,r+1,"表头","BZ503重复列："+label,"error");
+                if(header<0) {
+                    title|=label.equals("BZ-欧美服装专线挂号");
+                    if(label.startsWith("渠道代码:")||label.startsWith("渠道代码："))codes.add(label.replaceFirst("^渠道代码[:：]",""));
+                }
+            }
+            if(found.size()<3)continue;
+            if(header>=0){issue(target,r+1,"表头","BZ503出现多组价格表头","error");continue;}
+            header=r;columns.putAll(found);
+            for(int c=0;c<source.width(r);c++)if(!columns.containsValue(c)&&!source.text(r,c).isBlank())issue(target,r+1,"表头","BZ503出现未适配列："+source.text(r,c),"error");
+        }
+        if(!title||!codes.equals(Set.of("BZ503")))issue(target,0,"渠道代码","必须同时具有BZ-欧美服装专线挂号标题和唯一完整BZ503代码，禁止按近似名称导入","error");
+        if(!columns.keySet().containsAll(Set.of("country","weight","rate","fee","eta"))){issue(target,0,"表头","BZ503缺少国家、重量段、运费、挂号费或时效列","error");return true;}
+        int country=columns.get("country"),weight=columns.get("weight"),rate=columns.get("rate"),fee=columns.get("fee");
+        var previous=new HashMap<String,BigDecimal>();var limits=Map.of("US",30,"GB",20,"DE",30,"FR",30,"IT",5,"ES",30,"PT",30);
+        var notes=new LinkedHashSet<String>();boolean reference=false;
+        for(int r=header+1;r<=source.lastContentRow;r++) {
+            if(source.rowTexts(r).stream().anyMatch(t->clean(t).matches("三[、.]禁限运物品|食品.*等产品[；;]")))reference=true;
+            if(reference){source.referenceRows.add(r);notes.addAll(source.rowTexts(r));continue;}
+            if(source.rowEmpty(r))continue;
+            source.parsedRows.add(r);
+            String rawCountry=source.text(r,country),code=countryCode(rawCountry);
+            if(!limits.containsKey(code)){issue(target,r+1,"国家","BZ503国家缺失或超出已适配范围："+rawCountry,"error");continue;}
+            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
+                    .put("areaName",countryName(rawCountry)).put("countryCode",code).put("zoneName","").put("originRegion","")
+                    .put("sourceProductCode","BZ503").put("sourceCode","BZ503").put("sourceCountry",rawCountry)
+                    .put("sourceCountryCell",source.address(r,country)).put("sourceWeightRange",source.text(r,weight))
+                    .put("sourceWeightCell",source.address(r,weight)).put("sourcePriceCell",source.address(r,rate)).put("sourceFeeCell",source.address(r,fee))
+                    .put("sourceFeeLabel",source.text(header,fee)).put("sourcePriceUnit","RMB/KG")
+                    .put("minChargeWeightKg",new BigDecimal(".001")).put("sourceMinimumWeightKind","user-confirmed")
+                    .put("sourceMinimumWeightText","2026-11-16 用户确认：1g起计，按1g向上进位")
+                    .put("sourceRoundingConfirmation","2026-11-16 用户确认：公斤价乘计费重量加一次挂号费，合计向上取整到人民币元")
+                    .put("sourceServiceConfirmation","2026-11-16 用户确认：包税、全邮编、只发服装；覆盖原表税费及邮编限制")
+                    .put("notes","用户确认：包税、全邮编、只发服装；尺寸和特殊包裹条件按实际包裹核对");
+            // Country spans A:B in the supplied table; a real, separate zone must never be silently discarded.
+            int zone=columns.getOrDefault("zone",-1);
+            if(zone>=0&&!source.address(r,zone).equals(source.address(r,country))&&!source.text(r,zone).isBlank())issue(target,r+1,"分区","BZ503出现独立分区，需适配后再导入","error");
+            try {
+                var raw=clean(source.text(r,weight)).toUpperCase(Locale.ROOT);
+                if(!raw.matches("[0-9]+(?:\\.[0-9]+)?-[0-9]+(?:\\.[0-9]+)?(?:KG)?"))throw new IllegalArgumentException("BZ503重量段不明确："+raw);
+                var values=raw.replace("KG","").split("-");var lo=new BigDecimal(values[0]);var hi=new BigDecimal(values[1]);
+                var prev=previous.put(code,hi);
+                if(lo.compareTo(hi)>=0||lo.remainder(new BigDecimal(".001")).signum()!=0||hi.remainder(new BigDecimal(".001")).signum()!=0)throw new IllegalArgumentException("BZ503重量范围无效或不是整克边界");
+                if(prev==null?lo.signum()!=0:lo.compareTo(prev)!=0&&lo.subtract(prev).compareTo(new BigDecimal(".001"))!=0)issue(target,r+1,"重量段","BZ503首档缺失、重量重叠或断档，禁止部分替换","error");
+                row.put("weightFromKg",lo).put("weightToKg",hi).put("weightFromInclusive",prev!=null&&lo.compareTo(prev)!=0).put("weightToInclusive",true);
+            }catch(IllegalArgumentException invalid){issue(target,r+1,"重量段",invalid.getMessage(),"error");continue;}
+            numeric(row,"pricePerKg",source,r,rate,target,false);numeric(row,"registrationFee",source,r,fee,target,false);
+            var eta=new Columns();eta.eta=columns.get("eta");eta.headerRow=header;readRowEta(row,target,source,r,eta);
+            warn(row,"包税及全邮编按用户确认；尺寸和特殊包裹条件需按实际包裹核对");
+            add(target,row,source,r,file);
+        }
+        if(!reference)issue(target,0,"备注","BZ503原表限制说明缺失","error");
+        for(var limit:limits.entrySet())if(!previous.containsKey(limit.getKey())||previous.get(limit.getKey()).compareTo(BigDecimal.valueOf(limit.getValue()))!=0)
+            issue(target,0,"限重","BZ503缺少国家或最高重量档发生变化："+limit.getKey(),"error");
+        target.put("sourceNotes",String.join("\n",notes));
+        return true;
+    }
+
     private boolean parseKuailv(Source source,String file,Map<String,ObjectNode> channels) {
         if(kuailvEuropeSheet(source))return parseKuailvEurope(source,file,channels);
         for(var name:KUAILV_CHANNELS)if(kuailvContainsChannel(source,name))parseKuailvChannel(source,file,channels,name);

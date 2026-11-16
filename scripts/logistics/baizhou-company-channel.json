@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "revision": 24,
+  "entries": [{
+    "id": "fe84a955-c584-4ed5-9b0e-1c79957c1c83",
+    "providerName": "百州",
+    "providerAliases": ["百洲", "百洲货运", "义乌百洲国际货运代理有限公司"],
+    "channelName": "BZ-欧美服装专线挂号",
+    "productCodes": ["BZ503"],
+    "aliases": [],
+    "sharedSourceCodes": [],
+    "logisticsAttribute": "服装",
+    "enabled": true,
+    "sources": [{"file":"YB992-百洲最新报价-VVVVVIP-11.16(1).xlsx","sheet":"BZ-欧美服装专线挂号","firstRow":4,"lastRow":30,"priceRows":27}]
+  }]
+}
