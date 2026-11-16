@@ -18,9 +18,10 @@ s=s.replace(" switched=False"," assert json.loads((AUDIT/'candidate.json').read_
 (P/'deploy.py').write_text(s,encoding='utf-8')
 (P/'Dockerfile.backend').write_text(f'FROM quotation-backend:quotation-2026.11.16-06\nLABEL com.milano.quotation.release="{V}" com.milano.quotation.git-sha="{SHA}"\nCOPY --chown=quotation:quotation app.jar /app/app.jar\n',encoding='utf-8')
 (P/'.dockerignore').write_text('*\n!app.jar\n',encoding='utf-8')
-for n in ['company.json','source.xlsx','expected.json','billing-cases.json','finance-baseline.json','existing-company.json','validation.json']:
+for n in ['company.json','source.xlsx','expected.json','billing-cases.json','finance-baseline.json','existing-company.json','validation.json','expected-excluded-channels.json']:
  shutil.copyfile(D/n,P/n)
 shutil.copytree(D/'runtime',P/'runtime',dirs_exist_ok=True)
+for n in ['RunSfBulky.java','ReviewSfBulky.java']:shutil.copyfile(W/'scripts/logistics'/n,P/n)
 with zipfile.ZipFile(W/'backend/target/quotation-backend-0.1.0.jar') as new,zipfile.ZipFile(PACK/'quotation-2026.11.16-06/app.jar') as live:
  resources=lambda z:{n:z.read(n) for n in z.namelist() if n.startswith(('BOOT-INF/classes/db/migration/','BOOT-INF/classes/logistics-repairs/','BOOT-INF/classes/logistics-rules/')) and not n.endswith('/')}
  nr,lr=resources(new),resources(live);assert nr.keys()==lr.keys(),'Immutable resource inventory changed'
@@ -44,7 +45,7 @@ s=(OLD/'publish-reviewed.py').read_text(encoding='utf-8').replace('quotation-202
 s=s.replace("print(json.dumps(dict(passed=True", "summary=dict(passed=True").replace("backup=str(backup))))", "backup=str(backup))\n(P/'preservation-summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))\nprint(json.dumps(summary))")
 (P/'publish-reviewed.py').write_text(s,encoding='utf-8')
 for script in ['deploy.py','run-maintenance.py','publish-reviewed.py']:compile((P/script).read_text(encoding='utf-8'),script,'exec')
-files=['app.jar','source.bundle','deploy.py','Dockerfile.backend','.dockerignore','candidate.json','company.json','source.xlsx','expected.json','billing-cases.json','finance-baseline.json','existing-company.json','validation.json','run-maintenance.py','publish-reviewed.py']+[p.relative_to(P).as_posix() for p in (P/'runtime').rglob('*') if p.is_file()]
+files=['app.jar','source.bundle','deploy.py','Dockerfile.backend','.dockerignore','candidate.json','company.json','source.xlsx','expected.json','billing-cases.json','finance-baseline.json','existing-company.json','validation.json','expected-excluded-channels.json','run-maintenance.py','publish-reviewed.py','RunSfBulky.java','ReviewSfBulky.java']+[p.relative_to(P).as_posix() for p in (P/'runtime').rglob('*') if p.is_file()]
 (P/'SHA256SUMS').write_text(''.join(h(P/f)+'  '+f+'\n' for f in files))
 with tarfile.open(P/'release-upload.tgz','w:gz') as tar:
  for f in files+['SHA256SUMS']:tar.add(P/f,arcname=f)

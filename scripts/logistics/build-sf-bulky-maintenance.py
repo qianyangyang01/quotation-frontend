@@ -51,7 +51,7 @@ s=s[:start]+'''
                         audit(jdbc,"logistics.publish",versionId.toString(),Map.of("rows",52,"sourceSha256",expected.path("sha256").asText(),"channelId",channelId.toString()));
 '''+s[end:]
 start=s.index('                var rules=new LogisticsQueryService');end=s.index('            }finally{factory.destroy();}',start)
-s=s[:start]+'''                var rules=new LogisticsQueryService(jdbc,M).publishedRules(null,null,List.of(),List.of()).rules();
+s=s[:start]+'''                var rules=new LogisticsQueryService(jdbc,M).publishedRules(null,null,COUNTRIES.stream().toList(),List.of()).rules();
                 var hits=rules.stream().filter(r->r.path("relations").valueStream().anyMatch(x->x.path("carrier").asText().equals("顺丰")&&x.path("channel").asText().equals("欧洲-泡货专线"))).toList();
                 require(hits.size()==1&&hits.getFirst().path("billingVerified").asBoolean()&&hits.getFirst().path("prices").size()==52,"Quote projection mismatch");
                 var projected=M.createArrayNode();hits.forEach(projected::add);save("published-rules",projected);save("publication-status",acceptance.status(versionId));
@@ -69,6 +69,9 @@ s=s[:start]+'''                var rules=new LogisticsQueryService(jdbc,M).publi
                 save("final-verification",M.createObjectNode().put("passed",true).put("channelId",channelId.toString()).put("versionId",versionId.toString()).put("rows",52).put("countries",26).put("categories","普货、服装").put("euFixedUsd",5.83).put("gbTaxUsd",0).put("perKg",0).put("channelKey",key));
                 System.out.println("SF_BULKY_VERIFIED_OK "+versionId);
 '''+s[end:]
+s=s.replace('require(coverage.path("missingCount").asInt()==0,"Unexpected missing company channels");', '''var excluded=M.readTree(Files.readString(ROOT.resolve("expected-excluded-channels.json")));
+                    require(coverage.path("missingCount").asInt()==5&&coverage.path("missingChannels").equals(excluded.path("missingChannels")),"Unchanged existing SF channels differ from reviewed scope");
+                    LogisticsImportCoverage.requireAcknowledgment(coverage,M.createObjectNode().put("partialUpdateConfirmed",true).put("coverageToken",coverage.path("token").asText()));''')
 assert '百州' not in s and 'BZ503' not in s
 (W/'scripts/logistics/RunSfBulky.java').write_text(s,encoding='utf-8')
 shutil.copyfile(W.parents[1]/'release-packages/quotation-2026.11.11-01/ValidateKuailvFinance.java',P/'ValidateKuailvFinance.java')

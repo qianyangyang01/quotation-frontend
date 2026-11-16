@@ -72,7 +72,9 @@ public class RunSfBulky {
                 var batch=M.readTree(Files.readString(ROOT.resolve("import-result.json")));var item=batch.path("payload").path("results").get(0);var channelId=UUID.fromString(item.path("channelId").asText());var versionId=UUID.fromString(item.path("versionId").asText());
                 var acceptance=new LogisticsBillingAcceptanceService(jdbc,M,guard,new LogisticsBillingEngine(M));
                 if(args[0].equals("publish")){
-                    var service=new LogisticsBatchPublishService(jdbc,M,logistics,acceptance,manager);var coverage=service.coverage(UUID.fromString(batch.path("id").asText()));save("publication-coverage",coverage);require(coverage.path("missingCount").asInt()==0,"Unexpected missing company channels");
+                    var service=new LogisticsBatchPublishService(jdbc,M,logistics,acceptance,manager);var coverage=service.coverage(UUID.fromString(batch.path("id").asText()));save("publication-coverage",coverage);var excluded=M.readTree(Files.readString(ROOT.resolve("expected-excluded-channels.json")));
+                    require(coverage.path("missingCount").asInt()==5&&coverage.path("missingChannels").equals(excluded.path("missingChannels")),"Unchanged existing SF channels differ from reviewed scope");
+                    LogisticsImportCoverage.requireAcknowledgment(coverage,M.createObjectNode().put("partialUpdateConfirmed",true).put("coverageToken",coverage.path("token").asText()));
                     save("finance-before",jdbc.sql("select jsonb_object_agg(setting_key,to_jsonb(f))::text from finance_setting f").query((rs,n)->M.readTree(rs.getString(1))).single());
                     tx.executeWithoutResult(status->{
                         var v=acceptance.version(versionId);require(v.path("status").asText().equals("draft")&&v.path("currentVersionId").isNull(),"Version changed");reconcile(v.path("payload"),expected);
@@ -113,7 +115,7 @@ public class RunSfBulky {
                     System.out.println("SF_BULKY_PUBLISHED_OK "+versionId);
                 }
                 require(guard.quoteReady(versionId),"New version unavailable");var published=acceptance.version(versionId);reconcile(published.path("payload"),expected);billing(published.path("payload"),cases);
-                var rules=new LogisticsQueryService(jdbc,M).publishedRules(null,null,List.of(),List.of()).rules();
+                var rules=new LogisticsQueryService(jdbc,M).publishedRules(null,null,COUNTRIES.stream().toList(),List.of()).rules();
                 var hits=rules.stream().filter(r->r.path("relations").valueStream().anyMatch(x->x.path("carrier").asText().equals("顺丰")&&x.path("channel").asText().equals("欧洲-泡货专线"))).toList();
                 require(hits.size()==1&&hits.getFirst().path("billingVerified").asBoolean()&&hits.getFirst().path("prices").size()==52,"Quote projection mismatch");
                 var projected=M.createArrayNode();hits.forEach(projected::add);save("published-rules",projected);save("publication-status",acceptance.status(versionId));
