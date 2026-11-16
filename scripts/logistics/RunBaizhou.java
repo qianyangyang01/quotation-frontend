@@ -112,7 +112,7 @@ public class RunBaizhou {
                     System.out.println("BAIZHOU_PUBLISHED_OK "+versionId);
                 }
                 require(guard.quoteReady(versionId),"New version unavailable");var published=acceptance.version(versionId);reconcile(published.path("payload"),expected);billing(published.path("payload"),cases);
-                var rules=new LogisticsQueryService(jdbc,M).publishedRules(null,"服装",List.of(),List.of()).rules();
+                var rules=new LogisticsQueryService(jdbc,M).publishedRules(null,"服装",List.of("US"),List.of()).rules();
                 var hits=rules.stream().filter(r->r.path("relations").valueStream().anyMatch(x->x.path("carrier").asText().equals("百州")&&x.path("channel").asText().equals("BZ-欧美服装专线挂号"))).toList();
                 require(hits.size()==1&&hits.getFirst().path("billingVerified").asBoolean()&&hits.getFirst().path("prices").size()==7,"Quote projection mismatch");var projected=M.createArrayNode();hits.forEach(projected::add);save("published-rules",projected);save("publication-status",acceptance.status(versionId));
                 String key=jdbc.sql("select rule_id::text||'::百州::'||code from logistics_channel where id=:id").param("id",channelId).query(String.class).single();
