@@ -77,12 +77,89 @@ class BatchIndependentQuotationPostgresIntegrationTest {
         doThrow(AppException.conflict("资料已更新")).when(readiness).assertCanCreate(any());assertEquals(result,save(key,body));assertEquals(before+14,count("quotation_record"));
         assertEquals(approved,read(first.path("id").asText()));
     }
+    @Test void shippingWeightsSaveIndependentlyRetrySafelyAndKeepHistory() throws Exception {
+        var history = save(UUID.randomUUID().toString(), ordinary(1));
+        var old = read(history.at("/records/0/id").asText());
+        var approved = review(review(old,"claim","pending"),"complete","approved");
+        long before = count("quotation_record");
+        var body = mapper.createObjectNode().put("kind", "shipping-only"); body.set("document", BatchShippingQuotationTest.input(20));
+        var key = UUID.randomUUID().toString(); var result = save(key, body);
+        assertEquals(20, result.path("records").size()); assertEquals(before + 20, count("quotation_record"));
+        var ids = new HashSet<String>();
+        for (var record : result.path("records")) {
+            var saved = read(record.path("id").asText()); ids.add(saved.path("id").asText());
+            assertEquals("shipping-only", saved.path("quoteMode").asText());
+            assertEquals(200, saved.at("/manualPricing/weightGrams").asInt());
+            assertEquals("pending", saved.path("financeReviewStatus").asText());
+            assertEquals(20, saved.at("/quotationBatch/count").asInt());
+            assertTrue(saved.path("shippingBatchSheet").isObject());
+        }
+        assertEquals(20, ids.size()); assertEquals(result, save(key, body));
+        assertEquals(before + 20, count("quotation_record")); assertEquals(approved, read(old.path("id").asText()));
+        var rollbackKey = UUID.randomUUID().toString(); var calls = new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call -> { if (calls.incrementAndGet() == 22) throw AppException.conflict("来源变化"); return null; }).when(logistics).validate(any());
+        submit("employee", rollbackKey, body).andExpect(status().isConflict());
+        assertEquals(before + 20, count("quotation_record")); assertEquals(approved, read(old.path("id").asText()));
+        reset(logistics); assertEquals(20, save(rollbackKey, body).path("records").size());
+        assertEquals(before + 40, count("quotation_record"));
+    }
     @Test void laterPersistenceFailureRollsBackEarlierRecordAndRetryCreatesExactlyTwo() throws Exception {
         long before=count("quotation_record");var calls=new java.util.concurrent.atomic.AtomicInteger();
         doAnswer(call->{if(calls.incrementAndGet()==4)throw AppException.conflict("SKU1渠道已变化");return null;}).when(logistics).validate(any());
         var body=ordinary(2);var key=UUID.randomUUID().toString();
         submit("employee",key,body).andExpect(status().isConflict());assertEquals(before,count("quotation_record"));
         reset(logistics);assertEquals(2,save(key,body).path("records").size());assertEquals(before+2,count("quotation_record"));
+    }
+    ObjectNode shipping(int count) { var body=mapper.createObjectNode().put("kind","shipping-only");body.set("document",BatchShippingQuotationTest.input(count));return body; }
+    JsonNode update(String id, ObjectNode body) throws Exception {
+        return mapper.readTree(mvc.perform(patch("/api/v1/quotations/"+id).session(sessions.get("employee")).with(csrf()).contentType("application/json").content(body.toString()))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
+    }
+    @Test void shippingRecordReviewCustomerEditsDealsAndSearchRemainIndependent() throws Exception {
+        var result=save(UUID.randomUUID().toString(),shipping(20));
+        var first=read(result.at("/records/0/id").asText());var id=first.path("id").asText();
+        var siblings=new LinkedHashMap<String,String>();
+        for(int i=1;i<20;i++){var sibling=result.at("/records/"+i+"/id").asText();siblings.put(sibling,storedRecord(sibling));}
+        var approved=review(review(first,"claim","pending"),"complete","approved");
+        var prices=(ObjectNode)approved.path("customerQuote").deepCopy();prices.putObject("contact").put("agent","更新署名").put("whatsapp","");
+        var patch=mapper.createObjectNode().put("_version",approved.path("_version").asLong());patch.set("customerQuote",prices);
+        var contactOnly=update(id,patch);assertEquals("approved",contactOnly.path("financeReviewStatus").asText());
+        ((ArrayNode)prices.at("/rows/0/prices")).set(0,DoubleNode.valueOf(9.99));patch.put("_version",contactOnly.path("_version").asLong());
+        var edited=update(id,patch);assertEquals("pending",edited.path("financeReviewStatus").asText());assertEquals(9.99,edited.at("/customerQuote/rows/0/prices/0").asDouble());
+        assertEquals(first.path("systemQuantityQuotes"),edited.path("systemQuantityQuotes"));assertEquals(first.path("shippingBatchSheet"),edited.path("shippingBatchSheet"));
+        assertEquals(first.path("sheetQuote"),edited.path("sheetQuote"));assertEquals("更新署名",edited.at("/customerQuote/contact/agent").asText());
+        mvc.perform(patch("/api/v1/quotations/"+id).session(sessions.get("employee")).with(csrf()).contentType("application/json").content(patch.toString())).andExpect(status().isConflict());
+        var deal=mapper.createObjectNode().put("_version",edited.path("_version").asLong()).put("status","won").put("actualQuoteUsd",19.98).put("dealQuantity",2).put("dealOptionId",edited.at("/quoteOptions/0/id").asText()).put("closedAt","2026-11-16");
+        var won=update(id,deal);assertEquals("won",won.path("status").asText());assertEquals(edited.path("customerQuote"),won.path("customerQuote"));
+        for(var entry:siblings.entrySet())assertEquals(entry.getValue(),storedRecord(entry.getKey()));
+        for(var role:List.of("employee","finance"))mvc.perform(get("/api/v1/quotations/search").session(sessions.get(role)).param("scope",role.equals("employee")?"mine":"company").param("product",result.path("batchNo").asText())).andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(20));
+        mvc.perform(get("/api/v1/quotations/search").session(sessions.get("employee2")).param("scope","company").param("product",result.path("batchNo").asText())).andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        var before=storedRecord(id);
+        var newInput=((ObjectNode)BatchShippingQuotationTest.input(1).at("/items/0/input")).deepCopy();
+        mvc.perform(post("/api/v1/quotations").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(newInput.toString())).andExpect(status().isOk()).andExpect(jsonPath("$.data.quotationBatch").doesNotExist());
+        assertEquals(before,storedRecord(id));
+    }
+    @Test void shippingWholeBatchCopyPermissionsCancellationAndCleanupPreserveSnapshots() throws Exception {
+        var body=shipping(20);long before=count("quotation_record");
+        submit("purchase",UUID.randomUUID().toString(),body).andExpect(status().isForbidden());assertEquals(before,count("quotation_record"));
+        var result=save(UUID.randomUUID().toString(),body);var last=result.at("/records/19/id").asText();
+        var response=mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get("employee"))).andExpect(status().isOk()).andReturn();
+        var members=mapper.readTree(response.getResponse().getContentAsByteArray()).path("data");assertEquals(20,members.size());
+        for(int i=0;i<20;i++){assertEquals(i+1,members.get(i).at("/quotationBatch/index").asInt());assertEquals(1,members.get(i).at("/shippingBatchSheet/rows").size());}
+        mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get("employee2"))).andExpect(status().isForbidden());
+        var cancelled=result.at("/records/0/id").asText();var survivorBefore=storedRecord(last);cancelRecord(cancelled);
+        assertEquals(survivorBefore,storedRecord(last));
+        mvc.perform(get("/api/v1/quotations/"+last+"/batch-records").session(sessions.get("employee"))).andExpect(status().isConflict());
+        var lastBefore=read(last);trash("employee",last,trashPreview(last)).andExpect(status().isOk()).andExpect(jsonPath("$.data.changed").value(19));
+        assertEquals(before+19,count("quotation_record"));var after=read(last);assertEquals("trashed",after.path("lifecycleState").asText());
+        for(var field:List.of("customerQuote","sheetQuote","systemQuantityQuotes","shippingBatchSheet","manualPricing","shippingNote"))assertEquals(lastBefore.path(field),after.path(field));
+    }
+    @Test void concurrentShippingRetryCreatesOnlyOneTwentyRecordBatch() throws Exception {
+        long before=count("quotation_record");var body=shipping(20);var key=UUID.randomUUID().toString();
+        try(var executor=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var a=executor.submit(()->save(key,body));var b=executor.submit(()->save(key,body));assertEquals(a.get(45,java.util.concurrent.TimeUnit.SECONDS),b.get(45,java.util.concurrent.TimeUnit.SECONDS));
+        }
+        assertEquals(before+20,count("quotation_record"));
     }
     @Test void invalidPermissionsDuplicatesAndIdempotencyKeyReuseCannotCreateRecords() throws Exception {
         long before=count("quotation_record");var body=ordinary(2);

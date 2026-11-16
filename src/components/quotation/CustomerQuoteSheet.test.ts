@@ -26,8 +26,8 @@ function row(key = 'one', carrier = '花海'): QuoteSheetSourceRow {
 function png(firstRow = 1, lastRow = 1): QuoteSheetImage {
   return { blob: new Blob(['png'], { type: 'image/png' }), width: 1536, height: 1024, firstRow, lastRow }
 }
-function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot, recordMode = false) {
-  const state = reactive({ canRemoveRows: false, removalDisabled: false, skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, recordMode, initialSystemQuote: undefined as CustomerPriceSnapshot | undefined, resetKey: undefined as string | undefined })
+function mount(rows = [row()], calculatePrice?: QuoteSheetPriceCalculator, initialQuote?:CustomerPriceSnapshot, recordMode = false, initialSheet?: import('@/data/customerQuoteSheet').CustomerQuoteSheet) {
+  const state = reactive({ canRemoveRows: false, removalDisabled: false, skus: ['SKU-001'], rows, countries: [], salesperson: 'Alex', contextKey: 'product-1', customQuantity: 5, bundle: false, sourcePending: false, calculatePrice, initialQuote, initialSheet, recordMode, initialSystemQuote: undefined as CustomerPriceSnapshot | undefined, resetKey: undefined as string | undefined })
   const host = document.createElement('div'); document.body.append(host)
   app = createApp({ render: () => h(CustomerQuoteSheet, { ...state, ref:(instance:unknown)=>{exposed=instance as typeof exposed} }) }); app.mount(host)
   return state
@@ -52,6 +52,28 @@ beforeEach(() => {
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(revoke)
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it.each([false,true])('restores the latest record contact and size rules over the original batch sheet, including clearing: %s', async cleared => {
+  mount();await settle()
+  const original=exposed.captureSheet()
+  original.title='Original shipping quote';original.agent='旧署名';original.whatsapp='+111';original.sizeRules='旧尺码'
+  app.unmount();document.body.innerHTML=''
+  const contact={agent:cleared?'':'新署名',whatsapp:cleared?'':'+222'}
+  const state=mount([row()],undefined,{quantities:[1],rows:[{optionId:'one',prices:[99]}],contact,sizeRules:cleared?'':'新尺码',sizeRulesEnabled:!cleared},true,original)
+  await settle()
+  expect(exposed.capturePrices().contact).toEqual(contact)
+  expect(exposed.capturePrices().sizeRulesEnabled).toBe(!cleared)
+  expect(exposed.capturePrices().sizeRules).toBe(cleared?'':'新尺码')
+  expect(exposed.captureSheet().title).toBe('Original shipping quote')
+  expect(exposed.captureSheet().rows[0]!.prices).toEqual([99])
+  expect(original.agent).toBe('旧署名')
+  // The record drawer keeps the component mounted when a save changes its version.
+  state.initialQuote!.contact={agent:'再次更新',whatsapp:''};state.contextKey='record-version-2'
+  await settle()
+  expect(exposed.captureSheet().title).toBe('Original shipping quote')
+  expect(exposed.capturePrices().contact).toEqual({agent:'再次更新',whatsapp:''})
+  expect(exposed.captureSheet().rows[0]!.prices).toEqual([99])
+})
 
 it('restores edited cells, quantities, hidden rows and ordering after remount while using new system prices', async () => {
   mount([row(), row('two')])

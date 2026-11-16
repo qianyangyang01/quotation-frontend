@@ -4,18 +4,19 @@ import type { QuotationRecord } from '@/data/quotationRecords'
 import type { CustomerQuoteSheet as Sheet } from '@/data/customerQuoteSheet'
 import { canViewFullPricing, canViewPurchaseCost } from '@/data/quotationVisibility'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
-import { batchRecordCopyLayout, loadQuotationBatchRecords, mergeSavedBatchSheets, type BatchCopyKind } from '@/services/quotationBatchCopy'
+import { batchRecordCopyLayout, loadQuotationBatchRecords, mergeSavedBatchSheets, shippingBatchPhotos, type BatchCopyKind } from '@/services/quotationBatchCopy'
 import { copyQuotationText } from '@/services/customerQuoteSheetClipboard'
 import CustomerQuoteSheet from './CustomerQuoteSheet.vue'
 import BatchSingleSheet from './BatchSingleSheet.vue'
 const props = defineProps<{ record: QuotationRecord; version?: 'visible' | 'full' }>()
 const busy = ref(false), message = ref(''), failed = ref(false), lastKind = ref<BatchCopyKind>('full')
 const records = ref<QuotationRecord[]>([]), combined = ref<Sheet>(), dialog = ref<HTMLDialogElement>()
+const photos = ref<import('@/data/quoteSheetPhotos').QuoteSheetPhoto[]>([])
 const sources = computed(() => records.value.filter(record => record.quoteMode !== 'fob').map(record => ({ id: record.id, source: quotationRecordQuoteSheetSource(record) })))
 const sheets = new Map<string, InstanceType<typeof CustomerQuoteSheet>>(), preview = ref<InstanceType<typeof BatchSingleSheet>>()
 function setSheet(id: string, instance: unknown) { if (instance) sheets.set(id, instance as InstanceType<typeof CustomerQuoteSheet>); else sheets.delete(id) }
 let generation = 0
-function reset() { generation++; records.value = []; combined.value = undefined; busy.value = false; dialog.value?.close(); message.value = '' }
+function reset() { generation++; records.value = []; photos.value = []; combined.value = undefined; busy.value = false; dialog.value?.close(); message.value = '' }
 watch(() => [props.record.id, props.record._version, props.record.updatedAt], reset)
 onBeforeUnmount(() => { generation++ })
 async function run(kind: BatchCopyKind) {
@@ -30,6 +31,7 @@ async function run(kind: BatchCopyKind) {
       await copyQuotationText(layout.text, layout.html)
       if (token === generation) message.value = `已复制本批全部 ${members.length} 条记录，可粘贴到 Excel / WPS`
     } else {
+      photos.value = shippingBatchPhotos(members)
       records.value = members
       await nextTick()
       if (token !== generation) return
@@ -63,7 +65,7 @@ defineExpose({ run, busy })
   <div hidden aria-hidden="true"><CustomerQuoteSheet v-for="entry in sources" :key="entry.id" :ref="instance => setSheet(entry.id, instance)" v-bind="entry.source" :initial-photos="[]" :show-all-rows="version === 'full'" :context-key="`batch-copy:${entry.id}`" :source-pending="false" /></div>
   <Teleport to="body"><dialog ref="dialog" class="batch-copy-dialog" aria-label="本批全部报价图片" @cancel.prevent="close">
     <header><div><strong>本批全部报价 · {{ record.quotationBatch?.count }} 条</strong><p>使用各条记录已保存的报价；长报价单自动分成多张图片。</p></div><button type="button" aria-label="关闭整批报价图片" @click="close">×</button></header>
-    <BatchSingleSheet v-if="combined" ref="preview" :sheet="combined" />
+    <BatchSingleSheet v-if="combined" ref="preview" :sheet="combined" :photos="photos" />
   </dialog></Teleport>
 </template>
 <style scoped>

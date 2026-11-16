@@ -1,11 +1,22 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { request } from './http'
-import { batchRecordCopyLayout, loadQuotationBatchRecords, mergeSavedBatchSheets } from './quotationBatchCopy'
+import { batchRecordCopyLayout, loadQuotationBatchRecords, mergeSavedBatchSheets, shippingBatchPhotos } from './quotationBatchCopy'
 import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import type { CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 vi.mock('./http', () => ({ request: vi.fn() }))
 function record(index: number) { return normalizeQuotationRecord({ id: `r${index}`, no: `QT-${index}`, quoteMode: 'single', primarySku: `SKU-${index}`, purchaseUnitPriceCny: 789.12, quotationBatch: { id: 'batch-id', no: 'B1', index, count: 14 }, quoteOptions: [{ id: 'a', country: '美国', carrier: '闪电猴', channel: '专线', rule: '', eta: '', quote1Usd: index, quote2Usd: null, quote3Usd: null, quoteCustomUsd: null }] })! }
 beforeEach(() => vi.mocked(request).mockReset())
+it('keeps the shared shipping photo panel after save and refuses misleading mixtures after individual edits',()=>{
+  const photos=[{assetId:'12345678-1111-2222-3333-123456789abc',name:'photo.png'}]
+  const rows=Array.from({length:20},(_,i)=>({...record(i+1),quoteMode:'shipping-only' as const,customerQuote:{quantities:[1],rows:[],photos,showPhotos:true}}))
+  const before=JSON.stringify(rows)
+  expect(shippingBatchPhotos(rows)).toEqual(photos);expect(shippingBatchPhotos(rows)).not.toBe(photos)
+  expect(JSON.stringify(rows)).toBe(before)
+  rows[1]!.customerQuote.showPhotos=false
+  expect(()=>shippingBatchPhotos(rows)).toThrow('图片已分别修改')
+  rows.forEach(row=>{row.customerQuote.showPhotos=false});expect(shippingBatchPhotos(rows)).toEqual([])
+  expect(shippingBatchPhotos([record(1)])).toEqual([])
+})
 it('loads all 14 members from any record in batch order without page or review filters', async () => {
   const rows = Array.from({ length: 14 }, (_, i) => record(i + 1)).reverse()
   vi.mocked(request).mockResolvedValue(rows)

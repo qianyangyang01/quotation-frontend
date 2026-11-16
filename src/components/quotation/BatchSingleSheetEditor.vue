@@ -9,6 +9,7 @@ const props = defineProps<{ document: BatchSingleDocument; calculateItem?: (sku:
 const emit = defineEmits<{ busy: [value: boolean] }>()
 // Parent mounts a new editor only when its generated/selected SKU set changes.
 const original = JSON.parse(JSON.stringify(props.document)) as BatchSingleDocument
+const shipping = original.items[0]?.input.quoteMode === 'shipping-only'
 const source = batchSheetEditorSource(original)
 const editor = ref<InstanceType<typeof CustomerQuoteSheet>>()
 const system = ref(source.initialSystemQuote), busy = ref(false), error = ref('')
@@ -18,7 +19,7 @@ for (const [index, quantity] of system.value.quantities.entries()) extraPrices.s
 const sourcePending = computed(() => busy.value || !!error.value)
 function pricingBasis(input: BatchSingleItem['input']) {
   return JSON.stringify([
-    input.quoteMode, input.customerGrade, input.womensPricing,
+    input.quoteMode, input.customerGrade, input.womensPricing, input.manualPricing, input.shippingNote,
     input.exchangeRate, input.financeVersions, input.purchaseVersions, input.logisticsRevision,
     input.purchaseUnitPriceCny, input.domesticFreightPerUnitCny, input.customerOperation,
     input.weightSnapshot?.items, input.weightSnapshot?.specialPackagingGrams,
@@ -37,17 +38,17 @@ async function quantitiesChanged(quantities: number[]) {
         const loaded = new Map(missing.map(quantity => [quantity, new Map<string, number | null>()]))
         const sampleUpdates: Array<() => void> = []
         for (const [index, item] of original.items.entries()) {
-          const fresh = await props.calculateItem(item.input.primarySku, next)
+          const fresh = await props.calculateItem(item.entryId || item.input.primarySku, next)
           if (disposed) return
           // A quantity edit must not silently replace the previously generated pricing basis.
           if (pricingBasis(item.input) !== pricingBasis(fresh.input)) throw new Error(`${item.input.primarySku} 的计价资料已变化，请修改条件后重新生成整批报价`)
-          if (isWomensQuotation(item.input.quoteMode)) {
+          if (isWomensQuotation(item.input.quoteMode) || item.input.quoteMode === 'shipping-only') {
             for (const option of item.input.quoteOptions ?? []) {
               const updated = fresh.input.quoteOptions?.find(row => row.id === option.id)
               if (!updated) throw new Error(`${item.input.primarySku} 的报价渠道已变化，请重新生成`)
               for (const quantity of missing) {
                 const price = fresh.input.systemQuantityQuotes?.rows.find(row => row.optionId === option.id)?.prices[fresh.input.systemQuantityQuotes.quantities.indexOf(quantity)]
-                if (price != null && (!updated.womensPricingSamples?.some(row => row.quantity === quantity) || !updated.logisticsSamples?.some(row => row.quantity === quantity))) throw new Error(`${item.input.primarySku} 的新增数量缺少女装计价依据，请重新生成`)
+                if (price != null && (isWomensQuotation(item.input.quoteMode) && !updated.womensPricingSamples?.some(row => row.quantity === quantity) || !updated.logisticsSamples?.some(row => row.quantity === quantity))) throw new Error(`${item.input.primarySku} 的新增数量缺少女装计价依据，请重新生成`)
               }
               const mergeSamples = <T extends { quantity: number }>(previous: T[] = [], added: T[] = []) => {
                 const byQuantity = new Map(previous.map(row => [row.quantity, row]))
@@ -87,9 +88,9 @@ defineExpose({ capture })
 </script>
 <template>
   <div class="batch-sheet-editor">
-    <p v-if="busy" role="status">正在按各 SKU 的成本与重量计算新增数量…</p>
+    <p v-if="busy" role="status">{{ shipping ? '正在按各条克重计算新增数量…' : '正在按各 SKU 的成本与重量计算新增数量…' }}</p>
     <p v-if="error" role="alert">{{ error }} <button @click="quantitiesChanged(requested)">重试数量计算</button></p>
-    <CustomerQuoteSheet ref="editor" current-quote batch-average :rows="source.rows" :countries="[]" :salesperson="original.sheet.agent" context-key="batch-sheet" :custom-quantity="0" :bundle="false" :source-pending="sourcePending" :initial-quote="source.initialQuote" :initial-system-quote="system" :initial-sheet="source.initialSheet" record-mode paginated hide-back-to-top preserve-prices-while-pending quote-mode="single" :quantity-help="calculateItem ? '新增数量会按各 SKU 分别计算；可编辑客户报价、图片、行列和渠道平均报价。' : undefined" @quantities-change="quantitiesChanged" />
+    <CustomerQuoteSheet ref="editor" current-quote batch-average :rows="source.rows" :countries="[]" :salesperson="original.sheet.agent" context-key="batch-sheet" :custom-quantity="0" :bundle="false" :source-pending="sourcePending" :initial-quote="source.initialQuote" :initial-system-quote="system" :initial-sheet="source.initialSheet" record-mode paginated hide-back-to-top preserve-prices-while-pending :quote-mode="shipping ? 'shipping-only' : 'single'" :quantity-help="calculateItem ? (shipping ? '新增数量按每条克重分别计算；可编辑客户报价、图片、行列和渠道平均报价。' : '新增数量会按各 SKU 分别计算；可编辑客户报价、图片、行列和渠道平均报价。') : undefined" @quantities-change="quantitiesChanged" />
   </div>
 </template>
 <style scoped>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { batchItemLabel } from '@/services/batchSingleQuotation'
+import type { ShippingBatchEntry } from '@/services/batchShippingInput'
 import { isBundleQuotation, isSingleQuotation } from '@/data/quotationModes'
 
 import { loadWomensPricing, womensPricingSample, womensPolicyLabel, WOMENS_PRICING_UNAVAILABLE, WOMENS_PRICING_UPDATED, type WomensPricingSample } from '@/data/womensPricing'
@@ -13,6 +15,7 @@ import { canViewFullPricing, canViewLogisticsCost } from '@/data/quotationVisibi
 import { quotationInputMode, quotationModeForCustomer, isWomensQuotation, isManualQuotation, normalizeQuotationMode, quotationModeLabels, manualDecimal, manualPricingInput, manualQuantity } from '@/data/quotationModes'
 import { normalizeShippingNote, shippingQuotationSummary, SHIPPING_NOTE_MAX_LENGTH, SHIPPING_NOTE_LENGTH_ERROR } from '@/data/shippingQuotationNote'
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
+import ShippingEntrySwitch from '@/components/quotation/ShippingEntrySwitch.vue'
 import QuotationFeatureBoundary from '@/components/quotation/QuotationFeatureBoundary.vue'
 import FobQuotePanel from '@/components/quotation/FobQuotePanel.vue'
 import { FOB_SMALL_ORDER_POLICY } from '@/services/fobQuotation'
@@ -104,11 +107,12 @@ import {
 // Batch workspace reuses the proven calculator, but never enters ordinary persistence.
 const FobCorrectionDialog = defineAsyncComponent(() => import('@/components/quotation/FobCorrectionDialog.vue'))
 
-const props = defineProps<{ resumeQuoteId?: string; batchCapture?: boolean; batchInitialSku?: string; batchSize?: number; batchSkus?: string[] }>()
+const props = defineProps<{ resumeQuoteId?: string; batchCapture?: boolean; batchShipping?: boolean; beforeShippingQuery?: () => Promise<boolean>; shippingEntries?: ShippingBatchEntry[]; batchInitialSku?: string; batchSize?: number; batchSkus?: string[] }>()
 const emit = defineEmits<{ batchCaptured: [value: import('@/services/batchSingleQuotation').BatchSingleItem]; batchPreparing: [value: boolean]; batchSampleBusy: [value: boolean] }>()
 let batchCalculationActive = false
 let batchCaptured: import('@/services/batchSingleQuotation').BatchSingleItem | undefined
 const batchQuantities = ref<number[]>()
+const batchShippingRevision = ref(0)
 const batchReady = ref(false)
 const batchSampleSku = ref('')
 const batchSampleSwitching = ref(false)
@@ -189,7 +193,7 @@ function createTemplateFromCurrentMode() {
   templateWorkbench.value.startFromSelection(rows, '快速报价清单')
   quoteMatrixMode.value = 'template'
 }
-const quoteMode = ref<QuotationMode>('single')
+const quoteMode = ref<QuotationMode>(props.batchShipping ? 'shipping-only' : 'single')
 // FOB is a separate calculation workspace; it never serializes into a channel quotation or its draft.
 const fobKey = ref(0)
 const fobInitial = ref<{classification?: import('@/services/fobClassification').FobClassification;sku:string;source:'fob'|'standard';customer:string;quantity:number;batch?:{text:string;mode:'tiers'|'quantity';customer:string;sources:('fob'|'standard')[]}}>()
@@ -213,6 +217,8 @@ const manualPricing = computed(() => manualPricingInput(quoteMode.value, manualC
 const manualInputError = computed(() => !manualMode.value || manualPricing.value ? '' : quoteMode.value === 'shipping-only' ? '重量须大于0且不超过1000000克，最多3位小数' : '请填写有效成本（0～1000000元，最多2位小数）和重量（大于0且不超过1000000克，最多3位小数）')
 const manualPanelError = ref('')
 function invalidateManualQuery() {
+  // Batch restoration owns rule-cache invalidation; every weight is still recalculated.
+  if (props.batchShipping && batchCalculationActive) return
   if (recoveryRestoring.value) return
   if (!manualMode.value) return
   manualQueried.value = false; manualPanelError.value = ''
@@ -222,6 +228,10 @@ function invalidateManualQuery() {
   commonQuoteRows.value = []; templateQuoteRows.value = []
 }
 watch([manualCost, manualWeightGrams], invalidateManualQuery, { flush: 'sync' })
+async function loadBatchShippingChannels() {
+  if (props.beforeShippingQuery && !await props.beforeShippingQuery()) return
+  await queryManualQuote()
+}
 async function queryManualQuote() {
   if (!manualMode.value || savingQuotation.value || syncRefreshing.value) return
   if (blockConditionProgress(conditionIssues({ includeSku: false, includeCategory: false }))) return
@@ -1506,7 +1516,7 @@ async function resetLocalDraft(customer?: LastQuotationCustomer) {
   specialPackagingGrams.value = ''
   commissionThreshold.value = '1'
   selectedCustomerGrade.value = (customerGradeSettings.find(item => item.enabled)?.grade || 'S') as CustomerGrade
-  quoteMode.value = 'single'
+  quoteMode.value = props.batchShipping ? 'shipping-only' : 'single'
   manualCost.value = ''; manualWeightGrams.value = ''; manualQueried.value = false; manualPanelError.value = ''
   shippingNote.value = ''
   quoteMatrixMode.value = 'template'
@@ -1551,6 +1561,7 @@ async function initializeQuotationWorkspace() {
     }
     const requestedSku = String(route.query.sku || '').trim()
     if (requestedSku && !restored.exists) { skuSearch.value = requestedSku; markDraftDirty() }
+    if (route.query.mode === 'shipping-only' && !restored.exists && !sourceRecord && !requestedSku) changeQuoteMode('shipping-only')
   } catch (error) {
     draftInitializationFailed.value = true
     draftStatus.value = 'error'
@@ -2374,15 +2385,23 @@ async function calculateBatchItem(sku: string, conditions: QuotationDraftPayload
     batchCaptured = undefined
     notice.value = ''
     const payload = JSON.parse(JSON.stringify(conditions)) as QuotationDraftPayload
-    if (!isSingleQuotation(payload.quoteMode)) throw new Error('批量单品只支持普通单品或女装单品报价')
+    if (!props.batchShipping && !isSingleQuotation(payload.quoteMode)) throw new Error('批量单品只支持普通单品或女装单品报价')
     payload.skuSearch = sku; payload.product.sku = sku
     payload.product.weightSource = 'purchase'; payload.product.manualWeight = 0
     payload.product.primaryChannelKey = ''; payload.product.primaryRule = ''; payload.product.primaryCarrier = ''
     payload.bundleItems = []
     batchQuantities.value = quantities
-    const purchase = await loadPurchaseProduct(sku)
-    if (!purchase.quoteReady) throw new Error(purchaseQuoteBlockingMessage(purchase) || `${sku}：采购资料不完整`)
-    await applyDraftPayload(payload, new Map([[sku, purchase]]), { restoreQuotation: true })
+    if (props.batchShipping) {
+      const entry = props.shippingEntries?.find(row => row.id === sku)
+      if (!entry) throw new Error('该克重已移出本批，请重新生成')
+      applyShippingEntry(payload, entry)
+      await applyDraftPayload(payload, new Map(), { restoreQuotation: true })
+      batchShippingRevision.value++
+    } else {
+      const purchase = await loadPurchaseProduct(sku)
+      if (!purchase.quoteReady) throw new Error(purchaseQuoteBlockingMessage(purchase) || sku + '：采购资料不完整')
+      await applyDraftPayload(payload, new Map([[sku, purchase]]), { restoreQuotation: true })
+    }
     draftReady.value = true
     const deadline = Date.now() + 45000
     while (!viewDisposed && Date.now() < deadline) {
@@ -2396,9 +2415,25 @@ async function calculateBatchItem(sku: string, conditions: QuotationDraftPayload
     if (Date.now() >= deadline) throw new Error('渠道加载超时，请重试该 SKU')
     await nextTick()
     await attemptSave()
-    if (!batchCaptured) throw new Error(notice.value || saveValidationIssues.value.map(i => i.message).join('；') || '该 SKU 暂不能报价，请单独核对资料和渠道')
-    return batchCaptured
+    const captured = batchCaptured as import('@/services/batchSingleQuotation').BatchSingleItem | undefined
+    if (!captured) throw new Error(notice.value || saveValidationIssues.value.map(i => i.message).join('；') || '该条数据暂不能报价，请核对渠道')
+    if (props.batchShipping) {
+      captured.entryId = sku
+      captured.sheet.rows.forEach(row => { row.sku = batchItemLabel(captured) })
+    }
+    return captured
   } finally { batchCalculationActive = false }
+}
+function applyShippingEntry(payload: QuotationDraftPayload, entry: ShippingBatchEntry) {
+  payload.quoteMode = 'shipping-only'; payload.manualPricing = { costCny: 0, weightGrams: Number(entry.weight) }
+  payload.shippingNote = entry.note.trim(); payload.skuSearch = ''; payload.product.sku = ''; payload.bundleItems = []
+  payload.specialPackagingGrams = 0
+  payload.product.primaryChannelKey = ''; payload.product.primaryRule = ''; payload.product.primaryCarrier = ''
+}
+function primeBatchShipping(entry: ShippingBatchEntry) {
+  if (!props.batchShipping || !batchReady.value) return
+  quoteMode.value = 'shipping-only'; batchSampleSku.value = entry.id; batchSampleError.value = ''; batchReturnConditions = undefined
+  manualCost.value = '0'; manualWeightGrams.value = entry.weight; shippingNote.value = entry.note
 }
 function primeBatchProduct(purchase: PurchaseProductRecord) {
   if (!props.batchCapture || !batchReady.value) return
@@ -2419,6 +2454,14 @@ async function selectBatchSample(sku: string, restore = false) {
   batchSampleSwitching.value = true; batchSampleError.value = ''
   emit('batchSampleBusy', true)
   try {
+    if (props.batchShipping) {
+      const entry = props.shippingEntries?.find(row => row.id === sku)
+      if (!entry) throw new Error('未找到该克重')
+      applyShippingEntry(payload, entry)
+      await applyDraftPayload(payload, new Map(), { restoreQuotation: true })
+      draftReady.value = true; batchReturnConditions = undefined
+      return
+    }
     const purchase = await loadPurchaseProduct(sku)
     if (viewDisposed) return
     if (!purchase.quoteReady) throw new Error(purchaseQuoteBlockingMessage(purchase) || '采购资料不完整')
@@ -2440,7 +2483,7 @@ async function restoreBatchSample() {
 watch(() => props.batchSkus, skus => {
   if (props.batchCapture && batchSampleSku.value && skus?.length && !skus.includes(batchSampleSku.value) && !batchCalculationActive) void selectBatchSample(skus[0]!)
 })
-defineExpose({ calculateBatchItem, batchReady, primeBatchProduct, restoreBatchSample })
+defineExpose({ calculateBatchItem, batchReady, primeBatchProduct, primeBatchShipping, restoreBatchSample, resetBatchShippingChannels: invalidateManualQuery })
 async function persistQuotation(input: Parameters<typeof createQuotationRecord>[0]) {
   if (props.batchCapture) throw new Error('批量报价只能通过批量报价单保存')
   const userId = currentAuthUser.value.id
@@ -2567,6 +2610,10 @@ async function save() {
     const sheet = quotationPreview.value?.captureSheet()
     if (!sheet || sheet.issues.length) { toast(sheet?.issues.join('；') || '报价单尚未准备好'); return }
     batchCaptured = JSON.parse(JSON.stringify({ input, conditions: draftPayload(), sheet }))
+    if (props.batchShipping && batchCaptured) {
+      batchCaptured.entryId = batchSampleSku.value
+      batchCaptured.sheet.rows.forEach(row => { row.sku = batchItemLabel(batchCaptured!) })
+    }
     if (!batchCalculationActive) emit('batchCaptured', batchCaptured!)
     return
   }
@@ -2647,7 +2694,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           :coefficient="selectedGradeCoefficient()" :salesperson="selectedSalesperson"
           @update:mode="changeQuoteMode" @open-batch="openBatchQuotation"
           @update:sku-search="skuSearch=$event" @update:customer-name="typeCustomerName" @select-customer="selectFinanceCustomer" @update:monthly-sales-estimate="changeMonthlySalesEstimate(p,$event)" @update:grade="changeCustomerGrade"
-          @query="queryProduct" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
+          @query="batchShipping ? loadBatchShippingChannels() : queryProduct()" @update:logistics-attribute="changeLogisticsAttribute(p,$event)"
         />
 
         <p v-if="womensPricingBlock" class="womens-pricing-error" role="alert">{{ womensPricingBlock }}</p>
@@ -2660,7 +2707,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
           <i></i><span><b>{{ logisticsLoadState === 'loading' ? '正在按商品条件加载物流规则' : logisticsLoadState === 'stale' ? '当前显示缓存物流规则' : logisticsLoadState === 'empty' ? '没有匹配的已发布物流渠道' : logisticsLoadState === 'error' ? '物流规则加载失败' : '物流规则待加载' }}</b><small>{{ logisticsLoadState === 'loading' ? '页面其他内容可继续查看，完成后将自动计算最低报价渠道' : logisticsLoadState === 'stale' ? '网络恢复并确认正式版本后才能保存报价' : logisticsLoadState === 'idle' ? '点击重新加载，按当前商品条件获取正式物流规则' : logisticsLoadError || p.status }}</small></span><button v-if="logisticsLoadState !== 'loading'" type="button" @click="retryQuoteLogistics">重新加载</button>
         </section>
 
-        <ManualQuotePanel v-if="manualMode" :shipping-only="quoteMode === 'shipping-only'" :cost="manualCost" :weight="manualWeightGrams" :shipping-note="shippingNote" :error="shippingNoteError || manualPanelError" :busy="logisticsLoadState === 'loading' || savingQuotation || syncRefreshing" @update:cost="manualCost=$event" @update:weight="manualWeightGrams=$event" @update:shipping-note="shippingNote=$event" @query="queryManualQuote" />
+        <ShippingEntrySwitch v-if="quoteMode === 'shipping-only' && !batchCapture" active="single" />
+        <ManualQuotePanel v-if="manualMode && !batchShipping" :shipping-only="quoteMode === 'shipping-only'" :cost="manualCost" :weight="manualWeightGrams" :shipping-note="shippingNote" :error="shippingNoteError || manualPanelError" :busy="logisticsLoadState === 'loading' || savingQuotation || syncRefreshing" @update:cost="manualCost=$event" @update:weight="manualWeightGrams=$event" @update:shipping-note="shippingNote=$event" @query="queryManualQuote" />
         <section v-if="isSingleQuotation(quoteMode) && !draftNeedsQuery" class="cost-workbench">
           <CostWeightPanel :freight-warning="singleFreightWarning" :product="p" :base-weight="singleBaseWeight(p)" :packaging-weight="singlePackagingWeight(p)" :charge-weight="chargeWeight(p)" :domestic-freight="domesticFreight(p)" :purchase-tier-label="monthlySalesTierLabel()" :special-packaging-grams="specialPackagingGrams" :special-packaging-weight="specialPackagingWeightKg" :special-packaging-error="specialPackagingError" @update:special-packaging-grams="specialPackagingGrams=$event" @weight-change="normalizeRule(p)"><template #product><ProductInfoCard :product="p" :category="findPurchaseProduct(purchaseRecords,p.sku)?.category || productCategory" /></template></CostWeightPanel>
         </section>
@@ -2679,8 +2727,8 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <section class="matrix-mode-switcher">
           <header><div><h2><i class="section-number">03</i>{{ batchCapture ? '选择公共报价渠道' : '选择报价方式与渠道' }}</h2></div><span>快速报价支持全部国家与授权渠道，模板按当前业务员账号管理</span></header>
           <div v-if="batchCapture" class="batch-sample-bar">
-            <div><strong>已选 {{ batchSize || 0 }} 个 SKU</strong><label>当前样例 SKU <select aria-label="当前样例 SKU" :value="batchSampleSku" :disabled="batchSampleSwitching || savingQuotation || !batchSkus?.length" @change="selectBatchSample(($event.target as HTMLSelectElement).value)"><option v-for="sku in batchSkus" :key="sku" :value="sku">{{ sku }}</option></select></label><span>{{ batchSampleSwitching ? '正在读取样例…' : '切换仅影响样例预览' }}</span></div>
-            <p>下方价格仅为当前样例；所选渠道应用于全部已选 SKU，生成时逐项计算。</p>
+            <div><strong>已选 {{ batchSize || 0 }} {{ batchShipping ? '条代发数据' : '个 SKU' }}</strong><label>{{ batchShipping ? '当前样例克重' : '当前样例 SKU' }} <select aria-label="当前样例 SKU" :value="batchSampleSku" :disabled="batchSampleSwitching || savingQuotation || !batchSkus?.length" @change="selectBatchSample(($event.target as HTMLSelectElement).value)"><option v-for="sku in batchSkus" :key="sku" :value="sku">{{ batchShipping ? shippingEntries?.find(entry => entry.id === sku)?.weight + 'g · ' + (shippingEntries?.find(entry => entry.id === sku)?.note || '第' + sku + '条') : sku }}</option></select></label><span>{{ batchSampleSwitching ? '正在读取样例…' : '切换仅影响样例预览' }}</span></div>
+            <p>下方价格仅为当前样例；所选渠道应用于全部已选{{ batchShipping ? '克重' : ' SKU' }}，生成时逐项计算。</p>
             <p v-if="batchSampleError" role="alert">{{ batchSampleError }} <button type="button" :disabled="batchSampleSwitching" @click="selectBatchSample(batchSampleSku)">重试样例</button></p>
           </div>
           <nav aria-label="报价矩阵分类" :inert="batchSampleSwitching || undefined">
@@ -2724,10 +2772,10 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         </section>
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
-        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :batch-sample="batchCapture" :batch-size="batchSize" :save-label="batchCapture ? `生成 ${batchSize || 0} 个 SKU 报价` : draftSource ? '保存并重新提交审核' : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery"
+        <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :batch-sample="batchCapture" :batch-shipping="batchShipping" :batch-size="batchSize" :save-label="batchCapture ? `生成 ${batchSize || 0} ${batchShipping ? '条代发' : '个 SKU'}报价` : draftSource ? '保存并重新提交审核' : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery && (!batchShipping || manualQueried)"
           :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
-          :reset-key="quoteSheetResetKey"
+          :reset-key="batchShipping ? quoteSheetResetKey + '|' + batchShippingRevision : quoteSheetResetKey"
           :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
           :quote-mode="quoteMode" :product-name="manualMode ? quotationModeLabels[quoteMode] : isBundleQuotation(quoteMode) ? (bundleItems.filter(item=>item.sku).map(item=>item.name || item.sku).join(' + ') || '组合商品') : p.name"
           :skus="manualMode ? [quotationModeLabels[quoteMode]] : isBundleQuotation(quoteMode) ? quoteSheetBundleSkus(bundleItems) : [p.sku]"

@@ -5,13 +5,13 @@ import type { QuotationRecord } from '@/data/quotationRecords'
 import { captureQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import { mapAveragePlans } from '@/data/quoteChannelAverage'
 import { buildQuotationWeightSnapshot } from '@/data/quotationWeightSnapshot'
-import { mergeBatchSingle, type BatchSingleDocument, type BatchSingleItem } from './batchSingleQuotation'
+import { batchItemLabel, mergeBatchShipping, mergeBatchSingle, type BatchSingleDocument, type BatchSingleItem } from './batchSingleQuotation'
 
 /** Every route has a SKU-scoped UI identity, even when all products use the same channel. */
 export function batchSheetEditorSource(document: BatchSingleDocument) {
   const entries = document.items.flatMap((item, index) => quotationRecordQuoteSheetSource(item.input as QuotationRecord).rows.map(source => {
     const option = item.input.quoteOptions!.find(option => option.id === source.channelKey)! as NonNullable<BatchSingleItem['input']['quoteOptions']>[number] & { quoteSheetKey: string }
-    const row = { ...source, sku: item.input.primarySku, channelKey: JSON.stringify([item.input.primarySku, option.id]) }
+    const row = { ...source, sku: batchItemLabel(item), channelKey: JSON.stringify([item.entryId || item.input.primarySku, option.id]) }
     return { index, option, row, key: quoteSheetRowKey(row), mergedKey: `${index}:${option.quoteSheetKey}` }
   }))
   const averageId = (index: number, id: string) => `b${index}_${id}`
@@ -40,7 +40,7 @@ export function captureBatchSheet(document: BatchSingleDocument, source: ReturnT
   const ownership = new Map(source.entries.map(entry => [entry.key, entry.index]))
   for (const plan of captured.averagePlans ?? []) {
     const owners = new Set(plan.members.map(member => ownership.get(member.optionId)))
-    if (owners.size !== 1 || owners.has(undefined)) throw new Error('渠道平均报价只能合并同一 SKU 的渠道')
+    if (owners.size !== 1 || owners.has(undefined)) throw new Error(document.items[0]?.input.quoteMode === 'shipping-only' ? '渠道平均报价只能合并同一条克重的渠道' : '渠道平均报价只能合并同一 SKU 的渠道')
     ownership.set(`average:${plan.id}`, [...owners][0]!)
   }
   const savedKeys = new Map<string, string>()
@@ -59,13 +59,13 @@ export function captureBatchSheet(document: BatchSingleDocument, source: ReturnT
     const rows = sheet.rows.filter(row => ownership.get(row.key) === index).map(row => {
       const key = row.averageId ? row.key : entries.find(entry => entry.key === row.key)!.option.quoteSheetKey
       savedKeys.set(row.key, `${index}:${key}`)
-      return { ...row, key, sku: item.input.primarySku }
+      return { ...row, key, sku: batchItemLabel(item) }
     })
     if (!rows.length) throw new Error(`${item.input.primarySku} 的报价行已全部隐藏，请恢复至少一行，或在处理清单中取消选入该 SKU`)
     const weight = item.input.weightSnapshot
-    return { ...item, input: { ...item.input, ...(weight ? { weightSnapshot: buildQuotationWeightSnapshot(weight.items, weight.specialPackagingGrams, [...weight.quantities.map(row => row.quantity), ...captured.quantities]) } : {}), customerQuote: snapshot, sheetQuote: snapshot, systemQuantityQuotes: { quantities: [...captured.quantities], rows: entries.map(entry => ({ optionId: entry.option.id, prices: [...captured.rows.find(row => row.key === entry.key)!.systemPrices] })) } }, sheet: { ...sheet, rows } }
+    return { ...item, input: { ...item.input, ...(item.input.quoteMode === 'shipping-only' ? { shippingBatchSheet: { ...sheet, rows } } : {}), ...(weight ? { weightSnapshot: buildQuotationWeightSnapshot(weight.items, weight.specialPackagingGrams, [...weight.quantities.map(row => row.quantity), ...captured.quantities]) } : {}), customerQuote: snapshot, sheetQuote: snapshot, systemQuantityQuotes: { quantities: [...captured.quantities], rows: entries.map(entry => ({ optionId: entry.option.id, prices: [...captured.rows.find(row => row.key === entry.key)!.systemPrices] })) } }, sheet: { ...sheet, rows } }
   })
-  const result = mergeBatchSingle(items as BatchSingleItem[])
+  const result = (items[0]?.input.quoteMode === 'shipping-only' ? mergeBatchShipping : mergeBatchSingle)(items as BatchSingleItem[])
   const rowsByKey = new Map(result.sheet.rows.map(row => [row.key, row]))
   result.sheet.rows = sheet.rows.map((row, index) => ({ ...rowsByKey.get(savedKeys.get(row.key)!)!, number: index + 1 }))
   return result

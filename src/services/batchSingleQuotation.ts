@@ -9,6 +9,7 @@ import { request } from './http'
 import { saveQuotationBatch, type QuotationBatchResult } from './quotationBatchSubmission'
 
 export interface BatchSingleItem {
+  entryId?: string
   input: Parameters<typeof createQuotationRecord>[0]
   conditions: QuotationDraftPayload
   sheet: CustomerQuoteSheet
@@ -17,7 +18,7 @@ export interface BatchSingleDocument {
   createdRecords?: QuotationBatchResult['records']
   schemaVersion: 1
   customerName: string
-  items: Array<Pick<BatchSingleItem, 'input' | 'sheet'>>
+  items: Array<Pick<BatchSingleItem, 'input' | 'sheet' | 'entryId'>>
   sheet: CustomerQuoteSheet
   id?: string
   no?: string
@@ -63,13 +64,22 @@ export function parseBatchSingleSkus(text: string): BatchSingleLine[] {
     return { sku, selected: !error, error }
   })
 }
-export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument {
+export function batchItemLabel(item: Pick<BatchSingleItem, 'input' | 'entryId'>) {
+  if (item.input.quoteMode !== 'shipping-only') return item.input.primarySku
+  return shippingEntryLabel(item.entryId || '', item.input.manualPricing?.weightGrams || 0, item.input.shippingNote || '')
+}
+export function shippingEntryLabel(id: string, grams: number, note: string) { return id + ' · ' + grams + 'g' + (note.trim() ? ' · ' + note.trim() : '') }
+export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument { return mergeBatchItems(items, false) }
+export function mergeBatchShipping(items: BatchSingleItem[]): BatchSingleDocument { return mergeBatchItems(items, true) }
+function mergeBatchItems(items: BatchSingleItem[], shipping: boolean): BatchSingleDocument {
   if (!items.length || items.length > 50) throw new Error('请选择1至50个已完成报价的 SKU')
   const first = items[0]!, seen = new Set<string>()
   for (const item of items) {
-    if (!isSingleQuotation(item.input.quoteMode) || item.input.quoteMode !== first.input.quoteMode || seen.has(item.input.primarySku)) throw new Error('批量单品不能混入其他模式或重复 SKU')
+    if (shipping) {
+      if (item.input.quoteMode !== 'shipping-only' || !/^[1-9]\d{0,5}$/.test(item.entryId || '') || seen.has(item.entryId!) || !item.input.manualPricing || item.input.manualPricing.costCny !== 0 || item.input.manualPricing.weightGrams <= 0) throw new Error('批量代发须为有效克重和独立录入行')
+    } else if (!isSingleQuotation(item.input.quoteMode) || item.input.quoteMode !== first.input.quoteMode || seen.has(item.input.primarySku)) throw new Error('批量单品不能混入其他模式或重复 SKU')
     if (isWomensQuotation(item.input.quoteMode) && (!item.input.womensPricing || JSON.stringify(item.input.womensPricing) !== JSON.stringify(first.input.womensPricing))) throw new Error('女装系数规则已变化，请统一重新生成整批报价')
-    seen.add(item.input.primarySku)
+    seen.add(shipping ? item.entryId! : item.input.primarySku)
     if (item.input.customerName !== first.input.customerName || item.input.customerGrade !== first.input.customerGrade || item.input.exchangeRate !== first.input.exchangeRate || item.input.commissionThreshold !== first.input.commissionThreshold) throw new Error('客户、等级、汇率或佣金条件不一致，请统一重新生成')
     if (JSON.stringify(item.input.customerQuote?.quantities) !== JSON.stringify(first.input.customerQuote?.quantities)) throw new Error('各 SKU 的数量列必须一致，请重新生成')
     if (item.sheet.issues.length || !item.sheet.rows.length) throw new Error(`${item.input.primarySku}：报价单尚未准备好`)
@@ -86,10 +96,14 @@ export function mergeBatchSingle(items: BatchSingleItem[]): BatchSingleDocument 
       const members = source ? options.filter(option => scope(option) === scope(source)).map(option => (option as { quoteSheetKey?: string }).quoteSheetKey ?? option.id) : plan.members.map(member => member.optionId)
       return { key: item.sheet.rows.find(row => row.averageId === plan.id)!.key, members }
     }))
-    return orderQuoteRows(item.sheet.rows, order, row => row.key).map(row => ({ ...row, prices: [...row.prices], key: `${index}:${row.key}`, sku: item.input.primarySku }))
+    return orderQuoteRows(item.sheet.rows, order, row => row.key).map(row => ({ ...row, prices: [...row.prices], key: `${index}:${row.key}`, sku: batchItemLabel(item) }))
   }).map((row, index) => ({ ...row, number: index + 1 }))
   if (sheet.rows.length > 500) throw new Error('合并报价最多500条渠道明细，请减少 SKU 或渠道')
   return JSON.parse(JSON.stringify({ schemaVersion: 1, customerName: first.input.customerName, items, sheet }))
+}
+export async function saveBatchShipping(document: BatchSingleDocument, key: string): Promise<BatchSingleDocument> {
+  const result = await saveQuotationBatch({ kind: 'shipping-only', document }, key)
+  return { ...document, no: result.batchNo, createdRecords: result.records }
 }
 export async function saveBatchSingle(document: BatchSingleDocument, key: string): Promise<BatchSingleDocument> {
   const result = await saveQuotationBatch({ kind: 'single', document }, key)

@@ -3,13 +3,16 @@ import { isManualQuotation, quotationModeLabels } from './quotationModes'
 import type { QuotationRecord, QuotationRecordQuoteOption } from './quotationRecords'
 import { quoteSheetAssetPhoto } from './quoteSheetPhotos'
 import { recordHiddenOptionIds } from './customerQuotePrices'
-import { quoteSheetBundleSkus, type QuoteSheetSourceRow } from './customerQuoteSheet'
+import { quoteSheetRowKey, quoteSheetBundleSkus, type QuoteSheetSourceRow } from './customerQuoteSheet'
 
 /** Adapt the saved snapshot only. No current logistics lookup or price recalculation. */
 export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
   if(record.quoteMode==='fob')throw new Error('FOB报价使用已保存的独立报价单快照')
+  const shippingBatch = record.quoteMode === 'shipping-only' && !!record.quotationBatch
+  const shippingLabel = shippingBatch ? record.shippingBatchSheet?.rows[0]?.sku || record.quotationBatch!.index + ' · ' + record.manualPricing?.weightGrams + 'g' + (record.shippingNote ? ' · ' + record.shippingNote : '') : undefined
   const options = record.quoteOptions ?? record.specifiedQuotes ?? []
   const rows: QuoteSheetSourceRow[] = options.map(option => ({
+    ...(shippingLabel ? { sku: shippingLabel } : {}),
     country: String(('countryCode' in option && option.countryCode) || option.country),
     quoteRegion: option.quoteRegion,
     ...('id' in option ? { availabilityMessage: (option as QuotationRecordQuoteOption).availabilityMessage, quantityMessages: (option as QuotationRecordQuoteOption).quantityMessages } : {}),
@@ -24,5 +27,6 @@ export function quotationRecordQuoteSheetSource(record: QuotationRecord) {
   const snapshot = record.customerQuote ?? record.sheetQuote
   const saved = snapshot ? { ...snapshot, hiddenOptionIds: recordHiddenOptionIds(record) } : undefined
   const contact = saved?.contact ?? record.sheetQuote?.contact
-  return { quoteMode: record.quoteMode, initialPhotos: snapshot?.photos ?? record.sheetQuote?.photos ?? quoteSheetAssetPhoto(record.productImage), initialSystemQuote: record.systemQuantityQuotes, recordMode: true, skus: isManualQuotation(record.quoteMode) ? [quotationModeLabels[record.quoteMode]] : isBundleQuotation(record.quoteMode) && record.bundleItems?.length ? quoteSheetBundleSkus(record.bundleItems) : [record.primarySku], rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: isBundleQuotation(record.quoteMode), initialQuote: saved && contact ? { ...saved, contact } : saved }
+  const initialSheet = shippingBatch && record.shippingBatchSheet ? { ...record.shippingBatchSheet, rows: record.shippingBatchSheet.rows.map(row => { const index = options.findIndex(option => 'quoteSheetKey' in option && option.quoteSheetKey === row.key); return { ...row, key: index >= 0 ? quoteSheetRowKey(rows[index]!) : row.key } }) } : undefined
+  return { initialSheet, batchAverage: shippingBatch, quoteMode: record.quoteMode, initialPhotos: snapshot?.photos ?? record.sheetQuote?.photos ?? quoteSheetAssetPhoto(record.productImage), initialSystemQuote: record.systemQuantityQuotes, recordMode: true, skus: isManualQuotation(record.quoteMode) ? [quotationModeLabels[record.quoteMode]] : isBundleQuotation(record.quoteMode) && record.bundleItems?.length ? quoteSheetBundleSkus(record.bundleItems) : [record.primarySku], rows, countries: [], salesperson: record.salespersonName, customQuantity: record.customQuoteQuantity || 0, bundle: isBundleQuotation(record.quoteMode), initialQuote: saved && contact ? { ...saved, contact } : saved }
 }

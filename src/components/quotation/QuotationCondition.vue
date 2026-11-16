@@ -23,7 +23,7 @@ function changeMode(event: Event) {
 </script>
 
 <template>
-  <section class="condition-card" :class="{ 'batch-conditions': singleOnly }">
+  <section class="condition-card" :class="{ 'batch-conditions': singleOnly, 'shipping-batch-conditions': singleOnly && mode === 'shipping-only' }">
     <header><div><b><i>01</i> 报价条件</b><span>{{ mode === 'fob' ? '按报价分类与采购阶梯生成批发报价，校验含票价格口径' : isManualQuotation(mode) ? '手动填写条件，按现有规则查询渠道报价' : '系统自动匹配采购成本，并在报价矩阵中生成可用渠道' }}</span></div><p><span>当前报价业务员</span><strong>{{ salesperson }}</strong><em>登录账号自动带出</em></p></header>
     <div class="condition-grid" :class="{ bundle: isBundleQuotation(mode) }">
       <label v-if="mode !== 'fob'" class="customer-field" data-validation-field="customerName" :class="{ invalid:invalidFields.includes('customerName') }"><span>客户名称 <em>必填</em></span><CustomerNameInput :model-value="customerName" :selected-id="selectedCustomerId" :customers="customers" @update:model-value="$emit('update:customerName',$event)" @select="$emit('selectCustomer',$event)"/><small>{{ operationMessage || '手动填写，不加公司操作费' }}</small><small v-if="invalidFields.includes('customerName')" class="field-error">请填写客户名称</small></label>
@@ -39,7 +39,7 @@ function changeMode(event: Event) {
       <input aria-label="佣金阈值" inputmode="decimal" type="text" :value="commissionThreshold" :aria-invalid="!!commissionError" aria-describedby="commission-help" @input="$emit('update:commissionThreshold', ($event.target as HTMLInputElement).value)">
       <small id="commission-help" :class="{ 'field-error': commissionError }">{{ commissionError || '最终报价 ÷ 此值，默认1不调整；例如0.95' }}</small>
     </label>
-    <footer v-if="isSingleQuotation(mode)"><span>{{ singleOnly ? '加载渠道后选择报价方案，公共条件将应用于上方勾选的全部 SKU。' : '查询后将刷新商品成本、重量及下方渠道报价矩阵。' }}</span><button type="button" @click="$emit('query')">{{ singleOnly ? '加载渠道' : '查询商品' }}</button></footer>
+    <footer v-if="isSingleQuotation(mode) || singleOnly"><span>{{ singleOnly ? (mode === 'shipping-only' ? '公共条件和所选渠道应用于全部克重，分别计算。' : '加载渠道后选择报价方案，公共条件将应用于上方勾选的全部 SKU。') : '查询后将刷新商品成本、重量及下方渠道报价矩阵。' }}</span><button type="button" @click="$emit('query')">{{ singleOnly ? '加载渠道' : '查询商品' }}</button></footer>
     </div>
   </section>
 </template>
@@ -53,4 +53,5 @@ function changeMode(event: Event) {
 .condition-grid label.invalid input,.condition-grid label.invalid select{border-color:#e2523f;background:#fff8f6;box-shadow:0 0 0 3px rgba(226,82,63,.09)}.condition-grid .field-error{color:#c43f31;font-size:9px;font-weight:750}
 .commission-field{display:grid;gap:6px;margin-top:14px;max-width:440px;color:#66737e;font-size:11px}.commission-field input{width:160px;height:36px;box-sizing:border-box;border:1px solid #d9e0e6;border-radius:7px;padding:0 10px}.commission-field small{font-size:10px;color:#8c97a1}.commission-field.invalid input{border-color:#e2523f;background:#fff8f6}.commission-field .field-error{color:#c43f31}
 .batch-conditions header{display:none}.batch-conditions .condition-grid{margin-top:0}.batch-conditions .commission-field{margin-top:0}.batch-conditions footer{grid-column:1/-1;margin-top:0;padding-top:8px}.batch-conditions footer button{background:#ff9400;color:#17232d;min-height:42px}.batch-conditions .condition-grid{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:900px){.batch-conditions .condition-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:500px){.batch-conditions .condition-grid{grid-template-columns:1fr}}
+.shipping-batch-conditions .condition-grid footer{display:flex;flex-direction:row;justify-content:space-between;align-items:center;width:auto;border-top:1px solid #edf0f3;padding-top:12px}.shipping-batch-conditions .condition-grid footer button{flex:0 0 auto;width:auto;min-width:128px;min-height:38px;height:38px;margin:0;padding:0 20px;color:#fff;background:#f28b00;font-size:13px;border-radius:6px}.shipping-batch-conditions .condition-grid footer span{display:block;font-size:12px;color:#748399}@media(max-width:500px){.shipping-batch-conditions .condition-grid footer{flex-wrap:wrap}.shipping-batch-conditions .condition-grid footer button{margin-left:auto}}
 </style>

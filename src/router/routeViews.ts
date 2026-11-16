@@ -10,6 +10,7 @@ export const routeViewLoaders: Record<string, RouteViewLoader> = {
   '/change-password': () => import('@/views/ChangePasswordView.vue'),
   '/quotation/no-access': () => import('@/views/NoAccessView.vue'),
   '/quotation/overview': () => import('@/views/QuotationOverviewView.vue'),
+  '/quotation/batch-shipping': () => import('@/views/BatchShippingQuotationView.vue'),
   '/quotation/batch-single': () => import('@/views/BatchSingleQuotationView.vue'),
   '/quotation': () => import('@/views/QuotationSystemView.vue'),
   '/quotation/withdrawn-edit': () => import('@/views/WithdrawnQuotationView.vue'),
