@@ -13,6 +13,7 @@ const router = createRouter({
     { path: '/change-password', name: 'change-password', component: routeView('/change-password'), meta: { title: '修改临时密码' } },
     { path: '/quotation/no-access', name: 'quotation-no-access', component: routeView('/quotation/no-access'), meta: { title: '暂无业务权限' } },
     { path: '/quotation/overview', name: 'quotation-overview', component: routeView('/quotation/overview'), meta: { title: '报价情况预览', permission: 'allRecords' } },
+    { path: '/quotation/batch-shipping', name: 'quotation-batch-shipping', component: routeView('/quotation/batch-shipping'), meta: { title: '批量代发货报价', permissions: ['quote', 'myRecords', 'allRecords'] } },
     { path: '/quotation/batch-single', name: 'quotation-batch-single', component: routeView('/quotation/batch-single'), meta: { title: '批量单品报价', permissions: ['quote', 'myRecords', 'allRecords'] } },
     { path: '/quotation', name: 'quotation', component: routeView('/quotation'), meta: { title: '我的报价', permission: 'quote' } },
     { path: '/quotation/withdrawn-edit', name: 'quotation-withdrawn-edit', component: routeView('/quotation/withdrawn-edit'), meta: { title: '撤回报价编辑', permission: 'quote', permissions: ['myRecords', 'allRecords'] } },

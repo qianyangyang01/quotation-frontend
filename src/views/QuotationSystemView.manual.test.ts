@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { createApp, nextTick, type App } from 'vue'
+import { useRoute } from 'vue-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import View from './QuotationSystemView.vue'
 import { api } from '@/services/http'
@@ -14,7 +15,7 @@ import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteShee
 import { quoteSheetModeDefaults } from '@/data/customerQuoteSheet'
 import { authState, roleDefinitions } from '@/data/authStore'
 
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }), onBeforeRouteLeave: vi.fn() }))
+vi.mock('vue-router', () => ({ useRoute: vi.fn(() => ({ query: {} })), useRouter: () => ({ replace: vi.fn() }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async original => ({ ...await original<typeof import('@/services/quotationSync')>(), startQuotationSync: vi.fn(() => vi.fn()) }))
 vi.mock('@/data/publishedLogisticsRepository', async original => ({
   ...await original<typeof import('@/data/publishedLogisticsRepository')>(),
@@ -30,7 +31,7 @@ const rule = {
 const fees = (amount: number) => ({ countries: [{ country: '美国', fixedFeeUsd: amount, selected: true, enabled: true, sortOrder: 1 }], providers: [{ provider: '燕文', mode: 'taxable', selected: true, channels: [] }], updatedAt: 'test' })
 let app: App | undefined, host: HTMLDivElement
 let state: {
-  notice: string; draftReady: boolean; manualCost: string; manualWeightGrams: string; manualQueried: boolean; manualPanelError: string
+  initializeQuotationWorkspace: () => Promise<void>; notice: string; draftReady: boolean; manualCost: string; manualWeightGrams: string; manualQueried: boolean; manualPanelError: string
   shippingNote: string; quoteSheetResetKey: string; activeQuoteMatrixContextKey: string; resetLocalDraft: () => Promise<void>
   manualMode: boolean; quoteMode: QuotationMode; products: QuotationProduct[]; specialPackagingGrams: string
   quoteMatrixMode: string; commonQuoteRows: QuotationMatrixRow[]; templateQuoteRows: QuotationMatrixRow[]
@@ -278,4 +279,17 @@ it.each(['single', 'bundle'] as const)('changing the customer pricing for %s pre
   expect(state.quoteMode).toBe(mode)
   expect(state.products[0]!.quantity).toBe(3)
   expect(state.quoteSheetResetKey).toBe(sheetKey)
+})
+
+it('opens single shipping entry from the batch switch without a purchase query', async () => {
+  vi.mocked(useRoute).mockReturnValue({query:{mode:'shipping-only'}} as never)
+  app?.unmount();host.remove()
+  host=document.createElement('div');document.body.append(host)
+  app=createApp(View);const vm=app.mount(host)
+  state=(vm.$ as unknown as {setupState:typeof state}).setupState
+  await vi.waitFor(()=>expect(state.draftReady).toBe(true))
+  await vi.waitFor(()=>expect(state.quoteMode).toBe('shipping-only'))
+  expect(host.textContent).toContain('单条录入')
+  expect(host.textContent).not.toContain('采购阶梯')
+  expect(vi.mocked(api.get).mock.calls.some(([path])=>path.includes('/purchase-products'))).toBe(false)
 })

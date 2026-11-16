@@ -17,7 +17,7 @@ it('keeps temporary photos through repricing with the production product reset k
   const declaration = ast.statements.find(n => ts.isVariableStatement(n) && n.declarationList.declarations.some(d => d.name.getText(ast) === 'quoteSheetResetKey'))!
   const currentAuthUser = ref({ id: 'employee-a' }), quoteMode = ref('bundle'), skus = ref(['ONE', 'TWO'])
   const key = new Function('computed', 'currentAuthUser', 'quoteMode', 'activePurchaseSkus', 'quotationInputMode', ts.transpile(declaration.getText(ast)) + ';return quoteSheetResetKey')(computed, currentAuthUser, quoteMode, () => skus.value, quotationInputMode)
-  expect(source.match(/<QuotationPreviewSave[\s\S]*?\/>/)![0]).toContain(':reset-key="quoteSheetResetKey"')
+  expect(source.match(/<QuotationPreviewSave[\s\S]*?\/>/)![0]).toContain(':reset-key="batchShipping ? quoteSheetResetKey + \'|\' + batchShippingRevision : quoteSheetResetKey"')
   const revision = ref(1)
   const row: QuotationMatrixRow = { country:'US', carrier:'4PX', channelKey:'a', ruleId:1, rule:'', channelCode:'a', transport:'', eta:'5-8 days', quote1:1, quote2:2, quote3:3, quoteCustom:5, freight:0, totalCostCny:6.7, profitCny:0, quoteCny:6.7, taxIncluded:false, taxConfigured:true, taxRatePercent:null, countryFixedTaxUsd:0, taxFeeMode:'no-tax', taxLabel:'无税费', tax1Usd:0, tax2Usd:0, tax3Usd:0, taxCustomUsd:0 }
   const image = document.createElement('img')

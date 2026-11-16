@@ -65,6 +65,15 @@ function restoredEdits() {
   const date = /^(\d{1,2}) ([A-Za-z]{3}) (\d{4})$/.exec(sheet.date)
   const month = date ? ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(date[2]!) + 1 : 0
   Object.assign(result, { title: sheet.title, notes: sheet.notes, agent: sheet.agent, whatsapp: sheet.whatsapp, hiddenColumns: sheet.hiddenColumns, columnOrder: sheet.columnOrder, sizeRules: sheet.sizeRules, sizeRulesEnabled: typeof sheet.sizeRules === 'string', ...(date && month ? { date: `${date[3]}-${String(month).padStart(2,'0')}-${date[1]!.padStart(2,'0')}` } : {}) })
+  // A record may have been edited after its original batch sheet was saved.
+  // Restore the latest editable snapshot, including deliberately cleared values.
+  if (props.recordMode && props.initialQuote) {
+    Object.assign(result, props.initialQuote.contact)
+    if (props.initialQuote.sizeRules !== undefined || props.initialQuote.sizeRulesEnabled !== undefined) {
+      result.sizeRules = props.initialQuote.sizeRules
+      result.sizeRulesEnabled = props.initialQuote.sizeRulesEnabled ?? typeof props.initialQuote.sizeRules === 'string'
+    }
+  }
   for (const row of sheet.rows.filter(row => !row.averageId)) {
     result.fields ||= {}
     result.fields[row.key] = { number: String(row.number), country: row.country, region: row.region, provider: row.provider, processingTime: row.processingTime }
@@ -258,12 +267,12 @@ function removeRow(key: string) {
   if (!props.canRemoveRows || props.recordMode || rowControlsDisabled.value) return
   emit('removeRow', key)
 }
-function buildSheet(rows: QuoteSheetSourceRow[]) { return buildCustomerQuoteSheet({
+function buildSheet(rows: QuoteSheetSourceRow[]) { const result = buildCustomerQuoteSheet({
   rows, quoteMode: props.quoteMode, countries: props.countries, edits: edits.value, skus: props.skus,
   customQuantity: props.customQuantity, bundle: props.bundle,
   quantities: quantities.value, quantityUnits: quantityUnits.value, calculatePrice: props.sourcePending ? undefined : cachedSystemPrice,
   legacyCustomIndex: columns.value.findIndex(column => column.legacyCustom),
-}) }
+}); if (props.batchAverage && props.quoteMode === 'shipping-only') { result.groupBySku = true; result.skuLabel = 'Weight / Remark' }; return result }
 function loadAveragePlans() {
   return mapAveragePlans(props.initialQuote?.averagePlans, id => { const row = props.rows.find(row => row.channelKey === id); return row ? quoteSheetRowKey(row) : id })
 }
@@ -319,7 +328,7 @@ function addBatchAverages(plans: AveragePlan[]) {
     return { key: `average:${plan.id}`, members }
   }))
   averagePlans.value = [...averagePlans.value.filter(plan => !keys.has(`average:${plan.id}`)), ...plans]
-  averageNotice.value = `已为 ${plans.length} 个 SKU 生成平均行，分别放在对应国家的明细上方`
+  averageNotice.value = `已为 ${plans.length} ${props.quoteMode === 'shipping-only' ? '条克重' : '个 SKU'}生成平均行，分别放在对应国家的明细上方`
   invalidate()
 }
 function removeAverage(id: string) { for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(id + ':')) delete averagePriceErrors.value[key]; averagePlans.value = averagePlans.value.filter(plan => plan.id !== id); invalidate() }
@@ -497,7 +506,7 @@ watch(() => [props.contextKey, props.resetKey, props.rows, props.countries, prop
 watch(() => [props.contextKey, props.resetKey], () => {
   const resetKey = props.resetKey ?? props.contextKey
   if (resetKey !== previousResetKey) {
-    edits.value = initialEdits()
+    edits.value = restoredEdits()
     columns.value = initialColumns()
     loadSavedPrices()
     previousResetKey = resetKey
@@ -809,7 +818,7 @@ onBeforeUnmount(() => {
     <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
     <p v-if="outputBlocked" class="sheet-pending" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
-    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :batch="batchAverage" :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @add-batch="addBatchAverages" @remove="removeAverage" /></div>
+    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :shipping="quoteMode === 'shipping-only'" :batch="batchAverage" :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @add-batch="addBatchAverages" @remove="removeAverage" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
     <p v-if="photoLoading || photoSaving" class="sheet-pending" role="status">{{ photoSaving ? '正在保存报价单图片…' : '正在读取报价单图片…' }}</p>
     <p v-if="photoError" class="sheet-message failed" role="alert">{{ photoError }} <button type="button" @click="reloadSavedPhotos">重试读取图片</button></p>
@@ -869,7 +878,7 @@ onBeforeUnmount(() => {
       </div>
       <template v-if="editing">
       <p v-if="!sheet.rows.length" class="sheet-pending" role="status">所有行已隐藏，请恢复至少一行后再预览或复制。</p>
-      <div v-if="paginated" class="sheet-row-tools"><input v-model="rowSearch" type="search" placeholder="搜索 SKU" aria-label="搜索报价单 SKU"><span v-if="batchAverage" class="sheet-inline-help">点击文本即可编辑</span><span>共 {{ editorSheet.rows.length }} 行 · 搜索与分页仅影响屏幕显示，保存、复制和图片包含全部明细</span><button :disabled="rowPage===0" @click="rowPage--">上一页</button><span>{{ rowPage+1 }} / {{ rowPageCount }}</span><button :disabled="rowPage+1>=rowPageCount" @click="rowPage++">下一页</button><select v-model.number="rowPageSize" aria-label="每页报价明细数"><option :value="12">12 行</option><option :value="30">30 行</option><option :value="60">60 行</option></select></div><div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
+      <div v-if="paginated" class="sheet-row-tools"><input v-model="rowSearch" type="search" :placeholder="quoteMode === 'shipping-only' ? '搜索克重或备注' : '搜索 SKU'" :aria-label="quoteMode === 'shipping-only' ? '搜索报价单克重或备注' : '搜索报价单 SKU'"><span v-if="batchAverage" class="sheet-inline-help">点击文本即可编辑</span><span>共 {{ editorSheet.rows.length }} 行 · 搜索与分页仅影响屏幕显示，保存、复制和图片包含全部明细</span><button :disabled="rowPage===0" @click="rowPage--">上一页</button><span>{{ rowPage+1 }} / {{ rowPageCount }}</span><button :disabled="rowPage+1>=rowPageCount" @click="rowPage++">下一页</button><select v-model.number="rowPageSize" aria-label="每页报价明细数"><option :value="12">12 行</option><option :value="30">30 行</option><option :value="60">60 行</option></select></div><div ref="editorScroll" class="sheet-editor-scroll" @dragover="scrollWhileDragging">
         <table>
           <thead>
             <tr>

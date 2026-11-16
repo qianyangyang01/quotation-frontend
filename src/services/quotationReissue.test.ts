@@ -10,6 +10,14 @@ const record = (overrides: Partial<QuotationRecord> = {}) => normalizeQuotationR
 })!
 
 describe('reissuing a quotation as new editable inputs', () => {
+  it('reissues only the chosen shipping weight and selections without old batch identity or prices',()=>{
+    const original=record({quoteMode:'shipping-only',primarySku:'',manualPricing:{costCny:0,weightGrams:350},shippingNote:'代发样品',quotationBatch:{id:'batch',no:'B1',count:20,index:7}})
+    const before=JSON.stringify(original),payload=quotationReissuePayload(original)
+    expect(payload).toMatchObject({quoteMode:'shipping-only',manualPricing:{costCny:0,weightGrams:350},shippingNote:'代发样品',skuSearch:''})
+    for(const field of ['quotationBatch','shippingBatchSheet','systemQuantityQuotes','customerQuote','financeReviewStatus'])expect(payload).not.toHaveProperty(field)
+    payload.manualPricing!.weightGrams=500
+    expect(JSON.stringify(original)).toBe(before)
+  })
   it('starts a new ordinary quotation without copying priority or changing the original', () => {
     const original=record({priorityProcessing:true,financeReviewStatus:'pending'})
     const before=JSON.stringify(original)

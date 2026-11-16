@@ -3,6 +3,18 @@ import { normalizeQuotationRecord, type QuotationRecord } from '@/data/quotation
 import { type CustomerQuoteSheet, customerQuoteSheetHtml, customerQuoteSheetTsv } from '@/data/customerQuoteSheet'
 import { quotationRecordCopyLayout } from '@/data/quotationRecordCopyLayout'
 import { quotationRecordQuoteOnlyLayout } from '@/data/quotationRecordQuoteOnlyLayout'
+import type { QuoteSheetPhoto } from '@/data/quoteSheetPhotos'
+
+/** Shipping entries share one photo panel. Never imply different per-record photos are shared. */
+export function shippingBatchPhotos(records: QuotationRecord[]): QuoteSheetPhoto[] {
+  if (records[0]?.quoteMode !== 'shipping-only') return []
+  const photos = records.map(record => {
+    const snapshot = record.customerQuote ?? record.sheetQuote
+    return snapshot?.showPhotos === false ? [] : snapshot?.photos ?? record.sheetQuote?.photos ?? []
+  })
+  if (photos.some(value => JSON.stringify(value) !== JSON.stringify(photos[0]))) throw new Error('本批图片已分别修改，请分别复制各条报价图片')
+  return (photos[0] ?? []).map(photo => ({ ...photo }))
+}
 
 export type BatchCopyKind = 'quote' | 'full' | 'image'
 export async function loadQuotationBatchRecords(record: QuotationRecord, purpose: 'copy' | 'trash' = 'copy'): Promise<QuotationRecord[]> {

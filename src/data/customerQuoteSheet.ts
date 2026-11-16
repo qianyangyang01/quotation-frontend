@@ -86,6 +86,7 @@ export type CustomerQuoteSheetRow = {
   prices: Array<number | null>; sourceDescription: string
 }
 export type CustomerQuoteSheet = {
+  groupBySku?: boolean
   fobBatch?: boolean; customerName?: string
   showQuantityRange?: boolean
   priceGroupLabel?: string
@@ -353,7 +354,7 @@ export function customerQuoteSheetHtml(sheet: CustomerQuoteSheet) {
   const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const text = (value: string) => escape(/^[=+@-]/.test(value.trim()) ? "'" + value : value).replace(/\r?\n/g, '<br>')
   return '<table><thead><tr>' + table[0].map(label => '<th>' + escape(label) + '</th>').join('') + '</tr></thead><tbody>' +
-    table.slice(1).map((row, index) => '<tr>' + row.map((cell, column) => {
+    table.slice(1).map((row, index) => '<tr' + (sheet.groupBySku && index > 0 && sheet.rows[index]?.sku !== sheet.rows[index - 1]?.sku ? ' style="border-top:3px solid #9ca6b3"' : '') + '>' + row.map((cell, column) => {
       if (column === rulesIndex && index > 0) return ''
       return '<td style="white-space:pre-wrap;mso-number-format:\'@\'"' + (column === rulesIndex ? ' rowspan="' + sheet.rows.length + '"' : '') + '>' + text(cell) + '</td>'
     }).join('') + '</tr>').join('') + '</tbody></table>'

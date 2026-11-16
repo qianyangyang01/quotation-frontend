@@ -5,8 +5,8 @@ import type { BatchSingleDocument } from './batchSingleQuotation'
 export interface QuotationBatchResult {
   batchId: string
   batchNo: string
-  records: Array<{ id: string; no: string; primarySku: string; quoteMode: 'single' | 'womens-single' | 'fob' }>
+  records: Array<{ id: string; no: string; primarySku: string; quoteMode: 'single' | 'womens-single' | 'fob' | 'shipping-only' }>
 }
-export function saveQuotationBatch(body: { kind: 'single'; document: BatchSingleDocument } | { kind: 'fob'; customerName: string; fob: FobQuotationSnapshot }, key: string) {
+export function saveQuotationBatch(body: { kind: 'single' | 'shipping-only'; document: BatchSingleDocument } | { kind: 'fob'; customerName: string; fob: FobQuotationSnapshot }, key: string) {
   return request<QuotationBatchResult>('/quotations/batch', { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) })
 }

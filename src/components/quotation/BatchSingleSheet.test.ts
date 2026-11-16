@@ -8,6 +8,15 @@ vi.mock('@/services/customerQuoteSheetRenderer', () => ({ renderCustomerQuoteShe
 let app: App
 const button=(label:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===label)!
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.restoreAllMocks()})
+it('keeps separators between shipping entries after save and on later pages',async()=>{
+ const sheet:CustomerQuoteSheet={groupBySku:true,agent:'QA',date:'2026-11-16',quantityLabels:['1 pc'],issues:[],rows:Array.from({length:60},(_,i)=>({key:String(i),number:i+1,sku:`${Math.floor(i/3)+1} · 200g · 同款`,country:'US',provider:'4PX',shippingTime:'7-12 days',prices:[5],sourceDescription:''}))}
+ const host=document.createElement('div');document.body.append(host);app=createApp(Sheet,{sheet,paginated:true});app.mount(host);await nextTick()
+ expect(document.querySelectorAll('tr.group-start')).toHaveLength(3)
+ expect(document.querySelector('tr.group-start')!.textContent).toContain('2 · 200g')
+ button('下一页').click();await nextTick()
+ expect(document.querySelectorAll('tr.group-start')).toHaveLength(3)
+ expect(document.querySelector('tr.group-start')!.textContent).toContain('6 · 200g')
+})
 it('paginates and searches all SKUs without trimming exports or mutating the full sheet',async()=>{
  const sheet:CustomerQuoteSheet={agent:'QA',date:'2026-10-11',quantityLabels:['1 pc'],issues:[],rows:Array.from({length:60},(_,i)=>({key:String(i),number:i+1,sku:`SKU-${Math.floor(i/3)}`,country:'US',provider:'4PX',shippingTime:'7-12 days',prices:[i+1],sourceDescription:''}))}
  const before=JSON.stringify(sheet),writeText=vi.fn().mockResolvedValue(undefined)

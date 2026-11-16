@@ -14,8 +14,8 @@ public class BatchQuotationSubmission {
     public BatchQuotationSubmission(BatchSingleQuotation single, FobQuotation fob) { this.single=single; this.fob=fob; }
 
     public List<ObjectNode> prepare(JsonNode body) {
-        if ("single".equals(body.path("kind").asText())) {
-            var document=single.prepare(body.path("document"));
+        if ("single".equals(body.path("kind").asText()) || "shipping-only".equals(body.path("kind").asText())) {
+            var document="shipping-only".equals(body.path("kind").asText()) ? single.prepareShipping(body.path("document")) : single.prepare(body.path("document"));
             var result=new ArrayList<ObjectNode>();
             for (var item:document.path("items")) result.add((ObjectNode)item.path("input").deepCopy());
             return result;

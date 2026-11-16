@@ -227,6 +227,10 @@ export async function renderCustomerQuoteSheet(sheet: CustomerQuoteSheet, isCanc
       const height = heights[index]
       context.fillStyle = row.averageId ? '#fff1df' : (offset + index) % 2 ? '#fff2e9' : '#ffffff'
       context.fillRect(22, y, right - 22, height)
+      if (sheet.groupBySku && index > 0 && row.sku !== rows[index - 1]?.sku) {
+        context.fillStyle = '#eef1f4'; context.fillRect(22, y, right - 22, 7)
+        context.fillStyle = '#9ca6b3'; context.fillRect(22, y, right - 22, 2)
+      }
       const values = valuesFor(row)
       context.fillStyle = row.averageId ? '#d96100' : '#111111'
       values.forEach((value, column) => {

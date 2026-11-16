@@ -9,6 +9,7 @@ import type { QuoteSheetRecovery } from '@/services/quoteSheetRecovery'
 
 const props = withDefaults(defineProps<{
   batchSample?: boolean
+  batchShipping?: boolean
   batchSize?: number
   saveLabel?: string
   initialQuantities?: number[]
@@ -70,7 +71,7 @@ const footerStatus = computed(() => {
   if (props.blockReason) return props.blockReason
   if (props.validationIssues.length) return `缺少 ${props.validationIssues.length} 项必填内容，请按上方提示补充`
   if (!hasQuoteRows.value) return '请先在上方报价矩阵中加入至少一条渠道'
-  return props.batchSample ? '当前仅为样例价格，点击生成整批报价后查看全部 SKU' : '所有已选渠道均已完成报价计算，可以保存'
+  return props.batchSample ? (props.batchShipping ? '当前仅为样例价格，生成后查看全部克重报价' : '当前仅为样例价格，点击生成整批报价后查看全部 SKU') : '所有已选渠道均已完成报价计算，可以保存'
 })
 const quoteRange = computed(() => {
   const prices = props.rows.map(row => row.quote1).filter((value): value is number => value != null && Number.isFinite(value)).sort((a, b) => a - b)
@@ -87,7 +88,7 @@ const quoteRange = computed(() => {
     </header>
 
     <div class="preview-kpis">
-      <article><i>▤</i><span><b>1</b><small>{{ batchSample ? '个样例 SKU' : '张报价单' }}</small></span></article>
+      <article><i>▤</i><span><b>1</b><small>{{ batchSample ? (batchShipping ? '条样例克重' : '个样例 SKU') : '张报价单' }}</small></span></article>
       <article><i>◎</i><span><b>{{ countryCount }}</b><small>个国家</small></span></article>
       <article><i>⌘</i><span><b>{{ rows.length }}</b><small>条渠道</small></span></article>
       <article class="range"><i>$</i><span><small>{{ batchSample ? '样例 ' : '' }}1{{ unitLabel }}报价范围</small><b>{{ quoteRange }}</b></span></article>
@@ -121,7 +122,7 @@ const quoteRange = computed(() => {
       </div>
     </section>
 
-    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i><strong v-if="batchSample">{{ batchSize || 0 }} 个 SKU × {{ rows.length }} 条公共渠道 · </strong>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? (batchSample ? '正在校验条件…' : '正在校验并保存…') : saveLabel || `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
+    <footer><span role="status" :class="{ warning:blockReason || !hasQuoteRows }"><i></i><strong v-if="batchSample">{{ batchSize || 0 }} {{ batchShipping ? '条克重' : '个 SKU' }} × {{ rows.length }} 条公共渠道 · </strong>{{ footerStatus }}</span><div><button v-if="canRetry" type="button" class="outline" :disabled="retrying || saving" @click="emit('retry')">{{ retrying ? '正在重新检查…' : '重新检查报价' }}</button><label class="priority-control"><input type="checkbox" :checked="priorityProcessing === true" :disabled="saving || retrying" @change="emit('update:priorityProcessing', ($event.target as HTMLInputElement).checked)">优先处理</label><button class="save" :disabled="!!blockReason || !hasQuoteRows || saving || retrying" @click="emit('save')">{{ saving ? (batchSample ? '正在校验条件…' : '正在校验并保存…') : saveLabel || `保存 1 张报价单 · ${countryCount}国${rows.length}渠道` }}</button></div></footer>
   </section>
 </template>
 

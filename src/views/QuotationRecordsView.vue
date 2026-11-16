@@ -663,6 +663,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
               <div v-else class="record-product-title" :class="{'shipping-product-title':row.quoteMode==='shipping-only'}"><b class="record-sku" :title="recordSku(row)">{{ recordSku(row) }}</b><strong v-if="row.quoteMode!=='shipping-only'">{{ row.productSummary }}</strong><em v-if="priorityFor(row)" class="priority-badge">优先处理</em></div>
               <em v-if="row.fob?.schemaVersion===2 && priorityFor(row)" class="priority-badge">优先处理</em>
               <div class="record-product-meta"><span class="record-commission" :class="{applied: (row.commissionThreshold ?? 1) > 0 && (row.commissionThreshold ?? 1) < 1}">{{ recordCommission(row) }}</span><small>{{ quotationModeLabels[row.quoteMode] }}<template v-if="!isMine"> · {{ row.salespersonName }}</template></small></div>
+              <small v-if="row.quoteMode === 'shipping-only' && row.manualPricing">单件实重：{{ row.manualPricing.weightGrams }}g<template v-if="row.quotationBatch"> · 本批第{{ row.quotationBatch.index }}/{{ row.quotationBatch.count }}条</template></small>
               <small class="record-number" :title="row.no">报价单号：{{ row.no }}</small>
               <small>创建于 {{ dateTime(row.createdAt) }}</small>
               <small v-if="row.lifecycleChangedAt" class="lifecycle-metadata">{{ lifecycleLabel(row.lifecycleState) }} · {{ row.lifecycleChangedBy }} · {{ dateTime(row.lifecycleChangedAt) }}<br>原因：{{ row.lifecycleReason }}</small>

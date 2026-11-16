@@ -17,7 +17,9 @@ public class BatchSingleQuotation {
     public BatchSingleQuotation(QuotationSubmissionValidator validator, QuotationReadinessService readiness, LogisticsQuotationGuard logistics) {
         this.validator = validator; this.readiness = readiness; this.logistics = logistics;
     }
-    public ObjectNode prepare(JsonNode request) {
+    public ObjectNode prepare(JsonNode request) { return prepare(request, false); }
+    public ObjectNode prepareShipping(JsonNode request) { return prepare(request, true); }
+    private ObjectNode prepare(JsonNode request, boolean shipping) {
         if (!request.isObject() || request.toString().length() > 4_000_000 || request.path("schemaVersion").asInt() != 1
             || !request.path("items").isArray() || request.path("items").isEmpty() || request.path("items").size() > 50)
             throw AppException.unprocessable("批量单品报价须包含1至50个商品，且不超过4MB");
@@ -29,10 +31,22 @@ public class BatchSingleQuotation {
             if (!(item.path("input") instanceof ObjectNode original) || !(item.path("sheet") instanceof ObjectNode sheetInput))
                 throw AppException.unprocessable("批量商品与报价单格式错误");
             var input = original.deepCopy(); var sku = input.path("primarySku").asText().trim().toUpperCase(Locale.ROOT);
-            if (!WomensPricing.isSingle(input.path("quoteMode").asText()) || !sku.matches("[A-Z0-9][A-Z0-9._/-]{0,95}") || !seen.add(sku)
+            String entryId = item.path("entryId").asText();
+            if (shipping) {
+                if (!"shipping-only".equals(input.path("quoteMode").asText()) || !entryId.matches("[1-9][0-9]{0,5}") || !seen.add(entryId)
+                    || input.has("fob") || input.has("batchSingle") || !input.path("primarySku").asText().isBlank())
+                    throw AppException.unprocessable("批量代发须为独立的克重录入行，不得混入其他报价类型");
+                var weight = input.at("/manualPricing/weightGrams");
+                if (!weight.isNumber() || weight.decimalValue().signum() <= 0 || weight.decimalValue().compareTo(new java.math.BigDecimal("1000000")) > 0 || weight.decimalValue().stripTrailingZeros().scale() > 3
+                    || !input.at("/manualPricing/costCny").isNumber() || input.at("/manualPricing/costCny").decimalValue().signum() != 0)
+                    throw AppException.unprocessable("代发重量无效或商品成本不为零");
+                String note = input.path("shippingNote").asText().trim();
+                if (note.length() > 200) throw AppException.unprocessable("代发备注不能超过200字");
+                sku = entryId + " · " + weight.decimalValue().stripTrailingZeros().toPlainString() + "g" + (note.isBlank() ? "" : " · " + note);
+            } else if (!WomensPricing.isSingle(input.path("quoteMode").asText()) || !sku.matches("[A-Z0-9][A-Z0-9._/-]{0,95}") || !seen.add(sku)
                 || input.has("fob") || input.has("batchSingle"))
                 throw AppException.unprocessable("仅允许不重复的单品 SKU 报价");
-            input.put("primarySku", sku);
+            if (!shipping) input.put("primarySku", sku);
             if (input.path("quoteOptions").size() > 100) throw AppException.unprocessable("每个 SKU 最多100条渠道");
             if (firstInput == null) firstInput = input;
             else for (var field : List.of("quoteMode", "customerName", "customerGrade", "exchangeRate", "commissionThreshold", "womensPricing"))
@@ -43,6 +57,7 @@ public class BatchSingleQuotation {
             logistics.validate(input);
             CustomerQuotePrices.initialize(input);
             var sheet = validateSheet(input, sheetInput, sku);
+            if (shipping) input.set("shippingBatchSheet", sheet.deepCopy());
             if (merged == null) { merged = sheet.deepCopy(); mergedRows = merged.putArray("rows"); }
             else if (!merged.path("quantityLabels").equals(sheet.path("quantityLabels"))) throw AppException.unprocessable("各 SKU 的数量列必须一致");
             for (var row : sheet.path("rows")) {
@@ -52,7 +67,7 @@ public class BatchSingleQuotation {
             if (mergedRows.size() > 500) throw AppException.unprocessable("合并报价最多500条渠道明细");
             // Never store caller-supplied ownership/lifecycle state as an ordinary quotation.
             input.remove(List.of("id", "no", "status", "revisions", "lifecycleState", "financeReviewStatus", "salespersonAccount", "salespersonName"));
-            var savedItem = items.addObject(); savedItem.set("input", input); savedItem.set("sheet", sheet);
+            var savedItem = items.addObject(); savedItem.set("input", input); savedItem.set("sheet", sheet); if (shipping) savedItem.put("entryId", entryId);
             itemIndex++;
         }
         // The shared editor permits moving rows across SKU groups. Accept only a permutation
