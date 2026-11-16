@@ -50,6 +50,15 @@ class SfDiscountImportTest {
     @Test void otherProvidersIgnoreSfSettlementAndDiscountColumns() throws Exception {
         for(var provider:LogisticsSourceParser.PROVIDERS)if(!provider.equals("顺丰")) {
             var input=workbook("折后运费",0.7,97,51);
+            if(provider.equals("帆之润"))try(var book=new org.apache.poi.hssf.usermodel.HSSFWorkbook(new ByteArrayInputStream(new FanzhirunSourceTest().fixture()))) {
+                var sheet=book.getSheetAt(0);
+                sheet.getRow(3).getCell(4).setCellValue(97);
+                sheet.getRow(1).createCell(8).setCellValue("折扣");sheet.getRow(3).createCell(8).setCellValue(.7);
+                sheet.getRow(1).createCell(9).setCellValue("折后运费");sheet.getRow(3).createCell(9).setCellValue(51);
+                var result=parser.parse(LogisticsSourceParserTest.bytes(book),"帆之润.xls").path("channels").get(0);
+                assertFalse(result.path("quoteReady").asBoolean(),"Fanzhirun unknown discount columns require review");
+                assertEquals(97,result.path("rows").get(0).path("pricePerKg").asDouble());continue;
+            }
             if(provider.equals("顺友"))try(var book=new XSSFWorkbook()) {
                 var sheet=book.createSheet("顺邮宝挂");
                 LogisticsSourceParserTest.row(sheet,0,"顺邮宝挂号价目表");
