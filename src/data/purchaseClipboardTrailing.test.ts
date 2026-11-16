@@ -69,6 +69,6 @@ it('uses explicit headers for shorter or reordered selections and keeps exact fi
     ['HC2601658-1', '202', '45.6', '0%'],
   ], false), 0)
   expect(validatePurchasePaste(result.rows, true, columns).records).toEqual([
-    { sourceRow: 1, sku: 'HC2601658-1', freight100Cny: 202, purchasePriceCny: 45.6, taxPoint: 0 },
+    { sourceRow: 1, sku: 'HC2601658-1', freight100Cny: 202, purchasePriceCny: 45.6, taxPoint: 0, freeShipping: '否' },
   ])
 })

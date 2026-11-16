@@ -33,6 +33,29 @@ function preview(sku = 'P-1', action = 'update', notices: string[] = []) {
 }
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.resetAllMocks(); vi.unstubAllGlobals() })
 
+it.each([false,true])('shows and saves the freight-derived flag in the paste grid, unified=%s', async unified => {
+  mount(unified,null)
+  const columns=unified ? SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS : SPECIAL_PURCHASE_PASTE_COLUMNS
+  const index=(field:string)=>columns.findIndex(c=>c[1]===field)
+  for (const [freight,flag,expected] of [[['6','11','56'],'是','否'],[['3','0','0'],'是','否'],[['0','0','0'],'否','是']] as const) {
+    const values:Record<string,string>={sku:'AZ2603605',singleFreightCny:freight[0],freight10Cny:freight[1],freight100Cny:freight[2],freeShipping:flag}
+    await paste([columns.map(c=>values[c[1]] || '')])
+    expect(cell(0,index('freeShipping')).value).toBe(expected)
+    request.mockResolvedValueOnce(preview('AZ2603605'))
+    button('预览并保存 1 条').click(); await tick()
+    const payload=JSON.parse(request.mock.calls.at(-1)![1].body)
+    expect(payload[0]).toMatchObject({freeShipping:expected,singleFreightCny:Number(freight[0]),freight10Cny:Number(freight[1]),freight100Cny:Number(freight[2])})
+    request.mockResolvedValueOnce({added:[],updated:payload,unchanged:[],skipped:[]})
+    button('确认全部保存').click(); await tick()
+    expect(JSON.parse(request.mock.calls.at(-1)![1].body).rows).toEqual(payload)
+  }
+  const values:Record<string,string>={sku:'AZ2603605',singleFreightCny:'3',freight10Cny:'0',freight100Cny:'0'}
+  await paste([columns.map(c=>values[c[1]] || '')])
+  const freightInput=cell(0,index('singleFreightCny'))
+  freightInput.value='0';freightInput.dispatchEvent(new Event('input',{bubbles:true}));await tick()
+  expect(cell(0,index('freeShipping')).value).toBe('是')
+})
+
 it.each([false, true])('preserves tier 2 and all subsequent columns in the default headerless layout, unified=%s', async unified => {
   mount(unified, null)
   expect(document.querySelector('select')!.value).toBe('special')

@@ -25,6 +25,23 @@ export type PurchasePasteColumns = readonly (readonly [string, string])[]
 export const PURCHASE_PASTE_LIMIT = 100
 export const emptyPurchasePasteRow = (columns: PurchasePasteColumns = PURCHASE_PASTE_COLUMNS) => columns.map(() => '')
 
+const freightFields = ['singleFreightCny', 'freight10Cny', 'freight100Cny'] as const
+/** Positive freight wins over zero tiers; blanks and invalid values are not free freight. */
+export function inferredPasteFreeShipping(row: string[], columns: PurchasePasteColumns = PURCHASE_PASTE_COLUMNS): '是' | '否' | undefined {
+  const values = freightFields.map(field => {
+    const raw = (row[columns.findIndex(column => column[1] === field)] || '').trim()
+    return /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw) && Number.isFinite(Number(raw)) ? Number(raw) : null
+  })
+  if (values.some(value => value != null && value > 0)) return '否'
+  return values.every(value => value === 0) ? '是' : undefined
+}
+
+export function syncPasteFreeShipping(row: string[], columns: PurchasePasteColumns = PURCHASE_PASTE_COLUMNS) {
+  const inferred = inferredPasteFreeShipping(row, columns)
+  const index = columns.findIndex(column => column[1] === 'freeShipping')
+  if (inferred && index >= 0) row[index] = inferred
+}
+
 /** Excel/WPS TSV: quoted newlines, escaped quotes and empty columns retain their positions. */
 export function parsePurchaseClipboard(text: string): string[][] {
   if (text.length > 1_000_000) throw new Error('粘贴内容过大，每次最多100行')
@@ -67,6 +84,7 @@ export function applyPurchasePaste(grid: string[][], clipboard: string[][], star
     // Blank clipboard cells skip the target but never shift later columns.
     if (value.trim()) next[startRow + r]![startCol + c] = value
   }))
+  clipboard.forEach((_, r) => syncPasteFreeShipping(next[startRow + r]!, columns))
   return next
 }
 
@@ -116,6 +134,8 @@ export function validatePurchasePaste(grid: string[][], sparse = false, columns:
     }
     const dimensions = [...dimensionFields]
     if (dimensions.some(field => data[field] != null)) dimensions.forEach(field => { if ((!sparse && data[field] == null) || (data[field] != null && Number(data[field]) <= 0)) issue(field, '长宽高须一起填写且大于0；也可全部留空（0按空值处理）') })
+    const inferredShipping = inferredPasteFreeShipping(cells, columns)
+    if (inferredShipping) data.freeShipping = inferredShipping
     if (!['', '是', '否'].includes(String(data.freeShipping || ''))) issue('freeShipping', '请填写是或否')
     if (!sparse && data.freeShipping !== '是') for (const field of ['singleFreightCny', 'freight10Cny']) if (data[field] == null) issue(field, '未包邮时须填写运费；免运费请明确填0或选择包邮')
     if (data.stockStatus === '有') data.stockStatus = '有货'

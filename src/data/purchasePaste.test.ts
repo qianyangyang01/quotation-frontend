@@ -70,6 +70,8 @@ describe('purchase data-only paste', () => {
     const row=valid(); row[18]=''
     expect(validatePurchasePaste([row]).issues.some(i=>i.column===18)).toBe(true)
     row[20]='是'; row[12]='0'
+    expect(validatePurchasePaste([row]).canSave).toBe(false) // Positive freight overrides the stale free-shipping flag.
+    row[17]='0'; row[18]='0'; row[19]='0'
     expect(validatePurchasePaste([row]).canSave).toBe(true)
     row[4]='0'; row[11]='1.5'; row[12]=''
     expect(validatePurchasePaste([row]).canSave).toBe(false)
