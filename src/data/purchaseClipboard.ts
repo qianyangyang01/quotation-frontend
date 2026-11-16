@@ -1,4 +1,4 @@
-import { PURCHASE_PASTE_COLUMNS, UNIFIED_PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, parsePurchaseClipboard } from './purchasePaste'
+import { PURCHASE_PASTE_COLUMNS, UNIFIED_PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, parsePurchaseClipboard, type PurchasePasteColumns } from './purchasePaste'
 
 const MAX_CLIPBOARD_LENGTH = 2_000_000
 const ambiguousMessage = '复制内容的行列边界不完整，可能含单元格内换行。请直接在Excel/WPS中选择单元格区域复制（不要进入单元格编辑，也不要经过聊天框或记事本）；本次未写入。'
@@ -84,8 +84,9 @@ export function readPurchaseClipboard(data: Pick<DataTransfer, 'getData'>, start
 }
 
 /** Shared five-tier source. Headers disambiguate old layouts and hidden/copied columns. */
-export function readUnifiedPurchaseClipboardResult(data: Pick<DataTransfer, 'getData'>, startColumn: number): { rows: string[][]; skippedImageColumns: boolean } {
-  const columns = UNIFIED_PURCHASE_PASTE_COLUMNS
+export function readUnifiedPurchaseClipboardResult(data: Pick<DataTransfer, 'getData'>, startColumn: number, options?: { columns: PurchasePasteColumns; sourceColumns: PurchasePasteColumns }): { rows: string[][]; skippedImageColumns: boolean } {
+  const columns = options?.columns ?? UNIFIED_PURCHASE_PASTE_COLUMNS
+  const sourceColumns = options?.sourceColumns ?? columns
   const html = parsePurchaseHtmlTable(data.getData('text/html'), PURCHASE_PASTE_LIMIT + 1, columns.length + 3)
   let rows = html ?? parsePurchaseClipboard(data.getData('text/plain'))
   const normalize = (value: string) => value.normalize('NFKC').replace(/[\s*]/g, '').toLowerCase()
@@ -97,7 +98,9 @@ export function readUnifiedPurchaseClipboardResult(data: Pick<DataTransfer, 'get
     let skippedImageColumns = false
     const mapping = header.map(label => {
       if (/^(实物图|产品图片|产品图)/.test(label)) { skippedImageColumns = true; return -1 }
-      const index = columns.findIndex(([name]) => normalize(name) === label)
+      const alias = label.replace(/^阶梯价([345])起订$/, '阶梯价$1起订量')
+      if (label === '优化后价格') return -1 // User-confirmed erroneous column: keep its position, ignore its values.
+      const index = columns.findIndex(([name]) => normalize(name) === alias)
       if (index < 0 && label) throw new Error('未识别表头“' + label + '”，请核对模板；本次未写入')
       if (index >= 0 && used.has(index)) throw new Error('表头重复：' + label + '；本次未写入')
       if (index >= 0) used.add(index)
@@ -121,14 +124,31 @@ export function readUnifiedPurchaseClipboardResult(data: Pick<DataTransfer, 'get
   if (nonempty.length > PURCHASE_PASTE_LIMIT) throw new Error('每次最多100行，请分批粘贴')
   const imageOrBlank = (value: string) => !value.trim() || /^(?:\[?图片\]?|\[?image\]?|=?_?xlfn\.DISPIMG\([\s\S]*\)|=?DISPIMG\([\s\S]*\))$/i.test(value.trim())
   const skippedImageColumns = nonempty.length > 0 && nonempty.every(row =>
-    row.slice(0, 3).every(imageOrBlank) && (row.length === columns.length + 3 || (
-      row.length >= 16 && row.length < columns.length + 3 &&
+    row.slice(0, 3).every(imageOrBlank) && (row.length === sourceColumns.length + 3 || (
+      row.length >= 16 && row.length < sourceColumns.length + 3 &&
       /^\d{4}[./-]\d{1,2}[./-]\d{1,2}$/.test(row[3]!.trim()) &&
       /^[A-Z0-9._/-]{1,96}$/i.test(row[6]!.trim()) && /^\d+(?:\.\d+)?$/.test(row[7]!.trim())
     )))
   if (skippedImageColumns) {
     if (startColumn !== 0) throw new Error('整行复制请从“报价日期”列粘贴；本次未写入')
     rows = rows.map(row => row.slice(3))
+  }
+  if (options) {
+    if (startColumn === 0) {
+      const hasSpecial = sourceColumns.some(c => c[1] === 'specialTaxPoint')
+      const beforeInvoice = sourceColumns.findIndex(c => c[1] === 'invoiceType') + 1
+      if (rows.some(row => hasSpecial
+        ? row.length > beforeInvoice && row.length !== sourceColumns.length
+        : row.length > 17 && row.length !== sourceColumns.length && !(sourceColumns.length === 36 && row.length > 32 && row.length < 36)))
+        throw new Error('无表头请复制完整列至“相似货源”，或连同表头复制；旧模板请选择对应列序，避免专票资料与类别错列；本次未写入')
+      if (rows.some(row => row.length > sourceColumns.length)) throw new Error('粘贴列数超出模板；本次未写入')
+      rows = rows.map(row => {
+        const target = columns.map(() => '')
+        row.forEach((value, i) => { const index = columns.findIndex(c => c[1] === sourceColumns[i]?.[1]); if (index >= 0) target[index] = value })
+        return target
+      })
+    } else if (rows.some(row => row.length + startColumn > columns.length)) throw new Error('粘贴列数超出模板；本次未写入')
+    return { rows, skippedImageColumns }
   }
   // Only the suffix beyond the complete legacy layout is unambiguous without
   // headers. Pad at the end, never remove/reposition an internal empty cell.

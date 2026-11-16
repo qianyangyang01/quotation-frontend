@@ -11,7 +11,7 @@ import java.util.Set;
 
 /** Only this server-side policy owns classification coefficients. */
 public final class FobPricing {
-    public static final int POLICY_VERSION = 4;
+    public static final int POLICY_VERSION = 5;
     public static final String KEY = "fob-pricing";
     public static final Set<String> CLASSES = Set.of("rebate-fob", "rebate-cfr-cif", "ordinary-fob");
     public static ObjectNode defaults() {
@@ -59,6 +59,15 @@ public final class FobPricing {
     /** Derive quote-time ticket costs without changing procurement tiers or source invoice fields. */
     static void applyPurchase(ObjectNode product,JsonNode raw) {
         var kind=classification(product);
+        boolean specialColumns = !kind.equals("ordinary-fob") && FobInvoicePolicy.hasSpecialFields(raw);
+        if (specialColumns) {
+            var selected = (ObjectNode) raw.deepCopy();
+            selected.set("taxIncludedPriceCny", raw.has("specialTaxIncludedPriceCny") ? raw.get("specialTaxIncludedPriceCny") : NullNode.instance);
+            selected.set("taxPoint", raw.has("specialTaxPoint") ? raw.get("specialTaxPoint") : NullNode.instance);
+            selected.put("invoiceType", raw.path("specialInvoiceType").asText(""));
+            raw = selected;
+        }
+        product.put("invoiceType", raw.path("invoiceType").asText("未确认"));
         if(!missingInvoice(raw))invoice(raw,kind);
         var parsed=product.path("parsed");var tiers=parsed.path("priceTiers");
         if(!tiers.isArray()||tiers.isEmpty()||tiers.size()>100)invalid("采购阶梯缺失或超过100档");
@@ -76,13 +85,30 @@ public final class FobPricing {
         var base=positive(tiers.get(0).path("unitPriceCny"),"起步采购原价");
         var basis=raw.path("purchasePriceBasis").asText();
         if(!Set.of("","quoted","tax_included").contains(basis))invalid("采购价格口径无法识别");
-        var policy=product.putObject("invoicePricing").put("basePurchaseCny",base).put("policyVersion",POLICY_VERSION);
+        var policy=product.putObject("invoicePricing").put("basePurchaseCny",base).put("policyVersion",POLICY_VERSION)
+            .put("invoiceFieldSource", specialColumns ? "special-invoice-columns" : "original-invoice-columns");
         if(kind.equals("ordinary-fob")){
             boolean included=basis.equals("tax_included");
-            var factor=included?BigDecimal.ONE:new BigDecimal("1.10");
-            policy.put("mode",included?"included":"ordinary-fixed-ticket").put("fobInvoiceRatio",factor)
-                .put("baseIncludedCny",base.multiply(factor)).put("effectiveTaxPoint",new BigDecimal("0.10"))
-                .put("verificationRequired",false).put("ruleSource","ordinary-original-rule");
+            // The ordinary invoice group is independent of the optional special invoice group.
+            // Check its single included-price anchor against the lowest-quantity tier only.
+            BigDecimal anchor=raw.hasNonNull("taxIncludedPriceCny")?positive(raw.path("taxIncludedPriceCny"),"起步含票价"):null;
+            BigDecimal point=new BigDecimal("0.10");
+            if(anchor!=null && !included){
+                if(missingTaxPoint(raw))invalid("普通FOB含票价需填写原票点，以核对最低起订档");
+                var supplied=raw.path("taxPoint");
+                if(!supplied.isNumber()||!Double.isFinite(supplied.asDouble())||supplied.decimalValue().signum()<0||supplied.decimalValue().compareTo(BigDecimal.ONE)>0)
+                    invalid("普通FOB原票点须在0至1之间");
+                point=supplied.decimalValue();
+                if(anchor.subtract(base.multiply(BigDecimal.ONE.add(point))).abs().compareTo(new BigDecimal("0.005"))>0)
+                    invalid("普通FOB含票价与最低起订档采购价、原票点不匹配");
+            }
+            if(included && anchor!=null && anchor.compareTo(base)!=0)invalid("普通FOB含票价与已含票的最低起订档不匹配");
+            var factor=included?BigDecimal.ONE:BigDecimal.ONE.add(point);
+            policy.put("mode",included?"included":anchor!=null?"ordinary-invoice-tax-point":"ordinary-fixed-ticket").put("fobInvoiceRatio",factor)
+                .put("baseIncludedCny",included?base:anchor!=null?anchor:base.multiply(factor)).put("effectiveTaxPoint",point)
+                .put("verificationRequired",false).put("ruleSource",anchor!=null?"ordinary-included-price":"ordinary-original-rule")
+                .put("basisLabel",anchor!=null?"按原含票价核对最低起订档；其他档按原票点计价":"未填含票价，沿用普通FOB原10点规则");
+            if(anchor!=null)policy.put("sourceIncludedCny",anchor);
             return;
         }
         boolean missingType=missingInvoice(raw),missingPoint=missingTaxPoint(raw);
@@ -115,12 +141,15 @@ public final class FobPricing {
             .put("basisLabel",needsVerification?(basis.equals("tax_included")?"票据资料待核实 · 已含票阶梯直接使用":"票据资料待核实 · 系统默认按10点专票计价"):"按数据源实际专票类型和票点计价");
         if(suppliedTax!=null)policy.put("sourceTaxPoint",suppliedTax);
         if(needsVerification)policy.put("assumedTaxPoint",new BigDecimal("0.10"));
-        var missing=policy.putArray("missingFields");if(missingType)missing.add("票类型");if(missingPoint)missing.add("票点");
+        var missing=policy.putArray("missingFields");if(missingType)missing.add(specialColumns ? "专票类型" : "票类型");if(missingPoint)missing.add(specialColumns ? "专票点" : "票点");
         // No dismissal flag or procurement writes: every lookup re-derives this from the selected source.
     }
 
     static BigDecimal purchaseCost(JsonNode product,BigDecimal purchase) {
         var policy=product.path("invoicePricing");
+        if(policy.path("mode").asText().equals("ordinary-invoice-tax-point"))
+            return purchase.compareTo(policy.path("basePurchaseCny").decimalValue())==0 ? policy.path("baseIncludedCny").decimalValue()
+                : purchase.multiply(BigDecimal.ONE.add(policy.path("effectiveTaxPoint").decimalValue()));
         if(Set.of("actual-tax-point","default-tax-point","ordinary-fixed-ticket").contains(policy.path("mode").asText()))return purchase.multiply(BigDecimal.ONE.add(policy.path("effectiveTaxPoint").decimalValue()));
         if(policy.path("mode").asText().equals("legacy-ten-point"))return purchase.multiply(new BigDecimal("1.10"));
         return policy.path("mode").asText().equals("ratio")

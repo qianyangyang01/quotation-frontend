@@ -15,6 +15,7 @@ import { checkPurchaseImportRemoval, deletePurchaseImportTask, archivePurchaseIm
 import { preparePurchaseWorkbookTextOnly } from '@/services/purchaseWorkbookTextOnlyClient'
 import SupplierRecordsPanel from './SupplierRecordsPanel.vue'
 import PurchaseCategoryBadge from './PurchaseCategoryBadge.vue'
+import { validateSpecialInvoice } from '@/data/purchaseSpecialInvoice'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
 import FobPasteDialog from './FobPasteDialog.vue'
 import FobPurchaseEntry from './FobPurchaseEntry.vue'
@@ -359,6 +360,7 @@ const legacyEditorIncludedPrice = computed(() => {
 })
 function editorRecordForSave() {
   const record = editor.value!
+  validateSpecialInvoice(record)
   return record.dataSource === 'legacy_2026' && legacyEditorPricingDirty.value
     ? withLegacyAutoTax(record, legacyEditorUnitPrice.value) : record
 }
@@ -471,6 +473,7 @@ const detailFields = computed(() => detail.value ? [
   ['克重(g)*', value(detail.value.weightG, ' g')], ['长(cm)', value(detail.value.lengthCm, ' cm')], ['宽(cm)', value(detail.value.widthCm, ' cm')], ['高(cm)', value(detail.value.heightCm, ' cm')],
   ['起订量(件)*', value(detail.value.minOrderQty, ' 件')], [detail.value.dataSource==='legacy_2026' ? '未税采购单价(CNY/件)*' : '基准采购单价(CNY/件)*', money(detail.value.dataSource==='legacy_2026' ? legacyUntaxedUnitPrice(detail.value) : detail.value.purchasePriceCny)], ['阶梯价2起订量', value(detail.value.tier2MinQty, ' 件')], ['阶梯价2(CNY/件)', money(detail.value.tier2PriceCny)],
   ['阶梯价3起订量', value(detail.value.tier3MinQty, ' 件')], ['阶梯价3(CNY/件)', money(detail.value.tier3PriceCny)], ['阶梯价4起订量', value(detail.value.tier4MinQty, ' 件')], ['阶梯价4(CNY/件)', money(detail.value.tier4PriceCny)], ['阶梯价5起订量', value(detail.value.tier5MinQty, ' 件')], ['阶梯价5(CNY/件)', money(detail.value.tier5PriceCny)], ...freightDetailFields(detail.value),
+  ['含专票价(CNY/件)', money(detail.value.specialTaxIncludedPriceCny)], ['专票点', detail.value.specialTaxPoint == null ? '暂无数据' : `${Number((detail.value.specialTaxPoint * 100).toFixed(6))}%`], ['专票类型', detail.value.specialInvoiceType],
   ['是否包邮', detail.value.freeShipping], ['含票价(CNY/件)', money(detail.value.taxIncludedPriceCny)], ['票点', detail.value.taxPoint == null ? '暂无数据' : `${(detail.value.taxPoint * 100).toFixed(2).replace(/\.00$/, '')}%`], ['票类型', detail.value.invoiceType],
   ['是否有货', detail.value.stockStatus], ['备注', detail.value.notes], ['工厂信息', detail.value.factoryInfo], ['货源链接1', detail.value.sourceLink1], ['货源链接2', detail.value.sourceLink2], ['货源链接3', detail.value.sourceLink3],
   ['相似货源', detail.value.similarSource], ['审核备注', detail.value.auditNotes],
@@ -688,7 +691,11 @@ const detailFields = computed(() => detail.value ? [
       <label v-if="editor.dataSource==='legacy_2026'">23. 含票价(CNY/件，自动计算)<input :value="legacyEditorIncludedPrice?.toFixed(2) ?? ''" aria-label="含票价（自动计算）" type="text" readonly placeholder="待补齐未税单价和票点"><small>未税单价 ×（1＋票点），国内运费另计；报价不重复加票点。</small><small v-if="!legacyEditorPricingDirty && editor.legacyPriceMode!=='auto_tax'">当前保留原含票价；修改未税单价或票点后自动重算。</small><small v-if="editor.taxPoint===0">0票点时含票价等于未税价；报价另按现有规则加成1%。</small></label>
       <label v-else>23. 起步档含票价(CNY/件)<input v-model.number="editor.taxIncludedPriceCny" type="number" min="0" step="0.01"></label>
       <label>24. 票点（8%填写0.08）<input v-model.number="editor.taxPoint" aria-label="采购票点" type="number" min="0" max="1" step="0.001" @input="legacyEditorPricingDirty=true"></label><label>25. 票类型<select v-model="editor.invoiceType"><option v-if="editor.invoiceType" :value="editor.invoiceType">{{editor.invoiceType}}</option><option>专票13</option><option>专票10</option><option>专票3</option><option value="">暂无数据</option><option>普票</option><option>专票</option><option>不开票</option><option>收据</option><option>增值税专用发票</option><option>增值税普通发票</option></select></label>
-      <FobInvoiceFields v-if="editor.dataSource==='standard'" class="wide" :record="editor" :price-signature="JSON.stringify([editor.invoiceType,editor.purchasePriceBasis,editor.taxIncludedPriceCny,editor.taxPoint,editor.minOrderQty,editor.purchasePriceCny,editor.tier2MinQty,editor.tier2PriceCny,editor.tier3MinQty,editor.tier3PriceCny,editor.tier4MinQty,editor.tier4PriceCny,editor.tier5MinQty,editor.tier5PriceCny])" /><label>26. 是否有货（选填）<input v-model="editor.stockStatus" list="purchase-stock-options" placeholder="可留空，或填写现货、预订、交期等说明"><datalist id="purchase-stock-options"><option value="有货" /><option value="无货" /><option value="待确认" /><option value="定制款" /></datalist><small>仅供参考，不影响报价资格</small></label><label class="wide">27. 备注<textarea v-model="editor.notes"></textarea></label>
+      <label>含专票价(CNY/件，选填)<input v-model.number="editor.specialTaxIncludedPriceCny" aria-label="含专票价" type="number" min="0" max="1000000000" step="0.01" placeholder="可留空"></label>
+      <label>专票点（选填，13%填写0.13）<input v-model.number="editor.specialTaxPoint" aria-label="专票点" type="number" min="0" max="1" step="0.001" placeholder="可留空"></label>
+      <label>专票类型（选填）<input v-model="editor.specialInvoiceType" aria-label="专票类型" list="special-invoice-options" maxlength="200" placeholder="可留空，如专票13"><datalist id="special-invoice-options"><option value="专票" /><option value="专票13" /><option value="专票10" /><option value="专票3" /><option value="增值税专用发票" /></datalist></label>
+      <p class="wide">专票三列独立保存。退税 FOB 优先使用这一组资料；全部留空时沿用原票据资料，缺项会持续提示核实。普通报价沿用原规则，普通 FOB 按原含票价核对最低起订档。</p>
+      <FobInvoiceFields v-if="editor.dataSource==='standard'" class="wide" :record="editor" :price-signature="JSON.stringify([editor.specialTaxIncludedPriceCny,editor.specialTaxPoint,editor.specialInvoiceType,editor.invoiceType,editor.purchasePriceBasis,editor.taxIncludedPriceCny,editor.taxPoint,editor.minOrderQty,editor.purchasePriceCny,editor.tier2MinQty,editor.tier2PriceCny,editor.tier3MinQty,editor.tier3PriceCny,editor.tier4MinQty,editor.tier4PriceCny,editor.tier5MinQty,editor.tier5PriceCny])" /><label>26. 是否有货（选填）<input v-model="editor.stockStatus" list="purchase-stock-options" placeholder="可留空，或填写现货、预订、交期等说明"><datalist id="purchase-stock-options"><option value="有货" /><option value="无货" /><option value="待确认" /><option value="定制款" /></datalist><small>仅供参考，不影响报价资格</small></label><label class="wide">27. 备注<textarea v-model="editor.notes"></textarea></label>
       <label class="wide">27. 工厂信息<textarea v-model="editor.factoryInfo"></textarea></label><label>28. 货源链接1<input v-model="editor.sourceLink1"></label><label>29. 货源链接2<input v-model="editor.sourceLink2"></label>
       <label>30. 货源链接3<input v-model="editor.sourceLink3"></label><label>31. 相似货源<input v-model="editor.similarSource"></label><label class="wide">32. 审核备注<textarea v-model="editor.auditNotes"></textarea></label>
     </fieldset>

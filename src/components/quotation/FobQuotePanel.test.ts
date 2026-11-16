@@ -25,11 +25,12 @@ function mount(financeError=''){const host=document.createElement('div');documen
 async function sku(value:string){const input=document.querySelector<HTMLInputElement>('[aria-label="FOB查询SKU"]')!;input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));await tick()}
 async function query(){document.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await tick()}
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.resetAllMocks();authState.current=null;authState.permissions=[]})
-it('shows the ordinary fixed ticket rule instead of rebate actual-ticket guidance when switching categories',async()=>{
+it('shows ordinary included-price matching and separate rebate guidance when switching categories',async()=>{
   authState.current!.role='super_admin';mount();vi.mocked(loadFobQuoteProduct).mockResolvedValue(sample())
   const select=document.querySelector<HTMLSelectElement>('[aria-label="报价分类"]')!
   select.value='ordinary-fob';select.dispatchEvent(new Event('change'));await tick();await sku('PF2600053');await query()
-  expect(document.querySelector('.fob-rules')!.textContent).toContain('计价采购价＝各档原价×1.10')
+  expect(document.querySelector('.fob-rules')!.textContent).toContain('含票价对应最低起订档')
+  expect(document.querySelector('.fob-rules')!.textContent).toContain('不使用新专票三列')
   expect(document.querySelector('.fob-rules')!.textContent).not.toContain('含票采购价＝各档原价×（1＋实际票点）')
   select.value='rebate-cfr-cif';select.dispatchEvent(new Event('change'));await tick();await query()
   expect(document.querySelector('.fob-rules')!.textContent).toContain('含票采购价＝各档原价×（1＋实际票点）')

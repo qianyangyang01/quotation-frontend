@@ -34,6 +34,34 @@ async function flush(){await Promise.resolve();await nextTick();await Promise.re
 async function mount(){const host=document.createElement('div');document.body.append(host);app=createApp(PurchaseDataWorkspace);app.mount(host);await flush()}
 async function search(text:string){const input=document.querySelector('.toolbar input') as HTMLInputElement;input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));await nextTick()}
 beforeEach(()=>{vi.useFakeTimers();mocks.page.mockResolvedValue(page('INITIAL'));mocks.stats.mockResolvedValue({total:1,ready:1,pending:0,generatedSku:0})})
+
+it('edits and reopens special invoice values then clears them without changing original prices',async()=>{
+  const product=normalizePurchaseRecord({...row('INV-EDIT'),taxIncludedPriceCny:10.3,taxPoint:.03,invoiceType:'普票',specialTaxIncludedPriceCny:11.3,specialTaxPoint:.13,specialInvoiceType:'专票13'})
+  await openLegacyEditor(product)
+  expect(document.querySelector<HTMLInputElement>('[aria-label="含专票价"]')!.value).toBe('11.3')
+  await setPriceField('含专票价','10');await setPriceField('专票点','0');await setPriceField('专票类型','专票')
+  mocks.update.mockImplementation(async(_sku,input)=>normalizePurchaseRecord({...input,_version:6}))
+  editorSave();await flush()
+  expect(mocks.update).toHaveBeenCalledWith('INV-EDIT',expect.objectContaining({specialTaxIncludedPriceCny:10,specialTaxPoint:0,specialInvoiceType:'专票',taxIncludedPriceCny:10.3,taxPoint:.03}))
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.actions button')).find(b=>b.textContent==='编辑')!.click();await flush()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="专票点"]')!.value).toBe('0')
+  await setPriceField('含专票价','');await setPriceField('专票点','');await setPriceField('专票类型','')
+  editorSave();await flush()
+  expect(mocks.update).toHaveBeenLastCalledWith('INV-EDIT',expect.objectContaining({specialTaxIncludedPriceCny:null,specialTaxPoint:null,specialInvoiceType:'',taxIncludedPriceCny:10.3,taxPoint:.03}))
+})
+
+it.each([false,true])('creates procurement through the Add button with optional invoice fields populated=%s',async populated=>{
+  await mount()
+  Array.from(document.querySelectorAll('button')).find(b=>b.textContent?.includes('新增采购资料'))!.click();await flush()
+  const sku=document.querySelector<HTMLInputElement>('.form-grid input')!
+  sku.value='INV-ADD';sku.dispatchEvent(new Event('input',{bubbles:true}));await flush()
+  if(populated){await setPriceField('含专票价','113');await setPriceField('专票点','0.13');await setPriceField('专票类型','专票13')}
+  mocks.save.mockImplementationOnce(async rows=>rows.map(normalizePurchaseRecord))
+  editorSave();await flush()
+  expect(mocks.save).toHaveBeenCalledWith([expect.objectContaining({sku:'INV-ADD',specialTaxIncludedPriceCny:populated?113:null,specialTaxPoint:populated?.13:null,specialInvoiceType:populated?'专票13':''})])
+  expect(document.querySelector('.editor-modal')).toBeNull()
+  expect(document.querySelector('table')?.textContent).toContain('INV-ADD')
+})
 afterEach(()=>{app?.unmount();document.body.innerHTML='';vi.clearAllMocks();vi.useRealTimers();authState.current=null;authState.permissions=[]})
 
 it('edits legacy untaxed price and rate with a read-only included preview, then reads saved values back',async()=>{

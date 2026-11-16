@@ -12,6 +12,10 @@ import java.util.Set;
 
 /** Procurement confirmation is tied to the exact invoice and tier inputs. */
 public final class FobInvoicePolicy {
+    public static boolean hasSpecialFields(JsonNode raw) {
+        return List.of("specialTaxIncludedPriceCny", "specialTaxPoint", "specialInvoiceType").stream()
+            .anyMatch(key -> raw.hasNonNull(key) && !(raw.path(key).isTextual() && raw.path(key).asText().isBlank()));
+    }
     public static boolean special(String value) {
         var text=Normalizer.normalize(value,Normalizer.Form.NFKC).replaceAll("[\\s\\u200b]+", "");
         return Set.of("专票","含专票","增值税专用发票","special").contains(text)
@@ -21,8 +25,10 @@ public final class FobInvoicePolicy {
         var text=new StringBuilder();
         for(var key:List.of("dataSource","invoiceType","purchasePriceBasis","taxIncludedPriceCny","taxPoint",
                 "minOrderQty","purchasePriceCny","tier2MinQty","tier2PriceCny","tier3MinQty","tier3PriceCny",
-                "tier4MinQty","tier4PriceCny","tier5MinQty","tier5PriceCny","moqRaw","priceRaw")) {
+                "tier4MinQty","tier4PriceCny","tier5MinQty","tier5PriceCny","moqRaw","priceRaw",
+                "specialTaxIncludedPriceCny","specialTaxPoint","specialInvoiceType")) {
             var value=raw.path(key);
+            if(key.startsWith("special") && (value.isMissingNode() || value.isNull() || value.isTextual() && value.asText().isBlank())) continue;
             var normalized=value.isNumber()?value.decimalValue().stripTrailingZeros().toPlainString():value.isMissingNode()||value.isNull()?"":value.asText();
             text.append(key).append(':').append(normalized.length()).append(':').append(normalized).append(';');
         }

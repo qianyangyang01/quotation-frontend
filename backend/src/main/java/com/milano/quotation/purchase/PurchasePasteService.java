@@ -16,9 +16,9 @@ import java.util.stream.Collectors;
 public class PurchasePasteService {
     private static final Set<String> NUMBERS = Set.of("weightG", "lengthCm", "widthCm", "heightCm",
             "minOrderQty", "purchasePriceCny", "tier2MinQty", "tier2PriceCny", "tier3MinQty",
-            "tier3PriceCny", "tier4MinQty", "tier4PriceCny", "tier5MinQty", "tier5PriceCny", "singleFreightCny", "freight10Cny", "freight100Cny", "taxIncludedPriceCny", "taxPoint");
+            "tier3PriceCny", "tier4MinQty", "tier4PriceCny", "tier5MinQty", "tier5PriceCny", "singleFreightCny", "freight10Cny", "freight100Cny", "taxIncludedPriceCny", "taxPoint", "specialTaxIncludedPriceCny", "specialTaxPoint");
     private static final Set<String> TEXT = Set.of("sku", "quotationDate", "quotationOwner", "notes",
-            "size", "color", "material", "freeShipping", "invoiceType", "category", "stockStatus",
+            "size", "color", "material", "freeShipping", "invoiceType", "specialInvoiceType", "category", "stockStatus",
             "factoryInfo", "auditNotes", "sourceLink1", "sourceLink2", "sourceLink3", "similarSource");
     private final PurchaseProductRepository repository;
     private final PurchaseProductService products;

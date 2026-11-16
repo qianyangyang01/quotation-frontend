@@ -77,10 +77,32 @@ public class PurchaseImportRowMapper {
         stock(out,value(values,schema,PurchaseWorkbookSchema.Field.STOCK,warnings));
         out.put("notes",value(values,schema,PurchaseWorkbookSchema.Field.NOTES,warnings));out.put("factoryInfo",value(values,schema,PurchaseWorkbookSchema.Field.FACTORY,warnings));out.put("auditNotes",value(values,schema,PurchaseWorkbookSchema.Field.AUDIT_NOTES,warnings));
         out.put("sourceLink1",value(values,schema,PurchaseWorkbookSchema.Field.LINK1,warnings));out.put("sourceLink2",value(values,schema,PurchaseWorkbookSchema.Field.LINK2,warnings));out.put("sourceLink3",value(values,schema,PurchaseWorkbookSchema.Field.LINK3,warnings));out.put("similarSource",value(values,schema,PurchaseWorkbookSchema.Field.SIMILAR,warnings));
+        specialInvoice(out, values, schema, errors);
         if(legacy2026)applyLegacy2026PriceAndFreight(out,taxPointText,singleFreightText,warnings);
         derive(out,errors,warnings,legacy2026);return new MappedRow(sourceSheet,sourceRow,sku,out,List.copyOf(errors),List.copyOf(warnings),sourceContentHash(values,schema,false),sourceContentHash(values,schema,true));
     }
 
+    private static void specialInvoice(ObjectNode out, String[] values, PurchaseWorkbookSchema schema, List<String> errors) {
+        for (var field : List.of(PurchaseWorkbookSchema.Field.SPECIAL_INCLUDED_PRICE, PurchaseWorkbookSchema.Field.SPECIAL_TAX_POINT)) {
+            String key = field == PurchaseWorkbookSchema.Field.SPECIAL_TAX_POINT ? "specialTaxPoint" : "specialTaxIncludedPriceCny";
+            String label = field == PurchaseWorkbookSchema.Field.SPECIAL_TAX_POINT ? "专票点" : "含专票价";
+            var raw = schema.value(values, field, null);
+            if (raw.isBlank()) { out.putNull(key); continue; }
+            try {
+                String text = raw.replace("％", "%").trim();
+                boolean percent = key.equals("specialTaxPoint") && text.endsWith("%");
+                if (percent) text = text.substring(0, text.length()-1);
+                if (!text.matches("(?:\\d+(?:\\.\\d*)?|\\.\\d+)")) throw new NumberFormatException();
+                var value = new BigDecimal(text);
+                if (key.equals("specialTaxPoint") && (percent || value.compareTo(BigDecimal.ONE)>0)) value = value.movePointLeft(2);
+                if (value.signum()<0 || value.compareTo(key.equals("specialTaxPoint") ? BigDecimal.ONE : new BigDecimal("1000000000"))>0) throw new NumberFormatException();
+                out.put(key, value);
+            } catch (NumberFormatException e) { out.putNull(key); errors.add(label+"格式无效，请核对原表"); }
+        }
+        String type = schema.value(values, PurchaseWorkbookSchema.Field.SPECIAL_INVOICE_TYPE, null);
+        out.put("specialInvoiceType", type);
+        if (type.length()>200) errors.add("专票类型不能超过200字");
+    }
     private static String sourceContentHash(String[] values,PurchaseWorkbookSchema schema,boolean ignoreSku){
         try{
             var digest=MessageDigest.getInstance("SHA-256");
@@ -88,7 +110,7 @@ public class PurchaseImportRowMapper {
                 if(field==PurchaseWorkbookSchema.Field.PRODUCT_IMAGE||field==PurchaseWorkbookSchema.Field.PHYSICAL_IMAGE)continue;
                 if(ignoreSku&&field==PurchaseWorkbookSchema.Field.SKU)continue;
                 var text=schema.value(values,field,null);
-                if (Set.of(PurchaseWorkbookSchema.Field.TIER4_QTY, PurchaseWorkbookSchema.Field.TIER4_PRICE, PurchaseWorkbookSchema.Field.TIER5_QTY, PurchaseWorkbookSchema.Field.TIER5_PRICE).contains(field) && text.isBlank()) continue;
+                if ((field.name().startsWith("SPECIAL_") || Set.of(PurchaseWorkbookSchema.Field.TIER4_QTY, PurchaseWorkbookSchema.Field.TIER4_PRICE, PurchaseWorkbookSchema.Field.TIER5_QTY, PurchaseWorkbookSchema.Field.TIER5_PRICE).contains(field)) && text.isBlank()) continue;
                 var bytes=text.getBytes(StandardCharsets.UTF_8);
                 digest.update((field.name()+":"+bytes.length+":").getBytes(StandardCharsets.UTF_8));
                 digest.update(bytes);

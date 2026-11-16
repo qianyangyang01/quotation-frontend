@@ -18,12 +18,12 @@ class FobInvoiceRatioTest {
     static ObjectNode ready(){var r=raw().put("freeShipping","是");return confirmed(r);}
     static ObjectNode policy(){var p=FobQuotation.object().put("version",1);p.set("value",FobPricing.defaults());return p;}
     @Test void usesActualPointForSelectedTierAndEachClassificationWithoutAddingTaxTwice(){
-        for(var pair:List.of(new String[]{"rebate-fob","8.10"},new String[]{"rebate-cfr-cif","8.33"},new String[]{"ordinary-fob","8.25"})){
+        for(var pair:List.of(new String[]{"rebate-fob","8.10"},new String[]{"rebate-cfr-cif","8.33"},new String[]{"ordinary-fob","9.00"})){
             var r=ready();var p=product(r,pair[0]);FobPricing.applyPurchase(p,r);
             var result=FobPricing.pricing(p,new BigDecimal("7.2"),policy());
             assertEquals(pair[1],result.at("/rows/1/declaredUsd").asText());
             assertEquals(0,result.at("/rows/1/purchaseCny").decimalValue().compareTo(BigDecimal.valueOf(45)));
-            assertEquals(0,result.at("/rows/1/taxIncludedCny").decimalValue().compareTo(new BigDecimal(pair[0].equals("ordinary-fob")?"49.5":"54")));
+            assertEquals(0,result.at("/rows/1/taxIncludedCny").decimalValue().compareTo(new BigDecimal("54")));
             assertEquals(50,p.at("/parsed/priceTiers/0/unitPriceCny").asInt());
         }
     }

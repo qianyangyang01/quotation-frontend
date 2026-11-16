@@ -27,6 +27,33 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @SpringBootTest @ActiveProfiles("test") @Testcontainers(disabledWithoutDocker=true)
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
 class FobQuotationPostgresIntegrationTest {
+    @Autowired com.milano.quotation.purchase.PurchaseProductService standardPurchases;
+    @Test void newSpecialFieldsDriveAutoLookupAndSaveWhileHistoryRemainsAnExactSnapshot() throws Exception {
+        var source=mapper.createObjectNode().put("sku","FOB-SAVE").put("dataSource","standard").put("skuOrigin","manual")
+            .put("weightG",60).put("minOrderQty",1).put("purchasePriceCny",7.2).put("freeShipping","是")
+            .put("taxIncludedPriceCny",7.416).put("taxPoint",.03).put("invoiceType","普票")
+            .put("specialTaxIncludedPriceCny",8.136).put("specialTaxPoint",.13).put("specialInvoiceType","专票13");
+        var saved=standardPurchases.upsert(source);
+        var selected=fobQuotation.classifiedProduct("FOB-SAVE","auto","rebate-fob");
+        assertEquals("standard",selected.path("source").asText());assertEquals("专票13",selected.path("invoiceType").asText());
+        assertEquals(8.136,selected.at("/pricing/rows/0/taxIncludedCny").asDouble());
+        assertEquals(7.416,fobQuotation.classifiedProduct("FOB-SAVE","standard","ordinary-fob").at("/pricing/rows/0/taxIncludedCny").asDouble());
+        assertEquals("fob",fobQuotation.classifiedProduct("FOB-SAVE","fob","rebate-fob").path("source").asText());
+        var request=input.deepCopy();var snapshot=(ObjectNode)request.path("fob");snapshot.set("product",selected);
+        snapshot.put("quantity",1000).put("displayMode","quantity");
+        var sheet=(ObjectNode)snapshot.path("sheet");sheet.putArray("quantityLabels").add("Unit Price");
+        sheet.putArray("rows").addObject().put("key","FOB-SAVE-0").putArray("prices").add(1.31);
+        var quote=save("employee",UUID.randomUUID().toString(),request);
+        var quoteId=quote.path("id").asText();
+        var before=jdbc.sql("select payload::text from quotation_record where id=cast(:id as uuid)").param("id",quoteId).query(String.class).single();
+        var changed=((ObjectNode)saved.deepCopy()).put("specialTaxPoint",.10).put("specialTaxIncludedPriceCny",7.92);
+        standardPurchases.upsert(changed);
+        assertEquals(7.92,fobQuotation.classifiedProduct("FOB-SAVE","auto","rebate-fob").at("/pricing/rows/0/taxIncludedCny").asDouble());
+        assertEquals(before,jdbc.sql("select payload::text from quotation_record where id=cast(:id as uuid)").param("id",quoteId).query(String.class).single());
+        mvc.perform(post("/api/v1/quotations").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(request.toString())).andExpect(status().isConflict());
+        // Avoid affecting fixtures in other methods which share this test container.
+        jdbc.sql("delete from purchase_product where sku='FOB-SAVE'").update();
+    }
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url",postgres::getJdbcUrl);r.add("spring.datasource.username",postgres::getUsername);r.add("spring.datasource.password",postgres::getPassword);

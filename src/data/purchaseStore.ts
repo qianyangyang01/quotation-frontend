@@ -22,6 +22,7 @@ export type PurchaseProductRecord = {
   tier2MinQty: number | null; tier2PriceCny: number | null; tier3MinQty: number | null; tier3PriceCny: number | null; tier4MinQty: number | null; tier4PriceCny: number | null; tier5MinQty: number | null; tier5PriceCny: number | null
   priceTiers: PurchasePriceTier[]; singleFreightCny: number | null; freight10Cny: number | null; freight100Cny: number | null
   freeShipping: '' | '是' | '否'; taxIncludedPriceCny: number | null; taxPoint: number | null; taxPointExplicit: boolean; invoiceType: string; stockStatus: PurchaseStockStatus
+  specialTaxIncludedPriceCny: number | null; specialTaxPoint: number | null; specialInvoiceType: string
   notes: string; factoryInfo: string; sourceLink1: string; sourceLink2: string; sourceLink3: string; similarSource: string; auditNotes: string
   catalogState: PurchaseCatalogState; quoteReady: boolean; status: string; importWarnings: string[]; quotationBlockingReasons: string[]
   // Compatibility aliases consumed by the existing quotation calculator.
@@ -94,6 +95,7 @@ export function normalizePurchaseRecord(input: Partial<PurchaseProductRecord>): 
     freeShipping: input.freeShipping === '是' || input.freeShipping === '否' ? input.freeShipping : '' as '' | '是' | '否',
     taxIncludedPriceCny: numberOrNull(input.taxIncludedPriceCny ?? input.taxIncludedPrice), taxPoint: taxPointOrNull(input.taxPoint), taxPointExplicit,
     invoiceType: String(input.invoiceType || input.taxDifference || '').trim(),
+    specialTaxIncludedPriceCny: numberOrNull(input.specialTaxIncludedPriceCny), specialTaxPoint: taxPointOrNull(input.specialTaxPoint), specialInvoiceType: String(input.specialInvoiceType ?? '').trim(),
     stockStatus: String(input.stockStatus ?? '').trim(),
     notes: String(input.notes || '').trim(), factoryInfo: String(input.factoryInfo || input.packagingInfo || '').trim(),
     sourceLink1: String(input.sourceLink1 || sourceLinks[0] || '').trim(), sourceLink2: String(input.sourceLink2 || sourceLinks[1] || '').trim(),

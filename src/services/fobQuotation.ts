@@ -13,7 +13,7 @@ export interface FobQuoteProduct {
   sku: string; category: string; weight: string; source: 'fob' | 'standard'; updatedAt?: string
   parsed: FobParsed; notices: string[]
   classification?: FobClassification; invoiceType?: string; purchasePriceBasis?: string
-  invoicePricing?: {mode:'ratio'|'included'|'quoted'|'legacy-ten-point'|'actual-tax-point'|'default-tax-point'|'ordinary-fixed-ticket';basePurchaseCny:number;baseIncludedCny?:number;fobInvoiceRatio?:number;confirmed?:boolean;confirmationFingerprint?:string;policyVersion:number;assumedTaxPoint?:number;basisLabel?:string;ruleSource?:string;procurementUnchanged?:boolean;effectiveTaxPoint?:number;sourceTaxPoint?:number;sourceIncludedCny?:number;verificationRequired?:boolean;missingFields?:string[]}
+  invoicePricing?: {mode:'ratio'|'included'|'quoted'|'legacy-ten-point'|'actual-tax-point'|'default-tax-point'|'ordinary-fixed-ticket'|'ordinary-invoice-tax-point';basePurchaseCny:number;baseIncludedCny?:number;fobInvoiceRatio?:number;confirmed?:boolean;confirmationFingerprint?:string;policyVersion:number;assumedTaxPoint?:number;basisLabel?:string;ruleSource?:string;procurementUnchanged?:boolean;effectiveTaxPoint?:number;sourceTaxPoint?:number;sourceIncludedCny?:number;verificationRequired?:boolean;missingFields?:string[];invoiceFieldSource?:string}
   pricing?: { policyVersion?: number; version: number; rate: number; fobCoefficient?: number; rows: (FobQuoteRow & { smallOrderUsd: string })[] }
 }
 export function fromFobRecord(record: FobRecord): FobQuoteProduct {
@@ -63,7 +63,7 @@ export function fobTierQuotes(product: FobQuoteProduct, rate: number): FobQuoteR
   if (product.classification) {
     if (!product.pricing || product.pricing.rate !== rate) throw new Error('汇率或分类已变化，请重新查询')
     const legacy = product.source === 'fob' && product.invoicePricing?.mode === 'legacy-ten-point' && product.invoicePricing.ruleSource === 'legacy-fob-default' && product.invoicePricing.assumedTaxPoint === 0.1
-    if(product.pricing.policyVersion===4){
+    if((product.pricing.policyVersion===4 || product.pricing.policyVersion===5)){
       const p=product.invoicePricing, special=isFobSpecialInvoice(product.invoiceType||'')
       const missingType=['','未确认','待确认','暂无数据','未填写'].includes((product.invoiceType||'').trim())
       const validPoint=p?.effectiveTaxPoint!=null&&Number.isFinite(p.effectiveTaxPoint)&&p.effectiveTaxPoint>=0&&p.effectiveTaxPoint<=1

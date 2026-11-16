@@ -36,6 +36,38 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
 @DirtiesContext(classMode=DirtiesContext.ClassMode.AFTER_CLASS)
 @WithMockUser(username="PASTEBUYER", authorities="PERM_purchase")
 class PurchasePastePostgresIntegrationTest {
+    @Test void specialInvoicePasteSaveReadEditClearAndSparseUpdateRoundTrip() throws Exception {
+        for (int populated=0;populated<=3;populated++) {
+            String sku=sku();var input=full(sku).put("taxIncludedPriceCny",12.96).put("invoiceType","普票")
+                .put("category","服装").put("sourceLink1","https://example.com/source");
+            if(populated>=1)input.put("specialTaxIncludedPriceCny",13.56);
+            if(populated>=2)input.put("specialTaxPoint",.13);
+            if(populated>=3)input.put("specialInvoiceType","专票13");
+            var rows=mapper.createArrayNode().add(input);
+            var preview=mvc.perform(post("/api/v1/purchase-products/paste/shared/preview").with(csrf()).contentType("application/json").content(rows.toString()))
+                .andExpect(status().isOk()).andReturn();
+            var expected=mapper.readTree(preview.getResponse().getContentAsString()).at("/data/rows/0/expected");
+            var confirm=mapper.createObjectNode();confirm.set("rows",rows);confirm.putArray("expected").add(expected);
+            mvc.perform(post("/api/v1/purchase-products/paste/shared/confirm").with(csrf()).contentType("application/json").content(confirm.toString())).andExpect(status().isOk());
+            var read=mvc.perform(get("/api/v1/purchase-products/{sku}",sku)).andExpect(status().isOk()).andReturn();
+            var saved=(ObjectNode)mapper.readTree(read.getResponse().getContentAsString()).path("data");
+            for(var field:List.of("specialTaxIncludedPriceCny","specialTaxPoint","specialInvoiceType"))assertEquals(input.path(field),saved.path(field));
+            var edited=saved.deepCopy().put("specialTaxIncludedPriceCny",12).put("specialTaxPoint",0).put("specialInvoiceType","专票");
+            mvc.perform(post("/api/v1/purchase-products/{sku}/maintenance",sku).with(csrf()).contentType("application/json").content(edited.toString())).andExpect(status().isOk());
+            var after=(ObjectNode)products.get(sku);assertEquals(0,after.path("specialTaxPoint").asDouble());assertEquals(12,after.path("specialTaxIncludedPriceCny").asDouble());
+            assertEquals(12.96,after.path("taxIncludedPriceCny").asDouble());assertEquals(.08,after.path("taxPoint").asDouble());
+            assertEquals("服装",after.path("category").asText());assertEquals("https://example.com/source",after.path("sourceLink1").asText());
+            List<JsonNode> sparse=List.of(mapper.createObjectNode().put("sku",sku).put("notes","只改备注").putNull("specialTaxPoint").put("specialInvoiceType",""));
+            var checked=paste.preview(sparse,true);paste.confirmShared(new PurchasePasteService.Confirmation(sparse,checked.rows().stream().map(PurchasePasteService.PreviewRow::expected).toList()));
+            after=(ObjectNode)products.get(sku);assertEquals(0,after.path("specialTaxPoint").asDouble());assertEquals("专票",after.path("specialInvoiceType").asText());
+            // Editing explicitly clears fields; sparse paste blanks preserve the stored values.
+            var cleared=after.deepCopy().putNull("specialTaxIncludedPriceCny").putNull("specialTaxPoint").put("specialInvoiceType","");
+            mvc.perform(post("/api/v1/purchase-products/{sku}/maintenance",sku).with(csrf()).contentType("application/json").content(cleared.toString())).andExpect(status().isOk());
+            assertTrue(products.get(sku).path("specialTaxPoint").isNull());
+            var history=mvc.perform(get("/api/v1/purchase-products/{sku}/history",sku)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(history.contains("specialTaxIncludedPriceCny"));assertTrue(history.contains("specialTaxPoint"));assertTrue(history.contains("specialInvoiceType"));
+        }
+    }
     @Container static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url", postgres::getJdbcUrl); r.add("spring.datasource.username", postgres::getUsername); r.add("spring.datasource.password", postgres::getPassword);

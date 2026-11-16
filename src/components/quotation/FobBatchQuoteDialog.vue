@@ -122,7 +122,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
     <header><div><h2>批量粘贴报价</h2><p>粘贴SKU清单，核对异常后合并生成一份FOB报价单</p></div><button type="button" aria-label="关闭批量报价" :disabled="saving" @click="close">×</button></header>
     <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="financeIssue" role="alert" class="error">{{ financeIssue }}</p>
     <fieldset :disabled="saving" class="batch-fieldset">
-    <template v-if="!preview"><label class="batch-classification">本批报价分类<select v-model="classification" aria-label="批量报价分类" :disabled="busy || saving"><option v-for="c in fobClassifications" :key="c.value" :value="c.value">{{c.label}}</option></select><span>{{classification==='ordinary-fob'?'普票、无票等沿用普通FOB原计价方式，无需专票确认':'新采购与原FOB均按实际专票类型和票点计价；缺资料时默认10点并持续提醒，已含票不重复加点'}}</span></label>
+    <template v-if="!preview"><label class="batch-classification">本批报价分类<select v-model="classification" aria-label="批量报价分类" :disabled="busy || saving"><option v-for="c in fobClassifications" :key="c.value" :value="c.value">{{c.label}}</option></select><span>{{classification==='ordinary-fob'?'普通 FOB 使用原含票价核对最低起订档，不使用新增专票三列':'退税报价优先使用新专票三列，全空时沿用原资料；缺项默认10点并持续提醒，已含票不重复加点'}}</span></label>
       <div class="batch-body">
         <aside><label for="fob-batch-paste"><b>从Excel复制一列或两列粘贴</b></label><p>每行一个SKU，可用空格、逗号或Tab分隔数量。最多100行。</p><textarea id="fob-batch-paste" v-model="paste" :disabled="saving || busy" placeholder="PF2600274  30&#10;PF2600166，50&#10;ZS2600437" />
           <label>报价方式<select v-model="mode" :disabled="saving || busy"><option value="quantity">按指定数量（漏写需补齐）</option><option value="tiers">全部阶梯（允许不填数量）</option></select></label>

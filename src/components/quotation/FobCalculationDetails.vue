@@ -16,18 +16,18 @@ const money=(n:number)=>Number(n.toFixed(4)).toLocaleString('en-US',{minimumFrac
   <div v-if="showNotice && needsVerification" class="legacy-invoice-notice" role="note">
     <strong>{{product.invoicePricing?.basisLabel || '老 FOB 资料 · 系统统一按10点专票计价'}}</strong><span class="legacy-badge">可报价 · 待采购确认</span>
     <p class="procurement-reminder"><strong>采购核实提醒：本次可正常报价，请联系采购确认票据类型和票点。</strong>系统默认10点不代表采购已确认；实际资料维护后，请重新查询报价。</p>
-    <p class="procurement-reminder">请采购更新【{{sourceLabel}}】中 SKU <strong>{{product.sku}}</strong> 的票类型和票点。提醒以该来源的实际资料为准，刷新、重新登录或重复报价不会消除；补齐并重新查询后，新报价才解除提醒。已保存记录保留当时的计价依据。</p>
+    <p class="procurement-reminder">请采购更新【{{sourceLabel}}】中 SKU <strong>{{product.sku}}</strong> 的{{product.invoicePricing?.invoiceFieldSource==='special-invoice-columns'?'专票类型和专票点':'票类型和票点'}}。提醒以该来源的实际资料为准，刷新、重新登录或重复报价不会消除；补齐并重新查询后，新报价才解除提醒。已保存记录保留当时的计价依据。</p>
     <p v-if="product.invoicePricing?.missingFields?.length">当前缺少：{{product.invoicePricing.missingFields.join('、')}}。</p>
     <p><template v-if="product.invoicePricing?.mode==='included'">各档已标记含票，直接使用原阶梯价，不再加10点。</template><template v-else>本次报价按各档原采购价 × 1.10 计算。</template>此为系统计价口径，未修改或回填{{product.source==='fob'?' FOB ':''}}采购数据。</p>
   </div>
   <section v-if="showCalculation && product.classification && row && finalUsd" class="fob-calculation" aria-label="FOB报价计算过程">
-    <header><strong>本次数量的计算过程</strong><span>{{quantity}}{{row.unit}} · {{canViewFobCoefficient?'管理员视图':'报价明细'}}</span></header>
+    <p v-if="product.invoicePricing?.invoiceFieldSource">本次票据资料：{{product.invoicePricing.invoiceFieldSource==='special-invoice-columns'?'新增专票三列':'原含票价、票点和票类型'}}</p><header><strong>本次数量的计算过程</strong><span>{{quantity}}{{row.unit}} · {{canViewFobCoefficient?'管理员视图':'报价明细'}}</span></header>
     <div class="calculation-steps">
       <div v-if="canViewPurchaseCost" class="step"><span>① {{product.classification==='ordinary-fob'?'计价采购价':'含专票采购价'}}</span>
         <b v-if="point!=null && product.invoicePricing?.mode!=='included'">{{money(row.purchaseCny)}} ×（1 + {{percent(point)}}%）= ¥{{money(row.taxIncludedCny)}}</b>
         <b v-else-if="product.invoicePricing?.mode==='ratio' && canViewFobCoefficient">{{money(row.purchaseCny)}} ×（{{money(product.invoicePricing.baseIncludedCny!)}} ÷ {{money(product.invoicePricing.basePurchaseCny)}}）= ¥{{money(row.taxIncludedCny)}}</b>
         <b v-else>¥{{money(row.taxIncludedCny)}}</b>
-        <small>{{product.invoicePricing?.mode==='included'?'阶梯价已含票，直接使用':needsVerification?'默认10点只计入采购价，待采购补齐票据资料':product.classification==='ordinary-fob'?'沿用普通FOB原10点成本口径':point!=null?'采用数据源实际票点，不从专票名称推算':product.invoicePricing?.mode==='ratio'?'历史快照：按保存时含票比例换算':'按本档采购价格计价'}}</small>
+        <small>{{product.invoicePricing?.mode==='included'?'阶梯价已含票，直接使用':needsVerification?'默认10点只计入采购价，待采购补齐票据资料':product.classification==='ordinary-fob'?(product.invoicePricing?.basisLabel || '沿用保存时普通FOB成本口径'):point!=null?'采用数据源实际票点，不从专票名称推算':product.invoicePricing?.mode==='ratio'?'历史快照：按保存时含票比例换算':'按本档采购价格计价'}}</small>
       </div>
       <div v-if="canViewPurchaseCost" class="step"><span>② 单件综合成本</span><b>{{money(row.taxIncludedCny)}} + {{money(row.freightCny)}} = ¥{{money(row.costCny)}}</b><small>国内运费直接相加，不加票点</small></div>
       <div class="step"><span>{{canViewPurchaseCost?'③ ':''}}本次数量最终报价</span>

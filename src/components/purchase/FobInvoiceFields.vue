@@ -11,7 +11,7 @@ function included(event:Event){const value=(event.target as HTMLInputElement).va
     <label v-if="showInvoice">实际票点（8%填0.08）<input :value="record.taxPoint" aria-label="FOB票点" type="number" min="0" max="1" step="0.001" @input="record.taxPoint=($event.target as HTMLInputElement).value===''?null:Number(($event.target as HTMLInputElement).value)"></label>
     <label>FOB 阶梯价格口径<select v-model="record.purchasePriceBasis" aria-label="采购阶梯价格口径"><option value="">原始阶梯价（历史未标记）</option><option value="quoted">原始阶梯价，按实际票点计算</option><option value="tax_included">全部阶梯已含票，不再换算</option></select></label>
     <label class="wide">采购核实说明（选填）<textarea v-model="record.invoiceVerificationNote" aria-label="含票阶梯核实说明" maxlength="2000" placeholder="填写供应商票据类型及票点核实情况" /></label>
-    <small class="wide">FOB前两类报价按各档原价 ×（1＋实际票点）计算；已含票阶梯不重复加票点。票类型或票点缺失时默认10点并持续提醒，补齐当前数据源SKU后重新查询才解除。已填含票价与实际票点冲突时须核实；专票名称中的数字不会代填票点。</small>
+    <small class="wide">退税 FOB 优先采用采购新增专票三列，三列全空时沿用原票据资料；按各档原价 ×（1＋实际票点）计算；已含票阶梯不重复加票点。票类型或票点缺失时默认10点并持续提醒，补齐当前数据源SKU后重新查询才解除。已填含票价与实际票点冲突时须核实；专票名称中的数字不会代填票点。</small>
   </div>
 </template>
 <style scoped>

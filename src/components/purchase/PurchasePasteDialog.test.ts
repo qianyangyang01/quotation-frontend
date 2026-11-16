@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import PurchasePasteDialog from './PurchasePasteDialog.vue'
 import { emptyPurchasePasteRow, UNIFIED_PURCHASE_PASTE_COLUMNS } from '@/data/purchasePaste'
+import { SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS } from '@/data/purchasePaste'
 
 const request = vi.hoisted(() => vi.fn())
 vi.mock('@/services/http', () => ({ request }))
@@ -12,6 +13,9 @@ function mount(unified = false) {
   const saved = vi.fn()
   const host = document.createElement('div'); document.body.append(host)
   app = createApp(PurchasePasteDialog, { onSaved: saved, unified }); app.mount(host)
+  // Historical fixtures explicitly select the old column order.
+  const layout = document.querySelector('select')!
+  layout.value = 'legacy'; layout.dispatchEvent(new Event('change', { bubbles: true }))
   return saved
 }
 function button(name: string) { return Array.from(document.querySelectorAll('button')).find(b => b.textContent === name)! }
@@ -28,6 +32,24 @@ function preview(sku = 'P-1', action = 'update', notices: string[] = []) {
     effective: { sku, purchasePriceCny: 15 }, notices }], skipped: [] }
 }
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.resetAllMocks(); vi.unstubAllGlobals() })
+
+it('pastes new invoice columns, previews percentages, confirms exact prices and preserves category', async () => {
+  const saved=mount(true)
+  const values:Record<string,string>={sku:'INV-NEW',purchasePriceCny:'100',taxIncludedPriceCny:'103',taxPoint:'3%',invoiceType:'普票',specialTaxIncludedPriceCny:'113',specialTaxPoint:'13%',specialInvoiceType:'专票13',category:'服装',sourceLink1:'https://example.com/source'}
+  const columns=SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS
+  await paste([columns.map(c=>c[0]),columns.map(c=>values[c[1]] || '')])
+  expect(cell(0,28).value).toBe('113');expect(cell(0,29).value).toBe('13%');expect(cell(0,31).value).toBe('服装')
+  const changes=[{field:'specialTaxPoint',label:'专票点',before:null,after:.13}]
+  const response=preview('INV-NEW','create');response.rows[0]!.changes=changes as never
+  request.mockResolvedValueOnce(response);button('预览并保存 1 条').click();await tick()
+  const payload=JSON.parse(request.mock.calls[0]![1].body)
+  expect(payload[0]).toMatchObject({taxIncludedPriceCny:103,taxPoint:.03,specialTaxIncludedPriceCny:113,specialTaxPoint:.13,specialInvoiceType:'专票13',category:'服装'})
+  expect(document.querySelector('.paste-preview')?.textContent).toContain('13%')
+  request.mockResolvedValueOnce({added:payload,updated:[],unchanged:[],skipped:[]})
+  button('确认全部保存').click();await tick()
+  expect(JSON.parse(request.mock.calls[1]![1].body).rows).toEqual(payload)
+  expect(saved).toHaveBeenCalledWith({added:1,updated:0,unchanged:0,skipped:0})
+})
 
 it('previews and confirms the reported five-tier row without its empty trailing links, keeping every monetary field', async () => {
   mount(true)

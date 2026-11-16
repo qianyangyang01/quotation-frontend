@@ -15,6 +15,7 @@ final class PurchasePasteValidator {
     }
     static void validateValues(ObjectNode row, int index, boolean legacy) {
         var prefix = "第" + index + "行：";
+        validateSpecialInvoice(row);
         var sku = row.path("sku").asText("").trim().toUpperCase(java.util.Locale.ROOT).replaceAll("\\s+", "");
         if (!sku.matches("[A-Z0-9._/-]{1,96}") || sku.matches("(?i)^(TESTP|TEST|DEMO|MOCK|AUTO-).*$")) fail(prefix, "请填写有效的正式SKU");
         row.put("sku", sku);
@@ -42,6 +43,16 @@ final class PurchasePasteValidator {
         if (row.hasNonNull("stockStatus") && !row.path("stockStatus").isTextual()) fail(prefix, "是否有货请填写文字说明");
         var date = row.path("quotationDate").asText("");
         if (!date.isBlank()) try { if (!java.time.LocalDate.parse(date).toString().equals(date)) fail(prefix, "报价日期格式不合法"); } catch (java.time.DateTimeException error) { fail(prefix, "报价日期格式不合法"); }
+    }
+    static void validateSpecialInvoice(ObjectNode row) {
+        for (var field : List.of("specialTaxIncludedPriceCny", "specialTaxPoint")) {
+            var value = row.path(field);
+            if (value.isTextual() && value.asText().isBlank()) { row.putNull(field); continue; }
+            if (row.hasNonNull(field) && (!value.isNumber() || !Double.isFinite(value.asDouble()) || value.asDouble() < 0 || value.asDouble() > (field.equals("specialTaxPoint") ? 1 : 1000000000)))
+                fail("", field.equals("specialTaxPoint") ? "专票点须在0至1之间（13%填写0.13）" : "含专票价须为有效非负数且不超过10亿元");
+        }
+        var type = row.path("specialInvoiceType");
+        if (row.hasNonNull("specialInvoiceType") && (!type.isTextual() || type.asText().length() > 200)) fail("", "专票类型须为文字且不超过200字");
     }
     static void validateExtendedTiers(ObjectNode row) {
         if (!List.of("tier4MinQty", "tier4PriceCny", "tier5MinQty", "tier5PriceCny").stream().anyMatch(row::hasNonNull)) return;

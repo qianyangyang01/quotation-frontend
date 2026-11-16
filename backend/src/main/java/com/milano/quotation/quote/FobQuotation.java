@@ -39,9 +39,12 @@ public class FobQuotation {
     public ObjectNode classifiedProduct(String sku,String source,String classification) {
         if(!sku.matches("[A-Z0-9][A-Z0-9._/-]{0,95}")||!Set.of("auto","fob","standard").contains(source))throw AppException.unprocessable("SKU或采购来源无效");
         if(source.equals("auto")) {
-            var standard=jdbc.sql("select coalesce(payload->>'purchaseUsage','') from purchase_product where sku=:sku").param("sku",sku).query(String.class).optional();
+            var standard=jdbc.sql("select payload from purchase_product where sku=:sku").param("sku",sku)
+                .query((rs,n)->mapper.readTree(rs.getString(1))).optional();
             boolean dedicated=jdbc.sql("select exists(select 1 from fob_purchase_product where sku=:sku)").param("sku",sku).query(Boolean.class).single();
-            source=standard.filter("shared"::equals).isPresent()?"standard":dedicated?"fob":"standard";
+            source=standard.filter(raw -> "shared".equals(raw.path("purchaseUsage").asText())
+                || !"ordinary-fob".equals(classification) && "standard".equals(raw.path("dataSource").asText("standard"))
+                    && com.milano.quotation.fob.FobInvoicePolicy.hasSpecialFields(raw)).isPresent()?"standard":dedicated?"fob":"standard";
         }
         // Resolve fallback before a transactional lookup, which marks NOT_FOUND rollback-only.
         JsonNode raw=source.equals("fob")?fob.getForQuotation(sku):purchases.getForQuotation(sku);

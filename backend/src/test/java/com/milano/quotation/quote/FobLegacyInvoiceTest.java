@@ -16,7 +16,7 @@ class FobLegacyInvoiceTest {
             assertEquals(2,p.at("/invoicePricing/missingFields").size());
             assertEquals(0,FobPricing.purchaseCost(p,new BigDecimal("45")).compareTo(new BigDecimal("49.50")));
             var rows=FobPricing.pricing(p,new BigDecimal("7.2"),FobPricingTest.config());
-            assertEquals(kind.equals("rebate-fob")?"3.72":"3.82",rows.at("/rows/0/declaredUsd").asText());assertEquals(4,rows.path("policyVersion").asInt());
+            assertEquals(kind.equals("rebate-fob")?"3.72":"3.82",rows.at("/rows/0/declaredUsd").asText());assertEquals(FobPricing.POLICY_VERSION,rows.path("policyVersion").asInt());
         }
     }
     @Test void missingFieldsNeverBypassExplicitBadOrConflictingProcurement(){

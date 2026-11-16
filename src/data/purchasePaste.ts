@@ -1,3 +1,4 @@
+import { SPECIAL_INVOICE_COLUMNS } from './purchaseSpecialInvoice'
 import { normalizePurchaseRecord, type PurchaseProductRecord } from './purchaseStore'
 
 // Column order is the user's 采购新模版导入 (2).xlsx, Sheet1 A1:AF1.
@@ -18,6 +19,8 @@ export const UNIFIED_PURCHASE_PASTE_COLUMNS = [
   ['阶梯价5起订量', 'tier5MinQty'], ['阶梯价5(CNY/件)', 'tier5PriceCny'],
   ...PURCHASE_PASTE_COLUMNS.slice(17),
 ] as const
+export const SPECIAL_PURCHASE_PASTE_COLUMNS = [...PURCHASE_PASTE_COLUMNS.slice(0, 24), ...SPECIAL_INVOICE_COLUMNS, ...PURCHASE_PASTE_COLUMNS.slice(24)] as const
+export const SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS = [...UNIFIED_PURCHASE_PASTE_COLUMNS.slice(0, 28), ...SPECIAL_INVOICE_COLUMNS, ...UNIFIED_PURCHASE_PASTE_COLUMNS.slice(28)] as const
 export type PurchasePasteColumns = readonly (readonly [string, string])[]
 export const PURCHASE_PASTE_LIMIT = 100
 export const emptyPurchasePasteRow = (columns: PurchasePasteColumns = PURCHASE_PASTE_COLUMNS) => columns.map(() => '')
@@ -68,7 +71,7 @@ export function applyPurchasePaste(grid: string[][], clipboard: string[][], star
 }
 
 export type PurchasePasteIssue = { row: number; column: number; message: string }
-const numericFields = new Set(['weightG', 'lengthCm', 'widthCm', 'heightCm', 'minOrderQty', 'purchasePriceCny', 'tier2MinQty', 'tier2PriceCny', 'tier3MinQty', 'tier3PriceCny', 'tier4MinQty', 'tier4PriceCny', 'tier5MinQty', 'tier5PriceCny', 'singleFreightCny', 'freight10Cny', 'freight100Cny', 'taxIncludedPriceCny', 'taxPoint'])
+const numericFields = new Set(['weightG', 'lengthCm', 'widthCm', 'heightCm', 'minOrderQty', 'purchasePriceCny', 'tier2MinQty', 'tier2PriceCny', 'tier3MinQty', 'tier3PriceCny', 'tier4MinQty', 'tier4PriceCny', 'tier5MinQty', 'tier5PriceCny', 'singleFreightCny', 'freight10Cny', 'freight100Cny', 'taxIncludedPriceCny', 'taxPoint', 'specialTaxIncludedPriceCny', 'specialTaxPoint'])
 const dimensionFields = new Set(['lengthCm', 'widthCm', 'heightCm'])
 export type PurchasePastePatch = Partial<PurchaseProductRecord> & { sku: string; sourceRow: number }
 type PasteCheck<T> = { issues: PurchasePasteIssue[]; records: T[]; skipped: string[]; skippedRows: { sku: string; sourceRow: number }[]; canSave: boolean }
@@ -89,13 +92,13 @@ export function validatePurchasePaste(grid: string[][], sparse = false, columns:
       if (sparse && !raw) return
       if (!numericFields.has(field)) { data[field] = raw; return }
       if (!raw) { data[field] = null; return }
-      const numeric = field === 'taxPoint' ? raw.replace(/[％%]$/, '') : raw
+      const numeric = (field === 'taxPoint' || field === 'specialTaxPoint') ? raw.replace(/[％%]$/, '') : raw
       const value = Number(numeric)
       if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(numeric) || !Number.isFinite(value) || value < 0) issue(field, '请填写有效非负数字')
       // Dimension zero means missing, including sparse updates where blanks preserve the old value.
       if (dimensionFields.has(field) && value === 0) { if (!sparse) data[field] = null; return }
-      data[field] = field === 'taxPoint' && (/[％%]$/.test(raw) || value > 1) ? value / 100 : value
-      if (field === 'taxPoint' && Number(data[field]) > 1) issue(field, '票点须在0%至100%之间')
+      data[field] = (field === 'taxPoint' || field === 'specialTaxPoint') && (/[％%]$/.test(raw) || value > 1) ? value / 100 : value
+      if ((field === 'taxPoint' || field === 'specialTaxPoint') && Number(data[field]) > 1) issue(field, '票点须在0%至100%之间')
     })
     const sku = String(data.sku || '').toUpperCase().replace(/\s+/g, '')
     data.sku = sku

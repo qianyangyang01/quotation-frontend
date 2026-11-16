@@ -305,6 +305,7 @@ public class PurchaseProductService {
     private static void addReferencedSku(Collection<String> skus,String value){referencedSku(value).ifPresent(skus::add);}
     private static void validatePayload(ObjectNode object) {
         PurchasePasteValidator.validateExtendedTiers(object);
+        PurchasePasteValidator.validateSpecialInvoice(object);
         if (!List.of("standard", "legacy_2026").contains(object.path("dataSource").asText("standard")))
             throw AppException.unprocessable("普通采购接口仅支持新数据或2026旧数据；FOB资料请使用FOB入口");
         for (var field : List.of("weightG", "minOrderQty", "purchasePriceCny", "tier2PriceCny", "tier3PriceCny", "taxIncludedPriceCny", "singleFreightCny", "freight10Cny", "freight100Cny")) {
