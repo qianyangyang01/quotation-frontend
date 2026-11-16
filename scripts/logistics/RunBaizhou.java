@@ -21,6 +21,7 @@ import java.util.*;
 public class RunBaizhou {
     static final String COMPANY="fe84a955-c584-4ed5-9b0e-1c79957c1c83",ACTOR="codex-maintenance";
     static final Set<String> COUNTRIES=Set.of("美国","英国","德国","法国","意大利","西班牙","葡萄牙");
+    static final Set<String> TAX_SCOPES=Set.of("美国","英国","欧盟");
     static final Path ROOT=Path.of("/maintenance");
     static final ObjectMapper M=new ObjectMapper();
     static String env(String key){return Objects.requireNonNull(System.getenv(key),key);}
@@ -102,8 +103,8 @@ public class RunBaizhou {
                         }
                         require(added==7,"Wrong clothing country count");com.milano.quotation.finance.ValidateKuailvFinance.validate(next);
                         var nextTax=tax.path("payload").deepCopy();int taxAdded=0;
-                        for(var c:nextTax.path("countries"))if(COUNTRIES.contains(c.path("country").asText())){require(c.path("channelRules").valueStream().noneMatch(k->k.path("key").asText().equals(key)),"Already taxed");((ObjectNode)c).withArray("channelRules").addObject().put("key",key).put("mode","exempt").put("amount",0).put("currency","USD").put("perKg",0).put("source","2026-11-16用户确认：百州BZ503服装渠道包税、全邮编，覆盖原表税费及邮编限制");taxAdded++;}
-                        require(taxAdded==7,"Wrong tax country count");com.milano.quotation.finance.ValidateKuailvFinance.validateTax(nextTax);
+                        for(var c:nextTax.path("countries"))if(TAX_SCOPES.contains(c.path("country").asText())){require(c.path("selected").asBoolean(),"Tax scope inactive");require(c.path("channelRules").valueStream().noneMatch(k->k.path("key").asText().equals(key)),"Already taxed");((ObjectNode)c).withArray("channelRules").addObject().put("key",key).put("mode","exempt").put("amount",0).put("currency","USD").put("perKg",0).put("source","2026-11-16用户确认：百州BZ503服装渠道包税、全邮编，覆盖原表税费及邮编限制");taxAdded++;}
+                        require(taxAdded==3,"Wrong tax scope count");com.milano.quotation.finance.ValidateKuailvFinance.validateTax(nextTax);
                         require(jdbc.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1,updated_at=now() where setting_key='channel-policies' and version=66 and payload=cast(:old as jsonb)").param("p",next.toString()).param("old",policy.path("payload").toString()).update()==1,"Policy race");
                         require(jdbc.sql("update finance_setting set payload=cast(:p as jsonb),version=version+1,updated_at=now() where setting_key='tax-settings' and version=44 and payload=cast(:old as jsonb)").param("p",nextTax.toString()).param("old",tax.path("payload").toString()).update()==1,"Tax race");
                         audit(jdbc,"finance.channel-and-tax",key,Map.of("category","服装","countries",COUNTRIES,"taxMode","exempt","fullPostalCoverage",true));audit(jdbc,"logistics.publish",versionId.toString(),Map.of("rows",27,"sourceSha256",expected.path("sha256").asText(),"channelId",channelId.toString()));
@@ -117,8 +118,8 @@ public class RunBaizhou {
                 String key=jdbc.sql("select rule_id::text||'::百州::'||code from logistics_channel where id=:id").param("id",channelId).query(String.class).single();
                 var finance=jdbc.sql("select jsonb_object_agg(setting_key,to_jsonb(f))::text from finance_setting f").query((rs,n)->M.readTree(rs.getString(1))).single();save("finance-after",finance);int policyCount=0,taxCount=0;
                 for(var p:finance.path("channel-policies").path("payload"))for(var c:p.path("countryRules"))if(c.path("allowedChannels").valueStream().anyMatch(k->k.asText().equals(key))){require(p.path("category").asText().equals("服装")&&COUNTRIES.contains(c.path("country").asText()),"Non-clothing authorization");policyCount++;}
-                for(var c:finance.path("tax-settings").path("payload").path("countries"))for(var t:c.path("channelRules"))if(t.path("key").asText().equals(key)){require(COUNTRIES.contains(c.path("country").asText())&&t.path("mode").asText().equals("exempt")&&t.path("amount").asDouble()==0&&t.path("perKg").asDouble()==0,"Tax mismatch");taxCount++;}
-                require(policyCount==7&&taxCount==7,"Finance readback mismatch");save("final-verification",M.createObjectNode().put("passed",true).put("channelId",channelId.toString()).put("versionId",versionId.toString()).put("rows",27).put("countries",7).put("category","服装").put("taxMode","exempt").put("allPostalCodes",true).put("channelKey",key));System.out.println("BAIZHOU_VERIFIED_OK "+versionId);
+                for(var c:finance.path("tax-settings").path("payload").path("countries"))for(var t:c.path("channelRules"))if(t.path("key").asText().equals(key)){require(TAX_SCOPES.contains(c.path("country").asText())&&c.path("selected").asBoolean()&&t.path("mode").asText().equals("exempt")&&t.path("amount").asDouble()==0&&t.path("perKg").asDouble()==0,"Tax mismatch");taxCount++;}
+                require(policyCount==7&&taxCount==3,"Finance readback mismatch");save("final-verification",M.createObjectNode().put("passed",true).put("channelId",channelId.toString()).put("versionId",versionId.toString()).put("rows",27).put("countries",7).put("category","服装").put("taxMode","exempt").put("allPostalCodes",true).put("channelKey",key));System.out.println("BAIZHOU_VERIFIED_OK "+versionId);
             }finally{factory.destroy();}
         }
     }
