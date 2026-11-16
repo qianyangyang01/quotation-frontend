@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "revision": 25,
+  "entries": [{
+    "id": "17c2cb65-56fa-439d-bacc-3ec75b401034",
+    "providerName": "帆之润",
+    "providerAliases": ["帆之润国际"],
+    "channelName": "帆之润美国专线小包",
+    "productCodes": ["PK0003"],
+    "aliases": ["美国小包-普货"],
+    "sharedSourceCodes": [],
+    "logisticsAttribute": "普货、服装",
+    "enabled": true,
+    "sources": [{"file":"帆之润-美国小包VIP价格表7.14(2).xls","sheet":"美国小包-普货","firstRow":4,"lastRow":8,"priceRows":5,"country":"US","scopeConfirmation":"2026-11-16 用户指定：包税、全邮编、普货和服装；50g起重，按1g向上进位，运费合计向上取整到人民币元"}]
+  }]
+}
