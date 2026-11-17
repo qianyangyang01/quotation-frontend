@@ -14,7 +14,7 @@ function cellText(node: Node): string {
 }
 
 /** Parse into an inert template; copied markup is never mounted or executed. */
-export function parsePurchaseHtmlTable(html: string, maxRows = PURCHASE_PASTE_LIMIT, maxColumns = PURCHASE_PASTE_COLUMNS.length + 3): string[][] | null {
+export function parsePurchaseHtmlTable(html: string, maxRows = PURCHASE_PASTE_LIMIT, maxColumns = PURCHASE_PASTE_COLUMNS.length + 3, trimBlankSuffix = false): string[][] | null {
   if (!html.trim()) return null
   if (html.length > MAX_CLIPBOARD_LENGTH) throw new Error('粘贴内容过大，每次最多100行')
   const template = document.createElement('template')
@@ -27,6 +27,9 @@ export function parsePurchaseHtmlTable(html: string, maxRows = PURCHASE_PASTE_LI
   if (sourceRows.length > maxRows) throw new Error('每次最多100行，请分批复制')
   const rows = sourceRows.map(tr => {
     const cells = Array.from(tr.cells)
+    // Whole-row copies may include thousands of unused cells, or a merged empty
+    // suffix. Only discard a suffix; empty cells between fields retain positions.
+    if (trimBlankSuffix) while (cells.length && !cellText(cells[cells.length - 1]!).trim()) cells.pop()
     const values: string[] = []
     for (const cell of cells) {
       const value = Array.from(cell.childNodes, cellText).join('').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').trim()

@@ -9,13 +9,10 @@ const request = vi.hoisted(() => vi.fn())
 vi.mock('@/services/http', () => ({ request }))
 let app: App | undefined
 const tick = async () => { await nextTick(); await nextTick(); await nextTick() }
-function mount(unified = false, layoutValue: string | null = 'legacy') {
+function mount(unified = false) {
   const saved = vi.fn()
   const host = document.createElement('div'); document.body.append(host)
   app = createApp(PurchasePasteDialog, { onSaved: saved, unified }); app.mount(host)
-  // Historical fixtures explicitly select the old column order.
-  const layout = document.querySelector('select')!
-  if (layoutValue !== null) { layout.value = layoutValue; layout.dispatchEvent(new Event('change', { bubbles: true })) }
   return saved
 }
 function button(name: string) { return Array.from(document.querySelectorAll('button')).find(b => b.textContent === name)! }
@@ -33,8 +30,23 @@ function preview(sku = 'P-1', action = 'update', notices: string[] = []) {
 }
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.resetAllMocks(); vi.unstubAllGlobals() })
 
+it('opens ready to paste and previews the reported Shimo row without a layout selector', async () => {
+  mount(true)
+  expect(document.activeElement).toBe(cell(0,0))
+  expect(document.querySelector('select')).toBeNull()
+  const source=['','','[图片]','2026.11.14','杨','暂无库存，预计11.16号上架','YT2602031','130','60G（仅供外贸出口销售，禁止国内销售，购买等同默认免责申明','','','','','','1','8','','','','','','','','','6','6','15','否','8','0%','专票13','','','','日用品','有','深圳西之月选品跨境供应链有限公司','','https://detail.1688.com/offer/1098929882459.html','','','','','','']
+  await paste([source])
+  expect(cell(0,3).value).toBe('YT2602031')
+  expect(cell(0,31).value).toBe('日用品')
+  expect(cell(0,33).value).toBe('深圳西之月选品跨境供应链有限公司')
+  request.mockResolvedValueOnce(preview('YT2602031'))
+  button('预览并保存 1 条').click();await tick()
+  expect(JSON.parse(request.mock.calls[0]![1].body)).toEqual([{sourceRow:1,quotationDate:'2026-11-14',quotationOwner:'杨',notes:source[5],sku:'YT2602031',weightG:130,size:source[8],minOrderQty:1,purchasePriceCny:8,singleFreightCny:6,freight10Cny:6,freight100Cny:15,freeShipping:'否',taxIncludedPriceCny:8,taxPoint:0,invoiceType:'专票13',category:'日用品',stockStatus:'有货',factoryInfo:source[36],sourceLink1:source[38]}])
+  expect(request).toHaveBeenCalledTimes(1)
+})
+
 it.each([false,true])('shows and saves the freight-derived flag in the paste grid, unified=%s', async unified => {
-  mount(unified,null)
+  mount(unified)
   const columns=unified ? SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS : SPECIAL_PURCHASE_PASTE_COLUMNS
   const index=(field:string)=>columns.findIndex(c=>c[1]===field)
   for (const [freight,flag,expected] of [[['6','11','56'],'是','否'],[['3','0','0'],'是','否'],[['0','0','0'],'否','是']] as const) {
@@ -57,8 +69,8 @@ it.each([false,true])('shows and saves the freight-derived flag in the paste gri
 })
 
 it.each([false, true])('preserves tier 2 and all subsequent columns in the default headerless layout, unified=%s', async unified => {
-  mount(unified, null)
-  expect(document.querySelector('select')!.value).toBe('special')
+  mount(unified)
+  expect(document.querySelector('select')).toBeNull()
   const columns = unified ? SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS : SPECIAL_PURCHASE_PASTE_COLUMNS
   const values: Record<string, string> = {sku:'TIER-COLUMNS',quotationDate:'2026.11.16',quotationOwner:'周',weightG:'90',minOrderQty:'1',purchasePriceCny:'10',tier2MinQty:'20',tier2PriceCny:'9.5',tier3MinQty:'100',tier3PriceCny:'9',singleFreightCny:'6',freight10Cny:'11',freight100Cny:'56',freeShipping:'否',taxIncludedPriceCny:'10.3',taxPoint:'3%',invoiceType:'普票',specialTaxIncludedPriceCny:'11.3',specialTaxPoint:'13%',specialInvoiceType:'专票',category:'化妆品',stockStatus:'有',factoryInfo:'工厂',sourceLink1:'https://example.com/1',similarSource:'https://example.com/4'}
   if (unified) Object.assign(values,{tier4MinQty:'500',tier4PriceCny:'8',tier5MinQty:'1000',tier5PriceCny:'7'})
@@ -75,7 +87,7 @@ it.each([false, true])('preserves tier 2 and all subsequent columns in the defau
 })
 
 it('keeps the reported AZ2603605 row freight, non-free shipping and optional blanks in their original columns', async () => {
-  mount(true,null)
+  mount(true)
   const input=['','','','2026.11.16','周','暂时现货','AZ2603605','90','','PDRN Pink Vitamin','液体','','','','1','10','','','','','','','','','6','11','56','否','10.3','3%','普票','10','','','化妆品','有','广州市栩来旺信息产业有限公司','','https://detail.1688.com/offer/1060977145108.html','https://detail.1688.com/offer/1061832490737.html','','']
   expect(input).toHaveLength(42)
   await paste([input])

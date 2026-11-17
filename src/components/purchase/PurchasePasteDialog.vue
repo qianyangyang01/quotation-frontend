@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { applyPurchasePaste, emptyPurchasePasteRow, PURCHASE_PASTE_COLUMNS, UNIFIED_PURCHASE_PASTE_COLUMNS, SPECIAL_PURCHASE_PASTE_COLUMNS, SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, validatePurchasePaste, syncPasteFreeShipping, type PurchasePastePatch } from '@/data/purchasePaste'
-import { readUnifiedPurchaseClipboardResult } from '@/data/purchaseClipboard'
+import { computed, onMounted, ref } from 'vue'
+import { applyPurchasePaste, emptyPurchasePasteRow, SPECIAL_PURCHASE_PASTE_COLUMNS, SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS, PURCHASE_PASTE_LIMIT, validatePurchasePaste, syncPasteFreeShipping, type PurchasePastePatch } from '@/data/purchasePaste'
+import { readAutoPurchaseClipboardResult } from '@/data/purchaseClipboardAuto'
 import { previewPurchasePaste, confirmPurchasePaste, type PastePreview, type PasteSavedCounts, type PasteSkipped } from '@/services/purchasePaste'
 
 const props = defineProps<{ unified?: boolean }>()
 const columns = computed(() => props.unified ? SPECIAL_UNIFIED_PURCHASE_PASTE_COLUMNS : SPECIAL_PURCHASE_PASTE_COLUMNS)
-const sourceLayout = ref('special')
-const sourceColumns = computed(() => sourceLayout.value === 'special' ? columns.value : props.unified ? UNIFIED_PURCHASE_PASTE_COLUMNS : PURCHASE_PASTE_COLUMNS)
 const emptyRow = () => emptyPurchasePasteRow(columns.value)
 const emit = defineEmits<{ close: []; saved: [counts: PasteSavedCounts] }>()
 const grid = ref(Array.from({ length: 10 }, emptyRow))
@@ -32,19 +30,20 @@ function displayValue(value: unknown, field: string) {
 }
 const errors = computed(() => new Map(check.value.issues.map(issue => [`${issue.row}:${issue.column}`, issue.message])))
 const table = ref<HTMLElement | null>(null)
+onMounted(() => focusCell(0, 0))
 function paste(event: ClipboardEvent, row: number, col: number) {
   event.preventDefault()
-  if (busy.value) return
+  if (busy.value || pending.value) return
   try {
     if (!event.clipboardData) throw new Error('未读取到剪贴板内容，请重新复制单元格区域')
-    const { rows: cells, skippedImageColumns } = readUnifiedPurchaseClipboardResult(event.clipboardData, col, { columns: columns.value, sourceColumns: sourceColumns.value })
+    const { rows: cells, skippedImageColumns } = readAutoPurchaseClipboardResult(event.clipboardData, col, columns.value)
     grid.value = applyPurchasePaste(grid.value, cells, row, col, columns.value)
     message.value = cells.length ? `已粘贴${cells.length}行${skippedImageColumns ? '，已过滤前3列图片/空白列' : ''}，空白单元格已跳过并保留列位置` : '剪贴板中没有表格文字'
   } catch (error) { message.value = error instanceof Error ? error.message : '粘贴失败' }
 }
 function focusCell(row: number, col: number) {
   const input = table.value?.querySelector<HTMLInputElement>(`[data-cell="${row}:${col}"]`)
-  input?.focus(); input?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  input?.focus(); input?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
 }
 function move(event: KeyboardEvent, row: number, col: number) {
   if (event.key === 'Enter') { event.preventDefault(); focusCell(Math.min(grid.value.length - 1, row + (event.shiftKey ? -1 : 1)), col) }
@@ -104,8 +103,8 @@ async function confirmSave() {
   <Teleport to="body">
     <div class="paste-overlay" @keydown.esc.prevent="close">
       <section class="paste-dialog" role="dialog" aria-modal="true" aria-labelledby="paste-title">
-        <header><div><h2 id="paste-title">{{ unified ? '统一粘贴采购资料（五档）' : '采购粘贴新增/更新' }}</h2><p v-if="!unified">支持整行复制，自动过滤原表前3列图片/空白列。支持新旧表头，点击“报价日期”列后按 Ctrl + V；不带表头时请选择对应列序并复制完整字段至“相似货源”。</p><p v-if="unified">统一维护新数据与2026旧数据，支持最多五档价格；建议连同表头复制，自动识别字段并过滤图片列。无表头时请选择对应列序并复制完整字段至“相似货源”；若有“优化后价格”列，请连同表头复制以自动忽略该列，或先删除该列并确认保留第二档起订量。短区域、旧三档表请带表头，避免错列。</p></div><button :disabled="busy" aria-label="关闭采购粘贴" @click="close">×</button></header>
-        <p v-if="unified" class="paste-help">2026旧数据沿用原资料类型和价格规则；含票价资料保留原价格口径，更新不会自动切换 FOB 来源。未税新数据供普通与 FOB 报价共用。第四、第五档可留空；填写时数量与单价须成对、逐档递增。普通报价保留原采购票点与运费规则，退税 FOB 优先使用新专票三列，普通 FOB 使用原含票价核对最低起订档；均按百件运费均摊；使用共用资料进行 FOB 报价需填写100件总运费或明确包邮。</p><a v-if="unified" class="paste-template-link" href="/templates/采购统一五档模板.xlsx" download>下载统一五档模板</a><div class="paste-tools"><label>无表头列序 <select v-model="sourceLayout" :disabled="busy || !!pending"><option value="special">新版（含专票三列）</option><option value="legacy">旧版（不含专票三列）</option></select></label><span>当前：第{{ selected.row + 1 }}行 · {{ columns[selected.col]?.[0] }}</span><button :disabled="busy || !!pending || grid.length >= PURCHASE_PASTE_LIMIT" @click="grid.push(...Array.from({ length: Math.min(5, PURCHASE_PASTE_LIMIT-grid.length) }, emptyRow))">增加5行</button><small>最多100行 · 已有SKU确认后更新，空白保留原值 · 向右滚动查看全部列</small></div>
+        <header><div><h2 id="paste-title">{{ unified ? '统一粘贴采购资料（五档）' : '采购粘贴新增/更新' }}</h2><p>复制整行后直接按 Ctrl + V，自动识别新旧模板、过滤前3列图片及末尾空列，无需选择列序。支持带表头粘贴；非标准列序或多余业务列请连同表头复制。</p></div><button :disabled="busy" aria-label="关闭采购粘贴" @click="close">×</button></header>
+        <p v-if="unified" class="paste-help">2026旧数据沿用原资料类型和价格规则；含票价资料保留原价格口径，更新不会自动切换 FOB 来源。未税新数据供普通与 FOB 报价共用。第四、第五档可留空；填写时数量与单价须成对、逐档递增。普通报价保留原采购票点与运费规则，退税 FOB 优先使用新专票三列，普通 FOB 使用原含票价核对最低起订档；均按百件运费均摊；使用共用资料进行 FOB 报价需填写100件总运费或明确包邮。</p><a v-if="unified" class="paste-template-link" href="/templates/采购统一五档模板.xlsx" download>下载统一五档模板</a><div class="paste-tools"><span>自动识别列序</span><span>当前：第{{ selected.row + 1 }}行 · {{ columns[selected.col]?.[0] }}</span><button :disabled="busy || !!pending || grid.length >= PURCHASE_PASTE_LIMIT" @click="grid.push(...Array.from({ length: Math.min(5, PURCHASE_PASTE_LIMIT-grid.length) }, emptyRow))">增加5行</button><small>最多100行 · 已有SKU确认后更新，空白保留原值 · 向右滚动查看全部列</small></div>
         <p class="paste-help">已有SKU可只填写需更新的字段，空白保留原值；长宽高的0按空值处理，其他字段的0及0%正常更新。运费自动判断包邮：任一档运费大于0设为“否”，三档均明确为0设为“是”；空白不当作0。新SKU必填：正式SKU、克重、起订量、基准采购单价、票点；未包邮时需1件及10件总运费。含专票价、专票点、专票类型均可独立留空；专票点支持13%、13或0.13。是否有货为选填说明，可填写自定义文字，不影响报价资格。合并后统一校验，实际变更计入修改记录。</p>
         <div v-show="!pending" ref="table" class="paste-grid"><table><thead><tr><th class="row-index">行</th><th v-for="([label, field], c) in columns" :key="field" :class="{ 'quantity-column': unified && (field === 'minOrderQty' || field.endsWith('MinQty')) }"><small>{{ String.fromCharCode(65 + Math.floor(c / 26) - 1).replace('@', '') }}{{ String.fromCharCode(65 + c % 26) }}</small>{{ label }}</th><th>操作</th></tr></thead><tbody>
           <tr v-for="(row, r) in grid" :key="r"><th class="row-index">{{ r + 1 }}</th><td v-for="([label, field], c) in columns" :key="field" :class="{ invalid: errors.has(`${r}:${c}`) }"><input v-model="row[c]" :data-cell="`${r}:${c}`" :aria-label="`第${r + 1}行 ${label}`" :aria-invalid="errors.has(`${r}:${c}`)" :title="errors.get(`${r}:${c}`) || row[c]" :disabled="busy || !!pending" autocomplete="off" @input="syncPasteFreeShipping(row, columns)" @focus="selected = { row:r, col:c }" @paste="paste($event, r, c)" @keydown="move($event, r, c)"><small v-if="errors.has(`${r}:${c}`)">{{ errors.get(`${r}:${c}`) }}</small></td><td><button :disabled="busy" :aria-label="`删除第${r + 1}行`" @click="grid.splice(r,1)">删除</button></td></tr>
