@@ -21,3 +21,5 @@
 - 公网 app-version、入口 HTML/JS 与实际容器完全一致。公网采购页面 JS 与本地构建逐字节一致，包含自动识别列序，已经移除手动列序下拉框。报价与培训健康检查通过。
 - 实际浏览器操作验收未完成：CUA 和 computer-use 的 node_repl 都因运行环境 `failed to write kernel assets` 无法启动。上述原行验收是自动测试中的 DOM 粘贴及预览请求核验，不冒称线上浏览器操作通过；生产未提交测试数据。
 - 发布包与前后指纹证据位于 `C:/Users/25490/Documents/ProjectWorkspaces/quotation/release-packages/quotation-2026.11.17-01-paste-auto/`。回退目标为 `quotation-2026.11.16-07-sf-bulky`（其中前端为 `quotation-2026.11.16-06`）。
+
+收尾核验：前一前端发布的 83 个静态资源均公网 HTTP 200 且字节不变；CI 44002353635 最终全部成功，包括后端与隔离检查。完整历史资源扫描未作为验收门槛，已停止并改为针对前一实际发布镜像的资源清单核验。
