@@ -101,7 +101,7 @@ try{
   selectedKeys.push((await article.innerText()).match(/PREVIEW\d+/)[0])
   await article.locator('.selection-actions>button').first().click()
  }
- const sheetQuantities=page.locator('.sheet-quantity input')
+ const sheetQuantities=page.locator('.sheet-quantity input[type=number]')
  await sheetQuantities.nth(0).fill('2')
  await sheetQuantities.nth(1).fill('5')
  await sheetQuantities.nth(2).fill('7')
