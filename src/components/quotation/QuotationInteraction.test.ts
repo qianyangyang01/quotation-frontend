@@ -370,7 +370,8 @@ it.each(['common', 'specified', 'template'].flatMap(mode => ['件', '套'].map(u
     expect(document.querySelector('.quantity-field')).toBeNull()
     expect(document.querySelector('.custom-head')).toBeNull()
     expect(document.querySelector('.custom-price')).toBeNull()
-    expect(document.querySelectorAll('.table-head > span')).toHaveLength(6)
+    expect(document.querySelectorAll('.table-head > span')).toHaveLength(3)
+    expect(document.querySelectorAll('.table-head > button')).toHaveLength(3)
     expect(document.querySelectorAll('.quote-rows article:first-child > span')).toHaveLength(3)
     expect(document.body.textContent).not.toContain('8'+unit+'该重量段暂无运价')
   } else if (mode === 'template') {

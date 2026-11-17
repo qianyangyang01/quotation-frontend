@@ -7,13 +7,14 @@ import { api } from '@/services/http'
 import { clearFinanceSettingsCache, hydrateFinanceSettings } from '@/services/financeSettings'
 import { replaceLogisticsRules, type LogisticsRule } from '@/data/logistics'
 import { loadPublishedLogisticsRules } from '@/data/publishedLogisticsRepository'
-import type { QuotationMode, QuotationProduct, QuotationMatrixRow } from '@/components/quotation/types'
+import type { QuotationMode, QuotationProduct, QuotationMatrixRow, QuotationComparisonCopy } from '@/components/quotation/types'
 import type { QuotationDraftPayload } from '@/services/quotationDrafts'
 import { normalizeQuotationRecord } from '@/data/quotationRecords'
 import { quotationReissuePayload } from '@/services/quotationReissue'
 import { quotationRecordQuoteSheetSource } from '@/data/quotationRecordQuoteSheet'
 import { quoteSheetModeDefaults } from '@/data/customerQuoteSheet'
 import { authState, roleDefinitions } from '@/data/authStore'
+import * as channelPolicies from '@/data/financeChannelPolicies'
 
 vi.mock('vue-router', () => ({ useRoute: vi.fn(() => ({ query: {} })), useRouter: () => ({ replace: vi.fn() }), onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/services/quotationSync', async original => ({ ...await original<typeof import('@/services/quotationSync')>(), startQuotationSync: vi.fn(() => vi.fn()) }))
@@ -43,6 +44,14 @@ let state: {
   buildQuoteOptions: () => Array<{ logisticsInput: {weightKg: number; packagingWeightKg: number}; totalCostCny: number; logisticsSamples: Array<{quantity: number; input: {weightKg: number}}> }>
   excelQuoteRows: (p: QuotationProduct, country: string) => QuotationMatrixRow[]
   changeLogisticsAttribute: (p: QuotationProduct, attribute: string) => Promise<void>
+  commonComparisonQuantities: number[]
+  financePolicies: channelPolicies.FinanceChannelPolicy[]
+  logisticsRulesGeneration: number
+  activeComparisonRowsForCountry: (country: string, region?: string) => QuotationMatrixRow[]
+  resolveComparisonSelection: (row: QuotationMatrixRow, quantities: readonly number[]) => QuotationMatrixRow | undefined
+  calculateComparisonQuantityPrice: (row: QuotationMatrixRow, quantity: number) => number | null
+  copyQuoteRows: (rows: QuotationMatrixRow[], comparison?: QuotationComparisonCopy) => Promise<void>
+  useLogistics: (p: QuotationProduct, row: QuotationMatrixRow) => void
   save: () => Promise<void>; commissionThreshold: string; saveValidationIssues: Array<{key: string}>
 }
 beforeEach(async () => {
@@ -124,6 +133,63 @@ async function query(mode: QuotationMode) {
   await state.queryManualQuote(); await nextTick()
 }
 function quote(q: number) { return state.quantityCostBreakdown(state.products[0]!, rule.name, q, '美国', '燕文', '', '9910::燕文::TEST') }
+
+it('finds authorized high-minimum channels at custom quantities and respects exact weight boundaries', async () => {
+  await query('shipping-only')
+  const high = structuredClone(rule)
+  Object.assign(high.prices[0]!, {weightFromKg:2,weightFromInclusive:true,weightToKg:6,weightToInclusive:true})
+  const unauthorized = {...structuredClone(high),id:9911,name:'未授权渠道'}
+  replaceLogisticsRules([high,unauthorized]); state.commonComparisonQuantities=[4,8,12]; await nextTick()
+  expect(state.excelQuoteRows(state.products[0]!, '美国')).toHaveLength(0)
+  const rows = state.activeComparisonRowsForCountry('美国')
+  expect(rows.map(row=>row.channelKey)).toEqual(['9910::燕文::TEST'])
+  expect(state.calculateComparisonQuantityPrice(rows[0]!,4)).not.toBeNull()
+  expect(state.calculateComparisonQuantityPrice(rows[0]!,12)).not.toBeNull()
+  expect(state.calculateComparisonQuantityPrice(rows[0]!,13)).toBeNull()
+  const before = state.products[0]!.freight
+  state.useLogistics(state.products[0]!,rows[0]!)
+  expect(state.products[0]!.freight).toBe(before)
+  expect(state.notice).toContain('当前主报价数量下不可报价')
+  state.commonComparisonQuantities=[1,2,3]; await nextTick()
+  expect(state.activeComparisonRowsForCountry('美国')).toHaveLength(0)
+  expect(state.resolveComparisonSelection(rows[0]!,[4,8,12])?.channelKey).toBe(rows[0]!.channelKey)
+  high.status='停用';replaceLogisticsRules([high,unauthorized]);await nextTick()
+  expect(state.resolveComparisonSelection(rows[0]!,[4,8,12])).toBeUndefined()
+})
+
+it('copies cached custom quantities and unavailable reasons without exporting default prices under the wrong headers', async () => {
+  await query('shipping-only')
+  const writeText=vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('navigator',{clipboard:{writeText}})
+  try {
+    const row=state.excelQuoteRows(state.products[0]!, '美国')[0]!
+    await state.copyQuoteRows([row],{quantities:[4,8,12],prices:[[12.34,23.45,null]],reasons:[['','','12件超重']]})
+    const lines=writeText.mock.calls[0]![0].split('\r\n').map((line:string)=>line.split('\t'))
+    expect(lines[0].slice(-6)).toEqual(['4件（USD）','4件（CNY）','8件（USD）','8件（CNY）','12件（USD）','12件（CNY）'])
+    expect(lines[1].slice(-6)).toEqual(['12.34','74.04','23.45','140.70','',''])
+    expect(lines[1][3]).toContain('12件超重')
+  } finally { vi.unstubAllGlobals() }
+})
+
+it('scans authorization once across quantity cells and immediately invalidates it when policies or published rules change', async () => {
+  await query('shipping-only')
+  const row=state.excelQuoteRows(state.products[0]!, '美国')[0]!
+  const snapshot=JSON.stringify(row)
+  const scan=vi.spyOn(channelPolicies,'financeAllowedChannelKeys')
+  for(let i=0;i<10;i++)for(const quantity of [4,8,12])expect(state.calculateComparisonQuantityPrice(row,quantity)).not.toBeNull()
+  expect(scan).toHaveBeenCalledTimes(1)
+  const original=state.financePolicies
+  state.financePolicies=[]
+  expect(state.calculateComparisonQuantityPrice(row,4)).toBeNull()
+  expect(scan).toHaveBeenCalledTimes(2)
+  state.financePolicies=original
+  expect(state.calculateComparisonQuantityPrice(row,4)).not.toBeNull()
+  const disabled={...structuredClone(rule),status:'停用'}
+  replaceLogisticsRules([disabled])
+  state.logisticsRulesGeneration++
+  expect(state.calculateComparisonQuantityPrice(row,4)).toBeNull()
+  expect(JSON.stringify(row)).toBe(snapshot)
+})
 
 it('offers existing modes and the independent batch entry, hides SKU/tier and directly computes manual cost and grams at every quantity', async () => {
   await query('freight-trial')

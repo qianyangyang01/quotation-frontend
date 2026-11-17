@@ -26,11 +26,11 @@ it.each(['single', 'bundle'])('prices same-name routes independently in %s, incl
     singleActualWeight: (_p: unknown, n: number) => .208 * n, bundleGoodsWeight: (n: number) => .208 * n,
     bundlePurchaseCost: (n: number) => 10.1 * n, bundleDomesticFreight: (n: number) => n,
     findPurchaseProduct: () => null, purchaseRecords: { value: [] }, selectedGradeCoefficient: () => 1.15,
-    taxResult: (_country: string, _provider: string, cny: number) => ({ totalUsd: roundQuoteUsd(cny / 7) }),
+    taxResult: (_country: string, _provider: string, cny: number) => ({ totalUsd: roundQuoteUsd(cny / 7), configured:true }),
     exchange: { value: { usd: 7 } }, selectedQuoteRegions: { value: {} }, toast: () => {},
   }
   const run = new Function(...Object.keys(context), js + ';return {quantityCostBreakdown,useLogistics}')(...Object.values(context))
-  const p = { purchase: 10.1, purchaseFreightPerUnit: 1, logisticsAttribute: '普货' }
+  const p = { purchase: 10.1, purchaseFreightPerUnit: 1, logisticsAttribute: '普货', quantity:1 }
   const quote = (id: number, count: number) => run.quantityCostBreakdown(p, '同名渠道', count, '美国', '燕文', '', `${id}::燕文::DEEP-${id - 9100}`)
   expect(quote(9100, 1).quoteUsd).toBe(4.20)
   expect(quote(9101, 1).quoteUsd).toBe(4.55)

@@ -3,7 +3,7 @@ import { priceRegionLabel } from './priceRegionLabel'
 import { sameQuotationRegion } from '@/data/logistics'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection } from './types'
+import type { QuotationCountrySummary, QuotationMatrixRow, QuotationPresetSelection, QuotationComparisonCopy } from './types'
 import { hasAnyQuotationPrice } from '@/services/quotationAvailability'
 import QuoteUnavailableReason from './QuoteUnavailableReason.vue'
 import QuoteTaxMeta from './QuoteTaxMeta.vue'
@@ -32,13 +32,16 @@ const props = withDefaults(defineProps<{
   exchangeRate: number
   unitLabel?: string
   customQuantity?: number
+  calculateQuantityPrice?: (row: QuotationMatrixRow, quantity: number) => number | null
+  resolveSelectedRow?: (row: QuotationMatrixRow, quantities: readonly number[]) => QuotationMatrixRow | undefined
   presetSelection?: QuotationPresetSelection[]
   presetVersion?: number
 }>(), { active: true })
 
 const emit = defineEmits<{
   adopt: [row: QuotationMatrixRow]
-  copy: [rows: QuotationMatrixRow[]]
+  copy: [rows: QuotationMatrixRow[], comparison?: QuotationComparisonCopy]
+  comparisonQuantitiesChange: [quantities: number[]]
   selectionChange: [rows: QuotationMatrixRow[]]
   quoteRegionChange: [payload: { country: string; region: string }]
   countryOrderChange: [countries: string[]]
@@ -107,8 +110,73 @@ const channelSearch = ref('')
 const page = ref(1)
 const pageSize = ref(5)
 const sortMode = ref<'recommended' | 'price' | 'speed'>('recommended')
+const comparisonInput = ref('1, 2, 3')
+const comparisonQuantities = ref([1, 2, 3])
+const comparisonError = ref('')
+const sortQuantity = ref(1)
+const onlyQuotable = ref(false)
+function applyComparisonQuantities() {
+  const tokens = comparisonInput.value.trim().split(/[,，、;；\s]+/).filter(Boolean)
+  if (tokens.length > 3) {
+    comparisonError.value = '最多输入 3 个数量，请删减后再应用；当前比价结果保持不变'
+    return
+  }
+  const values = tokens.map(Number)
+  if (!values.length || tokens.some(token => !/^\d+$/.test(token)) || values.some(value => !Number.isSafeInteger(value) || value <= 0)) {
+    comparisonError.value = '请输入正整数数量，用逗号分隔，例如 4, 8, 12'
+    return
+  }
+  const quantities = [...new Set(values)]
+  if (quantities.length !== comparisonQuantities.value.length || quantities.some((quantity, index) => comparisonQuantities.value[index] !== quantity)) {
+    comparisonQuantities.value = quantities
+    emit('comparisonQuantitiesChange', [...quantities])
+  }
+  if (!comparisonQuantities.value.includes(sortQuantity.value)) sortQuantity.value = comparisonQuantities.value[0]!
+  comparisonInput.value = comparisonQuantities.value.join(', ')
+  comparisonError.value = ''
+  page.value = 1
+}
+function sortByQuantity(quantity: number) { sortQuantity.value = quantity; sortMode.value = 'price'; page.value = 1 }
+// Reuse the source's existing 1/2/3/custom prices. Only extra quantities invoke the
+// calculator, once per channel and quantity for the current reactive context.
+// Sorting, pagination and filtering consume this bounded cache without repricing.
+const comparisonPrices = computed(() => {
+  const result = new Map<string, Map<number, { price: number | null; reason: string; overweight: boolean }>>()
+  if (props.active === false || props.sourcePending || props.sourceError || countryLoading.value || countryError.value) return result
+  void props.contextKey
+  for (const row of rows.value) {
+    const values = new Map<number, { price: number | null; reason: string; overweight: boolean }>()
+    for (const quantity of comparisonQuantities.value) {
+      try {
+        const value = row.available === false ? null
+          : quantity === 1 ? row.quote1 : quantity === 2 ? row.quote2 : quantity === 3 ? row.quote3
+          : quantity === props.customQuantity ? row.quoteCustom : props.calculateQuantityPrice?.(row, quantity) ?? null
+        const invalid = value != null && (!Number.isFinite(value) || value < 0)
+        const price = value != null && !invalid ? value : null
+        const reason = invalid ? '计价结果异常，请重新查询或核对渠道资料' : price != null ? '' : row.quantityMessages?.[String(quantity)] || props.unavailableReason?.(row, quantity) || row.availabilityMessage || '当前条件暂无可用运价'
+        values.set(quantity, { price, reason, overweight: price == null && /超重|超过上限|超过渠道重量上限/.test(reason) })
+      } catch {
+        values.set(quantity, { price: null, reason: '计价异常，请重新查询或核对渠道资料', overweight: false })
+      }
+    }
+    result.set(rowKey(row), values)
+  }
+  return result
+})
+function priceFor(row: QuotationMatrixRow, quantity: number) { return comparisonPrices.value.get(rowKey(row))?.get(quantity)?.price ?? null }
+function reasonFor(row: QuotationMatrixRow, quantity: number) { return comparisonPrices.value.get(rowKey(row))?.get(quantity)?.reason || '当前条件暂无可用运价' }
+function isOverweight(row: QuotationMatrixRow, quantity: number) { return comparisonPrices.value.get(rowKey(row))?.get(quantity)?.overweight ?? false }
+function canAddRow(row: QuotationMatrixRow) { return row.available !== false && comparisonQuantities.value.some(quantity => priceFor(row, quantity) != null) }
+function copyComparison() {
+  const current = filteredRows.value
+  emit('copy', current, { quantities: [...comparisonQuantities.value],
+    prices: current.map(row => comparisonQuantities.value.map(quantity => priceFor(row, quantity))),
+    reasons: current.map(row => comparisonQuantities.value.map(quantity => reasonFor(row, quantity))) })
+}
+const comparisonGrid = computed(() => ({ gridTemplateColumns: `minmax(260px,1.35fr) 100px repeat(${comparisonQuantities.value.length},minmax(160px,1fr)) 118px`, minWidth: `${478 + comparisonQuantities.value.length * 160}px` }))
 const selectedKeys = ref<string[]>([])
 const retainedRows = new Map<string, QuotationMatrixRow>()
+const selectedQuantities = new Map<string, number[]>()
 const draggedCountry = ref('')
 const dragOverCountry = ref('')
 let observedPresetVersion = -1
@@ -150,20 +218,26 @@ function applyPresetSelection() {
       taxRatePercent: null, countryFixedTaxUsd: 0, taxFeeMode: 'no-tax', taxLabel: '',
       tax1Usd: null, tax2Usd: null, tax3Usd: null, taxCustomUsd: null } satisfies QuotationMatrixRow
   })
-  for (const row of matched) retainedRows.set(rowKey(row), row)
+  for (const row of matched) { retainedRows.set(rowKey(row), row); selectedQuantities.set(rowKey(row), [...comparisonQuantities.value]) }
   selectedKeys.value = [...new Set(matched.map(rowKey))]
   emit('selectionChange', selectedQuoteRows())
   activeCountry.value = matched[0]?.country || activeCountry.value
   pendingPreset = false
 }
 function isSelected(row: QuotationMatrixRow) { return selectedKeys.value.includes(rowKey(row)) }
-function selectedQuoteRows() {
+const selectedRowsCache = computed(buildSelectedQuoteRows)
+function selectedQuoteRows() { return selectedRowsCache.value }
+function buildSelectedQuoteRows() {
   const scopes = [...new Set(selectedKeys.value.map(key => JSON.stringify(key.split('|||').slice(0, 2))))]
   const current = scopes.flatMap(scope => { const [country, region] = JSON.parse(scope) as [string, string]; return availableRows(country, region) })
   return selectedKeys.value.flatMap(key => {
     const row = current.find(candidate => rowKey(candidate) === key)
     if (row) { retainedRows.set(key, row); return [row] }
     const old = retainedRows.get(key)
+    if (old && props.resolveSelectedRow) {
+      const refreshed = props.resolveSelectedRow(old, selectedQuantities.get(key) || [1, 2, 3])
+      if (refreshed) { retainedRows.set(key, refreshed); return [refreshed] }
+    }
     return old ? [{ ...old, available: false, quote1: null, quote2: null, quote3: null, quoteCustom: null,
       quantityMessages: Object.fromEntries([...new Set([1,2,3,props.customQuantity || 5])].map(count => [String(count), props.unavailableReason?.(old, count) || '当前条件暂无可用运价'])), availabilityMessage: props.unavailableReason?.(old) || '当前渠道或区域无法匹配，请移除后重新添加渠道' }] : []
   })
@@ -173,6 +247,8 @@ function toggleSelection(row: QuotationMatrixRow) {
   const key = rowKey(row)
   retainedRows.set(key, row)
   const removing = isSelected(row)
+  if (removing) selectedQuantities.delete(key)
+  else selectedQuantities.set(key, [...comparisonQuantities.value])
   const removingPrimary = removing && isAdopted(row)
   selectedKeys.value = removing ? selectedKeys.value.filter(item => item !== key) : [...selectedKeys.value, key]
   const selected = selectedQuoteRows()
@@ -219,11 +295,15 @@ function etaRange(eta: string) {
   return [values[0] ?? Number.POSITIVE_INFINITY, values[1] ?? values[0] ?? Number.POSITIVE_INFINITY]
 }
 function fastestRow(rows: QuotationMatrixRow[]) {
-  return rows.slice().sort((a, b) => {
-    const [aStart, aEnd] = etaRange(a.eta)
-    const [bStart, bEnd] = etaRange(b.eta)
-    return aStart - bStart || aEnd - bEnd || (a.quote1 ?? Infinity) - (b.quote1 ?? Infinity)
-  })[0]
+  let best: QuotationMatrixRow | undefined
+  for (const row of rows) {
+    if (!best) { best = row; continue }
+    const [start, end] = etaRange(row.eta)
+    const [bestStart, bestEnd] = etaRange(best.eta)
+    const order = start - bestStart || end - bestEnd || (priceFor(row, sortQuantity.value) ?? Infinity) - (priceFor(best, sortQuantity.value) ?? Infinity)
+    if (order < 0) best = row
+  }
+  return best
 }
 function countryFlag(code: string) {
   if (!/^[A-Z]{2}$/i.test(code)) return '🌐'
@@ -305,7 +385,7 @@ const sortedRows = computed(() => {
     return result.sort((a, b) => {
       const [aStart, aEnd] = etaRange(a.eta)
       const [bStart, bEnd] = etaRange(b.eta)
-      return (a.quote1 ?? Number.POSITIVE_INFINITY) - (b.quote1 ?? Number.POSITIVE_INFINITY)
+      return (priceFor(a, sortQuantity.value) ?? Number.POSITIVE_INFINITY) - (priceFor(b, sortQuantity.value) ?? Number.POSITIVE_INFINITY)
         || aStart - bStart
         || aEnd - bEnd
         || a.transport.localeCompare(b.transport, 'zh-CN')
@@ -316,21 +396,36 @@ const sortedRows = computed(() => {
       const [aStart, aEnd] = etaRange(a.eta)
       const [bStart, bEnd] = etaRange(b.eta)
       return aStart - bStart || aEnd - bEnd
-        || (a.quote1 ?? Number.POSITIVE_INFINITY) - (b.quote1 ?? Number.POSITIVE_INFINITY)
+        || (priceFor(a, sortQuantity.value) ?? Number.POSITIVE_INFINITY) - (priceFor(b, sortQuantity.value) ?? Number.POSITIVE_INFINITY)
         || a.transport.localeCompare(b.transport, 'zh-CN')
     })
   }
   return result
 })
-const lowest = computed(() => rows.value.slice().sort((a, b) => (a.quote1 ?? Number.POSITIVE_INFINITY) - (b.quote1 ?? Number.POSITIVE_INFINITY))[0])
-const fastest = computed(() => fastestRow(rows.value))
+const lowest = computed(() => quantitySummary.value.find(item => item.quantity === sortQuantity.value)?.bestRow)
+const fastest = computed(() => fastestRow(matchedRows.value.filter(row => priceFor(row, sortQuantity.value) != null)))
 const channelQuery = computed(() => channelSearch.value.trim().toLowerCase())
-const filteredRows = computed(() => sortedRows.value.filter(row => !channelQuery.value
+const matchedRows = computed(() => sortedRows.value.filter(row => !channelQuery.value
   || [row.carrier, row.transport, row.channelCode, row.rule].some(value => value?.toLowerCase().includes(channelQuery.value))).filter(row => {
     const query = search.value.trim().toLowerCase()
     return !query || (activeSummary.value && countryMatchesQuery(activeSummary.value, query))
       || [row.carrier, row.transport, row.channelCode, row.rule].some(value => value?.toLowerCase().includes(query))
   }))
+const filteredRows = computed(() => matchedRows.value.filter(row => !onlyQuotable.value || priceFor(row, sortQuantity.value) != null))
+const quantitySummary = computed(() => comparisonQuantities.value.map(quantity => {
+  let valid = 0, over = 0, missing = 0
+  let minimum: number | null = null, bestRow: QuotationMatrixRow | undefined
+  for (const row of matchedRows.value) {
+    const item = comparisonPrices.value.get(rowKey(row))?.get(quantity)
+    if (item?.price != null) {
+      valid++
+      if (minimum == null || item.price < minimum) { minimum = item.price; bestRow = row }
+    } else if (item?.overweight) over++
+    else missing++
+  }
+  return { quantity, minimum, bestRow, valid, over, missing }
+}))
+function isLowest(row: QuotationMatrixRow, quantity: number) { const price = priceFor(row, quantity); return price != null && quantitySummary.value.find(item => item.quantity === quantity)?.minimum === price }
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize.value)))
 const channelCountLabel = computed(() => channelQuery.value || search.value.trim()
   ? `匹配 ${filteredRows.value.length} / ${rows.value.length} 条渠道`
@@ -359,7 +454,7 @@ watch([activeCountry, () => activeSummary.value?.channelsLoaded, () => props.sou
   countryLoading.value = false
 })
 
-watch([activeCountry, pageSize, sortMode, channelQuery, search], () => { page.value = 1 })
+watch([activeCountry, pageSize, sortMode, sortQuantity, onlyQuotable, channelQuery, search], () => { page.value = 1 })
 watch(pageCount, count => { if (page.value > count) page.value = count })
 </script>
 
@@ -390,10 +485,10 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
 
     <template v-if="activeCountry && !sourcePending && !sourceError && !countryLoading && !countryError">
       <div class="country-summary">
-        <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请选择报价区域以匹配渠道' : `${batchSample ? '当前样例' : '当前条件下'} ${rows.length} 个可用渠道` }}</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
-        <div class="metric lowest"><i>¥</i><span><small>{{ batchSample ? '当前样例最低价' : '最低价渠道' }}</small><b>{{ formatUsd(lowest?.quote1 ?? null) }}</b><em>{{ lowest ? `${lowest.carrier}｜${lowest.transport}` : '暂无可用渠道' }}</em></span></div>
-        <div class="metric fastest"><i>⚡</i><span><small>最快渠道</small><b>{{ fastest?.eta || '—' }}</b><em>{{ fastest ? `${fastest.carrier}｜${fastest.transport}` : '暂无可用渠道' }}</em></span></div>
-        <button :disabled="!rows.length" @click="$emit('copy',sortedRows)">▦ 复制当前国家</button>
+        <div class="country-title"><b>{{ activeSummary?.code }}&nbsp; {{ activeCountry }}</b><span>{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请选择报价区域以匹配渠道' : `${rows.length} 条渠道 · ${sortQuantity}${unitLabel || '件'}可报 ${quantitySummary.find(item => item.quantity === sortQuantity)?.valid || 0} 条` }}</span><label v-if="activeSummary?.quoteRegions?.length" class="quote-region-select">报价区域<select :value="activeSummary.selectedQuoteRegion" @change="$emit('quoteRegionChange',{ country:activeCountry, region:($event.target as HTMLSelectElement).value })"><option disabled value="">请选择分区</option><option v-for="region in activeSummary.quoteRegions" :key="region" :value="region">{{ region }}</option></select></label></div>
+        <div class="metric lowest"><i>¥</i><span><small>{{ batchSample ? '当前样例最低价 · ' : '' }}{{ sortQuantity }}{{ unitLabel || '件' }}最低价渠道</small><b>{{ formatUsd(lowest ? priceFor(lowest, sortQuantity) : null) }}</b><em>{{ lowest ? `${lowest.carrier}｜${lowest.transport}` : '暂无可用渠道' }}</em></span></div>
+        <div class="metric fastest"><i>⚡</i><span><small>{{ sortQuantity }}{{ unitLabel || '件' }}可报价最快渠道</small><b>{{ fastest?.eta || '—' }}</b><em>{{ fastest ? `${fastest.carrier}｜${fastest.transport}` : '暂无可用渠道' }}</em></span></div>
+        <button :disabled="!filteredRows.length" @click="copyComparison">▦ 复制当前国家</button>
       </div>
       <div class="sort-toolbar" aria-label="渠道排序方式">
         <div class="channel-filter">
@@ -402,28 +497,41 @@ watch(pageCount, count => { if (page.value > count) page.value = count })
         </div>
         <nav>
           <button :class="{ active:sortMode==='recommended' }" :aria-pressed="sortMode==='recommended'" @click="sortMode='recommended'">☷ 综合排序</button>
-          <button :class="{ active:sortMode==='price' }" :aria-pressed="sortMode==='price'" @click="sortMode='price'">¥ 1{{ unitLabel || '件' }}价格从低到高</button>
+          <label class="quantity-sort-select">按 <select v-model.number="sortQuantity" aria-label="排序数量" @change="sortMode='price'"><option v-for="quantity in comparisonQuantities" :key="quantity" :value="quantity">{{ quantity }}{{ unitLabel || '件' }}</option></select></label>
+          <button :class="{ active:sortMode==='price' }" :aria-pressed="sortMode==='price'" @click="sortMode='price'">¥ {{ sortQuantity }}{{ unitLabel || '件' }}价格从低到高</button>
           <button :class="{ active:sortMode==='speed' }" :aria-pressed="sortMode==='speed'" @click="sortMode='speed'">⚡ 速度从快到慢</button>
         </nav>
       </div>
+      <div class="quantity-comparison-toolbar">
+        <label>比价数量 <input v-model="comparisonInput" aria-label="比价数量" maxlength="80" placeholder="最多 3 个数量，逗号分隔" @keydown.enter="applyComparisonQuantities"></label>
+        <button type="button" @click="applyComparisonQuantities">应用数量</button>
+        <span>默认 1、2、3 {{ unitLabel || '件' }} · 最多 3 个数量 · 点击应用后计算</span>
+        <label class="only-quotable"><input v-model="onlyQuotable" type="checkbox">只看 {{ sortQuantity }}{{ unitLabel || '件' }}可报价</label>
+        <small v-if="comparisonError" role="alert">{{ comparisonError }}</small>
+      </div>
+      <div class="quantity-summary-strip"><button v-for="summary in quantitySummary" :key="summary.quantity" type="button" :class="{ active:sortQuantity===summary.quantity }" @click="sortByQuantity(summary.quantity)"><b>{{ summary.quantity }}{{ unitLabel || '件' }}最低 {{ formatUsd(summary.minimum) }}</b><span>可报价 {{ summary.valid }} · 超重 {{ summary.over }} · 其他不可报价 {{ summary.missing }}</span></button></div>
       <p v-if="batchSample" class="batch-channel-note">每行代表一条物流渠道，不代表一个 SKU；是否适用各 SKU 将在生成时逐项校验。</p>
       <QuoteTaxLegend />
-      <div class="table-head"><span>物流渠道</span><span>预计时效</span><span>{{ batchSample ? '样例' : '' }}1{{ unitLabel || '件' }}{{ batchSample ? '价' : '报价' }}<small>USD / CNY</small></span><span>{{ batchSample ? '样例' : '' }}2{{ unitLabel || '件' }}{{ batchSample ? '价' : '报价' }}<small>USD / CNY</small></span><span>{{ batchSample ? '样例' : '' }}3{{ unitLabel || '件' }}{{ batchSample ? '价' : '报价' }}<small>USD / CNY</small></span><span>操作</span></div>
+      <div class="quantity-table-scroll">
+      <div class="table-head" :style="comparisonGrid"><span>物流渠道</span><span>预计时效</span><button v-for="quantity in comparisonQuantities" :key="quantity" type="button" :class="{ 'quantity-column-active':sortQuantity===quantity }" @click="sortByQuantity(quantity)">{{ batchSample ? '样例' : '' }}{{ quantity }}{{ unitLabel || '件' }}总报价 {{ sortQuantity===quantity && sortMode==='price' ? '↑' : '↕' }}<small>USD / CNY · 点击排序</small></button><span>操作</span></div>
       <div v-if="pagedRows.length" class="quote-rows">
-        <article v-for="row in pagedRows" :key="rowKey(row)" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
+        <article v-for="row in pagedRows" :key="rowKey(row)" :style="comparisonGrid" :class="{ adopted:isAdopted(row), selected:isSelected(row) }">
           <div><span class="channel-name-line"><QuoteChannelName :row="row" /><QuoteTaxMeta :row="row" /></span><small>渠道编码：{{ row.channelCode || '—' }} · 计费规则：{{ row.rule }}<template v-if="priceRegionLabel(row)"> · {{ priceRegionLabel(row) }}</template></small><QuoteMinimumWeight :weight-kg="row.minChargeWeightKg" /></div><b>{{ row.eta }}</b>
-          <span><b>{{ formatUsd(row.quote1) }}</b><small v-if="row.quote1 != null">{{ formatCny(row.quote1) }}</small><QuoteUnavailableReason :price="row.quote1" :message="row.quantityMessages?.['1'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote2) }}</b><small v-if="row.quote2 != null">{{ formatCny(row.quote2) }}</small><QuoteUnavailableReason :price="row.quote2" :message="row.quantityMessages?.['2'] || row.availabilityMessage" /></span><span><b>{{ formatUsd(row.quote3) }}</b><small v-if="row.quote3 != null">{{ formatCny(row.quote3) }}</small><QuoteUnavailableReason :price="row.quote3" :message="row.quantityMessages?.['3'] || row.availabilityMessage" /></span>
-          <div class="selection-actions"><button :disabled="!isSelected(row) && !hasAnyQuotationPrice(row)" @click="toggleSelection(row)">{{ isSelected(row) ? (row.available === false ? '移除渠道' : batchSample ? '已选用' : '已加入') : batchSample ? '选用此渠道' : '加入报价单' }}</button><button v-if="isSelected(row) && hasAnyQuotationPrice(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
+          <span v-for="quantity in comparisonQuantities" :key="quantity" class="comparison-price" :class="{ 'quantity-column-active':sortQuantity===quantity, 'comparison-lowest':isLowest(row,quantity), 'comparison-overweight':isOverweight(row,quantity) }"><template v-if="priceFor(row,quantity)!=null"><b>{{ formatUsd(priceFor(row,quantity)) }} <em v-if="isLowest(row,quantity)">最低价</em></b><small>{{ formatCny(priceFor(row,quantity)!) }}</small></template><template v-else><b>{{ isOverweight(row,quantity) ? '超重' : '不可报价' }}</b><QuoteUnavailableReason :price="null" :message="reasonFor(row,quantity)" /></template></span>
+          <div class="selection-actions"><button :disabled="!isSelected(row) && !canAddRow(row)" @click="toggleSelection(row)">{{ isSelected(row) ? (row.available === false ? '移除渠道' : batchSample ? '已选用' : '已加入') : batchSample ? '选用此渠道' : '加入报价单' }}</button><button v-if="isSelected(row) && hasAnyQuotationPrice(row)" class="primary-action" @click="$emit('adopt',row)">{{ isAdopted(row) ? '首选' : '设为首选' }}</button></div>
         </article>
       </div>
+      <div v-else-if="onlyQuotable && matchedRows.length" class="empty-rows">当前筛选范围内没有 {{ sortQuantity }}{{ unitLabel || '件' }}可报价渠道，可取消“只看可报价”查看原因。</div>
       <div v-else-if="(channelQuery || search.trim()) && rows.length" class="empty-rows">当前国家没有匹配的物流渠道，请选择搜索结果中的国家、更换关键词或清空搜索。</div>
       <div v-else class="empty-rows">{{ activeSummary?.quoteRegions?.length && !activeSummary.selectedQuoteRegion ? '请先选择报价区域，再查看该分区的渠道和价格' : '当前重量和物流属性下暂无可用渠道，请检查财务授权或调整报价条件' }}</div>
+      </div>
       <footer><span>{{ channelCountLabel }}</span><label>每页 <select v-model.number="pageSize"><option :value="5">5</option><option :value="10">10</option><option :value="20">20</option></select> 条</label><button :disabled="page<=1" @click="page--">上一页</button><b>{{ page }} / {{ pageCount }}</b><button :disabled="page>=pageCount" @click="page++">下一页</button></footer>
     </template>
   </section>
 </template>
 
 <style scoped>
+.quantity-comparison-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 18px;border-bottom:1px solid #e5eaed;font-size:12px}.quantity-comparison-toolbar label{display:flex;align-items:center;gap:8px;font-weight:700}.quantity-comparison-toolbar input:not([type=checkbox]){width:180px;padding:8px 10px;border:1px solid #d8e1e6;border-radius:6px;font:inherit}.quantity-comparison-toolbar>button{padding:8px 12px;border:1px solid #ff9700;border-radius:6px;background:#fff6e5;color:#9b5700;font:inherit;cursor:pointer}.quantity-comparison-toolbar>span{color:#81909b;font-size:11px}.quantity-comparison-toolbar .only-quotable{margin-left:auto;font-weight:400}.quantity-comparison-toolbar small{width:100%;color:#bf3c37}.quantity-sort-select{display:flex;align-items:center;gap:5px;font-size:11px}.quantity-sort-select select{padding:6px;border:1px solid #d8e1e6;border-radius:5px;background:#fff}.quantity-summary-strip{display:flex;gap:9px;padding:10px 18px;background:#fafcfd;flex-wrap:wrap}.quantity-summary-strip button{display:flex;gap:14px;align-items:center;padding:9px 12px;border:1px solid #e2e8ed;background:#fff;border-radius:6px;cursor:pointer}.quantity-summary-strip button.active{border-color:#ff9700;background:#fff8eb}.quantity-summary-strip b{font-size:12px;color:#188253}.quantity-summary-strip span{font-size:10px;color:#71808b}.quantity-table-scroll{overflow-x:auto}.table-head>button{display:grid;gap:4px;text-align:left;background:none;border:0;color:#526170;font-size:11px;font-weight:700;padding:8px;cursor:pointer}.quantity-table-scroll .quantity-column-active{background:#fff7e8;border-radius:5px}.quote-rows .comparison-price{padding:10px 8px;min-height:62px;align-content:center}.comparison-price>b{font-size:12px}.comparison-price em{font-size:9px;font-style:normal;background:#e8f7ed;color:#16815a;border-radius:4px;padding:3px 5px;margin-left:6px;white-space:nowrap}.comparison-price.comparison-lowest>b{color:#16815a}.comparison-price.comparison-overweight>b{color:#c43a35}.comparison-price.comparison-overweight :deep(.quote-unavailable-reason){color:#bd4944!important}.quantity-table-scroll .table-head{padding-top:6px;padding-bottom:6px}
 .batch-channel-note{margin:8px 16px;color:#668296;font-size:12px}
 
 .search-feedback{padding:10px 18px;color:#667784;font-size:12px}

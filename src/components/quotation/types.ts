@@ -129,6 +129,13 @@ export type QuotationMatrixRow = {
   taxCustomUsd: number | null
 }
 
+/** Values already computed for the visible comparison; copying must not reprice. */
+export type QuotationComparisonCopy = {
+  quantities: number[]
+  prices: Array<Array<number | null>>
+  reasons: string[][]
+}
+
 /**
  * 报价模板只保存渠道身份，不保存本次试算价格。
  * channelKey 是首选稳定标识；旧模板没有 channelKey 时仍可按三段业务字段兼容匹配。

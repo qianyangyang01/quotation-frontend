@@ -61,8 +61,8 @@ import QuotationPreviewSave from '@/components/quotation/QuotationPreviewSave.vu
 import type { QuoteSheetSourceRow } from '@/data/customerQuoteSheet'
 import QuotationCommonMatrix from '@/components/quotation/QuotationCommonMatrix.vue'
 import QuotationTemplateMatrix from '@/components/quotation/QuotationTemplateMatrix.vue'
-import { type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
-import { logisticsUnavailableReason, isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
+import { type BundleQuoteItem, type QuotationCountrySummary, type QuotationMatrixRow, type QuotationComparisonCopy, type QuotationMode, type QuotationPresetSelection, type QuotationProduct as Product } from '@/components/quotation/types'
+import { type LogisticsRule, logisticsUnavailableReason, isAustraliaQuoteCountry, sameQuotationRegion, billingQuoteRegion, calculateLogisticsFee, formatLogisticsEta, findPriceRow, logisticsCountries, logisticsQuoteRegions, logisticsRuleForChannel, logisticsRules, replaceLogisticsRules } from '@/data/logistics'
 import { findPurchaseProduct, loadPurchaseProduct, purchaseDisplayName, purchaseQuoteBlockingMessage, purchaseQuoteFreightUnit, purchaseQuoteFreightLabel, type PurchaseProductRecord } from '@/data/purchaseStore'
 import { createQuotationRecord, quotationSubmitter } from '@/data/quotationRecords'
 import { cancelQuotation, withdrawalSubmitter } from '@/services/quotationWithdrawal'
@@ -1751,12 +1751,12 @@ function cancelLeave() {
   leaveDecision?.(false); leaveDecision = null
   if (draftStatus.value === 'conflict') showDraftConflictDialog.value = true
 }
-function matchedLogistics(p: Product, country = p.country, region = quoteRegionForCountry(country)) {
+function matchedLogistics(p: Product, country = p.country, region = quoteRegionForCountry(country), fallbackQuantities: readonly number[] = [], excludeKeys: ReadonlySet<string> = new Set(), scopeRules: readonly LogisticsRule[] = logisticsRules) {
   const allowed = financeAllowedChannelKeys(financePolicies.value, p.logisticsAttribute, country)
-  return logisticsRules.flatMap(rule => {
-    const relations = rule.relations.filter(relation => allowed.has(financeChannelKey(rule.id, relation)))
+  return scopeRules.flatMap(rule => {
+    const relations = rule.relations.filter(relation => allowed.has(financeChannelKey(rule.id, relation)) && !excludeKeys.has(financeChannelKey(rule.id, relation)))
     if (!relations.length || rule.status !== '启用') return []
-    const result = calculateLogisticsFee(
+    let result = calculateLogisticsFee(
       rule,
       country,
       isBundleQuotation(quoteMode.value) ? chargeWeight(p) : singleActualWeight(p),
@@ -1764,6 +1764,12 @@ function matchedLogistics(p: Product, country = p.country, region = quoteRegionF
       undefined,
       region,
     )
+    if (!result) {
+      for (const quantity of fallbackQuantities) {
+        result = calculateLogisticsFee(rule, country, isBundleQuotation(quoteMode.value) ? bundleGoodsWeight(quantity) : singleActualWeight(p, quantity), [p.logisticsAttribute], undefined, region)
+        if (result) break
+      }
+    }
     if (!result) return []
     return relations.map(relation => ({
       channelKey: financeChannelKey(rule.id, relation),
@@ -1809,11 +1815,11 @@ function quantityCostBreakdown(p: Product, ruleName: string, quantity: number, c
   const quoteCny = quoteCnyFromUsd(tax.totalUsd, exchange.value.usd)
   return { freight, cost, quoteCny, profit: baseQuoteCny - cost, quoteUsd: tax.totalUsd, tax }
 }
-function quoteSheetPrice(p: Product, row: QuoteSheetSourceRow, quantity: number) {
+function quoteSheetPrice(p: Product, row: QuoteSheetSourceRow, quantity: number, allowedKeys?: ReadonlySet<string>) {
   if (row.available === false || logisticsLoadState.value !== 'ready' || !financeSettingsAreHydrated()) return null
   const rule = logisticsRuleForChannel(row.rule, row.channelKey || '')
   const relation = rule?.relations.find(relation => financeChannelKey(rule.id, relation) === row.channelKey)
-  if (!rule || !relation || !financeAllowsLogisticsChannel(financePolicies.value, p.logisticsAttribute, row.country, rule.id, relation)) return null
+  if (!rule || rule.status !== '启用' || !relation || !(allowedKeys ? allowedKeys.has(financeChannelKey(rule.id, relation)) : financeAllowsLogisticsChannel(financePolicies.value, p.logisticsAttribute, row.country, rule.id, relation))) return null
   const result = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)
   return result?.tax.configured ? result.quoteUsd : null
 }
@@ -1822,11 +1828,11 @@ function bestLogisticsOption(p: Product, country = p.country) {
   return rows.map(row => ({ ...row, finalQuoteCny: quantityCostBreakdown(p, row.rule, isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity), country, row.carrier, row.quoteRegion || '', row.channelKey)?.quoteCny ?? Infinity }))
     .filter(row => Number.isFinite(row.finalQuoteCny)).sort((a, b) => a.finalQuoteCny - b.finalQuoteCny || a.freight - b.freight)[0]
 }
-function excelQuoteRows(p: Product, country = p.country, region = quoteRegionForCountry(country)): QuotationMatrixRow[] {
+function excelQuoteRows(p: Product, country = p.country, region = quoteRegionForCountry(country), candidates?: ReturnType<typeof matchedLogistics>): QuotationMatrixRow[] {
   if (purchaseTaxBlockReason.value) return []
   const quantity = Math.max(1, customQuoteQuantity.value || 1)
   const currentQuantity = isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)
-  return matchedLogistics(p, country, region).map(option => {
+  return (candidates || matchedLogistics(p, country, region)).map(option => {
     const costs = new Map<number, ReturnType<typeof quantityCostBreakdown>>()
     const costFor = (count: number) => {
       if (!costs.has(count)) costs.set(count, quantityCostBreakdown(p, option.rule, count, country, option.carrier, region, option.channelKey))
@@ -2002,6 +2008,47 @@ async function searchChannelCountries(query: string): Promise<string[]> {
 }
 function activeQuoteRowsForCountry(country: string, region?: string) {
   return region === undefined ? countryQuoteRows(country) : regionalQuoteRows(JSON.stringify([country, region]))
+}
+const commonComparisonQuantities = ref([1, 2, 3])
+// Cache by country/region, never by quantity combinations. Existing valid rows
+// retain their prices; only previously unmatched channels need fallback checks.
+const comparisonCountryRows = createCountryQuotationCache(key => {
+  const [country, region] = JSON.parse(key) as [string, string | null]
+  countryRulesGeneration.read(country)
+  void logisticsRevision.value
+  const product = products.value[0]
+  if (!product || logisticsLoadState.value !== 'ready' || purchaseTaxBlockReason.value) return []
+  const base = activeQuoteRowsForCountry(country, region ?? undefined)
+  const regions = logisticsQuoteRegions(country)
+  const scopes = region != null ? [region] : isAustraliaQuoteCountry(country) ? [quoteRegionForCountry(country)] : regions.length ? regions : ['']
+  const extra = scopes.flatMap(scope => {
+    const known = new Set(base.filter(row => (row.quoteRegion || '') === scope).map(row => row.channelKey))
+    const candidates = matchedLogistics(product, country, scope, commonComparisonQuantities.value, known)
+    return candidates.length ? excelQuoteRows(product, country, scope, candidates) : []
+  })
+  return extra.length ? [...base, ...extra] : base
+})
+function activeComparisonRowsForCountry(country: string, region?: string) {
+  return comparisonCountryRows(JSON.stringify([country, region ?? null]))
+}
+function resolveComparisonSelection(row: QuotationMatrixRow, quantities: readonly number[]) {
+  const product = products.value[0]
+  const rule = logisticsRuleForChannel(row.rule, row.channelKey)
+  if (!product || !rule || logisticsLoadState.value !== 'ready') return undefined
+  const candidates = matchedLogistics(product, row.country, row.quoteRegion || '', quantities, new Set(), [rule]).filter(candidate => candidate.channelKey === row.channelKey)
+  return candidates.length ? excelQuoteRows(product, row.country, row.quoteRegion || '', candidates)[0] : undefined
+}
+// Eligibility is identical to financeAllowsLogisticsChannel, but a country's
+// catalogue is scanned once per policy/rule revision instead of once per cell.
+const activeQuantityAllowedKeys = createCountryQuotationCache(country => {
+  void logisticsRevision.value
+  countryRulesGeneration.read(country)
+  const product = products.value[0]
+  return product ? financeAllowedChannelKeys(financePolicies.value, product.logisticsAttribute, country) : new Set<string>()
+})
+function calculateComparisonQuantityPrice(row: QuoteSheetSourceRow, quantity: number) {
+  const product = products.value[0]
+  return product ? quoteSheetPrice(product, row, quantity, activeQuantityAllowedKeys(row.country)) : null
 }
 function updateCommonQuotes(rows: QuotationMatrixRow[]) {
   modeSelections.value.common = selectionFromRows(rows)
@@ -2193,7 +2240,7 @@ function locateValidationIssue(key: string) {
   target?.scrollIntoView({ behavior:'smooth', block:'center' })
   window.setTimeout(() => target?.querySelector<HTMLElement>('input,select,button')?.focus(), 380)
 }
-async function copyQuoteRows(rows: QuotationMatrixRow[]) {
+async function copyQuoteRows(rows: QuotationMatrixRow[], comparison?: QuotationComparisonCopy) {
   try { appUpdate.assertCurrent() } catch (error) { toast(error instanceof Error ? error.message : '系统已更新，请刷新后重新报价'); return }
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
   if (specialPackagingError.value) { toast(specialPackagingError.value); return }
@@ -2203,24 +2250,20 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
     return
   }
   const unit = isBundleQuotation(quoteMode.value) ? '套' : '件'
+  const quantities = comparison?.quantities || [1, 2, 3]
   const values = [
-    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', '附加费属性', '附加费（USD/单）', `1${unit}（USD）`, `1${unit}（CNY）`, `2${unit}（USD）`, `2${unit}（CNY）`, `3${unit}（USD）`, `3${unit}（CNY）`],
-    ...rows.map(row => [
+    ['国家', '报价区域', '物流商', '运输渠道', '预计时效', '物流商税务属性', '关税（USD/单）', '附加费属性', '附加费（USD/单）', ...quantities.flatMap(quantity => [`${quantity}${unit}（USD）`, `${quantity}${unit}（CNY）`])],
+    ...rows.map((row, index) => [
       row.country,
       row.quoteRegion || '全国统一',
       row.carrier,
-      row.transport + (row.availabilityMessage ? '（' + row.availabilityMessage + '）' : '') + (row.quantityMessages ? ' ' + [1, 2, 3].map(quantity => row.quantityMessages?.[String(quantity)]).filter(Boolean).join('；') : ''),
+      row.transport + (row.availabilityMessage ? '（' + row.availabilityMessage + '）' : '') + ' ' + (comparison?.reasons[index] || quantities.map(quantity => row.quantityMessages?.[String(quantity)])).filter(Boolean).join('；'),
       row.eta,
       row.taxFeeMode === 'no-tax' ? '无关税' : row.taxIncluded ? '免税' : row.taxFeeMode !== 'missing' ? '不免税' : '物流商税务属性待设置',
       row.taxFeeMode === 'fixed-order' ? row.countryFixedTaxUsd.toFixed(2) : '',
       row.surchargeLabel || '无附加费',
       row.surchargeEnabled ? Number(row.surchargeUsd || 0).toFixed(2) : '',
-      row.quote1 == null ? '' : row.quote1.toFixed(2),
-      row.quote1 == null ? '' : quoteCnyFromUsd(row.quote1, exchange.value.usd).toFixed(2),
-      row.quote2 == null ? '' : row.quote2.toFixed(2),
-      row.quote2 == null ? '' : quoteCnyFromUsd(row.quote2, exchange.value.usd).toFixed(2),
-      row.quote3 == null ? '' : row.quote3.toFixed(2),
-      row.quote3 == null ? '' : quoteCnyFromUsd(row.quote3, exchange.value.usd).toFixed(2),
+      ...(comparison?.prices[index] || [row.quote1, row.quote2, row.quote3]).flatMap(price => price == null ? ['', ''] : [price.toFixed(2), quoteCnyFromUsd(price, exchange.value.usd).toFixed(2)]),
     ]),
   ]
   const excelText = values
@@ -2244,15 +2287,18 @@ async function copyQuoteRows(rows: QuotationMatrixRow[]) {
 }
 function useLogistics(p: Product, option: { country: string; quoteRegion?: string; channelKey: string; rule: string; carrier: string; freight: number }) {
   if (purchaseTaxBlockReason.value) { toast(purchaseTaxBlockReason.value); return }
+  const quantity = isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)
+  const current = quantityCostBreakdown(p, option.rule, quantity, option.country, option.carrier, option.quoteRegion || '', option.channelKey)
+  if (!current?.tax.configured) { toast('该渠道在当前主报价数量下不可报价；已选渠道清单保留，请在下方报价单核对数量与价格'); return }
   selectedQuoteRegions.value[option.country] = option.quoteRegion || ''
   p.country = option.country
   p.channel = option.carrier
   p.rule = option.rule
   p.selectedChannelKey = option.channelKey
-  p.freight = option.freight
+  p.freight = current.freight
   p.manualFreight = false
   p.status = '已试算'
-  toast(canViewLogisticsCost.value ? `已采用“${option.rule}”，运费 ¥${option.freight.toFixed(2)}` : `已采用“${option.rule}”`)
+  toast(canViewLogisticsCost.value ? `已采用“${option.rule}”，运费 ¥${current.freight.toFixed(2)}` : `已采用“${option.rule}”`)
 }
 function logisticsSamplesFor(row: QuotationMatrixRow, p: Product, extraQuantities: number[] = []) {
   const quantities = [...new Set([...extraQuantities, 1, 2, 3, Math.max(1, customQuoteQuantity.value || 1), isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)])]
@@ -2744,9 +2790,12 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <div v-show="quoteMatrixMode==='common'" class="matrix-mode-panel" :inert="batchSampleSwitching || undefined">
           <QuotationCommonMatrix :batch-sample="batchCapture" :ref="instance => commonMatrix = instance as typeof commonMatrix" :auto-load-country="hasQueriedQuotationProduct && !draftNeedsQuery && ['ready', 'empty'].includes(logisticsLoadState)" :source-pending="productQueryBusy || logisticsLoadState === 'loading' || financeSettingsAreLoading()" :source-error="logisticsLoadError || countryLoadError || financeSettingsLoadError()" :unavailable-reason="unavailableTemplateReason" :active="quoteMatrixMode==='common'"
             :user-id="currentAuthUser.id" :ensure-countries="ensureCountries" :search-channel-countries="searchChannelCountries"
-            :countries="activeQuotationCountries" :quote-rows-for-country="activeQuoteRowsForCountry" :context-key="activeQuoteMatrixContextKey"
+            :countries="activeQuotationCountries" :quote-rows-for-country="activeComparisonRowsForCountry" :context-key="activeQuoteMatrixContextKey"
             :adopted-country="p.country" :adopted-rule="p.rule" :adopted-channel-key="p.selectedChannelKey" :adopted-carrier="p.channel" :exchange-rate="exchange.usd"
             :unit-label="isBundleQuotation(quoteMode) ? '套' : '件'" :custom-quantity="customQuoteQuantity"
+            :calculate-quantity-price="calculateComparisonQuantityPrice"
+            :resolve-selected-row="resolveComparisonSelection"
+            @comparison-quantities-change="commonComparisonQuantities = $event"
             :preset-selection="restoredCommonSelections" :preset-version="restoredSelectionVersion"
             @preset-state-change="commonSelectionState=$event" @selection-change="updateCommonQuotes" @country-order-change="reorderCommonCountries" @quote-region-change="changeQuoteRegion(p,$event)" @adopt="useLogistics(p,$event)" @copy="copyQuoteRows"
           >
@@ -2773,7 +2822,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
         <!-- This is inside v-for: a string ref would collect an array, even for one product. -->
         <QuotationPreviewSave :ref="instance => quotationPreview = instance as typeof quotationPreview" :initial-quantities="batchQuantities" :batch-sample="batchCapture" :batch-shipping="batchShipping" :batch-size="batchSize" :save-label="batchCapture ? `生成 ${batchSize || 0} ${batchShipping ? '条代发' : '个 SKU'}报价` : draftSource ? '保存并重新提交审核' : undefined" v-model:priority-processing="priorityProcessing" v-if="!draftNeedsQuery && (!batchShipping || manualQueried)"
-          :calculate-price="(row, quantity) => quoteSheetPrice(p, row, quantity)"
+          :calculate-price="calculateComparisonQuantityPrice"
           :rows="savedQuoteRows" :countries="activeQuotationCountries" :salesperson="currentSalespersonName"
           :reset-key="batchShipping ? quoteSheetResetKey + '|' + batchShippingRevision : quoteSheetResetKey"
           :context-key="`${currentAuthUser.id}|${activeQuoteMatrixContextKey}|${quoteMatrixMode}|${customQuoteQuantity}`" :source-pending="!!specialPackagingError || !!commissionError || logisticsLoadState !== 'ready' || savedQuoteRows.some(row => row.available !== false && !row.taxConfigured)" :matrix-mode-label="matrixModeLabel" :customer-name="customerName"
