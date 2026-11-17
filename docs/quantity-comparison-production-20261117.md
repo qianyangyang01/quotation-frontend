@@ -44,3 +44,5 @@
 - 本地发布包：`C:/Users/25490/Documents/ProjectWorkspaces/quotation/release-packages/quotation-2026.11.17-02-quantity-compare/`。
 - 独立工作区：`C:/Users/25490/Documents/ProjectWorkspaces/quotation/worktrees/quantity-comparison-release-20261117`。
 - 完整测试及截图见发布包 `local-verification/`；补充真实保存集成测试源码存于发布包根目录，不进入生产应用。
+
+后续用户授权真实线上保存后，默认、自定义数量及报价记录联动均已验收通过，历史指纹不变；详见 [线上保存验收](quantity-comparison-production-save-20261117.md)。
