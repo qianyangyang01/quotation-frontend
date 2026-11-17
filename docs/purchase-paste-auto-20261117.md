@@ -11,3 +11,13 @@
 改动仅前端粘贴识别及交互，不修改后端、数据库、历史报价、价格计算或审核状态。基线为当前生产顺丰发布提交的后续验收提交 02f48b62；其前端运行代码与生产前端 393eb0ab 一致，仅多一份顺丰测试文件。
 
 验证：7 个采购粘贴测试文件 108 项通过，包含原行到组件预览请求的完整字段核验、四种标准布局、HTML/TSV、末尾空列及空合并区域、重复 SKU、额外非空数据、歧义拦截。TypeScript 检查及生产构建通过。
+
+## 生产发布
+
+2026-11-17 10:26:57（北京时间）发布前端 `quotation-2026.11.17-01-paste-auto`，代码 `1393c66daa17b7edf7ce8d2e2323b0208e692b03`，构建标识 `dfb9ca7a-76cc-4cd0-902d-3bef166db03d`。
+
+- 本地完整前端回归 2704 项通过、24 项按既有条件跳过；完整 lint、部署配置校验和构建通过。GitHub CI 44002353635 的 frontend job 全部通过；后端、deploy、nginx.conf 对实际生产后端 dfca76e 无变化，后端 CI 在发布时仍运行，不计为本轮已通过检查。
+- 全量备份 `/srv/ahmln-data/quotation-app/backups/20261117T022419Z-full` 校验通过。仅切换前端，后端及解析器保留 `quotation-2026.11.16-07-sf-bulky`；26 个受保护容器及数据库迁移指纹不变，73818 条业务记录发布前后无新增、无改写。
+- 公网 app-version、入口 HTML/JS 与实际容器完全一致。公网采购页面 JS 与本地构建逐字节一致，包含自动识别列序，已经移除手动列序下拉框。报价与培训健康检查通过。
+- 实际浏览器操作验收未完成：CUA 和 computer-use 的 node_repl 都因运行环境 `failed to write kernel assets` 无法启动。上述原行验收是自动测试中的 DOM 粘贴及预览请求核验，不冒称线上浏览器操作通过；生产未提交测试数据。
+- 发布包与前后指纹证据位于 `C:/Users/25490/Documents/ProjectWorkspaces/quotation/release-packages/quotation-2026.11.17-01-paste-auto/`。回退目标为 `quotation-2026.11.16-07-sf-bulky`（其中前端为 `quotation-2026.11.16-06`）。
