@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="sf-europe-bulky-2026.11.16-v22";
+    public static final String VERSION="fanzhirun-product-blocks-2026.11.18-v23";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
@@ -60,8 +60,8 @@ public class LogisticsSourceParser {
                 var report=sheets.addObject().put("name",sheet.getSheetName()).put("hidden",book.isHidden(sheet));
                 var source=new Source(sheet,scope,book.formulaCells());
                 if(provider.isBlank())provider=providerFromTitles(source);
-                if(provider.equals("帆之润")&&!clean(sheet.getSheetName()).equals("美国小包-普货")) {
-                    report.put("status","filtered").put("priceCellsParsed",0).put("message","帆之润仅导入PK0003美国小包普货页，商派、仿牌及其他工作表不导入");continue;
+                if(provider.equals("帆之润")&&fanzhirunHeader(source)<0) {
+                    report.put("status","filtered").put("priceCellsParsed",0).put("message","帆之润按表内渠道名称、产品代码和货物属性识别小包价格区块；其他表保留原文件");continue;
                 }
                 if(provider.equals("快驴")&&!qiaojieStandardSheet(source)&&!kuailvSelectedSheet(source)) {
                     report.put("status","filtered").put("priceCellsParsed",0).put("message","快驴仅导入已适配的美国特敏感和欧盟小包特货渠道；其他渠道保留在原文件中");continue;
@@ -348,53 +348,92 @@ public class LogisticsSourceParser {
         return false;
     }
 
-    /** PK0003 has merged country, product, ETA and minimum labels; other sheets never share its tariff. */
+    private int fanzhirunHeader(Source source) {
+        for(int r=0;r<=Math.min(20,source.lastContentRow);r++)
+            if(clean(source.text(r,1)).equals("渠道名称")&&clean(source.text(r,3)).equals("重量区间"))return r;
+        // A changed required header on a known parcel sheet must still be reported.
+        return clean(source.sheet.getSheetName()).matches("美国小包-(?:特惠)?普货")?1:-1;
+    }
+
+    /** Product codes are source metadata, not constants. Match the name and code of each isolated block. */
     private boolean parseFanzhirun(Source source,String file,Map<String,ObjectNode> channels) {
-        var target=selected(source,"帆之润","帆之润美国专线小包","PK0003",0,channels);
-        if(target==null)return true;
-        var headers=List.of("国家","渠道名称","可走货属性","重量区间","KG运费","处理费","参考时效","备注");
-        for(int c=0;c<headers.size();c++)if(!clean(source.text(1,c)).equals(headers.get(c)))
-            issue(target,2,"表头","PK0003表头缺失或改变："+headers.get(c),"error");
-        if(!clean(source.text(0,0)).equals("帆之润美国专线小包")||!clean(source.text(3,1)).equals("美国小包-普货")
-                ||!clean(source.text(6,1)).replace('：',':').equals("代码:PK0003"))
-            issue(target,1,"渠道代码","必须具有帆之润美国专线小包、美国小包-普货及完整PK0003代码","error");
-        var bands=List.of("0.05-0.2","0.201-0.45","0.451-0.7","0.701-1","1.001-3");
-        for(int r=3;r<=7;r++) {
-            source.parsedRows.add(r);
-            if(!clean(source.text(r,0)).equals("美国")||!clean(source.text(r,2)).equals("只能普货"))
-                issue(target,r+1,"国家/属性","PK0003国家或源属性改变，需重新核对","error");
-            var raw=clean(source.text(r,3));
-            if(!raw.equals(bands.get(r-3))){issue(target,r+1,"重量段","PK0003五档重量缺失、重叠、断档或发生变化","error");continue;}
-            var note=clean(source.text(r,7));
-            if(!note.equals("50g起重(泡重为:长*宽*高cm/6000)"))issue(target,r+1,"起重/体积","PK0003的50g起重或6000体积系数说明发生变化","error");
-            var range=raw.split("-");
-            var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
-                    .put("areaName","美国").put("countryCode","US").put("zoneName","").put("originRegion","").put("allowedMarks","普货、服装")
-                    .put("weightFromKg",new BigDecimal(range[0])).put("weightToKg",new BigDecimal(range[1]))
-                    .put("weightFromInclusive",true).put("weightToInclusive",true).put("minChargeWeightKg",new BigDecimal(".05"))
-                    .put("volumetric",true).put("volumeDivisor",6000)
-                    .put("sourceProductCode","PK0003").put("sourceCode","PK0003").put("sourceCountryCell",source.address(r,0))
-                    .put("sourceWeightRange",source.text(r,3)).put("sourceWeightCell",source.address(r,3))
-                    .put("sourcePriceCell",source.address(r,4)).put("sourceFeeCell",source.address(r,5)).put("sourceFeeLabel","处理费")
-                    .put("sourceMinimumWeightKind","note").put("sourceMinimumWeightText",source.text(r,7)).put("sourceMinimumWeightCell",source.address(r,7))
-                    .put("sourceRoundingConfirmation","2026-11-16 用户确认：最低50g、重量按1g向上进位，公斤价乘计费重量加一次处理费后合计向上取整到人民币元；50g为21元")
-                    .put("sourceServiceConfirmation","2026-11-16 用户指定：包税、全邮编、普货和服装，覆盖原表税费及邮编限制")
-                    .put("notes","包税、全邮编，可发普货和服装。最低50g，重量按1g进位，运费合计向上取整到元。原表体积重除以6000，尺寸及特殊包裹条件需核对。");
-            for(int c:List.of(4,5))if(source.cell(r,c)!=null&&(source.cell(r,c).getCellType()==CellType.FORMULA||source.formulaCells.contains(source.cell(r,c))))
-                issue(target,r+1,"价格","PK0003价格公式需先核对，禁止使用缓存结果发布","error");
-            numeric(row,"pricePerKg",source,r,4,target,false);numeric(row,"registrationFee",source,r,5,target,false);
-            var eta=new Columns();eta.eta=6;eta.headerRow=1;readRowEta(row,target,source,r,eta);
-            if(!clean(source.text(r,6)).matches("[0-9]+-[0-9]+自然日"))issue(target,r+1,"表头","PK0003参考时效缺失或单位不明确","error");
-            add(target,row,source,r,file);
+        int header=fanzhirunHeader(source);
+        var starts=new ArrayList<Integer>();
+        String prior="";
+        for(int r=header+1;r<=source.lastContentRow;r++) {
+            String name=clean(source.text(r,1));
+            if(name.contains("小包")&&!name.equals(prior)){starts.add(r);prior=name;}
         }
-        // Retain the original terms, but never interpret footer numbers as freight or overwrite user-confirmed service scope.
-        var notes=new LinkedHashSet<String>();
-        for(int r=8;r<=source.lastContentRow;r++) {
-            source.referenceRows.add(r);notes.addAll(source.rowTexts(r));
-            if(source.width(r)>3&&looksRange(source.text(r,3)))issue(target,r+1,"重量段","PK0003出现五档之外的价格行，需适配后导入","error");
+        for(int i=0;i<starts.size();i++) {
+            int start=starts.get(i),end=i+1<starts.size()?starts.get(i+1):source.lastContentRow+1;
+            String name=clean(source.text(start,1));
+            var codes=new LinkedHashSet<String>();
+            for(int r=start;r<end;r++) {
+                var match=Pattern.compile("(?i)^(?:代码|产品代码|渠道代码)[:：]?([A-Z0-9_-]+)$").matcher(clean(source.text(r,1)));
+                if(match.matches())codes.add(match.group(1).toUpperCase(Locale.ROOT));
+            }
+            String code=codes.size()==1?codes.iterator().next():"";
+            // An unrelated product may share this worksheet and even an erroneous code.
+            // Its explicit product name and attribute must never be substituted with the generic sheet title.
+            if(!name.matches("美国(?:专线)?小包-?(?:特惠)?普货")) {
+                for(int r=start;r<end;r++)if(looksRange(source.text(r,3)))source.filteredOtherRows.put(r,"独立产品区块，非普货渠道："+name);
+                continue;
+            }
+            var target=selected(source,"帆之润",name,code,start,channels);
+            if(target==null)continue;
+            if(!target.path("rows").isEmpty())issue(target,start+1,"渠道代码","多个价格区块指向同一公司渠道，需核对本次应使用的产品","error");
+            if(codes.size()>1)issue(target,start+1,"渠道代码","同一价格区块出现多个产品代码，需核对名称和代码归属","error");
+            var headers=List.of("国家","渠道名称","可走货属性","重量区间","KG运费","处理费","参考时效","备注");
+            for(int c=0;c<headers.size();c++)if(!clean(source.text(header,c)).equals(headers.get(c)))
+                issue(target,header+1,"表头","帆之润价格表缺少必要列："+headers.get(c),"error");
+            BigDecimal previous=null;int count=0;
+            for(int r=start;r<end;r++) {
+                String raw=clean(source.text(r,3));
+                boolean priced=!source.text(r,4).isBlank()||!source.text(r,5).isBlank();
+                if(raw.isBlank()&&!priced){source.referenceRows.add(r);continue;}
+                source.parsedRows.add(r);count++;
+                if(!countryCode(source.text(r,0)).equals("US")||!Set.of("普货","只能普货").contains(clean(source.text(r,2))))
+                    issue(target,r+1,"国家/属性","普货价格区块的国家或货物属性缺失、不一致","error");
+                var bounds=Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)[-~～至]([0-9]+(?:\\.[0-9]+)?)$").matcher(raw);
+                if(!bounds.matches()){issue(target,r+1,"重量段","重量范围缺失或不明确","error");continue;}
+                var from=new BigDecimal(bounds.group(1));var to=new BigDecimal(bounds.group(2));
+                if(from.signum()<0||to.compareTo(from)<0||(previous!=null&&from.subtract(previous).compareTo(new BigDecimal(".001"))!=0))
+                    issue(target,r+1,"重量段","逐克计费重量段存在重叠、断档或倒序","error");
+                previous=to;
+                String note=clean(source.text(r,7));
+                var min=Pattern.compile("(?i)([0-9]+(?:\\.[0-9]+)?)(kg|g|公斤|克)起重").matcher(note);
+                BigDecimal minimum=null;
+                if(min.find()){minimum=new BigDecimal(min.group(1));if(Set.of("g","克").contains(min.group(2).toLowerCase(Locale.ROOT)))minimum=minimum.movePointLeft(3);}
+                if(minimum==null||minimum.signum()<=0){issue(target,r+1,"起重","缺少明确的最低计费重量","error");continue;}
+                if(count==1&&from.compareTo(minimum)!=0)issue(target,r+1,"重量段","首档下限与最低计费重量不一致","error");
+                var volume=Pattern.compile("(?i)cm/([0-9]+)").matcher(note);
+                int divisor=volume.find()?Integer.parseInt(volume.group(1)):0;
+                if(divisor<=0){issue(target,r+1,"体积","缺少明确的体积重系数","error");continue;}
+                var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
+                        .put("areaName","美国").put("countryCode","US").put("zoneName","").put("originRegion","")
+                        .put("allowedMarks",target.path("logisticsAttribute").asText("普货、服装"))
+                        .put("weightFromKg",from).put("weightToKg",to).put("weightFromInclusive",true).put("weightToInclusive",true)
+                        .put("minChargeWeightKg",minimum).put("volumetric",true).put("volumeDivisor",divisor)
+                        .put("sourceProductCode",code).put("sourceCode",code).put("sourceProductName",name)
+                        .put("sourceCountryCell",source.address(r,0)).put("sourceWeightRange",source.text(r,3)).put("sourceWeightCell",source.address(r,3))
+                        .put("sourcePriceCell",source.address(r,4)).put("sourceFeeCell",source.address(r,5)).put("sourceFeeLabel","处理费")
+                        .put("sourceMinimumWeightKind","note").put("sourceMinimumWeightText",source.text(r,7)).put("sourceMinimumWeightCell",source.address(r,7))
+                        .put("sourceRoundingConfirmation","沿用已确认渠道计费：重量按1g向上进位，公斤价乘计费重量加一次处理费，合计向上取整到人民币元")
+                        .put("sourceServiceConfirmation","沿用已确认渠道服务范围：包税、全邮编、普货和服装")
+                        .put("notes","包税、全邮编。重量按1g进位，运费合计向上取整到元。起重、体积重和时效以本次原表为准。");
+                for(int c:List.of(4,5))if(source.cell(r,c)!=null&&(source.cell(r,c).getCellType()==CellType.FORMULA||source.formulaCells.contains(source.cell(r,c))))
+                    issue(target,r+1,"价格","价格公式需先核对，禁止使用缓存结果发布","error");
+                numeric(row,"pricePerKg",source,r,4,target,false);numeric(row,"registrationFee",source,r,5,target,false);
+                var eta=new Columns();eta.eta=6;eta.headerRow=header;readRowEta(row,target,source,r,eta);
+                if(!clean(source.text(r,6)).matches("[0-9]+-[0-9]+(?:自然日|工作日|天)"))issue(target,r+1,"表头","参考时效缺失或单位不明确","error");
+                for(int c=8;c<source.width(r);c++)if(!source.text(r,c).isBlank())issue(target,r+1,"价格列","价格区块出现额外计费列，需核对","error");
+                add(target,row,source,r,file);
+            }
+            if(count==0)issue(target,start+1,"价格","渠道区块没有价格行","error");
+            var notes=new LinkedHashSet<String>();
+            for(int r=header+1;r<=source.lastContentRow;r++)if(source.text(r,1).isBlank()&&source.text(r,3).isBlank())notes.addAll(source.rowTexts(r));
+            target.put("sourceNotes",String.join("\n",notes));
         }
-        for(int r=1;r<=7;r++)for(int c=8;c<source.width(r);c++)if(!source.text(r,c).isBlank())issue(target,r+1,"价格列","PK0003出现额外列，需核对","error");
-        target.put("sourceNotes",String.join("\n",notes));
         return true;
     }
 

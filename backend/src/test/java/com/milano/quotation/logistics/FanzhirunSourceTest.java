@@ -40,17 +40,50 @@ class FanzhirunSourceTest {
         for(double[] sample:new double[][]{{.000001,21},{.05,21},{.2,30},{.200001,30},{.45,45},{.450001,51},{.7,70},{.700001,66},{1,88},{1.000001,89},{3,240}})
             assertEquals(sample[1],engine.calculate(c.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",sample[0])).path("total").asDouble());
     }
-    @Test void missingCellsWrongCodeConflictsAndExtraPriceRowsFailClosed()throws Exception {
+    @Test void missingCellsConflictsAndExtraPriceRowsFailClosed()throws Exception {
         for(int[] position:new int[][]{{1,4},{1,5},{3,3},{7,3},{3,4},{7,5},{3,7},{2,0},{3,6},{3,2}})
             try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){b.getSheetAt(0).getRow(position[0]).getCell(position[1]).setBlank();assertFalse(parse(bytes(b)).path("pricingReady").asBoolean(),Arrays.toString(position));}
-        for(String code:List.of("代码：PK00030","代码：PK0004",""))try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
-            b.getSheetAt(0).getRow(6).getCell(1).setCellValue(code);assertFalse(parse(bytes(b)).path("pricingReady").asBoolean());
-        }
         for(String range:List.of("0.2-0.45","0.3-0.45"))try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
             b.getSheetAt(0).getRow(4).getCell(3).setCellValue(range);assertFalse(parse(bytes(b)).path("pricingReady").asBoolean());
         }
         try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){row(b.getSheetAt(0),8,"美国","","","3.001-4",90,12);assertFalse(parse(bytes(b)).path("pricingReady").asBoolean());}
         try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){b.getSheetAt(0).getRow(3).getCell(4).setCellFormula("60+2");assertFalse(parse(bytes(b)).path("pricingReady").asBoolean());}
+    }
+    @Test void changingOrMissingProductCodeUsesRegisteredNameAndPreservesActualCode()throws Exception {
+        for(String code:List.of("PK0066","PK2027001","NEW-US-99",""))try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
+            b.getSheetAt(0).getRow(3).getCell(1).setCellValue("美国小包-特惠普货");
+            b.getSheetAt(0).getRow(3).getCell(2).setCellValue("普货");
+            b.getSheetAt(0).getRow(3).getCell(6).setCellValue("5-8工作日");
+            b.getSheetAt(0).getRow(6).getCell(1).setCellValue(code.isEmpty()?"":"代码："+code);
+            var c=parse(bytes(b));assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());
+            assertEquals(code,c.path("rows").get(0).path("sourceProductCode").asText());
+            assertEquals(5,c.path("rows").get(0).path("etaMinDays").asInt());
+        }
+    }
+    @Test void independentFBrandBlockNeverContaminatesGeneralCargoEvenWhenCodeMatches()throws Exception {
+        try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
+            var s=b.getSheetAt(0);row(s,8,"美国","美国小包-F牌","服装","0.05-3",999,999,"5-8工作日","50g起重 (泡重为:长*宽*高cm/6000)");
+            row(s,9,"","代码：PK0066");
+            var c=parse(bytes(b));assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(5,c.path("rows").size());
+            assertEquals(62,c.path("rows").get(0).path("pricePerKg").asInt());
+        }
+    }
+    @Test void blockLocationAndTierCountAreNotFixed()throws Exception {
+        try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
+            var s=b.getSheetAt(0);row(s,8,"美国","","普货","3.001-4",90,12,"5-8工作日","50g起重 (泡重为:长*宽*高cm/6000)");
+            s.shiftRows(0,9,3);b.setSheetName(0,"11月新价格");
+            var c=parse(bytes(b));assertTrue(c.path("pricingReady").asBoolean(),c.toPrettyString());assertEquals(6,c.path("rows").size());
+        }
+    }
+    @Test void conflictingNameAndCodeStillBlocks()throws Exception {
+        var config=(ObjectNode)mapper.readTree(Files.readString(Path.of("../scripts/logistics/fanzhirun-company-channel.json")));
+        var other=((ObjectNode)config.path("entries").get(0)).deepCopy().put("id",UUID.randomUUID().toString()).put("channelName","另一渠道");
+        other.putArray("aliases");other.putArray("productCodes").add("PKOTHER");config.withArray("entries").add(other);
+        try(var b=new HSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
+            b.getSheetAt(0).getRow(6).getCell(1).setCellValue("代码：PKOTHER");
+            var result=parser.parse(bytes(b),"帆之润.xls",new CompanyChannelScope(config));
+            assertEquals(0,result.path("channels").size());assertTrue(result.toString().contains("产品代码与渠道名称指向不同渠道"));
+        }
     }
     @Test @EnabledIfSystemProperty(named="fanzhirun.package",matches=".+")
     void originalWorkbookRatesAndEveryGramMatchIndependentExtraction()throws Exception {
