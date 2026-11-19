@@ -90,5 +90,14 @@ class QuotationChannelRankingPostgresTest {
   System.out.println("CHANNEL_RANKING_10000_RECORDS_MS="+elapsed);
   assertTrue(elapsed<6000,"10k-record aggregate exceeded the statement deadline");
   assertTrue(new ObjectMapper().writeValueAsString(large).length()<5000,"Response must contain aggregates, not historical quote details");
+  // Multiple current catalog bindings must not duplicate the same aggregate or inflate shares.
+  jdbc.execute("""
+   insert into logistics_channel values(md5('alias-c')::uuid,md5('p')::uuid,md5('d')::uuid,null,'C3','{"name":"同公司渠道另一个登记"}',null);
+   insert into logistics_company_binding values(md5('c')::uuid,md5('company')::uuid),(md5('alias-c')::uuid,md5('company')::uuid);
+   """);
+  var aliases=tx.execute(status->service.read(f,0,5,false));
+  assertEquals(large.totalUses(),aliases.totalUses());assertEquals(large.totalGroups(),aliases.totalGroups());
+  assertEquals(aliases.items().size(),aliases.items().stream().map(QuotationChannelRanking.Row::key).distinct().count());
+  assertEquals(2,aliases.pendingGroups());
  }
 }

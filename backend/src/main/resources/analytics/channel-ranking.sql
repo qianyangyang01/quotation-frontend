@@ -7,6 +7,11 @@ WITH catalog AS MATERIALIZED (
  FROM logistics_channel c JOIN logistics_provider p ON p.id=c.provider_id
  JOIN logistics_dataset d ON d.id=c.dataset_id
  LEFT JOIN logistics_company_binding b ON b.channel_id=c.id
+), live_catalog AS MATERIALIZED (
+ SELECT DISTINCT ON (coalesce('company:'||company_id,'id:'||id)) *,
+   coalesce('company:'||company_id,'id:'||id) identity
+ FROM catalog WHERE dataset_status='active' AND archived_at IS NULL
+ ORDER BY coalesce('company:'||company_id,'id:'||id),pending DESC,id
 ), names AS MATERIALIZED (
  SELECT *,count(*) OVER(PARTITION BY provider,channel) matches
  FROM catalog WHERE dataset_status='active' AND archived_at IS NULL
@@ -14,40 +19,42 @@ WITH catalog AS MATERIALIZED (
  SELECT *,count(*) OVER(PARTITION BY provider,code) matches
  FROM catalog WHERE dataset_status='active' AND archived_at IS NULL
 ), sources AS (
- SELECT q.id,q.created_at,q.payload,
-   CASE WHEN q.payload->>'quoteMode'='shipping-only' THEN '仅代发货报价'
+ SELECT q.id,q.created_at,raw.*,
+   CASE WHEN :category='' AND :keyword='' THEN '' WHEN raw."quoteMode"='shipping-only' THEN '仅代发货报价'
     ELSE (SELECT CASE WHEN count(DISTINCT coalesce(nullif(trim(p.payload->>'category'),''),'其他'))=1
           THEN min(coalesce(nullif(trim(p.payload->>'category'),''),'其他')) ELSE '其他' END
-      FROM regexp_split_to_table(upper(coalesce(q.payload->>'primarySku','')), '[、,+\s]+') sku_value
+      FROM regexp_split_to_table(upper(coalesce(raw."primarySku",'')), '[、,+\s]+') sku_value
       LEFT JOIN purchase_product p ON p.sku=sku_value
       WHERE sku_value NOT IN ('','—','-','--','暂无数据','无','N/A','NA')) END category
  FROM quotation_record q
+ CROSS JOIN LATERAL jsonb_to_record(q.payload) raw("quoteMode" text,"isTest" text,"primarySku" text,
+  "salespersonName" text,"salespersonAccount" text,"no" text,"customerName" text,"productSummary" text,
+  "country" text,"carrier" text,"channel" text,"systemQuoteUsd" jsonb,"quoteOptions" jsonb,"specifiedQuotes" jsonb)
  WHERE q.lifecycle_state IN ('active','archived') AND q.created_at>=:start AND q.created_at<:end
-   AND coalesce(q.payload->>'quoteMode','single') NOT IN ('freight-trial','fob')
-   AND coalesce(q.payload->>'isTest','false')<>'true'
-   AND (:salesperson='' OR q.payload->>'salespersonName'=:salesperson)
+   AND coalesce(raw."quoteMode",'single') NOT IN ('freight-trial','fob')
+   AND coalesce(raw."isTest",'false')<>'true'
+   AND (:salesperson='' OR raw."salespersonName"=:salesperson)
 ), selected AS (
  SELECT * FROM sources q WHERE (:category='' OR category=:category)
- AND (:keyword='' OR position(:keyword IN lower(concat_ws(' ',q.payload->>'no',q.payload->>'customerName',
-   q.payload->>'primarySku',q.payload->>'productSummary',q.payload->>'salespersonName',q.payload->>'salespersonAccount',
-   category,q.payload->>'country',
+ AND (:keyword='' OR position(:keyword IN lower(concat_ws(' ',q.no,q."customerName",q."primarySku",q."productSummary",
+   q."salespersonName",q."salespersonAccount",category,q.country,
    (SELECT string_agg(o->>'country',' ') FROM jsonb_array_elements(
-    CASE WHEN jsonb_typeof(q.payload->'quoteOptions')='array' THEN q.payload->'quoteOptions'
-     WHEN jsonb_typeof(q.payload->'specifiedQuotes')='array' THEN q.payload->'specifiedQuotes' ELSE '[]'::jsonb END) o))))>0)
-), expanded AS (
- SELECT q.id,q.created_at,o,
+    CASE WHEN jsonb_typeof(q."quoteOptions")='array' THEN q."quoteOptions"
+     WHEN jsonb_typeof(q."specifiedQuotes")='array' THEN q."specifiedQuotes" ELSE '[]'::jsonb END) o))))>0)
+), expanded AS MATERIALIZED (
+ SELECT q.id,q.created_at,
+  jsonb_build_object('countryCode',o->'countryCode','logisticsChannelId',o->'logisticsChannelId',
+   'channelKey',o->'channelKey','channelCode',o->'channelCode') o,
   trim(coalesce(o->>'country','')) country_name,trim(coalesce(o->>'carrier','')) provider_name,
   trim(coalesce(o->>'channel','')) channel_name
  FROM selected q CROSS JOIN LATERAL jsonb_array_elements(
-  CASE WHEN jsonb_typeof(q.payload->'quoteOptions')='array' THEN q.payload->'quoteOptions'
-   WHEN jsonb_typeof(q.payload->'specifiedQuotes')='array' THEN q.payload->'specifiedQuotes'
-   ELSE jsonb_build_array(jsonb_build_object('country',q.payload->'country','carrier',q.payload->'carrier',
-    'channel',q.payload->'channel','quote1Usd',q.payload->'systemQuoteUsd')) END) o
+  CASE WHEN jsonb_typeof(q."quoteOptions")='array' THEN q."quoteOptions"
+   WHEN jsonb_typeof(q."specifiedQuotes")='array' THEN q."specifiedQuotes"
+   ELSE jsonb_build_array(jsonb_build_object('country',q.country,'carrier',q.carrier,
+    'channel',q.channel,'quote1Usd',q."systemQuoteUsd")) END) o
  WHERE o->>'available' IS DISTINCT FROM 'false'
- AND EXISTS(SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof(o)='object' THEN o ELSE '{}'::jsonb END) price WHERE price.key IN
-   ('quote1Usd','quote2Usd','quote3Usd','quoteCustomUsd','quoteCny')
-   AND CASE WHEN jsonb_typeof(price.value) IN ('number','string') AND (price.value #>> '{}') ~ '^[0-9]+([.][0-9]+)?$'
-     THEN (price.value #>> '{}')::numeric>0 ELSE false END)
+ AND EXISTS(SELECT 1 FROM (VALUES (o->>'quote1Usd'),(o->>'quote2Usd'),(o->>'quote3Usd'),(o->>'quoteCustomUsd'),(o->>'quoteCny')) price(value)
+   WHERE CASE WHEN price.value ~ '^[0-9]+([.][0-9]+)?$' THEN price.value::numeric>0 ELSE false END)
 ), resolved AS (
  SELECT e.*,
   coalesce(CAST(:countries AS jsonb)->>upper(country_name),CAST(:countries AS jsonb)->>country_name,
@@ -81,6 +88,5 @@ WITH catalog AS MATERIALIZED (
  FROM usages GROUP BY country_key,identity
 )
 SELECT g.*,current.id current_id,current.dataset_id,current.version_id,coalesce(current.pending,false) pending
-FROM grouped g LEFT JOIN catalog current ON current.dataset_status='active' AND current.archived_at IS NULL
- AND (CASE WHEN g.company_id IS NOT NULL THEN current.company_id=g.company_id ELSE current.id=g.resolved_id END)
+FROM grouped g LEFT JOIN live_catalog current ON current.identity=g.identity
 ORDER BY uses DESC,latest DESC,country_key,identity
