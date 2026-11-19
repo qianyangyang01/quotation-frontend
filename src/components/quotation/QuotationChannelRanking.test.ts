@@ -27,7 +27,7 @@ it('shows a recoverable failure instead of misleading zero statistics',async()=>
  mount();await settle();expect(root.querySelector('[role="alert"]')?.textContent).toContain('统计超时')
  expect(root.querySelector('.ranking-summary')).toBeNull()
  ;(root.querySelector('[role="alert"] button')as HTMLButtonElement).click();await settle()
- expect(root.querySelector('tbody')?.textContent).toContain('待核查')
+ expect(root.querySelector('tbody')?.textContent).toContain('美国')
  expect(root.textContent).not.toContain('已核查')
 })
 it('only requests an aggregate page, cancels pending work on unmount',async()=>{
