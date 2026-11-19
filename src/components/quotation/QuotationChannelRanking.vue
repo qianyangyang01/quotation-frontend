@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
 import { currentAuthUser } from '@/data/authStore'
 import type { DashboardFilters } from '@/data/quotationAnalytics'
 import { loadChannelRanking, type ChannelRankingResult } from '@/services/quotationChannelRanking'
 
 const props = defineProps<{ filters: DashboardFilters }>()
 const data = ref<ChannelRankingResult | null>(null), loading = ref(true), error = ref('')
-const expanded = ref(false), page = ref(0), pageSize = ref(20)
-const size = computed(() => expanded.value ? pageSize.value : 5)
+const page = ref(0), pageSize = ref(5)
 let controller: AbortController | undefined, timer: ReturnType<typeof setTimeout> | undefined, generation = 0
 const dateTime = (value: string) => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
 function resetRequest() {
@@ -19,7 +18,7 @@ async function refresh() {
   controller = new AbortController()
   loading.value = true; error.value = ''; data.value = null
   try {
-    const result = await loadChannelRanking({ ...props.filters }, page.value, size.value, false, controller.signal)
+    const result = await loadChannelRanking({ ...props.filters }, page.value, pageSize.value, false, controller.signal)
     if (id !== generation || account !== currentAuthUser.value.account) return
     data.value = result
   } catch (e) {
@@ -32,7 +31,6 @@ watch(() => [props.filters, currentAuthUser.value.account], () => {
   timer = setTimeout(() => void refresh(), 300)
 }, { immediate: true, deep: true, flush: 'sync' })
 onUnmounted(() => { resetRequest() })
-function expand() { expanded.value = !expanded.value; page.value = 0; void refresh() }
 function goPage(next: number) { page.value = next; void refresh() }
 function changeSize(event: Event) { pageSize.value = Number((event.target as HTMLSelectElement).value); page.value = 0; void refresh() }
 function exportPage() {
@@ -59,8 +57,8 @@ function exportPage() {
         <tr v-for="(row,i) in data.items" :key="row.key"><td><i :class="{top:data.page*data.size+i<3}">{{data.page*data.size+i+1}}</i></td><td>{{row.country}}</td><td><b>{{row.provider}}</b><small>{{row.channel}}</small></td><td><strong>{{row.uses}}</strong><span class="ranking-share">{{row.share}}%</span></td></tr>
         <tr v-if="!data.items.length"><td colspan="4" class="ranking-empty">当前筛选范围暂无有效渠道使用记录。</td></tr>
       </tbody></table></div>
-      <footer><span>{{data.startDate}} 至 {{data.endDate}} · 更新 {{dateTime(data.generatedAt)}}</span><button v-if="data.total>5 || expanded" @click="expand">{{expanded ? '收起为前 5 条' : '查看全部 '+data.total+' 条'}} →</button></footer>
-      <div v-if="expanded" class="ranking-pagination"><span>共 {{data.total}} 条</span><label>每页 <select :value="pageSize" @change="changeSize"><option :value="20">20</option><option :value="50">50</option></select> 条</label><button :disabled="data.page===0" @click="goPage(data.page-1)">上一页</button><span>{{data.totalPages ? data.page+1 : 0}} / {{data.totalPages}}</span><button :disabled="data.page+1>=data.totalPages" @click="goPage(data.page+1)">下一页</button><button :disabled="!data.items.length" @click="exportPage">导出本页</button></div>
+      <footer><span>{{data.startDate}} 至 {{data.endDate}} · 更新 {{dateTime(data.generatedAt)}}</span></footer>
+      <div class="ranking-pagination"><span>共 {{data.total}} 条</span><label>每页 <select :value="pageSize" @change="changeSize"><option :value="5">5</option><option :value="20">20</option><option :value="50">50</option></select> 条</label><button :disabled="data.page===0" @click="goPage(data.page-1)">上一页</button><span>{{data.totalPages ? data.page+1 : 0}} / {{data.totalPages}}</span><button :disabled="data.page+1>=data.totalPages" @click="goPage(data.page+1)">下一页</button><button :disabled="!data.items.length" @click="exportPage">导出本页</button></div>
     </template>
   </section>
 </template>

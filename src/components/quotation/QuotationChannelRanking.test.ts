@@ -30,9 +30,23 @@ it('shows a recoverable failure instead of misleading zero statistics',async()=>
  expect(root.querySelector('tbody')?.textContent).toContain('美国')
  expect(root.textContent).not.toContain('已核查')
 })
-it('only requests an aggregate page, cancels pending work on unmount',async()=>{
- mock.load.mockResolvedValue(response());mount();await settle()
+it('paginates immediately with bounded requests, resets on filters and cancels pending work on unmount',async()=>{
+ mock.load.mockImplementation(async(_filters,page,size)=>({...response(),page,size,total:774,totalPages:Math.ceil(774/size)}))
+ const filters=mount();await settle()
  expect(mock.load.mock.calls[0].slice(1,4)).toEqual([0,5,false])
- const signal=mock.load.mock.calls[0][4] as AbortSignal
+ expect(root.querySelector('.ranking-pagination')).not.toBeNull()
+ expect(root.textContent).not.toContain('查看全部')
+ expect(mock.load).toHaveBeenCalledTimes(1)
+ ;([...root.querySelectorAll('button')].find(b=>b.textContent==='下一页') as HTMLButtonElement).click();await settle()
+ expect(mock.load.mock.lastCall?.slice(1,4)).toEqual([1,5,false])
+ expect(root.querySelector('tbody td i')?.textContent).toBe('6')
+ const select=root.querySelector('.ranking-pagination select') as HTMLSelectElement
+ select.value='20';select.dispatchEvent(new Event('change'));await settle()
+ expect(mock.load.mock.lastCall?.slice(1,4)).toEqual([0,20,false])
+ ;([...root.querySelectorAll('button')].find(b=>b.textContent==='下一页') as HTMLButtonElement).click();await settle()
+ filters.country='德国';await settle()
+ expect(mock.load.mock.lastCall?.slice(1,4)).toEqual([0,20,false])
+ expect(mock.load.mock.lastCall?.[0].country).toBe('德国')
+ const signal=mock.load.mock.lastCall?.[4] as AbortSignal
  app.unmount();expect(signal.aborted).toBe(true)
 })

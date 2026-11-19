@@ -19,10 +19,12 @@ try{
  assert.equal(await page.locator('.channel-ranking tbody tr').count(),5)
  await page.screenshot({path:out+'/real-snapshot-overview.png'})
  await page.locator('.channel-ranking').screenshot({path:out+'/real-snapshot-ranking.png'})
- await page.getByRole('button',{name:'查看全部 179 条 →'}).click()
- await page.waitForFunction(()=>document.querySelectorAll('.channel-ranking tbody tr').length===20)
+ assert.equal(await page.getByRole('button',{name:/查看全部 179/}).count(),0)
+ await page.locator('.ranking-pagination').waitFor()
  await page.getByRole('button',{name:'下一页',exact:true}).first().click()
- await page.waitForFunction(()=>document.querySelector('.channel-ranking tbody td i')?.textContent==='21')
+ await page.waitForFunction(()=>document.querySelector('.channel-ranking tbody td i')?.textContent==='6')
+ await page.locator('.ranking-pagination select').selectOption('20')
+ await page.waitForFunction(()=>document.querySelectorAll('.channel-ranking tbody tr').length===20)
  await page.locator('.ranking-pagination select').selectOption('50')
  await page.waitForFunction(()=>document.querySelectorAll('.channel-ranking tbody tr').length===50)
  const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'导出本页',exact:true}).click();await(await downloadPromise).saveAs(out+'/真实副本排行榜-本页.csv')
@@ -33,6 +35,6 @@ try{
  assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);assert.deepEqual(external,[])
  const hash=spawnSync('docker',['exec','quotation-channel-ranking-db-20261119','psql','-U','postgres','-d','ranking','-Atc',"SELECT count(*),md5(string_agg(id::text||payload::text||version::text||updated_at::text, chr(10) ORDER BY id)) FROM quotation_record"],{encoding:'utf8'}).stdout.trim()
  assert.equal(hash,'228|928679e5f4439c4d517cf723993eba17')
- const report={ok:true,source:'本机真实历史备份 2026-09-23（非当前线上数据）',records:228,totalUses:result.totalUses,totalGroups:result.totalGroups,timings,historyHashBefore:'228|928679e5f4439c4d517cf723993eba17',historyHashAfter:hash,errors,writes,external,rankingRequests:requests.length,checks:['默认Top5','展开与20/50条分页','下一页','国家筛选','CSV导出','报价payload/version/updated_at摘要不变']}
+ const report={ok:true,source:'本机真实历史备份 2026-09-23（非当前线上数据）',records:228,totalUses:result.totalUses,totalGroups:result.totalGroups,timings,historyHashBefore:'228|928679e5f4439c4d517cf723993eba17',historyHashAfter:hash,errors,writes,external,rankingRequests:requests.length,checks:['默认5条直接分页','5/20/50条分页','下一页','国家筛选','CSV导出','报价payload/version/updated_at摘要不变']}
  await fs.writeFile(out+'/local-verification.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report))
 }finally{await browser.close()}
