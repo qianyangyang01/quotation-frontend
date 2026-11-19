@@ -32,19 +32,19 @@ public final class CompanyChannelScope {
         return hits.size()==1?hits.first():"";
     }
     public Match match(String provider,String name,String code) {
-        return match(provider,List.of(name),List.of(code),false);
+        return match(provider,List.of(name),List.of(code));
     }
     /** Rongding's A/C rows share prices, but each registered product must retain its own identity. */
     public Match matchSourceCell(String provider,String name,String code) {
         if(unrestricted||!normalize(provider).equals("容鼎")||code.isBlank())return match(provider,name,code);
-        if(code.trim().matches("(?i)PK[0-9]+"))return match(provider,List.of(name),List.of(code),true);
+        if(code.trim().matches("(?i)[A-Z0-9][A-Z0-9_-]*"))return match(provider,List.of(name),List.of(code));
         var codes=Normalizer.normalize(code,Normalizer.Form.NFKC).strip().split("\\R",-1);
         var names=Normalizer.normalize(name,Normalizer.Form.NFKC).strip().split("\\R",-1);
         if(codes.length<1||codes.length>2||codes.length!=names.length)
             return new Match("ambiguous","容鼎产品名称与A/C代码未逐行对应，需核对原表",null);
         var candidates=new ArrayList<String>();var labels=new HashSet<String>();var bases=new HashSet<String>();String commonName=null;
         for(int i=0;i<codes.length;i++) {
-            var product=java.util.regex.Pattern.compile("(?i)^(PK[0-9]{4,6})\\s*\\(([AC])\\)$").matcher(codes[i].strip());
+            var product=java.util.regex.Pattern.compile("(?i)^([A-Z0-9][A-Z0-9_-]*)\\s*\\(([AC])\\)$").matcher(codes[i].strip());
             if(!product.matches())return new Match("ambiguous","容鼎产品代码格式不明确，禁止猜测或仅按名称更新",null);
             String base=product.group(1),label=product.group(2).toUpperCase(Locale.ROOT);
             if(!labels.add(label)||!bases.add(base.toUpperCase(Locale.ROOT)))return new Match("ambiguous","容鼎A/C标签或基础产品代码重复，需核对原表",null);
@@ -54,9 +54,10 @@ public final class CompanyChannelScope {
             if(commonName!=null&&!commonName.equals(stem))return new Match("ambiguous","容鼎同格A/C渠道名称不属于同一价格组，需核对原表",null);
             commonName=stem;candidates.add(base);candidates.add(codes[i].strip());
         }
-        return match(provider,Arrays.asList(names),candidates,true);
+        var identities=new ArrayList<>(Arrays.asList(names));identities.add(name);
+        return match(provider,identities,candidates);
     }
-    private Match match(String provider,List<String> names,List<String> codes,boolean requireCode) {
+    private Match match(String provider,List<String> names,List<String> codes) {
         if(unrestricted)return new Match("matched","兼容导入",null);
         var entries=providers.getOrDefault(normalize(provider),List.of());
         if(entries.isEmpty())return new Match("filtered","物流商不在公司清单",null);
@@ -68,12 +69,11 @@ public final class CompanyChannelScope {
         if(byName.size()>1||byCode.size()>1)return new Match("ambiguous","同一物流商下匹配多个渠道",null);
         if(!byName.isEmpty()&&!byCode.isEmpty()&&!byName.keySet().equals(byCode.keySet()))
             return new Match("ambiguous","产品代码与渠道名称指向不同渠道",null);
-        if(requireCode&&byCode.isEmpty())return new Match(byName.isEmpty()?"filtered":"ambiguous","容鼎基础产品代码未登记，未按名称猜测更新",null);
         var hits=byCode.isEmpty()?byName:byCode;
         if(hits.isEmpty())return new Match("filtered","渠道未登记或未登记该名称别名",null);
         var entry=hits.values().iterator().next();
         if(!entry.path("enabled").asBoolean(true))return new Match("filtered","公司渠道已停用",entry);
-        return new Match("matched",requireCode?"容鼎完整产品代码（A/C标记单独核对）":byCode.isEmpty()?"渠道名称或登记别名":"原产品代码",entry);
+        return new Match("matched",byCode.isEmpty()?"渠道名称或登记别名（保留当次产品代码）":byName.isEmpty()?"原产品代码":"渠道名称与产品代码一致",entry);
     }
     private static boolean matches(String input,JsonNode name,JsonNode aliases) {
         var n=normalize(input);if(n.isBlank())return false;
@@ -88,7 +88,7 @@ public final class CompanyChannelScope {
         for(var cell:cells)for(var line:cell.split("[\\r\\n]+")) {
             var text=normalize(line);
             var value=text.replaceFirst("^(?:渠道名称|渠道名|产品名称|渠道代码|产品代码|产品编码|渠道|产品)[:：]","");
-            explicit|=!value.equals(text);
+            explicit|=!value.equals(text)&&!text.matches("^(?:渠道代码|产品代码|产品编码)[:：].*");
             var name=value.replaceFirst("(?:运价表|报价表|价格表)$","");
             var decision=match(provider,name,value);
             if(decision.status().equals("ambiguous"))return decision;

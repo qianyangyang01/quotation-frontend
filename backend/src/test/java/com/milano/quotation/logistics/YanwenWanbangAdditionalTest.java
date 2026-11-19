@@ -35,7 +35,7 @@ class YanwenWanbangAdditionalTest {
         assertEquals(old.path("companyChannelId"),next.path("companyChannelId"));assertNotEquals(old.path("contentHash"),next.path("contentHash"));
         var result=new LogisticsBillingEngine(mapper).calculate(next.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",.001));
         assertEquals(.04,result.path("chargeWeightKg").asDouble());assertEquals(22.4,result.path("total").asDouble());
-        for(var bad:List.of(fixture(50,"","1667",false),fixture(50,"0.03","WRONG",false),fixture(50,"0.03","1667",true))) {
+        for(var bad:List.of(fixture(50,"","1667",false),fixture(50,"0.03","557",false),fixture(50,"0.03","1667",true))) {
             var c=parser.parse(bad,"燕文.xlsx",directory()).path("channels").get(0);assertTrue(c.path("errors").asInt()>0,c.toPrettyString());assertFalse(c.path("quoteReady").asBoolean());
         }
     }
@@ -98,7 +98,7 @@ class YanwenWanbangAdditionalTest {
 
     @Test void wanbangUsesPriceWeightColumnNotAcceptanceLimitAndIgnoresReturnFees() throws Exception {
         String identity="";
-        for(var code:List.of("WBSLLP","WRONG"))try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+        for(var code:List.of("WBSLLP","NEW-WBSL-2027"))try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
             var s=book.createSheet("新版含电报价");LogisticsSourceParserTest.row(s,1,"万邦速达大货专线含电报价表(RMB)");
             LogisticsSourceParserTest.row(s,3,"国家","重量限制(KG)","产品名称","操作费(RMB/PCS)","产品代码","公斤重(RMB/KG)","重量段","参考时效");
             LogisticsSourceParserTest.row(s,4,"美国","0-30KG","万邦大货专线含电",51,code,106,"0-10KG","9--12");
@@ -110,7 +110,6 @@ class YanwenWanbangAdditionalTest {
             var result=parser.parse(LogisticsSourceParserTest.bytes(book),"万邦更新.xlsx",directory());
             assertEquals(1,result.path("channels").size());var c=result.path("channels").get(0);
             assertEquals(2,c.path("rows").size());assertEquals("万邦大货专线挂号含电",c.path("channelName").asText());
-            if(code.equals("WRONG")){assertFalse(c.path("quoteReady").asBoolean());continue;}
             assertTrue(c.path("quoteReady").asBoolean(),c.toPrettyString());identity=c.path("companyChannelId").asText();
             var engine=new LogisticsBillingEngine(mapper);
             assertEquals(52.06,engine.calculate(c.path("rows"),mapper.createObjectNode().put("country","US").put("weightKg",.01)).path("total").asDouble());

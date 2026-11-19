@@ -88,7 +88,7 @@ class WanbangMediumSourceTest {
     }
 
     @Test void refusesMissingPriceWeightOperationFeeAndIncorrectProductCode() throws Exception {
-        for(var defect:List.of("code","weight-row","weight-column","fee-column")) {
+        for(var defect:List.of("weight-row","weight-column","fee-column")) {
             var result=parser.parse(fixture(true,defect,80),"万邦更新.xlsx",directory());
             assertEquals(2,result.path("channels").size(),defect+result.toPrettyString());
             for(var c:result.path("channels")) {

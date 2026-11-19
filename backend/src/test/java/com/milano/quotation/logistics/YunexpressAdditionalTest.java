@@ -37,7 +37,9 @@ class YunexpressAdditionalTest {
         var computed=new LogisticsBillingEngine(mapper).calculate(next.path("rows"),mapper.createObjectNode().put("country","CA").put("weightKg",.080001));
         assertEquals(.081,computed.path("chargeWeightKg").asDouble());assertEquals(33.18,computed.path("total").asDouble());
         for(var bad:List.of(fixture(98,.05,"BKPHR","1",false),fixture(98,.05,"BKZXR","2",false),fixture(98,.05,"BKZXR","1",true))) {
-            var c=parser.parse(bad,"云途.xlsx",directory()).path("channels").get(0);assertTrue(c.path("errors").asInt()>0);assertFalse(c.path("quoteReady").asBoolean());
+            var result=parser.parse(bad,"云途.xlsx",directory());
+            if(result.path("channels").isEmpty())assertTrue(result.path("ambiguousChannels").asInt()>0,result.toString());
+            else {var c=result.path("channels").get(0);assertTrue(c.path("errors").asInt()>0);assertFalse(c.path("quoteReady").asBoolean());}
         }
     }
     @Test @EnabledIfSystemProperty(named="yunexpress.source",matches=".+")

@@ -35,7 +35,9 @@ class QiaojieSourceParserTest {
             assertEquals(countries.get(product.code()).longValue(),c.path("rows").valueStream().map(r->r.path("countryCode").asText()).distinct().count());
             assertEquals(0,c.path("errors").asInt(),c.path("issues").toString());assertTrue(c.path("quoteReady").asBoolean());
             for(var r:c.path("rows")) {
-                assertEquals(product.perPiece()?.5:.05,r.path("minChargeWeightKg").asDouble());assertEquals(product.code(),r.path("sourceProductCode").asText());
+                assertEquals(product.perPiece()?.5:.05,r.path("minChargeWeightKg").asDouble());
+                // B's original sheet has no product code; do not manufacture one from the catalogue.
+                assertEquals(product.perPiece()?"":product.code(),r.path("sourceProductCode").asText());
                 var input=mapper.createObjectNode().put("country",r.path("countryCode").asText()).put("weightKg",r.path("weightToKg").asDouble());
                 var resultAtUpper=new LogisticsBillingEngine(mapper).calculate(c.path("rows"),input);
                 var expected=(product.perPiece()?r.path("intervalPrice").decimalValue():r.path("weightToKg").decimalValue().multiply(r.path("pricePerKg").decimalValue())).add(r.path("registrationFee").decimalValue()).setScale(2,java.math.RoundingMode.HALF_UP);
@@ -52,6 +54,10 @@ class QiaojieSourceParserTest {
                 if(!product.perPiece())for(double actual:new double[]{.049999,.05,.050001}) {
                     var boundary=new LogisticsBillingEngine(mapper).calculate(c.path("rows"),mapper.createObjectNode().put("country",country).put("weightKg",actual));
                     var charged=BigDecimal.valueOf(actual).max(new BigDecimal("0.05"));
+                    if(first.path("billingStepKg").asDouble()>0) {
+                        var step=first.path("billingStepKg").decimalValue();
+                        charged=charged.divide(step,0,java.math.RoundingMode.CEILING).multiply(step);
+                    }
                     assertEquals(charged.doubleValue(),boundary.path("chargeWeightKg").asDouble());
                     assertEquals(charged.multiply(first.path("pricePerKg").decimalValue()).add(first.path("registrationFee").decimalValue()).setScale(2,java.math.RoundingMode.HALF_UP).doubleValue(),boundary.path("total").asDouble());
                     cases.addObject().put("channel",product.name()).put("country",country).put("weightKg",actual).set("expected",boundary);

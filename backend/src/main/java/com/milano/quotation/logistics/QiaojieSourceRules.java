@@ -20,13 +20,19 @@ final class QiaojieSourceRules {
     private QiaojieSourceRules() {}
     static Product named(String text) {
         var normalized=CompanyChannelScope.normalize(text);
-        return PRODUCTS.stream().filter(p->normalized.equals(CompanyChannelScope.normalize(p.name()))
-                ||normalized.equals(CompanyChannelScope.normalize(p.name()+p.code()))).findFirst().orElse(null);
+        for(var p:PRODUCTS) {
+            String name=CompanyChannelScope.normalize(p.name());
+            if(normalized.equals(name))return p;
+            if(normalized.startsWith(name)) {
+                String suffix=normalized.substring(name.length());
+                if(suffix.matches("[a-z][a-z0-9_-]+"))return new Product(p.name(),suffix.toUpperCase(java.util.Locale.ROOT),p.attribute(),p.perPiece());
+            }
+        }
+        return null;
     }
     static boolean allowed(String name,String code) {
         var product=named(name);
-        return product!=null&&(code.isBlank()||PRODUCTS.stream().anyMatch(p->p.name().equals(product.name())
-                &&CompanyChannelScope.normalize(code).equals(CompanyChannelScope.normalize(p.code()))));
+        return product!=null&&!LogisticsProductIdentity.codeConflict(PROVIDER,product.name(),code);
     }
     static boolean explicitCode(String text,Product product) {
         return CompanyChannelScope.normalize(text).equals(CompanyChannelScope.normalize(product.name()+product.code()));
@@ -36,7 +42,7 @@ final class QiaojieSourceRules {
         return US_ONLY_COMPANY_ID.equals(companyId)
                 || CompanyChannelScope.normalize(US_ONLY_CHANNEL_CODE).equals(CompanyChannelScope.normalize(code))
                 || "qegbfa".equals(CompanyChannelScope.normalize(code))
-                || product!=null&&product.code().equals("QEGBFA");
+                || product!=null&&product.name().equals("巧捷小包全球特惠A(服装)");
     }
     static void validateCountries(String provider,String name,String code,JsonNode payload) {
         boolean restricted=US_ONLY_CHANNEL_CODE.equalsIgnoreCase(code)||US_ONLY_COMPANY_ID.equals(payload.path("companyChannelId").asText())

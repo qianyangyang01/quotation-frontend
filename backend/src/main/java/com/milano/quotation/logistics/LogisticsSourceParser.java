@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="fanzhirun-product-blocks-2026.11.18-v23";
+    public static final String VERSION="mutable-product-identities-2026.11.19-v24";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
@@ -278,7 +278,7 @@ public class LogisticsSourceParser {
             if(source.text(r,0).equals(LogisticsWorkbookService.HEADERS.getFirst())&&source.text(r,1).equals("国家简码"))return true;
             var header=detect(source,r,JisuSourceRules.PROVIDER);
             if(header!=null&&header.country>=0&&header.code>=0){columns=header;continue;}
-            if(columns!=null&&JisuSourceRules.allowed(countryCode(source.text(r,columns.country)),source.text(r,columns.code)))return true;
+            if(columns!=null&&JisuSourceRules.allowedSource(countryCode(source.text(r,columns.country)),source.text(r,columns.code),sourceAttribute(source,r)))return true;
         }
         return false;
     }
@@ -305,7 +305,12 @@ public class LogisticsSourceParser {
         // A bare sheet name identifies the service, not its dated carrier code.
         products.removeIf(p->!explicit.contains(p)&&explicit.stream().anyMatch(e->e.name().equals(p.name())));
         if(products.size()>1)source.ambiguous=true;
-        return products.isEmpty()?null:products.iterator().next();
+        if(products.isEmpty())return null;
+        var product=products.iterator().next();
+        var codes=titleProductCodes(source,QiaojieSourceRules.PROVIDER);
+        explicit.forEach(p->codes.add(p.code()));
+        if(codes.size()>1)source.ambiguous=true;
+        return new QiaojieSourceRules.Product(product.name(),codes.isEmpty()?"":codes.iterator().next(),product.attribute(),product.perPiece());
     }
 
     // Discover header columns and approved product identities; worksheet names and row positions are not identifiers.
@@ -447,7 +452,9 @@ public class LogisticsSourceParser {
 
     /** BZ503 alone: source identity, incomplete unit headers and merged cells are audited explicitly. */
     private boolean parseBaizhouClothing(Source source,String provider,String file,Map<String,ObjectNode> channels) {
-        var target=selected(source,provider,"BZ-欧美服装专线挂号","BZ503",0,channels);
+        var actualCodes=titleProductCodes(source,provider);
+        String actualCode=actualCodes.size()==1?actualCodes.iterator().next():"";
+        var target=selected(source,provider,"BZ-欧美服装专线挂号",actualCode,0,channels);
         if(target==null)return true;
         int header=-1;var columns=new HashMap<String,Integer>();var codes=new HashSet<String>();boolean title=false;
         for(int r=0;r<=source.lastContentRow;r++) {
@@ -466,7 +473,7 @@ public class LogisticsSourceParser {
             header=r;columns.putAll(found);
             for(int c=0;c<source.width(r);c++)if(!columns.containsValue(c)&&!source.text(r,c).isBlank())issue(target,r+1,"表头","BZ503出现未适配列："+source.text(r,c),"error");
         }
-        if(!title||!codes.equals(Set.of("BZ503")))issue(target,0,"渠道代码","必须同时具有BZ-欧美服装专线挂号标题和唯一完整BZ503代码，禁止按近似名称导入","error");
+        if(!title||codes.size()>1)issue(target,0,"渠道身份","服装渠道名称缺失或表头存在多个产品代码","error");
         if(!columns.keySet().containsAll(Set.of("country","weight","rate","fee","eta"))){issue(target,0,"表头","BZ503缺少国家、重量段、运费、挂号费或时效列","error");return true;}
         int country=columns.get("country"),weight=columns.get("weight"),rate=columns.get("rate"),fee=columns.get("fee");
         var previous=new HashMap<String,BigDecimal>();var limits=Map.of("US",30);
@@ -481,7 +488,7 @@ public class LogisticsSourceParser {
             if(!limits.containsKey(code)){issue(target,r+1,"国家","BZ503国家缺失或超出已适配范围："+rawCountry,"error");continue;}
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel",LogisticsGramPricing.CEIL_CNY_MODEL)
                     .put("areaName",countryName(rawCountry)).put("countryCode",code).put("zoneName","").put("originRegion","")
-                    .put("sourceProductCode","BZ503").put("sourceCode","BZ503").put("sourceCountry",rawCountry)
+                    .put("sourceProductCode",actualCode).put("sourceCode",actualCode).put("sourceCountry",rawCountry)
                     .put("sourceCountryCell",source.address(r,country)).put("sourceWeightRange",source.text(r,weight))
                     .put("sourceWeightCell",source.address(r,weight)).put("sourcePriceCell",source.address(r,rate)).put("sourceFeeCell",source.address(r,fee))
                     .put("sourceFeeLabel",source.text(header,fee)).put("sourcePriceUnit","RMB/KG")
@@ -686,8 +693,11 @@ public class LogisticsSourceParser {
     private boolean parseSunyou(Source source,String file,Map<String,ObjectNode> channels) {
         var product=sunyouProduct(source);
         if(product==null)return false;
-        var target=selected(source,SunyouSourceRules.PROVIDER,product.name(),product.code(),0,channels);
+        var sourceCodes=titleProductCodes(source,SunyouSourceRules.PROVIDER);
+        String actualCode=sourceCodes.size()==1?sourceCodes.iterator().next():"";
+        var target=selected(source,SunyouSourceRules.PROVIDER,product.name(),actualCode,0,channels);
         if(target==null)return true;
+        if(sourceCodes.size()>1)issue(target,0,"产品代码","同一渠道标题包含多个产品代码，需核对归属","error");
         int header=-1,rate=-1,fee=-1,limit=-1,code=-1,country=-1,minimum=-1,minimumHeader=-1,english=-1;
         for(int r=0;r<=source.lastContentRow;r++) {
             int foundRate=-1,foundFee=-1,foundLimit=-1;
@@ -733,7 +743,7 @@ public class LogisticsSourceParser {
             if(zoneMatch.find()){zone=normalizeZone(zoneMatch.group(1)+"区");label=label.substring(0,zoneMatch.start()).trim();}
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg")
                 .put("areaName",label).put("countryCode",countryCode).put("zoneName",zone)
-                .put("sourceProductCode",product.code()).put("sourceCountry",source.text(r,country))
+                .put("sourceProductCode",actualCode).put("sourceCountry",source.text(r,country))
                 .put("sourceCountryCode",countryCode).put("sourceWeightRange",source.text(r,limit))
                 .put("sourceWeightCell",source.address(r,limit)).put("sourceFeeLabel",source.text(header,fee))
                 .put("sourcePriceCell",source.address(r,rate)).put("sourceFeeCell",source.address(r,fee));
@@ -823,7 +833,22 @@ public class LogisticsSourceParser {
         }
         if(!decision.accepted()) {source.parsedRows.add(row);source.ambiguous|=decision.status().equals("ambiguous");return null;}
         String canonical=decision.entry()==null?name:decision.entry().path("channelName").asText();
-        var target=channel(provider,canonical,channels);CompanyChannelScope.identify(target,decision);return target;
+        var target=channel(provider,canonical,channels);CompanyChannelScope.identify(target,decision);
+        if(LogisticsProductIdentity.codeConflict(provider,canonical,code))issue(target,row+1,"渠道身份","名称与产品代码指向不同产品，需核对归属","error");
+        if(!source.scope.unrestricted()&&!source.scope.match(provider,name,"").accepted()&&LogisticsProductIdentity.nameAttributeConflict(name,canonical))
+            issue(target,row+1,"货物属性","仅代码匹配，但原表名称与登记渠道的货物属性不同","error");
+        return target;
+    }
+
+    private String sourceAttribute(Source source,int row) {
+        if(source.attributeColumns==null) {
+            source.attributeColumns=new HashMap<>();int column=-1;
+            for(int r=0;r<=source.lastContentRow;r++) {
+                for(int c=0;c<source.width(r);c++)if(Set.of("货物属性","可走货属性","产品属性","渠道属性").contains(clean(source.text(r,c))))column=c;
+                source.attributeColumns.put(r,column);
+            }
+        }
+        return source.text(row,source.attributeColumns.getOrDefault(row,-1));
     }
 
     private void validateRongdingIdentities(ArrayNode sheets,Map<String,ObjectNode> channels) {
@@ -1045,6 +1070,7 @@ public class LogisticsSourceParser {
                 var text=clean(source.text(r,col));
                 if(aliases.matches(QiaojieSourceRules.PROVIDER,"country",text))candidate.country=col;
                 else if(aliases.matches(QiaojieSourceRules.PROVIDER,"countryCode",text))candidate.countryCode=col;
+                else if(aliases.matches(QiaojieSourceRules.PROVIDER,"productCode",text))candidate.code=col;
                 else if(text.equals("重量")||text.equalsIgnoreCase("重量(KG)"))candidate.weight=col;
                 else if(aliases.matches(QiaojieSourceRules.PROVIDER,"minimumWeight",text))candidate.minimum=col;
                 else if(aliases.matches(QiaojieSourceRules.PROVIDER,"eta",text))candidate.eta=col;
@@ -1064,10 +1090,11 @@ public class LogisticsSourceParser {
             // Unit lines and footer prose are not price rows; numeric/invalid cells inside a country block are.
             if(!code.matches("[A-Z]{2}")&&!point.matches("[0-9]+(?:\\.[0-9]+)?"))continue;
             if(point.isBlank()&&amount.isBlank())continue;
-            var target=selected(source,QiaojieSourceRules.PROVIDER,product.name(),product.code(),r,channels);if(target==null)continue;
+            var productCode=columns.code>=0?source.text(r,columns.code):product.code();
+            var target=selected(source,QiaojieSourceRules.PROVIDER,product.name(),productCode,r,channels);if(target==null)continue;
             var row=mapper.createObjectNode().put("pricingModel",LogisticsPiecePricing.MODEL).put("currency","CNY")
                     .put("areaName",countryName(source.text(r,columns.country))).put("countryCode",code).put("zoneName","")
-                    .put("sourceProductCode",product.code()).put("sourceCode",product.code()).put("sourceWeightRange",point)
+                    .put("sourceProductCode",productCode).put("sourceCode",productCode).put("sourceWeightRange",point)
                     .put("weightFromInclusive",false).put("weightToInclusive",true).put("pricePerKg",0)
                     .put("sourceFeeLabel",source.text(columns.headerRow,columns.fee)).put("sourcePriceUnit","RMB/件")
                     .put("normalizationNote","用户确认：按0.5kg向上进位，匹配档位整票价，不再乘重量");
@@ -1234,7 +1261,7 @@ public class LogisticsSourceParser {
             var byCode=JYTD_PRODUCTS.entrySet().stream().filter(e->e.getValue().equals(code)).map(Map.Entry::getKey).findFirst().orElse("");
             if(name.isBlank()&&byCode.isBlank()) {source.filteredOtherRows.put(r,"非指定的1961/2001渠道，不解析价格");continue;}
             var canonical=name.isBlank()?byCode:name;
-            var target=selected(source,"捷易通达",canonical,JYTD_PRODUCTS.get(canonical),r,channels);
+            var target=selected(source,"捷易通达",canonical,"",r,channels);
             if(target==null)continue;
             if(source.scope.unrestricted())target.put("logisticsAttribute","带电、化妆品、保健品");
             for(var field:required) {
@@ -1242,8 +1269,8 @@ public class LogisticsSourceParser {
                 if(cell!=null&&cell.getCellType()==CellType.FORMULA)
                     issue(target,r+1,field,"关键字段含公式，不能仅依赖缓存价格，请提供确认后的数值","error");
             }
-            if(!canonical.equals(name)||!JYTD_PRODUCTS.get(canonical).equals(code)) {
-                issue(target,r+1,"产品代码","完整渠道名称与产品ID不一致或缺失，禁止串入其他产品","error");
+            if(!canonical.equals(name)||!byCode.isBlank()&&!canonical.equals(byCode)||source.scope.match("捷易通达",canonical,code).status().equals("ambiguous")) {
+                issue(target,r+1,"产品代码","完整渠道名称缺失或名称与产品ID指向不同渠道","error");
                 source.parsedRows.add(r);continue;
             }
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg")
@@ -1421,7 +1448,7 @@ public class LogisticsSourceParser {
             if(provider.equals("闪电猴")&&!countryCode(countryRaw).equals("US")){source.filteredOtherRows.put(r,"闪电猴仅限美国");continue;}
             var name=columns.channel>=0?source.text(r,columns.channel):section;
             if(provider.equals(JisuSourceRules.PROVIDER)) {
-                if(!JisuSourceRules.allowed(countryCode(countryRaw),columns.code>=0?source.text(r,columns.code):"")) {
+                if(!JisuSourceRules.allowedSource(countryCode(countryRaw),columns.code>=0?source.text(r,columns.code):"",sourceAttribute(source,r))) {
                     source.filteredOtherRows.put(r,"急速国际仅限美国邮编敏感货，普货及其他国家不导入");continue;
                 }
                 name=JisuSourceRules.CHANNEL;
@@ -1430,9 +1457,9 @@ public class LogisticsSourceParser {
             if(name.isBlank())name=section;
             var sourceOrigin=columns.origin>=0?source.text(r,columns.origin):"";
             if(excludeSouthChinaPrice(provider,sourceOrigin)){source.parsedRows.add(r);continue;}
-            var productCode=qiaojie!=null?qiaojie.code():columns.code>=0?source.text(r,columns.code):"";
+            var productCode=columns.code>=0?source.text(r,columns.code):qiaojie!=null?qiaojie.code():"";
             if(jitongBattery)productCode=JitongPureBatteryRules.code(productCode);
-            if(yunexpress!=null)productCode=yunexpress.code();
+            if(yunexpress!=null){var codes=titleProductCodes(source,"云途");productCode=codes.size()==1?codes.iterator().next():"";}
             if(yanwenWanbang!=null&&provider.equals("燕文"))productCode=zhengzhouProductCode(source);
             boolean sheetFallback=(columns.channel<0||source.text(r,columns.channel).isBlank())&&section.equals(source.sheet.getSheetName().trim());
             var target=selected(source,provider,name,productCode,r,channels,sheetFallback);
@@ -1444,7 +1471,7 @@ public class LogisticsSourceParser {
                 continue;
             }
             var additional=YanwenWanbangAdditionalRules.named(provider,target.path("channelName").asText());
-            if(additional!=null&&!additional.code().equals(productCode))issue(target,r+1,"产品代码","渠道名称与原表产品代码不一致或缺失，禁止混入其他产品","error");
+
             if(additional!=null&&provider.equals("燕文")&&Set.of("440","557").contains(additional.code())&&columns.fee<0)
                 issue(target,r+1,"处理费","燕文快递缺少处理费列，禁止按零费用导入","error");
             if(YanwenWanbangAdditionalRules.requiresWanbangPriceColumns(additional)) {
@@ -1452,7 +1479,7 @@ public class LogisticsSourceParser {
                     issue(target,r+1,"重量段","万邦专线缺少计价重量段，不能以重量限制代替","error");
                 if(columns.fee<0)issue(target,r+1,"操作费","万邦专线缺少操作费列，禁止按零费用导入","error");
             }
-            if(jitongBattery&&productCode.isBlank())issue(target,r+1,"产品代码","定制纯电缺少明确的JT-HQ-MDCD产品代码","error");
+
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg");
             for(var label:columns.blockingFeeHeaders)pending(row,"未知价格附加费“"+label+"”未映射到公斤价或每票费");
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
@@ -1465,7 +1492,7 @@ public class LogisticsSourceParser {
             if(jitongBattery)row.put("sourceProductCode",productCode);
             if(yunexpress!=null)row.put("sourceProductCode",productCode);
             if(additional!=null)row.put("sourceProductCode",productCode);
-            if(qiaojie!=null)row.put("sourceProductCode",qiaojie.code());
+            if(qiaojie!=null)row.put("sourceProductCode",productCode);
             if(zhengzhou&&row.path("sourceProductCode").asText().isBlank())row.put("sourceProductCode",zhengzhouProductCode(source));
             applyOriginPolicy(row,provider,sourceOrigin);
             String zoneName=columns.zone>=0?defaultText(source.text(r,columns.zone),zone(countryRaw)):zone(countryRaw);
@@ -1580,7 +1607,7 @@ public class LogisticsSourceParser {
             c.put("sourceNotes",String.join("\n",allNotes));
             if(yunexpress!=null) {
                 var codes=titleProductCodes(source,"云途");
-                if(!codes.equals(Set.of(yunexpress.code())))issue(c,0,"产品代码","云途渠道标题与产品代码不一致或缺失，禁止混入其他渠道","error");
+                if(codes.size()>1)issue(c,0,"产品代码","同一渠道标题包含多个产品代码，需核对归属","error");
                 var stepPattern=Pattern.compile(yunexpress.large()?"所有国家[^\\n]*以1[Gg]为单位进位":"加拿大[^\\n]*以1[Gg]为单位进位");
                 var step=stepPattern.matcher(String.join("\n",allNotes));boolean hasStep=step.find();String evidence=hasStep?step.group():"";
                 for(var value:c.path("rows"))if(yunexpress.large()||value.path("countryCode").asText().equals("CA")) {
@@ -1686,7 +1713,7 @@ public class LogisticsSourceParser {
         var sourceCode=jitongBattery?JitongPureBatteryRules.code(String.join("\n",source.resolvedTexts(header))):"";
         var target=selected(source,provider,jitongBattery?JitongPureBatteryRules.NAME:source.sheet.getSheetName().trim(),sourceCode,header,channels,!jitongBattery);
         if(target==null){for(int r=header;r<=end;r++)source.parsedRows.add(r);return end;}
-        if(jitongBattery&&sourceCode.isBlank())issue(target,header+1,"产品代码","定制纯电分区缺少明确的JT-HQ-MDCD产品代码","error");
+
         for(var zone:zones.entrySet()) {
             int rate=zone.getKey(),fee=rate+1;
             if(!source.text(header+1,rate).contains("运费")||!source.text(header+1,fee).contains("挂号费")) {
@@ -1784,6 +1811,9 @@ public class LogisticsSourceParser {
         if(!row.path("weightFromInclusive").asBoolean())pending(row,"原表重量下限为严格大于，最低计重及各档起点需物流商确认");
     }
     private void add(ObjectNode target,ObjectNode row,Source source,int r,String file) {
+        var identity=target.path("channelName").asText()+" "+target.path("logisticsAttribute").asText();
+        if(LogisticsProductIdentity.attributeConflict(identity,sourceAttribute(source,r)))
+            issue(target,r+1,"货物属性","渠道名称、登记属性与原表货物属性不一致，需核对价格区块","error");
         source.parsedRows.add(r);
         row.put("sourceFile",file).put("sourceSheet",source.sheet.getSheetName()).put("sourceRow",r+1);
         row.set("rawValues",source.rawRow(r));
@@ -1853,9 +1883,9 @@ public class LogisticsSourceParser {
             if(detect(source,r,provider)!=null)break;
             for(int c=0;c<source.width(r);c++) {
                 var text=source.text(r,c).trim();
-                var inline=Pattern.compile("^产品(?:编号|代码|号)\\s*[:：]\\s*([A-Za-z0-9_-]+)(?:\\s.*)?$",Pattern.DOTALL).matcher(text);
+                var inline=Pattern.compile("^(?:产品(?:编号|代码|号)|渠道代码)\\s*[:：]\\s*([A-Za-z0-9_-]+)(?:\\s.*)?$",Pattern.DOTALL).matcher(text);
                 if(inline.matches())codes.add(inline.group(1));
-                else if(clean(text).matches("产品(?:编号|代码|号)[:：]?")) {
+                else if(clean(text).matches("(?:产品(?:编号|代码|号)|渠道代码)[:：]?")) {
                     var adjacent=source.text(r,c+1).trim();
                     if(adjacent.matches("[A-Za-z0-9_-]+"))codes.add(adjacent);
                 }
@@ -2391,6 +2421,7 @@ public class LogisticsSourceParser {
             }
             wholeSheetWeight=limits.size()==1?limits.iterator().next():"";return wholeSheetWeight;
         }
+        Map<Integer,Integer> attributeColumns;
         final Set<Integer> filteredFirstNextRows=new HashSet<>();
         final Map<Integer,String> filteredOtherRows=new TreeMap<>();
         final Set<Integer> referenceRows=new HashSet<>();

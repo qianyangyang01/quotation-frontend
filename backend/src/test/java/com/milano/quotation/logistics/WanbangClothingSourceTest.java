@@ -75,7 +75,7 @@ class WanbangClothingSourceTest {
         reconcile(helper.parser.parse(helper.fixture(true,"",3),"新版文件.xlsx",directory()),3);
     }
     @Test void blocksMissingPricesRangesFeesAndWrongProductCodes() throws Exception {
-        for(String defect:List.of("code","weight-column","weight-row","fee-column","fee-cell","price-cell")) {
+        for(String defect:List.of("weight-column","weight-row","fee-column","fee-cell","price-cell")) {
             var result=helper.parser.parse(helper.fixture(true,defect,0),"万邦更新.xlsx",directory());
             assertEquals(1,result.path("channels").size(),defect+result.toPrettyString());
             assertFalse(result.path("channels").get(0).path("quoteReady").asBoolean(),defect+result.toPrettyString());

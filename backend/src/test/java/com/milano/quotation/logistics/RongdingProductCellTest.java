@@ -36,7 +36,7 @@ class RongdingProductCellTest {
         var scope=new CompanyChannelScope(snapshot());
         for(int i=0;i<CODES.length;i++)assertEquals(CODES[i],scope.matchSourceCell("容鼎",name(i),code(i)).entry().path("id").asText());
         assertTrue(scope.matchSourceCell("容鼎","旧渠道普货","PK00186").accepted());
-        assertEquals("ambiguous",scope.matchSourceCell("容鼎","旧渠道普货","PK001860").status());
+        assertTrue(scope.matchSourceCell("容鼎","旧渠道普货","PK001860").accepted());
         assertFalse(scope.matchSourceCell("其他物流",name(0),code(0)).accepted());
         assertFalse(scope.matchSourceCell("容鼎",name(0),"PK001860(A)\nPK002080(C)").accepted());
     }

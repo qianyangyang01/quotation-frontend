@@ -132,7 +132,7 @@ class WanbangPreferredSourceTest {
         Files.writeString(Path.of("target/wanbang-preferred/billing-cases.json"),reconcile(first,0).toPrettyString());
     }
     @Test void blocksMissingPricesRangesFeesAndWrongProductCodes() throws Exception {
-        for(String defect:List.of("code","weight-column","weight-row","fee-column","fee-cell","price-cell")) {
+        for(String defect:List.of("weight-column","weight-row","fee-column","fee-cell","price-cell")) {
             var result=parser.parse(fixture(true,defect,0),"万邦更新.xlsx",directory());
             assertEquals(3,result.path("channels").size(),defect+result.toPrettyString());
             for(var channel:result.path("channels"))assertFalse(channel.path("quoteReady").asBoolean(),defect+channel.toPrettyString());

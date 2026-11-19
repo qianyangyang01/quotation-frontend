@@ -18,9 +18,13 @@ final class JisuSourceRules {
     static boolean allowed(String country,String code) {
         return country.equalsIgnoreCase("US")&&CompanyChannelScope.normalize(CODE).equals(CompanyChannelScope.normalize(code));
     }
+    static boolean allowedSource(String country,String code,String attribute) {
+        if(!country.equalsIgnoreCase("US")||code.contains("普货"))return false;
+        return allowed(country,code)||attribute.contains("化妆品")||attribute.contains("邮编敏感");
+    }
     static boolean allowedStandard(String country,String name,String code) {
-        return allowed(country,code)||(country.equalsIgnoreCase("US")&&code.isBlank()
-                &&CompanyChannelScope.normalize(CHANNEL).equals(CompanyChannelScope.normalize(name)));
+        return !code.contains("普货")&&(allowed(country,code)||(country.equalsIgnoreCase("US")
+                &&CompanyChannelScope.normalize(CHANNEL).equals(CompanyChannelScope.normalize(name))));
     }
     static void apply(ObjectNode channel) {
         var footer=channel.path("sourceNotes").asText();
@@ -38,7 +42,7 @@ final class JisuSourceRules {
         ObjectNode first=null;
         for(var value:channel.path("rows")) {
             var row=(ObjectNode)value;
-            if(!allowed(row.path("countryCode").asText(),row.path("sourceProductCode").asText())||!row.has("sourceWeightCell"))continue;
+            if(!allowedStandard(row.path("countryCode").asText(),channel.path("channelName").asText(),row.path("sourceProductCode").asText())||!row.has("sourceWeightCell"))continue;
             if(first==null||row.path("weightFromKg").decimalValue().compareTo(first.path("weightFromKg").decimalValue())<0)first=row;
         }
         if(first==null)return;
@@ -53,7 +57,7 @@ final class JisuSourceRules {
         }
         for(var value:channel.path("rows")) {
             var row=(ObjectNode)value;
-            if(!allowed(row.path("countryCode").asText(),row.path("sourceProductCode").asText()))continue;
+            if(!allowedStandard(row.path("countryCode").asText(),channel.path("channelName").asText(),row.path("sourceProductCode").asText()))continue;
             if(row.path("minChargeWeightKg").asDouble()==0)row.put("minChargeWeightKg",minimum)
                     .put("sourceMinimumWeightKind",explicit?"column-inherited":"confirmed-provider-minimum")
                     .put("sourceMinimumWeightText",explicit?first.path("sourceMinimumWeightText").asText():"用户确认：50g起重，不足50g补至50g，50g进入首档")

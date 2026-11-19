@@ -45,7 +45,7 @@ class BaizhouSourceTest {
         for(int col:new int[]{0,1,2,3})try(var b=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
             b.getSheetAt(0).getRow(3).getCell(col).setBlank();assertFalse(parse(bytes(b)).path("pricingReady").asBoolean(),"column "+col);
         }
-        for(String code:List.of("渠道代码：BZ5030","渠道代码：BZ504",""))try(var b=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
+        for(String code:List.of("渠道代码：BZ504"))try(var b=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){
             b.getSheetAt(0).getRow(1).getCell(0).setCellValue(code);assertFalse(parse(bytes(b)).path("pricingReady").asBoolean(),code);
         }
         try(var b=new XSSFWorkbook(new java.io.ByteArrayInputStream(fixture()))){

@@ -34,7 +34,7 @@ class YanwenExpressSourceTest {
         var good=parser.parse(fixture(""),"燕文更新.xlsx",directory());
         assertEquals(2,good.path("channels").size());
         for(var c:good.path("channels")){assertTrue(c.path("quoteReady").asBoolean(),c.toPrettyString());assertEquals(2,c.path("rows").size());}
-        for(var defect:List.of("code","fee","minimum","weight")) {
+        for(var defect:List.of("fee","minimum","weight")) {
             var result=parser.parse(fixture(defect),"燕文更新.xlsx",directory());
             assertEquals(2,result.path("channels").size(),result.toPrettyString());
             for(var c:result.path("channels"))assertFalse(c.path("quoteReady").asBoolean(),defect+c.toPrettyString());
