@@ -26,7 +26,7 @@ async function download() {
   finally { saving.value = false }
 }
 onMounted(() => { previousFocus = document.activeElement as HTMLElement;dialog.value?.showModal();void load();window.addEventListener('quotation:account-changed', close);window.addEventListener('quotation:session-expired', close) })
-onBeforeUnmount(() => { controller.abort();dialog.value?.close();previousFocus?.isConnected && previousFocus.focus();window.removeEventListener('quotation:account-changed', close);window.removeEventListener('quotation:session-expired', close) })
+onBeforeUnmount(() => { controller.abort();dialog.value?.close();if (previousFocus?.isConnected) previousFocus.focus();window.removeEventListener('quotation:account-changed', close);window.removeEventListener('quotation:session-expired', close) })
 </script>
 <template>
   <dialog ref="dialog" class="batch-export-dialog" aria-labelledby="batch-export-title" @cancel.prevent="close">

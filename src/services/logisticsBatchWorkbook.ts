@@ -9,6 +9,8 @@ export async function loadExportVersionRows(version: PublishedPriceVersion, sign
     || (data.rowCount != null && data.rowCount !== data.rows.length)) throw new Error('版本资料不完整，请刷新后重试')
   return data.rows
 }
+// XML 1.0 disallows these control characters in text cells.
+// eslint-disable-next-line no-control-regex
 const esc = (value: unknown) => String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const col = (n: number): string => n < 26 ? String.fromCharCode(65 + n) : col(Math.floor(n / 26) - 1) + col(n % 26)
 const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
