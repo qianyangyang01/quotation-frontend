@@ -90,7 +90,8 @@ public class LogisticsDraftReviewService {
         var known=Set.of("原表重量下限为严格大于，最低计重及各档起点需物流商确认","原表重量下限为严格大于，50g及201g等边界需物流商确认");
         for(var value:payload.path("rows")) {
             var row=(ObjectNode)value;
-            if(!row.path("countryCode").asText().equals("US")||!Set.of("19221","14421","13601","19241","14021","18821").contains(row.path("sourceProductCode").asText()))continue;
+            // Product identity is checked on import. Resolving a confirmed boundary depends on weights, not a dated code.
+            if(!row.path("countryCode").asText().equals("US"))continue;
             var lower=row.path("weightFromKg");var minimum=row.path("minChargeWeightKg");
             if(!lower.isNumber()||!minimum.isNumber()||minimum.asDouble()<=0)continue;
             boolean confirmed=lower.decimalValue().compareTo(minimum.decimalValue())==0&&row.path("weightFromInclusive").asBoolean();

@@ -58,16 +58,17 @@ class ShandianhouSourceParserTest {
             assertEquals(9,rows.get(0).path("sourceRow").asInt());assertEquals(10,rows.get(1).path("sourceRow").asInt());
         }
     }
-    @Test void draftCorrectionClearsOnlyConfirmedBoundaryBlocker() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"19221","NEW-SDH-2027"})
+    void draftCorrectionClearsOnlyConfirmedBoundaryBlocker(String code) throws Exception {
         var payload=mapper.createObjectNode().put("providerName","闪电猴");
         var rows=payload.putArray("rows");
         var reason="原表重量下限为严格大于，50g及201g等边界需物流商确认";
-        var first=rows.addObject().put("countryCode","US").put("sourceProductCode","19221").put("minChargeWeightKg",0.05)
+        var first=rows.addObject().put("countryCode","US").put("sourceProductCode",code).put("minChargeWeightKg",0.05)
                 .put("weightFromKg",0.05).put("weightToKg",0.2).put("weightFromInclusive",false).put("blockingReason",reason+"；暂停服务").put("pendingReason",reason);
         LogisticsDraftReviewService.clearConfirmedShandianhouBoundaries(payload);
         assertTrue(first.path("blockingReason").asText().contains(reason));
         first.put("weightFromInclusive",true);
-        var next=rows.addObject().put("countryCode","US").put("sourceProductCode","19221").put("minChargeWeightKg",0.05)
+        var next=rows.addObject().put("countryCode","US").put("sourceProductCode",code).put("minChargeWeightKg",0.05)
                 .put("weightFromKg",0.201).put("weightToKg",0.45).put("weightFromInclusive",false).put("blockingReason",reason);
         LogisticsDraftReviewService.clearConfirmedShandianhouBoundaries(payload);
         assertEquals("暂停服务",first.path("blockingReason").asText());
