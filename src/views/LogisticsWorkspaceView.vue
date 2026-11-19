@@ -380,6 +380,8 @@ async function refresh() {
     const w = await service.workspace(id)
     if (disposed || id !== datasetId.value || epoch !== selectionEpoch) return
     workspace.value = w
+    const rankingChannel = typeof route.query.rankingChannel === 'string' ? w.channels.find(channel => channel.id === route.query.rankingChannel) : undefined
+    if (rankingChannel) selectedProviderId.value = rankingChannel.providerId
     if (!w.providers.some(provider => provider.id === selectedProviderId.value)) selectedProviderId.value = w.providers[0]?.id || ''
     workspaceLoading.value = false
     if (tab.value === 'imports') await restoreActiveBatch()

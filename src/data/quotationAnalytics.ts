@@ -58,6 +58,7 @@ export interface CategoryPerformanceRow {
 }
 
 const round = (value: number) => Number(value.toFixed(2))
+const beijingDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
 const invalidSkuValues = new Set(['—', '-', '--', '暂无数据', '无', 'N/A', 'NA'])
 
 export function quotationSkus(record: QuotationRecord) {
@@ -95,7 +96,8 @@ export function filterQuotationRecords(records: QuotationRecord[], filters: Dash
   return records.filter(record => record.quoteMode !== 'freight-trial').filter(record => {
     const category = resolveRecordCategory(record, purchaseBySku)
     const countries = recordCountries(record)
-    const createdDate = record.createdAt.slice(0, 10)
+    const timestamp = new Date(record.createdAt)
+    const createdDate = Number.isNaN(timestamp.getTime()) ? record.createdAt.slice(0, 10) : beijingDate.format(timestamp)
     const searchable = [record.no, record.customerName, record.primarySku, record.productSummary, record.salespersonName, record.salespersonAccount, category, ...countries].join(' ').toLowerCase()
     return (!keyword || searchable.includes(keyword))
       && (!filters.startDate || createdDate >= filters.startDate)

@@ -2,6 +2,8 @@
 import { canViewPurchaseCost, canViewFullPricing } from '@/data/quotationVisibility'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import DateFilter from '@/components/DateFilter.vue'
+import QuotationChannelRanking from '@/components/quotation/QuotationChannelRanking.vue'
+import { overviewDateRange } from '@/services/quotationChannelRanking'
 import {
   buildCategoryPerformance,
   buildDashboardSummary,
@@ -41,8 +43,9 @@ async function reloadPurchases() {
 }
 const purchasesReady = ref(false)
 const globalSearch = ref('')
-const startDate = ref('')
-const endDate = ref('')
+const initialDates = overviewDateRange()
+const startDate = ref(initialDates.startDate)
+const endDate = ref(initialDates.endDate)
 const countryFilter = ref('')
 const salespersonFilter = ref('')
 const categoryFilter = ref('')
@@ -111,7 +114,7 @@ const initials = (name: string) => name.trim().slice(0, 2) || '—'
 const categoryFor = (record: QuotationRecord) => purchasesReady.value ? resolveRecordCategory(record, purchaseBySku.value) : '—'
 
 function resetFilters() {
-  globalSearch.value = ''; startDate.value = ''; endDate.value = ''; countryFilter.value = ''; salespersonFilter.value = ''; categoryFilter.value = ''
+  globalSearch.value = ''; const dates = overviewDateRange(); startDate.value = dates.startDate; endDate.value = dates.endDate; countryFilter.value = ''; salespersonFilter.value = ''; categoryFilter.value = ''
 }
 
 function exportDetails() {
@@ -172,6 +175,9 @@ onMounted(() => {
         <article><i class="green">$</i><span><small>报价金额（不含FOB批量单）</small><b>{{ moneyUsd(summary.quoteUsd) }}</b><em>{{ moneyCny(summary.quoteCny) }}</em></span></article>
       </section>
 
+      </template>
+      <QuotationChannelRanking :filters="filters" />
+      <template v-if="recordsReady && purchasesReady">
       <section class="ranking-section">
         <article class="card ranking-card">
           <header><div><h2>业务员报价排行</h2><span>按成交比例、成交品数和报价品数综合排序</span></div><button v-if="ranking.length > 5" type="button" @click="rankingExpanded=!rankingExpanded">{{ rankingExpanded ? '收起' : '查看全部' }}</button></header>

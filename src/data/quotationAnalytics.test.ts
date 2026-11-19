@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDashboardSummary, buildSalespersonRanking, quotationDetailsCsv, quotationSkus } from './quotationAnalytics'
+import { buildDashboardSummary, buildSalespersonRanking, filterQuotationRecords, quotationDetailsCsv, quotationSkus } from './quotationAnalytics'
 import { fobBatchSnapshot, parseFobBatch } from '@/services/fobBatchQuotation'
 import { FOB_SMALL_ORDER_POLICY, type FobQuoteProduct } from '@/services/fobQuotation'
 import { normalizeQuotationRecord, type QuotationRecord } from './quotationRecords'
@@ -26,6 +26,12 @@ function record(input: Partial<QuotationRecord> & Pick<QuotationRecord, 'id' | '
 }
 
 describe('quotation overview conversion metrics', () => {
+  it('uses Beijing calendar dates consistently with the channel ranking endpoint',()=>{
+    const row=record({id:'midnight',salespersonName:'甲',salespersonAccount:'A',customerName:'客户',primarySku:'SKU1',status:'pending',createdAt:'2026-11-18T16:30:00Z'})
+    const filters={keyword:'',country:'',salesperson:'',category:'',startDate:'2026-11-19',endDate:'2026-11-19'}
+    expect(filterQuotationRecords([row],filters,[])).toEqual([row])
+    expect(filterQuotationRecords([row],{...filters,startDate:'2026-11-18',endDate:'2026-11-18'},[])).toEqual([])
+  })
   it('counts every batch SKU but only actually won SKUs and excludes ambiguous aggregate prices',()=>{
     const product=(sku:string):FobQuoteProduct=>({sku,source:'fob',category:'日用品',weight:'',notices:[],parsed:{minOrderQty:1,orderMultiple:1,priceTiers:[{minQty:1,maxQty:null,unitPriceCny:10,unit:'件'}],freight:{quantity:100,totalFreightCny:0,unitFreightCny:0,basis:'包邮',estimated:false}}})
     const fob=fobBatchSnapshot(parseFobBatch('FIRST 20\nSECOND 20').map(l=>({...l,product:product(l.sku)})),'quantity',6.7,FOB_SMALL_ORDER_POLICY,{title:'批量报价',agent:'业务员',date:'2026-10-11',whatsapp:''})
