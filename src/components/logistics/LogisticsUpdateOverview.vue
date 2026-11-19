@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import FinanceCountrySelect from '@/components/finance/FinanceCountrySelect.vue'
 import { priceHistoryAttributes } from '@/data/logisticsMajorChannelHistory'
 import { publicationTime, type RealPriceSnapshot } from '@/data/logisticsRealPriceHistory'
@@ -7,6 +7,8 @@ import { allCountryPriceUpdateGroups, matchesUpdateAttribute, updateAmount, upda
 
 const props = defineProps<{ snapshot: RealPriceSnapshot; initialCountry: string; initialAttribute: string; initialWeight: number; refreshing: boolean; error: string }>()
 const emit = defineEmits<{ close: [] }>()
+const LogisticsBatchExport = defineAsyncComponent(() => import('./LogisticsBatchExport.vue'))
+const exportBatch = shallowRef<PriceUpdateGroup>()
 const dialog = ref<HTMLDialogElement>()
 const batchSearchInput = ref<HTMLInputElement>()
 const batchSearch = ref('')
@@ -36,7 +38,7 @@ function changeBatchPage(page: number) {
   if (first) selectedBatch.value = first.id
 }
 const batch = computed(() => batches.value.find(item => item.id === selectedBatch.value))
-watch(selectedBatch, () => { originalBatch.value = ''; drawer.value = ''; country.value = '全部国家'; search.value = '' })
+watch(selectedBatch, () => { originalBatch.value = ''; drawer.value = ''; country.value = '全部国家'; search.value = ''; exportBatch.value = undefined })
 const sourceBatches = computed(() => {
   const group = batch.value
   if (!group) return []
@@ -130,8 +132,8 @@ async function download() {
 <template>
   <dialog ref="dialog" class="update-overview" aria-modal="true" aria-labelledby="update-overview-title" @cancel.prevent="cancel" @click="backdropClick">
     <header class="overview-header" :inert="!!drawer">
-      <div><h2 id="update-overview-title">价格更新概览 <span>真实已发布价格</span></h2><p>选择一次更新，查看全部国家和渠道的价格变化</p></div>
-      <div class="header-actions"><button type="button" class="primary" :disabled="!visibleRows.length || downloading" @click="download">{{ downloading ? '生成中…' : '下载概览图' }}</button><button type="button" class="overview-close" aria-label="关闭更新概览" @click="emit('close')">×</button></div>
+      <div><h2 id="update-overview-title">价格更新概览 <span>{{ snapshot.dataset === 'local-demo-only' ? '样例数据' : '真实已发布价格' }}</span></h2><p>选择一次更新，查看全部国家和渠道的价格变化</p></div>
+      <div class="header-actions"><button type="button" class="primary" :disabled="!batch" @click="exportBatch = batch">下载批次明细</button><button type="button" :disabled="!visibleRows.length || downloading" @click="download">{{ downloading ? '生成中…' : '下载概览图' }}</button><button type="button" class="overview-close" aria-label="关闭更新概览" @click="emit('close')">×</button></div>
     </header>
     <div class="overview-layout" :inert="!!drawer">
       <aside class="batch-sidebar" aria-label="更新批次列表">
@@ -212,6 +214,7 @@ async function download() {
       </section>
     </div>
   </dialog>
+  <LogisticsBatchExport v-if="exportBatch" :batch="exportBatch" :snapshot="snapshot" @close="exportBatch = undefined" />
 </template>
 
 <style scoped>
