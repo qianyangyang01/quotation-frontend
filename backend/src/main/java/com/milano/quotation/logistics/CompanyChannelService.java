@@ -18,7 +18,35 @@ public class CompanyChannelService {
         var state=state(false);
         var result=mapper.createObjectNode().put("revision",state.path("revision").asLong()).put("enabled",state.path("enabled").asBoolean());
         var entries=result.putArray("entries");jdbc.sql("select payload::text from logistics_company_channel order by payload->>'providerName',payload->>'channelName',id")
-                .query((rs,n)->mapper.readTree(rs.getString(1))).list().forEach(entries::add);return result;
+                .query((rs,n)->mapper.readTree(rs.getString(1))).list().forEach(entries::add);
+        // Source names already accepted in the current published version remain exact identity evidence.
+        // Never learn from drafts, rejected matches, inactive datasets, or unbound products.
+        var evidence=jdbc.sql("""
+                select distinct jsonb_build_object('companyChannelId',cc.id,'providerName',cc.payload->>'providerName','name',m->>'channelName')::text
+                from logistics_company_channel cc
+                join logistics_company_binding cb on cb.company_channel_id=cc.id
+                join logistics_channel c on c.id=cb.channel_id
+                join logistics_dataset d on d.id=c.dataset_id and d.status='active'
+                join logistics_version v on v.id=c.current_version_id and v.status='published'
+                join logistics_import_batch b on b.id::text=v.payload->>'batchId'
+                cross join lateral jsonb_array_elements(coalesce(b.payload->'fileReports','[]'::jsonb)) report
+                cross join lateral jsonb_array_elements(coalesce(report->'sheets','[]'::jsonb)) sheet
+                cross join lateral jsonb_array_elements(coalesce(sheet->'channelMatches','[]'::jsonb)) m
+                where report->>'fileIndex'=v.payload->>'sourceFileIndex'
+                  and m->>'status'='matched' and m->>'companyChannelId'=cc.id::text
+                  and m->>'providerName'=cc.payload->>'providerName'
+                  and v.payload->>'companyChannelId'=cc.id::text
+                """).query((rs,n)->mapper.readTree(rs.getString(1))).list();
+        addPublishedAliases(result,evidence);return result;
+    }
+    static void addPublishedAliases(ObjectNode snapshot,List<JsonNode> evidence) {
+        for(var value:snapshot.path("entries")) {
+            var entry=(ObjectNode)value;entry.remove("importAliases");var names=new LinkedHashSet<String>();
+            for(var match:evidence)if(match.path("companyChannelId").equals(entry.path("id"))
+                    &&match.path("providerName").equals(entry.path("providerName"))&&!match.path("name").asText().isBlank())
+                names.add(match.path("name").asText());
+            if(!names.isEmpty()){var aliases=entry.putArray("importAliases");names.forEach(aliases::add);}
+        }
     }
     public ObjectNode state(boolean lock){return jdbc.sql("select to_jsonb(s)::text from logistics_company_state s where singleton"+(lock?" for update":""))
             .query((rs,n)->(ObjectNode)mapper.readTree(rs.getString(1))).single();}
@@ -43,6 +71,7 @@ public class CompanyChannelService {
         var ids=new HashSet<String>();
         for(var entry:entries){
             var e=(ObjectNode)entry.deepCopy();var id=e.path("id").asText();if(id.isBlank())id=UUID.randomUUID().toString();
+            e.remove("importAliases");
             UUID parsed;try{parsed=UUID.fromString(id);}catch(IllegalArgumentException bad){throw AppException.unprocessable("公司渠道标识无效");}
             var priorProvider=jdbc.sql("select payload->>'providerName' from logistics_company_channel where id=:id").param("id",parsed).query(String.class).optional();
             if(priorProvider.isPresent()&&!priorProvider.get().equals(e.path("providerName").asText()))throw AppException.unprocessable("已有公司渠道不能改绑其他物流商；物流商别称请登记别名");

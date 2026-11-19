@@ -94,6 +94,11 @@ class MutableProductIdentityTest {
         }
         equivalent("顺友",source,sy.directory(),"SSBRAM","SYNEW2027");
     }
+    @Test @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="mutable.publishedScope",matches=".+")
+    void publishedOriginalNamesResolveCodeUpdatesAgainstTheLiveDirectory()throws Exception {
+        var scope=new CompanyChannelScope(mapper.readTree(Files.readString(Path.of(System.getProperty("mutable.publishedScope")))));
+        equivalent("容鼎",new RongdingProductCellTest().fixture(),scope,"PK00186","RDNEW2027");
+    }
     @Test void changedAttributeAndKnownOtherProductRemainBlocked()throws Exception {
         var f=new FanzhirunSourceTest();
         try(var book=WorkbookFactory.create(new ByteArrayInputStream(f.fixture()))){

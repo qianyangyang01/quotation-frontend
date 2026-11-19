@@ -63,7 +63,7 @@ public final class CompanyChannelScope {
         if(entries.isEmpty())return new Match("filtered","物流商不在公司清单",null);
         var byName=new LinkedHashMap<String,JsonNode>();var byCode=new LinkedHashMap<String,JsonNode>();
         for(var entry:entries) {
-            if(names.stream().anyMatch(name->matches(name,entry.path("channelName"),entry.path("aliases"))))byName.put(entry.path("id").asText(),entry);
+            if(names.stream().anyMatch(name->matches(name,entry.path("channelName"),entry.path("aliases"))||matches(name,null,entry.path("importAliases"))))byName.put(entry.path("id").asText(),entry);
             if(codes.stream().anyMatch(code->!code.isBlank()&&matches(code,null,entry.path("productCodes"))))byCode.put(entry.path("id").asText(),entry);
         }
         if(byName.size()>1||byCode.size()>1)return new Match("ambiguous","同一物流商下匹配多个渠道",null);
