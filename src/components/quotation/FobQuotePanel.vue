@@ -11,7 +11,7 @@ import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutpu
 
 const FobBatchQuoteDialog = defineAsyncComponent(() => import('./FobBatchQuoteDialog.vue'))
 
-const props = defineProps<{ rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {classification?: FobClassification;sku:string;source:FobSourceMode;customer:string;quantity:number;batch?:{text:string;mode:FobBatchMode;customer:string;sources?:FobSourceMode[]}} }>()
+const props = defineProps<{ discount?: number; rate: number; financePending?: boolean; financeError?: string; policy: FobSmallOrderPolicy | null; salesperson?: string; initial?: {classification?: FobClassification;sku:string;source:FobSourceMode;customer:string;quantity:number;batch?:{text:string;mode:FobBatchMode;customer:string;sources?:FobSourceMode[]}} }>()
 const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => true)
 const classification = ref<FobClassification>(props.initial?.classification || 'rebate-fob')
 const batchOpen = ref(!!props.initial?.batch)
@@ -22,6 +22,7 @@ const rulesOpen = ref(false), rulesElement = ref<HTMLElement | null>(null)
 let generation = 0, controller: AbortController | undefined
 function invalidate() { generation++; controller?.abort(); busy.value = false; error.value = ''; product.value = null; copied.value = ''; emit('status', '待查询SKU') }
 watch([sku, source, classification], invalidate)
+watch(() => props.discount, () => { copied.value = '' })
 onMounted(() => {skuInput.value?.focus({ preventScroll: true });if(props.initial && !props.initial.batch)void query()})
 onBeforeUnmount(() => { generation++; controller?.abort() })
 async function query() {
@@ -45,7 +46,7 @@ const calculation = computed(() => {
 })
 const selected = computed(() => {
   if (!product.value || calculation.value.error) return { result: null, error: '' }
-  try { return { result: fobQuantityQuote(product.value, calculation.value.rows, quantity.value, props.rate, props.policy), error: '' } }
+  try { return { result: fobQuantityQuote(product.value, calculation.value.rows, quantity.value, props.rate, props.policy, props.discount), error: '' } }
   catch (e) { return { result: null, error: e instanceof Error ? e.message : '数量无效' } }
 })
 const policyText = computed(() => !props.policy ? '不足200元的加价口径待确认；基础阶梯价可查看，低于门槛的最终报价暂不生成。'
@@ -105,7 +106,7 @@ async function copyExceptionSku(){try{await navigator.clipboard.writeText(sku.va
           </template>
         </tr></tbody>
       </table></div>
-      <FobCalculationDetails v-if="selected.result" :product="product" :rate="rate" :row="selected.result.row" :quantity="selected.result.quantity" :extra-cny="selected.result.extraCny" :final-usd="selected.result.declaredUsd" :show-notice="false" />
+      <FobCalculationDetails v-if="selected.result" :product="product" :rate="rate" :row="selected.result.row" :quantity="selected.result.quantity" :extra-cny="selected.result.extraCny" :final-usd="selected.result.declaredUsd" :discount="discount" :show-notice="false" />
       <p class="help"><template v-if="selected.result">右侧蓝色区域为本次数量的最终报价，已计入适用的小额订单加价。</template><template v-else>最终报价暂不可用，请先处理上方提示。</template><template v-if="canViewPurchaseCost">运费依据：{{ product.parsed.freight.basis }}。</template></p>
       <template v-if="canViewPurchaseCost"><p v-for="notice in product.notices" :key="notice" class="notice">{{ notice }}</p></template>
       <p v-if="canViewPurchaseCost && calculation.rows.length === 1" class="help">按本档成本达到200元且满足起订量及下单倍数的最低数量：{{ calculation.rows[0]?.thresholdQty ?? '本档成本或数量范围无法达到金额门槛' }}<template v-if="calculation.rows[0]?.thresholdQty != null">{{ calculation.rows[0]?.unit }}</template>。</p>
@@ -113,9 +114,9 @@ async function copyExceptionSku(){try{await navigator.clipboard.writeText(sku.va
     </template>
     <details v-if="canViewFobCoefficient && product" ref="rulesElement" :open="rulesOpen" class="fob-rules"><summary>FOB计算规则</summary><p><template v-if="classification==='ordinary-fob'">普通 FOB 的含票价对应最低起订档，与原基准价及票点核对后直接采用；其他档按原票点计算。不使用新专票三列。未填含票价时沿用原10点规则。</template><template v-else>优先使用新专票三列，全部留空时沿用原票据资料。专票类型和票点完整时，含票采购价＝各档原价×（1＋实际票点）；新采购与原FOB缺资料时默认10点，并持续提醒采购更新对应来源SKU。</template>已含票阶梯直接使用，不重复加票点。成本价＝计价采购价格＋批量均摊运费；最终报价＝适用成本×所选分类系数÷汇率。中间计算不提前取整，美元单价四舍五入保留两位。</p><p>{{ policyText }}</p></details>
   </section>
-  <FobQuoteSheet current-quote v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :salesperson="salesperson" :initial-customer="initial?.customer" />
+  <FobQuoteSheet current-quote v-if="product && !calculation.error" :key="product.sku" :product="product" :rate="rate" :quantity="quantity" :policy="policy" :discount="discount" :salesperson="salesperson" :initial-customer="initial?.customer" />
   <QuotationFeatureBoundary v-if="batchOpen" label="FOB批量报价" @close="batchOpen=false">
-  <FobBatchQuoteDialog :classification="classification" :rate="rate" :policy="policy" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
+  <FobBatchQuoteDialog :classification="classification" :rate="rate" :policy="policy" :discount="discount" :finance-pending="financePending" :finance-error="financeError" :salesperson="salesperson" :initial="initial?.batch" @close="batchOpen=false" />
   </QuotationFeatureBoundary>
 </template>
 

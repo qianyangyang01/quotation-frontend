@@ -49,6 +49,7 @@ public class BatchQuotationSubmission {
             for(int index:group.getValue()) {
                 var item=items.get(index);
                 if(!first.path("product").equals(item.path("product"))) throw AppException.unprocessable(group.getKey()+"：同一SKU不能混用不同采购来源");
+                if(FobQuotation.discount(first).compareTo(FobQuotation.discount(item))!=0) throw AppException.unprocessable(group.getKey()+"：同一SKU不能混用不同折扣");
                 quantities.add(item.path("quantity"));
                 for(var row:item.at("/sheet/rows")) rowKeys.put(index+":"+row.path("key").asText(),group.getValue().size()==1 ? row.path("key").asText() : group.getKey()+"-"+rowIndex++);
             }

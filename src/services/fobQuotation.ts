@@ -88,7 +88,17 @@ export function fobTierQuotes(product: FobQuoteProduct, rate: number): FobQuoteR
       thresholdQty: validThreshold != null && Number.isSafeInteger(validThreshold) && (tier.maxQty == null || validThreshold <= tier.maxQty) ? validThreshold : null }
   })
 }
-export function fobQuantityQuote(product: FobQuoteProduct, rows: FobQuoteRow[], quantity: string, rate: number, policy: FobSmallOrderPolicy | null) {
+export const FOB_DISCOUNT_ERROR = '折扣须大于0且不超过1，例如0.95'
+export function validateFobDiscount(discount: number = 1): number {
+  if (!Number.isFinite(discount) || discount <= 0 || discount > 1) throw new Error(FOB_DISCOUNT_ERROR)
+  return discount
+}
+// Discount the existing final unit price, including any small-order surcharge.
+export function discountFobPrice(price: string, discount: number = 1): string {
+  return decimal(price).times(validateFobDiscount(discount)).toFixed(2)
+}
+export function fobQuantityQuote(product: FobQuoteProduct, rows: FobQuoteRow[], quantity: string, rate: number, policy: FobSmallOrderPolicy | null, discount = 1) {
+  validateFobDiscount(discount)
   if (!/^\d+$/.test(quantity) || !Number.isSafeInteger(Number(quantity)) || Number(quantity) < 1) throw new Error('报价数量须为正整数')
   const count = Number(quantity), { minOrderQty, orderMultiple } = product.parsed
   if (count < minOrderQty) throw new Error(`报价数量不能低于起订量 ${minOrderQty}`)
@@ -103,12 +113,12 @@ export function fobQuantityQuote(product: FobQuoteProduct, rows: FobQuoteRow[], 
     if (!product.pricing || product.pricing.rate !== rate || policy?.scope !== 'single-price' || policy.calculation !== 'before-coefficient') throw new Error('报价规则已变化，请重新查询')
     const canonical=product.pricing.rows.find(t=>t.minQty===row.minQty)
     if(!canonical) throw new Error('报价阶梯已变化，请重新查询')
-    const price=extra?canonical.smallOrderUsd:canonical.declaredUsd
+    const price=discountFobPrice(extra?canonical.smallOrderUsd:canonical.declaredUsd, discount)
     return { quantity: count, row, extraCny: extra, declaredUsd: price, undeclaredUsd: price }
   }
   const price = (factor: string) => {
     const amount = policy?.calculation === 'before-coefficient' ? decimal(row.costCny).plus(extra).times(factor) : decimal(row.costCny).times(factor).plus(extra)
-    return amount.div(rate).toFixed(2)
+    return discountFobPrice(amount.div(rate).toFixed(2), discount)
   }
   return { quantity: count, row, extraCny: extra, declaredUsd: price('1.14'), undeclaredUsd: price('1.1628') }
 }
@@ -118,7 +128,7 @@ export function fobQuantityQuote(product: FobQuoteProduct, rows: FobQuoteRow[], 
 export interface FobSheetRow {
   minQty: number; maxQty: number | null; unit: string; declaredUsd: string; undeclaredUsd: string; extraCny?: number
 }
-export function fobSheetRows(product: FobQuoteProduct, rate: number, policy: FobSmallOrderPolicy | null): FobSheetRow[] {
+export function fobSheetRows(product: FobQuoteProduct, rate: number, policy: FobSmallOrderPolicy | null, discount = 1): FobSheetRow[] {
   const tiers = fobTierQuotes(product, rate), multiple = product.parsed.orderMultiple
   return tiers.flatMap(row => {
     const first = Math.ceil(row.minQty / multiple) * multiple
@@ -128,7 +138,7 @@ export function fobSheetRows(product: FobQuoteProduct, rate: number, policy: Fob
       && row.thresholdQty != null && row.thresholdQty > first ? row.thresholdQty : null
     const ranges = split == null ? [[first, last]] : [[first, split - multiple], [split, last]]
     return ranges.map(([min, max]) => {
-      const quote = fobQuantityQuote(product, tiers, String(min), rate, policy)
+      const quote = fobQuantityQuote(product, tiers, String(min), rate, policy, discount)
       return { minQty: min!, maxQty: max ?? null, unit: row.unit, declaredUsd: quote.declaredUsd, undeclaredUsd: quote.undeclaredUsd }
     })
   })

@@ -13,7 +13,7 @@ import { copyQuoteSheetImage, renderCustomerQuoteSheet, type QuoteSheetImage } f
 import { formatQuoteDate, localQuoteDate, quoteSheetTextTable, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 import { QUOTE_UPDATE_MESSAGE, useQuoteOutputGuard } from '@/services/quoteOutputGuard'
 
-const props = defineProps<{ product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string; previewOnly?: boolean; batchRecord?: QuotationRecord; currentQuote?: boolean }>()
+const props = defineProps<{ discount?: number; product: FobQuoteProduct; rate: number; quantity: string; policy: FobSmallOrderPolicy | null; salesperson?: string; savedSheet?: CustomerQuoteSheet; initialCustomer?: string; previewOnly?: boolean; batchRecord?: QuotationRecord; currentQuote?: boolean }>()
 const batchCopy = ref<InstanceType<typeof QuotationBatchCopy>>()
 const customer = ref(props.initialCustomer || ''), saving = ref(false), savedNo = ref(''), saveError = ref('')
 const { outputBlocked, assertOutputCurrent } = useQuoteOutputGuard(() => !!props.currentQuote && !savedNo.value)
@@ -44,9 +44,9 @@ const sheet = computed<CustomerQuoteSheet>(() => {
   if (props.savedSheet) return props.savedSheet
   let rows: FobSheetRow[] = [], error = ''
   try {
-    if (mode.value === 'tiers') rows = fobSheetRows(props.product, props.rate, props.policy)
+    if (mode.value === 'tiers') rows = fobSheetRows(props.product, props.rate, props.policy, props.discount)
     else {
-      const quote = fobQuantityQuote(props.product, fobTierQuotes(props.product, props.rate), props.quantity, props.rate, props.policy)
+      const quote = fobQuantityQuote(props.product, fobTierQuotes(props.product, props.rate), props.quantity, props.rate, props.policy, props.discount)
       rows = [{ minQty: quote.quantity, maxQty: quote.quantity, unit: quote.row.unit, declaredUsd: quote.declaredUsd, undeclaredUsd: quote.undeclaredUsd }]
     }
   } catch (e) { error = e instanceof Error ? e.message : '报价单生成失败' }
@@ -101,10 +101,10 @@ async function save() {
   if(!customer.value.trim()){saveError.value='请填写客户名称后保存';return}
   saving.value=true;saveError.value=''
   const name=customer.value.trim()
-  const snapshot=JSON.parse(JSON.stringify({schemaVersion:1,product:props.product,rate:props.rate,quantity:Number(props.quantity),policy:props.policy,displayMode:mode.value,sheet:sheet.value}))
+  const snapshot=JSON.parse(JSON.stringify({schemaVersion:1,product:props.product,rate:props.rate,discount:props.discount ?? 1,quantity:Number(props.quantity),policy:props.policy,displayMode:mode.value,sheet:sheet.value}))
   const signature=JSON.stringify({name,snapshot})
   if(signature!==lastSignature){lastSignature=signature;saveKey=idempotencyKey('fob-quotation')}
-  try { const saved=await saveFobQuotation(name,snapshot,saveKey);if(!disposed) { if(JSON.stringify({name:customer.value.trim(),snapshot:{schemaVersion:1,product:props.product,rate:props.rate,quantity:Number(props.quantity),policy:props.policy,displayMode:mode.value,sheet:sheet.value}})===signature) savedNo.value=saved.no;else message.value='先前报价已保存：'+saved.no+'；当前条件已变化，需要另行保存' } }
+  try { const saved=await saveFobQuotation(name,snapshot,saveKey);if(!disposed) { if(JSON.stringify({name:customer.value.trim(),snapshot:{schemaVersion:1,product:props.product,rate:props.rate,discount:props.discount ?? 1,quantity:Number(props.quantity),policy:props.policy,displayMode:mode.value,sheet:sheet.value}})===signature) savedNo.value=saved.no;else message.value='先前报价已保存：'+saved.no+'；当前条件已变化，需要另行保存' } }
   catch(e){if(!disposed)saveError.value=e instanceof Error?e.message:'保存失败，请重试'}
   finally{if(!disposed)saving.value=false}
 }

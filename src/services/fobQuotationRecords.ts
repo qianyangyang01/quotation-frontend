@@ -7,6 +7,7 @@ export interface FobQuotationSnapshot {
   schemaVersion: 1 | 2
   items?: FobQuotationSnapshot[]
   product: FobQuoteProduct
+  discount?: number
   rate: number
   quantity: number
   quantities?: number[]

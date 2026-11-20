@@ -16,7 +16,7 @@ export function parseFobBatch(text: string): FobBatchLine[] {
     return { id, sku: cells[0]!.toUpperCase(), quantity: cells[1] || '', selected: true, formatError: cells.length > 2 ? '无法识别格式：每行只填写SKU和数量，用空格、逗号或Tab分隔' : '' }
   })
 }
-export function fobBatchIssue(line: FobBatchLine, lines: FobBatchLine[], mode: FobBatchMode, rate: number, policy: FobSmallOrderPolicy | null): string {
+export function fobBatchIssue(line: FobBatchLine, lines: FobBatchLine[], mode: FobBatchMode, rate: number, policy: FobSmallOrderPolicy | null, discount = 1): string {
   if (line.formatError) return line.formatError
   if (!/^[A-Z0-9][A-Z0-9._/-]{0,95}$/.test(line.sku)) return 'SKU格式无效'
   if (line.loading) return '正在查询'
@@ -25,8 +25,8 @@ export function fobBatchIssue(line: FobBatchLine, lines: FobBatchLine[], mode: F
   if (lines.some(other => other.id < line.id && other.selected && other.sku === line.sku && (mode === 'tiers' || Number(other.quantity) === Number(line.quantity)))) return '重复行：相同SKU和报价范围已存在，请取消重复行或修改数量'
   if (mode === 'quantity' && !line.quantity.trim()) return '请填写报价数量'
   try {
-    if (mode === 'tiers') fobSheetRows(line.product, rate, policy)
-    else fobQuantityQuote(line.product, fobTierQuotes(line.product, rate), line.quantity, rate, policy)
+    if (mode === 'tiers') fobSheetRows(line.product, rate, policy, discount)
+    else fobQuantityQuote(line.product, fobTierQuotes(line.product, rate), line.quantity, rate, policy, discount)
   } catch (e) { return e instanceof Error ? e.message : '资料不完整，暂不能报价' }
   return ''
 }
@@ -49,19 +49,19 @@ export function fobBatchQuantity(product: FobQuoteProduct, quantity: string, mod
   }
   throw new Error('采购阶梯中没有满足下单倍数的数量')
 }
-export function fobBatchSnapshot(lines: FobBatchLine[], mode: FobBatchMode, rate: number, policy: FobSmallOrderPolicy, metadata: { title: string; agent: string; date: string; whatsapp: string }): FobQuotationSnapshot {
+export function fobBatchSnapshot(lines: FobBatchLine[], mode: FobBatchMode, rate: number, policy: FobSmallOrderPolicy, metadata: { title: string; agent: string; date: string; whatsapp: string }, discount = 1): FobQuotationSnapshot {
   const selected = lines.filter(l => l.selected)
   if (!selected.length) throw new Error('请至少选择一个有效商品')
   if (selected.length > 100) throw new Error('每份批量报价最多100行商品')
   // Validate every selected row before building cross-row notes from its product.
   for (const line of selected) {
-    const issue = fobBatchIssue(line, selected, mode, rate, policy)
+    const issue = fobBatchIssue(line, selected, mode, rate, policy, discount)
     if (issue) throw new Error(`第${line.id}行 ${line.sku}：${issue}`)
   }
   const items = selected.map(line => {
     const product = line.product!, quantity = fobBatchQuantity(product, line.quantity, mode)
-    const ranges = mode === 'tiers' ? fobSheetRows(product, rate, policy) : (() => {
-      const q = fobQuantityQuote(product, fobTierQuotes(product, rate), String(quantity), rate, policy)
+    const ranges = mode === 'tiers' ? fobSheetRows(product, rate, policy, discount) : (() => {
+      const q = fobQuantityQuote(product, fobTierQuotes(product, rate), String(quantity), rate, policy, discount)
       return [{ minQty: quantity, maxQty: quantity, unit: q.row.unit, declaredUsd: q.declaredUsd, undeclaredUsd: q.undeclaredUsd }]
     })()
     const sheet: CustomerQuoteSheet = { ...metadata, date: formatQuoteDate(metadata.date), columnOrder: ['number', 'sku', 'prices'],
@@ -81,7 +81,7 @@ export function fobBatchSnapshot(lines: FobBatchLine[], mode: FobBatchMode, rate
       else grouped.push(note)
     }
     sheet.notes = grouped
-    return { schemaVersion: 1 as const, product, quantity, rate, policy, displayMode: mode, sheet }
+    return { schemaVersion: 1 as const, product, quantity, rate, discount, policy, displayMode: mode, sheet }
   })
   const rows = items.flatMap((item, index) => item.sheet.rows.map(row => ({ ...row, key: `${index}:${row.key}` }))).map((row, i) => ({ ...row, number: i + 1 }))
   if (rows.length > 2000) throw new Error('报价阶梯超过2000行，请减少商品后分批生成')

@@ -17,6 +17,7 @@ import { normalizeShippingNote, shippingQuotationSummary, SHIPPING_NOTE_MAX_LENG
 import ManualQuotePanel from '@/components/quotation/ManualQuotePanel.vue'
 import ShippingEntrySwitch from '@/components/quotation/ShippingEntrySwitch.vue'
 import QuotationFeatureBoundary from '@/components/quotation/QuotationFeatureBoundary.vue'
+import { validateFobDiscount, FOB_DISCOUNT_ERROR } from '@/services/fobQuotation'
 import FobQuotePanel from '@/components/quotation/FobQuotePanel.vue'
 import { FOB_SMALL_ORDER_POLICY } from '@/services/fobQuotation'
 import { canUseFob } from '@/data/fobAccess'
@@ -198,6 +199,9 @@ function createTemplateFromCurrentMode() {
 const quoteMode = ref<QuotationMode>(props.batchShipping ? 'shipping-only' : 'single')
 // FOB is a separate calculation workspace; it never serializes into a channel quotation or its draft.
 const fobKey = ref(0)
+const fobDiscount = ref('1')
+watch(() => currentAuthUser.value.id, () => { fobDiscount.value = '1' })
+const fobDiscountError = computed(() => { try { validateFobDiscount(Number(fobDiscount.value)); return '' } catch { return FOB_DISCOUNT_ERROR } })
 const fobInitial = ref<{classification?: import('@/services/fobClassification').FobClassification;sku:string;source:'fob'|'standard';customer:string;quantity:number;batch?:{text:string;mode:'tiers'|'quantity';customer:string;sources:('fob'|'standard')[]}}>()
 const fobActive = ref(false)
 watch(canUseFob, allowed => { if (!allowed) fobActive.value = false })
@@ -270,6 +274,7 @@ async function applyReissue() {
     if (draftSource.value) throw new Error('当前正在编辑撤回报价，请返回我的报价后再次发起')
     if(record.quoteMode==='fob') {
       if(!record.fob || !canUseFob.value)throw new Error('无法载入FOB报价')
+      fobDiscount.value=String(record.fob.discount ?? 1)
       fobInitial.value={classification:record.fob.product.classification,sku:record.primarySku,source:record.fob.product.source,customer:record.customerName,quantity:record.fob.quantity}
       if(record.fob.quantities?.length)fobInitial.value.batch={text:record.fob.quantities.map(q=>`${record.primarySku}\t${q}`).join('\n'),mode:'quantity',customer:record.customerName,sources:record.fob.quantities.map(()=>record.fob!.product.source)}
       if(record.fob.schemaVersion===2 && record.fob.items?.length)fobInitial.value.batch={text:record.fob.items.map(item=>`${item.product.sku}\t${item.quantity}`).join('\n'),mode:record.fob.displayMode,customer:record.customerName,sources:record.fob.items.map(item=>item.product.source)}
@@ -805,7 +810,7 @@ function changeQuoteMode(mode: QuotationMode | 'fob') {
   if (savingQuotation.value || syncRefreshing.value) return
   if (mode === 'fob') {
     productQueryGeneration++; productQueryAbort?.abort(); productQueryBusy.value = false
-    cancelQuoteLogistics(); purchaseInvoiceNotice.value = []; fobInitial.value=undefined; fobKey.value++; fobActive.value = true
+    cancelQuoteLogistics(); purchaseInvoiceNotice.value = []; fobInitial.value=undefined; fobDiscount.value='1'; fobKey.value++; fobActive.value = true
     fobStatus.value = '待查询SKU'; return
   }
   if (fobActive.value) { fobActive.value = false; draftNeedsQuery.value = true }
@@ -2769,6 +2774,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
 
       <template v-for="p in products.slice(0,1)" :key="p.id">
         <QuotationCondition
+          v-model:fob-discount="fobDiscount" :fob-discount-error="fobDiscountError"
           :commission-threshold="commissionThreshold" :commission-error="commissionError" @update:commission-threshold="commissionThreshold=$event"
           :lock-mode="!!resumeQuoteId && (!draftSource || !!draftSource.quotationBatch)" :single-only="batchCapture" :mode="fobActive ? 'fob' : quoteMode" :sku-search="skuSearch" :customer-name="customerName" :selected-customer-id="selectedCustomerId" :customers="customerOperationSettings.customers" :operation-message="customerOperation.message" :monthly-sales-estimate="monthlySalesEstimate" :attributes="quotationAttributeOptions" :logistics-attribute="p.logisticsAttribute" :invalid-fields="fobActive ? [] : displayedInvalidFields"
           :finance-pending="!financeSettingsAreHydrated()" :finance-error="financeSettingsLoadError()"
@@ -2782,7 +2788,7 @@ const draftStatusText = computed(() => draftStatus.value === 'loading' ? '正在
         <p v-if="womensPricingBlock" class="womens-pricing-error" role="alert">{{ womensPricingBlock }}</p>
         <p v-if="batchCapture && queryValidationFields.length" class="batch-query-error" role="alert">{{ conditionIssues({ includeSku: true, includeCategory: false }).map(issue => issue.message).join('；') }}。填写后点击“加载渠道”。</p>
         <p v-if="batchCapture && purchaseQueryError" class="batch-query-error" role="alert">{{ purchaseQueryError }}</p>
-        <FobQuotePanel :initial="fobInitial" v-if="fobActive" :key="currentAuthUser.id + ':' + fobKey" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
+        <FobQuotePanel :discount="Number(fobDiscount)" :initial="fobInitial" v-if="fobActive" :key="currentAuthUser.id + ':' + fobKey" :salesperson="currentSalespersonName" :ref="instance => fobPanel = instance as typeof fobPanel" :rate="fobRate" :finance-pending="financeSettingsAreLoading() || !financeSettingsAreHydrated() && !financeSettingsLoadError()" :finance-error="financeSettingsLoadError()" :policy="fobSmallOrderPolicy" @status="fobStatus=$event" @retry-finance="retryFobFinance" />
         <template v-else>
         <section v-if="draftNeedsQuery" class="live-data-notice" role="status">已恢复报价条件。点击“{{ manualMode ? (quoteMode === 'shipping-only' ? '查询代发报价' : '查询试算') : isBundleQuotation(quoteMode) ? '查询全部 SKU' : '查询商品' }}”后生成当前可用渠道，再选择需要加入报价单的渠道。</section>
         <section v-if="!draftNeedsQuery && (manualMode ? manualQueried : p.sku) && logisticsLoadState !== 'ready'" class="logistics-load-panel" :class="logisticsLoadState">
