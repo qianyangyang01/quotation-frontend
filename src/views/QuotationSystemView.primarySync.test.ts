@@ -20,7 +20,7 @@ function harness() {
   const template = ref<QuotationMatrixRow[]>([]), common = ref<QuotationMatrixRow[]>([])
   const quoteMatrixMode = ref('template')
   const state = {
-    products: ref([product]), primarySelectionRequired: new WeakSet<object>(), draftReady: ref(true), draftNeedsQuery: ref(false),
+    products: ref([product]), draftReady: ref(true), draftNeedsQuery: ref(false),
     fobActive: ref(false), quotationHasInputs: () => true, productQueryBusy: ref(false), syncRefreshing: ref(false),
     syncPending: ref(''), syncError: ref(''), recoveryRestoring: ref(false), recoveryPending: ref<unknown>(null),
     savingQuotation: ref(false), logisticsLoadState: ref('ready'), logisticsRebuilding: ref(false), countryLoads: ref(0),
@@ -86,14 +86,16 @@ it.each([
   } finally { h.scope.stop() }
 })
 
-it('keeps an existing manual choice and requires confirmation for an unavailable restored primary', async () => {
+it('keeps an existing manual choice and replaces a cleared retired primary from the verified selection', async () => {
   const h = harness()
   try {
     Object.assign(h.product, { country: '澳大利亚', rule: '人工首选', selectedChannelKey: 'manual', freight: 88 })
     h.template.value = [row()]; await nextTick()
     expect(h.product.rule).toBe('人工首选'); expect(h.product.freight).toBe(88)
-    h.state.primarySelectionRequired.add(h.product); h.product.rule = ''; h.product.selectedChannelKey = ''
-    await nextTick(); expect(h.product.rule).toBe('')
+    h.product.rule = ''; h.product.selectedChannelKey = ''
+    h.template.value = [row('retired', { available: false, quote1: null }), row()]
+    await nextTick(); expect(h.product.selectedChannelKey).toBe('581::云速递::PURE')
+    expect(h.template.value[0]).toMatchObject({ available: false, quote1: null })
   } finally { h.scope.stop() }
 })
 

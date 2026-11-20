@@ -91,6 +91,9 @@ function findPresetRow(preset: QuotationPresetSelection, rows: QuotationMatrixRo
     const sameChannel = rows.filter(row => row.channelKey?.trim() === presetChannelKey)
     if (!isAustraliaQuoteCountry(preset.country)
       && sameChannel.length === 1 && sameChannel[0]?.quoteRegion === '全国统一') return sameChannel[0]
+    // A known retired identity must stay unavailable, even if another channel
+    // has the same display name. Name matching is for legacy keyless rows only.
+    return undefined
   }
   return rows.find(row => presetFallbackMatchesRow(preset, row))
 }

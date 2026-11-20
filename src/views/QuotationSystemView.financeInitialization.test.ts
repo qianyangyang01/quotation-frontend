@@ -219,7 +219,7 @@ describe('quotation finance initialization for an employee', () => {
     expect(host.textContent).not.toContain('旧渠道')
   })
 
-  it.each(['common', 'specified', 'template'] as const)('removes unauthorized restored channels from %s after loading, including preview and the next draft', async mode => {
+  it.each(['common', 'specified', 'template'] as const)('retains unauthorized restored channels in %s as unpriced status rows, including preview and the next draft', async mode => {
     await mountPage()
     resolveFinance(financeResponse())
     await vi.waitFor(() => expect(state.draftReady).toBe(true))
@@ -243,18 +243,18 @@ describe('quotation finance initialization for an employee', () => {
     expect(state.modeSelections[mode === 'specified' ? 'common' : mode]).toHaveLength(2)
     expect(state.quoteMatrixMode).toBe(mode === 'specified' ? 'common' : mode)
     finish(); await restoring
-    await vi.waitFor(() => expect(state.savedQuoteRows.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL']))
-    for (const selections of Object.values(state.modeSelections)) expect(selections.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL'])
-    expect(JSON.stringify(state.draftPayload())).not.toContain('2::物流商::OLD')
+    await vi.waitFor(() => expect(state.savedQuoteRows.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL', '2::物流商::OLD']))
+    for (const selections of Object.values(state.modeSelections)) expect(selections.map(row => row.channelKey)).toEqual(['1::物流商::CHANNEL', '2::物流商::OLD'])
+    expect(JSON.stringify(state.draftPayload())).toContain('2::物流商::OLD')
     expect(host.textContent).toContain('未获当前物流属性“香氛”授权')
-    expect(host.textContent).toContain('2::物流商::OLD')
+    expect(state.savedQuoteRows[1]).toMatchObject({ available: false, quote1: null, quote2: null, quote3: null })
     const good = state.savedQuoteRows[0]!
     expect(state.quoteSheetPrice(state.products[0]!, good, 5)).toEqual(expect.any(Number))
     expect(state.quoteSheetPrice(state.products[0]!, { ...good, channelKey:'2::物流商::OLD', ruleId:2 }, 5)).toBeNull()
     expect(state.quoteSheetPrice(state.products[0]!, { ...good, available:false }, 5)).toBeNull()
   })
 
-  it.each(['failed', 'unverified'] as const)('retains draft channels when logistics is %s, and prunes only after a verified retry', async outcome => {
+  it.each(['failed', 'unverified'] as const)('retains draft channels when logistics is %s, and marks them unavailable after a verified retry', async outcome => {
     await mountPage(); resolveFinance(financeResponse())
     await vi.waitFor(() => expect(state.draftReady).toBe(true))
     if (outcome === 'failed') vi.mocked(loadPublishedLogisticsRules).mockRejectedValueOnce(new Error('网络失败'))
@@ -267,8 +267,8 @@ describe('quotation finance initialization for an employee', () => {
     expect(state.modeSelections.common).toEqual([selection])
     expect(host.textContent).not.toContain('已按当前物流属性')
     await state.ensureQuoteLogistics(state.products[0]!)
-    await vi.waitFor(() => expect(state.modeSelections.common).toEqual([]))
-    expect(state.savedQuoteRows).toEqual([])
+    await vi.waitFor(() => expect(state.savedQuoteRows).toEqual([expect.objectContaining({ available: false, quote1: null })]))
+    expect(state.modeSelections.common).toEqual([selection])
   })
 
   it.each(['failed', 'unverified'] as const)('recovers %s initial logistics through the channel picker without refreshing the page', async outcome => {
