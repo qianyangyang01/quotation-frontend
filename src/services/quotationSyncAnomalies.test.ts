@@ -3,11 +3,12 @@ import {readFileSync} from 'node:fs'
 import ts from 'typescript'
 import {expect,it,vi} from 'vitest'
 import {ApiError} from './http'
+import { quotationPollingSkus } from './quotationSync'
 import { changedFinanceSettings, type FinanceSettingVersions } from './financeSettings'
 const source=readFileSync(new URL('../views/QuotationSystemView.vue',import.meta.url),'utf8').split('<script setup lang="ts">')[1]!.split('</script>')[0]!
 const ast=ts.createSourceFile('view.ts',source,ts.ScriptTarget.Latest,true)
 function setup(){
-  const state={isWomensQuotation, quoteMode:{value:'single'},props:{batchCapture:false},batchCalculationActive:false,financeSettingsAreHydrated:()=>true,liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
+  const state={quotationPollingSkus,isWomensQuotation, quoteMode:{value:'single'},props:{batchCapture:false},batchCalculationActive:false,financeSettingsAreHydrated:()=>true,liveVersionCheckSequence:0,activePurchaseSkus:()=>['SKU'],draftSignature:()=> 'A',
     selectedCustomerId:{value:''},customerName:{value:'甲'},customerOperation:{value:{snapshot:{id:'a',name:'甲',feeUsd:1}}},
     hydrateFinanceSettings:vi.fn(async()=>{}),loadCustomerOperationSettings:()=>({}),resolveCustomerOperation:vi.fn(()=>({configured:true,snapshot:{id:'a',name:'甲',feeUsd:1}})),
     appliedFinanceVersions:{} as FinanceSettingVersions,financeSettingVersions:vi.fn<()=>FinanceSettingVersions>(()=>({})),changedFinanceSettings,
