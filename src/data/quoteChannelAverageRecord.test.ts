@@ -23,8 +23,8 @@ it('retains interleaved saved order in customer copy and cloned price edits, inc
   const before = JSON.stringify(saved)
   for (const layout of [quotationRecordQuoteOnlyLayout(saved)]) {
     for (const output of [layout.text, layout.html]) {
-      expect(output.indexOf('顺丰｜B')).toBeLessThan(output.indexOf('Combined Shipping'))
-      expect(output.indexOf('Combined Shipping')).toBeLessThan(output.indexOf('SDH｜A'))
+      expect(output.indexOf('顺丰｜B')).toBeLessThan(output.indexOf('50%SDH · A'))
+      expect(output.indexOf('50%SDH · A')).toBeLessThan(output.indexOf('SDH｜A'))
     }
   }
   const draft = recordCustomerPrices(saved); draft.rowOrder!.reverse()
@@ -32,7 +32,7 @@ it('retains interleaved saved order in customer copy and cloned price edits, inc
   saved.customerQuote!.hiddenOptionIds = ['b']
   const visible = quotationRecordQuoteOnlyLayout(saved, 'visible')
   expect(visible.text).not.toContain('顺丰｜B')
-  expect(visible.text.indexOf('Combined Shipping')).toBeLessThan(visible.text.indexOf('SDH｜A'))
+  expect(visible.text.indexOf('50%SDH · A')).toBeLessThan(visible.text.indexOf('SDH｜A'))
   for (const rowOrder of [null, {}, [1], ['option:foreign'], ['average:foreign'], ['option:a', 'option:a']]) {
     expect(normalizeCustomerPrices({ ...r.customerQuote, rowOrder })).toBeUndefined()
   }
@@ -47,8 +47,8 @@ it('clones the full plan and shows its price difference and readable revision hi
 it('copies aggregate-only customer rows even if every channel customer price is blank, while full copy retains all sources', () => {
   const r = record(), visible = quotationRecordQuoteOnlyLayout(r, 'visible'), full = quotationRecordQuoteOnlyLayout(r, 'full')
   expect(visible.text).toContain('1件'); expect(visible.text).toContain('4.90')
-  expect(visible.text).toContain('Combined Shipping'); expect(visible.text).not.toContain('SDH｜A')
-  expect(full.text).toContain('SDH｜A'); expect(full.text).toContain('Combined Shipping')
+  expect(visible.text).toContain('50%SDH · A'); expect(visible.text).not.toContain('SDH｜A')
+  expect(full.text).toContain('SDH｜A'); expect(full.text).toContain('50%SDH · A')
   const audit = quotationRecordCopyLayout(r)
   expect(audit.text).toContain('综合报价方案（保存快照）'); expect(audit.text).toContain('5.10'); expect(audit.text).toContain('4.90')
 })

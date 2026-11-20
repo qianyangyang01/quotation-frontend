@@ -1,10 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { applyAveragePlans, averageScope, averagePrices, averagePlanIssues, mapAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
+import { averageProviderLabel, applyAveragePlans, averageScope, averagePrices, averagePlanIssues, mapAveragePlans, validAveragePlans, type AveragePlan } from './quoteChannelAverage'
 import { buildCustomerQuoteSheet, newQuoteSheetEdits, quoteSheetRowKey, quoteSheetTextTable, type QuoteSheetSourceRow } from './customerQuoteSheet'
 
 const sources: QuoteSheetSourceRow[] = ['SDH', 'SF', '燕文'].map((carrier, i) => ({ country: '美国', quoteRegion: '全国统一', carrier, transport: '普货', channelKey: String(i), rule: '', ruleId: i, channelCode: String(i), eta: '7-12 working days', quote1: [5, 5.25, 5.3][i]!, quote2: [5.95, 6.25, 6.45][i]!, quote3: [7, 7, 7.45][i]!, quoteCustom: null }))
 const plan = (): AveragePlan => ({ id: 'plan-1', mode: 'weighted', display: 'details', provider: 'Combined Shipping', shippingTime: '7-12 workingdays', quantities: [1, 2, 3], members: sources.map((row, i) => ({ optionId: quoteSheetRowKey(row), weight: [50, 30, 20][i]!, sourcePrices: [row.quote1, row.quote2, row.quote3] })), systemPrices: [5.14, 6.14, 7.09], prices: [5.14, 6.14, 7.09] })
 describe('channel average snapshot', () => {
+  it('shows original route weights without changing saved membership or customer prices', () => {
+    const p=plan(), before=JSON.stringify(p)
+    const label=averageProviderLabel(p,id=>sources.find(row=>quoteSheetRowKey(row)===id))
+    expect(label).toBe('50%SDH · 普货 + 30%SF · 普货 + 20%燕文 · 普货')
+    const sheet=buildCustomerQuoteSheet({rows:sources,countries:[],edits:newQuoteSheetEdits('QA'),customQuantity:0,bundle:false,quantities:[1,2,3]})
+    p.prices=[9.99,18.88,27.77]
+    const result=applyAveragePlans(sheet,[p],sources,[1,2,3])
+    expect(result.rows.find(row=>row.averageId)?.provider).toBe(label)
+    expect(result.rows.find(row=>row.averageId)?.prices).toEqual([9.99,18.88,27.77])
+    expect({...p,prices:JSON.parse(before).prices}).toEqual(JSON.parse(before))
+  })
+  it('distinguishes equal proportions, exact weights and missing historical sources', () => {
+    const p=plan();p.mode='equal'
+    expect(averageProviderLabel(p,()=>({carrier:'顺丰',transport:'顺丰商派'}))).toBe('≈33.33%顺丰商派 + ≈33.33%顺丰商派 + ≈33.33%顺丰商派')
+    p.members=p.members.slice(0,2)
+    expect(averageProviderLabel(p,id=>id===p.members[0].optionId?{carrier:'顺丰',transport:'顺丰商派'}:{carrier:'燕文'})).toBe('50%顺丰商派 + 50%燕文')
+    expect(averageProviderLabel(p,()=>undefined)).toBe('50%来源渠道未保存 + 50%来源渠道未保存')
+  })
   it('lists every selected zone on a cross-zone summary instead of inheriting only the first zone', () => {
     const rows = sources.map((row, i) => ({ ...row, country: 'AU', quoteRegion: `澳大利亚${i + 1}区` }))
     const sheet = buildCustomerQuoteSheet({ rows, countries: [], edits: newQuoteSheetEdits('QA'), customQuantity: 0, bundle: false, quantities: [1, 2, 3] })

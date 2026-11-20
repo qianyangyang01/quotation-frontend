@@ -1,0 +1,383 @@
+{
+  "priorityProcessing": false,
+  "financeVersions": {
+    "country-classification": 1,
+    "channel-policies": 1,
+    "customer-grades": 1,
+    "exchange-rate": 1,
+    "tax-settings": 1,
+    "surcharge-settings": 1,
+    "customer-operation-fees": 1,
+    "freight-discount-settings": -1,
+    "womens-pricing": -1,
+    "fob-pricing": -1
+  },
+  "customerQuote": {
+    "quantityUnits": {},
+    "photos": [],
+    "showPhotos": true,
+    "rowOrder": [
+      "option:英国::全国统一::9910::云速递::TEST",
+      "option:美国::全国统一::9910::云速递::TEST"
+    ],
+    "averagePlans": [],
+    "hiddenOptionIds": [],
+    "sizeRulesEnabled": false,
+    "contact": {
+      "agent": "本地验收",
+      "whatsapp": ""
+    },
+    "quantities": [
+      1,
+      2,
+      3
+    ],
+    "rows": [
+      {
+        "optionId": "英国::全国统一::9910::云速递::TEST",
+        "prices": [
+          21.4,
+          41.85,
+          62.3
+        ]
+      },
+      {
+        "optionId": "美国::全国统一::9910::云速递::TEST",
+        "prices": [
+          20.65,
+          40.35,
+          60.05
+        ]
+      }
+    ]
+  },
+  "systemQuantityQuotes": {
+    "quantities": [
+      1,
+      2,
+      3
+    ],
+    "rows": [
+      {
+        "optionId": "英国::全国统一::9910::云速递::TEST",
+        "prices": [
+          21.4,
+          41.85,
+          62.3
+        ]
+      },
+      {
+        "optionId": "美国::全国统一::9910::云速递::TEST",
+        "prices": [
+          20.65,
+          40.35,
+          60.05
+        ]
+      }
+    ]
+  },
+  "weightSnapshot": {
+    "schemaVersion": 1,
+    "rule": "per-item-50g-1g-v1",
+    "specialPackagingGrams": 0,
+    "specialPackagingScope": "per-shipment",
+    "items": [
+      {
+        "sku": "TC2602577",
+        "quantityPerSet": 1,
+        "baseWeightKg": 0.4,
+        "weightSource": "purchase",
+        "purchaseWeightKg": 0.4,
+        "standardPackagingWeightKg": 0.008
+      }
+    ],
+    "quantities": [
+      {
+        "quantity": 1,
+        "baseWeightKg": 0.4,
+        "standardPackagingWeightKg": 0.008,
+        "specialPackagingWeightKg": 0,
+        "weightKg": 0.408
+      },
+      {
+        "quantity": 2,
+        "baseWeightKg": 0.8,
+        "standardPackagingWeightKg": 0.016,
+        "specialPackagingWeightKg": 0,
+        "weightKg": 0.816
+      },
+      {
+        "quantity": 3,
+        "baseWeightKg": 1.2,
+        "standardPackagingWeightKg": 0.024,
+        "specialPackagingWeightKg": 0,
+        "weightKg": 1.224
+      }
+    ]
+  },
+  "purchaseVersions": {
+    "TC2602577": "0:test"
+  },
+  "logisticsRevision": "test",
+  "salespersonName": "本地验收",
+  "salespersonAccount": "LOCALQA",
+  "customerName": "本地回归测试，不用于业务",
+  "quoteMode": "single",
+  "productSummary": "配饰",
+  "productImage": "",
+  "primarySku": "TC2602577",
+  "productCategory": "配饰",
+  "purchaseBaseUnitPriceCny": 75,
+  "purchaseInvoiceType": "专票13",
+  "purchaseInvoiceRatePercent": 10,
+  "purchaseInvoiceTaxApplied": true,
+  "purchaseUnitPriceCny": 82.5,
+  "domesticFreightPerUnitCny": 6,
+  "volumetricEnabled": false,
+  "packageLengthCm": 0,
+  "packageWidthCm": 0,
+  "packageHeightCm": 0,
+  "defaultVolumeDivisor": 8000,
+  "logisticsAttribute": "纯电",
+  "country": "英国",
+  "carrier": "云速递",
+  "channel": "全球专线敏感",
+  "rule": "全球专线敏感",
+  "systemQuoteUsd": 21.4,
+  "systemQuoteCny": 141.88,
+  "totalCostCny": 117.98,
+  "customerGrade": "S级客户",
+  "monthlySalesEstimate": "10",
+  "commissionThreshold": 1,
+  "exchangeRate": 6.63,
+  "matrixMode": "template",
+  "quotationTemplateId": "local-pure",
+  "quotationTemplateName": "帽子客户-纯电",
+  "customQuoteQuantity": 3,
+  "quoteOptions": [
+    {
+      "id": "英国::全国统一::9910::云速递::TEST",
+      "quoteSheetKey": "[\"英国\",\"\",\"9910::云速递::TEST\"]",
+      "country": "英国",
+      "quoteRegion": "",
+      "countryCode": "GB",
+      "carrier": "云速递",
+      "channel": "全球专线敏感",
+      "deliveryModes": [],
+      "rule": "全球专线敏感",
+      "eta": "该物流暂无时效说明",
+      "channelKey": "9910::云速递::TEST",
+      "ruleId": "9910",
+      "channelCode": "TEST",
+      "quantityMessages": {},
+      "freightCny": 29.48,
+      "logisticsChannelId": "test-channel",
+      "logisticsVersionId": "test-version",
+      "logisticsSamples": [
+        {
+          "quantity": 1,
+          "input": {
+            "country": "英国",
+            "zoneName": "",
+            "weightKg": 0.408,
+            "marks": [
+              "纯电"
+            ]
+          },
+          "total": 29.48,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 2,
+          "input": {
+            "country": "英国",
+            "zoneName": "",
+            "weightKg": 0.816,
+            "marks": [
+              "纯电"
+            ]
+          },
+          "total": 53.96,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 3,
+          "input": {
+            "country": "英国",
+            "zoneName": "",
+            "weightKg": 1.224,
+            "marks": [
+              "纯电"
+            ]
+          },
+          "total": 78.44,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        }
+      ],
+      "logisticsInput": {
+        "country": "英国",
+        "baseWeightKg": 0.4,
+        "packagingWeightKg": 0.008,
+        "standardPackagingWeightKg": 0.008,
+        "specialPackagingWeightKg": 0,
+        "quantity": 1,
+        "weightKg": 0.408,
+        "zoneName": "",
+        "marks": [
+          "纯电"
+        ]
+      },
+      "totalCostCny": 343.94,
+      "profitCny": 68.78800000000001,
+      "quoteCny": 413.05,
+      "isPrimary": true,
+      "quote1Usd": 21.4,
+      "quote2Usd": 41.85,
+      "quote3Usd": 62.3,
+      "quoteCustomUsd": 62.3,
+      "taxIncluded": false,
+      "taxConfigured": true,
+      "taxRatePercent": null,
+      "countryFixedTaxUsd": 0,
+      "taxFeeMode": "no-tax",
+      "taxCalculations": {},
+      "taxLabel": "无关税",
+      "surchargeEnabled": false,
+      "surchargeConfigured": true,
+      "surchargeExempt": false,
+      "surchargeUsd": 0,
+      "surchargeLabel": "无附加费",
+      "tax1Usd": 0,
+      "tax2Usd": 0,
+      "tax3Usd": 0,
+      "taxCustomUsd": 0
+    },
+    {
+      "id": "美国::全国统一::9910::云速递::TEST",
+      "quoteSheetKey": "[\"美国\",\"\",\"9910::云速递::TEST\"]",
+      "country": "美国",
+      "quoteRegion": "",
+      "countryCode": "US",
+      "carrier": "云速递",
+      "channel": "全球专线敏感",
+      "deliveryModes": [],
+      "rule": "全球专线敏感",
+      "eta": "该物流暂无时效说明",
+      "channelKey": "9910::云速递::TEST",
+      "ruleId": "9910",
+      "channelCode": "TEST",
+      "quantityMessages": {},
+      "freightCny": 25.4,
+      "logisticsChannelId": "test-channel",
+      "logisticsVersionId": "test-version",
+      "logisticsSamples": [
+        {
+          "quantity": 1,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 0.408,
+            "marks": [
+              "纯电"
+            ]
+          },
+          "total": 25.4,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 2,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 0.816,
+            "marks": [
+              "纯电"
+            ]
+          },
+          "total": 45.8,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        },
+        {
+          "quantity": 3,
+          "input": {
+            "country": "美国",
+            "zoneName": "",
+            "weightKg": 1.224,
+            "marks": [
+              "纯电"
+            ]
+          },
+          "total": 66.2,
+          "etaMinDays": 0,
+          "etaMaxDays": 0
+        }
+      ],
+      "logisticsInput": {
+        "country": "美国",
+        "baseWeightKg": 0.4,
+        "packagingWeightKg": 0.008,
+        "standardPackagingWeightKg": 0.008,
+        "specialPackagingWeightKg": 0,
+        "quantity": 1,
+        "weightKg": 0.408,
+        "zoneName": "",
+        "marks": [
+          "纯电"
+        ]
+      },
+      "totalCostCny": 331.7,
+      "profitCny": 66.34000000000003,
+      "quoteCny": 398.13,
+      "isPrimary": false,
+      "quote1Usd": 20.65,
+      "quote2Usd": 40.35,
+      "quote3Usd": 60.05,
+      "quoteCustomUsd": 60.05,
+      "taxIncluded": false,
+      "taxConfigured": true,
+      "taxRatePercent": null,
+      "countryFixedTaxUsd": 0,
+      "taxFeeMode": "no-tax",
+      "taxCalculations": {},
+      "taxLabel": "无关税",
+      "surchargeEnabled": false,
+      "surchargeConfigured": true,
+      "surchargeExempt": false,
+      "surchargeUsd": 0,
+      "surchargeLabel": "无附加费",
+      "tax1Usd": 0,
+      "tax2Usd": 0,
+      "tax3Usd": 0,
+      "taxCustomUsd": 0
+    }
+  ],
+  "specifiedQuotes": [
+    {
+      "country": "美国",
+      "carrier": "云速递",
+      "channel": "全球专线敏感",
+      "rule": "全球专线敏感",
+      "eta": "该物流暂无时效说明",
+      "quote1Usd": 20.65,
+      "quote2Usd": 40.35,
+      "quote3Usd": 60.05,
+      "quoteCustomUsd": 60.05
+    },
+    {
+      "country": "英国",
+      "carrier": "云速递",
+      "channel": "全球专线敏感",
+      "rule": "全球专线敏感",
+      "eta": "该物流暂无时效说明",
+      "quote1Usd": 21.4,
+      "quote2Usd": 41.85,
+      "quote3Usd": 62.3,
+      "quoteCustomUsd": 62.3
+    }
+  ]
+}

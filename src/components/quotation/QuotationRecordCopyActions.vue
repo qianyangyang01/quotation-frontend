@@ -122,11 +122,22 @@ async function copyData(mode: 'full' | 'quote' = 'full') {
   catch (error) { if (context === contextKey.value) status.value = { message: error instanceof Error ? error.message : '复制失败，请重试', failed: true } }
   finally { copyingData.value = false }
 }
+async function copyCompact() {
+  if (busy.value) return
+  const context = contextKey.value
+  copyingData.value = true
+  status.value = undefined
+  try {
+    const result = await sheet.value?.copyCompact()
+    if (context === contextKey.value) status.value = result ?? { message: '报价单尚未就绪，请重试', failed: true }
+  } finally { copyingData.value = false }
+}
 </script>
 
 <template>
   <div class="record-copy-actions">
     <div class="record-copy-buttons">
+      <button type="button" :disabled="busy" title="复制本条记录的可编辑图文表格，可粘贴到 WPS" @click="copyCompact">复制图文表格</button>
       <QuotationCopyScope :count="record.quotationBatch?.count" label="仅复制报价单" :disabled="busy" @current="copyData('quote')" @batch="batchCopy?.run('quote')">
       <button type="button" :disabled="busy" :title="canViewPurchaseCost ? '复制客户、客户等级、SKU、成本与重量摘要、国家、物流商与渠道、各数量报价及预计时效' : '复制客户、SKU、重量、渠道及最终报价'" @click="copyData('quote')">{{ copyingData && copyMode === 'quote' ? '正在复制…' : '仅复制报价单' }}</button>
       </QuotationCopyScope>

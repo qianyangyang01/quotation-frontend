@@ -13,6 +13,7 @@ import {
 } from '@/data/customerQuoteSheet'
 import { copyQuoteSheetImage, preloadQuoteSheetAssets, renderCustomerQuoteSheet, type QuoteSheetImage } from '@/services/customerQuoteSheetRenderer'
 import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
+import { compactQuoteTable, compactTablePhotos, copyCompactQuoteTable } from '@/services/compactQuoteTable'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import QuoteAveragePanel from './QuoteAveragePanel.vue'
 import { applyAveragePlans, averageScope, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
@@ -439,6 +440,11 @@ const missingProviders = computed(() => !columnVisible('provider') ? [] : [...ne
   .filter(row => !quoteSheetProviderName(row.carrier))
   .map(row => [quoteSheetProviderKey(row.carrier), { key: quoteSheetProviderKey(row.carrier), name: row.carrier || '未命名' }])).values()])
 const canCopy = computed(() => !outputBlocked.value && Boolean(currentImage.value) && !editing.value && !props.sourcePending && !rendering.value && !copying.value)
+const compactTablePreview = ref('')
+function clearCompactPreview() {
+  compactTablePreview.value = ''
+}
+onBeforeUnmount(clearCompactPreview)
 
 const visibleGroups = computed(() => quoteSheetGroups(sheet.value.hiddenColumns, sheet.value.columnOrder, hasPhotos.value, typeof sheet.value.sizeRules === 'string').map(group => group.key === 'sku' ? { ...group, label: sheet.value.skuLabel ?? group.label } : group))
 const textTable = computed(() => quoteSheetTextTable(sheet.value))
@@ -494,6 +500,7 @@ function releaseImages() {
 }
 function invalidate() {
   generation++
+  clearCompactPreview()
   releaseImages()
   rendering.value = false
   editing.value = true
@@ -692,6 +699,34 @@ async function preview() {
     if (!disposed && token === generation) rendering.value = false
   }
 }
+async function copyCompact() {
+  if (disposed || copying.value || rendering.value || props.sourcePending || !sheet.value.rows.length) return
+  const context = props.contextKey
+  copying.value = true
+  failed.value = false
+  message.value = ''
+  try {
+    await photoLoad
+    if (disposed || context !== props.contextKey) throw new Error('报价记录已变化，请重新复制')
+    if (photoLoading.value || photoError.value) throw new Error(photoError.value || '图片尚未加载完成，请重试')
+    const token = generation
+    const guard = () => {
+      assertOutputCurrent()
+      if (disposed || token !== generation || props.sourcePending) throw new Error('报价已发生变化，请重新复制最新图文')
+    }
+    guard()
+    const result = compactQuoteTable(sheet.value, compactTablePhotos(hasPhotos.value ? photos.value : []))
+    guard()
+    clearCompactPreview()
+    compactTablePreview.value = result.table
+    await copyCompactQuoteTable(result, guard)
+    guard()
+    message.value = '图文表格已复制，可直接粘贴到 WPS；同 SKU 和商品图片为合并单元格'
+  } catch (error) {
+    if (!disposed) { failed.value = true; message.value = error instanceof Error ? error.message : '图文复制失败，请重试' }
+  } finally { copying.value = false }
+  return { message: message.value, failed: failed.value }
+}
 async function copyCurrent() {
   if (!canCopy.value || !currentImage.value) return
   const token = generation
@@ -799,7 +834,7 @@ async function restoreRecovery(snapshot: QuoteSheetRecovery) {
   showPhotos.value = snapshot.showPhotos
   invalidate()
 }
-defineExpose({ captureSheet: () => JSON.parse(JSON.stringify(sheet.value)) as import('@/data/customerQuoteSheet').CustomerQuoteSheet, preview, copyData, invalidate, copying, capturePrices, captureForSave, captureRecovery, restoreRecovery })
+defineExpose({ captureSheet: () => JSON.parse(JSON.stringify(sheet.value)) as import('@/data/customerQuoteSheet').CustomerQuoteSheet, preview, copyCompact, copyData, invalidate, copying, capturePrices, captureForSave, captureRecovery, restoreRecovery })
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', clearPhotos)
   window.removeEventListener('pageshow', restoreAfterNavigation)
@@ -818,6 +853,7 @@ onBeforeUnmount(() => {
     <div class="sheet-toolbar"><h3 id="customer-sheet-title">客户报价单</h3></div>
     <p v-if="outputBlocked" class="sheet-pending" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
+    <details v-if="compactTablePreview" class="sheet-accessible"><summary>查看图文表格</summary><div style="overflow:auto" v-html="compactTablePreview"></div></details>
     <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :shipping="quoteMode === 'shipping-only'" :batch="batchAverage" :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @add-batch="addBatchAverages" @remove="removeAverage" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
     <p v-if="photoLoading || photoSaving" class="sheet-pending" role="status">{{ photoSaving ? '正在保存报价单图片…' : '正在读取报价单图片…' }}</p>
@@ -866,6 +902,7 @@ onBeforeUnmount(() => {
           <button v-if="!editing" class="sheet-primary" type="button" :disabled="copying" @click="invalidate">编辑报价单</button>
           <button v-if="editing" class="sheet-primary" type="button" :disabled="outputBlocked || sourcePending || !sheet.rows.length || rendering || copying" @click="preview">{{ rendering ? '正在生成预览…' : '预览报价单' }}</button>
           <button type="button" :disabled="!canCopy" @click="copyCurrent">{{ copying ? '正在复制…' : images.length > 1 ? '复制当前图片' : '复制报价图片' }}</button>
+          <button type="button" :disabled="outputBlocked || sourcePending || !sheet.rows.length || rendering || copying || photoLoading" title="复制可编辑单元格，合并相同 SKU 和商品图片" @click="copyCompact">复制图文表格</button>
           <button type="button" :disabled="outputBlocked || sourcePending || !sheet.rows.length || rendering || copying" @click="copyData">复制报价数据</button>
           <button v-if="editing" type="button" class="sheet-add-button" :title="`价格列 ${columns.length} / ${MAX_QUOTE_SHEET_COLUMNS}`" :disabled="copying || columns.length >= MAX_QUOTE_SHEET_COLUMNS" @click="addColumn">＋ 新增列</button>
         </div>

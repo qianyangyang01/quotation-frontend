@@ -8,6 +8,18 @@ export type AveragePlan = {
   systemPrices: Array<number | null>; prices: Array<number | null>
 }
 export const cloneAveragePlans = (plans: AveragePlan[] = []): AveragePlan[] => JSON.parse(JSON.stringify(plans))
+/** Display saved membership only; never recalculate or persist quote prices here. */
+export function averageProviderLabel(plan: AveragePlan, sourceFor: (id: string) => { carrier?: string; transport?: string; channel?: string } | undefined) {
+  return plan.members.map(member => {
+    const source = sourceFor(member.optionId)
+    const carrier = source?.carrier?.trim() || ''
+    const route = (source?.transport || source?.channel || '').trim()
+    const name = !route || route === carrier ? carrier : route.startsWith(carrier) ? route : [carrier, route].filter(Boolean).join(' · ')
+    const percent = plan.mode === 'weighted' ? String(member.weight) : new Decimal(100).div(plan.members.length).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString()
+    const approximate = plan.mode === 'equal' && !new Decimal(percent).mul(plan.members.length).equals(100) ? '≈' : ''
+    return `${approximate}${percent}%${name || '来源渠道未保存'}`
+  }).join(' + ')
+}
 /** Describe every saved source region; a cross-zone plan must not inherit only the first zone. */
 export function averageSelectedRegions(plan: AveragePlan, options: { id: string; quoteRegion?: string }[] = []) {
   const members = new Set(plan.members.map(member => member.optionId))
@@ -73,7 +85,7 @@ export function applyAveragePlans(sheet: CustomerQuoteSheet, plans: AveragePlan[
     const first = sourceRows.find(row => keys.has(row.key))
     if (!first) continue
     const summary: CustomerQuoteSheetRow = {
-      ...first, key: `average:${plan.id}`, number: 'AVG', averageId: plan.id, provider: plan.provider,
+      ...first, key: `average:${plan.id}`, number: 'AVG', averageId: plan.id, provider: averageProviderLabel(plan, id => sources.find(row => quoteSheetRowKey(row) === id)),
       region: [...new Set(sourceRows.filter(row => keys.has(row.key)).map(row => row.region).filter(Boolean))].join(' / '),
       shippingTime: formatShippingTime(plan.shippingTime || 'To be confirmed'), processingTime: '1-2 working days',
       prices: quantities.map(q => plan.prices[plan.quantities.indexOf(q)] ?? null),

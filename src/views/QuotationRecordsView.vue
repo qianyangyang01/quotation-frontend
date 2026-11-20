@@ -36,6 +36,7 @@ import { quotationProductCategories } from '@/components/quotation/types'
 import QuotationProductImage from '@/components/quotation/QuotationProductImage.vue'
 import PurchaseCategoryBadge from '@/components/purchase/PurchaseCategoryBadge.vue'
 import QuotationRecordCopyActions from '@/components/quotation/QuotationRecordCopyActions.vue'
+import QuotationRecordTableCopy from '@/components/quotation/QuotationRecordTableCopy.vue'
 import { representativePriceDifference } from '@/data/customerQuotePrices'
 import CustomerPriceComparison from '@/components/quotation/CustomerPriceComparison.vue'
 import CustomerPriceRevision from '@/components/quotation/CustomerPriceRevision.vue'
@@ -676,6 +677,7 @@ function toast(text: string) { notice.value = text; window.setTimeout(() => noti
           <button v-if="row.quoteMode==='fob'" class="difference-cell" @click="open(row)"><template v-if="row.fob?.schemaVersion===2"><b>FOB批量 · {{ row.fob.items?.length }}行商品</b><span>查看各商品最终报价</span></template><template v-else-if="row.fob?.product.classification"><b>最终价 ${{row.fob.current?.declaredUsd}}</b><span>{{row.fob.quantities?.join(' / ') || row.fob.quantity}}件</span></template><template v-else><b>报关 ${{ row.fob?.current?.declaredUsd }}</b><span>不报关 ${{ row.fob?.current?.undeclaredUsd }} · {{ row.fob?.quantity }}件</span></template></button>
           <button v-else class="difference-cell" :class="representativePriceDifference(row).changed ? 'lower' : 'equal'" :title="representativePriceDifference(row).channel" @click="open(row)"><b>{{ representativePriceDifference(row).label }}</b><span>{{ representativePriceDifference(row).detail }}</span></button>
           <div class="record-row-actions">
+            <QuotationRecordTableCopy :record="row" :disabled="loading || lifecycleBusy || mutationBusy" />
             <button v-if="unreadReview(row.id)" type="button" class="review-unread-link" @click="open(row)">● 未读 · 查看审核结果</button>
             <QuotationReviewPanel :record="row" :state="reviewSync.stateFor(row)" :account="currentAuthUser.account" :can-review="canReview&&isActive(row)" :admin="currentAuthUser.role==='super_admin'" :busy="reviewing.has(row.id)||lifecycleBusy" compact @action="changeReview(row,$event)" @open="open(row)" @comment-saved="commentSaved" @viewed="reviewViewed(row,$event)">
               <template #inspection><QuotationSpotCheck :state="reviewSync.stateFor(row)" :can-mark="false" /></template>

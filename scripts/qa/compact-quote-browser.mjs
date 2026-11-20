@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict'
+import {mkdir,writeFile,readFile} from 'node:fs/promises'
+import {pathToFileURL} from 'node:url'
+import {execFileSync} from 'node:child_process'
+const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE || 'C:/Users/25490/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs').href)
+const out='outputs/compact-quote'
+await mkdir(out,{recursive:true})
+const browser=await chromium.launch({channel:'chrome',headless:process.env.QA_VISIBLE!=='1'})
+const context=await browser.newContext({viewport:{width:1700,height:1100},permissions:['clipboard-read','clipboard-write']})
+const page=await context.newPage()
+await page.addInitScript(()=>localStorage.setItem('milano.quote-sheet-column-order.v1:local-compact-preview',JSON.stringify(['sku','product','sizeRules','country','prices','provider','number','shippingTime','processingTime'])))
+const errors=[];page.on('pageerror',error=>errors.push(error.message))
+// Synthetic product drawn locally; never use or send real procurement data.
+const sample=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=200;c.height=200;const x=c.getContext('2d');x.fillStyle='#eaf5ff';x.fillRect(0,0,200,200);x.fillStyle='#d39b53';x.fillRect(45,45,110,120);x.fillStyle='#edc48e';x.fillRect(45,45,110,28);x.fillStyle='#fff';x.fillRect(83,45,34,120);x.fillStyle='#34495e';x.font='bold 16px Arial';x.fillText('DEMO',76,113);return c.toDataURL('image/png').split(',')[1]})
+await writeFile(`${out}/sample.png`,Buffer.from(sample,'base64'))
+try {
+  await page.goto('http://127.0.0.1:5392/scripts/qa/compact-quote-fixture.html')
+  const button=page.getByRole('button',{name:'复制图文表格',exact:true}).first()
+  await button.waitFor()
+  await page.waitForFunction(()=>!document.body.textContent.includes('正在读取报价单图片'))
+  const before=await page.evaluate(()=>JSON.stringify(window.localRecord))
+  await page.locator('.record-table-copy > button').click()
+  await page.locator('.record-table-copy > [role=status]').filter({hasText:'图文表格已复制'}).waitFor()
+  const listHtml=await page.evaluate(async()=>{const items=await navigator.clipboard.read();return (await items[0].getType('text/html')).text()})
+  assert.equal(await page.locator('dialog[open]').count(),0)
+  assert.equal(await page.locator('.record-table-copy .customer-sheet').count(),0)
+  await page.locator('.record-table-copy').screenshot({path:`${out}/record-list-button.png`})
+  await button.click()
+  await page.getByText('图文表格已复制，可直接粘贴到 WPS；同 SKU 和商品图片为合并单元格',{exact:true}).first().waitFor()
+  const html=await page.evaluate(async()=>{const items=await navigator.clipboard.read();const blob=await items[0].getType('text/html');return blob.text()})
+  await writeFile(`${out}/clipboard.html`,html)
+  await page.getByText('查看图文表格',{exact:true}).first().click()
+  await page.locator('.sheet-accessible[open] table').first().screenshot({path:`${out}/compact-table.png`})
+  await page.screenshot({path:`${out}/workbench.png`,fullPage:true})
+  await page.getByRole('button',{name:'隐藏第 1 行',exact:true}).first().click()
+  await button.click()
+  await page.getByText('图文表格已复制，可直接粘贴到 WPS；同 SKU 和商品图片为合并单元格',{exact:true}).first().waitFor()
+  const hiddenHtml=await page.evaluate(async()=>{const items=await navigator.clipboard.read();return (await items[0].getType('text/html')).text()})
+  assert.ok(!hiddenHtml.includes('13.40'))
+  assert.ok(hiddenHtml.includes('14.33'));assert.ok(hiddenHtml.includes('50%顺丰商派 + 50%燕文'))
+  assert.ok(hiddenHtml.includes('rowspan="6"'))
+  await page.locator('.record-copy-buttons').getByRole('button',{name:'复制图文表格',exact:true}).click()
+  await page.locator('.record-copy-actions > [role=status]').filter({hasText:'图文表格已复制'}).waitFor()
+  const detailHtml=await page.evaluate(async()=>{const items=await navigator.clipboard.read();return (await items[0].getType('text/html')).text()})
+  assert.equal(listHtml,detailHtml)
+  if(process.env.QA_WPS==='1') {
+    execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/qa/compact-quote-wps.ps1'],{encoding:'utf8',windowsHide:true})
+    const result=JSON.parse((await readFile(`${out}/wps-result.json`,'utf8')).replace(/^\uFEFF/,''))
+    assert.equal(result.shapes,1);assert.equal(result.rows,9);assert.equal(result.columns,8)
+    assert.equal(result.sku,'BK2603011');assert.equal(result.firstPrice,13.4);assert.equal(result.averagePrice,14.33)
+    assert.equal(result.skuMerged,'$A$3:$A$9');assert.equal(result.photoMerged,'$B$3:$B$9')
+    assert.equal(result.provider,'50%顺丰商派 + 50%燕文');assert.equal(result.photoTopLeft,'$B$3')
+    console.log('PASS: real WPS pasted numeric cells, merged SKU/photo cells and embedded product image.')
+  }
+  assert.equal(await page.locator('dialog[open]').count(),0)
+  assert.equal(await page.evaluate(()=>JSON.stringify(window.localRecord)),before)
+  const currentSheet=page.locator('.customer-sheet').first()
+  for(let i=0;i<5;i++)await currentSheet.locator('[data-group-handle="country"]').press('ArrowLeft')
+  await currentSheet.getByRole('button',{name:'第 1 个价格列排序，左右键移动',exact:true}).press('ArrowRight')
+  await currentSheet.getByRole('button',{name:'第 1 行排序，上下键移动',exact:true}).press('ArrowDown')
+  await button.click()
+  await page.getByText('图文表格已复制，可直接粘贴到 WPS；同 SKU 和商品图片为合并单元格',{exact:true}).first().waitFor()
+  const reordered=await page.evaluate(async()=>{
+    const items=await navigator.clipboard.read(),html=await (await items[0].getType('text/html')).text()
+    const doc=new DOMParser().parseFromString(html,'text/html')
+    return {html,headers:[...doc.querySelectorAll('thead tr:first-child th')].map(cell=>cell.textContent),quantities:[...doc.querySelectorAll('thead tr:last-child th')].map(cell=>cell.textContent),prices:[...doc.querySelectorAll('tbody tr:first-child td[x\\:num]')].map(cell=>cell.getAttribute('x:num'))}
+  })
+  assert.equal(reordered.headers[0],'Country / Zone')
+  assert.deepEqual(reordered.quantities,['2 pcs','1 pc','3 pcs'])
+  assert.deepEqual(reordered.prices,['25.18','14.33','36.55'])
+  await writeFile(`${out}/reordered-clipboard.html`,reordered.html)
+  if(process.env.QA_WPS==='1') {
+    execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/qa/compact-quote-wps.ps1','-Reordered'],{encoding:'utf8',windowsHide:true})
+    const result=JSON.parse((await readFile(`${out}/wps-reordered-result.json`,'utf8')).replace(/^\uFEFF/,''))
+    // WPS can split a wrapped HTML row into vertically merged physical rows.
+    // Verify logical rows and every numeric value rather than counting blank split rows.
+    assert.equal(result.columns,8);assert.equal(result.shapes,1)
+    assert.deepEqual(result.dataRows.map(row=>row.prices),[[25.18,14.33,36.55],[23.7,13.45,34],[18.85,11.15,26.75],[21.15,11.9,31.75],[19.65,12.3,27],[25.35,15.8,35.55]])
+    assert.equal(result.firstHeader,'Country / Zone')
+    assert.equal(result.firstQuantity,'2 pcs');assert.equal(result.secondQuantity,'1 pc')
+    assert.equal(result.firstPrice,25.18);assert.equal(result.secondPrice,14.33)
+    assert.equal(result.skuMerged,`$B$3:$B$${result.rows}`);assert.equal(result.photoMerged,`$C$3:$C$${result.rows}`)
+    assert.equal(result.photoTopLeft,'$C$3');assert.equal(result.provider,'50%顺丰商派 + 50%燕文')
+    console.log('PASS: real WPS retained moved columns, quantities, rows and price alignment.')
+  }
+  await currentSheet.getByText('查看图文表格',{exact:true}).click()
+  await currentSheet.locator('.sheet-accessible[open] table').screenshot({path:`${out}/reordered-table.png`})
+  assert.deepEqual(errors,[])
+  await writeFile(`${out}/report.json`,JSON.stringify({checks:['one-click record list with complete saved snapshot','one-click current sheet','actual HTML clipboard','one-click saved record','saved record unchanged','record dialog not required','photo included','weighted source labels','hidden rows excluded without changing averaged prices','moved column groups and quantity columns','moved rows preserve price alignment'],errors},null,2))
+  console.log('PASS: editable table clipboard prepared for WPS.')
+} catch(error) {
+  console.error(await page.locator('.record-table-copy').innerText().catch(()=>''),errors)
+  await page.screenshot({path:`${out}/failure.png`,fullPage:true}).catch(()=>{})
+  throw error
+} finally {await browser.close()}

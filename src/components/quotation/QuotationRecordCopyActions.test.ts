@@ -46,6 +46,21 @@ beforeEach(() => {
 function batchMembers() {
   return [record('one'), record('two')].map((row, index) => ({ ...row, primarySku: `SKU-${index + 1}`, quotationBatch: { id: 'batch', no: 'B1', index: index + 1, count: 2 } }))
 }
+it('copies saved record editable HTML in one click without opening a dialog or saving', async () => {
+  const write=vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('navigator',{clipboard:{write,writeText}})
+  vi.stubGlobal('ClipboardItem',class {constructor(public items:Record<string,Blob>) {}})
+  const state=mount();await settle()
+  const before=JSON.stringify(state.record)
+  footerButton('复制图文表格').click();await settle()
+  expect(render).not.toHaveBeenCalled()
+  expect(write).toHaveBeenCalledTimes(1)
+  const html=await write.mock.lastCall![0][0].items['text/html'].text()
+  for(const price of ['6.20','8.30','10.95'])expect(html).toContain(`x:num="${price}"`)
+  expect(document.querySelector('dialog')!.open).toBe(false)
+  expect(updateQuotationRecord).not.toHaveBeenCalled()
+  expect(JSON.stringify(state.record)).toBe(before)
+})
 async function chooseBatch(label: string) {
   footerButton(`${label}范围`).click(); await settle()
   const menu = document.querySelector(`[role="menu"][aria-label="${label}范围"]`)!

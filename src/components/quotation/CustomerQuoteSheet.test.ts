@@ -52,6 +52,29 @@ beforeEach(() => {
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(revoke)
 })
 afterEach(() => { app?.unmount(); document.body.innerHTML = ''; authState.current = null; localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+it('copies editable HTML directly from edited prices without preview or changing the quote', async () => {
+  mount(); await settle()
+  await input('第 1 行第 1 列美元价格','13.40')
+  const before=exposed.capturePrices()
+  await click('复制图文表格')
+  expect(render).not.toHaveBeenCalled()
+  expect(write).toHaveBeenCalledTimes(1)
+  const html=await write.mock.lastCall![0][0].items['text/html'].text()
+  expect(html).toContain('x:num="13.40"')
+  expect(html).not.toContain('IMPORTANT NOTES')
+  expect(document.body.textContent).toContain('图文表格已复制')
+  expect(exposed.capturePrices()).toEqual(before)
+})
+it('does not copy outdated table prices while waiting for the clipboard lock', async () => {
+  const state=mount();await settle()
+  let finish!:()=>Promise<void>
+  vi.stubGlobal('navigator',{clipboard:{write,writeText},locks:{request:(_name:string,_options:unknown,callback:(lock:object)=>Promise<void>)=>new Promise<void>((resolve,reject)=>{finish=async()=>{try{await callback({});resolve()}catch(error){reject(error)}}})}})
+  await click('复制图文表格')
+  state.rows=[{...row(),quote1:99}];await settle()
+  await finish();await settle()
+  expect(write).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('报价已发生变化')
+})
 
 it.each([false,true])('restores the latest record contact and size rules over the original batch sheet, including clearing: %s', async cleared => {
   mount();await settle()
