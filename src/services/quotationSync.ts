@@ -11,6 +11,11 @@ export function checkSelectedLogistics(body: unknown, signal?: AbortSignal) {
     method: 'POST', body: JSON.stringify(body), signal: signal || AbortSignal.timeout(15000), cache: 'no-store',
   })
 }
+/** Poll only complete SKU inputs; submission must still validate every active SKU. */
+export function quotationPollingSkus(skus: readonly string[]) {
+  return [...new Set(skus.map(sku => sku.trim().toUpperCase().replace(/\s/g, ''))
+    .filter(sku => sku.length <= 96 && /^[A-Z0-9._/-]+$/.test(sku)))].sort()
+}
 export function loadQuotationSync(skus: string[], signal?: AbortSignal) {
   const params = new URLSearchParams()
   ;[...new Set(skus.filter(Boolean))].sort().forEach(sku => params.append('sku', sku))

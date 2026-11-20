@@ -48,6 +48,8 @@ function financeResponse(disableS = false) {
 }
 
 type PricingState = {
+  quoteMode: string
+  checkLiveVersions: (signal?: AbortSignal, beforeSave?: boolean) => Promise<boolean>
   quoteMatrixMode: 'common' | 'template'
   ensureCountries: (countries: string[]) => Promise<boolean>
   logisticsLoadState: string
@@ -356,6 +358,45 @@ describe('quotation finance initialization for an employee', () => {
     expect(state.products[0].status).toBe('当前条件没有已发布物流渠道')
     expect(host.querySelector('.product-card .state')?.textContent).toContain('当前条件没有已发布物流渠道')
     expect(host.querySelector('.product-card .state')?.textContent).not.toContain('正在加载')
+  })
+
+  it.each(['QY2601484+QY2601485*2+QY2601486+QY2601488', 'SKU1*1;SKU2*1', 'SKU+'])('ignores unfinished bundle input %s only during polling, without bypassing save validation', async unfinished => {
+    await mountPage()
+    resolveFinance(financeResponse())
+    await vi.waitFor(() => expect(state.draftReady).toBe(true))
+    state.quoteMode = 'bundle'
+    await nextTick()
+    state.bundleItems = [
+      { ...state.bundleItems[0]!, sku: unfinished, quantityPerSet: 2, customWeightKg: null },
+      { ...state.bundleItems[0]!, sku: 'VALID-SKU', quantityPerSet: 1, customWeightKg: null },
+    ]
+    await nextTick()
+    state.draftNeedsQuery = true
+    state.syncError = 'SKU格式不合法'
+    const before = JSON.stringify(state.draftPayload())
+    const originalGet = vi.mocked(api.get).getMockImplementation()!
+    const requestedSkus: string[][] = []
+    vi.mocked(api.get).mockImplementation(async (path, ...args) => {
+      if (path.startsWith('/quotation-sync?')) {
+        const skus = new URL(path, 'https://test.invalid').searchParams.getAll('sku')
+        requestedSkus.push(skus)
+        if (skus.includes(unfinished)) throw new Error('SKU格式不合法')
+        return { purchaseVersions: {}, logisticsRevision: '', financeVersions: financeSettingVersions() }
+      }
+      return originalGet(path, ...args)
+    })
+    const writeDraft = vi.spyOn(api, 'put').mockRejectedValue(new Error('Polling must not write'))
+    await vi.mocked(startQuotationSync).mock.calls[0]![0](new AbortController().signal)
+    expect(requestedSkus).toEqual([['VALID-SKU']])
+    expect(state.syncError).toBe('')
+    expect(JSON.stringify(state.draftPayload())).toBe(before)
+    expect(writeDraft).not.toHaveBeenCalled()
+    await expect(state.checkLiveVersions(undefined, true)).rejects.toThrow('SKU格式不合法')
+    expect(requestedSkus[1]).toContain(unfinished)
+    // A complete SKU with a missing purchase revision must still block stale-price saving.
+    state.draftNeedsQuery = false
+    expect(await state.checkLiveVersions()).toBe(false)
+    expect(state.syncPending).toContain('采购资料')
   })
 
   it('rechecks a transient sync failure without writing or reloading the draft or recalculating the quote', async () => {

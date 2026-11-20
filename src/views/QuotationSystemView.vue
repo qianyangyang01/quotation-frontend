@@ -43,7 +43,7 @@ import { createCountryQuotationCache } from '@/services/countryQuotationCache'
 import { createCountryQuotationGeneration } from '@/services/countryQuotationGeneration'
 import { loadAdditionalCountryRules } from '@/services/publishedLogisticsCountryLoader'
 import { changedFinanceSettings, financeSettingVersions, financeSettingsAreHydrated, financeSettingsAreLoading, financeSettingsLoadError, hydrateFinanceSettings, readFinanceSetting, type FinanceSettingVersions } from '@/services/financeSettings'
-import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, startQuotationSync } from '@/services/quotationSync'
+import { checkSelectedLogistics, loadQuotationSync, purchaseRevision, quotationPollingSkus, startQuotationSync } from '@/services/quotationSync'
 import { ApiError } from '@/services/http'
 import { buildQuotationWeightSnapshot, parseSpecialPackagingGrams, SPECIAL_PACKAGING_ERROR } from '@/data/quotationWeightSnapshot'
 import { draftSelection, migrateDraftMatrix, loadQuotationDraft, saveQuotationDraft, type DraftChannelSelection, type QuotationDraftPayload } from '@/services/quotationDrafts'
@@ -1013,7 +1013,8 @@ function changedAppliedFinance(latest: FinanceSettingVersions) { return changedF
 async function checkLiveVersions(signal?: AbortSignal, beforeSave = false) {
   const request = ++liveVersionCheckSequence
   try {
-    const skus = activePurchaseSkus()
+    // Editable bundle rows may contain unfinished expressions. Keep save-time checks strict.
+    const skus = beforeSave ? activePurchaseSkus() : quotationPollingSkus(activePurchaseSkus())
     const key = draftSignature()
     const result = await loadQuotationSync(skus, signal)
     if (signal?.aborted || request !== liveVersionCheckSequence || key !== draftSignature() || logisticsLoadState.value === 'loading' || productQueryBusy.value) return false

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { loadQuotationSync, purchaseRevision, startQuotationSync } from './quotationSync'
+import { loadQuotationSync, purchaseRevision, quotationPollingSkus, startQuotationSync } from './quotationSync'
 const { get } = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('./http', () => ({ api: { get } }))
 
@@ -8,6 +8,12 @@ describe('scoped quotation synchronization', () => {
   let stop: (() => void) | undefined
   beforeEach(() => { vi.useFakeTimers(); vi.spyOn(document, 'hidden', 'get').mockReturnValue(false); get.mockReset() })
   afterEach(() => { stop?.(); vi.useRealTimers(); vi.restoreAllMocks() })
+  it('polls canonical SKUs without guessing products from unfinished bundle expressions', () => {
+    const inputs = [' tc2602578-5 ', 'TC2602578-5', 'A/B_C.1', 'SKU1+SKU2*2', 'SKU1*1;SKU2*1', 'SKU+', '', '中', 'A'.repeat(97), 'B'.repeat(96)]
+    const original = [...inputs]
+    expect(quotationPollingSkus(inputs)).toEqual(['A/B_C.1', 'B'.repeat(96), 'TC2602578-5'])
+    expect(inputs).toEqual(original)
+  })
   it('requests only active SKUs without paging or a purchase-wide revision', async () => {
     get.mockResolvedValue({ purchaseVersions: { CURRENT: '1:now' }, logisticsRevision: 'r1' })
     await loadQuotationSync(['CURRENT','CURRENT',''])
