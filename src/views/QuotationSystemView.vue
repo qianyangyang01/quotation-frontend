@@ -32,7 +32,7 @@ import { quotationRowsSignature as matrixRowsSignature } from '@/services/quotat
 import { normalizeLogisticsAttribute, quotationLogisticsAttribute, quotationLogisticsAttributeOptions } from '@/data/logisticsAttributes'
 import { quoteCnyFromUsd } from '@/services/quotationMoney'
 import { calculateFinanceQuoteFees, FINANCE_SURCHARGE_SETTINGS_UPDATED_EVENT, loadFinanceSurchargeSettings } from '@/data/financeSurchargeSettings'
-import { defineAsyncComponent, computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { defineAsyncComponent, computed, shallowRef, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { loadRecord } from '@/data/quotationRecordQuery'
 import { quotationReissuePayload } from '@/services/quotationReissue'
@@ -157,6 +157,8 @@ const logisticsRevision = ref('')
 // whenever that array is cleared or repopulated.
 const logisticsRulesGeneration = ref(0)
 const countryRulesGeneration = createCountryQuotationGeneration(logisticsRulesGeneration)
+// A missing historical channel must still be explicitly confirmed by the user.
+const primarySelectionRequired = new WeakSet<Product>()
 const savingQuotation = ref(false)
 const syncPending = ref('')
 const syncError = ref('')
@@ -1422,7 +1424,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     const primary = primaryRows.find(row => productState?.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
       || (!productState?.primaryChannelKey ? primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier) : undefined)
     if (primary) { selectedQuoteRegions.value[primary.country] = primary.quoteRegion || ''; p.country = primary.country; p.rule = primary.rule; p.selectedChannelKey = primary.channelKey; p.channel = primary.carrier; p.freight = primary.freight; p.status = '已恢复草稿并按当前规则重新计算' }
-    else if (productState?.primaryChannelKey) { p.rule = ''; p.selectedChannelKey = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已失效，请重新选择物流并确认价格'; toast('原报价引用的渠道不在当前物流库，请重新选择，不会按同名渠道自动套价') }
+    else if (productState?.primaryChannelKey) { primarySelectionRequired.add(p); p.rule = ''; p.selectedChannelKey = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已失效，请重新选择物流并确认价格'; toast('原报价引用的渠道不在当前物流库，请重新选择，不会按同名渠道自动套价') }
   }
   restoredSelectionVersion.value += 1
   draftRestored.value = true
@@ -2123,6 +2125,40 @@ const savedQuoteRows = computed(() => {
   if (quoteMatrixMode.value !== 'common') return activeMatrixRows.value
   return commonQuoteRows.value
 })
+// Additional countries/templates can finish after the initial automatic choice found
+// no route. Repair only that empty choice, using the active, verified selection.
+// Never serialize a record here or replace an existing/manual primary channel.
+function syncMissingPrimaryChannel() {
+  const p = products.value[0]
+  if (!p || (p.country && p.rule) || primarySelectionRequired.has(p)) return
+  if (!draftReady.value || draftNeedsQuery.value || fobActive.value || !quotationHasInputs()
+    || productQueryBusy.value || syncRefreshing.value || syncPending.value || syncError.value
+    || recoveryRestoring.value || recoveryPending.value || savingQuotation.value
+    || logisticsLoadState.value !== 'ready' || logisticsRebuilding.value
+    || countryLoads.value || countryLoadError.value || !financeSettingsAreHydrated()
+    || purchaseTaxBlockReason.value || specialPackagingError.value || commissionError.value) return
+  const selectionState = quoteMatrixMode.value === 'template' ? templateSelectionState.value : commonSelectionState.value
+  if (selectionState !== 'ready') return
+  const quantity = isBundleQuotation(quoteMode.value) ? 1 : Math.max(1, p.quantity)
+  for (const row of savedQuoteRows.value) {
+    if (row.available === false || row.quote1 == null || !Number.isFinite(row.quote1) || !row.taxConfigured
+      || !row.country || !row.rule || !row.carrier || !row.channelKey
+      || !financeAllowedChannelKeys(financePolicies.value, p.logisticsAttribute, row.country).has(row.channelKey)) continue
+    const current = quantityCostBreakdown(p, row.rule, quantity, row.country, row.carrier, row.quoteRegion || '', row.channelKey)
+    if (!current?.tax.configured || !Number.isFinite(current.quoteUsd)) continue
+    selectedQuoteRegions.value[row.country] = row.quoteRegion || ''
+    p.country = row.country
+    p.channel = row.carrier
+    p.rule = row.rule
+    p.selectedChannelKey = row.channelKey
+    p.freight = current.freight
+    p.manualFreight = false
+    p.status = '已从报价清单补齐首选渠道'
+    return
+  }
+}
+watchEffect(syncMissingPrimaryChannel, { flush: 'post' })
+
 function removePreviewRow(key: string) {
   if (savingQuotation.value || retryingSavePreparation.value) return
   const row = savedQuoteRows.value.find(row => quoteSheetRowKey(row) === key)
