@@ -1,6 +1,6 @@
 # FOB 最终报价折扣（2026-11-20）
 
-本地实现，尚未发布。独立分支 codex/fob-discount-20261120，基线 e52bdde5；工作区位于 Documents/ProjectWorkspaces/quotation/worktrees/fob-discount-20261120。主工作区现有物流改动未混入。
+已于北京时间 2026-11-20 13:52 发布，版本 quotation-2026.11.20-02-fob-discount。独立分支 codex/fob-discount-20261120，基线 e52bdde5；工作区位于 Documents/ProjectWorkspaces/quotation/worktrees/fob-discount-20261120。主工作区现有物流改动未混入。
 
 ## 计价口径
 
@@ -29,4 +29,14 @@
 - 真实 Chrome 本地页面验收脚本：scripts/qa/fob-discount-browser.mjs。所有接口由本地测试拦截，示例 SKU 和价格不用于业务，没有生产读写。覆盖默认值、100→95、复制、图片、保存请求、非法值、批量预览、再次发起、三类切换以及普通报价隔离。
 - 浏览器证据：outputs/fob-discount-browser/default-discount.png、discount-095.png、batch-discount.png、report.json。
 
-后续如发布，应核对届时生产基线并将前后端作为同一批变更发布；后端兼容旧客户端不带 discount 的请求（按 1），不能只更新前端。此次未执行部署或生产数据操作。
+## 生产发布与验收
+
+- 发布提交 b24809605dff8cd3b4e5482f7dadfa528f59e5de，保留当天已上线的前端 primary-sync 与后端 Jitong 更新，前后端作为同批变更发布。后端兼容旧客户端不带 discount 的请求（按 1）。
+- 完整 CI：https://github.com/qianyangyang01/quotation-frontend/actions/runs/44682597106。前端 2784 通过、26 项原有跳过；后端 1490 项、0 失败、0 错误、72 项原有跳过，覆盖率及集成测试门禁通过。FOB 数据库 14 项全部通过，无跳过。
+- 部署前完成数据库和对象存储备份，备份目录 /srv/ahmln-data/quotation-app/backups/20261120T054915Z-full；另存采购供应商导出，保留旧备份。上一版本 quotation-2026.11.20-01-primary-sync 保留。
+- 与线上原后端逐项比对，部署包仅 FobQuotation、FobBatchCorrections、BatchQuotationSubmission 三个业务 class 内容不同；已有迁移、规则与依赖字节保持一致，无数据库迁移。
+- 生产前后端健康、培训服务健康、产物哈希及 buildId 验证通过。14 个旧页面资源保持可访问且哈希一致。解析器、数据库、Redis、MinIO 及培训容器未重建。发布后日志检查未见 ERROR 或 HTTP 5xx。
+- 发布前后 18 张业务表逐行哈希完全一致，包括 10,461 条报价、5,776 条审核、31,577 条采购；没有历史价格或状态变更。Flyway 记录一致。
+- 使用生产已部署静态资源进行 Chrome 验收，全部业务接口隔离为示例数据，验证默认 1、100→95、保存快照、无效值、批量、再次发起及模式隔离，浏览器无错误。此验收没有向生产保存示例报价。
+- 验收限制：维护账号登录返回 401，未改账号或绕过认证，因此真实登录下的生产报价预览接口未完成验收；后端价格准确性由上述独立计算、数据库回归和已部署产物一致性验证支撑。
+- 发布证据：C:/Users/25490/Documents/ProjectWorkspaces/quotation/release-packages/quotation-2026.11.20-02-fob-discount/ACCEPTANCE.md。
