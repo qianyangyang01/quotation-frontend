@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createApp, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, ref, type App } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import Sheet from './FobQuoteSheet.vue'
 import { saveFobQuotation } from '@/services/fobQuotationRecords'
@@ -41,8 +41,37 @@ it('blocks double clicks and keeps the idempotency key for timeout retries, chan
 })
 it('renders historical snapshot without recalculation or editable/save actions',async()=>{
   const savedSheet={title:'Saved',agent:'A',date:'9 Oct 2026',quantityLabels:['With declaration','Without declaration'],rows:[{key:'saved',number:1,sku:'OLD',quantityRange:'100+',prices:[3.14,3.2],country:'',provider:'',shippingTime:'',sourceDescription:''}],notes:['Original'],issues:[]}
-  mount({savedSheet,rate:999,quantity:'invalid',product:{...product,parsed:{...product.parsed,priceTiers:[]}}});await tick()
+  mount({savedSheet,discount:.5,rate:999,quantity:'invalid',product:{...product,parsed:{...product.parsed,priceTiers:[]}}});await tick()
   expect(vi.mocked(renderCustomerQuoteSheet).mock.calls.at(-1)![0]).toEqual(savedSheet)
   expect(button('保存FOB报价')).toBeUndefined();expect(button('编辑报价单')).toBeUndefined()
   expect(normalizeQuotationRecord({id:'x',no:'x',quoteMode:'fob',quoteOptions:[],fob:{schemaVersion:1,product,rate:6.7,quantity:26,policy:FOB_SMALL_ORDER_POLICY,displayMode:'tiers',sheet:savedSheet}})?.quoteMode).toBe('fob')
+})
+
+it('saves discounted prices and the discount together and keeps historical prices intact',async()=>{
+  vi.mocked(saveFobQuotation).mockResolvedValue(normalizeQuotationRecord({id:'r',no:'FOB-DISCOUNT',quoteMode:'fob'})!)
+  mount({discount:.95});await tick();await customer('折扣验收');button('保存FOB报价').click();await tick()
+  const snapshot=vi.mocked(saveFobQuotation).mock.calls[0]![1]
+  expect(snapshot.discount).toBe(.95)
+  expect(snapshot.sheet.rows.map(r=>r.prices)).toEqual([[1.44,1.47],[1.28,1.30]])
+  expect(vi.mocked(renderCustomerQuoteSheet).mock.calls.at(-1)![0].rows.map(r=>r.prices)).toEqual([[1.44,1.47],[1.28,1.30]])
+})
+it('blocks save and output on an invalid discount',async()=>{
+  mount({discount:0});await tick();await customer('无效折扣')
+  expect(document.body.textContent).toContain('折扣须大于0')
+  expect(button('保存FOB报价').disabled).toBe(true)
+  expect(button('复制报价数据').disabled).toBe(true)
+  expect(saveFobQuotation).not.toHaveBeenCalled()
+})
+
+it('invalidates the saved marker when discount changes even if rounding keeps the same prices',async()=>{
+  const discount=ref(.95), host=document.createElement('div');document.body.append(host)
+  app=createApp({render:()=>h(Sheet,{product,rate:6.7,quantity:'26',policy:FOB_SMALL_ORDER_POLICY,discount:discount.value})});app.mount(host)
+  vi.mocked(saveFobQuotation).mockResolvedValue(normalizeQuotationRecord({id:'r',no:'FOB-SMALL-CHANGE',quoteMode:'fob'})!)
+  await tick();await customer('折扣验收');button('保存FOB报价').click();await tick()
+  expect(button('已保存').disabled).toBe(true)
+  discount.value=.950001;await tick()
+  expect(button('保存FOB报价').disabled).toBe(false)
+  button('保存FOB报价').click();await tick()
+  expect(vi.mocked(saveFobQuotation).mock.calls[1]![1].discount).toBe(.950001)
+  expect(vi.mocked(saveFobQuotation).mock.calls[1]![2]).not.toBe(vi.mocked(saveFobQuotation).mock.calls[0]![2])
 })

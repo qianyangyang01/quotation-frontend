@@ -77,3 +77,13 @@ it('blocks finance initialization and access from another account',async()=>{
   props.financePending=true;await mount();expect(button('重新查询异常项').disabled).toBe(true);expect(loadFobQuoteProduct).not.toHaveBeenCalled()
   app!.unmount();record.salespersonAccount='OTHER';props.financePending=false;await mount();expect(document.body.textContent).toContain('只能处理自己的退回报价');expect(button('提交0项').disabled).toBe(true)
 })
+
+it('preserves the saved discount when re-querying a returned item',async()=>{
+  record.fob!.items![0]!.discount=.95
+  const before=JSON.stringify(record)
+  await mount();button('重新查询异常项').click();await tick()
+  const snapshot=vi.mocked(validateFobQuotation).mock.calls.find(([,s])=>s.product.sku==='OK')![1]
+  expect(snapshot.discount).toBe(.95)
+  expect(snapshot.sheet.rows[0]!.prices).toEqual([.88,.90])
+  expect(JSON.stringify(record)).toBe(before)
+})

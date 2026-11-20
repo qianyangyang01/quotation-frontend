@@ -1,0 +1,54 @@
+{
+  "entries": [
+    {
+      "id": "8d935d9c-7be5-4089-b83c-ff4a90a4c779",
+      "providerName": "极通环球",
+      "providerAliases": [],
+      "channelName": "极通环球-定制特惠普货",
+      "aliases": [],
+      "productCodes": [
+        "JTHQ-MDBS"
+      ],
+      "logisticsAttribute": "普货",
+      "enabled": true
+    },
+    {
+      "id": "62dd44e3-2b6a-45af-8dca-90338bedcf7f",
+      "providerName": "极通环球",
+      "providerAliases": [],
+      "channelName": "极通环球-定制特惠特货",
+      "aliases": [],
+      "productCodes": [
+        "JTHQ-THDH"
+      ],
+      "logisticsAttribute": "化妆品",
+      "enabled": true
+    },
+    {
+      "id": "0650576e-1347-4924-9d39-37c65ac2aa23",
+      "providerName": "极通环球",
+      "providerAliases": [],
+      "channelName": "极通环球-定制特惠敏感",
+      "aliases": [
+        "极通环球-特惠定制敏感"
+      ],
+      "productCodes": [
+        "JTHQ-BSDM"
+      ],
+      "logisticsAttribute": "化妆品",
+      "enabled": true
+    },
+    {
+      "id": "e12b2034-adfc-4b93-99de-5322c1c26bd6",
+      "providerName": "极通环球",
+      "providerAliases": [],
+      "channelName": "极通环球-定制特惠纯电",
+      "aliases": [],
+      "productCodes": [
+        "JTHQ-BSCD"
+      ],
+      "logisticsAttribute": "纯电",
+      "enabled": true
+    }
+  ]
+}

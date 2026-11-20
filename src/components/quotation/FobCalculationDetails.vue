@@ -4,7 +4,7 @@ import { canViewPurchaseCost } from '@/data/quotationVisibility'
 import { canViewFobCoefficient } from '@/services/fobClassification'
 import { needsFobInvoiceVerification, type FobQuoteProduct, type FobQuoteRow } from '@/services/fobQuotation'
 
-const props = withDefaults(defineProps<{product:FobQuoteProduct;rate:number;row?:FobQuoteRow|null;quantity?:number;extraCny?:number;finalUsd?:string;showNotice?:boolean;showCalculation?:boolean}>(),{showNotice:true,showCalculation:true,extraCny:0})
+const props = withDefaults(defineProps<{discount?:number;product:FobQuoteProduct;rate:number;row?:FobQuoteRow|null;quantity?:number;extraCny?:number;finalUsd?:string;showNotice?:boolean;showCalculation?:boolean}>(),{discount:1,showNotice:true,showCalculation:true,extraCny:0})
 const legacy=computed(()=>props.product.invoicePricing?.mode==='legacy-ten-point')
 const needsVerification=computed(()=>needsFobInvoiceVerification(props.product))
 const sourceLabel=computed(()=>props.product.source==='fob'?'原FOB专用资料':'系统新采购数据')
@@ -31,9 +31,9 @@ const money=(n:number)=>Number(n.toFixed(4)).toLocaleString('en-US',{minimumFrac
       </div>
       <div v-if="canViewPurchaseCost" class="step"><span>② 单件综合成本</span><b>{{money(row.taxIncludedCny)}} + {{money(row.freightCny)}} = ¥{{money(row.costCny)}}</b><small>国内运费直接相加，不加票点</small></div>
       <div class="step"><span>{{canViewPurchaseCost?'③ ':''}}本次数量最终报价</span>
-        <b v-if="canViewFobCoefficient && canViewPurchaseCost && product.pricing?.fobCoefficient"><template v-if="extraCny">（{{money(row.costCny)}} + {{money(extraCny)}}）</template><template v-else>{{money(row.costCny)}}</template> × {{product.pricing.fobCoefficient}} ÷ {{money(rate)}} = <em>${{finalUsd}} / {{row.unit}}</em></b>
+        <b v-if="canViewFobCoefficient && canViewPurchaseCost && product.pricing?.fobCoefficient"><template v-if="extraCny">（{{money(row.costCny)}} + {{money(extraCny)}}）</template><template v-else>{{money(row.costCny)}}</template> × {{product.pricing.fobCoefficient}} ÷ {{money(rate)}}<template v-if="discount !== 1">（原单价保留2位）× {{discount}}</template> = <em>${{finalUsd}} / {{row.unit}}</em></b>
         <b v-else>${{finalUsd}} / {{row.unit}}</b>
-        <small>{{extraCny?`含每件 ¥${money(extraCny)} 小额订单加价`:'无小额订单加价'}} · 汇率 {{rate}} CNY/USD</small>
+        <small>{{extraCny?`含每件 ¥${money(extraCny)} 小额订单加价`:'无小额订单加价'}} · 汇率 {{rate}} CNY/USD · 折扣 {{discount}}</small>
       </div>
     </div>
     <p>按所选报价分类计算，最终美元单价四舍五入保留2位；报价系数及含系数的计算步骤仅管理员可见。</p>

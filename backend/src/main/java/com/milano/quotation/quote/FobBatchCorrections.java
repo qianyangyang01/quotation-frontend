@@ -146,6 +146,7 @@ public class FobBatchCorrections {
     }
     static boolean sourceChanged(JsonNode before,JsonNode after) {
         return !before.at("/product/pricing/version").equals(after.at("/product/pricing/version")) || !before.at("/product/pricing/policyVersion").equals(after.at("/product/pricing/policyVersion")) || !before.at("/product/updatedAt").equals(after.at("/product/updatedAt")) || before.path("quantity").asLong()!=after.path("quantity").asLong()
+                || FobQuotation.discount(before).compareTo(FobQuotation.discount(after))!=0
                 || FobQuotation.amount(before.path("rate")).compareTo(FobQuotation.amount(after.path("rate")))!=0
                 || !before.at("/policy/scope").equals(after.at("/policy/scope")) || !before.at("/policy/calculation").equals(after.at("/policy/calculation"));
     }

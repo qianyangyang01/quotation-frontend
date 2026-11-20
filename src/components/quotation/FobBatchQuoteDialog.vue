@@ -13,7 +13,7 @@ import FobQuoteSheet from './FobQuoteSheet.vue'
 import FobCalculationDetails from './FobCalculationDetails.vue'
 import FobBatchSheetExports from './FobBatchSheetExports.vue'
 
-const props = defineProps<{ classification?: FobClassification; rate: number; policy: FobSmallOrderPolicy | null; financePending?: boolean; financeError?: string; salesperson?: string; initial?: { text: string; mode: FobBatchMode; customer: string; sources?: FobSourceMode[] } }>()
+const props = defineProps<{ discount?: number; classification?: FobClassification; rate: number; policy: FobSmallOrderPolicy | null; financePending?: boolean; financeError?: string; salesperson?: string; initial?: { text: string; mode: FobBatchMode; customer: string; sources?: FobSourceMode[] } }>()
 const emit = defineEmits<{ close: [] }>()
 const classification=ref<FobClassification>(props.classification || 'rebate-fob'), copyMessage=ref('')
 const dialog = ref<HTMLDialogElement>(), paste = ref(props.initial?.text || ''), mode = ref<FobBatchMode>(props.initial?.mode || 'quantity'), source = ref<FobSourceMode>('auto')
@@ -28,25 +28,25 @@ let generation = 0, controller: AbortController | undefined, restoreFocus: HTMLE
 const financeIssue = computed(() => props.financePending ? '财务参数加载中，请稍候' : props.financeError || (!props.policy ? '报价规则尚未就绪，请关闭弹窗后刷新财务参数' : !Number.isFinite(props.rate) || props.rate <= 0 ? '汇率无效' : ''))
 function finalRows(line: FobBatchLine) {
   if (issue(line) || !line.product) return []
-  try { if(mode.value==='tiers')return fobSheetRows(line.product,props.rate,props.policy).map(r=>({...r,label:`${r.minQty}${r.maxQty==null?'+':'–'+r.maxQty}${r.unit}`}))
-    const q=fobQuantityQuote(line.product,fobTierQuotes(line.product,props.rate),line.quantity,props.rate,props.policy);return [{...q,label:`${q.quantity}${q.row.unit}`}]; } catch {return []}
+  try { if(mode.value==='tiers')return fobSheetRows(line.product,props.rate,props.policy,props.discount).map(r=>({...r,label:`${r.minQty}${r.maxQty==null?'+':'–'+r.maxQty}${r.unit}`}))
+    const q=fobQuantityQuote(line.product,fobTierQuotes(line.product,props.rate),line.quantity,props.rate,props.policy,props.discount);return [{...q,label:`${q.quantity}${q.row.unit}`}]; } catch {return []}
 }
 function calculationQuotes(line: FobBatchLine) {
   if(issue(line)||!line.product)return []
   const p=line.product,rows=fobTierQuotes(p,props.rate)
-  const quantities=mode.value==='tiers'?fobSheetRows(p,props.rate,props.policy).map(r=>r.minQty):[Number(line.quantity)]
-  return quantities.map(q=>fobQuantityQuote(p,rows,String(q),props.rate,props.policy))
+  const quantities=mode.value==='tiers'?fobSheetRows(p,props.rate,props.policy,props.discount).map(r=>r.minQty):[Number(line.quantity)]
+  return quantities.map(q=>fobQuantityQuote(p,rows,String(q),props.rate,props.policy,props.discount))
 }
 function costRows(line: FobBatchLine) { try { return line.product ? fobTierQuotes(line.product, props.rate) : [] } catch { return [] } }
-function issue(line: FobBatchLine) { return fobBatchIssue(line, lines.value, mode.value, props.rate, props.policy) }
+function issue(line: FobBatchLine) { return fobBatchIssue(line, lines.value, mode.value, props.rate, props.policy, props.discount) }
 const valid = computed(() => lines.value.filter(l => !issue(l)))
 const legacyCount = computed(() => valid.value.filter(l => l.product && needsFobInvoiceVerification(l.product)).length)
 const selected = computed(() => valid.value.filter(l => l.selected))
 const invalid = computed(() => lines.value.filter(l => !!issue(l)))
 const visible = computed(() => lines.value.filter(l => filter.value === 'all' || (filter.value === 'valid' ? !issue(l) : !!issue(l))))
-const previewChanged = computed(() => !!preview.value && (preview.value.rate !== props.rate || JSON.stringify(preview.value.policy) !== JSON.stringify(props.policy)))
+const previewChanged = computed(() => !!preview.value && (preview.value.rate !== props.rate || (preview.value.discount ?? 1) !== (props.discount ?? 1) || JSON.stringify(preview.value.policy) !== JSON.stringify(props.policy)))
 function discardPreview() { preview.value = undefined; savedNo.value = ''; saveKey.value = ''; stale.value = false }
-watch([mode, source], () => { discardPreview(); if (source.value) { error.value = '' } })
+watch([mode, source, () => props.discount], () => { discardPreview(); if (source.value) { error.value = '' } })
 watch([source,classification], () => { cancelQueries(); lines.value.forEach(l => { l.product = undefined; l.error = ''; l.loading = false }) })
 function cancelQueries() { generation++; controller?.abort(); busy.value = false }
 function changedSku(line: FobBatchLine) { line.sku = line.sku.trim().toUpperCase(); line.product = undefined; line.error = ''; line.formatError = ''; discardPreview() }
@@ -84,7 +84,7 @@ async function generate() {
   saving.value = true
   try {
     if (financeIssue.value) throw new Error(financeIssue.value)
-    const snapshot = fobBatchSnapshot(selected.value, mode.value, props.rate, props.policy!, { title: title.value, agent: agent.value, date: date.value, whatsapp: whatsapp.value })
+    const snapshot = fobBatchSnapshot(selected.value, mode.value, props.rate, props.policy!, { title: title.value, agent: agent.value, date: date.value, whatsapp: whatsapp.value }, props.discount)
     snapshot.sheet.customerName=customer.value.trim()
     preview.value = await validateFobQuotation(customer.value, snapshot)
     saveKey.value = idempotencyKey('fob-batch'); savedNo.value = ''; stale.value = false
@@ -119,7 +119,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
 </script>
 <template>
   <dialog ref="dialog" class="batch-dialog" aria-label="批量粘贴报价" @cancel.prevent="close" @keydown.esc.stop.prevent="close">
-    <header><div><h2>批量粘贴报价</h2><p>粘贴SKU清单，核对异常后合并生成一份FOB报价单</p></div><button type="button" aria-label="关闭批量报价" :disabled="saving" @click="close">×</button></header>
+    <header><div><h2>批量粘贴报价</h2><p>粘贴SKU清单，核对异常后合并生成一份FOB报价单 · 当前折扣 {{ discount ?? 1 }}</p></div><button type="button" aria-label="关闭批量报价" :disabled="saving" @click="close">×</button></header>
     <p v-if="error" role="alert" class="error">{{ error }}</p><p v-if="financeIssue" role="alert" class="error">{{ financeIssue }}</p>
     <fieldset :disabled="saving" class="batch-fieldset">
     <template v-if="!preview"><label class="batch-classification">本批报价分类<select v-model="classification" aria-label="批量报价分类" :disabled="busy || saving"><option v-for="c in fobClassifications" :key="c.value" :value="c.value">{{c.label}}</option></select><span>{{classification==='ordinary-fob'?'普通 FOB 使用原含票价核对最低起订档，不使用新增专票三列':'退税报价优先使用新专票三列，全空时沿用原资料；缺项默认10点并持续提醒，已含票不重复加点'}}</span></label>
@@ -136,7 +136,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', beforeUnload)
           <div class="filters"><button :class="{active:filter==='all'}" @click="filter='all'">全部</button><button :class="{active:filter==='valid'}" @click="filter='valid'">可报价</button><button :class="{active:filter==='invalid'}" @click="filter='invalid'">异常 / 待处理</button><button :disabled="saving || busy || !lines.length" @click="query()">重新查询全部</button><button :disabled="saving || !invalid.length || busy" @click="exportIssues">导出异常清单</button><button :disabled="busy || !invalid.length" @click="copyIssues">复制异常 SKU</button><button :disabled="busy || !invalid.length" @click="removeIssues">移除全部异常行</button></div><p v-if="copyMessage" role="status">{{copyMessage}}</p>
           <div class="result-scroll"><table aria-label="批量报价核对结果"><thead><tr><th>选择</th><th>原行</th><th>SKU</th><th>数量</th><th>状态 / 原因</th><th class="price">最终报价 $/单位</th><th>操作</th></tr></thead><tbody>
             <template v-for="line in visible" :key="line.id"><tr :class="{invalid:!!issue(line)}"><td><input v-model="line.selected" type="checkbox" :aria-label="`选择第${line.id}行`" :disabled="saving || busy"></td><td>{{ line.id }}</td><td><input v-model="line.sku" :aria-label="`第${line.id}行SKU`" :disabled="saving || busy" maxlength="96" @input="changedSku(line)"></td><td><input v-model="line.quantity" :aria-label="`第${line.id}行数量`" :disabled="saving || busy || mode==='tiers'" inputmode="numeric" placeholder="请填数量" @input="changedSku(line)"></td><td :class="issue(line)?'warning':'success'">{{ issue(line) || '可报价' }}<small v-if="!issue(line) && line.product && needsFobInvoiceVerification(line.product)" class="legacy-label">{{line.product.invoicePricing?.mode==='included'?'已含票 · 票据待核实':'系统默认10点 · 票据待核实'}}<br>请采购更新【{{line.product.source==='fob'?'原FOB专用资料':'系统新采购数据'}}】{{line.product.sku}} 的票类型和票点</small></td><td class="price"><div v-for="(q,i) in finalRows(line)" :key="i"><b>${{ q.declaredUsd }}</b><small>{{ q.label }}</small></div><span v-if="issue(line)">—</span></td><td><button :disabled="saving || busy" @click="query(false,line)">重新查询</button><button :disabled="busy || saving" @click="removeLine(line)">删除</button></td></tr>
-            <tr v-if="line.product && canViewDomesticFreight"><td colspan="8"><details><summary>{{ line.sku }} {{ canViewPurchaseCost ? '采购成本明细与计算过程（内部）' : '国内运费明细及计算过程' }}</summary><p v-if="canViewPurchaseCost">{{ line.product.parsed.freight.basis }}</p><table><thead><tr><th>起订量</th><th v-if="canViewPurchaseCost">采购价 ¥</th><th v-if="canViewPurchaseCost">含票价 ¥</th><th>运费 ¥</th><th v-if="canViewPurchaseCost">成本 ¥</th></tr></thead><tbody><tr v-for="tier in costRows(line)" :key="tier.minQty"><td>{{ tier.minQty }}</td><td v-if="canViewPurchaseCost">{{ tier.purchaseCny }}</td><td v-if="canViewPurchaseCost">{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td></tr></tbody></table><FobCalculationDetails v-for="(q,index) in calculationQuotes(line)" :key="q.quantity" :product="line.product" :rate="rate" :row="q.row" :quantity="q.quantity" :extra-cny="q.extraCny" :final-usd="q.declaredUsd" :show-notice="index===0" /></details></td></tr></template>
+            <tr v-if="line.product && canViewDomesticFreight"><td colspan="8"><details><summary>{{ line.sku }} {{ canViewPurchaseCost ? '采购成本明细与计算过程（内部）' : '国内运费明细及计算过程' }}</summary><p v-if="canViewPurchaseCost">{{ line.product.parsed.freight.basis }}</p><table><thead><tr><th>起订量</th><th v-if="canViewPurchaseCost">采购价 ¥</th><th v-if="canViewPurchaseCost">含票价 ¥</th><th>运费 ¥</th><th v-if="canViewPurchaseCost">成本 ¥</th></tr></thead><tbody><tr v-for="tier in costRows(line)" :key="tier.minQty"><td>{{ tier.minQty }}</td><td v-if="canViewPurchaseCost">{{ tier.purchaseCny }}</td><td v-if="canViewPurchaseCost">{{ tier.taxIncludedCny }}</td><td>{{ tier.freightCny }}</td><td v-if="canViewPurchaseCost">{{ tier.costCny }}</td></tr></tbody></table><FobCalculationDetails v-for="(q,index) in calculationQuotes(line)" :key="q.quantity" :product="line.product" :rate="rate" :row="q.row" :quantity="q.quantity" :extra-cny="q.extraCny" :final-usd="q.declaredUsd" :discount="discount" :show-notice="index===0" /></details></td></tr></template>
             <tr v-if="!visible.length"><td colspan="8">{{ lines.length ? '当前筛选无结果' : '请先粘贴并查询SKU' }}</td></tr>
           </tbody></table></div>
         </main>

@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="mutable-product-identities-2026.11.19-v24";
+    public static final String VERSION="jitong-custom-minimum-2026.11.19-v25";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
@@ -2119,11 +2119,11 @@ public class LogisticsSourceParser {
                     .put("sourceMinimumWeightText","用户确认：以色列以原表首档下限为起重，不足补重；本表100g")
                     .put("normalizationNote","用户确认以色列100g起重，不足补到100g，首档包含起重");
             }
-            if(JitongPureBatteryRules.channel(channel)&&prev==null&&row.path("minChargeWeightKg").asDouble()>0
+            if((JitongPureBatteryRules.channel(channel)||JitongCustomRules.channel(channel))&&prev==null&&row.path("minChargeWeightKg").asDouble()>0
                     &&Double.compare(from,row.path("minChargeWeightKg").asDouble())==0&&!row.path("weightFromInclusive").asBoolean()) {
                 row.put("weightFromInclusive",true).put("normalizationNote","按原表最低计费重量补重后，首档包含该起重；原重量表达式保留");
             }
-            boolean minimumRequired=JitongPureBatteryRules.channel(channel)||(provider.equals("通邮")&&channel.path("channelName").asText().equals("标准挂号类-敏感"))
+            boolean minimumRequired=JitongPureBatteryRules.channel(channel)||JitongCustomRules.channel(channel)||(provider.equals("通邮")&&channel.path("channelName").asText().equals("标准挂号类-敏感"))
                 ||(provider.equals("燕文")&&YanwenWanbangAdditionalRules.named(provider,channel.path("channelName").asText())!=null);
             if(minimumRequired&&row.path("minChargeWeightKg").asDouble()==0
                     &&!Set.of("note","column","column-inherited","confirmed-lower-bound").contains(row.path("sourceMinimumWeightKind").asText()))

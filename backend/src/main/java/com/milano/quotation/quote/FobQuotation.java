@@ -201,14 +201,24 @@ public class FobQuotation {
         return parsed;
     }
     static String price(BigDecimal cost,int extra,String factor,BigDecimal rate) {return cost.add(BigDecimal.valueOf(extra)).multiply(new BigDecimal(factor)).divide(rate,2,RoundingMode.HALF_UP).toPlainString();}
-    static ObjectNode quote(JsonNode row,long min,Long max,BigDecimal rate,boolean single) {
+    static BigDecimal discount(JsonNode input) {
+        if (!input.has("discount")) return BigDecimal.ONE;
+        var value=amount(input.path("discount"));
+        if(value.signum()<=0 || value.compareTo(BigDecimal.ONE)>0) throw AppException.unprocessable("折扣须大于0且不超过1，例如0.95");
+        return value;
+    }
+    static String discounted(String price,BigDecimal discount) {
+        return new BigDecimal(price).multiply(discount).setScale(2,RoundingMode.HALF_UP).toPlainString();
+    }
+    static ObjectNode quote(JsonNode row,long min,Long max,BigDecimal rate,boolean single) { return quote(row,min,max,rate,single,BigDecimal.ONE); }
+    static ObjectNode quote(JsonNode row,long min,Long max,BigDecimal rate,boolean single,BigDecimal discount) {
         var cost=amount(row.path("costCny"));int extra=single && cost.multiply(BigDecimal.valueOf(min)).compareTo(BigDecimal.valueOf(200))<0?1:0;
         var factor=row.has("fobCoefficient")?row.path("fobCoefficient").asText():"1.14";
-        var out=object().put("minQty",min).put("unit",row.path("unit").asText()).put("extraCny",extra).put("declaredUsd",price(cost,extra,factor,rate)).put("undeclaredUsd",price(cost,extra,row.has("fobCoefficient")?factor:"1.1628",rate));
+        var out=object().put("minQty",min).put("unit",row.path("unit").asText()).put("extraCny",extra).put("declaredUsd",discounted(price(cost,extra,factor,rate),discount)).put("undeclaredUsd",discounted(price(cost,extra,row.has("fobCoefficient")?factor:"1.1628",rate),discount));
         if(max==null)out.putNull("maxQty");else out.put("maxQty",max);return out;
     }
     static ObjectNode calculate(ObjectNode request,ObjectNode product,BigDecimal rate) {
-        var input=request.path("fob"); var parsed=product.path("parsed");
+        var input=request.path("fob"); var parsed=product.path("parsed"); var discount=discount(input);
         boolean classified=product.has("classification");var factor=classified?product.at("/pricing/fobCoefficient").asText():"1.14";
         long moq=count(parsed.path("minOrderQty")),multiple=count(parsed.path("orderMultiple")),quantity=count(input.path("quantity"));
         if(quantity<moq || quantity%multiple!=0)throw AppException.unprocessable("报价数量不满足起订量或下单倍数");
@@ -232,11 +242,11 @@ public class FobQuotation {
             if(threshold==null)row.putNull("thresholdQty");else row.put("thresholdQty",threshold);rows.add(row);
             if(quantity>=min&&(max==null||quantity<=max))selected=row;
             if(last!=null&&first>last)continue;
-            if(tiers.size()==1 && threshold!=null && threshold>first) {ranges.add(quote(row,first,threshold-multiple,rate,true));ranges.add(quote(row,threshold,last,rate,true));}
-            else ranges.add(quote(row,first,last,rate,tiers.size()==1));
+            if(tiers.size()==1 && threshold!=null && threshold>first) {ranges.add(quote(row,first,threshold-multiple,rate,true,discount));ranges.add(quote(row,threshold,last,rate,true,discount));}
+            else ranges.add(quote(row,first,last,rate,tiers.size()==1,discount));
         }
         if(selected==null)throw AppException.unprocessable("此数量没有有效采购价");
-        var current=quote(selected,quantity,quantity,rate,tiers.size()==1);
+        var current=quote(selected,quantity,quantity,rate,tiers.size()==1,discount);
         if(mode.equals("quantity")){ranges.removeAll();ranges.add(current);}
         // A batch may request several quantities for the same SKU; retain them in one single-SKU record.
         if(input.has("quantities")) {
@@ -250,13 +260,13 @@ public class FobQuotation {
                 JsonNode tier=null;
                 for(var row:rows) if(q>=row.path("minQty").asLong() && (row.path("maxQty").isNull() || q<=row.path("maxQty").asLong())) tier=row;
                 if(tier==null) throw AppException.unprocessable("此数量没有有效采购价");
-                ranges.add(quote(tier,q,q,rate,tiers.size()==1));
+                ranges.add(quote(tier,q,q,rate,tiers.size()==1,discount));
             }
         }
         if(classified && !input.at("/sheet/quantityLabels").equals(JsonNodeFactory.instance.arrayNode().add("Unit Price")))throw AppException.unprocessable("分类报价应使用单一最终价列");
         var sheet=validateSheet(input.path("sheet"),ranges,product.path("sku").asText());
         if(classified)sheet.put("priceGroupLabel",product.path("classification").asText().equals("rebate-cfr-cif")?"CFR / CIF · USD":product.path("classification").asText().equals("rebate-fob")?"FOB / EXW · USD":"FOB · USD");
-        var snapshot=object().put("schemaVersion",1).put("rate",rate).put("quantity",quantity).put("displayMode",mode);
+        var snapshot=object().put("schemaVersion",1).put("discount",discount).put("rate",rate).put("quantity",quantity).put("displayMode",mode);
         if(input.has("quantities")) snapshot.set("quantities",input.path("quantities").deepCopy());
         snapshot.set("product",product);snapshot.set("policy",input.path("policy").deepCopy());snapshot.set("tiers",rows);snapshot.set("ranges",ranges);snapshot.set("current",current);snapshot.set("sheet",sheet);
         var payload=object().put("quoteMode","fob").put("customerName",text(request.path("customerName"),120,true).trim()).put("primarySku",product.path("sku").asText())

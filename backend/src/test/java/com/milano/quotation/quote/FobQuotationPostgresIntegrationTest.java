@@ -54,6 +54,55 @@ class FobQuotationPostgresIntegrationTest {
         // Avoid affecting fixtures in other methods which share this test container.
         jdbc.sql("delete from purchase_product where sku='FOB-SAVE'").update();
     }
+    static void assertSheetPrices(JsonNode expected,JsonNode actual) {
+        assertEquals(expected.size(),actual.size());
+        for(int row=0;row<expected.size();row++) {
+            var left=expected.get(row).path("prices");var right=actual.get(row).path("prices");
+            assertEquals(left.size(),right.size());
+            for(int column=0;column<left.size();column++) assertEquals(0,left.get(column).decimalValue().compareTo(right.get(column).decimalValue()));
+        }
+    }
+    static void applyDiscount(ObjectNode snapshot) {
+        snapshot.put("discount",new java.math.BigDecimal("0.95"));
+        for(var row:snapshot.at("/sheet/rows")) {
+            var prices=(ArrayNode)row.path("prices");
+            for(int i=0;i<prices.size();i++) prices.set(i,DecimalNode.valueOf(prices.get(i).decimalValue().multiply(new java.math.BigDecimal("0.95")).setScale(2,java.math.RoundingMode.HALF_UP)));
+        }
+        for(var item:snapshot.path("items")) applyDiscount((ObjectNode)item);
+    }
+    @Test void discountRoundTripsThroughDatabaseWithoutTouchingPriorPriceOrReview() throws Exception {
+        var original=save("employee",UUID.randomUUID().toString(),input);var originalId=original.path("id").asText();
+        var before=read("employee",originalId).deepCopy();
+        var request=input.deepCopy();applyDiscount((ObjectNode)request.path("fob"));
+        var key=UUID.randomUUID().toString();var saved=save("employee",key,request);var id=saved.path("id").asText();
+        assertNotEquals(originalId,id);assertEquals(id,save("employee",key,request).path("id").asText());
+        for(var role:List.of("employee","finance","super_admin")) {
+            var loaded=read(role,id);assertEquals(.95,loaded.at("/fob/discount").asDouble());
+            assertSheetPrices(request.at("/fob/sheet/rows"),loaded.at("/fob/sheet/rows"));
+        }
+        assertEquals(before,read("employee",originalId));
+        var count=jdbc.sql("select count(*) from quotation_record").query(Long.class).single();
+        ((ObjectNode)request.path("fob")).put("discount",0);
+        mvc.perform(post("/api/v1/quotations").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(request.toString())).andExpect(status().isUnprocessableEntity());
+        assertEquals(count,jdbc.sql("select count(*) from quotation_record").query(Long.class).single());
+        assertEquals(before,read("employee",originalId));
+    }
+    @Test void discountedBatchSavesEachSkuWithTheSameCanonicalPriceAndDiscount() throws Exception {
+        var batch=FobClassifiedTestData.request(FobBatchQuotationTest.input(2));
+        for(var item:batch.at("/fob/items")) {
+            var p=(ObjectNode)item.path("product").deepCopy();p.put("weightRaw","60 g");
+            jdbc.sql("insert into fob_purchase_product(sku,payload,version,created_at,updated_at) values(:sku,cast(:p as jsonb),0,now(),'2026-10-09T00:00:00Z') on conflict(sku) do update set payload=excluded.payload,updated_at=excluded.updated_at")
+                .param("sku",p.path("sku").asText()).param("p",p.toString()).update();
+        }
+        applyDiscount((ObjectNode)batch.path("fob"));
+        var body=mapper.createObjectNode().put("kind","fob").put("customerName","折扣批量测试");body.set("fob",batch.path("fob"));
+        var result=mapper.readTree(mvc.perform(post("/api/v1/quotations/batch").session(sessions.get("employee")).with(csrf()).header("Idempotency-Key",UUID.randomUUID().toString()).contentType("application/json").content(body.toString())).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray()).path("data");
+        assertEquals(2,result.path("records").size());
+        int index=0;for(var record:result.path("records")) {
+            var loaded=read("employee",record.path("id").asText());assertEquals(.95,loaded.at("/fob/discount").asDouble());
+            assertSheetPrices(batch.at("/fob/items/"+(index++)+"/sheet/rows"),loaded.at("/fob/sheet/rows"));
+        }
+    }
     @Container static final PostgreSQLContainer<?> postgres=new PostgreSQLContainer<>("postgres:16.4-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url",postgres::getJdbcUrl);r.add("spring.datasource.username",postgres::getUsername);r.add("spring.datasource.password",postgres::getPassword);

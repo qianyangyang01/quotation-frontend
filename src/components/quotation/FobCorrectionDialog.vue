@@ -45,7 +45,7 @@ async function query(only?:Line){
         ? await loadFobQuoteProduct(line.old.product.sku,line.old.product.source,lookupSignal,true,line.old.product.classification)
         : await loadFobQuoteProduct(line.old.product.sku,line.old.product.source,lookupSignal,true)
       if(run!==generation||!alive)return
-      const batch=fobBatchSnapshot([{id:line.index+1,sku:product.sku,quantity:line.quantity,selected:true,formatError:'',product}],line.old.displayMode,props.rate,props.policy!,{title:record.value!.fob!.sheet.title||'JerryFulfillment Quote Sheet',agent:record.value!.salespersonName,date:localQuoteDate(),whatsapp:record.value!.fob!.sheet.whatsapp||''})
+      const batch=fobBatchSnapshot([{id:line.index+1,sku:product.sku,quantity:line.quantity,selected:true,formatError:'',product}],line.old.displayMode,props.rate,props.policy!,{title:record.value!.fob!.sheet.title||'JerryFulfillment Quote Sheet',agent:record.value!.salespersonName,date:localQuoteDate(),whatsapp:record.value!.fob!.sheet.whatsapp||''},line.old.discount ?? 1)
       const canonical=await validateFobQuotation(record.value!.customerName,batch.items![0]!,{id:record.value!.id,index:line.index})
       if(run!==generation||!alive)return
       line.result=canonical
