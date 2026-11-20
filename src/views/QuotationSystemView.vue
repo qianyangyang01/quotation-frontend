@@ -158,8 +158,6 @@ const logisticsRevision = ref('')
 // whenever that array is cleared or repopulated.
 const logisticsRulesGeneration = ref(0)
 const countryRulesGeneration = createCountryQuotationGeneration(logisticsRulesGeneration)
-// A missing historical channel must still be explicitly confirmed by the user.
-const primarySelectionRequired = new WeakSet<Product>()
 const savingQuotation = ref(false)
 const syncPending = ref('')
 const syncError = ref('')
@@ -1429,7 +1427,7 @@ async function applyDraftPayload(payload: QuotationDraftPayload, freshPurchases?
     const primary = primaryRows.find(row => productState?.primaryChannelKey && row.channelKey === productState.primaryChannelKey)
       || (!productState?.primaryChannelKey ? primaryRows.find(row => row.rule === productState?.primaryRule && row.carrier === productState?.primaryCarrier) : undefined)
     if (primary) { selectedQuoteRegions.value[primary.country] = primary.quoteRegion || ''; p.country = primary.country; p.rule = primary.rule; p.selectedChannelKey = primary.channelKey; p.channel = primary.carrier; p.freight = primary.freight; p.status = '已恢复草稿并按当前规则重新计算' }
-    else if (productState?.primaryChannelKey) { primarySelectionRequired.add(p); p.rule = ''; p.selectedChannelKey = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已失效，请重新选择物流并确认价格'; toast('原报价引用的渠道不在当前物流库，请重新选择，不会按同名渠道自动套价') }
+    else if (productState?.primaryChannelKey) { p.rule = ''; p.selectedChannelKey = ''; p.channel = ''; p.freight = 0; p.status = '原渠道已停用或不可用，将从当前报价清单补齐可用首选'; }
   }
   restoredSelectionVersion.value += 1
   draftRestored.value = true
@@ -1450,19 +1448,16 @@ function reconcileRestoredChannels(p: Product) {
       relation.carrier === selection.carrier && relation.channel === selection.transport
       && allowed.has(financeChannelKey(rule.id, relation))))
   }
-  let removed = 0
-  const removedLabels: string[] = []
+  const unavailableLabels: string[] = []
   for (const mode of ['common', 'template'] as const) {
     const previous = modeSelections.value[mode]
-    removedLabels.push(...previous.filter(selection => !keep(selection)).map(selection => [selection.country, selection.quoteRegion, selection.carrier, selection.transport || selection.rule, selection.channelKey].filter(Boolean).join(' · ')))
-    modeSelections.value[mode] = previous.filter(keep)
-    removed += previous.length - modeSelections.value[mode].length
+    unavailableLabels.push(...previous.filter(selection => !keep(selection)).map(selection => [selection.country, selection.quoteRegion, selection.carrier, selection.transport || selection.rule].filter(Boolean).join(' · ')))
   }
-  if (!removed) return
-  restoredCommonSelections.value = draftSelection(modeSelections.value.common)
-  restoredTemplateSelections.value = draftSelection(modeSelections.value.template)
-  restoredSelectionVersion.value += 1
-  draftChannelNotice.value = `以下 ${removed} 个渠道已停用或未获当前物流属性“${p.logisticsAttribute}”授权，未用于本次报价：${[...new Set(removedLabels)].join('；')}。请重新选择可用渠道。`
+  // Keep the selection identities so both matrices retain unavailable rows with
+  // blank prices. Their status is informational; other quoted rows remain savable.
+  draftChannelNotice.value = unavailableLabels.length
+    ? `以下 ${unavailableLabels.length} 个渠道已停用或未获当前物流属性“${p.logisticsAttribute}”授权：${[...new Set(unavailableLabels)].join('；')}。保留渠道及停用提示，不采用旧价，不影响其他可用渠道保存报价。`
+    : ''
 }
 async function establishDraftBaseline(status: 'idle' | 'saved') {
   await nextTick()
@@ -2135,7 +2130,7 @@ const savedQuoteRows = computed(() => {
 // Never serialize a record here or replace an existing/manual primary channel.
 function syncMissingPrimaryChannel() {
   const p = products.value[0]
-  if (!p || (p.country && p.rule) || primarySelectionRequired.has(p)) return
+  if (!p || (p.country && p.rule)) return
   if (!draftReady.value || draftNeedsQuery.value || fobActive.value || !quotationHasInputs()
     || productQueryBusy.value || syncRefreshing.value || syncPending.value || syncError.value
     || recoveryRestoring.value || recoveryPending.value || savingQuotation.value
@@ -2192,7 +2187,6 @@ const saveValidationIssues = computed(() => {
   const hasSku = quotationHasInputs()
   if (manualMode.value && !hasSku) issues.push({ key:'manualPricing', label:'手填条件', message:manualInputError.value || '条件已变更，请重新查询后保存' })
   if (!manualMode.value && !hasSku) issues.push({ key:'sku', label:isBundleQuotation(quoteMode.value) ? '组合商品' : '商品 SKU', message:isBundleQuotation(quoteMode.value) ? '请查询有效 SKU，每套合计至少 2 件；同款成套只需一行 SKU，将单套数量设为 2 或以上' : '请输入 SKU 并查询商品' })
-  if (hasSku && (!p.rule || !p.country)) issues.push({ key:'primaryChannel', label:'首选渠道', message:'请完成物流试算并设置一条首选报价渠道' })
   if (!savedQuoteRows.value.some(row => row.available !== false && row.quote1 != null)) issues.push({ key:'quoteChannels', label:'报价渠道', message:'请至少加入一条需要保存的报价渠道' })
   if (savedQuoteRows.value.some(row => row.available !== false && !row.taxConfigured)) issues.push({ key:'taxPolicy', label:'税费与附加费', message: savedQuoteRows.value.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请到对应财务模块补齐' })
   if (readiness.value && !readiness.value.ready && !(manualMode.value && readiness.value.logistics?.ready && readiness.value.finance?.ready)) issues.push({ key:'businessReadiness', label:'业务就绪条件', message:`报价业务尚未就绪：${readiness.value.missing.join('；')}` })
@@ -2362,6 +2356,8 @@ function missingQuantityReason(p: Product, name: string, channelKey: string, cou
     isBundleQuotation(quoteMode.value) ? '套' : '件') || '当前条件暂无可用运价'
 }
 function unavailableTemplateReason(preset: {country:string;channelKey?:string;quoteRegion?:string;rule?:string}, quantity = 1) {
+  if (preset.channelKey && logisticsLoadState.value === 'ready' && loadedQuoteCountries.value.includes(preset.country)
+    && !financeAllowedChannelKeys(financePolicies.value, products.value[0].logisticsAttribute, preset.country).has(preset.channelKey)) return '渠道已停用或未获当前物流属性授权'
   return missingQuantityReason(products.value[0], preset.rule || '', preset.channelKey || '', preset.country, preset.quoteRegion || '', quantity)
 }
 function womensSamplesFor(row: QuotationMatrixRow, p: Product, quantities: number[]): WomensPricingSample[] | undefined {
@@ -2601,7 +2597,7 @@ async function save() {
   const customer = customerName.value.trim()
   const selectedMatrixRows = savedQuoteRows.value
   if (!customer) { toast('请先填写客户名称，再保存报价记录'); return }
-  if (!quotationHasInputs() || !p.rule || !p.country) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
+  if (!quotationHasInputs()) { toast('请先查询商品并完成物流试算，再保存报价记录'); return }
   if (!selectedMatrixRows.length) { toast('请至少选择一条需要保存的报价渠道'); return }
   if (selectedMatrixRows.some(row => row.available !== false && !row.taxConfigured)) { toast(selectedMatrixRows.find(row => row.available !== false && !row.taxConfigured && row.taxLabel?.includes('欧元'))?.taxLabel || '物流商税务或附加费属性待设置，请先到财务设置补齐'); return }
   const templateSnapshot = quoteMatrixMode.value === 'template' ? activeTemplateSnapshot.value : null

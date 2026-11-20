@@ -154,9 +154,9 @@ it('restores update inputs after remount, reloads current purchase prices and id
   await vi.waitFor(() => expect(host.textContent).toContain('已恢复更新前的报价条件'), { timeout: 5000 })
   expect(state.customerName).toBe('更新前客户')
   expect(state.products[0]).toMatchObject({ sku: 'BK100', purchase: 20.2 })
-  expect(host.textContent).toContain('removed-special')
+  expect(host.textContent).toContain('渠道已停用')
   expect(host.textContent).toContain('指定渠道')
-  expect(state.modeSelections.common).toEqual([])
+  expect(state.modeSelections.common).toEqual([expect.objectContaining({ channelKey: 'removed-special' })])
   expect(readQuotationUpdateRecovery(scope)).toBeNull()
   expect(JSON.stringify(source)).toBe(original)
   expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled(); expect(api.delete).not.toHaveBeenCalled()
@@ -225,7 +225,7 @@ it('retains the backup on purchase reload failure and restores it on an explicit
   expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled()
 })
 
-it('reissues in memory, reads current purchase data and removes unavailable source channels without creating a record', async () => {
+it('reissues in memory, reads current purchase data and retains unavailable source channels without creating a record', async () => {
   rememberQuotationCustomer('employee-a', { name: '上次提交客户', selectedCustomerId: '' })
   await mount(false)
   await vi.waitFor(() => expect(state.reissueSource).toBe('QT-OLD'))
@@ -233,7 +233,7 @@ it('reissues in memory, reads current purchase data and removes unavailable sour
   expect(state.quoteMatrixMode).toBe('common')
   // Current zero-tax-point purchase pricing adds the configured 1%, rather than copying the old 999.
   expect(state.products[0]).toMatchObject({ sku: 'BK100', purchase: 12.12 })
-  expect(state.modeSelections.common).toEqual([])
+  expect(state.modeSelections.common).toEqual([expect.objectContaining({ country: '日本', channelKey: '1::原物流::JP' })])
   expect(loadPublishedLogisticsRules).toHaveBeenCalledWith(expect.objectContaining({ countries: expect.arrayContaining(['日本']) }), expect.anything())
   expect(router.replace).toHaveBeenCalledWith({ query: { release: 'local' } })
   expect(api.post).not.toHaveBeenCalled(); expect(api.patch).not.toHaveBeenCalled()

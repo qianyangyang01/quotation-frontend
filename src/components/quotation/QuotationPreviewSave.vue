@@ -71,7 +71,7 @@ const footerStatus = computed(() => {
   if (props.blockReason) return props.blockReason
   if (props.validationIssues.length) return `缺少 ${props.validationIssues.length} 项必填内容，请按上方提示补充`
   if (!hasQuoteRows.value) return '请先在上方报价矩阵中加入至少一条渠道'
-  return props.batchSample ? (props.batchShipping ? '当前仅为样例价格，生成后查看全部克重报价' : '当前仅为样例价格，点击生成整批报价后查看全部 SKU') : '所有已选渠道均已完成报价计算，可以保存'
+  return props.batchSample ? (props.batchShipping ? '当前仅为样例价格，生成后查看全部克重报价' : '当前仅为样例价格，点击生成整批报价后查看全部 SKU') : props.rows.some(row => row.available === false) ? '不可用渠道保留状态提示，其余渠道报价可以保存' : '所有已选渠道均已完成报价计算，可以保存'
 })
 const quoteRange = computed(() => {
   const prices = props.rows.map(row => row.quote1).filter((value): value is number => value != null && Number.isFinite(value)).sort((a, b) => a - b)
