@@ -29,7 +29,7 @@ with zipfile.ZipFile(source) as z:
         assert v('C')=='欧洲优选专线特敏B' and v('B') in countries
         lo,hi=[float(x) for x in re.findall(r'[0-9.]+',v('H'))]
         eta=[int(x) for x in re.findall(r'[0-9]+',v('E'))]
-        rows.append(dict(country=v('B'),countryCode=countries[v('B')],areaName=v('B'),product=v('C'),code=v('D'),sourceProductCode=v('D'),eta=v('E'),limit=v('F'),size=v('G'),weight=v('H'),
+        rows.append(dict(country=v('B'),countryCode=countries[v('B')],areaName=v('B'),zoneName='',product=v('C'),code=v('D'),sourceProductCode=v('D'),eta=v('E'),limit=v('F'),size=v('G'),weight=v('H'),
                          sourceSheet='万邦优选特敏B',sourceRow=r,sourceWeightRange=v('H'),weightFromKg=lo,weightToKg=hi,weightFromInclusive=lo>0,weightToInclusive=True,
                          pricePerKg=float(v('I')),registrationFee=float(v('J')),etaMinDays=eta[0],etaMaxDays=eta[-1],minChargeWeightKg=0,currency='CNY',pricingModel='per-kg',
                          sourcePriceCell='I'+str(r),sourceFeeCell='J'+str(r)))
