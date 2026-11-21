@@ -130,7 +130,13 @@ try {
     const weights=page.locator('.average-weight')
     await weights.nth(0).fill('30');await weights.nth(1).fill('50')
     const save=page.getByRole('button',{name:/保存 1 张报价单/})
-    if(await save.isEnabled())await save.click()
+    if(await save.isEnabled()) {
+      await save.click()
+      // Save preparation awaits finance/logistics checks; do not edit the inputs
+      // until that attempt has reached the sheet validator and returned.
+      await page.locator('.toast').filter({hasText:'权重合计必须为 100%'}).waitFor()
+      await page.waitForFunction(()=>!document.querySelector('.quote-preview footer .save')?.disabled)
+    }
     assert.equal(saved.length,0,'Incomplete weights must not submit an API save')
     await weights.nth(1).fill('70')
     await page.locator('.sheet-average-row').waitFor()
