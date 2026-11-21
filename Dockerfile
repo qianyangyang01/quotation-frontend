@@ -4,6 +4,8 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
+ARG QUOTATION_COMPATIBLE_BUILD_ID=""
+ENV QUOTATION_COMPATIBLE_BUILD_ID=$QUOTATION_COMPATIBLE_BUILD_ID
 RUN pnpm build
 
 FROM nginx:1.27-alpine

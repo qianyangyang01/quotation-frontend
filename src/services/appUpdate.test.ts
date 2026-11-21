@@ -6,6 +6,16 @@ const response = (buildId = 'current') => new Response(JSON.stringify({ schemaVe
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('application update monitor', () => {
+  it('keeps an already-open page usable for a verified compatible artifact', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      schemaVersion: 1, buildId: 'current', releaseBuildId: 'new-artifact',
+    })))
+    const monitor = createAppUpdateMonitor('current', fetcher)
+    await expect(monitor.ensureCurrent()).resolves.toBeUndefined()
+    expect(monitor.state.updateRequired).toBe(false)
+    monitor.requireUpdate('exchange-rate')
+    await expect(monitor.ensureCurrent()).rejects.toMatchObject({ code: 'CLIENT_UPDATE_REQUIRED' })
+  })
   it('keeps a finance-version refresh requirement even if the application build is unchanged', async () => {
     const monitor = createAppUpdateMonitor('current', vi.fn().mockResolvedValue(response()))
     monitor.requireUpdate('exchange-rate')

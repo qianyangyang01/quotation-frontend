@@ -376,16 +376,24 @@ class Release:
         if len(mounts) != 1 or mounts[0]["Type"] != "volume":
             raise RuntimeError("Frontend must already use the retained assets volume")
         image_id = json.loads(run("docker", "image", "inspect", image))[0]["Id"]
-        run("docker", "run", "--rm", "--network", "none", "--entrypoint", "/opt/quotation/retain-assets.sh",
-            "--mount", f"type=volume,src={mounts[0]['Name']},dst=/retained", image_id,
-            "/opt/quotation/assets", "/retained")
         name = safe_name(self.c["gateway"] + "-front-" + release)
-        run("docker", "run", "-d", "--name", name, "--restart", "unless-stopped",
+        run("docker", "create", "--name", name, "--restart", "unless-stopped",
             "--network", self.c["edge_network"], "--memory", "128m", "--cpus", "0.5",
             "--security-opt", "no-new-privileges:true", "--log-driver", "local",
             "--label", "com.milano.quotation.smooth=frontend", "--label", "com.milano.quotation.release=" + release,
             "--mount", f"type=volume,src={mounts[0]['Name']},dst=/usr/share/nginx/html/assets",
             "--health-cmd", "wget -qO- http://127.0.0.1/", "--health-interval", "5s", image_id)
+        manifest = self.root / "releases" / release / "frontend-version.json"
+        run("docker", "cp", name + ":/usr/share/nginx/html/app-version.json", str(manifest))
+        incoming = json.loads(manifest.read_text())
+        current = json.loads(run("docker", "exec", self.state["active"]["frontend"], "cat", "/usr/share/nginx/html/app-version.json"))
+        if incoming.get("schemaVersion") != 1 or not current.get("buildId") or incoming.get("buildId") != current["buildId"]:
+            run("docker", "rm", name)
+            raise RuntimeError("Frontend protocol ID changed: old pages would be forced to refresh; ordinary smooth release refused")
+        run("docker", "run", "--rm", "--network", "none", "--entrypoint", "/opt/quotation/retain-assets.sh",
+            "--mount", f"type=volume,src={mounts[0]['Name']},dst=/retained", image_id,
+            "/opt/quotation/assets", "/retained")
+        run("docker", "start", name)
         for _ in range(30):
             if healthy(name):
                 return name

@@ -63,7 +63,7 @@ def main():
     for index,suffix in enumerate(["internal", "edge"]):
         existing = command("docker", "network", "ls", "--format", "{{.Name}}").splitlines()
         if PREFIX+"-"+suffix not in existing:
-            command("docker", "network", "create", "--internal", "--subnet", f"10.245.{210+index}.0/24", PREFIX+"-"+suffix)
+            command("docker", "network", "create", *(["--internal"] if suffix == "internal" else []), "--subnet", f"10.245.{210+index}.0/24", PREFIX+"-"+suffix)
     command("docker", "volume", "create", "quotation-smooth-control")
     init = "from pathlib import Path; p=Path('"+ROOT+"');(p/'edge').mkdir(exist_ok=True);(p/'smooth-release').mkdir(exist_ok=True)"
     tool("-c", init)
@@ -88,7 +88,7 @@ def main():
         JAVA_TOOL_OPTIONS="-Xmx640m -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC")
     start("backend", "quotation-smooth-worker:20261121",
           ["--health-cmd","wget -qO- http://127.0.0.1:8088/actuator/health/readiness","--health-interval","5s","--health-retries","30"],env)
-    command("docker","network","connect",PREFIX+"-edge",PREFIX+"-backend")
+    command("docker","network","connect","--alias","quotation-backend",PREFIX+"-edge",PREFIX+"-backend")
     # Use an actual retained-assets frontend, never a fake success page.
     start("frontend", "quotation-frontend:quotation-2026.11.17-02-quantity-compare",
           ["-v",PREFIX+"-assets:/usr/share/nginx/html/assets","--health-cmd","wget -qO- http://127.0.0.1/","--health-interval","5s"])
@@ -98,7 +98,7 @@ location /api/ { proxy_pass http://quotation-smooth-uat-backend:8088; proxy_requ
 location / { proxy_pass http://quotation-smooth-uat-frontend:80; proxy_set_header Host $host; }
 }
 '''
-    cfg=dict(root=ROOT+"/smooth-release",gateway=PREFIX+"-gateway",worker=PREFIX+"-backend",backend=PREFIX+"-backend",frontend=PREFIX+"-frontend",
+    cfg=dict(test_only=True,root=ROOT+"/smooth-release",gateway=PREFIX+"-gateway",worker=PREFIX+"-backend",backend=PREFIX+"-backend",frontend=PREFIX+"-frontend",
         edge=PREFIX+"-edge",edge_network=PREFIX+"-edge",internal_network=PREFIX+"-internal",nginx_image="nginx:1.27-alpine",
         edge_file=ROOT+"/edge/default.conf",public_url="http://"+PREFIX+"-edge",adapters=ROOT+"/approved-runtime.json",
         edge_replacements={"http://quotation-smooth-uat-backend:8088":"http://"+PREFIX+"-gateway:80",

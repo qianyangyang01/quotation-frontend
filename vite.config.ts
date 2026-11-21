@@ -4,9 +4,12 @@ import { fileURLToPath, URL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 
 export default defineConfig(({ command }) => {
-  // The bundle and manifest share one opaque ID, including when a saved release
-  // is rolled back. Development sessions do not check production versions.
-  const buildId = command === 'build' ? randomUUID() : ''
+  // Compatible releases retain the client protocol identity so already-open
+  // pages can finish their work. The artifact still has a unique release ID.
+  const releaseBuildId = command === 'build' ? randomUUID() : ''
+  const compatibleBuildId = process.env.QUOTATION_COMPATIBLE_BUILD_ID || ''
+  if (compatibleBuildId && !/^[a-zA-Z0-9-]{1,100}$/.test(compatibleBuildId)) throw new Error('Invalid compatible build ID')
+  const buildId = command === 'build' ? compatibleBuildId || releaseBuildId : ''
 
   return {
     define: { __APP_BUILD_ID__: JSON.stringify(buildId) },
@@ -19,7 +22,7 @@ export default defineConfig(({ command }) => {
           this.emitFile({
             type: 'asset',
             fileName: 'app-version.json',
-            source: JSON.stringify({ schemaVersion: 1, buildId }),
+            source: JSON.stringify({ schemaVersion: 1, buildId, releaseBuildId }),
           })
         },
       },
