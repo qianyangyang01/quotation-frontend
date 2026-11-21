@@ -1,0 +1,127 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>自动平均报价 · 本地预览</title>
+<style>body{font-family:Arial,'Microsoft YaHei',sans-serif;margin:0;background:#f4f6f8;color:#202532}header{padding:20px 28px;background:#fff;border-bottom:3px solid #ff8120}h1{font-size:22px;margin:0 0 8px}header p{margin:5px 0;color:#765327}main{margin:20px;background:white;padding:20px;border:1px solid #dde2e8;border-radius:12px}.local-actions{padding:14px;background:#fff8ed;display:flex;gap:16px;align-items:center}.local-actions button{padding:10px 16px;border:1px solid #ff8120;border-radius:6px;background:white;color:#b95800}pre{white-space:pre-wrap;max-height:240px;overflow:auto}</style>
+<header><h1>自动平均报价 · 本地预览</h1><p>隔离示例，不用于业务，不连接线上。点“渠道平均报价”，选择美国或澳大利亚，勾选两条渠道即可自动生成。</p><p>美国平均行固定在本 SKU 最前；复制图文表格会补上左侧五个橙色列头，下方留空。其他表格、图片预览不加这些列头。</p></header><main id="app"></main>
+<script type="module">
+import {createApp,h,ref} from 'vue'
+import Sheet from '/src/components/quotation/CustomerQuoteSheet.vue'
+import {authState} from '/src/data/authStore.ts'
+const nativeFetch=window.fetch.bind(window)
+window.fetch=(input,options)=>{
+ const url=typeof input==='string'?input:input.url
+ if(url==='/api/v1/assets/11111111-1111-4111-8111-111111111111')return nativeFetch('/outputs/auto-average/sample.png',options)
+ if(url.includes('/api/'))throw new Error('本地示例禁止访问业务接口')
+ return nativeFetch(input,options)
+}
+authState.current={id:'local-average-preview',name:'本地验收',account:'LOCALQA',role:'super_admin',status:'enabled',mustChangePassword:false,passwordUpdatedAt:''}
+authState.permissions=['quote','purchase','logistics','finance'];authState.initialized=true
+const rows=[['澳大利亚','顺丰','澳大利亚2区',[8.1,10.1,12.1]],['澳大利亚','顺丰','澳大利亚3区',[9,10.6,12.2]],['美国','顺丰商派','全国统一',[13.4,23.15,33.6]],['美国','燕文','全国统一',[13.45,23.7,34]]].map(([country,carrier,quoteRegion,prices],i)=>({country,carrier,quoteRegion,sku:'DEMO-001',channelKey:'demo-'+i,channelCode:'D'+i,ruleId:1,rule:'示例',transport:carrier,eta:'7-12 days',quote1:prices[0],quote2:prices[1],quote3:prices[2],quoteCustom:null}))
+const initialQuote={quantities:[1,2,3],rows:rows.map(row=>({optionId:row.channelKey,prices:[row.quote1,row.quote2,row.quote3]})),showPhotos:true,photos:[{assetId:'11111111-1111-4111-8111-111111111111',name:'sample.png'}]}
+window.localPreview={rows,initialQuote}
+createApp({setup(){const sheet=ref(),result=ref('');window.getPreviewSheet=()=>sheet.value
+return()=>h('div',[h(Sheet,{ref:sheet,rows,countries:[],salesperson:'本地示例',skus:['DEMO-001'],contextKey:'local-auto-average',customQuantity:0,bundle:false,initialQuote}),h('div',{class:'local-actions'},[h('button',{onClick:async()=>{try{const data=await sheet.value.captureForSave();window.lastLocalCapture=data;result.value=JSON.stringify({平均方案:data.averagePlans,保存顺序:data.rowOrderKeys},null,2)}catch(error){result.value=error.message}}},'核验保存结果（仅本地）'),h('span','调用实际报价单保存前校验，不写入业务系统')]),h('pre',{id:'save-result'},result.value)])}}).mount('#app')
+</script>
+<style>#demo-guide{position:sticky;top:0;z-index:100;background:#fff3df;border:2px solid #ff8120;padding:12px 20px;display:flex;align-items:center;gap:16px;box-shadow:0 3px 12px #0001}#demo-guide strong{flex:1}#demo-guide button{padding:8px 14px;background:white;border:1px solid #ff8120;border-radius:6px;cursor:pointer}.demo-focus{outline:3px solid #ff8120!important;outline-offset:3px}</style>
+<script type="module">
+const guide=document.createElement('div')
+guide.id='demo-guide'
+guide.innerHTML='<strong aria-live="polite">本地示例：自动勾选渠道，观察平均行生成与美国置顶。</strong><button type="button">重新演示</button><button type="button">停止演示</button>'
+document.querySelector('header').after(guide)
+const status=guide.querySelector('strong')
+let stopped=false
+const pause=async(ms=2200)=>{await new Promise(resolve=>setTimeout(resolve,ms));if(stopped)throw new Error('演示已停止，可以手动操作')}
+const find=async(selector,predicate=()=>true)=>{
+ for(let i=0;i<100;i++){
+  const element=[...document.querySelectorAll(selector)].find(predicate)
+  if(element)return element
+  await pause(100)
+ }
+ throw new Error('未找到演示控件，请重新演示')
+}
+const focus=element=>{document.querySelectorAll('.demo-focus').forEach(item=>item.classList.remove('demo-focus'));element.classList.add('demo-focus');element.scrollIntoView({behavior:'smooth',block:'center'})}
+guide.querySelectorAll('button')[0].onclick=()=>{const url=new URL(location.href);if(!url.searchParams.has('demo'))url.searchParams.set('demo','1');if(location.href===url.href)location.reload();else location.href=url.href}
+guide.querySelectorAll('button')[1].onclick=()=>{stopped=true;status.textContent='演示已停止，可以手动勾选查看。'}
+async function demonstrate(){
+ window.demoState='running'
+ try{
+  await find('.sheet-editor')
+  status.textContent='第 1 步：打开渠道平均报价，先演示澳大利亚。'
+  await pause()
+  ;(await find('button',el=>el.textContent.trim()==='渠道平均报价')).click()
+  const zone2=await find('input[aria-label="参与平均区域：2区"]')
+  focus(zone2.closest('label')||zone2)
+  status.textContent='第 2 步：勾选澳大利亚 2 区，再勾选 3 区。'
+  await pause();zone2.click();await pause()
+  ;(await find('input[aria-label="参与平均区域：3区"]')).click()
+  const au=await find('.sheet-average-row')
+  focus(au)
+  status.textContent='澳大利亚平均行已自动生成：$8.55 / $10.35 / $12.15，无需点击生成。'
+  await pause(4200)
+  const country=await find('select[aria-label="平均报价国家"]')
+  country.value=[...country.options].find(option=>option.textContent.includes('美国')).value
+  country.dispatchEvent(new Event('change',{bubbles:true}))
+  await pause(400)
+  const first=await find('.average-channel input[type="checkbox"]')
+  focus(first.closest('.average-channel'))
+  status.textContent='第 3 步：切换美国，依次勾选顺丰商派和燕文。'
+  await pause();first.click();await pause()
+  const second=[...document.querySelectorAll('.average-channel input[type="checkbox"]')].find(input=>!input.checked)
+  if(!second)throw new Error('未找到第二条美国渠道')
+  second.click()
+  await pause(600)
+  const top=document.querySelector('.sheet-editor tbody tr')
+  if(!top?.textContent.includes('United States')||!top.classList.contains('sheet-average-row'))throw new Error('美国平均行置顶核验失败')
+  focus(top)
+  status.textContent='演示完成：美国平均行自动置顶，价格 $13.43 / $23.43 / $33.80；澳大利亚平均行保留。可点击“重新演示”。'
+  window.demoState='complete'
+ }catch(error){status.textContent=error.message;window.demoState=stopped?'stopped':'failed'}
+}
+async function demonstrateWeighted(){
+ window.demoState='running'
+ try{
+  await find('.sheet-editor')
+  status.textContent='加权演示 1/4：选择美国，切换加权平均，再勾选两条渠道。'
+  await pause()
+  ;(await find('button',el=>el.textContent.trim()==='渠道平均报价')).click()
+  const country=await find('select[aria-label="平均报价国家"]')
+  country.value=[...country.options].find(option=>option.textContent.includes('美国')).value
+  country.dispatchEvent(new Event('change',{bubbles:true}))
+  await pause(300)
+  ;(await find('button',el=>el.textContent.trim()==='加权平均')).click()
+  await pause(300)
+  for(const input of document.querySelectorAll('.average-channel input[type="checkbox"]')){if(!input.checked)input.click();await pause(500)}
+  await find('.average-weight')
+  const setWeight=(index,value)=>{const input=document.querySelectorAll('.average-weight')[index];input.value=String(value);input.dispatchEvent(new Event('input',{bubbles:true}))}
+  focus(document.querySelector('.average-channels'))
+  status.textContent='加权演示 2/4：输入 50% 顺丰商派 + 50% 燕文；合计 100% 后自动生成。'
+  setWeight(0,50);await pause();setWeight(1,50);await pause(600)
+  const checkPrices=expected=>{const plans=window.getPreviewSheet().capturePrices().averagePlans;if(plans.length!==1||JSON.stringify(plans[0].systemPrices)!==JSON.stringify(expected))throw new Error('加权价格核验失败');return plans[0]}
+  checkPrices([13.43,23.43,33.8])
+  focus(await find('.sheet-average-row'))
+  status.textContent='50% + 50% 已自动生成并置顶：$13.43 / $23.43 / $33.80。'
+  await pause(3500)
+  focus(document.querySelector('.average-channels'))
+  status.textContent='加权演示 3/4：先将顺丰商派改为 30%，此时合计只有 80%，检查保存拦截。'
+  setWeight(0,30);await pause(700)
+  let blocked=''
+  try{await window.getPreviewSheet().captureForSave()}catch(error){blocked=error.message}
+  if(!blocked.includes('权重合计必须为 100%'))throw new Error('未按预期拦截不完整权重')
+  window.weightedDemoBlocked=blocked
+  status.textContent='已核验：30% + 50% = 80%，保存被阻止；填写完成后才能保存。'
+  await pause(3500)
+  status.textContent='加权演示 4/4：把燕文改为 70%，合计恢复 100%，原平均行自动更新。'
+  setWeight(1,70);await pause(700)
+  checkPrices([13.44,23.54,33.88])
+  const saved=await window.getPreviewSheet().captureForSave()
+  if(saved.averagePlans.length!==1||!saved.rowOrderKeys[0].startsWith('average:'))throw new Error('加权保存快照或置顶核验失败')
+  window.weightedDemoCapture=saved
+  const top=document.querySelector('.sheet-editor tbody tr')
+  if(!top?.textContent.includes('United States')||!top.classList.contains('sheet-average-row'))throw new Error('美国加权平均行置顶失败')
+  focus(top)
+  status.textContent='加权演示完成：30% 顺丰商派 + 70% 燕文 → $13.44 / $23.54 / $33.88；只保留一条平均行、美国仍置顶，保存前校验通过。'
+  window.demoState='complete'
+ }catch(error){status.textContent=error.message;window.demoState=stopped?'stopped':'failed'}
+}
+const demoMode=new URLSearchParams(location.search).get('demo')
+if(demoMode==='weighted')demonstrateWeighted()
+else if(demoMode==='1')demonstrate()
+</script></html>

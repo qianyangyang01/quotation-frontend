@@ -1,0 +1,14 @@
+{
+  "entries": [{
+    "id": "480ea529-69ee-47d1-90a6-12ec8e3c2f0a",
+    "providerName": "万邦",
+    "channelName": "万邦优选特敏B",
+    "logisticsAttribute": "保健品",
+    "aliases": ["欧洲优选专线特敏B", "万邦速达优选特敏B报价表(RMB)"],
+    "importAliases": ["欧洲优选专线特敏B"],
+    "productCodes": ["EUSLHC-P"],
+    "providerAliases": [],
+    "enabled": true,
+    "sourceGoodsNote": "2026-11-21 用户确认：万邦优选特敏B用于保健品；原表禁运品、尺寸、邮编及附加服务条件须按货物核对"
+  }]
+}

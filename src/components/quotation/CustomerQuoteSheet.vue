@@ -16,8 +16,8 @@ import { copyQuoteSheetData } from '@/services/customerQuoteSheetClipboard'
 import { compactQuoteTable, compactTablePhotos, copyCompactQuoteTable } from '@/services/compactQuoteTable'
 import QuoteBackToTop from './QuoteBackToTop.vue'
 import QuoteAveragePanel from './QuoteAveragePanel.vue'
-import { applyAveragePlans, averageScope, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
-import { placeAverageRowsBeforeMembers, restoreQuoteRowOrder } from '@/data/quoteSheetRowOrder'
+import { applyAveragePlans, averageCountry, averageScope, cloneAveragePlans, mapAveragePlans, type AveragePlan } from '@/data/quoteChannelAverage'
+import { pinUsAverageRows, placeAverageRowsBeforeMembers, restoreQuoteRowOrder } from '@/data/quoteSheetRowOrder'
 import type { CustomerPriceSnapshot, CapturedSheetPrices } from '@/data/customerQuotePrices'
 import { releaseQuotePhotos, MAX_QUOTE_PHOTOS, type QuoteLocalPhoto } from '@/services/quoteLocalPhotos'
 import QuotePhotoPicker from './QuotePhotoPicker.vue'
@@ -231,7 +231,7 @@ const orderedSourceRows = computed(() => {
 })
 const visibleSourceRows = computed(() => props.showAllRows ? orderedSourceRows.value : orderedSourceRows.value.filter(row => !hiddenRowKeys.value.has(quoteSheetRowKey(row))))
 function moveRow(key: string, target: string) {
-  if (rowControlsDisabled.value || key === target) return
+  if (rowControlsDisabled.value || key === target || isPinnedRow(key)) return
   const keys = orderedRowsSheet.value.rows.map(row => row.key)
   const from = keys.indexOf(key), to = keys.indexOf(target)
   if (from < 0 || to < 0) return
@@ -247,7 +247,7 @@ function moveRowByKey(key: string, direction: number) {
 }
 function endRowDrag() { draggedRow.value = null; rowDropTarget.value = null }
 function startRowDrag(key: string, event: DragEvent) {
-  if (rowControlsDisabled.value) { event.preventDefault(); return }
+  if (rowControlsDisabled.value || isPinnedRow(key)) { event.preventDefault(); return }
   endColumnDrag()
   draggedRow.value = key
   if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', key) }
@@ -279,19 +279,22 @@ function loadAveragePlans() {
 }
 const averagePlans = ref<AveragePlan[]>(loadAveragePlans())
 const averageOpen = ref(averagePlans.value.length > 0)
+const averageEverOpened = ref(averageOpen.value)
 const averagePanelAnchor = ref<HTMLElement>()
 async function toggleAveragePanel() {
   averageOpen.value = !averageOpen.value
   if (averageOpen.value) {
+    averageEverOpened.value = true
     await nextTick()
     averagePanelAnchor.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }
 }
 const averageNotice = ref('')
+const averageDraftIssue = ref('')
 const averageInputs = ref<Record<string, string>>({})
 const averagePriceErrors = ref<Record<string, string>>({})
 function withAverageErrors(value: ReturnType<typeof applyAveragePlans>) {
-  const errors = Object.values(averagePriceErrors.value)
+  const errors = [...Object.values(averagePriceErrors.value), ...(averageDraftIssue.value ? [averageDraftIssue.value] : [])]
   return { ...value, issues: [...value.issues, ...errors], tableIssues: [...(value.tableIssues ?? []), ...errors], priceIssues: [...(value.priceIssues ?? []), ...errors] }
 }
 const systemSheet = computed(() => buildCustomerQuoteSheet({ rows: props.rows, quoteMode: props.quoteMode, countries: props.countries, edits: newQuoteSheetEdits(props.salesperson), skus: props.skus,
@@ -306,23 +309,26 @@ const systemPriceRows = computed(() => new Map(systemSheet.value.rows.map(row =>
 function cachedSystemPrice(row: QuoteSheetSourceRow, quantity: number) {
   return systemPriceRows.value.get(quoteSheetRowKey(row))?.[quantities.value.indexOf(quantity)] ?? null
 }
+function resetAveragePriceInputs(plan: AveragePlan) {
+  const previous = averagePlans.value.find(value => value.id === plan.id)
+  // Presentation-only edits must preserve even unfinished customer price input.
+  if (previous && JSON.stringify([previous.mode, previous.members, previous.quantities]) === JSON.stringify([plan.mode, plan.members, plan.quantities])) return
+  for (const key of Object.keys(averageInputs.value)) if (key.startsWith(plan.id + ':')) delete averageInputs.value[key]
+  for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(plan.id + ':')) delete averagePriceErrors.value[key]
+}
 function addAverage(plan: AveragePlan) {
   const index = averagePlans.value.findIndex(p => p.id === plan.id)
   if (index < 0 && averagePlans.value.length >= 20) { averageNotice.value = '每张报价单最多 20 个综合方案'; return }
+  resetAveragePriceInputs(plan)
   if (index < 0) averagePlans.value.push(plan)
   else averagePlans.value.splice(index, 1, plan)
-  for (const key of Object.keys(averageInputs.value)) if (key.startsWith(plan.id + ':')) delete averageInputs.value[key]
-  for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(plan.id + ':')) delete averagePriceErrors.value[key]
   averageNotice.value = ''
   invalidate()
 }
 function addBatchAverages(plans: AveragePlan[]) {
   const keys = new Set(plans.map(plan => `average:${plan.id}`))
   const order = orderedRowsSheet.value.rows.map(row => row.key)
-  for (const plan of plans) {
-    for (const key of Object.keys(averageInputs.value)) if (key.startsWith(plan.id + ':')) delete averageInputs.value[key]
-    for (const key of Object.keys(averagePriceErrors.value)) if (key.startsWith(plan.id + ':')) delete averagePriceErrors.value[key]
-  }
+  plans.forEach(resetAveragePriceInputs)
   rowOrder.value = placeAverageRowsBeforeMembers(order, plans.map(plan => {
     const source = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)
     const members = source ? props.rows.filter(row => averageScope(row) === averageScope(source)).map(quoteSheetRowKey) : plan.members.map(member => member.optionId)
@@ -352,19 +358,25 @@ function changeAveragePrice(id: string, quantity: number, event: Event) {
   averageNotice.value = ''
 }
 watch(() => JSON.stringify([layoutUserId.value, props.resetKey ?? props.contextKey, props.bundle, props.skus]), () => {
-  averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = loadAveragePlans(); averageOpen.value = averagePlans.value.length > 0; averageNotice.value = ''
+  averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = loadAveragePlans(); averageOpen.value = averagePlans.value.length > 0; averageEverOpened.value = averageOpen.value; averageDraftIssue.value = ''; averageNotice.value = ''
 })
 watch(() => JSON.stringify(props.initialQuote?.averagePlans), () => { averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = loadAveragePlans() })
 watch(() => JSON.stringify(systemSheet.value.rows.map(row => [row.key, quantities.value.map((q, i) => [q, row.prices[i]]).sort((a, b) => Number(a[0]) - Number(b[0]))]).sort()), (value, previous) => {
   if (!props.recordMode && value !== previous && averagePlans.value.length) {
-    averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = []; averageNotice.value = '系统价格、渠道或数量已变化，请重新生成综合报价'; averageOpen.value = true
+    averageInputs.value = {}; averagePriceErrors.value = {}; averagePlans.value = []; averageNotice.value = '系统价格、渠道或数量已变化，请重新选择渠道生成综合报价'; averageOpen.value = true
   }
 })
 watch(averagePlans, invalidate, { deep: true, flush: 'sync' })
 const allRowsSheet = computed(() => buildSheet(orderedSourceRows.value))
+const pinnedAverageKeys = computed(() => new Set(averagePlans.value.filter(plan => {
+  const source = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)
+  return source && averageCountry(source) === 'US'
+}).map(plan => `average:${plan.id}`)))
+function isPinnedRow(key: string) { return (!props.recordMode || props.currentQuote) && pinnedAverageKeys.value.has(key) }
 function orderSheetRows(value: ReturnType<typeof applyAveragePlans>) {
   const order = new Map(rowOrder.value.map((key, index) => [key, index]))
-  return { ...value, rows: [...value.rows].sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity)) }
+  const rows = [...value.rows].sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity))
+  return { ...value, rows: props.recordMode && !props.currentQuote ? rows : pinUsAverageRows(rows, pinnedAverageKeys.value) }
 }
 // Average rows share the same presentation order as their source routes, including hidden rows.
 const orderedRowsSheet = computed(() => orderSheetRows(applyAveragePlans(allRowsSheet.value, averagePlans.value, props.rows, quantities.value, true)))
@@ -854,7 +866,7 @@ onBeforeUnmount(() => {
     <p v-if="outputBlocked" class="sheet-pending" role="alert">{{ QUOTE_UPDATE_MESSAGE }}</p>
     <p v-if="message" class="sheet-message" :class="{ failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     <details v-if="compactTablePreview" class="sheet-accessible"><summary>查看图文表格</summary><div style="overflow:auto" v-html="compactTablePreview"></div></details>
-    <div v-if="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :shipping="quoteMode === 'shipping-only'" :batch="batchAverage" :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @add-batch="addBatchAverages" @remove="removeAverage" /></div>
+    <div v-if="averageEverOpened" v-show="averageOpen" ref="averagePanelAnchor"><QuoteAveragePanel :key="JSON.stringify([layoutUserId, resetKey ?? contextKey, skus])" :shipping="quoteMode === 'shipping-only'" :batch="batchAverage" :rows="rows" :system="systemSheet" :quantities="quantities" :plans="averagePlans" :disabled="copying || rendering || sourcePending" @add="addAverage" @add-batch="addBatchAverages" @remove="removeAverage" @validation="averageDraftIssue = $event" /></div>
     <p v-if="averageNotice" class="sheet-pending" role="alert">{{ averageNotice }}</p>
     <p v-if="photoLoading || photoSaving" class="sheet-pending" role="status">{{ photoSaving ? '正在保存报价单图片…' : '正在读取报价单图片…' }}</p>
     <p v-if="photoError" class="sheet-message failed" role="alert">{{ photoError }} <button type="button" @click="reloadSavedPhotos">重试读取图片</button></p>
@@ -963,9 +975,9 @@ onBeforeUnmount(() => {
               </template>
               </template>
               <td class="sheet-row-action"><div class="sheet-row-controls">
-                <button type="button" class="sheet-row-handle" :data-row-handle="row.key" :draggable="!rowControlsDisabled" :disabled="rowControlsDisabled" :aria-label="`第 ${index + 1} 行排序，上下键移动`" title="拖拽整行排序，也可按上下方向键" @dragstart.stop="startRowDrag(row.key, $event)" @dragend="endRowDrag" @keydown.up.prevent="moveRowByKey(row.key, -1)" @keydown.down.prevent="moveRowByKey(row.key, 1)">⠿</button>
-                <button type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || editorSheet.rows[0]?.key === row.key" @click="moveRowByKey(row.key, -1)">↑</button>
-                <button type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || editorSheet.rows.at(-1)?.key === row.key" @click="moveRowByKey(row.key, 1)">↓</button>
+                <button type="button" class="sheet-row-handle" :data-row-handle="row.key" :draggable="!rowControlsDisabled && !isPinnedRow(row.key)" :disabled="rowControlsDisabled || isPinnedRow(row.key)" :aria-label="`第 ${index + 1} 行排序，上下键移动`" title="拖拽整行排序，也可按上下方向键" @dragstart.stop="startRowDrag(row.key, $event)" @dragend="endRowDrag" @keydown.up.prevent="moveRowByKey(row.key, -1)" @keydown.down.prevent="moveRowByKey(row.key, 1)">⠿</button>
+                <button type="button" :aria-label="`上移第 ${index + 1} 行`" title="上移" :disabled="rowControlsDisabled || isPinnedRow(row.key) || editorSheet.rows[0]?.key === row.key" @click="moveRowByKey(row.key, -1)">↑</button>
+                <button type="button" :aria-label="`下移第 ${index + 1} 行`" title="下移" :disabled="rowControlsDisabled || isPinnedRow(row.key) || editorSheet.rows.at(-1)?.key === row.key" @click="moveRowByKey(row.key, 1)">↓</button>
                 <button v-if="row.averageId" type="button" class="sheet-delete-row" :aria-label="`删除第 ${index + 1} 行综合方案`" title="删除此平均行，同时移除上方对应方案" :disabled="rowControlsDisabled" @click="removeAverage(row.averageId!)">删除</button>
                 <template v-else>
                   <button type="button" title="隐藏此渠道，不影响综合报价计算" :aria-label="`隐藏第 ${index + 1} 行`" :disabled="copying || showAllRows" @click="hideRow(row.key)">隐藏</button>

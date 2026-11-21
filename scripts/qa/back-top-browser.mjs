@@ -5,7 +5,9 @@ const browser=await chromium.launch({channel:'chrome',headless:true})
 try {
   const page=await browser.newPage({viewport:{width:1280,height:650}})
   const errors=[];page.on('pageerror',error=>errors.push(error.message))
-  await page.goto('http://127.0.0.1:5392/scripts/qa/compact-quote-fixture.html')
+  const base=process.env.QA_BASE_URL || 'http://127.0.0.1:5397'
+  assert.equal(new URL(base).hostname,'127.0.0.1')
+  await page.goto(base+'/scripts/qa/compact-quote-fixture.html')
   await page.getByRole('button',{name:'复制图文表格',exact:true}).first().waitFor()
   await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight))
   const button=page.getByRole('button',{name:'回到顶部',exact:true}).first()

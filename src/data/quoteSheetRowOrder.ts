@@ -33,3 +33,16 @@ export function orderQuoteRows<T>(rows: T[], order: string[] | undefined, identi
   const positions = new Map((order ?? []).map((id, index) => [id, index]))
   return [...rows].sort((a, b) => (positions.get(identity(a)) ?? Infinity) - (positions.get(identity(b)) ?? Infinity))
 }
+
+/** Pin US summaries within each contiguous SKU block; never regroup interleaved SKUs. */
+export function pinUsAverageRows<T extends { sku?: string; key: string }>(rows: T[], pinned: ReadonlySet<string>): T[] {
+  const result: T[] = []
+  for (let start = 0; start < rows.length;) {
+    let end = start + 1
+    while (end < rows.length && rows[end]!.sku === rows[start]!.sku) end++
+    const block = rows.slice(start, end)
+    result.push(...block.filter(row => pinned.has(row.key)), ...block.filter(row => !pinned.has(row.key)))
+    start = end
+  }
+  return result
+}

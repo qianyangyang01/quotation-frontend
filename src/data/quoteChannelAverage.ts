@@ -39,8 +39,8 @@ export function validAveragePlans(plans: unknown): plans is AveragePlan[] {
     try { return JSON.stringify(averagePrices(p.members, p.mode, p.quantities.length)) === JSON.stringify(p.systemPrices) } catch { return false }
   })
 }
-function averageCountry(row: Pick<QuoteSheetSourceRow, 'country'>) {
-  return quoteSheetCountryCode(row.country, []) || (row.country.trim().toLowerCase() === 'australia' ? 'AU' : row.country)
+export function averageCountry(row: Pick<QuoteSheetSourceRow, 'country'>) {
+  return quoteSheetCountryCode(row.country, []) || ({ australia: 'AU', 'united states': 'US' }[row.country.trim().toLowerCase()] ?? row.country)
 }
 export function australiaAverageZone(row: QuoteSheetSourceRow) {
   const region = (row.quoteRegion || '').replace(/[（）()\s]/g, '').replace(/^澳大利亚/, '')

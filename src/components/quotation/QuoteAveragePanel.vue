@@ -1,20 +1,27 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Decimal from 'decimal.js'
-import { batchAveragePlans } from '@/data/batchQuoteAverage'
-import { averagePrices, averageScope, australiaAverageZone, type AveragePlan } from '@/data/quoteChannelAverage'
+import { batchAveragePlans, batchAveragePeerIds } from '@/data/batchQuoteAverage'
+import { averagePrices, averageScope, averageCountry, australiaAverageZone, type AveragePlan } from '@/data/quoteChannelAverage'
 import { quoteSheetRowKey, quoteSheetProviderName, type QuoteSheetSourceRow, type CustomerQuoteSheet } from '@/data/customerQuoteSheet'
 
 const props = defineProps<{ rows: QuoteSheetSourceRow[]; system: CustomerQuoteSheet; quantities: number[]; plans: AveragePlan[]; disabled: boolean; batch?: boolean; shipping?: boolean }>()
-const emit = defineEmits<{ add: [plan: AveragePlan]; addBatch: [plans: AveragePlan[]]; remove: [id: string] }>()
+const emit = defineEmits<{ add: [plan: AveragePlan]; addBatch: [plans: AveragePlan[]]; remove: [id: string]; validation: [message: string] }>()
 const scope = ref(''), mode = ref<'equal' | 'weighted'>('equal'), display = ref<'summary' | 'details'>('details')
 const weights = ref<Record<string, string>>({}), chosen = ref<string[]>([])
 const chosenZones = ref<number[]>([])
 const editingId = ref('')
+const editingBatchIds = ref<string[]>([])
+const validationErrors = ref<Record<string, string>>({})
+function setValidation(message: string) {
+  if (message) validationErrors.value[scope.value] = message
+  else delete validationErrors.value[scope.value]
+  emit('validation', Object.values(validationErrors.value).join('；'))
+}
 const provider = ref('Combined Shipping'), shippingTime = ref(''), error = ref('')
 function sourceLabel(row: QuoteSheetSourceRow) { return [row.carrier, row.transport, row.quoteRegion === '全国统一' ? '' : row.quoteRegion].filter(Boolean).join(' · ') }
 const groups = computed(() => [...new Map(props.rows.map(row => [averageScope(row), { key: averageScope(row), label: [row.sku, row.country].filter(Boolean).join(' · ') }])).values()])
-watch(groups, values => { if (!values.some(g => g.key === scope.value)) { scope.value = values[0]?.key || ''; changeScope() } }, { immediate: true })
+watch(groups, values => { if (!values.some(g => g.key === scope.value)) { scope.value = values[0]?.key || ''; editingId.value = ''; editingBatchIds.value = []; chosen.value = []; chosenZones.value = []; weights.value = {}; error.value = '' } }, { immediate: true })
 const activeScope = computed(() => scope.value || groups.value[0]?.key || '')
 const candidates = computed(() => props.rows.filter(row => averageScope(row) === activeScope.value))
 const zoneChoices = computed(() => candidates.value.some(row => australiaAverageZone(row)) ? [1, 2, 3, 4].map(number => {
@@ -28,7 +35,14 @@ function toggleZone(number: number, checked: boolean) {
   error.value = ''
 }
 const selected = computed(() => candidates.value.filter(row => row.available !== false && chosen.value.includes(quoteSheetRowKey(row))))
-function changeScope() { editingId.value = ''; chosen.value = []; chosenZones.value = []; weights.value = {}; error.value = '' }
+function changeScope() {
+  newPlan(false)
+  const old = [...props.plans].reverse().find(plan => {
+    const first = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)
+    return first && averageScope(first) === scope.value
+  })
+  if (old) editPlan(old)
+}
 function distribute() {
   if (!selected.value.length) return
   const count = selected.value.length, cents = Math.floor(10000 / count)
@@ -48,21 +62,29 @@ function editPlan(plan: AveragePlan) {
   const first = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)
   if (!first) { error.value = '来源渠道已移除，请移除方案后重新生成'; return }
   editingId.value = plan.id
+  editingBatchIds.value = props.batch ? batchAveragePeerIds(plan, props.rows, props.plans) : []
   scope.value = averageScope(first)
   mode.value = plan.mode; display.value = plan.display; provider.value = plan.provider; shippingTime.value = plan.shippingTime
   chosen.value = plan.members.map(m => m.optionId); weights.value = Object.fromEntries(plan.members.map(m => [m.optionId, String(m.weight)])); error.value = ''
   chosenZones.value = [...new Set(props.rows.filter(row => chosen.value.includes(quoteSheetRowKey(row))).map(australiaAverageZone).filter((zone): zone is number => zone !== undefined))]
 }
-function newPlan() { editingId.value = ''; chosen.value = []; chosenZones.value = []; weights.value = {}; error.value = ''; provider.value = 'Combined Shipping'; shippingTime.value = '' }
-watch(() => props.plans.map(plan => plan.id).join(','), () => { if (editingId.value && !props.plans.some(plan => plan.id === editingId.value)) newPlan() })
+function newPlan(clearValidation = true) { editingId.value = ''; editingBatchIds.value = []; if (clearValidation) setValidation(''); chosen.value = []; chosenZones.value = []; weights.value = {}; error.value = ''; provider.value = 'Combined Shipping'; shippingTime.value = '' }
+watch(() => props.plans.map(plan => plan.id).join(','), () => { if (editingId.value && !props.plans.some(plan => plan.id === editingId.value)) { if (!props.plans.length) validationErrors.value = {}; newPlan() } })
 function memberLabel(member: AveragePlan['members'][number], plan: AveragePlan) {
   const row = props.rows.find(row => quoteSheetRowKey(row) === member.optionId)
   return (row ? (quoteSheetProviderName(row.carrier) || row.carrier) + ' · ' + [row.transport, row.quoteRegion].filter(Boolean).join(' · ') : '来源渠道已移除') + (plan.mode === 'weighted' ? ' ' + member.weight + '%' : '')
 }
-function remove(id: string) { if (editingId.value === id) newPlan(); emit('remove', id) }
+function remove(id: string) {
+  const plan = props.plans.find(value => value.id === id)
+  const source = props.rows.find(row => quoteSheetRowKey(row) === plan?.members[0]?.optionId)
+  if (source) delete validationErrors.value[averageScope(source)]
+  if (editingId.value === id) newPlan()
+  emit('validation', Object.values(validationErrors.value).join('；'))
+  emit('remove', id)
+}
 function generate() {
   error.value = draft.value.error
-  if (error.value || props.disabled) return
+  if (error.value || props.disabled) return false
   if (!props.batch && !editingId.value && props.plans.length >= 20) { error.value = '每张报价单最多 20 个综合方案'; return }
   if (!provider.value.trim() || /[^\x20-\x7e]/.test(provider.value) || /[^\x20-\x7e]/.test(shippingTime.value)) { error.value = '方案名称和运输时效请填写英文'; return }
   const id = editingId.value || crypto.randomUUID()
@@ -73,14 +95,44 @@ function generate() {
   })
   const prices = sameCalculation ? props.quantities.map(q => old!.prices[old!.quantities.indexOf(q)] ?? null) : [...draft.value.prices]
   const plan: AveragePlan = { id, mode: mode.value, display: display.value, provider: provider.value.trim(), shippingTime: shippingTime.value.trim(), quantities: [...props.quantities], members: draft.value.members, systemPrices: draft.value.prices, prices }
-  if (props.batch && !editingId.value) {
-    try { emit('addBatch', batchAveragePlans(plan, props.rows, props.system, props.plans)) }
-    catch (e) { error.value = (e as Error).message }
-    return
+  if (props.batch && (!editingId.value || automatic.value)) {
+    try {
+      const plans = batchAveragePlans(plan, props.rows, props.system, props.plans, automatic.value ? editingBatchIds.value : [])
+      emit('addBatch', plans)
+      if (automatic.value) {
+        editingBatchIds.value = plans.map(value => value.id)
+        editingId.value = plans.find(value => value.members.some(member => member.optionId === plan.members[0]?.optionId))?.id || ''
+      }
+    } catch (e) { error.value = (e as Error).message; return false }
+    return true
   }
   emit('add', plan)
   editingId.value = id
+  return true
 }
+
+const automatic = computed(() => candidates.value.some(row => ['US', 'AU'].includes(averageCountry(row))))
+// Restore controls before installing the watcher: viewing a saved plan emits no calculation.
+const initialPlan = [...props.plans].reverse().find(plan => {
+  const source = props.rows.find(row => quoteSheetRowKey(row) === plan.members[0]?.optionId)
+  return source && averageScope(source) === activeScope.value
+})
+if (initialPlan) editPlan(initialPlan)
+// Watch the user's settings only. Opening a saved quote must never recalculate its snapshots.
+watch(() => JSON.stringify([scope.value, chosen.value, chosenZones.value, weights.value, mode.value, display.value, provider.value, shippingTime.value]), () => {
+  if (!automatic.value) { setValidation(''); return }
+  if (!chosen.value.length) {
+    const ids = props.batch ? editingBatchIds.value : editingId.value ? [editingId.value] : []
+    editingId.value = ''; editingBatchIds.value = []
+    ids.forEach(id => emit('remove', id))
+    error.value = ''; setValidation(''); return
+  }
+  if (props.disabled) { setValidation('平均报价来源正在更新，请完成核验后重新确认渠道'); return }
+  error.value = props.system.priceIssues?.join('；') || draft.value.error
+  if (!error.value) generate()
+  setValidation(error.value ? `平均报价尚未生效：${error.value}` : '')
+}, { flush: 'post' })
+
 </script>
 
 <template>
@@ -97,7 +149,7 @@ function generate() {
     </fieldset>
     <p v-if="batch" class="average-hint">{{ shipping ? '渠道与权重应用到每条克重，各自计算平均价；平均行置于该条克重对应国家的明细上方。' : '渠道与权重应用到整批 SKU，各自计算平均价；平均行置于各 SKU 对应国家的明细上方。' }}</p><p class="average-selection-count" role="status">已加入 {{ candidates.length }} 条渠道 · 已勾选 {{ selected.length }} 条参与平均</p>
     <div class="average-channels"><div v-for="row in candidates" :key="quoteSheetRowKey(row)" class="average-channel"><label><input v-model="chosen" type="checkbox" :disabled="row.available === false" :value="quoteSheetRowKey(row)" :aria-label="`参与平均：${sourceLabel(row)}`"><span>{{ quoteSheetProviderName(row.carrier) || row.carrier }}<small>{{ sourceLabel(row) }}<template v-if="row.available === false"> · 暂不可用</template></small></span></label><label v-if="mode === 'weighted' && chosen.includes(quoteSheetRowKey(row))"><input v-model="weights[quoteSheetRowKey(row)]" class="average-weight" type="number" min="0.01" max="100" step="0.01" :aria-label="`${sourceLabel(row)} 权重`">%</label></div></div>
-    <div class="average-options"><strong>客户展示</strong><label><input v-model="display" type="radio" value="summary">仅综合报价</label><label><input v-model="display" type="radio" value="details">综合报价＋明细</label><label>方案名称<input v-model="provider" maxlength="80" aria-label="综合报价方案名称"></label><label>运输时效<input v-model="shippingTime" maxlength="80" placeholder="手动确认，例如 7-12 working days" aria-label="综合报价运输时效"></label><button class="average-generate" type="button" :disabled="!!draft.error || !!system.priceIssues?.length" @click="generate">{{ editingId ? '应用修改' : '生成平均行' }}</button><button v-if="editingId" type="button" @click="newPlan">新增方案</button></div>
+    <div class="average-options"><strong>客户展示</strong><label><input v-model="display" type="radio" value="summary">仅综合报价</label><label><input v-model="display" type="radio" value="details">综合报价＋明细</label><label>方案名称<input v-model="provider" maxlength="80" aria-label="综合报价方案名称"></label><label>运输时效<input v-model="shippingTime" maxlength="80" placeholder="手动确认，例如 7-12 working days" aria-label="综合报价运输时效"></label><span v-if="automatic" class="average-auto-status" role="status">{{ error || draft.error ? '选好有效渠道后自动生成' : '已自动生成到下方报价单' }}</span><button v-else class="average-generate" type="button" :disabled="!!draft.error || !!system.priceIssues?.length" @click="generate">{{ editingId ? '应用修改' : '生成平均行' }}</button><button v-if="editingId" type="button" @click="newPlan()">新增方案</button></div>
     <p v-if="draft.error" role="status" class="average-hint">{{ draft.error }}</p><p v-else class="average-result">计算结果：<span v-for="(price, i) in draft.prices" :key="i">{{ quantities[i] }} 数量：${{ price!.toFixed(2) }} </span></p>
     <p v-if="error" role="alert">{{ error }}</p>
     <div v-for="plan in plans" :key="plan.id" class="average-saved"><span>{{ plan.provider }} · {{ plan.mode === 'equal' ? '普通平均' : '加权平均' }} · {{ plan.members.length }} 条渠道 · {{ plan.display === 'summary' ? '仅综合报价' : '综合报价＋明细' }}<small class="average-members">{{ plan.members.map(member => memberLabel(member, plan)).join('；') }}</small></span><div><button type="button" :aria-label="`编辑综合方案 ${plan.provider}`" @click="editPlan(plan)">编辑方案</button><button type="button" :aria-label="`移除综合方案 ${plan.provider}`" @click="remove(plan.id)">移除方案</button></div></div>

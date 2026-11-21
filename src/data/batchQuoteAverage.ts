@@ -8,7 +8,7 @@ function routeIdentity(row: QuoteSheetSourceRow) {
 }
 
 /** Validate the entire batch first. Prices always come from each SKU's snapshot. */
-export function batchAveragePlans(template: AveragePlan, rows: QuoteSheetSourceRow[], system: CustomerQuoteSheet, existing: AveragePlan[]) {
+export function batchAveragePlans(template: AveragePlan, rows: QuoteSheetSourceRow[], system: CustomerQuoteSheet, existing: AveragePlan[], replaceIds: string[] = []) {
   const sources = new Map(rows.map(row => [quoteSheetRowKey(row), row]))
   const prices = new Map(system.rows.map(row => [row.key, row.prices]))
   const selected = template.members.map(member => {
@@ -32,14 +32,26 @@ export function batchAveragePlans(template: AveragePlan, rows: QuoteSheetSourceR
     const systemPrices = averagePrices(members, template.mode, template.quantities.length)
     if (systemPrices.some(price => price == null)) throw new Error(`${sku} 的所选渠道存在缺价档位，请补齐报价或调整渠道选择`)
     // Update the same channel combination on repeat generation, without duplicating it.
-    const old = existing.find(plan => plan.members.length === members.length && members.every(member => plan.members.some(previous => previous.optionId === member.optionId)))
+    const old = existing.find(plan => replaceIds.includes(plan.id) && sources.get(plan.members[0]?.optionId ?? '')?.sku === sku)
+      ?? existing.find(plan => plan.members.length === members.length && members.every(member => plan.members.some(previous => previous.optionId === member.optionId)))
     const owned = existing.filter(plan => sources.get(plan.members[0]?.optionId ?? '')?.sku === sku)
     if (!old && owned.length >= 20) throw new Error(`${sku} 最多保留 20 个综合方案，请先移除不用的方案`)
-    const unchanged = old?.mode === template.mode && members.every(member => {
-      const previous = old.members.find(candidate => candidate.optionId === member.optionId)!
-      return (template.mode === 'equal' || previous.weight === member.weight) && template.quantities.every((q, i) => previous.sourcePrices[old.quantities.indexOf(q)] === member.sourcePrices[i])
+    const unchanged = old?.mode === template.mode && old.members.length === members.length && members.every(member => {
+      const previous = old.members.find(candidate => candidate.optionId === member.optionId)
+      return previous && (template.mode === 'equal' || previous.weight === member.weight) && template.quantities.every((q, i) => previous.sourcePrices[old.quantities.indexOf(q)] === member.sourcePrices[i])
     })
     return { ...template, id: old?.id ?? crypto.randomUUID(), members, systemPrices,
       prices: unchanged ? template.quantities.map(q => old!.prices[old!.quantities.indexOf(q)] ?? null) : [...systemPrices] }
   })
+}
+
+/** Locate only matching route combinations across SKUs, keeping other plans independent. */
+export function batchAveragePeerIds(plan: AveragePlan, rows: QuoteSheetSourceRow[], plans: AveragePlan[]) {
+  const sources = new Map(rows.map(row => [quoteSheetRowKey(row), row]))
+  const signature = (value: AveragePlan) => JSON.stringify(value.members.map(member => {
+    const row = sources.get(member.optionId)
+    return row ? routeIdentity(row) : member.optionId
+  }).sort())
+  const key = signature(plan)
+  return plans.filter(candidate => signature(candidate) === key).map(candidate => candidate.id)
 }

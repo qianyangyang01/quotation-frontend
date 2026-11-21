@@ -1049,6 +1049,12 @@ it('blocks both kinds of sorting during a clipboard write', async () => {
   finish(); await settle()
 })
 
+async function applyAverage() {
+  const action = button('生成平均行') || button('应用修改')
+  if (action) action.click()
+  else expect(document.querySelector('.average-auto-status')).not.toBeNull()
+  await settle()
+}
 async function generateWeighted() {
   await click('渠道平均报价'); await click('加权平均')
   for (const [carrier, weight] of [['SDH', '50'], ['顺丰', '30'], ['燕文', '20']]) {
@@ -1057,7 +1063,7 @@ async function generateWeighted() {
     await input(`${carrier} · 内部渠道 权重`, weight!)
   }
   await input('综合报价运输时效', '7-12 working days')
-  await click('生成平均行')
+  await applyAverage()
 }
 const averageRows = () => ['SDH', '顺丰', '燕文'].map((carrier, i) => ({ ...row(String(i), carrier), quote1: [5,5.25,5.3][i]!, quote2: [5.95,6.25,6.45][i]!, quote3: [7,7,7.45][i]!, quoteCustom: [7,7,7.45][i]! }))
 it('lists all three US channels across tax modes and restores the selected average in preview and copy', async () => {
@@ -1072,7 +1078,7 @@ it('lists all three US channels across tax modes and restores the selected avera
   expect(channels).toHaveLength(3)
   for (const channel of channels) { channel.click(); await settle() }
   expect(document.querySelector('.average-selection-count')?.textContent).toContain('已勾选 3 条')
-  await click('生成平均行')
+  await applyAverage()
   const saved = exposed.capturePrices()
   expect(saved.averagePlans![0]).toMatchObject({ mode: 'equal', systemPrices: [5.18, 6.22, 7.15, 7.15] })
   expect(saved.averagePlans![0]!.members).toHaveLength(3)
@@ -1096,12 +1102,12 @@ it('shows unavailable sources disabled and excludes other countries from the cur
   expect(channels[3]!.disabled).toBe(true)
   expect(document.querySelector('.average-channels')?.textContent).toContain('暂不可用')
   for (const channel of channels.slice(0, 2)) { channel.click(); await settle() }
-  await click('生成平均行')
+  await applyAverage()
   expect(exposed.capturePrices().averagePlans![0]!.members.map(m => m.optionId)).toEqual(rows.slice(0, 2).map(quoteSheetRowKey))
 })
 
 it('moves an average among source rows by drag, buttons and keyboard without changing prices, then exports that order', async () => {
-  const rows = averageRows(); mount(rows); await settle(); await generateWeighted()
+  const rows = averageRows().map(source => ({ ...source, country: '英国' })); mount(rows); await settle(); await generateWeighted()
   const id = exposed.capturePrices().averagePlans![0]!.id
   const key = `average:${id}`
   document.querySelector<HTMLInputElement>('[aria-label="显示尺码规则列"]')!.click(); await settle()
@@ -1140,12 +1146,12 @@ it('moves an average among source rows by drag, buttons and keyboard without cha
 })
 
 it('keeps a moved average in place through source refresh, hiding and plan edits; deleting it removes the plan only', async () => {
-  const state = mount(averageRows()); await settle(); await generateWeighted()
+  const state = mount(averageRows().map(source => ({ ...source, country: '英国' }))); await settle(); await generateWeighted()
   const id = exposed.capturePrices().averagePlans![0]!.id
   document.querySelector<HTMLButtonElement>('[aria-label="上移第 4 行"]')!.click(); await settle()
   state.rows = state.rows.map(r => ({ ...r })); await settle()
   expect(document.querySelectorAll('[data-row-handle]')[2]!.getAttribute('data-row-handle')).toBe(`average:${id}`)
-  await input('综合报价方案名称', 'Updated Shipping'); await click('应用修改')
+  await input('综合报价方案名称', 'Updated Shipping'); await applyAverage()
   document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 1 行"]')!.click(); await settle()
   expect(document.querySelectorAll('[data-row-handle]')[1]!.getAttribute('data-row-handle')).toBe(`average:${id}`)
   const saved = exposed.capturePrices()
@@ -1162,11 +1168,11 @@ it('keeps a moved average in place through source refresh, hiding and plan edits
 })
 
 it('sorts multiple averages independently and deletes just the selected plan', async () => {
-  mount(averageRows()); await settle(); await generateWeighted()
+  mount(averageRows().map(source => ({ ...source, country: '英国' }))); await settle(); await generateWeighted()
   const first = exposed.capturePrices().averagePlans![0]!
   await click('新增方案'); await click('普通平均')
   for (const checkbox of document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')) { checkbox.click(); await settle() }
-  await settle(); await input('综合报价方案名称', 'Second Shipping'); await click('生成平均行')
+  await settle(); await input('综合报价方案名称', 'Second Shipping'); await applyAverage()
   const second = exposed.capturePrices().averagePlans![1]!
   expect(second).toBeDefined()
   const handle = document.querySelector(`[data-row-handle="average:${first.id}"]`)!
@@ -1184,13 +1190,13 @@ it('hides all average sources while retaining the editable plan, copied AVG and 
   const original = exposed.capturePrices()
   await input('综合报价 ' + original.averagePlans![0]!.id + ' 数量 1', '4.80')
   for (let i = 0; i < rows.length; i++) {
-    expect(document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 1 行"]')!.disabled).toBe(false)
-    await hideRowAt(1)
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="隐藏第 2 行"]')!.disabled).toBe(false)
+    await hideRowAt(2)
   }
   expect(document.querySelector('.sheet-row-tools')!.textContent).toContain('显示 1 行 · 已隐藏 3 行')
   expect(document.querySelectorAll('.sheet-editor tbody tr')).toHaveLength(1)
   expect(document.querySelector('.average-saved')!.textContent).not.toContain('来源渠道已移除')
-  await click('应用修改')
+  await applyAverage()
   const saved = exposed.capturePrices()
   expect(saved.rows).toEqual(original.rows)
   expect(saved.hiddenRowKeys).toEqual(rows.map(quoteSheetRowKey))
@@ -1229,7 +1235,7 @@ it('generates weighted AVG, preserves system inputs after channel edits, and blo
   await exposed.copyData(); expect(write).not.toHaveBeenCalled()
   await input('综合报价 ' + id + ' 数量 1', '5.14')
   await click('预览报价单')
-  expect(render.mock.lastCall![0].rows[3]).toMatchObject({ number: 'AVG', prices: [5.14,6.14,7.09,7.09] })
+  expect(render.mock.lastCall![0].rows[0]).toMatchObject({ number: 'AVG', prices: [5.14,6.14,7.09,7.09] })
   state.rows[0]!.quote1 = 6; await settle()
   expect(exposed.capturePrices().averagePlans).toEqual([])
 })
@@ -1244,8 +1250,9 @@ it('restores aggregate snapshots by stable channel id and keeps the saved custom
   const state = mount(rows, calculate, initialQuote, true); state.initialSystemQuote = system; await settle()
   expect(exposed.capturePrices().averagePlans?.[0]?.systemPrices).toEqual([5.14,6.14,7.09,7.09])
   expect(calculate).not.toHaveBeenCalled()
+  expect(document.querySelector<HTMLInputElement>('[aria-label="SDH · 内部渠道 权重"]')?.value).toBe('50')
   await click('预览报价单')
-  expect(render.mock.lastCall![0].rows[3]).toMatchObject({ number: 'AVG', prices: [5.14,6.14,7.09,7.09] })
+  expect(render.mock.lastCall![0].rows.find(row => row.averageId)).toMatchObject({ number: 'AVG', prices: [5.14,6.14,7.09,7.09] })
 })
 
 it('updates an existing plan instead of duplicating it and outputs only AVG in summary mode', async () => {
@@ -1253,14 +1260,14 @@ it('updates an existing plan instead of duplicating it and outputs only AVG in s
   const id = exposed.capturePrices().averagePlans![0]!.id
   await input('综合报价 ' + id + ' 数量 1', '4.80')
   document.querySelector<HTMLInputElement>('input[type="radio"][value="summary"]')!.click(); await settle()
-  await click('应用修改')
+  await applyAverage()
   expect(exposed.capturePrices().averagePlans![0]!.prices[0]).toBe(4.8)
   const handle = document.querySelector('[aria-label="第 1 个价格列排序，左右键移动"]')!
   handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await settle()
   expect(exposed.capturePrices().averagePlans![0]).toMatchObject({ id, quantities: [2,1,3,5], prices: [6.14,4.8,7.09,7.09] })
   document.querySelector('[aria-label="第 2 个价格列排序，左右键移动"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); await settle()
   await input('SDH · 内部渠道 权重', '30'); await input('顺丰 · 内部渠道 权重', '50')
-  await click('应用修改')
+  await applyAverage()
   expect(exposed.capturePrices().averagePlans).toHaveLength(1)
   expect(exposed.capturePrices().averagePlans![0]).toMatchObject({ id, display: 'summary', systemPrices: [5.19,6.2,7.09,7.09] })
   await click('预览报价单'); expect(render.mock.lastCall![0].rows).toHaveLength(1)
@@ -1268,7 +1275,7 @@ it('updates an existing plan instead of duplicating it and outputs only AVG in s
   await click('编辑报价单')
   document.querySelector<HTMLButtonElement>('[aria-label="移除综合方案 Combined Shipping"]')!.click(); await settle()
   expect(exposed.capturePrices().averagePlans).toEqual([])
-  expect(button('生成平均行')).toBeTruthy()
+  expect(document.querySelector('.average-auto-status')).not.toBeNull()
 })
 
 it('lets users select arbitrary Australia zones of the same channel and outputs their average in the quote sheet', async () => {
@@ -1280,7 +1287,7 @@ it('lets users select arbitrary Australia zones of the same channel and outputs 
   for (const zone of [1, 4]) {
     document.querySelector<HTMLInputElement>(`input[aria-label="参与平均区域：${zone}区"]`)!.click(); await settle()
   }
-  await click('生成平均行')
+  await applyAverage()
   const saved = exposed.capturePrices().averagePlans![0]!
   expect(saved.systemPrices).toEqual([25, 50, 75, 125])
   expect(saved.members.map(m => m.optionId)).toEqual([quoteSheetRowKey(rows[0]!), quoteSheetRowKey(rows[3]!)])
@@ -1301,11 +1308,11 @@ it('keeps every channel visible while region shortcuts select or deselect its me
   expect(channels().map(c => c.checked)).toEqual([true, true, false])
   for (const channel of channels().filter(c => c.checked)) { channel.click(); await settle() }
   expect(zone(1).checked).toBe(true); expect(zone(4).checked).toBe(false)
-  expect(button('生成平均行').disabled).toBe(true)
+  expect(exposed.capturePrices().averagePlans).toEqual([])
   channels()[0]!.click(); await settle()
   expect(zone(1).checked).toBe(true); expect(zone(4).checked).toBe(false)
   zone(4).click(); await settle()
-  await click('生成平均行')
+  await applyAverage()
   expect(exposed.capturePrices().averagePlans![0]!.members).toHaveLength(2)
   await click('新增方案')
   expect(channels()).toHaveLength(3); expect(zone(1).checked).toBe(false)
@@ -1315,7 +1322,7 @@ it('keeps every channel visible while region shortcuts select or deselect its me
   zone(1).click(); await settle()
   expect(channels().map(c => c.checked)).toEqual([false, false, true])
   expect(zone(1).checked).toBe(false); expect(zone(4).checked).toBe(true)
-  expect(button('应用修改').disabled).toBe(true)
+  expect(exposed.captureSheet().priceIssues?.length).toBeGreaterThan(0)
 })
 
 
@@ -1421,10 +1428,7 @@ it('restores saved notes and switch state, but starts a new product with the swi
 it('persists average row position through capture, reopen, preview, copying and record reset', async () => {
   const rows = averageRows()
   mount(rows); await settle(); await generateWeighted()
-  for (const index of [4, 3, 2]) {
-    document.querySelector<HTMLButtonElement>('[aria-label="上移第 ' + index + ' 行"]')!.click()
-    await settle()
-  }
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="下移第 1 行"]')!.disabled).toBe(true)
   const position = () => [...document.querySelectorAll('.sheet-editor tbody tr')].findIndex(tr => tr.classList.contains('sheet-average-row'))
   const movedPosition = position()
   expect(movedPosition).toBe(0)
@@ -1487,4 +1491,81 @@ it('keeps units attached to moved and edited quantity columns and resets for a n
   state.contextKey = 'product-2'; await settle()
   expect(exposed.capturePrices().quantityUnits).toEqual({})
   expect(exposed.captureSheet().quantityLabels).toEqual(['1 pc','2 pcs','3 pcs','5 pcs'])
+})
+
+
+it.each(['美国', '澳大利亚'])('automatically creates and replaces %s averages as membership changes, preserving source prices', async country => {
+  const rows = averageRows().map(source => ({ ...source, country }))
+  const before = JSON.stringify(rows)
+  mount(rows); await settle(); await click('渠道平均报价')
+  expect(button('生成平均行')).toBeUndefined()
+  const channels = [...document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')]
+  channels[0]!.click(); await settle()
+  expect(() => exposed.capturePrices()).toThrow('至少选择两条')
+  channels[1]!.click(); await settle()
+  const first = exposed.capturePrices().averagePlans![0]!
+  expect(first.systemPrices).toEqual([5.13,6.1,7,7])
+  channels[2]!.click(); await settle()
+  expect(exposed.capturePrices().averagePlans).toHaveLength(1)
+  expect(exposed.capturePrices().averagePlans![0]).toMatchObject({ id:first.id, systemPrices:[5.18,6.22,7.15,7.15] })
+  channels[2]!.click(); await settle()
+  expect(exposed.capturePrices().averagePlans![0]!.systemPrices).toEqual([5.13,6.1,7,7])
+  await input(`综合报价 ${first.id} 数量 1`, '4.80')
+  await input('综合报价方案名称', 'New label')
+  expect(exposed.capturePrices().averagePlans![0]!.prices[0]).toBe(4.8)
+  await input(`综合报价 ${first.id} 数量 1`, 'invalid')
+  await input('综合报价运输时效', '10 days')
+  expect(() => exposed.capturePrices()).toThrow('综合报价')
+  await input(`综合报价 ${first.id} 数量 1`, '4.80')
+  expect(exposed.capturePrices().averagePlans![0]!.prices[0]).toBe(4.8)
+  expect(JSON.stringify(rows)).toBe(before)
+})
+
+it('blocks unfinished weighted edits even after closing the panel or switching country, then recovers without duplicate plans', async () => {
+  mount([...averageRows(), ...averageRows().map(source => ({ ...source, country:'澳大利亚', channelKey:'au-'+source.channelKey }))])
+  await settle();await generateWeighted()
+  const id = exposed.capturePrices().averagePlans![0]!.id
+  await input('SDH · 内部渠道 权重', '49')
+  expect(() => exposed.capturePrices()).toThrow('权重合计必须为 100%')
+  await exposed.copyCompact();await settle();expect(write).not.toHaveBeenCalled()
+  await click('渠道平均报价')
+  expect(() => exposed.capturePrices()).toThrow('权重合计')
+  await click('渠道平均报价')
+  const country=document.querySelector<HTMLSelectElement>('[aria-label="平均报价国家"]')!
+  const us=country.value
+  country.value=[...country.options].find(option=>option.textContent?.includes('澳大利亚'))!.value
+  country.dispatchEvent(new Event('change',{bubbles:true}));await settle()
+  expect(() => exposed.capturePrices()).toThrow('权重合计')
+  country.value=us;country.dispatchEvent(new Event('change',{bubbles:true}));await settle()
+  // Returning explicitly restores the last valid saved settings, visible in the inputs.
+  expect(document.querySelector<HTMLInputElement>('[aria-label="SDH · 内部渠道 权重"]')!.value).toBe('50')
+  expect(exposed.capturePrices().averagePlans).toHaveLength(1)
+  expect(exposed.capturePrices().averagePlans![0]!.id).toBe(id)
+})
+
+it('keeps the US average first through Australia generation, drag attempts, copying and save/reopen', async () => {
+  const rows=[...averageRows().map(source=>({...source,country:'澳大利亚',channelKey:'au-'+source.channelKey})),...averageRows()]
+  mount(rows);await settle();await click('渠道平均报价')
+  for(const input of [...document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')].slice(0,2)){input.click();await settle()}
+  const country=document.querySelector<HTMLSelectElement>('[aria-label="平均报价国家"]')!
+  country.value=[...country.options].find(option=>option.textContent?.includes('美国'))!.value
+  country.dispatchEvent(new Event('change',{bubbles:true}));await settle()
+  for(const input of [...document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')].slice(0,2)){input.click();await settle()}
+  const saved=exposed.capturePrices(), first=exposed.captureSheet().rows[0]!
+  expect(first).toMatchObject({number:'AVG',country:'United States',prices:[5.13,6.1,7,7]})
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="下移第 1 行"]')!.disabled).toBe(true)
+  document.querySelector('[data-row-handle]')!.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));await settle()
+  expect(exposed.capturePrices()).toEqual(saved)
+  await exposed.copyCompact();await settle()
+  const html=await write.mock.lastCall![0][0].items['text/html'].text()
+  const parsed=document.createElement('div');parsed.innerHTML=html
+  expect(parsed.querySelector('tbody tr')!.textContent).toContain('United States')
+  expect([...parsed.querySelectorAll('th[data-copy-metadata="header"]')].map(cell=>cell.textContent)).toEqual(['报价人','报价日期','报价客户','客户等级','客户佣金'])
+  const ids=(key:string)=>rows.find(row=>quoteSheetRowKey(row)===key)?.channelKey
+  const snapshot={quantities:saved.quantities,rows:saved.rows.map(row=>({optionId:ids(row.key)!,prices:row.prices})),averagePlans:mapAveragePlans(saved.averagePlans,ids),rowOrder:captureQuoteRowOrder(saved.rowOrderKeys,ids)}
+  const system={quantities:saved.quantities,rows:saved.rows.map(row=>({optionId:ids(row.key)!,prices:row.systemPrices}))}
+  app.unmount();document.body.innerHTML=''
+  const state=mount(rows,undefined,snapshot,true);state.initialSystemQuote=system;await settle()
+  expect(exposed.captureSheet().rows[0]!.key).toBe(first.key)
+  expect(exposed.capturePrices().averagePlans).toEqual(saved.averagePlans)
 })

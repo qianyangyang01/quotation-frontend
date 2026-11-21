@@ -14,7 +14,7 @@ const errors=[];page.on('pageerror',error=>errors.push(error.message))
 const sample=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=200;c.height=200;const x=c.getContext('2d');x.fillStyle='#eaf5ff';x.fillRect(0,0,200,200);x.fillStyle='#d39b53';x.fillRect(45,45,110,120);x.fillStyle='#edc48e';x.fillRect(45,45,110,28);x.fillStyle='#fff';x.fillRect(83,45,34,120);x.fillStyle='#34495e';x.font='bold 16px Arial';x.fillText('DEMO',76,113);return c.toDataURL('image/png').split(',')[1]})
 await writeFile(`${out}/sample.png`,Buffer.from(sample,'base64'))
 try {
-  await page.goto('http://127.0.0.1:5392/scripts/qa/compact-quote-fixture.html')
+  await page.goto((process.env.QA_BASE_URL || 'http://127.0.0.1:5392') + '/scripts/qa/compact-quote-fixture.html')
   const button=page.getByRole('button',{name:'复制图文表格',exact:true}).first()
   await button.waitFor()
   await page.waitForFunction(()=>!document.body.textContent.includes('正在读取报价单图片'))
@@ -43,13 +43,15 @@ try {
   await page.locator('.record-copy-actions > [role=status]').filter({hasText:'图文表格已复制'}).waitFor()
   const detailHtml=await page.evaluate(async()=>{const items=await navigator.clipboard.read();return (await items[0].getType('text/html')).text()})
   assert.equal(listHtml,detailHtml)
+  assert.equal((listHtml.match(/data-copy-metadata="header"/g)||[]).length,5)
+  for(const label of ['报价人','报价日期','报价客户','客户等级','客户佣金'])assert.ok(listHtml.includes(label))
   if(process.env.QA_WPS==='1') {
     execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/qa/compact-quote-wps.ps1'],{encoding:'utf8',windowsHide:true})
     const result=JSON.parse((await readFile(`${out}/wps-result.json`,'utf8')).replace(/^\uFEFF/,''))
-    assert.equal(result.shapes,1);assert.equal(result.rows,9);assert.equal(result.columns,8)
+    assert.equal(result.shapes,1);assert.equal(result.rows,9);assert.equal(result.columns,13)
     assert.equal(result.sku,'BK2603011');assert.equal(result.firstPrice,13.4);assert.equal(result.averagePrice,14.33)
-    assert.equal(result.skuMerged,'$A$3:$A$9');assert.equal(result.photoMerged,'$B$3:$B$9')
-    assert.equal(result.provider,'50%顺丰商派 + 50%燕文');assert.equal(result.photoTopLeft,'$B$3')
+    assert.equal(result.skuMerged,'$F$3:$F$9');assert.equal(result.photoMerged,'$G$3:$G$9')
+    assert.equal(result.provider,'50%顺丰商派 + 50%燕文');assert.equal(result.photoTopLeft,'$G$3')
     console.log('PASS: real WPS pasted numeric cells, merged SKU/photo cells and embedded product image.')
   }
   assert.equal(await page.locator('dialog[open]').count(),0)
@@ -63,7 +65,7 @@ try {
   const reordered=await page.evaluate(async()=>{
     const items=await navigator.clipboard.read(),html=await (await items[0].getType('text/html')).text()
     const doc=new DOMParser().parseFromString(html,'text/html')
-    return {html,headers:[...doc.querySelectorAll('thead tr:first-child th')].map(cell=>cell.textContent),quantities:[...doc.querySelectorAll('thead tr:last-child th')].map(cell=>cell.textContent),prices:[...doc.querySelectorAll('tbody tr:first-child td[x\\:num]')].map(cell=>cell.getAttribute('x:num'))}
+    return {html,headers:[...doc.querySelectorAll('thead tr:first-child th:not([data-copy-metadata])')].map(cell=>cell.textContent),quantities:[...doc.querySelectorAll('thead tr:last-child th')].map(cell=>cell.textContent),prices:[...doc.querySelectorAll('tbody tr:first-child td[x\\:num]')].map(cell=>cell.getAttribute('x:num'))}
   })
   assert.equal(reordered.headers[0],'Country / Zone')
   assert.deepEqual(reordered.quantities,['2 pcs','1 pc','3 pcs'])
@@ -74,13 +76,13 @@ try {
     const result=JSON.parse((await readFile(`${out}/wps-reordered-result.json`,'utf8')).replace(/^\uFEFF/,''))
     // WPS can split a wrapped HTML row into vertically merged physical rows.
     // Verify logical rows and every numeric value rather than counting blank split rows.
-    assert.equal(result.columns,8);assert.equal(result.shapes,1)
+    assert.equal(result.columns,13);assert.equal(result.shapes,1)
     assert.deepEqual(result.dataRows.map(row=>row.prices),[[25.18,14.33,36.55],[23.7,13.45,34],[18.85,11.15,26.75],[21.15,11.9,31.75],[19.65,12.3,27],[25.35,15.8,35.55]])
     assert.equal(result.firstHeader,'Country / Zone')
     assert.equal(result.firstQuantity,'2 pcs');assert.equal(result.secondQuantity,'1 pc')
     assert.equal(result.firstPrice,25.18);assert.equal(result.secondPrice,14.33)
-    assert.equal(result.skuMerged,`$B$3:$B$${result.rows}`);assert.equal(result.photoMerged,`$C$3:$C$${result.rows}`)
-    assert.equal(result.photoTopLeft,'$C$3');assert.equal(result.provider,'50%顺丰商派 + 50%燕文')
+    assert.equal(result.skuMerged,`$G$3:$G$${result.rows}`);assert.equal(result.photoMerged,`$H$3:$H$${result.rows}`)
+    assert.equal(result.photoTopLeft,'$H$3');assert.equal(result.provider,'50%顺丰商派 + 50%燕文')
     console.log('PASS: real WPS retained moved columns, quantities, rows and price alignment.')
   }
   await currentSheet.getByText('查看图文表格',{exact:true}).click()

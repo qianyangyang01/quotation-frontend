@@ -107,7 +107,7 @@ it('generates a summary for every SKU in one click and keeps saved ownership iso
  const members=[...document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')]
  expect(members).toHaveLength(2);for(const member of members){member.click();await nextTick()}
  const summary=document.querySelector<HTMLInputElement>('.average-options input[value="summary"]')!;summary.click();await nextTick()
- button('生成平均行').click();await nextTick()
+ await applyAverage()
  const saved=await editor.capture()
  expect(saved.items[0]!.input.customerQuote!.averagePlans).toHaveLength(1)
  expect(saved.items[1]!.input.customerQuote!.averagePlans).toHaveLength(1)
@@ -119,10 +119,16 @@ it('generates a summary for every SKU in one click and keeps saved ownership iso
  expect(restored.initialQuote.averagePlans![0]!.members.every(member=>member.optionId.includes('SKU-A'))).toBe(true)
 })
 
+async function applyAverage() {
+ const action=button('生成平均行') || button('应用修改')
+ if(action) action.click()
+ else expect(document.querySelector('.average-auto-status')).not.toBeNull()
+ await nextTick();await nextTick()
+}
 async function generateAverages() {
  button('渠道平均报价').click();await nextTick()
  for(const member of document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')) {member.click();await nextTick()}
- button('生成平均行').click();await nextTick()
+ await applyAverage()
 }
 
 function multiCountryItem(sku: string, withAverages = false): BatchSingleItem {
@@ -184,21 +190,21 @@ it('generates a second-country average next to its sources and leaves the first-
  expect(italy).toBeTruthy()
  country.value = italy.value;country.dispatchEvent(new Event('change'));await nextTick()
  for (const member of document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')) { if (!member.checked) member.click(); await nextTick() }
- button('生成平均行').click();await nextTick()
+ await applyAverage()
  const first = await editor.capture()
  expect(first.sheet.rows.map(row => [row.country, !!row.averageId])).toEqual(Array.from({length:2}, () => [
   ['United States',true],['United States',false],['United States',false],['Italy',true],['Italy',false],['Italy',false],
  ]).flat())
- button('生成平均行').click();await nextTick()
+ await applyAverage()
  expect((await editor.capture()).sheet.rows).toEqual(first.sheet.rows)
 })
 
-it('retains deliberate manual average moves through capture and reopen without changing prices', async () => {
+it('keeps US averages pinned through capture and reopen without changing prices', async () => {
  await mount();await generateAverages()
  const before = await editor.capture()
  document.querySelector<HTMLButtonElement>('.sheet-average-row [title="下移"]')!.click();await nextTick()
  const moved = await editor.capture()
- expect(moved.sheet.rows.map(row => !!row.averageId)).toEqual([false,true,false,true,false,false])
+ expect(moved.sheet.rows.map(row => !!row.averageId)).toEqual([true,false,false,true,false,false])
  expect(moved.items.map(item => item.input.customerQuote!.averagePlans)).toEqual(before.items.map(item => item.input.customerQuote!.averagePlans))
  app.unmount();document.body.innerHTML='';await mount(undefined,moved)
  expect((await editor.capture()).sheet.rows.map(row => [row.sku, !!row.averageId, row.prices])).toEqual(moved.sheet.rows.map(row => [row.sku, !!row.averageId, row.prices]))
@@ -218,9 +224,9 @@ it.each([false, true])('puts the average before unselected same-country routes (
  for (const label of ['参与平均：4PX · a','参与平均：4PX · b']) {
   // The extra route uses a distinct transport label to stay out of this plan.
   const member = [...document.querySelectorAll<HTMLInputElement>('.average-channels input[type="checkbox"]')].filter(input => input.getAttribute('aria-label') === label).at(-1)!
-  member.click();await nextTick()
+  if (!member.checked) member.click();await nextTick()
  }
- button('生成平均行').click();await nextTick()
+ await applyAverage()
  const saved = await editor.capture()
  expect(saved.sheet.rows[0]!.averageId).toBeTruthy()
  expect(saved.sheet.rows[1]!.provider).toBe('Unselected')
@@ -257,7 +263,7 @@ it('generates all 50 SKUs despite pagination and filtering and does not duplicat
  const first=await editor.capture()
  expect(first.sheet.rows).toHaveLength(150)
  expect(first.items.every(item=>item.input.customerQuote!.averagePlans!.length===1 && !!item.sheet.rows[0]!.averageId)).toBe(true)
- button('生成平均行').click();await nextTick()
+ await applyAverage()
  const repeated=await editor.capture()
  expect(repeated.items.map(item=>item.input.customerQuote!.averagePlans)).toEqual(first.items.map(item=>item.input.customerQuote!.averagePlans))
  expect(repeated.sheet.rows).toHaveLength(150)
@@ -270,8 +276,7 @@ it('reports a missing route and does not leave a partially generated batch',asyn
  await mount(undefined,mergeBatchSingle([a,b]));await generateAverages()
  expect(document.body.textContent).toContain('SKU-B 缺少所选渠道')
  expect(document.querySelectorAll('.sheet-average-row')).toHaveLength(0)
- const saved=await editor.capture()
- expect(saved.items.every(item=>!item.input.customerQuote!.averagePlans!.length)).toBe(true)
+ await expect(editor.capture()).rejects.toThrow('SKU-B 缺少所选渠道')
 })
 
 it('rejects a changed pricing basis instead of mixing new purchase prices with the existing sheet', async () => {
@@ -379,4 +384,31 @@ it('saves custom quantity units for every batch item and restores them without r
  }
  expect(batchSheetEditorSource(saved).initialQuote.quantityUnits).toEqual({'1':'set'})
  expect(calculate).not.toHaveBeenCalled()
+})
+
+
+it('automatically updates a whole batch when adding a third US route without leaving duplicate or stale averages',async()=>{
+ const values=['SKU-A','SKU-B'].map(sku=>{
+  const value=item(sku),factor=sku==='SKU-A'?1:2
+  const extra={...value.input.quoteOptions![0]!,id:'c',quoteSheetKey:'c',channel:'c',quote1Usd:10,quote2Usd:20,quote3Usd:30}
+  value.input.quoteOptions!.push(extra)
+  value.input.customerQuote!.rows.push({optionId:'c',prices:[10,20,30]})
+  value.input.systemQuantityQuotes=JSON.parse(JSON.stringify(value.input.customerQuote))
+  value.input.systemQuantityQuotes!.rows.forEach(row=>{row.prices=row.prices.map(price=>price! * factor)})
+  value.input.quoteOptions!.forEach(option=>{option.quote1Usd! *= factor;option.quote2Usd! *= factor;option.quote3Usd! *= factor})
+  value.sheet.rows.push({...value.sheet.rows[0]!,key:'c',prices:[10,20,30]})
+  return value
+ })
+ const original=JSON.stringify(values)
+ await mount(undefined,mergeBatchSingle(values));button('渠道平均报价').click();await nextTick()
+ const channels=[...document.querySelectorAll<HTMLInputElement>('.average-channel input[type="checkbox"]')]
+ channels[0]!.click();await nextTick();channels[1]!.click();await nextTick();await nextTick()
+ const first=await editor.capture(),ids=first.items.map(item=>item.input.customerQuote!.averagePlans![0]!.id)
+ channels[2]!.click();await nextTick();await nextTick()
+ const next=await editor.capture()
+ expect(next.items.map(item=>item.input.customerQuote!.averagePlans!.length)).toEqual([1,1])
+ expect(next.items.map(item=>item.input.customerQuote!.averagePlans![0]!.id)).toEqual(ids)
+ expect(next.items.map(item=>item.input.customerQuote!.averagePlans![0]!.systemPrices)).toEqual([[7,13.67,20.33],[14,27.33,40.67]])
+ expect(next.items.every(item=>item.sheet.rows[0]!.averageId)).toBe(true)
+ expect(JSON.stringify(values)).toBe(original)
 })
