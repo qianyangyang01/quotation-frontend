@@ -110,6 +110,26 @@ class LogisticsImportBindingPostgresTest {
         assertEquals(oldRows,jdbc.sql("select payload->'rows' from logistics_version where id=:id").param("id",oldId).query(String.class).single());
         assertEquals(3,jdbc.sql("select count(*) from logistics_version where channel_id=:id").param("id",c).query(Integer.class).single());
     }
+    @Test void japanFirstNextImportsPublishesRepeatsAndUpdatesWithoutTouchingHistory()throws Exception {
+        var fixture=new YanwenJapanFirstNextTest();var bytes=fixture.fixture(.5,"日本");var service=imports();var p=provider("燕文");
+        var quote=UUID.randomUUID();jdbc.sql("insert into quotation_record(id,quote_no,owner_account,status,payload,version,created_at,updated_at) values(:id,:no,'QA','quoted','{\"freightCny\":115,\"reviewStatus\":\"approved\",\"dealStatus\":\"won\"}',3,now(),now())").param("id",quote).param("no",quote.toString()).update();String beforeQuote=record("quotation_record",quote);
+        jdbc.sql("insert into finance_setting(setting_key,payload,version,updated_at) values('channel-policies','[]',0,now()) on conflict(setting_key) do nothing").update();String beforeFinance=finance();
+        var unrelated=channel(p,"日本修复不影响的渠道","KEEP-"+UUID.randomUUID());String beforeOther=record("logistics_channel",unrelated);
+        for(int i=0;i<4;i++) {
+            var company=register(YanwenJapanFirstNextTest.NAMES[i]);var c=channel(p,YanwenJapanFirstNextTest.NAMES[i],"JP-"+YanwenJapanFirstNextTest.CODES[i]);directory.bind(guard.activeId(),c,company.toString());
+            var parsed=parser.parse(bytes,"燕文.xlsx",new CompanyChannelScope(directory.scopeFor(null,c))).path("channels").get(0);var prior=mapper.createArrayNode();for(var r:parsed.path("rows"))if(!r.path("countryCode").asText().equals("JP"))prior.add(r);
+            var manual=mapper.createObjectNode().put("actor","TEST").put("fileName","修复前价格");manual.set("rows",prior);var old=UUID.fromString(logistics.createManualDraft(c,manual).path("id").asText());logistics.publishReviewed(c,old,"修复前价格","TEST",false,true,true);
+            String oldRows=jdbc.sql("select payload->'rows' from logistics_version where id=:id").param("id",old).query(String.class).single();
+            var first=item(service,bytes,c);assertEquals("draft",first.path("status").asText(),first.toString());assertEquals(i<2?22:42,first.path("priceRows").asInt());publish(c,UUID.fromString(first.path("versionId").asText()));
+            assertEquals("unchanged",item(service,bytes,c).path("status").asText());
+            byte[] changed;try(var book=new XSSFWorkbook(new ByteArrayInputStream(bytes));var out=new ByteArrayOutputStream()){book.getSheet(YanwenJapanFirstNextTest.NAMES[i]).getRow(6).getCell(8).setCellValue(YanwenJapanFirstNextTest.FIRST[i][0]+1);book.write(out);changed=out.toByteArray();}
+            var update=item(service,changed,c);assertEquals("draft",update.path("status").asText(),update.toString());publish(c,UUID.fromString(update.path("versionId").asText()));
+            var live=queries.publishedRules(null,null,List.of("JP"),List.of("JP-"+YanwenJapanFirstNextTest.CODES[i])).rules();assertEquals(1,live.size());assertEquals(YanwenJapanFirstNextTest.FIRST[i][0]+1,new LogisticsBillingEngine(mapper).calculate(live.getFirst().path("prices"),mapper.createObjectNode().put("country","JP").put("weightKg",.5)).path("total").asDouble());
+            assertEquals(oldRows,jdbc.sql("select payload->'rows' from logistics_version where id=:id").param("id",old).query(String.class).single());
+            assertEquals(3,jdbc.sql("select count(*) from logistics_version where channel_id=:id").param("id",c).query(Integer.class).single());
+        }
+        assertEquals(beforeFinance,finance());assertEquals(beforeQuote,record("quotation_record",quote));assertEquals(beforeOther,record("logistics_channel",unrelated));
+    }
     @Test void resolutionRejectsAmbiguousForeignProviderAndForeignCompanyBindings(){
         var service=imports();var p=provider("燕文");var tx=new TransactionTemplate(manager);
         tx.executeWithoutResult(s->{try{

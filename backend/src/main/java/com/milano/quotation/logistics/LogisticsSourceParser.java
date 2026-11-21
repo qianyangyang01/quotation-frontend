@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="wanbang-specialb-sensitive-name-2026.11.21-v26";
+    public static final String VERSION="yanwen-japan-first-next-2026.11.21-v27";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
@@ -1398,6 +1398,7 @@ public class LogisticsSourceParser {
             if(!columns.fixedWeight.isBlank()&&aliases.matches(provider,"country",source.text(r,columns.country)))continue;
             if((columns.firstPrice>=0||columns.nextPrice>=0)&&(columns.rate<0
                     ||hasFirstNextValue(source.text(r,columns.firstPrice))||hasFirstNextValue(source.text(r,columns.nextPrice)))) {
+                if(parseYanwenJapanFirstNext(source,r,provider,file,section,columns,channels))continue;
                 if(yunexpress!=null)for(var text:source.rowTexts(r))if(text.length()>20)allNotes.add(text);
                 if(!source.rowEmpty(r))source.filteredFirstNextRows.add(r);
                 continue;
@@ -1758,6 +1759,43 @@ public class LogisticsSourceParser {
             }
         }
         return end;
+    }
+
+    private boolean parseYanwenJapanFirstNext(Source source,int r,String provider,String file,String section,Columns columns,Map<String,ObjectNode> channels) {
+        if(!provider.equals("燕文")||!YanwenJapanFirstNext.CHANNELS.contains(section)
+                ||!countryCode(source.text(r,columns.country)).equals("JP"))return false;
+        var code=zhengzhouProductCode(source);
+        var target=selected(source,provider,section,code,r,channels,section.equals(source.sheet.getSheetName().trim()));
+        if(target==null)return true;
+        source.parsedRows.add(r);
+        try {
+            int first=-1,next=-1;
+            for(int col=0;col<source.width(columns.headerRow);col++) {
+                var label=clean(source.text(columns.headerRow,col));
+                if(label.equals("首重"))first=col;
+                if(label.equals("续重"))next=col;
+            }
+            if(first<0||next<0||columns.firstPrice<0||columns.nextPrice<0||columns.fee<0||columns.weight<0)
+                throw new IllegalArgumentException("日本首续重缺少首重、续重、价格、处理费或重量段列，禁止猜测默认值");
+            var row=mapper.createObjectNode().put("areaName","日本").put("countryCode","JP").put("sourceCountry","日本")
+                .put("sourceCountryCode","JP").put("sourceProductCode",code).put("currency","CNY").put("zoneName","")
+                .put("sourceWeightRange",source.text(r,columns.weight)).put("sourceFeeLabel",source.text(columns.headerRow,columns.fee));
+            var range=parseRange(source.text(r,columns.weight));
+            row.put("weightFromKg",range.from).put("weightToKg",range.to).put("weightToInclusive",range.includeTo);
+            numeric(row,"sourceFirstWeightKg",source,r,first,target,false);
+            numeric(row,"sourceNextWeightKg",source,r,next,target,false);
+            numeric(row,"sourceFirstWeightPrice",source,r,columns.firstPrice,target,false);
+            numeric(row,"sourceNextWeightPrice",source,r,columns.nextPrice,target,false);
+            numeric(row,"registrationFee",source,r,columns.fee,target,false);
+            if(!row.path("registrationFee").isNumber()||row.path("registrationFee").asDouble()<0)
+                throw new IllegalArgumentException("日本首续重处理费缺失或无效");
+            row.put("sourceFirstWeightCell",source.address(r,first)).put("sourceNextWeightCell",source.address(r,next))
+                .put("sourceFirstPriceCell",source.address(r,columns.firstPrice)).put("sourceNextPriceCell",source.address(r,columns.nextPrice))
+                .put("sourceWeightCell",source.address(r,columns.weight));
+            readRowEta(row,target,source,r,columns);
+            for(var expanded:YanwenJapanFirstNext.expand(row))add(target,expanded,source,r,file);
+        } catch(IllegalArgumentException failure) {issue(target,r+1,"日本首续重",failure.getMessage(),"error");}
+        return true;
     }
 
     private static int weightColumnRank(String label) {
