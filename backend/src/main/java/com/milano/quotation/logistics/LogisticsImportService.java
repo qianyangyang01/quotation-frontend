@@ -298,7 +298,7 @@ public class LogisticsImportService {
                     .param("id",providerId).param("dataset",dataset).param("code",providerCode).param("payload",p.toString()).update();
         }
         var channelCode="C-"+LogisticsDatasetService.hash(input.hasNonNull("companyChannelId")?input.path("companyChannelId").asText():LogisticsSourceParser.identity(input)).substring(0,20);
-        var found=jdbc.sql("select id from logistics_channel where dataset_id=:dataset and code=:code for update").param("dataset",dataset).param("code",channelCode).query(UUID.class).optional();
+        var found=existingChannel(dataset,providerId,input.path("companyChannelId").asText(),channelCode);
         UUID channelId;
         if(found.isPresent())channelId=found.get();else {
             channelId=UUID.randomUUID();int rule=guard.nextRuleId();
@@ -339,6 +339,33 @@ public class LogisticsImportService {
         outcome.put("pricingReady",version.path("pricingReady").asBoolean(false)).put("etaReady",version.path("etaReady").asBoolean(false)).put("etaMissingCount",version.path("etaMissingCount").asInt());
         outcome.set("missingEtaRoutes",version.path("missingEtaRoutes").deepCopy());outcome.set("blockingReasons",version.path("blockingReasons").deepCopy());outcome.set("reviewWarnings",version.path("reviewWarnings").deepCopy());
         outcome.set("summary",version.path("summary"));outcome.set("issues",input.path("issues"));return outcome;
+    }
+    /** A registered binding owns the channel identity, including legacy/manual channel codes. */
+    Optional<UUID> existingChannel(UUID dataset,UUID provider,String companyId,String generatedCode){
+        Optional<UUID> bound=Optional.empty();
+        if(!companyId.isBlank()){
+            bound=jdbc.sql("""
+                select c.id from logistics_company_binding b join logistics_channel c on c.id=b.channel_id
+                where b.dataset_id=:dataset and b.company_channel_id=:company
+                  and c.dataset_id=:dataset for update of b,c
+                """).param("dataset",dataset).param("company",UUID.fromString(companyId)).query(UUID.class).optional();
+        }
+        var generated=jdbc.sql("select id from logistics_channel where dataset_id=:dataset and code=:code for update")
+            .param("dataset",dataset).param("code",generatedCode).query(UUID.class).optional();
+        if(bound.isPresent()&&generated.isPresent()&&!bound.get().equals(generated.get()))
+            throw AppException.conflict("公司渠道绑定与自动编码指向不同渠道，请核对绑定，原价格未修改");
+        var found=bound.isPresent()?bound:generated;
+        if(found.isPresent()){
+            var actualProvider=jdbc.sql("select provider_id from logistics_channel where id=:id").param("id",found.get()).query(UUID.class).single();
+            if(!actualProvider.equals(provider))throw AppException.conflict("已登记渠道与原表物流商不一致，禁止改绑");
+            if(!companyId.isBlank()){
+                var actualCompany=jdbc.sql("select company_channel_id from logistics_company_binding where channel_id=:id for update")
+                    .param("id",found.get()).query(UUID.class).optional();
+                if(actualCompany.isPresent()&&!actualCompany.get().equals(UUID.fromString(companyId)))
+                    throw AppException.conflict("自动编码已绑定其他公司渠道，禁止覆盖原绑定");
+            }
+        }
+        return found;
     }
     static void inheritManualEta(ObjectNode incoming,JsonNode previous) {
         var manual=new HashMap<String,JsonNode>();var conflict=new HashSet<String>();
