@@ -21,7 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 /** Original workbooks are evidence, never executable instructions. No macros/evaluator/network. */
 @Service
 public class LogisticsSourceParser {
-    public static final String VERSION="jitong-custom-minimum-2026.11.19-v25";
+    public static final String VERSION="wanbang-specialb-sensitive-name-2026.11.21-v26";
     public static final long MAX_FILE_BYTES=100L*1024*1024;
     public static final int MAX_PRICE_ROWS_PER_SHEET=500;
     public static final List<String> PROVIDERS=List.of("花海","容鼎","通邮","万邦","云速递","递四方","极通环球","云途","燕文","顺丰","闪电猴","急速国际","顺友","快驴","帆之润");
@@ -1461,6 +1461,9 @@ public class LogisticsSourceParser {
             if(jitongBattery)productCode=JitongPureBatteryRules.code(productCode);
             if(yunexpress!=null){var codes=titleProductCodes(source,"云途");productCode=codes.size()==1?codes.iterator().next():"";}
             if(yanwenWanbang!=null&&provider.equals("燕文"))productCode=zhengzhouProductCode(source);
+            var originalProductName=name;
+            boolean confirmedSensitiveName=confirmedWanbangSensitiveName(source,provider,name,productCode,countryCode(countryRaw));
+            if(confirmedSensitiveName)name="欧洲优选专线敏感";
             boolean sheetFallback=(columns.channel<0||source.text(r,columns.channel).isBlank())&&section.equals(source.sheet.getSheetName().trim());
             var target=selected(source,provider,name,productCode,r,channels,sheetFallback);
             if(target==null)continue;
@@ -1481,6 +1484,13 @@ public class LogisticsSourceParser {
             }
 
             var row=mapper.createObjectNode().put("currency","CNY").put("pricingModel","per-kg");
+            if(confirmedSensitiveName) {
+                row.put("sourceProductName",originalProductName).put("sourceProductNameCell",source.address(r,columns.channel))
+                        .put("sourceIdentityCorrectionRule","wanbang-sensitive-gr-bg-cy-20261121")
+                        .put("sourceIdentityConfirmation","用户于2026-11-21确认：希腊、保加利亚、塞浦路斯均为敏感专线；后续同类误填按敏感专线识别")
+                        .put("normalizationNote","原表产品名称误写为欧洲优选服装专线，按已确认的敏感工作表、ECSL-P代码及国家归属识别为欧洲优选专线敏感");
+                warn(row,"原表产品名称误写为服装专线，已按用户确认识别为敏感专线");
+            }
             for(var label:columns.blockingFeeHeaders)pending(row,"未知价格附加费“"+label+"”未映射到公斤价或每票费");
             var rawCode=columns.countryCode>=0?source.text(r,columns.countryCode):countryCode(countryRaw);
             String sourceContinent=columns.continent>=0?source.text(r,columns.continent):"";
@@ -1632,6 +1642,19 @@ public class LogisticsSourceParser {
             if(!reviewNotes.isEmpty())for(var row:c.path("rows"))warn((ObjectNode)row,"原表普通尺寸、邮编或说明需要人工复核");
         }
         return recognized;
+    }
+    /** Confirmed supplier copy/paste error. Never makes product codes globally authoritative. */
+    private boolean confirmedWanbangSensitiveName(Source source,String provider,String name,String code,String country) {
+        if(!provider.equals("万邦")||!Set.of("GR","BG","CY").contains(country)
+                ||!CompanyChannelScope.normalize(source.sheet.getSheetName()).equals("万邦优选专线敏感")
+                ||!CompanyChannelScope.normalize(name).equals("欧洲优选服装专线")
+                ||!CompanyChannelScope.normalize(code).equals("ecsl-p"))return false;
+        var expected=source.scope.match(provider,"欧洲优选专线敏感",code);
+        if(!expected.accepted()||expected.entry()==null
+                ||!expected.entry().path("channelName").asText().equals("万邦优选专线敏感"))return false;
+        var title=source.titleIdentities.computeIfAbsent(provider,p->titleIdentity(source,p));
+        return !title.evidence().isEmpty()&&title.decision().accepted()&&title.decision().entry()!=null
+                &&title.decision().entry().path("id").equals(expected.entry().path("id"));
     }
     private boolean parseMatrix(Source source,String provider,String file,Map<String,ObjectNode> channels) {
         var sheetChannel=sheetChannelName(source,provider);
