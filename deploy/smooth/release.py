@@ -66,10 +66,21 @@ def safe_name(value):
     return value
 
 
+IMPORT_PATH = r"^/api/v1/logistics/(?:imports|(?:channels|providers)/[0-9a-f-]+/imports|rebuild/(?:datasets/[0-9a-f-]+/imports|uploads/[0-9a-f-]+/complete|imports/[0-9a-f-]+/retry))$"
+
+
 def configuration(active, worker):
     for name in (active["backend"], active["frontend"], worker):
         safe_name(name)
     label = safe_name(active["release"])
+    import_route = ""
+    if active.get("imports_on_worker"):
+        import_route = f'''    # Restore direct dispatch on the original worker; review/publish stays on web.
+    location ~ {IMPORT_PATH} {{
+        proxy_pass http://{worker}:8088;
+        include /etc/nginx/release/proxy.inc;
+    }}
+'''
     # No retry of non-idempotent requests, no client refresh or request replay.
     return f'''server {{
     listen 80;
@@ -89,7 +100,7 @@ def configuration(active, worker):
         proxy_pass http://{worker}:8088;
         include /etc/nginx/release/proxy.inc;
     }}
-    location /api/ {{
+{import_route}    location /api/ {{
         proxy_pass http://{active["backend"]}:8088;
         include /etc/nginx/release/proxy.inc;
     }}
@@ -376,6 +387,8 @@ class Release:
             if frontend_image:
                 frontend = self.prepare_frontend(release, frontend_image)
             target = slot(release, name, frontend)
+            if self.state["active"].get("imports_on_worker"):
+                target["imports_on_worker"] = True
             self.smoke(target)
         except BaseException:
             # The unpromoted web instance has never received public traffic.
@@ -475,6 +488,22 @@ class Release:
         self.save()
         self.event("switch-completed", active=target["release"], previous=old["release"], old_instances_retained=True)
 
+    def restore_imports(self, label):
+        """Routing-only restoration; no application lifecycle or database changes."""
+        safe_name(label)
+        if not self.state["installed"] or self.state.get("pending"):
+            raise RuntimeError("Gateway must be installed with no pending switch")
+        if label in self.state["slots"]:
+            raise RuntimeError("Release label already exists")
+        self.check_identity(self.state["active"])
+        worker_env = environment(self.c["worker"])
+        if worker_env.get("APP_RELEASE_WEB_ONLY", "false").lower() == "true":
+            raise RuntimeError("Import owner cannot be web-only")
+        target = dict(self.state["active"], release=label, imports_on_worker=True)
+        self.state["slots"][label] = target
+        self.save()
+        self.switch(target)
+
     def recover(self):
         if self.state.get("pending_install"):
             path = Path(self.c["edge_file"])
@@ -544,7 +573,7 @@ class Release:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
-    parser.add_argument("action", choices=["bootstrap", "install", "prepare", "switch", "rollback", "recover", "retire", "status"])
+    parser.add_argument("action", choices=["bootstrap", "install", "prepare", "switch", "rollback", "recover", "retire", "status", "restore-imports"])
     parser.add_argument("--release")
     parser.add_argument("--image")
     parser.add_argument("--frontend-image")
@@ -556,6 +585,9 @@ def main():
         elif args.action == "prepare":
             if not args.release or not args.image: parser.error("prepare requires --release and --image")
             manager.prepare(args.release, args.image, args.frontend_image)
+        elif args.action == "restore-imports":
+            if not args.release: parser.error("restore-imports requires --release")
+            manager.restore_imports(args.release)
         elif args.action == "switch": manager.switch(manager.state["slots"][args.release])
         elif args.action == "rollback":
             if not manager.state.get("previous"): raise RuntimeError("No rollback slot")
